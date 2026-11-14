@@ -1484,7 +1484,8 @@ asked of the listing's rows, so one document never mixes two reads of a bead:
 | `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), or a row of the store's ephemeral plane |
 | `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
 | `services/gctk/prstatus` (`Holding` over `Listing.Blockers`) | what a person owes on a bead through its `blocks` edges |
-| `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | where an open pull request stands and what holds it |
+| `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | where an open pull request on the old record stands and what holds it, and the facts a pull request on Gas Town's pending record is rendered with |
+| `services/gctk/pr` (`Ready`, through `Listing.Ready`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it, the evaluator's answer as `gctk pr status` renders it |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to |
 | `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows and waits' answers, and whether the city takes each piece as things stand |
 
@@ -1497,6 +1498,19 @@ and the only place those words are chosen. The read adds no rule about what
 holds a bead, whose move it is or whether work is moving.
 `specs/tk-yhquh93.2/gas-city-search.md` says why it reads through `gc bd list`
 rather than the supervisor's bead routes.
+
+**What it reads of GitHub.** The evaluator reads GitHub for each pull request
+on Gas Town's pending record, through gh on the host its URL names: five GraphQL
+queries and the account gh acts as, one PR after another for its own reads, six
+PRs at a time. Each read takes gh's own cached answer to the same read made
+within five minutes (`gh api --cache`, `gitHubMaxAge` in
+`internal/rigboard/gather.go`), so the board asks GitHub about a PR no more
+often than the landing order that lands it can, and the store's side of the
+answer is read with every document. A pull request the evaluator does not answer
+for, because a read of GitHub failed or the pack's definition of feedback did
+not load in the rig's checkout, reads unread, as `gctk pr status` derives no
+status for it. A bead the pending record holds at blocked reads by its pull
+request: the record writes that status as its own state, and it holds nothing.
 
 **How it orders work.** The read asks `services/gctk/queue` once for the
 order of the rig's open work, naming the work and handing over the listing, and
@@ -1530,16 +1544,18 @@ count on its line counts the needs that count too.
 `specs/tk-yhquh93.14/needs-you-count.md` records the rule and the calls it
 settled, and `specs/tk-yhquh93.14/gas-city-search.md` the search behind it.
 
-**How it is cached.** The document depends on the store's answers alone, so it
-is cached whole per rig, the work's order with it, since the order is a function
-of the rig's one read. The cache keeps the board's rule: a minute's time to
+**How it is cached.** The document depends on the store's answers and on
+GitHub's answers no older than five minutes, so it is cached whole per rig, the
+work's order with it, since the order is a function of the rig's one read. The
+cache keeps the board's rule: a minute's time to
 live (`server.RigBoardTTL`, from a measured 2.9 s read of gc-toolkit), one
 gather of a rig at a time however many requests wait on it, and every rig
 dropped when a write route succeeds. The drop also lets the next request gather
 at once, beside a gather that began before the write, and that gather's answer
 stays out of the cache. A gather has thirty seconds. When they run out, the read
-stops every store call it made, with the processes each call started, `bd`
-among them, and only then does the request answer its failure, so polls that
+stops every store call, every gh call and every command that loads or applies
+the pack's definition of feedback, with the processes each started, `bd` and
+git among them, and only then does the request answer its failure, so polls that
 come while the store hangs do not pile up reads on it. A failed read answers
 502 with the failure, never a document, so the page keeps its last good
 document and says the read failed.

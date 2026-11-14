@@ -102,7 +102,7 @@ func TestTableRows(t *testing.T) {
 			out: outInFlight, group: GroupQueued, signal: "In flight", note: "gc-toolkit/gc-toolkit.polecat-1"},
 		{name: "in flight with an open pull request names it and where it stands",
 			in: tableInput{b: bead{ID: "tk-w", Status: "open", MergeResult: "pull_request", PRNumber: "12"}, kind: KindWork,
-				holds: &waits.Holds{Status: waits.Clear, InFlight: "carries merge_result"}, facts: &prstatus.Facts{InFlightCount: 1}},
+				holds: &waits.Holds{Status: waits.Clear, InFlight: "carries merge_result"}, facts: &prFacts{facts: prstatus.Facts{InFlightCount: 1}}},
 			out: outPullRequest, group: GroupQueued, signal: "Pull request #12", note: "working"},
 		{name: "armed and clear is queued",
 			in:  tableInput{b: work, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: taken},
@@ -156,15 +156,15 @@ func TestTableRows(t *testing.T) {
 func TestAsks(t *testing.T) {
 	noGate := func(string) bool { return false }
 	openGate := func(id string) bool { return id == "tk-g" }
-	needsReview := &prstatus.Facts{}
-	working := &prstatus.Facts{InFlightCount: 1}
+	needsReview := &prFacts{}
+	working := &prFacts{facts: prstatus.Facts{InFlightCount: 1}}
 	cases := []struct {
 		name        string
 		b           bead
 		kind        Kind
 		conv, convA string
 		gateOpen    func(string) bool
-		facts       *prstatus.Facts
+		facts       *prFacts
 		open, all   int
 		want        *askAnswer
 	}{

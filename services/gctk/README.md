@@ -182,8 +182,8 @@ pr/                  the pr domain: whether the PR a bead owns is ready to merge
                      renders they replaced pinned under testdata
 prstatus/            the PR status derivation, exported for the helm board
 listing/             one pass's read of a store for the helm board: every live bead, the
-                     closed beads under a parent, the keys it decodes, and waits' and
-                     prstatus's answers from the same rows
+                     closed beads under a parent, the keys it decodes, and waits',
+                     prstatus's and the pr evaluator's answers from the same rows
 waits/               what holds a bead, from one snapshot: the rule by where the work is, the
                      in-flight test, the run link's copy and the keys it reads, read-only
 queue/               the order work is expected to land in, for the helm board: bd graph's

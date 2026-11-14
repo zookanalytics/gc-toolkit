@@ -313,11 +313,18 @@ func rootOf(id string, h waits.Holds) string {
 	return ""
 }
 
-func factsOf(g *gathered, id string) *prstatus.Facts {
-	if f, ok := g.facts[id]; ok {
-		return &f
+// factsOf is what the read knows of a bead's open pull request, nil when it
+// has none or a reader could not answer for it.
+func factsOf(g *gathered, id string) *prFacts {
+	f, ok := g.facts[id]
+	if !ok || g.noFacts[id] {
+		return nil
 	}
-	return nil
+	p := &prFacts{facts: f}
+	if a, ok := g.answers[id]; ok {
+		p.answer = &a
+	}
+	return p
 }
 
 // row is one row before the asks are linked and the counts made.

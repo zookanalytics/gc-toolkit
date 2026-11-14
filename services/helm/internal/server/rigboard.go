@@ -166,8 +166,9 @@ func (c *keyedCache[T]) fresh(key string) (T, bool) {
 // get answers key from the cache while it is fresh, and otherwise gathers it.
 // The gather runs on a context detached from the request's, so one client
 // leaving does not cancel the gather the others wait on, and gatherTimeout
-// bounds it. A rig's read stops its store calls when that bound runs out
-// (rigboard.Read), so a gather that has returned leaves none running.
+// bounds it. A rig's read stops its store calls, its gh calls and the commands
+// that load and apply the pack's definition of feedback when that bound runs
+// out (rigboard.Read), so a gather that has returned leaves none running.
 func (c *keyedCache[T]) get(ctx context.Context, key string, gather func(context.Context) (T, error)) (T, error) {
 	if v, ok := c.fresh(key); ok {
 		return v, nil

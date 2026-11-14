@@ -13,6 +13,7 @@ package gh
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // Runner runs gh with args and returns its stdout. A failure carries gh's own
@@ -27,21 +30,84 @@ import (
 type Runner func(args ...string) ([]byte, error)
 
 // Client reads GitHub through gh, as the account gh is logged in as on host.
+// maxAge is how old an answer from gh's own response cache its reads take
+// ([Client.Cached]), and zero for a client whose reads ask GitHub.
 type Client struct {
-	host string
-	run  Runner
+	host   string
+	run    Runner
+	maxAge time.Duration
 }
 
 // New returns a client for host, such as github.com, that runs the gh on PATH.
 func New(host string) *Client { return &Client{host: host, run: gh} }
 
+// NewContext returns a client for host that runs the gh on PATH, and whose
+// every call ends when ctx does. Each call runs in a process group of its own,
+// and once ctx is done the whole group is killed, so a reader with a deadline
+// has stopped every gh it started by the time it returns. A call that has not
+// started by then does not start, and a call ctx ended returns ctx's cause.
+func NewContext(ctx context.Context, host string) *Client {
+	return &Client{host: host, run: func(args ...string) ([]byte, error) { return ghContext(ctx, args...) }}
+}
+
 // NewWithRunner returns a client for host that runs gh through run, so the
 // adapter's own tests serve recorded answers.
 func NewWithRunner(host string, run Runner) *Client { return &Client{host: host, run: run} }
 
+// Cached returns a copy of c whose reads take an answer from gh's own response
+// cache (`gh api --cache`): gh answers a read it made within maxAge from the
+// response it kept for that request, and asks GitHub otherwise. A reader that
+// asks about the same PRs over and over, such as the helm board, so asks GitHub
+// at most once per maxAge for each read. A merge request and an enqueue are
+// never answered from the cache. A maxAge under a second gives a copy whose
+// reads ask GitHub.
+func (c *Client) Cached(maxAge time.Duration) *Client {
+	p := *c
+	p.maxAge = 0
+	if maxAge >= time.Second {
+		p.maxAge = maxAge
+	}
+	return &p
+}
+
+// read runs a read through gh with args, the endpoint first, adding the cache
+// flag when the client's reads take a cached answer.
+func (c *Client) read(args ...string) ([]byte, error) {
+	full := append([]string{"api", "--hostname", c.host}, args...)
+	if c.maxAge > 0 {
+		full = append(full, "--cache", c.maxAge.String())
+	}
+	return c.run(full...)
+}
+
+// stopGrace is how long a call stopped by its context may hold its output open
+// before the wait for it gives up. The stop kills every process the call
+// started, so only one that left the call's process group can hold it that
+// long.
+const stopGrace = 2 * time.Second
+
 // gh runs the gh on PATH.
 func gh(args ...string) ([]byte, error) {
-	cmd := exec.Command("gh", args...)
+	return output(exec.Command("gh", args...))
+}
+
+// ghContext runs the gh on PATH in a process group of its own, which is killed
+// once ctx is done.
+func ghContext(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = stopGrace
+	out, err := output(cmd)
+	if err != nil && ctx.Err() != nil {
+		return nil, fmt.Errorf("gh: %w", context.Cause(ctx))
+	}
+	return out, err
+}
+
+// output runs cmd and returns its stdout. A failure carries gh's own message
+// when gh printed one.
+func output(cmd *exec.Cmd) ([]byte, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -263,7 +329,9 @@ func (c *Client) EnqueuePullRequest(id, head string) error {
 	return c.mutate(enqueueMutation, id, head)
 }
 
-// mutate runs a request that names a PR by its node id and pins it to head.
+// mutate runs a request that names a PR by its node id and pins it to head. It
+// asks GitHub even on a client whose reads take a cached answer, because a
+// request acts, and an answer kept from an earlier one acts on nothing.
 func (c *Client) mutate(query, id, head string) error {
 	if id == "" {
 		return errors.New("github: a merge request names no pull request")
@@ -271,7 +339,7 @@ func (c *Client) mutate(query, id, head string) error {
 	if head == "" {
 		return errors.New("github: a merge request names no head to pin it to")
 	}
-	return c.graphql(query, []string{"-f", "id=" + id, "-f", "head=" + head}, false,
+	return c.Cached(0).graphql(query, []string{"-f", "id=" + id, "-f", "head=" + head}, false,
 		func(json.RawMessage) error { return nil })
 }
 
@@ -547,7 +615,7 @@ func (c *Client) IssueComments(repo string, number int) ([]IssueComment, error) 
 
 // Login reads the login of the account gh acts as on the host.
 func (c *Client) Login() (string, error) {
-	raw, err := c.run("api", "--hostname", c.host, "user")
+	raw, err := c.read("user")
 	if err != nil {
 		return "", err
 	}
@@ -609,13 +677,13 @@ func databaseID(s string) (int64, error) {
 // or every page when paginate is set. A page that carries GraphQL errors, holds
 // no data or does not decode fails the read.
 func (c *Client) graphql(query string, vars []string, paginate bool, take func(json.RawMessage) error) error {
-	args := []string{"api", "--hostname", c.host, "graphql"}
+	args := []string{"graphql"}
 	if paginate {
 		args = append(args, "--paginate")
 	}
 	args = append(args, "-f", "query="+query)
 	args = append(args, vars...)
-	raw, err := c.run(args...)
+	raw, err := c.read(args...)
 	if err != nil {
 		return err
 	}

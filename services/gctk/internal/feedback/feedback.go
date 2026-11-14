@@ -15,6 +15,7 @@ package feedback
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,11 +23,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 )
 
-// Rule is the definition, loaded.
+// Rule is the definition, loaded. ctx ends every application of it, and can
+// never end for a rule [Load] returned.
 type Rule struct {
 	def string
+	ctx context.Context
 }
 
 // Review is a review, in the facts the definition weighs one by.
@@ -60,16 +65,23 @@ type Thread struct {
 // ScriptsDir is the pack's scripts directory: GCTK_SCRIPTS_DIR when it is set,
 // which gctk-resolve.sh exports, and otherwise the one `gc gc-toolkit
 // scripts-dir` prints.
-func ScriptsDir() (string, error) {
+func ScriptsDir() (string, error) { return ScriptsDirContext(context.Background()) }
+
+// ScriptsDirContext is [ScriptsDir] for a reader with a deadline: the gc it
+// runs ends when ctx does, as [LoadContext] says.
+func ScriptsDirContext(ctx context.Context) (string, error) {
 	if dir := os.Getenv("GCTK_SCRIPTS_DIR"); dir != "" {
 		return dir, nil
 	}
-	cmd := exec.Command("gc", "gc-toolkit", "scripts-dir")
+	cmd := command(ctx, "gc", "gc-toolkit", "scripts-dir")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if dir := strings.TrimSpace(string(out)); err == nil && dir != "" {
 		return dir, nil
+	}
+	if err != nil && ctx.Err() != nil {
+		return "", fmt.Errorf("feedback: the pack's scripts directory did not resolve: %w", context.Cause(ctx))
 	}
 	if msg := strings.TrimSpace(stderr.String()); msg != "" {
 		return "", fmt.Errorf("feedback: the pack's scripts directory did not resolve: %s", msg)
@@ -80,11 +92,26 @@ func ScriptsDir() (string, error) {
 // Load reads the definition through pr-post.sh in scripts, run in checkout, a
 // directory in the rig's checkout, so it holds the prefixes the rig declares.
 func Load(scripts, checkout string) (*Rule, error) {
-	cmd := exec.Command("bash", filepath.Join(scripts, "pr-post.sh"), "feedback-def")
+	return LoadContext(context.Background(), scripts, checkout)
+}
+
+// LoadContext is [Load] for a reader with a deadline, such as the helm board:
+// the load, and every application of the rule it returns, ends when ctx does.
+// Each command runs in a process group of its own, and once ctx is done the
+// whole group is killed, so a reader whose deadline passed has stopped every
+// process the definition started by the time it returns. pr-post.sh runs git,
+// which can wait on a fetch in a partial clone, and a stop that killed bash
+// alone would leave git holding the load's output. A command that has not
+// started by then does not start, and one ctx ended returns ctx's cause.
+func LoadContext(ctx context.Context, scripts, checkout string) (*Rule, error) {
+	cmd := command(ctx, "bash", filepath.Join(scripts, "pr-post.sh"), "feedback-def")
 	cmd.Dir = checkout
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if err != nil && ctx.Err() != nil {
+		return nil, fmt.Errorf("feedback: pr-post.sh feedback-def: %w", context.Cause(ctx))
+	}
 	def := strings.TrimSpace(string(out))
 	if err != nil || def == "" {
 		msg := strings.TrimSpace(stderr.String())
@@ -93,7 +120,7 @@ func Load(scripts, checkout string) (*Rule, error) {
 		}
 		return nil, fmt.Errorf("feedback: pr-post.sh feedback-def printed no definition: %s", msg)
 	}
-	return &Rule{def: def}, nil
+	return &Rule{def: def, ctx: ctx}, nil
 }
 
 // Reviews returns the ids of the reviews that are feedback.
@@ -199,18 +226,43 @@ func (r *Rule) run(self, since, program string, inputs ...any) ([]byte, error) {
 		args = append(args, "-n")
 	}
 	args = append(args, r.def+"\n"+program)
-	cmd := exec.Command("jq", args...)
+	cmd := command(r.ctx, "jq", args...)
 	cmd.Stdin = &in
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if r.ctx.Err() != nil {
+			return nil, fmt.Errorf("feedback: jq: %w", context.Cause(r.ctx))
+		}
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			return nil, fmt.Errorf("feedback: jq: %s", msg)
 		}
 		return nil, fmt.Errorf("feedback: jq: %w", err)
 	}
 	return out, nil
+}
+
+// stopGrace is how long a command stopped by its context may hold its output
+// open before the wait for it gives up. The stop kills every process the
+// command started, so only one that left the command's process group can hold
+// it that long.
+const stopGrace = 2 * time.Second
+
+// command is the command that runs name with args and ends when ctx does, as
+// [LoadContext] says. A context that can never end, the one [Load] and
+// [ScriptsDir] give, runs it in gctk's own process group, where a signal to
+// that group stops it with gctk: the order runner's stop of a landing pass
+// that outlives its timeout, or a terminal's Ctrl-C.
+func command(ctx context.Context, name string, args ...string) *exec.Cmd {
+	if ctx.Done() == nil {
+		return exec.Command(name, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = stopGrace
+	return cmd
 }
 
 // login is an author as the definition reads one, null when GitHub names none.

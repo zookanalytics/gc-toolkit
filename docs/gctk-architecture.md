@@ -421,7 +421,7 @@ and CI runs those tests on every PR.
 |---|---|---|---|
 | store | the bead store | `gc bd` for writes, for reads that must see a fresh write and for the blocked set, the supervisor API for other reads | in-memory rows and edges, with the store's blocked answers set by the test |
 | git | git | one `git` command per call, in a named directory | a scratch repository |
-| github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
+| github | GitHub | `gh` and the GitHub API, each call ending with its caller's context, and for a reader that asks about the same PRs over and over, gh's own response cache (`gh api --cache`) | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
 | runtime | Gas City | `gc` (sling, config, session, events, runtime), the supervisor API (runs, sessions), and the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh` | recorded responses |
 | host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start inside the sandbox a demo capture runs in | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
@@ -516,8 +516,11 @@ bubble's clock, and no rule's test needs a tool on the machine.
   the loops act on. Its rig page reads each rig's store through `listing`, one
   pass that lists the store once, decodes each key the page shows through the
   listing's declarations, and answers `waits`, `prstatus` and `queue` from those
-  rows. The page lists work in the order `queue` gives for the open work the
-  page names, the order the work is expected to land in. Its ranking, bands and
+  rows. Where a PR on Gas Town's pending record stands is the `pr` domain's
+  evaluator's answer, which the listing asks over the same rows and GitHub's
+  facts, rendered through `prstatus` as `gctk pr status` renders it. The page
+  lists work in the order `queue` gives for the open work the page names, the
+  order the work is expected to land in. Its ranking, bands and
   grouping are its own. A question that a loop also acts on belongs to a domain,
   not to the board.
 
