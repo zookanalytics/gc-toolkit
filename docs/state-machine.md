@@ -280,13 +280,22 @@ publication writes it first, with the PR the refinery may reuse
 (`existing_pr`), while the bead is still open, and then the whole record with
 the `blocked` status in one write, so a refinery that dies between them leaves
 an open bead that names its PR, never a blocked bead with half a record. The
-landing order clears the marker once the close lands, and it is never a review
-or approval fact. Every writer of the record takes the store's record lock, and
-`bead-rehome.sh`'s close takes it too and clears any marker it finds. Each
-write is guarded on the status and assignee the writer read, so a bead that a
-close or a release reached first gets no record, and a run leaves a bead that a
-release took from the refinery as the release left it, with its PR named in a
-note.
+landing order reads a record whose marker is `true` while its bead is open,
+blocked or closed, and clears the marker once the record owes no further run:
+the bead closed on a verified merge, went back to the refinery or was released
+from it, or met an exception whose human gate is filed. A bead at any other
+status, such as one claimed or deferred, keeps its marker, and no run reads it.
+The marker is never a review or approval fact. On an open or blocked bead whose
+marker is `true`, the record's `blocked_reason` waits on the order's next run,
+and I1 reads that reason as answered (`settled_keys` in
+`lifecycle/lifecycle.toml`). At any other status or marker value, and once the
+marker clears, a reason still on the bead holds, and the bead owes its wait
+edge. Every writer of the record takes the store's
+record lock, and `bead-rehome.sh`'s close takes it too and clears any marker it
+finds. Each write is guarded on the status and assignee the writer read, so a
+bead that a close or a release reached first gets no record, and a run leaves a
+bead that a release took from the refinery as the release left it, with its PR
+named in a note.
 
 ## Checks
 

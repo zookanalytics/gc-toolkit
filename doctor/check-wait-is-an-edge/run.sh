@@ -15,14 +15,18 @@
 # prose as a hold carrier, which is the opposite of the rule this check
 # asserts, and no verb list ever finishes, so every gap in one reads as clean.
 #
-# One marker can be answered by its own writer instead, where lifecycle.toml
+# A marker can be answered by its own writer instead, where lifecycle.toml
 # declares a settled-key for it in `settled_keys`: a bead carrying that key
-# non-empty is one whose writer said, at the moment it stamped the marker, that
-# nothing is waiting. That is the same refusal to read prose, from the other
-# side — a sitting knows whether it settled its subject or parked it, and no
-# reader can recover that afterwards from the sentence it left. The key is
-# structural and the marker still stands beside it, so nothing here is a
-# blanked hold.
+# non-empty is one whose writer said, beside the marker, that no edge is owed
+# for it. A pair can narrow that to one value of the key and to the statuses it
+# names. A sitting that settled its subject says nothing is waiting. The pending
+# record's marker, true on an open or blocked bead, says the landing order's
+# next run answers the reason the record wrote. On any other status, or at any
+# other value, no run of the order reads the bead, so the reason holds. That is
+# the same refusal to read prose, from the other side — a sitting knows whether
+# it settled its subject or parked it, and no reader can recover that
+# afterwards from the sentence it left. The key is structural and the marker
+# still stands beside it, so nothing here is a blanked hold.
 #
 # Whether a held bead still waits is its own pending waits, as `gctk bead holds`
 # answers them (docs/gctk-architecture.md, "The bead holds contract"): a wait of
@@ -67,9 +71,12 @@ LIVE_STATUSES='open,in_progress,blocked,deferred,hooked,pinned'
 BUILTIN_MARKER_KEYS='triage.hold
 blocked_reason
 gc.takeaway'
-# <marker>=<settled-key>: the marker holds only while the settled-key is absent
-# or empty. Same list as the declaration, same standby role.
-BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled'
+# <marker>=[<status>,...:]<settled-key>[=<value>]: the marker holds while the
+# settled-key is absent or empty, while it reads anything but the value the
+# pair names, and on a bead at a status the pair does not name. Same list as
+# the declaration, same standby role.
+BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled
+blocked_reason=open,blocked:pr_reconcile_pending=true'
 # The terminal end of a wait — the bead others block ON. It can carry no
 # `blocks` edge of its own by construction (the gated bead blocks on it; it
 # blocks on nothing), so a marker it carries is exempt, not a finding. It is a
@@ -111,14 +118,26 @@ fi
 # declaration that omits it is asking for the default rather than for silence.
 [ -n "$severity" ] || severity="$BUILTIN_SEVERITY"
 MKEYS_JSON=$(printf '%s\n' "$marker_keys" | jq -R . | jq -cs 'map(select(. != ""))')
-# {<marker>: <settled-key>}. A pair with either half missing is dropped rather
-# than half-applied: half of this declaration is a marker answered by a key
-# nothing writes, which reads every hold as settled.
+# {<marker>: {key, value, statuses}}, with value and statuses only where the
+# pair names them. A pair that does not parse is dropped rather than
+# half-applied, so its marker holds: one with either half missing, an empty
+# value or status, or more than one value or status list. Read any other way,
+# such a pair could answer its marker on a bead its writer never answers.
 SETTLED_JSON=$(printf '%s\n' "$settled_keys" | jq -R '
     select(index("=") != null)
     | (index("=")) as $i
-    | {key: .[0:$i], value: .[$i+1:]}
-    | select(.key != "" and .value != "")' | jq -cs 'from_entries')
+    | .[0:$i] as $marker | .[$i+1:] as $rest
+    | select($marker != "" and $rest != "")
+    | ($rest | split(":")) as $sc
+    | select(($sc | length) <= 2)
+    | ($sc[-1] | split("=")) as $kv
+    | select(($kv | length) >= 1 and ($kv | length) <= 2 and $kv[0] != "")
+    | {key: $kv[0]}
+      + (if ($kv | length) == 2 then {value: $kv[1]} else {} end)
+      + (if ($sc | length) == 2 then {statuses: ($sc[0] | split(","))} else {} end)
+    | select(.value != "")
+    | select((.statuses // ["any"]) | length > 0 and all(test("^[a-z_]+$")))
+    | {key: $marker, value: .}' | jq -cs 'from_entries')
 
 stale=(); unedged=(); foreign=(); warnings=(); notes=()
 # What holds a bead is the answer of `gctk bead holds`, from the binary the city
@@ -198,10 +217,18 @@ WAIT_JQ='
 def txt: (. // "") | tostring | gsub("[[:cntrl:]]"; " ");
 def clip: if (length > 60) then (.[0:57] + "...") else . end;
 # A declared marker whose settled-key reads non-empty on this bead was answered
-# by the writer that stamped it. No pair declared for the key means no such
-# answer exists, so the marker holds on its own.
-def unsettled($m; $k): ($settled[$k] // "") as $sk
-    | $sk == "" or (($m[$sk] | txt) | length) == 0;
+# by the writer that stamped it, where the pair names a value only at that
+# value, and where it names statuses only on a bead at one of them. The value
+# is compared whole, where the record trims it first (record.Read), so a padded
+# value, which no writer writes, reads as a hold. No pair declared for the key
+# means no such answer exists, so the marker holds on its own.
+def unsettled($m; $k; $st): ($settled[$k] // null) as $p
+    | if $p == null then true
+      else ($m[$p.key] | txt) as $v
+        | ($v | length) == 0
+          or ($p.value != null and $v != $p.value)
+          or ($p.statuses != null and ($p.statuses | index($st)) == null)
+      end;
 [ .[]? | select(((.id // "") | tostring) != "") ] as $beads
 | $beads[]
 | . as $b
@@ -217,7 +244,7 @@ def unsettled($m; $k): ($settled[$k] // "") as $sk
 | select($twtype == "" or ($b.issue_type | txt) != $twtype)
 | ( [ $m | to_entries[]
       | .key as $k | (.value | txt) as $v
-      | select(($mkeys | index($k)) != null and ($v | length) > 0 and unsettled($m; $k))
+      | select(($mkeys | index($k)) != null and ($v | length) > 0 and unsettled($m; $k; $st))
       | $k + "=" + ($v | clip) ] | sort ) as $marks
 | select(($marks | length) > 0)
 | ( [ ($b.dependencies // [])[]

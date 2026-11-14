@@ -610,6 +610,129 @@ has "$OUT" "alpha: could not read the live beads' statuses off the listing — t
 hasnt "$OUT" "OK:" "and no store reads as clean"
 reset
 
+# --- 25. the pending record's reason waits on the landing order ------------
+# The record writes blocked_reason only on a bead whose marker,
+# pr_reconcile_pending, is true, and a run of the landing order reads such a
+# record while its bead is open or blocked. There the order's next run answers
+# the reason. At any other status or marker value no run reads the record, so
+# the reason holds. These cases read the shipped declaration, so the pairing is
+# pinned where it ships, and a finding is any non-zero exit, at the severity
+# that declaration names.
+SHIPPED="$HERE/../.."
+finding() { if [ "$1" -ne 0 ]; then ok "$2"; else bad "$2 (got rc 0)"; fi; }
+PR='https://github.com/o/r/pull/7'
+PENDING='"merge_result":"pull_request_pending","pr_url":"'"$PR"'","blocked_reason":"Awaiting verified merge of '"$PR"'"'
+EXCEPTION='"merge_result":"pull_request_closed_unmerged","pr_url":"'"$PR"'","blocked_reason":"Pull request '"$PR"' closed without merging."'
+pending() { # <status> <marker-value> — one bead with the record's reason, the marker at that value, no edge
+  store '[{"id":"aa-101","status":"'"$1"'","metadata":{'"$PENDING"',"pr_reconcile_pending":"'"$2"'"}}]'
+}
+for st in open blocked; do
+  pending "$st" true
+  OUT=$(PACK="$SHIPPED" run_check); RC=$?
+  eq "$RC" "0" "a bead at status $st pending on the record with no wait edge waits on the landing order, not on a bead"
+  has "$OUT" "OK:" "and the store holding it reads clean"
+done
+# No run of the order reads the record of a bead that is claimed, deferred,
+# hooked or pinned, so the marker answers nothing there.
+for st in in_progress deferred hooked pinned; do
+  pending "$st" true
+  OUT=$(PACK="$SHIPPED" run_check); RC=$?
+  finding "$RC" "a bead at status $st with the record's reason and its marker true, and no wait edge, is a finding"
+  has "$OUT" "alpha bead aa-101 ($st): held by blocked_reason=Awaiting verified merge" "and the finding names the bead at status $st and the reason"
+  has "$OUT" "carries no wait edge" "and the bead at status $st is unedged"
+done
+# Nor does a run read a record whose marker reads anything but true.
+for v in false 1; do
+  pending blocked "$v"
+  OUT=$(PACK="$SHIPPED" run_check); RC=$?
+  finding "$RC" "a blocked bead whose marker reads '$v', with the record's reason and no wait edge, is a finding"
+  has "$OUT" "alpha bead aa-101 (blocked): held by blocked_reason=Awaiting verified merge" "and the bead whose marker reads '$v' is named"
+done
+# The order clears an exception's marker once it has filed the exception's
+# human gate, and from then on the reason holds behind that gate's edge.
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$EXCEPTION"'}}]'
+OUT=$(PACK="$SHIPPED" run_check); RC=$?
+finding "$RC" "an exception whose marker is cleared, with no wait edge, is a finding"
+has "$OUT" "alpha bead aa-101 (blocked): held by blocked_reason=Pull request" "and the finding names the bead and the reason that holds it"
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$EXCEPTION"'},
+         "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-900","type":"blocks"}]},
+        {"id":"aa-900","status":"open","issue_type":"gate","metadata":{}}]'
+OUT=$(PACK="$SHIPPED" run_check); RC=$?
+eq "$RC" "0" "the same exception behind its human gate's edge passes"
+# Once a release takes an open or blocked bead from the refinery, the order's
+# next run clears the marker and leaves the bead as the release left it, so
+# nothing answers the reason it keeps.
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$PENDING"'}}]'
+OUT=$(PACK="$SHIPPED" run_check); RC=$?
+finding "$RC" "the record's reason with no marker beside it holds"
+has "$OUT" "held by blocked_reason=Awaiting verified merge" "and the finding names that reason"
+# The marker answers the record's reason and no other marker on the bead.
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$PENDING"',"pr_reconcile_pending":"true","gc.takeaway":"needs an operator ruling"}}]'
+OUT=$(PACK="$SHIPPED" run_check); RC=$?
+finding "$RC" "a pending bead is still held by another marker it carries"
+has "$OUT" "gc.takeaway=needs an operator ruling" "and the finding names that marker"
+hasnt "$OUT" "blocked_reason=Awaiting" "and not the reason the record's marker answers"
+# With no declaration to read, the built-in list carries the same pairing,
+# with the same statuses and value.
+pending blocked true
+OUT=$(PACK="$TMP/pack3" run_check); RC=$?
+eq "$RC" "0" "the built-in list carries the record's pairing"
+pending deferred true
+OUT=$(PACK="$TMP/pack3" run_check); RC=$?
+finding "$RC" "the built-in pairing answers no deferred bead"
+pending blocked false
+OUT=$(PACK="$TMP/pack3" run_check); RC=$?
+finding "$RC" "the built-in pairing answers no marker that reads false"
+# A condition that does not parse drops its pair, so the reason holds rather
+# than being answered on a condition read wrong.
+mkdir -p "$TMP/pack13/lifecycle"
+for entry in 'blocked_reason=:pr_reconcile_pending=true' 'blocked_reason=open,,blocked:pr_reconcile_pending=true' \
+             'blocked_reason=open,blocked:pr_reconcile_pending=' 'blocked_reason=open:blocked:pr_reconcile_pending=true' \
+             'blocked_reason=open,blocked:pr_reconcile_pending=true=true' 'blocked_reason=Open,blocked:pr_reconcile_pending=true'; do
+  { echo '[holds]'; echo 'marker_keys = ["blocked_reason"]'
+    echo "settled_keys = [\"$entry\"]"; } > "$TMP/pack13/lifecycle/lifecycle.toml"
+  pending blocked true
+  OUT=$(PACK="$TMP/pack13" run_check); RC=$?
+  eq "$RC" "1" "a pair that does not parse ($entry) is dropped, so the reason holds"
+  has "$OUT" "alpha bead aa-101 (blocked): held by blocked_reason=Awaiting verified merge" "and that is the bead's finding, not a declaration the check failed to read"
+done
+# The control: the same declaration with the shipped pair answers the reason.
+{ echo '[holds]'; echo 'marker_keys = ["blocked_reason"]'
+  echo 'settled_keys = ["blocked_reason=open,blocked:pr_reconcile_pending=true"]'; } > "$TMP/pack13/lifecycle/lifecycle.toml"
+pending blocked true
+OUT=$(PACK="$TMP/pack13" run_check); RC=$?
+eq "$RC" "0" "the same declaration with a pair that parses answers the reason"
+# (NO-DRIFT) The pair's statuses and value are the landing order's: due() in
+# services/gctk/pr/landing.go reads a record at the statuses it lists, closed
+# aside since this check lists no closed bead, and record.Read in record.go
+# marks a record whose marker, the key keys.go declares as pendingKey, reads the
+# value it compares. The declaration and the built-in list are held to that
+# code.
+PR_GO="$HERE/../../services/gctk/pr"
+due_body=$(awk '/^func \(l Landing\) due\(/ { f = 1 } f && /^}/ { exit } f' "$PR_GO/landing.go")
+due_statuses=$(printf '%s\n' "$due_body" | sed -n 's/^[[:space:]]*case \(".*"\):$/\1/p' \
+  | grep -o '"[a-z_]*"' | tr -d '"' | grep -vx closed | sort | paste -sd, -)
+# due() keeps a record only where record.Read reads it marked, which is what
+# makes record.Read's value the pair's.
+{ grep -q 'record\.Read(r)' <<< "$due_body" && grep -q '!rec\.Marked' <<< "$due_body"; } || due_statuses=""
+marker_key=$(sed -n 's/^[[:space:]]*pendingKey *= *ledger\.Declare("\([^"]*\)".*/\1/p' "$PR_GO/record/keys.go")
+marked_value=$(sed -n 's/.*Marked: *get(pendingKey) *== *"\([^"]*\)".*/\1/p' "$PR_GO/record/record.go")
+record_pair() { # <entry> — blocked_reason's pair, its statuses sorted
+  local rest="${1#blocked_reason=}" st=""
+  case "$rest" in *:*) st="${rest%%:*}"; rest="${rest#*:}" ;; esac
+  printf '%s:%s\n' "$(printf '%s' "$st" | tr ',' '\n' | sort | paste -sd, -)" "$rest"
+}
+if [ -n "$due_statuses" ] && [ -n "$marker_key" ] && [ -n "$marked_value" ]; then
+  want="$due_statuses:$marker_key=$marked_value"
+  declared=$(grep -o '"blocked_reason=[^"]*"' "$SHIPPED/lifecycle/lifecycle.toml" | head -1 | tr -d '"')
+  builtin=$(sed -n "s/^\(blocked_reason=[^']*\)'\$/\1/p" "$CHECK")
+  eq "$(record_pair "$declared")" "$want" "(NO-DRIFT) the declared pair answers the record at the statuses due() reads and the value record.Read marks"
+  eq "$(record_pair "$builtin")" "$want" "(NO-DRIFT) the built-in pair is the same"
+else
+  bad "(NO-DRIFT) could not read due()'s statuses ('$due_statuses'), the marker's key ('$marker_key') or record.Read's value ('$marked_value') from $PR_GO"
+fi
+reset
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
