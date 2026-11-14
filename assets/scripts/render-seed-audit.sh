@@ -57,8 +57,9 @@
 # new text lands in a change of its own. A render --since a revision keeps each
 # file the change does not move as that revision commits it, so the pre-commit
 # hook does not fold the new text into an unrelated commit. The merge gate
-# reports such a file as the base's own staleness and hands it to
-# assets/scripts/seed-audit-reaudit.sh, which slings the one bead that
+# reports such a file as the base's own staleness, and the landing order finds
+# it when it checks the default branch after a landing there. Each hands the
+# file to assets/scripts/seed-audit-reaudit.sh, which slings the one bead that
 # re-renders the default branch and lands the text in a pull request of its own.
 #
 # WHAT IS NOT RENDERED — and cannot be, by this or any `gc prime` caller.
@@ -83,7 +84,8 @@
 #   render-seed-audit.sh --check-merge <base> <head> [--base-stale-out FILE]
 #                                         render that merge, and fail if it lands
 #                                         a render the merge made stale; FILE
-#                                         gets each file <base> is already stale in
+#                                         gets each file <base> is already stale in,
+#                                         each file <rev> is stale in for <rev> <rev>
 #   render-seed-audit.sh --sizes [<rev>]  print each render's bytes and tokens,
 #                                         and the change since <rev> when given
 #   render-seed-audit.sh --install-hook   point core.hooksPath at assets/hooks
@@ -239,7 +241,11 @@ fi
 #
 # Agents and formulas added or removed are judged by the same rule: a render the
 # merge does not commit fails, and so does a committed render of something that
-# no longer exists. <base> is rendered only when some file fails the first test.
+# no longer exists. <base> is rendered only when some file fails the first test
+# and <base>'s tree is not the merge result's. So a revision checked against
+# itself, `--check-merge <rev> <rev>`, takes one render and reports every file
+# it does not commit as rendered as its own staleness: the landing order checks
+# the default branch that way after each landing on it (gctk pr reconcile).
 # Exits 0 when every file passes, 1 when one fails, and 2 when the merge cannot
 # be judged: a conflict, no `gc` to render with, or a render that fails.
 if [ "$MODE" = "check-merge" ]; then
@@ -250,11 +256,11 @@ if [ "$MODE" = "check-merge" ]; then
             || die "--check-merge: '$rev' names no commit in $ROOT; fetch it first"
     done
     # --base-stale-out names the files <base> is already stale in, one per line,
-    # for a caller that acts on the base's own staleness (the merge gate hands it
-    # to seed-audit-reaudit.sh). It starts empty, so a check that ends before
-    # rendering the base names none. The list informs and never decides the
-    # verdict, so a file that cannot be written is reported, and the check goes
-    # on without it.
+    # for a caller that acts on the base's own staleness (the merge gate and the
+    # landing order hand it to seed-audit-reaudit.sh). It starts empty, so a
+    # check that ends before rendering the base names none. The list informs and
+    # never decides the verdict, so a file that cannot be written is reported,
+    # and the check goes on without it.
     if [ -n "$BASE_STALE_OUT" ] && ! true 2>/dev/null > "$BASE_STALE_OUT"; then
         printf 'render-seed-audit: could not write --base-stale-out %s; the check goes on without it\n' \
             "$BASE_STALE_OUT" >&2
@@ -307,9 +313,17 @@ if [ "$MODE" = "check-merge" ]; then
     held=()
     base_stale=()
     if [ "${#unmatched[@]}" -gt 0 ]; then
-        materialize "$MERGE_BASE" "$BASE" || die "--check-merge: could not materialize $MERGE_BASE"
-        render_tree "$BASE" "$BASE_RENDER"; rc=$?
-        [ "$rc" -eq 0 ] || render_failed "$MERGE_BASE" "$BASE_RENDER" "$rc"
+        # A <base> whose tree is the merge result renders as the merge result
+        # does, so its tree and render are the merge's, and every file that
+        # fails the first test is <base>'s own staleness.
+        if [ "$(git -C "$ROOT" rev-parse --verify --quiet "$MERGE_BASE^{tree}" 2>/dev/null)" = "$merged_tree" ]; then
+            BASE="$MERGED"
+            BASE_RENDER="$MERGED_RENDER"
+        else
+            materialize "$MERGE_BASE" "$BASE" || die "--check-merge: could not materialize $MERGE_BASE"
+            render_tree "$BASE" "$BASE_RENDER"; rc=$?
+            [ "$rc" -eq 0 ] || render_failed "$MERGE_BASE" "$BASE_RENDER" "$rc"
+        fi
         for p in "${unmatched[@]}"; do
             if same "$MERGED/$AUDIT/$p" "$BASE/$AUDIT/$p" && same "$BASE_RENDER/$p" "$MERGED_RENDER/$p"; then
                 base_stale+=("$p")

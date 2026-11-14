@@ -5,7 +5,11 @@
 # queue, and its bead closes once the merge commit is on the freshly fetched
 # target. A PR open at another head goes back to the refinery, and the
 # exceptions stay blocked behind a human gate. A PR that waits on your approval
-# or its checks holds no agent: the wait is this order's next run.
+# or its checks holds no agent: the wait is this order's next run. Once a PR
+# lands on the rig's default branch, a run checks that branch's seed audit,
+# where the rig's clone carries one, and hands the pages stale there to
+# seed-audit-reaudit.sh, which slings the branch's one re-render. No PR waits
+# on the check or on the re-render.
 #
 # Exec, not a formula: a run reads records and GitHub and writes guarded
 # updates, with no judgment for an LLM. Rig-scoped, each run against its own
@@ -25,12 +29,14 @@
 #
 # A run reads at most 20 records, the least recently checked first, and starts
 # none after four minutes (gctk pr reconcile's --count and --budget). One record
-# whose PR is open costs about seven seconds, measured on 2026-11-12, so a run
-# ends inside the 300-second timeout, and the kernel frees the lock of a run
-# the timeout stops. Every 5 minutes, a cycle over 50 open records takes three
-# runs, so a PR lands within about fifteen minutes of the last thing it waits
-# for, the design's landing-time check being nine in ten within 3 hours. Tune
-# from city.toml [[orders.overrides]].
+# whose PR is open costs about seven seconds, measured on 2026-11-12. A landing
+# on the default branch adds the seed audit's check, one render of the branch's
+# tip, which took about three seconds on 2026-11-14 and starts only inside the
+# four minutes. So a run ends inside the 300-second timeout, and the kernel
+# frees the lock of a run the timeout stops. Every 5 minutes, a cycle over 50
+# open records takes three runs, so a PR lands within about fifteen minutes of
+# the last thing it waits for, the design's landing-time check being nine in
+# ten within 3 hours. Tune from city.toml [[orders.overrides]].
 [order]
 description = "Landing order: read each PR the refinery recorded as pending, merge a ready one with its head pinned, and close its bead once the merge commit is on the target"
 trigger = "cooldown"

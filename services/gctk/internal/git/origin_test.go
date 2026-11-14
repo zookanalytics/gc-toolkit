@@ -102,6 +102,53 @@ func TestReachesIgnoresWhatRewritesHistory(t *testing.T) {
 	}
 }
 
+// The default branch is the one origin/HEAD names, which a clone sets, and a
+// clone whose origin/HEAD is gone names none.
+func TestDefaultBranchIsTheBranchOriginsHEADNames(t *testing.T) {
+	dir, _, _ := clone(t)
+	if got, err := DefaultBranch(dir); err != nil || got != "main" {
+		t.Fatalf("DefaultBranch = %q, %v, want main", got, err)
+	}
+	if err := FetchBranch(dir, "side"); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "remote", "set-head", "origin", "side")
+	if got, err := DefaultBranch(dir); err != nil || got != "side" {
+		t.Fatalf("after set-head, DefaultBranch = %q, %v, want side", got, err)
+	}
+	gitIn(t, dir, "remote", "set-head", "origin", "--delete")
+	if got, err := DefaultBranch(dir); err == nil {
+		t.Fatalf("a clone with no origin/HEAD named %q", got)
+	}
+}
+
+// The tip is origin's branch as the clone last fetched it, never a local
+// branch or tag of the same name, and a branch the clone never fetched has
+// none.
+func TestTipIsTheBranchAsTheCloneLastFetchedIt(t *testing.T) {
+	dir, landed, side := clone(t)
+	before := gitIn(t, dir, "rev-parse", "refs/remotes/origin/main")
+	if got, err := Tip(dir, "main"); err != nil || got != before {
+		t.Fatalf("before the fetch, Tip = %q, %v, want the clone's %s", got, err, before)
+	}
+	for _, b := range []string{"main", "side"} {
+		if err := FetchBranch(dir, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitIn(t, dir, "branch", "origin/main", side)
+	gitIn(t, dir, "tag", "origin/main", side)
+	if got, err := Tip(dir, "main"); err != nil || got != landed {
+		t.Fatalf("after the fetch, Tip = %q, %v, want %s", got, err, landed)
+	}
+	if got, err := Tip(dir, "gone"); err == nil {
+		t.Fatalf("a branch the clone never fetched has tip %q", got)
+	}
+	if _, err := Tip(dir, "no such branch"); err == nil {
+		t.Fatal("Tip took a name that is no branch")
+	}
+}
+
 func TestReachesReadsACommitTheCloneLacksAsUnreached(t *testing.T) {
 	dir, _, _ := clone(t)
 	if err := FetchBranch(dir, "main"); err != nil {

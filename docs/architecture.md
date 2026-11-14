@@ -465,9 +465,8 @@ why a reader must know it, and the work that retires it.
   machine, so steps 6 to 8 are not what runs there today. Each rig's cutover
   bead moves the rig onto the pending record once the review loop
   (tk-1tfzr71.22) lands, along with the board's phase of a pending PR by the
-  evaluator's answer (tk-1tfzr71.88), a sitting's retirement of one
-  (tk-1tfzr71.89) and, for gc-toolkit, the seed audit's re-render after a
-  landing (tk-1tfzr71.92). The retirement bead (tk-1tfzr71.70), which waits on
+  evaluator's answer (tk-1tfzr71.88) and a sitting's retirement of one
+  (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which waits on
   every cutover, deletes the old path once no open bead is on it.
 - **The merge cadence still admits work on a pending record.** It files work
   for a PR on the pending record beside the landing order
