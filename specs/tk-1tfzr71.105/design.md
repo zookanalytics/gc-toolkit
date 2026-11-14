@@ -623,14 +623,16 @@ Upstream is 297772b4c3. Of the Gas City files this record cites, these are
 byte-identical there and in the installed build 6589a7df45:
 `internal/sling/sling_core.go`, `internal/sling/sling_attachment.go`,
 `internal/graphv2/invocation.go`, `internal/beadmeta/hold_labels.go`,
-`internal/orders/scanner.go`, `cmd/gc/demand_serve_predicate.go`, the core
-pack's `template-fragments/claim-protocol.template.md` and
+`internal/orders/scanner.go`, `cmd/gc/demand_serve_predicate.go`,
+`internal/molecule/cleanup.go`, the core pack's
+`template-fragments/claim-protocol.template.md` and
 `engdocs/architecture/life-of-a-bead.md`. The rest differ between the two:
 `cmd/gc/cmd_hook_claim.go`, `cmd/gc/build_desired_state.go`,
-`cmd/gc/cmd_sling.go`, `cmd/gc/cmd_convoy.go`, `cmd/gc/cmd_convoy_dispatch.go`,
-`cmd/gc/order_dispatch.go`, `cmd/gc/order_store.go`,
-`cmd/gc/pool_detached_orphan_sweep.go`, `cmd/gc/wisp_gc.go`,
-`internal/sling/sling.go`, `internal/molecule/molecule.go`,
+`cmd/gc/api_state.go`, `cmd/gc/wisp_autoclose.go`,
+`cmd/gc/molecule_autoclose.go`, `cmd/gc/cmd_sling.go`, `cmd/gc/cmd_convoy.go`,
+`cmd/gc/cmd_convoy_dispatch.go`, `cmd/gc/order_dispatch.go`,
+`cmd/gc/order_store.go`, `cmd/gc/pool_detached_orphan_sweep.go`,
+`cmd/gc/wisp_gc.go`, `internal/sling/sling.go`, `internal/molecule/molecule.go`,
 `internal/sourceworkflow/sourceworkflow.go`,
 `internal/api/huma_handlers_runs.go`, `internal/events/events.go`, the core
 pack's orders, `docs/tutorials/07-orders.md` and `docs/reference/config.md`.
@@ -646,7 +648,7 @@ Each symbol and sentence cited from them is in both.
 | A second live run of one formula on a bead is refused with exit 3, and one of another formula is not | checkLegacySourceWorkflowConflict; liveConvoyTrackedWorkflowRoots; `cmd/gc/cmd_sling.go`, the conflict's `return 3` |
 | A pour cut short leaves its root open, marked failed or still fenced; the fence holds a bead's route back and marking the pour failed does not restore it; the conflict check counts any root that is not closed | markFailed, fenceGraphWorkflowBead and deferBeadRouting (`internal/molecule/molecule.go`); closeFailedGraphV2Roots (`internal/sling/sling.go`); liveConvoyTrackedWorkflowRoots, which skips only a terminal root |
 | An exec order that outlasts its timeout is ended by signalling its whole process group | shellExecRunner and cancelShellExecProcessGroup (`cmd/gc/order_dispatch.go`) |
-| A claim retires a run whose input is terminal or handed off, and nothing else retires it | retireDoneWorkflowCandidates, hookRetireIfInputSettled (`cmd/gc/cmd_hook_claim.go`), reached only from the claim |
+| A claim retires a run whose input is terminal or handed off, and nothing else retires it while its step is open; the auto-closes that run when a bead closes leave such a run open | retireDoneWorkflowCandidates, hookRetireIfInputSettled (`cmd/gc/cmd_hook_claim.go`), reached only from the claim; beadCloseAutoclose (`cmd/gc/api_state.go`), whose convoy auto-close closes only convoys (doConvoyAutocloseWith, `cmd/gc/cmd_convoy.go`), and whose wisp and molecule auto-closes close a run only once every bead carrying its `gc.root_bead_id` is terminal (doWispAutocloseWith and attachedMoleculeIsParked, `cmd/gc/wisp_autoclose.go`; autocloseMoleculeIfComplete, autocloseRootsForSourceBead and subtreeTerminalOrErr, `cmd/gc/molecule_autoclose.go`; ListSubtree, `internal/molecule/cleanup.go`) |
 | The pool's default demand counts a ready, routed step without reading its input, and a worker runs its claim only once its session has started | defaultScaleCheckCountsAndDemand (`cmd/gc/build_desired_state.go`); demandServableForTemplates and demandRowServable (`cmd/gc/demand_serve_predicate.go`); core's claim protocol (`internal/bootstrap/packs/core/template-fragments/claim-protocol.template.md`) |
 | A plain sling clears the execution route; reopen-source re-routes the bead; neither source command finds a run slung with `--on` | clearGraphTakeoverRoute; cmdWorkflowReopenSource, cmdWorkflowDeleteSource (`cmd/gc/cmd_convoy_dispatch.go`); the graph.v2 pour's empty source (`internal/sling/sling.go`) and the lookup by `gc.source_bead_id` (`internal/sourceworkflow/sourceworkflow.go`) |
 | A convoy closes only once every member is terminal | closeCompletedConvoyAcross (`cmd/gc/cmd_convoy.go`) |
