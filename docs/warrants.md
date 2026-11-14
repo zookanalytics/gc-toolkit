@@ -635,8 +635,43 @@ shares only the word ([authority-map.md](authority-map.md)).
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-12, at `gastownhall/gascity` main 1f0c10495b1c,
-  `gastownhall/beads` main e51a90036718 and `gastownhall/gascity-packs` main
-  1f6d8e41c5b0.
+- **Verified.** 2026-11-14, at `gastownhall/gascity` main dc5486b999,
+  `gastownhall/beads` main 8cdfa796a8f5 and `gastownhall/gascity-packs` main
+  0f07496d2fa4.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
+
+## Memory note waits
+
+- **Covers.** `assets/scripts/memory-intake.sh`, and the state it keeps for
+  each memory directory under the city's
+  `.gc/runtime/packs/gc-toolkit/memory-intake`: the list of the notes the
+  distiller kept, each with the bead it waits on or the date it is next due,
+  and the text of each note it removed.
+- **Stands in for.** A lifecycle for an agent's memory note: a wait that holds
+  a note, a file in Claude Code's memory directory, until the bead that carries
+  its lesson is done or a date comes, and the record of what the judge decided
+  about it.
+- **Evidence.**
+  - In `gastownhall/gascity`, nothing reads or empties an agent's memory. No
+    file outside the tests names `MEMORY.md`, auto memory or
+    `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, and the audit of Gas Town's commits
+    defers agent memory (`engdocs/archive/analysis/gastown-upstream-audit.md`,
+    "22g. Agent memory").
+  - In `gastownhall/beads`, a wait holds only an issue. `bd defer --until`
+    snoozes an issue (`cmd/bd/defer.go`), and a dependency joins an issue to a
+    bd id or an `external:<project>:<capability>` reference (`cmd/bd/dep.go`).
+    A note is a file, which neither can hold. bd's own memory plane,
+    `bd remember` (`rememberCmd` in `cmd/bd/memory.go`), keeps a key and a
+    value that `bd prime` injects into every session, with no wait.
+  - Claude Code keeps memory files out of its retention sweep and expires or
+    empties none of them ([memory](https://code.claude.com/docs/en/memory),
+    "Storage location").
+  - The search is
+    [specs/tk-zlot608.2/gas-city-search.md](../specs/tk-zlot608.2/gas-city-search.md).
+- **Verified.** 2026-11-14, at `gastownhall/gascity` main dc5486b999 and
+  `gastownhall/beads` main 8cdfa796a8f5. Claude Code's memory page as the
+  search read it on 2026-11-11.
+- **Retires when.** Gas City or bd ships a wait that can hold an agent's
+  memory note on a bead or a date, or Claude Code keeps a lifecycle for its
+  memory notes.

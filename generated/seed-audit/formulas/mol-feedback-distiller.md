@@ -27,6 +27,12 @@ Every run leaves each pattern decided: closed once resolved, waiting on the
 follow-up it spawned, or deferred with a date while it gathers evidence. A
 closed pattern reopens when its feedback recurs.
 
+Agent memory notes are the loop's second intake. read-memory ends the waits
+that are done, and the due notes join the pending set, so the cadence gate
+counts them and the judge reads each one by the rubric's memory section
+beside the observations. file-and-dispatch applies each note's decision. The
+mechanics are `assets/scripts/memory-intake.sh`.
+
 Read-only plus bead-filing: this formula never edits a fragment, prompt, or
 skill — only an operator-merged PR changes agent behavior.
 
@@ -48,13 +54,15 @@ Variables:
   {{exemplar_cap}}: Entry budget for the exemplar corpus, template-fragments/learning-exemplars.template.md (carrier: exemplar). Read per review rather than per turn, so the cap is larger per unit of cost and still bounded. (default=8)
   {{fragment_bullet_cap}}: Bullet budget per learned-conventions fragment. A promotion past the cap must name a displacement in the same proposal or it does not file. (default=15)
   {{max_beads_per_run}}: Maximum prompt-update/engineering beads filed per run; dropped survivors re-surface next cycle (state is durable, so this is naturally resumable). (default=3)
+  {{memory_notes_per_run}}: How many due memory notes one run judges, oldest first. The rest stay due and are judged by later runs in turn. (default=200)
   {{pattern_defer_days}}: How long a held pattern waits for the recurrence it is held for: judge-and-cluster §7 defers it for this many days, and a pattern whose deferral ends with no new evidence is dismissed by a run that has judged the pending observations, since one of them may be its recurrence. It sets when a pattern is looked at again, not what its evidence earns: the rubric judges that. (default=90)
   {{profile_entry_cap}}: Entry budget for the operator profile (carrier: profile). Same displacement rule as fragment_bullet_cap. (default=12)
   {{rig_list}}: Space-separated rig names whose stores hold observations (D5). Empty = runtime enumeration; if that fails, the run aborts fail-safe — never judge on a partial observation set. (default=)
   {{work_quality_entry_cap}}: Entry budget per work-quality fragment — the shared base or any one per-class fragment (carrier: work-quality). Same displacement rule as fragment_bullet_cap. (default=12)
 
-Steps (4):
-  ├── mol-feedback-distiller.load-and-gate: Prime, home-rig gate, read pending observations cross-rig, apply the D7 cadence gate
+Steps (5):
+  ├── mol-feedback-distiller.read-memory: Read the city's agent memory: end the waits that are done, tidy the indexes, count the due notes
+  ├── mol-feedback-distiller.load-and-gate: Prime, home-rig gate, read pending observations cross-rig, apply the D7 cadence gate [needs: mol-feedback-distiller.read-memory]
   ├── mol-feedback-distiller.judge-and-cluster: Judge the pending set with the learning-distill rubric; cluster onto pattern beads; run the retirement pass; leave every pattern decided [needs: mol-feedback-distiller.load-and-gate]
   ├── mol-feedback-distiller.file-and-dispatch: File one prompt-update bead per proposal, stamp consumed observations, gate contested rules, drain [needs: mol-feedback-distiller.judge-and-cluster]
   └── mol-feedback-distiller.workflow-finalize: Finalize workflow [needs: mol-feedback-distiller.file-and-dispatch]
