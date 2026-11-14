@@ -67,12 +67,14 @@ Dropping these is as much the design as keeping the list above.
 
 A bead of one of the pack's own kinds names that kind in
 `metadata.task_kind`. Every reader that branches on such a kind reads that key
-and nothing else. `review`, `triage-subject`, `observation` and the standing
-kinds are all resolved this way, in the liveness sweeps, the gate scripts and
-the doctor checks. The standing kinds name a record that is open, unrouted and
-unassigned by design and never closes. Their one definition is
-`assets/scripts/standing-kinds.sh`, which a reader sources for the list and
-for the `is_standing_kind` test.
+and nothing else. `review`, `triage-subject`, `observation`, `feedback-pattern`
+and the standing kinds are all resolved this way, in the liveness sweeps, the
+gate scripts and the doctor checks. The standing kinds name a record that is
+open, unrouted and unassigned by design and never closes. Their one definition
+is `assets/scripts/standing-kinds.sh`, which a reader sources for the list and
+for the `is_standing_kind` test. A feedback pattern is no standing kind: it is
+backlog work the feedback distiller triages, which closes once resolved and
+reopens when its feedback recurs (`formulas/mol-feedback-distiller.toml`).
 
 A human gate and a conversation carry no `task_kind`. Each is known by its
 shape, read off the bead's own fields and edges, and every reader of a shape
@@ -254,8 +256,9 @@ blocked, unassigned, plainly-work bead — an allowlisted work issue_type, not a
 review/step/workflow bead or a merge anchor — must carry a dispatch path,
 `gc.routed_to` or a `gc.dispatch_when_ready` arm, or it strands when its blocker
 closes and no pool is offered it; a bead a live molecule drives is exempt on a
-liveness check, and a bead carrying a hold label is exempt because its dispatch
-is the placement sitting's, warn-only), and `doctor/check-armed-dispatch-owed`
+liveness check, a bead carrying a hold label is exempt because its dispatch
+is the placement sitting's, and a feedback pattern is exempt because the
+distiller decides it on every run once its wait clears, warn-only), and `doctor/check-armed-dispatch-owed`
 (the complement to `check-cadence-live`: a bead armed with `gc.dispatch_when_ready`
 that nothing holds is slung by the deferred-dispatch reconcile order within its
 cadence, so one that has stayed armed and open past that window — or one armed at a

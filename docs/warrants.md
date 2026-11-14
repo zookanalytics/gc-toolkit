@@ -569,7 +569,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   nudges each open dependent's assignee or routed pool with `gc session nudge`.
   It slings nothing, and no core order or script calls `gc sling`
   (`internal/bootstrap/packs/core/assets/scripts/cascade-nudge-on-blocker-close.sh`).
-- **Verified.** 2026-11-09, at `gastownhall/gascity` main e35c1602d936.
+- **Verified.** 2026-11-12, at `gastownhall/gascity` main 6bd609f5bfb4.
 - **Retires when.** Gas City or bd pours a formula on a bead once its blockers
   close.
 
@@ -595,3 +595,48 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City wakes a session parked on a provider's limit once
   the limit resets, or every provider the city runs resumes such a session by
   itself.
+
+## Feedback patterns
+
+- **Covers.** The `feedback-pattern` name, the `evidence_count`,
+  `distinct_sources`, `first_seen`, `last_seen`, `promotion_hold`,
+  `proposal_bead`, `proposal_carrier`, `proposal_action` and `remedy_note`
+  keys, in the `[metadata.learning]` table of `lifecycle/lifecycle.toml`. Their
+  writer: `formulas/mol-feedback-distiller.toml`. The pattern's lifecycle is in
+  [feedback-learning.md](feedback-learning.md).
+- **Stands in for.** A learning loop's decision about one recurring piece of
+  agent feedback, kept as work. The record gathers the observations that report
+  the feedback and keeps the evidence they add up to, such as how many distinct
+  events and sources report it. It carries the decision to adopt a standing
+  rule, to wait for more evidence or to dismiss the feedback, and it closes once
+  resolved and reopens when the feedback recurs.
+- **Evidence.**
+  - In `gastownhall/gascity`, no order or formula of the bundled `core` pack
+    reads agent feedback (its `orders/` and `formulas/` directories under
+    `internal/bootstrap/packs/core/`). `gc prompt synth`, which writes a role's
+    prompt, works from a meta-prompt and a baseline template and takes no
+    feedback (`docs/reference/cli.md`).
+  - In `gastownhall/beads`, what keeps knowledge holds no decision.
+    `bd remember` stores a text that `bd prime` injects into each session
+    (`rememberCmd` in `cmd/bd/memory.go`). The Memory Beads proposal (issue
+    #5877, open) would add a Memory Bead, which never becomes ready, blocked,
+    claimed, completed or closed (R1), keeps evidence and confidence as an
+    application's metadata (R3), and leaves judging whether its content is
+    true, duplicated or contradictory to tools outside bd (R30). Either could
+    hold an adopted rule but not the decision to adopt it, and no memory type
+    is in `internal/types/types.go`.
+  - In `gastownhall/gascity-packs`, the packs that capture learnings keep one
+    record per learning. compound-engineering's `ce-compound` skill writes or
+    updates a solution doc, and gstack's skills log each learning to a
+    per-project `learnings.jsonl`. Neither counts how often a piece of feedback
+    recurs or decides whether it becomes a standing rule.
+  - So a pattern is a task the distiller triages, and its lifecycle composes
+    bd's own work states: the `deferred` status with a date (`bd defer
+    --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
+    The search is
+    [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
+- **Verified.** 2026-11-12, at `gastownhall/gascity` main 1f0c10495b1c,
+  `gastownhall/beads` main e51a90036718 and `gastownhall/gascity-packs` main
+  1f6d8e41c5b0.
+- **Retires when.** Gas City ships a loop that decides agents' recurring
+  feedback as work, with the evidence each decision rests on.

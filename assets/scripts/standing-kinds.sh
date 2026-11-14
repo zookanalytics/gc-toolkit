@@ -24,8 +24,7 @@
 STANDING_KINDS_JQ='
   # The task_kind values of a standing record.
   def standing_kinds: [
-    "triage-subject",    # a triage bucket the liveness sweep files on (liveness-sweep.sh)
-    "feedback-pattern"   # a learning-loop pattern record (mol-feedback-distiller.toml)
+    "triage-subject"     # a triage bucket the liveness sweep files on (liveness-sweep.sh)
   ];
   # True when this bead is a standing record. Reads metadata.task_kind only.
   def is_standing_kind:
