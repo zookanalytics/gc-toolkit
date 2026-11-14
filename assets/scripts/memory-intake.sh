@@ -33,8 +33,9 @@
 # next due), `removed/<name>@<hash>` (each removed unit's text) and `lock`. A
 # unit is due when the list does not hold it at its hash, or its date has
 # come, and is as old as its last change or that date. A note's list hash
-# leaves out its use lines. A unit is removed, and an index or collection note
-# edited, only while it is unchanged since it was read.
+# leaves out its use lines. A unit is removed only once its text is kept, and
+# it is removed, or an index or collection note edited, only while it is
+# unchanged since it was read.
 #
 # A note on a closed feedback pattern leaves once a fix the pattern spawned has
 # landed on its repository's default branch and none is still on its way, and
@@ -268,31 +269,89 @@ unlock_dir() { exec 8>&-; }
 # rewrite <file> <fn> [args] — <fn> reads the file's text on stdin and writes
 # its new text. The new text is written only while the file still holds the
 # text <fn> read, and is made again, up to three times, when another writer
-# moved it. 0 written or nothing to change (REWROTE says which), 3 the file
-# kept moving, 1 failure.
-REWROTE=0
+# moved it. 0 written or nothing to change (REWROTE says which, and
+# REWROTE_HASH is the hash of the text written), 3 the file kept moving, 1
+# failure.
+REWROTE=0; REWROTE_HASH=""
 rewrite() {
-  local file=$1 fn=$2 before tmp; shift 2
-  REWROTE=0
+  local file=$1 fn=$2 before after tmp; shift 2
+  REWROTE=0; REWROTE_HASH=""
   for _ in 1 2 3; do
     before=$(sha_file "$file") || return 1
     tmp=$(mktemp "${file%/*}/.memory-intake.XXXXXX") || return 1
     cp -p "$file" "$tmp" 2>/dev/null
     if ! "$fn" "$@" < "$file" > "$tmp"; then rm -f "$tmp"; return 1; fi
-    if [ "$(sha_file "$tmp")" = "$before" ]; then rm -f "$tmp"; return 0; fi
+    after=$(sha_file "$tmp")
+    if [ "$after" = "$before" ]; then rm -f "$tmp"; return 0; fi
     if [ "$(sha_file "$file")" = "$before" ]; then
       mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
-      REWROTE=1; return 0
+      REWROTE=1; REWROTE_HASH=$after; return 0
     fi
     rm -f "$tmp"
   done
   return 3
 }
 
-# keep_text <state dir> <name> <hash> <file> — files a removed unit's text.
+# keep_text <state dir> <name> <hash> <file> — files the text of a unit that is
+# leaving at removed/<name>@<hash>. It is copied under another name and moved
+# there only once the copy holds text of <hash>, so a file that no longer
+# holds that text is refused. KEPT_NEW is the file it made, empty when that
+# text was kept already, and unkeep takes it back when the unit stays.
+KEPT_NEW=""
 keep_text() {
+  local dest="$1/removed/$2@$3" tmp
+  KEPT_NEW=""
   mkdir -p "$1/removed" 2>/dev/null || return 1
-  [ -e "$1/removed/$2@$3" ] || cp "$4" "$1/removed/$2@$3"
+  if [ -f "$dest" ] && [ "$(sha_file "$dest" 2>/dev/null)" = "$3" ]; then return 0; fi
+  tmp=$(mktemp "$1/removed/.keep.XXXXXX" 2>/dev/null) || return 1
+  if cp "$4" "$tmp" 2>/dev/null && [ "$(sha_file "$tmp")" = "$3" ] && mv -f "$tmp" "$dest" 2>/dev/null; then
+    KEPT_NEW=$dest; return 0
+  fi
+  rm -f "$tmp"; return 1
+}
+unkeep() { [ -z "$KEPT_NEW" ] || rm -f "$KEPT_NEW"; KEPT_NEW=""; }
+
+# remove_file <state dir> <dir> <name> <hash> — removes a note, or a
+# collection note left with no entries, while it holds text of <hash>, once
+# that text is kept. Agents write memory without the lock, so the file is read
+# again right before it goes. 0 removed; 2 it holds other text or is gone, and
+# stays; 1 its text was not kept or it could not be removed, and it stays.
+remove_file() {
+  local f="$2/$3"
+  if ! keep_text "$1" "$3" "$4" "$f"; then
+    [ "$(sha_file "$f" 2>/dev/null)" = "$4" ] && return 1
+    return 2
+  fi
+  if [ "$(sha_file "$f" 2>/dev/null)" = "$4" ] && rm -f "$f"; then return 0; fi
+  unkeep
+  [ "$(sha_file "$f" 2>/dev/null)" = "$4" ] && return 1
+  return 2
+}
+
+# remove_entry <state dir> <dir> <name> <hash> <entry file> — takes an entry
+# out of its collection note once its text is kept, and the collection note
+# with it when that leaves it with no entries (HUB_GONE). 0 removed; 2 the note
+# no longer holds the entry or kept changing, and it stays; 1 its text was not
+# kept or the note could not be written, and it stays; 3 removed, but the
+# collection note it leaves with no entries stays, its text not kept.
+HUB_GONE=0
+remove_entry() {
+  local sd=$1 dir=$2 name=$3 rc
+  HUB_GONE=0
+  keep_text "$sd" "$name" "$4" "$5" || return 1
+  rewrite "$dir/$name" drop_entry "$5"; rc=$?
+  if [ "$rc" != 0 ] || [ "$REWROTE" != 1 ]; then
+    unkeep
+    [ "$rc" = 1 ] && [ -e "$dir/$name" ] && return 1
+    return 2
+  fi
+  grep -q '^- ' "$dir/$name" && return 0
+  remove_file "$sd" "$dir" "$name" "$REWROTE_HASH"; rc=$?
+  case $rc in
+    0) HUB_GONE=1 ;;
+    1) err "$dir/$name has no entries left and stays: its text was not kept, or it could not be removed"; return 3 ;;
+  esac
+  return 0
 }
 
 # --- reading a directory ------------------------------------------------------
@@ -474,18 +533,19 @@ drop_entry() { LC_ALL=C awk -v ENTRY="$1" "$DROP_ENTRY_AWK"; }
 # tidy <dir> <state dir> — takes the pointers to notes no longer in the
 # directory out of the index and every collection note, and removes, with its
 # text kept, a collection note this leaves with no entries. LINKS counts the
-# files it edited.
+# files it edited. 1 when a collection note left with no entries stays because
+# its text was not kept.
 LINKS=0
 tidy() {
-  local dir=$1 sd=$2 f mode had gone_hub rc
+  local dir=$1 sd=$2 f name had gone_hub rc fail=0
   for _ in 1 2 3; do
     gone_hub=0
     find "$dir" -maxdepth 1 -type f -name '*.md' -print 2>/dev/null | sed 's|.*/||' > "$WORK/present"
     for f in "$dir/MEMORY.md" "$dir"/hub-*.md; do
       [ -f "$f" ] || continue
-      mode=hub; [ "${f##*/}" = MEMORY.md ] && mode=index
+      name=${f##*/}
       had=$(grep -c '^- ' "$f" 2>/dev/null)
-      rewrite "$f" prune_links "$WORK/present" "${f##*/}"; rc=$?
+      rewrite "$f" prune_links "$WORK/present" "$name"; rc=$?
       case $rc in
         0) ;;
         3) err "$f kept changing while its links were tidied; the next run tries again"; continue ;;
@@ -493,12 +553,17 @@ tidy() {
       esac
       [ "$REWROTE" = 1 ] || continue
       LINKS=$((LINKS + 1))
-      if [ "$mode" = hub ] && [ "${had:-0}" -gt 0 ] && ! grep -q '^- ' "$f"; then
-        keep_text "$sd" "${f##*/}" "$(sha_file "$f")" "$f" && rm -f "$f" && gone_hub=1
+      if [ "$name" != MEMORY.md ] && [ "${had:-0}" -gt 0 ] && ! grep -q '^- ' "$f"; then
+        remove_file "$sd" "$dir" "$name" "$REWROTE_HASH"; rc=$?
+        case $rc in
+          0) gone_hub=1 ;;
+          1) err "$f has no entries left and stays: its text was not kept, or it could not be removed"; fail=1 ;;
+        esac
       fi
     done
     [ "$gone_hub" = 1 ] || break
   done
+  return "$fail"
 }
 
 # --- the guidance block -------------------------------------------------------
@@ -692,7 +757,7 @@ settle() {
   return "$rc"
 }
 settle_dir() {
-  local dir=$1 sd=$2 plan=$3 w="$WORK/settle" kind name hash wait out day why ef rc
+  local dir=$1 sd=$2 plan=$3 w="$WORK/settle" kind name hash wait out day why unit full ef r rc=0
   lock_dir "$sd" "$dir" || return 1
   scan "$dir" "$w" || { unlock_dir; return 1; }
   list_rows "$sd" > "$w/rows"
@@ -701,16 +766,17 @@ settle_dir() {
     awk -F'\t' -v k="$kind" -v n="$name" -v h="$hash" -v wt="$wait" '$1 == k && $2 == n && $3 == h && $5 == wt { f = 1 } END { exit !f }' "$w/rows" || continue
     if [ "$out" = left ]; then
       # A unit changed since it was judged stays: it is due again.
-      ef=$(awk -F'\t' -v k="$kind" -v n="$name" -v h="$hash" '$1 == k && $2 == n && $3 == h { print ($6 == "" ? "-" : $6); exit }' "$w/units.tsv")
-      [ -n "$ef" ] || continue
-      if [ "$kind" = note ]; then
-        keep_text "$sd" "$name" "$(sha_file "$dir/$name")" "$dir/$name" && rm -f "$dir/$name" || continue
-      else
-        rewrite "$dir/$name" drop_entry "$ef"; rc=$?
-        [ "$rc" = 0 ] && [ "$REWROTE" = 1 ] || continue
-        keep_text "$sd" "$name" "$hash" "$ef"
-        grep -q '^- ' "$dir/$name" || { keep_text "$sd" "$name" "$(sha_file "$dir/$name")" "$dir/$name" && rm -f "$dir/$name"; }
-      fi
+      unit=$(awk -F'\t' -v k="$kind" -v n="$name" -v h="$hash" '$1 == k && $2 == n && $3 == h { print; exit }' "$w/units.tsv")
+      [ -n "$unit" ] || continue
+      IFS="$US" read -r _ _ _ full _ ef <<< "$(printf '%s' "$unit" | to_us)"
+      if [ "$kind" = note ]; then remove_file "$sd" "$dir" "$name" "$full"; else remove_entry "$sd" "$dir" "$name" "$hash" "$ef"; fi
+      r=$?
+      case $r in
+        0) ;;
+        3) rc=1 ;;
+        2) continue ;;
+        *) err "$dir/$name stays, though its wait ended with a fix landed: its text was not kept, or its file could not be written"; rc=1; continue ;;
+      esac
       drop_row "$w/rows" "$kind" "$name" "$hash"
       SETTLED_LEFT=$((SETTLED_LEFT + 1))
     else
@@ -719,8 +785,8 @@ settle_dir() {
       SETTLED_DUE=$((SETTLED_DUE + 1))
     fi
   done < <(to_us < "$plan")
-  tidy "$dir" "$sd"
-  write_list "$sd" "$w/rows"; rc=$?
+  tidy "$dir" "$sd" || rc=1
+  write_list "$sd" "$w/rows" || rc=1
   unlock_dir
   return "$rc"
 }
@@ -797,7 +863,7 @@ cmd_read() {
     sd=$(state_of "$dir")
     lock_dir "$sd" "$dir" || { rc=1; continue; }
     LINKS=0
-    tidy "$dir" "$sd"
+    tidy "$dir" "$sd" || rc=1
     guide "$dir" || { err "the guidance block of $dir/MEMORY.md was not written"; rc=1; }
     if scan "$dir" "$w"; then
       # A row whose unit is gone from the directory leaves the list.
@@ -879,20 +945,21 @@ apply_dir() {
     IFS="$US" read -r kind _ base full _ ef <<< "$(printf '%s' "$unit" | to_us)"
     if [ "$verb" = drop ]; then
       if [ "$kind" = note ]; then
-        if [ "$(sha_file "$dir/$name" 2>/dev/null)" != "$full" ]; then say "refused $ref: it changed since it was listed; it stays and is due"; continue; fi
-        if keep_text "$sd" "$name" "$full" "$dir/$name" && rm -f "$dir/$name"; then
-          say "removed $ref, its text kept at $sd/removed/$name@$full"
-        else
-          err "could not remove $ref"; APPLY_FAIL=1; continue
-        fi
+        remove_file "$sd" "$dir" "$name" "$full"; rc=$?
+        case $rc in
+          0) say "removed $ref, its text kept at $sd/removed/$name@$full" ;;
+          2) say "refused $ref: it changed since it was listed; it stays and is due"; continue ;;
+          *) err "could not remove $ref, so it stays: its text was not kept, or it could not be removed"; APPLY_FAIL=1; continue ;;
+        esac
       else
-        rewrite "$dir/$name" drop_entry "$ef"; rc=$?
-        if [ "$rc" != 0 ] || [ "$REWROTE" != 1 ]; then say "refused $ref: its collection note kept changing or no longer holds it; it stays"; continue; fi
-        keep_text "$sd" "$name" "$base" "$ef"
-        say "removed $ref, its text kept at $sd/removed/$name@$base"
-        if ! grep -q '^- ' "$dir/$name"; then
-          keep_text "$sd" "$name" "$(sha_file "$dir/$name")" "$dir/$name" && rm -f "$dir/$name" && say "removed $name, which has no entries left"
-        fi
+        remove_entry "$sd" "$dir" "$name" "$base" "$ef"; rc=$?
+        case $rc in
+          0|3) say "removed $ref, its text kept at $sd/removed/$name@$base" ;;
+          2) say "refused $ref: its collection note kept changing or no longer holds it; it stays"; continue ;;
+          *) err "could not remove $ref, so it stays: its text was not kept, or its collection note could not be written"; APPLY_FAIL=1; continue ;;
+        esac
+        [ "$rc" = 3 ] && APPLY_FAIL=1
+        [ "$HUB_GONE" = 1 ] && say "removed $name, which has no entries left"
       fi
       drops=1
       drop_row "$w/rows" "$kind" "$name" "$base"
@@ -915,7 +982,7 @@ apply_dir() {
       say "recorded $ref: due again on $arg${ask:+, with a request to record each use}"
     fi
   done < <(to_us < "$lines")
-  [ "$drops" = 1 ] && tidy "$dir" "$sd"
+  if [ "$drops" = 1 ]; then tidy "$dir" "$sd" || APPLY_FAIL=1; fi
   write_list "$sd" "$w/rows" || APPLY_FAIL=1
   unlock_dir
 }

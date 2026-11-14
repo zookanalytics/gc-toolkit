@@ -7,8 +7,10 @@
 #
 # Hermetic: a stub gc answers the rig list and each store's beads from files,
 # a stub gh answers a PR's state, and a stub patrol-finding.sh logs what it is
-# asked to file. Each case builds its own city, home and memory directories in
-# a sandbox, and the clock is fixed through MEMORY_INTAKE_NOW.
+# asked to file. Stub cp and mkdir, put on the path for one run, land an
+# agent's edit while a unit is being removed. Each case builds its own city,
+# home and memory directories in a sandbox, and the clock is fixed through
+# MEMORY_INTAKE_NOW.
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -67,6 +69,21 @@ cat > "$SB/bin/pf" <<'STUB'
 printf '%s\n' "$*" >> "$STUB_FINDINGS"
 STUB
 chmod +x "$SB/bin/gc" "$SB/bin/gh" "$SB/bin/pf"
+mkdir -p "$SB/edit-bin"
+cat > "$SB/edit-bin/cp" <<'STUB'
+#!/usr/bin/env bash
+# cp or mkdir by its name. When STUB_EDIT_AT names it and the call reaches a
+# removed/ directory, it then makes, once, the edit an agent makes to $STUB_EDIT.
+command -p "${0##*/}" "$@"; rc=$?
+if [ "${0##*/}" = "${STUB_EDIT_AT:-}" ] && [ ! -e "$STUB_EDIT.fired" ]; then
+  case "${*: -1}" in
+    */removed|*/removed/*) printf 'An edit made while it was being removed.\n' >> "$STUB_EDIT"; : > "$STUB_EDIT.fired" ;;
+  esac
+fi
+exit "$rc"
+STUB
+cp "$SB/edit-bin/cp" "$SB/edit-bin/mkdir"
+chmod +x "$SB/edit-bin/cp" "$SB/edit-bin/mkdir"
 export PATH="$SB/bin:$ROOT/tools/test-floor:$PATH"
 export GC_PATROL_FINDING_TOOL="$SB/bin/pf"
 export MEMORY_INTAKE_MANAGED_SETTINGS="$SB/managed.json"
@@ -433,6 +450,83 @@ R=$(due_json | jq -r '.[0].memory_ref'); K=$(printf '%s' "$R" | cut -c1-16); SD=
 apply_lines "$R drop"
 has "$OUT" "removed hub-b.md, which has no entries left" "dropped, the entry leaves with its collection note"
 eq "$(cat "$SD"/removed/hub-b.md@"${R##*@}"*)" "$ENTRY" "its whole text kept"
+
+echo "── nothing leaves while its text cannot be kept ──"
+city keep
+rig k tk
+M=$(memdir "$B/rigs/k")
+echo '[{"id": "tk-p1", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]' > "$B/rigs/k/beads.json"
+printf 'k lesson.\n' > "$M/k.md"
+printf -- '- (no file) An entry to drop.\n- (no file) An entry that waits.\n' > "$M/hub-k.md"
+run read
+RD=$(due_json | jq -r '.[] | select((.memory_text // "") | contains("to drop")) | .memory_ref')
+RW=$(due_json | jq -r '.[] | select((.memory_text // "") | contains("that waits")) | .memory_ref')
+apply_lines "$RD next 2026-11-20" "$RW waits tk-p1" "$(ref_of k.md) waits tk-p1"
+SD=$(find "$STATE" -mindepth 1 -maxdepth 1 -type d | head -1)
+# The row of an entry: its kind, collection note and the hash its ref begins.
+row() { awk -F'\t' -v n="$1" -v h="${2##*@}" '$1 == "entry" && $2 == n && index($3, h) == 1' "$SD/list.tsv"; }
+rm -rf "$SD/removed"; : > "$SD/removed"   # removed/ cannot be made
+MEMORY_INTAKE_NOW=1795262400 apply_lines "$RD drop"   # 2026-11-21, the entry due on its date
+eq "$RC" 1 "an entry whose text cannot be kept fails the apply"
+has "$ERR" "could not remove $RD" "and says so"
+hasnt "$OUT" "kept at" "with no word of its text kept"
+has "$(cat "$M/hub-k.md")" "- (no file) An entry to drop." "the entry stays in its collection note"
+has "$(row hub-k.md "$RD")" "2026-11-20" "and its row stays on the list"
+printf -- '- [P](gone.md) — a pointer to a gone note\n' > "$M/hub-p.md"
+run read
+eq "$RC" 1 "a collection note its last pointer leaves fails the read when its text cannot be kept"
+has "$ERR" "hub-p.md has no entries left and stays" "and says so"
+eq "$([ -e "$M/hub-p.md" ] && echo kept || echo gone)" "kept" "and it stays"
+cat > "$B/rigs/k/beads.json" <<'JSON'
+[{"id": "tk-p1", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "metadata": {"task_kind": "feedback-pattern", "proposal_bead": "tk-f1"}},
+ {"id": "tk-f1", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "main"}}]
+JSON
+run read
+eq "$RC" 1 "a wait that ends while the text cannot be kept fails the read"
+has "$OUT" "waits ended: 0 unit(s) removed" "nothing is removed"
+eq "$(left k.md)" "k.md:kept " "the note stays"
+has "$(cat "$M/hub-k.md")" "- (no file) An entry that waits." "and so does the entry"
+has "$(row hub-k.md "$RW")" "tk-p1" "with its row still waiting"
+rm -f "$SD/removed"
+run read
+eq "$RC" 0 "once the text can be kept"
+eq "$(left k.md)" "k.md:gone " "the note leaves"
+hasnt "$(cat "$M/hub-k.md")" "An entry that waits." "and so does the entry"
+eq "$(cat "$SD"/removed/k.md@*)" "k lesson." "each with its text kept"
+
+echo "── a note an agent edits while it is being removed stays ──"
+city race
+rig r tk
+M=$(memdir "$B/rigs/r")
+echo '[{"id": "tk-p1", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}, {"id": "tk-p2", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]' > "$B/rigs/r/beads.json"
+for n in d s t; do printf '%s lesson.\n' "$n" > "$M/$n.md"; done
+EDITED=$(printf 'An edit made while it was being removed.')
+run read
+apply_lines "$(ref_of s.md) waits tk-p1" "$(ref_of t.md) waits tk-p2"
+RD=$(ref_of d.md)
+STUB_EDIT="$M/d.md" STUB_EDIT_AT=mkdir PATH="$SB/edit-bin:$PATH" apply_lines "$RD drop"
+has "$OUT" "refused $RD" "a drop is refused when the note changes after the scan, before its text is kept"
+has "$(cat "$M/d.md")" "$EDITED" "the note stays with the edit"
+eq "$(due_json | jq -r '.[] | select(.memory_file | endswith("/d.md")) | .memory_due')" "new" "and is due"
+eq "$(find "$STATE" -path '*/removed/d.md@*' | grep -c .)" 0 "no text is kept for it"
+# landed <pattern>... — each pattern closes with its fix landed on main.
+landed() {
+  local p; for p in "$@"; do
+    jq --arg p "$p" '(.[] | select(.id == $p)) |= . + {status: "closed", closed_at: "2026-11-14T10:00:00Z", metadata: {task_kind: "feedback-pattern", proposal_bead: ($p + "f")}}
+      | . + [{id: ($p + "f"), status: "closed", metadata: {merge_result: "merged", merged_target: "main"}}]' "$B/rigs/r/beads.json" > "$B/beads.next" && mv "$B/beads.next" "$B/rigs/r/beads.json"
+  done
+}
+landed tk-p1
+STUB_EDIT="$M/s.md" STUB_EDIT_AT=mkdir PATH="$SB/edit-bin:$PATH" run read
+eq "$(left s.md)" "s.md:kept " "a wait that ends keeps a note that changes after the scan, before its text is kept"
+has "$(cat "$M/s.md")" "$EDITED" "with the edit"
+eq "$(due_json | jq -r '.[] | select(.memory_file | endswith("/s.md")) | .memory_due + " / " + .memory_prior')" "changed / waited on tk-p1" "due as changed"
+landed tk-p2
+STUB_EDIT="$M/t.md" STUB_EDIT_AT=cp PATH="$SB/edit-bin:$PATH" run read
+eq "$(left t.md)" "t.md:kept " "and one that changes after its text is kept, before it goes"
+has "$(cat "$M/t.md")" "$EDITED" "with the edit"
+eq "$(due_json | jq -r '.[] | select(.memory_file | endswith("/t.md")) | .memory_due')" "changed" "due as changed"
+eq "$(find "$STATE" -path '*/removed/[st].md@*' | grep -c .)" 0 "the text kept for them is taken back"
 
 echo "── off the home rig ──"
 city offhome
