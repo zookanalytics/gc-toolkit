@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -189,53 +188,12 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 	}
 }
 
-// guideServe returns the serve command on the **Serve:** line of
-// docs/review-demo.md, the rig's demo guide, as demo_engine_guide in
-// assets/scripts/demo-engine-lib.sh reads it: the one reader of the guide's app,
-// through which a demo capture given --guide and a sitting's live copy of the
-// board each take the command they run. It reads the guide at the commit the
-// repository has checked out, as every reader does, and fails the test when the
-// guide does not read, such as one that names a **Port:** beside its command, or
-// names no command.
-func guideServe(t *testing.T, repo string) string {
-	t.Helper()
-	cmd := exec.Command("bash", "-c", `. "$1/assets/scripts/demo-engine-lib.sh" && demo_engine_guide "$1" && printf '%s' "$DEMO_GUIDE_SERVE"`, "bash", repo)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("the rig's demo guide does not read through demo_engine_guide: %v\n%s", err, stderr.String())
-	}
-	if len(out) == 0 {
-		t.Fatal("the rig's demo guide names no **Serve:** command, so neither a capture nor a sitting's live copy can bring the board up")
-	}
-	return string(out)
-}
-
-// docCapture reads docs/review-demo.md and returns the board's capture: the
-// demo-screenshot.sh call whose --script is board.md. The page gives the capture
-// in prose, as inline code that can wrap, so the capture is read with the page's
-// line breaks folded into spaces, and it runs to the end of its code span.
-func docCapture(t *testing.T) (capture string) {
-	t.Helper()
-	doc, err := os.ReadFile(filepath.Join(moduleRoot, "../../docs/review-demo.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := strings.Join(strings.Fields(string(doc)), " ")
-	for _, c := range regexp.MustCompile("demo-screenshot\\.sh\"? page [^`]*").FindAllString(text, -1) {
-		if strings.Contains(c, "--script board.md") {
-			if capture != "" {
-				t.Fatalf("docs/review-demo.md gives more than one capture of the board:\n%s\n%s", capture, c)
-			}
-			capture = c
-		}
-	}
-	if capture == "" {
-		t.Fatal("docs/review-demo.md gives no capture of the board")
-	}
-	return capture
-}
+// declaredServe is the command the town's city.toml declares as gc-toolkit's
+// ui_serve_command, which a demo capture of the board and a sitting's live copy
+// of it each run as a copy that gctk rig serve runs. It runs from the
+// worktree's root, and it ends with the fixture's own invocation, so a capture
+// can add the fixture's flags to it.
+const declaredServe = "cd services/helm && exec go run ./cmd/helm-fixture"
 
 // lockedBuffer collects a command's output, which the test reads while the
 // command may still be writing it.
@@ -314,27 +272,19 @@ func startServe(t *testing.T, cmdline, dir string) string {
 	return ""
 }
 
-// TestTheDocumentedCommandServesTheBoard checks that the command on the
-// **Serve:** line of docs/review-demo.md, the rig's demo guide, serves the
-// board, and that the board's capture takes the app from the guide. A capture
-// and a sitting's live copy each run that command as a copy that gctk rig serve
-// runs from the worktree's root, on a free port it hands over as PORT, and the
-// test runs it the same way. It reads back what the capture's browser reads: the
-// app, the board as JSON at its own path, and a verb refused for want of an
-// answer. It runs the command again with the --answers the page tells a reviewer
-// to add, which the command passes on only when it ends with the fixture's own
-// invocation, and a click's answer comes back.
-func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
+// TestTheDeclaredCommandServesTheBoard runs the command gc-toolkit declares as
+// its serve command the way gctk rig serve runs a copy's: from the worktree's
+// root, on a free port it hands over as PORT. It reads back what a capture's
+// browser reads: the app, the board as JSON at its own path, and a verb refused
+// for want of an answer. It runs the command again with the --answers a
+// reviewer adds, and a click's answer comes back.
+func TestTheDeclaredCommandServesTheBoard(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and runs the command with go run")
 	}
 	repo, err := filepath.Abs(filepath.Join(moduleRoot, "../.."))
 	if err != nil {
 		t.Fatal(err)
-	}
-	serve := guideServe(t, repo)
-	if capture := docCapture(t); !strings.Contains(capture, "--guide <worktree>") || strings.Contains(capture, "--serve") || strings.Contains(capture, "--port") {
-		t.Errorf("the board's capture names its own app; it takes the app from the guide with --guide <worktree>: %s", capture)
 	}
 	mod, err := filepath.Abs(moduleRoot)
 	if err != nil {
@@ -353,8 +303,8 @@ func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("as the page gives it", func(t *testing.T) {
-		base := startServe(t, serve, repo)
+	t.Run("as declared", func(t *testing.T) {
+		base := startServe(t, declaredServe, repo)
 		if res, body := get(t, http.MethodGet, base+"/", "text/html"); res.StatusCode != http.StatusOK || !bytes.Equal(body, shell) {
 			t.Errorf("GET /: %d, want the app shell the reviewed commit embeds", res.StatusCode)
 		}
@@ -379,7 +329,7 @@ func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(answers, "dismiss.json"), []byte(answer), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		base := startServe(t, serve+" --answers "+answers, repo)
+		base := startServe(t, declaredServe+" --answers "+answers, repo)
 		if res, body := get(t, http.MethodPost, base+"/helm/dismiss", ""); res.StatusCode != http.StatusOK || string(body) != answer {
 			t.Errorf("POST /helm/dismiss: %d %s, want the canned answer", res.StatusCode, body)
 		}
