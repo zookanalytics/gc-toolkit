@@ -34,16 +34,47 @@ const (
 )
 
 // checkout is the rig's clone as a test sets it: its origin, a fetch that fails
-// when fetchErr is set, and the commits on the target once a fetch has run.
+// when fetchErr is set, and the commits on the target once a fetch has run. Its
+// default branch is def, main when that is empty, and its tip once a fetch has
+// run is tip, else the merge commit. defErr and tipErr fail their reads.
 type checkout struct {
 	mu        sync.Mutex
 	origin    string
 	fetchErr  error
 	fetched   bool
 	reachable map[string]bool
+	def, tip  string
+	defErr    error
+	tipErr    error
 }
 
 func (c *checkout) OriginURL() (string, error) { return c.origin, nil }
+
+func (c *checkout) DefaultBranch() (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.defErr != nil {
+		return "", c.defErr
+	}
+	if c.def == "" {
+		return "main", nil
+	}
+	return c.def, nil
+}
+
+func (c *checkout) Tip(branch string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch {
+	case c.tipErr != nil:
+		return "", c.tipErr
+	case !c.fetched:
+		return "", errors.New("origin/" + branch + " was never fetched")
+	case c.tip != "":
+		return c.tip, nil
+	}
+	return merged, nil
+}
 
 func (c *checkout) FetchBranch(string) error {
 	c.mu.Lock()
@@ -84,6 +115,50 @@ func (g *gates) list() []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return slices.Clone(g.filed)
+}
+
+// audit is the seed audit as a test sets it: the pages stale at each commit, a
+// check that fails while failChecks counts down, and a writer that refuses while
+// failReaudits does. It records each commit checked, and each hand-off as its
+// branch and pages, with who found them.
+type audit struct {
+	mu           sync.Mutex
+	stale        map[string][]string
+	failChecks   int
+	failReaudits int
+	checks       []string
+	reaudits     []string
+	seenBy       []string
+}
+
+func (a *audit) Stale(commit string) ([]string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.checks = append(a.checks, commit)
+	if a.failChecks > 0 {
+		a.failChecks--
+		return nil, errors.New("render-seed-audit.sh: exit 2: gc is not on PATH")
+	}
+	return a.stale[commit], nil
+}
+
+func (a *audit) Reaudit(branch, seenBy string, pages []string) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.reaudits = append(a.reaudits, branch+" "+strings.Join(pages, ","))
+	a.seenBy = append(a.seenBy, seenBy)
+	if a.failReaudits > 0 {
+		a.failReaudits--
+		return "", errors.New("seed-audit-reaudit.sh: exit 2: the dedup query failed")
+	}
+	return "re-1 gc-toolkit/gc-toolkit.polecat filed", nil
+}
+
+// calls is what the audit was asked: each commit checked, and each hand-off.
+func (a *audit) calls() (checks, reaudits []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.checks), slices.Clone(a.reaudits)
 }
 
 // land is one bead on the pending record, blocked and assigned to the refinery,
@@ -749,6 +824,190 @@ func TestAPRMergedIntoAnotherBaseIsNotLanded(t *testing.T) {
 	if b.Status != "blocked" || b.Metadata["merge_result"] != record.Invalid {
 		t.Fatalf("a merge into another base left the bead %s, %s", b.Status, b.Metadata["merge_result"])
 	}
+}
+
+// --- the seed audit after a landing --------------------------------------------
+
+// withAudit is a bead whose PR merged at the validated head into main, the
+// rig's default branch, in a rig whose repository carries a seed audit stale in
+// pages at the merge.
+func withAudit(t *testing.T, pages ...string) (*land, *audit) {
+	t.Helper()
+	d := newLand(t)
+	mergedOnGitHub(d, head)
+	a := &audit{stale: map[string][]string{merged: pages}}
+	d.l.Audit = a
+	return d, a
+}
+
+// alsoLanding puts a second bead on the record of the same merged PR, which a
+// run reads after the first.
+func alsoLanding(d *land, id string) {
+	md := map[string]string{}
+	for k, v := range d.md {
+		md[k] = v
+	}
+	d.store.Put(fake.Bead{ID: id, Title: "more work", Status: "blocked", Assignee: refinery, Metadata: md})
+}
+
+func says(t *testing.T, o pr.RunOutcome, wants ...string) {
+	t.Helper()
+	for _, w := range wants {
+		if !strings.Contains(o.Detail, w) {
+			t.Errorf("the outcome %q does not say %q", o.Detail, w)
+		}
+	}
+}
+
+// A landing on the default branch that leaves its seed audit stale hands the
+// stale pages to the writer of the branch's re-render, once, and the bead
+// closes as it does in a rig with no audit.
+func TestALandingThatLeavesTheSeedAuditStaleAsksForItsReRenderOnce(t *testing.T) {
+	d, a := withAudit(t, "agents/claude.md", "formulas/mol-polecat-base.md")
+	o := d.once(t)
+	is(t, o, pr.ActLanded)
+	b := d.row(t)
+	if b.Status != "closed" {
+		t.Fatalf("the landing left the bead %s", b.Status)
+	}
+	meta(t, b, map[string]string{"merge_result": record.Merged, "pr_reconcile_pending": "<absent>"})
+	checks, reaudits := a.calls()
+	if !slices.Equal(checks, []string{merged}) {
+		t.Fatalf("checked %v, want the merge on main", checks)
+	}
+	if !slices.Equal(reaudits, []string{"main agents/claude.md,formulas/mol-polecat-base.md"}) {
+		t.Fatalf("handed off %v, want main's two stale pages once", reaudits)
+	}
+	if want := "The landing order, checking main at " + merged + " after PR #7 landed,"; a.seenBy[0] != want {
+		t.Errorf("the writer was told it was found by %q, want %q", a.seenBy[0], want)
+	}
+	says(t, o, "PR #7 merged to main at e1111111: the bead is closed",
+		"the seed audit on main at e1111111 is stale in 2 of its pages",
+		"answered re-1 gc-toolkit/gc-toolkit.polecat filed")
+}
+
+// A landing that leaves the audit current asks for no re-render.
+func TestALandingThatLeavesTheSeedAuditCurrentAsksForNone(t *testing.T) {
+	d, a := withAudit(t)
+	o := d.once(t)
+	is(t, o, pr.ActLanded)
+	checks, reaudits := a.calls()
+	if !slices.Equal(checks, []string{merged}) || len(reaudits) != 0 {
+		t.Fatalf("checked %v and handed off %v, want one check and no hand-off", checks, reaudits)
+	}
+	says(t, o, "the seed audit on main is current at e1111111")
+}
+
+// The check reads the default branch at its tip as the run fetched it, which
+// carries every merge since this one, so a render a later commit made current
+// asks for nothing.
+func TestTheCheckReadsTheDefaultBranchAtTheTipTheRunFetched(t *testing.T) {
+	d, a := withAudit(t, "agents/claude.md")
+	d.co.tip = other
+	o := d.once(t)
+	checks, reaudits := a.calls()
+	if !slices.Equal(checks, []string{other}) || len(reaudits) != 0 {
+		t.Fatalf("checked %v and handed off %v, want main's tip %s alone", checks, reaudits, other)
+	}
+	says(t, o, "the seed audit on main is current at 22222222")
+}
+
+// Only the default branch is re-rendered, so a landing on any other, such as an
+// integration branch, checks nothing and says nothing of the audit.
+func TestALandingOnAnotherBranchChecksNoSeedAudit(t *testing.T) {
+	d, a := withAudit(t, "agents/claude.md")
+	d.co.def = "trunk"
+	o := d.once(t)
+	is(t, o, pr.ActLanded)
+	if checks, reaudits := a.calls(); len(checks)+len(reaudits) != 0 {
+		t.Fatalf("a landing on main, not the default trunk, checked %v and handed off %v", checks, reaudits)
+	}
+	if strings.Contains(o.Detail, "seed audit") {
+		t.Fatalf("the outcome %q speaks of an audit no landing on main checks", o.Detail)
+	}
+}
+
+// A check that does not run, for any reason, holds nothing: the bead closes and
+// its marker clears as with no audit, nothing is handed off but the pages a
+// check found, and the outcome says a later landing asks again.
+func TestASeedAuditCheckThatDoesNotRunHoldsNothing(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		set    func(*land, *audit)
+		says   string
+		handed int
+	}{
+		{"the default branch does not read", func(d *land, _ *audit) { d.co.defErr = errors.New("origin/HEAD is gone") },
+			"the rig's default branch did not read, so no seed audit was checked, and a later landing checks it", 0},
+		{"the tip does not read", func(d *land, _ *audit) { d.co.tipErr = errors.New("bad object") },
+			"the tip of main did not read, so its seed audit was not checked, and a later landing checks it", 0},
+		{"the render does not run", func(_ *land, a *audit) { a.failChecks = 1 },
+			"the seed audit on main at e1111111 was not checked, and a later landing checks it: render-seed-audit.sh: exit 2", 0},
+		{"the writer refuses", func(_ *land, a *audit) { a.failReaudits = 1 },
+			"its re-render was not asked for, so a later landing asks again: seed-audit-reaudit.sh: exit 2", 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d, a := withAudit(t, "agents/claude.md")
+			c.set(d, a)
+			o := d.once(t)
+			is(t, o, pr.ActLanded)
+			b := d.row(t)
+			if b.Status != "closed" || len(d.gates.list()) != 0 {
+				t.Fatalf("a check that did not run left the bead %s, with gates %v", b.Status, d.gates.list())
+			}
+			meta(t, b, map[string]string{"merge_result": record.Merged, "pr_reconcile_pending": "<absent>"})
+			if _, reaudits := a.calls(); len(reaudits) != c.handed {
+				t.Errorf("handed off %v, want %d", reaudits, c.handed)
+			}
+			says(t, o, "the bead is closed", c.says)
+		})
+	}
+}
+
+// A check that did not run is asked for again by the next landing, even one the
+// same run finds at the same tip, and a tip a check has answered is not checked
+// again in that run.
+func TestALaterLandingChecksAgainAndATipIsCheckedOnceARun(t *testing.T) {
+	d, a := withAudit(t, "agents/claude.md")
+	a.failChecks = 1
+	alsoLanding(d, "tk-2")
+	alsoLanding(d, "tk-3")
+	out := d.reconcile(t, pr.Options{Count: 10})
+	if len(out) != 3 {
+		t.Fatalf("three records, %d outcomes: %+v", len(out), out)
+	}
+	for _, o := range out {
+		is(t, o, pr.ActLanded)
+	}
+	checks, reaudits := a.calls()
+	if !slices.Equal(checks, []string{merged, merged}) || !slices.Equal(reaudits, []string{"main agents/claude.md"}) {
+		t.Fatalf("checked %v and handed off %v, want the failed check run again once, and one hand-off", checks, reaudits)
+	}
+	says(t, out[0], "was not checked, and a later landing checks it")
+	says(t, out[1], "is stale in 1 of its pages", "answered re-1")
+	says(t, out[2], "the seed audit on main at e1111111 was checked after tk-2 landed")
+}
+
+// A landing that completes after the run's deadline leaves the check to a later
+// landing, so the check cannot carry a run past its time limit.
+func TestALandingPastTheRunsDeadlineLeavesTheCheckToALaterOne(t *testing.T) {
+	d, a := withAudit(t, "agents/claude.md")
+	deadline := time.Now().Add(200 * time.Millisecond)
+	d.store.BeforeUpdate = func(_ string, args []string) error {
+		if slices.Contains(args, "--status=closed") {
+			time.Sleep(time.Until(deadline) + 50*time.Millisecond)
+		}
+		return nil
+	}
+	out := d.reconcile(t, pr.Options{Count: 10, Deadline: deadline})
+	if len(out) != 1 {
+		t.Fatalf("one record, %d outcomes: %+v", len(out), out)
+	}
+	is(t, out[0], pr.ActLanded)
+	if checks, _ := a.calls(); len(checks) != 0 {
+		t.Fatalf("a landing past the deadline checked %v", checks)
+	}
+	says(t, out[0], "the run reached its deadline, so the seed audit on main was not checked, and a later landing checks it")
 }
 
 // --- the record's writers under the lock --------------------------------------

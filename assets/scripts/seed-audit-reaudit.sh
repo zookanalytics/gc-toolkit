@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 # seed-audit-reaudit.sh — the one writer of the seed audit's re-audit: the bead
 # that re-renders generated/seed-audit on the default branch and lands the new
-# text in a pull request of its own, once that branch's audit has gone stale
-# with no change in this repository behind it.
+# text in a pull request of its own, once that branch's audit has gone stale.
 #
 #   seed-audit-reaudit.sh --base <branch> [--page <path>]... [--seen-by <text>]
 #                         [--pool <pool-name>]
 #
 # What a page renders to is a function of this repository and of the `gc`
 # binary that renders it (render-seed-audit.sh, WHOSE TEXT IT IS). A newer build
-# moves the pages that carry gc's own text on every branch at once. The merge
-# gate reports such a page as the base's own staleness, holds nothing on it
-# (render-seed-audit.sh --check-merge --base-stale-out), and hands the pages
-# here. The new text lands as a change of its own: one bead, slung to the
+# moves the pages that carry gc's own text on every branch at once, and a
+# landing whose render was made before another landing moved an input it
+# renders leaves that page stale on the branch it lands on. Two callers hand the
+# pages here. The merge gate reports a page its base is already stale in as the
+# base's own staleness and holds nothing on it (render-seed-audit.sh
+# --check-merge --base-stale-out). The landing order checks the default branch
+# after each landing on it and hands every page stale there (gctk pr
+# reconcile). The new text lands as a change of its own: one bead, slung to the
 # polecat pool on mol-polecat-work, whose pull request is the re-render and
-# nothing else. That route stands on the operator's ruling, so it needs no
+# nothing else. That route stands on the operator's rulings, so it needs no
 # placement sitting (docs/steering.md, the intake rule).
 #
 # --base is the branch the caller found stale. Only the default branch is
@@ -165,9 +168,9 @@ else
   [ -n "$PAGE_LIST" ] || PAGE_LIST="- (none named: the render shows them)
 "
   # shellcheck disable=SC2016  # the backticks are markdown in the bead body
-  BODY=$(printf '## What happened\n\nThe `gc` binary renders files of generated/seed-audit differently from what %s commits, and no change in this repository moved them. %s found %s already stale in the files below: each renders the same at %s as at the change it was checking. The text came from gc itself, whose builtin packs carry the prompts and recipes those files mirror (assets/scripts/render-seed-audit.sh, WHOSE TEXT IT IS).\n\n%s\n## The work\n\nOn a branch from %s, run `assets/scripts/render-seed-audit.sh` and commit generated/seed-audit as it renders, every file the render changes, including any not listed above. That re-render is the whole change. Edit no rendered file by hand and change no seed input: a page that reads wrong is corrected in gc and arrives here on the next re-audit.\n\nIn the PR summary, name the gc that rendered it (`gc version`, the binary'"'"'s path and its build time) and say what text moved.\n\nIf the render changes nothing, %s already carries this text and there is nothing to land: decline the work through a human gate, as for a falsified premise, so a person closes this bead.' \
-    "$BASE" "${SEEN_BY:-A caller}" "$BASE" "$BASE" "$PAGE_LIST" "$BASE" "$BASE")
-  TITLE="Re-render the seed audit on $BASE: the gc binary moved its text"
+  BODY=$(printf '## What happened\n\n%s found %s stale in the files of generated/seed-audit below: %s commits each of them other than as its own tree renders it. A committed page goes stale with no edit to it in two ways. The `gc` binary moves the text its builtin packs carry, the prompts and recipes those files mirror, on every branch at once (assets/scripts/render-seed-audit.sh, WHOSE TEXT IT IS). And a landing whose render was made before another landing moved an input it renders leaves that page stale.\n\n%s\n## The work\n\nOn a branch from %s, run `assets/scripts/render-seed-audit.sh` and commit generated/seed-audit as it renders, every file the render changes, including any not listed above. That re-render is the whole change. Edit no rendered file by hand and change no seed input: a page that reads wrong is corrected at its source, gc or this pack'"'"'s inputs, in a change of its own, and arrives here on the next render.\n\nIn the PR summary, name the gc that rendered it (`gc version`, the binary'"'"'s path and its build time) and say what text moved.\n\nIf the render changes nothing, %s already carries this text and there is nothing to land: decline the work through a human gate, as for a falsified premise, so a person closes this bead.' \
+    "${SEEN_BY:-A caller}" "$BASE" "$BASE" "$PAGE_LIST" "$BASE" "$BASE")
+  TITLE="Re-render the seed audit on $BASE: its pages no longer render as committed"
   # A create bd could not confirm after a lost connection exits non-zero and may
   # still have written, so a retry adopts by the key before it files again.
   CREATE_RC=0

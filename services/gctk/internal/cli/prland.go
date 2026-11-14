@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -85,6 +86,13 @@ writer of the record holds it. It reads each PR from GitHub by its number:
     names: an exception, kept blocked behind a human gate keyed by its value
   - a lookup or a fetch that failed, or a merge commit not yet on the target:
     recorded in pr_reconcile_error, and read again by the next run
+
+A PR that lands on the rig's default branch has that branch's seed audit
+checked at its tip as the run fetched it, once the lock is free, in a clone
+that carries one (render-seed-audit.sh). The pages that no longer render as
+committed go to seed-audit-reaudit.sh, which slings the branch's one re-render,
+and the landing's line says what the check found. The check holds nothing, and
+one that does not run is asked for again at a later landing.
 
 It acts only on a bead it reads under the lock as carrying the marker and,
 unless the bead is closed, still assigned to the refinery --refinery names,
@@ -212,7 +220,8 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 // at db, else the one gc routes the first of ids to, the record lock in that
 // store's .beads directory, GitHub through gh, the clone at $GC_RIG_ROOT else
 // the working directory, the pack's definition of feedback, loaded in that
-// clone, and the runtime adapter for human gates.
+// clone, and the runtime adapter for human gates and, where the clone carries
+// one, the seed audit.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -229,6 +238,11 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if dir == "" {
 		dir = "."
 	}
+	rt := gascity.New()
+	var audit pr.Audit
+	if carriesSeedAudit(dir) {
+		audit = seedAudit{rt: rt, dir: dir}
+	}
 	return pr.Landing{
 		Ledger:   l,
 		Dir:      db,
@@ -242,7 +256,8 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 			return rule, nil
 		},
 		Checkout: checkout{dir: dir},
-		Gates:    gates{rt: gascity.New()},
+		Gates:    gates{rt: rt},
+		Audit:    audit,
 		Wait:     recordLockWait,
 	}, nil
 }
@@ -253,6 +268,73 @@ type checkout struct{ dir string }
 func (c checkout) OriginURL() (string, error)             { return git.OriginURL(c.dir) }
 func (c checkout) FetchBranch(branch string) error        { return git.FetchBranch(c.dir, branch) }
 func (c checkout) Reaches(commit, b string) (bool, error) { return git.Reaches(c.dir, commit, b) }
+func (c checkout) DefaultBranch() (string, error)         { return git.DefaultBranch(c.dir) }
+func (c checkout) Tip(branch string) (string, error)      { return git.Tip(c.dir, branch) }
+
+// carriesSeedAudit reports whether the clone at dir is a pack that carries a
+// rendered seed audit, generated/seed-audit/INDEX.md beside its pack.toml. A
+// repository with none has nothing a landing can leave stale.
+func carriesSeedAudit(dir string) bool {
+	for _, p := range []string{"pack.toml", "generated/seed-audit/INDEX.md"} {
+		if fi, err := os.Stat(filepath.Join(dir, p)); err != nil || !fi.Mode().IsRegular() {
+			return false
+		}
+	}
+	return true
+}
+
+// seedAudit is the clone's seed audit through the runtime adapter, which runs
+// the pack's render-seed-audit.sh to check a commit and its
+// seed-audit-reaudit.sh to ask for the default branch's re-render.
+type seedAudit struct {
+	rt  gascity.Runtime
+	dir string
+}
+
+// Stale checks the merge of commit into itself, which is commit's own tree, so
+// every page that does not render as committed is commit's own staleness, the
+// pages --base-stale-out names, on one render. A check the script did not
+// complete is an error carrying why: its exit and its last line.
+func (a seedAudit) Stale(commit string) ([]string, error) {
+	f, err := os.CreateTemp("", "gctk-seed-audit-stale.*")
+	if err != nil {
+		return nil, fmt.Errorf("no file for the stale pages: %w", err)
+	}
+	list := f.Name()
+	f.Close()
+	defer os.Remove(list)
+	res := a.rt.Script("render-seed-audit.sh", "--root", a.dir, "--check-merge", commit, commit, "--base-stale-out", list)
+	if why := res.Failure(); why != "" {
+		return nil, fmt.Errorf("render-seed-audit.sh: %s", why)
+	}
+	raw, err := os.ReadFile(list)
+	if err != nil {
+		return nil, fmt.Errorf("the stale pages did not read: %w", err)
+	}
+	var pages []string
+	for _, p := range strings.Split(string(raw), "\n") {
+		if p = strings.TrimSpace(p); p != "" {
+			pages = append(pages, p)
+		}
+	}
+	return pages, nil
+}
+
+// Reaudit hands the pages to seed-audit-reaudit.sh, which keeps one live
+// re-render per branch and slings it, and returns the one line it answers with:
+// the bead, its route and what it did. A writer that exits other than 0
+// dispatched nothing, an error carrying why.
+func (a seedAudit) Reaudit(branch, seenBy string, pages []string) (string, error) {
+	args := []string{"--base", branch, "--seen-by", seenBy}
+	for _, p := range pages {
+		args = append(args, "--page", p)
+	}
+	res := a.rt.Script("seed-audit-reaudit.sh", args...)
+	if why := res.Failure(); why != "" {
+		return "", fmt.Errorf("seed-audit-reaudit.sh: %s", why)
+	}
+	return res.Tail(), nil
+}
 
 // gates files human gates through the runtime adapter, which runs the pack's
 // human-gate.sh from the scripts directory GCTK_SCRIPTS_DIR names. A gate the

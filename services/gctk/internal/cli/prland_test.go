@@ -164,3 +164,120 @@ func TestLandingFilesItsGatesThroughTheRuntime(t *testing.T) {
 		t.Fatalf("a gate the script refused read as %v", err)
 	}
 }
+
+// auditClone is a clone at $GC_RIG_ROOT that carries a rendered seed audit
+// beside its pack.toml, with stubs of the pack's render-seed-audit.sh and
+// seed-audit-reaudit.sh in GCTK_SCRIPTS_DIR that log their arguments to
+// calls.render and calls.reaudit. The render stub writes the pages STUB_PAGES
+// names to its --base-stale-out file, and each exits STUB_EXIT with its reason
+// last.
+func auditClone(t *testing.T) (clone, scripts string) {
+	t.Helper()
+	clone = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(clone, "generated", "seed-audit"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"pack.toml", "generated/seed-audit/INDEX.md"} {
+		if err := os.WriteFile(filepath.Join(clone, p), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scripts = t.TempDir()
+	stubs := map[string]string{
+		"render-seed-audit.sh": "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done >> '" + scripts + "/calls.render'\n" +
+			"out=''; prev=''\nfor a in \"$@\"; do [ \"$prev\" = --base-stale-out ] && out=\"$a\"; prev=\"$a\"; done\n" +
+			"[ \"${STUB_EXIT:-0}\" = 0 ] || { echo 'render-seed-audit: gc is not on PATH' >&2; exit \"$STUB_EXIT\"; }\n" +
+			": > \"$out\"\nfor p in $STUB_PAGES; do printf '%s\\n' \"$p\" >> \"$out\"; done\n" +
+			"echo 'the merge makes no render stale'\n",
+		"seed-audit-reaudit.sh": "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done >> '" + scripts + "/calls.reaudit'\n" +
+			"echo \"seed-audit-reaudit: filed main's re-audit re-1\" >&2\n" +
+			"[ \"${STUB_EXIT:-0}\" = 0 ] || { echo 'seed-audit-reaudit: the dedup query failed' >&2; exit \"$STUB_EXIT\"; }\n" +
+			"echo 're-1 gc-toolkit/gc-toolkit.polecat filed'\n",
+	}
+	for name, body := range stubs {
+		if err := os.WriteFile(filepath.Join(scripts, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("GC_RIG_ROOT", clone)
+	t.Setenv("GCTK_SCRIPTS_DIR", scripts)
+	return clone, scripts
+}
+
+// Only a clone that carries a rendered seed audit beside its pack.toml has an
+// audit a landing can leave stale.
+func TestLandingKeepsASeedAuditOnlyWhereTheCloneCarriesOne(t *testing.T) {
+	clone, _ := auditClone(t)
+	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Audit == nil {
+		t.Fatal("a clone carrying generated/seed-audit/INDEX.md has no audit")
+	}
+	for _, p := range []string{"generated/seed-audit/INDEX.md", "pack.toml"} {
+		if err := os.Remove(filepath.Join(clone, p)); err != nil {
+			t.Fatal(err)
+		}
+		if l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/refinery"); err != nil || l.Audit != nil {
+			t.Fatalf("a clone without %s has an audit (%v)", p, err)
+		}
+	}
+}
+
+// The audit checks a commit by the pack's render-seed-audit.sh, run in the
+// clone on the merge of the commit into itself, and reads the stale pages from
+// the file the script names them in. A check the script does not complete is an
+// error carrying its own words.
+func TestTheSeedAuditChecksACommitThroughThePacksRenderer(t *testing.T) {
+	clone, scripts := auditClone(t)
+	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STUB_PAGES", "agents/claude.md formulas/mol-polecat-base.md")
+	pages, err := l.Audit.Stale(validated)
+	if err != nil || strings.Join(pages, ",") != "agents/claude.md,formulas/mol-polecat-base.md" {
+		t.Fatalf("Stale = %v, %v, want the two pages the script named", pages, err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(scripts, "calls.render"))
+	args := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(args) != 7 || strings.Join(args[:6], " ") != "--root "+clone+" --check-merge "+validated+" "+validated+" --base-stale-out" {
+		t.Fatalf("render-seed-audit.sh got %q", args)
+	}
+	if _, err := os.Stat(args[6]); !os.IsNotExist(err) {
+		t.Errorf("the stale pages' file %s outlived the check (%v)", args[6], err)
+	}
+	t.Setenv("STUB_PAGES", "")
+	if pages, err := l.Audit.Stale(validated); err != nil || len(pages) != 0 {
+		t.Fatalf("a current audit read as %v, %v", pages, err)
+	}
+	t.Setenv("STUB_EXIT", "2")
+	if _, err := l.Audit.Stale(validated); err == nil || !strings.Contains(err.Error(), "exit 2: render-seed-audit: gc is not on PATH") {
+		t.Fatalf("a check the script did not complete read as %v", err)
+	}
+}
+
+// The audit hands the stale pages to the pack's seed-audit-reaudit.sh, with the
+// branch and who found them, and answers with the line the writer ends on. A
+// writer that exits other than 0 is an error carrying its own words.
+func TestTheSeedAuditHandsItsPagesToThePacksWriter(t *testing.T) {
+	_, scripts := auditClone(t)
+	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, err := l.Audit.Reaudit("main", "The landing order, checking main,", []string{"agents/claude.md", "formulas/mol-x.md"})
+	if err != nil || answer != "re-1 gc-toolkit/gc-toolkit.polecat filed" {
+		t.Fatalf("Reaudit = %q, %v, want the writer's last line", answer, err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(scripts, "calls.reaudit"))
+	if want := "--base\nmain\n--seen-by\nThe landing order, checking main,\n--page\nagents/claude.md\n--page\nformulas/mol-x.md\n"; string(raw) != want {
+		t.Fatalf("seed-audit-reaudit.sh got %q, want %q", raw, want)
+	}
+	t.Setenv("STUB_EXIT", "2")
+	if _, err := l.Audit.Reaudit("main", "x,", []string{"agents/claude.md"}); err == nil ||
+		!strings.Contains(err.Error(), "exit 2: seed-audit-reaudit: the dedup query failed") {
+		t.Fatalf("a writer that dispatched nothing read as %v", err)
+	}
+}

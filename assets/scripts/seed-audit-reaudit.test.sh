@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/seed-audit-reaudit.sh — the one writer of the
 # seed audit's re-audit. Stubbed gc over a JSON store; no live city, Dolt, or
-# network. merge.test.sh pins the merge gate's hand-off to it. This suite pins
-# the writer's own contract: the usage refusals; a base that is not the default
-# branch, read from origin/HEAD, filing nothing; a filed re-audit carrying its
-# identity in the create, listing the files and who found them, settled before
-# it is slung on mol-polecat-work to the pool route, with the stdout line the
-# merge gate quotes; one live re-audit per base, whether dispatched, held,
-# armed to re-sling once its wait clears, or never dispatched (adopted and
-# slung), while a closed one or
-# another base's files beside it; the stops that dispatch nothing (an
+# network. merge.test.sh pins the merge gate's hand-off to it, and gctk's
+# landing tests (services/gctk/internal/cli/prland_test.go) the landing
+# order's. This suite pins the writer's own contract: the usage refusals; a base
+# that is not the default branch, read from origin/HEAD, filing nothing; a filed
+# re-audit carrying its identity in the create, listing the files, who found
+# them and both ways a page goes stale, settled before it is slung on
+# mol-polecat-work to the pool route, with the stdout line its callers quote;
+# one live re-audit per base, whether dispatched, held, armed to re-sling once
+# its wait clears, or never dispatched (adopted and slung), while a closed one
+# or another base's files beside it; the stops that dispatch nothing (an
 # unanswered dedup query, a refused create, an unsettled priority, a sling that
 # fails), each leaving what a retry adopts; and every metadata key it writes
 # registered in lifecycle.toml.
@@ -194,11 +195,13 @@ eq "$(meta re-1 seed_audit_reaudit)" "main" "…carrying its identity, the base"
 eq "$(meta re-1 target)" "main" "…and the branch it lands on"
 has "$(cat "$STUB_GC_LOG")" '--metadata {"seed_audit_reaudit":"main","target":"main"} --json' "…both written in the create itself"
 eq "$(calls '^bd update re-1')" "0" "…with no second write to complete it"
-eq "$(field re-1 title)" "Re-render the seed audit on main: the gc binary moved its text" "…titled for the work"
+eq "$(field re-1 title)" "Re-render the seed audit on main: its pages no longer render as committed" "…titled for the work"
 BODY=$(field re-1 description)
 has "$BODY" "- generated/seed-audit/agents/claude.md" "…listing each file it was handed"
 has "$BODY" "- generated/seed-audit/formulas/mol-polecat-base.md" "…every one of them"
-has "$BODY" "The merge gate, checking PR#7, found main already stale" "…and who found it"
+has "$BODY" "The merge gate, checking PR#7, found main stale in the files of generated/seed-audit below" "…and who found it"
+has "$BODY" "The \`gc\` binary moves the text its builtin packs carry" "…naming a gc that moved its text as one way a page goes stale"
+has "$BODY" "a landing whose render was made before another landing moved an input it renders" "…and a landing as the other"
 has "$BODY" 'run `assets/scripts/render-seed-audit.sh` and commit generated/seed-audit as it renders' "…stating the work"
 eq "$(field re-1 priority)" "2" "…at P2"
 eq "$(meta re-1 gc.execution_routed_to)" "$ROUTE" "the pour stamps the pool route"
