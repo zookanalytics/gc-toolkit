@@ -15,10 +15,12 @@
 # prose as a hold carrier, which is the opposite of the rule this check
 # asserts, and no verb list ever finishes, so every gap in one reads as clean.
 #
-# One marker can be answered by its own writer instead, where lifecycle.toml
+# A marker can be answered by its own writer instead, where lifecycle.toml
 # declares a settled-key for it in `settled_keys`: a bead carrying that key
-# non-empty is one whose writer said, at the moment it stamped the marker, that
-# nothing is waiting. That is the same refusal to read prose, from the other
+# non-empty is one whose writer said, beside the marker, that no edge is owed
+# for it. A sitting that settled its subject says nothing is waiting, and the
+# pending record's marker says the landing order's next run answers the reason
+# the record wrote. That is the same refusal to read prose, from the other
 # side — a sitting knows whether it settled its subject or parked it, and no
 # reader can recover that afterwards from the sentence it left. The key is
 # structural and the marker still stands beside it, so nothing here is a
@@ -69,7 +71,8 @@ blocked_reason
 gc.takeaway'
 # <marker>=<settled-key>: the marker holds only while the settled-key is absent
 # or empty. Same list as the declaration, same standby role.
-BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled'
+BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled
+blocked_reason=pr_reconcile_pending'
 # The terminal end of a wait — the bead others block ON. It can carry no
 # `blocks` edge of its own by construction (the gated bead blocks on it; it
 # blocks on nothing), so a marker it carries is exempt, not a finding. It is a

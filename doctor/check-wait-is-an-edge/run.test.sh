@@ -610,6 +610,50 @@ has "$OUT" "alpha: could not read the live beads' statuses off the listing — t
 hasnt "$OUT" "OK:" "and no store reads as clean"
 reset
 
+# --- 25. the pending record's reason waits on the landing order ------------
+# The record writes blocked_reason only on a bead that carries its marker,
+# pr_reconcile_pending, and while the marker stands the landing order's next
+# run answers the reason. These cases read the shipped declaration, so the
+# pairing is pinned where it ships, and a finding is any non-zero exit, at the
+# severity that declaration names.
+SHIPPED="$HERE/../.."
+finding() { if [ "$1" -ne 0 ]; then ok "$2"; else bad "$2 (got rc 0)"; fi; }
+PR='https://github.com/o/r/pull/7'
+PENDING='"merge_result":"pull_request_pending","pr_url":"'"$PR"'","blocked_reason":"Awaiting verified merge of '"$PR"'"'
+EXCEPTION='"merge_result":"pull_request_closed_unmerged","pr_url":"'"$PR"'","blocked_reason":"Pull request '"$PR"' closed without merging."'
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$PENDING"',"pr_reconcile_pending":"true"}}]'
+OUT=$(PACK="$SHIPPED" run_check); RC=$?
+eq "$RC" "0" "a bead pending on the record with no wait edge waits on the landing order, not on a bead"
+has "$OUT" "OK:" "and the store reads clean"
+# The order clears an exception's marker once it has filed the exception's
+# human gate, and from then on the reason holds behind that gate's edge.
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$EXCEPTION"'}}]'
+OUT=$(PACK="$SHIPPED" run_check); RC=$?
+finding "$RC" "an exception whose marker is cleared, with no wait edge, is a finding"
+has "$OUT" "alpha bead aa-101 (blocked): held by blocked_reason=Pull request" "and the finding names the bead and the reason that holds it"
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$EXCEPTION"'},
+         "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-900","type":"blocks"}]},
+        {"id":"aa-900","status":"open","issue_type":"gate","metadata":{}}]'
+OUT=$(PACK="$SHIPPED" run_check); RC=$?
+eq "$RC" "0" "the same exception behind its human gate's edge passes"
+# A release from the refinery clears the marker and leaves the bead as it
+# stands, so nothing answers the reason it keeps.
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$PENDING"'}}]'
+OUT=$(PACK="$SHIPPED" run_check); RC=$?
+finding "$RC" "the record's reason with no marker beside it holds"
+has "$OUT" "held by blocked_reason=Awaiting verified merge" "and the finding names that reason"
+# The marker answers the record's reason and no other marker on the bead.
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$PENDING"',"pr_reconcile_pending":"true","gc.takeaway":"needs an operator ruling"}}]'
+OUT=$(PACK="$SHIPPED" run_check); RC=$?
+finding "$RC" "a pending bead is still held by another marker it carries"
+has "$OUT" "gc.takeaway=needs an operator ruling" "and the finding names that marker"
+hasnt "$OUT" "blocked_reason=Awaiting" "and not the reason the record's marker answers"
+# With no declaration to read, the built-in list carries the same pairing.
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$PENDING"',"pr_reconcile_pending":"true"}}]'
+OUT=$(PACK="$TMP/pack3" run_check); RC=$?
+eq "$RC" "0" "the built-in list carries the record's pairing"
+reset
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

@@ -209,17 +209,27 @@ approval_rule = "universal-nonself-standing"
 # Present with a non-empty value, and the bead is held, whatever it says.
 marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 # A marker its own writer can answer, as `<marker>=<settled-key>`: <marker>
-# holds only while <settled-key> is absent or empty on the same bead.
+# holds only while <settled-key> is absent or empty on the same bead. Nothing
+# here clears a marker: the sentence stands, and the second key records beside
+# it what answers it.
+#
 # gc.takeaway is stamped by every sign-off, the one that settled its subject as
 # much as the one that parked it for a person, and only the writer knows which
 # it was — `gc-helm.sh takeaway --no-wait` says so by stamping
 # gc.takeaway_settled beside the headline, and a takeaway without it is a hold.
-# Nothing here clears a marker: the sentence stands and the second key records
-# the disposition beside it. Every writer of a marker in this list writes its
-# settled-key in the same statement, empty unless it means settled, so a stamp
-# cannot inherit the disposition of the sitting before it
-# (assets/scripts/takeaway-settled-pairing.test.sh).
-settled_keys = ["gc.takeaway=gc.takeaway_settled"]
+# Every writer of gc.takeaway writes gc.takeaway_settled in the same statement,
+# empty unless it means settled, so a stamp cannot inherit the disposition of
+# the sitting before it (assets/scripts/takeaway-settled-pairing.test.sh).
+#
+# blocked_reason is also the pending record's reason: the merge a bead awaits,
+# or the exception that holds it. The record writes it only on a bead that
+# carries pr_reconcile_pending, the marker by which the landing order selects
+# the records it reads (services/gctk/pr/record), so while that marker stands,
+# the reason waits on the order's next run and not on a bead. The order clears
+# an exception's marker only after it files the exception's human gate. A
+# reason with no marker beside it holds, and the bead owes its edge, which for
+# an exception or a refinery park is the human gate filed with it.
+settled_keys = ["gc.takeaway=gc.takeaway_settled", "blocked_reason=pr_reconcile_pending"]
 # merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a
 # hold that must show as an edge asserts it through blocked_reason or
 # gc.takeaway beside it, both declared above, which carry the wait's sentence.
@@ -543,7 +553,9 @@ keys = [
 #   holds it. Written by pr-facts.sh, the refinery's parks (refinery-prep.sh,
 #   refinery-land.sh, refinery-publish.sh) and the pending record's writers
 #   (gctk pr record, gctk pr reconcile); it is also a [holds] marker, so a live
-#   bead carrying it owes a blocks edge. Freeform.
+#   bead carrying it owes a blocks edge, save while pr_reconcile_pending beside
+#   it says the landing order owes the record a run ([holds] settled_keys).
+#   Freeform.
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
 #   workspace-setup so a restart or witness recovery can find the work in flight.
 #   Absent means no worktree is recorded yet. Never cleared. Absolute path.
