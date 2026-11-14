@@ -11,8 +11,9 @@ package rigboard
 // and TestPageTypesAreCurrent fails when that file is stale.
 
 // Response is what the rig's route answers: the document, and the time its
-// gather finished beside it. The document depends on the store's answers
-// alone, so two reads of an unchanged store give the same document.
+// gather finished beside it. The document depends on the store's answers and,
+// for each pull request on Gas Town's pending record, on GitHub's, so two
+// reads of an unchanged store and an unchanged GitHub give the same document.
 type Response struct {
 	ReadAt string   `json:"read_at"`
 	Board  Document `json:"board"`
@@ -87,7 +88,8 @@ type Row struct {
 	// scheduled to do.
 	Line3 []Ref `json:"line3,omitempty"`
 	// Reasons are what holds a pull request a person owes a move on, in the
-	// pack's words (prstatus.Reasons).
+	// pack's words (prstatus.Reasons, or prstatus.RenderReasons over the
+	// evaluator's answer for a pull request on Gas Town's pending record).
 	Reasons []Reason `json:"reasons,omitempty"`
 	// PullRequest is the facts of the bead's pull request, when it has one.
 	PullRequest *PullRequest `json:"pull_request,omitempty"`

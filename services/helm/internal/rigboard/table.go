@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
@@ -26,7 +27,9 @@ import (
 //  4. A wait behind its status is a gate that is no human gate, its own or an
 //     ancestor's: "Held by a gate", with the gate's title. Group Not moving.
 //  5. Its status is deferred: "Deferred". Any other status that is neither
-//     open nor a claim reads as the store's word. Group Not moving.
+//     open nor a claim reads as the store's word, except the blocked status
+//     Gas Town's pending record writes on a bead whose pull request it holds,
+//     which is the record's own and holds nothing. Group Not moving.
 //  6. waits says it is in flight. With an open pull request: "Pull request
 //     #<n>", with where it stands. Otherwise "In flight", with its assignee.
 //     Group Queued.
@@ -163,9 +166,10 @@ type tableInput struct {
 	// unwalked is true when the row needs Holding's answer and its walk ran
 	// past its bound.
 	unwalked bool
-	// facts is the row's pull request facts, nil when it has no open pull
-	// request, and prUnread is true when it has one prstatus could not answer.
-	facts    *prstatus.Facts
+	// facts is what the read knows of the row's pull request, nil when it has
+	// no open pull request, and prUnread is true when it has one a reader could
+	// not answer for.
+	facts    *prFacts
 	prUnread bool
 	// place is the row's place in queue's order, nil when queue placed it
 	// nowhere.
@@ -193,9 +197,10 @@ func table(in tableInput) verdict {
 	if w := gateHold(h); w != nil {
 		return verdict{out: outHeldByGate, group: GroupNotMoving, signal: "Held by a gate", note: w.Title}
 	}
-	switch st := status(b); st {
-	case "open", "in_progress", "hooked":
-	case "deferred":
+	switch st := status(b); {
+	case st == "open", st == "in_progress", st == "hooked":
+	case st == "blocked" && pr.OnRecord(b.MergeResult):
+	case st == "deferred":
 		return verdict{out: outNotOpen, group: GroupNotMoving, signal: "Deferred"}
 	default:
 		return verdict{out: outNotOpen, group: GroupNotMoving, signal: st}
@@ -209,7 +214,7 @@ func table(in tableInput) verdict {
 	if h.InFlight != "" {
 		if in.facts != nil && b.PRNumber != "" {
 			return verdict{out: outPullRequest, group: GroupQueued, signal: "Pull request #" + b.PRNumber,
-				note: string(prstatus.Derive(*in.facts))}
+				note: string(in.facts.state())}
 		}
 		return verdict{out: outInFlight, group: GroupQueued, signal: "In flight", note: b.Assignee}
 	}
@@ -302,7 +307,7 @@ func joinIDs(refs []Ref) string {
 //
 // A gate that is no human gate is never an ask.
 func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQuestionGate func(string) bool,
-	facts *prstatus.Facts, membersOpen, members int) *askAnswer {
+	facts *prFacts, membersOpen, members int) *askAnswer {
 	if !isOpen(b) {
 		return nil
 	}
@@ -330,7 +335,7 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 		}
 	}
 	if facts != nil {
-		if st := prstatus.Derive(*facts); st == prstatus.NeedsReview || st == prstatus.NeedsAttention {
+		if st := facts.state(); st == prstatus.NeedsReview || st == prstatus.NeedsAttention {
 			return &askAnswer{kind: AskPullRequest, words: string(st), need: NeedKindPullRequest}
 		}
 	}
@@ -356,28 +361,28 @@ func questionAsk(answeredBy, assignee string) *askAnswer {
 
 // pullRequestOf is a bead's pull request in the pack's words, nil when it
 // records none.
-func pullRequestOf(b bead, facts *prstatus.Facts) *PullRequest {
+func pullRequestOf(b bead, facts *prFacts) *PullRequest {
 	n := b.PRNumber
 	if n == "" {
 		return nil
 	}
-	pr := &PullRequest{Number: n, URL: b.PRURL}
+	out := &PullRequest{Number: n, URL: b.PRURL}
 	if facts != nil {
-		pr.State = string(prstatus.Derive(*facts))
-		for _, h := range prstatus.Held(*facts) {
-			pr.Held = append(pr.Held, string(h))
+		out.State = string(facts.state())
+		for _, h := range facts.held() {
+			out.Held = append(out.Held, string(h))
 		}
 	}
-	return pr
+	return out
 }
 
 // reasonsOf is what holds a pull request, in the pack's words.
-func reasonsOf(facts *prstatus.Facts) []Reason {
+func reasonsOf(facts *prFacts) []Reason {
 	if facts == nil {
 		return nil
 	}
 	var out []Reason
-	for _, r := range prstatus.Reasons(*facts) {
+	for _, r := range facts.reasons() {
 		out = append(out, Reason{Held: string(r.Held), ID: r.ID, Title: r.Title})
 	}
 	return out

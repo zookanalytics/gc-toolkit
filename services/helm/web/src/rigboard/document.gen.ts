@@ -7,8 +7,9 @@
 
 /**
  * Response is what the rig's route answers: the document, and the time its
- * gather finished beside it. The document depends on the store's answers
- * alone, so two reads of an unchanged store give the same document.
+ * gather finished beside it. The document depends on the store's answers and,
+ * for each pull request on Gas Town's pending record, on GitHub's, so two
+ * reads of an unchanged store and an unchanged GitHub give the same document.
  */
 export interface Response {
   read_at: string;
@@ -106,7 +107,8 @@ export interface Row {
   line3?: Ref[];
   /**
    * Reasons are what holds a pull request a person owes a move on, in the
-   * pack's words (prstatus.Reasons).
+   * pack's words (prstatus.Reasons, or prstatus.RenderReasons over the
+   * evaluator's answer for a pull request on Gas Town's pending record).
    */
   reasons?: Reason[];
   /**

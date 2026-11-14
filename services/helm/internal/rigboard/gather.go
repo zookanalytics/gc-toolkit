@@ -6,13 +6,17 @@
 // services/gctk/prstatus for what a person owes on a bead and where a pull
 // request stands, and services/gctk/queue for the order the rig's work is
 // expected to land in. services/gctk/conversation says what a conversation
-// is. One table (table.go) turns those answers into a row's group and signal,
-// and it holds no rule of its own about what holds a bead, whose move it is or
-// whether work is moving.
+// is. Where a pull request on Gas Town's pending record stands is the pr
+// domain's evaluator's answer, which the listing asks over the same rows and
+// GitHub's facts about the PR, rendered through prstatus as `gctk pr status`
+// renders it. One table (table.go) turns those answers into a row's group and
+// signal, and it holds no rule of its own about what holds a bead, whose move
+// it is or whether work is moving.
 //
-// The listing decodes each key the board shows, so the board spells no key,
-// and the document depends on the store's answers alone, so it can be cached
-// whole per rig and dropped when a write lands.
+// The listing decodes each key the board shows, so the board spells no key.
+// The document depends on the store's answers and, for each pull request on
+// the pending record, GitHub's facts no older than gitHubMaxAge, so it can be
+// cached whole per rig and dropped when a write lands.
 package rigboard
 
 import (
@@ -23,6 +27,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
@@ -109,8 +114,12 @@ type gathered struct {
 	holding  map[string]prstatus.Holds
 	unwalked map[string]bool
 	// facts is prstatus.Read's answer for each bead with an open pull
-	// request, and noFacts the error for each it could not answer.
+	// request, and answers the evaluator's answer for each of them on Gas
+	// Town's pending record. noFacts holds each bead with an open pull request
+	// a reader could not answer for: prstatus.Read, or the evaluator for a
+	// pull request on the pending record.
 	facts   map[string]prstatus.Facts
+	answers map[string]pr.Answer
 	noFacts map[string]bool
 	// order is queue.Order's answer for every open piece of work (openWork).
 	order queue.Ordered
@@ -118,9 +127,11 @@ type gathered struct {
 
 // Read reads one rig's store once, through a gctk listing, and builds its
 // document. A read that fails returns its error and no document, so a caller
-// never draws a board from a read that did not happen. Every store call the
-// read makes ends when ctx does, the processes it started killed with it, so a
-// read that runs out has stopped them all when it returns.
+// never draws a board from a read that did not happen. Every store call and
+// every read of GitHub the read makes ends when ctx does, the processes it
+// started killed with it, so a read that runs out has stopped them all when it
+// returns, and it returns ctx's cause, never a document with the pull requests
+// it did not finish reading.
 func Read(ctx context.Context, rig Rig) (Document, error) {
 	ls, err := listing.Read(ctx, rig.Store)
 	if err != nil {
@@ -129,6 +140,9 @@ func Read(ctx context.Context, rig Rig) (Document, error) {
 	g, err := gather(ls, rig.Name)
 	if err != nil {
 		return Document{}, err
+	}
+	if ctx.Err() != nil {
+		return Document{}, fmt.Errorf("read the board of %s: %w", rig.Name, context.Cause(ctx))
 	}
 	return build(g), nil
 }
@@ -191,10 +205,97 @@ func gather(ls *listing.Listing, rig string) (*gathered, error) {
 	}
 	g.facts = facts
 
-	if g.order, err = queue.Order(openWork(g.open), ls); err != nil {
+	// The evaluator reads GitHub, so it runs beside the queue's read of the
+	// store, and the gather waits for it on every path, so a read that returns
+	// has stopped every call it started.
+	var pending []string
+	for _, a := range anchors {
+		if f, ok := facts[a]; ok && pr.OnRecord(f.MergeResult) {
+			pending = append(pending, a)
+		}
+	}
+	evaluated := make(chan map[string]pr.Answer, 1)
+	go func() { a, _ := ready(ls, pending); evaluated <- a }()
+
+	g.order, err = queue.Order(openWork(g.open), ls)
+	g.answers = <-evaluated
+	if err != nil {
 		return nil, fmt.Errorf("place the work of %s: %w", rig, err)
 	}
+	for _, a := range pending {
+		if _, ok := g.answers[a]; !ok {
+			g.noFacts[a] = true
+		}
+	}
 	return g, nil
+}
+
+// gitHubMaxAge is how old an answer from GitHub the read takes about a pull
+// request on Gas Town's pending record (listing.Ready). The landing order
+// (orders/pr-reconcile.toml) runs every five minutes and reads GitHub for at
+// most twenty such PRs a run, so at this age the board asks GitHub about a PR
+// no more often than the order that lands it can. A page left open on a rig
+// then spends about sixty of the account's 5,000 GraphQL points an hour on
+// each such PR, where a read of GitHub with every document, once a minute,
+// would spend three hundred. The cost is a board up to five minutes behind
+// GitHub: an approval reads needs-review until the next read of GitHub after
+// it. The store's side of the answer is read with every document.
+const gitHubMaxAge = 5 * time.Minute
+
+// ready is the evaluator's answer the gather asks for the PRs on Gas Town's
+// pending record: listing.Ready at gitHubMaxAge. A PR it does not answer reads
+// unread, as `gctk pr status` derives nothing for it. It is a variable so that
+// the package's tests answer without GitHub.
+var ready = func(ls *listing.Listing, ids []string) (map[string]pr.Answer, map[string]error) {
+	return ls.Ready(ids, gitHubMaxAge)
+}
+
+// prFacts is what the read knows of a bead's open pull request: the facts
+// prstatus.Read gathered about its anchor and, for a PR on Gas Town's pending
+// record, the evaluator's answer. Where the PR stands and what holds it are
+// rendered from the answer when there is one, as `gctk pr status` renders
+// them, and derived from the facts otherwise.
+type prFacts struct {
+	facts  prstatus.Facts
+	answer *pr.Answer
+}
+
+// prFactsOf is what the read knows of a bead's open pull request, nil when it
+// has none or a reader could not answer for it.
+func prFactsOf(g *gathered, id string) *prFacts {
+	f, ok := g.facts[id]
+	if !ok || g.noFacts[id] {
+		return nil
+	}
+	p := &prFacts{facts: f}
+	if a, ok := g.answers[id]; ok {
+		p.answer = &a
+	}
+	return p
+}
+
+// state is where the pull request stands.
+func (p *prFacts) state() prstatus.State {
+	if p.answer != nil {
+		return prstatus.Render(*p.answer, p.facts)
+	}
+	return prstatus.Derive(p.facts)
+}
+
+// held is the held: value of each thing that holds the pull request.
+func (p *prFacts) held() []prstatus.Hold {
+	if p.answer != nil {
+		return prstatus.RenderHeld(*p.answer, p.facts)
+	}
+	return prstatus.Held(p.facts)
+}
+
+// reasons is each thing that holds the pull request.
+func (p *prFacts) reasons() []prstatus.Reason {
+	if p.answer != nil {
+		return prstatus.RenderReasons(*p.answer, p.facts)
+	}
+	return prstatus.Reasons(p.facts)
 }
 
 // readClosedMembers reads the closed members of each open epic and Delivery,
