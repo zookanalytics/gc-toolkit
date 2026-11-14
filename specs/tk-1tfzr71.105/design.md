@@ -65,8 +65,8 @@ These calls carry a cost either way:
    writes to every reaction, and your direction of 2026-10-14, recorded there
    too, asks for its how to be redone at build time, so tk-georjc's validating
    closer asks you about it once this lands. The cost of the cap's
-   end: lifting your override in the one other rig whose scan is off reacts to
-   its 71 waiting beads, about $128 at the measured rate.
+   end: lifting the city's override in the one other rig whose scan is off
+   reacts to its 71 waiting beads, about $128 at the measured rate.
 5. **One rig first.** When the landing merges, the mechanik pauses the scan in
    three of the four rigs where it runs, so the new path's scan runs in one
    pilot rig alone, the one of the four with the most reactions in the week
@@ -481,20 +481,30 @@ What the design changes:
 - **A reaction costs what it cost.** The session's reading and judgment are the
   cost, and the run swaps one bead and one edge for a few more store writes,
   which cost no tokens.
-- **Fewer sessions start for nothing.** A subject closed before its sling gets
-  no run, and a run whose subject closed, or was handed to another assignee,
-  before a worker took it is retired at the claim, so no session starts for
-  either. Of the three cases tk-i829bzv records, each of which spent a
-  session, two would start none: one subject closed before its reaction was
-  filed and one before a worker claimed it.
+- **Fewer reactions read a closed subject.** A subject closed before its sling
+  gets no run, so no session starts for it. A run whose subject closed, or was
+  handed to another assignee, before a worker took it is retired by the next
+  claim that reaches its step, so no worker reads or judges that subject. A
+  session can still start for that run, because Gas City's pool demand counts a
+  ready, routed step without reading its input, and only a running worker's
+  `gc hook --claim` retires the run (section 9). When no other step waits, that
+  session retires the run in its claim and drains, so the run costs a session's
+  start but none of a reaction's reading and judgment. Of the three cases
+  tk-i829bzv records, each of which spent a session, one would start none,
+  since its subject closed before its reaction was filed. One closed before a
+  worker claimed its reaction, so a session could still start for it but would
+  read nothing. The third closed while its worker read it, so it still spends a
+  session, and the card's guarded write (section 4) stops that reaction with
+  nothing written.
 - **The cap goes, and the spend does not move.** The cap delays a reaction to a
   later sweep and prevents none, and two sessions a rig still run at once. The
   measured steady state is small: when this design read the stores, no bead
   waited for a reaction in the four rigs where the scan runs, and 6 waited in
-  gc-toolkit and 71 in the one other rig where your overrides keep it off. The
-  reactions of the 7.4 days to 2026-11-14 were 58, about $104: 24 in gc-toolkit
-  from findings and requests, 13 in the pilot rig of section 6, 20 in the three
-  rigs it pauses (9, 6 and 5), and 1 in the other rig the overrides keep off.
+  gc-toolkit and 71 in the one other rig where the city's overrides keep it
+  off. The reactions of the 7.4 days to 2026-11-14 were 58, about $104: 24 in
+  gc-toolkit from findings and requests, 13 in the pilot rig of section 6, 20 in
+  the three rigs it pauses (9, 6 and 5), and 1 in the other rig the overrides
+  keep off.
 - **The cadence stays.** The order's 15-minute interval is unchanged, and so are
   the pool's model and its two sessions.
 
@@ -613,9 +623,11 @@ Upstream is 297772b4c3. Of the Gas City files this record cites, these are
 byte-identical there and in the installed build 6589a7df45:
 `internal/sling/sling_core.go`, `internal/sling/sling_attachment.go`,
 `internal/graphv2/invocation.go`, `internal/beadmeta/hold_labels.go`,
-`internal/orders/scanner.go` and `engdocs/architecture/life-of-a-bead.md`. The
-rest differ between the two: `cmd/gc/cmd_hook_claim.go`, `cmd/gc/cmd_sling.go`,
-`cmd/gc/cmd_convoy.go`, `cmd/gc/cmd_convoy_dispatch.go`,
+`internal/orders/scanner.go`, `cmd/gc/demand_serve_predicate.go`, the core
+pack's `template-fragments/claim-protocol.template.md` and
+`engdocs/architecture/life-of-a-bead.md`. The rest differ between the two:
+`cmd/gc/cmd_hook_claim.go`, `cmd/gc/build_desired_state.go`,
+`cmd/gc/cmd_sling.go`, `cmd/gc/cmd_convoy.go`, `cmd/gc/cmd_convoy_dispatch.go`,
 `cmd/gc/order_dispatch.go`, `cmd/gc/order_store.go`,
 `cmd/gc/pool_detached_orphan_sweep.go`, `cmd/gc/wisp_gc.go`,
 `internal/sling/sling.go`, `internal/molecule/molecule.go`,
@@ -634,7 +646,8 @@ Each symbol and sentence cited from them is in both.
 | A second live run of one formula on a bead is refused with exit 3, and one of another formula is not | checkLegacySourceWorkflowConflict; liveConvoyTrackedWorkflowRoots; `cmd/gc/cmd_sling.go`, the conflict's `return 3` |
 | A pour cut short leaves its root open, marked failed or still fenced; the fence holds a bead's route back and marking the pour failed does not restore it; the conflict check counts any root that is not closed | markFailed, fenceGraphWorkflowBead and deferBeadRouting (`internal/molecule/molecule.go`); closeFailedGraphV2Roots (`internal/sling/sling.go`); liveConvoyTrackedWorkflowRoots, which skips only a terminal root |
 | An exec order that outlasts its timeout is ended by signalling its whole process group | shellExecRunner and cancelShellExecProcessGroup (`cmd/gc/order_dispatch.go`) |
-| A claim retires a run whose input is terminal or handed off | retireDoneWorkflowCandidates, hookRetireIfInputSettled (`cmd/gc/cmd_hook_claim.go`) |
+| A claim retires a run whose input is terminal or handed off, and nothing else retires it | retireDoneWorkflowCandidates, hookRetireIfInputSettled (`cmd/gc/cmd_hook_claim.go`), reached only from the claim |
+| The pool's default demand counts a ready, routed step without reading its input, and a worker runs its claim only once its session has started | defaultScaleCheckCountsAndDemand (`cmd/gc/build_desired_state.go`); demandServableForTemplates and demandRowServable (`cmd/gc/demand_serve_predicate.go`); core's claim protocol (`internal/bootstrap/packs/core/template-fragments/claim-protocol.template.md`) |
 | A plain sling clears the execution route; reopen-source re-routes the bead; neither source command finds a run slung with `--on` | clearGraphTakeoverRoute; cmdWorkflowReopenSource, cmdWorkflowDeleteSource (`cmd/gc/cmd_convoy_dispatch.go`); the graph.v2 pour's empty source (`internal/sling/sling.go`) and the lookup by `gc.source_bead_id` (`internal/sourceworkflow/sourceworkflow.go`) |
 | A convoy closes only once every member is terminal | closeCompletedConvoyAcross (`cmd/gc/cmd_convoy.go`) |
 | Run cancel closes a run's open steps and interrupts the turn of each session holding one, without stopping the session | `POST /v0/city/{cityName}/runs/{run_id}/cancel` (`internal/api/huma_handlers_runs.go`) |
