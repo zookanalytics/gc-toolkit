@@ -1213,7 +1213,7 @@ DEMO_CHECK="$REPO/skills/review-demo/SKILL.md"
 START_READ='SERVE=$(gc formula show mol-rig-demo --rig <rig> --json | jq -r '"'"'[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty'"'"')'
 have "the demo:capture skill reads a rig's start command, its ui_serve_command" "$START_READ" "$DEMO_SKILL"
 have "…and its Demo a PR captures a page script with it" 'rig-demo-capture.sh" --script <script.md> --output <clip.mp4> --serve "$SERVE" --cwd .' "$DEMO_SKILL"
-have "the demo check's capture reads the same command" "$START_READ" "$DEMO_CHECK"
+have "the demo check's capture reads the same command, for the review's rig" 'SERVE=$(gc formula show mol-rig-demo --rig "${GC_RIG:-}" --json | jq -r '"'"'[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty'"'"')' "$DEMO_CHECK"
 have "…and serves it from the reviewed worktree" 'Give it as `--serve "$SERVE" --cwd <worktree>`.' "$DEMO_CHECK"
 echo "── a moot or benign close settles a headline that waits on nothing ──"
 # A cut-short sitting leaves its hold's headline on the subject, and the next

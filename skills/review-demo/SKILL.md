@@ -139,10 +139,11 @@ reports whether the `gh` it needs is present.
   The app target is the draft's preview, `--base-url <url>`, where one deploys.
   Otherwise serve the reviewed worktree, so the clip shows the reviewed commit,
   with the command the rig declares as its `ui_serve_command`
-  (`gc-toolkit.demo-capture`, "The rig's start command"):
+  (`gc-toolkit.demo-capture`, "The rig's start command"). A review runs in the
+  rig's own pool, so read it for the session's rig:
 
   ```bash
-  SERVE=$(gc formula show mol-rig-demo --rig <rig> --json | jq -r '[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty')
+  SERVE=$(gc formula show mol-rig-demo --rig "${GC_RIG:-}" --json | jq -r '[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty')
   ```
 
   Give it as `--serve "$SERVE" --cwd <worktree>`. It runs as a copy that
