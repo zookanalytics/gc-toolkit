@@ -6,10 +6,12 @@
 // whose keys it decodes through its declarations, so the reader spells no key
 // and parses no value. It answers what holds a bead through waits, and it is
 // prstatus's Store and queue's, so a pull request's facts, what a person owes
-// and the order work lands in come from the same rows the reader lays out.
+// and the order work lands in come from the same rows the reader lays out. It
+// asks the pr domain's evaluator about a PR on Gas Town's pending record over
+// those rows too, beside GitHub's facts about the PR ([Listing.Ready]).
 //
 // The package sits outside internal/ so the helm board, a separate module, can
-// import it, while the ledger stays internal.
+// import it, while the ledger and the adapters stay internal.
 package listing
 
 import (
@@ -91,8 +93,11 @@ type Epic struct {
 	RulingAt         string
 }
 
-// Listing is one pass's read of a store.
+// Listing is one pass's read of a store. ctx ends every read it makes, and db
+// is the store it read, empty for the store gc resolves.
 type Listing struct {
+	ctx  context.Context
+	db   string
 	pass *ledger.Ledger
 	live []*ledger.Record
 	// beads is each bead decoded, by id.
@@ -110,12 +115,17 @@ func Read(ctx context.Context, db string) (*Listing, error) {
 	if err != nil {
 		return nil, err
 	}
-	return read(l)
+	ls, err := read(l)
+	if err != nil {
+		return nil, err
+	}
+	ls.ctx, ls.db = ctx, db
+	return ls, nil
 }
 
 // read lists every live bead through a pass over l.
 func read(l *ledger.Ledger) (*Listing, error) {
-	ls := &Listing{pass: l.Pass(), beads: map[string]Bead{}}
+	ls := &Listing{ctx: context.Background(), pass: l.Pass(), beads: map[string]Bead{}}
 	live, err := ls.pass.Find(ledger.Every())
 	if err != nil {
 		return nil, err
