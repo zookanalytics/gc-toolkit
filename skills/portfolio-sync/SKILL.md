@@ -35,10 +35,12 @@ That ruling is the operator's, made in the review and never in this sitting,
 but a close or a shift can change what the rig works on and in what order, so
 weigh each one. A sync notes each epic it weighs, under the sync's date
 (section 4), so an epic's newest such note dates the last sync that weighed it.
-This lists, oldest first, each epic that closed or shifted on or after that
-date, and each one that closed or shifted with no such note, so a rig's first
-sync lists every one. A sitting that ends before it notes every epic it listed
-leaves the rest on the next sync's list. A note carries its day only, so a
+This lists, oldest first, each close and each shift made on or after that date,
+and each one on an epic with no such note, so a rig's first sync lists every
+one. It reads each shift from the `## Epic review` block the review records in
+the epic's notes. The epic's `epic_ruling` key holds only its latest ruling, so
+a review that continues the epic after a shift leaves no shift there. A sitting that ends before it notes every epic it listed leaves the rest
+on the next sync's list. A note and a review's block carry their day only, so a
 change made on the day its epic was last noted lists again: read that note for
 what the sync made of it. The list leaves out Deliveries, the epics under
 another of the rig's epics with no hypothesis of their own, whose close is one
@@ -61,20 +63,25 @@ printf '%s' "$EPICS" | jq -r '
   (reduce .[] as $e ({}; .[$e.id] = true)) as $epic
   | [.[] | select(($epic[.parent // ""] | not) or (.metadata.epic_hypothesis // "") != "")
     | ([(.notes // "") | scan("Portfolio sync, po sitting ([0-9]{4}-[0-9]{2}-[0-9]{2})") | .[0]] | max // "") as $noted
-    | select((.status == "closed" and (.closed_at // "") >= $noted)
-      or (.status != "closed" and .metadata.epic_ruling == "shift" and (.metadata.epic_ruling_at // "") >= $noted))]
-  | sort_by(.closed_at // .metadata.epic_ruling_at)
+    | (select(.status == "closed" and (.closed_at // "") >= $noted)
+        | {at: .closed_at, line: "\(.closed_at) \(.id) closed: \(.close_reason // "")"}),
+      (.id as $id | ("\n" + (.notes // "")) | split("\n## Epic review, ")[1:][]
+        | {at: .[0:10], ruling: (([split("\n")[] | select(startswith("Ruling: "))][0] // "")[8:])}
+        | select(.at >= $noted and (.ruling | startswith("shift")))
+        | {at, line: "\(.at) \($id) shifted: \(.ruling | sub("^shift[.:]? *"; ""))"})]
+  | sort_by(.at)
   | if length == 0 then "No epic has closed or shifted since a sync last noted it."
-    else .[] | if .status == "closed" then "\(.closed_at) \(.id) closed: \(.close_reason // "")"
-      else "\(.metadata.epic_ruling_at) \(.id) shifted: \(.metadata.epic_ruling_reason // "")" end end'
+    else .[].line end'
 ```
 
-For each, read the newest `## Epic review` block in its notes, when it has one,
-for what the ruling moved. A close can send the epic's work to another epic, and
-a shift changes an epic's course and can change its hypothesis. Say what each
-changes in the portfolio, such as a parked epic to bring forward now that a
-worked one has closed, or a priority that no longer fits a shifted epic, and
-propose the move.
+For each epic listed, read each `## Epic review` block in its notes dated on or
+after its newest sync note, or every one when it has none, for what the rulings
+moved. A later review can continue an epic on the course a shift set, so weigh
+the shift even when the newest ruling is continue. A close can send the epic's
+work to another epic, and a shift changes an epic's course and can change its
+hypothesis. Say what each changes in the portfolio, such as a parked epic to
+bring forward now that a worked one has closed, or a priority that no longer
+fits a shifted epic, and propose the move.
 
 ## 3. Name the epics due a review
 

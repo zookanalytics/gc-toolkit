@@ -1,30 +1,38 @@
 #!/usr/bin/env bash
-# portfolio-sync.test.sh — a portfolio sync lists each epic closed or shifted
-# since a sync last noted that epic, by the heading its own notes write.
+# portfolio-sync.test.sh — a portfolio sync lists each close and each shift
+# since a sync last noted its epic, by the heading its own notes write.
 #
 # The po keeps no memory, so the portfolio-sync skill reads, on each of the
-# rig's epics, the newest note a sync wrote there, and lists the epic when it
-# closed or shifted on or after that note's day, or has no such note. Each epic
-# answers for itself, so a sitting that ends before it notes every epic it
-# listed leaves the rest on the next sync's list. The note and the read are two
-# blocks of the same skill, and only this suite ties the heading the note
-# writes to the pattern the read scans for. A heading that drifted from the
-# pattern would leave every epic unnoted, so every sync would list every epic
-# the rig ever closed.
+# rig's epics, the newest note a sync wrote there, and lists the epic's close
+# and each of its shifts made on or after that note's day, or every one when the
+# epic has no such note. Each epic answers for itself, so a sitting that ends
+# before it notes every epic it listed leaves the rest on the next sync's list.
+# The note and the read are two blocks of the same skill, and only this suite
+# ties the heading the note writes to the pattern the read scans for. A heading
+# that drifted from the pattern would leave every epic unnoted, so every sync
+# would list every epic the rig ever closed.
+#
+# The read takes each shift from the record an epic review appends to the
+# epic's notes, a block of the converse-epic-review skill, because the epic's
+# ruling key holds only its latest ruling, and a later continue replaces a
+# shift there. The suite runs that block too, so a record whose heading or
+# ruling line drifted from what the read scans for fails here instead of
+# leaving every shift off the list.
 #
 # The read decides what the sitting weighs by what it lists, so a store that
 # did not answer must stop it rather than read as a rig where nothing changed.
 # The suite runs it under a gc that fails with no answer, one that fails after
 # printing a list, and one that answers with something other than a list.
 #
-# Hermetic: runs the skill's two blocks in bash, and in zsh where it is
-# installed, under a stub gc that answers the list from a fixture and records
-# the note. No city, no network.
+# Hermetic: runs the skill's two blocks and the review's record in bash, and in
+# zsh where it is installed, under a stub gc that answers the list from a
+# fixture and records each note. No city, no network.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SKILL="$ROOT/skills/portfolio-sync/SKILL.md"
+REVIEW="$ROOT/skills/converse-epic-review/SKILL.md"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-portfolio-sync-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -35,22 +43,29 @@ bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 shells="bash"
 command -v zsh >/dev/null 2>&1 && shells="bash zsh"
 
-# block <marker> — the skill's fenced bash block that holds <marker>, with each
-# <placeholder> filled with x.
+# block <marker> [<skill>] — the fenced bash block of <skill>, the
+# portfolio-sync skill by default, that holds <marker>, with each <placeholder>
+# filled with x.
 block() {
     awk -v m="$1" '
         /^```bash[ \t]*$/ { inb = 1; buf = ""; hit = 0; next }
         /^```/ && inb { if (hit) { printf "%s", buf; exit } inb = 0; next }
         inb { buf = buf $0 "\n"; if (index($0, m)) hit = 1 }
-    ' "$SKILL" | sed -e 's#<[^>]*>#x#g'
+    ' "${2:-$SKILL}" | sed -e 's#<[^>]*>#x#g'
 }
 
 block 'scan("Portfolio sync, po sitting' >"$TMP/read.sh"
 block '--append-notes "Portfolio sync, po sitting' >"$TMP/note.sh"
+block '--append-notes "$RECORD"' "$REVIEW" >"$TMP/review.sh"
 [ -s "$TMP/read.sh" ] && ok "the skill holds the read of what changed since a sync last noted each epic" \
     || bad "the skill holds the read of what changed since a sync last noted each epic" "no fenced bash block in $SKILL scans for the sync's heading"
 [ -s "$TMP/note.sh" ] && ok "the skill holds the note a sync writes" \
     || bad "the skill holds the note a sync writes" "no fenced bash block in $SKILL appends a note under the sync's heading"
+[ -s "$TMP/review.sh" ] && ok "the epic review holds the record it appends to the epic" \
+    || bad "the epic review holds the record it appends to the epic" "no fenced bash block in $REVIEW appends its record"
+# The record of a review that rules shift, and of one that rules continue.
+sed -e 's/^Ruling: x\. x$/Ruling: shift. re-aimed/' "$TMP/review.sh" >"$TMP/review-shift.sh"
+sed -e 's/^Ruling: x\. x$/Ruling: continue. held/' "$TMP/review.sh" >"$TMP/review-continue.sh"
 
 mkdir -p "$TMP/bin" "$TMP/away"
 cat >"$TMP/bin/gc" <<'STUB'
@@ -62,61 +77,76 @@ case "$1 $2 $3 $4" in
     "bd --rig x update")
         [ "${5:-}" = x ] && [ "${6:-}" = --append-notes ] || { echo "stub gc: unexpected update: $*" >&2; exit 2; }
         printf '%s' "$7" >"$NOTE_OUT" ;;
+    "bd update x --append-notes") printf '%s' "$5" >"$NOTE_OUT" ;;
     *) echo "stub gc: unexpected call: $*" >&2; exit 2 ;;
 esac
 STUB
 chmod +x "$TMP/bin/gc"
 
 # run <shell> <block> <fixture> [<list exit>] — the block's output, run from
-# outside any repo.
+# outside any repo, with x as the epic a review records on.
 run() {
     (cd "$TMP/away" && env -u BASH_ENV -u ENV FIXTURE="$3" LIST_EXIT="${4:-0}" \
-        NOTE_OUT="$TMP/note" PATH="$TMP/bin:$PATH" $1 "$2" 2>"$TMP/err")
+        NOTE_OUT="$TMP/note" EPIC=x PATH="$TMP/bin:$PATH" $1 "$2" 2>"$TMP/err")
 }
 
-# Each epic answers for itself. e1 and e2 were noted, and neither closed nor
-# shifted since: e2's latest ruling is continue. e3 shifted and e5 closed with
-# no sync's note, and so did c1, a child epic with a hypothesis of its own. e4's
-# shift and e6's close came before each one's newest note, so a sync weighed
-# them, and e6 carries an older note too, from the day it closed. e7 closed on
-# the day of its own newest note, which the read lists again, since a note
-# carries the day only. p1 was noted when a sync parked it and shifted after.
+# Each epic answers for itself, and each shift is read from a review's block in
+# its notes, never from its latest ruling. e2 was noted, and a review that
+# continued it after its note lists nothing. e3 shifted twice, e5 shifted and
+# then closed, and c1, a child epic with a hypothesis of its own, closed, all
+# with no sync's note, so e5 lists its shift and its close. e4's shift, the
+# continue after it, and e6's close came before each one's newest note, so a
+# sync weighed them, and e6 carries an older note too, from the day it closed.
+# e1 shifted and e7 closed on the day of each one's own newest note, which the
+# read lists again, since a note carries the day only. e8 shifted after its note
+# and a later review continued it, so its latest ruling is continue and its
+# shift was never weighed. p1 was noted when a sync parked it and shifted after.
 # d1 is a Delivery, an epic under an epic with no hypothesis. o1 closed under a
 # parent that is none of the rig's epics, so it is no Delivery and is listed.
 cat >"$TMP/synced.json" <<'JSON'
 [
-  {"id": "e1", "status": "open", "notes": "Portfolio sync, po sitting 2026-11-13: in focus, left unparked.", "metadata": {}},
-  {"id": "e2", "status": "open", "notes": "An older note.\nPortfolio sync, po sitting 2026-11-14: parked behind gate g1.", "metadata": {"epic_ruling": "continue", "epic_ruling_at": "2026-11-15T01:00:00Z"}},
-  {"id": "e3", "status": "open", "notes": "", "metadata": {"epic_ruling": "shift", "epic_ruling_at": "2026-11-15T02:00:00Z", "epic_ruling_reason": "re-aimed"}},
-  {"id": "e4", "status": "open", "notes": "Portfolio sync, po sitting 2026-11-13: its shift moves nothing.", "metadata": {"epic_ruling": "shift", "epic_ruling_at": "2026-11-12T00:00:00Z", "epic_ruling_reason": "old shift"}},
-  {"id": "e5", "status": "closed", "closed_at": "2026-11-15T03:00:00Z", "close_reason": "held", "metadata": {"epic_ruling": "close"}},
+  {"id": "e1", "status": "open", "notes": "Portfolio sync, po sitting 2026-11-13: in focus, left unparked.\n## Epic review, 2026-11-13\nPrompted by: the operator's call\nRuling: shift. re-aimed the same day", "metadata": {"epic_ruling": "shift", "epic_ruling_at": "2026-11-13T09:00:00Z"}},
+  {"id": "e2", "status": "open", "notes": "An older note.\nPortfolio sync, po sitting 2026-11-14: parked behind gate g1.\n## Epic review, 2026-11-15\nPrompted by: the operator's call\nRuling: continue. on course", "metadata": {"epic_ruling": "continue", "epic_ruling_at": "2026-11-15T01:00:00Z"}},
+  {"id": "e3", "status": "open", "notes": "## Epic review, 2026-11-14\nPrompted by: the operator's call\nRuling: shift. first aim\n## Epic review, 2026-11-15\nPrompted by: the operator's call\nRuling: shift. re-aimed", "metadata": {"epic_ruling": "shift", "epic_ruling_at": "2026-11-15T02:00:00Z"}},
+  {"id": "e4", "status": "open", "notes": "## Epic review, 2026-11-11\nPrompted by: the operator's call\nRuling: shift. old shift\n## Epic review, 2026-11-12\nPrompted by: the operator's call\nRuling: continue. held\nPortfolio sync, po sitting 2026-11-13: its shift moves nothing.", "metadata": {"epic_ruling": "continue", "epic_ruling_at": "2026-11-12T00:00:00Z"}},
+  {"id": "e5", "status": "closed", "notes": "## Epic review, 2026-11-14\nPrompted by: the operator's call\nRuling: shift. narrowed before its close", "closed_at": "2026-11-15T03:00:00Z", "close_reason": "held", "metadata": {"epic_ruling": "close"}},
   {"id": "e6", "status": "closed", "notes": "Portfolio sync, po sitting 2026-11-10: in focus.\nPortfolio sync, po sitting 2026-11-13: its close brings e2 forward.", "closed_at": "2026-11-10T00:00:00Z", "close_reason": "old close", "metadata": {"epic_ruling": "close"}},
   {"id": "e7", "status": "closed", "notes": "Portfolio sync, po sitting 2026-11-14: its close moves nothing.", "closed_at": "2026-11-14T00:30:00Z", "close_reason": "same day", "metadata": {"epic_ruling": "close"}},
-  {"id": "p1", "status": "open", "notes": "Portfolio sync, po sitting 2026-11-13: parked behind gate g2.", "metadata": {"epic_ruling": "shift", "epic_ruling_at": "2026-11-15T06:00:00Z", "epic_ruling_reason": "shifted once parked"}},
+  {"id": "e8", "status": "open", "notes": "Portfolio sync, po sitting 2026-11-10: in focus.\n## Epic review, 2026-11-11\nPrompted by: the operator's call\nRuling: shift. re-aimed at the board\n## Epic review, 2026-11-12\nPrompted by: the operator's call\nRuling: continue. on the new course", "metadata": {"epic_ruling": "continue", "epic_ruling_at": "2026-11-12T00:00:00Z"}},
+  {"id": "p1", "status": "open", "notes": "Portfolio sync, po sitting 2026-11-13: parked behind gate g2.\n## Epic review, 2026-11-15\nPrompted by: the operator's call\nRuling: shift. shifted once parked", "metadata": {"epic_ruling": "shift", "epic_ruling_at": "2026-11-15T06:00:00Z"}},
   {"id": "d1", "status": "closed", "parent": "e5", "closed_at": "2026-11-15T03:30:00Z", "close_reason": "checkpoint", "metadata": {}},
   {"id": "c1", "status": "closed", "parent": "e5", "closed_at": "2026-11-15T04:00:00Z", "close_reason": "answered", "metadata": {"epic_hypothesis": "for whom, what changes, and the signal", "epic_ruling": "close"}},
   {"id": "o1", "status": "closed", "parent": "t1", "closed_at": "2026-11-15T05:00:00Z", "close_reason": "under a task", "metadata": {"epic_ruling": "close"}}
 ]
 JSON
 cat >"$TMP/synced.want" <<'WANT'
+2026-11-11 e8 shifted: re-aimed at the board
+2026-11-13 e1 shifted: re-aimed the same day
+2026-11-14 e3 shifted: first aim
+2026-11-14 e5 shifted: narrowed before its close
 2026-11-14T00:30:00Z e7 closed: same day
-2026-11-15T02:00:00Z e3 shifted: re-aimed
+2026-11-15 e3 shifted: re-aimed
+2026-11-15 p1 shifted: shifted once parked
 2026-11-15T03:00:00Z e5 closed: held
 2026-11-15T04:00:00Z c1 closed: answered
 2026-11-15T05:00:00Z o1 closed: under a task
-2026-11-15T06:00:00Z p1 shifted: shifted once parked
 WANT
 # The same epics with no sync's note: every close and shift, Deliveries left out.
-jq '[.[] | .notes = ""]' "$TMP/synced.json" >"$TMP/first.json"
+jq '[.[] | .notes = ((.notes // "") | split("\n") | map(select(startswith("Portfolio sync, po sitting") | not)) | join("\n"))]' \
+    "$TMP/synced.json" >"$TMP/first.json"
 cat >"$TMP/first.want" <<'WANT'
 2026-11-10T00:00:00Z e6 closed: old close
-2026-11-12T00:00:00Z e4 shifted: old shift
+2026-11-11 e4 shifted: old shift
+2026-11-11 e8 shifted: re-aimed at the board
+2026-11-13 e1 shifted: re-aimed the same day
+2026-11-14 e3 shifted: first aim
+2026-11-14 e5 shifted: narrowed before its close
 2026-11-14T00:30:00Z e7 closed: same day
-2026-11-15T02:00:00Z e3 shifted: re-aimed
+2026-11-15 e3 shifted: re-aimed
+2026-11-15 p1 shifted: shifted once parked
 2026-11-15T03:00:00Z e5 closed: held
 2026-11-15T04:00:00Z c1 closed: answered
 2026-11-15T05:00:00Z o1 closed: under a task
-2026-11-15T06:00:00Z p1 shifted: shifted once parked
 WANT
 # An interrupted sitting: a1 and b1 closed on 2026-11-13, and the sync of
 # 2026-11-14 noted a1, then ended before it reached b1.
@@ -147,16 +177,16 @@ for sh_ in $shells; do
     [ "$sh_" = zsh ] && sh_run="zsh -f"
     got=$(run "$sh_run" "$TMP/read.sh" "$TMP/synced.json"); rc=$?
     if [ "$rc" -eq 0 ] && [ "$got" = "$(cat "$TMP/synced.want")" ]; then
-        ok "($sh_) the read lists each epic closed or shifted on or after its own newest sync note, or with none"
+        ok "($sh_) the read lists each close and each shift on or after its epic's own newest sync note, or with none, whatever the latest ruling"
     else
-        bad "($sh_) the read lists each epic closed or shifted on or after its own newest sync note, or with none" \
+        bad "($sh_) the read lists each close and each shift on or after its epic's own newest sync note, or with none, whatever the latest ruling" \
             "exit $rc, got: $(printf '%s' "$got" | tr '\n' '|') $(cat "$TMP/err")"
     fi
     got=$(run "$sh_run" "$TMP/read.sh" "$TMP/first.json"); rc=$?
     if [ "$rc" -eq 0 ] && [ "$got" = "$(cat "$TMP/first.want")" ]; then
-        ok "($sh_) a rig with no sync noted lists every epic closed or shifted, Deliveries left out"
+        ok "($sh_) a rig with no sync noted lists every close and every shift, Deliveries left out"
     else
-        bad "($sh_) a rig with no sync noted lists every epic closed or shifted, Deliveries left out" \
+        bad "($sh_) a rig with no sync noted lists every close and every shift, Deliveries left out" \
             "exit $rc, got: $(printf '%s' "$got" | tr '\n' '|') $(cat "$TMP/err")"
     fi
     got=$(run "$sh_run" "$TMP/read.sh" "$TMP/interrupted.json"); rc=$?
@@ -224,6 +254,28 @@ for sh_ in $shells; do
     else
         bad "($sh_) the note a sync writes today shows a close before today weighed, and lists one made today again" \
             "exit $rc, note: '$note', read: '$(printf '%s' "$got" | tr '\n' '|')' $(cat "$TMP/err")"
+    fi
+
+    # The record an epic review writes, of a shift and then of a continue, both
+    # after the epic's newest sync note. The read lists the shift under the day
+    # its record carries, though the latest ruling is continue.
+    before=$(date -u +%Y-%m-%d)
+    rm -f "$TMP/note"
+    run "$sh_run" "$TMP/review-shift.sh" /dev/null >/dev/null; rc=$?
+    shifted=$(cat "$TMP/note" 2>/dev/null)
+    rm -f "$TMP/note"
+    run "$sh_run" "$TMP/review-continue.sh" /dev/null >/dev/null || rc=$?
+    continued=$(cat "$TMP/note" 2>/dev/null)
+    after=$(date -u +%Y-%m-%d)
+    jq -n --arg s "$shifted" --arg c "$continued" '[{id: "r1", status: "open",
+        notes: ("Portfolio sync, po sitting 2000-01-01: in focus.\n" + $s + "\n" + $c),
+        metadata: {epic_ruling: "continue"}}]' >"$TMP/reviewed.json"
+    got=$(run "$sh_run" "$TMP/read.sh" "$TMP/reviewed.json")
+    if [ "$rc" -eq 0 ] && { [ "$got" = "$before r1 shifted: re-aimed" ] || [ "$got" = "$after r1 shifted: re-aimed" ]; }; then
+        ok "($sh_) a shift the epic review records lists, though a later review continued the epic"
+    else
+        bad "($sh_) a shift the epic review records lists, though a later review continued the epic" \
+            "exit $rc, shift record: '$(printf '%s' "$shifted" | head -n 3 | tr '\n' '|')', read: '$(printf '%s' "$got" | tr '\n' '|')' $(cat "$TMP/err")"
     fi
 done
 
