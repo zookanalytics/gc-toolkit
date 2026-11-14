@@ -26,8 +26,11 @@ formula choice reads. How any integration effort is stood up, and how its beads
 branch and land, is the `work` skill's effort recipe
 (`skills/work/integration-effort.md`). How a summary task writes its PR summary
 is the polecat doctrine's (`template-fragments/polecat-doctrine.template.md`).
-The merge rule the gates apply is `gctk merge`'s, which `assets/scripts/merge.sh`
-runs; this page says how the pattern meets that rule and does not define it.
+The merge rule the gates apply is the pack's approval contract, which the
+evaluator in `gctk`'s pr domain decides for the landing order, and which
+`gctk merge` applies on a rig still on the old path
+([refinery-merge-cadence.md](refinery-merge-cadence.md)); this page says how the
+pattern meets that rule and does not define it.
 
 ## Why a molecule stands it up
 
@@ -42,8 +45,8 @@ Cutting the branch is the one step a converse sitting cannot perform, because a
 sitting pushes only the branch of a change the operator rules it make, through
 Work's hand-off. Everything downstream expects the integration branch to
 already exist: a polecat branches from `origin/<target>`, the refinery brings a
-branch current by merging `origin/<target>` into it, and pre-open review diffs
-against the anchor's target. None of them creates it. So the branch cut is the
+branch current by merging `origin/<target>` into it, and review diffs against
+the anchor's target. None of them creates it. So the branch cut is the
 piece the pattern supplies, performed by a pool worker that has push rights.
 
 ## mol-design-convoy — the molecule
@@ -111,52 +114,52 @@ first commit.
 
 ## The two operator gates
 
-Every PR a design-convoy produces merges only with a standing APPROVED review
-from an account other than the city's. The approval counts at whatever commit
-it was given and stands across later pushes until someone dismisses it, so a
-push to an approved PR does not wait for a second approval. A standing
-CHANGES_REQUESTED from any other account vetoes the merge. `merge.sh` enforces
-this as a universal merge rule: it is armed for every PR and named by no
-`check_set` token (`gctk merge`, which `assets/scripts/merge.sh` execs), and
-GitHub branch protection is an extra layer, not the authority. The design
-child's PR into the integration branch, when the design is gated, and the
-subject's PR into the default branch both pass through it. The pattern's two
-gates are the two approvals that decide what moves next.
+Every PR a design-convoy produces merges only once the operator's approval
+stands on it, on any target. An approval counts at whatever commit it was given
+and stands across later pushes until it is dismissed, so a push to an approved
+PR does not wait for a second approval, and a standing request for changes
+holds the merge. The city applies this rule to every PR it opens, no check
+names it, and GitHub's branch rules are an extra layer, not the authority. The
+design child's PR into the integration branch, when the design is gated, and
+the subject's PR into the default branch both pass through it. The pattern's
+two gates are the two approvals that decide what moves next.
 
-The rule is the default branch's `gctk merge`, the binary the `gctk-build`
-order builds from the deployed pack the refinery runs, and it gates PRs onto an
-integration branch as well. An integration branch's own copy of `services/gctk`
-can predate the rule. The refinery never runs a build of that copy, and an
-effort that changes nothing under `services/gctk` leaves the default branch's
-version in place when its PR merges.
+The rule runs in the default branch's `gctk`, the binary the `gctk-build` order
+builds from the deployed pack: the landing order's `gctk pr reconcile`, or
+`gctk merge` on a rig still on the old path. It gates PRs onto an integration
+branch as well. An integration branch's own copy of `services/gctk` can predate
+the rule. Neither the landing order nor the merge cadence runs a build of that
+copy, and an effort that changes nothing under `services/gctk` leaves the
+default branch's version in place when its PR merges.
 
 **Gate 1, the design checkpoint** (design-gated only). The design child is a
 stage: its doc lands on the integration branch through its own PR into that
-branch, and the universal rule holds that PR until the operator approves it. The
+branch, and the rule holds that PR until the operator approves it. The
 implementation child is held behind the design child by a `blocks` edge, and a
 deferred dispatch sends it to the pool when the design child closes. The design
-child closes only when its PR merges, so the operator's approval of the design
-is what releases implementation, which then lands on the branch with no PR of
-its own.
+child closes only once its PR's merge is verified on the integration branch, so
+the operator's approval of the design is what releases implementation, which
+then lands on the branch with no PR of its own.
 
 **Gate 2, the subject's PR.** The subject waits on each child and on the summary
 task by `blocks` edges, and the `dispatch` step assigned it to the refinery. The
-summary task is dispatched once both children have landed, and writes the
-subject's `pr_summary` from the finished branch: what the whole branch does,
-and where the finished work departs from the subject's description. It also
-titles the subject with the branch's subject line, because the PR's title is
-composed from the subject's. Once it closes, nothing the subject waits on is
-open. The refinery takes the subject and brings its branch current with the
-default branch, and the merge cadence opens the PR from the integration branch
-into the default branch, with the summary task's account as its `## Summary`.
-The same universal rule holds that PR until an operator's approval stands on
-it, so the operator reviews the whole unit, design and implementation together,
-before the default branch moves.
+summary task is dispatched once both children have landed, and records the
+subject's PR summary (`gctk pr summary`) from the finished branch: what the
+whole branch does, and where the finished work departs from the subject's
+description. In the same write it titles the subject with the branch's subject
+line, because the PR's title is composed from the subject's. Once it closes,
+nothing the subject waits on is open. The refinery takes the subject, brings
+its branch current with the default branch, and publishes the PR from the
+integration branch into the default branch, with the summary task's account as
+its `## Summary`. On a rig still on the old path it parks the subject for the
+merge cadence, which opens the PR. The same rule holds that PR until an
+operator's approval stands on it, so the operator reviews the whole unit, design
+and implementation together, before the default branch moves.
 
 ## When the subject closes
 
-The subject is the owning bead of the effort's PR, so it closes when that PR
-merges, as any PR's owning bead does. Work that waits on the subject through a
+The subject is the owning bead of the effort's PR, so it closes once that PR's
+merge is verified on the default branch, as any PR's owning bead does. Work that waits on the subject through a
 `blocks` edge starts once the subject closes.
 
 ## Design-gated versus all-in-one

@@ -306,7 +306,8 @@ blk "$R_TK" tk-w-hidden open "$POOL"
 
 # Merge anchors read their recorded merge axis, not their empty route.
 blk "$R_TK" tk-w-anchors open '{}' tk-a-approval tk-a-progress tk-a-preopen tk-a-approved \
-  tk-a-hold tk-a-blocked tk-a-stale tk-a-noaxis tk-a-humanstate
+  tk-a-hold tk-a-blocked tk-a-stale tk-a-noaxis tk-a-humanstate \
+  tk-a-rpend tk-a-rreview tk-a-rnopost tk-a-rhead tk-a-rhold
 AX='@h1@2026-10-01T00:00:00Z'
 blk "$R_TK" tk-a-approval open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required$AX\"}"
 blk "$R_TK" tk-a-progress open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"progressing$AX\",\"pr_posture\":\"changes_requested$AX\"}"
@@ -317,6 +318,13 @@ blk "$R_TK" tk-a-blocked open "{\"merge_result\":\"pull_request\",\"pr.machine\"
 blk "$R_TK" tk-a-stale open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required@h0@2026-09-30T00:00:00Z\"}"
 blk "$R_TK" tk-a-noaxis open '{"merge_result":"pre_open_gate"}'
 blk "$R_TK" tk-a-humanstate open '{"merge_result":"abandoned","gc.takeaway":"PR#9 was closed without merging"}'
+# The pending record: no merge axis is ever written there, and a pending bead is
+# blocked by the record itself while it waits on the merge.
+blk "$R_TK" tk-a-rpend blocked "{\"merge_result\":\"pull_request_pending\",\"pr_posture\":\"approved$AX\"}"
+blk "$R_TK" tk-a-rreview blocked "{\"merge_result\":\"pull_request_pending\",\"pr_posture\":\"review_required$AX\"}"
+blk "$R_TK" tk-a-rnopost blocked '{"merge_result":"pull_request_pending"}'
+blk "$R_TK" tk-a-rhead open '{"merge_result":"pull_request_head_changed"}'
+blk "$R_TK" tk-a-rhold blocked "{\"merge_result\":\"pull_request_pending\",\"merge_hold\":\"true\",\"pr_posture\":\"approved$AX\"}"
 
 # A bead's own state, one rule per blocker.
 blk "$R_TK" tk-w-kinds open '{}' tk-k-blocked tk-k-validation tk-k-finding tk-k-needsyou \
@@ -841,7 +849,12 @@ eq "$(blkr tk-a-blocked)" "stuck tk-a-blocked merge-blocked" "an anchor its mach
 eq "$(blkr tk-a-stale)" "stuck tk-a-stale unread" "a posture read at another head than the axis is unread, so stuck"
 eq "$(blkr tk-a-noaxis)" "stuck tk-a-noaxis unread" "an anchor with no recorded axis is unread, so stuck"
 eq "$(blkr tk-a-humanstate)" "stuck tk-a-humanstate human" "an anchor parked in a human state is stuck on a person"
-eq "$(logcount 'list --id')" 1 "  ... nine same-store blockers cost one read"
+eq "$(blkr tk-a-rpend)" "advancing - -" "an approved PR on the pending record advances to the landing order, though its bead is blocked"
+eq "$(blkr tk-a-rreview)" "stuck tk-a-rreview approval" "a PR on the pending record waiting on review is stuck on the operator's approval"
+eq "$(blkr tk-a-rnopost)" "stuck tk-a-rnopost unread" "a PR on the pending record with no recorded posture is unread, so stuck"
+eq "$(blkr tk-a-rhead)" "advancing - -" "a PR whose head moved advances: the refinery validates the new head"
+eq "$(blkr tk-a-rhold)" "stuck tk-a-rhold merge-hold" "an operator merge hold on the pending record is stuck"
+eq "$(logcount 'list --id')" 1 "  ... the same-store blockers cost one read"
 
 # A bead's own state, one rule per blocker.
 run tk-w-kinds --frontier --json

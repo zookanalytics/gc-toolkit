@@ -160,6 +160,13 @@ type Facts struct {
 	// rework of this one waits for. No automated actor will move any of them, so
 	// each holds the PR.
 	Owed []Blocker
+	// Staying are the conversations the PR waits on, on its own blockers or
+	// behind a bead it waits on, whose sittings stay for the work they sent, as
+	// [Holding] reads them ([Holds.Staying]). Each holds the merge until its
+	// sitting comes back to the operator once that work closes, so the PR waits
+	// on that work first and is no person's move yet, approved or not. Once the
+	// work closes, the conversation is among Owed.
+	Staying []Blocker
 	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
 	// read before the first '@', and the oid after it is the head the posture
 	// was read at, the current head as far as the city knows.
@@ -198,6 +205,10 @@ type Facts struct {
 	// rework or fix child, a validation pass, a review, a finding). Non-zero
 	// means the city is acting on the PR.
 	InFlightCount int
+	// MergeResult is metadata.merge_result, the anchor's landing state. A value
+	// pr.OnRecord names is a PR on Gas Town's pending record, which the pr
+	// domain's evaluator answers for and [Render] renders.
+	MergeResult string
 }
 
 // InFlightStatuses are the statuses at which a bead carrying anchor_bead is in
@@ -210,9 +221,11 @@ var InFlightStatuses = []string{"open", "in_progress", "blocked", "deferred", "h
 // Derive returns the state the anchor projects. Precedence:
 // needs-attention > merging > working > needs-review. A blocker the city will
 // not clear holds the PR whatever else stands. An approved PR with nothing
-// blocking it is the city's to land, whatever work is in flight on the way.
-// Live city work on an unapproved PR comes before the review verdict it leads
-// to, and the verdict is what remains when neither stands.
+// blocking it is the city's to land, whatever work is in flight on the way. A
+// conversation whose sitting stays for work holds the merge until it comes back
+// to the operator, so the PR is working while one does, approved or not. Live
+// city work on an unapproved PR comes before the review verdict it leads to,
+// and the verdict is what remains when neither stands.
 func Derive(f Facts) State {
 	posture, _ := splitDated(f.PRPosture)
 	machine, _ := splitDated(f.PRMachine)
@@ -232,6 +245,12 @@ func Derive(f Facts) State {
 	// The merge pass's blocked verdict, while it holds the PR.
 	if Blocked(f) {
 		return NeedsAttention
+	}
+
+	// working: a conversation whose sitting stays for work holds the merge, so
+	// the work comes first, then the sitting's return to the operator.
+	if len(f.Staying) > 0 {
+		return Working
 	}
 
 	// merging: approved, and nothing known blocks the merge.
@@ -282,9 +301,12 @@ func Blocked(f Facts) bool {
 // derivation after the condition clears leaves it out. The merge freeze and the
 // rebase hold are not among them: they read needs-attention in [Derive] with no
 // held value of their own.
-func Held(f Facts) []Hold {
+func Held(f Facts) []Hold { return holdsOf(Reasons(f)) }
+
+// holdsOf is the held: value of each reason, once each, in their order.
+func holdsOf(reasons []Reason) []Hold {
 	var held []Hold
-	for _, r := range Reasons(f) {
+	for _, r := range reasons {
 		if !slices.Contains(held, r.Held) {
 			held = append(held, r.Held)
 		}

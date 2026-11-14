@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -141,4 +142,62 @@ func (c *Checkout) PutBack() (string, error) {
 		return "", err
 	}
 	return c.Dirty()
+}
+
+// OriginURL reads the URL of the remote named origin in the clone dir sits in.
+func OriginURL(dir string) (string, error) {
+	out, err := Output(dir, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// ValidBranch reports whether name is a branch name git accepts.
+func ValidBranch(name string) bool {
+	if name == "" {
+		return false
+	}
+	return exec.Command("git", "check-ref-format", "refs/heads/"+name).Run() == nil
+}
+
+// FetchBranch fetches branch from origin into refs/remotes/origin/<branch> in
+// the clone dir sits in, forced, so the ref names the tip origin holds now.
+func FetchBranch(dir, branch string) error {
+	if !ValidBranch(branch) {
+		return fmt.Errorf("git fetch: %q is not a branch name", branch)
+	}
+	_, err := Output(dir, "fetch", "--no-tags", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch)
+	return err
+}
+
+// Reaches reports whether commit is reachable from origin's branch as the clone
+// dir sits in last fetched it, refs/remotes/origin/<branch> named in full, so a
+// local branch or tag of the same name cannot stand in for it. It reads the
+// history git stores, with replace refs and the grafts file ignored, since
+// either rewrites what merge-base sees. A commit the clone does not hold is not
+// reachable. An error is a read that did not answer.
+func Reaches(dir, commit, branch string) (bool, error) {
+	if !IsObjectID(commit) {
+		return false, fmt.Errorf("git merge-base: %q is not a full object name", commit)
+	}
+	cmd := exec.Command("git", "--no-replace-objects", "-C", dir, "merge-base", "--is-ancestor", commit,
+		"refs/remotes/origin/"+branch)
+	cmd.Env = append(os.Environ(), "GIT_GRAFT_FILE="+os.DevNull)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &ee) && ee.ExitCode() == 1:
+		return false, nil
+	case errors.As(err, &ee) && strings.Contains(stderr.String(), "Not a valid commit name "+commit):
+		return false, nil
+	}
+	if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		return false, fmt.Errorf("git merge-base: %s", msg)
+	}
+	return false, fmt.Errorf("git merge-base: %w", err)
 }

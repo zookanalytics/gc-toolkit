@@ -2,23 +2,17 @@ package waits
 
 import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 
-// The keys the bead read reads. No domain owns any of them: the runtime writes
-// the run link's, and shell writes the rest, so each is declared read-only here
-// and its definition stays in lifecycle/lifecycle.toml. The change that moves a
-// shell writer into a domain takes its key's declaration over.
+// The keys the bead read reads that no domain owns: the runtime writes the run
+// link's, and shell writes the rest, so each is declared read-only here and its
+// definition stays in lifecycle/lifecycle.toml. The change that moves a shell
+// writer into a domain takes its key's declaration over. merge_result and
+// rejection_reason are the pr domain's record's, read through its reading faces.
 
-// The keys that show a bead in flight (steering.md, In flight).
-var (
-	branchKey = ledger.ReadOnly("branch", ledger.String,
-		"The source branch a work bead's change is on, which the work formula's workspace-setup writes "+
-			"(lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight.")
-	mergeResultKey = ledger.ReadOnly("merge_result", ledger.String,
-		"The anchor's lifecycle state, which lifecycle.sh, through gctk lifecycle, writes on every transition "+
-			"(lifecycle/lifecycle.toml, [machine] and [states]). A bead carrying it is in flight.")
-	rejectionReasonKey = ledger.ReadOnly("rejection_reason", ledger.String,
-		"Why the bead's last attempt bounced, which the refinery writes "+
-			"(lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight.")
-)
+// The branch a work bead's change is on, one of the keys that show a bead in
+// flight (steering.md, In flight).
+var branchKey = ledger.ReadOnly("branch", ledger.String,
+	"The source branch a work bead's change is on, which the work formula's workspace-setup writes "+
+		"(lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight.")
 
 // The run link Gas City keeps, which assets/scripts/run-lib.sh defines and
 // run.go copies under its fixture test. The runtime writes each at the pour

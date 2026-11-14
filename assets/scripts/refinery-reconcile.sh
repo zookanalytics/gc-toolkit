@@ -13,11 +13,10 @@
 # projection), review-sweep (cleanup over closed anchors; no projection, no
 # merge authority), scaffolding-sweep (retires validation/finding/rework on a
 # disposed anchor; BEADS_ACTOR projected: it closes a finding it carries forward
-# through bead-rehome; no merge authority), pr-stack (PR bodies only — both
-# managed regions; no projection, no merge authority).
+# through bead-rehome; no merge authority).
 # The arms that walk a set growing with the queue share the pass budget (see
 # PASS_BUDGET_SECS and PACED_ARMS below): merge, pr-open, pr-feedback,
-# pre-open-rebase, gate-ensure, pr-facts and pr-stack.
+# pre-open-rebase, gate-ensure and pr-facts.
 # Landing is the main way an anchor leaves the gating set, and pr-open is what
 # puts an anchor in front of the operator for the approval merge waits on. The
 # arms that iterate that set grow in cost with it, so one placed ahead of these
@@ -280,7 +279,7 @@ run_pass() { # <label> <script> [args...]
 # among it and the arms still on this list, in PACE_ARGS, and takes it off the
 # list. pace_skip takes off an arm this pass will not run, so the arms behind it
 # split its share.
-PACED_ARMS=(merge pr-open pr-feedback pre-open-rebase gate-ensure pr-facts pr-stack)
+PACED_ARMS=(merge pr-open pr-feedback pre-open-rebase gate-ensure pr-facts)
 pace_skip() { # <arm>
   local a left=()
   for a in ${PACED_ARMS[@]+"${PACED_ARMS[@]}"}; do
@@ -428,17 +427,6 @@ run_pass "(8) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 ( export BEADS_ACTOR="$AGENT"
   run_pass "(9) scaffolding-sweep" scaffolding-sweep.sh ) \
   || FAILED="${FAILED}scaffolding-sweep rc=$?; "
-
-# (10) pr-stack: bring each open PR's body current with its anchor in both managed
-# regions — re-render the beads-on-this-branch section, and refresh the pr-summary
-# region when a rework moved the anchor summary past the published one (pr-open
-# composes that region only at pre_open_gate, which an open anchor never re-enters).
-# Last, and after merge: a bead this pass landed onto another anchor's branch is in
-# the ledger it reads, so the body names it on the same tick rather than a minute
-# later. It writes only PR bodies — no bead, no merge authority — so it runs
-# unprojected and its failure gates nothing.
-pace_args pr-stack
-run_pass "(10) pr-stack" pr-stack.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-stack rc=$?; "
 
 # The per-pass bd_list cache is this pass's; drop it so no later pass can read
 # these rows. A killed pass never reaches here and the next pass's rm-then-create

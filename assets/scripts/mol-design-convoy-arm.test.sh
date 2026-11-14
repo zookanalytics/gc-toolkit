@@ -673,7 +673,7 @@ for sh in "${SHELLS[@]}"; do
   eq "$RC" "0" "[$sh] summary create: the summary task is filed"
   eq "$(parents dz-sum)" "ep-1" "[$sh] summary create: it is filed under the subject's epic, beside the subject"
   eq "$(meta dz-sum target)" "<absent>" "[$sh] summary create: it carries no target"
-  says dz-sum "pr_summary of dz-sub" && ok "[$sh] summary create: its description names the subject it writes for" \
+  says dz-sum "PR summary of dz-sub" && ok "[$sh] summary create: its description names the subject it writes for" \
     || bad "[$sh] summary create: its description does not name the subject"
   eq "$(meta dz-sub gc.summary_task)" "dz-sum" "[$sh] summary create: gc.summary_task is recorded on the subject"
 

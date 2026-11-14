@@ -4510,3 +4510,27 @@ func TestRecommendationRidesTheAcceptableRow(t *testing.T) {
 		t.Errorf("whitespace-only notes is null, not an empty recommendation: got %q", *got)
 	}
 }
+
+// TestThePendingRecordReadsAsAnOpenPullRequest: the values Gas Town's pending
+// record gives a bead that owns an open pull request read as one, as
+// pull_request does, and the value it records on a merge reads as merged.
+func TestThePendingRecordReadsAsAnOpenPullRequest(t *testing.T) {
+	for _, v := range []string{"pre_open_gate", "pull_request", "pull_request_pending", "pull_request_head_changed"} {
+		if !inReview(map[string]string{mdMergeResult: v}) {
+			t.Errorf("merge_result %s is a pull request the city is landing", v)
+		}
+	}
+	for _, v := range []string{"", "merged", "mr_merged", "pull_request_closed_unmerged", "abandoned"} {
+		if inReview(map[string]string{mdMergeResult: v}) {
+			t.Errorf("merge_result %q is no pull request the city is landing", v)
+		}
+	}
+	for v, want := range map[string]string{
+		"merged": PhaseMerged, "mr_merged": PhaseMerged,
+		"pull_request_closed_unmerged": PhaseClosed, "abandoned": PhaseClosed,
+	} {
+		if got := terminalPRPhase(Anchor{Metadata: map[string]string{mdMergeResult: v}}); got != want {
+			t.Errorf("a closed anchor at merge_result %s reads %q, want %q", v, got, want)
+		}
+	}
+}

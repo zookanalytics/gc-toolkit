@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 )
 
 // A bead's state is what its next move waits on, read off its graph and its
@@ -46,7 +48,8 @@ const (
 const mdDispatchWhenReady = "gc.dispatch_when_ready"
 
 // mergeResultPullRequest is the merge_result of an anchor whose pull request is
-// open.
+// open on the old record. On Gas Town's pending record an open pull request is
+// one of the values [pr.OnRecord] names.
 const mergeResultPullRequest = "pull_request"
 
 // beadState is one bead's state, with what a phrase needs to name it.
@@ -419,14 +422,15 @@ func (r rollup) subtreeState() string {
 }
 
 // inReview reports whether a bead carries a pull request the city is landing:
-// open, or at the pre-open gate before it opens. The other merge_result values
-// are a landed one, or a state a person resolves, which is routed to them.
+// open, on either record, or at the pre-open gate before it opens. The other
+// merge_result values are a landed one, or a state a person resolves, which is
+// routed to them.
 func inReview(md map[string]string) bool {
 	switch md[mdMergeResult] {
 	case mergeResultPreOpenGate, mergeResultPullRequest:
 		return true
 	}
-	return false
+	return pr.OnRecord(md[mdMergeResult])
 }
 
 // heldByPerson reports whether an open blocker is one a person releases: a gate

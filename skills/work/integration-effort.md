@@ -5,8 +5,8 @@ land on one integration branch, each with no PR of its own, and reach the
 default branch together through one PR the operator reviews. The landing bead
 records the branch, and the refinery opens that PR from it. A stage is a bead
 of the effort the operator asks to review on its own: slung `--merge mr`, its
-PR goes into the branch. The summary task writes the landing bead's
-`pr_summary` once the effort's beads have landed.
+PR goes into the branch. The summary task records the landing bead's PR
+summary once the effort's beads have landed.
 
 A converse sitting does not run the recipe: step 2 is a push from the rig's
 checkout, and a sitting pushes only the branch of a change the operator rules
@@ -69,7 +69,7 @@ WORK=$(gc bd --rig <rig> create "<task>" -t task -d "<what to build>" --parent <
 # the effort's epic, waiting on each bead of the effort, with the landing bead
 # waiting on it.
 SUMMARY=$(gc bd --rig <rig> create "summary: the PR for <what the effort delivers>" -t task \
-  -d "Write the pr_summary of $LANDING once every bead this task waits on has landed, by the polecat doctrine's paragraph on integration branches." \
+  -d "Write the PR summary of $LANDING once every bead this task waits on has landed, by the polecat doctrine's paragraph on integration branches." \
   --parent <epic> --deps "<each bead of the effort, comma-separated>,blocks:$LANDING" --json | jq -r '.id // empty')
 [ -n "$SUMMARY" ] || { echo "no summary task filed; stopping" >&2; exit 1; }
 
@@ -92,7 +92,7 @@ gc sling <rig>/<binding>.polecat "$WORK"
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 "$GCTK" bead arm "$SUMMARY" --target <rig>/<binding>.polecat --on mol-polecat-report \
-  --reason "writes the pr_summary of $LANDING once the effort's beads land"
+  --reason "writes the PR summary of $LANDING once the effort's beads land"
 ```
 
 ## Add a bead to an existing effort

@@ -1,0 +1,12 @@
+## Summary
+
+Adds the widget.
+
+It replaces the gadget, so the board reads one source.
+
+## Refinery handoff
+
+- Issue: `tk-a1`
+- Source branch: `polecat/tk-a1`
+- Target: `main`
+- Head `abcdef12`; gates `correctness,triage`; see the PR checks for current status.

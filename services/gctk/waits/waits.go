@@ -26,6 +26,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
 // Status is what holds a bead, in one word.
@@ -271,7 +272,10 @@ func rowFlight(r *ledger.Record) (string, error) {
 	if st := r.Status(); st == "in_progress" || st == "hooked" {
 		return "status " + st, nil
 	}
-	for _, k := range []ledger.Key[string]{branchKey, mergeResultKey, rejectionReasonKey} {
+	for _, k := range []interface {
+		Get(*ledger.Record) (string, bool, error)
+		Name() string
+	}{branchKey, prrecord.Result, prrecord.Rejection} {
 		v, _, err := k.Get(r)
 		if err != nil {
 			return "", err

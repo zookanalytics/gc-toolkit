@@ -24,7 +24,7 @@
 #   changed  the diff adds or edits it.
 #   named    a line the diff adds names it, as a path from the repository root
 #            or from that file's own directory, or the anchor bead's title,
-#            description, design, notes or pr_summary names it from the root.
+#            description, design, notes or PR summary names it from the root.
 #   near     its directory is at most two steps from a changed file's. The same
 #            directory is zero steps, the parent or a child is one, and a
 #            sibling, the grandparent or a grandchild is two. Nearest first,
@@ -63,6 +63,10 @@ VISUAL_EXTS="png jpg jpeg gif svg mp4 mov webm"
 NEAR_CAP=20
 TAB=$(printf '\t')
 DELIVER="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/demo-deliver.sh"
+# The anchor's PR summary is read through gctk's pr domain, which owns it.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 usage() { sed -n '/^# Usage:/,/^# Exit:/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 usage_err() { echo "$PROG: $1" >&2; usage >&2; exit 2; }
@@ -229,10 +233,12 @@ cmd_candidates() {
     if ! command -v gc >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
       echo "$PROG: gc or jq not found, so the text of anchor $anchor was not searched" >&2
     elif ! gc bd show "$anchor" --json 2>/dev/null | scrub \
-        | jq -r '.[0] | [.title, .description, .design, .notes, .metadata.pr_summary] | .[] | select(type == "string")' \
+        | jq -r '.[0] | [.title, .description, .design, .notes] | .[] | select(type == "string")' \
         >"$TMPD/anchor" 2>/dev/null; then
       echo "$PROG: could not read anchor $anchor, so its text was not searched" >&2
       : >"$TMPD/anchor"
+    elif ! "$GCTK" pr summary "$anchor" >>"$TMPD/anchor" 2>/dev/null </dev/null; then
+      echo "$PROG: could not read the PR summary of anchor $anchor, so the rest of its text was searched without it" >&2
     fi
   fi
 

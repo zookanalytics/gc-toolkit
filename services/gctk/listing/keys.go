@@ -2,10 +2,11 @@ package listing
 
 import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 
-// The keys a listing decodes onto a Bead. No domain owns any of them: shell
-// and the runtime write them, so each is declared read-only here and its
-// definition stays in lifecycle/lifecycle.toml. The change that moves a
-// writer into a domain takes its key's declaration over.
+// The keys a listing decodes onto a Bead that no domain owns: shell and the
+// runtime write them, so each is declared read-only here and its definition
+// stays in lifecycle/lifecycle.toml. The change that moves a writer into a
+// domain takes its key's declaration over. merge_result, pr_number and pr_url
+// are the pr domain's record's, read through its reading faces.
 var (
 	anchorKey = ledger.ReadOnly("anchor_bead", ledger.String,
 		"The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, "+
@@ -16,14 +17,6 @@ var (
 	workOutcomeKey = ledger.ReadOnly("gc.work_outcome", ledger.String,
 		"A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's "+
 			"(lifecycle/lifecycle.toml, [metadata.runtime_owned]).", ledger.Alias("work_outcome"))
-	mergeResultKey = ledger.ReadOnly("merge_result", ledger.String,
-		"A listing names it on each bead, so a reader tells an anchor whose pull request is open.")
-	prNumberKey = ledger.ReadOnly("pr_number", ledger.String,
-		"The number of the anchor's open pull request, which pr-open.sh writes when it opens and pr-facts.sh "+
-			"copies onto rework children (lifecycle/lifecycle.toml, [metadata.merge_identity]).")
-	prURLKey = ledger.ReadOnly("pr_url", ledger.String,
-		"The URL of the anchor's open pull request, written with pr_number "+
-			"(lifecycle/lifecycle.toml, [metadata.merge_identity]).")
 )
 
 // An epic's contract and its latest ruling (lifecycle/lifecycle.toml,

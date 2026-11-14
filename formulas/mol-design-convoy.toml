@@ -393,8 +393,8 @@ needs = ["file-implementation"]
 description = """
 File the summary task beside the subject: an ordinary task in the rig's store,
 under the subject's epic when it has one, so the epic ranks and parks it as it
-does the effort's beads (docs/steering.md). It writes the subject's
-`pr_summary`, the `## Summary` of the effort's PR, from the finished branch. Its
+does the effort's beads (docs/steering.md). It records the subject's PR
+summary, the `## Summary` of the effort's PR, from the finished branch. Its
 method is the polecat doctrine's paragraph on integration branches, and its
 description names the subject it writes for. It lands nothing, so it carries no
 `target`.
@@ -428,7 +428,7 @@ type-guarded as in file-design:
 if [ -z "$SUMMARY_TASK" ]; then
   EPIC=$(printf '%s' "$SUBJECT_JSON" | jq -r '[.[0].dependencies[]? | select(.dependency_type == "parent-child" and .issue_type == "epic") | .id] | .[0] // empty' 2>/dev/null)
   SUMMARY_ARGS=(--title "summary: the PR for $INITIATIVE" -t task -d "## Goal
-Write the pr_summary of $SUBJECT, the landing bead that carries $BRANCH to the
+Write the PR summary of $SUBJECT, the landing bead that carries $BRANCH to the
 default branch through the effort's one PR, once every bead this task waits on
 has landed.
 
@@ -564,7 +564,7 @@ if [ -z "$SUMMARY_ARMED" ]; then
     fi
     gc bd update "$SUBJECT" --set-metadata "gc.impl_armed=1" || { echo "implementation child $IMPL_CHILD is dispatched but gc.impl_armed did not record on $SUBJECT; record it by hand before a re-run, or the re-run dispatches it again" >&2; exit 1; }
   fi
-  "$GCTK" bead arm "$SUMMARY_TASK" --target "$POOL" --on mol-polecat-report --reason "design-convoy: writes the pr_summary of $SUBJECT once the effort's beads have landed" || { echo "gctk bead arm of summary task $SUMMARY_TASK failed" >&2; exit 1; }
+  "$GCTK" bead arm "$SUMMARY_TASK" --target "$POOL" --on mol-polecat-report --reason "design-convoy: writes the PR summary of $SUBJECT once the effort's beads have landed" || { echo "gctk bead arm of summary task $SUMMARY_TASK failed" >&2; exit 1; }
   gc bd update "$SUBJECT" --set-metadata "gc.summary_armed=1" || { echo "summary task $SUMMARY_TASK is armed but gc.summary_armed did not record on $SUBJECT; record it by hand before a re-run" >&2; exit 1; }
 fi
 # <<< setup-dispatch

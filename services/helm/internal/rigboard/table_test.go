@@ -133,6 +133,15 @@ func TestTableRows(t *testing.T) {
 		{name: "a walk past its bound leaves the bead unread",
 			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait), unwalked: true},
 			out: outUnread, signal: "unread"},
+		{name: "a conversation its sitting stays in waits on that work, queued",
+			in:  tableInput{b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation, holds: blockedOn(workWait)},
+			out: outNone, group: GroupQueued, signal: "Waits on tk-other"},
+		{name: "a conversation its sitting holds over an earlier stay's open work reads who holds it",
+			in:  tableInput{b: bead{ID: "tk-c", Status: "in_progress", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation, holds: blockedOn(workWait)},
+			out: outNone, signal: "In conversation"},
+		{name: "a conversation nothing holds reads who holds it",
+			in:  tableInput{b: bead{ID: "tk-c", Status: "in_progress", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation, holds: clear},
+			out: outNone, signal: "In conversation"},
 		{name: "a pull request prstatus could not answer is unread before any ask",
 			in:  tableInput{b: work, kind: KindWork, ask: &askAnswer{kind: AskRoutedToYou, words: "Routed to you"}, prUnread: true},
 			out: outUnread, signal: "unread"},
@@ -166,6 +175,7 @@ func TestAsks(t *testing.T) {
 		gateOpen    func(string) bool
 		facts       *prstatus.Facts
 		open, all   int
+		stay        bool
 		want        *askAnswer
 	}{
 		{name: "a human gate is a question", b: bead{ID: "tk-g", Status: "open", IssueType: "gate", AwaitType: "human"}, kind: KindGate,
@@ -180,6 +190,12 @@ func TestAsks(t *testing.T) {
 		{name: "a conversation is its own ask", b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}, kind: KindConversation,
 			gateOpen: noGate, want: &askAnswer{kind: AskConversation, words: "Conversation waits for you", need: NeedKindWaitsForYou}},
 		{name: "a conversation a sitting holds is in conversation", b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation,
+			gateOpen: noGate, want: &askAnswer{kind: AskConversation, words: "In conversation", need: NeedKindInConversation}},
+		{name: "a conversation its sitting stays in waits for its work and is no ask",
+			b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation,
+			gateOpen: noGate, stay: true},
+		{name: "a conversation its sitting holds, over an earlier stay's work, is its ask",
+			b: bead{ID: "tk-c", Status: "in_progress", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation,
 			gateOpen: noGate, want: &askAnswer{kind: AskConversation, words: "In conversation", need: NeedKindInConversation}},
 		{name: "a conversation that replies to an open human gate belongs to its ask",
 			b:    bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human", Edges: []listing.Edge{{ID: "tk-g", Type: "replies-to"}}},
@@ -203,9 +219,40 @@ func TestAsks(t *testing.T) {
 			if gateOpen == nil {
 				gateOpen = noGate
 			}
-			got := askOf(c.b, c.kind, c.conv, c.convA, gateOpen, c.facts, c.open, c.all)
+			got := askOf(c.b, c.kind, c.conv, c.convA, gateOpen, c.facts, c.open, c.all, c.stay)
 			if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
 				t.Errorf("askOf = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestStaying holds a stay to the state the stay's last write leaves: open
+// under its sitting, held by a wait of its own. A claim, the operator's queue
+// or no wait each make it something the operator owes a move.
+func TestStaying(t *testing.T) {
+	work := waits.Wait{ID: "tk-w", Type: "blocks", Status: "open", IssueType: "task"}
+	blocked := waits.Holds{ID: "tk-c", Status: waits.Blocked, Waits: []waits.Wait{work}}
+	sitting := "gc-toolkit/gc-toolkit.tk-c"
+	cases := []struct {
+		name string
+		b    bead
+		h    waits.Holds
+		want bool
+	}{
+		{name: "open under its sitting and held by its work is a stay",
+			b: bead{ID: "tk-c", Status: "open", Assignee: sitting}, h: blocked, want: true},
+		{name: "claimed by its sitting over an earlier stay's work is a hold",
+			b: bead{ID: "tk-c", Status: "in_progress", Assignee: sitting}, h: blocked},
+		{name: "in the operator's queue over work still out is theirs to move",
+			b: bead{ID: "tk-c", Status: "open", Assignee: "human"}, h: blocked},
+		{name: "open under its sitting with nothing holding it is back",
+			b: bead{ID: "tk-c", Status: "open", Assignee: sitting}, h: waits.Holds{ID: "tk-c", Status: waits.Clear}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := staying(c.b, c.h); got != c.want {
+				t.Errorf("staying = %v, want %v", got, c.want)
 			}
 		})
 	}

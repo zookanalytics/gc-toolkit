@@ -2,6 +2,7 @@ package gcbd
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -330,5 +331,25 @@ func TestStatusLowerOrSubstitutesOnlyForNullOrAbsent(t *testing.T) {
 	}
 	if got := decode(t, `[{"id":"b","status":null}]`).StatusLower(); got != "" {
 		t.Errorf("StatusLower on a null status = %q, want empty", got)
+	}
+}
+
+// bd update exits 13 when every failure is a stale --if-status or --if-assignee
+// guard, and nothing was written. Update reads that exit as ErrGuard and keeps
+// the exit itself, and any other failure is not ErrGuard.
+func TestAnUpdateAGuardRefusedIsErrGuard(t *testing.T) {
+	bin := t.TempDir()
+	stub := "#!/bin/sh\necho \"Error: precondition failed\" >&2\nexit \"${STUB_EXIT:-13}\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	_, err := New().Update("b-1", "--if-status=open", "--status=closed")
+	if !errors.Is(err, ErrGuard) || ExitCode(err) != 13 {
+		t.Fatalf("a guard's refusal read as %v (exit %d)", err, ExitCode(err))
+	}
+	t.Setenv("STUB_EXIT", "1")
+	if _, err := New().Update("b-1", "--status=closed"); err == nil || errors.Is(err, ErrGuard) {
+		t.Fatalf("another failure read as %v", err)
 	}
 }
