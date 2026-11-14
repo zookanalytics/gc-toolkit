@@ -106,7 +106,9 @@ case "${1:-}" in
     # Each flag becomes one operation, in the order given, and one jq pass
     # lands them all: --set-metadata k=v split at its first =, --unset-metadata,
     # --append-notes, --status=<s>, and --priority, which a value that is not a
-    # number leaves as it was. The knobs above drop an operation here.
+    # number leaves as it was. The knobs above drop an operation here. The --
+    # after --args keeps a value that begins with a dash, such as -s or a note
+    # that opens with ---, from reading as one of jq's options.
     ops=()
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -147,7 +149,7 @@ case "${1:-}" in
             elif $op == "status" then .status = $a
             elif $op == "priority" then .priority = (($a | tonumber?) // .priority)
             else . end)
-        else . end)' "$STORE" --args ${ops[@]+"${ops[@]}"} > "$STORE.$$" && mv "$STORE.$$" "$STORE"
+        else . end)' "$STORE" --args -- ${ops[@]+"${ops[@]}"} > "$STORE.$$" && mv "$STORE.$$" "$STORE"
     echo "updated $id" ;;
   create)
     shift; title="$1"; shift

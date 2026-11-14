@@ -246,7 +246,9 @@ case "$1 ${2:-}" in
       { [ "$_ifs_set" = 1 ] && [ -n "$_ifs" ]; } && exit 13
     fi
     # Each flag becomes one operation, in the order given, and one jq checks
-    # the guards and lands them all.
+    # the guards and lands them all. The -- after --args keeps a value that
+    # begins with a dash, such as -s or a note that opens with ---, from
+    # reading as one of jq's options.
     _ops=()
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -270,7 +272,7 @@ case "$1 ${2:-}" in
             elif $op == "note" then .notes = (if (.notes // "") == "" then $a else .notes + "\n" + $a end)
             elif $op == "unset" then del(.metadata[$a])
             elif $op == "unlabel" then .labels = ((.labels // []) - [$a])
-            else . end)' --args ${_ops[@]+"${_ops[@]}"} 2>/dev/null)
+            else . end)' --args -- ${_ops[@]+"${_ops[@]}"} 2>/dev/null)
       [ "$?" = 13 ] && exit 13
     fi
     printf '%s' "$_r" | put "$_id" ;;
