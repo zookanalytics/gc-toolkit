@@ -28,18 +28,22 @@ prompt's "Reads". An epic's frontier names the park that holds it, when one
 does. Its horizon counts the work directly under it, open, closed, advancing
 and stuck, and counts an open Delivery as stuck, because no pool takes an epic.
 
-## 2. Weigh each epic closed or shifted since the last sync
+## 2. Weigh each epic closed or shifted since a sync last noted it
 
 A review of an epic rules continue, shift or close on the epic's own evidence.
 That ruling is the operator's, made in the review and never in this sitting,
 but a close or a shift can change what the rig works on and in what order, so
-weigh each one. Every note a sync writes carries its date (section 4), so the
-newest such date is the last sync's. This prints that date, then each epic
-closed or shifted since, oldest first. It leaves out Deliveries, the epics under
+weigh each one. A sync notes each epic it weighs, under the sync's date
+(section 4), so an epic's newest such note dates the last sync that weighed it.
+This lists, oldest first, each epic that closed or shifted on or after that
+date, and each one that closed or shifted with no such note, so a rig's first
+sync lists every one. A sitting that ends before it notes every epic it listed
+leaves the rest on the next sync's list. A note carries its day only, so a
+change made on the day its epic was last noted lists again: read that note for
+what the sync made of it. The list leaves out Deliveries, the epics under
 another of the rig's epics with no hypothesis of their own, whose close is one
-of the writes of their epic's ruling. A rig with no sync yet lists every one.
-When the store does not answer, it lists nothing and says so, since a list it
-could not read is not an empty one:
+of the writes of their epic's ruling. When the store does not answer, it lists
+nothing and says so, since a list it could not read is not an empty one:
 
 ```bash
 # >>> control-char-scrub
@@ -55,14 +59,14 @@ EPICS=$(gc bd --rig <rig> list --type epic --all --limit 0 --json) \
   || { echo "The rig's epics did not read, so what closed or shifted is unknown. Run this again before you weigh any change." >&2; exit 1; }
 printf '%s' "$EPICS" | jq -r '
   (reduce .[] as $e ({}; .[$e.id] = true)) as $epic
-  | ([.[] | (.notes // "") | scan("Portfolio sync, po sitting ([0-9]{4}-[0-9]{2}-[0-9]{2})") | .[0]] | max // "") as $since
-  | "last sync: \(if $since == "" then "none" else $since end)",
-    ([.[] | select(($epic[.parent // ""] | not) or (.metadata.epic_hypothesis // "") != "")
-      | select((.status == "closed" and (.closed_at // "") >= $since)
-        or (.status != "closed" and .metadata.epic_ruling == "shift" and (.metadata.epic_ruling_at // "") >= $since))]
-    | sort_by(.closed_at // .metadata.epic_ruling_at)[]
-    | if .status == "closed" then "\(.closed_at) \(.id) closed: \(.close_reason // "")"
-      else "\(.metadata.epic_ruling_at) \(.id) shifted: \(.metadata.epic_ruling_reason // "")" end)'
+  | [.[] | select(($epic[.parent // ""] | not) or (.metadata.epic_hypothesis // "") != "")
+    | ([(.notes // "") | scan("Portfolio sync, po sitting ([0-9]{4}-[0-9]{2}-[0-9]{2})") | .[0]] | max // "") as $noted
+    | select((.status == "closed" and (.closed_at // "") >= $noted)
+      or (.status != "closed" and .metadata.epic_ruling == "shift" and (.metadata.epic_ruling_at // "") >= $noted))]
+  | sort_by(.closed_at // .metadata.epic_ruling_at)
+  | if length == 0 then "No epic has closed or shifted since a sync last noted it."
+    else .[] | if .status == "closed" then "\(.closed_at) \(.id) closed: \(.close_reason // "")"
+      else "\(.metadata.epic_ruling_at) \(.id) shifted: \(.metadata.epic_ruling_reason // "")" end end'
 ```
 
 For each, read the newest `## Epic review` block in its notes, when it has one,
@@ -96,8 +100,8 @@ piece fits one screen and carries a recommendation for each epic.
 
 Note each ruling on its bead under the sync's date, with the operator's reason
 in their words. On each epic that section 2 listed, note too what the sync made
-of its close or shift, even when nothing moved, so the next sync's list starts
-after this one:
+of its close or shift, even when nothing moved, because the next sync's read
+looks for that note on the epic itself:
 
 ```bash
 gc bd --rig <rig> update <bead> --append-notes "Portfolio sync, po sitting $(date -u +%Y-%m-%d): <ruling: reason>"
