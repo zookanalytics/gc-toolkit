@@ -12,7 +12,9 @@
 #     preexisting-failure.sh, rig-check-pre-existing.sh, stand-down.sh), each
 #     logging its argv;
 #   - fake gc, gh and gctk on PATH, over a JSON bead store ($STORE). The fake
-#     `gctk bead arm` writes nothing and exits $STUB_ARM_RC. The fake
+#     `gctk bead arm` records the arm's target on the bead as
+#     gc.dispatch_when_ready, or writes nothing when $STUB_ARM_RC is set to a
+#     non-zero exit, which it exits. The fake
 #     `gctk pr record` keeps the real one's guard: it writes nothing on a bead
 #     that is closed or assigned to anyone but the refinery, and exits 3. The
 #     fake `gctk pr compose` names, as riding the owner's PR, each bead whose
@@ -338,7 +340,14 @@ cat > "$BIN/gctk" <<'GCTK'
 echo "$*" >> "$LOGS/gctk.log"
 case "$1 $2" in
   "bead arm")
-    exit "${STUB_ARM_RC:-0}" ;;
+    [ "${STUB_ARM_RC:-0}" = 0 ] || exit "$STUB_ARM_RC"
+    id="$3"; target=""; shift 3
+    while [ $# -gt 0 ]; do
+      case "$1" in --target) target="$2"; shift ;; esac
+      shift
+    done
+    jq --arg id "$id" --arg t "$target" 'map(if .id == $id then .metadata["gc.dispatch_when_ready"] = $t else . end)' \
+      "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE" ;;
   "bead holds")
     shift 2
     for id in "$@"; do

@@ -544,6 +544,8 @@ are the scripts that make it claimable:
 - `pre-open-rebase.sh` routes the merge-in before a PR exists.
 - `rework-child.sh` slings the rework that a review verdict or an operator
   ruling asks for.
+- `refinery-requeue.sh` slings the rework the refinery sends back on the branch
+  of a bead that keeps its open PR, or of a convoy.
 
 Each child carries `anchor_bead` and follows its anchor.
 
@@ -587,11 +589,17 @@ decision, so either ranks as not approved.
 
 **Where it is written.** Each creator runs `queue-priority.sh settle` on a child
 before it makes the child claimable, in the order [Settle](#settle) gives.
-`rework-child.sh` and `gate-ensure.sh` then sling the child, and the pour copies
-its priority. `pr-facts.sh` and `pre-open-rebase.sh` then route it, in a write
-that carries no priority. A child whose priority does not settle is neither
-slung nor routed, and the creator's retry settles it: the next pass of the
-cadence arm, or the caller of `rework-child.sh` running it again.
+`rework-child.sh`, `gate-ensure.sh` and `refinery-requeue.sh` then sling the
+child, and the pour copies its priority. `pr-facts.sh` and `pre-open-rebase.sh`
+then route it, in a write that carries no priority. A child whose priority does
+not settle is neither slung nor routed, and the creator's retry settles it: the
+next pass of the cadence arm, or the caller of `rework-child.sh` running it
+again. `refinery-requeue.sh` has no retry that runs on its own. Its retry would
+be the refinery's next patrol, but the child holds the bead that patrol takes,
+and Gas City counts open work assigned to the refinery as demand that wakes it
+only once the work is ready. So it arms the child instead (`gctk bead arm`):
+the deferred-dispatch order pours the child with no settle, and
+[the pass](#the-pass) settles it with its workflow once that is queued.
 
 **Re-ranked when its rank moves.** The rank moves when the posture or the PR
 head `pr-facts.sh` records moves the anchor into or out of an approval at that
