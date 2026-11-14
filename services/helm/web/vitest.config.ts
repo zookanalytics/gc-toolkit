@@ -12,11 +12,10 @@ export default defineConfig({
   },
   // Vitest loads each test file through Vite's transform, which enforces
   // server.fs.deny. Vite's default deny list includes '**/.git/**', so a
-  // worktree whose path contains a .git segment — the refinery stages its
-  // merge-prep tree at <git-common-dir>/gc-refinery-prep, inside .git — makes
-  // every source file match the deny glob and fail to load. fs.strict guards a
-  // served dev server; vitest serves nothing, so disabling it lets the suite
-  // run from any path.
+  // worktree whose path contains a .git segment, such as one staged inside a
+  // repository's git directory, makes every source file match the deny glob
+  // and fail to load. fs.strict guards a served dev server; vitest serves
+  // nothing, so disabling it lets the suite run from any path.
   server: { fs: { strict: false } },
   define: {
     // vite.config.ts injects this from HELM_DEV_MOUNT. Under vitest the page

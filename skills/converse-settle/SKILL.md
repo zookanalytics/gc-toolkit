@@ -211,8 +211,9 @@ Then take the case that fits. The cases:
   no `--close-brief`, because its members carry it, and the sign-off arms no
   closer for it.
 
-**On a `--ruled yes` sign-off that reaches an open PR
-(`merge_result=pull_request`), answer what the ruling does to the PR.** The
+**On a `--ruled yes` sign-off that reaches an open PR (`merge_result`
+`pull_request`, `pull_request_pending` or `pull_request_head_changed`), answer
+what the ruling does to the PR.** The
 ruling reaches the subject when it is an open PR, the PR whose merge this
 conversation holds, which a conversation on the PR's review or rework reaches
 through nothing else, and each open PR that a gate it answers releases, such

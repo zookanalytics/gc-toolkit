@@ -121,11 +121,13 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Verified.** 2026-11-13, at `gastownhall/gascity` main dba20336e and
   `gastownhall/gascity-packs` main 1f6d8e41c.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
-  parked and held work and ends a run by cancelling it. `workspace-setup`: the
-  refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.
+  parked and held work and ends a run by cancelling it. `workspace-setup`: no end
+  is planned for the merge resume, since the refinery brings every branch current
+  by merge and never rebases one
+  ([built-once-target.md](built-once-target.md#merge)).
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
-  commit. `submit-and-exit`: `tk-1tfzr71.20` moves the merge onto GitHub's branch
-  rules.
+  commit. `submit-and-exit`: the merge and review nouns it holds retire, the
+  bring-current guard among them with the review loop (`tk-1tfzr71.22`).
 
 ## Dolt reclaim
 
@@ -299,59 +301,11 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
-## Prep worktree staging record
-
-- **Covers.** The record that `stage --work` writes and `held` and `verify`
-  read in `assets/scripts/refinery-workspace.sh`, a `gc-refinery-staged` file
-  in the prep worktree's private git dir, and its readers: the
-  `prep-staged-work` block of `formulas/mol-refinery-patrol.toml`, which takes
-  the bead and branch the merge-push step acts for from it, and the prep
-  worktree check in `assets/scripts/direct-merge-push.sh`.
-- **Stands in for.** A worktree's ownership record, naming the bead and the
-  branch that the refinery's detached prep worktree was staged for.
-- **Evidence.**
-  - In `gastownhall/gascity`, `gc worktree` records a worktree's bead and branch
-    in its private git dir, and `gc worktree verify` checks them, only for a
-    worktree with the bead's branch checked out on an attached HEAD, never
-    detached, at a direct child of a per-rig root (`gc worktree` in
-    `docs/reference/cli.md`). `Spec.validate` in `internal/worktree/worktree.go`
-    also refuses a path inside a registered worktree, and the prep worktree
-    lives in the rig checkout's git dir.
-  - `gc worktree cleanup` refuses a dirty worktree and a HEAD not merged into
-    its base, removes only the attempt whose id it is given, and has no force
-    mode (`gc worktree cleanup` in `docs/reference/cli.md`). The refinery
-    removes its prep worktree after a gate that can leave files in it and after
-    a landing on the target, and it clears a leftover of an interrupted
-    iteration without knowing which bead staged it.
-  - With `auto_reap_closed_bead_worktrees`, the reconciler removes a per-bead
-    worktree once its work bead is closed. With `auto_prune_worker_dir`, it
-    removes a pool session's `worker_dir` once the session bead is closed
-    (`DaemonConfig` in `docs/reference/config.md`). Each removal refuses a
-    worktree with uncommitted changes or a stash, and each acts only under the
-    city's `.gc/worktrees/` tree, where the reaper takes a worktree's bead from
-    its directory name (`reapClosedBeadWorktrees` in
-    `cmd/gc/bead_worktree_reaper.go`). Neither reaches the prep worktree.
-  - No formula or order in Gas City's bundled `core` pack calls `gc worktree`.
-    No pack in `gastownhall/gascity-packs` calls it either, and the gastown
-    pack's `mol-refinery-patrol` stages every bead on one local `temp` branch
-    and records nothing about which bead that branch holds.
-  - In `gastownhall/beads`, `bd worktree create` checks out a branch in the
-    worktree it adds and records no bead.
-- **Verified.** 2026-10-27, at `gastownhall/gascity` main f11f48825520,
-  `gastownhall/gascity-packs` main dac12a4a802c and `gastownhall/beads` main
-  5011528b3ad5. The gastown pack was also read at 66c672b5ed00, the release
-  Gas City pins (`PublicGastownPackVersion` in
-  `internal/config/public_packs.go`).
-- **Retires when.** Gas City can bind a detached worktree to a bead and remove
-  the attempt that created it whatever state it is in, for example through
-  `gc worktree`. The record's readers then move onto that primitive, and the
-  record goes.
-
 ## Main lands only through a PR
 
-- **Covers.** The rule in the `merge-strategy-resolve` block of
-  `formulas/mol-refinery-patrol.toml` that resolves a bead which would land
-  `direct` on the default branch to `mr`.
+- **Covers.** The rule in `assets/scripts/refinery-land.sh`, the refinery's
+  merge-push step, that resolves a bead which would land `direct` on the
+  default branch to `mr`.
 - **Stands in for.** A merge strategy set per target branch. With one, the
   default branch would take work only through a PR, whether or not its GitHub
   ruleset is on, while an integration branch takes its work `direct`.
@@ -360,11 +314,49 @@ shares only the word ([authority-map.md](authority-map.md)).
   rig when the caller passes no `--merge` (the `Rig` section of
   `docs/reference/config.md`). Sling takes the explicit `--merge`, then the
   bead's rig's default, then the agent's rig's, and reads no target branch
-  (`SlingMergeStrategy` in `internal/sling/sling.go`). Neither the reference
-  nor the code chooses a strategy by the branch a bead lands on.
-- **Verified.** 2026-10-24, at `gastownhall/gascity` main 7cff3a265.
+  (`SlingMergeStrategy` in `internal/sling/sling.go` 1156-1171). Neither the
+  reference nor the code chooses a strategy by the branch a bead lands on. In
+  `gastownhall/gascity-packs`, the gastown refinery's merge-push step takes the
+  bead's `merge_strategy`, `direct` when it has none, and moves a `direct` bead
+  to `mr` only when it names an `existing_pr`, whatever its target
+  (`gastown/formulas/mol-refinery-patrol.toml` 674-704).
+- **Verified.** 2026-11-12, at `gastownhall/gascity` main 603e7eeec and
+  `gastownhall/gascity-packs` main 1f6d8e41c.
 - **Retires when.** Gas City can set a merge strategy for a target branch, so the
   rule becomes a line of the rig's config.
+
+## A merged PR's refused close
+
+- **Covers.** The `pull_request_merged_close_refused` name, the exception the
+  landing order records when bd refuses to close a bead whose merge it
+  verified. Its writers: `Refuse` in `services/gctk/pr/record/record.go`, and
+  `refused`, `refusedMessage` and `closeRefused` in
+  `services/gctk/pr/landing.go`.
+- **Stands in for.** An escalation, on the bead's own pending record, of a
+  merge the reconcile verified but whose close the store refuses.
+- **Evidence.**
+  - In `gastownhall/gascity-packs`, Gas Town's reconcile writes `mr_merged` on
+    the still-blocked bead, and when `bd_close` fails it prints "merge verified
+    but bead close failed; pending marker retained for retry" and returns, so
+    its next run tries the close again. Its record has no value for the case,
+    and it escalates nothing (`gastown/commands/pr-merge-reconcile/run.sh`
+    709-723). Its escalations elsewhere in that file are mail to the mayor
+    (`mail_mayor` at 40, called at 302, 404, 423 and 699).
+  - In `gastownhall/beads`, an update that would close a bead with an open
+    child or a live direct blocker returns `CloseOpenChildrenError` or
+    `ErrCloseBlocked` to its caller unless it forces the close policy
+    (`issueops/issueops.go` 561-566). bd's human gate
+    (`bd gate create --type human`, `cmd/bd/gate.go` 1952) is the primitive the
+    exception's gate composes.
+  - A search of `gastownhall/gascity` and `gastownhall/beads` for a refused
+    close finds no record of one kept on the bead for a person. What it finds
+    in Gas City handles a refusal inside the closes Gas City makes itself, such
+    as the autoclose sweep's retry of a convoy, wisp or molecule autoclose
+    (`cmd/gc/autoclose_sweep.go` 21-22).
+- **Verified.** 2026-11-13, at `gastownhall/gascity-packs` main 1f6d8e41c,
+  `gastownhall/beads` main 526c1c877 and `gastownhall/gascity` main cb9105579.
+- **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
+  make. The exception then moves onto what Gas Town records.
 
 ## Machine axis
 
@@ -411,9 +403,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-08, at `gastownhall/gascity` main fdfec4c19dc4,
-  `gastownhall/gascity-packs` main 2a3b142e3fbd, and `gastownhall/beads` main
-  2edea9ced8c6.
+- **Verified.** 2026-11-13, at `gastownhall/gascity` main cb9105579667,
+  `gastownhall/gascity-packs` main 1f6d8e41c5b0, and `gastownhall/beads` main
+  526c1c877e26.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -492,9 +484,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
     or answer. Neither keeps a record of the thread.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-08, at `gastownhall/gascity` main 9f1abb50188b with
+- **Verified.** 2026-11-13, at `gastownhall/gascity` main cb9105579667 with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
-  main 2a3b142e3fbd, and `gastownhall/beads` main 2edea9ced8c6.
+  main 1f6d8e41c5b0, and `gastownhall/beads` main 526c1c877e26.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from

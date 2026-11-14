@@ -129,7 +129,7 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 
 // RowFacts are the facts a bead's own row records, read off its metadata: its
 // holds, the posture, the machine verdict with its cause and sentence, the
-// thread count and the draft-stage markers. [Read] adds what it gathers beside
+// thread count, the draft-stage markers and its landing state. [Read] adds what it gathers beside
 // the row to them: the gates, the beads a person owes and the in-flight count.
 // [Holding] weighs a merge anchor it reaches by its row's facts, and the helm
 // board reads a row that is no PR, or whose PR has no answer, by them alone.
@@ -144,5 +144,6 @@ func RowFacts(md map[string]string) Facts {
 		PRUnansweredThreads: md["pr.unanswered_threads"],
 		OpenedAsDraft:       md["opened_as_draft"],
 		DraftReadied:        md["draft_readied"],
+		MergeResult:         md["merge_result"],
 	}
 }

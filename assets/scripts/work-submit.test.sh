@@ -4,10 +4,11 @@
 #
 # It runs against a real git repository with a real bare origin, a gc stub over a
 # JSON store that its reads serve and its writes change, and the real work-lib.sh,
-# run-lib.sh, decline.sh, claim-close.sh, hand-back.sh and store-only-exit.sh. The
-# guard, the gate, the wait and the cancel are stubs that record their calls,
-# except in the cases that run the real bring-current guard over a reviewed anchor,
-# and run-lib.stub.sh answers which runs work a bead in the cases that need a run.
+# run-lib.sh, decline.sh, claim-close.sh, hand-back.sh and store-only-exit.sh, with
+# gctk built from this checkout for the summary and a retitle. The guard, the gate,
+# the wait and the cancel are stubs that record their calls, except in the cases
+# that run the real bring-current guard over a reviewed anchor, and
+# run-lib.stub.sh answers which runs work a bead in the cases that need a run.
 # Everything goes into one log, in order, so a case can read what landed before
 # what. No live city, Dolt, network, or PRs.
 set -uo pipefail
@@ -38,11 +39,13 @@ git config --file "$GIT_CONFIG_GLOBAL" advice.detachedHead false
 
 PACK="$TMP/pack"; BIN="$TMP/bin"; mkdir -p "$PACK" "$BIN"
 cp "$HERE/work-submit.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/claim-close.sh" "$HERE/bd-lib.sh" \
-   "$HERE/hand-back.sh" "$HERE/store-only-exit.sh" "$HERE/run-lib.sh" "$PACK/" 2>/dev/null
+   "$HERE/hand-back.sh" "$HERE/store-only-exit.sh" "$HERE/run-lib.sh" "$HERE/branch-push.sh" "$PACK/" 2>/dev/null
 export REAL_GIT REAL_FIND LOG="$TMP/log" STORE="$TMP/store.json"
 
 # git: push and ls-remote can be made to fail, and a push, a worktree's removal
-# and a branch's delete are logged, whatever directory -C names.
+# and a branch's delete are logged, whatever directory -C names. LS_REMOTE_DOWN
+# fails the first read of origin, as an unreachable remote does: git prints why
+# and exits 128.
 cat > "$BIN/git" <<'SH'
 #!/usr/bin/env bash
 dir=()
@@ -52,6 +55,7 @@ case "${1:-}" in
     printf 'push %s\n' "$*" >> "$LOG"
     [ -z "${PUSH_FAIL:-}" ] || { echo "remote: refused (stub)" >&2; exit 1; } ;;
   ls-remote)
+    [ -z "${LS_REMOTE_DOWN:-}" ] || { echo "fatal: unable to access origin (stub)" >&2; exit 128; }
     [ -z "${LS_REMOTE_WRONG:-}" ] || { [ ! -e "$LS_REMOTE_WRONG" ] || { printf 'deadbeef\trefs/heads/x\n'; exit 0; }; : > "$LS_REMOTE_WRONG"; } ;;
   branch)
     case "${2:-}" in -D) printf 'release %s\n' "${3:-}" >> "$LOG" ;; esac ;;
@@ -138,6 +142,12 @@ esac
 exit 0
 SH
 chmod +x "$BIN/git" "$BIN/find" "$BIN/gc"
+# The summary and a retitle go through `gctk pr summary`, built from this checkout.
+# gctk runs the `gc` on PATH, so its write lands in the stub store and its log.
+command -v go >/dev/null 2>&1 || { echo "go is required for this test: work-submit.sh records the summary through gctk" >&2; exit 1; }
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) > "$TMP/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
+export GCTK_BIN="$TMP/gctk"
 
 recorder() { # <name> <log word> <rc var>
   cat > "$PACK/$1" <<STUB
@@ -538,6 +548,15 @@ go "LS_REMOTE_WRONG=$TMP/ls-seen-$N"
 eq "$RC" 1 "(12) a ref on origin that is not HEAD: stops"
 has "$OUT" "PUSH VERIFICATION FAILED" "(12) says so"
 eq "$(field assignee)" "" "(12) nothing is handed off"
+prepare polecat/tk-w "$FRESH"
+go LS_REMOTE_DOWN=1
+eq "$RC" 1 "(12b) a read of origin that does not answer: stops"
+has "$OUT" "ORIGIN UNREAD" "(12b) says origin's read did not answer"
+no "$OUT" "moved under you" "(12b) …never that the branch moved"
+eq "$(pushed)" 0 "(12b) nothing is pushed"
+eq "$(field assignee)" "" "(12b) nothing is handed off"
+eq "$(closed_step)" "in_progress" "(12b) the step stays open"
+eq "$(tail -n 1 "$LOG")" "drain" "(12b) the session drains"
 
 echo "# the bring-current guard holds the handoff"
 prepare polecat/tk-w "$FRESH"
@@ -621,8 +640,14 @@ prepare polecat/tk-w "$FRESH"
 printf 'the summary\n' > "$SUM"
 submit -- --convoy cv-1 --base main --notes n --summary-file "$SUM" --title "A better title"
 eq "$(meta pr_summary)" "the summary" "(20) fresh work: the summary lands on this bead"
-has "$(grep '^update tk-w --set-metadata target=' "$LOG")" "pr_summary=the summary" "(20) in the first handoff write"
 eq "$(field title)" "A better title" "(20) a retitle lands on this bead"
+eq "$(grep -c -- 'pr_summary=' "$LOG" | tr -d ' ')" 1 "(20) the summary is written once"
+eq "$(grep -- 'pr_summary=' "$LOG")" "update tk-w --title A better title --set-metadata pr_summary=the summary" \
+  "(20) in one write with the retitle"
+no "$(grep '^update tk-w --set-metadata target=' "$LOG")" "pr_summary" "(20) and not in the handoff write"
+ACCOUNT_AT=$(grep -n -- 'pr_summary=' "$LOG" | cut -d: -f1); HANDOFF_AT=$(grep -n '^update tk-w --set-metadata target=' "$LOG" | cut -d: -f1)
+[ -n "$ACCOUNT_AT" ] && [ -n "$HANDOFF_AT" ] && [ "$ACCOUNT_AT" -lt "$HANDOFF_AT" ] \
+  && ok "(20) ahead of the handoff" || bad "(20) ahead of the handoff" "account at ${ACCOUNT_AT:-none}, handoff at ${HANDOFF_AT:-none}"
 [ ! -e "$SUM" ] && ok "(20) the summary file is gone once handed off" || bad "(20) the summary file is gone once handed off"
 ANCHOR_ROW='[{"id":"tk-a","title":"the anchor","status":"open","assignee":"","created_at":"2026-01-01","metadata":{"branch":"polecat/tk-a","merge_result":"pull_request"}}]'
 prepare polecat/tk-a '{"branch":"polecat/tk-a"}' "$ANCHOR_ROW"
@@ -633,16 +658,20 @@ eq "$(meta pr_summary tk-a)" "the summary" "(21) the summary lands on the anchor
 eq "$(meta pr_summary)" "<absent>" "(21) and not on the child"
 eq "$(field title tk-a)" "A better title" "(21) the retitle lands on the anchor"
 eq "$(field title)" "the work" "(21) and not on the child"
+eq "$(grep -c '^update tk-a' "$LOG" | tr -d ' ')" 1 "(21) in one write"
 prepare polecat/tk-a '{"branch":"polecat/tk-a"}' "$ANCHOR_ROW"
 printf 'the summary\n' > "$SUM"
-submit UPDATE_FAIL=pr_summary= -- --convoy cv-1 --base main --notes n --summary-file "$SUM"
+submit UPDATE_FAIL=pr_summary= -- --convoy cv-1 --base main --notes n --summary-file "$SUM" --title "A better title"
 eq "$RC" 0 "(22) a summary the anchor refuses costs the PR its body, not the handoff"
-has "$OUT" "pr_summary did not reach anchor tk-a" "(22) and says so"
+has "$OUT" "the summary and retitle given did not reach tk-a" "(22) and says so"
+has "$OUT" "refused (stub)" "(22) with what refused it"
+eq "$(field title tk-a)" "the anchor" "(22) the retitle in that write did not land either"
 eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(22) the handoff lands"
 prepare polecat/tk-w "$FRESH"
 submit UPDATE_FAIL=--title -- --convoy cv-1 --base main --notes n --title "A new title"
 eq "$RC" 0 "(23) a retitle bd refuses cannot roll the handoff back"
-has "$OUT" "the retitle did not reach tk-w" "(23) and says so"
+has "$OUT" "the summary and retitle given did not reach tk-w" "(23) and says so"
+eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(23) the handoff lands"
 prepare polecat/tk-w "$FRESH"
 submit -- --convoy cv-1 --base main --notes n --title "   "
 eq "$(grep -c -- '--title' "$LOG" | tr -d ' ')" 0 "(24) a blank title writes nothing"
@@ -650,6 +679,18 @@ prepare polecat/tk-w "$FRESH"
 : > "$SUM"
 submit -- --convoy cv-1 --base main --notes n --summary-file "$SUM"
 eq "$(meta pr_summary)" "<absent>" "(25) an empty summary file writes no summary"
+prepare polecat/tk-w "$FRESH"
+printf ' \n\t\n' > "$SUM"
+submit -- --convoy cv-1 --base main --notes n --summary-file "$SUM" --title "A better title"
+eq "$(meta pr_summary)" "<absent>" "(25) a summary file of whitespace alone writes no summary"
+eq "$(field title)" "A better title" "(25) and the retitle beside it still lands"
+prepare polecat/tk-w "$FRESH"
+printf 'the summary\n' > "$SUM"
+submit GCTK_BIN="$TMP/no-gctk" -- --convoy cv-1 --base main --notes n --summary-file "$SUM" --title "A better title"
+eq "$RC" 0 "(25) with no gctk to record it, the handoff still lands"
+has "$OUT" "the summary and retitle given did not reach tk-w" "(25) and says the summary did not"
+eq "$(meta pr_summary)" "<absent>" "(25) nothing was recorded"
+eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(25) the bead is the refinery's"
 
 echo "# which bead is the anchor"
 TWO='[{"id":"tk-new","status":"open","created_at":"2026-02-01","metadata":{"branch":"polecat/b","merge_result":"pre_open_gate"}},{"id":"tk-old","status":"open","created_at":"2026-01-01","metadata":{"branch":"polecat/b","merge_result":"pull_request"}},{"id":"tk-none","status":"open","created_at":"2025-01-01","metadata":{"branch":"polecat/b"}}]'

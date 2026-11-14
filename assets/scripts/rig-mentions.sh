@@ -35,8 +35,8 @@
 # reads the list and fixes what it finds, and neither stops on it.
 #
 # Exit: 0 no other rig named · 1 mentions printed, one per line, then the
-#       advice · 2 usage, or the rig list, a bead, a file or the repository
-#       could not be read, so nothing was checked
+#       advice · 2 usage, or the rig list, a bead or its summary, a file or the
+#       repository could not be read, so nothing was checked
 set -uo pipefail
 
 PROG="rig-mentions"
@@ -44,6 +44,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 2; }
+# A bead's PR summary is read through gctk's pr domain, which owns it.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -147,8 +151,9 @@ if [ -n "$BEAD" ]; then
     row=$(bd_json show "$BEAD")
     printf '%s' "$row" | jq -e '.[0].id' >/dev/null 2>&1 || fail "cannot read bead $BEAD, the anchor whose pull request this is"
   fi
+  summary=$("$GCTK" pr summary "$BEAD" 2>/dev/null </dev/null) || fail "cannot read the PR summary of bead $BEAD"
   printf '%s' "$row" | jq -r '.[0].title // ""' | number "$BEAD title" >> "$LINES"
-  row_meta "$row" pr_summary | number "$BEAD pr_summary" >> "$LINES"
+  [ -z "$summary" ] || printf '%s\n' "$summary" | number "$BEAD summary" >> "$LINES"
   printf '%s' "$row" | jq -r '.[0].description // ""' | number "$BEAD description" >> "$LINES"
 fi
 

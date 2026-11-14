@@ -46,7 +46,7 @@ whole system, write none, as in `fix: ...`, and never coin a name of your own.
 **The words name what changes rather than how**, as an imperative phrase that
 starts in lowercase, at most 72 characters with the type and scope: `fix: keep an
 open PR's title current after a rework`, not `fix: re-read the title in pr-stack's
-loop`. The symptom, the reason and the detail go in the body and in `pr_summary`.
+loop`. The symptom, the reason and the detail go in the body and in the PR summary.
 A bead's title is a label filed before the work, so reuse its words only where
 they name what the diff does.
 
@@ -75,9 +75,7 @@ does not apply, so a small change's brief can be a sentence or two.
 **The account of the diff follows the brief**: the behavior before, the behavior
 now, and the shape of the change, in a short paragraph or a few bullets of
 markdown. Anything that would take the open text past one screen goes in a
-collapsed section, opened on one line as
-`<details><summary>what it holds</summary>`, because `pr-stack.sh` reads the
-published summary only up to a bare `<details>` line.
+collapsed section.
 
 **The summary describes the branch, not the pass that writes it.** On a rework or
 a rebase the PR publishes the whole branch, so an account of only the fix you just

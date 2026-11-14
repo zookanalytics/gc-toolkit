@@ -20,8 +20,8 @@ the test that keeps new work grounded, the decisions the architecture rests on,
 and the debt where what is built falls short of it.
 
 **Boundaries.** It works at altitude. The anchor lifecycle's states, writers,
-and check mechanics are owned by [state-machine.md](state-machine.md); the merge
-cadence's runtime semantics by
+and check mechanics are owned by [state-machine.md](state-machine.md); the
+runtime semantics of the merge cadence and the landing order by
 [refinery-merge-cadence.md](refinery-merge-cadence.md); the primitive list and
 the invariant→check binding by [component-model.md](component-model.md); the
 filing conventions by [file-structure.md](file-structure.md); how work is
@@ -47,7 +47,7 @@ flowchart LR
   end
   subgraph pack["gc-toolkit pack"]
     FORM[formulas +<br/>agent prompts]
-    LIFE[lifecycle.sh<br/>the transition writer]
+    REF[refinery<br/>the landing writer]
     DISP[bead-rehome.sh<br/>the disposition writer]
     CAD[merge cadence]
     SIGN[signoff.sh<br/>the verdict writer]
@@ -60,30 +60,39 @@ flowchart LR
   end
 
   OP -->|files subject / conversation| LEDGER
+  OP -->|reviews / approves| PR
   OP -.->|reads| HELM
   LEDGER --> POOL
   POOL -->|claim| FORM
   FORM -->|push| BR
-  FORM -->|via lifecycle.sh| LIFE
-  LIFE -->|one atomic bd update| LEDGER
+  FORM -->|hand-off| REF
+  REF -->|direct landing| BR
+  REF -->|opens as draft / edits| PR
+  REF -->|pending record| LEDGER
   FORM -->|disposition| DISP
   CAD -->|disposition| DISP
   DISP -->|successor edge, then checked close| LEDGER
   SIGN -->|verdicts on review beads| LEDGER
   ORD -->|every 60s| CAD
-  CAD -->|reads + writes via lifecycle.sh| LEDGER
-  CAD -->|opens / merges| PR
+  ORD -->|landing order: merge request| PR
+  ORD -->|landing order: record, then close| LEDGER
+  CAD -->|reads + writes| LEDGER
+  CAD -->|labels| PR
   BR --> PR
+  PR -->|GitHub merges| BR
   HELM -.->|derives per render| LEDGER
   DOC -.->|asserts| LEDGER
   DOC -.->|asserts| FORM
 ```
 
 **Legend.** Solid = writes state. Dashed = reads without writing. Each write
-path that matters has one writer. `lifecycle.sh` writes lifecycle transitions.
-`bead-rehome.sh` writes dispositions, the closes that name a successor.
-`signoff.sh` writes check verdicts. The merge cadence alone opens or merges a PR.
-Everything else reads.
+path that matters has one writer. The refinery writes landings, and the landing
+order writes merges. `bead-rehome.sh` writes dispositions, the closes that name
+a successor. `signoff.sh` writes check verdicts. Everything else reads.
+
+**The PRs the city lands.** A PR another account opened, such as a person's,
+Dependabot's or one from a fork, stays outside the city's landing, even when it
+is open from a work bead's branch.
 
 **Beside the ledger.** The pack also keeps files of its own. Some hold a run's
 progress, such as a paced cadence arm's cursor or the job directory of the
@@ -136,20 +145,25 @@ performer; the full transition table with writers is
    carries the handoff — target, refinery assignee, cleared route (branch was
    stamped at workspace-setup). All-or-nothing: a dead session mid-handoff
    leaves either the pre-handoff state (witness orphan recovery re-routes it)
-   or the complete post-handoff state, never a half. The anchor is still
-   unanchored here; its first lifecycle transition is the refinery's.
-6. **Gate.** The merge cadence's gate-ensure arm makes every declared check
+   or the complete post-handoff state, never a half. The bead carries no
+   landing record yet, and the refinery writes its first.
+6. **Land.** The refinery takes each bead handed to it through Gas Town's
+   refinery flow. A `direct` bead lands on its target with no PR. For an `mr`
+   bead the refinery opens the PR as a draft, or updates the PR the bead owns,
+   and puts the PR on Gas Town's pending record
+   ([state-machine.md](state-machine.md#the-pending-record)).
+7. **Review.** The merge cadence's gate-ensure arm makes every declared check
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
    single call to `signoff.sh` records the verdict on the review bead and, on
-   request-changes, files one rework child.
-7. **PR.** With every `pre-open` check deriving green from its reviews,
-   `pr-open.sh` opens (or adopts) the pull request.
-8. **Merge.** `merge.sh` validates the full authorization set, merges pinned to
-   the validated commit, then closes the anchor and records `merged_sha` in one
-   `lifecycle.sh` call.
+   request-changes, files one rework child. The review loop moves the PR
+   between draft and ready for review.
+8. **Merge.** The landing order has GitHub merge each PR on the pending record
+   at the head the refinery validated, once the evaluator reads the PR ready,
+   and closes the bead once the merge commit is on the target
+   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 9. **Close propagates.** `closed` is the one signal waiting parties key on
-   ([lifecycle-composition.md](lifecycle-composition.md)). A merge closes a bead
-   as *landed and verified*. A disposition closes one that did not land, through
+   ([lifecycle-composition.md](lifecycle-composition.md)). A landing closes a
+   bead as *landed and verified*. A disposition closes one that did not land, through
    `bead-rehome.sh`, and names in bd's own `duplicates` or `supersedes` edge the
    bead that carries its work now, or under `not-needed` the evidence that ruled
    it out ([state-machine.md](state-machine.md#disposition)). A duplicate closes
@@ -177,18 +191,19 @@ the sitting, for a change whose next step is the operator's reaction.
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a provider quota park, a `gc` build that moves the text the seed
 audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
-the cadence) records PR events and files a human gate, the witness patrol
+the cadence), or the landing order for a PR on the pending record, records PR
+events and files a human gate, the witness patrol
 recovers work orphaned by dead sessions, the `dog` pool is warrant executor for
 due-process recovery of wedged sessions (demand-scaled 0-2),
 `quota-park-nudge.sh` nudges a session parked behind a provider limit,
 `witness-nudge.sh` gives a witness whose patrol pass stopped its next turn,
 `boot-health.sh` detects a wedged deacon (report-only by design),
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
-edit no writer saw, and `seed-audit-reaudit.sh`, which the merge arm calls,
-slings the one re-render of the default branch's `generated/seed-audit`. See
-[authority-map.md](authority-map.md). There is no healer category: writers
-complete their own transitions, so nothing reconstructs pack-written state
-after the fact.
+edit no writer saw, and `seed-audit-reaudit.sh`, which a landing on the default
+branch calls, slings the one re-render of the default branch's
+`generated/seed-audit`. See [authority-map.md](authority-map.md). There is no
+healer category: writers complete their own transitions, so nothing
+reconstructs pack-written state after the fact.
 
 ## What the pack supplies and what a rig supplies
 
@@ -417,6 +432,22 @@ first. Either way the change is a decision on the record, not a drift.
 
 ## Decisions
 
+- **The operator's approval is the one permission to merge a PR the city
+  opens.**
+- **The pack keeps no landing state of its own beside Gas Town's pending
+  record.**
+- **The board and the merge both read the evaluator's answer,** which is
+  computed at each read and stored nowhere.
+- **A review, a hold or a change of base that arrives after the landing
+  order's read is not part of its decision to merge,** even when GitHub carries
+  out the merge request after it.
+- **The landing order is the one path that admits work on a pending record.**
+- **An approval stands across a push until triage reads the change as
+  material.**
+- **No city push rewrites or overwrites a PR's commits,** so the PR keeps the
+  commits its approval and its threads were given on.
+- **No machine checks a landing's transitions,** and the doctor checks the
+  beads after they are written.
 - **After the hand-off, a sitting's change takes every step a polecat's
   takes,** and the sitting is not one of its checks.
 - **A copy of a rig's UI that a session runs from a change's tree serves
@@ -424,6 +455,25 @@ first. Either way the change is a decision on the record, not a drift.
 
 ## Debt
 
+Each entry is a place where what is built falls short of the sections above,
+why a reader must know it, and the work that retires it.
+
+- **The pack still merges each PR itself, and closes on its own record.** Until
+  a rig's cutover, the pack merges that rig's PRs under its own approval rule,
+  takes a PR open on a work bead's branch whoever opened it, keeps its own
+  record of an open PR, and checks each landing write against its transition
+  machine, so steps 6 to 8 are not what runs there today. Each rig's cutover
+  bead moves the rig onto the pending record once the review loop
+  (tk-1tfzr71.22) lands, along with the board's phase of a pending PR by the
+  evaluator's answer (tk-1tfzr71.88), a sitting's retirement of one
+  (tk-1tfzr71.89) and, for gc-toolkit, the seed audit's re-render after a
+  landing (tk-1tfzr71.92). The retirement bead (tk-1tfzr71.70), which waits on
+  every cutover, deletes the old path once no open bead is on it.
+- **The merge cadence still admits work on a pending record.** It files work
+  for a PR on the pending record beside the landing order
+  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
+  decision that the landing order is the one path is not yet what runs. The
+  GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds

@@ -1,0 +1,22 @@
+Lead text kept.
+## Summary
+
+Old legacy summary.
+
+<details>
+<summary>Dispatch — what this work was asked to do</summary>
+
+Old desc.
+
+</details>
+
+## Refinery handoff
+
+- Issue: `tk-a1`
+- Source branch: `polecat/tk-a1`
+- Gates `x` signed off pre-open at `11111111`; PR opened green.
+Operator text right after the bullets.
+
+<!-- gc:branch-beads -->
+beads
+<!-- /gc:branch-beads -->

@@ -11,7 +11,8 @@
 // from them, and a test fails when it is stale.
 //
 // A verb's change of state is one Write, which Commit makes as one `gc bd
-// update` carrying every key the act sets, so the act lands whole or not at all.
+// update` carrying every key the act sets, and the title when the act gives
+// the bead one, so the act lands whole or not at all.
 // The update's exit decides whether the write landed: a write that exits
 // non-zero has failed, and nothing reads a write back to confirm it. A Snapshot
 // is one pass's read of the beads a question needs.
@@ -67,19 +68,28 @@ func open(c *gcbd.Client, db string, ids ...string) (*Ledger, error) {
 	return New(c.In(db)), nil
 }
 
-// Write is one act on one bead: every key it sets or clears, and the note it
-// appends, made in one update.
+// ErrGuard is the error of a write whose guard no longer held: the bead had
+// left the status or the assignee the write was guarded on, so bd wrote
+// nothing (gcbd.ErrGuard). A domain tells it from any other failure with
+// errors.Is.
+var ErrGuard = gcbd.ErrGuard
+
+// Write is one act on one bead: every key it sets or clears, the title it gives
+// the bead, the status it moves the bead to, the note it appends and the guard
+// it lands under, made in one update.
 type Write struct {
 	id     string
+	title  string
 	sets   []string // key=value, in the order set
 	unsets []string
+	status string
 	note   string
+	guard  *guard
 	err    error
 }
 
-// Note appends text to the bead's notes in the same update, so the act and its
-// record land together or not at all. A later Note replaces an earlier one.
-func (w *Write) Note(text string) { w.note = text }
+// guard is the status and assignee a write lands under.
+type guard struct{ status, assignee string }
 
 // Write starts an act on the bead.
 func (l *Ledger) Write(id string) *Write {
@@ -102,10 +112,38 @@ func (w *Write) unset(name string) {
 	}
 }
 
-// args is the update's arguments: every set, then every removal, then the
-// note.
+// Title gives the bead title in the same write. The title is the row's own
+// field, which no key declares, so the act that sets it says what it means.
+func (w *Write) Title(title string) { w.title = title }
+
+// Status moves the bead to status in the same write. A move into closed is bd's
+// checked close, which bd refuses while a live blocker or an open child holds
+// the bead.
+func (w *Write) Status(status string) { w.status = status }
+
+// Note appends text to the bead's notes in the same write, so the act and its
+// record land together or not at all. A later Note replaces an earlier one.
+func (w *Write) Note(text string) { w.note = text }
+
+// Guard makes the write land only while the bead still has status and assignee,
+// "" for unassigned, which bd checks in the write's own transaction. A write
+// whose guard no longer holds writes nothing, and Commit returns an error that
+// is ErrGuard.
+func (w *Write) Guard(status, assignee string) { w.guard = &guard{status: status, assignee: assignee} }
+
+// args is the update's arguments: the guard, the status, the title, every set,
+// every removal, then the note.
 func (w *Write) args() []string {
 	var args []string
+	if w.guard != nil {
+		args = append(args, "--if-status="+w.guard.status, "--if-assignee="+w.guard.assignee)
+	}
+	if w.status != "" {
+		args = append(args, "--status="+w.status)
+	}
+	if w.title != "" {
+		args = append(args, "--title", w.title)
+	}
 	for _, s := range w.sets {
 		args = append(args, "--set-metadata", s)
 	}
@@ -119,21 +157,21 @@ func (w *Write) args() []string {
 }
 
 // Commit makes w as one update, whose exit decides whether it landed. A write a
-// Set refused, a write that carries no key and an update that exits non-zero
-// all fail, and nothing reads the write back.
+// Set refused, a write that changes nothing and an update that exits non-zero
+// all fail, and nothing reads the write back. A write its guard refused fails
+// with an error that is ErrGuard.
 func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
-	args := w.args()
-	if len(w.sets) == 0 && len(w.unsets) == 0 {
+	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.title == "" && w.note == "" {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}
-	if out, err := l.store.Update(w.id, args...); err != nil {
+	if out, err := l.store.Update(w.id, w.args()...); err != nil {
 		if out = strings.TrimSpace(out); out != "" {
-			return fmt.Errorf("ledger: the write to %s did not land (%v): %s", w.id, err, out)
+			return fmt.Errorf("ledger: the write to %s did not land (%w): %s", w.id, err, out)
 		}
-		return fmt.Errorf("ledger: the write to %s did not land: %v", w.id, err)
+		return fmt.Errorf("ledger: the write to %s did not land: %w", w.id, err)
 	}
 	return nil
 }

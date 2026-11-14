@@ -125,6 +125,14 @@ case "$STUB_STORE" in "$TMP"/*) ok "STUB_STORE points into TMP" ;; *) bad "STUB_
 case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin not on PATH" ;; esac
 [ -x "$TMP/bin/gc" ] && ok "stub gc installed" || bad "stub gc missing"
 
+# gctk pins a read to the store gc routes a bead to: it asks `bd where` first,
+# then names that store with bd's --db ahead of the verb. The stub names its
+# one store at no prefix, and serves a pinned read from it.
+store '[{"id":"pin-1","status":"open","metadata":{}}]'
+eq "$(gc bd where --json | jq -r '[.path, .prefix] | join("|")')" "${STUB_STORE%/*}/.beads|" "bd where names the stub's store at no prefix"
+eq "$(gc bd --db /another/.beads show pin-1 | jq -r '.[0].id')" "pin-1" "a read pinned with --db <path> answers from the stub's store"
+eq "$(gc bd --db=/another/.beads show pin-1 | jq -r '.[0].id')" "pin-1" "…and one pinned with --db=<path>"
+
 # A suite that WANTS a rig sets it after harness_init returns.
 export GC_RIG=myrig
 eq "$GC_RIG" "myrig" "a rig exported after harness_init is honored"

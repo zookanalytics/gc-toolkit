@@ -1,0 +1,18 @@
+Operator note above.
+
+<!-- gc:pr-summary -->
+## Summary
+
+New summary.
+
+## Refinery handoff
+
+- Issue: `tk-a1`
+- Head `abcdef12`; gates `correctness`; see the PR checks for current status.
+<!-- /gc:pr-summary -->
+
+Operator note below.
+
+<!-- gc:branch-beads -->
+## Beads on this branch
+<!-- /gc:branch-beads -->

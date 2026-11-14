@@ -24,10 +24,9 @@ import (
 // a listing does. ClosedAt is when a closed bead closed. An edge carries the far
 // bead's fields as a show row reports them, so a closed row that names no close
 // time takes the one an edge onto it names. Assignee, AwaitType, Description,
-// Priority, Labels and CreatedAt are the row's own fields a listing carries,
-// and Ephemeral and Template put the row in the ephemeral plane or make it a
-// template. Notes is the bead's notes, which an update's --append-notes adds a
-// line to.
+// Priority, Labels, CreatedAt and Notes are the row's own fields a listing
+// carries, and an update's --append-notes adds a line to Notes. Ephemeral and
+// Template put the row in the ephemeral plane or make it a template.
 type Bead struct {
 	ID, Title, Status, IssueType, ClosedAt string
 	Assignee, AwaitType, Description       string
@@ -60,12 +59,14 @@ type Store struct {
 	// set, and UpdateErr fails every write.
 	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr error
 
-	// OnUpdate, when set, runs before each update the store takes, outside the
-	// store's lock, and fails the update with the error it returns. OnFind runs
-	// before each find the same way, and fails nothing. A test lands another
-	// actor's write in either.
-	OnUpdate func(id string, args []string) error
-	OnFind   func(q gcbd.Query)
+	// OnFind, when set, runs before each find the store takes, outside the
+	// store's lock, and fails nothing. A test lands another actor's write in it.
+	OnFind func(q gcbd.Query)
+
+	// BeforeUpdate, when set, runs ahead of each update, outside the store's
+	// lock, so a test can land another writer's change between a read and a
+	// write, or refuse the write with the error it returns.
+	BeforeUpdate func(id string, args []string) error
 
 	finds []gcbd.Query
 }
@@ -259,12 +260,14 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 	return gcbd.NewBlockedSet(s.listed, s.marked), nil
 }
 
-// Update applies one update's --set-metadata, --unset-metadata, --status and
-// --append-notes to the row, and records it. A bead the store does not hold
-// refuses the write, as bd does.
+// Update applies one update's --set-metadata, --unset-metadata, --status,
+// --assignee, --append-notes and --title to the row, and records it. A bead the
+// store does not hold refuses the write, as bd does. --if-status and
+// --if-assignee are bd's guards: an update whose guard no longer holds writes
+// nothing and fails with an error that is gcbd.ErrGuard.
 func (s *Store) Update(id string, args ...string) (string, error) {
-	if s.OnUpdate != nil {
-		if err := s.OnUpdate(id, slices.Clone(args)); err != nil {
+	if s.BeforeUpdate != nil {
+		if err := s.BeforeUpdate(id, slices.Clone(args)); err != nil {
 			return "", err
 		}
 	}
@@ -277,6 +280,7 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("fake store: no bead %s", id)
 	}
+	b.Metadata = maps.Clone(b.Metadata)
 	if b.Metadata == nil {
 		b.Metadata = map[string]string{}
 	}
@@ -300,11 +304,23 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 			delete(b.Metadata, value)
 		case "--status":
 			b.Status = value
+		case "--assignee":
+			b.Assignee = value
 		case "--append-notes":
 			if b.Notes != "" {
 				b.Notes += "\n"
 			}
 			b.Notes += value
+		case "--title":
+			b.Title = value
+		case "--if-status":
+			if cur := s.rows[id].Status; cur != value {
+				return "", fmt.Errorf("fake store: %s is %s, not %s: %w", id, cur, value, gcbd.ErrGuard)
+			}
+		case "--if-assignee":
+			if cur := s.rows[id].Assignee; cur != value {
+				return "", fmt.Errorf("fake store: %s is assigned %q, not %q: %w", id, cur, value, gcbd.ErrGuard)
+			}
 		default:
 			return "", fmt.Errorf("fake store: update takes no %s", name)
 		}
@@ -382,6 +398,9 @@ func bead(b Bead, deps []any) gcbd.Bead {
 	}
 	if b.Description != "" {
 		out.Description = b.Description
+	}
+	if b.Notes != "" {
+		out.Notes = b.Notes
 	}
 	if b.CreatedAt != "" {
 		out.CreatedAt = b.CreatedAt

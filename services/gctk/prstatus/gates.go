@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
 // Blocker is the far end of one `blocks` edge, in the fields [Holding] and
@@ -58,7 +59,9 @@ func IsPersonBlocker(b Blocker) bool {
 }
 
 // mergeResultPullRequest is the merge_result of a merge anchor whose pull
-// request is open.
+// request is open on the old record. On Gas Town's pending record an open pull
+// request is [record.Pending], or [record.HeadChanged] while the refinery
+// validates a head it has not.
 const mergeResultPullRequest = "pull_request"
 
 // awaitsPerson reports whether a merge anchor the walk reached is a person's to
@@ -83,10 +86,27 @@ func awaitsPerson(b Blocker, edges []Blocker) bool {
 			f.InFlightCount++
 		}
 	}
+
+	// The walk reads no GitHub, so a pull request on Gas Town's pending record
+	// is weighed by its row as well, less the old record's facts, which no pass
+	// writes on a bead on this one and which [Render] does not read for the PR
+	// itself: the merge pass's verdict and thread count, and pr-open.sh's draft
+	// markers. Its review is a person's move only at the validated head, and
+	// only once pr-facts.sh has recorded a posture, which it does not read while
+	// the pull request is a draft, the city's work.
+	onRecord := record.OnRecord(result)
+	if onRecord {
+		f.PRMachine, f.PRMachineCause, f.PRMachineReason, f.PRUnansweredThreads = "", "", "", ""
+		f.OpenedAsDraft, f.DraftReadied = "", ""
+	}
 	switch Derive(f) {
 	case NeedsAttention:
 		return true
 	case NeedsReview:
+		if onRecord {
+			posture, _ := splitDated(f.PRPosture)
+			return result == record.Pending && posture != ""
+		}
 		return result == mergeResultPullRequest
 	}
 	return false

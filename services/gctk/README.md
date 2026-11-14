@@ -20,7 +20,11 @@ through `gc bd` and the supervisor's API.
 | `epic` | actions taken on an epic: filing one with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic --help`, `internal/cli/epic.go` |
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
-| `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus` |
+| `pr compose` | a PR's title and body as the bead that owns it says they should be: its title with the conventional-commit type a repository's title check requires, and its body's managed summary region and branch-beads section, each read by its markers and kept current while the text people add stays as it is | `gctk pr compose --help`, `internal/cli/prcompose.go`, `pr` |
+| `pr summary` | the account of what a change does, for its PR: the bead's PR summary and the change's subject line as its title, recorded in one write whose exit decides, or the summary recorded, printed for a reader of the PR's text | `gctk pr summary --help`, `internal/cli/prsummary.go`, `pr` |
+| `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
+| `pr record` | the refinery's record of the PR a bead owns as pending until its merge is verified, in Gas Town's two writes under the store's record lock, each guarded on the status and assignee it read, so a bead that a close or a release reached first gets no record | `gctk pr record --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
+| `pr reconcile` | one run of the landing order over the store's pending records, the least recently checked first, each under the store's record lock: a ready PR merged with its head pinned, a bead closed once its merge commit is on the target, a changed head sent back to the refinery, and each exception kept blocked behind a human gate | `gctk pr reconcile --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit, and running a copy of its UI from a checkout for a demo capture or a person | `gctk rig --help`, `internal/cli/rig.go`, `internal/cli/rig_serve.go`, `internal/rig` |
 | `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session --help`, `internal/cli/session.go` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
@@ -55,6 +59,18 @@ binary the same way, and when there is none, or the binary is too old to carry
 lists what holds a bead from the reasons in the same verb's `--json` answer, and
 the helm board imports the package behind it, `prstatus`, so the labels, engage
 and the board read one definition of what holds a PR.
+
+`assets/scripts/pr-open.sh` and the refinery's merge-push step
+(`refinery-publish.sh`, `refinery-land.sh`) take a PR's title and body from
+`gctk pr compose`, so an opened PR and a later refresh read one composer.
+Each finds the binary through `gctk-resolve.sh`'s `gctk_path`, and with no
+binary, or one too old to carry the verb, it opens no PR and edits no body or
+title that pass.
+
+`assets/scripts/pr-reconcile.sh`, the landing order's script
+(`orders/pr-reconcile.toml`), names the rig's refinery from the roster and execs
+`gctk pr reconcile` through `gctk-resolve.sh`. With no binary to run, it refuses
+the run with exit 1, and the order's next run tries again.
 
 ## rig
 
@@ -150,10 +166,20 @@ internal/gcbd/       the store adapter: bead reads and writes through `gc bd` an
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
 internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
+internal/gh/         the GitHub adapter: one `gh api` call per read, paged to its end
+internal/gh/fake/    the GitHub adapter's in-memory fake, for the domains' tests
+internal/feedback/   the pack's one definition of feedback, pr-post.sh's feedback-def, run
+                     through jq
 internal/rig/        rig's runner, its commit-keyed record store, and a copy of the rig's UI
 arm/                 the arm's verbs and its start: what arm refuses, the dispatch lock, and the
                      steps that send each armed bead once
 arm/record/          the arm's keys, which it owns, the arm they decode to, and every write to them
+pr/                  the pr domain: whether the PR a bead owns is ready to merge at its
+                     current revision, from the store, GitHub and the definition of
+                     feedback; the account of the change its author records, the PR
+                     summary; and what the PR's title and body say: its title, and its
+                     body's managed summary region and branch-beads section, with the
+                     renders they replaced pinned under testdata
 prstatus/            the PR status derivation, exported for the helm board
 listing/             one pass's read of a store for the helm board: every live bead, the
                      closed beads under a parent, the keys it decodes, and waits' and
