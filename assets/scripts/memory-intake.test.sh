@@ -386,7 +386,7 @@ cat > "$B/rigs/s/beads.json" <<'JSON'
  {"id": "tk-p2", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "metadata": {"task_kind": "feedback-pattern"}, "deps": ["tk-f2"]},
  {"id": "tk-f2", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "integration/tk-l1"}},
  {"id": "tk-l1", "status": "open", "metadata": {}},
- {"id": "tk-p3", "status": "closed", "closed_at": "2026-11-13T09:00:00Z", "close_reason": "dismissed: the hold's window passed", "metadata": {"task_kind": "feedback-pattern"}},
+ {"id": "tk-p3", "status": "closed", "closed_at": "2026-11-13T09:00:00Z", "close_reason": "dismissed: the hold's window passed with no line matching '^\\t- used' in C:\\new", "metadata": {"task_kind": "feedback-pattern"}},
  {"id": "tk-p4", "status": "open", "metadata": {"task_kind": "feedback-pattern"}},
  {"id": "tk-p5", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "metadata": {"task_kind": "feedback-pattern", "proposal_bead": "tk-f5"}},
  {"id": "tk-f5", "status": "closed", "metadata": {"merge_result": "pull_request", "pr_url": "https://example.test/pull/5"}},
@@ -408,7 +408,8 @@ hasnt "$(cat "$M/MEMORY.md")" "(hub-h.md)" "as is the line of a collection note 
 DUE=$(due_json)
 eq "$(printf '%s' "$DUE" | jq -r '[.[] | (.memory_file | split("/") | last) + ":" + .memory_due] | join(" ")')" "c.md:date g.md:date i.md:changed" "a wait that ended with no fix landed makes its note due"
 eq "$(printf '%s' "$DUE" | jq -r '.[] | select(.memory_file | endswith("/c.md")) | .created_at + " / " + .memory_prior')" \
-  "2026-11-13T00:00:00Z / waited on tk-p3, which closed with no fix landed: dismissed: the hold's window passed" "as old as the day it ended, saying why"
+  "2026-11-13T00:00:00Z / waited on tk-p3, which closed with no fix landed: dismissed: the hold's window passed with no line matching '^\t- used' in C:\new" \
+  "as old as the day it ended, saying why in the close reason's own words, backslashes and all"
 echo "── a merge into an effort's branch lands with the effort's landing bead ──"
 jq '(.[] | select(.id == "tk-l1")) |= . + {status: "closed", metadata: {merge_result: "merged", merged_target: "main"}}' "$B/rigs/s/beads.json" > "$B/beads.next" && mv "$B/beads.next" "$B/rigs/s/beads.json"
 echo '{"https://example.test/pull/5": {"state": "MERGED", "baseRefName": "main"}, "https://example.test/pull/6": {"state": "CLOSED", "baseRefName": "main"}}' > "$STUB_PRS"

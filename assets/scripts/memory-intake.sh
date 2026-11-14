@@ -901,8 +901,10 @@ settle_dir() {
         esac
         SETTLED_VETOED=$((SETTLED_VETOED + 1))
       fi
-      awk -F'\t' -v OFS='\t' -v k="$kind" -v n="$name" -v h="$hash" -v nh="$nh" -v d="$day" -v y="$why" \
-        '$1 == k && $2 == n && $3 == h { $3 = nh; $5 = ""; $6 = d; $7 = y } { print }' "$w/rows" > "$w/rows.next" && mv -f "$w/rows.next" "$w/rows"
+      # awk reads escapes in a -v value, so the reason, which can hold a
+      # backslash, reaches it through the environment.
+      WHY=$why awk -F'\t' -v OFS='\t' -v k="$kind" -v n="$name" -v h="$hash" -v nh="$nh" -v d="$day" \
+        '$1 == k && $2 == n && $3 == h { $3 = nh; $5 = ""; $6 = d; $7 = ENVIRON["WHY"] } { print }' "$w/rows" > "$w/rows.next" && mv -f "$w/rows.next" "$w/rows"
       SETTLED_DUE=$((SETTLED_DUE + 1))
     fi
   done < <(to_us < "$plan")
@@ -1024,10 +1026,12 @@ cmd_due() {
   place_all
   due_all > "$WORK/due.tsv"
   if [ "$count" = 1 ]; then grep -c . "$WORK/due.tsv"; return 0; fi
+  # The fields are joined unescaped: none holds a tab or a newline, and the
+  # reads below take each backslash as written.
   jq -Rnr --argjson lim "${limit:-null}" '[inputs | split("\t")
       | {age: (if .[0] == "d" then (.[1] | strptime("%Y-%m-%d") | mktime) else (.[1] | tonumber) end), row: .}]
     | sort_by(.age, .row[2], .row[5]) | (if $lim == null then . else .[0:$lim] end)
-    | .[] | [(.age | todate)] + .row[2:] | @tsv' < "$WORK/due.tsv" > "$WORK/due.sel" || { echo '[]'; return 1; }
+    | .[] | [(.age | todate)] + .row[2:] | join("\t")' < "$WORK/due.tsv" > "$WORK/due.sel" || { echo '[]'; return 1; }
   while IFS="$US" read -r i ef; do
     args+=(--rawfile "t$i" "$ef")
   done < <(awk -F'\t' -v OFS="$US" '$9 != "" { print NR - 1, $9 }' "$WORK/due.sel")
