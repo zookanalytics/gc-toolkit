@@ -351,7 +351,7 @@ done
 blocked_store alpha "$(bmeta a-1 task_kind feedback-pattern)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a feedback pattern waiting on its follow-up is not flagged"
-hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and draws no arm remedy"
+hasnt "$OUT" "gctk bead arm a-1" "…and draws no arm remedy"
 clear_stores
 
 # A negative list would flag any type it forgot; the allowlist exempts every
