@@ -1,13 +1,14 @@
-# feedback-distiller — turn pending observations into reviewed prompt-update
-# proposals. The 24h timer is a HEARTBEAT, not the cadence (D7): the formula's
-# own first step gates judging on pending volume / urgency / age — do not
+# feedback-distiller — turn pending observations and due agent memory notes
+# into reviewed prompt-update proposals. The 24h timer is a HEARTBEAT, not the
+# cadence (D7): the formula's load-and-gate step gates judging on pending
+# volume / urgency / age — do not
 # "fix" a quiet order by shortening this interval; tune the formula's gate
 # vars. A gated fire still runs the retirement pass over adopted rules (that
 # pass is unconditional). Home-rig-gated inside the formula: importers' daily
 # fire is one cheap idempotent no-op session. Rig-scoped, BARE pool (same
 # rationale as feedback-miner).
 [order]
-description = "learning: distill pending feedback observations; file prompt-update / retirement beads (judging gated on volume or urgency; the retirement pass runs every fire)"
+description = "learning: distill pending feedback observations and due agent memory notes; file prompt-update / retirement beads (judging gated on volume or urgency; the retirement pass runs every fire)"
 formula = "mol-feedback-distiller"
 trigger = "cooldown"
 interval = "24h"

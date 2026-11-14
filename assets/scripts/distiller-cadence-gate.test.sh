@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # distiller-cadence-gate.test.sh — mol-feedback-distiller's cadence gate (D7)
-# judges the pending observations on volume, on urgency, or on the age of the
-# oldest one.
+# judges the pending set, observations and due memory notes alike, on volume,
+# on urgency, or on the age of the oldest one.
 #
 # The age arm is the trickle guard. A few observations that never reach the
 # volume floor are still judged once the oldest passes distill_max_age_days,
@@ -106,6 +106,18 @@ echo "── the stamp is read as UTC whatever zone the distiller runs in ──
 # file. A parse that read the stamp as local time would make it ten hours
 # younger, and a day and an hour would count as no whole day.
 eq "$(TZ=HST10 gate "$(ago_days 1)")" "gated 1" "ten hours behind UTC, a day-old observation is still a day old"
+
+echo "── due memory notes count beside the observations ──"
+# load-and-gate seeds the pending set with them, each marked by a memory_ref.
+mixed() {  # <observations> <notes> -> the verdict and the count
+  jq -n --argjson o "$1" --argjson m "$2" --arg t "$(ago_days 1)" '
+    [range($o) | {metadata: {task_kind: "observation"}, created_at: $t}]
+    + [range($m) | {memory_ref: "k/n\(.).md@h", created_at: $t}]' > "$SANDBOX/pending.json"
+  PENDING="$SANDBOX/pending.json" bash "$SANDBOX/block.sh" 2>/dev/null \
+    | sed -n 's/^DISTILL_RUN=\([a-z]*\) .* \([0-9]*\) pending.*/\1 \2/p'
+}
+eq "$(mixed 1 4)" "open 5" "one observation and four due notes reach the floor"
+eq "$(mixed 0 4)" "gated 4" "four due notes alone wait for volume"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

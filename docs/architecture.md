@@ -389,7 +389,8 @@ corrective feedback into standing behavior, so attention is never spent twice:
    holds what should change the next agent's behavior, and an observation
    holds what is to be evaluated. The distiller judges notes beside
    observations onto the same patterns, and a note leaves memory once its
-   pattern closes or it holds nothing worth keeping.
+   pattern's fix has landed or the distiller finds nothing worth keeping in
+   it.
 2. **Distill.** The `feedback-distiller` order clusters observations into
    patterns and promotes recurring ones as ordinary PRs against the pack —
    prompt edits, lint rules under `tools/lint-learned.d/`, doc changes.
@@ -474,10 +475,6 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
-- **The distiller reads no memory notes yet.** A note stays in its memory
-  directory until an agent or a person removes it, and what it shows reaches
-  the learning loop only when an agent also reports it. Epic tk-zlot608 builds
-  the memory intake.
 - **A sitting does not edit an open PR's branch.** A ruling on an open PR still
   files a rework a polecat runs. A unit that waits on the review-lanes member
   (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it

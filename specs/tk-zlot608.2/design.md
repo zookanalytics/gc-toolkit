@@ -13,8 +13,10 @@ is, by the operator's three questions, and groups what the note shows onto the
 same feedback patterns, so a lesson an agent wrote down and a correction an
 agent reported meet in one judgment. A note stays in memory while its pattern is
 open. It leaves once the pattern closes and its fix has landed, or as soon as
-the distiller finds nothing in it worth keeping. No note leaves because of its
-age.
+the distiller finds nothing in it worth keeping. A note the distiller cannot
+substantiate either way stays, and records each dated use for a later review to
+weigh. No note leaves because of its age, and no fixed span decides when a note
+is read again.
 
 The backlog record, [specs/tk-zlot608.1/report.md](../tk-zlot608.1/report.md),
 is the worked example of reading notes by the three questions.
@@ -165,6 +167,10 @@ how it reads.
   subsumes it. A rule current agents follow untold, or one the pack already
   carries, is dropped, and so is anything else the judge finds nothing worth
   keeping in.
+- **Not substantiated either way**: the judge cannot tell whether the note
+  still serves. It is not dropped on that judgment (section 3). It stays until
+  a date the judge sets, with a line that asks whoever uses it to record each
+  use.
 
 **A note on a pattern.** The pattern's evidence names the note by its memory
 directory, its name and the hash the judge read. A note is one occurrence in its
@@ -212,9 +218,13 @@ A note leaves in one of two ways, and never because of its age.
   run that judged them, once the run has carried what each shows to where it
   goes.
 - **When what it waits on is done.** A note on a pattern leaves once the pattern
-  closes and every follow-up of the pattern that closed on a merge has landed. A
+  closes, a follow-up of the pattern has landed and none is still on its way. A
   note that waits on a bead in another rig's store leaves once that bead closes
-  and, if it closed on a merge, has landed.
+  on a merge that has landed. A note whose pattern or bead closed with no fix
+  landed does not leave: it is due again from the day the wait ended, and the
+  judge weighs it. When the operator vetoed a proposal the pattern spawned, the
+  run that ends the wait first marks the note, so agents stop following its
+  rule while it waits for the judge (below).
 
 A follow-up has landed when its merge is on its repository's default branch.
 Closing is not enough, because a follow-up placed under an integration effort
@@ -223,15 +233,56 @@ closes when it lands on the effort's branch: tk-jvl45ot closed on 2026-10-31 at
 PR, #1379, merged at 22:48Z. So a follow-up merged into an effort's branch has
 landed once the effort's landing bead has merged into the default branch. A
 follow-up that closed with no merge, such as a proposal the operator vetoed,
-ends the wait at its close.
+ends the wait at its close, and a pattern all of whose follow-ups closed so has
+landed no fix.
 
 A note on a held pattern stays through the pattern's deferral, which lasts
 `pattern_defer_days` (90). When the window ends with no recurrence, the
-distiller dismisses the pattern and the note leaves. When the lesson recurs, the
-distiller judges the pattern again on the new evidence, and the note stays while
-the pattern is open. A lesson that comes back after its notes left is new
-evidence on its closed pattern, which the rubric's recurrence bar decides
-whether to reopen.
+distiller dismisses the pattern and the note is due again. A note that works
+prevents the recurrence the hold waits for, so that silence substantiates
+nothing, and the judge weighs the note as one it cannot substantiate. When the
+lesson recurs, the distiller judges the pattern again on the new evidence, and
+the note stays while the pattern is open. A lesson that comes back after its
+notes left is new evidence on its closed pattern, which the rubric's recurrence
+bar decides whether to reopen.
+
+**A note the judge cannot substantiate.** The operator ruled in conversation
+tk-0vo6nph on 2026-11-14, dropping a fixed window for such notes:
+
+> Shape feels good, I'd like to drop the 90 days though, I think we can largely
+> leave time out of it, and have directions include that a note that can't be
+> substantiated either way, can have an update made to have it report it's
+> usage on the note with date. That builds up the data point for that case and
+> then lets the agent on a future pass evaluate it more holistically. Some might
+> be fine to drop when no usage in a week and another might need a year (taking
+> an extreme example). Why dictate any timing requirement
+
+So such a note is not dropped on that judgment. The judge keeps it until a date
+it sets for that note, and the script adds one line to it, in the pack's own
+words, asking whoever uses it to append a dated line recording the use. A use
+is recorded in the note itself, keeps the note, and does not reopen its lesson.
+When the note comes due, the judge weighs it as a whole: its dated uses, what it
+holds, and what losing it would cost. A note the judge can substantiate is kept
+or dropped as above, and a note on a pattern whose fix has landed leaves as
+above.
+
+The sitting recorded two proposals of its own beside the ruling, which the
+operator did not rule on. The build takes one: a use line alone does not make a
+note due early, so the per-run read stays for new notes and the uses are read
+when the note next comes due. It leaves the other, that the list keep each
+note's use count so the most-used notes can later go to the operator as
+candidates for the pack. The uses stay in the note alone, where the judge reads
+them. The build makes one call of its own, which the operator did not rule on
+either. Where the design as approved had a note leave at the veto, the build
+keeps it in memory, marked, for the judge to read again. In the run that ends
+the wait, the note gains a line, in the pack's words, saying that the operator
+declined its rule in the PR the line names and not to follow it. Each line of
+the index or a collection note that points at the note gains a short mark that
+says the same, and an entry of a collection note gains the line under its first
+line. The note is due again from the day the pattern closed, and since the veto
+settled its rule, the judge weighs what else it holds. Removing the note at the
+veto would also have taken out of memory anything else it held. A dismissal
+marks nothing, because its silence substantiates nothing.
 
 The operator's two concerns, in that cycle:
 
@@ -240,7 +291,8 @@ The operator's two concerns, in that cycle:
   (skills/learning-distill/SKILL.md, Retirement questions).
 - **Keeping a long-term rule until something permanent replaces it.** A note
   worth keeping stays while its pattern is open, which lasts until the pattern's
-  fix has landed, or until its deferral passes with no recurrence.
+  fix has landed, and a note the judge cannot substantiate stays while its
+  recorded uses build the case for keeping or dropping it.
 
 The cost is that memory shrinks only as fast as the distiller decides and fixes
 land, and until a rule's replacement lands, a rule the judge kept steers agents
@@ -298,10 +350,12 @@ Other writers and other runs:
 ## 5. Which notes a run reads
 
 A note is due from the first run that finds it, new or changed since the judge
-read it, and a note the judge kept for a moment that has not passed is due again
-from the date the judge set (section 2). The judge's own question, whether a
-note can go away, decides whether a fresh note leaves, so no age decides when a
-note is read.
+read it, and a note the judge kept for a moment that has not passed, or kept
+unsubstantiated, is due again from the date the judge set (sections 2 and 3). A
+use line a note gains does not change it for this purpose, because the hash the
+list keeps leaves out its use lines. The judge's own question, whether a note
+can go away, decides whether a fresh note leaves, so no age decides when a note
+is read.
 
 Due notes are pending like reports. They count toward the distiller's cadence
 gate beside the pending observations, and a gated run leaves them due. With

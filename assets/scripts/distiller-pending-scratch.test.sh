@@ -51,7 +51,7 @@ fi
 ODD="$(printf '%s\n' "$RAW_BLOCK" | grep -c '\(^\|[^\\]\)\\\([^\\]\|$\)' || true)"
 eq "$ODD" "0" "every backslash in the block is a TOML-doubled pair"
 
-BLOCK="$(printf '%s\n' "$RAW_BLOCK" | sed 's/\\\\/\\/g; s/{{rig_list}}/r-alpha r-beta/g')"
+BLOCK="$(printf '%s\n' "$RAW_BLOCK" | sed 's/\\\\/\\/g; s/{{rig_list}}/r-alpha r-beta/g; s/{{memory_notes_per_run}}/200/g')"
 
 printf '%s\n' "$BLOCK" > "$SANDBOX/block.sh"
 if bash -n "$SANDBOX/block.sh" 2>"$SANDBOX/syntax.err"; then
@@ -82,6 +82,16 @@ printf '%s\n' "$*" >> "$STUB_CLOSE_LOG"
 STUB
 chmod +x "$SANDBOX/pack/assets/scripts/claim-close.sh"
 
+# The memory intake beside claim-close.sh seeds the set with the due notes.
+# STUB_MEMORY=fail stands for an intake that cannot read memory.
+cat > "$SANDBOX/pack/assets/scripts/memory-intake.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$STUB_MEMORY_LOG"
+[ "${STUB_MEMORY:-}" = fail ] && exit 1
+printf '%s\n' '[{"memory_ref": "0123456789abcdef/a.md@0123456789abcdef", "memory_kind": "note", "created_at": "2026-08-01T00:00:00Z"}]'
+STUB
+chmod +x "$SANDBOX/pack/assets/scripts/memory-intake.sh"
+
 # write_store <path> <bead-id> <category> — one pending observation.
 write_store() {
   jq -n --arg id "$2" --arg cat "$3" \
@@ -107,6 +117,7 @@ run_block() {
     STUB_STORE_DIR="$SANDBOX/stores" \
     STUB_SC="$SANDBOX/pack/assets/scripts/claim-close.sh" \
     STUB_CLOSE_LOG="$SANDBOX/close-$label.log" \
+    STUB_MEMORY_LOG="$SANDBOX/memory-$label.log" STUB_MEMORY="${STUB_MEMORY:-}" \
     GC_PACK_DIR="$SANDBOX/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
       bash "$SANDBOX/run-$label.sh"
   ) > "$SANDBOX/out-$label.txt" 2>&1
@@ -144,15 +155,30 @@ case "$KEPT" in
 esac
 
 if [ -n "$KEPT" ] && [ -f "$KEPT" ]; then
-  eq "$(jq -r 'length' "$KEPT" 2>/dev/null || echo ERR)" "2" \
+  eq "$(jq -r '[.[] | select(.memory_ref == null)] | length' "$KEPT" 2>/dev/null || echo ERR)" "2" \
     "the pending set carries one observation from each store"
-  eq "$(jq -r '[.[].obs_rig] | sort | join(",")' "$KEPT" 2>/dev/null || echo ERR)" "r-alpha,r-beta" \
+  eq "$(jq -r '[.[] | select(.memory_ref == null) | .obs_rig] | sort | join(",")' "$KEPT" 2>/dev/null || echo ERR)" "r-alpha,r-beta" \
     "each observation is tagged with the store it came from"
+  eq "$(jq -r '[.[] | .memory_ref // empty] | join(",")' "$KEPT" 2>/dev/null || echo ERR)" "0123456789abcdef/a.md@0123456789abcdef" \
+    "and the due memory notes seed it"
 fi
+eq "$(cat "$SANDBOX/memory-keep.log")" "due --limit 200" "the seed asks for memory_notes_per_run notes"
 eq "$(grep -c -- '--outcome fail' "$SANDBOX/close-keep.log" || true)" "0" \
   "handoff path closed no step --outcome fail"
 eq "$(find "$SANDBOX/cwd-keep" -mindepth 1 | grep -c . || true)" "0" \
   "handoff path wrote nothing into the cwd"
+
+echo "── memory the intake cannot read leaves the observations ──"
+STUB_MEMORY=fail run_block nomem
+NOMEM="$(leftovers nomem)"
+if [ -n "$NOMEM" ] && [ -f "$NOMEM" ]; then
+  eq "$(jq -r '[.[].obs_rig] | sort | join(",")' "$NOMEM" 2>/dev/null || echo ERR)" "r-alpha,r-beta" \
+    "the pending set still carries every observation"
+else
+  bad "the pending set still carries every observation" "no pending set survived"
+fi
+eq "$(grep -c -- '--outcome fail' "$SANDBOX/close-nomem.log" || true)" "0" \
+  "and the step does not fail"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
