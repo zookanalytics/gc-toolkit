@@ -207,22 +207,19 @@ reap removes once this bead closes, and a relative `serve_dir` resolves against
 that worktree:
 ```bash
 RIG_PATH=$(gc rig list --json | tr -d '\\000-\\037' | jq -r --arg r "{{rig_name}}" '.rigs[]? | objects | select(.name == $r) | .path // empty' | head -n1)
-SERVE_DIR="{{serve_dir}}"
-SERVE_CMD="{{serve_cmd}}"
-BASE_URL="{{base_url}}"
+SERVE_DIR="{{serve_dir}}" SERVE_CMD="{{serve_cmd}}" BASE_URL="{{base_url}}"
 # >>> rig-demo-app-target
-# One character for each app target the pour sets.
+# One character for each app target the pour sets. With none, a page script
+# takes the command the rig declares as its ui_serve_command, and a terminal
+# script brings up no app. More than one is a malformed pour.
 TARGETS="${SERVE_DIR:+x}${SERVE_CMD:+x}${BASE_URL:+x}"
-if [ "${#TARGETS}" -gt 1 ]; then
-  gc bd update "$REQUEST_BEAD" --append-notes "rig-demo: malformed pour; ${#TARGETS} of serve_dir/serve_cmd/base_url set, and at most one names the app."
-  "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step mol-rig-demo.capture --reason "malformed pour: ${#TARGETS} of serve_dir/serve_cmd/base_url set, and at most one names the app" --subject "$REQUEST_BEAD" --key rig-demo-ambiguous-app-target --message "mol-rig-demo on $REQUEST_BEAD got ${#TARGETS} of serve_dir / serve_cmd / base_url (serve_dir='$SERVE_DIR' serve_cmd='$SERVE_CMD' base_url='$BASE_URL'), and at most one names how the rig's app is reached. Its run is cancelled; nothing was captured. Re-pour with one app target, or with none to take the rig's ui_serve_command."
-  exit 1
-fi
-# A page script that the pour names no app for takes the command the rig
-# declares as its ui_serve_command. A terminal script brings up no app.
-if [ -z "$TARGETS" ] && [ "$(. "$SCRIPTS/demo-engine-lib.sh" && demo_engine_script_kind "$SCRIPT_PATH")" = page ]; then
-  SERVE_CMD=$(gc formula show mol-rig-demo --rig "{{rig_name}}" --json | jq -r '[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty') || SERVE_CMD=""
-fi
+case "$TARGETS" in
+  "") [ "$(. "$SCRIPTS/demo-engine-lib.sh"; demo_engine_script_kind "$SCRIPT_PATH")" != page ] || SERVE_CMD=$(gc formula show mol-rig-demo --rig "{{rig_name}}" --json | jq -r '[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty') || SERVE_CMD="" ;;
+  x) ;;
+  *) gc bd update "$REQUEST_BEAD" --append-notes "rig-demo: malformed pour; ${#TARGETS} of serve_dir/serve_cmd/base_url set, and at most one names the app."
+     "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step mol-rig-demo.capture --reason "malformed pour: ${#TARGETS} of serve_dir/serve_cmd/base_url set, and at most one names the app" --subject "$REQUEST_BEAD" --key rig-demo-ambiguous-app-target --message "mol-rig-demo on $REQUEST_BEAD got ${#TARGETS} of serve_dir / serve_cmd / base_url (serve_dir='$SERVE_DIR' serve_cmd='$SERVE_CMD' base_url='$BASE_URL'), and at most one names how the rig's app is reached. Its run is cancelled; nothing was captured. Re-pour with one app target, or with none to take the rig's ui_serve_command."
+     exit 1 ;;
+esac
 # <<< rig-demo-app-target
 # >>> rig-demo-app-root
 # A worktree that cannot be made leaves APP_ROOT empty. The capture refuses an
