@@ -254,7 +254,7 @@ func build(g *gathered) Document {
 				}
 			}
 		}
-		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, prFactsOf(g, id), open, members); a != nil {
+		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, factsOf(g, id), open, members); a != nil {
 			bt.asks[id] = a
 		}
 	}
@@ -265,7 +265,7 @@ func build(g *gathered) Document {
 		}
 	}
 	for _, id := range ix.rows {
-		in := tableInput{b: ix.beads[id], kind: ix.kinds[id], ask: bt.asks[id], facts: prFactsOf(g, id),
+		in := tableInput{b: ix.beads[id], kind: ix.kinds[id], ask: bt.asks[id], facts: factsOf(g, id),
 			prUnread: g.noFacts[id]}
 		if p, ok := places[id]; ok {
 			in.place = &p
@@ -313,6 +313,20 @@ func rootOf(id string, h waits.Holds) string {
 	return ""
 }
 
+// factsOf is what the read knows of a bead's open pull request, nil when it
+// has none or a reader could not answer for it.
+func factsOf(g *gathered, id string) *prFacts {
+	f, ok := g.facts[id]
+	if !ok || g.noFacts[id] {
+		return nil
+	}
+	p := &prFacts{facts: f}
+	if a, ok := g.answers[id]; ok {
+		p.answer = &a
+	}
+	return p
+}
+
 // row is one row before the asks are linked and the counts made.
 func (bt *built) row(id string) Row {
 	ix := bt.ix
@@ -325,7 +339,7 @@ func (bt *built) row(id string) Row {
 	if a := bt.asks[id]; a != nil {
 		r.Ask = a.kind
 		if a.kind == AskPullRequest {
-			r.Reasons = reasonsOf(prFactsOf(ix.g, id))
+			r.Reasons = reasonsOf(factsOf(ix.g, id))
 		}
 	}
 	if h, ok := ix.g.holds[id]; ok {
@@ -334,7 +348,7 @@ func (bt *built) row(id string) Row {
 			r.Waits = []Ref{}
 		}
 	}
-	r.PullRequest = pullRequestOf(b, prFactsOf(ix.g, id))
+	r.PullRequest = pullRequestOf(b, factsOf(ix.g, id))
 	if k == KindEpic {
 		r.Contract = contractOf(b)
 	}

@@ -260,20 +260,6 @@ type prFacts struct {
 	answer *pr.Answer
 }
 
-// prFactsOf is what the read knows of a bead's open pull request, nil when it
-// has none or a reader could not answer for it.
-func prFactsOf(g *gathered, id string) *prFacts {
-	f, ok := g.facts[id]
-	if !ok || g.noFacts[id] {
-		return nil
-	}
-	p := &prFacts{facts: f}
-	if a, ok := g.answers[id]; ok {
-		p.answer = &a
-	}
-	return p
-}
-
 // state is where the pull request stands.
 func (p *prFacts) state() prstatus.State {
 	if p.answer != nil {
