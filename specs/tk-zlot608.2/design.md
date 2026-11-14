@@ -256,19 +256,24 @@ tk-0vo6nph on 2026-11-14, dropping a fixed window for such notes:
 > an extreme example). Why dictate any timing requirement
 
 So such a note is not dropped on that judgment. The judge keeps it until a date
-it sets for that note and adds one line asking whoever uses it to append a
-dated line recording the use. A use is recorded in the note itself, keeps the
-note, and does not reopen its lesson. When the note comes due, the judge weighs
-it as a whole: its dated uses, what it holds, and what losing it would cost. A
-note the judge can substantiate is kept or dropped as above, and a note on a
-pattern whose fix has landed leaves as above. The build takes two of the
-sitting's proposals, which the operator did not rule on: a use line alone does
-not make a note due early, so the per-run read stays for new notes and the
-uses are read when the note next comes due, and the line that asks for uses is
-the pack's own, added by the script. The build makes one call of its own, which
-the operator did not rule on either. A note whose pattern closed after a veto
-is due again, and the judge weighs it with the veto as the operator's word on
-its rule, where the design as approved had it leave at the veto.
+it sets for that note, and the script adds one line to it, in the pack's own
+words, asking whoever uses it to append a dated line recording the use. A use
+is recorded in the note itself, keeps the note, and does not reopen its lesson.
+When the note comes due, the judge weighs it as a whole: its dated uses, what it
+holds, and what losing it would cost. A note the judge can substantiate is kept
+or dropped as above, and a note on a pattern whose fix has landed leaves as
+above.
+
+The sitting recorded two proposals of its own beside the ruling, which the
+operator did not rule on. The build takes one: a use line alone does not make a
+note due early, so the per-run read stays for new notes and the uses are read
+when the note next comes due. It leaves the other, that the list keep each
+note's use count so the most-used notes can later go to the operator as
+candidates for the pack. The uses stay in the note alone, where the judge reads
+them. The build makes one call of its own, which the operator did not rule on
+either. A note whose pattern closed after a veto is due again, and the judge
+weighs it with the veto as the operator's word on its rule, where the design as
+approved had it leave at the veto.
 
 The operator's two concerns, in that cycle:
 
