@@ -42,6 +42,7 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --stay "<what the operator agreed, which the return compares the work with, one line>"
      # no --close-brief for a subject the sign-off arms no closer for, such as an epic or a PR's anchor
      # --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR's rework, and the other flags as converse-settle's sign-off takes them
+     # --waiting-on "$SUBJECT" and no --close-brief when the work runs on the subject itself, with --accept when the ruling takes its recommendation (below)
 then
   "$CONV/converse-entry.sh"  # staying: waiting while the work is out, returned once it has closed
 else
@@ -57,20 +58,37 @@ member, so the sign-off makes the member the conversation's wait alone: the
 subject's headline leaves it out, and says `--no-wait` when nothing else is
 left, and no closer is armed on it.
 
+**The subject itself** goes in `--waiting-on` when the ruling's work runs on
+it: the subject sent on a formula, its recommendation taken, or the landing of
+the PR it anchors. The conversation tracks the subject, and bd keeps one edge
+from a bead onto another, so the sign-off makes the conversation wait on the
+convoy the subject's dispatch poured its run over, which Gas City closes once
+the subject closes. The subject is the conversation's wait alone, as a member
+is, and takes no `--close-brief`. That convoy stands only once the subject is
+sent:
+
+- **The ruling takes the recommendation.** Stay with `--accept` and
+  `--waiting-on "$SUBJECT"`. Accept dispatches the recommendation inside the
+  sign-off, before the conversation waits on its run.
+- **The ruling sends the subject on a formula.** Carry the ruling out as a turn
+  that does not sign off does: answer its gates with `--answer`, and send the
+  subject once that answer lands (`converse-continue`). Then stay with
+  `--waiting-on "$SUBJECT"`.
+
 The sign-off refuses three stays, each before any write:
 
-- **A stay on work in another store** than the conversation's, where the wait
-  would hold nothing.
-- **A stay on the subject itself**, as when the ruling sends the subject or
-  takes its recommendation, because the conversation tracks the subject and bd
-  keeps one edge from a bead onto another.
+- **A stay on work in another store** than the conversation's, the subject's
+  included, where the wait would hold nothing.
+- **A stay on a subject nothing has sent**, without `--accept`, because no run
+  of it has a convoy to wait on.
 - **A stay for the landing of the PR whose merge this conversation holds**, or
   for work that waits on that PR, directly or through other beads.
 
-After either of the first two refusals, end at the hand-off
-(`converse-settle`), and tell the operator why the sitting does not stay. After
-the third, lift the hold (`converse-hold`) and run the stay again when the
-operator wants that PR to land first, and otherwise end at the hand-off.
+After the first refusal, end at the hand-off (`converse-settle`), and tell the
+operator why the sitting does not stay. After the second, answer the gates and
+send the subject, then run the stay again. After the third, lift the hold
+(`converse-hold`) and run the stay again when the operator wants that PR to
+land first, and otherwise end at the hand-off.
 
 The block runs the entry as soon as the stay lands, because the work can close
 before the conversation waits on it, as on a re-run, and then no close is left
@@ -135,7 +153,9 @@ whole call. Take the case that fits:
   - `WORK`, which the entry prints once the sign-off has finished, names its
     work for `--waiting-on`. A bead in `WORK` whose `source_ruling_bead` is
     this conversation is the ruling's rework, so the call takes `--rework` for
-    it, in the rework form the stay example's comment gives.
+    it, in the rework form the stay example's comment gives. `SUBJECT` in
+    `WORK` is a stay on the subject itself, whose call takes `--accept` when
+    the conversation's comments record that the recommendation was taken.
 - **The record does not give the whole call**, as when `WORK` is empty. Hold
   instead (`converse-hold`, after the claim-back below), and tell the operator
   that the stay stopped short and what it had done.
@@ -203,8 +223,9 @@ Start where the return stands:
    to know, never a verdict. A departure they want changed is new work
    (`converse-settle`, Send the work).
 4. **Then sign off, or hold.** Sign off with the stay's call less `--stay`,
-   with `--no-wait` in place of its waits and brief, and with `--no-rework` in
-   place of a `--rework`, whose child has landed. Leave out the `--pr-anchor`
+   with `--no-wait` in place of its waits and brief, with `--no-rework` in
+   place of a `--rework`, whose child has landed, and less an `--accept`, whose
+   dispatch has run. Leave out the `--pr-anchor`
    that named the PR the rework went to: the sign-off takes one only beside
    `--rework` or `--retire`, and `--no-rework` leaves every PR the ruling
    reaches standing. The return's `--outcome` says what landed, in place of the

@@ -242,7 +242,11 @@ Take the case that fits the ruling:
 
 - **The subject is the work.** Sign off with `--ruled yes --no-wait`, then send
   the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`. Never send a
-  formula the subject recommends this way: the next case takes it.
+  formula the subject recommends this way: the next case takes it. A sitting
+  that stays sends the subject before its sign-off instead, once a turn's
+  `--answer` has answered the ruling's gates (`converse-continue`), and then
+  stays with `--waiting-on "$SUBJECT"` in place of `--no-wait`
+  (`converse-stay`).
 - **The subject takes its recommendation.** Reply to the recommendation's gate,
   which is the human gate under the key `first-reaction` that blocks the
   subject, and sign off with `--ruled yes --no-wait --accept`. Send nothing
@@ -255,7 +259,8 @@ Take the case that fits the ruling:
   off without `--accept` and with `--leave` on the recommendation's gate, and
   the board offers Accept once the other gate clears. A `first-reaction` gate
   on an epic's member asks about the member's recommendation, which this case
-  does not take.
+  does not take. A sitting that stays signs off through `converse-stay`, with
+  `--waiting-on "$SUBJECT"` in place of `--no-wait`.
 - **The work will not go on, and a human gate holds the subject.** Stand the
   subject down first, with the gate's `await_id` as the key:
   `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.

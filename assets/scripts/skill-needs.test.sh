@@ -580,7 +580,7 @@ have "the stay skill stays through the sign-off" \
 tr -s '[:space:]' ' ' <"$STAY" >"$TMP/stay-squeezed"
 have "…and a stay drains nothing" 'A stay closes nothing, so it drains nothing' "$TMP/stay-squeezed"
 have "the stay skill gives the return its sign-off" \
-    'Sign off with the stay'"'"'s call less `--stay`, with `--no-wait` in place of its waits and brief, and with `--no-rework` in place of a `--rework`' "$TMP/stay-squeezed"
+    'Sign off with the stay'"'"'s call less `--stay`, with `--no-wait` in place of its waits and brief, with `--no-rework` in place of a `--rework`, whose child has landed, and less an `--accept`, whose dispatch has run' "$TMP/stay-squeezed"
 have "…which leaves out the --pr-anchor of a rework that picked its PR" \
     'Leave out the `--pr-anchor` that named the PR the rework went to' "$TMP/stay-squeezed"
 have "…and the return passes and fails nothing" \
@@ -972,8 +972,16 @@ have "the stay example's rework form takes --rework --no-wait in place of the wa
     '# --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR'"'"'s rework' "$STAY"
 have "…and converse-settle's sign-off, whose other flags it takes, picks the PR a rework acts on with --pr-anchor" \
     '# --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one' "$SETTLE"
-have "…and a stay on the subject itself is refused" \
-    'A stay on the subject itself**, as when the ruling sends the subject or takes its recommendation' "$TMP/stay-squeezed"
+have "…and a stay on the subject itself waits on the convoy of the subject's dispatch" \
+    'the sign-off makes the conversation wait on the convoy the subject'"'"'s dispatch poured its run over, which Gas City closes once the subject closes' "$TMP/stay-squeezed"
+have "…which stands only once the subject is sent: Accept sends it inside the sign-off" \
+    'Stay with `--accept` and `--waiting-on "$SUBJECT"`. Accept dispatches the recommendation inside the sign-off, before the conversation waits on its run.' "$TMP/stay-squeezed"
+have "…and a sitting that sends it answers the gates and sends it before the stay" \
+    'answer its gates with `--answer`, and send the subject once that answer lands (`converse-continue`). Then stay with `--waiting-on "$SUBJECT"`.' "$TMP/stay-squeezed"
+have "…as the settle skill sends a stay to do" \
+    'A sitting that stays sends the subject before its sign-off instead, once a turn'"'"'s `--answer` has answered the ruling'"'"'s gates (`converse-continue`), and then stays with `--waiting-on "$SUBJECT"` in place of `--no-wait`' "$TMP/settle-squeezed"
+have "…and the stay example names the subject's form" \
+    '# --waiting-on "$SUBJECT" and no --close-brief when the work runs on the subject itself, with --accept when the ruling takes its recommendation (below)' "$STAY"
 have "the stay example says when it takes no brief" \
     '# no --close-brief for a subject the sign-off arms no closer for, such as an epic or a PR'"'"'s anchor' "$STAY"
 have "…which the sign-off refuses there, naming the case" \
@@ -982,8 +990,10 @@ have "…and a member of the subject is the conversation's wait alone" \
     'bd refuses the subject'"'"'s edge onto its own member, so the sign-off makes the member the conversation'"'"'s wait alone' "$TMP/stay-squeezed"
 have "…and a recovery takes a brief only when one is held on its work" \
     'The subject'"'"'s latest close brief is its `--close-brief` when the brief'"'"'s heading holds it on work that `WORK` names.' "$TMP/stay-squeezed"
-have "…so that sitting ends at the hand-off" \
-    'After either of the first two refusals, end at the hand-off' "$TMP/stay-squeezed"
+have "…so a sitting whose work is in another store ends at the hand-off" \
+    'After the first refusal, end at the hand-off' "$TMP/stay-squeezed"
+have "…and one whose subject nothing has sent sends it, then stays" \
+    'After the second, answer the gates and send the subject, then run the stay again.' "$TMP/stay-squeezed"
 SV="$TMP/stay-forms"
 mkdir -p "$SV/bin" "$SV/pack"
 printf '#!/bin/sh\nexit 1\n' >"$SV/bin/gc"
@@ -1009,6 +1019,7 @@ else
         drop_args "$SV/stay" --close-brief >"$SV/stay-no-brief"
         { drop_args "$SV/stay" --waiting-on --close-brief; printf '%s\n' --rework --no-wait; } >"$SV/rework"
         { cat "$SV/rework"; printf '%s\n' --pr-anchor x; } >"$SV/rework-pick"
+        { drop_args "$SV/stay" --waiting-on --close-brief; printf '%s\n' --waiting-on x --accept; } >"$SV/subject"
         { drop_args "$SV/stay" --stay --waiting-on --close-brief; printf '%s\n' --no-wait; } >"$SV/return"
         for f in rework rework-pick; do
             drop_args "$SV/$f" --stay --pr-anchor | sed 's/^--rework$/--no-rework/' >"$SV/$f-return"
@@ -1028,6 +1039,7 @@ stay|the stay example's call passes the sign-off's parser
 stay-no-brief|…as does its form with no brief, for a subject the sign-off arms no closer for
 rework|…as does its rework form, with --rework --no-wait in place of --waiting-on and --close-brief
 rework-pick|…and that form with the --pr-anchor that picks its PR when the ruling reaches more than one
+subject|…as does its form on the subject itself that takes its recommendation, with --waiting-on the subject, --accept and no brief
 return|…the return's call, the stay's less --stay with --no-wait in place of its waits and brief
 rework-return|…the return of a rework stay, with --no-rework in place of its --rework
 rework-pick-return|…and the return of one that picked its PR, which leaves out its --pr-anchor

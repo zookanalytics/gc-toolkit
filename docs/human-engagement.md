@@ -751,8 +751,8 @@ values every later call sets and the skill to load next:
 | Entry | What the record shows | Next |
 |---|---|---|
 | `fresh` | A new claim, with no `staying:` line newest. | The premise re-check. |
-| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A `no_work` drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it, or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
-| `waiting` | No ready work (a `no_work` drain), and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out. | `converse-stay`. |
+| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A `no_work` drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it (for the subject, none onto a convoy that tracks it), or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
+| `waiting` | No ready work (a `no_work` drain), and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out, or for the subject onto a convoy that tracks it. | `converse-stay`. |
 | `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line that names work, each bead of which has closed, with nothing left open that the conversation waits on. | `converse-stay`. |
 | `none` | No ready work (a `no_work` drain), and no conversation under the alias. | Drain. |
 | `stop` | A drain for a reason other than `no_work` and `claims_errored`, such as `drain_pending` or `stale_session`: Gas City is stopping the session and hands it no work, whatever the conversation's state. The entry prints what the hook wrote to stderr, which can name the acknowledgement to run. | Drain. Gas City refuses the acknowledgement while the session holds a claim it started and has not finished, as a conversation in progress under it is, and tells it to continue. So a sitting refused over its conversation goes on with it, and acknowledges the drain once the conversation is closed, back in the operator's queue or left to wait. |
@@ -771,7 +771,8 @@ began last, and a stay that stops anywhere reads as a stay, never as a hold
 that stands or a sitting that held nothing. A conversation keeps its edges onto
 the work of a stay that returned, so an edge alone proves nothing: the entry
 reads a stay as waiting or returned only once each bead its newest line names
-has an edge or has closed. A return that leaves the operator something to
+has an edge or has closed, the subject's edge being one onto a convoy that
+tracks it. A return that leaves the operator something to
 answer holds, which writes a newer `holding:` line, so a restart after it reads
 the hold, and a conversation handed back to the queue after such a hold starts
 its next sitting fresh. A stay that stopped short where the record cannot
@@ -1471,6 +1472,25 @@ alias, which drops the claim. Gas City does the rest with what it already has
   that cannot come back, because its session was closed, leaves its
   conversation open, and once the work closes the next engagement takes up
   the return from the record.
+- **Work that runs on the subject.** When the ruling sends the subject on a
+  formula, takes its recommendation, or waits for the landing of the PR it
+  anchors, the work is the subject itself. The conversation tracks the
+  subject, and bd keeps one edge from a bead onto another (beads
+  `DependencyTypeConflictError`), so the conversation waits instead on the
+  convoy the subject's dispatch poured its run over. A sling of a bead pours
+  its run over an input convoy that tracks that bead alone (Gas City
+  `graphv2.CreateSingleItemInputConvoy`), and Gas City closes a convoy once
+  every bead it tracks has closed (`doConvoyAutocloseWith`, run on the bead's
+  close and retried by the controller's autoclose sweep). That close is a
+  bead's close like any other, so it wakes the sitting or sends it the
+  notice. The convoy stands once the subject is sent: a sitting that sends
+  the subject answers the ruling's gates on a turn that does not sign off,
+  sends it, and then stays, and one that takes the recommendation stays with
+  `--accept`, whose dispatch comes before the wait. The staying: line names
+  the subject, the subject's headline leaves it out as it leaves out a
+  member, and the board's row reads "Waits on" the convoy. A subject that
+  closes while the controller is down is one its sweep never sees, which
+  leaves the convoy open until `gc convoy check` closes it.
 - **Low context during the return.** The comparison stays owed when the
   sitting's context runs low, so the sitting neither signs off nor holds for
   that reason. Claude Code and Codex compact a thread on their own, and the
@@ -1490,16 +1510,16 @@ alias, which drops the claim. Gas City does the rest with what it already has
   brings one back.
 - **Where it cannot stay.** An edge onto a bead in another store holds
   nothing, so a sitting stays only for work in its conversation's own store,
-  and ends at the hand-off otherwise. It ends there too when the work is the
-  subject itself, sent on a formula or taking its recommendation: the
-  conversation tracks the subject, and bd keeps one edge from a bead onto
-  another, so the sign-off refuses a wait on the subject before any write.
-  Nor does it stay for the PR whose merge its conversation holds, or for work
-  that waits on that PR, itself or through other beads, since that PR's anchor
-  already waits on the conversation and neither could close. bd would refuse
-  the stay's edge as a cycle, so the sign-off walks the edges bd's cycle check
-  walks, blocks, conditional-blocks and parent-child, and refuses that stay
-  before any write until the sitting lifts the hold.
+  and ends at the hand-off otherwise. A stay on a subject nothing has sent,
+  without `--accept`, is refused before any write, because no run of it has a
+  convoy to wait on. Nor does it stay for the PR whose merge its conversation
+  holds, or for work that waits on that PR, itself or through other beads,
+  since that PR's anchor already waits on the conversation and neither could
+  close. bd would refuse the stay's edge as a cycle, so the sign-off walks the
+  edges bd's cycle check walks, blocks, conditional-blocks and parent-child,
+  and refuses that stay before any write until the sitting lifts the hold. A
+  stay for that PR's own landing would wait through its convoy, an edge bd's
+  cycle check does not follow, and the sign-off refuses it the same way.
 
 Gas City's `gc session wait <session> --on-beads <ids> --sleep` also sleeps a
 session until a bead closes. A sitting does not use it, because the attach that
