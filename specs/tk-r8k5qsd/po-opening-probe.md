@@ -26,7 +26,12 @@ sitting. The arms are revisions of the po's prompt and skill:
 - **third**: 20524b5b1, which makes the pointer to the skill an act to take
   before asking the operator anything.
 - **final**: 0acdac690, whose opening sentence names those docs as part of what
-  a sitting opens from. This is the wording the branch ships.
+  a sitting opens from. This is the prompt the branch ships.
+- **fixed**: d00c52e9d, the final prompt with the skill the branch ships. The
+  correctness review found that the final skill reopened a closed request only
+  where the po asks, so a request that already carried the answer would go to
+  its place or sling still closed. This skill reopens a closed request first,
+  whether or not it carries the answer.
 
 Each arm's prime is its own commit's render of the po,
 `generated/seed-audit/agents/po.md`, with the city root filled in, appended to the
@@ -48,21 +53,24 @@ The cases:
   is not the skill, so only the prompt's pointer sends the po to it.
 - **A recorded answer, portfolio sync.** The same rig, but its request for the page
   already carries an earlier sitting's answer in its notes and is routed to a pool.
+- **A closed request, refinement.** The same rig in a backlog refinement, with
+  that request closed while the page is still missing. It still carries the
+  answer and `hold:mayor`, and no pool holds it.
 
 The operator's line is "Let's start a backlog refinement sitting." or "Let's do a
 portfolio sync.". Stubs stand in for the store and for writes, and each logs every
 call. The `gc` stub answers the queue read with two held beads for each rig, the
-epic read with none, and the request probe with `[]`, or with the routed request
-in the last case. It refuses every write. The `git` stub passes read-only
-subcommands to git and refuses the rest, and the `gh` stub answers `pr list` with
-`[]`. Each run is:
+epic read with none, and the request probe with `[]`, with the routed request in
+the recorded-answer case, or with the closed request in the closed-request case.
+It refuses every write. The `git` stub passes read-only subcommands to git and
+refuses the rest, and the `gh` stub answers `pr list` with `[]`. Each run is:
 
 `claude -p --model claude-opus-5-5 --setting-sources project --strict-mcp-config --tools "Bash,Read,Grep,Glob,Skill" --permission-mode bypassPermissions --max-turns 14 --no-session-persistence --output-format stream-json --verbose --append-system-prompt-file <prime> "<operator line>"`
 
 It runs from the session's home, in an environment holding only `HOME`, `USER`,
 `PATH` with the stubs first, `TERM`, `LANG`, `SHELL` and
-`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. There are three runs to a cell. The 51
-counted runs cost $9.19, and one dry run of the first wording, not counted, cost
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. There are three runs to a cell. The 69
+counted runs cost $12.66, and one dry run of the first wording, not counted, cost
 $0.21.
 
 The reads are counted from each run's tool calls and the stubs' call log. Whether
@@ -81,33 +89,42 @@ Each cell counts runs out of three. A blank arm was not run on that case.
 | | second | 3 | 3 | 0 | 0 | 0 | no answer asked for |
 | | third | 3 | 2 | 0 | 0 | 0 | no answer asked for |
 | | final | 3 | 3 | 0 | 0 | 0 | no answer asked for |
+| | fixed | 3 | 3 | 0 | 1 | 0 | no answer asked for |
 | No goals, refinement | old | 0 | | 3 | 0 | 3 | `AGENTS.md`, 3 |
 | | first | 3 | | 0 | 3 | 3 | the request for the page, 3 |
 | | second | 3 | | 0 | 3 | 3 | the request for the page, 3 |
 | | third | 3 | | 0 | 3 | 3 | the request for the page, 3 |
 | | final | 3 | | 0 | 3 | 3 | the request for the page, 3 |
+| | fixed | 3 | | 0 | 3 | 3 | the request for the page, 3 |
 | No goals, portfolio sync | old | 0 | | 3 | 0 | 3 | `AGENTS.md`, 3 |
 | | second | 3 | | 0 | 2 | 3 | the request, 2; the page by its own words, with no look for the request, 1 |
 | | third | 3 | | 0 | 3 | 3 | the request for the page, 3 |
 | | final | 3 | | 0 | 3 | 3 | the request for the page, 3 |
+| | fixed | 3 | | 0 | 3 | 3 | the request for the page, 3 |
 | Recorded answer, portfolio sync | old | 0 | | 3 | 0 | 3 | `AGENTS.md`, 3 |
 | | third | 3 | | 0 | 3 | 0 | opened from the recorded answer, 3 |
 | | final | 3 | | 0 | 3 | 0 | opened from the recorded answer, 3 |
+| | fixed | 3 | | 0 | 3 | 0 | opened from the recorded answer, 3 |
+| Closed request, refinement | final | 3 | | 0 | 3 | 0 | opened from the recorded answer, 3 |
+| | fixed | 3 | | 0 | 3 | 0 | opened from the recorded answer, 3 |
 
 The old arm reproduces the sitting that prompted the bead in every case. It opens
 `AGENTS.md`, finds no target and asks: "The rig's instructions (`AGENTS.md`) don't
 state a target. ... I'll file a task to write it into `AGENTS.md` so no later
 sitting asks again."
 
-Under the final wording, every run in this repository opens from the goals and asks
-nothing, as in "this hits the goal that the board shows what actually happened".
-Every run in a rig with no goals looks for the request before it asks, and says
-the answer goes there: "Once you agree on the wording, I'll file it as one request
-so a normal PR writes the goals page and no later sitting asks again." Every run
-whose request already carries an answer opens from it, and neither asks again nor
-sends the routed request a second time: "your words on the goals-page request
-... A polecat already has that request, so I didn't ask you again or send it a
-second time."
+Under the final wording, and again under the fixed skill, every run in this
+repository opens from the goals and asks nothing, as in "this hits the goal that
+the board shows what actually happened". Every run in a rig with no goals looks
+for the request before it asks, and says the answer goes there: "Once you agree on
+the wording, I'll file it as one request so a normal PR writes the goals page and
+no later sitting asks again." Every run whose request already carries an answer
+opens from it, and neither asks again nor sends the routed request a second time:
+"your words on the goals-page request ... A polecat already has that request, so I
+didn't ask you again or send it a second time." One fixed run in this repository
+also ran the request probe, late in the sitting and in the same command as a full
+listing it ran because the store's answers disagreed, after it had opened from
+the goals.
 
 Each revision answers what the arm before it missed:
 
@@ -122,16 +139,28 @@ Each revision answers what the arm before it missed:
   goals page, which summarizes the foundation's goals. The final wording's
   opening sentence makes those docs part of what a sitting opens from.
 
-The one call any stub refused was a read: `git remote get-url origin`, which the
-`git` stub refuses with every other `remote` subcommand. No run tried a bead
-write, a sling or a change to a file.
+In the closed-request case the final and fixed skills differ only in the reopen.
+Both open from the recorded answer and ask nothing. Under the final skill no run
+reopened the request, and each proposed reopening it as a ruling for the
+operator: "The request for it is closed but the page was never written ... I'd
+reopen it and send it on so a normal PR writes the page. Agree?" Under the fixed
+skill every run reopened it before it read any queued bead's description, and
+said so once the stub refused: "I tried to reopen that request and the store
+refused". The probe ends before any send, so it does not show the failure the
+review found, a place or sling of the closed request.
+
+Besides the fixed skill's three reopens, the one call any stub refused was a
+read: `git remote get-url origin`, which the `git` stub refuses with every other
+`remote` subcommand. No other run tried a bead write, a sling or a change to a
+file.
 
 ## What the probe does not show
 
 - It covers only the opening turn: what a sitting reads, whether it asks, and what
-  it says it will do with the answer. The writes that follow the operator's
-  agreement are not run: the append, reopen or create on the request, and its
-  place or sling. The stubs refuse writes, and every run ended its turn at the ask.
+  it says it will do with the answer. No write is run. The stubs refuse the
+  reopen of a closed request, and no run reached the append or create that
+  follows the operator's agreement, or the request's place or sling. Every run
+  ended its turn waiting on the operator.
 - The prime arrives appended to the system prompt, not as the first message a
   real start sends. One model ran every session, and three runs to a cell shows a
   direction, not a rate.
