@@ -64,8 +64,8 @@ the PR it anchors. The conversation tracks the subject, and bd keeps one edge
 from a bead onto another, so the sign-off makes the conversation wait on the
 convoy the subject's dispatch poured its run over, which Gas City closes once
 the subject closes. The subject is the conversation's wait alone, as a member
-is, and takes no `--close-brief`. That convoy stands only once the subject is
-sent:
+is, and takes no `--close-brief`. That convoy stands only once a formula's
+sling has sent the subject:
 
 - **The ruling takes the recommendation.** Stay with `--accept` and
   `--waiting-on "$SUBJECT"`. Accept dispatches the recommendation inside the
@@ -79,16 +79,19 @@ The sign-off refuses three stays, each before any write:
 
 - **A stay on work in another store** than the conversation's, the subject's
   included, where the wait would hold nothing.
-- **A stay on a subject nothing has sent**, without `--accept`, because no run
-  of it has a convoy to wait on.
+- **A stay on a subject no formula's sling has sent**, without `--accept`,
+  because no run of it has a convoy to wait on. A change this sitting resumed
+  is such a subject, since it went to review with no sling.
 - **A stay for the landing of the PR whose merge this conversation holds**, or
   for work that waits on that PR, directly or through other beads.
 
 After the first refusal, end at the hand-off (`converse-settle`), and tell the
-operator why the sitting does not stay. After the second, answer the gates and
-send the subject, then run the stay again. After the third, lift the hold
-(`converse-hold`) and run the stay again when the operator wants that PR to
-land first, and otherwise end at the hand-off.
+operator why the sitting does not stay. After the second, when the ruling sends
+the subject on a formula, answer the gates and send the subject, then run the
+stay again. When the subject went out with no sling, as a change this sitting
+resumed and handed off did, end at the hand-off and tell the operator why.
+After the third, lift the hold (`converse-hold`) and run the stay again when
+the operator wants that PR to land first, and otherwise end at the hand-off.
 
 The block runs the entry as soon as the stay lands, because the work can close
 before the conversation waits on it, as on a re-run, and then no close is left

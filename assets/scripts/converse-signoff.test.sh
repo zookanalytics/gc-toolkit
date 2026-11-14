@@ -156,10 +156,11 @@
 #             headline waits on nothing of it and no closer is armed on it;
 #             with --accept it waits on the convoy Accept's run was poured
 #             over, and stops with no edge written when Accept poured none;
-#             without --accept, a subject nothing has sent, a subject in another
-#             store and one whose merge the conversation holds are refused
-#             before any write, a read of its convoys that fails stops before
-#             any write, and a subject that has closed takes no edge
+#             without --accept, a subject no formula's sling has sent, a
+#             subject in another store and one whose merge the conversation
+#             holds are refused before any write, a read of its convoys that
+#             fails stops before any write, and a subject that has closed
+#             takes no edge
 #   (APPROVE*) a PR a ruling leaves standing whose status (gctk pr status)
 #             reads needs-review with no approval standing, or does not read, is
 #             named in the headline, the close reason and the reminder, and
@@ -2558,14 +2559,17 @@ closer_case; convoy tk-cv tk-sub
 run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
 eq "$RC/$(field tk-g status)" "0/closed" "(STAY-SUBJECT-ANSWERS) a stay on a subject already sent answers the ruling's gate itself"
 has "$(cat "$CALLS")" "bd dep add tk-conv tk-cv --type blocks" "(STAY-SUBJECT-ANSWERS) …and waits on the convoy"
-# Nothing has sent the subject: no convoy tracks it, so nothing would close for
-# the conversation to wait on. The stay is refused before any write, saying how
-# to send it first.
+# No formula's sling has sent the subject: no convoy tracks it, so nothing
+# would close for the conversation to wait on. The stay is refused before any
+# write, saying how to send it first, and that a subject that went out with no
+# sling, as a change a sitting resumes and hands off to review does, ends at
+# the hand-off.
 closer_case
 run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
-eq "$RC" 2 "(STAY-SUBJECT-UNSENT) a stay on a subject nothing has sent exits 2"
-has "$OUT" "no open convoy tracks tk-sub alone, so tk-sub has not been sent" "(STAY-SUBJECT-UNSENT) …saying so"
-has "$OUT" "(--answer), send tk-sub (gc sling <rig>/<pool> tk-sub --on <formula>), then run this call again" "(STAY-SUBJECT-UNSENT) …and naming the order that sends it first"
+eq "$RC" 2 "(STAY-SUBJECT-UNSENT) a stay on a subject no formula's sling has sent exits 2"
+has "$OUT" "no open convoy tracks tk-sub alone, so no such sling has sent tk-sub" "(STAY-SUBJECT-UNSENT) …saying so"
+has "$OUT" "(--answer), send tk-sub (gc sling <rig>/<pool> tk-sub --on <formula>), then run this call again" "(STAY-SUBJECT-UNSENT) …naming the order that sends it first"
+has "$OUT" "When tk-sub went out another way, as a change a sitting resumes and hands off to review does, no convoy closes with it, so sign off without --stay and end at the hand-off" "(STAY-SUBJECT-UNSENT) …and the hand-off ending for a subject that went out with no sling"
 eq "$(writes)" 0 "(STAY-SUBJECT-UNSENT) …and writes nothing"
 eq "$(field tk-g status)" "open" "(STAY-SUBJECT-UNSENT) …leaving the gate open"
 # Only a convoy that Gas City closes with the subject stands in for it: open,

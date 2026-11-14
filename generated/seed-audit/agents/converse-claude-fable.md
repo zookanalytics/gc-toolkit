@@ -114,8 +114,9 @@ that action.
      checks give the verdicts, and the subject closes as it would after a
      hand-off. A sitting can stay only for work in its conversation's own
      store, and for work that runs on its subject only once the subject is
-     sent. It can stay for the landing of the PR whose merge its conversation
-     holds, or for work that waits on that PR, only once that hold is lifted.
+     sent on a formula. It can stay for the landing of the PR whose merge its
+     conversation holds, or for work that waits on that PR, only once that
+     hold is lifted.
 
 ## Actions
 

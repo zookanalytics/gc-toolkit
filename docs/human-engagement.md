@@ -1477,20 +1477,20 @@ alias, which drops the claim. Gas City does the rest with what it already has
   anchors, the work is the subject itself. The conversation tracks the
   subject, and bd keeps one edge from a bead onto another (beads
   `DependencyTypeConflictError`), so the conversation waits instead on the
-  convoy the subject's dispatch poured its run over. A sling of a bead pours
-  its run over an input convoy that tracks that bead alone (Gas City
-  `graphv2.CreateSingleItemInputConvoy`), and Gas City closes a convoy once
-  every bead it tracks has closed (`doConvoyAutocloseWith`, run on the bead's
-  close and retried by the controller's autoclose sweep). That close is a
-  bead's close like any other, so it wakes the sitting or sends it the
-  notice. The convoy stands once the subject is sent: a sitting that sends
-  the subject answers the ruling's gates on a turn that does not sign off,
-  sends it, and then stays, and one that takes the recommendation stays with
-  `--accept`, whose dispatch comes before the wait. The staying: line names
-  the subject, the subject's headline leaves it out as it leaves out a
-  member, and the board's row reads "Waits on" the convoy. A subject that
-  closes while the controller is down is one its sweep never sees, which
-  leaves the convoy open until `gc convoy check` closes it.
+  convoy the subject's dispatch poured its run over. A formula's sling of a
+  bead pours its run over an input convoy that tracks that bead alone (Gas
+  City `graphv2.CreateSingleItemInputConvoy`), and Gas City closes a convoy
+  once every bead it tracks has closed (`doConvoyAutocloseWith`, run on the
+  bead's close and retried by the controller's autoclose sweep). That close
+  is a bead's close like any other, so it wakes the sitting or sends it the
+  notice. The convoy stands once a formula's sling has sent the subject: a
+  sitting that sends the subject answers the ruling's gates on a turn that
+  does not sign off, sends it, and then stays, and one that takes the
+  recommendation stays with `--accept`, whose dispatch comes before the
+  wait. The staying: line names the subject, the subject's headline leaves
+  it out as it leaves out a member, and the board's row reads "Waits on" the
+  convoy. A subject that closes while the controller is down is one its sweep
+  never sees, which leaves the convoy open until `gc convoy check` closes it.
 - **Low context during the return.** The comparison stays owed when the
   sitting's context runs low, so the sitting neither signs off nor holds for
   that reason. Claude Code and Codex compact a thread on their own, and the
@@ -1510,16 +1510,19 @@ alias, which drops the claim. Gas City does the rest with what it already has
   brings one back.
 - **Where it cannot stay.** An edge onto a bead in another store holds
   nothing, so a sitting stays only for work in its conversation's own store,
-  and ends at the hand-off otherwise. A stay on a subject nothing has sent,
-  without `--accept`, is refused before any write, because no run of it has a
-  convoy to wait on. Nor does it stay for the PR whose merge its conversation
-  holds, or for work that waits on that PR, itself or through other beads,
-  since that PR's anchor already waits on the conversation and neither could
-  close. bd would refuse the stay's edge as a cycle, so the sign-off walks the
-  edges bd's cycle check walks, blocks, conditional-blocks and parent-child,
-  and refuses that stay before any write until the sitting lifts the hold. A
-  stay for that PR's own landing would wait through its convoy, an edge bd's
-  cycle check does not follow, and the sign-off refuses it the same way.
+  and ends at the hand-off otherwise. A stay on a subject no formula's sling
+  has sent, without `--accept`, is refused before any write, because no run of
+  it has a convoy to wait on. A change a sitting resumes is its
+  conversation's subject and goes to review with no sling, so that sitting
+  ends at the hand-off rather than stay for its landing. Nor does it stay for
+  the PR whose merge its conversation holds, or for work that waits on that
+  PR, itself or through other beads, since that PR's anchor already waits on
+  the conversation and neither could close. bd would refuse the stay's edge as
+  a cycle, so the sign-off walks the edges bd's cycle check walks, blocks,
+  conditional-blocks and parent-child, and refuses that stay before any write
+  until the sitting lifts the hold. A stay for that PR's own landing would
+  wait through its convoy, an edge bd's cycle check does not follow, and the
+  sign-off refuses it the same way.
 
 Gas City's `gc session wait <session> --on-beads <ids> --sleep` also sleeps a
 session until a bead closes. A sitting does not use it, because the attach that

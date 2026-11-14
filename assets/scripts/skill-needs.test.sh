@@ -974,7 +974,7 @@ have "…and converse-settle's sign-off, whose other flags it takes, picks the P
     '# --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one' "$SETTLE"
 have "…and a stay on the subject itself waits on the convoy of the subject's dispatch" \
     'the sign-off makes the conversation wait on the convoy the subject'"'"'s dispatch poured its run over, which Gas City closes once the subject closes' "$TMP/stay-squeezed"
-have "…which stands only once the subject is sent: Accept sends it inside the sign-off" \
+have "…which stands only once a formula's sling has sent the subject: Accept sends it inside the sign-off" \
     'Stay with `--accept` and `--waiting-on "$SUBJECT"`. Accept dispatches the recommendation inside the sign-off, before the conversation waits on its run.' "$TMP/stay-squeezed"
 have "…and a sitting that sends it answers the gates and sends it before the stay" \
     'answer its gates with `--answer`, and send the subject once that answer lands (`converse-continue`). Then stay with `--waiting-on "$SUBJECT"`.' "$TMP/stay-squeezed"
@@ -992,8 +992,12 @@ have "…and a recovery takes a brief only when one is held on its work" \
     'The subject'"'"'s latest close brief is its `--close-brief` when the brief'"'"'s heading holds it on work that `WORK` names.' "$TMP/stay-squeezed"
 have "…so a sitting whose work is in another store ends at the hand-off" \
     'After the first refusal, end at the hand-off' "$TMP/stay-squeezed"
-have "…and one whose subject nothing has sent sends it, then stays" \
-    'After the second, answer the gates and send the subject, then run the stay again.' "$TMP/stay-squeezed"
+have "…and one whose ruling sends the subject on a formula sends it, then stays" \
+    'After the second, when the ruling sends the subject on a formula, answer the gates and send the subject, then run the stay again.' "$TMP/stay-squeezed"
+have "…while one whose subject went out with no sling, as a resumed change does, ends at the hand-off" \
+    'When the subject went out with no sling, as a change this sitting resumed and handed off did, end at the hand-off and tell the operator why.' "$TMP/stay-squeezed"
+have "…which the refusal names" \
+    'A change this sitting resumed is such a subject, since it went to review with no sling.' "$TMP/stay-squeezed"
 SV="$TMP/stay-forms"
 mkdir -p "$SV/bin" "$SV/pack"
 printf '#!/bin/sh\nexit 1\n' >"$SV/bin/gc"

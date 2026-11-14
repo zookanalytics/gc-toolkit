@@ -107,3 +107,9 @@ subject.
   answers the ruling's gates on a turn that does not sign off, sends the
   subject, and then stays. A stay with no convoy to wait on and no `--accept` is
   refused before any write.
+- **A subject that went out with no formula's sling.** A change a sitting
+  resumes is its conversation's subject and goes to review through
+  `work-submit.sh`, whose hand-off assigns it to the refinery with no sling, so
+  no convoy closes with it. A stay for its landing is refused before any write,
+  and the sitting ends at the hand-off. A change a sitting files fresh is a
+  bead of its own, which the stay waits on through its own edge.

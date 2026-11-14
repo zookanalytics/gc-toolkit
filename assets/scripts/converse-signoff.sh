@@ -122,18 +122,20 @@
 # whatever became of the run, and its close is a bead.closed of its own, which
 # wakes the sitting as any wait's close does. The stay waits on the newest open
 # convoy that tracks the subject alone and carries no owned label, which keeps
-# Gas City from closing it. That convoy exists once the subject is dispatched:
-# Accept's dispatch makes it at step 4, and a sitting that sends the subject
-# itself answers the ruling's gates on a turn that does not sign off (--answer),
-# sends the subject, and only then stays. A stay on the subject with no such
-# convoy and no --accept is refused before any write. A subject that has closed
-# needs no convoy, and its close returns the stay. bd's cycle check walks no
-# tracks edge, so it would take that edge from a conversation whose subject
-# waits on it, as the anchor of a PR whose merge the conversation holds does,
-# and neither could close: that stay is refused before any write, as a stay on
-# work that waits on the conversation is. A close made while the controller is
-# down is one its sweep never sees (cmd/gc/autoclose_sweep.go), which leaves
-# the convoy open until `gc convoy check` closes it.
+# Gas City from closing it. That convoy exists once a formula's sling has
+# dispatched the subject: Accept's dispatch makes it at step 4, and a sitting
+# that sends the subject itself answers the ruling's gates on a turn that does
+# not sign off (--answer), sends the subject, and only then stays. A stay on the
+# subject with no such convoy and no --accept is refused before any write, as on
+# a change a sitting resumed and handed off to review, which went out with no
+# sling. A subject that has closed needs no convoy, and its close returns the
+# stay. bd's cycle check walks no tracks edge, so it would take that edge from
+# a conversation whose subject waits on it, as the anchor of a PR whose merge
+# the conversation holds does, and neither could close: that stay is refused
+# before any write, as a stay on work that waits on the conversation is. A
+# close made while the controller is down is one its sweep never sees
+# (cmd/gc/autoclose_sweep.go), which leaves the convoy open until
+# `gc convoy check` closes it.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 4 when it takes the recommendation,
@@ -292,8 +294,9 @@
 #     recommendation: the conversation waits on the convoy the subject's
 #     dispatch poured its run over (above), since the conversation tracks the
 #     subject and bd keeps one edge from a bead onto another. With --accept,
-#     step 4 makes that dispatch. Otherwise the subject must be sent before
-#     this call, and with no such convoy the stay is refused, nothing written.
+#     step 4 makes that dispatch. Otherwise a formula's sling must send the
+#     subject before this call, and with no such convoy the stay is refused,
+#     nothing written.
 #     It is refused on a conversation no sitting holds, and with nothing to
 #     wait on. The sitting signs off on its return with the same call less
 #     --stay, with --no-wait in place of its --waiting-on and --close-brief,
@@ -1179,7 +1182,7 @@ if [ -n "$STAY" ]; then
         subject_convoy >/dev/null || SC_RC=$?
         case "$SC_RC" in
           0) ;;
-          1) die "--stay would make conversation $CONVERSATION wait on $SUBJECT through the convoy its dispatch poured its run over, and no open convoy tracks $SUBJECT alone, so $SUBJECT has not been sent; nothing was written. Answer the ruling's gates on a turn that does not sign off (--answer), send $SUBJECT (gc sling <rig>/<pool> $SUBJECT --on <formula>), then run this call again. A ruling that takes the recommendation stays with --accept, whose dispatch makes that convoy" ;;
+          1) die "--stay would make conversation $CONVERSATION wait on $SUBJECT through the convoy a formula's sling of $SUBJECT pours its run over, and no open convoy tracks $SUBJECT alone, so no such sling has sent $SUBJECT; nothing was written. When the ruling sends $SUBJECT on a formula, answer its gates on a turn that does not sign off (--answer), send $SUBJECT (gc sling <rig>/<pool> $SUBJECT --on <formula>), then run this call again. A ruling that takes the recommendation stays with --accept, whose dispatch makes that convoy. When $SUBJECT went out another way, as a change a sitting resumes and hands off to review does, no convoy closes with it, so sign off without --stay and end at the hand-off" ;;
           *) stopped "the convoys that track $SUBJECT could not be read to find the one its dispatch poured its run over, which the conversation would wait on; nothing was written" ;;
         esac
       fi ;;
