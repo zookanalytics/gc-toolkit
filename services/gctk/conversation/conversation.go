@@ -50,9 +50,27 @@ func IsAssignee(assignee, id string) bool {
 // edges decide the rest of the shape ([Shape]). A reader that holds the row and
 // not the edges, such as the far end of a `blocks` edge, reads a candidate as a
 // person's to move: a conversation, or work assigned to the operator, and no
-// automated actor moves either.
+// automated actor moves either. A reader that also knows whether a wait of the
+// candidate's own holds it can tell a conversation its sitting stays in
+// ([Staying]), which is no person's move until that wait clears.
 func IsCandidate(issueType, assignee, id string) bool {
 	return issueType == IssueType && IsAssignee(assignee, id)
+}
+
+// Staying reports whether a conversation reads as one its sitting stays in:
+// open under its sitting's alias, which the stay's last write leaves it, while
+// a wait of its own holds it (waiting), the edge the stay writes onto each bead
+// of the work it sent. The sitting comes back to the operator once that work
+// closes, so until then the conversation is no person's move, and what it
+// waits on counts on its own, a human gate as a gate. A sitting that holds its
+// conversation keeps it claimed, in progress, and one in the operator's queue
+// is assigned to `human`, so neither is a stay, whatever edge an earlier stay
+// left on it. Once no wait holds it, it is a person's move again, as the
+// sitting's return is. The helm board's row and the PR's facts (prstatus)
+// both read a stay by this rule, each with its own read of the wait.
+func Staying(status, assignee string, waiting bool) bool {
+	a := strings.TrimSpace(assignee)
+	return waiting && strings.EqualFold(strings.TrimSpace(status), "open") && a != "" && a != "human"
 }
 
 // Edge is one of a task's own dependency edges: its type, and the bead it
