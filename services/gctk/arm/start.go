@@ -318,7 +318,7 @@ func (a *Arms) start(listed *ledger.Record, opts StartOptions) Act {
 	}
 	formula := arm.Formula()
 	if formula == "" {
-		f, err := a.defaultFormula(arm.Target)
+		f, err := a.defaultFormula(gascity.Sling{Rig: opts.Rig, Target: arm.Target, Bead: id})
 		if err != nil || f == "" {
 			why := fmt.Sprintf("its arm names no formula, and %s's default formula could not be read", arm.Target)
 			if err == nil {

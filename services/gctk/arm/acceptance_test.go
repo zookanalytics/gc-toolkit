@@ -37,7 +37,13 @@ type accept struct {
 	asks  string // the asks the pack's scripts were given
 }
 
-const acceptPool = "pa/pa.polecat"
+// acceptPool's agent names its default formula itself, and acceptInherits'
+// names none, so its pack's [agent_defaults] gives it one, which config show's
+// JSON leaves out and only gc sling --dry-run prints.
+const (
+	acceptPool     = "pa/pa.polecat"
+	acceptInherits = "pa/pa.inherits"
+)
 
 func newAccept(t *testing.T) *accept {
 	t.Helper()
@@ -57,9 +63,14 @@ func newAccept(t *testing.T) *accept {
 			t.Fatal(err)
 		}
 	}
-	config := `{"ok":true,"config":{"Agents":[{"Name":"polecat","Dir":"pa","DefaultSlingFormula":"mol-polecat-work"}]}}`
+	config := `{"ok":true,"config":{"Agents":[{"Name":"polecat","Dir":"pa","DefaultSlingFormula":"mol-polecat-work"},{"Name":"inherits","Dir":"pa"}]}}`
 	a.s.Enter(t, `sling) shift
   [ "$1" = --rig ] && shift 2
+  case " $* " in *" --dry-run "*)
+    [ "$1" = `+acceptInherits+` ] && printf 'Default formula:\n  Formula: mol-pack\n'
+    printf 'No side effects executed (--dry-run).\n'
+    exit 0 ;;
+  esac
   printf '%s\n' "$*" >> '`+a.slung+`'
   code=$(cat '`+a.exit+`' 2>/dev/null || echo 0)
   if [ "$code" = 3 ]; then
@@ -304,6 +315,33 @@ func TestStoreAcceptanceTheVerbsAndTheStopsOrder(t *testing.T) {
 	lines = a.pass(false, "0")
 	if _, read := lines[b]; read || len(a.slungLines()) != 0 {
 		t.Errorf("after the stop, the pass read %v and slung %v", lines[b], a.slungLines())
+	}
+}
+
+// For an agent whose only default formula is its pack's, arm with no --on
+// records the formula gc sling's dry run prints, and a start, in a process of
+// its own, pours it on an arm that names no formula, as the deleted script
+// wrote one.
+func TestStoreAcceptanceAPacksDefaultFormula(t *testing.T) {
+	a := newAccept(t)
+	b := a.bead("armed with no --on")
+	if _, err := a.arms.Arm(arm.Request{ID: b, Target: acceptInherits, Reason: "waits for the base"}); err != nil {
+		t.Fatal(err)
+	}
+	if meta, _ := a.row(b); meta["gc.dispatch_when_ready_args"] != `["--on","mol-pack"]` {
+		t.Errorf("the arm wrote %v; want the pack's formula", meta)
+	}
+	old := a.bead("armed with no formula")
+	a.s.Run("update", old,
+		"--set-metadata", "gc.dispatch_when_ready="+acceptInherits,
+		"--set-metadata", "gc.dispatch_when_ready_args=[]",
+		"--set-metadata", "gc.dispatch_when_ready_armed_at="+armedAt)
+	a.arms = &arm.Arms{Ledger: a.arms.Ledger, Runtime: gascity.New(), Locks: a.arms.Locks, Now: time.Now, Actor: "acceptance", Wait: time.Second}
+	lines := a.pass(false, "0")
+	act(t, lines, b, arm.ActStart, "", "on mol-pack")
+	act(t, lines, old, arm.ActStart, "", "on mol-pack")
+	if s := a.slungLines(); len(s) != 2 || !strings.Contains(s[0], " --on mol-pack ") || !strings.Contains(s[1], " --on mol-pack ") {
+		t.Errorf("slung %v; want both beads on the pack's formula", s)
 	}
 }
 

@@ -25,11 +25,13 @@ import (
 type Runtime interface {
 	// Sling runs one `gc sling` and returns what it answered.
 	Sling(s Sling) SlingResult
-	// DefaultFormula is the formula a sling to target pours when it names none:
-	// the default sling formula the city's config gives the agent target
-	// addresses. It is empty when that agent names none, and an error when the
-	// config does not read or no agent in it answers to target.
-	DefaultFormula(target string) (string, error)
+	// DefaultFormula is the formula sling s pours when it names none: the
+	// default sling formula the city's config gives the agent s.Target
+	// addresses, its own or else the one its pack's [agent_defaults] gives it.
+	// It is empty when that agent has neither, and an error when the answer
+	// does not read or no agent in the config answers to s.Target. It reads
+	// s.Rig, s.Target and s.Bead.
+	DefaultFormula(s Sling) (string, error)
 	// Script runs one of the pack's scripts, by its file name in the pack's
 	// scripts directory, and returns what it answered.
 	Script(name string, args ...string) Result
@@ -125,46 +127,122 @@ func liveWorkflows(output, bead string) []string {
 }
 
 // agent is one agent the city's config names: the rig directory it serves, its
-// name, and its default sling formula, empty when it names none.
+// name, and, when Own is set, the default sling formula it names itself, which
+// may be empty.
 type agent struct {
 	Dir, Name, Formula string
+	Own                bool
 }
 
 // DefaultFormula reads `gc config show --json` once per process. An agent
-// answers to target when its directory is the part of target before its last
-// slash, none when target has none, and its name is the rest, or the rest's
-// last dot-separated part, since a pack's agent is addressed by its binding
-// and its name (ParseQualifiedName and BindingQualifiedName in
+// answers to s.Target when its directory is the part of s.Target before its
+// last slash, none when s.Target has none, and its name is the rest, or the
+// rest's last dot-separated part, since a pack's agent is addressed by its
+// binding and its name (ParseQualifiedName and BindingQualifiedName in
 // internal/config/config.go at gastownhall/gascity 8d2fb3120c), and the
 // config's JSON carries no binding. Two agents that answer with different
-// formulas are no answer.
-func (c *City) DefaultFormula(target string) (string, error) {
+// formulas of their own are no answer. The JSON carries only an agent's own
+// default: the one its pack's [agent_defaults] gives it, which gc sling pours
+// when the agent names none, is a runtime-only field it leaves out
+// (InheritedDefaultSlingFormula and EffectiveDefaultSlingFormula in
+// internal/config/config.go at 8d2fb3120c). So when an agent that answers names
+// none of its own, Gas City's dry run of the sling says which it pours.
+func (c *City) DefaultFormula(s Sling) (string, error) {
 	c.once.Do(func() { c.agents, c.cfgErr = c.readAgents() })
 	if c.cfgErr != nil {
 		return "", c.cfgErr
 	}
-	dir, name := "", target
-	if i := strings.LastIndex(target, "/"); i >= 0 {
-		dir, name = target[:i], target[i+1:]
+	dir, name := "", s.Target
+	if i := strings.LastIndex(s.Target, "/"); i >= 0 {
+		dir, name = s.Target[:i], s.Target[i+1:]
 	}
 	var formulas []string
-	matched := false
+	matched, inherits := false, false
 	for _, a := range c.agents {
 		if a.Dir != dir || (a.Name != name && !strings.HasSuffix(name, "."+a.Name)) {
 			continue
 		}
 		matched = true
-		if !slices.Contains(formulas, a.Formula) {
+		if !a.Own {
+			inherits = true
+		} else if !slices.Contains(formulas, a.Formula) {
 			formulas = append(formulas, a.Formula)
 		}
 	}
 	switch {
 	case !matched:
-		return "", fmt.Errorf("no agent in the city's config answers to %s", target)
+		return "", fmt.Errorf("no agent in the city's config answers to %s", s.Target)
+	case inherits:
+		return c.dryRunFormula(s)
 	case len(formulas) > 1:
-		return "", fmt.Errorf("the agents in the city's config that answer to %s name different default formulas (%s)", target, strings.Join(formulas, ", "))
+		return "", fmt.Errorf("the agents in the city's config that answer to %s name different default formulas (%s)", s.Target, strings.Join(formulas, ", "))
 	}
 	return formulas[0], nil
+}
+
+// dryRunFormula is the default formula `gc sling --dry-run` says sling s pours.
+// Its preview prints the formula EffectiveDefaultSlingFormula resolves, and its
+// --json form prints none (dryRunSingle and dryRunBatch in cmd/gc/cmd_sling.go
+// at gastownhall/gascity 8d2fb3120c). Without --force the preview stops at a
+// bead a live workflow already works, before it prints the formula
+// (dryRunReportBlockingWorkflow there). A dry run executes nothing.
+func (c *City) dryRunFormula(s Sling) (string, error) {
+	if s.Bead == "" {
+		return "", fmt.Errorf("%s names no default formula of its own, and with no bead to name, gc sling --dry-run cannot say which its pack gives it", s.Target)
+	}
+	args := []string{"sling"}
+	if s.Rig != "" {
+		args = append(args, "--rig", s.Rig)
+	}
+	args = append(args, s.Target, s.Bead, "--dry-run", "--force")
+	r := run(c.bin, args...)
+	if r.Code != 0 {
+		return "", fmt.Errorf("%s names no default formula of its own, and gc sling --dry-run did not say which its pack gives it: %s", s.Target, r.why())
+	}
+	f, ok := dryRunDefault(r.Output)
+	if !ok {
+		return "", fmt.Errorf("%s names no default formula of its own, and gc sling --dry-run's preview did not read: %s", s.Target, r.Tail())
+	}
+	return f, nil
+}
+
+// The lines of a dry run's preview that dryRunDefault reads: the heading over
+// the default formula, for a bead or for each open child of a container, the
+// formula's line under it, and the preview's last line.
+const (
+	defaultHeading      = "Default formula:"
+	defaultChildHeading = "Default formula (per open child):"
+	formulaLine         = "  Formula: "
+	previewEnd          = "No side effects executed (--dry-run)."
+)
+
+// dryRunDefault reads the formula a dry run's preview pours by default: the
+// formula line under its default formula heading, or empty when a preview that
+// reached its last line has no such heading. ok is false for a preview that
+// stops short of its last line, a heading with no formula line under it, or two
+// headings.
+func dryRunDefault(preview string) (formula string, ok bool) {
+	lines := strings.Split(strings.ReplaceAll(preview, "\r\n", "\n"), "\n")
+	ended := false
+	for i, l := range lines {
+		switch l {
+		case previewEnd:
+			ended = true
+		case defaultHeading, defaultChildHeading:
+			if formula != "" || i+1 == len(lines) {
+				return "", false
+			}
+			f, found := strings.CutPrefix(lines[i+1], formulaLine)
+			if f = strings.TrimSpace(f); !found || f == "" {
+				return "", false
+			}
+			formula = f
+		}
+	}
+	if !ended {
+		return "", false
+	}
+	return formula, true
 }
 
 func (c *City) readAgents() ([]agent, error) {
@@ -186,11 +264,11 @@ func (c *City) readAgents() ([]agent, error) {
 	}
 	out := make([]agent, 0, len(shown.Config.Agents))
 	for _, a := range shown.Config.Agents {
-		f := ""
+		ag := agent{Dir: a.Dir, Name: a.Name}
 		if a.DefaultSlingFormula != nil {
-			f = strings.TrimSpace(*a.DefaultSlingFormula)
+			ag.Formula, ag.Own = strings.TrimSpace(*a.DefaultSlingFormula), true
 		}
-		out = append(out, agent{Dir: a.Dir, Name: a.Name, Formula: f})
+		out = append(out, ag)
 	}
 	return out, nil
 }

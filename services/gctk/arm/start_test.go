@@ -151,6 +151,25 @@ func TestStartPoursTheTargetsDefaultFormula(t *testing.T) {
 	}
 }
 
+// An arm that names no formula, for a target whose agent names no default of
+// its own, pours the one its pack gives it, asked about the bead through the
+// rig the pass slings with.
+func TestStartPoursThePacksDefaultFormula(t *testing.T) {
+	w := newWorld(t)
+	const inherits = "rig/rig.inherits"
+	w.rt.PackFormulas = map[string]string{inherits: "mol-pack"}
+	w.put(fake.Bead{ID: "b", Metadata: armedBead("", map[string]string{"gc.dispatch_when_ready": inherits})})
+	w.store.MakeReady("b")
+	lines, _ := w.run(false)
+	act(t, lines, "b", arm.ActStart, "", "on mol-pack")
+	if s := w.rt.Slings(); len(s) != 1 || s[0].Formula != "mol-pack" || s[0].Title != "mol-pack arm:b@"+armedAt {
+		t.Errorf("slings = %+v", s)
+	}
+	if got, want := w.rt.Asks(), []gascity.Sling{{Rig: "rig", Target: inherits, Bead: "b"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("asks = %+v, want %+v", got, want)
+	}
+}
+
 // The start sends only what the pool's own serve rule would serve, bd's ready
 // read with its flags, and holds back what bd cannot judge: a waits-for edge of
 // the bead's own and a wait edge into another store. It holds a hold label in

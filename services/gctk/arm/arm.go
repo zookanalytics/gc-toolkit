@@ -56,12 +56,7 @@ type Arms struct {
 	// lock, lockWait when zero.
 	Wait time.Duration
 
-	formulas map[string]formulaAnswer
-}
-
-type formulaAnswer struct {
-	formula string
-	err     error
+	formulas map[string]string
 }
 
 // LockDir is the directory the dispatch locks live in: the city's
@@ -129,7 +124,7 @@ func (a *Arms) Arm(req Request) (string, error) {
 	if status != "open" {
 		return "", refuse("%s is at status %s, and the start sends an open bead alone, so this arm could never fire. Return it to open, then arm it", req.ID, status)
 	}
-	formula, err := a.formulaFor(req.Target, req.Formula)
+	formula, err := a.formulaFor(req.ID, req.Target, req.Formula)
 	if err != nil {
 		return "", err
 	}
@@ -161,14 +156,14 @@ func (a *Arms) armedAlready(req Request, have *record.Arm) (string, error) {
 	if have.Malformed() != "" {
 		return "", refuse("%s carries an arm the start cannot read (%s). Disarm it, then arm it again", req.ID, have.Malformed())
 	}
-	want, err := a.formulaFor(req.Target, req.Formula)
+	want, err := a.formulaFor(req.ID, req.Target, req.Formula)
 	if err != nil {
 		return "", err
 	}
 	// An arm that names no formula pours its target's default at each start.
 	had := have.Formula()
 	if had == "" {
-		had, _ = a.defaultFormula(have.Target)
+		had, _ = a.defaultFormula(gascity.Sling{Target: have.Target, Bead: req.ID})
 	}
 	if have.Target == req.Target && had != "" && had == want {
 		return fmt.Sprintf("%s is already armed for %s on %s, so nothing was written", req.ID, req.Target, want), nil
@@ -176,13 +171,13 @@ func (a *Arms) armedAlready(req Request, have *record.Arm) (string, error) {
 	return "", refuse("%s is already armed for %s on %s. Disarm it first if you mean to change where it goes", req.ID, have.Target, nonEmpty(have.Formula(), "its default formula"))
 }
 
-// formulaFor is the formula an arm for target pours: named, or else the
-// target's default, which a target with none refuses.
-func (a *Arms) formulaFor(target, named string) (string, error) {
+// formulaFor is the formula an arm of bead id for target pours: named, or else
+// the target's default, which a target with none refuses.
+func (a *Arms) formulaFor(id, target, named string) (string, error) {
 	if named != "" {
 		return named, nil
 	}
-	f, err := a.defaultFormula(target)
+	f, err := a.defaultFormula(gascity.Sling{Target: target, Bead: id})
 	if err != nil {
 		return "", refuse("%s's default formula could not be read (%v), so name one with --on", target, err)
 	}
@@ -192,17 +187,24 @@ func (a *Arms) formulaFor(target, named string) (string, error) {
 	return f, nil
 }
 
-// defaultFormula reads target's default formula once per Arms.
-func (a *Arms) defaultFormula(target string) (string, error) {
-	if ans, ok := a.formulas[target]; ok {
-		return ans.formula, ans.err
+// defaultFormula reads the default formula sling s pours, once per Arms for
+// each rig and target it reads. An answer that did not read is asked again for
+// the next bead, since the dry run that resolves a pack's default reads the
+// bead too.
+func (a *Arms) defaultFormula(s gascity.Sling) (string, error) {
+	key := s.Rig + " " + s.Target
+	if f, ok := a.formulas[key]; ok {
+		return f, nil
 	}
-	f, err := a.Runtime.DefaultFormula(target)
+	f, err := a.Runtime.DefaultFormula(s)
+	if err != nil {
+		return "", err
+	}
 	if a.formulas == nil {
-		a.formulas = map[string]formulaAnswer{}
+		a.formulas = map[string]string{}
 	}
-	a.formulas[target] = formulaAnswer{formula: f, err: err}
-	return f, err
+	a.formulas[key] = f
+	return f, nil
 }
 
 // Disarm removes the arm, under the bead's dispatch lock, in one write that

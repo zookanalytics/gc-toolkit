@@ -20,10 +20,13 @@ type Call struct {
 
 // Runtime is an in-memory gascity.Runtime, safe for concurrent use.
 type Runtime struct {
-	// Formulas is each target's default formula. A target it does not name has
-	// no agent in the config, and ConfigErr fails every read of it.
-	Formulas  map[string]string
-	ConfigErr error
+	// Formulas is the default formula each target's agent names itself, and
+	// PackFormulas the one its pack's [agent_defaults] gives a target whose
+	// agent names none, which the runtime reads only for a sling that names a
+	// bead. A target neither names has no agent in the config, and ConfigErr
+	// fails every read.
+	Formulas, PackFormulas map[string]string
+	ConfigErr              error
 	// Root is the city's root, and RootErr fails the read of it.
 	Root    string
 	RootErr error
@@ -34,6 +37,7 @@ type Runtime struct {
 
 	mu      sync.Mutex
 	slings  []gascity.Sling
+	asks    []gascity.Sling
 	scripts []Call
 }
 
@@ -51,14 +55,24 @@ func (r *Runtime) Sling(s gascity.Sling) gascity.SlingResult {
 	return gascity.SlingResult{}
 }
 
-// DefaultFormula answers from Formulas.
-func (r *Runtime) DefaultFormula(target string) (string, error) {
+// DefaultFormula records s and answers from Formulas, else from PackFormulas
+// when s names a bead.
+func (r *Runtime) DefaultFormula(s gascity.Sling) (string, error) {
+	r.mu.Lock()
+	r.asks = append(r.asks, s)
+	r.mu.Unlock()
 	if r.ConfigErr != nil {
 		return "", r.ConfigErr
 	}
-	f, ok := r.Formulas[target]
-	if !ok {
-		return "", fmt.Errorf("no agent in the city's config answers to %s", target)
+	if f, ok := r.Formulas[s.Target]; ok {
+		return f, nil
+	}
+	f, ok := r.PackFormulas[s.Target]
+	switch {
+	case !ok:
+		return "", fmt.Errorf("no agent in the city's config answers to %s", s.Target)
+	case s.Bead == "":
+		return "", fmt.Errorf("%s names no default formula of its own, and with no bead to name, gc sling --dry-run cannot say which its pack gives it", s.Target)
 	}
 	return f, nil
 }
@@ -89,6 +103,13 @@ func (r *Runtime) Slings() []gascity.Sling {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.slings)
+}
+
+// Asks returns every sling the domain asked the default formula of, in order.
+func (r *Runtime) Asks() []gascity.Sling {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.asks)
 }
 
 // Scripts returns every script call the domain made, in order.

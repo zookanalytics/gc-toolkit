@@ -153,6 +153,32 @@ func TestArmOnAnArmedBead(t *testing.T) {
 	}
 }
 
+// With no --on, an arm for a target whose agent names no default formula of its
+// own records the one its pack gives it, which the runtime reads by asking
+// about the bead armed. An arm naming no --on over an arm that names no formula
+// for that target is the same arm.
+func TestArmRecordsThePacksDefaultFormula(t *testing.T) {
+	w := newWorld(t)
+	const inherits = "rig/rig.inherits"
+	w.rt.PackFormulas = map[string]string{inherits: "mol-pack"}
+	w.put(fake.Bead{ID: "b"})
+	w.put(fake.Bead{ID: "old", Metadata: armedBead("", map[string]string{"gc.dispatch_when_ready": inherits})})
+	if _, err := w.arms.Arm(arm.Request{ID: "b", Target: inherits, Reason: "r"}); err != nil {
+		t.Fatal(err)
+	}
+	if args, _ := w.meta("b", "gc.dispatch_when_ready_args"); args != `["--on","mol-pack"]` {
+		t.Errorf("the arm recorded %s; want the pack's formula", args)
+	}
+	if said, err := w.arms.Arm(arm.Request{ID: "old", Target: inherits, Reason: "again"}); err != nil || !strings.Contains(said, "already armed") {
+		t.Errorf("an arm over one with no formula = %q, %v; want already armed", said, err)
+	}
+	for _, s := range w.rt.Asks() {
+		if s.Target != inherits || (s.Bead != "b" && s.Bead != "old") {
+			t.Errorf("asked %+v; want each ask to name its target and the bead armed", s)
+		}
+	}
+}
+
 // What arm refuses, each writing nothing.
 func TestArmRefusals(t *testing.T) {
 	w := newWorld(t)
