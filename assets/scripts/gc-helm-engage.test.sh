@@ -40,7 +40,9 @@
 #             unattached at the bound, which exits 4, one that ends first is
 #             reported with the attach of its conversation, and --no-attach
 #             does not wait. (LIVE-BLANK) one listed with no state is live, a
-#             create still under way, and is waited on the same way
+#             create still under way, and is waited on the same way.
+#             (REUSE-ASLEEP) one that reads asleep has run and slept, and is
+#             attached at once, which wakes it
 #   (LEFT)    a conversation whose sitting's session closed is resumed under
 #             the same alias, with no bind needed
 #   (TWO-TRACKS, UNREAD) a task assigned to human that tracks the bead and
@@ -930,6 +932,15 @@ hasnt "$CALLED" "session attach" "(REUSE-ENDED) …without attaching"
 has "$OUT" "ended before the reconciler started it" "(REUSE-ENDED) …saying it ended"
 has "$OUT" "Re-run to start a new sitting on conversation tk-conv: gc-helm attach tk-conv" "(REUSE-ENDED) …and naming the attach of its conversation, as a new sitting's failed start does"
 hasnt "$CALLED" "bd update" "(REUSE-ENDED) …writing nothing to the conversation"
+# A sitting that has run and slept, such as one staying for the return of the
+# work it sent, is attached at once: the attach wakes it with its thread and
+# delivers its prompt again.
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+GC_HELM_ENGAGE_WAIT_TIMEOUT=2 LIVE_STATES="asleep" run_engage tk-subj
+eq "$RC" 0 "(REUSE-ASLEEP) reusing a live sitting that reads asleep exits 0"
+has "$CALLED" "session attach gc-50" "(REUSE-ASLEEP) …attaching to it, which wakes it"
+hasnt "$OUT" "waiting for the reconciler" "(REUSE-ASLEEP) …without waiting for a start"
+hasnt "$CALLED" "session new" "(REUSE-ASLEEP) …and spawning no second sitting"
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="start-pending" run_engage tk-subj --no-attach
 eq "$RC" 0 "(REUSE-NOATTACH) --no-attach on a reused unstarted sitting exits 0"

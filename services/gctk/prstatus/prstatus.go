@@ -160,6 +160,13 @@ type Facts struct {
 	// rework of this one waits for. No automated actor will move any of them, so
 	// each holds the PR.
 	Owed []Blocker
+	// Staying are the conversations the PR waits on, on its own blockers or
+	// behind a bead it waits on, whose sittings stay for the work they sent, as
+	// [Holding] reads them ([Holds.Staying]). Each holds the merge until its
+	// sitting comes back to the operator once that work closes, so the PR waits
+	// on that work first and is no person's move yet, approved or not. Once the
+	// work closes, the conversation is among Owed.
+	Staying []Blocker
 	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
 	// read before the first '@', and the oid after it is the head the posture
 	// was read at, the current head as far as the city knows.
@@ -214,9 +221,11 @@ var InFlightStatuses = []string{"open", "in_progress", "blocked", "deferred", "h
 // Derive returns the state the anchor projects. Precedence:
 // needs-attention > merging > working > needs-review. A blocker the city will
 // not clear holds the PR whatever else stands. An approved PR with nothing
-// blocking it is the city's to land, whatever work is in flight on the way.
-// Live city work on an unapproved PR comes before the review verdict it leads
-// to, and the verdict is what remains when neither stands.
+// blocking it is the city's to land, whatever work is in flight on the way. A
+// conversation whose sitting stays for work holds the merge until it comes back
+// to the operator, so the PR is working while one does, approved or not. Live
+// city work on an unapproved PR comes before the review verdict it leads to,
+// and the verdict is what remains when neither stands.
 func Derive(f Facts) State {
 	posture, _ := splitDated(f.PRPosture)
 	machine, _ := splitDated(f.PRMachine)
@@ -236,6 +245,12 @@ func Derive(f Facts) State {
 	// The merge pass's blocked verdict, while it holds the PR.
 	if Blocked(f) {
 		return NeedsAttention
+	}
+
+	// working: a conversation whose sitting stays for work holds the merge, so
+	// the work comes first, then the sitting's return to the operator.
+	if len(f.Staying) > 0 {
+		return Working
 	}
 
 	// merging: approved, and nothing known blocks the merge.

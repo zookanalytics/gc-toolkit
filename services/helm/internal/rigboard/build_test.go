@@ -7,6 +7,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus/fixture"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
@@ -600,6 +601,126 @@ func TestAConversationAnsweringTwoQuestions(t *testing.T) {
 			t.Fatalf("tk-q holds %v and tk-q2 holds %v, want tk-b.3 under the first question its conversation answers",
 				doc.Rows["tk-q"].Holds, doc.Rows["tk-q2"].Holds)
 		}
+	}
+}
+
+// TestAConversationThatStaysAndOneThatHolds holds the board to the stay's
+// record. A conversation left open under its sitting over the work it sent
+// waits for that work and is no need. One its sitting claimed back to hold,
+// keeping the edge an earlier stay left onto work still out, owes the operator
+// an answer, so Needs you counts it.
+func TestAConversationThatStaysAndOneThatHolds(t *testing.T) {
+	for _, c := range []struct {
+		name, status string
+		need         bool
+		group        Group
+		signal       string
+	}{
+		{name: "a stay", status: "open", group: GroupQueued, signal: "Waits on tk-w"},
+		{name: "a hold over an earlier stay's work", status: "in_progress", need: true, group: GroupWaitingOnYou, signal: "In conversation"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := graph()
+			g.open = append(g.open,
+				bead{ID: "tk-w", Title: "the work it sent", Status: "open", Priority: 2, IssueType: "task", CreatedAt: "2026-01-11"},
+				bead{ID: "tk-c", Title: "talk it through", Status: c.status, Priority: 1, IssueType: "task",
+					Assignee: "gc-toolkit/gc-toolkit.tk-c", CreatedAt: "2026-01-11",
+					Edges: []listing.Edge{{ID: "tk-b.1", Type: "tracks"}, {ID: "tk-w", Type: "blocks"}}},
+			)
+			g.holds["tk-w"] = waits.Holds{ID: "tk-w", Status: waits.Clear}
+			g.holds["tk-c"] = waits.Holds{ID: "tk-c", Status: waits.Blocked,
+				Waits: []waits.Wait{{ID: "tk-w", Type: "blocks", Title: "the work it sent", Status: "open", IssueType: "task"}}}
+			doc := boardOf(t, g)
+			on := func(ns []Need) bool { return slices.ContainsFunc(ns, func(n Need) bool { return n.ID == "tk-c" }) }
+			if counted, uncounted := on(doc.NeedsYou.Counted), on(doc.NeedsYou.NotCounted); counted != c.need || uncounted {
+				t.Errorf("Needs you counts tk-c: %v, and lists it uncounted: %v, want %v and false", counted, uncounted, c.need)
+			}
+			if r := doc.Rows["tk-c"]; r.Group != c.group || r.Signal != c.signal {
+				t.Errorf("tk-c reads %q in %q, want %q in %q", r.Signal, r.Group, c.signal, c.group)
+			}
+		})
+	}
+}
+
+// TestAPullRequestThatWaitsOnAStay holds a pull request whose merge its
+// conversation holds to the stay that conversation keeps: the conversation
+// waits on the rework it sent, so neither it nor its pull request is the
+// operator's move until that rework closes, and then both are. The pull
+// request's facts and what holds each row come from prstatus over the same
+// beads, as gather reads them.
+func TestAPullRequestThatWaitsOnAStay(t *testing.T) {
+	sitting := "gc-toolkit/gc-toolkit.tk-c"
+	for _, c := range []struct {
+		name, rework      string
+		counted           []string
+		prGroup, cGroup   Group
+		prSignal, cSignal string
+	}{
+		{name: "while the rework is out", rework: "in_progress",
+			prGroup: GroupQueued, prSignal: "Pull request #7", cGroup: GroupQueued, cSignal: "Waits on tk-rw"},
+		{name: "once the rework has closed", rework: "closed", counted: []string{"tk-c", "tk-pr"},
+			prGroup: GroupWaitingOnYou, prSignal: "needs-attention", cGroup: GroupWaitingOnYou, cSignal: "In conversation"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			prMeta := map[string]string{"merge_result": "pull_request",
+				"pr_posture": "review_required@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}
+			store := fixture.NewStore([]fixture.Bead{
+				{ID: "tk-pr", Title: "the change", Status: "open", IssueType: "task", WaitsOn: []string{"tk-c", "tk-rw"}, Metadata: prMeta},
+				{ID: "tk-c", Title: "should this land as built?", Status: "open", IssueType: "task", Assignee: sitting,
+					Tracks: []string{"tk-pr"}, WaitsOn: []string{"tk-rw"}},
+				{ID: "tk-rw", Title: "rework the change", Status: c.rework, IssueType: "task",
+					Metadata: map[string]string{"task_kind": "rework", "anchor_bead": "tk-pr", "source_ruling_bead": "tk-c"}},
+			})
+			wait := func(id, title, status string) waits.Wait {
+				return waits.Wait{ID: id, Type: "blocks", Title: title, Status: status, IssueType: "task"}
+			}
+			conv := wait("tk-c", "should this land as built?", "open")
+			rework := wait("tk-rw", "rework the change", c.rework)
+			pr := bead{ID: "tk-pr", Title: "the change", Status: "open", Priority: 2, IssueType: "task", MergeResult: "pull_request", PRNumber: "7",
+				Assignee: "gc-toolkit/refinery", CreatedAt: "2026-01-01",
+				Edges: []listing.Edge{{ID: "tk-c", Type: "blocks"}, {ID: "tk-rw", Type: "blocks"}}}
+			cb := bead{ID: "tk-c", Title: "should this land as built?", Status: "open", Priority: 2, IssueType: "task", Assignee: sitting,
+				CreatedAt: "2026-01-02", Edges: []listing.Edge{{ID: "tk-pr", Type: "tracks"}, {ID: "tk-rw", Type: "blocks"}}}
+			g := &gathered{rig: "gc-toolkit", open: []bead{pr, cb},
+				holds: map[string]waits.Holds{
+					"tk-pr": {ID: "tk-pr", Status: waits.Blocked, Waits: []waits.Wait{conv}, InFlight: "carries merge_result"},
+					"tk-c":  {ID: "tk-c", Status: waits.Clear},
+				},
+				unread: map[string]error{}, unwalked: map[string]bool{}, noFacts: map[string]bool{}}
+			if c.rework != "closed" {
+				g.open = append(g.open, bead{ID: "tk-rw", Title: "rework the change", Status: c.rework, Priority: 2, IssueType: "task",
+					Assignee: "gc-toolkit/gc-toolkit.polecat-1", Anchor: "tk-pr", CreatedAt: "2026-01-03"})
+				g.holds["tk-pr"] = waits.Holds{ID: "tk-pr", Status: waits.Blocked, Waits: []waits.Wait{conv, rework}, InFlight: "carries merge_result"}
+				g.holds["tk-c"] = waits.Holds{ID: "tk-c", Status: waits.Blocked, Waits: []waits.Wait{rework}}
+				g.holds["tk-rw"] = waits.Holds{ID: "tk-rw", Status: waits.Clear, InFlight: "claimed"}
+			}
+			var ids []string
+			for _, b := range g.open {
+				ids = append(ids, b.ID)
+			}
+			var err error
+			if g.holding, err = prstatus.Holding(holdingRoots(ids, g.holds), store.Blockers); err != nil {
+				t.Fatal(err)
+			}
+			if g.facts, err = prstatus.Read([]string{"tk-pr"}, store); err != nil {
+				t.Fatal(err)
+			}
+			doc := boardOf(t, g)
+			var counted []string
+			for _, n := range doc.NeedsYou.Counted {
+				counted = append(counted, n.ID)
+			}
+			slices.Sort(counted)
+			if !slices.Equal(counted, c.counted) {
+				t.Errorf("Needs you counts %v, want %v", counted, c.counted)
+			}
+			if r := doc.Rows["tk-pr"]; r.Group != c.prGroup || r.Signal != c.prSignal {
+				t.Errorf("tk-pr reads %q in %q, want %q in %q", r.Signal, r.Group, c.prSignal, c.prGroup)
+			}
+			if r := doc.Rows["tk-c"]; r.Group != c.cGroup || r.Signal != c.cSignal {
+				t.Errorf("tk-c reads %q in %q, want %q in %q", r.Signal, r.Group, c.cSignal, c.cGroup)
+			}
+		})
 	}
 }
 

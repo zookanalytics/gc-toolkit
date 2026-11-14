@@ -78,17 +78,17 @@ session_live = [
 # or drains a held sitting whatever this field holds. The manual origin is the
 # exemption.
 # Nothing is lost at launch. The launch delivers the rendered prompt, and that
-# prompt's loop opens with the claim block, so a fresh sitting claims with no
-# keystrokes. A provider that takes no prompt argument gets the prompt prepended
-# to this field, and prepending to an empty field still delivers it, so the
-# precondition is the prompt rather than prompt_mode. A prompt that stops
-# opening with the claim block leaves nothing to start the turn.
+# prompt opens with the entry (converse-entry.sh), which claims, so a fresh
+# sitting starts with no keystrokes. A provider that takes no prompt argument
+# gets the prompt prepended to this field, and prepending to an empty field
+# still delivers it, so the precondition is the prompt rather than
+# prompt_mode. A prompt that stops opening with the entry leaves nothing to
+# start the turn.
 # Non-empty text arms no nudge here; it feeds that launch delivery.
-# The text must then send the session back through the prompt's claim block
-# rather than name `gc hook --claim` alone: the block's restart rule, which
-# reads an existing assignment as a sitting to resume rather than one to drain
-# or work to a close, is what stops a nudge from ending a live sitting, and it
-# is read there and nowhere else. Keep it at peer length; fixes go in the
+# The text must then send the session back through the entry rather than name
+# `gc hook --claim` alone: the entry, which reads a restart as a sitting to
+# resume rather than one to drain or work to a close, is what stops a nudge
+# from ending a live sitting. Keep it at peer length; fixes go in the
 # prompt.
 nudge = ""
 # 0 keeps this template off the idle ladder; any positive value re-arms it. That

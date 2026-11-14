@@ -23,7 +23,9 @@ import (
 //     on its branch, or a review thread that work acts on, or with only the
 //     merge state GitHub has yet to compute (UNKNOWN), which the next read
 //     settles.
-//   - working: the PR waits on the city's work and on an approval.
+//   - working: the PR waits on the city's work and on an approval, or a
+//     conversation whose sitting stays for work holds it, approved or not, as
+//     Derive reads it ([Facts.Staying]).
 //   - needs-review: only an approval is left, or a request for changes that
 //     the account that made it has to lift.
 func Render(a pr.Answer, f Facts) State {
@@ -52,6 +54,8 @@ func Render(a pr.Answer, f Facts) State {
 		return NeedsAttention
 	case !approval && !city && mergeState != "" && mergeState != "UNKNOWN":
 		return NeedsAttention
+	case len(f.Staying) > 0:
+		return Working
 	case !approval:
 		return Merging
 	case city:
@@ -89,10 +93,11 @@ func RenderHeld(a pr.Answer, f Facts) []Hold { return holdsOf(RenderReasons(a, f
 // threadsHeld is how many review threads the answer names as waiting on the
 // city's answer, or 0 while something of the city's acts on them: feedback the
 // intake has yet to route, a bead that names the PR's bead as its anchor, or a
-// wait of the bead's own that is neither a gate nor a bead a person owes, such
-// as work on the PR's branch.
+// wait of the bead's own that is neither a gate, a bead a person owes nor a
+// conversation whose sitting stays for work, such as work on the PR's branch.
+// A stay waits for its work to close, and acts on no thread.
 func threadsHeld(a pr.Answer, f Facts) int {
-	persons := slices.Concat(f.Gates, f.Owed)
+	persons := slices.Concat(f.Gates, f.Owed, f.Staying)
 	person := func(id string) bool {
 		return slices.ContainsFunc(persons, func(b Blocker) bool { return b.ID == id })
 	}

@@ -19,13 +19,13 @@ This applies when the operator wants a document's content changed and more than
 one call stands between its text and what they want. The document can be a
 design, a spec, a docs page, a prompt or a skill, on an open PR or not written
 yet. A ruling that asks for one plain change needs none of this: it goes
-straight to the sign-off (step 7).
+straight to the sign-off (`converse-settle`).
 
-The steps keep their own skills. The hold still records what the operator owes
-before the first framing, each hand-back is still recorded before you post it,
-and the sign-off still closes the conversation. Each tool call starts a fresh
-shell, so set `CONV`, `CONVERSATION` and `SUBJECT` literally, from what step 1
-found, at the top of every call below.
+The actions keep their own skills. The hold still records what the operator
+owes before the first framing, each hand-back is still recorded before you post
+it, and the sign-off still closes the conversation. Each tool call starts a
+fresh shell, so set `CONV`, `CONVERSATION` and `SUBJECT` literally, from the
+entry's output, at the top of every call below.
 
 ## Settle it, one item at a time
 
@@ -53,14 +53,14 @@ direction.
   a decision the rework carries. Read what another system does or cannot do at a
   named commit, and send a call the document rests on to a subagent charged with
   breaking it.
-- **Record each ruling on the subject when it lands (step 6),** opening with
+- **Record each ruling on the subject when it lands (`converse-settle`, Record),** opening with
   `$(date -u +%Y-%m-%d)`: the direction it sets and why. A quote of the operator
   there is the evidence of what they ruled, not text for the document.
 
 ## Where the big picture lives between sittings
 
 It lives on the subject's notes: the dated rulings, and the newest
-`## Current state` block, which the next sitting primes from (step 4). When a
+`## Current state` block, which the next sitting primes from (`converse-prep`). When a
 sitting stops with items still open, write that block with them under
 `Open questions`. A spec cannot hold it, because a spec moves only when a change
 to it lands. A spec gains the decisions as a line of the scaffold, or as a step
