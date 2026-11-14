@@ -50,6 +50,7 @@ case "$1" in
     if [ "$out" = "[]" ]; then echo '{"error": "no issues found matching the provided IDs"}'; exit 1; fi
     printf '%s\n' "$out" ;;
   dep)
+    [ -z "${STUB_DEP_FAIL:-}" ] || { echo '{"error": "the store did not answer"}'; exit 1; }
     jq -c --arg id "$3" '(.[] | select(.id == $id) | .deps // []) as $d
       | [.[] | select(.id as $i | $d | index($i)) | . + {dependency_type: "blocks"}]' "$f" ;;
   *) echo "stub gc: bd $*" >&2; exit 1 ;;
@@ -161,6 +162,7 @@ rig r1 tk; rig r2 tk
 mkdir -p "$B/shared"; printf 'A note.\n' > "$B/shared/n.md"
 setting "$B/city/.gc/settings.json" "{\"autoMemoryDirectory\": \"$B/shared\"}"
 run read
+has "$OUT" "town: $B/shared (autoMemoryDirectory in the city settings)" "the city's --settings file places it"
 has "$OUT" "town, r1, r2: 1 notes and 0 entries" "a directory the --settings file places is read once for every place"
 eq "$(find "$STATE" -mindepth 1 -maxdepth 1 -type d | grep -c .)" 1 "and keeps one list"
 rm "$B/city/.gc/settings.json"
@@ -321,6 +323,18 @@ eq "$(sed -n '1,/^<!-- \/memory-intake -->$/p' "$G1/MEMORY.md")" "$(sed -n '1,/^
 eq "$(sed -n '1,3p;4p' "$G2/MEMORY.md" | tr '\n' '|')" "---|title: index|---|<!-- memory-intake: rewritten from the gc-toolkit pack each run -->|" "the block follows front matter"
 eq "$(tail -1 "$G2/MEMORY.md")" "# Index" "and the index keeps the rest"
 
+echo "── a listing that was not read takes out no link ──"
+city unread
+rig u tk
+U=$(memdir "$B/rigs/u")
+printf 'u lesson.\n' > "$U/u.md"
+printf '# Memory Index\n\n- [U](u.md) — u\n' > "$U/MEMORY.md"
+chmod 300 "$U"   # its files open by name, but the directory cannot be listed
+run read
+chmod 700 "$U"
+has "$(cat "$U/MEMORY.md")" "- [U](u.md) — u" "the index keeps its links"
+has "$ERR" "the links in $U/MEMORY.md were not tidied" "and says so"
+
 # ── waits that end ─────────────────────────────────────────────────────────
 echo "── a wait ends once its pattern's fix has landed ──"
 city settle
@@ -383,6 +397,24 @@ jq '(.[] | select(.id == "tk-l1")) |= . + {status: "closed", metadata: {merge_re
 echo '{"https://example.test/pull/5": {"state": "MERGED", "baseRefName": "main"}, "https://example.test/pull/6": {"state": "CLOSED", "baseRefName": "main"}}' > "$STUB_PRS"
 run read
 eq "$(left b.md f.md)" "b.md:gone f.md:gone " "once the landing bead merges, and once the PR merges into the default branch"
+
+echo "── a pattern whose edges were not read keeps its notes ──"
+city edges
+rig s tk
+M=$(memdir "$B/rigs/s")
+printf 'z lesson.\n' > "$M/z.md"
+echo '[{"id": "tk-p1", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]' > "$B/rigs/s/beads.json"
+run read
+apply_lines "$(ref_of z.md) waits tk-p1"
+cat > "$B/rigs/s/beads.json" <<'JSON'
+[{"id": "tk-p1", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "metadata": {"task_kind": "feedback-pattern", "proposal_bead": "tk-f1"}},
+ {"id": "tk-f1", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "main"}}]
+JSON
+STUB_DEP_FAIL=1 run read
+has "$ERR" "did not answer for the follow-ups of tk-p1" "a follow-up named only by an edge may be on its way"
+eq "$(left z.md)" "z.md:kept " "so the note stays"
+run read
+eq "$(left z.md)" "z.md:gone " "until the edges are read"
 
 echo "── off the home rig ──"
 city offhome

@@ -72,7 +72,7 @@ LIST_HEAD=$'#memory-intake list 1\tkind\tname\thash\tjudged\twait\tnext\twhy'
 USE_MARK='<!-- memory-intake: use -->'
 # A use line, as the awk programs below match it.
 USE_AWK_RE='^(- )?used [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
-LEVELS=(managed settings local project user)
+LEVELS=(managed city local project user)
 LOCK_WAIT=120
 # Rows are read into bash split on the unit separator: a tab is whitespace to
 # read, which would close up an empty field.
@@ -411,6 +411,8 @@ due_rows() {
 # directory, and in a collection note it is one line. A pointer line can hold
 # several, joined by " · ". Each pointer to a note no longer in the directory
 # is taken out with the text that follows it, and a line left with none goes.
+# A listing that does not name the file being edited was not read, and nothing
+# is taken out on it.
 PRUNE_AWK='
 function link_start(s) { return s ~ /^\[\[[^]]+\]\]/ || s ~ /^\[[^]]*\]\([^)]+\)/ }
 function target(s,   t) {
@@ -420,9 +422,10 @@ function target(s,   t) {
   return t
 }
 function gone(s,   t) { t = target(s); if (t == "" || t ~ /[\/:]/ || t !~ /\.md$/) return 0; return !(t in present) }
-BEGIN { while ((getline x < NAMES) > 0) present[x] = 1 }
+BEGIN { while ((getline x < NAMES) > 0) present[x] = 1; if (!(SELF in present)) { unread = 1; exit 2 } }
 { L[NR] = $0 }
 END {
+  if (unread) exit 2
   for (i = 1; i <= NR; i++) {
     line = L[i]
     if (substr(line, 1, 2) != "- " || !link_start(substr(line, 3)) || (MODE == "hub" && i < NR && L[i + 1] ~ /^[ \t]+[^ \t]/)) { print line; continue }
@@ -434,7 +437,7 @@ END {
     if (kept) print "- " out
   }
 }'
-prune_links() { LC_ALL=C awk -v NAMES="$1" -v MODE="$2" "$PRUNE_AWK"; }
+prune_links() { LC_ALL=C awk -v NAMES="$1" -v MODE="$2" -v SELF="$3" "$PRUNE_AWK"; }
 
 DROP_ENTRY_AWK='
 BEGIN { while ((getline x < ENTRY) > 0) E[++m] = x }
@@ -472,8 +475,12 @@ tidy() {
       [ -f "$f" ] || continue
       mode=hub; [ "${f##*/}" = MEMORY.md ] && mode=index
       had=$(grep -c '^- ' "$f" 2>/dev/null)
-      rewrite "$f" prune_links "$WORK/present" "$mode"; rc=$?
-      [ "$rc" = 0 ] || { err "$f kept changing while its links were tidied; the next run tries again"; continue; }
+      rewrite "$f" prune_links "$WORK/present" "$mode" "${f##*/}"; rc=$?
+      case $rc in
+        0) ;;
+        3) err "$f kept changing while its links were tidied; the next run tries again"; continue ;;
+        *) err "the links in $f were not tidied; the next run tries again"; continue ;;
+      esac
       [ "$REWROTE" = 1 ] || continue
       LINKS=$((LINKS + 1))
       if [ "$mode" = hub ] && [ "${had:-0}" -gt 0 ] && ! grep -q '^- ' "$f"; then
@@ -486,11 +493,13 @@ tidy() {
 
 # --- the guidance block -------------------------------------------------------
 # The block goes at the top of the index, after any front matter, in place of
-# the block an earlier run wrote, with one blank line before the rest.
+# the block an earlier run wrote, with one blank line before the rest. A block
+# that was not read whole is not written.
 GUIDE_AWK='
-BEGIN { while ((getline x < BLOCK) > 0) blk = blk x "\n" }
+BEGIN { while ((getline x < BLOCK) > 0) { blk = blk x "\n"; last = x }; if (last != "<!-- /memory-intake -->") { unread = 1; exit 2 } }
 { L[NR] = $0 }
 END {
+  if (unread) exit 2
   i = 1; head = ""
   if (NR > 0 && L[1] == "---") {
     for (j = 2; j <= NR && L[j] != "---"; j++) ;
@@ -601,7 +610,7 @@ landed() {
 # ended<US><date><US><why> (done with no fix landed).
 DECISION="wait"
 decide() {
-  local id=$1 store j f any=0 day why reason
+  local id=$1 store j f any=0 day why reason deps
   local -a ups=()
   DECISION="wait"
   store=${STORE_OF[${id%%-*}]:-}
@@ -614,9 +623,14 @@ decide() {
   [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ && ! "$day" > "$TODAY" ]] || day=$TODAY
   reason=$(one_line "$(field "$j" '.close_reason // ""')")
   if [ "$(field "$j" '.metadata.task_kind // ""')" = feedback-pattern ]; then
+    # A follow-up may be named only by the pattern's blocks edge, so an edge
+    # list that was not read leaves the wait as it is.
+    deps=$(cd / && gc bd -C "$store" dep list "$id" --json </dev/null 2>/dev/null | scrub)
+    if ! printf '%s' "$deps" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      err "the store at $store did not answer for the follow-ups of $id"; return 0
+    fi
     mapfile -t ups < <( { field "$j" '.metadata.proposal_bead // empty, .metadata.eng_bead // empty'
-        (cd / && gc bd -C "$store" dep list "$id" --json </dev/null 2>/dev/null | scrub) \
-          | jq -r '.[]? | select((.dependency_type // .type // "") == "blocks") | .id // empty' 2>/dev/null; } | sort -u)
+        printf '%s' "$deps" | jq -r '.[] | select((.dependency_type // .type // "") == "blocks") | .id // empty'; } | sort -u)
     if [ "${#ups[@]}" -gt 0 ] && ! fetch "$store" "${ups[@]}"; then
       err "the store at $store did not answer for the follow-ups of $id"; return 0
     fi
