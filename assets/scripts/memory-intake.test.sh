@@ -379,6 +379,7 @@ has "$(cat "$U/MEMORY.md")" "- [U](u.md) — u" "the index keeps its links"
 has "$ERR" "the links in $U/MEMORY.md were not tidied" "and says so"
 eq "$RC" 1 "the read fails"
 has "$ERR" "cannot list $U; nothing there is removed, and its list stays as it is" "saying it cannot list the directory"
+has "$OUT" "u: not counted, since its notes could not all be read;" "and counting none of its notes"
 eq "$(cmp -s "$LIST" "$B/list.before" && echo same || echo changed)" "same" "and its list reads back unchanged"
 eq "$(due_json --count)" 0 "so the wait and the date hold once it can be listed"
 chmod 000 "$U/w.md"   # listed, but its text cannot be read

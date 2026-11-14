@@ -1034,11 +1034,11 @@ cmd_read() {
       list_rows "$sd" | awk -F'\t' 'FILENAME == ARGV[1] { u[$1 SUBSEP $2 SUBSEP ($1 == "note" ? "" : $3)] = 1; next }
           (($1 SUBSEP $2 SUBSEP ($1 == "note" ? "" : $3)) in u)' "$w/units.tsv" - > "$w/rows"
       write_list "$sd" "$w/rows" || rc=1
+      counts=$(awk -F'\t' '{ c[$1]++ } END { printf "%d notes and %d entries", c["note"], c["entry"] }' "$w/units.tsv")
     else
-      rc=1
+      rc=1; counts="not counted, since its notes could not all be read"
     fi
     unlock_dir
-    counts=$(awk -F'\t' '{ c[$1]++ } END { printf "%d notes and %d entries", c["note"], c["entry"] }' "$w/units.tsv")
     say "${DIR_NAMES[$dir]}: $counts; links to gone notes taken out of $LINKS file(s)$([ "$GUIDED" = 1 ] && printf '; guidance block rewritten')"
   done
   SETTLED_LEFT=0; SETTLED_DUE=0; SETTLED_VETOED=0
