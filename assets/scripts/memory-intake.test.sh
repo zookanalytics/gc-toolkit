@@ -73,12 +73,17 @@ mkdir -p "$SB/edit-bin"
 cat > "$SB/edit-bin/cp" <<'STUB'
 #!/usr/bin/env bash
 # cp or mkdir by its name. When STUB_EDIT_AT names it and the call reaches a
-# removed/ directory, it then makes, once, the edit an agent makes to $STUB_EDIT.
+# removed/ directory, or the path STUB_EDIT_IN matches when it is set, it then
+# makes, once, the edit an agent makes to $STUB_EDIT.
 command -p "${0##*/}" "$@"; rc=$?
 if [ "${0##*/}" = "${STUB_EDIT_AT:-}" ] && [ ! -e "$STUB_EDIT.fired" ]; then
-  case "${*: -1}" in
-    */removed|*/removed/*) printf 'An edit made while it was being removed.\n' >> "$STUB_EDIT"; : > "$STUB_EDIT.fired" ;;
-  esac
+  last=${*: -1}; hit=0
+  if [ -n "${STUB_EDIT_IN:-}" ]; then
+    case "$last" in $STUB_EDIT_IN) hit=1 ;; esac
+  else
+    case "$last" in */removed|*/removed/*) hit=1 ;; esac
+  fi
+  [ "$hit" = 0 ] || { printf 'An edit made while it was being removed.\n' >> "$STUB_EDIT"; : > "$STUB_EDIT.fired"; }
 fi
 exit "$rc"
 STUB
@@ -134,6 +139,13 @@ stamped() {
 save() {
   awk -v t="$2" '!d && /^  modified: / { $0 = "  modified: " t; d = 1 } { print }' "$1" > "$1.next" \
     && printf '%s\n' "$3" >> "$1.next" && mv "$1.next" "$1"
+}
+# ref_at <note> — the ref due gives a note, from its directory and its text.
+ref_at() {
+  local k h
+  k=$(printf '%s' "$(cd -P "$(dirname "$1")" && pwd -P)" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)
+  h=$({ sha256sum 2>/dev/null || shasum -a 256; } < "$1" | cut -c1-16)
+  printf '%s/%s@%s' "$k" "${1##*/}" "$h"
 }
 due_of() { due_json | jq -r --arg n "$1" '[.[] | select(.memory_file | endswith("/" + $n)) | .memory_due] | join(" ")'; }
 
@@ -310,17 +322,16 @@ eq "$(cat "$M/fresh.md")" "Fresh lesson, edited after the listing." "and left in
 eq "$(due_json | jq -r '[.[] | select(.memory_file | endswith("/fresh.md"))] | length')" 1 "and due"
 
 echo "── a note kept to record its uses ──"
+REQ='<!-- memory-intake: use --> When this note steers your work and holds no used line for today, add one at its end: used <YYYY-MM-DD>: <what it changed>'
 RF=$(ref_of fresh.md)
 apply_lines "$RF next 2026-12-01 ask-use"
-has "$OUT" "with a request to record each use" "ask-use is recorded"
-eq "$(tail -1 "$M/fresh.md")" "<!-- memory-intake: use --> When this note steers your work, add a line at its end: used <YYYY-MM-DD>: <what it changed>" "the note gains the line that asks for its uses"
+has "$OUT" "recorded $RF: due again on 2026-12-01, with a request to record the days it is used, one line a day" "ask-use is recorded"
+eq "$(tail -1 "$M/fresh.md")" "$REQ" "the note gains the line that asks for one dated line a day it is used"
 printf 'used 2026-11-16: chose the lock path\n' >> "$M/fresh.md"
-eq "$(due_json | jq -r '[.[] | select(.memory_file | endswith("/fresh.md"))] | length')" 0 "a recorded use does not make it due"
-eq "$(MEMORY_INTAKE_NOW=1796212800 due_json | jq -r '.[] | select(.memory_file | endswith("/fresh.md")) | .memory_due')" "date" "it comes due on its date"
+eq "$(due_of fresh.md)" "" "a use line in a note with no front matter, which Claude Code leaves alone, does not make it due"
 printf 'A new line.\n' >> "$M/fresh.md"
-eq "$(due_json | jq -r '.[] | select(.memory_file | endswith("/fresh.md")) | .memory_due')" "changed" "any other change makes it due"
+eq "$(due_of fresh.md)" "changed" "any other change makes it due"
 
-REQ='<!-- memory-intake: use --> When this note steers your work, add a line at its end: used <YYYY-MM-DD>: <what it changed>'
 echo "── uses recorded through Claude Code's saves leave a note's date alone ──"
 stamped steer 'Take the lock path when two runs share a directory.' > "$M/steer.md"
 apply_lines "$(ref_of steer.md) next 2026-12-01 ask-use"
@@ -398,6 +409,30 @@ used 2026-11-16: probe three
 EOF
 eq "$(due_of keys.md)" "" "nor does one that moves its top-level keys and a list under metadata"
 
+echo "── a decision that does not ask again takes the request out ──"
+D1=1796212800   # 2026-12-02, past the date steer.md was kept until
+RS=$(MEMORY_INTAKE_NOW=$D1 due_json | jq -r '.[] | select(.memory_file | endswith("/steer.md")) | .memory_ref')
+MEMORY_INTAKE_NOW=$D1 apply_lines "$RS next 2026-12-15"
+has "$OUT" "recorded $RS: due again on 2026-12-15; its request to record the days it is used taken out" "a date without ask-use takes the request out"
+hasnt "$(cat "$M/steer.md")" "memory-intake: use" "the note holds no request"
+eq "$(grep -c '^used ' "$M/steer.md")" 2 "and keeps its use lines as its dated record"
+eq "$(MEMORY_INTAKE_NOW=$((D1 + 86400)) due_of steer.md)" "" "and is not due the next day"
+D2=1797422400   # 2026-12-16
+MEMORY_INTAKE_NOW=$D2 apply_lines "$(ref_at "$M/steer.md") next 2027-01-15 ask-use"
+eq "$(grep -c 'memory-intake: use' "$M/steer.md")" 1 "ask-use again adds the request back"
+MEMORY_INTAKE_NOW=$D2 apply_lines "$(ref_at "$M/steer.md") next 2027-01-15 ask-use"
+eq "$(grep -c 'memory-intake: use' "$M/steer.md")" 1 "and ask-use on a note that holds it leaves one"
+MEMORY_INTAKE_NOW=$D2 apply_lines "$(ref_at "$M/steer.md") waits tk-p1"
+has "$OUT" "waits on tk-p1; its request to record the days it is used taken out" "a wait takes the request out"
+hasnt "$(cat "$M/steer.md")" "memory-intake: use" "the waiting note holds no request"
+eq "$(MEMORY_INTAKE_NOW=$((D2 + 86400)) due_of steer.md)" "" "and is not due the next day"
+stamped guard 'Guard lesson.' > "$M/guard.md"
+apply_lines "$(ref_of guard.md) next 2026-12-01 ask-use"
+RG=$(MEMORY_INTAKE_NOW=$D1 due_json | jq -r '.[] | select(.memory_file | endswith("/guard.md")) | .memory_ref')
+STUB_EDIT="$M/guard.md" STUB_EDIT_AT=cp STUB_EDIT_IN='*/.memory-intake.*' PATH="$SB/edit-bin:$PATH" MEMORY_INTAKE_NOW=$D1 apply_lines "$RG next 2026-12-15"
+has "$OUT" "refused $RG" "a note an agent edits while its request is being taken out is refused"
+eq "$(grep -c 'memory-intake: use' "$M/guard.md") $(grep -c 'An edit made while' "$M/guard.md")" "1 1" "and keeps its request beside the edit"
+eq "$(MEMORY_INTAKE_NOW=$D1 due_of guard.md)" "changed" "and is due"
 
 echo "── decisions the script refuses ──"
 apply_lines "$RE next 2026-12-01 ask-use" "nonsense" "$RO next 2026-11-15" "$RO waits zz-1" "$RO waits tk-nope" "0000000000000000/old.md@0000000000000000 drop" "$RO drop extra"
@@ -624,6 +659,31 @@ cp "$M/v.md" "$B/v.before"; cp "$M/MEMORY.md" "$B/index.before"; cp "$M/hub-v.md
 run read
 hasnt "$OUT" "vetoed:" "a later run marks nothing again"
 eq "$(cmp -s "$M/v.md" "$B/v.before" && cmp -s "$M/MEMORY.md" "$B/index.before" && cmp -s "$M/hub-v.md" "$B/hub.before" && echo same)" "same" "and leaves each mark as it is"
+
+echo "── a vetoed note holds no request: the wait the veto ends took it out ──"
+city vetouse
+rig v tk
+M=$(memdir "$B/rigs/v")
+origin_head v main
+echo '[{"id": "tk-p7", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]' > "$B/rigs/v/beads.json"
+stamped asked 'Asked lesson: take the asked path.' > "$M/asked.md"
+run read
+apply_lines "$(ref_of asked.md) next 2026-11-20 ask-use"
+save "$M/asked.md" 2026-11-16T09:00:00.000Z 'used 2026-11-16: took the asked path'
+D=1795262400   # 2026-11-21
+MEMORY_INTAKE_NOW=$D apply_lines "$(MEMORY_INTAKE_NOW=$D due_json | jq -r '.[0].memory_ref') waits tk-p7"
+has "$OUT" "waits on tk-p7; its request to record the days it is used taken out" "the judge sets the asked note on a pattern"
+cat > "$B/rigs/v/beads.json" <<'JSON'
+[{"id": "tk-p7", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "close_reason": "resolved: follow-ups closed", "metadata": {"task_kind": "feedback-pattern", "proposal_bead": "tk-f7"}},
+ {"id": "tk-f7", "status": "closed", "metadata": {"task_kind": "prompt-update", "merge_result": "pull_request", "pr_url": "https://example.test/pull/7"}}]
+JSON
+echo '{"https://example.test/pull/7": {"state": "CLOSED", "baseRefName": "main"}}' > "$STUB_PRS"
+MEMORY_INTAKE_NOW=$D run read
+has "$OUT" "vetoed: 1 of those due again marked" "the veto marks it"
+has "$(cat "$M/asked.md")" "memory-intake: veto" "the note holds the veto line"
+hasnt "$(cat "$M/asked.md")" "memory-intake: use" "and no request"
+has "$(cat "$M/asked.md")" "used 2026-11-16: took the asked path" "and keeps its use line"
+eq "$(MEMORY_INTAKE_NOW=$D due_of asked.md)" "date" "and is due from the day its pattern closed"
 
 echo "── a waiting note that records a use through a save leaves once its fix lands ──"
 city usewait

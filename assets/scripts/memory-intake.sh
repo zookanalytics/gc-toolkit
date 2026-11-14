@@ -19,8 +19,10 @@
 #        memory_prior, created_at, and memory_text for a collection entry).
 #        --limit N prints the N oldest, and --count how many are due.
 # apply  One decision a line, by the ref `due` gave: `<ref> waits <bead-id>`,
-#        `<ref> next <YYYY-MM-DD> [ask-use]` or `<ref> drop`. A note changed
-#        since it was listed is refused, and stays due.
+#        `<ref> next <YYYY-MM-DD> [ask-use]` or `<ref> drop`. ask-use adds to
+#        a note the line that asks its users to record the days they use it,
+#        and a wait, or a date without ask-use, takes that line out. A note
+#        changed since it was listed is refused, and stays due.
 #
 # A unit is a whole note, or an entry of a collection note (hub-*.md): a
 # top-level list item, with the indented lines under it, that is more than one
@@ -1187,21 +1189,29 @@ cmd_due() {
   printf '%s\n' "$rows"
 }
 
-# append_use <full hash> — the note's text with the use line added, while it
-# still has the hash it was listed at.
+# append_use <full hash> — the note's text with the line that asks for its
+# uses added, and drop_use <full hash> the note's text without that line, each
+# while the note still has the hash it was listed at. Each leaves the text it
+# makes in $WORK/written, so the list takes the hash of the text written.
 append_use() {
   local text
   text=$(cat; printf x); text=${text%x}
   [ "$(sha_text "$text")" = "$1" ] || return 1
-  printf '%s' "$text"
-  case "$text" in *$'\n'|'') ;; *) printf '\n' ;; esac
-  printf '%s\n' "$USE_LINE"
+  { printf '%s' "$text"
+    case "$text" in *$'\n'|'') ;; *) printf '\n' ;; esac
+    printf '%s\n' "$USE_LINE"; } | tee "$WORK/written"
+}
+drop_use() {
+  local text
+  text=$(cat; printf x); text=${text%x}
+  [ "$(sha_text "$text")" = "$1" ] || return 1
+  printf '%s' "$text" | LC_ALL=C awk -v M="$USE_MARK" 'index($0, M) == 0' | tee "$WORK/written"
 }
 
 # apply_dir <dir> <decisions> — applies one directory's decisions under its lock.
 APPLY_FAIL=0
 apply_dir() {
-  local dir=$1 lines=$2 sd w="$WORK/apply" ref verb arg ask name h16 kind full base ef rc drops=0 unit
+  local dir=$1 lines=$2 sd w="$WORK/apply" ref verb arg ask name h16 kind full base ef rc drops=0 unit edit withdrawn
   sd=$(state_of "$dir")
   lock_dir "$sd" "$dir" || { APPLY_FAIL=1; return; }
   scan "$dir" "$w" || { unlock_dir; APPLY_FAIL=1; return; }
@@ -1236,21 +1246,29 @@ apply_dir() {
       drop_row "$w/rows" "$kind" "$name" "$base"
       continue
     fi
-    if [ "$ask" = ask-use ]; then
-      if [ "$kind" != note ]; then err "$ref: ask-use takes a whole note"; APPLY_FAIL=1; continue; fi
-      if ! grep -qF "$USE_MARK" "$dir/$name"; then
-        rewrite "$dir/$name" append_use "$full"; rc=$?
-        if [ "$rc" != 0 ] || [ "$REWROTE" != 1 ]; then say "refused $ref: it changed since it was listed; it stays and is due"; continue; fi
-        base=$(list_hash "$dir/$name")
-      fi
+    if [ "$ask" = ask-use ] && [ "$kind" != note ]; then err "$ref: ask-use takes a whole note"; APPLY_FAIL=1; continue; fi
+    # A whole note holds the line that asks for its uses only while the judge
+    # asks: ask-use adds it, and a wait, or a date without ask-use, takes it
+    # out and leaves the use lines the note has.
+    edit=""
+    if [ "$kind" = note ]; then
+      if [ "$ask" = ask-use ]; then grep -qF "$USE_MARK" "$dir/$name" || edit=append_use
+      elif grep -qF "$USE_MARK" "$dir/$name"; then edit=drop_use; fi
     fi
+    if [ -n "$edit" ]; then
+      rewrite "$dir/$name" "$edit" "$full"; rc=$?
+      if [ "$rc" != 0 ] || [ "$REWROTE" != 1 ]; then say "refused $ref: it changed since it was listed; it stays and is due"; continue; fi
+      base=$(list_hash "$WORK/written")
+    fi
+    withdrawn=""
+    [ "$edit" = drop_use ] && withdrawn="; its request to record the days it is used taken out"
     drop_row "$w/rows" "$kind" "$name" "$base"
     if [ "$verb" = waits ]; then
       printf '%s\t%s\t%s\t%s\t%s\t\t\n' "$kind" "$name" "$base" "$NOW_ISO" "$arg" >> "$w/rows"
-      say "recorded $ref: waits on $arg"
+      say "recorded $ref: waits on $arg$withdrawn"
     else
       printf '%s\t%s\t%s\t%s\t\t%s\t\n' "$kind" "$name" "$base" "$NOW_ISO" "$arg" >> "$w/rows"
-      say "recorded $ref: due again on $arg${ask:+, with a request to record each use}"
+      say "recorded $ref: due again on $arg${ask:+, with a request to record the days it is used, one line a day}$withdrawn"
     fi
   done < <(to_us < "$lines")
   if [ "$drops" = 1 ]; then tidy "$dir" "$sd" || APPLY_FAIL=1; fi

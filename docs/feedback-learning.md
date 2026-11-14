@@ -164,7 +164,9 @@ holds nothing worth keeping, once what the note shows is carried to where it
 goes. It sets a note on the feedback pattern its lesson joins, or on the bead
 in another rig's store that carries its fix, or keeps it until a date it
 chooses. A note it cannot substantiate either way stays, and a line in it asks
-its users to record each dated use for the judge's next look.
+its users to record the days they use it, one dated line a day, for the judge's
+next look. A decision that does not ask again takes that line out, and the use
+lines stay as the note's dated record.
 
 A note on a pattern leaves once the pattern closes and a fix it spawned has
 landed on its repository's default branch. When the pattern closes with no fix
@@ -184,7 +186,7 @@ Each run also writes a guidance block at the top of every index, from
 `assets/scripts/memory-guidance.md`. It tells agents what a note holds and how
 to write one so it can be acted on, and sends what is to be evaluated to an
 observation bead. The same file holds the line that asks a note's users to
-record each use, and the words a veto's marks use.
+record the days they use it, and the words a veto's marks use.
 
 ## The promotion path
 

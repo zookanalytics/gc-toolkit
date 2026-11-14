@@ -475,11 +475,15 @@ outcome:
   dropped, and so is anything else with nothing worth keeping in it.
 - **Not substantiated either way**: you cannot tell whether the note still
   serves. Do not drop it on that judgment. Keep it until a date you choose and
-  ask its users to record each use (`ask-use` below adds the line that asks).
-  When it comes due, weigh it as a whole: its dated use lines, what it holds,
-  and what losing it would cost. No fixed span applies, so one note may go
-  after a week with no use and another may need a year. A use keeps the note
-  and does not reopen its lesson. A note due again because its pattern's hold
+  ask its users to record the days they use it, one dated line a day
+  (`ask-use` below adds the line that asks). When it comes due, weigh it as a
+  whole: the days it was used and what each day's line says it changed, what
+  it holds, and what losing it would cost. No fixed span applies, so one note
+  may go after a week with no use and another may need a year. A use keeps the
+  note and does not reopen its lesson. The line that asks is in the note, and
+  an agent that a pointer in the index or a collection note steers need not
+  open the note. So a note whose pointer already states its rule can be in use
+  and gather no use lines, and their absence says little about such a note. A note due again because its pattern's hold
   was dismissed with no recurrence is read this way too, since a working note
   prevents the recurrence the hold waits for, and that silence substantiates
   nothing. A veto is not such silence: it is the operator's word on the rule
@@ -556,7 +560,10 @@ lines name are filed:
   and one whose fix went to another rig's store waits on that bead.
 - `<memory_ref> next <YYYY-MM-DD>`: a note about a moment that has not passed
   is due again that day, which must be after today. Add `ask-use` for a note
-  not substantiated either way, a whole note only.
+  not substantiated either way, a whole note only. A `waits` line, or a `next`
+  line without `ask-use`, takes the line that asks out of a note that holds it,
+  and the note keeps its use lines. Write `ask-use` again to go on collecting
+  them.
 - `<memory_ref> drop`: point-in-time, live work once its bead has what the note
   added, and nothing worth keeping.
 

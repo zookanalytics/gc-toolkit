@@ -14,9 +14,9 @@ same feedback patterns, so a lesson an agent wrote down and a correction an
 agent reported meet in one judgment. A note stays in memory while its pattern is
 open. It leaves once the pattern closes and its fix has landed, or as soon as
 the distiller finds nothing in it worth keeping. A note the distiller cannot
-substantiate either way stays, and records each dated use for a later review to
-weigh. No note leaves because of its age, and no fixed span decides when a note
-is read again.
+substantiate either way stays, and records the days it is used, one dated line a
+day, for a later review to weigh. No note leaves because of its age, and no
+fixed span decides when a note is read again.
 
 The backlog record, [specs/tk-zlot608.1/report.md](../tk-zlot608.1/report.md),
 is the worked example of reading notes by the three questions.
@@ -169,8 +169,8 @@ how it reads.
   keeping in.
 - **Not substantiated either way**: the judge cannot tell whether the note
   still serves. It is not dropped on that judgment (section 3). It stays until
-  a date the judge sets, with a line that asks whoever uses it to record each
-  use.
+  a date the judge sets, with a line that asks whoever uses it to record the
+  day, one line a day.
 
 **A note on a pattern.** The pattern's evidence names the note by its memory
 directory, its name and the hash the judge read. A note is one occurrence in its
@@ -259,10 +259,18 @@ tk-0vo6nph on 2026-11-14, dropping a fixed window for such notes:
 
 So such a note is not dropped on that judgment. The judge keeps it until a date
 it sets for that note, and the script adds one line to it, in the pack's own
-words, asking whoever uses it to append a dated line recording the use. A use
-is recorded in the note itself, keeps the note, and does not reopen its lesson.
-When the note comes due, the judge weighs it as a whole: its dated uses, what it
-holds, and what losing it would cost. A note the judge can substantiate is kept
+words, asking whoever uses it to append a dated line recording the use when the
+note holds none for that day. A use is recorded in the note itself, keeps the
+note, and does not reopen its lesson. When the note comes due, the judge weighs
+it as a whole: the days it was used and what each day's line says it changed,
+what it holds, and what losing it would cost. The script takes the line that
+asks out of the note once the judge decides on it without asking again, by a
+wait or by a date without the ask, and the use lines stay as the note's dated
+record. These two limits, a line a day and a request that ends with the judge's
+answer, come from a later sitting's recommendation, which the operator approved
+("go as recommended", conversation tk-g2f63z7). The sitting found that a note
+used once in each of the rig's sessions, about 176 a day, would outgrow what one
+Read returns within a week. A note the judge can substantiate is kept
 or dropped as above, and a note on a pattern whose fix has landed leaves as
 above.
 
