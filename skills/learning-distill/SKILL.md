@@ -483,12 +483,12 @@ outcome:
   note and does not reopen its lesson. The line that asks is in the note, and
   an agent that a pointer in the index or a collection note steers need not
   open the note. So a note whose pointer already states its rule can be in use
-  and gather no use lines, and their absence says little about such a note. A note due again because its pattern's hold
-  was dismissed with no recurrence is read this way too, since a working note
-  prevents the recurrence the hold waits for, and that silence substantiates
-  nothing. A veto is not such silence: it is the operator's word on the rule
-  the note states, and [When a note leaves](#when-a-note-leaves) says how you
-  read such a note.
+  and gather no use lines, and their absence says little about such a note. A
+  note due again because its pattern's hold was dismissed with no recurrence is
+  read this way too, since a working note prevents the recurrence the hold
+  waits for, and that silence substantiates nothing. A veto is not such
+  silence: it is the operator's word on the rule the note states, and
+  [When a note leaves](#when-a-note-leaves) says how you read such a note.
 
 ### A note on a pattern
 

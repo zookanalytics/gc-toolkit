@@ -433,6 +433,13 @@ STUB_EDIT="$M/guard.md" STUB_EDIT_AT=cp STUB_EDIT_IN='*/.memory-intake.*' PATH="
 has "$OUT" "refused $RG" "a note an agent edits while its request is being taken out is refused"
 eq "$(grep -c 'memory-intake: use' "$M/guard.md") $(grep -c 'An edit made while' "$M/guard.md")" "1 1" "and keeps its request beside the edit"
 eq "$(MEMORY_INTAKE_NOW=$D1 due_of guard.md)" "changed" "and is due"
+QUOTE='The intake starts the line it adds with `<!-- memory-intake: use -->`.'
+printf '%s\n' "$QUOTE" > "$M/quote.md"
+apply_lines "$(ref_of quote.md) next 2026-12-01 ask-use"
+eq "$(tail -1 "$M/quote.md")" "$REQ" "a note that quotes the mark inside a line still gains the request"
+MEMORY_INTAKE_NOW=$D1 apply_lines "$(ref_at "$M/quote.md") next 2026-12-15"
+has "$OUT" "its request to record the days it is used taken out" "a date without ask-use takes it out"
+eq "$(cat "$M/quote.md")" "$QUOTE" "and leaves the line that quotes the mark"
 
 echo "── decisions the script refuses ──"
 apply_lines "$RE next 2026-12-01 ask-use" "nonsense" "$RO next 2026-11-15" "$RO waits zz-1" "$RO waits tk-nope" "0000000000000000/old.md@0000000000000000 drop" "$RO drop extra"

@@ -1189,6 +1189,10 @@ cmd_due() {
   printf '%s\n' "$rows"
 }
 
+# The line that asks for a note's uses is a line that begins with the use mark,
+# as append_use writes it, so a note that quotes the mark inside a line keeps
+# that line. asks_use <file> says whether the note holds it.
+asks_use() { LC_ALL=C awk -v M="$USE_MARK" 'index($0, M) == 1 { f = 1; exit } END { exit !f }' "$1"; }
 # append_use <full hash> — the note's text with the line that asks for its
 # uses added, and drop_use <full hash> the note's text without that line, each
 # while the note still has the hash it was listed at. Each leaves the text it
@@ -1205,7 +1209,7 @@ drop_use() {
   local text
   text=$(cat; printf x); text=${text%x}
   [ "$(sha_text "$text")" = "$1" ] || return 1
-  printf '%s' "$text" | LC_ALL=C awk -v M="$USE_MARK" 'index($0, M) == 0' | tee "$WORK/written"
+  printf '%s' "$text" | LC_ALL=C awk -v M="$USE_MARK" 'index($0, M) != 1' | tee "$WORK/written"
 }
 
 # apply_dir <dir> <decisions> — applies one directory's decisions under its lock.
@@ -1252,8 +1256,8 @@ apply_dir() {
     # out and leaves the use lines the note has.
     edit=""
     if [ "$kind" = note ]; then
-      if [ "$ask" = ask-use ]; then grep -qF "$USE_MARK" "$dir/$name" || edit=append_use
-      elif grep -qF "$USE_MARK" "$dir/$name"; then edit=drop_use; fi
+      if [ "$ask" = ask-use ]; then asks_use "$dir/$name" || edit=append_use
+      elif asks_use "$dir/$name"; then edit=drop_use; fi
     fi
     if [ -n "$edit" ]; then
       rewrite "$dir/$name" "$edit" "$full"; rc=$?
