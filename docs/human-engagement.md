@@ -1454,6 +1454,23 @@ alias, which drops the claim. Gas City does the rest with what it already has
   that cannot come back, because its session was closed, leaves its
   conversation open, and once the work closes the next engagement takes up
   the return from the record.
+- **Low context during the return.** The comparison stays owed when the
+  sitting's context runs low, so the sitting neither signs off nor holds for
+  that reason. Claude Code and Codex compact a thread on their own, and the
+  city's PreCompact hook runs `gc handoff --auto`, which mails the session a
+  note and requests no restart, so the sitting keeps its conversation through
+  a compaction and goes on with the return. When a fresh session must take the
+  return over, the sitting appends a `## Return hand-over` block to the
+  conversation's notes: what was agreed and where it is recorded, the returned
+  work and the revision to examine, the comparison so far with its evidence,
+  what remains, and the conversation and its waits. It posts a hand-back that
+  says the comparison is still owed, then runs `gc session reset`, which asks
+  Gas City to restart the session with fresh provider state under the same
+  alias and assigned work. No line of the hand-over starts with `holding:` or
+  `staying:`, so the entry of whichever session takes the conversation up
+  next still reads `returned`, and its return starts from the hand-over. When
+  no session has taken it up, the conversation is still open, and engaging it
+  brings one back.
 - **Where it cannot stay.** An edge onto a bead in another store holds
   nothing, so a sitting stays only for work in its conversation's own store,
   and ends at the hand-off otherwise. It ends there too when the work is the

@@ -542,11 +542,14 @@ have "…and runs it on Gas City's notice that a blocker closed, which a sitting
 # Gas City refuses a session's own drain-ack while the session holds a claim it
 # started and has not finished, so a sitting that holds its conversation when
 # Gas City stops the session goes on with it, and acknowledges the drain once
-# the conversation no longer holds it.
-have "…whose stop says a sitting refused its ack over its conversation goes on with it" \
-    'When the ack is refused because this session holds the conversation, which it started and has not finished, the sitting goes on: carry the conversation on where your thread left it, and run the ack again once the conversation is closed, back in the operator'"'"'s queue or left to wait.' "$TMP/prompt-stay"
+# the conversation no longer holds it. A stop writes nothing to the
+# conversation before it tries the acknowledgement.
+have "…whose stop writes nothing to the conversation before it acknowledges the drain" \
+    'On `stop`, write nothing to the conversation. Run `gc runtime drain-ack`' "$TMP/prompt-stay"
+have "…and says a sitting refused its ack over its conversation goes on with it" \
+    'The acknowledgement is refused because this session holds the conversation**, which it started and has not finished. The sitting goes on: carry the conversation on where your thread left it, and run the acknowledgement again once the conversation is closed, back in the operator'"'"'s queue or left to wait.' "$TMP/prompt-stay"
 have "…and asks for help when its thread does not hold the conversation" \
-    'When your thread does not hold it, say so in the thread, mail the witness `HELP:`, and wait.' "$TMP/prompt-stay"
+    'The acknowledgement is refused and your thread does not hold the conversation**, so you cannot tell where it was left. Say so in the thread, mail the witness `HELP:`, and wait.' "$TMP/prompt-stay"
 lacks "…and reconstructs no entry from a conversation's notes" 'staying:' "$PROMPT" \
     "the entry reads the record; the prompt acts on what it prints"
 have "the stay skill stays through the sign-off" \
@@ -559,6 +562,17 @@ have "…which leaves out the --pr-anchor of a rework that picked its PR" \
     'Leave out the `--pr-anchor` that named the PR the rework went to' "$TMP/stay-squeezed"
 have "…and the return passes and fails nothing" \
     'It works on nothing, takes no check'"'"'s send-back, and passes and fails nothing' "$TMP/stay-squeezed"
+# Context that runs low during a return changes which session finishes the
+# comparison, never whether it is done: the sitting compacts and goes on, or
+# records a hand-over that the next session on the conversation starts from.
+have "…and context that runs low never ends the comparison" \
+    'Never sign off, hold, or tell the operator that the comparison is done because your context ran low' "$TMP/stay-squeezed"
+lacks "…nor lets a sitting sign off without it" 'say so in a hand-back and sign off the same way' "$TMP/stay-squeezed" \
+    "the comparison stays owed when context runs low, and another session finishes it"
+have "…which a fresh session takes over only from a hand-over recorded before the reset" \
+    'Never reset during a return without this hand-over.' "$TMP/stay-squeezed"
+have "…and the return starts from a hand-over an earlier session left" \
+    'The conversation'"'"'s notes carry a return hand-over** from an earlier session' "$TMP/stay-squeezed"
 for f in "$PROMPT" "$SETTLE" "$STAY" "$CONTINUE" "$HOLD"; do
     missing=""
     for w in $(grep -oE '"\$CONV/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u); do
@@ -935,8 +949,10 @@ have "the stay example's rework form takes --rework --no-wait in place of the wa
     '# --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR'"'"'s rework' "$STAY"
 have "…and converse-settle's sign-off, whose other flags it takes, picks the PR a rework acts on with --pr-anchor" \
     '# --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one' "$SETTLE"
-have "…and a stay on the subject itself is refused, so that sitting ends at the hand-off" \
-    'It refuses one on the subject itself' "$STAY"
+have "…and a stay on the subject itself is refused" \
+    'A stay on the subject itself**, as when the ruling sends the subject or takes its recommendation' "$TMP/stay-squeezed"
+have "…so that sitting ends at the hand-off" \
+    'After either of the first two refusals, end at the hand-off' "$TMP/stay-squeezed"
 SV="$TMP/stay-forms"
 mkdir -p "$SV/bin" "$SV/pack"
 printf '#!/bin/sh\nexit 1\n' >"$SV/bin/gc"

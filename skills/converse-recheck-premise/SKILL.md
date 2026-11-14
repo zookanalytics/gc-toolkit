@@ -9,21 +9,22 @@ Each call starts a fresh shell, so set `CONV`, `CONVERSATION` and `SUBJECT`
 literally, from the entry's output, at the top of every call below.
 
 The condition that justified a conversation, or a gate it replies to, often
-dies before the operator engages it. Test it against live state before you
-prep, so a conversation that closes here has not moved the operator's session
-title or posted on the subject's PR.
+dies before the operator engages the conversation. Test that condition against
+live state before you prepare, so a conversation that closes here has not
+moved the operator's session title or posted on the subject's PR.
 
-The premise is the conversation's ask, its description, with the title and
-description of each gate it replies to, the entry's `GATES`:
+The premise is the conversation's ask, which is its description, together with
+the title and description of each gate it replies to, the entry's `GATES`:
 
 ```bash
 gc bd show "$CONVERSATION"
 gc bd show <each gate GATES names>
 ```
 
-Their stated conditions are the premise, often bulleted literally, such as
-*"no `triage.hold` and no `gc.takeaway` on the root"*. Check each one still
-holds, on the subject and on whatever bead it is about:
+The conditions they state are the premise, often bulleted literally, such as
+*"no `triage.hold` and no `gc.takeaway` on the root"*. Check that each
+condition still holds, on the subject and on whatever bead the condition is
+about:
 
 ```bash
 gc bd show "$SUBJECT" --json | jq -r '.[0].metadata
@@ -47,30 +48,35 @@ Two readings end the question with nothing posted:
   (`gc bd show`, and `gc bd list --parent "$SUBJECT" --all`), and it is moot
   only if something is open again.
 
-Either reading names the stamp or state it rests on. When you cannot, hold the
-sitting: uncertain is not benign.
+Either reading names the stamp or the state it rests on. When you cannot name
+one, hold the sitting: uncertain is not benign.
 
-Clear each gate the reading answers, with the reading as its answer, and read
-it back. A gate another answer already closed keeps that answer, and a gate
-assigned to a person is theirs to clear:
+Clear each gate the reading answers, with the reading as the gate's answer, and
+read the gate back. A gate another answer already closed keeps that answer,
+and a gate assigned to a person is that person's to clear:
 
 ```bash
 gc bd gate resolve <gate> --reason "<moot|benign>: <the premise, and what is true instead>" \
   && gc bd show <gate> --json | jq -r '.[0] | "\(.status) \(.close_reason // "")"'
 ```
 
-When the conversation's own ask dies with them, close the conversation with
-its record. The reading goes on the subject's notes, the conversation closes
-with the reading as its reason, and the close is recorded among the visit's
-actions, which the comment on the subject's PR then shows, so write it as one
-plain sentence that names no other rig or its beads. The close writes no
-headline, since one for a conversation that needs nobody spends the attention
-it saves, except over a headline an earlier sitting's hold left waiting on
-nothing. That is a headline with no `gc.takeaway_settled`, on a subject none of
-whose own waits is pending, and it is replaced with the reading. `gctk bead
-holds` answers what still holds the subject, and the block leaves this
-conversation out of it, because its close frees an open PR's merge. Each write
-takes its exit, and the conversation closes only after them:
+When the conversation's own ask has died too, close the conversation with its
+record:
+
+- The reading goes on the subject's notes.
+- The conversation closes with the reading as its reason.
+- The close is recorded among the visit's actions, which the comment on the
+  subject's PR then shows, so write that action as one plain sentence that
+  names no other rig or its beads.
+- The close writes no headline, because a headline for a conversation that
+  needs nobody spends the attention the close saves. The one exception is a
+  headline an earlier sitting's hold left waiting on nothing: a headline with
+  no `gc.takeaway_settled`, on a subject none of whose own waits is pending.
+  The block replaces that headline with the reading. `gctk bead holds` answers
+  what still holds the subject, and the block leaves this conversation out of
+  that answer, because the conversation's close frees an open PR's merge.
+
+Each write takes its exit, and the conversation closes only after them:
 
 ```bash
 # >>> gctk-bin
@@ -96,12 +102,15 @@ ROW=$(gc bd show "$SUBJECT" --json) \
   && echo "closed $CONVERSATION as $KIND"
 ```
 
-When it prints its `closed` line, drain (the prompt's How a sitting ends), and
-post nothing, not even "this turned out to be fine". No `closed` line means the
-close stopped short, and the conversation stays open under this sitting,
-still holding an open PR's merge. Say in the thread what the block printed,
-fix what it names, and re-run it: the gates cleared above stay cleared, and
-each write is safe to repeat.
+Then take the case that matches what the block printed:
+
+- **It printed its `closed` line.** Drain (the prompt's How a sitting ends),
+  and post nothing, not even "this turned out to be fine".
+- **It printed no `closed` line.** The close stopped short, and the
+  conversation stays open under this sitting, still holding an open PR's
+  merge. Say in the thread what the block printed, fix what it names, and run
+  the block again: the gates cleared above stay cleared, and each write is
+  safe to repeat.
 
 When the premise holds and needs a person, the conversation earns a sitting:
 prepare it (`converse-prep`). A gate this check cleared stays cleared.
