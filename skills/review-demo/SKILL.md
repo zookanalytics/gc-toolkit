@@ -156,10 +156,12 @@ reports whether the `gh` it needs is present.
   `--base-url`, unless `city.toml` sets `app_reads_city = "true"` for the rig.
   The capture refuses any other URL on this host and says why. A terminal
   script, one that declares `**Terminal:**`, brings up no app: give it
-  `--cwd`, naming the directory in `<worktree>` where the guide says its shell
-  starts, or `<worktree>` itself. Exit 0 is a clip in which every step's proof
-  held, exit 3 is a clip in which at least one step failed its proof, and exit
-  1 is no clip. The last line names the clip and says whether it is narrated.
+  `--cwd <worktree>`, the root its shell starts in on every demo path. When the
+  guide says its commands run in a directory below the root, the script's first
+  step changes into it, as the drafter writes it. Exit 0 is a clip in which
+  every step's proof held, exit 3 is a clip in which at least one step failed
+  its proof, and exit 1 is no clip. The last line names the clip and says
+  whether it is narrated.
   Narration needs `OPENAI_API_KEY` in the session. Without it the clip is
   silent and captioned, and it still shows the change.
   `doctor/check-demo-toolchain` reports which parts of the capture toolchain

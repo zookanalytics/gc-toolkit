@@ -72,8 +72,9 @@ the same thing in the same place:
   that draw it.
 - `## Bring the app up`: what the rig's
   [start command](#the-rigs-start-command) serves, and what a capture needs
-  beyond it, such as how long the app takes to start, where a terminal
-  script's shell starts, or how to capture an app the command does not serve.
+  beyond it, such as how long the app takes to start, the directory a terminal
+  session's commands run in, or how to capture an app the command does not
+  serve.
 - `## A known state`: how a script puts the app in a known state, such as the
   start path a page script opens on, and the fixture data, seed or scenario
   behind it.
@@ -138,7 +139,7 @@ assemble the MP4:
 ```bash
 demo_engine_cli run demo.md --serve-dir ./public          # serve a static directory
 demo_engine_cli run demo.md --base-url https://<preview-host>   # drive a deployed preview
-demo_engine_cli run terminal.md --cwd ./cli               # a terminal script: no app, its shell starts in --cwd
+demo_engine_cli run terminal.md --cwd .                   # a terminal script: no app, its shell starts in --cwd
 ```
 
 A script that declares `**Terminal:**` drives a bash session in the engine's own
@@ -189,8 +190,13 @@ assets/scripts/rig-demo-capture.sh --script demo.md --output <out.mp4> \
 A page script needs its app, named with one of the three flags, such as
 `--serve "$SERVE" --cwd <worktree>` for the rig's
 [start command](#the-rigs-start-command). A terminal script takes none of them,
-and its shell starts in `--cwd`. A `--serve` command runs as a copy on a free
-port of its own, which it gets as `$PORT`, as a screenshot's command does.
+and its shell starts in `--cwd`. `mol-rig-demo`, the `demo` check and
+[Demo a PR](#demo-a-pr) each give a terminal script the root of the worktree
+they capture from, so one script runs alike on all three. A script whose
+commands run in a directory below the root, which the rig's guide names,
+changes into it in its first step, as `run cd <dir>`. A `--serve` command runs
+as a copy on a free port of its own, which it gets as `$PORT`, as a screenshot's
+command does.
 
 `mol-rig-demo` runs that call as a pool workflow against any rig. It turns the
 scenario into a script (a ready one, or one written from a bead with
@@ -253,9 +259,10 @@ the clip are working files, and neither is committed.
    ```
 
    On a rig that declares no start command, name the app as the guide's
-   `## Bring the app up` says instead. A terminal script takes `--cwd` alone,
-   naming where that section says its shell starts, or `.` for the worktree's
-   root. Exit 0 is a clip in which every step's proof held. Exit 3 is a clip in
+   `## Bring the app up` says instead. A terminal script takes `--cwd .` alone,
+   the worktree's root. When that section says its commands run in a directory
+   below the root, the script's first step changes into it, as the draft's
+   does. Exit 0 is a clip in which every step's proof held. Exit 3 is a clip in
    which a step failed its proof. Read which step failed and whether the
    change or the script is wrong. Correct a wrong script and capture again, and
    report a change that fails instead of attaching the clip as its demo. Exit 1

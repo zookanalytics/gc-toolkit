@@ -58,10 +58,12 @@ service. A capture refuses a `--base-url` that any gc-toolkit server answers,
 and the service's verbs act on the live city. The verdict says that the board
 shows fixture data.
 
-A terminal script of the conversation form starts its shell in
-`services/helm`, where the form runs, so give its capture
-`--cwd <worktree>/services/helm`. A report runs from the worktree's root, so
-give its capture `--cwd <worktree>`.
+The conversation form runs in `services/helm`, and a report runs from the
+worktree's root. A terminal script's shell starts at the root, so a script of
+the form changes into `services/helm` in its first step, with
+`run cd services/helm`. A capture of one command, `terminal --command`, runs it
+in `--cwd`: give it `<worktree>/services/helm` for the form and `<worktree>` for
+a report.
 
 ## A known state
 

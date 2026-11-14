@@ -61,8 +61,10 @@
 # UI under a stub gc, and fails unless the copy runs the command the rig declares
 # as its ui_serve_command, as written, from the tree, with the city's publisher,
 # and starts no copy for a rig that declares none. It pins that the demo:capture
-# skill and the demo check read that command for a capture of the rig's app. It
-# pins that every skill and formula names a pack skill to load by its catalog
+# skill and the demo check read that command for a capture of the rig's app, and
+# that they start a drafted terminal script's shell at the worktree's root, as
+# the drafter's script expects. It pins that every skill and formula names a
+# pack skill to load by its catalog
 # name, never by its path, so an agent in any tree loads the installed pack's
 # copy.
 #
@@ -1215,6 +1217,14 @@ have "the demo:capture skill reads a rig's start command, its ui_serve_command" 
 have "…and its Demo a PR captures a page script with it" 'rig-demo-capture.sh" --script <script.md> --output <clip.mp4> --serve "$SERVE" --cwd .' "$DEMO_SKILL"
 have "the demo check's capture reads the same command, for the review's rig" 'SERVE=$(gc formula show mol-rig-demo --rig "${GC_RIG:-}" --json | jq -r '"'"'[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty'"'"')' "$DEMO_CHECK"
 have "…and serves it from the reviewed worktree" 'Give it as `--serve "$SERVE" --cwd <worktree>`.' "$DEMO_CHECK"
+# A terminal script the drafter writes runs on three paths, mol-rig-demo, the
+# demo check and Demo a PR. Each starts its shell at the worktree's root, which
+# mol-rig-demo-capture-arm.test.sh runs for mol-rig-demo, so the draft changes
+# into the directory its guide names in its first step.
+have "the drafter's terminal script changes into the directory its guide names, in its first step" \
+    'changes into it before its other actions, as `run cd <dir>`,' "$REPO/skills/gc-demo-script/SKILL.md"
+have "…which Demo a PR captures from the worktree's root" 'A terminal script takes `--cwd .` alone,' "$DEMO_SKILL"
+have "…and so does the demo check" '`--cwd <worktree>`, the root its shell starts in on every demo path.' "$DEMO_CHECK"
 echo "── a moot or benign close settles a headline that waits on nothing ──"
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The

@@ -20,7 +20,8 @@ operational surface, so the arch check asks what Gas City already ships for it
    script whose pour names none takes the command the `rig_name` rig declares
    as its `ui_serve_command`, which the capture step reads with
    `gc formula show mol-rig-demo --rig <rig_name> --json`. A terminal script's
-   pour names none, and its shell starts in the worktree the capture runs from.
+   pour names none, and its shell starts at the root of the worktree the
+   capture runs from.
    `serve_port`, the port of a `serve_dir` server, defaults to empty, a free
    port.
 2. **More callers of the start command.** A sitting's live copy reads
@@ -111,7 +112,11 @@ clearly defined APIs." Offered a start command the rig declares as it declares
 its test commands, with the guide kept as plain text, they answered "Yes
 declared command as recommended." So the capture flags stay the defined
 interface, and a rig's guide says in prose what a capture needs beyond the
-command, such as where a terminal script's shell starts.
+command, such as the directory a terminal session's commands run in. Every demo
+path starts a terminal script's shell at the root of the worktree it captures
+from, and a script whose commands run below the root changes into that
+directory in its first step. So no value read from a guide becomes a capture
+flag, and what `--cwd` opens to the capture's sandbox stays that worktree.
 
 The capture options are the SprintShow engine's own: `--serve`, `--serve-dir`,
 `--base-url`, `--port` and `--cwd` (the engine's `src/cli.ts` help, and its

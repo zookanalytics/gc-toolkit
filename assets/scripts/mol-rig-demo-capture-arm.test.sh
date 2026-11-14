@@ -28,6 +28,9 @@
 # and workspace scripts, against a fixture city, a stub engine, a stub
 # sandbox-exec that keeps the profile it was handed, and a stub gctk that runs a
 # copy's serve command through the library's sandbox, as gctk rig serve does.
+# The stub engine types a terminal script's run lines into one bash that starts
+# in --cwd, as the engine's own terminal does, so a case shows where a script's
+# commands run.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -184,17 +187,24 @@ eq "$(grep -c "^# >>> $APP_MARKER\$" "$TOML")" "1" "exactly one $APP_MARKER regi
 cat "$TMP/app-target.sh" "$TMP/app-root.sh" "$TMP/block.sh" > "$TMP/app-plain.sh"
 bash -n "$TMP/app-plain.sh" && ok "the three regions run as one script" || bad "the three regions failed bash -n"
 
-# A city whose one rig is a git repository holding a store and a committed site.
+# A city whose one rig is a git repository holding a store, a committed site,
+# and a report that runs from the directory below the root that holds it.
 CITY="$TMP/city"; RIG="$CITY/rigs/demo-rig"; WS="$TMP/ws"; WT="$WS/gc-review-tk-req/wt"
-mkdir -p "$RIG/.beads" "$RIG/site" "$TMP/home" "$WS"
+mkdir -p "$RIG/.beads" "$RIG/site" "$RIG/tools" "$TMP/home" "$WS"
 printf '<!doctype html><title>x</title>\n' > "$RIG/site/index.html"
+printf 'echo report from tools\n' > "$RIG/tools/report.sh"
 printf '.beads/\n' > "$RIG/.gitignore"
 git -C "$RIG" init -q
-git -C "$RIG" add .gitignore site
+git -C "$RIG" add .gitignore site tools
 git -C "$RIG" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q -m init
 RIG_HEAD="$(git -C "$RIG" rev-parse HEAD)"
 printf '# Demo: fixture\n\n**Start:** `/`\n' > "$TMP/cwd/walkthrough.md"
 printf '# Demo: a report\n\n**Terminal:**\n\n## Steps\n\n1. **It prints**\n   `run true`\n' > "$TMP/cwd/terminal.md"
+# A rig's guide says the report runs in tools/, so its script changes into tools
+# in its first step, as the drafter writes it. The same script without that
+# step runs from the root.
+printf '# Demo: the report\n\n**Terminal:**\n\n## Steps\n\n1. **It prints the report**\n   `run cd tools`\n   `run sh report.sh`\n' > "$TMP/cwd/subdir.md"
+printf '# Demo: the report\n\n**Terminal:**\n\n## Steps\n\n1. **It prints the report**\n   `run sh report.sh`\n' > "$TMP/cwd/subdir-no-cd.md"
 
 # The stubs these cases add. The engine lints clean and writes the clip it is
 # told to; sandbox-exec keeps the profile and runs the engine; node says no
@@ -203,7 +213,8 @@ printf '# Demo: a report\n\n**Terminal:**\n\n## Steps\n\n1. **It prints**\n   `r
 case "${1:-}" in
   lint) exit 0 ;;
   run) printf '%s\n' "$*" >> "$FAKE_DIR/engine.argv"
-       o=""; p=""; for a in "$@"; do [ "$p" = "-o" ] && o="$a"; p="$a"; done
+       o=""; c=""; p=""; for a in "$@"; do [ "$p" = "-o" ] && o="$a"; [ "$p" = "--cwd" ] && c="$a"; p="$a"; done
+       sed -n 's/^[[:space:]]*`run \(.*\)`[[:space:]]*$/\1/p' "$2" | ( cd "${c:-.}" && bash ) > "$FAKE_DIR/terminal.out" 2>&1
        printf 'clip' > "$o" ;;
 esac
 exit 0
@@ -267,7 +278,7 @@ GC
 # "<rc>|<ordered verb log>", with no workspace left by an earlier case.
 pour() {
   : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/decline.argv"; : > "$TMP/gctk.argv"; : > "$TMP/formula.argv"
-  rm -f "$TMP/profile" "$TMP/copy-profile" "$TMP/copy-dir"
+  rm -f "$TMP/profile" "$TMP/copy-profile" "$TMP/copy-dir" "$TMP/terminal.out"
   REVIEW_WORKSPACE_DIR="$WS" "$HERE/review-workspace.sh" remove --review-bead tk-req >/dev/null
   local rc=0
   ( cd "$TMP/cwd" && env -i PATH="$PATH" HOME="$TMP/home" TMPDIR="$TMP" GC_CITY_PATH="$CITY" GIT_CEILING_DIRECTORIES="$TMP" \
@@ -349,6 +360,17 @@ for MODE in strict plain; do
   case "$(cat "$TMP/gctk.argv")" in
     *"rig serve --command"*) bad "$MODE: and no copy is started" "$(cat "$TMP/gctk.argv")" ;;
     *) ok "$MODE: and no copy is started" ;;
+  esac
+
+  echo "# $MODE shell: a terminal script whose commands run below the root changes into their directory in its first step"
+  eq "$(POUR_SCRIPT="$TMP/cwd/subdir.md" pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the terminal capture passes the sandbox, and the clip is recorded"
+  has "$(cat "$TMP/engine.argv")" "--cwd $WT" "$MODE: its shell starts at the worktree's root"
+  eq "$(cat "$TMP/terminal.out" 2>/dev/null)" "report from tools" "$MODE: and its commands run in tools/, from the rig's HEAD"
+  POUR_SCRIPT="$TMP/cwd/subdir-no-cd.md" pour "$MODE" "" "" "" >/dev/null
+  has "$(cat "$TMP/terminal.out" 2>/dev/null)" "report.sh" "$MODE: the same commands with no first step run from the root, where no report is found"
+  case "$(cat "$TMP/terminal.out" 2>/dev/null)" in
+    *"report from tools"*) bad "$MODE: and print no report" "$(cat "$TMP/terminal.out")" ;;
+    *) ok "$MODE: and print no report" ;;
   esac
 
   echo "# $MODE shell: a pour that names two app targets declines before anything is made"

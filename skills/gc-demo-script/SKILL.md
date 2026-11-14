@@ -87,8 +87,8 @@ The `gc-toolkit.demo-capture` skill says what a guide holds. Keep from it:
 - `## Surfaces`: what a person sees, and the files that draw each surface.
   Phase B sorts the diff by them.
 - `## Bring the app up`: whether a surface is a page or a terminal session,
-  and where a terminal script's shell starts. The capture starts the app from
-  the rig's declared start command, so the script names no app.
+  and the directory a terminal session's commands run in. The capture starts
+  the app from the rig's declared start command, so the script names no app.
 - `## A known state`: the start path and the fixture data a script opens on.
 - `## Sign-in`: the steps a script signs in with, or that the app has none.
 - `## Worked examples`: the rig's own scripts, whose actions and assertions
@@ -269,8 +269,12 @@ No script generated.
 With a guide, the script opens where its `## A known state` says: the start path
 that puts the app in the state the demo needs, such as one that arms a
 scenario. A surface the guide names as a terminal session takes no entry URL:
-its script declares `**Terminal:**`, and its shell starts where the guide's
-`## Bring the app up` says.
+its script declares `**Terminal:**`. Every path that captures the script starts
+its shell at the root of the worktree it captures from
+(`gc-toolkit.demo-capture`). So when the guide's `## Bring the app up` says the
+session's commands run in a directory below the root, the script's first step
+changes into it before its other actions, as `run cd <dir>`, and every later
+step runs there.
 
 With no guide, scan the user-facing file list for the most natural entry point:
 
@@ -431,7 +435,9 @@ If any fails, fix inline and re-check (up to 2 rewrite attempts).
    like a real route: one the guide's `## A known state` names, or with no
    guide a path you saw in `src/app/`.
    If the URL is obviously fabricated, fall back to `/` and note it in
-   the summary. A terminal script has no URL to check.
+   the summary. A terminal script has no URL to check. Check instead that
+   its first step changes into the directory the guide's commands run in,
+   when that directory is below the root (Step C1).
 
 If validation still fails after 2 rewrite attempts, save the script
 anyway but print a warning listing the unresolved validation failures so
