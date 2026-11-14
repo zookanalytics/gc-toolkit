@@ -242,7 +242,7 @@ grep -qF '"$BC" merged' "$TOML" \
 grep -qF 'if [ "$BRANCH_ON_ORIGIN" = "present" ]' "$TOML" \
   && ok "(T4) salvage branches on BRANCH_ON_ORIGIN" || bad "(T4) salvage must branch on BRANCH_ON_ORIGIN"
 GUARD_LN=$(grep -nF 'push-target-ok' "$TOML" | head -1 | cut -d: -f1)
-PUSH_LN=$(grep -nE '^[[:space:]]*git push origin HEAD' "$TOML" | head -1 | cut -d: -f1)
+PUSH_LN=$(grep -nF '/branch-push.sh" --repo "$WORKTREE"' "$TOML" | head -1 | cut -d: -f1)
 [ -n "$GUARD_LN" ] && [ -n "$PUSH_LN" ] && [ "$GUARD_LN" -lt "$PUSH_LN" ] \
   && ok "(T5) push-target-ok gates and precedes the salvage push" \
   || bad "(T5) push-target-ok must gate the salvage push (guard@${GUARD_LN:-none} push@${PUSH_LN:-none})"

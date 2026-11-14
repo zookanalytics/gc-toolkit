@@ -26,7 +26,7 @@ is yours. Judge the intent the change serves, not the wording it satisfied.
 the change claims, then the diff at `<reviewed_oid>`, in `<worktree>`
 (`git diff origin/<review_base>...HEAD`), and the PR as it will reach the
 operator: the page the review formula printed from `<review_pr_url>`, or
-pre-open the anchor's pending `pr_summary`. Then the rig's guidance for this
+pre-open the anchor's pending PR summary. Then the rig's guidance for this
 check, the reviewed commit's `docs/review-pm.md`, which the review formula
 printed when the commit carries one. A rig says there where it keeps its product
 goals when that is not where this method looks.

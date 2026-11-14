@@ -202,3 +202,30 @@ func TestDefaultFormula(t *testing.T) {
 		t.Errorf("config show was read %d times; want once", n)
 	}
 }
+
+// Script runs a script from the pack's scripts directory with each argument as
+// given, a line break inside one included, and answers its exit and its output.
+// A city whose scripts directory is unnamed runs nothing and says why.
+func TestScriptRunsFromThePacksScriptsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	stub := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done >> '" + log + "'\n" +
+		"[ \"${STUB_EXIT:-0}\" = 0 ] || echo 'human-gate.sh: the store refused it' >&2\nexit \"${STUB_EXIT:-0}\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "human-gate.sh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &City{scriptsDir: dir}
+	if r := c.Script("human-gate.sh", "--subject", "tk-1", "--message", "Pull request closed.\nMore."); r.Code != 0 || r.Failure() != "" {
+		t.Fatalf("a script that exits 0 answered %+v", r)
+	}
+	if raw, _ := os.ReadFile(log); string(raw) != "--subject\ntk-1\n--message\nPull request closed.\nMore.\n" {
+		t.Fatalf("the script got %q", raw)
+	}
+	t.Setenv("STUB_EXIT", "1")
+	if f := c.Script("human-gate.sh").Failure(); f != "exit 1: human-gate.sh: the store refused it" {
+		t.Fatalf("a script that exits 1 failed as %q", f)
+	}
+	if r := (&City{}).Script("human-gate.sh"); r.Code != -1 || r.Err == nil || !strings.Contains(r.Err.Error(), "GCTK_SCRIPTS_DIR") {
+		t.Fatalf("a city with no scripts directory answered %+v", r)
+	}
+}

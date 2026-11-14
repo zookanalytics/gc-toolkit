@@ -59,7 +59,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "distinct pr_urls are OK"
 has "$OUT" "OK:" "the pass message is the OK line"
 ARGS=$(cat "$BD_ARGS")
-has "$ARGS" "--status open" "the scan asks for open beads only"
+has "$ARGS" "--status open,blocked" "the scan asks for open beads, and blocked ones, where the pending record keeps a PR that waits on its merge"
 has "$ARGS" "--has-metadata-key pr_url" "the scan asks for beads carrying a pr_url"
 has "$ARGS" "--limit 0" "the scan is not truncated by a default limit"
 
@@ -71,6 +71,19 @@ has "$OUT" "https://x/pr/7" "the PR is named"
 has "$OUT" "alpha/a-1" "the first anchor is listed"
 has "$OUT" "alpha/a-2" "the second anchor is listed"
 clear_stores
+
+# --- 2b. the pending record's open-PR values count, blocked or open -----------
+rec() { printf '{"id":"%s","status":"%s","metadata":{"pr_url":"%s","merge_result":"%s"}}' "$1" "$2" "$3" "$4"; }
+store alpha "$(anchor a-1 https://x/pr/8)" "$(rec a-2 blocked https://x/pr/8 pull_request_pending)"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an open anchor and a pending one on the same PR are an ERROR"
+has "$OUT" "a-2" "…naming the pending twin"
+store alpha "$(rec a-1 blocked https://x/pr/8 pull_request_pending)" "$(rec a-2 open https://x/pr/8 pull_request_head_changed)"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "two anchors on the pending record naming one PR are an ERROR"
+store alpha "$(anchor a-1 https://x/pr/8)" "$(rec a-2 blocked https://x/pr/8 pull_request_closed_unmerged)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a bead the record blocks at an exception owns no open PR, so it is no twin"
 
 # --- 3. the twin can live in ANOTHER store -----------------------------------
 store alpha "$(anchor a-1 https://x/pr/9)"

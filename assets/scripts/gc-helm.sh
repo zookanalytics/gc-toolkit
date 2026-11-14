@@ -2801,10 +2801,11 @@ subject_anchor() {
 
 # conversation_pr_anchor <subject-row> — the anchor whose merge a conversation
 # about the subject holds: subject_anchor's, when that anchor is an open PR
-# (merge_result=pull_request, not closed). Prints nothing when the subject is no
-# open PR and no bead of one. Returns 1 when the anchor its anchor_bead names
-# does not read, because a PR whose state cannot be read could be one the
-# conversation must hold.
+# (merge_result pull_request, or pull_request_pending or
+# pull_request_head_changed on the pending record, and not closed). Prints
+# nothing when the subject is no open PR and no bead of one. Returns 1 when the
+# anchor its anchor_bead names does not read, because a PR whose state cannot
+# be read could be one the conversation must hold.
 conversation_pr_anchor() {
     _cpa_id=$(printf '%s' "$1" | jq -r '(.id // "") | tostring' 2>/dev/null || true)
     _cpa_anchor=$(subject_anchor "$1")
@@ -2816,7 +2817,8 @@ conversation_pr_anchor() {
         [ -n "$_cpa_row" ] || return 1
     fi
     printf '%s' "$_cpa_row" | jq -r '
-        if ((.metadata // {}).merge_result // "") == "pull_request"
+        if (((.metadata // {}).merge_result // "") as $mr
+              | $mr == "pull_request" or $mr == "pull_request_pending" or $mr == "pull_request_head_changed")
            and ((.status // "") | tostring | ascii_downcase) != "closed"
         then (.id // "") | tostring else empty end' 2>/dev/null || true
 }
@@ -5160,7 +5162,12 @@ cmd_engage() {
     #
     # engage_await_start returns 0 once the sitting's `gc session list` row
     # reads `active`, which it does only once the runtime is running; before the
-    # launch it reads start-pending or creating. It returns 2 when the sitting
+    # launch it reads start-pending or creating. It returns 0 at once for a row
+    # that reads `asleep` as well: a sitting that has run and slept, as one that
+    # stays for the return of the work it sent sleeps under the template's
+    # sleep_after_idle, and `gc session attach` wakes it with its thread and
+    # delivers its prompt again (specs/tk-pb9wnr3/stay-probe.md), so waiting
+    # would only hold the operator to the bound. It returns 2 when the sitting
     # ended first, and 1 when ENGAGE_WAIT_TIMEOUT seconds pass first. The
     # sitting is the row whose id is $sid. With $sid empty it is the open row
     # under the alias $start_alias, bare or qualified, a sitting that holds the
@@ -5210,7 +5217,7 @@ cmd_engage() {
             start_waited=$(( $(date +%s) - _start_t0 ))
             _start_now=""
             case "$start_state" in
-                active) return 0 ;;
+                active|asleep) return 0 ;;
                 closed|failed-create) return 2 ;;
                 unlisted) [ "$_start_seen" = 0 ] || { start_state=gone; return 2; } ;;
                 none) _start_seen=1 ;;
@@ -5674,9 +5681,10 @@ cmd_engage() {
     # --no-attach` records the sitting as start-pending. The reconciler then
     # launches it with the rendered converse prompt on argv: every converse
     # provider resolves to prompt_mode=arg, and Claude Code and the codex CLI
-    # each take that argument as the session's first user turn. The prompt's
-    # loop opens with the claim block, so the sitting claims its conversation,
-    # re-checks the premise, preps, and posts its framing with no keystrokes.
+    # each take that argument as the session's first user turn. The prompt
+    # opens with the entry (converse-entry.sh), which claims the conversation,
+    # so the sitting re-checks the premise, preps, and posts its framing with no
+    # keystrokes.
     # That holds on the --no-attach board-picker path too, so whoever attaches
     # later finds a started sitting.
     #

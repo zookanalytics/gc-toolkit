@@ -87,12 +87,21 @@
 # one review at a time keeps one comment, every mark its copies carry, and
 # deletes the rest; and a finding filed with no round, or with another one,
 # carries its review's round from the next pass.
+# An anchor on Gas Town's pending record, pull_request_pending on a blocked bead
+# or pull_request_head_changed on an open one: the posture, conflict, feedback,
+# draft and red-check arms and the write-back reach it, and each records what it
+# read in a plain write guarded on the status and assignee the pass read,
+# leaving merge_result, the status, the assignee and the route as the record has
+# them; a red-check park files its gate and no route, and its withdrawal clears
+# none; the merged, closed and base-moved arms leave it to the landing order;
+# the full pass settles the work of a bead the landing order moved to an
+# exception; and the pre-merge pass's exit counts no such anchor.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
 # timeout. Run directly, the file runs each part in order, each in a process of
 # its own (test-harness.sh), so no part reads the fixtures an earlier part left.
-# run-tests-parts: reconcile rework posture routing feedback writeback answers reactions checks selfheal living pacing
+# run-tests-parts: reconcile rework posture routing feedback writeback answers reactions checks selfheal living pacing record
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7926,6 +7935,227 @@ has "$out" "PR#382 conflicts with 'main'; filed merge-mode rework" "…and its m
 rm -f "$GH_DIR/open_prs.json"
 
 fi # part pacing
+
+# ==== part record: an anchor that owns an open PR on Gas Town's pending record ====
+if part record; then
+
+# An anchor on Gas Town's pending record (specs/tk-1tfzr71.66/design.md, section
+# 6): <value> pull_request_pending, kept blocked, or pull_request_head_changed,
+# kept open, assigned to the refinery and carrying a route of its own. The
+# record's writers alone move those four, so each case reads them back (rec_of)
+# as the record has them.
+ranchor() { # id num value [extra]
+  anchor "$1" "$2" "${4:-}" | jq -c --arg v "$3" '.metadata.merge_result = $v
+    | .metadata["gc.routed_to"] //= "rig/gc-toolkit.refinery"
+    | .status = (if $v == "pull_request_pending" then "blocked" else "open" end)'
+}
+rec_of() { jq -r --arg id "$1" '[ .[] | select(.id == $id)
+    | .metadata.merge_result, .status, .assignee, .metadata["gc.routed_to"] ]
+  | map(. // "<absent>" | tostring) | join(" ")' "$STUB_STORE"; }
+# The writes on <bead> the stub logged that do not carry <guard>.
+unguarded() { grep "^bd update $1 " "$STUB_GC_LOG" | grep -cvF -- "$2" || true; }
+open_gates() { jq --arg k "$1" '[ .[] | select((.await_id // "") == $k) | select(.status != "closed") ] | length' "$STUB_STORE"; }
+quiet_pr() { # num [jq edit of the PR view]
+  printf '%s' "$(prview "$1" OPEN BLOCKED MERGEABLE)" | jq -c ".reviewDecision = \"REVIEW_REQUIRED\" | ${2:-.}" > "$GH_DIR/pr_view_$1.json"
+  echo '[]' > "$GH_DIR/reviews_$1.json"; echo '[]' > "$GH_DIR/comments_$1.json"
+}
+REQ_TEST='[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]'
+
+for RV in pull_request_pending pull_request_head_changed; do
+case "$RV" in pull_request_pending) RS=blocked; RN=0 ;; *) RS=open; RN=1 ;; esac
+REC="$RV $RS rig/refinery rig/gc-toolkit.refinery"
+GUARD="--if-status=$RS --if-assignee=rig/refinery"
+
+echo "# a PR on the record ($RV): the posture arm records what it read, leaving the record as it stands"
+N=$((9100 + RN))
+store "[$(ranchor "RA$RN" "$N" "$RV")]"
+quiet_pr "$N"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "RA$RN — PR#$N recorded posture review_required@sha-$N" "the pass names the posture it recorded"
+eq "$(meta_pinned "RA$RN" pr_posture)" "review_required@sha-$N" "the posture is pinned to the head"
+eq "$(meta "RA$RN" pr_merge_state)" "BLOCKED@sha-$N" "…beside GitHub's merge state"
+eq "$(meta "RA$RN" pr_head_oid)" "sha-$N" "…and the PR head it read"
+has "$(meta "RA$RN" pr_provenance_since)" "Z" "the first read of the open PR stamps its provenance cutover"
+eq "$(rec_of "RA$RN")" "$REC" "the record's value, status, assignee and route stand as the record has them"
+has "$(cat "$STUB_GC_LOG")" "bd update RA$RN $GUARD --set-metadata pr_provenance_since=" "a write on the anchor is a plain metadata write"
+eq "$(unguarded "RA$RN" "$GUARD")" "0" "…and every one is guarded on the status and assignee the pass read"
+hasnt "$out" "transition refused" "no write goes through a transition the record's value would refuse"
+
+echo "# …a merge state moving alone keeps the posture's instant, and a moved head stamps a fresh one ($RV)"
+bmut "RA$RN" ".metadata.pr_posture = \"review_required@sha-$N@2026-01-01T00:00:00Z\""
+quiet_pr "$N" '.mergeStateStatus = "CLEAN"'
+out=$(run)
+eq "$(meta "RA$RN" pr_merge_state)" "CLEAN@sha-$N" "the merge state is recorded"
+eq "$(meta "RA$RN" pr_posture)" "review_required@sha-$N@2026-01-01T00:00:00Z" "…and the posture keeps the instant its turn began"
+quiet_pr "$N" '.mergeStateStatus = "CLEAN" | .headRefOid = "sha-NEW"'
+out=$(run)
+eq "$(meta_pinned "RA$RN" pr_posture)" "review_required@sha-NEW" "a moved head re-pins the posture"
+hasnt "$(meta "RA$RN" pr_posture)" "2026-01-01T00:00:00Z" "…stamped afresh at the new head"
+eq "$(rec_of "RA$RN")" "$REC" "the record still stands"
+
+echo "# …an unchanged posture writes nothing ($RV)"
+: > "$STUB_GC_LOG"
+out=$(run)
+eq "$(grep -c "^bd update RA$RN " "$STUB_GC_LOG" || true)" "0" "no write when nothing moved"
+
+echo "# a conflicting approved PR on the record gets its merge-in, the record standing ($RV)"
+N=$((9110 + RN))
+store "[$(ranchor "RB$RN" "$N" "$RV")]"
+printf '%s' "$(prview "$N" OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_$N.json"
+approve "$N"; echo '[]' > "$GH_DIR/comments_$N.json"
+out=$(run)
+RBK=$(reworks_of "RB$RN")
+has "$out" "RB$RN — PR#$N conflicts with 'main'; filed merge-mode rework $RBK routed to $FIX" "the conflict arm files its merge-in"
+eq "$(meta "$RBK" existing_pr)" "https://github.com/zook/gc-toolkit/pull/$N" "…reworking this PR"
+grep -qxF "$RBK|blocks|RB$RN" "$STUB_DEPS" && ok "…and it blocks the anchor, which holds the PR's merge" || bad "blocks edge missing"
+eq "$(rec_of "RB$RN")" "$REC" "the record stands"
+
+echo "# unanswered feedback on the record routes to a rework child, its watermark recorded, the record standing ($RV)"
+N=$((9120 + RN))
+store "[$(ranchor "RC$RN" "$N" "$RV")]"
+quiet_pr "$N"
+printf '[{"id":5001,"user":{"login":"human1"},"body":"this path never runs","path":"docs/x.md"}]' > "$GH_DIR/comments_$N.json"
+out=$(run)
+RCK=$(reworks_of "RC$RN")
+has "$out" "RC$RN — PR#$N review comments routed to rework:$RCK" "the feedback routes to a rework child"
+eq "$(meta "RC$RN" pr_comment_watermark)" "5001" "…and its watermark is recorded, the receipt the landing order's evaluator reads"
+eq "$(meta "RC$RN" pr_comment_disposition)" "rework:$RCK" "…beside the disposition"
+eq "$(meta_pinned "RC$RN" pr_posture)" "commented@sha-$N" "the posture says feedback is outstanding"
+eq "$(meta "$RCK" 'gc.routed_to')" "$FIX" "the child is routed to the fix pool"
+eq "$(rec_of "RC$RN")" "$REC" "the record stands"
+out=$(run)
+eq "$(reworks_of "RC$RN")" "$RCK" "the batch never re-fires"
+
+echo "# the write-back acknowledges a routed comment on the record, and answers it once its child closes ($RV)"
+N=$((9130 + RN))
+store "[$(ranchor "RW$RN" "$N" "$RV" "$(wb_meta "rework:KW$RN")"), $(child "KW$RN" open)]"
+printf '%s' "$(prview "$N" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$N.json"
+threads "$N" "$(one_thread "$N")"
+out=$(run)
+eq "$(reacted "$N" "NC-$N")" "true" "the routed comment got its EYES reaction"
+bmut "KW$RN" '.status = "closed"'
+out=$(run)
+has "$(treply "$N" "T-$N")" "<!-- gc-writeback-mark:resolved -->" "once the child closes the comment is answered"
+eq "$(tresolved "$N" "T-$N")" "true" "…and its thread resolved"
+eq "$(rec_of "RW$RN")" "$REC" "the record stands"
+
+echo "# a draft PR on the record has its head recorded, the record standing ($RV)"
+N=$((9140 + RN))
+store "[$(ranchor "RD$RN" "$N" "$RV" ',"pr_head_oid":"sha-OLD"')]"
+printf '%s' "$(prview "$N" OPEN CLEAN MERGEABLE)" | jq -c '.isDraft = true' > "$GH_DIR/pr_view_$N.json"
+out=$(run)
+has "$out" "RD$RN — PR#$N is a draft; recorded PR head sha-$N" "the draft's head is recorded"
+eq "$(meta "RD$RN" pr_head_oid)" "sha-$N" "…on the anchor"
+eq "$(rec_of "RD$RN")" "$REC" "the record stands"
+
+echo "# the rank of the PR-finishing work on the record is recorded in a plain write ($RV)"
+N=$((9150 + RN))
+store "[$(ranchor "RF$RN" "$N" "$RV" "$(printf ',"pr_posture":"review_required@sha-%s@2026-01-01T00:00:00Z","pr_merge_state":"BLOCKED@sha-%s","pr_head_oid":"sha-%s","pr_finishing_settled":"approved","pr_provenance_since":"2026-01-01T00:00:00Z"' "$N" "$N" "$N")")]"
+quiet_pr "$N"
+: > "$STUB_GC_LOG"
+out=$(run)
+eq "$(meta "RF$RN" pr_finishing_settled)" "unapproved" "a posture that is not approved settles the work at the unapproved rank"
+hasnt "$out" "WARN RF$RN" "…with no record of it refused"
+eq "$(unguarded "RF$RN" "$GUARD")" "0" "…each write guarded on what the pass read"
+eq "$(rec_of "RF$RN")" "$REC" "the record stands"
+
+echo "# a red required check on the record: one re-run, then a park that files its gate and writes no route ($RV)"
+N=$((9160 + RN))
+printf '%s' "$REQ_TEST" > "$GH_DIR/rules_main.json"
+store "[$(ranchor "RR$RN" "$N" "$RV")]"
+printf '%s' "$(prview "$N" OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[{\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"TIMED_OUT\",\"detailsUrl\":\"https://github.com/zook/gc-toolkit/actions/runs/7$N/job/1\"}]")" > "$GH_DIR/pr_view_$N.json"
+approve "$N"
+: > "$STUB_ESC_LOG"
+out=$(run)
+has "$out" "re-ran the failed jobs of run(s) 7$N at head sha-$N" "the timed-out run is re-run"
+eq "$(meta "RR$RN" pr_check_rerun)" "sha-$N" "…its head recorded on the anchor"
+out=$(run)
+has "$out" "RR$RN — PR#$N required check(s) failing (test) for a non-code cause; parked to human" "the failure at a head already re-run parks the approved PR"
+has "$(cat "$STUB_ESC_LOG")" "--subject RR$RN --key pr-fix-noncode.$N" "…behind its gate"
+eq "$(meta "RR$RN" gc.takeaway)" "<absent>" "…writing no takeaway on the anchor"
+eq "$(rec_of "RR$RN")" "$REC" "…and no route, which is the record's"
+out=$(run)
+eq "$(ngates "pr-fix-noncode.$N")" "1" "a later pass stands down on the open gate"
+eq "$(reworks_of "RR$RN")" "" "…and sends no fixer"
+printf '%s' "$(prview "$N" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$N.json"
+out=$(run)
+eq "$(open_gates "pr-fix-noncode.$N")" "0" "once GitHub reads the PR mergeable the park's gate is withdrawn"
+eq "$(rec_of "RR$RN")" "$REC" "…with no route to clear"
+
+echo "# …on a bead on the record that carries the park route, the gate goes and the route stays ($RV)"
+N=$((9170 + RN))
+store "[$(ranchor "RG$RN" "$N" "$RV" ',"gc.routed_to":"human"'), $(hgate "RGk$RN" "RG$RN" "pr-fix-noncode.$N")]"
+printf '%s' "$(prview "$N" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$N.json"
+out=$(run)
+eq "$(bstatus "RGk$RN")" "closed" "the park's gate is withdrawn"
+eq "$(meta "RG$RN" gc.routed_to)" "human" "…and the route, the record's, is left as it stands"
+hasnt "$out" "gate stays open" "…with no route clear for the withdrawal to wait on"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# the merged, closed and base-moved arms leave a PR on the record to the landing order ($RV)"
+N=$((9180 + RN))
+store "[$(ranchor "RM$RN" "$N" "$RV")]"
+printf '%s' "$(prview "$N" MERGED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$N.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "RM$RN — PR#$N is MERGED; its record ($RV) is the landing order's to close" "a merged PR is left to the landing order"
+eq "$(rec_of "RM$RN")" "$REC" "…its record standing"
+eq "$(meta "RM$RN" merged_sha)" "<absent>" "…with no merge recorded"
+eq "$(grep -c "^bd update RM$RN " "$STUB_GC_LOG" || true)" "0" "…and nothing written on the bead"
+
+N=$((9182 + RN))
+store "[$(ranchor "RK$RN" "$N" "$RV" ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-succ"')]"
+printf '%s' "$(prview "$N" CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$N.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+has "$out" "RK$RN — PR#$N is CLOSED; its record ($RV) is the landing order's to close" "a PR closed without merging is left to the landing order"
+eq "$(rec_of "RK$RN")" "$REC" "…its record standing, not abandoned"
+eq "$(cat "$STUB_REHOME_LOG")" "" "…a disposition recorded on it not consummated here"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and no gate filed"
+eq "$(grep -c "^bd update RK$RN " "$STUB_GC_LOG" || true)" "0" "…nor anything written on the bead"
+
+N=$((9184 + RN))
+store "[$(ranchor "RT$RN" "$N" "$RV")]"
+printf '%s' "$(prview "$N" OPEN DIRTY CONFLICTING)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_$N.json"
+approve "$N"
+: > "$STUB_ESC_LOG"
+out=$(run)
+has "$out" "RT$RN — PR#$N sits on base 'release', not its record's target 'main'; the landing order records it" "a moved base is left to the landing order"
+eq "$(rec_of "RT$RN")" "$REC" "…its record standing, not retargeted"
+eq "$(cat "$STUB_ESC_LOG")" "" "…with no gate filed"
+eq "$(reworks_of "RT$RN")" "" "…and no arm acts on the PR while it sits on another base"
+done
+
+echo "# a bead outside the record's shape is not walked: pending on an open bead, head_changed on a blocked one"
+store "[$(ranchor RY0 9190 pull_request_pending | jq -c '.status = "open"'), $(ranchor RY1 9191 pull_request_head_changed | jq -c '.status = "blocked"')]"
+quiet_pr 9190; quiet_pr 9191
+out=$(run)
+has "$out" "no gating anchors" "neither is an anchor the arms walk"
+
+echo "# the full pass settles the work of a bead the landing order moved to an exception, in a plain write"
+store "[$(anchor RE1 9192 ',"pr_finishing_settled":"approved","pr_posture":"approved@sha-9192@2026-01-01T00:00:00Z","pr_head_oid":"sha-9192"' \
+  | jq -c '.metadata.merge_result = "pull_request_closed_unmerged" | .status = "blocked"')]"
+: > "$STUB_GC_LOG"
+out=$(run)
+eq "$(meta RE1 pr_finishing_settled)" "unapproved" "the exception's work is settled at the unapproved rank"
+eq "$(unguarded RE1 "--if-status=blocked --if-assignee=rig/refinery")" "0" "…in writes guarded on what the pass read"
+has "$(cat "$STUB_GC_LOG")" "bd update RE1 --if-status=blocked --if-assignee=rig/refinery --set-metadata pr_finishing_settled=unapproved" "…the last of which records the rank"
+eq "$(meta RE1 merge_result)" "pull_request_closed_unmerged" "…moving nothing of the record"
+hasnt "$out" "WARN RE1" "…and no record of it refused"
+
+echo "# --posture-only: an anchor on the record whose posture does not record holds no merge, since merge.sh never reads it"
+store "[$(ranchor RX0 9193 pull_request_pending)]"
+quiet_pr 9193
+out=$(STUB_UPDATE_FAIL=RX0 run_posture); rc=$?
+has "$out" "RX0 posture/conversation record failed for PR#9193" "the pre-merge pass says the posture did not record"
+eq "$rc" "0" "…and exits 0 over it"
+store "[$(anchor RX1 9194)]"
+quiet_pr 9194
+out=$(STUB_UPDATE_FAIL=RX1 run_posture); rc=$?
+eq "$rc" "1" "…while an anchor merge.sh reads holds the merge arm"
+
+fi # part record
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -462,6 +462,15 @@ has "$OUT" "already closed" "…and says so"
 fresh; patch 'map(if .id == "tk-w" then .metadata.merge_result = "pull_request" else . end)'
 refused "an open PR" tk-w --key polecat-x --ruling "x"
 has "$OUT" "pr-dispose.sh" "an open PR: it names the writer that retires one"
+fresh; patch 'map(if .id == "tk-w" then .metadata.merge_result = "pull_request_pending" else . end)'
+refused "an open PR on the pending record" tk-w --key polecat-x --ruling "x"
+has "$OUT" "pull_request_closed_unmerged" "an open PR on the pending record: it names the gate the landing order files on the close"
+hasnt "$OUT" "pr-dispose.sh" "…and not the old record's writer, which refuses it"
+fresh; patch 'map(if .id == "tk-w" then .metadata.merge_result = "pull_request_head_changed" else . end)'
+refused "an open PR at a head the refinery has not validated" tk-w --key polecat-x --ruling "x"
+has "$OUT" "refinery-invalid-existing-pr" "an open PR at a head the refinery has not validated: it names the gate the refinery's publication files on the closed PR"
+hasnt "$OUT" "pull_request_closed_unmerged" "…and not the landing order's, which does not read that bead"
+hasnt "$OUT" "pr-dispose.sh" "…nor the old record's writer, which refuses it"
 fresh
 refused "no gate under the key" tk-w --key another-key --ruling "x"
 has "$OUT" "no human gate under another-key" "no gate under the key: it says so"

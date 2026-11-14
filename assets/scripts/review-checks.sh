@@ -79,8 +79,8 @@
 # The index declares mechanical facts only. When a check applies to a given diff
 # is a judgment its method states in prose, not a column here.
 # Callers: signoff.sh, skills/review-triage, formulas/mol-review.toml and
-# mol-review-quorum-signoff.toml, pr-open.sh, gctk merge, gate-ensure.sh,
-# pr-facts.sh, review-outcome.sh, pr-summary-region.sh, liveness-sweep.sh,
+# mol-review-quorum-signoff.toml, pr-open.sh, refinery-land.sh, gctk merge,
+# gate-ensure.sh, pr-facts.sh, review-outcome.sh, liveness-sweep.sh,
 # review-checks.test.sh.
 # Exit: 0 ok · 1 a commit --at names cannot be read (no repository here holds or
 # can fetch it, or there is no repository here at all), an extension at a

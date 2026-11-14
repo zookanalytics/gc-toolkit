@@ -363,12 +363,23 @@ eq "$RC" "0" "once the first rework has landed and closed, the later ruling is f
 eq "$(created)" "2" "…as a child of its own"
 has "$(meta fix-2 rejection_reason)" "also rename the section" "…carrying the later ruling"
 
+echo "# --- an open PR on the pending record takes a ruling's rework the same way ---"
+for rec in "pull_request_pending blocked" "pull_request_head_changed open"; do
+  set -- $rec
+  reset "$(printf '%s' "$ANCHOR_PR" | jq -c --arg mr "$1" --arg st "$2" 'map(.metadata.merge_result = $mr | .status = $st)')"
+  OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment directly to docs/material-layers.md" 2>&1); RC=$?
+  eq "$RC" "0" "$1: exit 0 on a clean mint+dispatch"
+  eq "$(created)" "1" "$1: exactly one rework child created"
+  eq "$(meta fix-1 anchor_bead)" "anc-1" "$1: the child names the anchor"
+  eq "$(meta fix-1 branch)" "polecat/anc-1" "$1: the child resumes the anchor's branch"
+done
+
 echo "# --- guard: a non-PR anchor is refused, nothing filed ---"
 reset '[{"id":"anc-1","status":"open","metadata":{"merge_result":"","branch":"polecat/anc-1","target":"main"}}]'
 OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
 eq "$RC" "2" "exit 2 when the anchor is not an open PR"
 eq "$(created)" "0" "no child filed for a non-PR anchor"
-has "$OUT" "not pull_request" "says why it refused"
+has "$OUT" "not an open PR's (pull_request, pull_request_pending or pull_request_head_changed)" "says why it refused"
 
 echo "# --- guard: an open PR with no branch is refused ---"
 reset '[{"id":"anc-1","status":"open","metadata":{"merge_result":"pull_request","target":"main"}}]'

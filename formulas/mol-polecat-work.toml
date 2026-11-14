@@ -176,8 +176,6 @@ edge, and clearing the gate re-slings the work:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-setup.sh" --stop-merge --convoy {{convoy_id}} --path "<file>" --collided "<the two intents that met>" --question "<the one decision you need>"
 ```
-Leave `prepare_mode` on the bead: the refinery re-stamps it (merge) on every
-prepare.
 
 **3. Clean state and setup:** `git status` should be clean. The rig's setup
 command runs in the worktree through `gctk rig setup`, which records nothing; an
@@ -562,8 +560,9 @@ one meets the standard.
 **4. Name the branch on the anchor's title.** `pr-open.sh`, `pr-facts.sh` and
 `merge.sh` read the anchor, the open bead that carries a `merge_result` for this
 branch, which on fresh work is this bead. The PR's title is composed from its
-title: `pr-open.sh` writes it at create, `pr-stack.sh` keeps an open PR's title
-equal to it, and the squash merge takes its commit subject from it. Like the
+title: the PR is opened with it, the refinery's merge-push step brings an open
+PR's title back to it at each round it lands on the branch, and the squash merge
+takes its commit subject from it. Like the
 summary, it names the branch, not this pass. Read it:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-submit.sh" --anchor-only --convoy {{convoy_id}}

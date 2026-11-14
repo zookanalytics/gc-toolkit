@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
@@ -166,7 +167,7 @@ func beadOf(r *ledger.Record) (Bead, error) {
 		Assignee: r.Assignee(), AwaitType: r.AwaitType(), Priority: r.Priority(), Labels: r.Labels(),
 		CreatedAt: r.CreatedAt(), ClosedAt: r.ClosedAt(), EphemeralPlane: r.EphemeralPlane(), Template: r.Template(),
 		Anchor: text(anchorKey, r), RoutedTo: text(routedToKey, r), WorkOutcome: text(workOutcomeKey, r),
-		MergeResult: text(mergeResultKey, r), PRNumber: text(prNumberKey, r), PRURL: text(prURLKey, r),
+		MergeResult: text(record.Result, r), PRNumber: text(record.PRNumber, r), PRURL: text(record.PRURL, r),
 		Epic: Epic{
 			Handle: text(epicHandleKey, r), Hypothesis: text(epicHypothesisKey, r), Boundaries: text(epicBoundariesKey, r),
 			ClosureCondition: text(epicClosureKey, r), Indicators: text(epicIndicatorsKey, r), Ruling: text(epicRulingKey, r),
@@ -181,7 +182,9 @@ func beadOf(r *ledger.Record) (Bead, error) {
 
 // text is a String key's value on r as the row holds it, empty when r does not
 // carry it. A String key's stored text always decodes.
-func text(k ledger.Key[string], r *ledger.Record) string {
+func text(k interface {
+	Get(*ledger.Record) (string, bool, error)
+}, r *ledger.Record) string {
 	v, _, _ := k.Get(r)
 	return v
 }
