@@ -41,12 +41,14 @@ living comment per review shows the reviewer how each point was answered. A
 reply through `pr-post.sh` only adds detail that answer leaves out.
 
 Resolve a thread only once its answer has landed. The write-back resolves a
-thread whose fix a rework landed. A thread you answered yourself, with nothing
-left to land, you resolve with GitHub's `resolveReviewThread` mutation on the
-thread's `PRRT_` id:
+thread whose fix a rework landed, and one whose declined or deferred point its
+answer is on. A thread you answered yourself, a decline or a deferral included,
+with nothing left to land, you resolve with GitHub's `resolveReviewThread`
+mutation on the thread's `PRRT_` id:
 `gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -f t=<PRRT_ id>`.
 Leave a thread open when a person replied in it after you, or when it holds a
-declined, deferred or needs-you point, because a person closes those.
+needs-you point, because that person's ruling closes it. A reply in a thread
+the city resolved is still feedback, which the reconcile reads and routes.
 
 ## Send it back for rework
 
