@@ -43,6 +43,8 @@ invariants over
 this machine and their doctor checks are
 [component-model.md](component-model.md) §3. How completion propagates to a
 waiting conversation is [lifecycle-composition.md](lifecycle-composition.md).
+What the status labels and the pending record's values mean to a person
+reading a pull request is [pull-request-states.md](pull-request-states.md).
 
 ## The machine
 
