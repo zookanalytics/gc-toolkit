@@ -479,9 +479,11 @@ outcome:
   When it comes due, weigh it as a whole: its dated use lines, what it holds,
   and what losing it would cost. No fixed span applies, so one note may go
   after a week with no use and another may need a year. A use keeps the note
-  and does not reopen its lesson. A note due again because its pattern closed
-  with no fix landed is read this way too, since a working note prevents the
-  recurrence a hold waits for, and that silence substantiates nothing.
+  and does not reopen its lesson. A note due again because its pattern's hold
+  was dismissed with no recurrence is read this way too, since a working note
+  prevents the recurrence the hold waits for, and that silence substantiates
+  nothing. A veto is not such silence: it is the operator's word on the rule
+  the note states.
 
 ### A note on a pattern
 
