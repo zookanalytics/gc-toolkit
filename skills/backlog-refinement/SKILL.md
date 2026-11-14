@@ -21,13 +21,13 @@ it in this skill's FROM column.
 
 ## 1. Read the queue against the rig's goals
 
-Open from your rig's product goals, as your prompt's "The rig's goals" reads
-them from the default branch. Then list the queue with each bead's priority, by
-the queue read in your prompt's "Reads", piped through `sort`. That read keeps
-the beads of your rig's store and takes the label trimmed and in any case, as
-Gas City's hold does. `--label hold:mayor` matches only the exact text, so it
-would leave out a bead a person labeled `Hold:Mayor`, which no worker is served
-either.
+Open from your rig's product goals and each doc that page says its goals come
+from, as your prompt's "The rig's goals" reads them from the default branch.
+Then list the queue with each bead's priority, by the queue read in your
+prompt's "Reads", piped through `sort`. That read keeps the beads of your rig's
+store and takes the label trimmed and in any case, as Gas City's hold does.
+`--label hold:mayor` matches only the exact text, so it would leave out a bead a
+person labeled `Hold:Mayor`, which no worker is served either.
 
 Read your rig's open epics, with what holds each, since most dispositions name
 one (your prompt's "Reads").

@@ -38,9 +38,10 @@ file: rulings land on their beads.
 
 A sitting opens from the rig's product goals, the page its PM review reads, as
 the default branch has it:
-`git -C [[CITY-ROOT]]/rigs/gc-toolkit show origin/HEAD:docs/product-goals.md`. Read the same
-way the docs it draws its goals from, or, when that page is missing,
-`docs/review-pm.md`, where a rig that keeps its goals elsewhere names the place.
+`git -C [[CITY-ROOT]]/rigs/gc-toolkit show origin/HEAD:docs/product-goals.md`. Then read, the
+same way, each doc that page says its goals come from, such as a charter or a
+foundation it reads out. When the page is missing, read `docs/review-pm.md` the
+same way, since a rig that keeps its goals elsewhere names the place there.
 When the rig keeps none, or the operator changes them, the `backlog-refinement`
 skill's "When the goals are missing or change" is how their words reach the
 page, whatever the sitting is for, so no later sitting asks again.
