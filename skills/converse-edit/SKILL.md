@@ -231,14 +231,17 @@ When the change is to a rig's UI, the operator reacts to a copy of it: a live
 page served from the tree on fixture data, at an address of its own that they
 open in their own browser. `gctk rig serve` runs the copy from the checkout you
 run it in, inside the sandbox a demo capture runs in, where the live city
-cannot be reached. Start one once the tree is set up, with the rig's serve
-command and the city's publisher, which the rig's formula vars carry:
+cannot be reached. Start one once the tree is set up, with the serve command
+on the `**Serve:**` line of the rig's demo guide, its `docs/review-demo.md`,
+which the block reads at the tree's commit through the reader a demo capture
+uses, and with the city's publisher, which the rig's formula vars carry:
 
 ```bash
 VARS=$(gc formula show mol-rig-demo --rig "$GC_RIG" --json)
 var() { printf '%s' "$VARS" | jq -r --arg n "$1" '[.vars[] | select(.name == $n)][0].rig_default // empty'; }
-SERVE=$(var ui_serve_command)
-[ -n "$SERVE" ] || echo "rig $GC_RIG declares no ui_serve_command, so it offers no copy"
+SERVE=""
+. "$CONV/demo-engine-lib.sh" && demo_engine_guide "$TREE" && SERVE=$DEMO_GUIDE_SERVE
+[ -n "$SERVE" ] || echo "the demo guide in $TREE gives no serve command, so it offers no copy"
 [ -z "$SERVE" ] || ( cd "$TREE" && GCTK_SCRIPTS_DIR="$CONV" "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --command "$SERVE" \
   --publish-command "$(var ui_publish_command)" --address-pattern "$(var ui_address_pattern)" )
 ```
@@ -264,7 +267,7 @@ copy and start it again, which runs it on another port. Where the city sets no
 publisher, or a second start still prints no address, the city can give no
 address and the operator cannot open the copy, so stop it with
 `( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )`.
-A rig that declares no serve command offers no copy at all, and the block says
+A rig whose guide names no serve command offers no copy, and the block says
 so. Either way the look cannot be shown live. Tell the operator, and recommend
 sending the change on a formula (the converse-settle step), and the operator's
 ruling decides. A small fix agreed here, whose next step is not a look, is still

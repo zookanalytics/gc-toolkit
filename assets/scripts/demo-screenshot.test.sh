@@ -241,7 +241,7 @@ run() {
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
   [ $# -gt 0 ] && shift
   : >"$CALLLOG"; rm -f "$HANDED" "$GH_REQ" "$SCRIPT_HANDED" "$SERVED"; : >"$COPY_STATE"
-  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" \
+  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" GIT_CEILING_DIRECTORIES="$TMPD" \
       GH_REQ="$GH_REQ" ENGINE_STUB="$ENGINE_STUB" SCRIPT_HANDED="$SCRIPT_HANDED" SERVED="$SERVED" \
       GCTK_BIN="$BIN/gctk" COPY_STATE="$COPY_STATE" "${envs[@]}" bash "$SUT" "$@" 2>&1 )
 }
@@ -269,7 +269,7 @@ out="$(run -- page --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 2 "page without --script exits 2"
 out="$(run -- page --script "$SCRIPT" --output "$OUT")"; rc=$?
 eq "$rc" 2 "page with no app target exits 2"
-has "exactly one of --serve-dir / --serve / --base-url (got 0)" "$out" "it names the app-target requirement"
+has "exactly one of --serve-dir / --serve / --base-url, or --guide (got 0)" "$out" "it names the app-target requirement, --guide among its forms"
 out="$(run -- page --script "$SCRIPT" --output "$OUT" --serve-dir "$APP" --base-url http://localhost:3000)"; rc=$?
 eq "$rc" 2 "page with two app targets exits 2"
 out="$(run -- page --script "$SCRIPT" --output "$OUT" --serve-dir "$APP" --selector '#board' --full-page)"; rc=$?
@@ -438,6 +438,72 @@ has "--cwd names the checkout a --serve command serves the app from" "$out" "it 
 out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 has "engine-env PORT=unset" "$(calls)" "a --serve-dir capture sets no PORT"
 
+echo "# page: --guide takes the app the rig's demo guide names, as the video capture takes it"
+# commit_all <worktree>: a repository whose one commit holds what the worktree
+# holds, so a guide is read at that commit.
+commit_all() {
+  git -C "$1" init -q && git -C "$1" add -A \
+    && git -C "$1" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q -m fixture
+}
+# guide <worktree> <lines>: a worktree whose committed demo guide holds the
+# section "Bring the app up" with those lines.
+guide() {
+  mkdir -p "$1/docs"
+  printf '# Demo guide\n\n## Bring the app up\n\n%s\n\n## Sign-in\n\nNone.\n' "$2" >"$1/docs/review-demo.md"
+  commit_all "$1"
+}
+GW="$WORK/rig-wt"; mkdir -p "$GW/services/helm"
+guide "$GW" '**Serve:** `cd services/helm && exec go run ./cmd/helm-fixture`
+**Cwd:** `services/helm`'
+out="$(run -- page --script "$SCRIPT" --guide "$GW" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a page capture with --guide exits 0"
+has "gctk rig serve --command cd services/helm && exec go run ./cmd/helm-fixture (in $GW)" "$(calls)" "the guide's command is served as a copy from the worktree's root, whatever **Cwd:** says"
+has "[--base-url] [http://127.0.0.1:50200/]" "$(calls)" "and the engine captures the copy"
+hasnt "[--serve]" "$(calls)" "with no --serve of its own"
+has " in $GW names" "$out" "it says the app came from the guide in the worktree --guide named"
+GS="$WORK/rig-static"; mkdir -p "$GS/site"; guide "$GS" '**Serve dir:** `site`'
+out="$(run -- page --script "$SCRIPT" --guide "$GS" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a guide's static directory captures"
+has "[--serve-dir] [$GS/site]" "$(calls)" "the engine serves the guide's directory under the worktree"
+hasnt "[--cwd]" "$(calls)" "and a directory served needs no --cwd"
+GP="$WORK/rig-static-port"; mkdir -p "$GP/site"; guide "$GP" '**Serve dir:** `site`
+**Port:** `4321`'
+out="$(run -- page --script "$SCRIPT" --guide "$GP" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a guide's static directory with a port captures"
+has "[--serve-dir] [$GP/site] [--port] [4321]" "$(calls)" "the engine's server serves it on the guide's port"
+GC2="$WORK/rig-cmd"; mkdir -p "$GC2"; guide "$GC2" '**Serve:** `npm run dev`
+**Port:** `5173`'
+out="$(run -- page --script "$SCRIPT" --guide "$GC2" --output "$OUT")"; rc=$?
+eq "$rc" 2 "a guide that names **Port:** beside **Serve:** exits 2"
+has "names **Port:**, which is the port of the server that serves a **Serve dir:**" "$out" "it says a command's copy takes a port of its own"
+hasnt "rig serve --command" "$(calls)" "and no copy is started"
+GN="$WORK/rig-none"; mkdir -p "$GN"; printf 'x\n' >"$GN/README"; commit_all "$GN"
+out="$(run -- page --script "$SCRIPT" --guide "$GN" --output "$OUT")"; rc=$?
+eq "$rc" 2 "a commit that carries no guide exits 2"
+has "the commit checked out in $GN carries no docs/review-demo.md" "$out" "it says the commit carries no guide"
+hasnt "[screenshot]" "$(calls)" "and nothing is captured"
+GE="$WORK/rig-noapp"; guide "$GE" 'The app is brought up apart from the capture.'
+out="$(run -- page --script "$SCRIPT" --guide "$GE" --output "$OUT")"; rc=$?
+eq "$rc" 2 "a guide that names no app exits 2"
+has "in $GE names no app" "$out" "it says the guide names no app"
+GT="$WORK/rig-two"; guide "$GT" '**Serve dir:** `site`
+**Base URL:** `https://preview.example.com`'
+out="$(run -- page --script "$SCRIPT" --guide "$GT" --output "$OUT")"; rc=$?
+eq "$rc" 2 "a guide that names two apps exits 2"
+has "names more than one of **Serve:**, **Serve dir:** and **Base URL:**" "$out" "it says the guide names more than one app"
+hasnt "[screenshot]" "$(calls)" "and nothing is captured"
+GO="$WORK/rig-climb"; mkdir -p "$GO"; guide "$GO" '**Serve dir:** `../rig-static/site`'
+out="$(run -- page --script "$SCRIPT" --guide "$GO" --output "$OUT")"; rc=$?
+eq "$rc" 2 "a guide whose directory climbs out of the repository by .. exits 2"
+has "**Serve dir:** \`../rig-static/site\` leads outside the worktree, to $GS/site" "$out" "it says where the directory leads, which the sandbox would open"
+hasnt "[screenshot]" "$(calls)" "and nothing is captured"
+for extra in "--serve-dir $APP" "--port 4321" "--cwd $APP"; do
+  # shellcheck disable=SC2086 # each case is a flag and a value without blanks
+  out="$(run -- page --script "$SCRIPT" --guide "$GW" $extra --output "$OUT")"; rc=$?
+  eq "$rc" 2 "--guide with ${extra%% *} exits 2"
+  has "--guide names the whole app" "$out" "it says --guide names the whole app"
+done
+
 echo "# page: a step whose proof failed still yields the capture -> exit 3"
 out="$(run ENGINE_MODE=failed -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 3 "a capture with a failed proof exits 3"
@@ -516,6 +582,18 @@ for cols in 20 300; do
   eq "$rc" 0 "--columns $cols, at the edge of the widths the engine's terminal takes, captures"
   has "**Terminal:** ${cols}x30" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "and is the terminal's width"
 done
+
+echo "# terminal: --guide names the directory the command runs in, the guide's or the worktree"
+out="$(run -- terminal --command 'ls' --guide "$GW" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a terminal capture with --guide exits 0"
+has "[--cwd] [$GW/services/helm] [--full-page]" "$(calls)" "the shell starts in the guide's directory"
+out="$(run -- terminal --command 'ls' --guide "$GS" --output "$OUT")"; rc=$?
+has "[--cwd] [$GS] [--full-page]" "$(calls)" "or in the worktree when the guide names none"
+out="$(run -- terminal --command 'ls' --guide "$GW" --cwd "$WORK" --output "$OUT")"; rc=$?
+eq "$rc" 2 "--guide with --cwd exits 2"
+out="$(run -- terminal --text "$TXT" --guide "$GW" --output "$OUT")"; rc=$?
+eq "$rc" 2 "--guide with --text exits 2"
+has "--text takes none" "$out" "it says output printed earlier runs nowhere"
 
 echo "# terminal: how the command ended, read from the engine's log"
 out="$(run ENGINE_RUN=took -- terminal --command 'node board.mjs' --output "$OUT")"; rc=$?

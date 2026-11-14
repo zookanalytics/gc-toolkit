@@ -9,7 +9,7 @@ ends (the gc-toolkit.review-demo skill).
   gc sling <rig>/<pool> <demo-request-bead> --on mol-rig-demo \
     --var rig_name=<rig> \
     --var demo_script=<path>            # or: --var source_bead=<bead>
-    --var serve_dir=<dir>               # or: --var serve_cmd="<cmd>" / --var base_url=<url>
+    --var serve_dir=<dir>               # or: --var serve_cmd="<cmd>" / --var base_url=<url> / none, for the rig's guide
     --var deliver_subject=<bead>        # optional; or --var deliver_pr=<n>; omit to just report
 
 The capture is engine-driven over @zookanalytics/sprintshow
@@ -22,11 +22,13 @@ which attaches the clip to the PR inline and uncommitted.
 
 Two inputs name the scenario, and the mol needs exactly one: demo_script is a
 ready demo:capture-format script; source_bead is a bead whose work the mol turns
-into a script by following the gc-toolkit.gc-demo-script skill. One input,
-serve_dir, serve_cmd or base_url, names how the rig's app is reached. It is a
-pour var because no rig-to-app map exists.
-A per-rig default store is tracked separately; this mol reads the target from
-the pour.
+into a script by following the gc-toolkit.gc-demo-script skill. At most one
+input, serve_dir, serve_cmd or base_url, names how the rig's app is reached. A
+pour that names none takes the app the rig's demo guide names: its
+docs/review-demo.md at the commit the capture shows, which the
+gc-toolkit.demo-capture skill describes. A terminal script brings up no app,
+so its pour names none, and its shell starts where the guide says, or in the
+worktree when the rig keeps no guide.
 
 The clip is an artifact, never a committed file: it is written outside the repo
 tree and delivered to the PR, because a user-attachments URL is the only
@@ -47,20 +49,19 @@ Required vars:
 
 Optional vars:
   {{app_reads_city}}: "true" for a rig whose app reads the city, such as a rig that develops code for a city. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a demo capture then refuses the rig's servers. Any value but "false" counts as "true". demo-engine-lib.sh reads it, and this formula's steps do not use it. (default=false)
-  {{base_url}}: URL of a deployed preview, or of the rig's app that a worktree of the rig serves on this host, driven as-is. A capture refuses any other server on this host, and the rig's app too when city.toml sets the rig's app_reads_city to "true". One of serve_dir / serve_cmd / base_url. (default=)
+  {{base_url}}: URL of a deployed preview, or of the rig's app that a worktree of the rig serves on this host, driven as-is. A capture refuses any other server on this host, and the rig's app too when city.toml sets the rig's app_reads_city to "true". At most one of serve_dir / serve_cmd / base_url; with none, the rig's docs/review-demo.md names the app. (default=)
   {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
   {{capture_mode}}: walkthrough (default, one continuous recorded take) or proof (one checked screenshot per step). (default=walkthrough)
   {{deliver_pr}}: PR number or URL to deliver the clip to, when no deliver_subject names one. Optional. (default=)
   {{deliver_subject}}: A bead whose pr_number/pr_url names the PR to deliver the clip to. Optional; with deliver_pr unset too, the mol reports the artifact path instead of delivering. (default=)
   {{demo_script}}: Path to a ready demo:capture-format markdown script. Use this OR source_bead. Absolute, or relative to the capture session's cwd. (default=)
   {{narrate}}: Narrate the clip when OPENAI_API_KEY is set. 'false' forces a silent, captioned clip. A missing key is always silent, never a failure. (default=true)
-  {{serve_cmd}}: Command that serves the rig's app (e.g. 'npm run dev'). The capture runs it as a copy that `gctk rig serve` runs inside the capture's sandbox, with a free port of its own as $PORT, from a detached worktree of the rig_name checkout at its HEAD, which holds only what the rig commits, so it installs what it needs. One of serve_dir / serve_cmd / base_url. (default=)
-  {{serve_dir}}: Static directory the engine serves with its built-in file server. Absolute, or relative to a detached worktree of the rig_name checkout at its HEAD, so a relative one names a directory the rig commits. One of serve_dir / serve_cmd / base_url. (default=)
-  {{serve_port}}: Port for serve_dir's server. A serve_cmd's copy takes a free port of its own. (default=5173)
+  {{serve_cmd}}: Command that serves the rig's app (e.g. 'npm run dev'). The capture runs it as a copy that `gctk rig serve` runs inside the capture's sandbox, with a free port of its own as $PORT, from a detached worktree of the rig_name checkout at its HEAD, which holds only what the rig commits, so it installs what it needs. At most one of serve_dir / serve_cmd / base_url; with none, the rig's docs/review-demo.md names the app. (default=)
+  {{serve_dir}}: Static directory the engine serves with its built-in file server. Absolute, or relative to a detached worktree of the rig_name checkout at its HEAD, so a relative one names a directory the rig commits. At most one of serve_dir / serve_cmd / base_url; with none, the rig's docs/review-demo.md names the app. (default=)
+  {{serve_port}}: Port for serve_dir's server. Empty takes a free port. A serve_cmd's copy takes a free port of its own, and a pour that names no app target takes the app, and any port, that the rig's guide names. (default=)
   {{source_bead}}: A bead whose work becomes the script, generated by following the gc-toolkit.gc-demo-script skill. Use this OR demo_script. (default=)
   {{ui_address_pattern}}: The address ui_publish_command gives a live copy, with $PORT or ${PORT} where the copy's port goes, such as https://<the host's tailnet name>:$PORT/. A city sets it beside ui_publish_command. A caller of `gctk rig serve` that gives a person a copy, such as the converse-edit skill, reads it and passes it to the verb, and this formula's steps do not use it. (default=)
   {{ui_publish_command}}: The city's command that publishes a live copy's loopback port, $PORT, at an origin of its own for exactly as long as the command runs, such as a foreground `tailscale serve --yes --https=$PORT http://127.0.0.1:$PORT`. Gas City sets a formula var only for a rig, so a city sets it, with ui_address_pattern, among the [rigs.formula_vars] of each rig that offers a live copy, and a copy gets no address where either is unset. A caller of `gctk rig serve` that gives a person a copy, such as the converse-edit skill, reads it and passes it to the verb, and this formula's steps do not use it. (default=)
-  {{ui_serve_command}}: The command that serves the rig's UI for a live copy, run from the root of the tree the copy shows with the copy's loopback port as $PORT. It serves the UI on fixture data with no city behind it, listens on loopback at $PORT, and takes nothing two copies would share. It is one value for every branch of the rig, so it names an entry point every branch carries. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a rig that sets none offers no live copy. A caller of `gctk rig serve`, such as the converse-edit skill or a rig's demo guidance, reads it and passes it to the verb, and this formula's steps do not use it. (default=)
 
 Steps (4):
   ├── mol-rig-demo.prepare-script: Resolve or generate the demo:capture script

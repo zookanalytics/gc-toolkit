@@ -17,9 +17,10 @@ import (
 )
 
 // `gctk rig serve` runs a copy of the rig's UI. Like the checks, it runs the
-// command its caller passes and reads no formula var: a caller reads the rig's
-// ui_serve_command, and the city's ui_publish_command and ui_address_pattern,
-// and passes them.
+// command its caller passes and reads no formula var. A caller reads the serve
+// command from the **Serve:** line of the rig's demo guide, or a capture from
+// its --serve, and one that gives a person the copy reads the city's
+// ui_publish_command and ui_address_pattern, and passes them.
 
 const rigServeLong = `Runs a copy of the rig's UI from the checkout the current directory sits in:
 the command --command passes, with bash at the checkout's top, on a free

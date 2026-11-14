@@ -33,7 +33,7 @@ trap 'rm -rf "$TMPD" "$ETMP"' EXIT
 # which is why every happy case either sets $SPRINTSHOW_BIN or puts the
 # resolution stubs on PATH.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
-for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat env readlink; do
+for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat env readlink awk git; do
   p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
   ln -s "$p" "$FARM/$c"
 done
@@ -175,7 +175,7 @@ run() {
     shift
   done
   : >"$RUNLOG"; : >"$SANDBOX_LOG"; : >"$COPY_STATE"; rm -f "$OUT"
-  ( cd "$TMPD" && env -i PATH="${RUN_PATH-$SBX}:$FARM" RUNLOG="$RUNLOG" SPRINTSHOW_BIN="$STUB" SANDBOX_LOG="$SANDBOX_LOG" \
+  ( cd "$TMPD" && env -i PATH="${RUN_PATH-$SBX}:$FARM" RUNLOG="$RUNLOG" SPRINTSHOW_BIN="$STUB" SANDBOX_LOG="$SANDBOX_LOG" GIT_CEILING_DIRECTORIES="$TMPD" \
       LINT_RC="$lint_rc" RUN_RC="$run_rc" RUN_NOFILE="$nofile" RUN_EMPTY="$empty" \
       RUN_REPORT="$report" RUN_FAILED="$failed" RUN_LATE_RC="$late_rc" \
       GCTK_BIN="$SBX/gctk" COPY_STATE="$COPY_STATE" COPY_RUNNING="$copy_running" COPY_FOUND="$copy_found" COPY_FAIL="$copy_fail" COPY_OTHER="$copy_other" \
@@ -264,6 +264,189 @@ ok "nothing is captured" "[ ! -e '$OUT' ]"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --port 4321 --cwd "$SITE")"; rc=$?
 ok "--port with --serve exits 2" "[ '$rc' = 2 ]"
 has "--port names the --serve-dir server's port" "$out" "it says --port is the --serve-dir server's"
+
+# A terminal script declares **Terminal:** among its head lines and drives a
+# shell in the engine's own terminal.
+TSCRIPT="$TMPD/terminal.md"
+printf '# Demo: a report\n\n**Terminal:** 100x30\n\n## Steps\n\n1. **The report prints**\n   `run true`\n' >"$TSCRIPT"
+echo "# a terminal script records with no app target, linted and captured in the sandbox, and its shell starts in --cwd"
+out="$(run -- --script "$TSCRIPT" --output "$OUT" --cwd "$SERVE_DIR")"; rc=$?
+ok "a terminal script with no app target exits 0" "[ '$rc' = 0 ]"
+ok "the clip exists and is non-empty" "[ -s '$OUT' ]"
+has "captured $OUT" "$out" "it reports the captured clip"
+RL="$(cat "$RUNLOG")"
+has "run $TSCRIPT" "$RL" "it records the terminal script"
+has "--cwd $SERVE_DIR" "$RL" "its shell starts in --cwd"
+for f in --serve-dir --serve --base-url --port; do hasnt "$f " "$RL" "the engine is given no $f"; done
+has "sandbox-exec $STUB lint $TSCRIPT" "$(cat "$SANDBOX_LOG")" "it lints the terminal script inside the sandbox"
+has "sandbox-exec $STUB run $TSCRIPT" "$(cat "$SANDBOX_LOG")" "and records it inside the sandbox"
+out="$(run -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+ok "a terminal script with no --cwd exits 0" "[ '$rc' = 0 ]"
+hasnt "--cwd" "$(cat "$RUNLOG")" "its shell starts where the capture runs"
+out="$(run LINT_RC=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+ok "a terminal script the linter rejects exits 1" "[ '$rc' = 1 ]"
+ok "and nothing is recorded" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+out="$(run RUN_NOFILE=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+ok "a terminal capture that leaves no clip exits 1" "[ '$rc' = 1 ]"
+has "does not exist" "$out" "it catches the silent non-delivery"
+out="$(run RUN_FAILED=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+ok "a terminal clip with a failed proof exits 3" "[ '$rc' = 3 ]"
+
+echo "# a terminal script takes no app target and no --port -> exit 2, before anything is linted"
+for args in "--serve-dir $SERVE_DIR" "--serve true" "--base-url https://preview.example.com" "--port 4321"; do
+  # shellcheck disable=SC2086 # each case is a flag and a value without blanks
+  out="$(run -- --script "$TSCRIPT" --output "$OUT" $args)"; rc=$?
+  ok "a terminal script with ${args%% *} exits 2" "[ '$rc' = 2 ]"
+  has "is a terminal script, which runs in the engine's own terminal" "$out" "it says a terminal script takes no ${args%% *}"
+  ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
+done
+
+echo "# the engine's rule for a terminal script: **Terminal:** in any case, among the lines above the first ## heading"
+LSCRIPT="$TMPD/lower.md"
+printf '# Demo: lower\n\n   **terminal:**\n\n## Steps\n\n1. **The report prints**\n   `run true`\n' >"$LSCRIPT"
+out="$(run -- --script "$LSCRIPT" --output "$OUT")"; rc=$?
+ok "an indented, lowercase **terminal:** declares a terminal script" "[ '$rc' = 0 ]"
+PSCRIPT="$TMPD/late.md"
+printf '# Demo: late\n\n**Start:** `/`\n\n## Notes\n\n**Terminal:** 80x24\n\n## Steps\n\n1. **It opens**\n' >"$PSCRIPT"
+out="$(run -- --script "$PSCRIPT" --output "$OUT")"; rc=$?
+ok "a **Terminal:** line below a ## heading leaves a page script, which needs its app (exit 2)" "[ '$rc' = 2 ]"
+has "exactly one of --serve-dir" "$out" "it asks for the page's app target"
+
+# commit_all <worktree>: a repository whose one commit holds what the worktree
+# holds, so a guide is read at that commit.
+commit_all() {
+  git -C "$1" init -q && git -C "$1" add -A \
+    && git -C "$1" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q -m fixture
+}
+# guide <worktree> <lines>: a worktree whose committed demo guide holds the
+# section "Bring the app up" with those lines, between two other sections. The
+# worktrees sit under the physical path git reports for them.
+GBASE="$(cd "$TMPD" && pwd -P)"
+guide() {
+  mkdir -p "$1/docs"
+  printf '# Demo guide\n\n## Surfaces\n\nA page.\n\n## Bring the app up\n\n%s\n\n## Sign-in\n\n**Serve:** `not-the-app`\n' "$2" >"$1/docs/review-demo.md"
+  commit_all "$1"
+}
+GW="$GBASE/rig-wt"; mkdir -p "$GW/web"
+guide "$GW" '**Serve:** `npm run dev`
+**Cwd:** `web`'
+echo "# --guide takes the app the rig's demo guide names: its command, served as a copy from the worktree's root"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GW")"; rc=$?
+ok "a page script with --guide exits 0" "[ '$rc' = 0 ]"
+RL="$(cat "$RUNLOG")"
+has "gctk rig serve --command npm run dev (in $GW)" "$RL" "the guide's command is served as a copy from the worktree's root, whatever **Cwd:** says"
+has "--base-url http://127.0.0.1:50200/" "$RL" "the engine records the copy"
+hasnt "not-the-app" "$RL" "a line in another section of the guide names nothing"
+has "the app is the one docs/review-demo.md at " "$out" "it says the app came from the guide at a commit"
+has " in $GW names" "$out" "in the worktree --guide named"
+sed 's/npm run dev/npm start/' "$GW/docs/review-demo.md" >"$GW/docs/edited" && mv "$GW/docs/edited" "$GW/docs/review-demo.md"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GW")"; rc=$?
+ok "a guide edited in the worktree and not committed still captures" "[ '$rc' = 0 ]"
+has "gctk rig serve --command npm run dev (in $GW)" "$(cat "$RUNLOG")" "the guide is read at the commit, not from the working tree"
+hasnt "npm start" "$(cat "$RUNLOG")" "and the edit is not served"
+git -C "$GW" checkout -q -- docs/review-demo.md
+
+GS="$GBASE/rig-static"; mkdir -p "$GS/site"
+guide "$GS" '**Serve dir:** `site`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GS")"; rc=$?
+ok "a guide's static directory exits 0" "[ '$rc' = 0 ]"
+has "--serve-dir $GS/site" "$(cat "$RUNLOG")" "the engine serves the guide's directory, under the worktree"
+has "--port 50123" "$(cat "$RUNLOG")" "on a free port, as any --serve-dir is"
+
+GU="$GBASE/rig-preview"; guide "$GU" '**Base URL:** `https://preview.example.com`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GU")"; rc=$?
+ok "a guide's running endpoint exits 0" "[ '$rc' = 0 ]"
+has "--base-url https://preview.example.com" "$(cat "$RUNLOG")" "the engine drives the endpoint the guide names"
+
+GP="$GBASE/rig-static-port"; mkdir -p "$GP/site"
+guide "$GP" '**Serve dir:** `site`
+**Port:** `4321`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GP")"; rc=$?
+ok "a guide's static directory with a port exits 0" "[ '$rc' = 0 ]"
+has "--serve-dir $GP/site --port 4321" "$(cat "$RUNLOG")" "the engine's server serves it on the guide's port"
+
+GZ="$GBASE/rig-serve-port"; guide "$GZ" '**Serve:** `go run ./cmd/fixture`
+**Port:** `5173`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GZ")"; rc=$?
+ok "a guide that names **Port:** beside **Serve:** exits 2" "[ '$rc' = 2 ]"
+has "names **Port:**, which is the port of the server that serves a **Serve dir:**" "$out" "it says a command's copy takes a port of its own"
+ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
+
+echo "# a guide that cannot name the app refuses the capture -> exit 2, with nothing captured"
+GN="$GBASE/rig-none"; mkdir -p "$GN"; printf 'x\n' >"$GN/README"; commit_all "$GN"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GN")"; rc=$?
+ok "a commit that carries no guide exits 2" "[ '$rc' = 2 ]"
+has "the commit checked out in $GN carries no docs/review-demo.md" "$out" "it says the commit carries no guide"
+ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+GG="$GBASE/rig-uncommitted"; mkdir -p "$GG/docs"
+printf '## Bring the app up\n\n**Serve dir:** `site`\n' >"$GG/docs/review-demo.md"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GG")"; rc=$?
+ok "a directory in no git worktree exits 2" "[ '$rc' = 2 ]"
+has "is in no git worktree with a commit checked out" "$out" "it says no commit holds a guide there"
+ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+GE="$GBASE/rig-noapp"; guide "$GE" 'The app is brought up apart from the capture.'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GE")"; rc=$?
+ok "a guide whose section names no app exits 2" "[ '$rc' = 2 ]"
+has "in $GE names no app" "$out" "it says the guide names no app"
+GT="$GBASE/rig-two"; guide "$GT" '**Serve:** `npm run dev`
+**Base URL:** `https://preview.example.com`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GT")"; rc=$?
+ok "a guide that names two apps exits 2" "[ '$rc' = 2 ]"
+has "names more than one of **Serve:**, **Serve dir:** and **Base URL:**" "$out" "it says the guide names more than one app"
+ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+GB="$GBASE/rig-bare"; guide "$GB" '**Serve:** npm run dev'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GB")"; rc=$?
+ok "a guide line whose value is not one code span exits 2" "[ '$rc' = 2 ]"
+has "write **Serve:** with its value in one code span" "$out" "it says how to write the line"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$TMPD/nowhere")"; rc=$?
+ok "a --guide that is not a directory exits 1" "[ '$rc' = 1 ]"
+has "is not a directory" "$out" "it says so"
+
+echo "# a directory the guide names lies in its worktree, which the capture's sandbox would widen to: one that leads out -> exit 2"
+GO="$GBASE/rig-climb"; mkdir -p "$GO"; guide "$GO" '**Serve:** `npm run dev`
+**Cwd:** `../rig-wt/web`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GO")"; rc=$?
+ok "a **Cwd:** that climbs out of the repository by .. exits 2" "[ '$rc' = 2 ]"
+has "**Cwd:** \`../rig-wt/web\` leads outside the worktree, to $GW/web" "$out" "it names the directory as the guide writes it, and where it leads"
+ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+GA="$GBASE/rig-whole"; mkdir -p "$GA"; guide "$GA" "**Serve dir:** \`$GS/site\`"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GA")"; rc=$?
+ok "a **Serve dir:** named whole, in another worktree, exits 2" "[ '$rc' = 2 ]"
+has "leads outside the worktree, to $GS/site" "$out" "it says where the directory leads"
+GL="$GBASE/rig-link"; mkdir -p "$GL"; ln -s ../rig-static/site "$GL/site"; guide "$GL" '**Serve dir:** `site`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GL")"; rc=$?
+ok "a **Serve dir:** that a committed symlink leads out of the repository exits 2" "[ '$rc' = 2 ]"
+has "**Serve dir:** \`site\` leads outside the worktree, to $GS/site" "$out" "it says where the symlink leads"
+ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+GI="$GBASE/rig-inside"; mkdir -p "$GI/build/web"; ln -s build/web "$GI/web"; guide "$GI" '**Serve:** `npm run dev`
+**Cwd:** `web`'
+out="$(run -- --script "$TSCRIPT" --output "$OUT" --guide "$GI")"; rc=$?
+ok "a **Cwd:** that a symlink leads elsewhere in the repository captures (exit 0)" "[ '$rc' = 0 ]"
+has "--cwd $GI/web" "$(cat "$RUNLOG")" "a terminal script's shell starts in the directory the guide names"
+GD="$GBASE/rig-unbuilt"; mkdir -p "$GD"; guide "$GD" '**Serve dir:** `dist`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GD")"; rc=$?
+ok "a **Serve dir:** that a build has not made yet captures (exit 0)" "[ '$rc' = 0 ]"
+has "--serve-dir $GD/dist" "$(cat "$RUNLOG")" "the engine is given the directory the guide names"
+
+echo "# --guide names the whole app, so it takes no app target, --cwd or --port beside it -> exit 2"
+for args in "--serve-dir $SERVE_DIR" "--base-url https://preview.example.com" "--cwd $SERVE_DIR" "--port 4321"; do
+  # shellcheck disable=SC2086 # each case is a flag and a value without blanks
+  out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GW" $args)"; rc=$?
+  ok "--guide with ${args%% *} exits 2" "[ '$rc' = 2 ]"
+  has "--guide names the whole app" "$out" "it says --guide names the whole app"
+  ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
+done
+
+echo "# a terminal script under --guide starts its shell in the guide's directory, or in the worktree, and takes no app"
+out="$(run -- --script "$TSCRIPT" --output "$OUT" --guide "$GW")"; rc=$?
+ok "a terminal script with --guide exits 0" "[ '$rc' = 0 ]"
+RL="$(cat "$RUNLOG")"
+has "--cwd $GW/web" "$RL" "its shell starts in the guide's directory"
+for f in --serve --port --base-url; do hasnt "$f " "$RL" "the guide's app gives the engine no $f"; done
+hasnt "gctk rig serve" "$RL" "and no copy of the guide's command is started"
+out="$(run -- --script "$TSCRIPT" --output "$OUT" --guide "$GN")"; rc=$?
+ok "a terminal script under a worktree that keeps no guide exits 0" "[ '$rc' = 0 ]"
+has "--cwd $GN" "$(cat "$RUNLOG")" "its shell starts in the worktree"
 
 echo "# fail closed: lint rejects the script -> exit 1, no capture"
 out="$(run LINT_RC=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?

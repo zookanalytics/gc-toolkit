@@ -32,10 +32,13 @@ The anchor `<anchor_bead>` for what the change is for, then the diff at
 `<reviewed_oid>`, in `<worktree>`: `git diff origin/<review_base>...HEAD`. The
 draft PR, `<review_pr_url>`, and its preview where the rig's host deploys one.
 The rig's guidance for this check, the reviewed commit's `docs/review-demo.md`,
-which the review formula printed when the commit carries one: a rig names its
-own visual surfaces there, how to serve its app for a capture, and how a run of
-its app shows the messages it sends. A rig can also name its design and writing
-standards there, and the states to capture for each screen or message.
+which the review formula printed when the commit carries one. It is also the
+rig's demo guide, which the drafter and `mol-rig-demo` read, and the
+`gc-toolkit.demo-capture` skill says what it holds: the rig's visual surfaces,
+how a capture brings its app up, how a script puts it in a known state and
+signs in, and worked examples. A rig names there how a run of its app shows the
+messages it sends. A rig can also name its design and writing standards there,
+and the states to capture for each screen or message.
 
 ### When it runs
 
@@ -134,21 +137,25 @@ reports whether the `gh` it needs is present.
   the anchor and the diff. Keep the script and the clip in the review workspace.
 
   The app target is the draft's preview, `--base-url <url>`, where one deploys.
-  Otherwise serve the reviewed worktree, so the clip shows the reviewed commit:
-  `--serve-dir <worktree>/<dir>` for a static build, or
+  Otherwise serve the reviewed worktree, so the clip shows the reviewed commit.
+  When the rig's guide names its app under `## Bring the app up`,
+  `--guide <worktree>` takes that app from the reviewed commit. Otherwise name
+  it: `--serve-dir <worktree>/<dir>` for a static build, or
   `--serve "<command>" --cwd <worktree>` for an app a command serves, which
   runs as a copy that `gctk rig serve` runs from the worktree, inside the
   capture's sandbox, on a free port of its own that the command gets as
   `$PORT`. When the rig's guidance serves its app on this host from
   `<worktree>`, give its `--base-url`, unless `city.toml` sets
   `app_reads_city = "true"` for the rig. The capture refuses any other URL on
-  this host and says why. Exit 0 is a clip in which every step's proof held,
-  exit 3 is a clip in which at least one step failed its proof, and exit 1 is
-  no clip. The last line names the clip and says whether it is narrated.
-  Narration needs `OPENAI_API_KEY` in the session. Without it the clip is
-  silent and captioned, and it still shows the change.
-  `doctor/check-demo-toolchain` reports which parts of the capture toolchain
-  resolve in this session.
+  this host and says why. A terminal script, one that declares
+  `**Terminal:**`, brings up no app: give it `--cwd <worktree>`, or
+  `--guide <worktree>` to start its shell where the guide says. Exit 0 is a
+  clip in which every step's proof held, exit 3 is a clip in which at least one
+  step failed its proof, and exit 1 is no clip. The last line names the clip
+  and says whether it is narrated. Narration needs `OPENAI_API_KEY` in the
+  session. Without it the clip is silent and captioned, and it still shows the
+  change. `doctor/check-demo-toolchain` reports which parts of the capture
+  toolchain resolve in this session.
 
 - `repo-artifact`: list the visuals the reviewed commit already carries.
 
@@ -192,10 +199,12 @@ reports whether the `gh` it needs is present.
   changes the size from that step on.
   A `--serve` command's copy takes a free port of its own, for a screenshot as
   for a video. A worktree has one copy, so take its captures one after another.
+  `--guide <worktree>` takes the app from the rig's guide here too.
   `--selector <css>` captures one element instead of the viewport, and
   `--full-page` captures the whole page. For a terminal, the engine types the
   command at a bash prompt in a terminal of its own, whose shell starts in
-  `--cwd`, so a relative path runs the reviewed commit's script. The capture
+  `--cwd`, or under `--guide <worktree>` where the guide says, so a relative
+  path runs the reviewed commit's script. The capture
   shows the command after a `$` prompt, then what it printed, or the screen a
   full-screen program it starts draws. A command that waits for input is no
   capture, and one that pages a long output in a terminal, such as `git log`,

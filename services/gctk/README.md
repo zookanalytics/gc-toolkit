@@ -99,11 +99,12 @@ records the design and its measured cost.
 command its caller passes, with bash at the checkout's top, on a free loopback
 port it is given as `$PORT`, inside the sandbox that
 `assets/scripts/demo-engine-lib.sh` defines for a demo capture, which
-`GCTK_SCRIPTS_DIR` names. A demo capture's `--serve` starts one with no address
-and points the engine at its port. The `converse-edit` skill starts one with the
-city's publish command and address pattern for the operator. Each caller reads
-the rig's `ui_serve_command`, and the city's `ui_publish_command` and
-`ui_address_pattern`, from the rig's formula vars and passes them. A copy is a
+`GCTK_SCRIPTS_DIR` names. A demo capture starts one with no address and points
+the engine at its port. The `converse-edit` skill starts one for the operator,
+with the city's publish command and address pattern, which it reads from the
+rig's formula vars `ui_publish_command` and `ui_address_pattern`. Each caller
+passes the serve command on the `**Serve:**` line of the rig's demo guide
+(`docs/review-demo.md`), or a capture the one its `--serve` names. A copy is a
 process group led by a detached gctk, `rig serve --lead`, which ends the group
 when the serve command ends, and Gas City's orphan sweep ends it once the
 session that started it has ended. Starts and stops of one checkout take turns

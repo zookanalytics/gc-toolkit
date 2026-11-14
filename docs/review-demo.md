@@ -1,65 +1,83 @@
 ---
-name: The demo check on gc-toolkit
-description: The guidance the demo check reads on gc-toolkit reviews, which the review formula prints from the reviewed commit. It names this rig's visual surfaces, one per kind of screenshot, and how to capture each from the reviewed commit on fixture data, since a capture cannot reach the live city.
+name: The demo guide for gc-toolkit
+description: Use when you demo a gc-toolkit change, write a demo script for one, or bring its helm board up for a capture, as the demo check, the demo drafter, mol-rig-demo and a capture given --guide do at the commit they show.
 ---
 
-# The demo check on gc-toolkit
+# The demo guide for gc-toolkit
 
 gc-toolkit shows a person three kinds of surface, and `demo-screenshot.sh` has a
-kind for each. Capture each one from the reviewed commit, and always use fake
-data or gc-toolkit-only data. A capture is prevented from reaching live data.
+kind for each. Capture each one from the commit the demo shows, and always use
+fake data or gc-toolkit-only data. A capture is prevented from reaching live
+data.
 
 ## Scope
 
-**Mandate.** gc-toolkit's own visual surfaces, and how a demo review captures
-each one: the helm board, the reports the pack's commands print, and the
-markdown the city posts on GitHub.
+**Mandate.** gc-toolkit's own visual surfaces, and how a demo captures each
+one: the helm board, the reports the pack's commands print, the conversation
+form, and the markdown the city posts on GitHub. The demo check, the drafter
+`gc-demo-script`, `mol-rig-demo` and a capture given `--guide` read it at the
+commit they show.
 
-**Boundaries.** The demo check's method, its modalities and the capture scripts
-are pack content, in `skills/review-demo/SKILL.md`. This page adds only what is
-particular to this rig.
+**Boundaries.** What a demo guide holds is pack content, in
+`skills/demo-capture/SKILL.md`, and so are the demo check's method, its
+modalities and the capture scripts, in `skills/review-demo/SKILL.md`. This page
+adds only what is particular to this rig.
 
-## The helm board
+## Surfaces
 
-The board is the app the helm service embeds. The service's `helm-fixture`
-command serves the reviewed commit's board on fixture data, with no city behind
-it (`services/helm/README.md`). The command that runs it is the rig's declared
-serve command, `ui_serve_command`, which the city sets among gc-toolkit's
-formula vars and which a sitting's live copy of the board runs too, through
-`gctk rig serve`. It runs from the worktree's root. A capture of the board needs
-that value as gc reads it: the city sets it for gc-toolkit, and the
-`mol-rig-demo` that gc loads declares the var, since `gc formula show` lists
-only the vars a formula declares. Read it as that var's `rig_default`, and
-capture the board from the review workspace under the keepalive, as every
-capture runs, with the pack's `demo-screenshot.sh`. Where gc reads no value, the
-block captures nothing and says why:
+- **The helm board**, the page the helm service embeds, which
+  `services/helm/web/` draws. It is the app a capture brings up.
+- **Reports a command prints**, the output of a pack script under
+  `assets/scripts/` in a terminal.
+- **The conversation form**, the terminal form `gc-helm.sh engage` and
+  `gc-helm.sh attach` open, which helm-svc's `form` command in
+  `services/helm/` draws.
+- **Markdown the city posts**, the comments and PR bodies the pack's scripts
+  compose.
 
-```bash
-SERVE=$(gc formula show mol-rig-demo --rig gc-toolkit --json | jq -r '[.vars[] | select(.name == "ui_serve_command")][0].rig_default // empty')
-if [ -z "$SERVE" ]; then
-  echo "no capture of the board: gc reads no ui_serve_command for gc-toolkit; the city sets none for it, or the mol-rig-demo that gc loads declares none" >&2
-  false
-else
-  demo-screenshot.sh page --script board.md --serve "$SERVE" --cwd <worktree> --output board.png
-fi
-```
+The sections after [Worked examples](#worked-examples) say how to capture each.
 
-The page shows the gc-toolkit rig's document,
+## Bring the app up
+
+**Serve:** `cd services/helm && exec go run ./cmd/helm-fixture`
+**Cwd:** `services/helm`
+
+The app is the helm board on fixture data. The service's `helm-fixture` command
+serves the board of the commit it runs from, with no city behind it
+(`services/helm/README.md`). A capture serves the command as a copy that
+`gctk rig serve` runs from the worktree's root, inside the capture's sandbox, on
+a free port of its own that the command gets as `$PORT`, where `helm-fixture`
+reads it. A worktree has one copy, so take its captures one after another. A
+capture whose command differs from a copy that still runs there is refused until
+`gctk rig serve --stop`, run in the worktree, ends it. On a cold Go build cache
+the first run compiles Go's HTTP stack, and the copy's start waits up to three
+minutes for it to answer. A sitting's live copy of the board runs the command
+the `**Serve:**` line names, as a capture does.
+
+Capture the board through `helm-fixture`, never through a running helm
+service. A capture refuses a `--base-url` that any gc-toolkit server answers,
+and the service's verbs act on the live city. The verdict says that the board
+shows fixture data.
+
+A terminal capture given `--guide` starts its shell in `services/helm`, which
+is where the conversation form runs. A report runs from the worktree's root, so
+give its capture `--cwd <worktree>` instead.
+
+## A known state
+
+**Start:** `/?rig=gc-toolkit`
+
+The board shows the gc-toolkit rig's document,
 `services/helm/internal/rigboard/testdata/gc-toolkit.board.json`, which the rig
-read builds from the committed fixture of real gc-toolkit beads, so the
-script's start path is `/?rig=gc-toolkit`. To show another rig's document,
-write it in the shape `services/helm/web/src/rigboard/document.gen.ts` names
-and add `--rig-board $PWD/<file>` to the command. `demo-screenshot.sh` serves
-the command as a copy that `gctk rig serve` runs from the worktree, inside the
-capture's sandbox, on a free port of its own that the command gets as `$PORT`,
-where `helm-fixture` reads it. A worktree has one copy, so take its captures one
-after another. A capture whose command differs from a copy that still runs
-there is refused until `gctk rig serve --stop`, run in the worktree, ends it.
-On a cold Go build cache the first run compiles Go's HTTP stack, and the copy's
-start waits up to three minutes for it to answer.
+read builds from the committed fixture of real gc-toolkit beads, so a script's
+start path is `/?rig=gc-toolkit`. To show another rig's document, write it in
+the shape `services/helm/web/src/rigboard/document.gen.ts` names and add
+`--rig-board $PWD/<file>` to the command, which a capture then names with
+`--serve` and `--cwd <worktree>` in place of `--guide`.
 
 A state that a verb leads to needs that verb's answer. Add
-`--answers $PWD/answers` to the command. A file there named for the verb, such
+`--answers $PWD/answers` to the command, named with the flags as above. A file
+there named for the verb, such
 as `engage.json`, is the answer a click on Start the conversation or Rejoin
 the conversation gets, in the shape `services/helm/web/src/actuate/client.ts`
 reads, or `open/client.ts` for the form Discuss opens. Name it
@@ -69,10 +87,19 @@ unavailable, so the board shows the refusal and nothing runs. Details reads a
 bead's description from the supervisor, which a fixture cannot reach, so the
 page says it cannot read the description and shows the rest of Details.
 
-Capture the board through `helm-fixture`, never through a running helm
-service. A capture refuses a `--base-url` that any gc-toolkit server answers,
-and the service's verbs act on the live city. The verdict says that the board
-shows fixture data.
+## Sign-in
+
+None. `helm-fixture` serves the board on this host's loopback with no sign-in,
+and the reports and the form run as commands.
+
+## Worked examples
+
+gc-toolkit keeps no committed demo script. Each capture call below is one to
+copy, run from the review workspace under the keepalive, as every capture runs.
+The board, with a script whose start path is `/?rig=gc-toolkit`:
+`demo-screenshot.sh page --script board.md --guide <worktree> --output
+board.png`, or for a clip, `rig-demo-capture.sh --script board.md --output
+board.mp4 --guide <worktree>`.
 
 ## Reports a command prints
 
