@@ -741,8 +741,7 @@ The lock:
 - The driver takes a non-blocking exclusive `flock` on
   `<state-dir>/<rig>/pass.lock` before the first arm and records the holder's
   pid and start time in `pass.holder` beside it. It depends on no bead
-  surviving. The lock is `bd-lib.sh`'s `take_pass_lock`, which
-  `deferred-dispatch.sh` takes its pass lock through too.
+  surviving. The lock is `bd-lib.sh`'s `take_pass_lock`.
 - `<rig>` is the rig name with each byte outside `A-Za-z0-9._-` read as `_`,
   and `rig` for a name of `.` or `..`. Every version of the driver must derive
   it the same way. A deploy can start a new driver while the one it replaces

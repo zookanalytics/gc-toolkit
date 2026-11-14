@@ -17,19 +17,18 @@
 # branch and whose merge strategy is direct, under the hand-off's parent when it
 # has one, with the hand-off and the landing bead waiting on it. Its description
 # lists the conflicted files one per line, as git names them, unquoted where git
-# allows, and asks the operator only for a product decision. The block records
-# the notice that hands the hand-off back to the refinery, then settles the task
-# and slings it to the rig's polecat pool on mol-polecat-work with --merge
-# direct, so the task lands as a fast-forward of the effort's branch whatever
-# merge strategy the rig defaults to, and its merge commit is never squashed. It
-# files no human gate, and the hand-off stays open. A create that writes the
-# task but answers no id is followed by a read of what the hand-off waits on,
-# which finds the task, and the block goes on with it. A create that wrote
-# nothing stops the block before anything is sent, and so does a hand-off that
-# cannot be read after a create that answered no id, saying how to find the
-# task. A notice, a settle or a send that does not land stops the block, naming
-# the step to finish from, and a run of it then finds the hand-off waiting on
-# the task and does nothing more.
+# allows, and asks the operator only for a product decision. The block then
+# settles the task and slings it to the rig's polecat pool on mol-polecat-work
+# with --merge direct, so the task lands as a fast-forward of the effort's
+# branch whatever merge strategy the rig defaults to, and its merge commit is
+# never squashed. It files no human gate, and the hand-off stays open. A create
+# that writes the task but answers no id is followed by a read of what the
+# hand-off waits on, which finds the task, and the block goes on with it. A
+# create that wrote nothing stops the block before anything is sent, and so
+# does a hand-off that cannot be read after a create that answered no id,
+# saying how to find the task. A settle or a send that does not land stops the
+# block, naming the step to finish from, and a run of it then finds the
+# hand-off waiting on the task and does nothing more.
 #
 # A push that origin refuses leaves the branch and the hand-off as they were. A
 # hand-off that is closed or still waits on a blocker, a landing bead that
@@ -114,14 +113,13 @@ fi
 exit 0
 STUB
 chmod +x "$TMP/bin/gc"
-# The pack's scripts the block calls log each call; STUB_NOTIFY_FAIL and
-# STUB_SETTLE_FAIL make deferred-dispatch.sh and queue-priority.sh fail.
-# human-gate.sh only logs, so a call to it shows in the log.
-for s in deferred-dispatch queue-priority human-gate; do
+# The pack's scripts the block calls log each call; STUB_SETTLE_FAIL makes
+# queue-priority.sh fail. human-gate.sh only logs, so a call to it shows in the
+# log.
+for s in queue-priority human-gate; do
   { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'NAME=%s\n' "$s"; cat; } > "$TMP/scripts/$s.sh" <<'STUB'
 printf '%s %s\n' "$NAME" "$*" >> "$GC_LOG"
 case "$NAME" in
-  deferred-dispatch) [ -z "${STUB_NOTIFY_FAIL:-}" ] || exit 1 ;;
   queue-priority) [ -z "${STUB_SETTLE_FAIL:-}" ] || exit 1 ;;
 esac
 exit 0
@@ -205,10 +203,9 @@ conflict() {
   commit_on integration/land-1 shared.txt "the effort's line"; commit_on integration/land-1 other.txt "the effort's file"
   OWN=$(head_of integration/land-1); MAIN=$(head_of main)
 }
-# What a conflict sends, in order: the task's create, the hand-off's notice, the
-# task's settle, and its sling to the rig's polecat pool with a direct landing.
+# What a conflict sends, in order: the task's create, its settle, and its sling
+# to the rig's polecat pool with a direct landing.
 SENT="create
-deferred-dispatch notify ho-1 --agent rig-1/gc-toolkit.refinery
 queue-priority settle task-1
 sling rig-1/gc-toolkit.polecat task-1 --on mol-polecat-work --merge direct"
 
@@ -271,7 +268,7 @@ for sh in "${SHELLS[@]}"; do
   eq "$RC" "0" "[$sh] conflict: the block succeeds once the merge is sent to a polecat"
   eq "$(head_of integration/land-1) $(status_of ho-1)" "$OWN open" "[$sh] conflict: the branch is not pushed and the hand-off stays open"
   eq "$(cat "$GC_LOG")" "$SENT" \
-    "[$sh] conflict: it files the task, records the hand-off's notice, then settles the task and slings it to the rig's polecat pool on mol-polecat-work with --merge direct"
+    "[$sh] conflict: it files the task, then settles it and slings it to the rig's polecat pool on mol-polecat-work with --merge direct"
   grep -qxF "sling rig-1/gc-toolkit.polecat task-1 --on mol-polecat-work --merge direct" "$GC_LOG" \
     && ok "[$sh] conflict: the sling pins the task's landing with --merge direct, which outranks the rig's default strategy, so a squash never drops the merge" \
     || bad "[$sh] conflict: the sling does not pin the task's landing with --merge direct"
@@ -333,7 +330,7 @@ for sh in "${SHELLS[@]}"; do
   setup; conflict
   export STUB_CREATE_NOID=1; run "$sh"; unset STUB_CREATE_NOID
   eq "$RC $(cat "$GC_LOG" | tr '\n' '|')" "0 $(printf '%s\n' "$SENT" | tr '\n' '|')" \
-    "[$sh] create answers no id: the block finds the task the create wrote among what the hand-off waits on, then records the notice, settles and sends it"
+    "[$sh] create answers no id: the block finds the task the create wrote among what the hand-off waits on, then settles and sends it"
   eq "$(head_of integration/land-1) $(status_of ho-1)" "$OWN open" "[$sh] create answers no id: the branch is not pushed and the hand-off stays open"
 
   # A create that answers no id and a hand-off that cannot be read then: the
@@ -341,32 +338,25 @@ for sh in "${SHELLS[@]}"; do
   setup; conflict
   export STUB_CREATE_NOID=1 STUB_SHOW_FAIL_AFTER_CREATE=1; run "$sh"; unset STUB_CREATE_NOID STUB_SHOW_FAIL_AFTER_CREATE
   eq "$([ "$RC" -ne 0 ] && echo stopped) $(cat "$GC_LOG")" "stopped create" "[$sh] create answers no id, hand-off unread: the block stops with nothing sent"
-  grep -qF "reading ho-1 did not settle whether the create wrote it. gc bd show ho-1 lists what it waits on: finish from the notice with the open task titled \"Merge origin/main into integration/land-1 and resolve its conflicts\", or run the block again when it waits on none" "$TMP/err" \
+  grep -qF "reading ho-1 did not settle whether the create wrote it. gc bd show ho-1 lists what it waits on: finish from the settle with the open task titled \"Merge origin/main into integration/land-1 and resolve its conflicts\", or run the block again when it waits on none" "$TMP/err" \
     && ok "[$sh] create answers no id, hand-off unread: it says how to find the task and what to do either way" \
     || bad "[$sh] create answers no id, hand-off unread: it does not say how to find the task"
 
-  # A notice that does not land stops the block before the task is sent, and a
-  # run of it then finds the hand-off waiting on the task and does nothing more.
-  setup; conflict
-  export STUB_NOTIFY_FAIL=1; run "$sh"; unset STUB_NOTIFY_FAIL
-  eq "$([ "$RC" -ne 0 ] && echo stopped) $(cat "$GC_LOG" | tr '\n' '|')" "stopped create|deferred-dispatch notify ho-1 --agent rig-1/gc-toolkit.refinery|" \
-    "[$sh] notice fails: the block stops before the task is settled or sent"
-  grep -qF "filed task-1 for the conflict in other.txt, shared.txt, but the notice on ho-1 did not land; finish from the notice" "$TMP/err" \
-    && ok "[$sh] notice fails: it names the task and the step to finish from" || bad "[$sh] notice fails: it does not name the task and the step to finish from"
-  : > "$GC_LOG"; run "$sh"
-  eq "$([ "$RC" -ne 0 ] && echo refused) $(wc -l < "$GC_LOG" | tr -d ' ') $(head_of integration/land-1)" "refused 0 $OWN" \
-    "[$sh] notice fails: a run of the block again files, sends and pushes nothing"
-  grep -qF "ho-1 does not read as open with every blocker closed" "$TMP/err" \
-    && ok "[$sh] notice fails: the run again says the hand-off waits" || bad "[$sh] notice fails: the run again does not say the hand-off waits"
-
   # A settle that does not land stops the block before the send, and names the
-  # settle as the step to finish from.
+  # settle as the step to finish from. A run of it then finds the hand-off
+  # waiting on the task and does nothing more.
   setup; conflict
   export STUB_SETTLE_FAIL=1; run "$sh"; unset STUB_SETTLE_FAIL
-  eq "$([ "$RC" -ne 0 ] && echo stopped) $(grep -c '^sling' "$GC_LOG" || true)" "stopped 0" "[$sh] settle fails: the block stops before the send"
-  grep -qF "filed task-1 for the conflict in other.txt, shared.txt and recorded the notice on ho-1, but task-1 was not settled, so it was not sent; finish from the settle" "$TMP/err" \
+  eq "$([ "$RC" -ne 0 ] && echo stopped) $(cat "$GC_LOG" | tr '\n' '|')" "stopped create|queue-priority settle task-1|" \
+    "[$sh] settle fails: the block stops before the send"
+  grep -qF "filed task-1 for the conflict in other.txt, shared.txt, but task-1 was not settled, so it was not sent; finish from the settle" "$TMP/err" \
     && ok "[$sh] settle fails: it names the settle as the step to finish from" || bad "[$sh] settle fails: it does not name the settle as the step to finish from"
   grep -q '^human-gate' "$GC_LOG" && bad "[$sh] settle fails: a human gate was filed" || ok "[$sh] settle fails: no human gate is filed"
+  : > "$GC_LOG"; run "$sh"
+  eq "$([ "$RC" -ne 0 ] && echo refused) $(wc -l < "$GC_LOG" | tr -d ' ') $(head_of integration/land-1)" "refused 0 $OWN" \
+    "[$sh] settle fails: a run of the block again files, sends and pushes nothing"
+  grep -qF "ho-1 does not read as open with every blocker closed" "$TMP/err" \
+    && ok "[$sh] settle fails: the run again says the hand-off waits" || bad "[$sh] settle fails: the run again does not say the hand-off waits"
 
   # A sling that exits non-zero stops the block once the task is settled, and
   # names the send as the step to finish from.
@@ -374,7 +364,7 @@ for sh in "${SHELLS[@]}"; do
   export STUB_SLING_FAIL=1; run "$sh"; unset STUB_SLING_FAIL
   eq "$([ "$RC" -ne 0 ] && echo stopped) $(cat "$GC_LOG" | tr '\n' '|')" "stopped $(printf '%s\n' "$SENT" | tr '\n' '|')" \
     "[$sh] send fails: the block stops after the settle and the sling"
-  grep -qF "filed task-1 for the conflict in other.txt, shared.txt, recorded the notice on ho-1 and settled task-1, but its sling exited non-zero; finish from the send" "$TMP/err" \
+  grep -qF "filed task-1 for the conflict in other.txt, shared.txt and settled it, but its sling exited non-zero; finish from the send" "$TMP/err" \
     && ok "[$sh] send fails: it names the send as the step to finish from" || bad "[$sh] send fails: it does not name the send as the step to finish from"
   grep -q '^human-gate' "$GC_LOG" && bad "[$sh] send fails: a human gate was filed" || ok "[$sh] send fails: no human gate is filed"
 

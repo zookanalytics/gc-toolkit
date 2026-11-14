@@ -24,6 +24,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
@@ -66,20 +67,10 @@ type Foreign struct {
 	Type string `json:"type"`
 }
 
-// Arm is the arm on a bead armed to start by itself, each value as the store
-// holds it: the pool or agent a sling goes to, with its arguments, why and by
-// whom it was armed and when, its sling marker and attempt count, and the agent
-// a notice is owed to.
-type Arm struct {
-	Target    string `json:"target,omitempty"`
-	Args      string `json:"args,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	ArmedBy   string `json:"armed_by,omitempty"`
-	ArmedAt   string `json:"armed_at,omitempty"`
-	Slung     string `json:"slung,omitempty"`
-	FailCount string `json:"fail_count,omitempty"`
-	Notify    string `json:"notify,omitempty"`
-}
+// Arm is the arm on a bead armed to start by itself, as the arm's record
+// decodes it (record.Arm): the pool or agent a sling goes to, the formula it
+// pours, why and by whom it was armed and when, and the attempts made on it.
+type Arm = record.Arm
 
 // Holds is what holds one bead. Waits are the waits behind its status: its own
 // for a blocked or an unjudged bead, and for a held bead the waits of the
@@ -328,7 +319,7 @@ func (s *Snapshot) Holds(id string) (Holds, error) {
 	if err != nil {
 		return Holds{}, &ledger.ReadError{ID: id, Reason: "its edges did not decode: " + err.Error()}
 	}
-	h := Holds{ID: id, Waits: []Wait{}, Pending: []Wait{}, InFlight: s.flight[id], Arm: armOf(r), Foreign: []Foreign{}}
+	h := Holds{ID: id, Waits: []Wait{}, Pending: []Wait{}, InFlight: s.flight[id], Arm: record.Of(r), Foreign: []Foreign{}}
 	if h.LastLanded, err = s.lastLanded(r, own, h.InFlight == ""); err != nil {
 		return Holds{}, err
 	}
@@ -477,27 +468,4 @@ func landedAmong(id string, edges []ledger.Edge, last time.Time, text string) (t
 		}
 	}
 	return last, text, nil
-}
-
-// armOf is the bead's arm, nil when it carries neither a sling target nor an
-// owed notice.
-func armOf(r *ledger.Record) *Arm {
-	get := func(k ledger.Key[string]) string {
-		v, _, _ := k.Get(r) // a String key's stored text always decodes
-		return v
-	}
-	a := Arm{
-		Target:    get(armTargetKey),
-		Args:      get(armArgsKey),
-		Reason:    get(armReasonKey),
-		ArmedBy:   get(armedByKey),
-		ArmedAt:   get(armedAtKey),
-		Slung:     get(armSlungKey),
-		FailCount: get(armFailCountKey),
-		Notify:    get(noticeKey),
-	}
-	if a.Target == "" && a.Notify == "" {
-		return nil
-	}
-	return &a
 }

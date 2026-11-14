@@ -1,10 +1,11 @@
 // Package fake is the store adapter's in-memory fake: rows and their edges, with
-// the store's blocked answers set by the test (docs/gctk-architecture.md, "The
-// adapters"). A domain's tests run on it through the ledger, so every domain
-// rule is tested in Go without a store. It answers the questions gcbd.Store
-// asks, and holds none of the store's rules: what the listing names and what
-// the store marks blocked are the test's to set, and gcbd.BlockedSet judges
-// them as it judges the real store's.
+// the store's blocked and ready answers set by the test
+// (docs/gctk-architecture.md, "The adapters"). A domain's tests run on it
+// through the ledger, so every domain rule is tested in Go without a store. It
+// answers the questions gcbd.Store asks, and holds none of the store's rules:
+// what the listing names, what the store marks blocked and which beads it
+// reports ready are the test's to set, and gcbd.BlockedSet judges the first two
+// as it judges the real store's.
 package fake
 
 import (
@@ -25,11 +26,12 @@ import (
 // time takes the one an edge onto it names. Assignee, AwaitType, Description,
 // Priority, Labels and CreatedAt are the row's own fields a listing carries,
 // and Ephemeral and Template put the row in the ephemeral plane or make it a
-// template.
+// template. Notes is the bead's notes, which an update's --append-notes adds a
+// line to.
 type Bead struct {
 	ID, Title, Status, IssueType, ClosedAt string
 	Assignee, AwaitType, Description       string
-	CreatedAt                              string
+	CreatedAt, Notes                       string
 	Priority                               int
 	Labels                                 []string
 	Ephemeral, Template                    bool
@@ -51,11 +53,19 @@ type Store struct {
 	lost   map[string]bool
 	listed map[string][]string
 	marked []string
+	ready  map[string]bool
 	writes []Write
 
-	// RowsErr, BlockedErr and FindErr fail the matching read when set, and
-	// UpdateErr fails every write.
-	RowsErr, BlockedErr, FindErr, UpdateErr error
+	// RowsErr, BlockedErr, FindErr and ReadyErr fail the matching read when
+	// set, and UpdateErr fails every write.
+	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr error
+
+	// OnUpdate, when set, runs before each update the store takes, outside the
+	// store's lock, and fails the update with the error it returns. OnFind runs
+	// before each find the same way, and fails nothing. A test lands another
+	// actor's write in either.
+	OnUpdate func(id string, args []string) error
+	OnFind   func(q gcbd.Query)
 
 	finds []gcbd.Query
 }
@@ -64,7 +74,53 @@ var _ gcbd.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store {
-	return &Store{rows: map[string]Bead{}, listed: map[string][]string{}}
+	return &Store{rows: map[string]Bead{}, listed: map[string][]string{}, ready: map[string]bool{}}
+}
+
+// MakeReady makes the store report each bead named ready, as bd's readiness
+// would. Which beads are ready is the test's to set, as the blocked listing is.
+func (s *Store) MakeReady(ids ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range ids {
+		s.ready[id] = true
+	}
+}
+
+// Ready returns, in id order, the row of each bead MakeReady named that q
+// selects, in a listing's shape: an open bead that carries q's key, unassigned
+// when q asks, of no type q leaves out and with no label q leaves out, each
+// compared exactly, as bd's flags compare them.
+func (s *Store) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ReadyErr != nil {
+		return nil, s.ReadyErr
+	}
+	if q.HasKey == "" {
+		return nil, &gcbd.ReadError{Reason: "the fake store takes no ready read that names no key"}
+	}
+	var out []gcbd.Bead
+	for _, id := range slices.Sorted(maps.Keys(s.rows)) {
+		b := s.rows[id]
+		if !s.ready[id] || !strings.EqualFold(b.Status, "open") {
+			continue
+		}
+		if _, held := b.Metadata[q.HasKey]; !held {
+			continue
+		}
+		if q.Unassigned && b.Assignee != "" {
+			continue
+		}
+		if slices.Contains(q.ExcludeTypes, b.IssueType) {
+			continue
+		}
+		if slices.ContainsFunc(b.Labels, func(l string) bool { return slices.Contains(q.ExcludeLabels, l) }) {
+			continue
+		}
+		out = append(out, s.listing(b))
+	}
+	return out, nil
 }
 
 // Put adds b, or replaces the row of the same id.
@@ -145,13 +201,16 @@ func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
 // names that the store does not hold is left out, as a listing leaves it out.
 // A parent selects the beads whose own parent-child edge names it.
 func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
+	if s.OnFind != nil {
+		s.OnFind(q)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.finds = append(s.finds, q)
 	if s.FindErr != nil {
 		return nil, s.FindErr
 	}
-	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && !q.Every {
+	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && !q.Every {
 		return nil, &gcbd.ReadError{Reason: "the fake store takes no find that selects no beads"}
 	}
 	ids := slices.Sorted(maps.Keys(s.rows))
@@ -173,6 +232,9 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 		if q.Parent != "" && !slices.ContainsFunc(b.Edges, func(e gcbd.Edge) bool {
 			return e.Type == gcbd.EdgeParentChild && e.ID == q.Parent
 		}) {
+			continue
+		}
+		if q.TitleContains != "" && !strings.Contains(b.Title, q.TitleContains) {
 			continue
 		}
 		out = append(out, s.listing(b))
@@ -197,10 +259,15 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 	return gcbd.NewBlockedSet(s.listed, s.marked), nil
 }
 
-// Update applies one update's --set-metadata, --unset-metadata and --status to
-// the row, and records it. A bead the store does not hold refuses the write, as
-// bd does.
+// Update applies one update's --set-metadata, --unset-metadata, --status and
+// --append-notes to the row, and records it. A bead the store does not hold
+// refuses the write, as bd does.
 func (s *Store) Update(id string, args ...string) (string, error) {
+	if s.OnUpdate != nil {
+		if err := s.OnUpdate(id, slices.Clone(args)); err != nil {
+			return "", err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.UpdateErr != nil {
@@ -233,6 +300,11 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 			delete(b.Metadata, value)
 		case "--status":
 			b.Status = value
+		case "--append-notes":
+			if b.Notes != "" {
+				b.Notes += "\n"
+			}
+			b.Notes += value
 		default:
 			return "", fmt.Errorf("fake store: update takes no %s", name)
 		}
@@ -313,6 +385,9 @@ func bead(b Bead, deps []any) gcbd.Bead {
 	}
 	if b.CreatedAt != "" {
 		out.CreatedAt = b.CreatedAt
+	}
+	if b.Notes != "" {
+		out.Notes = b.Notes
 	}
 	if b.Ephemeral {
 		out.Ephemeral = true

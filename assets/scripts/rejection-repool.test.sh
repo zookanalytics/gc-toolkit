@@ -10,8 +10,8 @@
 # for a retry, an exit-0 pour that does not read back never armed, and neither
 # routed bare; a human gate on the handoff for every other way the repool stops
 # short, and a patrol finding naming a handoff it could not read. The real
-# lifecycle.sh (through a gctk built from this tree), pool-route.sh and
-# deferred-dispatch.sh run against the harness store, and human-gate.sh and
+# lifecycle.sh and `gctk bead arm` (through a gctk built from this tree) and
+# pool-route.sh run against the harness store, and human-gate.sh and
 # patrol-finding.sh are stubs that record their argv.
 set -uo pipefail
 
@@ -31,17 +31,13 @@ PF_STUB='#!/usr/bin/env bash
 printf "%s\n" "$*" >> "${STUB_PF_LOG:?}"
 exit 0'
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/rejection-repool.sh" "$HERE/lifecycle.sh" "$HERE/pool-route.sh" \
-  "$HERE/deferred-dispatch.sh"
+mk_sut_dir "$SD" "$HERE/rejection-repool.sh" "$HERE/lifecycle.sh" "$HERE/pool-route.sh"
 printf '%s\n' "$ESC_STUB" > "$SD/human-gate.sh"; chmod +x "$SD/human-gate.sh"
 printf '%s\n' "$PF_STUB" > "$SD/patrol-finding.sh"; chmod +x "$SD/patrol-finding.sh"
-# The same SUT beside a deferred-dispatch.sh whose arm does not land.
-SD_NOARM="$TMP/scripts-noarm"
-mk_sut_dir "$SD_NOARM" "$HERE/rejection-repool.sh" "$HERE/lifecycle.sh" "$HERE/pool-route.sh"
-printf '%s\n' "$ESC_STUB" > "$SD_NOARM/human-gate.sh"; chmod +x "$SD_NOARM/human-gate.sh"
-printf '%s\n' "$PF_STUB" > "$SD_NOARM/patrol-finding.sh"; chmod +x "$SD_NOARM/patrol-finding.sh"
-printf '#!/usr/bin/env bash\necho "deferred-dispatch: arm refused (stub)" >&2\nexit 1\n' > "$SD_NOARM/deferred-dispatch.sh"
-chmod +x "$SD_NOARM/deferred-dispatch.sh"
+# A gctk whose arm does not land, and whose every other verb is the harness's.
+NOARM_GCTK="$TMP/gctk-noarm"
+printf '#!/usr/bin/env bash\n[ "${1:-} ${2:-}" = "bead arm" ] && { echo "gctk bead arm: arm refused (stub)" >&2; exit 1; }\nexec "%s" "$@"\n' "$GCTK_BIN" > "$NOARM_GCTK"
+chmod +x "$NOARM_GCTK"
 # A gc whose sling exits 0 and stamps nothing, the shape of a pour whose own
 # execution stamp did not land. Every other call reaches the harness stub.
 NOSTAMP="$TMP/bin-nostamp"; mkdir -p "$NOSTAMP"
@@ -73,7 +69,7 @@ reset() { # [extra-metadata-fields]
 # $out is stderr and stdout together; $TMP/stdout holds stdout alone.
 _run() { "$@" > "$TMP/stdout" 2> "$TMP/stderr"; rc=$?; out=$(cat "$TMP/stderr" "$TMP/stdout"); }
 run()  { _run "$SD/rejection-repool.sh" "$@"; }
-run_noarm() { _run "$SD_NOARM/rejection-repool.sh" "$@"; }
+run_noarm() { _run env GCTK_BIN="$NOARM_GCTK" "$SD/rejection-repool.sh" "$@"; }
 stdout_meta() { jq -r --arg k "$1" '(.[0].metadata[$k] // "<absent>") | tostring' "$TMP/stdout" 2>/dev/null; }
 slings() { grep -c '^sling ' "$STUB_GC_LOG" || true; }
 gates() { wc -l < "$STUB_ESC_LOG" | tr -d ' '; }

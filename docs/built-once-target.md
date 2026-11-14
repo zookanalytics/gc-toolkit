@@ -368,7 +368,7 @@ convoy lands only after the operator approves its design.
 | A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,894 |
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,411 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| B | tk-1tfzr71.16 | deferred dispatch's notify path, lock, budget and crash marker | partial files |
+| B | tk-1tfzr71.16 | deferred dispatch's notify path, lock, budget and crash marker | +409 net on its branch |
 | B | tk-1tfzr71.17 | the reaction bead and the intake converters | 189, plus partial files |
 | B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,838 |
 | B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps | 7,855 |

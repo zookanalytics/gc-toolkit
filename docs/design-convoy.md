@@ -60,7 +60,7 @@ The subject is the effort's landing bead. Its steps:
 | `file-design` | File the design child with the integration branch as its `target` in its create, under the subject's epic when it has one, and make the subject wait on it by a `blocks` edge, written only when the child's id prefix is the subject's. |
 | `file-implementation` | File one implementation child the same way, which builds the initiative per the design and lands with no PR of its own. `design_gated=true`: also hold it behind the design child by a `blocks` edge. |
 | `file-summary` | File the summary task beside the subject, under the subject's epic when it has one, with no `target`. It waits on each child by a `blocks` edge, and the subject waits on it, each edge written as in `file-design`. |
-| `dispatch` | Hand the subject to the refinery, assigned with the notice that assignment owes, and dispatch the work: sling the design child, `--merge mr` when design-gated; arm the implementation child behind the design (`design_gated=true`) or sling it now, in parallel (`design_gated=false`); and arm the summary task to the polecat pool on `mol-polecat-report`. Then close the step chain and drain. |
+| `dispatch` | Hand the subject to the refinery by its assignee alone, which Gas City nudges when the subject's last blocker closes, and dispatch the work: sling the design child, `--merge mr` when design-gated; arm the implementation child behind the design (`design_gated=true`) or sling it now, in parallel (`design_gated=false`); and arm the summary task to the polecat pool on `mol-polecat-report`. Then close the step chain and drain. |
 
 Nothing is handed over or dispatched until the whole setup is written. The
 filing steps dispatch nothing, so a run that stops between them leaves no child
