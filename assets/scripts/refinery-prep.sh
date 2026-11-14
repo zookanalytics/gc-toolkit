@@ -122,8 +122,9 @@ git -C "$TREE" update-ref "$REFINERY_READ_NS/$BRANCH" "$READ" || stop "the commi
 
 # A rework child an earlier requeue filed for the bead and never sent on
 # (refinery-lib.sh) holds the bead until it lands, so the bead is taken no
-# further than sending it on. The requeue finds it on the branch and makes it
-# whole, its blocks edge and its priority, before its sling.
+# further than sending it on. The requeue finds it on the branch, writes its
+# blocks edge when it lacks one, and settles and slings it, or arms it when the
+# settle or the sling fails.
 KIDS=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --metadata-field "anchor_bead=$BEAD" --status=open --limit=0) || KIDS=""
 printf '%s' "$KIDS" | jq -e 'type == "array"' >/dev/null 2>&1 || stop "the open beads that name $BEAD as their anchor did not read"
 UNSENT=$(printf '%s' "$KIDS" | jq -r --arg a "$BEAD" --arg b "$BRANCH" "$REFINERY_UNSENT_JQ"'[ .[] | select(refinery_unsent($a; $b)) | .id ] | join(", ")')
