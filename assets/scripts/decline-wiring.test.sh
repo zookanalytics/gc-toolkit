@@ -154,8 +154,8 @@ skill_has waits 'Never remove that edge yourself first' "the waits skill rules o
 skill_has work '/stand-down.sh" <bead> --key <situation-key> --ruling "' "the work skill gives the stand-down's command"
 skill_has work 'It leaves a deferred-dispatch arm in place' "the work skill says a stop that keeps the bead leaves its arm"
 skill_has converse-settle '/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"' "the converse-settle step gives the stand-down's command, with the conversation as its evidence"
-skill_has converse-settle 'Stand it down first' "the converse-settle step stands the subject down before the sign-off"
-skill_has converse-settle 'add `--leave <gate>` to the sign-off' "the converse-settle step keeps a gate's other bead waiting through the sign-off"
+skill_has converse-settle 'Stand the subject down first' "the converse-settle step stands the subject down before the sign-off"
+skill_has converse-settle 'add `--leave <gate>` for that gate unless the ruling settles the other bead too' "the converse-settle step keeps a gate's other bead waiting through the sign-off"
 # mol-polecat-work's step scripts file their gates through decline.sh, which ends
 # the message of each gate that arms a re-sling with the stand-down under that
 # gate's own key (decline.test.sh holds the sentence). So no work script arms a
