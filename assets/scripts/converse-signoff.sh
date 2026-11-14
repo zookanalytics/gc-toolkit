@@ -128,14 +128,21 @@
 # not sign off (--answer), sends the subject, and only then stays. A stay on the
 # subject with no such convoy and no --accept is refused before any write, as on
 # a change a sitting resumed and handed off to review, which went out with no
-# sling. A subject that has closed needs no convoy, and its close returns the
-# stay. bd's cycle check walks no tracks edge, so it would take that edge from
-# a conversation whose subject waits on it, as the anchor of a PR whose merge
-# the conversation holds does, and neither could close: that stay is refused
-# before any write, as a stay on work that waits on the conversation is. A
-# close made while the controller is down is one its sweep never sees
-# (cmd/gc/autoclose_sweep.go), which leaves the convoy open until
-# `gc convoy check` closes it.
+# sling, or on a subject whose convoy closed while it was still out, since `gc
+# convoy close` closes a convoy whatever the state of the beads it tracks. A
+# subject that has gone out is never sent again to make a convoy: gc sling
+# refuses a second run of one formula on a bead only while the first run's
+# root is live (internal/sling liveConvoyTrackedWorkflowRoots), and a root can
+# close while its bead is still out, as a mol-polecat-work root does at submit.
+# So the refusal, and a stay that stops at step 5 for want of that convoy, send
+# a sitting whose subject has gone out to the hand-off. A subject that has
+# closed needs no convoy, and its close returns the stay. bd's cycle check
+# walks no tracks edge, so it would take that edge from a conversation whose
+# subject waits on it, as the anchor of a PR whose merge the conversation holds
+# does, and neither could close: that stay is refused before any write, as a
+# stay on work that waits on the conversation is. A close made while the
+# controller is down is one its sweep never sees (cmd/gc/autoclose_sweep.go),
+# which leaves the convoy open until `gc convoy check` closes it.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 4 when it takes the recommendation,
@@ -1182,7 +1189,7 @@ if [ -n "$STAY" ]; then
         subject_convoy >/dev/null || SC_RC=$?
         case "$SC_RC" in
           0) ;;
-          1) die "--stay would make conversation $CONVERSATION wait on $SUBJECT through the convoy a formula's sling of $SUBJECT pours its run over, and no open convoy tracks $SUBJECT alone, so no such sling has sent $SUBJECT; nothing was written. When the ruling sends $SUBJECT on a formula, answer its gates on a turn that does not sign off (--answer), send $SUBJECT (gc sling <rig>/<pool> $SUBJECT --on <formula>), then run this call again. A ruling that takes the recommendation stays with --accept, whose dispatch makes that convoy. When $SUBJECT went out another way, as a change a sitting resumes and hands off to review does, no convoy closes with it, so sign off without --stay and end at the hand-off" ;;
+          1) die "--stay would make conversation $CONVERSATION wait on $SUBJECT through the convoy a formula's sling of $SUBJECT pours its run over, and no open convoy tracks $SUBJECT alone, so no such sling has sent $SUBJECT, or the convoy of the one that did has closed; nothing was written. When the ruling sends $SUBJECT on a formula and has not sent it yet, answer its gates on a turn that does not sign off (--answer), send $SUBJECT (gc sling <rig>/<pool> $SUBJECT --on <formula>), then run this call again. A ruling that takes the recommendation stays with --accept, whose dispatch makes that convoy. Once $SUBJECT has gone out, never send it again to make a convoy for the stay, since a second sling can pour it a second run: when it went out another way, as a change a sitting resumes and hands off to review does, or its convoy has closed while it is still out, as a stay that stopped short finds when it runs again, sign off without --stay and end at the hand-off" ;;
           *) stopped "the convoys that track $SUBJECT could not be read to find the one its dispatch poured its run over, which the conversation would wait on; nothing was written" ;;
         esac
       fi ;;
@@ -1474,7 +1481,7 @@ if [ "$RULED" = yes ]; then
           SUBJECT_ON=$(subject_convoy) || SC_RC=$?
           case "$SC_RC" in
             0) ;;
-            1) stopped "no open convoy tracks $SUBJECT alone, so no dispatch of $SUBJECT poured a run for conversation $CONVERSATION to wait on${ACCEPT:+, and the take of the recommendation above poured none}; every gate above is answered, and the conversation does not stay. Send $SUBJECT and run this call again, or sign off without --stay to end at the hand-off" ;;
+            1) stopped "no open convoy tracks $SUBJECT alone, so no dispatch of $SUBJECT poured a run for conversation $CONVERSATION to wait on${ACCEPT:+, and the take of the recommendation above poured none}; every gate above is answered, and the conversation does not stay, so sign off without --stay to end at the hand-off. Do not send $SUBJECT to make a convoy for the stay: it went out before this call or through its take, or another answer stands on its recommendation, and a second sling can pour it a second run" ;;
             *) stopped "the convoys that track $SUBJECT could not be read to find the one its dispatch poured its run over; every gate above is answered, the conversation is not yet left to wait, and a re-run writes the wait" ;;
           esac
         fi ;;

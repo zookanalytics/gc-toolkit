@@ -1493,6 +1493,14 @@ alias, which drops the claim. Gas City does the rest with what it already has
   it out as it leaves out a member, and the board's row reads "Waits on" the
   convoy. A subject that closes while the controller is down is one its sweep
   never sees, which leaves the convoy open until `gc convoy check` closes it.
+  A convoy closed by hand while the subject is still out leaves the
+  conversation nothing to wait on: the entry reads the stay as stopped short,
+  the sign-off refuses its re-run or stops it before the wait, and the sitting
+  ends at the hand-off. A subject that
+  has gone out is never sent again to make a convoy, because `gc sling` refuses
+  a second run of one formula on a bead only while the first run's root is
+  live, and a `mol-polecat-work` root closes at submit while its bead waits to
+  land.
 - **Low context during the return.** The comparison stays owed when the
   sitting's context runs low, so the sitting neither signs off nor holds for
   that reason. Claude Code and Codex compact a thread on their own, and the
@@ -1512,9 +1520,10 @@ alias, which drops the claim. Gas City does the rest with what it already has
   brings one back.
 - **Where it cannot stay.** An edge onto a bead in another store holds
   nothing, so a sitting stays only for work in its conversation's own store,
-  and ends at the hand-off otherwise. A stay on a subject no formula's sling
-  has sent, without `--accept`, is refused before any write, because no run of
-  it has a convoy to wait on. A change a sitting resumes is its
+  and ends at the hand-off otherwise. A stay on a subject no open convoy
+  tracks, without `--accept`, is refused before any write, because no run of
+  it has a convoy to wait on: no formula's sling has sent it, or the convoy of
+  the one that did has closed. A change a sitting resumes is its
   conversation's subject and goes to review with no sling, so that sitting
   ends at the hand-off rather than stay for its landing. Nor does it stay for
   the PR whose merge its conversation holds, or for work that waits on that

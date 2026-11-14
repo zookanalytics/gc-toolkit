@@ -992,10 +992,16 @@ have "…and a recovery takes a brief only when one is held on its work" \
     'The subject'"'"'s latest close brief is its `--close-brief` when the brief'"'"'s heading holds it on work that `WORK` names.' "$TMP/stay-squeezed"
 have "…so a sitting whose work is in another store ends at the hand-off" \
     'After the first refusal, end at the hand-off' "$TMP/stay-squeezed"
-have "…and one whose ruling sends the subject on a formula sends it, then stays" \
-    'After the second, when the ruling sends the subject on a formula, answer the gates and send the subject, then run the stay again.' "$TMP/stay-squeezed"
-have "…while one whose subject went out with no sling, as a resumed change does, ends at the hand-off" \
-    'When the subject went out with no sling, as a change this sitting resumed and handed off did, end at the hand-off and tell the operator why.' "$TMP/stay-squeezed"
+have "…and one whose ruling sends the subject on a formula sends it, then stays, when it has not sent it yet" \
+    'After the second, when the ruling sends the subject on a formula and you have not sent it yet, answer the gates and send the subject, then run the stay again.' "$TMP/stay-squeezed"
+have "…since a subject that has gone out is never sent again" \
+    'A subject that has gone out is never sent again, since a second sling can pour it a second run.' "$TMP/stay-squeezed"
+have "…while one whose subject went out with no sling, as a resumed change does, or whose convoy closed, ends at the hand-off" \
+    'When the subject went out with no sling, as a change this sitting resumed and handed off did, or its convoy has closed while it is still out, end at the hand-off and tell the operator why.' "$TMP/stay-squeezed"
+have "…and the re-run of a stay that stopped short never sends the subject" \
+    'A re-run never sends the subject. A stay on the subject began only once the subject had gone out, or sends it through `--accept`, and a second sling can pour it a second run.' "$TMP/stay-squeezed"
+have "…ending at the hand-off when the sign-off finds no open convoy for it" \
+    'When the sign-off refuses the re-run, or stops it, because no open convoy tracks the subject, the conversation has nothing left to wait on: end at the hand-off (`converse-settle`), and tell the operator why the sitting no longer stays.' "$TMP/stay-squeezed"
 have "…which the refusal names" \
     'A change this sitting resumed is such a subject, since it went to review with no sling.' "$TMP/stay-squeezed"
 SV="$TMP/stay-forms"

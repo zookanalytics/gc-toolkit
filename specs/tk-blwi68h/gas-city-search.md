@@ -101,6 +101,18 @@ the subject, and the subject's own status once that convoy has closed.
   the fix as deriving autoclose from journal operations). The convoy then stays
   open until `gc convoy check` closes it, and the sitting sleeps until then. The
   cause is Gas City's, and the pack adds no sweep for it.
+- **A convoy closed by hand.** `gc convoy close` closes a convoy whatever the
+  state of the beads it tracks (`doConvoyCloseJSON` in `cmd/gc/cmd_convoy.go`
+  checks only that the bead is a convoy). A conversation that waited on such a
+  convoy has nothing left to wait on, so the entry reads the stay as stopped
+  short, the sign-off refuses its re-run or stops it before the wait, and the
+  sitting ends at the hand-off.
+  It never sends the subject again to make a convoy: `gc sling` refuses a
+  second run of one formula on a bead only while the first run's root is live
+  (`liveConvoyTrackedWorkflowRoots` in `internal/sling/sling_attachment.go`
+  judges each root by its own status), and a `mol-polecat-work` root closes at
+  submit while its bead waits to land. Gas City permits the close, and the pack
+  adds no guard for it.
 - **The order of a sitting that sends the subject.** The dispatch must exist
   before the stay waits on its convoy, and a run whose bead is still held by a
   gate is declined by its own load-context (`work-gate.sh`). So that sitting

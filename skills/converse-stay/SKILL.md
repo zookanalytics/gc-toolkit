@@ -79,17 +79,21 @@ The sign-off refuses three stays, each before any write:
 
 - **A stay on work in another store** than the conversation's, the subject's
   included, where the wait would hold nothing.
-- **A stay on a subject no formula's sling has sent**, without `--accept`,
-  because no run of it has a convoy to wait on. A change this sitting resumed
-  is such a subject, since it went to review with no sling.
+- **A stay on a subject no open convoy tracks**, without `--accept`, because
+  no run of it has a convoy to wait on: no formula's sling has sent it, or the
+  convoy of the one that did has closed. A change this sitting resumed is such
+  a subject, since it went to review with no sling.
 - **A stay for the landing of the PR whose merge this conversation holds**, or
   for work that waits on that PR, directly or through other beads.
 
 After the first refusal, end at the hand-off (`converse-settle`), and tell the
 operator why the sitting does not stay. After the second, when the ruling sends
-the subject on a formula, answer the gates and send the subject, then run the
-stay again. When the subject went out with no sling, as a change this sitting
-resumed and handed off did, end at the hand-off and tell the operator why.
+the subject on a formula and you have not sent it yet, answer the gates and
+send the subject, then run the stay again. A subject that has gone out is never
+sent again, since a second sling can pour it a second run. When the subject
+went out with no sling, as a change this sitting resumed and handed off did,
+or its convoy has closed while it is still out, end at the hand-off and tell
+the operator why.
 After the third, lift the hold (`converse-hold`) and run the stay again when
 the operator wants that PR to land first, and otherwise end at the hand-off.
 
@@ -138,9 +142,10 @@ fits:
 
 The entry says `interrupted` and names this skill when a stay stopped short:
 before its sign-off finished, before the conversation waited on all its work,
-or before the sign-off left the conversation to wait. The recovery is the
-stay's call, run again with the same ruling, but only when you can give the
-whole call. Take the case that fits:
+or before the sign-off left the conversation to wait. A stay on the subject
+itself reads so too when the convoy it waited on has closed while the subject
+is still out. The recovery is the stay's call, run again with the same ruling,
+but only when you can give the whole call. Take the case that fits:
 
 - **Your thread holds the call.** Run it again with the same ruling, and act on
   the entry it runs, as after any stay.
@@ -162,6 +167,13 @@ whole call. Take the case that fits:
 - **The record does not give the whole call**, as when `WORK` is empty. Hold
   instead (`converse-hold`, after the claim-back below), and tell the operator
   that the stay stopped short and what it had done.
+
+A re-run never sends the subject. A stay on the subject began only once the
+subject had gone out, or sends it through `--accept`, and a second sling can
+pour it a second run. When the sign-off refuses the re-run, or stops it,
+because no open convoy tracks the subject, the conversation has nothing left
+to wait on: end at the hand-off (`converse-settle`), and tell the operator why
+the sitting no longer stays.
 
 A re-run with the same ruling never files a second rework. What it does
 depends on the rework the stopped stay left:

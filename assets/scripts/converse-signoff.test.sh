@@ -156,11 +156,13 @@
 #             headline waits on nothing of it and no closer is armed on it;
 #             with --accept it waits on the convoy Accept's run was poured
 #             over, and stops with no edge written when Accept poured none;
-#             without --accept, a subject no formula's sling has sent, a
-#             subject in another store and one whose merge the conversation
+#             without --accept, a subject no formula's sling has sent, the
+#             re-run of a stay whose convoy closed with the subject still out,
+#             a subject in another store and one whose merge the conversation
 #             holds are refused before any write, a read of its convoys that
 #             fails stops before any write, and a subject that has closed
-#             takes no edge
+#             takes no edge; neither the refusal nor the stop tells a sitting
+#             to send a subject that has gone out a second time
 #   (APPROVE*) a PR a ruling leaves standing whose status (gctk pr status)
 #             reads needs-review with no approval standing, or does not read, is
 #             named in the headline, the close reason and the reminder, and
@@ -2553,6 +2555,18 @@ has "$OUT" "gate tk-g was already cleared before this sign-off" "(STAY-SUBJECT) 
 run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
 eq "$RC" 0 "(STAY-SUBJECT-RERUN) a re-run of the stay exits 0"
 eq "$(grep -c '^bd dep add tk-conv tk-cv --type blocks' "$CALLS")" 2 "(STAY-SUBJECT-RERUN) …writing the same edge again, which bd keeps once"
+# The convoy the stay waits on closes while the subject is still out, as `gc
+# convoy close` closes one whatever the state of the beads it tracks. The
+# sitting's entry reads the stay as stopped short, and its re-run finds no open
+# convoy: refused before any write, and told never to send the subject again.
+setf tk-cv status closed
+: > "$CALLS"
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+eq "$RC" 2 "(STAY-SUBJECT-CONVOY-CLOSED) the re-run of a stay whose convoy closed with the subject still out is refused"
+has "$OUT" "so no such sling has sent tk-sub, or the convoy of the one that did has closed; nothing was written" "(STAY-SUBJECT-CONVOY-CLOSED) …naming the convoy that closed"
+has "$OUT" "Once tk-sub has gone out, never send it again to make a convoy for the stay, since a second sling can pour it a second run" "(STAY-SUBJECT-CONVOY-CLOSED) …never sending the subject a second time"
+has "$OUT" "or its convoy has closed while it is still out, as a stay that stopped short finds when it runs again, sign off without --stay and end at the hand-off" "(STAY-SUBJECT-CONVOY-CLOSED) …but ending at the hand-off"
+eq "$(writes)" 0 "(STAY-SUBJECT-CONVOY-CLOSED) …and writes nothing"
 # The stay's call is the same when the dispatch poured first and the call
 # answers the gate itself.
 closer_case; convoy tk-cv tk-sub
@@ -2561,15 +2575,17 @@ eq "$RC/$(field tk-g status)" "0/closed" "(STAY-SUBJECT-ANSWERS) a stay on a sub
 has "$(cat "$CALLS")" "bd dep add tk-conv tk-cv --type blocks" "(STAY-SUBJECT-ANSWERS) …and waits on the convoy"
 # No formula's sling has sent the subject: no convoy tracks it, so nothing
 # would close for the conversation to wait on. The stay is refused before any
-# write, saying how to send it first, and that a subject that went out with no
-# sling, as a change a sitting resumes and hands off to review does, ends at
+# write, saying how to send it first when the ruling has not sent it yet, and
+# that a subject that has gone out is never sent again: one that went out with
+# no sling, as a change a sitting resumes and hands off to review does, ends at
 # the hand-off.
 closer_case
 run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
 eq "$RC" 2 "(STAY-SUBJECT-UNSENT) a stay on a subject no formula's sling has sent exits 2"
 has "$OUT" "no open convoy tracks tk-sub alone, so no such sling has sent tk-sub" "(STAY-SUBJECT-UNSENT) …saying so"
-has "$OUT" "(--answer), send tk-sub (gc sling <rig>/<pool> tk-sub --on <formula>), then run this call again" "(STAY-SUBJECT-UNSENT) …naming the order that sends it first"
-has "$OUT" "When tk-sub went out another way, as a change a sitting resumes and hands off to review does, no convoy closes with it, so sign off without --stay and end at the hand-off" "(STAY-SUBJECT-UNSENT) …and the hand-off ending for a subject that went out with no sling"
+has "$OUT" "When the ruling sends tk-sub on a formula and has not sent it yet, answer its gates on a turn that does not sign off (--answer), send tk-sub (gc sling <rig>/<pool> tk-sub --on <formula>), then run this call again" "(STAY-SUBJECT-UNSENT) …naming the order that sends it first, when the ruling has not sent it"
+has "$OUT" "Once tk-sub has gone out, never send it again to make a convoy for the stay" "(STAY-SUBJECT-UNSENT) …and never a second time"
+has "$OUT" "when it went out another way, as a change a sitting resumes and hands off to review does, or its convoy has closed while it is still out" "(STAY-SUBJECT-UNSENT) …and the hand-off ending for a subject that went out with no sling"
 eq "$(writes)" 0 "(STAY-SUBJECT-UNSENT) …and writes nothing"
 eq "$(field tk-g status)" "open" "(STAY-SUBJECT-UNSENT) …leaving the gate open"
 # Only a convoy that Gas City closes with the subject stands in for it: open,
@@ -2642,6 +2658,8 @@ ACCEPT_DOES=other run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub --accept
 eq "$RC" 1 "(STAY-ACCEPT-NOT-TAKEN) a stay whose recommendation another answer reached first stops"
 has "$OUT" "no open convoy tracks tk-sub alone, so no dispatch of tk-sub poured a run for conversation tk-conv to wait on" "(STAY-ACCEPT-NOT-TAKEN) …saying no run was poured"
 has "$OUT" "sign off without --stay to end at the hand-off" "(STAY-ACCEPT-NOT-TAKEN) …and naming the hand-off ending"
+has "$OUT" "Do not send tk-sub to make a convoy for the stay: it went out before this call or through its take, or another answer stands on its recommendation" "(STAY-ACCEPT-NOT-TAKEN) …and never a send of the subject, over the answer that stands"
+hasnt "$OUT" "Send tk-sub and run this call again" "(STAY-ACCEPT-NOT-TAKEN) …nor a send to retry with"
 eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the dialog keeps what is typed" "(STAY-ACCEPT-NOT-TAKEN) …its first line still newest, naming no work"
 hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-ACCEPT-NOT-TAKEN) …with no edge written"
 eq "$(field tk-conv status)" "in_progress" "(STAY-ACCEPT-NOT-TAKEN) …and the conversation still claimed"
@@ -2649,6 +2667,7 @@ closer_case; setm tk-sub gc.recommended_formula mol-fix
 ACCEPT_NO_POUR=1 run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub --accept
 eq "$RC" 1 "(STAY-ACCEPT-NO-POUR) a stay whose Accept poured no run stops"
 hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-ACCEPT-NO-POUR) …with no edge written"
+has "$OUT" "so sign off without --stay to end at the hand-off. Do not send tk-sub to make a convoy for the stay" "(STAY-ACCEPT-NO-POUR) …ending at the hand-off, never sending the subject its take already sent"
 
 echo "# a stay for the landing of the PR its conversation is about, once its hold is lifted"
 open_pr; convoy tk-cv tk-anc
