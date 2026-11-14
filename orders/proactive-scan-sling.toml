@@ -1,27 +1,36 @@
 # proactive-scan-sling — the scheduled intake trigger for first reactions.
 # A newly-filed bead gets no reaction until something slings a first reaction
-# at it. The only other scheduled triage is liveness-sweep, a periodic backstop
-# that batches still-untriaged beads into one visit per rig rather than reacting
-# at intake. This order gives the existing picker
-# (tools/gc-proactive.sh scan --sling) a schedule, so a filed bead gets a first
-# reaction promptly: an actionable one routes to a pool, a blocked one gets a
-# blocks edge, one needing a ruling files a visit. liveness-sweep then feeds only
-# on genuine stalls, the backstop it was built to be.
+# at it, and Gas City starts no work on a bead nobody slung: an order that
+# fires on bead.created is told no bead, so it would run this same scan on
+# every create. This order runs the scan on a schedule, so a filed bead gets a
+# first reaction promptly: an actionable one routes to a pool, a blocked one
+# gets a blocks edge, one needing a ruling gets a human gate. Patrol findings
+# and requests sling theirs at once, through the same verb.
 #
-# Bounded by the picker's own caps — GC_PROACTIVE_SLING_CAP reactions per sweep,
-# GC_PROACTIVE_SCAN_LIMIT beads scanned — and by the proactive pool's
-# max_active_sessions, which queues an over-slung sweep at zero cost. The sweep
-# WRITES (it slings), so there is no `idempotent` key: single-flight per rig is
-# what keeps two sweeps from racing the same beads.
+# The sweep has no cap: tools/gc-proactive.sh slings a run of
+# mol-first-reaction at every candidate, and the proactive pool's
+# max_active_sessions queues the runs at no cost. Gas City ends an exec order
+# at its timeout by signalling its whole process group, which would cut a pour
+# short, so [order.env] gives the sweep the same deadline as `timeout`: it
+# starts no sling once less time is left than its slowest sling took, and the
+# next sweep reads the rest. A city that overrides one sets both. The sweep
+# WRITES (it slings), so there is no `idempotent` key: single-flight per rig
+# keeps two sweeps from racing the same beads, and gc sling refuses a second
+# live reaction on a bead.
 #
 # scope = rig: each importing rig reacts over its own store and slings into its
-# own proactive pool. The exec self-gates on `deliverable`, so a rig whose pool
-# is absent, suspended, or capped skips cleanly. Cadence is tunable per city via
-# city.toml [[orders.overrides]], not by editing here.
+# own proactive pool. The scan self-gates on `deliverable`, so a rig whose pool
+# is absent, suspended, or capped skips cleanly. Cadence and enablement are
+# tunable per city via city.toml [[orders.overrides]] by this order's name, not
+# by editing here.
 [order]
-description = "proactive intake: run the picker's scan --sling so movable-forward beads get a first reaction at intake, not left for the liveness-sweep backstop. Bounded by GC_PROACTIVE_SLING_CAP/_SCAN_LIMIT; roster-gated; fully exec."
+description = "proactive intake: run gc-proactive.sh scan --sling so each ready bead nobody has decided on gets a first reaction at intake: an actionable one is routed, a blocked one gets an edge, one needing a ruling gets a human gate. Uncapped, deadline-bounded, roster-gated; fully exec."
 trigger = "cooldown"
 interval = "15m"
-exec = "$PACK_DIR/assets/scripts/proactive-scan-sling.sh"
+exec = "$PACK_DIR/tools/gc-proactive.sh scan --sling"
 timeout = "300s"
 scope = "rig"
+
+[order.env]
+# The sweep's deadline, from its start. Keep it equal to `timeout` above.
+GC_PROACTIVE_SWEEP_TIMEOUT = "300s"

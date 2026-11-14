@@ -648,8 +648,8 @@ shares only the word ([authority-map.md](authority-map.md)).
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-12, at `gastownhall/gascity` main 1f0c10495b1c,
-  `gastownhall/beads` main e51a90036718 and `gastownhall/gascity-packs` main
-  1f6d8e41c5b0.
+- **Verified.** 2026-11-14, at `gastownhall/gascity` main cf33557276ef,
+  `gastownhall/beads` main 8cdfa796a8f5 and `gastownhall/gascity-packs` main
+  0f07496d2fa4.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.

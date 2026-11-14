@@ -31,17 +31,21 @@
 # refused / a placement whose write the store refused or whose dispatch failed
 # / an Accept refused, held by another Accept on the bead, or whose disarm did
 # not land),
-# 5 react no-op: the subject already has an open first reaction, or a live owner
-# owns its reaction, so nothing was filed (a first reaction happens once at a
-# time) — distinct from 4 so an intake caller files its own conversation
+# 5 react no-op: a first reaction already runs on the subject, or an open
+# conversation tracks it, so nothing was slung (a first reaction happens once
+# at a time) — distinct from 4 so an intake caller files its own conversation
 # instead of reading a skip as a dispatched reaction.
 # 6 react no-op: a live workflow already drives the subject, so nothing was
-# filed (a first reaction never races work in flight) — distinct from 5 so the
+# slung (a first reaction never races work in flight) — distinct from 5 so the
 # intake caller names the cause in the conversation it files.
-# 7 react no-op: the subject already has a route or a deferred-dispatch arm, so
-# nothing was filed (a first reaction never second-guesses a dispatch already
-# decided) — distinct from 5 and 6 so the intake caller names the cause in the
+# 7 react no-op: the subject already has a route or a deferred-dispatch arm, is
+# held, assigned or not open, or waits on a person's answer, so nothing was
+# slung (a first reaction never second-guesses a dispatch already decided) —
+# distinct from 5 and 6 so the intake caller names the cause in the
 # conversation it files.
+# 8 react no-op: the subject is a standing record or a feedback pattern, whose
+# kind takes no first reaction, so nothing was slung — distinct from 5, 6 and 7
+# so the intake caller names the cause in the conversation it files.
 
 set -eu
 
@@ -69,7 +73,7 @@ Usage:
   gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or of several waiting the --from bead when it is one of them and otherwise the one whose wait on it is oldest, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject (a bead or a PR, or a rig's name or prefix typed there for a new topic in that rig), question, model and whether to attach on one screen, filled in from the command line, where --rig fills in the subject and --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
   gc-helm conversations [<ref> [--from <bead-id>]] [--json]  list where each open conversation stands: its sitting's readiness (queued, starting, preparing, ready, ended) and whether a terminal is attached; with a subject reference, the subject as engage resolves it, --from as engage takes it, the rig a conversation about it is held in, whether a sitting can start there, its open conversations and what holds it; with none, --json also gives the rigs a new topic can be filed in, and the seats the form's People page lists, mechanik and each rig's Product Owner, each with its session as 'gc session list' holds it. Read-only
-  gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
+  gc-helm react <bead-id> [--reason "..."]  sling a first reaction — a run of mol-first-reaction on the subject, which the proactive pool claims and disposes
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent> | --assign <named-agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm park <bead-id> "<text>" [--body "..."]  hold everything under the bead that has not started: file a gate titled with why it is parked and what releases it (≤140 chars, ENFORCED), described by --body, and make the bead wait on it
   gc-helm park <bead-id> --waiting-on <bead-id>  the same hold behind an existing bead, filing no gate
@@ -197,10 +201,9 @@ one conversation and engages it, all in one gesture. The positional text, or
 --reason without one, is the question: the subject's description keeps it
 unchanged with a provenance line after it, its title is the label
 conversation_title derives from its opening, and absent --reason or
---template it is the conversation's opener too. The subject is marked
-gc.reaction_owned=1 so the async first-reaction/proactive worker stands down
-rather than file a second conversation; engage files the one conversation
-itself.
+--template it is the conversation's opener too. The one conversation engage
+files tracks the subject, so a first reaction refuses the subject rather than
+put it to the operator a second time.
 
 A bare gc-helm on a terminal opens engage's form on starting a conversation.
 The form's pages are tabs at its top: starting a conversation (Ctrl+N),
@@ -223,8 +226,8 @@ message. The Product Owner starts fresh, so a sitting of it that slept or
 ended comes back as a new sitting. A failed attach exits 4 once gc has said
 why.
 
-dismiss ends the sitting. react files a proactive first-reaction bead via
-tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
+dismiss ends the sitting. react slings a proactive first reaction on the bead
+via tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one update, and exits 4 before anything
 follows it when the store refuses that update. --release first removes the
 bead's arm through gctk bead disarm, so the deferred-dispatch start cannot send
@@ -305,7 +308,8 @@ starts once the blocker closes. It refuses a closed bead, PR-finishing work
 parent that is closed or not in the bead's store, --standalone on a bead that
 has a parent, and a bead an arm already sends to another pool or on another
 formula. A bead with no hold:mayor is refused, or reported as already placed
-when a live run, a route, an arm or an assignee shows its dispatch. A
+when a live run, a route, an arm or an assignee shows its dispatch; a first
+reaction's run shows none, since it triages the bead and works none of it. A
 dispatch that fails leaves the hold on, so the bead stays in the queue. A
 re-run after a stop at any write finishes the placement without a second
 run: it dispatches nothing once an assignee, a merge_result, a live run or an
@@ -2192,7 +2196,9 @@ cmd_priority() {
 #   3. It settles the bead's priority (queue-priority.sh settle), because a
 #      pour copies the priority once.
 #   4. It dispatches, unless an assignee, a merge_result, a live run or an arm
-#      shows that an earlier dispatch did. A bead `gctk bead holds` finds held
+#      shows that an earlier dispatch did. A run of mol-first-reaction shows
+#      none, since a first reaction triages the bead and works none of it.
+#      A bead `gctk bead holds` finds held
 #      by a wait on it or on a parent above it, such as a park, is armed
 #      (gctk bead arm), so the park keeps holding it, and so is one
 #      whose holds it could not answer. Any other is slung; gc sling's exit 3
@@ -2301,7 +2307,11 @@ cmd_place() {
         echo "$PROG: place: could not read the runs that work $bead, so whether an earlier dispatch already started one cannot be told. Re-run once the store answers. Nothing was written." >&2
         exit 4
     fi
-    pl_live=$(printf '%s' "$pl_runs" | jq -r '[ .[] | select(.live) | .root ] | join(" ")' 2>/dev/null || true)
+    # A run of mol-first-reaction is no dispatch: a first reaction triages the
+    # bead and does no work on it, and its held exit writes hold:mayor seconds
+    # before its run ends, so taking that run for a dispatch would lift the
+    # hold with nothing sent.
+    pl_live=$(printf '%s' "$pl_runs" | jq -r '[ .[] | select(.live and .formula != "mol-first-reaction") | .root ] | join(" ")' 2>/dev/null || true)
     dispatched=""
     [ -z "$pl_assignee" ] || dispatched="assigned to $pl_assignee"
     [ -z "$pl_landing" ] || dispatched="${dispatched:+$dispatched, }merge_result=$pl_landing"
@@ -3309,10 +3319,10 @@ $gate_desc}"
 }
 
 # ── Verb: react ──────────────────────────────────────────────────────
-# Thin wrapper over tools/gc-proactive.sh `sling` (which owns the budget/cap
-# clamp): files a reaction bead that tracks the subject and routes it to the
-# proactive pool, so a worker reads the subject, writes a first-reaction card,
-# and disposes it.
+# Thin wrapper over tools/gc-proactive.sh `sling`, which applies the
+# refusals and slings a run of mol-first-reaction on the subject, so a
+# proactive worker reads the subject, writes a first-reaction card, and
+# disposes it.
 cmd_react() {
     bead=""; reason=""; nudge=""; dry=""
     while [ $# -gt 0 ]; do
@@ -3354,38 +3364,42 @@ cmd_react() {
     set -- sling "$bead"
     [ -n "$nudge" ] && set -- "$@" --nudge
     [ -n "$dry" ] && set -- "$@" --dry-run
-    # gc-proactive.sh sling exits 3 (RC_ALREADY_REACTED) when its dedup found an
-    # open reaction bead already tracking this subject, or a live owner owning its
-    # reaction, 4 (RC_LIVE_WORKFLOW) when its live-workflow guard skipped a bead a
-    # live workflow already drives, and 5 (RC_DISPATCH_PATH) when its
-    # dispatch-path guard skipped a bead that is already routed or armed, that a
-    # dispatch hold holds, or that an open human gate blocks. Each is
-    # a no-op, not a failure, and NO new reaction was filed. Re-raise them as exit
-    # 5, exit 6 and exit 7 so an intake caller (operator-intake.sh) files its own
-    # conversation, naming the cause, instead of waiting for a reaction that is already
-    # in flight or never ran; any other non-zero is a real failure.
+    # gc-proactive.sh sling refuses a subject with a code of its cause: 3 when a
+    # first reaction already runs on it or an open conversation tracks it, 4
+    # when a live run of another formula works it, 5 when it is already routed
+    # or armed, held, assigned, not open, or waits on a person's answer, and 6
+    # when it is a standing record or a feedback pattern, whose kind takes no
+    # first reaction. Each is a no-op, not a failure, and no reaction was
+    # slung. Re-raise them as exit 5, 6, 7 and 8 so an intake caller
+    # (operator-intake.sh) files its own conversation, naming the cause,
+    # instead of waiting for a reaction that is already running or never ran;
+    # any other non-zero is a real failure.
     if "$tool" "$@"; then
         :
     else
         sling_rc=$?
         if [ "$sling_rc" -eq 3 ]; then
-            echo "$PROG: react: $bead already has an open first reaction, or a live owner owns its reaction — nothing filed (a first reaction happens once at a time). It reacts when the pool claims the reaction bead, or open a conversation directly." >&2
+            echo "$PROG: react: a first reaction already runs on $bead, or an open conversation tracks it — nothing slung (a first reaction happens once at a time). Open a conversation directly, or react once that reaction or conversation ends." >&2
             exit 5
         fi
         if [ "$sling_rc" -eq 4 ]; then
-            echo "$PROG: react: a live workflow already drives $bead — nothing filed (a first reaction never races work in flight). React once that workflow's root closes, or open a conversation directly." >&2
+            echo "$PROG: react: a live workflow already drives $bead — nothing slung (a first reaction never races work in flight). React once that workflow's root closes, or open a conversation directly." >&2
             exit 6
         fi
         if [ "$sling_rc" -eq 5 ]; then
-            echo "$PROG: react: $bead is already routed or armed, held, or waits on a person's answer — nothing filed (a first reaction never second-guesses a dispatch already decided). Open a conversation directly, or react once that route, arm, hold or gate is cleared." >&2
+            echo "$PROG: react: $bead is already routed or armed, held, assigned, not open, or waits on a person's answer — nothing slung (a first reaction never second-guesses a dispatch already decided). Open a conversation directly, or react once that is cleared." >&2
             exit 7
+        fi
+        if [ "$sling_rc" -eq 6 ]; then
+            echo "$PROG: react: $bead is a standing record or a feedback pattern, whose kind takes no first reaction — nothing slung. Open a conversation directly." >&2
+            exit 8
         fi
         echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
         exit 4
     fi
 
-    # The reaction runs async once the pool claims the reaction bead; just clear
-    # the cache.
+    # The reaction runs async once the pool claims its step; just clear the
+    # cache.
     if [ -z "$dry" ]; then bust_cache; fi
 }
 
@@ -4659,14 +4673,12 @@ engage_resolve_skill() {
 # The text is the operator's question as typed. The description keeps it
 # unchanged, newlines included, with a provenance line after it, and the title
 # is the short label conversation_title derives from its opening, because a
-# question is not a title and bd refuses a title over 500 bytes. The subject is
-# created MARKED gc.reaction_owned=1, so the async first-reaction / proactive
-# worker stands down rather than file a SECOND conversation (the caller files
-# the one conversation itself): tools/gc-proactive.sh drops a marked bead from
-# its scan and refuses to file a reaction for one, and a reaction that reaches
-# one anyway closes without acting (agents/proactive/prompt.template.md). The
-# marker rides the `gc bd create` write itself (--metadata), so the scan can
-# never observe the bead unmarked. gc.origin=operator is the honest origin.
+# question is not a title and bd refuses a title over 500 bytes. The caller
+# files the subject's one conversation itself, and that conversation's tracks
+# edge is what keeps a first reaction off the subject: tools/gc-proactive.sh
+# sling refuses a bead an open conversation tracks, and a reaction's own first
+# act asks the same refusal, so a reaction slung before the conversation is
+# filed stands down once it starts. gc.origin=operator is the honest origin.
 create_subject() {
     _cs_verb="$1"; _cs_rig="$2"; _cs_text="$3"
     enumerate_rigs
@@ -4697,7 +4709,7 @@ create_subject() {
 ---
 Operator-initiated conversation subject, filed by \`$PROG $_cs_verb --new-subject\`. The text above is the operator's question as typed, and the title is a label derived from its opening."
     _cs_json=$(gc bd create -t task --title "$_cs_title" -d "$_cs_body" \
-        --metadata '{"gc.origin":"operator","gc.reaction_owned":"1"}' \
+        --metadata '{"gc.origin":"operator"}' \
         --db "$_cs_path/.beads" --json 2>/dev/null || true)
     bead=$(printf '%s' "$_cs_json" | scrub | jq -r 'if type=="array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     if [ -z "$bead" ] || [ "$bead" = "null" ]; then
@@ -4764,7 +4776,7 @@ engage_new_subject_cleanup() {
     if ( cmd_open "$@" >/dev/null 2>&1 ); then
         echo "$PROG: engage: the live engage aborted, but filed the one conversation new subject $_enc_bead owes — waiting in the operator's queue. Engage it when ready: $PROG engage $_enc_bead" >&2
     else
-        echo "$PROG: engage: new subject $_enc_bead was created but its conversation could NOT be filed (store error?); it still carries the gc.reaction_owned marker. File the conversation by hand: $PROG open $_enc_bead" >&2
+        echo "$PROG: engage: new subject $_enc_bead was created but its conversation could NOT be filed (store error?), so a first reaction may take it up. File the conversation by hand: $PROG open $_enc_bead" >&2
     fi
     return "$_enc_rc"
 }

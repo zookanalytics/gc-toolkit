@@ -1710,8 +1710,7 @@ eq "$(grep 'status=closed' "$SCRIPT" | grep -v -E '^[[:space:]]*(note|die|#)' | 
 # prompt is a second copy of close_reaction's write, free to drift from the work
 # record that close carries, so the prompt stands a reaction down through
 # --stand-down and closes nothing itself. This suite is the merge gate a prompt
-# change runs, since tools/run-tests.sh maps the prompt's path below to it;
-# tools/proactive-first-reaction-fixture.sh asserts the same, by hand only.
+# change runs, since tools/run-tests.sh maps the prompt's path below to it.
 PROMPT_MD="$HERE/../../agents/proactive/prompt.template.md"
 if [ -f "$PROMPT_MD" ]; then
   PM="$(cat "$PROMPT_MD")"

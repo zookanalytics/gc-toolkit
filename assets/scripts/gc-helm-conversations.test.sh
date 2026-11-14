@@ -67,7 +67,7 @@
 #                 candidates, and one that one anchor records resolves to it
 #   (NEWSUBJ)     open --new-subject files the subject in the --rig rig, titled
 #                 from the question's opening, the question unchanged in its
-#                 description, marked reaction-owned, then its conversation, whose
+#                 description, with no reaction marker, then its conversation, whose
 #                 ask is the question unchanged; --json's last answer names both
 #   (NEWSUBJ-EARLY) --json answers the subject the moment it is filed, before
 #                 open reads anything after it, so a caller that stops waiting
@@ -432,7 +432,7 @@ eq "$RC" 0 "(NEWSUBJ) a new subject files, exit 0"
 eq "$(printf '%s\n' "$OUT" | tail -n 1)" '{"subject":"tk-newsubj","conversation":"tk-newconv","filed":true}' "(NEWSUBJ) --json's last answer names the subject and its conversation"
 eq "$(printf '%s\n' "$OUT" | head -n 1)" '{"subject":"tk-newsubj","conversation":"","filed":false}' "(NEWSUBJ) …after the subject's own answer"
 eq "$(cat "$STATE/subj.db")" "$TMP/rig/.beads" "(NEWSUBJ) the subject is filed in the --rig rig's store"
-has "$(cat "$STATE/subj.metadata")" '"gc.reaction_owned":"1"' "(NEWSUBJ) …marked reaction-owned"
+hasnt "$(cat "$STATE/subj.metadata")" 'reaction_owned' "(NEWSUBJ) …with no reaction marker: its conversation keeps a first reaction off it"
 has "$(cat "$STATE/subj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ) …with the operator as its origin"
 case "$(cat "$STATE/subj.description")" in
   "$Q"$'\n\n---\n'*) ok "(NEWSUBJ) the subject's description opens with the question, unchanged" ;;

@@ -1815,15 +1815,15 @@ eq "$RC" 2 "(IA-REASON-TEMPLATE) --reason and --template together exit 2"
 has "$OUT" "both set the opening message" "(IA-REASON-TEMPLATE) …saying why"
 hasnt "$CALLED" "bd create" "(IA-REASON-TEMPLATE) …and nothing filed"
 
-echo "# --new-subject: file a fresh marked subject in a chosen rig, then engage it"
+echo "# --new-subject: file a fresh subject in a chosen rig, then engage it"
 # One-shot: --rig names the rig, the positional is the subject title. The subject
-# is created MARKED (gc.reaction_owned=1 + gc.origin=operator) in that rig's
-# .beads store, then its one conversation is filed and a sitting spawned. The
-# marker is what stands the async first-reaction/proactive worker down.
+# is created with gc.origin=operator in that rig's .beads store, then its one
+# conversation is filed and a sitting spawned. That conversation's tracks edge
+# is what keeps a first reaction off the subject, so no marker rides the create.
 run_fresh "ship the new intake flow" --new-subject --rig gc-toolkit --no-input --no-attach
 eq "$RC" 0 "(NEWSUBJ) --new-subject --rig --no-input exits 0"
-has "$(cat "$STATE_DIR/newsubj.metadata")" '"gc.reaction_owned":"1"' "(NEWSUBJ) the subject is created with the gc.reaction_owned marker"
-has "$(cat "$STATE_DIR/newsubj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ) …and gc.origin=operator (honest origin)"
+has "$(cat "$STATE_DIR/newsubj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ) the subject is created with gc.origin=operator (honest origin)"
+hasnt "$(cat "$STATE_DIR/newsubj.metadata")" 'reaction_owned' "(NEWSUBJ) …and no reaction marker"
 eq "$(cat "$STATE_DIR/newsubj.db")" "$TMP/rig/.beads" "(NEWSUBJ) …in the chosen rig's store (cross-rig create)"
 eq "$(cat "$STATE_DIR/newsubj.title")" "ship the new intake flow" "(NEWSUBJ) …titled with the question, which is short"
 has "$OUT" "filed subject tk-newsubj in rig 'gc-toolkit'" "(NEWSUBJ) reports the filed subject"
@@ -1832,10 +1832,11 @@ has "$CALLED" "session new converse-claude-opus --alias tk-new --no-attach" "(NE
 # given: the conversation cmd_open files carries it as its ask.
 eq "$(cat "$STATE_DIR/tk-new.title")" "ship the new intake flow" "(NEWSUBJ-OPENER) the question is the conversation's opener"
 eq "$(cat "$STATE_DIR/tk-new.description")" "ship the new intake flow" "(NEWSUBJ-OPENER) …and its ask, unchanged"
-# The marker outlives a SUCCESSFUL engage (it is what stands the async worker
-# down); the abort backstop must be disarmed once the conversation is filed, so a clean
-# engage never revokes it. (The disarm's control; its arm is NEWSUBJ-ABORT below.)
-hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ) a successful engage keeps the marker — the backstop is disarmed once the conversation is filed"
+# The conversation outlives a SUCCESSFUL engage and keeps a first reaction off
+# the subject; the abort backstop is disarmed once the conversation is filed,
+# so a clean engage files no second one. (The disarm's control; its arm is
+# NEWSUBJ-ABORT below.)
+eq "$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -c -- '--deps tracks:')" 1 "(NEWSUBJ) a successful engage files exactly one conversation"
 
 echo "# --new-subject one-shot without --rig is refused (no id prefix to derive a rig)"
 run_fresh "some topic" --new-subject --no-input --no-attach
@@ -1873,25 +1874,22 @@ run_fresh "doomed subject" --new-subject --rig gc-toolkit --no-input --no-attach
 eq "$RC" 4 "(NEWSUBJ-CREATEFAIL) a failed subject create exits 4"
 has "$OUT" "could not create the subject" "(NEWSUBJ-CREATEFAIL) …naming the fault"
 hasnt "$CALLED" "session new" "(NEWSUBJ-CREATEFAIL) …and no sitting spawned"
-hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ-CREATEFAIL) …and no cleanup runs — nothing was created to clean up"
+hasnt "$CALLED" "--deps tracks:" "(NEWSUBJ-CREATEFAIL) …and no cleanup runs — nothing was created to clean up"
 unset SUBJ_CREATE_FAIL
 
 echo "# --new-subject whose post-create gate aborts still files the subject's one conversation"
-# The subject is created MARKED before the gates that can still refuse the live
-# engage (here an unknown --model, like the suspended, controller-down and unknown
-# --template gates). An abort there must not leave the operator-origin subject with
-# no conversation: the async worker will not supply one (gc-proactive drops a
-# marked bead, a reaction that reaches one stands down, and even unmarked a first
-# reaction files none for gc.origin=operator). So the backstop files the one
-# conversation itself in the operator's queue (via cmd_open, carrying the opener)
-# and LEAVES the marker,
-# exactly as a successful engage does, so the async worker still stands down.
+# The subject is created before the gates that can still refuse the live engage
+# (here an unknown --model, like the suspended, controller-down and unknown
+# --template gates). An abort there must not leave the operator-origin subject
+# with no conversation: nothing else puts the operator's question to them. So
+# the backstop files the one conversation itself in the operator's queue (via
+# cmd_open, carrying the opener), and its tracks edge keeps a first reaction off
+# the subject, exactly as a successful engage's does.
 run_fresh "topic after a bad model" --new-subject --rig gc-toolkit --model bogus --no-input --no-attach
 eq "$RC" 2 "(NEWSUBJ-ABORT) a post-create --model abort exits 2"
-has "$(cat "$STATE_DIR/newsubj.metadata")" "reaction_owned" "(NEWSUBJ-ABORT) the subject was already created with the marker (the abort is post-create)"
+has "$(cat "$STATE_DIR/newsubj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ-ABORT) the subject was already created (the abort is post-create)"
 CONV_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--deps tracks:' | head -n1)"
 has "$CONV_CREATE" "topic after a bad model" "(NEWSUBJ-ABORT) …so the backstop files the subject's one conversation, carrying its opener"
-hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ-ABORT) …and LEAVES the marker, exactly as a successful engage does"
 has "$OUT" "waiting in the operator's queue" "(NEWSUBJ-ABORT) …and tells the operator it waits in their queue to engage"
 hasnt "$CALLED" "session new" "(NEWSUBJ-ABORT) …and nothing was spawned"
 

@@ -1,0 +1,68 @@
+description = """
+First reaction — one proactive worker reads a freshly filed bead once, writes a
+first-reaction card into its notes and disposes it through one exit: route it to
+a pool or to the named agent whose work it is, recommend an action the operator
+can accept, hold it on an edge, hand a confident no-op to a validating closer,
+or put a question to the operator as a human gate. A reaction never closes the
+bead, and code it produces takes the gated `mr` path only.
+
+`tools/gc-proactive.sh sling <bead>` slings this formula on the bead, once its
+refusals pass: `gc sling <rig>/gc-toolkit.proactive <bead> --on
+mol-first-reaction`. The run is the reaction's lease, Gas City's run cancel is
+its stop, and gc sling refuses a second live run on the bead, so a reaction
+happens once at a time.
+
+## The contract
+
+1. **The subject arrives as the input convoy's single tracked member.** The
+   step derives it in its own shell (`gc convoy status {{convoy_id}}`), the way
+   every graph.v2 worker does.
+2. **Check before you read.** The subject's state can change between the sling
+   and the claim, so the step's first act asks the sling's refusals again, and
+   any refusal ends the run with nothing written.
+3. **The reaction is the proactive prompt's.** The card, the exits and the
+   judgment between them live in agents/proactive/prompt.template.md; this
+   formula holds the run's mechanics.
+4. **Close your own step** through assets/scripts/claim-close.sh, then drain.
+"""
+formula = "mol-first-reaction"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars.binding_prefix]
+description = "The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default."
+default = "gc-toolkit."
+
+[[steps]]
+id = "react"
+title = "React once to the subject and dispose it"
+description = """
+React once to the subject, the one bead this run's input convoy tracks, as your
+prompt's first reaction says. The subject is the convoy's one tracked member:
+```bash
+gc convoy status {{convoy_id}} --json
+```
+
+The check is the reaction's first act, before it reads the subject. It asks the
+sling's refusals again and writes nothing. It passes over this run, whose root
+is the `root_bead_id` your claim carries, and over a first-reaction gate whose
+message names that root, so a reaction re-offered after it filed its gate goes
+on. Run
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/../../tools/gc-proactive.sh" sling <subject> --check --run <root>`.
+Exit 0: react. Exit 3, 4, 5 or 6 is a refusal: the subject is reacted to,
+spoken for, decided or not a reaction's kind, so end the run with no gate, which
+drains this session too:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step mol-first-reaction.react --reason "<the refusal the check printed>"`.
+Any other exit decided nothing, so do not react until the check exits 0.
+
+Once one exit has landed, close this step with
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-first-reaction.react`,
+then drain:
+```bash
+gc runtime drain-ack
+```
+
+**Exit criteria:** the subject's card is written and one exit has landed, or
+the check refused the subject and the decline ended the run. This step is closed.
+"""
