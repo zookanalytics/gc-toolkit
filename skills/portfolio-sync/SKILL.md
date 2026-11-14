@@ -39,8 +39,9 @@ This lists, oldest first, each close and each shift made on or after that date,
 and each one on an epic with no such note, so a rig's first sync lists every
 one. It reads each shift from the `## Epic review` block the review records in
 the epic's notes. The epic's `epic_ruling` key holds only its latest ruling, so
-a review that continues the epic after a shift leaves no shift there. A sitting that ends before it notes every epic it listed leaves the rest
-on the next sync's list. A note and a review's block carry their day only, so a
+a review that continues the epic after a shift leaves no shift there. A sitting
+that ends before it notes every epic it listed leaves the rest on the next
+sync's list. A note and a review's block carry their day only, so a
 change made on the day its epic was last noted lists again: read that note for
 what the sync made of it. The list leaves out Deliveries, the epics under
 another of the rig's epics with no hypothesis of their own, whose close is one
