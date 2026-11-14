@@ -3,11 +3,11 @@
 # human gate holds will not go on.
 #
 # The constraint: bd refuses to close a bead an open gate blocks, and answering
-# the gate first makes the bead ready, which is what a deferred-dispatch arm waits
-# for. So the suite gives the fake store what makes those two true, a `blocks` edge
-# that holds a close and keeps a bead out of the ready listing, and runs the real
-# stand-down.sh, deferred-dispatch.sh, gc-helm.sh, bead-rehome.sh and
-# finalize-gate.sh over it.
+# the gate first makes the bead ready, which is what an arm waits for. So the
+# suite gives the fake store what makes those two true, a `blocks` edge that holds
+# a close and keeps a bead out of the ready listing, and runs the real
+# stand-down.sh, gc-helm.sh, bead-rehome.sh and finalize-gate.sh over it, with
+# the arm's verbs those scripts call run by gctk built from this checkout.
 #
 # What is exercised here:
 #   * the orders a person would try by hand, as controls: a close first is refused,
@@ -70,8 +70,9 @@ BIN="$TMP/bin"; mkdir -p "$BIN" "$TMP/rig/.beads" "$TMP/state"
 # the bead out of --ready, as bd does. STUB_FAIL is text: a bd call whose arguments
 # carry it writes nothing and exits 1. STUB_LAND_AT is text and STUB_LAND a command:
 # the first bd call whose arguments carry it runs the command first, a write that
-# lands between two of a script's reads. STUB_PASS_AFTER_WRITES runs a reconcile
-# pass after each write the stand-down makes.
+# lands between two of a script's reads. STUB_PASS_AFTER_WRITES runs the
+# deferred-dispatch order's pass, gctk bead start-armed, after each write the
+# stand-down makes.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 S="${STUB_STORE:?}"
@@ -82,17 +83,29 @@ case "${1:-}" in
   bd) shift ;;
   *) echo "gc stub: unsupported '$*'" >&2; exit 2 ;;
 esac
-# A read the gctk under test makes answers from the same store, through the seam
-# holds-store.stub.sh keeps. STUB_LAND_AT lands its write ahead of such a read
+# A call the gctk under test makes answers from the same store, through the seam
+# holds-store.stub.sh keeps. STUB_LAND_AT lands its write ahead of such a call
 # as ahead of any, and the command it runs reaches this stub as a script's
-# calls do, not as gctk's.
+# calls do, not as gctk's. gctk's writes are the stand-down's own, since its
+# disarm runs gctk bead disarm, so each is logged as a script's write is,
+# refused under STUB_FAIL, and followed by a pass under STUB_PASS_AFTER_WRITES.
 if [ -n "${HOLDS_STUB_READ:-}" ]; then
   if [ -n "${STUB_LAND_AT:-}" ] && [ ! -e "$S.landed" ]; then
     case " $* " in
       *"$STUB_LAND_AT"*) : > "$S.landed"; env -u HOLDS_STUB_READ -u STUB_LAND_AT -u STUB_LAND -u STUB_FAIL bash -c "$STUB_LAND" >>"$S.land.log" 2>&1 ;;
     esac
   fi
-  HOLDS_STORE="$S" exec "${HOLDS_STUB:?}" answer "$@"
+  w=("$@"); [ "${w[0]:-}" = --db ] && w=("${w[@]:2}")
+  [ "${w[0]:-}" = update ] || HOLDS_STORE="$S" exec "${HOLDS_STUB:?}" answer "$@"
+  printf 'bd %s\n' "${w[*]}" >> "${STUB_GC_LOG:?}"
+  if [ -n "${STUB_FAIL:-}" ]; then
+    case " ${w[*]} " in *"$STUB_FAIL"*) echo "gc stub: refused: ${w[*]}" >&2; exit 1 ;; esac
+  fi
+  HOLDS_STORE="$S" "${HOLDS_STUB:?}" answer "$@" || exit $?
+  if [ -n "${STUB_PASS_AFTER_WRITES:-}" ] && [ -z "${STUB_IN_PASS:-}" ]; then
+    STUB_IN_PASS=1 "${GCTK_BIN:?}" bead start-armed >>"$S.pass.log" 2>&1
+  fi
+  exit 0
 fi
 actor="${BEADS_ACTOR:-}"
 while :; do
@@ -115,7 +128,7 @@ apply() { jq -c "$@" "$S" > "$S.n" && mv "$S.n" "$S"; }
 wrote() {
   [ -n "${STUB_PASS_AFTER_WRITES:-}" ] || return 0
   [ -n "${STUB_IN_PASS:-}" ] && return 0
-  STUB_IN_PASS=1 "${STUB_DEFERRED:?}" reconcile >>"$S.pass.log" 2>&1
+  STUB_IN_PASS=1 "${GCTK_BIN:?}" bead start-armed >>"$S.pass.log" 2>&1
   return 0
 }
 BLOCKERS='def live_blockers($s): [ (._deps // [])[] | select(.dependency_type == "blocks") | .id as $t
@@ -271,13 +284,15 @@ printf '{"rigs":[{"name":"tkrig","path":"%s","prefix":"tk"}]}\n' "$TMP/rig" > "$
 
 export PATH="$BIN:$ROOT/tools/test-floor:$PATH"
 export STUB_STORE="$TMP/beads.json" STUB_RIGS="$TMP/rigs.json" STUB_GC_LOG="$TMP/gc.log" STUB_SLING_LOG="$TMP/sling.log"
-export STUB_DEFERRED="$HERE/deferred-dispatch.sh"
 export BEADS_ACTOR=a-person GC_RUN_CANCEL_TOOL="$BIN/run-cancel" GC_BRANCH_END_TOOL="$BIN/branch-end"
 export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json"
-export DEFERRED_DISPATCH_STATE_DIR="$TMP/state" DEFERRED_DISPATCH_PASS_BUDGET_SECS=0
-# The pass reads what holds the work through gctk bead holds, built from this
-# checkout and run over the stub store.
+# The pass is the deferred-dispatch order's, gctk bead start-armed, and the
+# stand-down's disarm is gctk bead disarm: both run the gctk this checkout
+# builds over the stub store. The config it reads names the pool's default
+# formula, for an arm that names none.
 export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+HOLDS_CONFIG=$(jq -nc '{ok: true, config: {Agents: [{Name: "pool", Dir: "rig", DefaultSlingFormula: "mol-polecat-work"}]}}')
+export HOLDS_CONFIG
 GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no pass can read what holds the work"; exit 1; }
 export GCTK_BIN
 
@@ -287,6 +302,7 @@ fresh() {
   cat > "$STUB_STORE" <<'JSON'
 [{"id":"tk-w","status":"open","assignee":"","issue_type":"task","notes":"","title":"the work",
   "metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]",
+              "gc.dispatch_when_ready_armed_at":"2026-11-01T00:00:00Z",
               "gc.dispatch_when_ready_reason":"waits on the ruling","resling_target":"rig/pool"},
   "_deps":[{"id":"tk-g","dependency_type":"blocks"}]},
  {"id":"tk-g","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"polecat-x",
@@ -309,7 +325,7 @@ meta()   { jq -r --arg id "$1" --arg k "$2" '.[] | select(.id == $id) | .metadat
 succ()   { jq -r --arg id "$1" '.[] | select(.id == $id) | [(._deps // [])[] | select(.dependency_type == "supersedes" or .dependency_type == "duplicates") | .id] | .[0] // "<absent>"' "$STUB_STORE"; }
 slings() { wc -l < "$STUB_SLING_LOG" | tr -d ' '; }
 run()    { OUT=$("$SCRIPT" "$@" 2>&1); RC=$?; }
-pass()   { PASS_OUT=$("$HERE/deferred-dispatch.sh" reconcile 2>&1); PASS_RC=$?; }
+pass()   { PASS_OUT=$("$GCTK_BIN" bead start-armed 2>&1); PASS_RC=$?; }
 line_of() { grep -n -F -- "$1" "$STUB_GC_LOG" | head -1 | cut -d: -f1; }
 writes() { grep -c -E '^bd (update|close|gate resolve|dep remove|dep add)' "$STUB_GC_LOG" || true; }
 refused() { # <label> <args...>: exit 1, the store as it was, nothing sent
@@ -381,10 +397,10 @@ eq "$(slings)" 0 "…and none of those passes slings the work"
 [ -s "$STUB_STORE.pass.log" ] && ok "…and the passes did run" || bad "…and the passes did run"
 
 fresh
-STUB_LAND_AT="where --json" STUB_LAND="$SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs'" pass
+STUB_LAND_AT="list --id tk-w" STUB_LAND="$SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs'" pass
 eq "$(field tk-w status)" closed "a stand-down that lands between a pass's listing and its hold read closes the work"
 eq "$(slings)" 0 "…and that pass does not sling it"
-has "$PASS_OUT" "withdrawn tk-w" "…and says why"
+has "$PASS_OUT" '"action":"withdrawn"' "…and says why"
 
 # --- the run beneath the bead ----------------------------------------------------
 fresh
@@ -524,7 +540,7 @@ else
 fi
 pass
 eq "$(slings)" 0 "the next pass slings nothing"
-patch 'map(if .id == "tk-o" then .metadata += {"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"} else . end)'
+patch 'map(if .id == "tk-o" then .metadata += {"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_armed_at":"2026-11-01T00:00:00Z"} else . end)'
 pass
 eq "$(slings)" 0 "the gate still holds the other bead's arm"
 gc bd gate resolve tk-g --reason "ruled: the other bead goes on" >/dev/null 2>&1
@@ -660,10 +676,23 @@ eq "$(field tk-g close_reason)" "ruled: over two lines" "a ruling is one line"
 fresh; patch 'map(if .id == "tk-w" then .metadata = {} else . end)'
 run tk-w --key polecat-x --ruling "no arm here"
 eq "$RC" 0 "a bead with no arm stands down"
-eq "$(line_of "--unset-metadata gc.dispatch_when_ready ")" "" "…with no disarm to run"
-fresh; patch 'map(if .id == "tk-w" then .metadata = {"gc.notify_when_ready":"an-agent"} else . end)'
-run tk-w --key polecat-x --ruling "no notice either"
-eq "$(meta tk-w gc.notify_when_ready)" "<absent>" "a notice owed goes with the arm"
+eq "$(line_of "--unset-metadata gc.dispatch_when_ready ")" "" "…and its disarm writes nothing"
+# The disarm reads no arm first, so an arm written after the stand-down read the
+# bead is removed before the gate's answer could send it. The arm lands ahead of
+# gctk's own read of the bead, the first read that lists templates.
+fresh; patch 'map(if .id == "tk-w" then .metadata = {} else . end)'
+STUB_LAND_AT="--include-templates" STUB_LAND="jq -c 'map(if .id == \"tk-w\" then .metadata = {\"gc.dispatch_when_ready\":\"rig/pool\",\"gc.dispatch_when_ready_args\":\"[]\",\"gc.dispatch_when_ready_armed_at\":\"2026-11-13T00:00:00Z\",\"gc.dispatch_when_ready_reason\":\"armed meanwhile\"} else . end)' '$STUB_STORE' > '$STUB_STORE.x' && mv '$STUB_STORE.x' '$STUB_STORE'" \
+  run tk-w --key polecat-x --ruling "armed after the read"
+eq "$RC" 0 "a bead armed after the stand-down read it stands down"
+[ -e "$STUB_STORE.landed" ] && ok "…the arm landed in the stand-down's run" || bad "the arm never landed, so the case proves nothing"
+eq "$(meta tk-w gc.dispatch_when_ready)" "<absent>" "…and the arm written meanwhile is gone"
+DISARM=$(line_of "--unset-metadata gc.dispatch_when_ready ")
+ANSWER=$(line_of "gate resolve tk-g")
+if [ -n "$DISARM" ] && [ -n "$ANSWER" ] && [ "$DISARM" -lt "$ANSWER" ]; then
+  ok "…removed before the gate's answer"
+else
+  bad "the arm written meanwhile is removed before the gate's answer (lines ${DISARM:-none}, ${ANSWER:-none})"
+fi
 fresh; patch 'map(if .id == "tk-w" then .metadata["gc.routed_to"] = "human" else . end)'
 run tk-w --key polecat-x --ruling "parked for a person"
 eq "$RC" 0 "a subject parked on the person route stands down"

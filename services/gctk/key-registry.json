@@ -82,58 +82,39 @@
   {
     "name": "gc.dispatch_when_ready",
     "type": "string",
-    "readers": [
-      "waits"
-    ],
-    "doc": "The pool or agent an armed bead is slung to once nothing holds it. Its presence is the arm."
+    "owner": "arm/record",
+    "warrant": "deferred-dispatch-residual",
+    "doc": "The pool or agent an armed bead is slung to once nothing holds it. Its presence is the arm. gctk bead arm writes it with the rest of the arm, and gctk bead disarm and the start clear them together."
   },
   {
     "name": "gc.dispatch_when_ready_args",
     "type": "string",
-    "readers": [
-      "waits"
-    ],
-    "doc": "The arm's extra sling arguments, as a JSON array."
+    "owner": "arm/record",
+    "doc": "The formula the arm pours, as the JSON array of sling arguments that names it: [\"--on\",\"\u003cformula\u003e\"] or [\"--on=\u003cformula\u003e\"], or [] or absent for the target's default formula, read at each start. Any other value is a record the start reports as malformed and slings nothing on."
   },
   {
     "name": "gc.dispatch_when_ready_armed_at",
     "type": "string",
-    "readers": [
-      "waits"
-    ],
-    "doc": "When the bead was armed, in RFC 3339 UTC."
+    "owner": "arm/record",
+    "doc": "When the bead was armed, in RFC 3339 UTC, which gctk bead arm writes to the nanosecond. The title of every root the start pours for the arm carries it, in the token arm:\u003cbead\u003e@\u003carmed at\u003e. The bead's dispatch lock writes its arms one after the other, and the nanosecond keeps each arm's token apart from the token of any arm written before it."
   },
   {
     "name": "gc.dispatch_when_ready_armed_by",
     "type": "string",
-    "readers": [
-      "waits"
-    ],
+    "owner": "arm/record",
     "doc": "Who armed the bead."
   },
   {
     "name": "gc.dispatch_when_ready_fail_count",
     "type": "string",
-    "readers": [
-      "waits"
-    ],
-    "doc": "The sling attempts made on the arm, as an integer string."
+    "owner": "arm/record",
+    "doc": "The sling attempts the start has made on the arm, as a decimal integer, raised in one write before each sling. At the cap, GC_MAX_DISPATCH_SLING_FAILURES (3 by default), the start asks a person instead of slinging. Absent means none."
   },
   {
     "name": "gc.dispatch_when_ready_reason",
     "type": "string",
-    "readers": [
-      "waits"
-    ],
+    "owner": "arm/record",
     "doc": "Why the bead was armed, as free text."
-  },
-  {
-    "name": "gc.dispatch_when_ready_slung",
-    "type": "string",
-    "readers": [
-      "waits"
-    ],
-    "doc": "The arm's sling marker: slinging@\u003ctime\u003e while an attempt is in flight, slung@\u003ctime\u003e once it is proven."
   },
   {
     "name": "gc.formula_contract",
@@ -152,6 +133,14 @@
     "doc": "The input convoy a graph.v2 workflow root was poured over. The convoy tracks the bead the run works, and the bead a live run works is in flight once the run has passed load-context. A root without it works the bead its gc.var.issue names."
   },
   {
+    "name": "gc.instantiating",
+    "type": "string",
+    "readers": [
+      "arm"
+    ],
+    "doc": "Gas City's fence on a bead it is still pouring, true until it lifts it to empty (fenceGraphWorkflowBead in internal/molecule). A root that it, or a bead under it, still fences is an unfinished pour."
+  },
+  {
     "name": "gc.kind",
     "type": "string",
     "readers": [
@@ -160,28 +149,22 @@
     "doc": "The runtime's kind of a bead. A root reading workflow is a run's root."
   },
   {
-    "name": "gc.notify_when_ready",
-    "type": "string",
-    "readers": [
-      "waits"
-    ],
-    "doc": "The named agent a notice is owed to once nothing holds the bead assigned to it. Its presence is the arm."
-  },
-  {
     "name": "gc.root_bead_id",
     "type": "string",
     "readers": [
+      "arm",
       "waits"
     ],
-    "doc": "The workflow root a step was poured under."
+    "doc": "The workflow root a step was poured under. The start reads the fence of each bead poured under a root to tell a pour Gas City left unfinished."
   },
   {
     "name": "gc.routed_to",
     "type": "string",
     "readers": [
+      "arm",
       "listing"
     ],
-    "doc": "The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
+    "doc": "gctk bead arm refuses a routed bead, which is dispatched already. The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
   },
   {
     "name": "gc.step_ref",
@@ -214,10 +197,19 @@
     "name": "merge_result",
     "type": "string",
     "readers": [
+      "arm",
       "listing",
       "waits"
     ],
-    "doc": "The anchor's lifecycle state, which lifecycle.sh, through gctk lifecycle, writes on every transition (lifecycle/lifecycle.toml, [machine] and [states]). A bead carrying it is in flight. A listing names it on each bead, so a reader tells an anchor whose pull request is open."
+    "doc": "The anchor's lifecycle state, which lifecycle.sh, through gctk lifecycle, writes on every transition (lifecycle/lifecycle.toml, [machine] and [states]). A bead carrying it is in flight. Another path has delivered the work of a bead that carries it, so the start retires its arm without a sling. A listing names it on each bead, so a reader tells an anchor whose pull request is open."
+  },
+  {
+    "name": "molecule_failed",
+    "type": "string",
+    "readers": [
+      "arm"
+    ],
+    "doc": "Gas City's stamp on each bead of a pour that failed part way (markFailed in internal/molecule). A root that carries true is an unfinished pour."
   },
   {
     "name": "pr_number",

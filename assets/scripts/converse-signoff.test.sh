@@ -384,39 +384,39 @@ cat > "$S/pr-sitting-comment.sh" <<'P'
 #!/usr/bin/env bash
 printf 'pr-sitting-comment %s\n' "$*" >> "$CALLS"
 P
-# The sign-off never disarms. A sitting's own block does, before an answer that
-# sends the subject elsewhere, and (ANSWER-ROUTE) runs that block from the
-# continue step over this store. The sign-off arms the subject's validating
-# closer, and the arm logs the rig it ran in, as the rework does. ARM_FAIL makes
-# the arm write nothing and exit 1, as a refused arm does. The arm and the
-# disarm each append the note the real ones append, so a case sees the notes
-# that follow a close brief in a real store.
-cat > "$S/deferred-dispatch.sh" <<'DD'
+# The sign-off never disarms. A sitting's own block does, through gctk bead
+# disarm, before an answer that sends the subject elsewhere, and (ANSWER-ROUTE)
+# runs that block from the continue step over this store. The sign-off arms the
+# subject's validating closer through gctk bead arm, and each verb logs its
+# call, the store it was pinned to among it. ARM_FAIL makes the arm write
+# nothing and exit 1, as a refused arm does. The arm and the disarm each append
+# the note the real ones append, so a case sees the notes that follow a close
+# brief in a real store.
+cat > "$S/gctk-fake.sh" <<'GCTK'
 #!/usr/bin/env bash
-printf 'deferred-dispatch %s\n' "$*" >> "$CALLS"
-case "$1" in
-  disarm)
-    gc bd update "$2" --unset-metadata gc.dispatch_when_ready --unset-metadata gc.dispatch_when_ready_args \
-      --append-notes "deferred-dispatch: dispatch record cleared at 2026-11-09T12:00:00Z" >/dev/null ;;
-  arm)
-    printf 'deferred-dispatch ran in GC_RIG=%s GC_RIG_ROOT=%s PWD=%s\n' "${GC_RIG:-}" "${GC_RIG_ROOT:-}" "$PWD" >> "$CALLS"
-    [ -n "${ARM_FAIL:-}" ] && { echo "deferred-dispatch: arm: failed to write the dispatch record onto $2" >&2; exit 1; }
-    _t=""; _a=""; _r=""; _p=""
+printf 'gctk %s\n' "$*" >> "$CALLS"
+case "${1:-} ${2:-}" in
+  "bead disarm")
+    gc bd update "$3" --unset-metadata gc.dispatch_when_ready --unset-metadata gc.dispatch_when_ready_args \
+      --append-notes "deferred-dispatch: dispatch record cleared at 2026-11-09T12:00:00Z: disarmed by test" >/dev/null
+    echo "disarmed $3" ;;
+  "bead arm")
+    [ -n "${ARM_FAIL:-}" ] && { echo "gctk bead arm: the arm on $3 was not written: simulated" >&2; exit 1; }
+    _t=""; _f=""; _r=""; _p=""
     for x in "$@"; do
       [ "$_p" = "--target" ] && _t="$x"
+      [ "$_p" = "--on" ] && _f="$x"
       [ "$_p" = "--reason" ] && _r="$x"
-      [ "$_p" = "--sling-arg" ] && _a="$_a$x
-"
       _p="$x"
     done
-    _j=$(printf '%s' "$_a" | jq -Rsc 'split("\n") | map(select(length > 0))')
-    gc bd update "$2" --set-metadata "gc.dispatch_when_ready=$_t" \
+    _j=$(jq -nc --arg f "$_f" 'if $f == "" then [] else ["--on", $f] end')
+    gc bd update "$3" --set-metadata "gc.dispatch_when_ready=$_t" \
       --set-metadata "gc.dispatch_when_ready_args=$_j" \
-      --append-notes "deferred-dispatch: dispatch armed by test at 2026-11-09T12:00:00Z — target=$_t sling_args=$_j${_r:+ reason=$_r}. It will be slung by the deferred-dispatch reconcile pass once nothing holds this bead; no agent keeps it in context." >/dev/null
-    echo "deferred-dispatch: armed $2 -> $_t" ;;
-  *) exit 2 ;;
+      --append-notes "deferred-dispatch: dispatch armed by test at 2026-11-09T12:00:00Z, for $_t on $_f, because $_r. The deferred-dispatch order starts it once nothing holds this bead, and no agent keeps it in context." >/dev/null
+    echo "armed $3 for $_t on $_f" ;;
+  *) echo "gctk fake: unsupported '$*'" >&2; exit 2 ;;
 esac
-DD
+GCTK
 chmod +x "$S"/*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
@@ -427,6 +427,7 @@ SCRIPT="$S/converse-signoff.sh"
 
 mkdir -p "$TMP/rig-a" "$TMP/rig-b" "$TMP/city"
 RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"; CITY_ROOT="$(cd "$TMP/city" && pwd -P)"
+export GCTK_BIN="$S/gctk-fake.sh"
 export PATH="$TMP/bin:$PATH" STORE="$TMP/store" CALLS="$TMP/calls" GH_CALLS="$TMP/gh-calls" GC_RIG_ROOT="$TMP/rig" RIG_A RIG_B CITY_ROOT
 unset GC_CITY_PATH 2>/dev/null || true
 
@@ -880,20 +881,19 @@ has "$(field tk-sub notes)" "## Close brief (held on tk-work, " "(CLOSER) the su
 has "$(field tk-sub notes)" "$BRIEF" "(CLOSER) …with the sitting's brief"
 eq "$(meta tk-sub gc.dispatch_when_ready)" "rig-a/gc-toolkit.polecat" "(CLOSER) the subject is armed to its own rig's polecat pool"
 eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(CLOSER) …to send it the validating closer"
-has "$(grep '^deferred-dispatch arm' "$CALLS")" "--db $RIG_A/.beads" "(CLOSER) …from its own rig's store"
-has "$(cat "$CALLS")" "deferred-dispatch ran in GC_RIG=rig-a GC_RIG_ROOT=$RIG_A PWD=$RIG_A" "(CLOSER) …with that rig pinned"
+has "$(grep '^gctk bead arm' "$CALLS")" "--db $RIG_A/.beads" "(CLOSER) …in its own rig's store"
 eq "$(field tk-g status)/$(field tk-conv status)" "closed/closed" "(CLOSER) the ruling answers the gate and closes the conversation"
 has "$(acts tk-conv)" "Arranged the check that closes this once the work it waits on lands." "(CLOSER) the arm is one of the visit's actions"
 hasnt "$(cat "$CALLS")" "--remove-label" "(CLOSER) …and a subject that carries no hold has no label removed"
 case "$(cat "$CALLS")" in
-  *"gc-helm takeaway tk-sub"*"--waiting-on tk-work"*"## Close brief"*"deferred-dispatch arm tk-sub"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-ORDER) the headline and its edge, then the brief, then the arm, then the gate and the close" ;;
+  *"gc-helm takeaway tk-sub"*"--waiting-on tk-work"*"## Close brief"*"gctk bead arm tk-sub"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-ORDER) the headline and its edge, then the brief, then the arm, then the gate and the close" ;;
   *) bad "(CLOSER-ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
 esac
-ARMS=$(grep -c '^deferred-dispatch arm' "$CALLS" || true)
+ARMS=$(grep -c '^gctk bead arm' "$CALLS" || true)
 run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 0 "(CLOSER-RERUN) a re-run of the sign-off exits 0"
 eq "$(briefs tk-sub)" 1 "(CLOSER-RERUN) …writing the brief no second time"
-eq "$(grep -c '^deferred-dispatch arm' "$CALLS")" "$ARMS" "(CLOSER-RERUN) …and arming no second time"
+eq "$(grep -c '^gctk bead arm' "$CALLS")" "$ARMS" "(CLOSER-RERUN) …and arming no second time"
 has "$OUT" "tk-sub's validating closer is already armed" "(CLOSER-RERUN) …saying the closer is already armed"
 
 closer_case
@@ -905,7 +905,7 @@ eq "$(field tk-g status)/$(field tk-conv status)" "closed/in_progress" "(CLOSER-
 closer_case
 REFUSE_UPDATE_MATCH='## Close brief' run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 1 "(CLOSER-BRIEF-REFUSED) a close brief the store refuses stops the sign-off"
-hasnt "$(cat "$CALLS")" "deferred-dispatch arm" "(CLOSER-BRIEF-REFUSED) …before the arm"
+hasnt "$(cat "$CALLS")" "gctk bead arm" "(CLOSER-BRIEF-REFUSED) …before the arm"
 eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-BRIEF-REFUSED) …with the gate and the conversation still open"
 closer_case
 ARM_FAIL=1 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
@@ -953,11 +953,11 @@ GATE_STUCK=tk-g run_signoff --conversation tk-conv --outcome "ruled — a fix is
 eq "$RC" 1 "(CLOSER-RERUN-ARMED) a gate that does not close stops the sign-off after the brief and the arm"
 has "$(field tk-sub notes)" "$BRIEF
 deferred-dispatch: dispatch armed by" "(CLOSER-RERUN-ARMED) …whose note follows the brief"
-ARMS=$(grep -c '^deferred-dispatch arm' "$CALLS" || true)
+ARMS=$(grep -c '^gctk bead arm' "$CALLS" || true)
 run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC/$(field tk-g status)" "0/closed" "(CLOSER-RERUN-ARMED) the re-run signs off"
 eq "$(briefs tk-sub)" 1 "(CLOSER-RERUN-ARMED) …taking the brief before the arm's note for this one, and writing it no second time"
-eq "$(grep -c '^deferred-dispatch arm' "$CALLS")" "$ARMS" "(CLOSER-RERUN-ARMED) …and arming no second time"
+eq "$(grep -c '^gctk bead arm' "$CALLS")" "$ARMS" "(CLOSER-RERUN-ARMED) …and arming no second time"
 closer_case; bead tk-more
 setf tk-sub notes "## Close brief (held on tk-work, 2026-11-01T09:00:00Z)
 $BRIEF"
@@ -972,10 +972,10 @@ has "$(latest tk-sub)" "## Close brief (held on tk-work,tk-more, " "(CLOSER-BRIE
 closer_case
 run_signoff --conversation tk-conv --answer tk-g --ruling "build the fix" --outcome "ruled — a fix is building" --waiting-on tk-work --close-brief "$BRIEF"
 setf tk-work status closed; sent_closer
-ARMS=$(grep -c '^deferred-dispatch arm' "$CALLS" || true)
+ARMS=$(grep -c '^gctk bead arm' "$CALLS" || true)
 run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-SENT) the sign-off after the arm has sent the closer exits 0 and arms the closer again"
-eq "$(grep -c '^deferred-dispatch arm' "$CALLS")" "$((ARMS + 1))" "(CLOSER-SENT) …once"
+eq "$(grep -c '^gctk bead arm' "$CALLS")" "$((ARMS + 1))" "(CLOSER-SENT) …once"
 eq "$(briefs tk-sub)/$(field tk-conv status)" "1/closed" "(CLOSER-SENT) …keeping the one brief the answer wrote, and closing the conversation"
 
 # A subject held for placement: the deferred-dispatch pass sends no arm while
@@ -989,7 +989,7 @@ eq "$(grep -c -e '--remove-label' "$CALLS")" 1 "(CLOSER-HOLD) …in one write"
 has "$(grep -e '--remove-label' "$CALLS")" "--db $RIG_A/.beads" "(CLOSER-HOLD) …in its own rig's store"
 has "$OUT" "lifted hold:mayor from tk-sub" "(CLOSER-HOLD) …saying so"
 case "$(cat "$CALLS")" in
-  *"deferred-dispatch arm tk-sub"*"--remove-label hold:mayor --remove-label Hold:Mayor"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-HOLD) …after the arm and before any gate is answered" ;;
+  *"gctk bead arm tk-sub"*"--remove-label hold:mayor --remove-label Hold:Mayor"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-HOLD) …after the arm and before any gate is answered" ;;
   *) bad "(CLOSER-HOLD) the lift ran out of order: $(cat "$CALLS")" ;;
 esac
 closer_case; labelled tk-sub Hold:Mayor
@@ -1000,10 +1000,10 @@ has "$OUT" "gc bd update tk-sub --db $(printf '%q' "$RIG_A/.beads") --remove-lab
 eq "$(meta tk-sub gc.dispatch_when_ready_args)/$(labels tk-sub)" "$CLOSER_ARGS/[\"Hold:Mayor\"]" "(CLOSER-HOLD-REFUSED) …once the arm has landed, with the hold still on"
 eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-HOLD-REFUSED) …before any gate is answered"
 hasnt "$(acts tk-conv)" "Arranged the check" "(CLOSER-HOLD-REFUSED) …and before the arrangement is recorded"
-ARMS=$(grep -c '^deferred-dispatch arm' "$CALLS" || true)
+ARMS=$(grep -c '^gctk bead arm' "$CALLS" || true)
 run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC/$(labels tk-sub)" "0/[]" "(CLOSER-HOLD-REFUSED) the re-run lifts the hold and signs off"
-eq "$(briefs tk-sub)/$(grep -c '^deferred-dispatch arm' "$CALLS")" "1/$ARMS" "(CLOSER-HOLD-REFUSED) …writing the brief and the arm no second time"
+eq "$(briefs tk-sub)/$(grep -c '^gctk bead arm' "$CALLS")" "1/$ARMS" "(CLOSER-HOLD-REFUSED) …writing the brief and the arm no second time"
 eq "$(field tk-g status)/$(field tk-conv status)" "closed/closed" "(CLOSER-HOLD-REFUSED) …then answering the gate and closing the conversation"
 # The labels are read again once the arm stands, the subject's second read.
 closer_case; labelled tk-sub hold:mayor
@@ -1033,7 +1033,7 @@ run_signoff --conversation tk-conv --outcome "ruled — builds once tk-work land
 eq "$RC" 0 "(CLOSER-ELSEWHERE) a subject armed to another dispatch signs off with no brief"
 has "$OUT" "no validating closer is armed for tk-sub: it has a dispatch path (gc.dispatch_when_ready=rig-a/gc-toolkit.polecat)" "(CLOSER-ELSEWHERE) …saying why no closer is armed"
 eq "$(meta tk-sub gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "(CLOSER-ELSEWHERE) …and leaving that arm as it is"
-hasnt "$(cat "$CALLS")" "deferred-dispatch arm" "(CLOSER-ELSEWHERE) …arming nothing"
+hasnt "$(cat "$CALLS")" "gctk bead arm" "(CLOSER-ELSEWHERE) …arming nothing"
 closer_case; setm tk-sub gc.dispatch_when_ready rig-a/gc-toolkit.polecat; setm tk-sub gc.dispatch_when_ready_args '["--on","mol-polecat-work"]'
 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC/$(writes)" "2/0" "(CLOSER-ELSEWHERE) …and a --close-brief there exits 2, writing nothing"

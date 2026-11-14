@@ -41,26 +41,3 @@ var (
 		"The formula step a step bead carries out, as <formula>.<step>. A live run with an open step whose "+
 			"ref ends in .load-context has not passed load-context.")
 )
-
-// The arm on a bead armed to start by itself, which deferred-dispatch.sh writes
-// and clears as one family (lifecycle/lifecycle.toml,
-// [metadata.deferred_dispatch]). The bead read carries each as the store holds
-// it.
-var (
-	armTargetKey = ledger.ReadOnly("gc.dispatch_when_ready", ledger.String,
-		"The pool or agent an armed bead is slung to once nothing holds it. Its presence is the arm.")
-	armArgsKey = ledger.ReadOnly("gc.dispatch_when_ready_args", ledger.String,
-		"The arm's extra sling arguments, as a JSON array.")
-	armReasonKey = ledger.ReadOnly("gc.dispatch_when_ready_reason", ledger.String,
-		"Why the bead was armed, as free text.")
-	armedByKey = ledger.ReadOnly("gc.dispatch_when_ready_armed_by", ledger.String,
-		"Who armed the bead.")
-	armedAtKey = ledger.ReadOnly("gc.dispatch_when_ready_armed_at", ledger.String,
-		"When the bead was armed, in RFC 3339 UTC.")
-	armSlungKey = ledger.ReadOnly("gc.dispatch_when_ready_slung", ledger.String,
-		"The arm's sling marker: slinging@<time> while an attempt is in flight, slung@<time> once it is proven.")
-	armFailCountKey = ledger.ReadOnly("gc.dispatch_when_ready_fail_count", ledger.String,
-		"The sling attempts made on the arm, as an integer string.")
-	noticeKey = ledger.ReadOnly("gc.notify_when_ready", ledger.String,
-		"The named agent a notice is owed to once nothing holds the bead assigned to it. Its presence is the arm.")
-)

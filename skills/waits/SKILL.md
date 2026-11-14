@@ -51,11 +51,11 @@ which the operator clears once the blocker lands.
 The message is that this bead's whole job ends once that one closes: when that
 work lands, nothing should be left to do here, and someone must check that
 nothing is. bd holds the bead out of `bd ready` until the blocker closes. Then
-the deferred-dispatch order's reconcile pass slings the validating closer
-(`mol-validate-close`) on it, which checks the close brief against what landed
-and closes the bead, or puts it to a person when the landing did not end the
-job. Nothing closes the bead unchecked, because the blocker can close without
-the fix it promised.
+the deferred-dispatch order's pass, `gctk bead start-armed`, slings the
+validating closer (`mol-validate-close`) on it, which checks the close brief
+against what landed and closes the bead, or puts it to a person when the
+landing did not end the job. Nothing closes the bead unchecked, because the
+blocker can close without the fix it promised.
 
 Writers, in order: the close brief the closer checks, the edge, then the arm.
 Write the edge only when `<bead>` and `<blocker>` carry the same id prefix, as
@@ -65,7 +65,10 @@ above.
 gc bd update <bead> --append-notes "## Close brief (held on <blocker>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
 <what <blocker>'s landing fixes here, and what to check once it has>"
 gc bd dep add <bead> <blocker> --type=blocks
-"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm <bead> --target <rig>/gc-toolkit.polecat --sling-arg --on --sling-arg mol-validate-close --reason "waits for <blocker>; the validating closer checks it once that closes"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead arm <bead> --target <rig>/gc-toolkit.polecat --on mol-validate-close --reason "waits for <blocker>; the validating closer checks it once that closes"
 ```
 
 Arm only once the add exits 0. When the prefixes differ, the blocker is in
@@ -161,8 +164,8 @@ operator decides, file a human gate on that work as well (above).
 ## Have work start by itself when its wait clears (an arm)
 
 The message is that once nothing holds this bead, it goes to this pool. The
-deferred-dispatch order's reconcile pass slings it as soon as nothing holds it,
-and retires the arm if the bead closes first.
+deferred-dispatch order's pass, `gctk bead start-armed`, slings it as soon as
+nothing holds it, and retires the arm if the bead closes first.
 
 What holds a bead is the store's own answer, which `gctk bead holds <bead>`
 prints, from the gctk the city builds at
@@ -172,9 +175,15 @@ parked epic, while its work has not started. Once its work has started, only
 its own waits hold it. The answer names each wait behind it, so read it, not
 the bead's rows, to learn whether a bead still waits and on what.
 
-Writer: `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm <bead> --target <rig>/<pool> --reason "waits for <blocker>"`.
-Add `--sling-arg --on --sling-arg <formula>` to send it on a formula other than
-the default. The bead must be open and carry no route.
+Writer:
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead arm <bead> --target <rig>/<pool> --reason "waits for <blocker>"
+```
+Add `--on <formula>` to send it on a formula other than the default. The bead
+must be open and carry no route.
 
 Arm a blocked bead rather than leave it for someone to route once its blocker
 lands: a blocked work bead with no route and no arm is the debt
@@ -207,7 +216,14 @@ limits arming too (the work skill).
   the gate goes on asking about the other one. Never remove that edge yourself
   first, because an armed bead off its gate is sent too. It refuses, writing
   nothing, an open PR (retire it, the prs skill) and a bead anything else holds.
-- **An arm no longer wanted:** `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
+- **An arm no longer wanted** is removed by its verb, which exits 0 once no arm
+  remains:
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead disarm <bead> --reason "<why>"
+```
 - **A park** (`gc-helm.sh park`) is released by closing its gate,
   `gc bd close <gate>`, or for one bead by `gc bd dep remove <bead> <gate>`
   (`docs/steering.md`).

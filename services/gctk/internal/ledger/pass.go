@@ -3,6 +3,7 @@ package ledger
 import (
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -52,6 +53,11 @@ func (p *pass) Rows(ids []string) ([]gcbd.Bead, error) {
 }
 
 func (p *pass) Update(id string, args ...string) (string, error) { return "", errPassWrite }
+
+// Ready reads the store's ready set afresh each time it is asked: readiness is
+// the store's answer at the moment it is read, and no row the pass keeps
+// answers it.
+func (p *pass) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) { return p.store.Ready(q) }
 
 // Blocked reads the store's blocked set the first time it is asked, and answers
 // with that read every time after.
@@ -166,14 +172,17 @@ func (p *pass) keep(rows []gcbd.Bead) []*gcbd.Bead {
 func live(r *gcbd.Bead) bool { return r.StatusLower() != "closed" }
 
 // selected reports whether q selects r: its status, the ids named, the key it
-// carries and the value that key holds, as the store's listing selects them.
-// A key's value compares as the scripts render it, `(.metadata[k] // "") |
-// tostring`.
+// carries, the value that key holds and the text its title holds, as the
+// store's listing selects them. A key's value compares as the scripts render
+// it, `(.metadata[k] // "") | tostring`.
 func selected(q gcbd.Query, r *gcbd.Bead) bool {
 	if !q.Closed && !live(r) {
 		return false
 	}
 	if len(q.IDs) > 0 && !slices.Contains(q.IDs, r.ID) {
+		return false
+	}
+	if q.TitleContains != "" && !strings.Contains(r.Title, q.TitleContains) {
 		return false
 	}
 	if q.HasKey != "" {

@@ -118,8 +118,9 @@ performer; the full transition table with writers is
 [state-machine.md](state-machine.md).
 
 1. **File.** Something — a formula step, an event, the operator — files a bead.
-2. **Route.** `gc sling` (or `deferred-dispatch.sh` when blockers must close
-   first) routes it to a pool. Routed, unclaimed work is *demand*: the runtime
+2. **Route.** `gc sling` routes it to a pool. When blockers must close first,
+   `gctk bead arm` arms it instead, and the deferred-dispatch order slings it
+   once nothing holds it. Routed, unclaimed work is *demand*: the runtime
    spawns a session to meet it, with no operator keystroke. New work is routed
    only once it may enter a pool: a member of an epic, PR-finishing work, an
    emergency, or the operator's own move. Other new work waits, held, until the

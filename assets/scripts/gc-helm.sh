@@ -26,10 +26,11 @@
 # its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
 # a --route, or a takeaway headline or disposition, that will not stamp / a
-# takeaway release that a live session's claim, or a change to the bead after
-# its read, refused / a priority move the store refused / a placement whose
-# write the store refused or whose dispatch failed / an Accept refused or held
-# by another Accept on the bead),
+# takeaway release whose disarm did not land, or that a live session's claim,
+# or a change to the bead after its read, refused / a priority move the store
+# refused / a placement whose write the store refused or whose dispatch failed
+# / an Accept refused, held by another Accept on the bead, or whose disarm did
+# not land),
 # 5 react no-op: the subject already has an open first reaction, or a live owner
 # owns its reaction, so nothing was filed (a first reaction happens once at a
 # time) — distinct from 4 so an intake caller files its own conversation
@@ -225,12 +226,14 @@ why.
 dismiss ends the sitting. react files a proactive first-reaction bead via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one update, and exits 4 before anything
-follows it when the store refuses that update; --release also
-reopens/unassigns/clears the route in that update and ends the run beneath the
-anchor through gascity's run cancel. The update is guarded on the status and
-the assignee the release read: a bead closed since takes only the headline and
-the run's end, and any other change exits 4 with nothing written. It takes no
-live claim: a claim another session holds is released only once
+follows it when the store refuses that update. --release first removes the
+bead's arm through gctk bead disarm, so the deferred-dispatch start cannot send
+the bead again, and exits 4 with nothing else written when that does not land;
+it also reopens/unassigns/clears the route in that update and ends the run
+beneath the anchor through gascity's run cancel. The update is guarded on the
+status and the assignee the release read: a bead closed since takes only the
+headline and the run's end, and any other change exits 4 with nothing written.
+It takes no live claim: a claim another session holds is released only once
 'gc session list' lists that holder under none of its names, and otherwise the
 release writes the headline and any wait, ends the run beneath the bead,
 nudges the holder to stop and give the bead back, and exits 4 naming the
@@ -243,8 +246,8 @@ anchor and on a bead blocked by anything but a human gate, a wait its own
 --waiting-on names included, since the work is then on the blocker and a pool
 has nothing to perform here; --assign <named-agent> releases
 it TO a named agent instead, in the same write, as its assignee and with no
-route, because the assignee is what the controller and the pack's notice read
-to give a named agent a turn (docs/deferred-dispatch.md). Either one also
+route, the form an agent that finds its work by listing the beads assigned to
+it takes (docs/deferred-dispatch.md). Either one also
 lifts the bead's hold:mayor in the release's write, because sending a held bead
 on is a placement, and Gas City serves no bead a hold label holds, assigned or
 not. Both are refused on an anchor whose merge_result is pre_open_gate or
@@ -296,7 +299,7 @@ dispatches, then lifts the hold with a note in one write, and each write's
 exit decides whether it landed. With no --route it dispatches to the polecat
 pool of the bead's rig, and with no --on on that pool's default formula. While
 a blocker holds the bead or a parent above it, such as a park on the epic, it
-arms the dispatch (deferred-dispatch.sh arm) instead of slinging, so the run
+arms the dispatch (gctk bead arm) instead of slinging, so the run
 starts once the blocker closes. It refuses a closed bead, PR-finishing work
 (anchor_bead), a bead another hold also holds, a status other than open, a
 parent that is closed or not in the bead's store, --standalone on a bead that
@@ -362,7 +365,9 @@ acceptance an earlier Accept did not finish, and no other open human gate
 blocks the bead. Every Accept on a bead runs under the bead's acceptance lock,
 a flock on a file under <city>/.gc/runtime/packs/gc-toolkit, from before its
 live read of those three conditions to its last write, and refuses while
-another Accept holds it. It records the acceptance's dispatch input (its
+another Accept holds it. Its first write removes the bead's arm through gctk
+bead disarm, because the gate's answer could release the bead to that arm
+ahead of Accept's own pour. It records the acceptance's dispatch input (its
 token, the formula and each --var) on the gate, resolves the gate with
 `ruled: accepted <formula> accept:<token>`, reads its own answer back, checks
 that no open human gate blocks the bead, slings the formula titled
@@ -586,9 +591,6 @@ PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # The priority move's writer, which owns the priority function and the store's
 # priority lock.
 QUEUE_PRIORITY_TOOL="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPT_DIR/queue-priority.sh}"
-# The writer of a deferred dispatch, which place runs for a bead a blocker
-# holds; overridable so a hermetic test can point it at a fixture.
-DEFERRED_DISPATCH_TOOL="${GC_DEFERRED_DISPATCH_TOOL:-$SCRIPT_DIR/deferred-dispatch.sh}"
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
 # from what `gc session new converse-<model>` resolves. Both are overridable so
@@ -1305,6 +1307,13 @@ takeaway_nudge_holder() {
 # root and every step that is not closed; a run the releasing session holds a
 # step of is its own, and is left to close its chain.
 #
+# A release stops the bead, or sends it on another way, so its first write is
+# the disarm (helm_disarm), once every refusal above it has passed: an arm left
+# on the bead would start it again once nothing holds it. The disarm takes the
+# bead's dispatch lock, so a start already sending the bead finishes before it
+# returns, and the run that start poured is there for the release to end. A
+# disarm that does not land exits 4 with nothing else written.
+#
 # --route names a pool to send the bead TO. The park clears the bead's route,
 # and once the run beneath the bead has ended, `gc sling <rig>/<pool> <bead>
 # --no-formula --no-convoy` routes it. The sling pours nothing, files no convoy,
@@ -1670,6 +1679,13 @@ cmd_takeaway() {
     fi
     # <<< takeaway-release-claim
 
+    # The release's first write removes the bead's arm, whatever the release
+    # goes on to do, a kept claim and a closed anchor included.
+    if [ -n "$release" ] && ! helm_disarm "$bead" "$db" "takeaway --release: $text"; then
+        echo "$PROG: takeaway: --release stops $bead, so its first write removes the arm that would start it again once nothing holds it, and that disarm did not land (its reason is above). Nothing else was written. Re-run once the arm can be removed." >&2
+        exit 4
+    fi
+
     # Build args with `set --` ($text/$by contain spaces); --release rides the
     # SAME update so stamp + release stay one Dolt write.
     takeaway_at=$(iso_now)
@@ -1682,10 +1698,10 @@ cmd_takeaway() {
     # bead on only through gc sling, once its run has ended. It also drops
     # gc.execution_routed_to, the stamp a pour leaves naming the pool it
     # dispatched to. That stamp is execution provenance, not a live dispatch
-    # path: deferred-dispatch's reconcile keys idempotency on its own
-    # gc.dispatch_when_ready_slung marker, and arm refuses on a live route
-    # (gc.routed_to) or that marker, so neither reads gc.execution_routed_to. No
-    # queue reads it either, a held bead's included, since a hold is its label.
+    # path: the deferred-dispatch start finds an earlier pour by the token on
+    # its root and by gc sling's exit 3, and arm refuses on a live route
+    # (gc.routed_to), so neither reads gc.execution_routed_to. No queue reads
+    # it either, a held bead's included, since a hold is its label.
     # The release drops it.
     #
     # The park unassigns the bead, or assigns it to the --assign agent, so the
@@ -2169,7 +2185,7 @@ cmd_priority() {
 #      hold:mayor that a live run, a route, an arm or an assignee shows
 #      dispatched is reported as placed.
 #   2. It clears a route, which a doctor --fix may have written and which
-#      deferred-dispatch.sh arm refuses. With --under it removes a relates-to
+#      gctk bead arm refuses. With --under it removes a relates-to
 #      link between the bead and the parent, since bd refuses a parent-child
 #      edge beside one on the same pair, sets the parent, and moves --shift
 #      through queue-priority.sh move.
@@ -2178,7 +2194,7 @@ cmd_priority() {
 #   4. It dispatches, unless an assignee, a merge_result, a live run or an arm
 #      shows that an earlier dispatch did. A bead `gctk bead holds` finds held
 #      by a wait on it or on a parent above it, such as a park, is armed
-#      (deferred-dispatch.sh arm), so the park keeps holding it, and so is one
+#      (gctk bead arm), so the park keeps holding it, and so is one
 #      whose holds it could not answer. Any other is slung; gc sling's exit 3
 #      says a live run of the formula already works the bead.
 #   5. It lifts the hold with its note in one write (lift_hold).
@@ -2346,10 +2362,16 @@ cmd_place() {
     # deferred-dispatch pass slings it once nothing holds the bead, so a second
     # dispatch beside it would start a second run when it fires. place keeps an
     # arm that sends the bead where this placement would, and refuses one that
-    # sends it to another pool or on another formula. An arm for the validating
-    # closer (mol-validate-close) is a wait on another bead, which the closer
-    # checks once that bead lands (skills/waits/SKILL.md), so its refusal names
-    # the lift that lets the closer run before the disarm that would drop it.
+    # sends it to another pool or on another formula. It compares formulas:
+    # gctk bead arm stores an omitted --on as the target's default formula, and
+    # an arm written before gctk held the verb may name no formula, which pours
+    # the default. So an arm for this pool whose sling args differ from this
+    # placement's is the arm verb's to judge: on a bead that carries an arm it
+    # writes nothing, resolves both sides to a formula, and exits 0 only when
+    # they are the same arm. An arm for the validating closer
+    # (mol-validate-close) is a wait on another bead, which the closer checks
+    # once that bead lands (skills/waits/SKILL.md), so its refusal names the
+    # lift that lets the closer run before the disarm that would drop it.
     pl_arm=""
     if [ -z "$dispatched" ]; then
         pl_arm=$(printf '%s' "$row" | jq -r '((.metadata // {})["gc.dispatch_when_ready"] // "") | tostring | select(test("[^[:space:]]"))' 2>/dev/null || true)
@@ -2358,12 +2380,25 @@ cmd_place() {
         pl_arm_args=$(printf '%s' "$row" | jq -c '((.metadata // {})["gc.dispatch_when_ready_args"] // "")
             | if type == "string" then (if test("[^[:space:]]") then (fromjson? // [.]) else [] end) else . end' 2>/dev/null || true)
         pl_want_args=$(jq -nc --arg f "$formula" 'if $f == "" then [] else ["--on", $f] end')
-        if [ "$pl_arm" != "$pool" ] || [ "$pl_arm_args" != "$pl_want_args" ]; then
+        pl_same=""; pl_said=""
+        if [ "$pl_arm" = "$pool" ] && [ "$pl_arm_args" = "$pl_want_args" ]; then
+            pl_same=1
+        elif [ "$pl_arm" = "$pool" ]; then
+            if ! _pl_bin=$(helm_gctk); then
+                echo "$PROG: place: $bead is already armed for $pool with the sling args $pl_arm_args, and there is no gctk binary to ask whether that arm pours the formula this placement would (GCTK_BIN names one, or the city root its build sits under). Nothing was written." >&2
+                exit 4
+            fi
+            set -- "$bead" --target "$pool" --reason "placed${under:+ under $under}"
+            [ -z "$formula" ] || set -- "$@" --on "$formula"
+            if pl_said=$("$_pl_bin" bead arm "$@" --db "$db" 2>&1); then pl_same=1; fi
+            pl_said=$(printf '%s' "$pl_said" | tr '\n' ' ' | sed 's/ *$//')
+        fi
+        if [ -z "$pl_same" ]; then
             if printf '%s' "$pl_arm_args" | jq -e 'type == "array" and any(.[]; tostring | test("(^|=)mol-validate-close$"))' >/dev/null 2>&1; then
-                echo "$PROG: place: $bead is armed for its validating closer (mol-validate-close) on $pl_arm: it waits on another bead to land and is checked then, so it is not new work to place. Lift its hold and keep the arm, removing each spelling of the hold it carries: $(hold_lift_cmd "$bead" "$hold_sp"). To place it as work instead, disarm it, then re-run: $DEFERRED_DISPATCH_TOOL disarm $bead --db $db && $pl_again. Nothing was written." >&2
+                echo "$PROG: place: $bead is armed for its validating closer (mol-validate-close) on $pl_arm: it waits on another bead to land and is checked then, so it is not new work to place. Lift its hold and keep the arm, removing each spelling of the hold it carries: $(hold_lift_cmd "$bead" "$hold_sp"). To place it as work instead, disarm it, then re-run: $(helm_disarm_cmd "$bead" "placed as work instead of waiting for its validating closer") && $pl_again. Nothing was written." >&2
                 exit 2
             fi
-            echo "$PROG: place: $bead is already armed for $pl_arm with the sling args $pl_arm_args, and this placement would send it to $pool${formula:+ on $formula}. Disarm it, then re-run: $DEFERRED_DISPATCH_TOOL disarm $bead --db $db && $pl_again. Nothing was written." >&2
+            echo "$PROG: place: $bead is already armed for $pl_arm with the sling args $pl_arm_args, and this placement would send it to $pool${formula:+ on $formula}${pl_said:+ ($pl_said)}. Disarm it, then re-run: $(helm_disarm_cmd "$bead" "placed to $pool${formula:+ on $formula}") && $pl_again. Nothing was written." >&2
             exit 2
         fi
     fi
@@ -2373,7 +2408,7 @@ cmd_place() {
         pl_routed=$(meta_now "$bead" gc.routed_to)
         if [ -n "$pl_routed" ]; then
             if ! gc bd update "$bead" --db "$db" --unset-metadata gc.routed_to >/dev/null 2>&1; then
-                echo "$PROG: place: $bead is routed to '$pl_routed', which a held bead never carries and deferred-dispatch.sh arm refuses, and the store refused its clear. Its hold stays on. Clear it by hand, then re-run: gc bd update $bead --db $db --unset-metadata gc.routed_to && $pl_again" >&2
+                echo "$PROG: place: $bead is routed to '$pl_routed', which a held bead never carries and gctk bead arm refuses, and the store refused its clear. Its hold stays on. Clear it by hand, then re-run: gc bd update $bead --db $db --unset-metadata gc.routed_to && $pl_again" >&2
                 exit 4
             fi
             echo "$PROG: place: cleared the route '$pl_routed' $bead carried while held" >&2
@@ -2441,11 +2476,16 @@ cmd_place() {
         else
             [ -n "$pl_why" ] || pl_why="a hold that could not be read"
             set -- "$bead" --target "$pool" --reason "placed${under:+ under $under}, held by $pl_why"
-            [ -z "$formula" ] || set -- "$@" --sling-arg --on --sling-arg "$formula"
+            [ -z "$formula" ] || set -- "$@" --on "$formula"
             _pl_rc=0
-            "$DEFERRED_DISPATCH_TOOL" arm "$@" --db "$db" >&2 || _pl_rc=$?
+            if _pl_bin=$(helm_gctk); then
+                "$_pl_bin" bead arm "$@" --db "$db" >&2 || _pl_rc=$?
+            else
+                echo "$PROG: place: there is no gctk binary to arm $bead with (GCTK_BIN names one, or the city root its build sits under)" >&2
+                _pl_rc=127
+            fi
             if [ "$_pl_rc" -ne 0 ]; then
-                echo "$PROG: place: $bead is held by $pl_why, so it is armed rather than slung, and the arm failed (deferred-dispatch.sh arm exited $_pl_rc and says why above). Its hold stays on, so it stays in the queue. Re-run once the cause is fixed: $pl_again" >&2
+                echo "$PROG: place: $bead is held by $pl_why, so it is armed rather than slung, and the arm failed (gctk bead arm exited $_pl_rc and says why above). Its hold stays on, so it stays in the queue. Re-run once the cause is fixed: $pl_again" >&2
                 exit 4
             fi
             how="armed for $pool${formula:+ on $formula}, held by $pl_why, so its run starts once nothing holds it"
@@ -3961,7 +4001,9 @@ accept_vars_said() {
 # Every Accept on a bead runs under the bead's acceptance lock from before its
 # live read of those conditions to its last write, so one run's search, sling
 # and record never interleave with another's, and an acceptance is dispatched
-# once even after the work it sent has finished. On an open gate it records
+# once even after the work it sent has finished. Its first write removes the
+# bead's arm (helm_disarm), because the gate's answer could release the bead to
+# that arm ahead of Accept's own pour. On an open gate it records
 # the acceptance's dispatch input on the gate (gc.acceptance: the token, the
 # formula and each --var), resolves the gate with
 # `ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
@@ -4093,6 +4135,15 @@ cmd_accept() {
     fi
     # shellcheck disable=SC2086  # the gate ids are space-free words
     accept_warn_live "$bead" $rec_gates
+
+    # Accept dispatches the recommendation at the bead itself, so its first write
+    # removes the bead's arm: the gate's answer could otherwise release the bead
+    # to its arm ahead of Accept's own pour.
+    accept_db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && accept_db="$path/.beads"
+    if ! helm_disarm "$bead" "$accept_db" "accept: Accept dispatches $formula at the bead itself"; then
+        echo "$PROG: accept: Accept dispatches $formula at $bead itself, so its first write removes the arm that would start $bead another way once the gate's answer releases it, and that disarm did not land (its reason is above). Nothing is dispatched or written. Re-run once the arm can be removed: $PROG accept $bead" >&2
+        exit 4
+    fi
 
     if [ -z "$tok" ]; then
         # Step 1: the operator's acceptance, which the resolve is. Its dispatch
@@ -4309,6 +4360,33 @@ helm_gctk() {
     fi
     [ -x "$_hg_bin" ] || return 1
     printf '%s' "$_hg_bin"
+}
+
+# helm_disarm <bead> <db> <reason> — remove the bead's arm through
+# `gctk bead disarm`, in the store <db> names, or the one gc routes the bead to
+# when <db> is empty. The disarm holds the bead's dispatch lock, so once it
+# returns 0 no start has the bead in flight and none will send it, and a bead
+# that carries no arm returns 0 with nothing written. It says on stderr when it
+# removed an arm. Returns 1 when there is no gctk to run or the disarm failed,
+# and stderr says why. A write that stops the bead, or sends it on another way,
+# runs this first and goes on only once it returns 0. The disarm runs with fd 9
+# closed, so no process it starts keeps Accept's lock.
+helm_disarm() {
+    if ! _hd_bin=$(helm_gctk); then
+        echo "$PROG: there is no gctk binary to remove $1's arm with (GCTK_BIN names one, or the city root its build sits under)" >&2
+        return 1
+    fi
+    # shellcheck disable=SC2086  # ${2:+--db "$2"} expands to 0 or 2 space-free fields
+    _hd_out=$("$_hd_bin" bead disarm "$1" ${2:+--db "$2"} --reason "$3" 9>&-) || return 1
+    case "$_hd_out" in disarmed\ *) echo "$PROG: $_hd_out" >&2 ;; esac
+    return 0
+}
+
+# helm_disarm_cmd <bead> <reason> — the disarm a person runs by hand, in the
+# caller's store pin, for a message to name.
+helm_disarm_cmd() {
+    _hdc_bin=$(helm_gctk) || _hdc_bin=gctk
+    printf '%s bead disarm %s%s --reason %s' "$_hdc_bin" "$1" "${db:+ --db $db}" "$(sh_quote "$2")"
 }
 
 # helm_pending <bead> [<db>] — the bead's own waits that have not landed, as

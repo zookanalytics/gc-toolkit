@@ -95,7 +95,9 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "rejection-repool: cannot source bd-lib.sh beside this script" >&2; exit 3; }
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 POOL_ROUTE="$SCRIPTS_DIR/pool-route.sh"
-DEFERRED="$SCRIPTS_DIR/deferred-dispatch.sh"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 HUMAN_GATE="$SCRIPTS_DIR/human-gate.sh"
 PATROL_FINDING="$SCRIPTS_DIR/patrol-finding.sh"
 WORK_FORMULA="mol-polecat-work"
@@ -319,7 +321,7 @@ fi
 [ "$SLING_RC" != 0 ] \
   || stop_short "gc.execution_routed_to did not read back as $ROUTE${CHILD:+ on its rebuild child $CHILD} after gc sling exited 0, so the pour may be running, and no retry was armed because one could pour the work twice" \
        "check that no $WORK_FORMULA workflow is live on $ON, then dispatch the rebuild: gc sling $ROUTE $POUR --on $WORK_FORMULA"
-if "$DEFERRED" arm "$POUR" --target "$ROUTE" --sling-arg --on --sling-arg "$WORK_FORMULA" \
+if "$GCTK" bead arm "$POUR" --target "$ROUTE" --on "$WORK_FORMULA" \
      --reason "refinery rejection: the rebuild's gc sling failed (exit $SLING_RC)" >&2; then
   warn "$WORK: gc sling${CHILD:+ of its rebuild child $CHILD} exited $SLING_RC and its $WORK_FORMULA pour did not read back; armed a deferred dispatch${CHILD:+ on $CHILD}, whose reconcile pass retries the pour"
   exit 2

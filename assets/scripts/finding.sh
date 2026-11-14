@@ -189,6 +189,9 @@ set -uo pipefail
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 warn() { echo "finding: $*" >&2; }
@@ -806,9 +809,8 @@ cmd_set_disposition() {
         | jq -r '(.[0].metadata["fix_target_pool"] // .[0].metadata["gc.execution_routed_to"] // "") | tostring' 2>/dev/null)
       { [ -n "$fixpool" ] && [ "$fixpool" != "null" ]; } \
         || { warn "deferred $finding: no fix pool to make its follow-up dispatchable (pass --fix-pool, or carry fix_target_pool / gc.execution_routed_to on anchor $anchor); NOT closing (an unroutable follow-up is the orphan this retires)"; exit 2; }
-      local dispatcher="${GC_DEFERRED_DISPATCH_SH:-$_bd_lib_dir/deferred-dispatch.sh}"
-      [ -x "$dispatcher" ] \
-        || { warn "deferred $finding: deferred-dispatch.sh not executable at $dispatcher; cannot arm its follow-up; NOT closing"; exit 2; }
+      [ -x "$GCTK" ] \
+        || { warn "deferred $finding: no gctk binary at $GCTK; cannot arm its follow-up; NOT closing"; exit 2; }
       # One finding has one follow-up. Every step after the follow-up is filed can
       # fail and exit 2, which leaves the finding at its prior disposition, so the
       # validator rules it again. That retry reuses the follow-up the failed attempt
@@ -864,7 +866,7 @@ cmd_set_disposition() {
       local armed
       armed=$(bd_json show "$followup" | jq -r '(.[0].metadata["gc.dispatch_when_ready"] // "") | tostring' 2>/dev/null)
       if [ "$armed" != "$fixpool" ]; then
-        "$dispatcher" arm "$followup" --target "$fixpool" --sling-arg --on --sling-arg mol-polecat-work \
+        "$GCTK" bead arm "$followup" --target "$fixpool" --on mol-polecat-work \
           --reason "deferred from the review of anchor $anchor (finding $finding); dispatch once the anchor merges" >/dev/null 2>&1 \
           || { warn "deferred $finding: could not arm follow-up $followup to '$fixpool'; NOT closing"; exit 2; }
         armed=$(bd_json show "$followup" | jq -r '(.[0].metadata["gc.dispatch_when_ready"] // "") | tostring' 2>/dev/null)
