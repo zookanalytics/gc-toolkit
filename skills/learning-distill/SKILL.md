@@ -483,7 +483,8 @@ outcome:
   was dismissed with no recurrence is read this way too, since a working note
   prevents the recurrence the hold waits for, and that silence substantiates
   nothing. A veto is not such silence: it is the operator's word on the rule
-  the note states, and When a note leaves says how you read such a note.
+  the note states, and [When a note leaves](#when-a-note-leaves) says how you
+  read such a note.
 
 ### A note on a pattern
 
