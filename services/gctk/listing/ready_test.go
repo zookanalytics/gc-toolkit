@@ -3,8 +3,12 @@ package listing
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -106,7 +110,7 @@ func newReadyWorld(t *testing.T) *readyWorld {
 		w.hosts, w.ages = append(w.hosts, host), append(w.ages, maxAge)
 		return w.github
 	}
-	feedbackIn = func(checkout string) (pr.Feedback, error) {
+	feedbackIn = func(_ context.Context, checkout string) (pr.Feedback, error) {
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		w.loaded = append(w.loaded, checkout)
@@ -153,7 +157,7 @@ func TestReadyAnswersEachBeadOnThePendingRecord(t *testing.T) {
 func TestReadyWithNoDefinitionOfFeedbackAnswersNoBead(t *testing.T) {
 	w := newReadyWorld(t)
 	broken := errors.New("pr-post.sh printed no definition")
-	feedbackIn = func(string) (pr.Feedback, error) { return nil, broken }
+	feedbackIn = func(context.Context, string) (pr.Feedback, error) { return nil, broken }
 	answers, failed := w.ls.Ready([]string{"tk-a", "tk-b"}, time.Minute)
 	if len(answers) != 0 || !errors.Is(failed["tk-a"], broken) || !errors.Is(failed["tk-b"], broken) {
 		t.Errorf("Ready answered %v and failed %v, want every bead failed by the definition's error", answers, failed)
@@ -170,5 +174,70 @@ func TestReadyWithNoDefinitionOfFeedbackAnswersNoBead(t *testing.T) {
 	w = newReadyWorld(t)
 	if answers, failed := w.ls.Ready(nil, time.Minute); len(answers)+len(failed) != 0 || len(w.loaded) != 0 {
 		t.Errorf("a call naming no bead answered %v, failed %v and loaded %v", answers, failed, w.loaded)
+	}
+}
+
+// A definition of feedback whose resolution or load stalls ends with the
+// listing's context: the gc that names the pack's scripts directory, which
+// helm-svc asks since it runs with no GCTK_SCRIPTS_DIR, and pr-post.sh, whose
+// git can wait on a fetch in a partial clone. Ready returns soon after the
+// deadline with the deadline's error for every bead, having waited on the
+// command it started, and the command's whole process group is gone, so a
+// board read that runs out leaves nothing of the definition running.
+func TestReadyStopsTheDefinitionOfFeedbackPastTheListingsDeadline(t *testing.T) {
+	load := feedbackIn
+	for _, stalled := range []string{"gc", "pr-post.sh"} {
+		t.Run(stalled, func(t *testing.T) {
+			w := newReadyWorld(t)
+			feedbackIn = load
+			dir := t.TempDir()
+			group := filepath.Join(dir, "group")
+			stub := "#!/bin/sh\nsleep 30 &\necho $$ > \"$STUB_GROUP.tmp\" && mv \"$STUB_GROUP.tmp\" \"$STUB_GROUP\"\nwait\n"
+			if err := os.WriteFile(filepath.Join(dir, stalled), []byte(stub), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("STUB_GROUP", group)
+			if stalled == "gc" {
+				t.Setenv("GCTK_SCRIPTS_DIR", "")
+				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			} else {
+				t.Setenv("GCTK_SCRIPTS_DIR", dir)
+			}
+			w.ls.db = filepath.Join(t.TempDir(), ".beads")
+
+			const deadline = 500 * time.Millisecond
+			ctx, cancel := context.WithTimeout(context.Background(), deadline)
+			defer cancel()
+			w.ls.ctx = ctx
+			start := time.Now()
+			answers, failed := w.ls.Ready([]string{"tk-a", "tk-b"}, time.Minute)
+			took := time.Since(start)
+			if len(answers) != 0 || !errors.Is(failed["tk-a"], context.DeadlineExceeded) ||
+				!errors.Is(failed["tk-b"], context.DeadlineExceeded) {
+				t.Errorf("Ready answered %v and failed %v, want every bead failed by the deadline", answers, failed)
+			}
+			if took > deadline+1500*time.Millisecond {
+				t.Errorf("Ready returned %s after it began, past its %s deadline", took, deadline)
+			}
+			raw, err := os.ReadFile(group)
+			if err != nil {
+				return // the deadline came before the command started, so none ran
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+			if err != nil {
+				t.Fatalf("the stub wrote %q as its process group", raw)
+			}
+			if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+				t.Errorf("the stub %d had not ended when Ready returned (signal 0: %v)", pid, err)
+			}
+			gone := time.Now().Add(5 * time.Second)
+			for syscall.Kill(-pid, 0) == nil {
+				if time.Now().After(gone) {
+					_ = syscall.Kill(-pid, syscall.SIGKILL)
+					t.Fatalf("the command's process group %d outlived Ready", pid)
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		})
 	}
 }

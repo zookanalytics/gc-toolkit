@@ -1546,14 +1546,16 @@ settled, and `specs/tk-yhquh93.14/gas-city-search.md` the search behind it.
 
 **How it is cached.** The document depends on the store's answers and on
 GitHub's answers no older than five minutes, so it is cached whole per rig, the
-work's order with it, since the order is a function of the rig's one read. The cache keeps the board's rule: a minute's time to
+work's order with it, since the order is a function of the rig's one read. The
+cache keeps the board's rule: a minute's time to
 live (`server.RigBoardTTL`, from a measured 2.9 s read of gc-toolkit), one
 gather of a rig at a time however many requests wait on it, and every rig
 dropped when a write route succeeds. The drop also lets the next request gather
 at once, beside a gather that began before the write, and that gather's answer
 stays out of the cache. A gather has thirty seconds. When they run out, the read
-stops every store call and every gh call it made, with the processes each call
-started, `bd` among them, and only then does the request answer its failure, so polls that
+stops every store call, every gh call and every command that loads or applies
+the pack's definition of feedback, with the processes each started, `bd` and
+git among them, and only then does the request answer its failure, so polls that
 come while the store hangs do not pile up reads on it. A failed read answers
 502 with the failure, never a document, so the page keeps its last good
 document and says the read failed.

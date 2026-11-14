@@ -30,13 +30,15 @@ var gitHubOn = func(ctx context.Context, host string, maxAge time.Duration) pr.G
 
 // feedbackIn is the pack's definition of feedback, loaded in checkout, a rig's
 // clone, so that it holds the posts that rig's default branch declares not for
-// review. It is a variable so that the package's tests can set the definition.
-var feedbackIn = func(checkout string) (pr.Feedback, error) {
-	scripts, err := feedback.ScriptsDir()
+// review. The commands that resolve and load it, and each that applies it, end
+// when ctx does, their processes killed with them. It is a variable so that the
+// package's tests can set the definition.
+var feedbackIn = func(ctx context.Context, checkout string) (pr.Feedback, error) {
+	scripts, err := feedback.ScriptsDirContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rule, err := feedback.Load(scripts, checkout)
+	rule, err := feedback.LoadContext(ctx, scripts, checkout)
 	if err != nil {
 		return nil, err
 	}
@@ -53,11 +55,13 @@ var feedbackIn = func(checkout string) (pr.Feedback, error) {
 // gh on the host each PR's URL names. A read of GitHub takes gh's own cached
 // answer to the same read made within maxAge (`gh api --cache`), so a reader
 // that asks over and over asks GitHub at most once per maxAge for each read,
-// and a maxAge under a second asks GitHub every time. Every read ends when the
-// listing's context does. The evaluator applies the pack's definition of
-// feedback, loaded once per call in the checkout that holds the listing's
-// store, the directory above its .beads, so a listing of the store gc resolves
-// answers no bead. At most readyLimit beads are evaluated at once.
+// and a maxAge under a second asks GitHub every time. The evaluator applies the
+// pack's definition of feedback, loaded once per call in the checkout that
+// holds the listing's store, the directory above its .beads, so a listing of
+// the store gc resolves answers no bead. Every read of the store and of GitHub,
+// and every command that loads or applies the definition, ends when the
+// listing's context does, so a call whose context ended returns once it has
+// stopped them all. At most readyLimit beads are evaluated at once.
 func (ls *Listing) Ready(ids []string, maxAge time.Duration) (map[string]pr.Answer, map[string]error) {
 	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
 	answers, failed := map[string]pr.Answer{}, map[string]error{}
@@ -100,12 +104,12 @@ func (ls *Listing) Ready(ids []string, maxAge time.Duration) (map[string]pr.Answ
 }
 
 // feedback loads the pack's definition of feedback in the checkout that holds
-// the listing's store.
+// the listing's store, within the listing's context.
 func (ls *Listing) feedback() (pr.Feedback, error) {
 	if ls.db == "" {
 		return nil, errors.New("listing: the listing names no store, so no rig's checkout holds the definition of feedback")
 	}
-	rule, err := feedbackIn(filepath.Dir(filepath.Clean(ls.db)))
+	rule, err := feedbackIn(ls.ctx, filepath.Dir(filepath.Clean(ls.db)))
 	if err != nil {
 		return nil, fmt.Errorf("listing: the definition of feedback did not load: %w", err)
 	}

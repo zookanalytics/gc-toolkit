@@ -127,11 +127,12 @@ type gathered struct {
 
 // Read reads one rig's store once, through a gctk listing, and builds its
 // document. A read that fails returns its error and no document, so a caller
-// never draws a board from a read that did not happen. Every store call and
-// every read of GitHub the read makes ends when ctx does, the processes it
-// started killed with it, so a read that runs out has stopped them all when it
-// returns, and it returns ctx's cause, never a document with the pull requests
-// it did not finish reading.
+// never draws a board from a read that did not happen. Every store call, every
+// read of GitHub and every command that loads or applies the pack's definition
+// of feedback the read makes ends when ctx does, the processes it started
+// killed with it, so a read that runs out has stopped them all when it returns,
+// and it returns ctx's cause, never a document with the pull requests it did
+// not finish reading.
 func Read(ctx context.Context, rig Rig) (Document, error) {
 	ls, err := listing.Read(ctx, rig.Store)
 	if err != nil {

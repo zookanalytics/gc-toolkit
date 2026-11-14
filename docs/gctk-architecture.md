@@ -422,7 +422,7 @@ and CI runs those tests on every PR.
 | store | the bead store | `gc bd` for writes, for reads that must see a fresh write and for the blocked set, the supervisor API for other reads | in-memory rows and edges, with the store's blocked answers set by the test |
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API, each call ending with its caller's context, and for a reader that asks about the same PRs over and over, gh's own response cache (`gh api --cache`) | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
-| feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
+| feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does, each command the adapter runs ending with its caller's context | answers a test sets |
 | runtime | Gas City | `gc` (sling, config, session, events, runtime), the supervisor API (runs, sessions), and the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh` | recorded responses |
 | host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start inside the sandbox a demo capture runs in | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
 
