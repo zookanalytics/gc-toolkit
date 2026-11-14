@@ -50,9 +50,11 @@ the default branch has it:
 same way, each doc that page says its goals come from, such as a charter or a
 foundation it reads out. When the page is missing, read `docs/review-pm.md` the
 same way, since a rig that keeps its goals elsewhere names the place there.
-When the rig keeps none, or the operator changes them, the `backlog-refinement`
-skill's "When the goals are missing or change" is how their words reach the
-page, whatever the sitting is for, so no later sitting asks again.
+When the rig keeps none, or the operator changes them, load the
+`backlog-refinement` skill and follow its "When the goals are missing or change"
+before you ask the operator anything, whatever the sitting is for. It finds an
+answer an earlier sitting recorded, and it takes the operator's words to the
+page, so no later sitting asks again.
 
 ## Sequencing: WSJF
 
