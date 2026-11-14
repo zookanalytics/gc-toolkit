@@ -265,7 +265,10 @@ pattern whose fix has landed leaves as above. The build takes two of the
 sitting's proposals, which the operator did not rule on: a use line alone does
 not make a note due early, so the per-run read stays for new notes and the
 uses are read when the note next comes due, and the line that asks for uses is
-the pack's own, added by the script.
+the pack's own, added by the script. The build makes one call of its own, which
+the operator did not rule on either. A note whose pattern closed after a veto
+is due again, and the judge weighs it with the veto as the operator's word on
+its rule, where the design as approved had it leave at the veto.
 
 The operator's two concerns, in that cycle:
 
