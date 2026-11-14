@@ -87,6 +87,8 @@ has "$OUT" "c-r1" "the pending husk is named"
 has "$OUT" "https://x/pr/11" "…with its PR"
 has "$OUT" "c-r2" "the head-changed husk is named"
 has "$OUT" "the landing order records a PR's end only on a bead that is not closed" "…and why nothing lands it"
+has "$OUT" "gc bd update c-r1 --set-metadata merge_result=mr_merged --set-metadata merged_sha=<the full 40-character merge commit id> --set-metadata pr_state=merged --set-metadata pr_merged_at=<the PR's mergedAt>" \
+    "…and a merged PR's repair writes the whole mr_merged record the landing order settles, the sha in full"
 hasnt "$OUT" "lifecycle.sh" "…with repairs that do not go through the old record's machine"
 store "$(bead c-r3 '{"merge_result":"mr_merged","merged_sha":"abc123"}')" \
       "$(bead c-r4 '{"merge_result":"pull_request_closed_unmerged"}')"
