@@ -221,7 +221,8 @@ esac
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<what is red on main, and why this bead fixes it>" --takeaway "<headline>" --emergency "<the failing check on main>"
    # Work that is a named agent's own goes TO that agent: --assign hands the
    # subject to it in the form it finds its work in, a route for the mechanik
-   # and the assignee for the refinery or the keeper, and nudges the agent.
+   # and the assignee for the refinery or the keeper, and nudges the agent
+   # when bd reports the bead ready.
    # A town-repo edit takes gc-toolkit.mechanik. The exit refuses the po, which
    # takes no work by assignment: work no epic holds is routed, and the exit
    # holds it for placement. It refuses the deacon and the witness, which take
