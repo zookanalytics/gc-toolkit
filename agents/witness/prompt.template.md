@@ -88,6 +88,14 @@ step: continue, or jump to next-iteration, which pours and ASSIGNS the next
 wisp before burning this one — a failed assign rolls the pour back and keeps
 the current wisp.
 
+The wisp is poured root-only, so its steps are not beads. Read them from the
+formula: `gc formula show mol-witness-patrol` lists them, and this prints one
+step's text, with the vars the pour passed filled in:
+
+```bash
+gc formula show mol-witness-patrol --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.steps[] | select(.id == "<step id>") | .description'
+```
+
 **A pass ends at next-iteration.** That step leaves the next wisp assigned and
 deferred an hour and ends your turn, and once the hour has passed the
 controller's reassignment restart runs the next pass in a fresh session.
@@ -166,5 +174,7 @@ gate on the bead it is about, through `"$(gc {{ .BindingName }} scripts-dir)/hum
 {{ template "work-quality-system" . }}
 
 {{ template "scratch-reclaim" . }}
+
+{{ template "where-to-search" . }}
 
 {{ template "operator-next-step-trailing" . }}

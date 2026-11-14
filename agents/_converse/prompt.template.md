@@ -189,4 +189,6 @@ it is the one ending that drains with the conversation still open.
 
 {{ template "scratch-reclaim" . }}
 
+{{ template "where-to-search" . }}
+
 {{ template "file-feedback-observations" . }}

@@ -227,10 +227,10 @@ fi
 # reviewer wrote into it is the line's own label, and a decision of none or
 # nothing is no decision.
 NEEDS_YOU=$(printf '%s' "$NEEDS_YOU" | tr '\000-\037' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
-case "$(printf '%s' "$NEEDS_YOU" | tr '[:upper:]' '[:lower:]')" in
+case "${NEEDS_YOU,,}" in
   "needs you:"*) NEEDS_YOU="${NEEDS_YOU:10}"; NEEDS_YOU="${NEEDS_YOU# }" ;;
 esac
-case "$(printf '%s' "$NEEDS_YOU" | tr '[:upper:]' '[:lower:]')" in
+case "${NEEDS_YOU,,}" in
   ''|none|none.|nothing|nothing.|n/a) NEEDS_YOU="" ;;
   *[.!?]) : ;;
   *) NEEDS_YOU="$NEEDS_YOU." ;;
@@ -364,21 +364,22 @@ file_findings() { # <anchor> <lane>
 
 REVIEW_ROW=$(bd_json show "$REVIEW_BEAD")
 is_rows "$REVIEW_ROW" || { warn "review bead $REVIEW_BEAD does not resolve; nothing written"; exit 1; }
+row_meta_all REVIEW_META "$REVIEW_ROW"
 
 # A verdict answering a closed bead records nothing: the dispatch it answers was
 # already recorded, or retired unjudged.
 REVIEW_STATUS=$(printf '%s' "$REVIEW_ROW" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
 if [ "$REVIEW_STATUS" = "closed" ]; then
-  warn "review bead $REVIEW_BEAD is already closed (gc.outcome='$(row_meta "$REVIEW_ROW" gc.outcome)'); refusing — a retired dispatch records no verdict. Nothing written; re-dispatch the check if it is still owed."
+  warn "review bead $REVIEW_BEAD is already closed (gc.outcome='${REVIEW_META[gc.outcome]-}'); refusing — a retired dispatch records no verdict. Nothing written; re-dispatch the check if it is still owed."
   exit 1
 fi
-CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
+CHECK_NAME=${REVIEW_META[check_name]-}
 [ -n "$CHECK_NAME" ] || CHECK_NAME=correctness
 # CHECK_NAME is the lane token the review was dispatched under, in the case the
 # anchor's check_set wrote it. CHECK is the check whose method the review ran,
 # known by its name case-folded as the check index resolves a token, and the
 # triage and demo rules below go by it.
-CHECK=$(printf '%s' "$CHECK_NAME" | tr '[:upper:]' '[:lower:]')
+CHECK=${CHECK_NAME,,}
 
 # --add-gates carries triage's classification, so it is recorded only by a triage
 # approve. Refuse anything else before anything is written.
@@ -458,7 +459,7 @@ fi
 # The anchor the check lands on: the durable anchor_bead stamp first, the
 # blocks edge second. Unresolvable is a refusal — a verdict with no anchor to
 # land on must not write anything.
-ANCHOR=$(row_meta "$REVIEW_ROW" anchor_bead)
+ANCHOR=${REVIEW_META[anchor_bead]-}
 if [ -z "$ANCHOR" ]; then
   ANCHOR=$(bd_json dep list "$REVIEW_BEAD" --direction=up -t blocks \
     | jq -r 'if type == "array" then (.[0].id // "") else "" end' 2>/dev/null)
@@ -466,6 +467,7 @@ fi
 [ -n "$ANCHOR" ] || { warn "no anchor resolves for $REVIEW_BEAD (no metadata.anchor_bead, no blocks edge); refusing — the check has nowhere to land"; exit 1; }
 ANCHOR_ROW=$(bd_json show "$ANCHOR")
 is_rows "$ANCHOR_ROW" || { warn "anchor $ANCHOR does not resolve; nothing written"; exit 1; }
+row_meta_all ANCHOR_META "$ANCHOR_ROW"
 
 # A bring-current round that conflicted and awaits this triage verdict's ruling.
 # The guard filed it on the anchor and reopened the triage lane, so a triage
@@ -524,13 +526,13 @@ if [ -n "$ROUND_HEAD" ] && [ "$VERDICT" = "approve" ]; then
 fi
 
 # Post-open iff the ANCHOR names a PR.
-PR_NUMBER=$(row_meta "$ANCHOR_ROW" pr_number)
-PR_URL=$(row_meta "$ANCHOR_ROW" pr_url)
+PR_NUMBER=${ANCHOR_META[pr_number]-}
+PR_URL=${ANCHOR_META[pr_url]-}
 POST_OPEN=""
 { [ -n "$PR_NUMBER" ] || [ -n "$PR_URL" ]; } && POST_OPEN=1
 PR_REPO_Q=""; PR_REPO=""; PR_HOST=""
 if [ -n "$POST_OPEN" ]; then
-  [ -n "$PR_URL" ] || PR_URL=$(row_meta "$REVIEW_ROW" pr_url)
+  [ -n "$PR_URL" ] || PR_URL=${REVIEW_META[pr_url]-}
   # Pin host+repo from the bead's own pr_url: a bare PR number names a
   # different pull request per repository per host.
   PR_REPO_Q=$(printf '%s' "$PR_URL" \
@@ -544,8 +546,8 @@ if [ -n "$POST_OPEN" ]; then
   [ -n "$PR_NUMBER" ] || { warn "post-open anchor $ANCHOR has no resolvable PR number"; exit 1; }
 fi
 
-BRANCH=$(row_meta "$ANCHOR_ROW" branch)
-[ -n "$BRANCH" ] || BRANCH=$(row_meta "$REVIEW_ROW" review_branch)
+BRANCH=${ANCHOR_META[branch]-}
+[ -n "$BRANCH" ] || BRANCH=${REVIEW_META[review_branch]-}
 # The commit this verdict READ. A review's record pins the commit its dispatch
 # read, and nothing moves it, so a verdict names that commit or is not
 # recorded: a --reviewed-oid naming any other is refused before anything is
@@ -554,8 +556,8 @@ BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 # takes the caller's --reviewed-oid in full, else the live head. The posted
 # artifact and the record name this commit. The verdict is about the lane and
 # is not bound to it, and the merge compares no verdict to a head.
-PINNED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid | tr '[:upper:]' '[:lower:]')
-OID_OVERRIDE=$(printf '%s' "$OID_OVERRIDE" | tr '[:upper:]' '[:lower:]')
+PINNED_OID=${REVIEW_META[reviewed_oid]-}; PINNED_OID=${PINNED_OID,,}
+OID_OVERRIDE=${OID_OVERRIDE,,}
 # The full id <oid> names. The record and every reader at the commit take a full
 # id, and the resolver fetches a commit no repository here holds only by its
 # full id. A full id is taken as given. An abbreviation is expanded in this
@@ -744,7 +746,7 @@ post_artifact() {
       rec+=(--unset-metadata visual_fallback_from)
     fi
   fi
-  if [ -z "$(row_meta "$REVIEW_ROW" anchor_bead)" ]; then
+  if [ -z "${REVIEW_META[anchor_bead]-}" ]; then
     if ! bd_anchor_link "$ANCHOR" "$REVIEW_BEAD"; then
       warn "review $REVIEW_BEAD could not be joined to anchor $ANCHOR; nothing posted, review left open for a retry"
       exit 2
@@ -755,22 +757,23 @@ post_artifact() {
   gc bd update "$REVIEW_BEAD" "${rec[@]}" >/dev/null 2>&1 || true
   local row got
   row=$(bd_json show "$REVIEW_BEAD")
-  got=$(row_meta "$row" reviewed_oid)
+  row_meta_all RECORDED_META "$row"
+  got=${RECORDED_META[reviewed_oid]-}
   if [ "$got" != "$REVIEWED_OID" ]; then
     warn "the reviewed commit did not read back on $REVIEW_BEAD (reviewed_oid='$got', want '$REVIEWED_OID'); nothing posted, review left open for a retry"
     exit 2
   fi
-  got=$(row_meta "$row" anchor_bead)
+  got=${RECORDED_META[anchor_bead]-}
   if [ -n "$adopt" ] && [ "$got" != "$ANCHOR" ]; then
     warn "the anchor did not read back on $REVIEW_BEAD (anchor_bead='$got', want '$ANCHOR'); nothing posted, review left open for a retry"
     exit 2
   fi
-  got=$(row_meta "$row" visual)
+  got=${RECORDED_META[visual]-}
   if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL" ]; then
     warn "the visual decision did not read back on $REVIEW_BEAD (visual='$got', want '$VISUAL'); nothing posted, review left open for a retry"
     exit 2
   fi
-  got=$(row_meta "$row" visual_fallback_from)
+  got=${RECORDED_META[visual_fallback_from]-}
   if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL_FALLBACK" ]; then
     warn "the visual fallback did not read back on $REVIEW_BEAD (visual_fallback_from='$got', want '$VISUAL_FALLBACK'); nothing posted, review left open for a retry"
     exit 2
@@ -809,8 +812,9 @@ close_review() {
   local row st oc sv
   row=$(bd_json show "$REVIEW_BEAD")
   st=$(printf '%s' "$row" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
-  oc=$(row_meta "$row" gc.outcome)
-  sv=$(row_meta "$row" signoff_verdict)
+  row_meta_all CLOSED_META "$row"
+  oc=${CLOSED_META[gc.outcome]-}
+  sv=${CLOSED_META[signoff_verdict]-}
   if [ "$st" != "closed" ] || [ "$oc" != "recorded" ] || [ "$sv" != "$VERDICT" ]; then
     warn "review bead $REVIEW_BEAD close did not read back (status='$st' gc.outcome='$oc' signoff_verdict='$sv')"
     exit 2
@@ -891,25 +895,27 @@ ensure_validation_pass() {
   # it opened at rather than a validator mid-rule being moved under it.
   vmeta=$(bd_json show "$vpass")
   is_rows "$vmeta" || { warn "validation pass $vpass did not resolve after open; review left open for a retry"; exit 2; }
+  row_meta_all VPASS_META "$vmeta"
   # A pass about to take anchor_bead is joined to the anchor first, so the stamp
   # never lands on a pass the anchor's closed-children read cannot reach. A pass
   # filed above carries the edge from its create.
-  if [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ] && ! bd_anchor_link "$ANCHOR" "$vpass"; then
+  if [ "${VPASS_META[anchor_bead]-}" != "$ANCHOR" ] && ! bd_anchor_link "$ANCHOR" "$vpass"; then
     warn "validation pass $vpass could not be joined to anchor $ANCHOR; review left open for a retry"
     exit 2
   fi
   vfix=()
-  [ "$(row_meta "$vmeta" task_kind)" != "validation" ]   && vfix+=(--set-metadata task_kind=validation)
-  [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ]    && vfix+=(--set-metadata "anchor_bead=$ANCHOR")
-  [ "$(row_meta "$vmeta" check_name)" != "$CHECK_NAME" ] && vfix+=(--set-metadata "check_name=$CHECK_NAME")
-  [ -z "$(row_meta "$vmeta" reviewed_oid)" ]             && vfix+=(--set-metadata "reviewed_oid=$REVIEWED_OID")
+  [ "${VPASS_META[task_kind]-}" != "validation" ]   && vfix+=(--set-metadata task_kind=validation)
+  [ "${VPASS_META[anchor_bead]-}" != "$ANCHOR" ]    && vfix+=(--set-metadata "anchor_bead=$ANCHOR")
+  [ "${VPASS_META[check_name]-}" != "$CHECK_NAME" ] && vfix+=(--set-metadata "check_name=$CHECK_NAME")
+  [ -z "${VPASS_META[reviewed_oid]-}" ]             && vfix+=(--set-metadata "reviewed_oid=$REVIEWED_OID")
   if [ "${#vfix[@]}" -gt 0 ]; then
     gc bd update "$vpass" "${vfix[@]}" >/dev/null 2>&1 || true
     vmeta=$(bd_json show "$vpass")
+    row_meta_all VPASS_META "$vmeta"
   fi
-  if [ "$(row_meta "$vmeta" task_kind)" != "validation" ] || [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ] \
-     || [ "$(row_meta "$vmeta" check_name)" != "$CHECK_NAME" ] || [ -z "$(row_meta "$vmeta" reviewed_oid)" ]; then
-    warn "validation pass $vpass did not record the batch shape (want task_kind=validation anchor_bead=$ANCHOR check_name=$CHECK_NAME reviewed_oid set; got task_kind='$(row_meta "$vmeta" task_kind)' anchor_bead='$(row_meta "$vmeta" anchor_bead)' check_name='$(row_meta "$vmeta" check_name)' reviewed_oid='$(row_meta "$vmeta" reviewed_oid)'); review left open for a retry"
+  if [ "${VPASS_META[task_kind]-}" != "validation" ] || [ "${VPASS_META[anchor_bead]-}" != "$ANCHOR" ] \
+     || [ "${VPASS_META[check_name]-}" != "$CHECK_NAME" ] || [ -z "${VPASS_META[reviewed_oid]-}" ]; then
+    warn "validation pass $vpass did not record the batch shape (want task_kind=validation anchor_bead=$ANCHOR check_name=$CHECK_NAME reviewed_oid set; got task_kind='${VPASS_META[task_kind]-}' anchor_bead='${VPASS_META[anchor_bead]-}' check_name='${VPASS_META[check_name]-}' reviewed_oid='${VPASS_META[reviewed_oid]-}'); review left open for a retry"
     exit 2
   fi
   # The pass must HOLD the anchor, not merely sit beside it: merge.sh reads every
@@ -950,7 +956,7 @@ dismiss_superseded() {
   [ -n "$handle" ] || return 0
   owndef=$("$PR_POST" own-def 2>/dev/null) && [ -n "$owndef" ] || return 0
   # Passed on as found: gc_city_cutover reads a malformed stamp as no cutover.
-  since=$(row_meta "$ANCHOR_ROW" pr_provenance_since)
+  since=${ANCHOR_META[pr_provenance_since]-}
   live=$(live_head)
   [ "$live" = "$REVIEWED_OID" ] || return 0
   raw=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json autoMergeRequest 2>/dev/null) || return 0
@@ -1031,9 +1037,9 @@ index_has_check() { # <check>
 GUIDANCE_EDITS=""; GUIDANCE_WHY=""
 guidance_edits() {
   local base err out rc
-  base=$(row_meta "$REVIEW_ROW" review_base)
-  [ -n "$base" ] || base=$(row_meta "$ANCHOR_ROW" merged_target)
-  [ -n "$base" ] || base=$(row_meta "$ANCHOR_ROW" target)
+  base=${REVIEW_META[review_base]-}
+  [ -n "$base" ] || base=${ANCHOR_META[merged_target]-}
+  [ -n "$base" ] || base=${ANCHOR_META[target]-}
   [ -n "$base" ] || { GUIDANCE_WHY="neither the review nor its anchor names the base the branch left"; return 1; }
   [ -x "$INDEX_PARSER" ] || { GUIDANCE_WHY="the check resolver is missing ($INDEX_PARSER)"; return 1; }
   err=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-edits.XXXXXX") || { GUIDANCE_WHY="no scratch file for the resolver's reason"; return 1; }
@@ -1083,13 +1089,14 @@ $tok"
   newset=$(printf '%s\n' "$union" | sed '/^$/d' | tr '\n' ',' | sed 's/,$//')
   gc bd update "$ANCHOR" --set-metadata "check_set=$newset" --append-notes "$lines" >/dev/null 2>&1 || true
   fresh=$(bd_json show "$ANCHOR")
-  got=$(gate_tokens "$(row_meta "$fresh" check_set)")
+  row_meta_all FRESH_META "$fresh"
+  got=$(gate_tokens "${FRESH_META[check_set]-}")
   missing=""
   for tok in $(printf '%s\n' "$union" | sed '/^$/d'); do
     grep -qx -- "$tok" <<< "$got" || missing="${missing:+$missing,}$tok"
   done
   if [ -n "$missing" ]; then
-    warn "check_set on $ANCHOR did not read back with '$missing' (have '$(row_meta "$fresh" check_set)', want '$newset'); review left OPEN so the check stays owed"
+    warn "check_set on $ANCHOR did not read back with '$missing' (have '${FRESH_META[check_set]-}', want '$newset'); review left OPEN so the check stays owed"
     exit 2
   fi
   first="${lines%%$'\n'*}"
@@ -1184,10 +1191,10 @@ FINDING_COUNT=0
 # (source_review_bead). What the review decides is decided here: the pool the
 # rework routes to (the review's fix_target_pool, else the writer's default),
 # where it lands, and the reason and title it carries.
-FIX_POOL_NAME=$(row_meta "$REVIEW_ROW" fix_target_pool)
-FIX_TARGET=$(row_meta "$ANCHOR_ROW" merged_target)
-[ -n "$FIX_TARGET" ] || FIX_TARGET=$(row_meta "$ANCHOR_ROW" target)
-[ -n "$FIX_TARGET" ] || FIX_TARGET=$(row_meta "$REVIEW_ROW" review_base)
+FIX_POOL_NAME=${REVIEW_META[fix_target_pool]-}
+FIX_TARGET=${ANCHOR_META[merged_target]-}
+[ -n "$FIX_TARGET" ] || FIX_TARGET=${ANCHOR_META[target]-}
+[ -n "$FIX_TARGET" ] || FIX_TARGET=${REVIEW_META[review_base]-}
 if [ -z "$FIX_TARGET" ]; then
   warn "no landing target resolves for the rework child (anchor merged_target/target, review_base all empty); review left open"
   exit 2

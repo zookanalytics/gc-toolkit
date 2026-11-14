@@ -12,6 +12,8 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
 
 {{ template "scratch-reclaim" . }}
 
+{{ template "where-to-search" . }}
+
 {{ template "file-feedback-observations" . }}
 
 {{ template "learned-conventions-polecat" . }}

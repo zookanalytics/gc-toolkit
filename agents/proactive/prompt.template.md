@@ -326,6 +326,8 @@ main. Never `--merge direct`.
 
 {{ template "scratch-reclaim" . }}
 
+{{ template "where-to-search" . }}
+
 ## Communication
 
 ```bash
