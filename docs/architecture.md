@@ -35,7 +35,7 @@ one rule for whether a bead is blocked by
 ## The boundary
 
 Four parties, one data plane. Lifecycle transitions, dispositions, routes,
-waits and review verdicts are all written on beads.
+waits, review verdicts and review results are all written on beads.
 
 ```mermaid
 flowchart LR
@@ -50,7 +50,7 @@ flowchart LR
     REF[refinery<br/>the landing writer]
     DISP[bead-rehome.sh<br/>the disposition writer]
     CAD[merge cadence]
-    SIGN[signoff.sh<br/>the verdict writer]
+    RUN[review run<br/>the result writer]
     DOC[doctor/<br/>invariant checks]
     HELM[helm board<br/>render-only]
   end
@@ -72,9 +72,11 @@ flowchart LR
   FORM -->|disposition| DISP
   CAD -->|disposition| DISP
   DISP -->|successor edge, then checked close| LEDGER
-  SIGN -->|verdicts on review beads| LEDGER
+  RUN -->|review result| LEDGER
+  RUN -->|repair push| BR
   ORD -->|every 60s| CAD
-  ORD -->|landing order: merge request| PR
+  ORD -->|landing order: one run per head| RUN
+  ORD -->|landing order: ready, merge request| PR
   ORD -->|landing order: record, then close| LEDGER
   CAD -->|reads + writes| LEDGER
   CAD -->|labels| PR
@@ -88,7 +90,8 @@ flowchart LR
 **Legend.** Solid = writes state. Dashed = reads without writing. Each write
 path that matters has one writer. The refinery writes landings, and the landing
 order writes merges. `bead-rehome.sh` writes dispositions, the closes that name
-a successor. `signoff.sh` writes check verdicts. Everything else reads.
+a successor. A PR's review run writes the PR's review result, for the last head
+the run judged. Everything else reads.
 
 **The PRs the city lands.** A PR another account opened, such as a person's,
 Dependabot's or one from a fork, stays outside the city's landing, even when it
@@ -112,8 +115,8 @@ are recorded and where the records live.
   outlive any one worktree. A re-clone loses them, and the loss costs one run
   of each check.
 - **What a record is not.** A record is evidence about a commit. It is neither
-  workflow state nor a review's verdict, and both of those stay on beads,
-  written by their own writers. Nor is it a judgment of whose failure a fail
+  workflow state nor a review's verdict or result, and each of those stays on
+  beads, written by its own writer. Nor is it a judgment of whose failure a fail
   is: a caller that finds a recorded fail red on the base too writes that on a
   bead as `rig_check_pre_existing.<check>`, holding the record it judged, so a
   run that replaces that record needs a judgment of its own.
@@ -152,11 +155,16 @@ performer; the full transition table with writers is
    bead the refinery opens the PR as a draft, or updates the PR the bead owns,
    and puts the PR on Gas Town's pending record
    ([state-machine.md](state-machine.md#the-pending-record)).
-7. **Review.** The merge cadence's gate-ensure arm makes every declared check
-   raisable; a review bead is routed to the polecat-codex pool; the reviewer's
-   single call to `signoff.sh` records the verdict on the review bead and, on
-   request-changes, files one rework child. The review loop moves the PR
-   between draft and ready for review.
+7. **Review.** For each head the refinery validates without a passed review
+   result, the landing order pours a review run. The run records the PR's
+   review result, which the evaluator reads. While it works, the run is the
+   one writer of the PR's branch. Work that needs the branch changed, such as
+   a person's comment or a conflict with the target, is filed as an ask, and a
+   run takes it. Each city writer returns the PR to draft before it pushes.
+   The landing order marks the PR ready once a run has passed at the head the
+   refinery validated. When a run rules a head's change material, the landing
+   order dismisses each approval given on a commit that does not contain that
+   head.
 8. **Merge.** The landing order has GitHub merge each PR on the pending record
    at the head the refinery validated, once the evaluator reads the PR ready,
    and closes the bead once the merge commit is on the target
@@ -221,16 +229,16 @@ is the rig's, so it lives in the root [`AGENTS.md`](../AGENTS.md), which every
 session that works in a gc-toolkit worktree loads, or in one of the rig's docs
 or checks. It is never written into the pack content every rig runs.
 
-A review is where the two meet. It reads its values from the record its dispatch
-wrote, and every other piece either from the installed pack, as that checkout
-stands when the piece is read, or from the rig at the reviewed commit. The
-reviewed commit is the branch's head when the review was dispatched, and nothing
-moves it afterwards.
+A review is where the two meet. It takes its values from the part that starts
+it, and reads every other piece either from the installed pack, as that
+checkout stands when the piece is read, or from the rig at the reviewed commit.
+The reviewed commit is the head a check judges. It is fixed when the check
+starts, and nothing moves it afterwards.
 
 | What the reviewer uses | Where it comes from | Which version |
 |---|---|---|
-| The review's steps, `mol-review` or `mol-review-quorum-signoff` | The pack's formula. Each rig's `.beads/formulas` entry for it is a link Gas City makes into the installed pack. | The installed pack when the review is poured. A poured review keeps its step text. |
-| The review's values: its check, anchor, branch, base, reviewed commit and PR, and why it went out | The record `assets/scripts/gate-ensure.sh` writes on the review bead and passes to the pour as formula vars | Fixed at dispatch |
+| The review's steps | The pack's formulas. Each rig's `.beads/formulas` entry for one is a link Gas City makes into the installed pack. | The installed pack when each formula is poured. A poured formula keeps its step text. |
+| The review's values: the bead that owns the PR, its branch and target, and each check with the head it judges | The landing order, which starts the review, and the review itself, which starts each check | Fixed when the review starts, and for each check when that check starts |
 | The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the var `gc sling` adds to every pour. | The installed pack when the reviewer loads it |
 | The specialist stance, the skill `gc-toolkit.specialist-stance`, held by arch, demo, pm and a check of the rig's own | The reviewer's skill catalog | The installed pack when the reviewer loads it |
 | The architecture-document standard, the skill `gc-toolkit.architecture-document`, which the arch method holds the rig's architecture document to | The reviewer's skill catalog | The installed pack when the reviewer loads it |
@@ -244,8 +252,8 @@ pack's check index and a rig's are layered. `review-checks.sh` resolves both
 for every reader of the index, not only the review, and every reader takes the
 rig's rows at the commit it judges. [skills.md](skills.md) states how a pack
 skill is named and surfaced, and `gc skill list` prints the file each catalog
-entry points at. The method-load paragraph of `formulas/mol-review.toml` states
-which skill a review loads, and what the reviewer does when its catalog has
+entry points at. The method-load paragraph of the formula a check runs states
+which skill the check loads, and what its reviewer does when the catalog has
 none.
 
 - **A rig supplies no skill to a review.** The review names the method and the
@@ -253,9 +261,7 @@ none.
   installed pack. Skills a rig's repository carries for its own agents can
   appear in a reviewer's skill list, and no review step names one. A check that
   a rig's index declares, and that the pack ships no skill for, is judged
-  against the purpose its row states, with the specialist stance held. A check
-  no index declares is approved with `--needs-you`, so the operator decides
-  whether it stays in the anchor's `check_set`.
+  against the purpose its row states, with the specialist stance held.
 - **A rig's guidance is read at the reviewed commit, not from the rig's
   default branch,** so a branch is judged against the guidance it carries. A
   guidance fix merged on the default branch reaches an open PR when that PR
@@ -266,9 +272,7 @@ none.
   copy, not its own. A branch that edits `review-checks.toml` or a
   `docs/review-<check>.md` is reviewed under its own edit, because that
   guidance is read at the reviewed commit. The index's rows at that commit are
-  laid over the installed copy's. In any rig, `signoff.sh` refuses a
-  correctness approve on a change that edits its own review guidance until
-  `--needs-you` names the edit to the person who approves the merge.
+  laid over the installed copy's.
 - **Only a skill's catalog name reaches its installed copy.** A path such as
   `skills/<name>/SKILL.md` resolves against whatever tree the agent stands in:
   another rig's checkout, or in gc-toolkit a reviewer's home worktree or the
@@ -482,3 +486,16 @@ why a reader must know it, and the work that retires it.
   files a rework a polecat runs. A unit that waits on the review-lanes member
   (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it
   (tk-e70808f).
+- **A PR's checks still run as review beads.** Until a rig's cutover, the merge
+  cadence sends each check on a PR there out as a review bead, `signoff.sh`
+  records its verdict and files its findings, and a validation pass rules them
+  for a rework child to fix, so step 7 is not what runs there. On that path a
+  check no index declares is approved with `--needs-you`, so the operator
+  decides whether it stays in the anchor's `check_set`, and `signoff.sh`
+  refuses a correctness approve on a change that edits its own review guidance
+  until `--needs-you` names the edit to the person who approves the merge. The
+  review run is not built yet. The review-lanes member (tk-1tfzr71.22) builds
+  it in the units its implementation child (tk-1tfzr71.109) files. Each rig's
+  cutover bead then moves the rig onto it, and a retirement bead that child
+  files deletes the old path once every rig has moved and the GitHub intake
+  (tk-1tfzr71.21) has landed.
