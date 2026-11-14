@@ -400,14 +400,23 @@ FNR == 1 { emit(); hub = FILENAME; sub(/.*\//, "", hub) }
 { L[++nl] = $0 }
 END { emit() }'
 
+# incomplete <dir> — says that a scan of <dir> could not read a file it listed.
+incomplete() { err "cannot read every note in $1; nothing there is removed, and its list stays as it is"; }
 # scan <dir> <work> — the directory as <work>/files.tsv (name, hash, mtime of
 # each note and collection note) and <work>/units.tsv (kind, name, hash for
-# the list, full hash, mtime, entry text file).
+# the list, full hash, mtime, entry text file). 1 when it cannot list the
+# directory or read each file the listing names, as it says: a scan that is not
+# whole would read as notes gone, so every caller leaves the list as it is.
 scan() {
   local dir=$1 w=$2 f n i
   local -a all=() notes=() hubs=()
-  rm -rf "$w"; mkdir -p "$w/e" "$w/s" || return 1
+  rm -rf "$w"; mkdir -p "$w/e" "$w/s" || { err "cannot make $w, so $dir is not read"; return 1; }
   : > "$w/files.tsv"; : > "$w/units.tsv"
+  if ! find "$dir" -maxdepth 1 -type f -name '*.md' -print0 > "$w/found" 2>/dev/null \
+     || ! LC_ALL=C sort -z "$w/found" > "$w/listed"; then
+    err "cannot list $dir; nothing there is removed, and its list stays as it is"
+    return 1
+  fi
   while IFS= read -r -d '' f; do
     n=${f##*/}
     case "$n" in
@@ -416,20 +425,25 @@ scan() {
     esac
     all+=("$f")
     case "$n" in hub-*.md) hubs+=("$f") ;; *) notes+=("$f") ;; esac
-  done < <(find "$dir" -maxdepth 1 -type f -name '*.md' -print0 2>/dev/null | LC_ALL=C sort -z)
+  done < "$w/listed"
   [ "${#all[@]}" -gt 0 ] || return 0
   "${SHA[@]}" "${all[@]}" > "$w/sha.out" 2>/dev/null
   "${MTIME[@]}" "${all[@]}" > "$w/mt.out" 2>/dev/null
   awk 'FNR == NR { h[substr($0, 67)] = substr($0, 1, 64); next }
        { i = index($0, " "); p = substr($0, i + 1); if (p in h) { n = p; sub(/.*\//, "", n); print n "\t" h[p] "\t" substr($0, 1, i - 1) } }' \
     "$w/sha.out" "$w/mt.out" > "$w/files.tsv"
+  # A file joins files.tsv only with both its hash and its mtime, so a row
+  # short of the listing is a file that could not be read.
+  [ "$(grep -c . "$w/files.tsv")" = "${#all[@]}" ] || { incomplete "$dir"; return 1; }
   if [ "${#notes[@]}" -gt 0 ]; then
     # A note's list hash leaves out its use lines.
     for i in "${!notes[@]}"; do : > "$w/s/$i"; done
-    LC_ALL=C awk -v W="$w/s/" -v RE="$USE_AWK_RE" '
+    if ! LC_ALL=C awk -v W="$w/s/" -v RE="$USE_AWK_RE" '
       BEGIN { for (j = 1; j < ARGC; j++) idx[ARGV[j]] = j - 1 }
       FNR == 1 { if (out != "") close(out); out = W idx[FILENAME] }
-      $0 !~ RE { print > out }' "${notes[@]}"
+      $0 !~ RE { print > out }' "${notes[@]}"; then
+      incomplete "$dir"; return 1
+    fi
     "${SHA[@]}" "$w"/s/* > "$w/base.out" 2>/dev/null
     printf '%s\n' "${notes[@]}" > "$w/notes.lst"
     awk -F'\t' -v W="$w/s/" '
@@ -439,7 +453,7 @@ scan() {
       "$w/base.out" "$w/notes.lst" "$w/files.tsv" >> "$w/units.tsv"
   fi
   if [ "${#hubs[@]}" -gt 0 ]; then
-    LC_ALL=C awk -v W="$w" "$ENTRY_AWK" "${hubs[@]}" > "$w/entries.raw"
+    LC_ALL=C awk -v W="$w" "$ENTRY_AWK" "${hubs[@]}" > "$w/entries.raw" || { incomplete "$dir"; return 1; }
     if [ -s "$w/entries.raw" ]; then
       "${SHA[@]}" "$w"/e/* > "$w/entry.out" 2>/dev/null
       awk -F'\t' -v W="$w/e/" '
@@ -963,7 +977,7 @@ due_all() {  # prints the due rows of every directory
   local dir i=0
   for dir in "${DIRS[@]}"; do
     i=$((i + 1))
-    scan "$dir" "$WORK/due.$i" || { err "cannot read $dir"; continue; }
+    scan "$dir" "$WORK/due.$i" || continue
     due_rows "$dir" "$WORK/due.$i"
   done
 }

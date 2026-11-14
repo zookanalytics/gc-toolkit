@@ -340,17 +340,33 @@ eq "$(sed -n '1,/^<!-- \/memory-intake -->$/p' "$G1/MEMORY.md")" "$(sed -n '1,/^
 eq "$(sed -n '1,3p;4p' "$G2/MEMORY.md" | tr '\n' '|')" "---|title: index|---|<!-- memory-intake: rewritten from the gc-toolkit pack each run -->|" "the block follows front matter"
 eq "$(tail -1 "$G2/MEMORY.md")" "# Index" "and the index keeps the rest"
 
-echo "── a listing that was not read takes out no link ──"
+echo "── a directory that cannot be listed keeps its links and every judgment ──"
 city unread
 rig u tk
 U=$(memdir "$B/rigs/u")
+echo '[{"id": "tk-p1", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]' > "$B/rigs/u/beads.json"
 printf 'u lesson.\n' > "$U/u.md"
+printf 'w lesson.\n' > "$U/w.md"
 printf '# Memory Index\n\n- [U](u.md) — u\n' > "$U/MEMORY.md"
+run read
+apply_lines "$(ref_of u.md) waits tk-p1" "$(ref_of w.md) next 2026-12-01"
+eq "$RC" 0 "one note waits on its pattern and one on a date"
+LIST=$(find "$STATE" -name list.tsv); cp "$LIST" "$B/list.before"
 chmod 300 "$U"   # its files open by name, but the directory cannot be listed
 run read
 chmod 700 "$U"
 has "$(cat "$U/MEMORY.md")" "- [U](u.md) — u" "the index keeps its links"
 has "$ERR" "the links in $U/MEMORY.md were not tidied" "and says so"
+eq "$RC" 1 "the read fails"
+has "$ERR" "cannot list $U; nothing there is removed, and its list stays as it is" "saying it cannot list the directory"
+eq "$(cmp -s "$LIST" "$B/list.before" && echo same || echo changed)" "same" "and its list reads back unchanged"
+eq "$(due_json --count)" 0 "so the wait and the date hold once it can be listed"
+chmod 000 "$U/w.md"   # listed, but its text cannot be read
+run read
+chmod 644 "$U/w.md"
+has "$ERR" "cannot read every note in $U" "a note that cannot be read stops the read of its directory"
+eq "$(cmp -s "$LIST" "$B/list.before" && echo same || echo changed)" "same" "and its list stays as it was"
+eq "$(due_json --count)" 0 "with every judgment held"
 
 # ── waits that end ─────────────────────────────────────────────────────────
 echo "── a wait ends once its pattern's fix has landed ──"
