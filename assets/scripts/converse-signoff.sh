@@ -49,16 +49,26 @@
 # question of that PR to the ruling just as an open-PR subject does.
 #
 # A ruling is not an approval: the merge counts only an Approve review on GitHub
-# from an account other than the city's (review-verdict.sh). So the headline
-# says when an open PR the ruling leaves standing still needs one, naming one PR
-# and counting several so the clause fits the cap, and a printed line gives the
-# sitting each PR's link. The reviews are read before the first write, each call
-# bounded at 20 seconds, so a stalled read cannot hold the ruling's writes. A PR
-# whose reviews do not read counts as needing one: a needless ask costs a glance,
-# and a missed one leaves the PR unmerged. A standing request for changes holds
-# the merge whatever approval stands, so a PR with both needs no Approve, and its
-# line names whose request holds it. The sign-off cannot tell which login is the
-# operator's, so each line reads true whichever it is.
+# from an account other than the city's. So the headline says when an open PR
+# the ruling leaves standing still needs one, naming one PR and counting several
+# so the clause fits the cap, and a printed line gives the sitting each PR's
+# link. Whether one is still needed is read from the PR's status, the one its
+# status: label shows (`gctk pr status`). needs-review means a person's review is
+# all that is left: an Approve, or a request for changes, which holds the merge
+# whatever approval stands until its author approves or it is dismissed. A PR
+# the city is still changing or landing, or one a person must clear first, asks
+# for no Approve yet. For a PR on the pending record the status also carries the
+# evaluator's conditions, which say whether an approval stands and name the
+# account behind each standing request for changes. A PR whose approval stands
+# needs no Approve, and its line names whose request holds its merge. A request
+# beside no approval is named on the line too. The sign-off cannot tell which
+# login is the operator's, so each line reads true whichever it is. A status
+# with no conditions, as on the old record, does not say whether an approval
+# stands, so needs-review there asks for one. The statuses are read before the
+# first write, each call bounded at 20 seconds, since a PR on the pending record
+# is read from GitHub, so a stalled read cannot hold the ruling's writes. A PR
+# whose status does not read counts as needing one: a needless ask costs a
+# glance, and a missed one leaves the PR unmerged.
 #
 # A sitting that stays for the return (--stay) runs steps 1 to 4 as a sign-off
 # does, so the record is as complete as a sign-off leaves it: the subject's
@@ -163,10 +173,11 @@
 #     every other gate as it is, so --ruled no and --leave are refused beside
 #     it.
 #   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
-#     does to an already-published PR it reaches: the subject at
-#     merge_result=pull_request, the PR whose merge this conversation holds,
-#     the anchor that depends on the conversation through a blocks edge, and
-#     each bead at merge_result=pull_request that a human gate the ruling
+#     does to an already-published PR it reaches: the subject when it owns an
+#     open PR (merge_result pull_request, or pull_request_pending or
+#     pull_request_head_changed on the pending record), the PR whose merge this
+#     conversation holds, the anchor that depends on the conversation through a
+#     blocks edge, and each bead owning an open PR that a human gate the ruling
 #     answers releases, while the gate is open or once this ruling's own answer
 #     has closed it, so a re-run reaches the PRs an earlier attempt did. A
 #     ruling that reaches one must give one of them;
@@ -312,6 +323,11 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "$HERE/bd-lib.sh" || { echo "converse-signoff: cannot source bd-lib.sh from $HERE" >&2; exit 2; }
 DIE_STATUS=2
+# The arm of a subject's validating closer is gctk's, from the binary the city
+# builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # stopped <why> — refuse the sign-off (exit 1). Whatever ran before it is a write
 # a re-run repeats safely.
 stopped() {
@@ -371,13 +387,9 @@ pr_label() {
 # with gc-helm.sh dismiss. Exposes work_outcome_noop.
 # shellcheck source=work-outcome.sh
 . "$HERE/work-outcome.sh" || die "cannot source work-outcome.sh from $HERE"
-# The one definition of the approval rule the merge lands on. Exposes
-# $REVIEW_VERDICT_DEF.
-# shellcheck source=review-verdict.sh
-. "$HERE/review-verdict.sh" || die "cannot source review-verdict.sh from $HERE"
-# How the pack reads the host and repository of a PR's url. Exposes pr_coords.
-# shellcheck source=review-dismissal.sh
-. "$HERE/review-dismissal.sh" || die "cannot source review-dismissal.sh from $HERE"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # The one definition of a dispatch path, the route or the arm that sends a bead
 # on once nothing holds it. Exposes $DISPATCH_PATH_JQ.
 # shellcheck source=dispatch-path.sh
@@ -526,7 +538,7 @@ fi
 # any gate it answers releases the merge, or an approved PR lands first. Only
 # the sitting knows a ruling's consequence, so a ruling must answer the question
 # for each open PR it reaches: the subject when it is one, the PR whose merge
-# the conversation holds, and each bead at merge_result=pull_request that a
+# the conversation holds, and each bead that owns an open PR (open_pr_row) that a
 # human gate the ruling answers releases, such as an epic member whose gate the
 # epic's sitting answers, or the other PR behind a gate about two. A
 # conversation about an open PR holds its merge through the anchor's blocks
@@ -544,6 +556,15 @@ fi
 # from an open PR either.
 PR_ANCHORS=()
 GATE_WAITERS='{}'
+# open_pr_row <row> — 0 when the row's bead owns an open PR: merge_result
+# pull_request, or pull_request_pending or pull_request_head_changed on Gas
+# Town's pending record.
+open_pr_row() {
+  case "$(printf '%s' "$1" | jq -r '.metadata.merge_result // ""' 2>/dev/null)" in
+    pull_request|pull_request_pending|pull_request_head_changed) return 0 ;;
+  esac
+  return 1
+}
 reaches_pr() { # <bead> — 0 when the ruling already reaches it as an open PR
   local p
   for p in "${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}"; do [ "$p" = "$1" ] && return 0; done
@@ -554,7 +575,7 @@ if [ "$RULED" = yes ]; then
     [ -n "$PR_ANSWER" ] || die "could not read $SUBJECT to tell whether it is an open PR; nothing was written. Re-run with --rework, --no-rework or --retire <kind>"
     stopped "could not read $SUBJECT to tell whether it is an open PR, which decides the PR the ruling's answer acts on; nothing was written"
   fi
-  [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$SUBJECT")
+  open_pr_row "$SUBJECT_ROW" && PR_ANCHORS+=("$SUBJECT")
   HELD=$(gc bd dep list "$CONVERSATION" --direction=up --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
     | jq -ce 'if type == "array" then [ .[] | objects ] else error("unread") end' 2>/dev/null) \
     || stopped "the beads that depend on conversation $CONVERSATION could not be read, and an open PR whose merge it holds could be among them; nothing was written"
@@ -562,7 +583,7 @@ if [ "$RULED" = yes ]; then
     reaches_pr "$b" && continue
     BROW=$(show_row "$b") \
       || stopped "$b, which depends on conversation $CONVERSATION, could not be read to tell whether it is an open PR whose merge the conversation holds; nothing was written"
-    [ "$(printf '%s' "$BROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$b")
+    open_pr_row "$BROW" && PR_ANCHORS+=("$b")
   done
   for g in $TO_ANSWER; do
     printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
@@ -578,15 +599,15 @@ if [ "$RULED" = yes ]; then
       reaches_pr "$b" && continue
       BROW=$(show_row "$b") \
         || stopped "$b, which gate $g releases, could not be read to tell whether it is an open PR; nothing was written"
-      [ "$(printf '%s' "$BROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$b")
+      open_pr_row "$BROW" && PR_ANCHORS+=("$b")
     done
   done
 fi
 PR_LIST="${PR_ANCHORS[*]+"${PR_ANCHORS[*]}"}"
 if [ "$RULED" = yes ] && [ -z "$PR_ANSWER" ] && [ -n "$PR_LIST" ]; then
   [ "$PR_LIST" != "$SUBJECT" ] \
-    || die "$SUBJECT is an open PR (merge_result=pull_request), so a ruling on it must say what it does to the PR; nothing was written. Re-run with --rework to file the rework its branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land"
-  die "this ruling reaches $PR_LIST at merge_result=pull_request, as its subject, as the PR whose merge this conversation holds, or as a bead a gate it answers releases, so it must say what it does to each open PR; nothing was written. Re-run with --rework to file the rework a branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land, and with --pr-anchor <bead> to name the one --rework or --retire acts on when it reaches more than one"
+    || die "$SUBJECT is an open PR, so a ruling on it must say what it does to the PR; nothing was written. Re-run with --rework to file the rework its branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land"
+  die "this ruling reaches $PR_LIST, each an open PR, as its subject, as the PR whose merge this conversation holds, or as a bead a gate it answers releases, so it must say what it does to each open PR; nothing was written. Re-run with --rework to file the rework a branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land, and with --pr-anchor <bead> to name the one --rework or --retire acts on when it reaches more than one"
 fi
 # --rework and --retire act on one open PR: the one the ruling reaches, the one
 # --pr-anchor names when it reaches more than one, or else the subject, which
@@ -844,33 +865,33 @@ fi
   || die "--close-brief is the claim $SUBJECT's validating closer checks once the work it waits on lands, and none of --waiting-on${WAIT_IDS:+ ($WAIT_IDS)} is work in $SUBJECT's own store, a bead that is no gate, so no closer is armed; nothing was written. Drop --close-brief"
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
 
-# gh_bounded <args...> — gh, stopped after 20 seconds. A call stopped that way exits
-# non-zero, as one that failed does. A host with neither timeout tool makes no call
-# and exits non-zero too, so every PR left standing reads as one whose reviews did
-# not read, an approved one included: the sign-off exists to get a ruling's writes
-# down, and an unbounded call ahead of them could hold them.
-gh_bounded() {
+# pr_status <bead> — what `gctk pr status` says of the PR the bead owns, as one
+# line of words: the status; then `owed` when its conditions name a missing
+# approval, `stands` when they name none, or `untold` when the status carries no
+# conditions, as one on the old record does; then the login of each account
+# whose request for changes stands, which the conditions name only on the
+# pending record. The call is stopped after 20 seconds, and one stopped that way
+# exits non-zero, as one that failed does. A host with neither timeout tool
+# makes no call and exits non-zero too, so every PR left standing reads as one
+# whose status did not read: the sign-off exists to get a ruling's writes down,
+# and an unbounded call ahead of them could hold them. Prints nothing when the
+# status does not read.
+pr_status() {
   local t
+  [ -x "$GCTK" ] || return 1
   for t in timeout gtimeout; do
     command -v "$t" >/dev/null 2>&1 || continue
-    "$t" -k 5 20 gh "$@" </dev/null
+    "$t" -k 5 20 "$GCTK" pr status "$1" --json </dev/null 2>/dev/null | scrub | jq -er '
+      select((.status | type) == "string" and .status != "")
+      | [.status,
+          (.conditions | if type != "array" then "untold"
+            elif any(.[]; .kind == "approval") then "owed" else "stands" end)]
+        + [.conditions | arrays | .[] | select(.kind == "changes-requested")
+            | .value | strings | select(. != "")]
+      | join(" ")' 2>/dev/null
     return
   done
   return 1
-}
-# pr_approval <pr-url> <pr-number> <bring_current_lifted_at> — what the rule the
-# merge lands on finds, as a word and the login it names for a standing request
-# for changes: `approved` when an approval stands and no request does, `vetoed
-# <login>` when both do, and `owed [<login>]` when no approval stands. Non-zero,
-# printing nothing, when the reviews do not read.
-pr_approval() {
-  local self reviews
-  pr_coords "$1" "$2" || return 1
-  self=$(gh_bounded api --hostname "$PR_HOST" user --jq '.login' 2>/dev/null) && [ -n "$self" ] || return 1
-  reviews=$(gh_bounded api --hostname "$PR_HOST" --paginate "repos/$PR_REPO/pulls/$2/reviews?per_page=100" --jq '.[]' 2>/dev/null) || return 1
-  printf '%s' "$reviews" | scrub | jq -sr --arg self "$self" --arg lifted "$3" "$REVIEW_VERDICT_DEF"'
-    review_verdict($self; $lifted)
-    | "\(if .approver == "" then "owed" elif .veto == "" then "approved" else "vetoed" end) \(.veto)"' 2>/dev/null
 }
 APPROVE_OWED=()
 APPROVE_TELL=()
@@ -881,24 +902,33 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do
   P_URL=$(printf '%s' "$PROW" | jq -r '.metadata.pr_url // .metadata.existing_pr // ""')
   P_NUM=$(printf '%s' "$PROW" | jq -r '.metadata.pr_number // "" | tostring')
   [ -n "$P_NUM" ] || P_NUM=$(printf '%s' "$P_URL" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
-  P_LIFTED=$(printf '%s' "$PROW" | jq -r '.metadata.bring_current_lifted_at // ""')
-  P_READ=$(pr_approval "$P_URL" "$P_NUM" "$P_LIFTED") || P_READ=""
-  P_VETO="${P_READ#* }"
-  P_READ="${P_READ%% *}"
-  [ "$P_READ" != approved ] || continue
+  P_READ=$(pr_status "$p") || P_READ=""
+  P_WORDS=()
+  [ -z "$P_READ" ] || read -r -a P_WORDS <<<"$P_READ"
+  case "${P_WORDS[0]:-}" in ""|needs-review) ;; *) continue ;; esac
   P_NAME="PR #$P_NUM"
   [ -n "$P_NUM" ] || P_NAME="$p's PR"
-  case "$P_READ" in
-    vetoed)
-      P_SAYS="An approval stands on $P_NAME, and a request for changes from $P_VETO holds its merge until $P_VETO approves or the request is dismissed. This ruling does neither." ;;
-    owed)
-      APPROVE_OWED+=("$P_NAME")
-      P_SAYS="$P_NAME still needs the operator's Approve review on GitHub before it can merge, and this ruling does not count as one."
-      [ -z "$P_VETO" ] || P_SAYS="$P_SAYS A request for changes from $P_VETO also stands: the operator's Approve replaces it only if $P_VETO is their own account, and otherwise it holds the merge until $P_VETO approves or the request is dismissed." ;;
-    *)
-      APPROVE_OWED+=("$P_NAME")
-      P_SAYS="The reviews of $P_NAME could not be read, so its merge may still need the operator's Approve review on GitHub, and this ruling does not count as one." ;;
-  esac
+  if [ -z "${P_WORDS[0]:-}" ]; then
+    APPROVE_OWED+=("$P_NAME")
+    P_SAYS="The status of $P_NAME could not be read, so its merge may still need the operator's Approve review on GitHub, and this ruling does not count as one."
+  elif [ "${P_WORDS[1]:-}" = stands ] && [ "${#P_WORDS[@]}" -gt 2 ]; then
+    # An approval stands, and each request for changes the status names holds
+    # the merge until its author approves or it is dismissed.
+    P_SAYS="An approval stands on $P_NAME, and a request for changes from ${P_WORDS[2]} holds its merge until ${P_WORDS[2]} approves or the request is dismissed."
+    for ((P_I = 3; P_I < ${#P_WORDS[@]}; P_I++)); do
+      P_SAYS="$P_SAYS A request for changes from ${P_WORDS[$P_I]} also holds it until ${P_WORDS[$P_I]} approves or the request is dismissed."
+    done
+    P_SAYS="$P_SAYS This ruling does neither."
+  else
+    # No approval stands, or the status does not say whether one does, so the
+    # Approve is asked. A request the status names beside it is the operator's
+    # to replace only when it is their own.
+    APPROVE_OWED+=("$P_NAME")
+    P_SAYS="$P_NAME still needs the operator's Approve review on GitHub before it can merge, and this ruling does not count as one."
+    for ((P_I = 2; P_I < ${#P_WORDS[@]}; P_I++)); do
+      P_SAYS="$P_SAYS A request for changes from ${P_WORDS[$P_I]} also stands: the operator's Approve replaces it only if ${P_WORDS[$P_I]} is their own account, and otherwise it holds the merge until ${P_WORDS[$P_I]} approves or the request is dismissed."
+    done
+  fi
   APPROVE_TELL+=("$P_SAYS Tell them so in plain words${P_URL:+ and link it: $P_URL}")
 done
 APPROVE_CLAUSE=""
@@ -1171,7 +1201,7 @@ fi
 # the arm an earlier attempt wrote, and writes neither again.
 # The closer checks the latest close brief in the subject's notes: the last
 # `## Close brief (` heading and the lines after it, up to the next heading.
-# The notes deferred-dispatch.sh appends end it too: the arm's own note
+# The notes the arm's verbs append end it too: the arm's own note
 # follows the brief, and the record's clearing follows that once the closer
 # is sent. So the brief counts as written only when that heading is held on
 # these same waits and its lines are this brief. The same words anywhere
@@ -1198,12 +1228,12 @@ $CLOSE_BRIEF" >/dev/null 2>&1 \
   if [ -n "$CLOSER_ARMED" ]; then
     echo "$SUBJECT's validating closer is already armed"
   else
-    DD=$(pack_script deferred-dispatch.sh) \
-      || stopped "no deferred-dispatch.sh beside $0, so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
-    ( cd "$CLOSER_PATH" && GC_RIG="$CLOSER_RIG" GC_RIG_ROOT="$CLOSER_PATH" "$DD" arm "$SUBJECT" --db "$CLOSER_PATH/.beads" \
-        --target "$CLOSER_RIG/gc-toolkit.polecat" --sling-arg --on --sling-arg mol-validate-close \
-        --reason "waits for $CLOSER_WAITS, the work conversation $CONVERSATION's ruling sent; the validating closer checks it once that lands" ) \
-      || stopped "$SUBJECT's validating closer was not armed, and deferred-dispatch.sh's message above says why; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
+    [ -x "$GCTK" ] \
+      || stopped "no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is), so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
+    "$GCTK" bead arm "$SUBJECT" --db "$CLOSER_PATH/.beads" \
+        --target "$CLOSER_RIG/gc-toolkit.polecat" --on mol-validate-close \
+        --reason "waits for $CLOSER_WAITS, the work conversation $CONVERSATION's ruling sent; the validating closer checks it once that lands" \
+      || stopped "$SUBJECT's validating closer was not armed, and gctk bead arm's message above says why; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
   fi
   # A subject held for placement carries Gas City's hold:mayor, and the
   # deferred-dispatch pass sends no arm while a hold label holds its bead, so

@@ -294,7 +294,7 @@ main through the one PR the operator reviews, so do not read "landed in the
 refinery" as "main moved". There is nothing special to do, because the formula
 preserves `metadata.target`.
 
-An effort's summary task writes its landing bead's `pr_summary`, the `## Summary`
+An effort's summary task records its landing bead's PR summary, the `## Summary`
 of the effort's PR, once every bead it waits on has landed. It runs on
 `mol-polecat-report`, changes no file, and its description names the landing
 bead. This is how to write it:
@@ -302,18 +302,29 @@ bead. This is how to write it:
 1. Read the landing bead's `branch` and `target`, fetch origin, and read the
    whole branch against its target: `git log` and
    `git diff origin/<target>...origin/<branch>`.
-2. Read the `pr_summary` that each landed bead's own polecat wrote. Those beads
-   are the ones the landing bead waits on.
+2. Read the PR summary that each landed bead's own polecat recorded. Those beads
+   are the ones the landing bead waits on:
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" pr summary <landed-bead>
+```
 3. Write what the whole branch does, for the operator's merge decision. Name
    where the finished work departs from the landing bead's description: work the
    description promised that did not land, work that landed beyond it, and an
    approach that changed.
-4. Stamp it on the landing bead, with the whole branch's subject line as its title
-   (the skill `gc-toolkit.commit-conventions`):
-   `gc bd update <landing-bead> --title "<subject line>" --set-metadata pr_summary="$(cat <file>)"`.
-   Its exit decides whether both landed. Write nothing else there. The formula's
+4. Record it on the landing bead, with the whole branch's subject line as its
+   title (the skill `gc-toolkit.commit-conventions`), in one write. Its
+   exit decides whether both landed. Write nothing else there. The formula's
    write-report step then closes the task, which releases the landing bead to
    the refinery.
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" pr summary <landing-bead> --title "<subject line>" --file <file>
+```
 
 ## Work bead metadata contract
 
@@ -322,8 +333,7 @@ bead. This is how to write it:
 | `work_dir` | you (workspace-setup) | absolute worktree path — enables crash recovery |
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
 | `target` | you (submit) / caller | landing branch; a caller-set target wins, and `work-submit.sh` resolves it once |
-| `pr_summary` | you (submit), or an effort's summary task | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed; a summary task stamps its landing bead |
-| `prepare_mode` | refinery | `merge`: the branch is brought current by merging its base in, never by a rebase |
+| PR summary (`gctk pr summary`) | you (submit), or an effort's summary task | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Recorded on the ANCHOR, which on a child is not the bead you claimed; a summary task records it on its landing bead |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
 | `existing_pr` | caller/refinery | PR to reuse — leave for the refinery to validate |
 
@@ -337,6 +347,12 @@ without them, and every message a person reads about the merge is composed
 from them. A conflict you cannot resolve without guessing is a question for a
 person: push nothing and ask. The formula's workspace-setup step carries the
 exact blocks.
+
+A conflict in code the base removed is drift, not a superseded branch, when the
+branch's edits inside that code are a small share of its change: resolve it,
+and keep the rest of the work, which still applies. A branch whose purpose the
+base already removed is a falsified premise, which you decline with a gate, as
+Blocked work and human gates says.
 
 ## The claimed bead and the anchor
 

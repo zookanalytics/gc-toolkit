@@ -29,11 +29,13 @@
 #     blocks it, and that edge is the wait. A gate filed on another bead gets
 #     the work bead's own edge here, because a rework child's `related` edge to
 #     its anchor holds nothing, and the gate is then about both beads;
-#   * a deferred-dispatch arm that re-slings the work through <formula> once bd
-#     reports it ready. Clearing the gate is the "proceed" ruling: the edge
-#     clears and the next reconcile pass pours a fresh molecule. A ruling not to
-#     proceed goes through stand-down.sh, which removes the arm before it answers
-#     the gate, because bd refuses to close a bead the open gate blocks.
+#   * an arm, written by `gctk bead arm`, that re-slings the work through
+#     <formula> once bd reports it ready. Clearing the gate is the "proceed"
+#     ruling: the edge clears and the deferred-dispatch order's next pass pours
+#     a fresh molecule.
+#     A ruling not to proceed goes through stand-down.sh, which removes the arm
+#     before it answers the gate, because bd refuses to close a bead the open
+#     gate blocks.
 # The gate has to be open. A caller files it through human-gate.sh with no
 # --quiet-window, so a situation a person answered moot or benign before is
 # asked again rather than answered from the closed gate, which would leave the
@@ -51,10 +53,11 @@
 # claim the bare bead instead of the re-sling pouring a fresh molecule.
 #
 # The re-sling fires only for an open, unassigned bead: the arm refuses an
-# in_progress one, and reconcile never slings over an assignee. So a claim the
-# work bead still carries is released after the edge lands and before the arm,
-# when no live worker holds it. That is a claim in this session's name, or an
-# in_progress claim whose owner `gc session list` lists under none of its names.
+# in_progress one, and the deferred-dispatch order never slings over an
+# assignee. So a claim the work bead still carries is released after the edge
+# lands and before the arm, when no live worker holds it. That is a claim in
+# this session's name, or an in_progress claim whose owner `gc session list`
+# lists under none of its names.
 # mol-polecat-work's load-context builds over such a crashed owner's claim, and
 # this script proves the owner gone itself, so a wait asked at any step of that
 # run releases the claim without the caller naming it.
@@ -78,13 +81,10 @@
 # the first, and after an arm that did not land, the re-run arms to the pool
 # the earlier run recorded.
 #
-# Callers: work-gate.sh and work-setup.sh, the decline arms of mol-polecat-work
-# that wait for what already holds the work bead, a person or a sibling, and two
-# arms of mol-refinery-patrol's merge-push: the zero-diff guard, which makes
-# work whose check could not run three patrols in a row wait on a human gate,
-# and the arm that makes a convoy's rebuild child wait when no bead can carry
-# its PR. That work is assigned to the refinery, so the release is of a claim in
-# that session's name.
+# Callers: decline.sh, for work a worker declines until a person rules, and any
+# agent the waits skill sends here for the same; and work-gate.sh and
+# work-setup.sh, the decline arms of mol-polecat-work that wait for what already
+# holds the work bead, a person or a sibling.
 # exit: 0 the work bead waits on the gate and is armed, or is closed and needs
 #       neither · 1 the wait did not land · 2 usage
 set -uo pipefail
@@ -178,7 +178,10 @@ esac
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
-DEFERRED="${GC_DEFERRED_DISPATCH_TOOL:-$SCRIPT_DIR/deferred-dispatch.sh}"
+# The arm's verb is gctk's, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 bd_json_array() { # <bd args...> -> the array on stdout; non-zero on a failed read or a non-array payload
   local out
@@ -241,7 +244,7 @@ if [ -n "$ASSIGNEE" ]; then
       esac
     fi
     if [ -z "$RELEASE" ]; then
-      echo "$PROG: $WORK is $STATUS under $ASSIGNEE, a claim not in this session's name: $KEPT. Reconcile never slings an assigned bead, so the claim is kept and no wait was recorded" >&2
+      echo "$PROG: $WORK is $STATUS under $ASSIGNEE, a claim not in this session's name: $KEPT. The deferred-dispatch order never slings an assigned bead, so the claim is kept and no wait was recorded" >&2
       exit 1
     fi
   fi
@@ -305,6 +308,13 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+# The arm is the last write, so the binary that makes it is found before the
+# first one.
+if [ ! -x "$GCTK" ]; then
+  echo "$PROG: no gctk binary at '$GCTK' to arm the re-sling with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is); no wait was recorded" >&2
+  exit 1
+fi
+
 # `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>". A gate filed
 # on the work bead already blocks it, and bd takes that edge again as a no-op.
 if [ -z "$HELD_BY" ] && ! gc bd dep add "$WORK" "$GATE" --type=blocks </dev/null >/dev/null 2>&1; then
@@ -352,7 +362,7 @@ if ! gc bd update "$WORK" --set-metadata gc.routed_to="" --set-metadata gc.execu
   echo "$PROG: could not clear the route keys on $WORK, so the re-sling cannot be armed; it waits on $WAIT_ON unarmed" >&2
   exit 1
 fi
-if ! ARM_OUT=$("$DEFERRED" arm "$WORK" --target "$TARGET" --sling-arg --on --sling-arg "$FORMULA" \
+if ! ARM_OUT=$("$GCTK" bead arm "$WORK" --target "$TARGET" --on "$FORMULA" \
     --reason "${KEY:+waits on the ruling asked by $WAIT_ON ($KEY)}${BLOCKER:+waits on $BLOCKER}${HELD_BY:+held by a wait on $HELD_BY}" 2>&1); then
   echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on $WAIT_ON unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
   exit 1

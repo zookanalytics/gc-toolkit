@@ -1,0 +1,6 @@
+## Beads on this branch
+
+Every bead whose work is on `polecat/A`. Approving this PR approves all of them.
+
+- `A` — Investigate V2 patch timing _(opener)_
+- `B` — Lane-B migration impl _(merged in from `polecat/B`)_

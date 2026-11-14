@@ -176,9 +176,9 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
   move is the sitting's, and its sling refuses one held after the scan read it
   or named to the sling directly;
 - the deferred-dispatch pass slings no armed bead while it is held, because a
-  sling reads no hold, and `deferred-dispatch.sh list` names the label that
-  holds the arm, so `doctor/check-armed-dispatch-owed` owes that arm no
-  dispatch;
+  sling reads no hold, and its dry run (`gctk bead start-armed --dry-run`)
+  names the label that holds the arm, so `doctor/check-armed-dispatch-owed`
+  owes that arm no dispatch;
 - `gc-helm.sh place` refuses a bead that `hold:external` also holds, because a
   placement lifts only `hold:mayor`.
 
@@ -213,7 +213,7 @@ its hold, so `place` runs the writes in one order, each taking its exit:
    formula. A bead with no `hold:mayor` is refused, or reported as already
    placed when a live run, a route, an arm or an assignee shows its dispatch.
 2. It clears any route, since the `--fix` of Gas City's `hold-label-routed-to`
-   check writes one and `deferred-dispatch.sh arm` refuses a routed bead. With
+   check writes one and `gctk bead arm` refuses a routed bead. With
    `--under` it removes a relates-to link between the bead and the parent,
    which bd refuses beside a parent edge, sets the parent, and moves `--shift`
    through `queue-priority.sh move`.
@@ -222,7 +222,7 @@ its hold, so `place` runs the writes in one order, each taking its exit:
 4. It dispatches the bead to `--route`, or else to the polecat pool of the
    bead's rig, on `--on`, or else on that pool's default formula. While a
    blocker holds the bead or a parent above it, such as a park, it arms the
-   dispatch (`deferred-dispatch.sh arm`), so the run starts once nothing holds
+   dispatch (`gctk bead arm`), so the run starts once nothing holds
    the bead. Otherwise it slings.
 5. It lifts the hold, with a note saying where the bead went, in one write
    that removes each label spelling the hold, one `--remove-label` each:
@@ -346,14 +346,18 @@ direct blocker, so `merge.sh` would hold its merge and bd would refuse its close
 Parking its parent instead holds the rest of the parent's work and leaves the PR
 landing.
 
-A park leaves a rejected handoff running too. When the refinery rejects a
-handed-off bead, `rejection-repool.sh` records the `rejection_reason` on it and
-dispatches the rebuild as a fresh `mol-polecat-work` pour. A rejected convoy's
-reason and pour go to its rebuild child, which is born with no parent. The
-cascade does not reach a poured workflow, and the rejected bead is in flight, so
+A park leaves a rejected handoff running too. When the refinery sends a
+handed-off bead back, `refinery-requeue.sh` records the `rejection_reason` on it
+and dispatches the rebuild through `gc sling` as a fresh `mol-polecat-work`
+pour. A bead that records an open PR (`pull_request_head_changed`), or a convoy,
+keeps what it carries, and the reason and the pour go to a rework child on its
+branch instead. The cascade
+does not reach a poured workflow, and the rejected bead is in flight, so
 load-context holds it only by its own waits and the rebuild runs. When that
-sling fails, the script arms a retry, which deferred dispatch slings once the
-bead's own blockers close.
+sling fails, the script arms a retry. Deferred dispatch slings it once bd reports
+the bead ready, which a park on its epic delays until the park lifts, because
+bd's readiness holds a bead on its ancestors' waits whether or not its work has
+started.
 
 ### What a park holds
 
@@ -362,9 +366,9 @@ A park holds this work that has not started, in the bead and under it:
 - the bead itself and every pool-routed member, because the pool offers only
   what `bd ready` returns;
 - a member placed under the bead later, through the same cascade;
-- an armed member, because deferred dispatch slings an armed bead only when
-  `gctk bead holds` answers it clear, and a wait on any of its ancestors holds
-  work that has not started;
+- an armed member, because deferred dispatch slings an armed bead only once
+  bd reports it ready, and a wait on any of its ancestors keeps it from bd's
+  ready set;
 - a sling of the parked bead or a member onto mol-polecat-work, made by hand or
   poured before the park, until its run passes load-context. `gc sling --on`
   pours without reading any edge, so the run starts, and load-context's gate
@@ -372,9 +376,11 @@ A park holds this work that has not started, in the bead and under it:
   run and arms a re-dispatch that fires once nothing holds the bead. `park`
   names the poured workflows still at load-context.
 
-An armed member in flight keeps running, such as a rejected handoff armed for a
-retry: once a bead is in flight, as the section above says, only its own waits
-hold it.
+An armed member in flight waits too, such as a rejected handoff armed for a
+retry. Deferred dispatch sends what the pool would serve, and bd's readiness
+holds a bead in flight under a parked epic as it holds one not yet started, so
+the retry waits for the park to lift. That is the one place a park holds work in
+flight: work already running keeps running.
 
 ### Releasing a park
 
@@ -558,9 +564,11 @@ A child adopted or re-routed later keeps the shift it carries, because after its
 birth the shift is its own input, which `gc-helm.sh priority --shift` may have
 set.
 
-**Reading the approval.** For the rank, a PR is approved when its anchor rests
-in `pull_request` and the posture `pr-facts.sh` records there, `pr_posture`,
-reads `approved` at the PR head `pr-facts.sh` last read, `pr_head_oid`. The
+**Reading the approval.** For the rank, a PR is approved when its anchor owns
+an open PR, resting in `pull_request` or at `pull_request_pending` or
+`pull_request_head_changed` on the pending record, and the posture
+`pr-facts.sh` records there, `pr_posture`, reads `approved` at the PR head
+`pr-facts.sh` last read, `pr_head_oid`. The
 posture is a dated key stored as `<posture>@<oid>@<since>`
 ([state-machine.md](state-machine.md#posture)), so the priority function reads
 the part before the first `@` and compares the `<oid>` after it with
@@ -568,9 +576,13 @@ the part before the first `@` and compares the `<oid>` after it with
 longer carries, so it ranks nothing at P0. An anchor that rests anywhere else
 has no open PR to be approved, whatever posture an earlier PR left on it, and
 leaving `pull_request` clears `pr_head_oid`, so an anchor that returns counts no
-approval until `pr-facts.sh` has read its PR again. The posture is not the approval rule `merge.sh` lands on
-(`review-verdict.sh`): an unanswered review comment outranks an approval in the
-posture, and a PR whose base requires no approving review reports no review
+approval until `pr-facts.sh` has read its PR again. The pending record's
+writers clear neither key, so an anchor that leaves the record's open values
+for an exception and comes back keeps the posture its earlier head was read at
+until `pr-facts.sh` reads the PR again. The posture is not the approval rule
+`merge.sh` lands on (`review-verdict.sh`), nor the evaluator's, which the
+landing order merges on: an unanswered review comment outranks an approval in
+the posture, and a PR whose base requires no approving review reports no review
 decision, so either ranks as not approved.
 
 **Where it is written.** Each creator runs `queue-priority.sh settle` on a child
@@ -583,7 +595,7 @@ cadence arm, or the caller of `rework-child.sh` running it again.
 
 **Re-ranked when its rank moves.** The rank moves when the posture or the PR
 head `pr-facts.sh` records moves the anchor into or out of an approval at that
-head, and when the anchor leaves `pull_request`. Either way the anchor's open
+head, and when the anchor leaves the values of an open PR. Either way the anchor's open
 reviews, reworks and validation passes are settled again, with their live
 workflows. The anchor's
 `pr_finishing_settled` records the rank all of that work last settled at,
@@ -592,8 +604,8 @@ write that moves the rank marks the record `unsettled` in the same update: the
 posture and head write in `pr-facts.sh`, and every transition out of
 `pull_request`, through the lifecycle writer's `exit_sets`
 ([state-machine.md](state-machine.md#the-machine)). Every pass of `pr-facts.sh`
-compares the record of each anchor it reads in `pull_request` with the rank the
-priority function gives that anchor, one on a draft PR included: it records a
+compares the record of each anchor it reads as owning an open PR with the rank
+the priority function gives that anchor, one on a draft PR included: it records a
 draft's head though it reads no posture for it. Every full pass does the same
 for each live anchor that carries a record and rests anywhere else, whichever
 writer moved it there. While the two differ, the pass settles the work, and it
@@ -602,8 +614,9 @@ other rank turns `unsettled` before the first settle. So a settle that fails, or
 stops partway, leaves a record that a later pass settles again and that no
 return to the other rank reads as settled. `pr-facts.sh` settles the work of an
 anchor it moves out of `pull_request` in the pass that moves it, and the next
-full pass settles an anchor that another writer moved, such as a repool through
-`rejection-repool.sh`. A finding carries `anchor_bead` too, but no pool claims
+full pass settles an anchor that another writer moved, such as the landing
+order's move of a PR into one of the record's exceptions. A finding carries
+`anchor_bead` too, but no pool claims
 it, so that settle leaves it as it is.
 
 ### The pass

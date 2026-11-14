@@ -393,8 +393,8 @@ needs = ["file-implementation"]
 description = """
 File the summary task beside the subject: an ordinary task in the rig's store,
 under the subject's epic when it has one, so the epic ranks and parks it as it
-does the effort's beads (docs/steering.md). It writes the subject's
-`pr_summary`, the `## Summary` of the effort's PR, from the finished branch. Its
+does the effort's beads (docs/steering.md). It records the subject's PR
+summary, the `## Summary` of the effort's PR, from the finished branch. Its
 method is the polecat doctrine's paragraph on integration branches, and its
 description names the subject it writes for. It lands nothing, so it carries no
 `target`.
@@ -428,7 +428,7 @@ type-guarded as in file-design:
 if [ -z "$SUMMARY_TASK" ]; then
   EPIC=$(printf '%s' "$SUBJECT_JSON" | jq -r '[.[0].dependencies[]? | select(.dependency_type == "parent-child" and .issue_type == "epic") | .id] | .[0] // empty' 2>/dev/null)
   SUMMARY_ARGS=(--title "summary: the PR for $INITIATIVE" -t task -d "## Goal
-Write the pr_summary of $SUBJECT, the landing bead that carries $BRANCH to the
+Write the PR summary of $SUBJECT, the landing bead that carries $BRANCH to the
 default branch through the effort's one PR, once every bead this task waits on
 has landed.
 
@@ -483,9 +483,11 @@ child in flight and the subject with nobody, so no child can have landed while
 the subject waited on fewer than all of them.
 
 Then the subject is assigned to the rig's refinery, at the address the polecat
-handoff checks against the roster, with the notice that assignment owes
-(`deferred-dispatch.sh notify`). The refinery takes it once nothing it waits on
-is open. Then the work is dispatched: the design child is slung, `--merge mr`
+handoff checks against the roster. The refinery's patrol finds its work by the
+beads assigned to it, and the subject waits on its children and its summary
+task, so the assignee is all the hand-off needs: Gas City nudges the refinery
+when the last of them closes, and the refinery takes the subject once nothing
+it waits on is open. Then the work is dispatched: the design child is slung, `--merge mr`
 when design-gated; the implementation child is armed, so the design's closure
 sends it to the pool, or, all-in-one, slung now; and the summary task is armed
 on `mol-polecat-report`. Armed or slung, every bead the subject waits on is
@@ -522,20 +524,20 @@ case "$(printf '%s' "$DESIGN_GATED_RAW" | tr '[:upper:]' '[:lower:]' | tr -d '[:
 esac
 # <<< design-gated-resolve
 
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/deferred-dispatch.sh" ] || SCRIPTS=""
-[ -n "$SCRIPTS" ] || { echo "deferred-dispatch.sh not found in the pack" >&2; exit 1; }
-
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
 REFINERY="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
 case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool and the refinery; set GC_RIG" >&2; exit 1 ;; esac
 ```
 
 **Hand the subject over, then dispatch.** A refinery address the roster lacks,
-a subject someone else holds, or a notice that does not record stops the step
-before anything is dispatched:
+or a subject someone else holds, stops the step before anything is dispatched:
 ```bash
 # >>> setup-dispatch
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 if [ -z "$SUMMARY_ARMED" ]; then
+  [ -x "$GCTK" ] || { echo "no gctk binary at '$GCTK' to arm the implementation child and the summary task with; handing nothing over and dispatching nothing" >&2; exit 1; }
   ROSTER=$(gc agent list --json 2>/dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null) || true
   if [ -z "$ROSTER" ]; then
     echo "roster unreadable; handing $SUBJECT to $REFINERY unchecked" >&2
@@ -548,7 +550,6 @@ if [ -z "$SUMMARY_ARMED" ]; then
     "") gc bd update "$SUBJECT" --if-assignee "" --assignee "$REFINERY" || { echo "could not assign $SUBJECT to $REFINERY; dispatching nothing" >&2; exit 1; } ;;
     *) echo "$SUBJECT is assigned to $OWNER, so it is not this run's to hand to $REFINERY; dispatching nothing" >&2; exit 1 ;;
   esac
-  "$SCRIPTS/deferred-dispatch.sh" notify "$SUBJECT" --agent "$REFINERY" --reason "design-convoy: the landing bead waits on its children and its summary task" || { echo "the notice the assignment of $SUBJECT owes did not record; dispatching nothing" >&2; exit 1; }
   if [ -z "$DESIGN_ARMED" ]; then
     SLING_ARGS=(--on mol-polecat-work)
     [ "$DESIGN_GATED" = "true" ] && SLING_ARGS+=(--merge mr)
@@ -557,13 +558,13 @@ if [ -z "$SUMMARY_ARMED" ]; then
   fi
   if [ -z "$IMPL_ARMED" ]; then
     if [ "$DESIGN_GATED" = "true" ]; then
-      "$SCRIPTS/deferred-dispatch.sh" arm "$IMPL_CHILD" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "design-convoy: implementation armed behind design child $DESIGN_CHILD's approval" || { echo "deferred-dispatch arm of implementation child $IMPL_CHILD failed" >&2; exit 1; }
+      "$GCTK" bead arm "$IMPL_CHILD" --target "$POOL" --on mol-polecat-work --reason "design-convoy: implementation armed behind design child $DESIGN_CHILD's approval" || { echo "gctk bead arm of implementation child $IMPL_CHILD failed" >&2; exit 1; }
     else
       gc sling "$POOL" "$IMPL_CHILD" --on mol-polecat-work || { echo "sling of implementation child $IMPL_CHILD failed" >&2; exit 1; }
     fi
     gc bd update "$SUBJECT" --set-metadata "gc.impl_armed=1" || { echo "implementation child $IMPL_CHILD is dispatched but gc.impl_armed did not record on $SUBJECT; record it by hand before a re-run, or the re-run dispatches it again" >&2; exit 1; }
   fi
-  "$SCRIPTS/deferred-dispatch.sh" arm "$SUMMARY_TASK" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-report --reason "design-convoy: writes the pr_summary of $SUBJECT once the effort's beads have landed" || { echo "deferred-dispatch arm of summary task $SUMMARY_TASK failed" >&2; exit 1; }
+  "$GCTK" bead arm "$SUMMARY_TASK" --target "$POOL" --on mol-polecat-report --reason "design-convoy: writes the PR summary of $SUBJECT once the effort's beads have landed" || { echo "gctk bead arm of summary task $SUMMARY_TASK failed" >&2; exit 1; }
   gc bd update "$SUBJECT" --set-metadata "gc.summary_armed=1" || { echo "summary task $SUMMARY_TASK is armed but gc.summary_armed did not record on $SUBJECT; record it by hand before a re-run" >&2; exit 1; }
 fi
 # <<< setup-dispatch
@@ -578,7 +579,7 @@ the subject, the summary task, or any child yourself.
 ```
 
 **Exit criteria:** the subject is
-assigned to the refinery with its notice recorded, the design child is slung,
+assigned to the refinery, the design child is slung,
 the implementation child is armed behind the design or slung, the summary task
 is armed on `mol-polecat-report`, this step is closed, and the session is
 drained.

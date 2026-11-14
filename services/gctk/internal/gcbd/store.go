@@ -18,6 +18,9 @@ type Store interface {
 	// store does not hold is left out, since one list query answers for every
 	// bead it names. A read that fails returns a *ReadError.
 	Find(q Query) ([]Bead, error)
+	// Ready reads the beads q selects that the store reports ready, in the
+	// listing's shape. A read that fails returns a *ReadError.
+	Ready(q ReadyQuery) ([]Bead, error)
 	// Update makes one `gc bd update` of id with args, returning its output.
 	// An error is a write that did not land.
 	Update(id string, args ...string) (string, error)

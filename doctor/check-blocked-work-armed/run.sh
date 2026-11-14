@@ -6,7 +6,7 @@
 # is held out of `bd ready` by an open `blocks` edge must ALSO carry a way to be
 # dispatched once that edge clears: either `gc.routed_to` (a pool queue
 # consumes it, and bd's readiness gates the offer until the blocker closes) or
-# `gc.dispatch_when_ready` (armed, so the deferred-dispatch reconcile order
+# `gc.dispatch_when_ready` (armed, so the deferred-dispatch order's pass
 # slings it the moment bd reports it ready). Both keys come from the one
 # definition of a dispatch path, assets/scripts/dispatch-path.sh, which this
 # check sources. A blocked work bead with NEITHER is the "unrouted-and-remember"
@@ -67,8 +67,8 @@
 # reader of a gate shares, says which of them still hold. A candidate is
 # reported as unverifiable and never flagged when that listing cannot be read.
 #
-# The remedy the finding names is arming — deferred-dispatch.sh arm, which is a
-# safe universal substitute for a hand-held sling (docs/deferred-dispatch.md).
+# The remedy the finding names is arming — gctk bead arm, which is a safe
+# universal substitute for a hand-held sling (docs/deferred-dispatch.md).
 # The complement check is doctor/check-wait-is-an-edge (I1): that one asserts
 # the wait IS an edge rather than prose; this one asserts an edged wait has
 # somewhere to go. A bead can pass one and fail the other.
@@ -113,7 +113,7 @@ WORK_TYPES=" bug feature task chore spike story "
     exit 1
 }
 # What counts as a dispatch path and a dispatch hold, from the one definition
-# shared with the proactive scan, check-step-terminal and deferred-dispatch.sh.
+# shared with the proactive scan, check-step-terminal and gc-helm.sh.
 # Exposes $DISPATCH_PATH_JQ. An unsourceable one warns: without it no bead can be
 # told to have a dispatch path or a hold.
 # shellcheck source=../../assets/scripts/dispatch-path.sh
@@ -312,7 +312,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
                 continue
             fi
         fi
-        findings+=("$label bead $id [$btype]: blocked with no gc.routed_to and no gc.dispatch_when_ready — when its blocker closes it becomes ready and no pool is offered it. Arm it so it auto-resumes: deferred-dispatch.sh arm $id --target <rig>/<agent> --reason \"waits for <blocker>\" ($title)")
+        findings+=("$label bead $id [$btype]: blocked with no gc.routed_to and no gc.dispatch_when_ready — when its blocker closes it becomes ready and no pool is offered it. Arm it so it auto-resumes: gctk bead arm $id --target <rig>/<agent> --reason \"waits for <blocker>\" ($title)")
     done <<< "$cand"
 done <<< "$scopes"
 

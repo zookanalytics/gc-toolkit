@@ -2,7 +2,8 @@
 # doctor/check-state-space — I2: the anchor state space is closed.
 # Per bead store: every open bead's merge_result value is a state declared in
 # lifecycle/lifecycle.toml (built-in enum when the declaration is absent or
-# unparseable); a closed-only state (merged) on an OPEN bead is an error; and
+# unparseable) or a value of Gas Town's pending record; a closed-only state
+# (merged, or the record's mr_merged) on an OPEN bead is an error; and
 # an open bead in a declared detached state is held by nobody and offered to no
 # pool. The merge cadence drives those states, so its assignee and its
 # gc.routed_to must be empty; any value is a second driver racing the cadence.
@@ -29,6 +30,13 @@ dir="${GC_PACK_DIR:-.}"
 BUILTIN_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion"
 BUILTIN_CLOSED="merged"
 BUILTIN_DETACHED="pre_open_gate pull_request"
+# The values Gas Town's pending record gives merge_result, kept outside the
+# machine lifecycle.toml declares: services/gctk/pr/record spells them, and
+# run.test.sh holds this copy to that file. mr_merged is the record's landed
+# value, which only a closed bead carries. None is detached: the record keeps a
+# bead assigned to the refinery, blocked while its PR waits on the merge.
+RECORD_STATES="pull_request_pending pull_request_head_changed mr_merged pull_request_record_incomplete pull_request_reconcile_invalid pull_request_closed_unmerged pull_request_merged_unvalidated_head pull_request_merge_evidence_contradiction pull_request_legacy_closed_unverified pull_request_merged_close_refused"
+RECORD_CLOSED="mr_merged"
 lifecycle="$dir/lifecycle/lifecycle.toml"
 toml_array() { # <file> <key> — quoted strings of the first `<key> = [...]`
     awk -v k="$2" 'ok { print } $0 ~ ("^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\\[") { ok = 1; print }' "$1" 2>/dev/null \
@@ -43,6 +51,8 @@ fi
 [ -n "$states" ] || states=$(printf '%s\n' $BUILTIN_STATES)
 [ -n "$closed_states" ] || closed_states=$(printf '%s\n' $BUILTIN_CLOSED)
 [ -n "$detached_states" ] || detached_states=$(printf '%s\n' $BUILTIN_DETACHED)
+states=$(printf '%s\n' $states $RECORD_STATES)
+closed_states=$(printf '%s\n' $closed_states $RECORD_CLOSED)
 states_json=$(printf '%s\n' "$states" | jq -R . | jq -cs 'map(select(. != ""))')
 closed_json=$(printf '%s\n' "$closed_states" | jq -R . | jq -cs 'map(select(. != ""))')
 detached_json=$(printf '%s\n' "$detached_states" | jq -R . | jq -cs 'map(select(. != ""))')

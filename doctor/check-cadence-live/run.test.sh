@@ -494,8 +494,8 @@ grep -qF 'assets/scripts/order-cadence.sh' "$CHECK" && ok "the check sources ass
     || bad "the check sources assets/scripts/order-cadence.sh"
 
 # --- 14. the pass lock's tool resolves -------------------------------------------
-# refinery-reconcile and deferred-dispatch refuse every pass without flock, while
-# their orders keep firing, so arms 1 and 2 read healthy through it. This PATH
+# refinery-reconcile refuses every pass without flock, while its order keeps
+# firing, so arms 1 and 2 read healthy through it. This PATH
 # carries every command the test's own PATH does except flock, so the check runs
 # exactly as it would on a host that lacks it.
 OUT=$(run_check); RC=$?
@@ -511,7 +511,7 @@ if [ -e "$NOFLOCK/bash" ] && [ -e "$NOFLOCK/jq" ] && [ -e "$NOFLOCK/git" ]; then
     OUT=$(PATH="$NOFLOCK" run_check); RC=$?
     eq "$RC" "2" "no flock on PATH is an ERROR"
     has "$OUT" "flock: not found on PATH" "naming the missing tool"
-    has "$OUT" "refinery-reconcile and deferred-dispatch" "and the orders that refuse every pass without it"
+    has "$OUT" "refinery-reconcile takes its per-rig pass lock" "and the order that refuses every pass without it"
     hasnt "$OUT" "has NOT fired" "while every order still reads as firing"
 else
     bad "the flock-less PATH lacks the tools the check needs (fixture broken)"

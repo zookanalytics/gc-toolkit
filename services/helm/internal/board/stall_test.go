@@ -338,11 +338,10 @@ func TestPreOpenCheckStallReadsTheReviews(t *testing.T) {
 	}
 }
 
-// TestCheckLanes pins the lane rule merge.sh and pr-open.sh apply to a
-// check_set (lanes_of, and the gates_of pr-summary-region.sh defines): comma
-// split, every whitespace character stripped, empty tokens and the
-// none/off/approval tokens dropped case-insensitively, and each surviving name
-// kept in its declared order and case.
+// TestCheckLanes pins checkLanes's lane rule for a check_set: comma split,
+// every whitespace character stripped, empty tokens and the none/off/approval
+// tokens dropped case-insensitively, and each surviving name kept in its
+// declared order and case.
 func TestCheckLanes(t *testing.T) {
 	cases := []struct {
 		checkSet string

@@ -87,9 +87,12 @@ text before the first `-`, and runs the arm only once the edge's write exits 0.
 Each call names the follow-up's rig:
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 [ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ] \
   && gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
-  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
+  && "$GCTK" bead arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
 ```
 
 When the blocker is in another store, make the follow-up wait on a human gate
@@ -98,9 +101,12 @@ that gate. The operator clears the gate once the blocker lands. The message's
 first line is the gate's title, cut at 140 characters:
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 "$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
 <follow-up> waits for <blocker> in <its rig>. Clear this gate once <blocker> closes." \
-  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
+  && "$GCTK" bead arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
 ```
 
 ## Answer the gates
@@ -139,16 +145,20 @@ Then take the case that fits the ruling:
   the same method.** Keep the arm and the route, and send nothing yourself:
   once the gate is answered, the arm or the route sends the subject.
 - **Any other ruling**, with or without `--accept`. Withdraw the arm and the
-  route before the answer. The block below disarms an arm and clears a pool
-  route. It prints its `carries no arm and no pool route` line only once each
-  write has exited 0. Without that line, answer nothing:
+  route before the answer. The block below disarms the subject and clears a
+  pool route. The disarm runs whatever the read shows: it exits 0 once no arm
+  remains, so an arm written after the read is removed too. The block prints
+  its `carries no arm and no pool route` line only once each write has exited
+  0. Without that line, answer nothing:
 
 ```bash
 WHY="<the ruling, one line>"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 ROW=$(gc bd show "$SUBJECT" --json) \
-  && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
-  && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
-  && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
+  && ROUTE=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.routed_to"] // "") | tostring else error("unread") end') \
+  && "$GCTK" bead disarm "$SUBJECT" --reason "$WHY" \
   && { [ -z "$ROUTE" ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
   && echo "$SUBJECT carries no arm and no pool route"
 ```
@@ -265,10 +275,10 @@ Take the case that fits the ruling:
   yet, does not stop the ruling: an open PR is retired instead (below). An epic
   ruled close is the `converse-epic-review` skill's to close.
 
-**A ruling that reaches an open PR** (`merge_result=pull_request`) says what it
-does to that PR. A ruling reaches the subject's PR, the PR whose merge this
-conversation holds, and any PR that a gate the ruling answers releases. Pass
-one of these:
+**A ruling that reaches an open PR** (`merge_result` `pull_request`,
+`pull_request_pending` or `pull_request_head_changed`) says what it does to that
+PR. A ruling reaches the subject's PR, the PR whose merge this conversation
+holds, and any PR that a gate the ruling answers releases. Pass one of these:
 
 - `--rework` when the PR's branch must change (the `prs` skill);
 - `--no-rework` when the PR stands as it is;

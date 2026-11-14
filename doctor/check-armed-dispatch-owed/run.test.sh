@@ -1,32 +1,34 @@
 #!/usr/bin/env bash
 # Hermetic test for doctor/check-armed-dispatch-owed. Stub gc/bd only; no live
-# city, Dolt, or network. Covers: the OWED finding (open arm whose own blocks
-# edges closed long ago but that never dispatched), the STRANDED finding (armed
-# at a non-open status), the narrowing exemptions (still waiting on its own open
-# blocker; dispatchable only recently, within the reconcile window; armed only
-# recently, after its blockers closed; mid-dispatch via a slung marker;
-# delivered via merge_result; closed; assigned; held by a hold label, which
-# reconcile slings no bead past; capped at the configured sling-failure cap,
-# which reconcile has already escalated), the fail-closed
-# probes (unreadable blocker listing, unreadable or non-array armed listing,
-# unreadable rig list, an unresolvable blocker of the arm's own, a scan that
-# cannot report, no scratch directory), the stderr each failed read reports,
-# the hold, as the gctk this checkout builds answers it over the stub stores
-# (an arm a park holds, on its epic or two levels up, or whose epic waits on a
-# task or on a human gate, is not owed; a park or a human gate released just
-# now dates the window, and a park released before the arm was armed does not;
-# an arm in flight is held by its own waits alone; a pinned blocker holds
-# nothing, a human gate included, as a closed one does, while one in progress,
-# blocked, deferred or hooked still holds; an own edge onto a bead the store
-# does not hold, an ancestor it does not return, and a blocker on such an
-# ancestor hold nothing; an arm with a waits-for edge of its own is held and
-# noted unjudged; a failed read leaves the arms NOT checked), the
-# suspended-rig skip, and the quiet path (no armed beads). One gctk bead holds
-# call answers a store's candidates, so a store costs a fixed number of
-# queries. The stores are scanned at once, no more of them than the fan-out
-# cap, each store's read kept apart from the others', and reported in rig
-# order, and the rig and order registries are read at once. The cases that
-# assert those mechanisms assert them directly, not just the findings.
+# city, Dolt, or network. The check reads each store's arms from the start's
+# dry run, `gctk bead start-armed --dry-run`, which the suite builds from this
+# checkout and runs over the stub stores. Covers: the OWED finding (an arm the
+# next pass would start, whose own blocks edges closed long ago, that never
+# dispatched, and an arm nothing holds whose formula the start cannot resolve,
+# named with why), the STRANDED finding (armed at a non-open status, or with a
+# record that does not decode, whatever its age), the narrowing
+# exemptions (still waiting on its own open blocker; dispatchable only
+# recently, within the order's window; armed only recently, after its blockers
+# closed; delivered via merge_result; closed; assigned; held by a hold label;
+# capped at the configured sling-failure cap, which the start asks a person
+# about; a wait edge into another store, which the start holds), the
+# fail-closed probes (an unreadable armed listing, one that is not a JSON array,
+# a hold walk that cannot read, an unreadable rig list, a scan that cannot
+# report, no scratch directory), the stderr each failed read reports, the hold,
+# as the start reads it over the stub stores (an arm a park holds, on its epic
+# or two levels up, or whose epic waits on a task or on a human gate, is not
+# owed, and neither is one in flight under a park; a park or a human gate
+# released just now dates the window, and a park released before the arm was
+# armed does not; a pinned blocker holds nothing, a human gate included, as a
+# closed one does, while one in progress, blocked, deferred or hooked still
+# holds; an ancestor the store does not return, and a blocker on such an
+# ancestor, hold nothing; an arm with a waits-for edge of its own is held and
+# noted unjudged), the suspended-rig skip, and the quiet path (no armed beads).
+# One dry run reads a store, so a store costs a fixed number of queries. The
+# stores are scanned at once, no more of them than the fan-out cap, each
+# store's read kept apart from the others', and reported in rig order, and the
+# rig and order registries are read at once. The cases that assert those
+# mechanisms assert them directly, not just the findings.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -78,7 +80,30 @@ if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$1" = bd ]; then
   shift
   db=""; [ "${1:-}" = --db ] && db="${2:-}"
   name=$(basename "$(dirname "$db")")
-  [ -n "${CALL_LOG:-}" ] && printf '%s holds %s\n' "$name" "$*" >> "$CALL_LOG"
+  bd_die() { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
+  # The armed listing the dry run starts from: the store's own listing, which
+  # the listing hooks below act on.
+  case " $* " in
+    *" list "*"--has-metadata-key gc.dispatch_when_ready "*)
+      [ -n "${CALL_LOG:-}" ] && printf '%s list-armed %s\n' "$name" "$*" >> "$CALL_LOG"
+      if [ -n "${INFLIGHT:-}" ]; then
+        mkdir "${INFLIGHT:?}/${name:?}"; ls "$INFLIGHT" | wc -l | tr -d ' ' >> "$INFLIGHT.peaks"
+        sleep 1; rmdir "${INFLIGHT:?}/${name:?}"
+      fi
+      if [ -n "${BD_BARRIER_DIR:-}" ]; then
+        : > "$BD_BARRIER_DIR/$name"
+        waited=0
+        while started=("$BD_BARRIER_DIR"/*); [ "${#started[@]}" -lt "$BD_BARRIER_N" ]; do
+          [ "$waited" -lt 200 ] || exit 3
+          sleep 0.1; waited=$((waited + 1))
+        done
+      fi
+      [ "$name" = "${BD_SLOW_STORE:-}" ] && sleep "$BD_SLOW_SECS"
+      [ "$name" = "${BD_REAP_SCAN_AT:-}" ] && rm -rf "${TMPDIR:?}"/gctk-check-armed-dispatch-owed.*
+      [ "$name" = "${BD_FAIL_LIST:-}" ] && bd_die
+      [ "$name" = "${BD_BLANK_LIST:-}" ] && { printf '  '; exit 0; } ;;
+    *) [ -n "${CALL_LOG:-}" ] && printf '%s holds %s\n' "$name" "$*" >> "$CALL_LOG" ;;
+  esac
   if [ -n "${BD_ID_BARRIER_DIR:-}" ] && [ ! -e "$BD_ID_BARRIER_DIR/$name" ]; then
     : > "$BD_ID_BARRIER_DIR/$name"
     waited=0
@@ -87,9 +112,8 @@ if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$1" = bd ]; then
       sleep 0.1; waited=$((waited + 1))
     done
   fi
-  holds_die() { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
-  [ "$name" = "${BD_FAIL_BLOCKERS:-}" ] && holds_die
-  for fid in ${BD_FAIL_IDS:-}; do case " $* " in *"$fid"*) holds_die ;; esac; done
+  [ "$name" = "${BD_FAIL_BLOCKERS:-}" ] && bd_die
+  for fid in ${BD_FAIL_IDS:-}; do case " $* " in *"$fid"*) bd_die ;; esac; done
   merged="$STORES/$name.holds-store.json"
   a="$STORES/$name.armed.json"; b="$STORES/$name.blockers.json"; e="$STORES/$name.edges.json"
   jq -n --slurpfile a "$( [ -f "$a" ] && echo "$a" || echo /dev/null )" \
@@ -98,7 +122,9 @@ if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$1" = bd ]; then
     ($e[0] // []) as $E
     | (($a[0] // []) + ($b[0] // [])) | unique_by(.id)
     | map(. as $r | if has("dependencies") then . else .dependencies = [ $E[] | select(.issue_id == $r.id) ] end)' > "$merged"
-  HOLDS_STORE="$merged" exec "${HOLDS_STUB:?}" answer "$@"
+  HOLDS_STORE="$merged" "${HOLDS_STUB:?}" answer "$@"; rc=$?
+  case " $* " in *" list "*"--has-metadata-key gc.dispatch_when_ready "*) printf '%s\n' "$name" >> "${BD_DONE:-/dev/null}" ;; esac
+  exit "$rc"
 fi
 case "$1 $2" in
   "rig list") reg_barrier rigs; rc="${RIGS_RC:-0}"
@@ -117,28 +143,27 @@ case "$1 $2" in
   *) exit 0 ;;
 esac
 GC
-# The stub models the two reads the check makes, and the failure shapes the real
-# bd shows for each:
-#   * `bd list --has-metadata-key ...`  → the armed listing (per-rig fixture).
-#      Like real bd's, each row carries its own dependency edges ({issue_id,
-#      depends_on_id, type}), taken from the store's edge fixture. A fixture row
-#      that sets its own `dependencies` keeps them. BD_FAIL_LIST fails the read,
-#      and BD_BLANK_LIST answers whitespace at rc 0.
-#   * `bd list --id <csv> --all ...`     → the named beads, DROPPING ids with no
-#      row (real --id is silent about a miss): the ancestors and blockers the
-#      hold walk reads. BD_FAIL_BLOCKERS fails every such read in a store,
-#      BD_FAIL_IDS only a read naming one of its ids.
-# `bd dep list` is no read the check makes, so the stub fails it.
-# CALL_LOG, when set, gets one line per read ("<store> <read> <args>"), so a case
-# can assert what the check read. For the armed listing only, BD_BARRIER_DIR and
-# BD_BARRIER_N make each read wait until N have started (failing after 20s),
-# BD_SLOW_STORE and BD_SLOW_SECS slow one store, BD_REAP_SCAN_AT removes the
-# check's scratch from under it as a scratch reaper would, and BD_DONE gets the
-# store's name once its listing has answered. With INFLIGHT set, each listing
-# marks its store in flight for a second and appends how many stores were then
-# in flight to INFLIGHT.peaks. BD_ID_BARRIER_DIR and BD_ID_BARRIER_N hold the
-# hold walk's reads the same way, one per store. A failed read prints BD_ERR on
-# stderr when set.
+# The check's own reads are the rig and order registries. Each store is read by
+# the start's dry run, whose reads the gc stub answers through the seam
+# holds-store.stub.sh keeps, from the store its --db names: the armed rows, the
+# edge fixture and the rows the walk reads, merged.
+#   * The armed listing the dry run starts from (`bd list --has-metadata-key
+#     gc.dispatch_when_ready`): BD_FAIL_LIST fails it, and BD_BLANK_LIST answers
+#     whitespace at rc 0. BD_BARRIER_DIR and BD_BARRIER_N make each listing wait
+#     until N have started (failing after 20s), BD_SLOW_STORE and BD_SLOW_SECS
+#     slow one store, BD_REAP_SCAN_AT removes the check's scratch from under it
+#     as a scratch reaper would, and BD_DONE gets the store's name once its
+#     listing has answered. With INFLIGHT set, each listing marks its store in
+#     flight for a second and appends how many stores were then in flight to
+#     INFLIGHT.peaks.
+#   * Every other read the dry run makes: BD_FAIL_BLOCKERS fails each such read
+#     in its store, the listing included, BD_FAIL_IDS one naming any of its ids,
+#     and BD_ID_BARRIER_DIR with BD_ID_BARRIER_N holds the first read of each
+#     store until that many stores have started theirs.
+# CALL_LOG, when set, gets one line per read ("<store> list-armed <args>" for the
+# listing, "<store> holds <args>" for the rest), so a case can assert what a
+# store's scan read. A failed read prints BD_ERR on stderr when set. The bd stub
+# below answers any read the check would make itself, which none should.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 sub="$1"; shift
@@ -228,7 +253,10 @@ export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
 # from this checkout and the check runs it over the stub stores above.
 export HOLDS_STUB="$HERE/../../assets/scripts/holds-store.stub.sh" GC_NO_API=1
 GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
-export GCTK_BIN
+# The config the start's dry run reads for an arm's default formula: the pool
+# the fixtures arm for pours mol-polecat-work.
+HOLDS_CONFIG=$(jq -nc '{ok: true, config: {Agents: [{Name: "pool", Dir: "rig", DefaultSlingFormula: "mol-polecat-work"}]}}')
+export GCTK_BIN HOLDS_CONFIG
 
 # GC_CITY_PATH is pinned to a fixture city, so the dispatch budget the window is
 # derived from never comes from the AMBIENT city.toml. The check's own TMPDIR is
@@ -239,15 +267,20 @@ run_check() {
 }
 clear_stores() { rm -f "$TMP/stores/"*.json; }
 
-# Armed-bead fixtures (the check reads status + the slung/merge_result/armed_at
-# metadata off this listing, and the hold walk reads each bead's own edges off
-# it, as real `bd list --json` carries them).
+# Armed-bead fixtures (the start reads status, merge_result and the arm off this
+# listing, and the hold walk reads each bead's own edges off it, as real `bd
+# list --json` carries them).
 armed_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.armed.json"; }
 aarmed()  { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
-astatus() { printf '{"id":"%s","status":"%s","metadata":{"gc.dispatch_when_ready":"rig/pool"}}' "$1" "$2"; }
-aslung()  { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_slung":"slinging@2020-01-01T00:00:00Z"}}' "$1"; }
+astatus() { printf '{"id":"%s","status":"%s","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"2020-01-01T00:00:00Z"}}' "$1" "$2"; }
 amr()     { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","merge_result":"pull_request"}}' "$1"; }
 aassigned() { printf '{"id":"%s","status":"open","assignee":"rig/rig.refinery","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
+# amalformed <id> [armed_at] — an open arm whose sling arguments are no JSON
+# array, a record the start reports as malformed.
+amalformed() { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"not json","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
+# anoformula <id> <target> [armed_at] — an open arm that names no formula, for a
+# target the fixture config gives no agent, so the start cannot resolve one.
+anoformula() { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"%s","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "$2" "${3:-2020-01-01T00:00:00Z}"; }
 # alabelled <id> <label> — an open, unassigned arm carrying that label.
 alabelled() { printf '{"id":"%s","status":"open","labels":["learning","%s"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"2020-01-01T00:00:00Z"}}' "$1" "$2"; }
 # A capped arm: fail count defaults to the cap (3); $2 overrides it. Paired with
@@ -304,15 +337,17 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "an owed-but-not-firing arm warns (exit 1)"
 has "$OUT" "owed but not firing" "the headline names the defect"
 has "$OUT" "alpha bead a-1" "the finding names the rig and bead"
-has "$OUT" "disarm a-1" "the finding names the disarm remedy for that bead"
+has "$OUT" "gctk bead disarm a-1 --reason" "the finding names the disarm remedy for that bead, gctk's verb"
+has "$OUT" "Look: gctk bead start-armed --dry-run --db " "…and the look at the start's dry run in that rig's store"
 clear_stores
 
 # --- 2. STRANDED: armed at a non-open status ---------------------------------
 armed_store alpha "$(astatus a-2 blocked)"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "an arm at a non-open status warns (exit 1)"
-has "$OUT" "status=blocked" "the finding names the stranding status"
+has "$OUT" "it is at status blocked" "the finding names the stranding status"
 has "$OUT" "alpha bead a-2" "the stranded finding names the rig and bead"
+has "$OUT" "Return it to open, or disarm it: gctk bead disarm a-2 --reason" "the stranded finding names gctk's disarm"
 clear_stores
 
 # --- 3. EXEMPT: still waiting on its OWN open blocker ------------------------
@@ -324,7 +359,7 @@ eq "$RC" "0" "an arm with an open own blocker is correctly waiting (exit 0)"
 has "$OUT" "OK:" "the quiet headline is printed"
 clear_stores
 
-# --- 4. EXEMPT: dispatchable only recently (within the reconcile window) -----
+# --- 4. EXEMPT: dispatchable only recently (within the order's window) -------
 armed_store alpha "$(aarmed a-4)"
 edges_store alpha "$(e_blk a-4 b-0)"
 blockers_store alpha "$(b_closed b-0 "$RECENT")"
@@ -333,20 +368,12 @@ eq "$RC" "0" "an arm whose blocker closed just now is within cadence, not flagge
 hasnt "$OUT" "alpha bead a-4" "a recently-dispatchable arm is not reported"
 clear_stores
 
-# --- 5. EXEMPT: mid-dispatch (a slung marker present) ------------------------
-armed_store alpha "$(aslung a-5)"
-edges_store alpha "$(e_blk a-5 b-0)"
-blockers_store alpha "$(b_closed b-0 "$OLD")"
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "a mid-dispatch arm (slung marker) is left to reconcile, not flagged"
-clear_stores
-
 # --- 6. EXEMPT: delivered by another path (merge_result) --------------------
 armed_store alpha "$(amr a-6)"
 edges_store alpha "$(e_blk a-6 b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "an arm carrying merge_result is retired by reconcile, not flagged"
+eq "$RC" "0" "an arm carrying merge_result is retired by the start, not flagged"
 clear_stores
 
 # --- 7. EXEMPT: closed bead ---------------------------------------------------
@@ -355,7 +382,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "a closed armed bead owes no dispatch, not flagged"
 clear_stores
 
-# --- 7b. EXEMPT: an assigned (HELD) arm — reconcile will not sling over it ---
+# --- 7b. EXEMPT: an assigned (HELD) arm — the start sends no assigned bead ----
 armed_store alpha "$(aassigned a-7b)"
 edges_store alpha "$(e_blk a-7b b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
@@ -364,7 +391,7 @@ eq "$RC" "0" "an assigned (HELD) arm is not owed a dispatch, not flagged"
 hasnt "$OUT" "alpha bead a-7b" "a handed-off/held arm is not reported as owed"
 clear_stores
 
-# --- 7b'. EXEMPT: an arm a hold label holds — reconcile slings no held bead ---
+# --- 7b'. EXEMPT: an arm a hold label holds — the start sends no held bead -----
 # Its own blocker closed long ago, so without the label it is owed; the label
 # is Gas City's hold, in either value and any case, which no sling reads.
 for lbl in hold:mayor ' Hold:External'; do
@@ -383,8 +410,8 @@ OUT=$(run_check); RC=$?
 has "$OUT" "alpha bead a-7h" "a label that only resembles a hold leaves the arm owed"
 clear_stores
 
-# --- 7c. EXEMPT: a capped arm whose own blockers closed long ago — the reconcile
-#          pass already escalated it, so it is surfaced, not silent -----------
+# --- 7c. EXEMPT: a capped arm whose own blockers closed long ago — the start
+#          asks a person about it, so it is surfaced, not silent --------------
 armed_store alpha "$(acapped a-7c)"
 edges_store alpha "$(e_blk a-7c b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
@@ -403,23 +430,23 @@ eq "$RC" "1" "an arm below the cap (2 < 3) is still owed and flagged"
 has "$OUT" "alpha bead a-7d" "a sub-cap owed arm is still reported"
 clear_stores
 
-# --- 7e. the cap honors GC_MAX_DISPATCH_SLING_FAILURES, exactly as
-#          deferred-dispatch.sh reads the configured cap ----------------------
+# --- 7e. the cap honors GC_MAX_DISPATCH_SLING_FAILURES, as the arm's record
+#          reads it -----------------------------------------------------------
 armed_store alpha "$(acapped a-7e 2)"
 edges_store alpha "$(e_blk a-7e b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
 OUT=$(GC_MAX_DISPATCH_SLING_FAILURES=2 run_check); RC=$?
 eq "$RC" "0" "with the cap lowered to 2, a 2-failure arm is capped and exempt"
-hasnt "$OUT" "alpha bead a-7e" "the configured-cap override matches deferred-dispatch.sh"
+hasnt "$OUT" "alpha bead a-7e" "the configured-cap override is the start's"
 clear_stores
 
 # --- 8b. FAIL CLOSED: the blocker-status read is unreadable ------------------
 armed_store alpha "$(aarmed a-8b)"
 edges_store alpha "$(e_blk a-8b b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
-OUT=$(BD_FAIL_BLOCKERS=alpha run_check); RC=$?
-eq "$RC" "1" "an unreadable blocker listing warns (exit 1)"
-has "$OUT" "could not read what holds 1 armed bead(s)" "the blocker-listing failure is named"
+OUT=$(BD_FAIL_IDS=b-0 run_check); RC=$?
+eq "$RC" "1" "an unreadable blocker read warns (exit 1)"
+has "$OUT" "alpha bead a-8b: could not read what holds it" "the blocker read's failure is named"
 hasnt "$OUT" "owed but not firing" "an unresolved blocker set is NOT a firm finding"
 clear_stores
 
@@ -427,21 +454,21 @@ clear_stores
 armed_store alpha "$(astatus a-8e1 deferred)" "$(aarmed a-8e2)"
 edges_store alpha "$(e_blk a-8e2 b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
-OUT=$(BD_FAIL_BLOCKERS=alpha run_check); RC=$?
-eq "$RC" "1" "a stranded arm beside an unreadable blocker listing warns (exit 1)"
-has "$OUT" "alpha bead a-8e1: armed for dispatch at status=deferred" "the stranded arm is still reported"
-has "$OUT" "could not read what holds 1 armed bead(s)" "and the failed read is named"
+OUT=$(BD_FAIL_IDS=b-0 run_check); RC=$?
+eq "$RC" "1" "a stranded arm beside an unreadable blocker read warns (exit 1)"
+has "$OUT" "alpha bead a-8e1: armed for dispatch, and it is at status deferred" "the stranded arm is still reported"
+has "$OUT" "alpha bead a-8e2: could not read what holds it" "and the failed read is named"
 clear_stores
 
-# --- 8c. OWED: an edge of the arm's own onto a bead its store does not hold
-#          holds nothing, as the store judges it, so reconcile slings the arm
-#          and one still armed past the window is owed --------------------------
+# --- 8c. HELD: an edge of the arm's own onto a bead its store does not hold
+#          holds nothing in bd's readiness, so the start holds the arm itself
+#          until the wait moves into this store, and it is not owed -----------
 armed_store alpha "$(aarmed a-8c)"
 edges_store alpha "$(e_blk a-8c ghost)"
 blockers_store alpha "$(b_closed other "$OLD")"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "an arm whose only edge is into another store is owed (exit 1)"
-has "$OUT" "alpha bead a-8c: armed and nothing has held it" "it is reported owed"
+eq "$RC" "0" "an arm whose only edge is into another store is held, not owed (exit 0)"
+hasnt "$OUT" "alpha bead a-8c" "it is not reported"
 clear_stores
 
 # --- 8d. a CLOSED GATE blocker still resolves — bd list hides gates by default,
@@ -460,14 +487,14 @@ clear_stores
 armed_store alpha "$(aarmed a-9)"
 OUT=$(BD_FAIL_LIST=alpha run_check); RC=$?
 eq "$RC" "1" "an unreadable armed listing warns (exit 1)"
-has "$OUT" "could not list armed beads" "the listing failure is named"
+has "$OUT" "could not read the armed beads" "the listing failure is named"
 clear_stores
 
 # --- 9b. FAIL CLOSED: a listing that is not one JSON array is unreadable, not
 #          an empty store ------------------------------------------------------
 OUT=$(BD_BLANK_LIST=alpha run_check); RC=$?
 eq "$RC" "1" "a listing of whitespace at rc 0 warns rather than passing (exit 1)"
-has "$OUT" "alpha: could not list armed beads in $TMP/alpha/.beads (rc=0) — this store was NOT checked" "the store is named as NOT checked"
+has "$OUT" "alpha: could not read the armed beads in $TMP/alpha/.beads (gctk bead start-armed --dry-run rc=1) — this store was NOT checked" "the store is named as NOT checked"
 hasnt "$OUT" "OK:" "it never reads as a clean pass"
 
 # --- 10. FAIL CLOSED: unreadable rig list ------------------------------------
@@ -493,9 +520,9 @@ has "$OUT" "OK:" "the quiet headline is printed"
 
 # --- 13. BATCH ONCE: three owed candidates cost ONE bead read, not three -----
 #          This asserts the mechanism, not merely that three findings come back:
-#          one gctk bead holds call answers the store's three candidates, one
-#          listing of them among its reads (the far beads' is another), and
-#          the check makes no read of its own past the armed listing.
+#          one dry run reads the store, listing its arms once and reading the
+#          three in one read by id (the far beads' is another), and the check
+#          makes no read of its own past the dry run.
 armed_store alpha "$(aarmed m-1)" "$(aarmed m-2)" "$(aarmed m-3)"
 edges_store alpha "$(e_blk m-1 x-1)" "$(e_blk m-2 x-2)" "$(e_blk m-3 x-3)"
 blockers_store alpha "$(b_closed x-1 "$OLD")" "$(b_closed x-2 "$OLD")" "$(b_closed x-3 "$OLD")"
@@ -506,9 +533,8 @@ has "$OUT" "alpha bead m-1" "the first owed candidate is reported"
 has "$OUT" "alpha bead m-2" "the second owed candidate is reported"
 has "$OUT" "alpha bead m-3" "the third owed candidate is reported"
 eq "$(grep -c '^alpha list-armed ' "$CALLS")" "1" "the store's armed beads are listed once"
-eq "$(grep '^alpha list-armed ' "$CALLS" | grep -c -- '--brief')" "1" "the armed listing omits the free text"
 eq "$(grep -c '^alpha dep ' "$CALLS")" "0" "the store makes no dependency read: each arm's edges come off its listing row"
-eq "$(grep -c -E '^alpha holds --db [^ ]* list --id [^ ]*m-[123]' "$CALLS")" "1" "the three arms are read in ONE gctk bead holds call, not one call per bead"
+eq "$(grep -c -E '^alpha holds --db [^ ]* list --id [^ ]*m-[123]' "$CALLS")" "1" "the three arms are read in ONE read, not one per bead"
 eq "$(grep -c '^alpha holds --db [^ ]* list --id m-1,m-2,m-3 ' "$CALLS")" "1" "that call names every candidate once"
 eq "$(grep -vc -E '^alpha (list-armed|holds) ' "$CALLS")" "0" "the check makes no other read"
 clear_stores
@@ -613,18 +639,19 @@ edges_store alpha "$(e_pc h-7 epic-1)" "$(e_blk h-7 b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" park-1)" "$(b_gate park-1)"
 OUT=$(BD_FAIL_IDS=epic-1 run_check); RC=$?
 eq "$RC" "1" "a hold walk that cannot read warns rather than passing (exit 1)"
-has "$OUT" "could not read what holds 1 armed bead(s)" "the not-checked reason is named"
+has "$OUT" "alpha bead h-7: could not read what holds it" "the not-checked reason is named"
 hasnt "$OUT" "owed but not firing" "a failed walk is NOT reported as owed"
 clear_stores
 
-# --- 21. OWED: a bead in flight is held by its own blockers alone, so a park on
-#          its epic leaves its arm owed, and one owed past the window is flagged
+# --- 21. HELD: the start selects by bd's readiness, which holds a bead in
+#          flight under a parked epic as it holds one not yet started, so the
+#          arm waits for the park to lift and is not owed --------------------
 armed_store alpha "$(aedged h-8 epic-1 b-0 | jq -c '.metadata += {branch: "polecat/h-8", rejection_reason: "a test failed"}')"
 edges_store alpha "$(e_pc h-8 epic-1)" "$(e_blk h-8 b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" park-1)" "$(b_gate park-1)"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "an arm in flight under a parked epic is owed (exit 1)"
-has "$OUT" "alpha bead h-8" "it is reported as owed"
+eq "$RC" "0" "an arm in flight under a parked epic is held, not owed (exit 0)"
+hasnt "$OUT" "alpha bead h-8" "it is not reported"
 clear_stores
 
 # --- 22. OWED: a blocker the store does not return on an ancestor holds
@@ -700,6 +727,16 @@ eq "$RC" "0" "with no release either, the arm cannot be aged and is skipped"
 hasnt "$OUT" "alpha bead u-1" "…so it is not reported"
 clear_stores
 
+# --- 28. an armed_at to the nanosecond, as gctk bead arm writes it, dates the
+#          window as a whole second does: an arm armed just now whose own
+#          blocker closed long ago is not owed --------------------------------
+armed_store alpha "$(aedged n-1 "" b-0 | jq -c --arg t "${RECENT%Z}.123456789Z" '.metadata["gc.dispatch_when_ready_armed_at"] = $t')"
+blockers_store alpha "$(b_closed b-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an arm armed just now, to the nanosecond, whose own blocker closed long ago is not owed"
+hasnt "$OUT" "alpha bead n-1" "…so it is not reported"
+clear_stores
+
 # --- the owed window is the deferred-dispatch order's cadence window ----------
 # check-cadence-live (I10) and this check read one definition
 # (assets/scripts/order-cadence.sh): max(3×interval, one trip of the order
@@ -770,7 +807,7 @@ E=$(( $(date +%s) - S ))
 if [ "$E" -lt 12 ]; then ok "the check returns inside its 12s budget (took ${E}s)"
 else bad "the check returns inside its 12s budget (took ${E}s)"; fi
 eq "$RC" "1" "a store the budget cut warns"
-has "$OUT" "beta: could not list armed beads in $TMP/beta/.beads (rc=124) — this store was NOT checked" "the wedged store is named as cut"
+has "$OUT" "beta: could not read the armed beads in $TMP/beta/.beads (gctk bead start-armed --dry-run rc=124) — this store was NOT checked" "the wedged store is named as cut"
 has "$OUT" "alpha bead o-3" "a store scanned beside it is still judged"
 has "$OUT" "doctor budget before every store was scanned" "and it says the budget, not the data, ended the run"
 clear_stores
@@ -812,9 +849,9 @@ edges_store alpha "$(e_blk s-1 b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
 OUT=$(BD_FAIL_LIST=alpha BD_ERR="dolt: database is locked" run_check); RC=$?
 eq "$RC" "1" "a failed armed listing warns (exit 1)"
-has "$OUT" "alpha: could not list armed beads in $TMP/alpha/.beads (rc=3) — this store was NOT checked; \`gc bd list\` stderr: dolt: database is locked" "the listing warning carries \`gc bd list\` stderr"
-OUT=$(BD_FAIL_BLOCKERS=alpha BD_ERR="dolt: query timed out" run_check); RC=$?
-has "$OUT" "alpha: could not read what holds 1 armed bead(s) in $TMP/alpha/.beads — they were NOT checked; gctk bead holds: the store's read failed: gc bd list exited 3: dolt: query timed out" "the bead read's warning carries the stderr of its failed read"
+has "$OUT" "alpha: could not read the armed beads in $TMP/alpha/.beads (gctk bead start-armed --dry-run rc=1) — this store was NOT checked; gctk bead start-armed: could not list the armed beads: the store's read failed: gc bd list exited 3: dolt: database is locked" "the listing warning carries the stderr of its failed read"
+OUT=$(BD_FAIL_IDS=b-0 BD_ERR="dolt: query timed out" run_check); RC=$?
+has "$OUT" "alpha bead s-1: could not read what holds it in $TMP/alpha/.beads (what holds it could not be read, so it stays armed: the store's read failed: gc bd list exited 3: dolt: query timed out) — NOT checked" "the bead read's warning carries the stderr of its failed read"
 OUT=$(RIGS_RC=2 RIGS_ERR="rig registry: permission denied" run_check); RC=$?
 eq "$RC" "1" "a failed rig list warns (exit 1)"
 has "$OUT" "rig-map: \`gc rig list --json\` exited 2: rig registry: permission denied" "the rig-list detail carries rig-map.sh's reason, with gc's stderr"
@@ -859,6 +896,31 @@ eq "$RC" "1" "of two stores whose walks read at once, the one with an owed arm w
 has "$OUT" "beta bead k-2: armed and nothing has held it" "beta's arm is judged against beta's blockers"
 hasnt "$OUT" "alpha bead k-1" "alpha's arm is judged against alpha's blockers, which hold it"
 hasnt "$OUT" "could not read" "neither walk judges the other store's arms"
+clear_stores
+
+# --- 37. MALFORMED: an arm whose record does not decode is stranded ----------
+# The start sends no malformed arm and counts no attempt on it, so the cap never
+# asks a person about it. The check reports it at once, however recently it was
+# armed, because no wait landing will dispatch it.
+armed_store alpha "$(amalformed m-1 "$RECENT")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an arm whose record does not decode warns (exit 1)"
+has "$OUT" "alpha bead m-1: armed for dispatch, and its arm does not decode" "the finding names the bead and that its arm does not decode"
+has "$OUT" "do not decode as a JSON array of strings" "the finding names what in the record does not decode"
+has "$OUT" "Disarm it (gctk bead disarm m-1 --reason" "the finding names the disarm remedy for that bead, gctk's verb"
+clear_stores
+
+# --- 38. an arm whose formula the start cannot resolve is owed past the window
+# An arm that names no formula pours its target's default, and a target the
+# city's config gives no agent has none, so the start sends nothing and counts
+# no attempt. Nothing holds the arm, so it reads as owed once the window has
+# passed, and the finding says why it has not dispatched.
+armed_store alpha "$(anoformula f-1 rig/gone)" "$(anoformula f-2 rig/gone "$RECENT")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an old arm whose formula cannot be resolved warns (exit 1)"
+has "$OUT" "alpha bead f-1: armed and nothing has held it" "it reads as owed but not firing"
+has "$OUT" "no agent in the city's config answers to rig/gone" "the finding names why the start cannot send it"
+hasnt "$OUT" "alpha bead f-2" "one armed within the window is not flagged yet"
 clear_stores
 
 echo "── every run removes its scratch ──"

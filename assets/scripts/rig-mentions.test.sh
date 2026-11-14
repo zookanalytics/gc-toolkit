@@ -18,7 +18,8 @@
 #     when it could check nothing: no rig list, an unknown rig, no rig to judge
 #     for, a bead, file or base it cannot read, or a usage error.
 # Runs against a fake gc that serves the rig list and bead reads from JSON
-# files, with real git. No live city.
+# files, with real git and gctk built from this checkout, which reads a bead's
+# PR summary through the same fake gc. No live city.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,6 +52,13 @@ if [ "${1:-}" = rig ] && [ "${2:-}" = list ]; then
   [ "${STUB_RIGS_RC:-0}" = 0 ] || { echo "the store did not answer" >&2; exit "$STUB_RIGS_RC"; }
   cat "${STUB_RIGS:?}"; exit 0
 fi
+# gctk's read of a bead's PR summary: the rows --id names.
+if [ "${1:-}" = bd ] && [ "${2:-}" = list ]; then
+  [ "${STUB_LIST_RC:-0}" = 0 ] || { echo "the store did not answer" >&2; exit "$STUB_LIST_RC"; }
+  ids=""; shift 2
+  while [ $# -gt 0 ]; do case "$1" in --id) ids="$2"; shift 2 ;; *) shift ;; esac; done
+  jq -c --arg ids "$ids" '[.[] | select(.id as $i | $ids | split(",") | index($i))]' "${STUB_LEDGER:?}"; exit 0
+fi
 if [ "${1:-}" = bd ] && [ "${2:-}" = show ]; then
   out=$(jq -c --arg id "${3:-}" '[.[] | select(.id == $id)]' "${STUB_LEDGER:?}")
   if [ "$out" = "[]" ]; then
@@ -63,6 +71,9 @@ echo "fake gc: unexpected call: $*" >&2
 exit 1
 STUB
 chmod +x "$BIN/gc"
+harness_build_gctk
+[ -z "$GCTK_BUILD_ERR" ] || bad "$GCTK_BUILD_ERR"
+export GCTK_BIN="${GCTK_BUILT:-none}" GC_NO_API=1
 
 # The city: an HQ, the rig the change is for, two other rigs, and the three
 # rigs the pack runs on or with, each under a name the check must not report.
@@ -185,7 +196,12 @@ rc=0; out=$(run --bead ws-fresh) || rc=$?
 eq "$rc" 1 "a bead whose text names another rig exits 1"
 has "$out" "ws-fresh title:1: names rig harbor" "the title is read"
 has "$out" "ws-fresh description:2: names rig lantern" "the dispatch text is read by line"
-has "$out" "ws-fresh pr_summary:2: names bead ol-abc12 of rig orchard-lane" "the summary is read by line"
+has "$out" "ws-fresh summary:2: names bead ol-abc12 of rig orchard-lane" "the summary is read by line"
+rc=0; out=$(STUB_LIST_RC=1 run --bead ws-fresh) || rc=$?
+eq "$rc" 2 "a bead whose summary does not read checks nothing"
+has "$out" "cannot read the PR summary of bead ws-fresh" "...and says so"
+rc=0; out=$(GCTK_BIN=none run --bead ws-fresh) || rc=$?
+eq "$rc" 2 "with no gctk to read the summary, nothing is checked"
 rc=0; out=$(run --bead ws-child) || rc=$?
 has "$out" "ws-anchor description:1: names rig harbor" "a rework child is judged by its anchor's text"
 hasnt "$out" "ws-child" "...and its own text, which no pull request publishes, is not read"
