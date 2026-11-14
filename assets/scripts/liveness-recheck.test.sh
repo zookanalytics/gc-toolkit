@@ -115,7 +115,7 @@ jq -nc --argjson b "[
  ,$(bead b-held    open   '{"triage.hold":"waiting on the operator"}')
  ,$(bead b-take    open   '{"gc.takeaway":"routed — nothing further needed here"}')
  ,$(bead b-demand  open   '{"gc.takeaway":"holding — needs a decision"}' | jq -c '.dependencies = [{issue_id: "b-demand", depends_on_id: "g-1", type: "blocks"}]')
- ,$(bead b-stand   open   '{"task_kind":"feedback-pattern"}')
+ ,$(bead b-stand   open   '{"task_kind":"triage-subject"}')
  ,$(bead b-parked  open   '{}')
  ,$(bead b-marker  open   '{"merge_result":"pull_request","pr_number":"349"}')
 ]" '$b' > "$STUB_BEADS"
@@ -151,7 +151,7 @@ printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-take")] | .[0
 
 # The detail is what tells a sitting why it cannot disposition the bead: a
 # standing record has no owner to chase and no close to wait for.
-printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-stand")] | .[0].detail | test("task_kind=feedback-pattern")' >/dev/null 2>&1 \
+printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-stand")] | .[0].detail | test("task_kind=triage-subject")' >/dev/null 2>&1 \
     && ok "the standing-record detail names the kind" \
     || bad "the standing-record detail names the kind" "detail did not name task_kind"
 

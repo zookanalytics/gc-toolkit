@@ -211,7 +211,6 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"root-landed","title":"the ROOT of a spent molecule, still routed","issue_type":"task","metadata":{"gc.kind":"workflow","gc.routed_to":"rig/rig.polecat","gc.input_convoy_id":"conv-landed"}},
   {"id":"root-live","title":"the ROOT of an in-flight molecule, routed","issue_type":"task","metadata":{"gc.kind":"workflow","gc.routed_to":"rig/rig.polecat","gc.input_convoy_id":"conv-anchorlive"}},
   {"id":"c-subject","title":"triage: a scope","issue_type":"task","metadata":{"task_kind":"triage-subject"}},
-  {"id":"c-pattern","title":"a distiller cluster anchor","issue_type":"task","metadata":{"task_kind":"feedback-pattern"}},
   {"id":"c-docupdate","title":"a doc-update bead nobody routed","issue_type":"task","metadata":{"task_kind":"doc-update"}},
   {"id":"c-conv-held","title":"subject of a conversation a live sitting holds","issue_type":"task","metadata":{}},
   {"id":"c-conv-fallback","title":"subject of a held conversation under its c- alias","issue_type":"task","metadata":{}},
@@ -404,7 +403,7 @@ for r in root-landed root-live; do
 done
 
 echo "── each named class drops, each inverse-defect shape stays visible ──"
-for drop in c-routed c-subject c-pattern c-conv-held c-conv-fallback \
+for drop in c-routed c-subject c-conv-held c-conv-fallback \
             c-demand-live c-demand-widen \
             c-pr-open c-pr-case c-preopen-green c-preopen-multigreen \
             c-preopen-approval c-hold c-hold-bare c-worked c-inputconvoy \
