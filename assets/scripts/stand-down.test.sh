@@ -77,7 +77,7 @@ BIN="$TMP/bin"; mkdir -p "$BIN" "$TMP/rig/.beads" "$TMP/state"
 set -u
 S="${STUB_STORE:?}"
 case "${1:-}" in
-  rig) cat "${STUB_RIGS:?}"; exit 0 ;;
+  rig) printf '%s\n' "$(<"${STUB_RIGS:?}")"; exit 0 ;;
   session) printf '{"sessions":[]}\n'; exit 0 ;;
   sling) shift; printf '%s\n' "$*" >> "${STUB_SLING_LOG:?}"; exit 0 ;;
   bd) shift ;;
@@ -141,7 +141,7 @@ case "$verb" in
         | .dependencies = [ ($b._deps // [])[] | . as $e | ($s | map(select(.id == $e.id)) | .[0]) as $t | select($t != null)
             | {id: $e.id, dependency_type: $e.dependency_type, issue_type: ($t.issue_type // "task"), status: ($t.status // "open")} ]
         | del(._deps) ]' "$S")
-    if [ "$(printf '%s' "$out" | jq 'length')" = 0 ]; then
+    if [ "$out" = "[]" ]; then
       echo '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1
     fi
     printf '%s\n' "$out" ;;

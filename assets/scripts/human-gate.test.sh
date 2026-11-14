@@ -205,10 +205,10 @@ has "$(cat "$TMP/err")" "already asks" "it says the person is already asked"
 echo "# a gate filed on another bead that the subject waits on counts too"
 # A rework child waits on its anchor's bring-current gate through its own edge,
 # so a child-side call under the same key files nothing more.
-reset "$(task tk-anchor),$(task tk-child),$(gate g-bc bring-current-conflict open)" "tk-anchor|blocks|g-bc
+reset "$(task tk-anchor),$(task tk-child),$(gate g-bc bring-current-question.tk-child open)" "tk-anchor|blocks|g-bc
 tk-child|blocks|g-bc
 "
-out=$("$SUT" --subject tk-child --key bring-current-conflict --message m 2>/dev/null); rc=$?
+out=$("$SUT" --subject tk-child --key bring-current-question.tk-child --message m 2>/dev/null); rc=$?
 eq "$rc" 0 "exits 0"
 eq "$(creates)" 0 "nothing filed: the child already waits on the anchor's gate"
 eq "$out" "g-bc" "it names that gate"
