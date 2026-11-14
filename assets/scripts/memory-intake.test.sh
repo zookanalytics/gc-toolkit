@@ -120,6 +120,9 @@ apply_lines() { OUT=$(cd "$SB/home-rig" && printf '%s\n' "$@" | "$SUT" apply - 2
 due_json() { (cd "$SB/home-rig" && "$SUT" due "$@" 2>/dev/null); }
 ref_of() { due_json | jq -r --arg n "$1" '[.[] | select(.memory_file | endswith("/" + $n))][0].memory_ref // ""'; }
 setting() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
+# origin_head <rig> <branch> — makes the rig's checkout a repository whose
+# origin/HEAD names <branch>, as a clone records its default branch.
+origin_head() { git -C "$B/rigs/$1" init -q && git -C "$B/rigs/$1" symbolic-ref refs/remotes/origin/HEAD "refs/remotes/origin/$2"; }
 
 # ── placement: each input that moves a directory or turns memory off ───────
 echo "── placement ──"
@@ -371,10 +374,14 @@ eq "$(due_json --count)" 0 "with every judgment held"
 # ── waits that end ─────────────────────────────────────────────────────────
 echo "── a wait ends once its pattern's fix has landed ──"
 city settle
-rig s tk; rig o sl
+rig s tk; rig o sl; rig n nl
 M=$(memdir "$B/rigs/s")
-git -C "$B/rigs/o" init -q && git -C "$B/rigs/o" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
-for n in a b c d e f g i y; do printf '%s lesson.\n' "$n" > "$M/$n.md"; done
+origin_head s main
+origin_head o trunk
+# n's upstream defaults to trunk, and its checkout records no origin/HEAD.
+git init -q --bare "$B/up-n" && git -C "$B/up-n" symbolic-ref HEAD refs/heads/trunk
+git -C "$B/rigs/n" init -q && git -C "$B/rigs/n" remote add origin "$B/up-n"
+for n in a b c d e f g i y w; do printf '%s lesson.\n' "$n" > "$M/$n.md"; done
 printf -- '- (no file) An entry on P1.\n' > "$M/hub-h.md"
 printf '# Memory Index\n\n- [A](a.md) — a\n- [H](hub-h.md) — h\n' > "$M/MEMORY.md"
 cat > "$B/rigs/s/beads.json" <<'JSON'
@@ -386,13 +393,14 @@ cat > "$B/rigs/s/beads.json" <<'JSON'
  {"id": "tk-p6", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]
 JSON
 echo '[{"id": "sl-x", "status": "open"}, {"id": "sl-y", "status": "open"}]' > "$B/rigs/o/beads.json"
+echo '[{"id": "nl-w", "status": "open"}]' > "$B/rigs/n/beads.json"
 run read
 LINES=()
 for n in a b c d f g i; do
   case $n in a|i) p=tk-p1 ;; b) p=tk-p2 ;; c) p=tk-p3 ;; d) p=tk-p4 ;; f) p=tk-p5 ;; g) p=tk-p6 ;; esac
   LINES+=("$(ref_of "$n.md") waits $p")
 done
-LINES+=("$(ref_of e.md) waits sl-x" "$(ref_of y.md) waits sl-y" "$(due_json | jq -r '.[] | select(.memory_kind == "entry") | .memory_ref') waits tk-p1")
+LINES+=("$(ref_of e.md) waits sl-x" "$(ref_of y.md) waits sl-y" "$(ref_of w.md) waits nl-w" "$(due_json | jq -r '.[] | select(.memory_kind == "entry") | .memory_ref') waits tk-p1")
 apply_lines "${LINES[@]}"
 eq "$RC" 0 "every note waits on its bead"
 printf 'i lesson, changed after it was judged.\n' > "$M/i.md"
@@ -410,6 +418,7 @@ cat > "$B/rigs/s/beads.json" <<'JSON'
  {"id": "tk-f6", "status": "closed", "metadata": {"merge_result": "pull_request", "pr_url": "https://example.test/pull/6"}}]
 JSON
 echo '[{"id": "sl-x", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "trunk"}}, {"id": "sl-y", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "main"}}]' > "$B/rigs/o/beads.json"
+echo '[{"id": "nl-w", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "main"}}]' > "$B/rigs/n/beads.json"
 echo '{"https://example.test/pull/5": {"state": "OPEN", "baseRefName": "main"}, "https://example.test/pull/6": {"state": "CLOSED", "baseRefName": "main"}}' > "$STUB_PRS"
 run read
 eq "$RC" 0 "read settles the waits"
@@ -417,6 +426,8 @@ has "$OUT" "waits ended: 3 unit(s) removed with a fix landed, their text kept; 2
 left() { local n; for n in "$@"; do if [ -e "$M/$n" ]; then printf '%s:kept ' "$n"; else printf '%s:gone ' "$n"; fi; done; }
 eq "$(left a.md b.md c.md d.md e.md f.md g.md i.md y.md hub-h.md)" "a.md:gone b.md:kept c.md:kept d.md:kept e.md:gone f.md:kept g.md:kept i.md:kept y.md:kept hub-h.md:gone " \
   "a fix on the default branch removes a note; one on its way, an open pattern, a changed note and a merge off the default branch keep theirs"
+eq "$(left w.md)" "w.md:kept " "a merge into main keeps its note where origin/HEAD names no default branch"
+has "$ERR" "the origin/HEAD of $B/rigs/n names no branch, so no merge there is taken as landed and each wait on one stays; set it with git -C '$B/rigs/n' remote set-head origin --auto" "and the run names the repair"
 SD=$(find "$STATE" -mindepth 1 -maxdepth 1 -type d | head -1)
 eq "$(cat "$SD"/removed/a.md@*)" "a lesson." "a removed note's text is kept"
 hasnt "$(cat "$M/MEMORY.md")" "(a.md)" "and its index line is taken out"
@@ -436,6 +447,7 @@ echo "── a veto marks the note, its pointers and an entry in the run that en
 city veto
 rig v tk
 M=$(memdir "$B/rigs/v")
+origin_head v main
 VL=$(grep -F '<!-- memory-intake: veto -->' "$HERE/memory-guidance.md" | sed 's|<PR>|https://example.test/pull/7|')
 VM=$(grep -F '<!-- memory-intake: veto mark -->' "$HERE/memory-guidance.md" | sed 's|^<!-- memory-intake: veto mark --> ||')
 printf -- '---\nname: v\n---\nV lesson: do the vetoed thing.\n' > "$M/v.md"
@@ -498,6 +510,7 @@ echo "── a pattern whose edges were not read keeps its notes ──"
 city edges
 rig s tk
 M=$(memdir "$B/rigs/s")
+origin_head s main
 printf 'z lesson.\n' > "$M/z.md"
 echo '[{"id": "tk-p1", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]' > "$B/rigs/s/beads.json"
 run read
@@ -534,6 +547,7 @@ echo "── nothing leaves while its text cannot be kept ──"
 city keep
 rig k tk
 M=$(memdir "$B/rigs/k")
+origin_head k main
 echo '[{"id": "tk-p1", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]' > "$B/rigs/k/beads.json"
 printf 'k lesson.\n' > "$M/k.md"
 printf -- '- (no file) An entry to drop.\n- (no file) An entry that waits.\n' > "$M/hub-k.md"
@@ -577,6 +591,7 @@ echo "── a note an agent edits while it is being removed stays ──"
 city race
 rig r tk
 M=$(memdir "$B/rigs/r")
+origin_head r main
 echo '[{"id": "tk-p1", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}, {"id": "tk-p2", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]' > "$B/rigs/r/beads.json"
 for n in d s t; do printf '%s lesson.\n' "$n" > "$M/$n.md"; done
 EDITED=$(printf 'An edit made while it was being removed.')

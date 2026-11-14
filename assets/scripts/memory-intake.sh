@@ -47,7 +47,9 @@
 # mark, or an entry gains the veto line under its first line. A note that
 # waits on another bead leaves once that bead's merge lands, and is due again
 # when it closed with no merge. A merge into an integration effort's branch
-# lands with the effort's landing bead.
+# lands with the effort's landing bead. The default branch is the one the
+# checkout's origin/HEAD names. Where it names none, no merge there counts as
+# landed, so the wait stays.
 #
 # Placement follows Claude Code's storage-location rules, from this session's
 # environment, home and user settings, the managed settings, the city's
@@ -753,13 +755,32 @@ pr_state() {
     && gh pr view "$1" --json state,baseRefName -q '.state + " " + .baseRefName' </dev/null 2>/dev/null \
     || echo unknown
 }
-# landed <store> <bead row> [depth] — sets LANDED: landed (its merge is on its
-# repository's default branch), vetoed (a prompt-update whose PR closed
-# unmerged, which the distiller reads as the operator's veto; VETOED_PR names
-# the PR), none (it closed with no merge on the way there), or pending.
+# default_branch <store> — sets DEFAULT to the branch the origin/HEAD of the
+# repository at <store> names. 1 when it names none, said once a run: no
+# branch is taken for the default in its place.
+declare -A DEFAULT_OF=()
+DEFAULT=""
+default_branch() {
+  local ref
+  if [ -z "${DEFAULT_OF[$1]+x}" ]; then
+    ref=$(git -C "$1" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || ref=""
+    case "$ref" in
+      refs/remotes/origin/?*) DEFAULT_OF[$1]=${ref#refs/remotes/origin/} ;;
+      *) DEFAULT_OF[$1]=""
+         err "the origin/HEAD of $1 names no branch, so no merge there is taken as landed and each wait on one stays; set it with git -C '$1' remote set-head origin --auto" ;;
+    esac
+  fi
+  DEFAULT=${DEFAULT_OF[$1]}
+  [ -n "$DEFAULT" ]
+}
+# landed <store> <bead row> [depth] — sets LANDED: landed (its merge is on the
+# default branch its repository's origin/HEAD names), vetoed (a prompt-update
+# whose PR closed unmerged, which the distiller reads as the operator's veto;
+# VETOED_PR names the PR), none (it closed with no merge on the way there), or
+# pending.
 LANDED=pending; VETOED_PR=""
 landed() {
-  local store=$1 j=$2 depth=${3:-0} mr tgt url st lid def
+  local store=$1 j=$2 depth=${3:-0} mr tgt url st lid
   LANDED=pending; VETOED_PR=""
   [ "$(field "$j" '.status // ""')" = closed ] || return 0
   mr=$(field "$j" '.metadata.merge_result // ""')
@@ -779,8 +800,8 @@ landed() {
       esac ;;
     *) LANDED=none; return 0 ;;
   esac
-  def=$(git -C "$store" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) || def=origin/main
-  if [ "$tgt" = "${def#origin/}" ]; then LANDED=landed; return 0; fi
+  default_branch "$store" || return 0
+  if [ "$tgt" = "$DEFAULT" ]; then LANDED=landed; return 0; fi
   case "$tgt" in
     integration/?*)
       lid=${tgt#integration/}
