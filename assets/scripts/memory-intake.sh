@@ -785,7 +785,9 @@ landed() {
   [ "$(field "$j" '.status // ""')" = closed ] || return 0
   mr=$(field "$j" '.metadata.merge_result // ""')
   case "$mr" in
-    merged) tgt=$(field "$j" '.metadata.merged_target // .metadata.target // ""') ;;
+    # A landing records merged, or mr_merged on Gas Town's pending record,
+    # each beside the branch it landed on.
+    merged|mr_merged) tgt=$(field "$j" '.metadata.merged_target // .metadata.target // ""') ;;
     pull_request)
       url=$(field "$j" '.metadata.pr_url // ""')
       if [ -z "$url" ]; then

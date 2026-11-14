@@ -398,7 +398,7 @@ origin_head o trunk
 # n's upstream defaults to trunk, and its checkout records no origin/HEAD.
 git init -q --bare "$B/up-n" && git -C "$B/up-n" symbolic-ref HEAD refs/heads/trunk
 git -C "$B/rigs/n" init -q && git -C "$B/rigs/n" remote add origin "$B/up-n"
-for n in a b c d e f g i y w x; do printf '%s lesson.\n' "$n" > "$M/$n.md"; done
+for n in a b c d e f g i y w x m; do printf '%s lesson.\n' "$n" > "$M/$n.md"; done
 printf -- '- (no file) An entry on P1.\n' > "$M/hub-h.md"
 printf '# Memory Index\n\n- [A](a.md) — a\n- [H](hub-h.md) — h\n' > "$M/MEMORY.md"
 cat > "$B/rigs/s/beads.json" <<'JSON'
@@ -408,14 +408,15 @@ cat > "$B/rigs/s/beads.json" <<'JSON'
  {"id": "tk-p4", "status": "open", "metadata": {"task_kind": "feedback-pattern"}},
  {"id": "tk-p5", "status": "open", "metadata": {"task_kind": "feedback-pattern"}},
  {"id": "tk-p6", "status": "open", "metadata": {"task_kind": "feedback-pattern"}},
- {"id": "tk-p7", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]
+ {"id": "tk-p7", "status": "open", "metadata": {"task_kind": "feedback-pattern"}},
+ {"id": "tk-p8", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]
 JSON
 echo '[{"id": "sl-x", "status": "open"}, {"id": "sl-y", "status": "open"}]' > "$B/rigs/o/beads.json"
 echo '[{"id": "nl-w", "status": "open"}]' > "$B/rigs/n/beads.json"
 run read
 LINES=()
-for n in a b c d f g i x; do
-  case $n in a|i) p=tk-p1 ;; b) p=tk-p2 ;; c) p=tk-p3 ;; d) p=tk-p4 ;; f) p=tk-p5 ;; g) p=tk-p6 ;; x) p=tk-p7 ;; esac
+for n in a b c d f g i x m; do
+  case $n in a|i) p=tk-p1 ;; b) p=tk-p2 ;; c) p=tk-p3 ;; d) p=tk-p4 ;; f) p=tk-p5 ;; g) p=tk-p6 ;; x) p=tk-p7 ;; m) p=tk-p8 ;; esac
   LINES+=("$(ref_of "$n.md") waits $p")
 done
 LINES+=("$(ref_of e.md) waits sl-x" "$(ref_of y.md) waits sl-y" "$(ref_of w.md) waits nl-w" "$(due_json | jq -r '.[] | select(.memory_kind == "entry") | .memory_ref') waits tk-p1")
@@ -435,14 +436,16 @@ cat > "$B/rigs/s/beads.json" <<'JSON'
  {"id": "tk-p6", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "close_reason": "resolved: follow-ups closed", "metadata": {"task_kind": "feedback-pattern", "proposal_bead": "tk-f6"}},
  {"id": "tk-f6", "status": "closed", "metadata": {"merge_result": "pull_request", "pr_url": "https://example.test/pull/6"}},
  {"id": "tk-p7", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "metadata": {"task_kind": "feedback-pattern", "proposal_bead": "tk-f7"}},
- {"id": "tk-f7", "status": "closed", "metadata": {"merge_result": "pull_request"}}]
+ {"id": "tk-f7", "status": "closed", "metadata": {"merge_result": "pull_request"}},
+ {"id": "tk-p8", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "metadata": {"task_kind": "feedback-pattern", "eng_bead": "tk-f8"}},
+ {"id": "tk-f8", "status": "closed", "metadata": {"merge_result": "mr_merged", "merged_target": "main", "merged_sha": "8a1c0de8a1c0de8a1c0de8a1c0de8a1c0de8a1c0", "pr_state": "merged"}}]
 JSON
 echo '[{"id": "sl-x", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "trunk"}}, {"id": "sl-y", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "main"}}]' > "$B/rigs/o/beads.json"
 echo '[{"id": "nl-w", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "main"}}]' > "$B/rigs/n/beads.json"
 echo '{"https://example.test/pull/5": {"state": "OPEN", "baseRefName": "main"}, "https://example.test/pull/6": {"state": "CLOSED", "baseRefName": "main"}}' > "$STUB_PRS"
 run read
 eq "$RC" 0 "read settles the waits"
-has "$OUT" "waits ended: 3 unit(s) removed with a fix landed, their text kept; 2 due again with no fix landed" "and counts them"
+has "$OUT" "waits ended: 4 unit(s) removed with a fix landed, their text kept; 2 due again with no fix landed" "and counts them"
 left() { local n; for n in "$@"; do if [ -e "$M/$n" ]; then printf '%s:kept ' "$n"; else printf '%s:gone ' "$n"; fi; done; }
 eq "$(left a.md b.md c.md d.md e.md f.md g.md i.md y.md hub-h.md)" "a.md:gone b.md:kept c.md:kept d.md:kept e.md:gone f.md:kept g.md:kept i.md:kept y.md:kept hub-h.md:gone " \
   "a fix on the default branch removes a note; one on its way, an open pattern, a changed note and a merge off the default branch keep theirs"
@@ -450,6 +453,7 @@ eq "$(left w.md)" "w.md:kept " "a merge into main keeps its note where origin/HE
 has "$ERR" "the origin/HEAD of $B/rigs/n names no branch, so no merge there is taken as landed and each wait on one stays; set it with git -C '$B/rigs/n' remote set-head origin --auto" "and the run names the repair"
 eq "$(left x.md)" "x.md:kept " "a fix merged by a PR its record does not name keeps its note"
 has "$ERR" "tk-f7 has merge_result pull_request and no pr_url, so the wait it decides stays" "and the run says what the record lacks"
+eq "$(left m.md)" "m.md:gone " "a fix that landed through Gas Town's pending record (mr_merged) removes its note"
 SD=$(find "$STATE" -mindepth 1 -maxdepth 1 -type d | head -1)
 eq "$(cat "$SD"/removed/a.md@*)" "a lesson." "a removed note's text is kept"
 hasnt "$(cat "$M/MEMORY.md")" "(a.md)" "and its index line is taken out"
