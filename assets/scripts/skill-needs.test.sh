@@ -475,6 +475,21 @@ have "the settle step files an epic subject's decomposition as its member" \
     'created with `--parent "$SUBJECT"`' "$SETTLE"
 have "…and gives that member no --waiting-on" \
     'it gets no `--waiting-on`' "$SETTLE"
+tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-squeezed"
+# The sign-off arms a subject's validating closer only when nothing else sends
+# the subject on, and refuses a --close-brief anywhere else, so the settle skill
+# gives the brief only where a closer is armed and names each case where none
+# is, as the sign-off's own cases do.
+have "the settle skill names each subject the sign-off arms no closer for" \
+    'It arms none for an epic, whose members carry it, for the anchor of a PR (the subject carries a `merge_result`), which the refinery closes on its merge, for a subject that is assigned, at a status other than open, or still routed or armed for another dispatch, or when the ruling takes the subject'"'"'s recommendation.' "$TMP/settle-squeezed"
+have "…and leaves the brief out there, since the sign-off refuses it" \
+    'There, leave the brief out: the sign-off refuses it with nothing written, and says why it arms no closer.' "$TMP/settle-squeezed"
+have "…and its sign-off block gives the brief on that condition" \
+    'beside a --waiting-on on work, unless the sign-off arms no closer for the subject (below)' "$SETTLE"
+have "the continue skill's answer gives the brief on the same condition" \
+    'beside a --waiting-on on work, unless the sign-off arms no closer for the subject (converse-settle)' "$CONTINUE"
+lacks "…and no sentence says a wait the store refuses only warns" 'A wait the store refuses only warns' "$TMP/settle-squeezed" \
+    "the sign-off stops when takeaway cannot wire a wait"
 lacks "…and keeps no blanket rule against filing under the subject" \
     'Never file it under the subject' "$SETTLE" \
     "an epic subject's decomposition is filed as its member"
@@ -955,6 +970,12 @@ have "…and converse-settle's sign-off, whose other flags it takes, picks the P
     '# --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one' "$SETTLE"
 have "…and a stay on the subject itself is refused" \
     'A stay on the subject itself**, as when the ruling sends the subject or takes its recommendation' "$TMP/stay-squeezed"
+have "the stay example says when it takes no brief" \
+    '# no --close-brief for a subject the sign-off arms no closer for, such as an epic or a PR'"'"'s anchor' "$STAY"
+have "…which the sign-off refuses there, naming the case" \
+    'such as an epic or the anchor of a PR, where it refuses the brief and names the case' "$TMP/stay-squeezed"
+have "…and a recovery takes a brief only when one is held on its work" \
+    'The subject'"'"'s latest close brief is its `--close-brief` when the brief'"'"'s heading holds it on work that `WORK` names.' "$TMP/stay-squeezed"
 have "…so that sitting ends at the hand-off" \
     'After either of the first two refusals, end at the hand-off' "$TMP/stay-squeezed"
 SV="$TMP/stay-forms"
@@ -979,6 +1000,7 @@ else
         rm -f "$SV/stay"
         (cd "$TMP/away" && env -u BASH_ENV -u ENV STAY_ARGV="$SV/stay" CONV="$SV/pack" CONVERSATION=tk-v \
             $run "$SV/block" </dev/null >/dev/null 2>&1)
+        drop_args "$SV/stay" --close-brief >"$SV/stay-no-brief"
         { drop_args "$SV/stay" --waiting-on --close-brief; printf '%s\n' --rework --no-wait; } >"$SV/rework"
         { cat "$SV/rework"; printf '%s\n' --pr-anchor x; } >"$SV/rework-pick"
         { drop_args "$SV/stay" --stay --waiting-on --close-brief; printf '%s\n' --no-wait; } >"$SV/return"
@@ -997,6 +1019,7 @@ else
             esac
         done <<FORMS
 stay|the stay example's call passes the sign-off's parser
+stay-no-brief|…as does its form with no brief, for a subject the sign-off arms no closer for
 rework|…as does its rework form, with --rework --no-wait in place of --waiting-on and --close-brief
 rework-pick|…and that form with the --pr-anchor that picks its PR when the ruling reaches more than one
 return|…the return's call, the stay's less --stay with --no-wait in place of its waits and brief

@@ -45,7 +45,8 @@ resolve reason.
 ## Send the work
 
 When the ruling needs work, file the work and send it before the sign-off, then
-name it in the sign-off's `--waiting-on`, with a `--close-brief`. The `work`
+name it in the sign-off's `--waiting-on`, with a `--close-brief` when the
+sign-off arms the subject's validating closer (Sign off, below). The `work`
 skill says which bead carries the work and how to choose its formula. In the
 block below, the sling runs only once the create has returned the bead's id.
 The comment then records the dispatch as one of the visit's actions, which the
@@ -188,7 +189,7 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --ruled yes --ruling "<the ruling, one line>" --no-wait
      # --leave <gate>, once for each gate the ruling leaves owed
      # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
-     # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work
+     # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work, unless the sign-off arms no closer for the subject (below)
      # --rework, --no-rework or --retire <kind>: one is required when the ruling reaches an open PR
      # --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one
      # --accept when the ruling takes the subject's recommendation (below)
@@ -208,17 +209,27 @@ fi
   with its reply in place.
 - What the subject waits on is yours to state:
   - a `--waiting-on` for each bead this sitting routed work into, with a
-    `--close-brief` beside work, or for the gate still holding the subject;
+    `--close-brief` beside work when the sign-off arms a closer (below), or
+    for the gate still holding the subject;
   - `--no-wait` when nothing waits;
   - neither flag when the subject is parked for a person.
 
   The brief is the claim the subject's validating closer tests once the work
-  lands: what the landing settles on the subject, and what to check. A subject
-  in the city's own store has no pool to run its closer, so the sign-off
-  refuses a wait on work for that subject: wait on a human gate that names the
-  work instead (the `waits` skill). A wait the store refuses only warns, and
-  the warning gives the command that wires the wait: run that command before
-  you tell the operator what the subject waits on.
+  lands: what the landing settles on the subject, and what to check. The
+  sign-off arms that closer only when nothing else sends the subject on once
+  its wait clears. It arms none for an epic, whose members carry it, for the
+  anchor of a PR (the subject carries a `merge_result`), which the refinery
+  closes on its merge, for a subject that is assigned, at a status other than
+  open, or still routed or armed for another dispatch, or when the ruling takes
+  the subject's recommendation. The subject's row shows which
+  (`gc bd show "$SUBJECT"`). There, leave the brief out: the sign-off refuses
+  it with nothing written, and says why it arms no closer. A subject in the
+  city's own store has no pool to run its closer, so the sign-off refuses a
+  wait on work for that subject: wait on a human gate that names the work
+  instead (the `waits` skill). A wait the store refuses stops the sign-off
+  before any gate is answered, and the message gives the command that wires
+  the wait: run it, or leave that wait out when the store refuses it again,
+  then run the sign-off again.
 - **The first answer wins.** A gate that another answer closed first, such as
   a withdrawal, an Accept or another sitting's ruling, keeps that answer, and
   the sign-off prints it. Tell the operator which gate it was and what that
@@ -253,7 +264,8 @@ Take the case that fits the ruling:
   `--ruled yes --no-wait`, and add `--leave <gate>` for that gate unless the
   ruling settles the other bead too. An open PR is retired instead (below).
 - **New work carries the ruling.** Send the work (Send the work, above), then
-  sign off with `--ruled yes --waiting-on <the work> --close-brief "<…>"`.
+  sign off with `--ruled yes --waiting-on <the work> --close-brief "<…>"`,
+  without the brief for a subject the sign-off arms no closer for (above).
 - **New work decomposes an epic subject.** Sign off with
   `--ruled yes --no-wait`, or with a `--waiting-on` for only the dependencies
   the sitting also sent. An epic takes no `--close-brief`, because its members

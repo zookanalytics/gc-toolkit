@@ -35,7 +35,7 @@ answer that gate at once, so a later dismiss leaves nothing they ruled on open:
   # when the ruling reaches an open PR, add --rework, --no-rework or --retire <kind> (converse-settle)
   # when it takes the subject's recommendation, --answer its gate and add --accept (converse-settle)
   # --waiting-on <bead> for each bead this turn routed work into, or --no-wait
-  # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work
+  # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work, unless the sign-off arms no closer for the subject (converse-settle)
 ```
 
 Once the answer exits 0, carry out a ruling that sends the subject on, as the

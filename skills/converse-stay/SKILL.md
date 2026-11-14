@@ -21,14 +21,18 @@ The sign-off with `--stay` writes in this order:
 1. It appends `staying: <what was agreed>` to the conversation's notes, so a
    restart anywhere in the call finds the stay.
 2. It writes everything an ending sign-off writes: the subject's headline and
-   wait, the close brief, the validating closer's arm and the gate answers. So
-   the subject's record stands even if this sitting never comes back.
+   wait, the close brief and the validating closer's arm where it arms one,
+   and the gate answers. So the subject's record stands even if this sitting
+   never comes back.
 3. In place of the close, it appends
    `staying: <what was agreed> (waits on <the work>)`, makes the conversation
    wait on that work, and leaves the conversation open under this sitting.
 
-Write the headline as what the conversation waits for. When the call exits
-non-zero, it stopped short, and you have not stayed:
+Write the headline as what the conversation waits for. Give `--close-brief`
+only when the sign-off arms the subject's validating closer, as
+`converse-settle` says: leave it out for a subject it arms no closer for, such
+as an epic or the anchor of a PR, where it refuses the brief and names the
+case. When the call exits non-zero, it stopped short, and you have not stayed:
 
 ```bash
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
@@ -36,6 +40,7 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --ruled yes --ruling "<the ruling, one line>" --waiting-on <the work> \
      --close-brief "<what that work's landing settles here, and what to check once it has>" \
      --stay "<what the operator agreed, which the return compares the work with, one line>"
+     # no --close-brief for a subject the sign-off arms no closer for, such as an epic or a PR's anchor
      # --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR's rework, and the other flags as converse-settle's sign-off takes them
 then
   "$CONV/converse-entry.sh"  # staying: waiting while the work is out, returned once it has closed
@@ -116,7 +121,10 @@ whole call. Take the case that fits:
   - `AGREED` is its `--stay`.
   - The conversation's comments record its ruling and what the call already
     did.
-  - The subject's latest close brief is its `--close-brief`.
+  - The subject's latest close brief is its `--close-brief` when the brief's
+    heading holds it on work that `WORK` names. When no brief is held on that
+    work, the stay gave none, because the sign-off armed the subject no
+    closer.
   - `WORK`, which the entry prints once the sign-off has finished, names its
     work for `--waiting-on`. A bead in `WORK` whose `source_ruling_bead` is
     this conversation is the ruling's rework, so the call takes `--rework` for
