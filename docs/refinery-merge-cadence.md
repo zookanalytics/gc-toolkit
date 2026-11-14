@@ -895,12 +895,12 @@ in that run. `render-seed-audit.sh --check-merge <tip> <tip>` renders the tip's
 tree once and names each file the tip commits other than as rendered, and the
 run hands those files to `seed-audit-reaudit.sh`, which slings the one bead that
 re-renders the default branch and lands the new text in a pull request of its
-own. The check holds no PR, so until that re-render lands, a PR's diff can show
-render lines it did not change. A check that does not run holds nothing either:
-when the default branch or its tip does not read, the render does not complete,
-the writer dispatches nothing, or the run has reached its deadline, the next
-landing on the branch checks again. The landing's line says what the check
-found.
+own. The writer runs in the rig's clone, whose `origin/HEAD` it reads. The check
+holds no PR, so until that re-render lands, a PR's diff can show render lines it
+did not change. A check that does not run holds nothing either: when the default
+branch or its tip does not read, the render does not complete, the writer
+dispatches nothing, or the run has reached its deadline, the next landing on the
+branch checks again. The landing's line says what the check found.
 
 **Reading what a run did.** Each record's outcome prints on a line of its own,
 `<bead> <action>: <detail>`. `gc order history pr-reconcile` lists the runs

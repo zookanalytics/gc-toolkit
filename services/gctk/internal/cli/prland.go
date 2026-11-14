@@ -221,7 +221,7 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 // store's .beads directory, GitHub through gh, the clone at $GC_RIG_ROOT else
 // the working directory, the pack's definition of feedback, loaded in that
 // clone, and the runtime adapter for human gates and, where the clone carries
-// one, the seed audit.
+// one, the seed audit, whose scripts run in the clone.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -241,7 +241,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	rt := gascity.New()
 	var audit pr.Audit
 	if carriesSeedAudit(dir) {
-		audit = seedAudit{rt: rt, dir: dir}
+		audit = seedAudit{rt: rt.In(dir), dir: dir}
 	}
 	return pr.Landing{
 		Ledger:   l,
@@ -285,7 +285,11 @@ func carriesSeedAudit(dir string) bool {
 
 // seedAudit is the clone's seed audit through the runtime adapter, which runs
 // the pack's render-seed-audit.sh to check a commit and its
-// seed-audit-reaudit.sh to ask for the default branch's re-render.
+// seed-audit-reaudit.sh to ask for the default branch's re-render, each in the
+// clone. The writer has no flag that names a checkout: it reads the default
+// branch from origin/HEAD where it runs, and its gc bd calls resolve the store
+// there when GC_RIG names no rig, so a clone that $GC_RIG_ROOT names apart from
+// the working directory is still the one it reads.
 type seedAudit struct {
 	rt  gascity.Runtime
 	dir string

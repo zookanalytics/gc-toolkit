@@ -168,9 +168,10 @@ func TestLandingFilesItsGatesThroughTheRuntime(t *testing.T) {
 // auditClone is a clone at $GC_RIG_ROOT that carries a rendered seed audit
 // beside its pack.toml, with stubs of the pack's render-seed-audit.sh and
 // seed-audit-reaudit.sh in GCTK_SCRIPTS_DIR that log their arguments to
-// calls.render and calls.reaudit. The render stub writes the pages STUB_PAGES
-// names to its --base-stale-out file, and each exits STUB_EXIT with its reason
-// last.
+// calls.render and calls.reaudit. The writer's stub also writes where it ran,
+// and the default branch it reads there as the writer does, to where.reaudit.
+// The render stub writes the pages STUB_PAGES names to its --base-stale-out
+// file, and each exits STUB_EXIT with its reason last.
 func auditClone(t *testing.T) (clone, scripts string) {
 	t.Helper()
 	clone = t.TempDir()
@@ -190,6 +191,7 @@ func auditClone(t *testing.T) (clone, scripts string) {
 			": > \"$out\"\nfor p in $STUB_PAGES; do printf '%s\\n' \"$p\" >> \"$out\"; done\n" +
 			"echo 'the merge makes no render stale'\n",
 		"seed-audit-reaudit.sh": "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done >> '" + scripts + "/calls.reaudit'\n" +
+			"{ pwd -P; git symbolic-ref -q --short refs/remotes/origin/HEAD; } > '" + scripts + "/where.reaudit' 2>/dev/null\n" +
 			"echo \"seed-audit-reaudit: filed main's re-audit re-1\" >&2\n" +
 			"[ \"${STUB_EXIT:-0}\" = 0 ] || { echo 'seed-audit-reaudit: the dedup query failed' >&2; exit \"$STUB_EXIT\"; }\n" +
 			"echo 're-1 gc-toolkit/gc-toolkit.polecat filed'\n",
@@ -279,5 +281,43 @@ func TestTheSeedAuditHandsItsPagesToThePacksWriter(t *testing.T) {
 	if _, err := l.Audit.Reaudit("main", "x,", []string{"agents/claude.md"}); err == nil ||
 		!strings.Contains(err.Error(), "exit 2: seed-audit-reaudit: the dedup query failed") {
 		t.Fatalf("a writer that dispatched nothing read as %v", err)
+	}
+}
+
+// originHead makes dir a checkout whose origin/HEAD names branch, the default
+// branch a clone of a repository whose default is branch reads.
+func originHead(t *testing.T, dir, branch string) {
+	t.Helper()
+	for _, a := range [][]string{{"init", "-q"}, {"symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/" + branch}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+}
+
+// The writer runs in the clone, because it reads the default branch from
+// origin/HEAD where it runs, and $GC_RIG_ROOT can name a clone other than the
+// working directory. A clone whose default is trunk, reached from a checkout
+// whose default is main, is the one the writer reads.
+func TestTheSeedAuditsWriterRunsInTheClone(t *testing.T) {
+	clone, scripts := auditClone(t)
+	originHead(t, clone, "trunk")
+	here := t.TempDir()
+	originHead(t, here, "main")
+	t.Chdir(here)
+	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Audit.Reaudit("trunk", "The landing order, checking trunk,", []string{"agents/claude.md"}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(scripts, "where.reaudit"))
+	if want := resolved + "\norigin/trunk\n"; string(raw) != want {
+		t.Fatalf("the writer ran where it read %q, want the clone and its default, %q", raw, want)
 	}
 }
