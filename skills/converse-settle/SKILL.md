@@ -315,9 +315,11 @@ Until that rework closes:
   `--no-rework`;
 - keep the gate of a ruling that needs more changes to the branch open with
   `--leave <gate>`, until the open rework lands and that ruling can file its
-  own;
-- keep open the same way the gate that releases a second PR whose own branch
-  must change, until a ruling of its own is carried out on that PR.
+  own.
+
+A sign-off files at most one rework, on one PR. When a ruling also needs a
+second PR's branch to change, keep the gate that releases that PR open with
+`--leave <gate>`, until a ruling of its own is carried out on that PR.
 
 `--rework` and `--retire` act only on an open PR. When the ruling reaches none,
 send its consequence as work and sign off without them.
