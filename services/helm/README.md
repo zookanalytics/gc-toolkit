@@ -1780,11 +1780,10 @@ it under a real service mount) and leave `GC_HELM_SOURCE` unset.
 `cmd/helm-fixture` serves the app this commit embeds with no city behind it.
 `/helm` answers a board file as JSON, `GET /helm/rigs` and
 `GET /helm/rigs/{rig}` answer one rig's document, and `POST /helm/<verb>`
-answers a canned answer, so nothing it serves reads or writes a city. It is
-what gc-toolkit's declared `ui_serve_command` runs, and the rig's demo guide
-(`docs/review-demo.md`) names the same command as the app a demo capture of the
-board brings up, so a capture and a sitting's live copy of the board each run
-it as a copy that `gctk rig serve` runs.
+answers a canned answer, so nothing it serves reads or writes a city. The rig's
+demo guide (`docs/review-demo.md`) names the command that runs it on its
+`**Serve:**` line, and a demo capture of the board and a sitting's live copy of
+it each run that command as a copy that `gctk rig serve` runs.
 
 ```bash
 cd services/helm

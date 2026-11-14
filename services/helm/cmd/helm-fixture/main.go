@@ -1,12 +1,11 @@
 // Command helm-fixture serves the Helm board on fixture data: the app this
 // commit embeds, a board answer read from a file, one rig's document read from a
 // file at the rig board's routes, and canned answers for the write verbs (see
-// package fixture). The serve command the rig declares runs it, and the rig's
-// demo guide, docs/review-demo.md, names the same command as the app a demo
-// capture of the board brings up, so the capture shows the board the reviewed
-// commit builds and never reaches the live city. The capture serves it as a
-// copy that `gctk rig serve` runs, and a sitting's live copy of the board runs
-// the same command through the same verb.
+// package fixture). The rig's demo guide, docs/review-demo.md, names the command
+// that runs it as the app a demo capture of the board brings up, so the capture
+// shows the board the reviewed commit builds and never reaches the live city.
+// The capture serves it as a copy that `gctk rig serve` runs, and a sitting's
+// live copy of the board runs the same command through the same verb.
 //
 // It is a command of its own rather than a helm-svc subcommand. helm-svc links
 // the beads library and, through Dolt, cgo and ICU, so a cold build takes minutes

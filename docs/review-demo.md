@@ -51,8 +51,8 @@ reads it. A worktree has one copy, so take its captures one after another. A
 capture whose command differs from a copy that still runs there is refused until
 `gctk rig serve --stop`, run in the worktree, ends it. On a cold Go build cache
 the first run compiles Go's HTTP stack, and the copy's start waits up to three
-minutes for it to answer. A sitting's live copy of the board runs the same
-command, which the city declares as gc-toolkit's `ui_serve_command`.
+minutes for it to answer. A sitting's live copy of the board runs the command
+the `**Serve:**` line names, as a capture does.
 
 Capture the board through `helm-fixture`, never through a running helm
 service. A capture refuses a `--base-url` that any gc-toolkit server answers,
