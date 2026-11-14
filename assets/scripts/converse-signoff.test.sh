@@ -162,12 +162,14 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # added is logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
-row() { cat "$B/$1.json" 2>/dev/null; }
-put() { cat > "$B/$1.json.tmp" && mv "$B/$1.json.tmp" "$B/$1.json"; }
+# The store's reads and writes start no cat or basename: $(<file) and read are
+# bash's own.
+row() { [ -f "$B/$1.json" ] || return 1; local _row; _row=$(<"$B/$1.json"); printf '%s\n' "$_row"; }
+put() { local _in=""; IFS= read -r -d '' _in; printf '%s' "$_in" > "$B/$1.json.tmp" && mv "$B/$1.json.tmp" "$B/$1.json"; }
 log() { printf '%s\n' "$*" >> "$CALLS"; }
-all_ids() { for f in "$B"/*.json; do [ -f "$f" ] && basename "$f" .json; done; }
-show_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] | {id: .on, dependency_type: .type} ]} | del(.deps)'; }
-list_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] as $d | {issue_id: .id, depends_on_id: $d.on, type: $d.type} ]} | del(.deps)'; }
+all_ids() { for f in "$B"/*.json; do [ -f "$f" ] && { f=${f##*/}; printf '%s\n' "${f%.json}"; }; done; }
+show_rows() { row "$1" | jq -c '[. + {dependencies: [ .deps[] | {id: .on, dependency_type: .type} ]} | del(.deps)]'; }
+list_rows() { row "$1" | jq -c '[. + {dependencies: [ .deps[] as $d | {issue_id: .id, depends_on_id: $d.on, type: $d.type} ]} | del(.deps)]'; }
 case "$1 ${2:-}" in
   "rig list")
     jq -n --arg a "$RIG_A" --arg b "$RIG_B" --arg c "$CITY_ROOT" '{rigs: [{name: "the-city", prefix: "hq", path: $c, hq: true},
@@ -179,12 +181,12 @@ case "$1 ${2:-}" in
         [ -f "$STORE/shown-$3" ] && { echo "bd show: data plane down" >&2; exit 1; }
         : > "$STORE/shown-$3"
     fi
-    if [ -f "$B/$3.json" ]; then jq -c -n --argjson r "$(show_row "$3")" '[$r]'
+    if [ -f "$B/$3.json" ]; then show_rows "$3"
     else printf '{"error":"no issues found matching the provided IDs"}\n'; exit 1; fi ;;
   "bd list")
     [ -n "${LIST_DOWN:-}" ] && { echo "bd list: data plane down" >&2; exit 1; }
     _id=""; _p=""; for a in "$@"; do [ "$_p" = "--id" ] && _id="$a"; _p="$a"; done
-    if [ -n "$_id" ] && [ -f "$B/$_id.json" ]; then jq -c -n --argjson r "$(list_row "$_id")" '[$r]'; else printf '[]\n'; fi ;;
+    if [ -n "$_id" ] && [ -f "$B/$_id.json" ]; then list_rows "$_id"; else printf '[]\n'; fi ;;
   "bd dep")
     case "$3" in
       list)
@@ -192,9 +194,13 @@ case "$1 ${2:-}" in
         for a in "$@"; do case "$a" in --direction=up) _up=1 ;; esac; [ "$_p" = "--type" ] && _ty="$a"; _p="$a"; done
         [ "$_up" = 1 ] && [ -n "${DEP_UP_DOWN:-}" ] && [ "$_who" = "$DEP_UP_DOWN" ] && { echo "bd dep list: data plane down" >&2; exit 1; }
         if [ "$_up" = 1 ]; then
-          for i in $(all_ids); do
-            row "$i" | jq -c --arg w "$_who" --arg t "$_ty" 'select(any(.deps[]; .type == $t and .on == $w)) | . + {dependency_type: $t} | del(.deps)'
-          done | jq -sc '.'
+          # One jq reads every bead file. A comments file holds an array, and
+          # is no bead.
+          _files=("$B"/*.json)
+          if [ -f "${_files[0]}" ]; then
+            jq -sc --arg w "$_who" --arg t "$_ty" '[ .[] | objects | select(any((.deps // [])[]; .type == $t and .on == $w))
+              | . + {dependency_type: $t} | del(.deps) ]' "${_files[@]}"
+          else printf '[]\n'; fi
         else
           for o in $(row "$_who" | jq -r --arg t "$_ty" '.deps[] | select(.type == $t) | .on'); do
             row "$o" | jq -c --arg t "$_ty" '. + {dependency_type: $t} | del(.deps)'
@@ -202,10 +208,10 @@ case "$1 ${2:-}" in
         fi ;;
       *) log "$*" ;;
     esac ;;
-  "bd comments") cat "$B/$3.comments.json" 2>/dev/null || printf '[]\n' ;;
+  "bd comments") if [ -f "$B/$3.comments.json" ]; then printf '%s\n' "$(<"$B/$3.comments.json")"; else printf '[]\n'; fi ;;
   "bd comment")
     log "$*"
-    _c=$(cat "$B/$3.comments.json" 2>/dev/null || printf '[]')
+    _c='[]'; [ -f "$B/$3.comments.json" ] && _c=$(<"$B/$3.comments.json")
     printf '%s' "$_c" | jq -c --arg t "$4" '. + [{text: $t}]' > "$B/$3.comments.json" ;;
   "bd gate")
     _g="$4"; _r=""; _p=""; for a in "$@"; do [ "$_p" = "--reason" ] && _r="$a"; _p="$a"; done
@@ -238,19 +244,42 @@ case "$1 ${2:-}" in
       [ "${_args[$_i]}" = "--if-status" ] && { _ifs_set=1; _ifs="${_args[$((_i + 1))]}"; }
       _i=$((_i + 1))
     done
-    if [ "$_ifa_set" = 1 ] && [ "$(printf '%s' "$_r" | jq -r '.assignee // ""')" != "$_ifa" ]; then exit 13; fi
-    if [ "$_ifs_set" = 1 ] && [ "$(printf '%s' "$_r" | jq -r '.status // ""')" != "$_ifs" ]; then exit 13; fi
+    # A guard the bead does not meet refuses the update (13), and a bead that
+    # is not there meets only a guard that asks for nothing.
+    if [ -z "$_r" ]; then
+      { [ "$_ifa_set" = 1 ] && [ -n "$_ifa" ]; } && exit 13
+      { [ "$_ifs_set" = 1 ] && [ -n "$_ifs" ]; } && exit 13
+    fi
+    # Each flag becomes one operation, in the order given, and one jq checks
+    # the guards and lands them all. The -- after --args keeps a value that
+    # begins with a dash, such as -s or a note that opens with ---, from
+    # reading as one of jq's options.
+    _ops=()
     while [ $# -gt 0 ]; do
       case "$1" in
-        --set-metadata) _k="${2%%=*}"; _v="${2#*=}"; _r=$(printf '%s' "$_r" | jq --arg k "$_k" --arg v "$_v" '.metadata[$k] = $v'); shift 2 ;;
-        --assignee)     _r=$(printf '%s' "$_r" | jq --arg v "$2" '.assignee = $v'); shift 2 ;;
-        --status)       _r=$(printf '%s' "$_r" | jq --arg v "$2" '.status = $v'); shift 2 ;;
-        --append-notes) _r=$(printf '%s' "$_r" | jq --arg v "$2" '.notes = (if (.notes // "") == "" then $v else .notes + "\n" + $v end)'); shift 2 ;;
-        --unset-metadata) _r=$(printf '%s' "$_r" | jq --arg k "$2" 'del(.metadata[$k])'); shift 2 ;;
-        --remove-label) _r=$(printf '%s' "$_r" | jq --arg v "$2" '.labels = ((.labels // []) - [$v])'); shift 2 ;;
+        --set-metadata) _ops+=(set "${2%%=*}" "${2#*=}"); shift 2 ;;
+        --assignee)     _ops+=(assignee "$2" ""); shift 2 ;;
+        --status)       _ops+=(status "$2" ""); shift 2 ;;
+        --append-notes) _ops+=(note "$2" ""); shift 2 ;;
+        --unset-metadata) _ops+=(unset "$2" ""); shift 2 ;;
+        --remove-label) _ops+=(unlabel "$2" ""); shift 2 ;;
         *) shift ;;
       esac
     done
+    if [ -n "$_r" ]; then
+      _r=$(printf '%s' "$_r" | jq --argjson ifa_set "$_ifa_set" --arg ifa "$_ifa" --argjson ifs_set "$_ifs_set" --arg ifs "$_ifs" '
+        if ($ifa_set == 1 and ((.assignee // "") | tostring) != $ifa)
+           or ($ifs_set == 1 and ((.status // "") | tostring) != $ifs) then halt_error(13) else . end
+        | reduce ([ $ARGS.positional | range(0; length; 3) as $i | .[$i:$i + 3] ][]) as [$op, $a, $b] (.;
+            if $op == "set" then .metadata[$a] = $b
+            elif $op == "assignee" then .assignee = $a
+            elif $op == "status" then .status = $a
+            elif $op == "note" then .notes = (if (.notes // "") == "" then $a else .notes + "\n" + $a end)
+            elif $op == "unset" then del(.metadata[$a])
+            elif $op == "unlabel" then .labels = ((.labels // []) - [$a])
+            else . end)' --args -- ${_ops[@]+"${_ops[@]}"} 2>/dev/null)
+      [ "$?" = 13 ] && exit 13
+    fi
     printf '%s' "$_r" | put "$_id" ;;
 esac
 exit 0

@@ -431,14 +431,24 @@ printf '{"id":"tk-nul","title":"nul","status":"open","issue_type":"task","notes"
 # --direction=up --type tracks (reverse trackers). Every call is logged so the
 # test can prove which store was asked, not just what came back.
 set -u
-# A read the gctk under test makes answers from the store its --db names, every
-# bead file in it read one at a time, through the seam holds-store.stub.sh
-# keeps. An edge onto a bead another store holds is one into another store.
+# A read the gctk under test makes answers from the store its --db names,
+# through the seam holds-store.stub.sh keeps. gctk reads the store several times
+# for each frontier, so one jq builds the store whatever its size: the shell's
+# read builtin takes in each bead file whole, and jq parses each file on its
+# own, so a file it cannot parse, such as a fixture that carries a raw control
+# byte, is left out without ending the read. An edge onto a bead another store
+# holds is one into another store.
 if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
   shift
   hdb="$STUB_ROOT/rigs/gc-toolkit/.beads"; [ "${1:-}" = --db ] && hdb="${2:-}"
-  hs="$STUB_ROOT/holds-$(basename "$(dirname "$hdb")").json"
-  for f in "$hdb"/*.json; do [ -e "$f" ] && jq -c 'objects' "$f" 2>/dev/null; done | jq -s -c . > "$hs"
+  hs="${hdb%/*}"; hs="$STUB_ROOT/holds-${hs##*/}.json"
+  rows=()
+  for f in "$hdb"/*.json; do
+    [ -e "$f" ] || continue
+    IFS= read -r -d '' row < "$f"
+    rows+=("$row")
+  done
+  jq -n -c '[$ARGS.positional[] | fromjson? | objects]' --args "${rows[@]}" > "$hs"
   HOLDS_STORE="$hs" HOLDS_WHERE="$hdb" exec "${HOLDS_STUB:?}" answer "$@"
 fi
 printf '%s\n' "$*" >> "$FAKE_GC_LOG"
@@ -622,20 +632,21 @@ has "$OUT" "[settled]"                           "  ... a settled takeaway is ma
 has "$(cat "$FAKE_GC_LOG")" "show tk-anchor --brief-deps" \
   "  ... via a --brief-deps read, so a hub bead's dependency bodies are never fetched"
 
-JQF='.subject.title'                  runj tk-anchor; eq "$JQ" "rich anchor" "subject.title — section A returns the subject's own title"
-JQF='.subject.status'                 runj tk-anchor; eq "$JQ" open        "subject.status"
-JQF='.subject.priority'               runj tk-anchor; eq "$JQ" 1           "subject.priority (top-level)"
-JQF='.subject.task_kind'              runj tk-anchor; eq "$JQ" rework      "subject.task_kind"
-JQF='.subject.routed_to'              runj tk-anchor; eq "$JQ" ""          "subject.routed_to preserves the empty (cleared) route"
-JQF='.subject.execution_routed_to'    runj tk-anchor; eq "$JQ" gc-toolkit/gc-toolkit.polecat "subject.execution_routed_to"
-JQF='.subject.anchor.merge_result'    runj tk-anchor; eq "$JQ" pull_request "anchor.merge_result present when the bead carries one"
-JQF='.subject.anchor.pr_number'       runj tk-anchor; eq "$JQ" 9           "anchor.pr_number"
-JQF='.subject.anchor.branch'          runj tk-anchor; eq "$JQ" polecat/tk-anchor "anchor.branch"
-JQF='.subject.anchor.merged_target'   runj tk-anchor; eq "$JQ" main        "anchor.merged_target"
-JQF='.subject.first_reaction.reaction' runj tk-anchor; eq "$JQ" ruling     "first_reaction.reaction"
-JQF='.subject.first_reaction.target'  runj tk-anchor; eq "$JQ" tk-frt      "first_reaction.target"
-JQF='.subject.origin'                 runj tk-anchor; eq "$JQ" operator    "subject.origin"
-JQF='.subject.takeaway_settled'       runj tk-anchor; eq "$JQ" 1           "subject.takeaway_settled returned as the field it is"
+run tk-anchor --json
+eq "$(jr .subject.title)"                    "rich anchor"     "subject.title — section A returns the subject's own title"
+eq "$(jr .subject.status)"                   open              "subject.status"
+eq "$(jr .subject.priority)"                 1                 "subject.priority (top-level)"
+eq "$(jr .subject.task_kind)"                rework            "subject.task_kind"
+eq "$(jr .subject.routed_to)"                ""                "subject.routed_to preserves the empty (cleared) route"
+eq "$(jr .subject.execution_routed_to)"      gc-toolkit/gc-toolkit.polecat "subject.execution_routed_to"
+eq "$(jr .subject.anchor.merge_result)"      pull_request      "anchor.merge_result present when the bead carries one"
+eq "$(jr .subject.anchor.pr_number)"         9                 "anchor.pr_number"
+eq "$(jr .subject.anchor.branch)"            polecat/tk-anchor "anchor.branch"
+eq "$(jr .subject.anchor.merged_target)"     main              "anchor.merged_target"
+eq "$(jr .subject.first_reaction.reaction)"  ruling            "first_reaction.reaction"
+eq "$(jr .subject.first_reaction.target)"    tk-frt            "first_reaction.target"
+eq "$(jr .subject.origin)"                   operator          "subject.origin"
+eq "$(jr .subject.takeaway_settled)"         1                 "subject.takeaway_settled returned as the field it is"
 # A bead with no merge_result carries a null anchor, not a fabricated one.
 JQF='.subject.anchor'                 runj tk-epic;   eq "$JQ" null        "anchor is null when the bead is not an anchor"
 # A subject a reaction bead reacted to carries gc.reacted_by, the reaction's
@@ -649,13 +660,14 @@ run tk-reacted
 has "$OUT" "First react by tk-r9" "  ... and the text view names it"
 
 # --- D. Context edges -------------------------------------------------------
-JQF='.edges.parent.id'                runj tk-anchor; eq "$JQ" tk-epic     "edges.parent resolved from .parent"
-JQF='.edges.parent.title'             runj tk-anchor; eq "$JQ" "the parent epic" "  ... with the parent's title from the edge"
-JQF='.edges.counts.parent'            runj tk-anchor; eq "$JQ" 1           "edges.counts.parent"
-JQF='.edges.relates_to | length'      runj tk-anchor; eq "$JQ" 2           "both relates spellings — relates-to AND related — are the relates class"
-JQF='[.edges.relates_to[].id]|sort|join(",")' runj tk-anchor; eq "$JQ" tk-rel,tk-rel2 "  ... and both are named"
-JQF='.edges.tracked_by | length'      runj tk-anchor; eq "$JQ" 1           "tracked-by is read from the reverse tracks edge"
-JQF='.edges.tracked_by[0].id'         runj tk-anchor; eq "$JQ" tk-conv     "  ... naming the conversation that tracks it"
+run tk-anchor --json
+eq "$(jr .edges.parent.id)"                  tk-epic           "edges.parent resolved from .parent"
+eq "$(jr .edges.parent.title)"               "the parent epic" "  ... with the parent's title from the edge"
+eq "$(jr .edges.counts.parent)"              1                 "edges.counts.parent"
+eq "$(jr '.edges.relates_to | length')"      2                 "both relates spellings — relates-to AND related — are the relates class"
+eq "$(jr '[.edges.relates_to[].id]|sort|join(",")')" tk-rel,tk-rel2 "  ... and both are named"
+eq "$(jr '.edges.tracked_by | length')"      1                 "tracked-by is read from the reverse tracks edge"
+eq "$(jr '.edges.tracked_by[0].id')"         tk-conv           "  ... naming the conversation that tracks it"
 has "$(cat "$FAKE_GC_LOG")" "dep list tk-anchor --direction=up --type tracks" \
   "  ... via a reverse dep-list, since the subject carries no tracked-by edge itself"
 
@@ -702,48 +714,58 @@ run hq-city --db "$HQ/.beads"
 has "$OUT" "$NO_EDGES" "a bead with no edge of any class reads (none)"
 
 # --- B. Frontier (opt-in) ---------------------------------------------------
-# Default output carries no frontier; it is added only on --frontier.
+# Default output carries no frontier; it is added only on --frontier. A frontier
+# run starts the gctk under test, which reads the store several times, so each
+# subject runs once and its assertions query that run's output.
 JQF='has("frontier")'  runj tk-anchor;             eq "$JQ" false "frontier is absent by default (opt-in)"
-JQF='.frontier.verdict' runj tk-anchor --frontier; eq "$JQ" ready "all blocks-blockers closed (one cross-store) reads ready"
-JQF='.frontier.blockers.closed' runj tk-anchor --frontier; eq "$JQ" 1 "the same-store closed blocker is counted"
-JQF='.frontier.foreign | join(",")' runj tk-anchor --frontier; eq "$JQ" or-far "  ... and the edge into another store holds nothing, listed as foreign"
-JQF='.frontier.blockers.open'   runj tk-anchor --frontier; eq "$JQ" 0 "no open blocker"
-JQF='.frontier.open | length'   runj tk-anchor --frontier; eq "$JQ" 0 "closed blockers are counted, never listed"
-JQF='.frontier.holds'           runj tk-anchor --frontier; eq "$JQ" clear "  ... and gctk bead holds answers clear"
+run tk-anchor --frontier --json
+eq "$(jr .frontier.verdict)"                ready  "all blocks-blockers closed (one cross-store) reads ready"
+eq "$(jr .frontier.blockers.closed)"        1      "the same-store closed blocker is counted"
+eq "$(jr '.frontier.foreign | join(",")')"  or-far "  ... and the edge into another store holds nothing, listed as foreign"
+eq "$(jr .frontier.blockers.open)"          0      "no open blocker"
+eq "$(jr '.frontier.open | length')"        0      "closed blockers are counted, never listed"
+eq "$(jr .frontier.holds)"                  clear  "  ... and gctk bead holds answers clear"
 
-JQF='.frontier.verdict'          runj tk-under --frontier; eq "$JQ" stuck "a member of a parked parent is held through it, so not ready"
-JQF='.frontier.holds'            runj tk-under --frontier; eq "$JQ" held "  ... holds=held"
-JQF='.frontier.open[0] | "\(.id) \(.ancestor)"' runj tk-under --frontier; eq "$JQ" "tk-pgate tk-parked" "  ... naming the parent's gate and the parent it sits on"
+run tk-under --frontier --json
+eq "$(jr .frontier.verdict)" stuck "a member of a parked parent is held through it, so not ready"
+eq "$(jr .frontier.holds)"   held  "  ... holds=held"
+eq "$(jr '.frontier.open[0] | "\(.id) \(.ancestor)"')" "tk-pgate tk-parked" "  ... naming the parent's gate and the parent it sits on"
 
-JQF='.frontier.verdict'          runj tk-waiter --frontier; eq "$JQ" stuck "a waits-for edge of its own is a wait the store cannot judge, so not ready"
-JQF='.frontier.holds'            runj tk-waiter --frontier; eq "$JQ" unjudged "  ... holds=unjudged"
-JQF='.frontier.open[0] | "\(.id) \(.unjudged)"' runj tk-waiter --frontier; eq "$JQ" "tk-spawner true" "  ... and the spawner is listed as unjudged"
+run tk-waiter --frontier --json
+eq "$(jr .frontier.verdict)" stuck    "a waits-for edge of its own is a wait the store cannot judge, so not ready"
+eq "$(jr .frontier.holds)"   unjudged "  ... holds=unjudged"
+eq "$(jr '.frontier.open[0] | "\(.id) \(.unjudged)"')" "tk-spawner true" "  ... and the spawner is listed as unjudged"
 
-GCTK_BIN="$TMP/no-gctk" JQF='.frontier | "\(.verdict) \(.holds)"' runj tk-anchor --frontier
-eq "$JQ" "stuck unread" "a read of what holds it that cannot run fails the verdict closed"
-GCTK_BIN="$TMP/no-gctk" JQF='.frontier.unread' runj tk-anchor --frontier
-has "$JQ" "no gctk binary at $TMP/no-gctk" "  ... and says why"
+GCTK_BIN="$TMP/no-gctk" run tk-anchor --frontier --json
+eq "$(jr '.frontier | "\(.verdict) \(.holds)"')" "stuck unread" "a read of what holds it that cannot run fails the verdict closed"
+has "$(jr .frontier.unread)" "no gctk binary at $TMP/no-gctk" "  ... and says why"
 
-JQF='.frontier.verdict'          runj tk-stuck --frontier; eq "$JQ" stuck "an open unrouted blocker is stuck, so the verdict is stuck"
-JQF='.frontier.open[0].id'       runj tk-stuck --frontier; eq "$JQ" tk-op "  ... and the open blocker is named"
-JQF='.frontier.open[0].advance'  runj tk-stuck --frontier; eq "$JQ" stuck "  ... advance=stuck"
-JQF='.frontier.open[0].title'    runj tk-stuck --frontier; eq "$JQ" "open unrouted blocker" "  ... with its title"
+run tk-stuck --frontier --json
+eq "$(jr .frontier.verdict)"           stuck                   "an open unrouted blocker is stuck, so the verdict is stuck"
+eq "$(jr '.frontier.open[0].id')"      tk-op                   "  ... and the open blocker is named"
+eq "$(jr '.frontier.open[0].advance')" stuck                   "  ... advance=stuck"
+eq "$(jr '.frontier.open[0].title')"   "open unrouted blocker" "  ... with its title"
 
-JQF='.frontier.verdict'          runj tk-adv --frontier; eq "$JQ" advancing "an open pool-routed blocker is advancing"
-JQF='.frontier.open[0].advance'  runj tk-adv --frontier; eq "$JQ" advancing "  ... advance=advancing"
+run tk-adv --frontier --json
+eq "$(jr .frontier.verdict)"           advancing "an open pool-routed blocker is advancing"
+eq "$(jr '.frontier.open[0].advance')" advancing "  ... advance=advancing"
 
-JQF='.frontier.verdict'          runj tk-humangate --frontier; eq "$JQ" stuck "a human gate as the blocker is stuck, not advancing"
-JQF='.frontier.open[0].advance'  runj tk-humangate --frontier; eq "$JQ" stuck "  ... advance=stuck for the human gate"
+run tk-humangate --frontier --json
+eq "$(jr .frontier.verdict)"           stuck "a human gate as the blocker is stuck, not advancing"
+eq "$(jr '.frontier.open[0].advance')" stuck "  ... advance=stuck for the human gate"
 
-JQF='.frontier.open[0] | "\(.id) \(.advance)"' runj tk-convheld --frontier; eq "$JQ" "tk-cv stuck" "a conversation its sitting holds is a person's, so stuck, not advancing"
-JQF='.frontier.verdict'          runj tk-convheld --frontier; eq "$JQ" stuck "  ... and so is the subject it holds"
+run tk-convheld --frontier --json
+eq "$(jr '.frontier.open[0] | "\(.id) \(.advance)"')" "tk-cv stuck" "a conversation its sitting holds is a person's, so stuck, not advancing"
+eq "$(jr .frontier.verdict)" stuck "  ... and so is the subject it holds"
 
-JQF='.frontier.open[0].advance'  runj tk-inreview --frontier; eq "$JQ" advancing "a review bead with a pour-cleared route is machine work, so advancing not stuck"
-JQF='.frontier.verdict'          runj tk-inreview --frontier; eq "$JQ" advancing "  ... so a subject held only by a review in flight is advancing, not stuck"
+run tk-inreview --frontier --json
+eq "$(jr '.frontier.open[0].advance')" advancing "a review bead with a pour-cleared route is machine work, so advancing not stuck"
+eq "$(jr .frontier.verdict)"           advancing "  ... so a subject held only by a review in flight is advancing, not stuck"
 
-JQF='.frontier.verdict'          runj tk-failclosed --frontier; eq "$JQ" ready "an edge onto a bead the store does not hold holds nothing, so the verdict is ready"
-JQF='.frontier.blockers.open'    runj tk-failclosed --frontier; eq "$JQ" 0     "  ... counted as no open blocker"
-JQF='.frontier.foreign | join(",")' runj tk-failclosed --frontier; eq "$JQ" zz-ghost "  ... and listed as foreign"
+run tk-failclosed --frontier --json
+eq "$(jr .frontier.verdict)"               ready    "an edge onto a bead the store does not hold holds nothing, so the verdict is ready"
+eq "$(jr .frontier.blockers.open)"         0        "  ... counted as no open blocker"
+eq "$(jr '.frontier.foreign | join(",")')" zz-ghost "  ... and listed as foreign"
 
 # --- B2. The transitive walk --------------------------------------------------
 blkr() { jr "[.frontier.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuck_on.id // \"-\") \(.stuck_on.why // \"-\")\""; }
@@ -857,16 +879,16 @@ has "$OUT" "(open, stuck: unrouted)" "  ... and a blocker that stops itself as j
 
 # --- C. Horizon (opt-in) ----------------------------------------------------
 JQF='has("horizon")'                 runj tk-epic;            eq "$JQ" false "horizon is absent by default (opt-in)"
-JQF='.horizon.children.total'        runj tk-epic --horizon;  eq "$JQ" 10 "every direct child is counted, in any status, and a bd set-state event is not a child"
-JQF='.horizon.children.open'         runj tk-epic --horizon;  eq "$JQ" 9 "  ... nine are open"
-JQF='.horizon.children.closed'       runj tk-epic --horizon;  eq "$JQ" 1 "  ... the done child is counted (the listing asks for every status), and the closed event is not"
-JQF='.horizon.children.advancing'    runj tk-epic --horizon;  eq "$JQ" 5 "  ... pool-routed, in-progress, hooked, a progressing anchor and a pour-cleared rework child advance"
-JQF='.horizon.children.stuck'        runj tk-epic --horizon;  eq "$JQ" 4 "  ... the operator-queued, armed-behind-the-gate, pinned and custom-status children are stuck"
-JQF='.horizon.open | length'         runj tk-epic --horizon;  eq "$JQ" 9 "open children are listed; the done one is not"
-JQF='[.horizon.open[].id] | index("tk-kid-done")' runj tk-epic --horizon; eq "$JQ" null "the done child is never in the open list"
-JQF='[.horizon.open[]|select(.id=="tk-kid-pool")][0].advance' runj tk-epic --horizon; eq "$JQ" advancing "a pool-routed open child advances"
-JQF='[.horizon.open[]|select(.id=="tk-kid-human")][0].advance' runj tk-epic --horizon; eq "$JQ" stuck "an open child in the operator's queue is stuck"
 : > "$FAKE_GC_LOG"; run tk-epic --horizon --json
+eq "$(jr .horizon.children.total)"     10 "every direct child is counted, in any status, and a bd set-state event is not a child"
+eq "$(jr .horizon.children.open)"      9  "  ... nine are open"
+eq "$(jr .horizon.children.closed)"    1  "  ... the done child is counted (the listing asks for every status), and the closed event is not"
+eq "$(jr .horizon.children.advancing)" 5  "  ... pool-routed, in-progress, hooked, a progressing anchor and a pour-cleared rework child advance"
+eq "$(jr .horizon.children.stuck)"     4  "  ... the operator-queued, armed-behind-the-gate, pinned and custom-status children are stuck"
+eq "$(jr '.horizon.open | length')"    9  "open children are listed; the done one is not"
+eq "$(jr '[.horizon.open[].id] | index("tk-kid-done")')" null "the done child is never in the open list"
+eq "$(jr '[.horizon.open[]|select(.id=="tk-kid-pool")][0].advance')" advancing "a pool-routed open child advances"
+eq "$(jr '[.horizon.open[]|select(.id=="tk-kid-human")][0].advance')" stuck "an open child in the operator's queue is stuck"
 kid() { jr "[.horizon.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuck_on.id // \"-\") \(.stuck_on.why // \"-\")\""; }
 eq "$(kid tk-kid-human)" "stuck tk-kid-human human" "  ... and names itself, a person's to move"
 eq "$(kid tk-kid-rework)" "advancing - -" "a pour-cleared rework child advances, with no stuck_on"

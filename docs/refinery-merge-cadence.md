@@ -453,26 +453,26 @@ the cadence — the arms run whether or not any refinery session is awake.
    ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
    conflict is a landed change deleting or rewriting code the branch edits,
    the approved PR gets the operator's supersession decision instead of the
-   child, as for arm 5), `BLOCKED`
-   (→ a human gate under `merge-blocked-threads`, only where
-   `required_review_thread_resolution` is on and a thread is unresolved, read
-   from the branch's own rules. A missing required approving review files no
-   gate: it is the operator's own review queue, the state the board's review
-   section already surfaces from the recorded `pr_posture`. Because such a
-   review is state and never a question for a person, the cadence also
-   withdraws any open `merge-blocked-approval` gate, resolving it `moot:`, at
-   the top of its run ahead of the no-anchors early-exit and in every rig. It
-   lists the store's gates and reaches the beads each one blocks from the
-   gate's end, and leaves a gate whose beads do not read for the next pass. A
-   cause the rules cannot name — an unmodeled rule, or unreadable
-   rules or thread count — files nothing and the next reconcile retries.
-   `reviewDecision` cannot name the cause alone, reading EMPTY while threads
-   are unresolved, so the rules are read directly),
-   hold-resolved retraction, and the withdrawal of its own merge-path gates
+   child, as for arm 5), `BLOCKED` on an unresolved review thread or a
+   missing required approving review (→ no gate. The write-back below resolves
+   every thread the city rules on, whether it fixed, declined or deferred the
+   point, and a thread whose question only a person can answer waits on a gate
+   of its own, as a `needs-you` finding's does. The merge pass's
+   `review-threads` verdict shows a thread still unresolved on an approved PR,
+   which the board and the PR's labels read as `held: review`
+   ([state-machine.md](state-machine.md#the-status-label-github-projection)).
+   A missing approving review is the operator's own review queue, the state the
+   board's review section already surfaces from the recorded `pr_posture`.
+   Neither asks a person anything, so the cadence withdraws any open
+   `merge-blocked-threads` or `merge-blocked-approval` gate, resolving it
+   `moot:`, at the top of its run ahead of the no-anchors early-exit and in
+   every rig. It lists the store's gates and reaches the beads each one blocks
+   from the gate's end, and leaves a gate whose beads do not read for the next
+   pass), hold-resolved retraction, and the withdrawal of its own merge-path gates
    once their situation is gone (an unengaged-threads gate once the head moves
-   past the one it counted, `merge-blocked-threads` once no thread blocks the
-   merge, the retarget and abandoned gates once the base or the PR is back, and
-   a red-check park's gate once GitHub reads the PR mergeable). A feedback gate
+   past the one it counted, the retarget and abandoned gates once the base or
+   the PR is back, and a red-check park's gate once GitHub reads the PR
+   mergeable). A feedback gate
    waits for its answer, and a gate a person is assigned is left to them. It re-reviews no moved head: a lane state is a
    state of the lane, and only gate-ensure dispatches on it. It also records every open
    non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the
@@ -523,22 +523,22 @@ the cadence — the arms run whether or not any refinery session is awake.
    open, and its owed reply is the answer, leading with the question mark. A
    declined or deferred finding's owed reply is its comment's answer too. That
    reply leads with the ruling ("Declined" or "Deferred"), so a reader scanning
-   the PR tells a fix from a pushback. The write-back leaves the thread
-   holding that reply open for the operator. While nobody has resolved it, the
-   reply also leads with the question mark, and its last line says that
-   resolving the thread accepts the ruling and that a reply in it is ruled as
-   new feedback. Such a reply is filed as a finding of its own, and the
-   declined or deferred finding stays closed. A thread the operator resolved
-   before the reply reached it gets the ruling alone. The
-   comment trades EYES for THUMBS_UP once the reply is on the PR. Whether an
+   the PR tells a fix from a pushback. The comment trades EYES for THUMBS_UP
+   once the reply is on the PR. Whether an
    owed reply is on the PR is read back off GitHub on every pass, by its own
    text, so another reply in the thread never stands in for it. An inline
    comment is answered in its thread.
-   The thread is answered once every routed comment in it is resolved, by one
-   reply naming each bead. It is resolved behind that reply unless it holds a
-   declined or deferred finding, whose thread stays open for the operator to
-   accept or push back on, as a needs-you finding's does until they rule. A
-   needs-you finding closes once the human gate holding its question, followed
+   The thread is answered once every routed comment in it is resolved: the
+   comments a batch resolved by one reply naming each bead, and a comment its
+   own finding answers by that finding's owed reply. It is resolved behind
+   those answers, whether the city fixed, declined or deferred the point, on
+   a pass whose own read of the PR shows each owed reply in it, never on a
+   stamp an earlier read left. A thread
+   holding a needs-you finding stays open until the person rules. A post in a
+   thread the city resolved is feedback like any other, so a reply of the
+   reviewer's there is ruled as a finding of its own, and the declined or
+   deferred finding stays closed. A needs-you finding closes once the human
+   gate holding its question, followed
    through any re-home, has been cleared with a reason headed `ruled:` (or the
    finding records the bead whose ruling released it, `finding.ruling_bead`),
    and no fix unit on its lane, nor a ruling's rework child, is in flight, and
@@ -556,16 +556,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    waiting on the operator first, a count line, then one point per finding, sorted into
    Needs you, Worth a look, In progress and Done, each a label linked to the
    comment, a sentence in the words of whoever answered it, and the commit,
-   follow-up or gate carrying it. A declined or deferred point is under Needs
-   you while its thread waits on the reviewer: the thread is open, holds the
-   city's reply to that point, and ends with a post that is the city's own.
-   The point ends with the same line as that reply. Once the reviewer resolves
-   the thread, the point is worth a look. A reply of theirs in the thread is a
-   point of its own, and the point it answers is worth a look until the city
-   answers that reply. The thread is still open then, so it waits on the
-   reviewer again. The count line counts the points under Needs you, so it
-   never reads all answered while one waits, and it still says where the other
-   points stand. It carries a digest of its own
+   follow-up or gate carrying it. A declined or deferred point that owes its
+   raiser a reply is worth a look, since the city resolves its thread, and a
+   reply of the reviewer's in that thread is a point of its own. The count line
+   counts the points under Needs you, so it never reads all answered while one
+   waits, and it still says where the other points stand. It carries a digest of its own
    rendering, so a pass that changes nothing writes nothing. When the city
    holds more than one comment for a round, each keyed to one of its reviews,
    the pass keeps one, moves every mark the others carry into it, and deletes
@@ -584,8 +579,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    batch's range, but the batch's bead never saw it, so unless a finding names
    it, it is acknowledged and never marked. A record is dropped once
    every comment it covers carries its final mark and every inline comment the
-   batch answered sits in a resolved thread, or in one a declined or deferred
-   finding holds open for the operator. The reactions are written
+   batch answered sits in a resolved thread, unless the comment's own finding
+   answers it, which the plan reads from the finding until its thread is
+   resolved. The reactions are written
    first and bounded per pass; when the cap or a failed write leaves one owing,
    that pass posts no answer, so no comment is answered before it is
    acknowledged. A thread with a post after the city's own reply that is not
@@ -626,12 +622,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    file the diff touches becomes a file-level review comment on that file, and
    any other locus becomes a Conversation comment. Once the finding closes, the
    comment is answered with how it closed: the fix units and the commits they
-   made, the deferral's follow-up, or the decline. A fixed finding's
-   thread is then resolved unless a post that is feedback has come after it.
-   A thread the identity cannot resolve leaves the finding owed its
-   answer, as above. A declined or deferred finding's thread stays open for the
-   operator to accept or overrule. A Conversation comment is edited to carry the
-   answer. A finding that closed
+   made, the deferral's follow-up, or the decline. Its thread is then
+   resolved, whether the finding was fixed, declined or deferred, unless a post
+   that is feedback has come after it. A thread the identity cannot resolve
+   leaves the finding owed its answer, as above. A declined or deferred
+   finding's answer is recorded `settled`. One recorded `1` can still have its
+   thread open, behind an answer carrying the `<!-- gc-finding:<id>:open -->`
+   line, so it is answered again, and its thread is resolved by the same rule.
+   A Conversation comment is edited to carry the answer. A finding that closed
    before it was posted, as a pre-open round's findings have, is posted with its
    answer already in place. A human finding is never posted, because it already
    sits on the PR where its raiser wrote it and is answered there. One
@@ -642,11 +640,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    merge through its own `blocks` edge. Its comments go through `pr-post.sh`, so
    they carry the city's mark and no feedback reader routes them or reads their
    thread as unengaged. Each also carries a `<!-- gc-finding:<id> -->` marker,
-   which is how a later pass finds the finding's comment. The BLOCKED
-   arm's gate does not count a thread that holds only the city's finding
-   comments, unless its answer carries the `<!-- gc-finding:<id>:open -->` line
-   a declined or deferred finding's answer adds, since that thread waits for a
-   person.
+   which is how a later pass finds the finding's comment.
 
    On a PR on the pending record every arm of this script runs but the three
    that record the PR merged, closed without merging or moved to another base,

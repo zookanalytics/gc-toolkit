@@ -459,10 +459,10 @@ carries is `needs-you` on that gate: the rework minted for its batch may have
 put the question to the operator before the validator ran, and `finding.sh`
 refuses every other ruling of the finding while such a gate blocks that rework.
 A gate on the anchor itself refuses nothing, because an anchor gathers gates
-about anything, so the validator judges whether one carries the question. Only
-a fix's thread is resolved behind its answer: the thread of a declined or
-deferred finding stays
-open for the operator to accept or overrule. A `CHANGES_REQUESTED`
+about anything, so the validator judges whether one carries the question. A
+finding's thread is resolved behind its answer, whether it was fixed, declined
+or deferred, and a `needs-you` finding's stays open until the operator rules. A
+reply in a thread the city resolved is feedback like any other. A `CHANGES_REQUESTED`
 that is feedback is auto-dismissed once every finding it raised has closed and
 every answer one of them owes its raiser (a decline's reason, a deferral's
 follow-up, a `needs-you` finding's gate) is on the PR, and
@@ -737,9 +737,8 @@ does a post a dismissal retired (`live_comments` in `review-dismissal.sh`). The
 count holds the PR at the head the posture was read at, while nothing is in
 flight on the anchor, because work in flight is the city answering, and while
 no feedback waits for `pr-facts.sh` to route it (posture `commented`). A thread
-the city answered and left open for the reviewer, such as a point it declined
-or deferred, waits on the reviewer and not on the city, so the PR reads as the
-reviewer's queue: `needs-review` before approval. Where the base requires
+the city answered and left open, such as one whose question waits on a human
+gate, does not wait on the city and is not counted. Where the base requires
 thread resolution, the merge pass's `review-threads` verdict holds an approved
 PR for any unresolved thread, answered or not. The merge does not read the
 count, so on a base that requires no thread resolution an approved PR still

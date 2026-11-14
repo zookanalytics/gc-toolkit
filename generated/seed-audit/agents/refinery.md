@@ -75,6 +75,14 @@ Identity is `$GC_AGENT`, never `$GC_ALIAS` (which can be legitimately empty
 Then follow the formula: find-work, prepare, test, judge, land or publish, pour
 the next wisp before burning this one.
 
+The wisp is poured root-only, so its steps are not beads. Read them from the
+formula: `gc formula show mol-refinery-patrol` lists them, and this prints one
+step's text, with the vars the pour passed filled in:
+
+```bash
+gc formula show mol-refinery-patrol --var target_branch=main --var rig_name=gc-toolkit --var binding_prefix='gc-toolkit.' --json | jq -r '.steps[] | select(.id == "<step id>") | .description'
+```
+
 ## Patrol lifecycle
 
 - **Pour-next-before-burn, always** — every exit path pours and ASSIGNS the
@@ -108,13 +116,37 @@ into the effort's branch, never the reverse, so no check or review runs on it:
 "$(gc gc-toolkit scripts-dir)/effort-bring-current.sh" --hand-off <the hand-off> --landing <the landing bead it names>
 ```
 
-Exit 0 brought the branch current and closed the hand-off. Exit 4: the merge
-conflicts, which is a decision, and you never resolve one; the call put it to a
-person in a gate on the hand-off, which comes back to you once the gate clears.
-Exit 3: the hand-off is not ready, because it is closed or something still
-holds it. Exit 1: nothing was pushed or closed; run it again, which reads the
-branch afresh. Archive the notice once the hand-off is closed or waits on its
-gate.
+Exit 0 brought the branch current and closed the hand-off. Exit 3: the hand-off
+is not ready, because it is closed or something still holds it.
+
+Exit 4: the merge conflicts, and a polecat resolves it, never you and never the
+operator. The call pushed nothing and filed the merge as a task on the effort's
+branch, which the hand-off and the landing bead wait on. It recorded the notice
+that hands the hand-off back to you once the task lands, then sent the task to
+the rig's polecat pool with `--merge direct`, so the task lands as a
+fast-forward of the effort's branch and the polecat's merge commit reaches the
+branch as it is. The polecat asks the operator only when a resolution needs a
+product decision. The task is a polecat's work like any other, so the rig's
+checks run on its merge, in the polecat's self-review and in your gate, and no
+review does, because it lands direct.
+
+Exit 1: nothing was pushed or closed, and the output says why. Until the call
+has filed a task, run it again, which reads the branch afresh. A call that
+stops after it filed the task names the step that did not land. The hand-off
+already waits on the task, so running the call again brings nothing current.
+Run that step instead, then each step after it. The notice is
+`"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" notify <the hand-off> --agent "$GC_AGENT"`,
+the settle is
+`"$(gc gc-toolkit scripts-dir)/queue-priority.sh" settle <the task>`,
+and the send is
+`gc sling gc-toolkit/gc-toolkit.polecat <the task> --on mol-polecat-work --merge direct`.
+A sling can pour the task's workflow and still exit non-zero. The send, run
+again, pours nothing while that workflow is live: it exits 3 and says the task
+already has a live workflow, which means the task was sent.
+
+When the hand-off comes back, run the call again, which brings the branch
+current from where the task's merge left it. Archive a notice with
+`gc mail archive <its id>` once its hand-off is closed or waits on its task.
 
 ## Human gates
 
@@ -284,3 +316,28 @@ durable work belongs in the repo (docs/file-structure.md) and a returning
 session may need `mkdir -p` first. Keep build artifacts and whole-store bead
 dumps out of scratch: reference a binary at its build path, and ask for the
 narrow `gc bd list` rather than writing `--all` to a file.
+
+
+
+## Where to search
+
+Search only inside the city (`$GC_CITY_PATH`), your rig or worktree, and
+`$TMPDIR` or your scratchpad. Never search the home folder (`~`), `/Users` or
+the disk root (`/`): on macOS such a search reaches folders the system guards
+with a privacy prompt, nobody answers the prompt, and the search waits until
+the tool's time limit ends it. Look up anything else where it lives:
+
+- a formula: `gc formula show <name>`, whose `--json` carries each step's text
+  under `.steps[]`, or `gc formula list`;
+- the gc-toolkit pack's scripts: `"$(gc <binding> scripts-dir)"`, where
+  `<binding>` is the name in front of its skills, as in `gc-toolkit.work`;
+- the packs the city imports, and their sources: `gc import list`;
+- Gas City's own source: the rig that checks it out (`gc rig list`), with the
+  core pack at `internal/bootstrap/packs/core` and bd at `examples/bd`;
+- a skill: `gc skill list`;
+- a Go module's source, such as beads: the `Dir` that
+  `go mod download -json <module>` prints, run in the repo that depends on it;
+- a command: `command -v <name>`;
+- a node package: the worktree's own `node_modules`, or its package manager;
+- Claude session transcripts: `~/.claude/projects/`, in the folder named for
+  the session's working directory with each `/` and `.` turned into `-`.

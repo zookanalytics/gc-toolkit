@@ -345,6 +345,15 @@ for k in $KINDS; do
     clear_stores
 done
 
+# A feedback pattern waits on its follow-up, and the distiller decides it once
+# that closes, so the distiller is its dispatch path and an arm would sling it
+# to a pool with no formula for it.
+blocked_store alpha "$(bmeta a-1 task_kind feedback-pattern)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a feedback pattern waiting on its follow-up is not flagged"
+hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and draws no arm remedy"
+clear_stores
+
 # A negative list would flag any type it forgot; the allowlist exempts every
 # non-work type by naming what IS work. Types Gas City's Ready() leaves out
 # (step, convoy, session), records no ready list leaves out (spec, event,

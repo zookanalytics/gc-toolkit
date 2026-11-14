@@ -74,6 +74,26 @@ bd_json() {
 # empty.
 row_meta() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 
+# row_meta_all <array> <show-json> — every metadata value off a `gc bd show
+# --json` row, from one jq, into the associative array <array>, which it
+# declares global and empties first. ${array[<key>]-} then reads what
+# "$(row_meta <show-json> <key>)" gives: a key that is absent and a row that
+# will not parse read as empty, and a value loses the newlines that end it, as
+# a command substitution drops them. A script that reads several keys of one
+# row reads them this way, with one jq for the row in place of one for each
+# key. It needs bash 4.2 or later when it runs; sourcing the file does not run
+# it. Returns 2, and declares nothing, for an array name that is not a name.
+row_meta_all() {
+  local _rma
+  case "$1" in ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) return 2 ;; esac
+  declare -gA "$1"
+  eval "$1=()"
+  _rma=$(printf '%s' "$2" | jq -r --arg a "$1" '.[0].metadata
+    | if type == "object" then to_entries[] else empty end | select(.key != "")
+    | "\($a)[\(.key | @sh)]=\((.value // "") | tostring | sub("\n+\\z"; "") | @sh)"' 2>/dev/null)
+  eval "$_rma"
+}
+
 # bd_list memoization — opt-in, off by default.
 #
 # When GC_RECONCILE_BD_CACHE names a directory, bd_list serves a repeated query

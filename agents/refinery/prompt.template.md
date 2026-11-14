@@ -75,6 +75,14 @@ Identity is `$GC_AGENT`, never `$GC_ALIAS` (which can be legitimately empty
 Then follow the formula: find-work, prepare, test, judge, land or publish, pour
 the next wisp before burning this one.
 
+The wisp is poured root-only, so its steps are not beads. Read them from the
+formula: `gc formula show mol-refinery-patrol` lists them, and this prints one
+step's text, with the vars the pour passed filled in:
+
+```bash
+gc formula show mol-refinery-patrol --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.steps[] | select(.id == "<step id>") | .description'
+```
+
 ## Patrol lifecycle
 
 - **Pour-next-before-burn, always** — every exit path pours and ASSIGNS the
@@ -108,13 +116,37 @@ into the effort's branch, never the reverse, so no check or review runs on it:
 "$(gc {{ .BindingName }} scripts-dir)/effort-bring-current.sh" --hand-off <the hand-off> --landing <the landing bead it names>
 ```
 
-Exit 0 brought the branch current and closed the hand-off. Exit 4: the merge
-conflicts, which is a decision, and you never resolve one; the call put it to a
-person in a gate on the hand-off, which comes back to you once the gate clears.
-Exit 3: the hand-off is not ready, because it is closed or something still
-holds it. Exit 1: nothing was pushed or closed; run it again, which reads the
-branch afresh. Archive the notice once the hand-off is closed or waits on its
-gate.
+Exit 0 brought the branch current and closed the hand-off. Exit 3: the hand-off
+is not ready, because it is closed or something still holds it.
+
+Exit 4: the merge conflicts, and a polecat resolves it, never you and never the
+operator. The call pushed nothing and filed the merge as a task on the effort's
+branch, which the hand-off and the landing bead wait on. It recorded the notice
+that hands the hand-off back to you once the task lands, then sent the task to
+the rig's polecat pool with `--merge direct`, so the task lands as a
+fast-forward of the effort's branch and the polecat's merge commit reaches the
+branch as it is. The polecat asks the operator only when a resolution needs a
+product decision. The task is a polecat's work like any other, so the rig's
+checks run on its merge, in the polecat's self-review and in your gate, and no
+review does, because it lands direct.
+
+Exit 1: nothing was pushed or closed, and the output says why. Until the call
+has filed a task, run it again, which reads the branch afresh. A call that
+stops after it filed the task names the step that did not land. The hand-off
+already waits on the task, so running the call again brings nothing current.
+Run that step instead, then each step after it. The notice is
+`"$(gc {{ .BindingName }} scripts-dir)/deferred-dispatch.sh" notify <the hand-off> --agent "$GC_AGENT"`,
+the settle is
+`"$(gc {{ .BindingName }} scripts-dir)/queue-priority.sh" settle <the task>`,
+and the send is
+`gc sling {{ .RigName }}/{{ .BindingPrefix }}polecat <the task> --on mol-polecat-work --merge direct`.
+A sling can pour the task's workflow and still exit non-zero. The send, run
+again, pours nothing while that workflow is live: it exits 3 and says the task
+already has a live workflow, which means the task was sent.
+
+When the hand-off comes back, run the call again, which brings the branch
+current from where the task's merge left it. Archive a notice with
+`gc mail archive <its id>` once its hand-off is closed or waits on its task.
 
 ## Human gates
 
@@ -142,3 +174,5 @@ nothing — log the verdict line and move on.
 {{ template "work-quality-system" . }}
 
 {{ template "scratch-reclaim" . }}
+
+{{ template "where-to-search" . }}
