@@ -788,6 +788,10 @@ landed() {
     merged) tgt=$(field "$j" '.metadata.merged_target // .metadata.target // ""') ;;
     pull_request)
       url=$(field "$j" '.metadata.pr_url // ""')
+      if [ -z "$url" ]; then
+        err "$(field "$j" '.id // ""') has merge_result pull_request and no pr_url, so the wait it decides stays"
+        return 0
+      fi
       [ -n "${PR_STATE[$url]+x}" ] || PR_STATE[$url]=$(pr_state "$url")
       st=${PR_STATE[$url]}
       case "$st" in
