@@ -1460,9 +1460,14 @@ alias, which drops the claim. Gas City does the rest with what it already has
   left on it. A
   dismiss closes it as it closes any conversation, and the stop it asks for
   leaves an asleep sitting asleep.
-- **What the record keeps.** The subject's wait, its close brief and its
-  validating closer's arm are written at the stay, as at a hand-off, so the
-  subject's next steps stand whether or not the sitting comes back. A sitting
+- **What the record keeps.** The subject's wait, and its close brief and its
+  validating closer's arm where the sign-off arms one, are written at the
+  stay, as at a hand-off, so the subject's next steps stand whether or not the
+  sitting comes back. A member of the subject, as an epic's own decomposition
+  is, is the conversation's wait alone: bd refuses a `blocks` edge from a bead
+  onto its own descendant (beads `CheckBlockingHierarchyInTx`), so the
+  subject's headline leaves the member out, and no closer is armed on it,
+  since the epic's members carry its close. A sitting
   that cannot come back, because its session was closed, leaves its
   conversation open, and once the work closes the next engagement takes up
   the return from the record.

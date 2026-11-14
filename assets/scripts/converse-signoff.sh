@@ -101,7 +101,12 @@
 # returned. An edge onto a bead in
 # another store holds nothing, so a stay waits only on work in the
 # conversation's own store, and a sitting whose work is elsewhere ends at the
-# hand-off.
+# hand-off. A member of the subject, as an epic's own decomposition is, is work
+# the conversation waits on and the subject does not: bd refuses a blocks edge
+# from a bead onto its own descendant, and an epic's members carry its close.
+# So a stay's --waiting-on bead whose parent chain reaches the subject is the
+# conversation's wait alone. The headline leaves it out, and says --no-wait
+# when it is all the work, and no closer is armed on it.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 4 when it takes the recommendation,
@@ -255,7 +260,11 @@
 #     conversation tracks: bd keeps one edge from a bead onto another, so the
 #     conversation cannot wait on the subject too, and a sitting whose work is
 #     the subject itself, sent on a formula or taking its recommendation, ends
-#     at the hand-off.
+#     at the hand-off. A bead that is a member of the subject, at any depth,
+#     as an epic's own decomposition is, is the conversation's wait alone: the
+#     subject's headline leaves it out, with --no-wait when it is all the work,
+#     and arms no closer on it, since bd refuses the subject's blocks edge onto
+#     its own descendant.
 #     It is refused on a conversation no sitting holds, and with nothing to
 #     wait on. The sitting signs off on its return with the same call less
 #     --stay, with --no-wait in place of its --waiting-on and --close-brief,
@@ -355,6 +364,58 @@ pack_script() {
   [ -x "$HERE/$1" ] || return 1
   printf '%s' "$HERE/$1"
 }
+
+# walk_to <bead> <target> <type>... — the bead whose edge onto <target> ends a
+# path from <bead> to it over edges of the named types, each edge read from the
+# bead it starts from. The walk reads one level at a time through
+# `gc bd list --id`, which leaves out gates, templates, infrastructure beads and
+# wisps unless the call asks for them (workapi.applyTypeSuppressions at beads
+# 7ef2fd05e). So it passes the flags bd_exact_row (bd-lib.sh) passes, which
+# lift all four, and a gate on the path reads like any other bead. An edge onto
+# another store than <target>'s ends a path. Prints that bead and returns 0
+# when a path reaches <target>, 1 when none does, 2 when a level did not read
+# as the beads it asked for, and 3 when the walk went past 50 levels, the depth
+# bd's dep tree stops at.
+#
+# waits_on_conversation <bead> walks to the conversation, along a path bd would
+# close into a cycle with the conversation's edge onto <bead>, and refuse. bd's
+# cycle check walks every blocks, conditional-blocks and parent-child edge from
+# <bead>, whatever the status or the kind of the beads it passes (beads
+# 7ef2fd05e, issueops.cycleReachabilityQuery), and only its own store's edges.
+# member_of_subject <bead> walks the parent chain to the subject, which finds a
+# bead the subject cannot wait on, since bd refuses a blocks edge between a bead
+# and its own descendant (CheckBlockingHierarchyInTx at the same commit).
+walk_to() {
+  local frontier="$1" target="$2" seen=" $1 " level=0 json out types
+  shift 2
+  types=" $* "
+  while [ -n "$frontier" ]; do
+    level=$((level + 1))
+    [ "$level" -le 50 ] || return 3
+    json=$(gc bd list --id "$(printf '%s' "$frontier" | tr ' ' ',')" --all \
+        --include-gates --include-infra --include-templates --json --limit 0 2>/dev/null) || return 2
+    out=$(printf '%s\n' "$json" | grep -av '^gc bd:' | scrub | jq -r --arg want "$frontier" --arg seen "$seen" \
+        --arg c "$target" --arg p "${target%%-*}-" --arg types "$types" '
+      if type != "array" or ([ .[] | (.id // "") | tostring ] | sort) != ($want | split(" ") | sort)
+      then error("not the beads asked for") else . end
+      | [ .[] | (.id | tostring) as $from | .dependencies[]? | objects
+          | select(((.type // .dependency_type) // "") as $t | $types | contains(" " + $t + " "))
+          | {from: $from, on: ((.depends_on_id // "") | tostring)}
+          | select(.on | startswith($p)) ] as $edges
+      | ([ $edges[] | select(.on == $c) | .from ] | first) as $hit
+      | if $hit != null then "HIT " + $hit
+        else "NEXT " + ([ $edges[] | .on | select(. as $o | $seen | contains(" " + $o + " ") | not) ] | unique | join(" "))
+        end' 2>/dev/null) || return 2
+    case "$out" in
+      "HIT "*) printf '%s' "${out#HIT }"; return 0 ;;
+      "NEXT "*) frontier="${out#NEXT }"; seen="$seen$frontier " ;;
+      *) return 2 ;;
+    esac
+  done
+  return 1
+}
+waits_on_conversation() { walk_to "$1" "$CONVERSATION" blocks conditional-blocks parent-child; }
+member_of_subject() { walk_to "$1" "$SUBJECT" parent-child; }
 
 # record_action <text> — record an act this sign-off took on the conversation,
 # as a comment in plain words, which the comment that shows the visit on the
@@ -787,6 +848,26 @@ if [ -n "$ACCEPT" ]; then
   [ -z "$OTHERS" ] \
     || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or leave the recommendation's gate owed until it is cleared, when Accept on the board takes the recommendation"
 fi
+# A stay's work can be a member of the subject, as an epic's own decomposition
+# is, at any depth. The subject cannot wait on it, since bd refuses a blocks
+# edge from a bead onto its own descendant, so the conversation alone waits on
+# it: the headline leaves it out, and no closer is armed on it, because the
+# subject's members carry its close. Without --stay such a wait reaches the
+# headline, whose edge the store refuses.
+MEMBER_WAITS=""
+if [ -n "$STAY" ]; then
+  for w in $WAIT_IDS; do
+    [ "${w%%-*}" = "${SUBJECT%%-*}" ] || continue
+    MEMBER_RC=0
+    member_of_subject "$w" >/dev/null || MEMBER_RC=$?
+    case "$MEMBER_RC" in
+      0) MEMBER_WAITS="${MEMBER_WAITS:+$MEMBER_WAITS }$w" ;;
+      1) ;;
+      3) stopped "the beads above $w lead more than 50 levels deep, so the sign-off could not tell whether $w is a member of $SUBJECT, which cannot wait on its own member; nothing was written" ;;
+      *) stopped "the beads above $w could not be read to tell whether it is a member of $SUBJECT, which cannot wait on its own member; nothing was written" ;;
+    esac
+  done
+fi
 # The subject's validating closer. A ruling that leaves the subject waiting on
 # work arms it, so the subject is checked and closed once that work lands.
 # Work is a wait in the subject's own store that is no gate: a gate is what a
@@ -810,6 +891,7 @@ CLOSER_ARMED=""
 if [ "$RULED" = yes ]; then
   for w in $WAIT_IDS; do
     [ "$w" != "$SUBJECT" ] && [ "${w%%-*}" = "${SUBJECT%%-*}" ] || continue
+    case " $MEMBER_WAITS " in *" $w "*) continue ;; esac
     WROW=$(show_row "$w") \
       || stopped "$w, which this ruling leaves $SUBJECT waiting on, could not be read to tell whether it is work whose landing $SUBJECT's validating closer checks; nothing was written"
     printf '%s' "$WROW" | jq -e '(.issue_type // "") == "gate"' >/dev/null 2>&1 \
@@ -862,7 +944,7 @@ if [ -n "$CLOSER_WAITS" ]; then
   fi
 fi
 [ -z "$CLOSE_BRIEF" ] || [ -n "$CLOSER_RIG" ] \
-  || die "--close-brief is the claim $SUBJECT's validating closer checks once the work it waits on lands, and none of --waiting-on${WAIT_IDS:+ ($WAIT_IDS)} is work in $SUBJECT's own store, a bead that is no gate, so no closer is armed; nothing was written. Drop --close-brief"
+  || die "--close-brief is the claim $SUBJECT's validating closer checks once the work it waits on lands, and none of --waiting-on${WAIT_IDS:+ ($WAIT_IDS)} is work in $SUBJECT's own store that it waits on, a bead that is no gate and no member of $SUBJECT, so no closer is armed; nothing was written. Drop --close-brief"
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
 
 # pr_status <bead> — what `gctk pr status` says of the PR the bead owns, as one
@@ -982,49 +1064,6 @@ take_recommendation() {
     return 0
   fi
   stopped "the recommendation was not taken: gc-helm.sh accept exited $rc, and its output above says why${open:+, and its gate $open is still open}. The conversation is not closed. Repair what Accept names, then re-run, which finishes an acceptance Accept left unfinished without dispatching it twice"
-}
-
-# waits_on_conversation <bead> — the bead whose edge onto the conversation ends
-# a path from <bead> to it, a path bd would close into a cycle with the
-# conversation's edge onto <bead>, and refuse. bd's cycle check walks every
-# blocks, conditional-blocks and parent-child edge from <bead>, whatever the
-# status or the kind of the beads it passes (beads 7ef2fd05e,
-# issueops.cycleReachabilityQuery), and only its own store's edges, so a bead
-# in another store ends a path. The walk reads one level at a time through
-# `gc bd list --id`, which leaves out gates, templates, infrastructure beads and
-# wisps unless the call asks for them (workapi.applyTypeSuppressions at the
-# same commit). So it passes the flags bd_exact_row (bd-lib.sh) passes, which
-# lift all four, and a gate on the path reads like any other bead. Prints that
-# bead and returns 0 when a path reaches the conversation, 1 when none does, 2
-# when a level did not read as the beads it asked for, and 3 when the walk went
-# past 50 levels, the depth bd's dep tree stops at.
-waits_on_conversation() {
-  local frontier="$1" seen=" $1 " level=0 json out
-  while [ -n "$frontier" ]; do
-    level=$((level + 1))
-    [ "$level" -le 50 ] || return 3
-    json=$(gc bd list --id "$(printf '%s' "$frontier" | tr ' ' ',')" --all \
-        --include-gates --include-infra --include-templates --json --limit 0 2>/dev/null) || return 2
-    out=$(printf '%s\n' "$json" | grep -av '^gc bd:' | scrub | jq -r --arg want "$frontier" --arg seen "$seen" \
-        --arg c "$CONVERSATION" --arg p "${CONVERSATION%%-*}-" '
-      if type != "array" or ([ .[] | (.id // "") | tostring ] | sort) != ($want | split(" ") | sort)
-      then error("not the beads asked for") else . end
-      | [ .[] | (.id | tostring) as $from | .dependencies[]? | objects
-          | select(((.type // .dependency_type) // "") as $t
-              | $t == "blocks" or $t == "conditional-blocks" or $t == "parent-child")
-          | {from: $from, on: ((.depends_on_id // "") | tostring)}
-          | select(.on | startswith($p)) ] as $edges
-      | ([ $edges[] | select(.on == $c) | .from ] | first) as $hit
-      | if $hit != null then "HIT " + $hit
-        else "NEXT " + ([ $edges[] | .on | select(. as $o | $seen | contains(" " + $o + " ") | not) ] | unique | join(" "))
-        end' 2>/dev/null) || return 2
-    case "$out" in
-      "HIT "*) printf '%s' "${out#HIT }"; return 0 ;;
-      "NEXT "*) frontier="${out#NEXT }"; seen="$seen$frontier " ;;
-      *) return 2 ;;
-    esac
-  done
-  return 1
 }
 
 # The work a sitting that stays waits on: each --waiting-on bead that is no
@@ -1188,10 +1227,23 @@ fi
   || stopped "the PR this ruling's rework acts on reads closed and filed no rework, and no --waiting-on names other work, so the conversation has nothing to wait on and does not stay. Sign off without --stay"
 
 # 2. The headline. An ARRAY, not a string: this city runs zsh, which does not
-# word-split an unquoted parameter, so "${WAIT[@]}" is what passes each flag as
-# its own argument, and nothing when it is empty. The resolves, the release and
-# the close below cannot be undone, so they wait on takeaway's exit.
-"$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]+"${WAIT[@]}"}" \
+# word-split an unquoted parameter, so "${HEADLINE_WAIT[@]}" is what passes each
+# flag as its own argument, and nothing when it is empty. Its waits are the
+# call's own, less each member of the subject a stay waits on through the
+# conversation alone, and with none left it says --no-wait, as an epic's
+# sign-off on its own decomposition does. An explicit --no-wait stays, so
+# takeaway still refuses it beside a wait. The resolves, the release and the
+# close below cannot be undone, so they wait on takeaway's exit.
+HEADLINE_WAIT=("${WAIT[@]+"${WAIT[@]}"}")
+if [ -n "$MEMBER_WAITS" ]; then
+  HEADLINE_WAIT=()
+  for w in $WAIT_IDS; do
+    case " $MEMBER_WAITS " in *" $w "*) ;; *) HEADLINE_WAIT+=(--waiting-on "$w") ;; esac
+  done
+  case " ${WAIT[*]} " in *" --no-wait "*) HEADLINE_WAIT+=(--no-wait) ;; esac
+  [ "${#HEADLINE_WAIT[@]}" -gt 0 ] || HEADLINE_WAIT=(--no-wait)
+fi
+"$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${HEADLINE_WAIT[@]+"${HEADLINE_WAIT[@]}"}" \
   || stopped "gc-helm.sh takeaway did not finish on $SUBJECT, and its message above says which write it could not make${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
 # The subject's validating closer, once the headline's edges hold the subject
 # on the work: first the close brief the closer checks, then its arm, then the

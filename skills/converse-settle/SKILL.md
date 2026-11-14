@@ -70,7 +70,9 @@ lands, in one plain sentence that names no other rig or its beads.
   work goes under that Delivery's epic.
 - **An epic's own decomposition is its member**, created with `--parent "$SUBJECT"`,
   and it gets no `--waiting-on`, because bd refuses a `blocks` edge from a
-  parent to its own descendant.
+  parent to its own descendant. A sitting that stays for it names it in the
+  stay's `--waiting-on`, where it is the conversation's wait alone
+  (`converse-stay`).
 - **Another rig's pool**: run the create as `gc bd --rig <rig> create`.
 - **An epic the ruling files**: create it with the `work` skill's epic create,
   then append a note that says whose words each field is:
@@ -269,7 +271,10 @@ Take the case that fits the ruling:
 - **New work decomposes an epic subject.** Sign off with
   `--ruled yes --no-wait`, or with a `--waiting-on` for only the dependencies
   the sitting also sent. An epic takes no `--close-brief`, because its members
-  carry the brief.
+  carry the brief. A sitting that stays names the member in the stay's
+  `--waiting-on`, in place of `--no-wait`: the sign-off makes it the
+  conversation's wait alone, and the epic's headline waits only on the
+  dependencies the sitting also sent, or on nothing (`converse-stay`).
 - **The subject needs no work.** Sign off first, because an open gate on the
   subject holds its close. Then close the subject through the disposition
   writer (the `work` skill), with this conversation as the evidence. The

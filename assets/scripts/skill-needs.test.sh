@@ -476,6 +476,10 @@ have "the settle step files an epic subject's decomposition as its member" \
 have "…and gives that member no --waiting-on" \
     'it gets no `--waiting-on`' "$SETTLE"
 tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-squeezed"
+have "…but a stay's, where the member is the conversation's wait alone" \
+    'A sitting that stays for it names it in the stay'"'"'s `--waiting-on`, where it is the conversation'"'"'s wait alone' "$TMP/settle-squeezed"
+have "…in place of the decomposition's --no-wait" \
+    'A sitting that stays names the member in the stay'"'"'s `--waiting-on`, in place of `--no-wait`' "$TMP/settle-squeezed"
 # The sign-off arms a subject's validating closer only when nothing else sends
 # the subject on, and refuses a --close-brief anywhere else, so the settle skill
 # gives the brief only where a closer is armed and names each case where none
@@ -974,6 +978,8 @@ have "the stay example says when it takes no brief" \
     '# no --close-brief for a subject the sign-off arms no closer for, such as an epic or a PR'"'"'s anchor' "$STAY"
 have "…which the sign-off refuses there, naming the case" \
     'such as an epic or the anchor of a PR, where it refuses the brief and names the case' "$TMP/stay-squeezed"
+have "…and a member of the subject is the conversation's wait alone" \
+    'bd refuses the subject'"'"'s edge onto its own member, so the sign-off makes the member the conversation'"'"'s wait alone' "$TMP/stay-squeezed"
 have "…and a recovery takes a brief only when one is held on its work" \
     'The subject'"'"'s latest close brief is its `--close-brief` when the brief'"'"'s heading holds it on work that `WORK` names.' "$TMP/stay-squeezed"
 have "…so that sitting ends at the hand-off" \

@@ -50,6 +50,13 @@ else
 fi
 ```
 
+**A member of the subject**, such as the member an epic's ruling files under
+the epic, goes in `--waiting-on` like any other work, though an ending sign-off
+gives it none (`converse-settle`). bd refuses the subject's edge onto its own
+member, so the sign-off makes the member the conversation's wait alone: the
+subject's headline leaves it out, and says `--no-wait` when nothing else is
+left, and no closer is armed on it.
+
 The sign-off refuses three stays, each before any write:
 
 - **A stay on work in another store** than the conversation's, where the wait

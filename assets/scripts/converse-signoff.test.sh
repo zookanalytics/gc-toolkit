@@ -209,8 +209,11 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # An appended note follows the notes before it on a line of its own, as bd
 # joins them, and a removed label goes only by its exact text, as bd removes
 # it. A dep add onto a bead its source already has an edge onto, of another
-# type, is refused, because bd keeps one edge from a bead onto another; the
-# hook DEP_ADD_REFUSED refuses every dep add. A bead's comments are kept in
+# type, is refused, because bd keeps one edge from a bead onto another. A
+# blocks or conditional-blocks edge between a bead and its own ancestor or
+# descendant, over every parent-child edge at any depth, is refused, as bd's
+# CheckBlockingHierarchyInTx refuses it. The hook DEP_ADD_REFUSED=<id> refuses
+# every dep add from that bead. A bead's comments are kept in
 # $STORE/b/<id>.comments.json, and each one added is logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
@@ -222,6 +225,21 @@ log() { printf '%s\n' "$*" >> "$CALLS"; }
 all_ids() { for f in "$B"/*.json; do [ -f "$f" ] && { f=${f##*/}; printf '%s\n' "${f%.json}"; }; done; }
 show_rows() { row "$1" | jq -c '[. + {dependencies: [ .deps[] | {id: .on, dependency_type: .type} ]} | del(.deps)]'; }
 list_rows() { row "$1" | jq -c '[. + {dependencies: [ .deps[] as $d | {issue_id: .id, depends_on_id: $d.on, type: $d.type} ]} | del(.deps)]'; }
+# ancestors <id> — every bead above <id> over its parent-child edges, each once,
+# between spaces.
+ancestors() {
+  local frontier="$1" seen=" " next n p
+  while [ -n "$frontier" ]; do
+    next=""
+    for n in $frontier; do
+      for p in $(row "$n" 2>/dev/null | jq -r '.deps[]? | select(.type == "parent-child") | .on'); do
+        case "$seen" in *" $p "*) ;; *) seen="$seen$p "; next="$next $p" ;; esac
+      done
+    done
+    frontier="$next"
+  done
+  printf '%s' "$seen"
+}
 case "$1 ${2:-}" in
   "rig list")
     jq -n --arg a "$RIG_A" --arg b "$RIG_B" --arg c "$CITY_ROOT" '{rigs: [{name: "the-city", prefix: "hq", path: $c, hq: true},
@@ -280,12 +298,18 @@ case "$1 ${2:-}" in
         fi ;;
       add)
         log "$*"
-        [ -n "${DEP_ADD_REFUSED:-}" ] && { echo "Error adding dependency: the store refused it" >&2; exit 1; }
+        [ -n "${DEP_ADD_REFUSED:-}" ] && [ "$4" = "$DEP_ADD_REFUSED" ] && { echo "Error adding dependency: the store refused it" >&2; exit 1; }
         _ty=blocks; _p=""; for a in "$@"; do [ "$_p" = "--type" ] && _ty="$a"; _p="$a"; done
         _had=$(row "$4" | jq -r --arg on "$5" '[ .deps[]? | select(.on == $on) | .type ] | first // ""')
         if [ -n "$_had" ] && [ "$_had" != "$_ty" ]; then
           echo "Error: dependency $4 -> $5 already exists with type \"$_had\" (requested \"$_ty\"); remove it first with 'bd dep remove' then re-add" >&2
           exit 1
+        fi
+        if [ "$_ty" = blocks ] || [ "$_ty" = conditional-blocks ]; then
+          case "$(ancestors "$4")" in *" $5 "*)
+            echo "Error adding dependency: $4 cannot be blocked by its ancestor $5: $5 cannot close until its descendants finish, so the gate would never clear" >&2; exit 1 ;; esac
+          case "$(ancestors "$5")" in *" $4 "*)
+            echo "Error adding dependency: $4 cannot be blocked by its descendant $5: blocked status cascades to descendants, so $5 would inherit the block and never close" >&2; exit 1 ;; esac
         fi ;;
       *) log "$*" ;;
     esac ;;
@@ -477,7 +501,18 @@ B="$STORE/b"
 case "$1" in
   takeaway)
     [ -n "${TAKEAWAY_FAIL:-}" ] && { echo "takeaway refused" >&2; exit 2; }
-    gc bd update "$2" --set-metadata "gc.takeaway=$3" >/dev/null ;;
+    gc bd update "$2" --set-metadata "gc.takeaway=$3" >/dev/null
+    # Each --waiting-on after the headline, as a blocks edge from the bead onto
+    # it, and exit 4 once the rest is written when the store refuses one, as
+    # takeaway does.
+    _miss=""; _p=""
+    for a in "$@"; do
+      if [ "$_p" = --waiting-on ] && ! gc bd dep add "$2" "$a" --type blocks >/dev/null; then
+        echo "gc-helm.sh: takeaway: could not wire --waiting-on $a" >&2; _miss=1
+      fi
+      _p="$a"
+    done
+    [ -z "$_miss" ] || exit 4 ;;
   accept)
     _s="$2"; _f=$(jq -r '.metadata["gc.recommended_formula"] // ""' "$B/$_s.json")
     _rec=""
@@ -2267,7 +2302,7 @@ eq "$(field tk-conv notes | grep '^staying:' | tr '\n' '|')" "staying: the dialo
 # One that stops at its edge has named its work, which the entry checks the
 # edges and the work's status against.
 closer_case
-DEP_ADD_REFUSED=1 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+DEP_ADD_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 1 "(STAY-EDGE-REFUSED) a stay whose edge the store refuses exits 1"
 has "$OUT" "its staying: line names the work" "(STAY-EDGE-REFUSED) …saying the line naming the work is written"
 eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the dialog keeps what is typed (waits on tk-work)" "(STAY-EDGE-REFUSED) …which is newest"
@@ -2357,7 +2392,9 @@ run_signoff "${FOLLOW[@]}" --waiting-on tk-sub
 eq "$RC" 2 "(STAY-HOLDS-MERGE-CHILD) a stay on a child of that work exits 2"
 has "$OUT" "tk-sub already waits on tk-conv through tk-anc" "(STAY-HOLDS-MERGE-CHILD) …through the parent-child edge"
 eq "$(writes)" 0 "(STAY-HOLDS-MERGE-CHILD) …and writes nothing"
-LIST_DOWN_ID=tk-follow run_signoff "${FOLLOW[@]}" --waiting-on tk-follow
+# The walk's second level, which the walk above the work for the subject's
+# members does not read, is the one that does not read.
+LIST_DOWN_ID=tk-anc run_signoff "${FOLLOW[@]}" --waiting-on tk-follow
 eq "$RC" 1 "(STAY-HOLDS-MERGE-UNREAD) a stay whose walk does not read exits 1"
 has "$OUT" "could not be read to tell whether one of them waits on conversation tk-conv" "(STAY-HOLDS-MERGE-UNREAD) …saying so"
 eq "$(writes)" 0 "(STAY-HOLDS-MERGE-UNREAD) …and writes nothing"
@@ -2391,6 +2428,89 @@ run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the f
 eq "$RC" 2 "(STAY-QUEUED) a conversation in the operator's queue has no sitting to stay"
 has "$OUT" "open for the sitting that holds it, and it reads open under human" "(STAY-QUEUED) …saying it has no sitting to stay"
 eq "$(writes)" 0 "(STAY-QUEUED) …and nothing is written"
+
+echo "# a stay on the subject's own member waits on it through the conversation alone"
+# An epic the sitting ruled on, the gate its conversation replies to, and the
+# member the ruling filed under the epic. bd refuses a blocks edge between a
+# bead and its own ancestor or descendant, and the stub refuses it too, so the
+# subject's edge onto its member is never attempted.
+member_case() {
+    fresh; bead tk-epic epic; gate tk-g decomposition; edge tk-epic blocks tk-g
+    conv tk-conv tk-epic; edge tk-conv replies-to tk-g
+    bead tk-mem; edge tk-mem parent-child tk-epic
+}
+MEMBER_STAY=(--conversation tk-conv --outcome "staying — waits on the first unit" --ruled yes --ruling "file the parser as the first unit" --stay "the first unit lands the parser")
+member_case
+(cd "$TMP/cwd" && gc bd dep add tk-epic tk-mem --type blocks >/dev/null 2>&1) \
+  && bad "(STAY-MEMBER) the stub took a blocks edge from the epic onto its own member" \
+  || ok "(STAY-MEMBER) the stub refuses a blocks edge from the epic onto its own member, as bd does"
+: > "$CALLS"
+run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
+eq "$RC" 0 "(STAY-MEMBER) a stay on the epic's own member exits 0"
+has "$(cat "$CALLS")" "gc-helm takeaway tk-epic staying — waits on the first unit --by converse --no-wait" "(STAY-MEMBER) …its headline waiting on nothing, as an epic's sign-off on its decomposition does"
+hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-mem" "(STAY-MEMBER) …attempting no edge from the epic onto its member"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-mem --type blocks" "(STAY-MEMBER) …while the conversation waits on the member"
+has "$(field tk-conv notes)" "staying: the first unit lands the parser (waits on tk-mem)" "(STAY-MEMBER) …which its staying: line names"
+eq "$(meta tk-epic gc.dispatch_when_ready)" "" "(STAY-MEMBER) …arming no closer, since the epic's members carry its close"
+eq "$(field tk-g status)" "closed" "(STAY-MEMBER) …answering the gate"
+eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolkit.tk-conv" "(STAY-MEMBER) …and leaving the conversation open under its sitting"
+run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
+eq "$RC" 0 "(STAY-MEMBER-RERUN) a re-run with the same flags exits 0"
+eq "$(grep -c -- '^gc-helm takeaway tk-epic .* --by converse --no-wait$' "$CALLS")" 2 "(STAY-MEMBER-RERUN) …giving the headline the same --no-wait"
+hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-RERUN) …and attempting no edge from the epic onto its member"
+member_case
+DEP_ADD_REFUSED=tk-conv run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
+eq "$RC" 1 "(STAY-MEMBER-STOPS-SHORT) a stay on the member whose own edge the store refuses exits 1"
+eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the first unit lands the parser (waits on tk-mem)" "(STAY-MEMBER-STOPS-SHORT) …its newest line naming the member, which a recovery rebuilds --waiting-on from"
+run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
+eq "$RC" 0 "(STAY-MEMBER-STOPS-SHORT) the call rebuilt from that record stays"
+hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-STOPS-SHORT) …making the same split"
+member_case; bead tk-unit; edge tk-unit parent-child tk-mem
+run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-unit
+eq "$RC" 0 "(STAY-MEMBER-DEEP) a stay on a member of the epic's member exits 0"
+has "$(cat "$CALLS")" "--by converse --no-wait" "(STAY-MEMBER-DEEP) …its headline waiting on nothing"
+hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-unit" "(STAY-MEMBER-DEEP) …attempting no edge from the epic onto it"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-unit --type blocks" "(STAY-MEMBER-DEEP) …while the conversation waits on it"
+member_case; bead tk-other; bead tk-unit; edge tk-unit parent-child tk-other; edge tk-unit parent-child tk-mem
+run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-unit
+eq "$RC" 0 "(STAY-MEMBER-PARENTS) a stay on a bead with two parents, one of them under the epic, exits 0"
+hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-unit" "(STAY-MEMBER-PARENTS) …walking every parent, not the first"
+member_case; bead tk-dep
+run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem --waiting-on tk-dep
+eq "$RC" 0 "(STAY-MEMBER-BESIDE) a stay on the member and on independent work exits 0"
+has "$(cat "$CALLS")" "gc-helm takeaway tk-epic staying — waits on the first unit --by converse --waiting-on tk-dep" "(STAY-MEMBER-BESIDE) …the headline waiting on the independent work alone"
+has "$(cat "$CALLS")" "bd dep add tk-epic tk-dep --type blocks" "(STAY-MEMBER-BESIDE) …which the epic waits on"
+hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-BESIDE) …and not on its member"
+has "$(field tk-conv notes)" "(waits on tk-mem, tk-dep)" "(STAY-MEMBER-BESIDE) …while the conversation waits on both"
+member_case; bead tk-dep
+run_signoff "${MEMBER_STAY[@]}" --no-wait --waiting-on tk-mem --waiting-on tk-dep
+has "$(cat "$CALLS")" "--by converse --waiting-on tk-dep --no-wait" "(STAY-MEMBER-NO-WAIT) an explicit --no-wait beside other work still reaches the headline, which refuses the two together"
+member_case
+run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem --close-brief "$BRIEF"
+eq "$RC/$(writes)" "2/0" "(STAY-MEMBER-BRIEF) a --close-brief on a stay whose only work is the epic's member exits 2, writing nothing"
+# A subject that is no epic takes a closer, on the independent work alone.
+closer_case; bead tk-kid; edge tk-kid parent-child tk-sub
+run_signoff --conversation tk-conv --outcome "staying — waits on the fix" --ruled yes --ruling "build the fix" --waiting-on tk-kid --close-brief "$BRIEF" --stay "the dialog keeps what is typed"
+eq "$RC/$(writes)" "2/0" "(STAY-MEMBER-BRIEF) …and one whose only work is a child of a subject that is no epic exits 2, writing nothing"
+has "$OUT" "no member of tk-sub" "(STAY-MEMBER-BRIEF) …saying a member is no work the subject waits on"
+closer_case; bead tk-kid; edge tk-kid parent-child tk-sub
+run_signoff --conversation tk-conv --outcome "staying — waits on the fix" --ruled yes --ruling "build the fix" --waiting-on tk-kid --waiting-on tk-work --close-brief "$BRIEF" --stay "the dialog keeps what is typed"
+eq "$RC" 0 "(STAY-MEMBER-CLOSER) a stay on a child of the subject and on independent work exits 0"
+has "$(field tk-sub notes)" "## Close brief (held on tk-work, " "(STAY-MEMBER-CLOSER) …its brief held on the independent work alone"
+eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(STAY-MEMBER-CLOSER) …the closer armed for it"
+has "$(cat "$CALLS")" "--by converse --waiting-on tk-work" "(STAY-MEMBER-CLOSER) …and the headline waiting on it alone"
+hasnt "$(cat "$CALLS")" "bd dep add tk-sub tk-kid" "(STAY-MEMBER-CLOSER) …attempting no edge from the subject onto its child"
+member_case
+LIST_DOWN_ID=tk-mem run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
+eq "$RC/$(writes)" "1/0" "(STAY-MEMBER-UNREAD) a stay whose walk above the member does not read stops, writing nothing"
+has "$OUT" "could not be read to tell whether it is a member of tk-epic" "(STAY-MEMBER-UNREAD) …saying so"
+# The ending sign-off is left as it was: its wait on the epic's own member
+# reaches the headline, whose edge bd refuses, and it stops there.
+member_case
+run_signoff --conversation tk-conv --outcome "decomposed — the first unit is building" --ruled yes --ruling "file the parser as the first unit" --waiting-on tk-mem
+eq "$RC" 1 "(MEMBER-ENDING) an ending sign-off that waits on the epic's own member stops"
+has "$(cat "$CALLS")" "bd dep add tk-epic tk-mem --type blocks" "(MEMBER-ENDING) …at the headline's edge, which bd refuses"
+eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(MEMBER-ENDING) …before any gate is answered or the conversation closes"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
