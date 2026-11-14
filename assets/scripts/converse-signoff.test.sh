@@ -155,7 +155,9 @@
 #             its one edge onto the subject: its line names the subject, the
 #             headline waits on nothing of it and no closer is armed on it;
 #             with --accept it waits on the convoy Accept's run was poured
-#             over, and stops with no edge written when Accept poured none;
+#             over, and stops with no edge written when Accept poured none,
+#             or on the re-run of one whose convoy closed with the subject
+#             still out;
 #             without --accept, a subject no formula's sling has sent, the
 #             re-run of a stay whose convoy closed with the subject still out,
 #             a subject in another store and one whose merge the conversation
@@ -2653,6 +2655,21 @@ esac
 has "$(cat "$CALLS")" "--by converse --no-wait" "(STAY-ACCEPT) …the headline waiting on nothing, as a sign-off that takes the recommendation does"
 has "$(field tk-conv notes)" "staying: the dialog keeps what is typed (waits on tk-sub)" "(STAY-ACCEPT) …its line naming the subject"
 eq "$(field tk-conv status)" "open" "(STAY-ACCEPT) …and the conversation open"
+# The convoy Accept's run was poured over closes while the subject is still
+# out, as `gc convoy close` closes one whatever the state of the beads it
+# tracks, and the sitting's entry claims the conversation back and reads the
+# stay as stopped short. The re-run takes --accept, since the recommendation was
+# taken, finds that take already made, and stops before the wait, never sending
+# the subject a second time.
+convoy tk-accv tk-sub; setf tk-accv status closed; setf tk-conv status in_progress
+: > "$CALLS"
+ACCEPT_DOES=dispatched run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub --accept
+eq "$RC" 1 "(STAY-ACCEPT-CONVOY-CLOSED) the re-run of a stay whose convoy closed with the subject still out stops"
+has "$OUT" "the recommendation was already taken" "(STAY-ACCEPT-CONVOY-CLOSED) …finding the take its first run made"
+has "$OUT" "or the convoy of the one that did has closed" "(STAY-ACCEPT-CONVOY-CLOSED) …naming the convoy that closed"
+has "$OUT" "sign off without --stay to end at the hand-off. Do not send tk-sub to make a convoy for the stay" "(STAY-ACCEPT-CONVOY-CLOSED) …ending at the hand-off, never sending the subject again"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-ACCEPT-CONVOY-CLOSED) …with no edge written"
+eq "$(field tk-conv status)" "in_progress" "(STAY-ACCEPT-CONVOY-CLOSED) …and the conversation still claimed"
 closer_case; setm tk-sub gc.recommended_formula mol-fix
 ACCEPT_DOES=other run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub --accept
 eq "$RC" 1 "(STAY-ACCEPT-NOT-TAKEN) a stay whose recommendation another answer reached first stops"

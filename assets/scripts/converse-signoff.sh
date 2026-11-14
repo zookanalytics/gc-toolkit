@@ -1481,7 +1481,7 @@ if [ "$RULED" = yes ]; then
           SUBJECT_ON=$(subject_convoy) || SC_RC=$?
           case "$SC_RC" in
             0) ;;
-            1) stopped "no open convoy tracks $SUBJECT alone, so no dispatch of $SUBJECT poured a run for conversation $CONVERSATION to wait on${ACCEPT:+, and the take of the recommendation above poured none}; every gate above is answered, and the conversation does not stay, so sign off without --stay to end at the hand-off. Do not send $SUBJECT to make a convoy for the stay: it went out before this call or through its take, or another answer stands on its recommendation, and a second sling can pour it a second run" ;;
+            1) stopped "no open convoy tracks $SUBJECT alone, so no dispatch of $SUBJECT poured a run for conversation $CONVERSATION to wait on${ACCEPT:+, and the take of the recommendation above poured none}, or the convoy of the one that did has closed; every gate above is answered, and the conversation does not stay, so sign off without --stay to end at the hand-off. Do not send $SUBJECT to make a convoy for the stay: it went out before this call or through its take, or another answer stands on its recommendation, and a second sling can pour it a second run" ;;
             *) stopped "the convoys that track $SUBJECT could not be read to find the one its dispatch poured its run over; every gate above is answered, the conversation is not yet left to wait, and a re-run writes the wait" ;;
           esac
         fi ;;
@@ -1490,7 +1490,7 @@ if [ "$RULED" = yes ]; then
     gc bd update "$CONVERSATION" --append-notes "$STAY_LINE" >/dev/null 2>&1 \
       || stopped "the store refused the staying: line that names the work conversation $CONVERSATION waits on, which the sitting's entry reads to tell a stay that stopped short from one whose work is out; every gate above is answered, the conversation is not yet left to wait, and a re-run writes it"
     for w in $STAY_ON; do
-      ON="$w"; VIA=""
+      ON="$w"; VIA=","
       if [ "$w" = "$SUBJECT" ]; then
         [ -n "$SUBJECT_ON" ] || continue
         ON="$SUBJECT_ON"; VIA=", the convoy that closes with $SUBJECT,"
