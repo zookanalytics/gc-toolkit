@@ -2362,10 +2362,16 @@ cmd_place() {
     # deferred-dispatch pass slings it once nothing holds the bead, so a second
     # dispatch beside it would start a second run when it fires. place keeps an
     # arm that sends the bead where this placement would, and refuses one that
-    # sends it to another pool or on another formula. An arm for the validating
-    # closer (mol-validate-close) is a wait on another bead, which the closer
-    # checks once that bead lands (skills/waits/SKILL.md), so its refusal names
-    # the lift that lets the closer run before the disarm that would drop it.
+    # sends it to another pool or on another formula. It compares formulas:
+    # gctk bead arm stores an omitted --on as the target's default formula, and
+    # an arm written before gctk held the verb may name no formula, which pours
+    # the default. So an arm for this pool whose sling args differ from this
+    # placement's is the arm verb's to judge: on a bead that carries an arm it
+    # writes nothing, resolves both sides to a formula, and exits 0 only when
+    # they are the same arm. An arm for the validating closer
+    # (mol-validate-close) is a wait on another bead, which the closer checks
+    # once that bead lands (skills/waits/SKILL.md), so its refusal names the
+    # lift that lets the closer run before the disarm that would drop it.
     pl_arm=""
     if [ -z "$dispatched" ]; then
         pl_arm=$(printf '%s' "$row" | jq -r '((.metadata // {})["gc.dispatch_when_ready"] // "") | tostring | select(test("[^[:space:]]"))' 2>/dev/null || true)
@@ -2374,12 +2380,25 @@ cmd_place() {
         pl_arm_args=$(printf '%s' "$row" | jq -c '((.metadata // {})["gc.dispatch_when_ready_args"] // "")
             | if type == "string" then (if test("[^[:space:]]") then (fromjson? // [.]) else [] end) else . end' 2>/dev/null || true)
         pl_want_args=$(jq -nc --arg f "$formula" 'if $f == "" then [] else ["--on", $f] end')
-        if [ "$pl_arm" != "$pool" ] || [ "$pl_arm_args" != "$pl_want_args" ]; then
+        pl_same=""; pl_said=""
+        if [ "$pl_arm" = "$pool" ] && [ "$pl_arm_args" = "$pl_want_args" ]; then
+            pl_same=1
+        elif [ "$pl_arm" = "$pool" ]; then
+            if ! _pl_bin=$(helm_gctk); then
+                echo "$PROG: place: $bead is already armed for $pool with the sling args $pl_arm_args, and there is no gctk binary to ask whether that arm pours the formula this placement would (GCTK_BIN names one, or the city root its build sits under). Nothing was written." >&2
+                exit 4
+            fi
+            set -- "$bead" --target "$pool" --reason "placed${under:+ under $under}"
+            [ -z "$formula" ] || set -- "$@" --on "$formula"
+            if pl_said=$("$_pl_bin" bead arm "$@" --db "$db" 2>&1); then pl_same=1; fi
+            pl_said=$(printf '%s' "$pl_said" | tr '\n' ' ' | sed 's/ *$//')
+        fi
+        if [ -z "$pl_same" ]; then
             if printf '%s' "$pl_arm_args" | jq -e 'type == "array" and any(.[]; tostring | test("(^|=)mol-validate-close$"))' >/dev/null 2>&1; then
                 echo "$PROG: place: $bead is armed for its validating closer (mol-validate-close) on $pl_arm: it waits on another bead to land and is checked then, so it is not new work to place. Lift its hold and keep the arm, removing each spelling of the hold it carries: $(hold_lift_cmd "$bead" "$hold_sp"). To place it as work instead, disarm it, then re-run: $(helm_disarm_cmd "$bead" "placed as work instead of waiting for its validating closer") && $pl_again. Nothing was written." >&2
                 exit 2
             fi
-            echo "$PROG: place: $bead is already armed for $pl_arm with the sling args $pl_arm_args, and this placement would send it to $pool${formula:+ on $formula}. Disarm it, then re-run: $(helm_disarm_cmd "$bead" "placed to $pool${formula:+ on $formula}") && $pl_again. Nothing was written." >&2
+            echo "$PROG: place: $bead is already armed for $pl_arm with the sling args $pl_arm_args, and this placement would send it to $pool${formula:+ on $formula}${pl_said:+ ($pl_said)}. Disarm it, then re-run: $(helm_disarm_cmd "$bead" "placed to $pool${formula:+ on $formula}") && $pl_again. Nothing was written." >&2
             exit 2
         fi
     fi

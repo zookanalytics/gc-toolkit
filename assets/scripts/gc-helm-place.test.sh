@@ -24,6 +24,10 @@
 #     validating closer is refused with the by-hand lift, which removes each
 #     spelling of the hold it carries. A bead with no hold that a live run or
 #     an arm shows dispatched is reported as placed.
+#   - an arm already on the bead for this pool is kept when it pours the
+#     formula this placement would, however its sling args spell it: the
+#     pool's default named, as gctk bead arm stores an omitted --on, or no
+#     formula at all, as an older writer stored it.
 #   - a sling that fails leaves the hold on, and so does an arm that fails.
 #   - a stop at any write, then a second run, ends with one run and no hold:
 #     the second run dispatches nothing once a live run works the bead or the
@@ -296,10 +300,14 @@ QP
 chmod +x "$TMP/bin/queue-priority"
 
 # gctk: `bead arm <bead> --target T [--on F] --reason R [--db D]`, the flags the
-# real arm parses. Like the real one it refuses a routed bead and one whose
-# status is not open, and otherwise writes the arm's keys, the formula as the
-# sling args the record stores. STUB_ARM_FAIL refuses with nothing written.
-# Every other gctk call runs the build GCTK_BUILT names.
+# real arm parses. An omitted --on is the target's default formula,
+# STUB_DEFAULT_FORMULA or mol-polecat-work. Like the real one, on a bead that
+# carries an arm it writes nothing: it resolves an arm that names no formula to
+# the default too, and exits 0 for the same target and formula and 1 for any
+# other. Otherwise it refuses a routed bead and one whose status is not open,
+# and writes the arm's keys, the sling args stored as record.Set stores them,
+# ["--on","<formula>"]. STUB_ARM_FAIL refuses with nothing written. Every other
+# gctk call runs the build GCTK_BUILT names.
 cat > "$TMP/bin/gctk-arm" <<'GCTK'
 #!/usr/bin/env bash
 set -u
@@ -320,14 +328,24 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$target" ] && [ -n "$reason" ] || { echo "gctk bead arm: name the bead, its --target and the --reason it is armed for" >&2; exit 2; }
 [ -n "${STUB_ARM_FAIL:-}" ] && { echo "gctk bead arm: the arm on $bead was not written: simulated" >&2; exit 1; }
+default="${STUB_DEFAULT_FORMULA:-mol-polecat-work}"
+want="${formula:-$default}"
+have_t=$(jq -r --arg b "$bead" '.[] | select(.id == $b) | (.metadata["gc.dispatch_when_ready"] // "")' "$S")
+if [ -n "$have_t" ]; then
+  have_f=$(jq -r --arg b "$bead" '.[] | select(.id == $b) | (.metadata["gc.dispatch_when_ready_args"] // "[]")
+    | (if type == "string" then fromjson else . end) | if length == 2 and .[0] == "--on" then .[1] else "" end' "$S")
+  if [ "$have_t" = "$target" ] && [ "${have_f:-$default}" = "$want" ]; then
+    echo "$bead is already armed for $target on $want, so nothing was written"; exit 0
+  fi
+  echo "gctk bead arm: $bead is already armed for $have_t on ${have_f:-its default formula}. Disarm it first if you mean to change where it goes" >&2; exit 1
+fi
 jq -e --arg b "$bead" 'any(.[]; .id == $b and .status == "open" and ((.metadata["gc.routed_to"] // "") == ""))' "$S" >/dev/null \
   || { echo "gctk bead arm: $bead is dispatched already, or not open" >&2; exit 1; }
-aj=$(jq -nc --arg f "$formula" 'if $f == "" then [] else ["--on", $f] end')
-jq -c --arg b "$bead" --arg t "$target" --arg r "$reason" --argjson a "$aj" '
+jq -c --arg b "$bead" --arg t "$target" --arg r "$reason" --arg f "$want" '
   map(if .id == $b then .metadata["gc.dispatch_when_ready"] = $t
-                        | .metadata["gc.dispatch_when_ready_args"] = ($a | tojson)
+                        | .metadata["gc.dispatch_when_ready_args"] = (["--on", $f] | tojson)
                         | .metadata["gc.dispatch_when_ready_reason"] = $r else . end)' "$S" > "$S.tmp" && mv "$S.tmp" "$S"
-echo "armed $bead for $target on ${formula:-its default formula}"
+echo "armed $bead for $target on $want"
 GCTK
 chmod +x "$TMP/bin/gctk-arm"
 
@@ -584,23 +602,28 @@ eq "$(labels tk-fixed)" "hold:mayor" "(STOP) a route clear that fails leaves the
 run_place tk-fixed --standalone
 eq "$RC" "0" "(STOP) after a failed route clear, a second run finishes"
 eq "$(runs tk-fixed)" "1" "(STOP) with one run"
+# arm_of <bead> — the bead's arm keys, so a second run can show it wrote none.
+arm_of() { row "$1" | jq -c '(.metadata // {}) | with_entries(select(.key | startswith("gc.dispatch_when_ready")))'; }
 reset_store
 (export STUB_UPDATE_FAIL_ON=--remove-label; sh "$SCRIPT" place tk-new --under tk-parked >/dev/null 2>&1) || true
+eq "$(meta tk-new gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "(STOP) the first run's arm names the pool's default, as gctk bead arm stores an omitted --on"
+ARM1="$(arm_of tk-new)"
 run_place tk-new --under tk-parked
 eq "$RC" "0" "(STOP) after a stop at an armed bead's lift, a second run finishes"
 eq "$(labels tk-new)" "" "(STOP) its hold is lifted"
 hasnt "$CALLS" "sling " "(STOP) and nothing is slung"
-hasnt "$CALLS" "gctk bead arm" "(STOP) and the first run's arm is kept, not written again"
+eq "$(arm_of tk-new)" "$ARM1" "(STOP) and the first run's arm is kept, not written again"
 # The park closes between the stop and the second run: the first run's arm is
 # the dispatch, which the deferred-dispatch pass slings once the hold is gone,
 # so a sling beside it would start a second run when it fires.
 reset_store
 (export STUB_UPDATE_FAIL_ON=--remove-label; sh "$SCRIPT" place tk-new --under tk-parked >/dev/null 2>&1) || true
+ARM1="$(arm_of tk-new)"
 jq -c 'map(if .id == "tk-pg" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
 run_place tk-new --under tk-parked
 eq "$RC" "0" "(STOP-FREED) after a stop at an armed bead's lift and its park's close, a second run finishes"
 hasnt "$CALLS" "sling " "(STOP-FREED) …slinging nothing beside the arm"
-hasnt "$CALLS" "gctk bead arm" "(STOP-FREED) …and arming nothing again"
+eq "$(arm_of tk-new)" "$ARM1" "(STOP-FREED) …and arming nothing again"
 eq "$(meta tk-new gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat" "(STOP-FREED) …keeping the arm, which the pass slings once the hold is gone"
 eq "$(labels tk-new)" "" "(STOP-FREED) …and lifting the hold"
 has "$OUT" "already armed for gc-toolkit/gc-toolkit.polecat" "(STOP-FREED) …and says the arm stands"
@@ -642,6 +665,34 @@ run_place tk-new --under tk-epic --on mol-polecat-work
 eq "$RC" "0" "(ARMED-SAME) a bead armed where this placement sends it exits 0"
 hasnt "$CALLS" "sling " "(ARMED-SAME) …slinging nothing beside the arm"
 eq "$(labels tk-new)" "" "(ARMED-SAME) …and lifting the hold"
+
+# A placement compares formulas, not the spelling of the sling args: gctk bead
+# arm stores an omitted --on as the pool's default, and an arm written before
+# gctk held the verb names no formula, which pours the default.
+reset_store; arm_new gc-toolkit/gc-toolkit.polecat '["--on","mol-polecat-work"]'
+run_place tk-new --under tk-epic
+eq "$RC" "0" "(ARMED-DEFAULT) a placement naming no --on keeps an arm on the pool's default formula"
+hasnt "$CALLS" "sling " "(ARMED-DEFAULT) …slinging nothing beside the arm"
+eq "$(meta tk-new gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "(ARMED-DEFAULT) …writing no arm over it"
+eq "$(labels tk-new)" "" "(ARMED-DEFAULT) …and lifting the hold"
+reset_store; arm_new gc-toolkit/gc-toolkit.polecat '[]'
+run_place tk-new --under tk-epic
+eq "$RC" "0" "(ARMED-DEFAULT) an arm that names no formula matches a placement that names none"
+hasnt "$CALLS" "gctk bead arm" "(ARMED-DEFAULT) …whose sling args are the same, so nothing is asked"
+reset_store; arm_new gc-toolkit/gc-toolkit.polecat '[]'
+run_place tk-new --under tk-epic --on mol-polecat-work
+eq "$RC" "0" "(ARMED-DEFAULT) …and a placement on the default formula, which that arm pours"
+eq "$(meta tk-new gc.dispatch_when_ready_args)" '[]' "(ARMED-DEFAULT) …keeping the arm as it was"
+reset_store; arm_new gc-toolkit/gc-toolkit.polecat '["--on","mol-polecat-report"]'
+run_place tk-new --under tk-epic
+eq "$RC" "2" "(ARMED-ELSEWHERE) an arm on another formula refuses a placement on the default"
+has "$ERR" "gctk bead arm: tk-new is already armed for gc-toolkit/gc-toolkit.polecat on mol-polecat-report" "(ARMED-ELSEWHERE) …with the arm verb's own answer"
+unchanged "(ARMED-ELSEWHERE) …with nothing written"
+reset_store; arm_new gc-toolkit/gc-toolkit.polecat '["--on","mol-polecat-work"]'
+GCTK_BIN="$TMP/no-gctk" run_place tk-new --under tk-epic
+eq "$RC" "4" "(ARMED-DEFAULT) with no gctk binary to ask, a placement whose sling args differ from its arm's exits 4"
+has "$ERR" "no gctk binary to ask whether that arm pours the formula this placement would" "(ARMED-DEFAULT) …saying why"
+unchanged "(ARMED-DEFAULT) …with nothing written"
 
 echo "# a sling that exits 3 counts as dispatched"
 reset_store
