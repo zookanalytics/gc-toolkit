@@ -119,13 +119,13 @@ echo "── every required field is checked (fail closed on a missing one) ─�
 
 echo "── the work skill wires this script (doctrine and tool do not drift) ──"
 # Withdrawing a recommendation is an option in the pack-wide work skill, and the
-# converse prompt's rule points there for it.
+# converse hold, where a sitting judges what to recommend, points there for it.
 WORK_SKILL="$REPO/skills/work/SKILL.md"
-PROMPT="$REPO/agents/_converse/prompt.template.md"
+HOLD="$REPO/skills/converse-hold/SKILL.md"
 has "the work skill names converse-invalidate-recommendation.sh" \
     'converse-invalidate-recommendation.sh' "$WORK_SKILL"
-has "the prompt's recommendation rule points at the work skill" \
-    'withdraw it (the `work` skill' "$PROMPT"
+has "the converse hold points a stale recommendation at the work skill" \
+    'withdraw it (the `work` skill' "$HOLD"
 
 echo
 echo "converse-invalidate-recommendation: $PASS passed, $FAIL failed"

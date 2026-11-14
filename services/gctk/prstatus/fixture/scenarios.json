@@ -256,6 +256,78 @@
     ]
   },
   {
+    "name": "a conversation its sitting stays in over the PR's rework, which holds the merge and is no person's move",
+    "anchor": "tk-a",
+    "want": {"status": "working", "held": []},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c", "tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"], "waits_on": ["tk-a.rw"]},
+      {"id": "tk-a.rw", "status": "in_progress", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.polecat-1", "metadata": {"task_kind": "rework", "anchor_bead": "tk-a", "source_ruling_bead": "tk-c"}}
+    ]
+  },
+  {
+    "name": "an approved PR whose conversation stays for other work waits for the return, not merging",
+    "anchor": "tk-a",
+    "want": {"status": "working", "held": []},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"], "waits_on": ["tk-w"]},
+      {"id": "tk-w", "status": "open", "issue_type": "task", "title": "the docs it waits on", "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
+    ]
+  },
+  {
+    "name": "a conversation its sitting stays in, once the work it sent has closed, is the operator's again",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"], "waits_on": ["tk-w"]},
+      {"id": "tk-w", "status": "closed", "issue_type": "task", "title": "the docs it waits on"}
+    ]
+  },
+  {
+    "name": "a conversation its sitting holds again, over work an earlier stay sent, is the operator's",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-c", "status": "in_progress", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"], "waits_on": ["tk-w"]},
+      {"id": "tk-w", "status": "open", "issue_type": "task", "title": "the docs it waits on", "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
+    ]
+  },
+  {
+    "name": "a conversation in the operator's queue over work still out is the operator's",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "human", "title": "what about this?", "tracks": ["tk-a"], "waits_on": ["tk-w"]},
+      {"id": "tk-w", "status": "open", "issue_type": "task", "title": "the docs it waits on", "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
+    ]
+  },
+  {
+    "name": "a conversation its sitting stays in over a human gate holds as the gate alone",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["gate"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"], "waits_on": ["tk-g"]},
+      {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
+    ]
+  },
+  {
+    "name": "a rework waiting on another PR whose conversation stays for work",
+    "anchor": "tk-a",
+    "want": {"status": "working", "held": []},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "waits_on": ["tk-bc"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@def@2026-10-27T00:00:00Z", "pr.machine": "settled@def@2026-10-27T00:00:00Z"}},
+      {"id": "tk-bc", "status": "open", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-bc", "title": "does this one land first?", "tracks": ["tk-b"], "waits_on": ["tk-w"]},
+      {"id": "tk-w", "status": "open", "issue_type": "task", "title": "the docs it waits on", "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
+    ]
+  },
+  {
     "name": "a live blocker routed to human is no person's",
     "anchor": "tk-a",
     "want": {"status": "merging", "held": []},

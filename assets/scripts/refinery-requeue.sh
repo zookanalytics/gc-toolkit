@@ -22,20 +22,30 @@
 # because a pour copies the priority it finds, and slung. The bead stays open
 # and assigned to the refinery, so the child's hand-back records the PR on it.
 #
-# A child that does not settle is not slung, and the run stops with the child
+# A child that does not settle is not slung. It is armed instead (gctk bead
+# arm), and the deferred-dispatch order pours it on its next pass, with no
+# settle, so the queue-priority pass settles it with its workflow once that is
+# queued (docs/steering.md). The arm sends it rather than the refinery's next
+# patrol, because the bead the child holds is no demand that wakes the
+# refinery: Gas City counts open work assigned to an on-demand session as its
+# demand only once the work is ready.
+#
+# A run that ends after the create and before the sling or the arm, or whose
+# create reply was lost and whose children did not read again, leaves the child
 # unsent (refinery-lib.sh): it holds the bead, and no one works it. The
-# refinery's next patrol sends it on. find-work counts an unsent child as no
-# wait and no writer, so it takes the bead, and the bead's prep runs this
-# requeue again, which finds the child on the branch.
+# refinery's next patrol, which comes once other work wakes the refinery, sends
+# it on. find-work counts an unsent child as no wait and no writer, so it takes
+# the bead, and the bead's prep runs this requeue again, which finds the child
+# on the branch.
 #
 # One worker per branch: when an open rework child of the bead is already on
 # the branch, running or parked, the reason goes to that child's notes and
-# nothing else is filed. An unsent child among them is sent on: its blocks edge
-# onto the bead is written when it lacks one, as a child filed before the edge
-# rode the create can, and it is settled, then slung. When that fails too, the
-# run files a human gate keyed refinery-requeue-failed on the child, so the
-# patrol stops taking the bead, and clearing the gate lets the next patrol send
-# the child on.
+# nothing else is filed. An unsent child among them is sent on as a new child
+# is, once its blocks edge onto the bead is written when it lacks one, as a
+# child filed before the edge rode the create can. When that edge does not
+# land, the run files a human gate keyed refinery-requeue-failed on the child
+# and then arms the child, so the gate holds both the child and the bead, and
+# clearing the gate lets the deferred-dispatch order send the child on.
 #
 # Any other bead, a rework child among them, goes back itself. One write,
 # guarded on the assignee and status it read, reopens it unassigned with the
@@ -49,14 +59,16 @@
 # existing_pr stay, so the rework reuses the PR it may have. A live workflow
 # left on it is closed (gc workflow delete-source), and it is slung.
 #
-# A sling that fails arms a deferred dispatch (gctk bead arm), which the
-# deferred-dispatch order pours on its next pass. An arm that fails too files a
-# human gate keyed refinery-requeue-failed.
+# A sling that fails is armed the same way. An arm that fails files a human
+# gate keyed refinery-requeue-failed, which asks a person to pour the work by
+# hand.
 #
-# Exit: 0 sent back, or the reason reached the child already on the branch
+# Exit: 0 sent back or armed to go back, or the reason reached the child
+#         already on the branch
 #       1 the work did not go back; the output says why. The bead stays with
-#         the refinery, and its next patrol retries the requeue, or sends on
-#         the unsent child this run filed
+#         the refinery: its next patrol retries the requeue, or sends on the
+#         unsent child this run filed, and a refinery-requeue-failed gate the
+#         run filed waits for a person
 #       2 usage
 #       3 the bead left the refinery or changed status before the write, so
 #         nothing was written
@@ -90,20 +102,21 @@ done
 [ -n "$BEAD" ] && [ -n "$(printf '%s' "$REASON" | tr -d '[:space:]')" ] || usage
 
 stop() { echo "$PROG: $1; nothing went back to the pool, and $BEAD stays with the refinery" >&2; exit 1; }
-# unsent <child> <why>: stop with the child this run filed left unsent, for the
-# refinery's next patrol to send on.
-unsent() {
-  echo "$PROG: rework child $1 was filed for $BEAD, but $2, so it is not slung. It holds $BEAD unsent, and the refinery's next patrol sends it on: find-work takes $BEAD, and its prep runs this requeue again" >&2
-  exit 1
-}
 # said <refusal> <writer>: a write's refusal on one line, for a gate's message.
 said() { printf '%s' "${1:-$2 gave no reason}" | tr -s '[:space:]' ' ' | sed 's/ $//'; }
-# ask <child> <why>: an unsent child that could not be sent on again waits for a
-# person, behind a human gate on it. The gate holds the child, so the patrol
-# stops taking the bead, and once it is cleared the next patrol sends it on.
+# ask <child> <why>: an unsent child whose blocks edge could not be written
+# waits for a person, behind a human gate on it, and is armed once the gate has
+# landed. The gate holds the child, so the patrol stops taking the bead, and
+# clearing it lets the deferred-dispatch order send the child on. Without the
+# gate nothing is armed, since the arm alone would send the child without its
+# edge.
 ask() {
-  "$HERE/human-gate.sh" --subject "$1" --key refinery-requeue-failed --message "The refinery sent $BEAD's branch $BRANCH back to the pool as rework child $1 ($REASON), but $2, so no polecat is building it. Fix that, then clear this gate, and the refinery's next patrol sends $1 on. To send it on yourself instead: $HERE/queue-priority.sh settle $1, then gc sling $ROUTE $1 --on $FORMULA, then clear this gate." >/dev/null \
-    || echo "$PROG: no refinery-requeue-failed gate landed on $1 either, so the refinery's next patrol tries to send it on again" >&2
+  if "$HERE/human-gate.sh" --subject "$1" --key refinery-requeue-failed --message "The refinery sent $BEAD's branch $BRANCH back to the pool as rework child $1 ($REASON), but $2, so no polecat is building it. Fix that, then clear this gate: $1 is armed behind it, and the deferred-dispatch order sends it on. If gctk bead holds $1 shows no arm on it, send it on yourself instead: $HERE/queue-priority.sh settle $1, then gc sling $ROUTE $1 --on $FORMULA, then clear this gate." >/dev/null; then
+    "$GCTK" bead arm "$1" --target "$ROUTE" --on "$FORMULA" --reason "refinery requeue: $2; it goes once the refinery-requeue-failed gate is cleared" >&2 \
+      || echo "$PROG: the refinery-requeue-failed gate holds $1, but no deferred dispatch was armed behind it, so a person sends it on by hand" >&2
+  else
+    echo "$PROG: no refinery-requeue-failed gate landed on $1 either, and nothing was armed, so the refinery's next patrol tries to send it on again" >&2
+  fi
   stop "rework child $1 was never sent on, and $2"
 }
 
@@ -118,21 +131,43 @@ TARGET=$(bead_meta target)
 STATUS=$(bead_field status)
 ROUTE=$("$HERE/pool-route.sh" "$POOL") || stop "the pool $POOL resolves to no route"
 
-# sling <bead>: pour mol-polecat-work on <bead> for the pool. A sling that
-# fails arms the reconcile pass's retry, and an arm that fails asks a person.
+# What a send did with the work, for the line that reports it: slung, or armed.
+WENT=""
+# arm <bead> <why> [<by-hand>]: arm the dispatch this run could not make (gctk
+# bead arm), so the deferred-dispatch order's next pass pours mol-polecat-work
+# on <bead> for the pool once nothing holds it. An arm that fails asks a person,
+# behind a refinery-requeue-failed gate on <bead>, to pour it by hand:
+# <by-hand>, else a plain gc sling.
+arm() {
+  local hand="${3:-gc sling $ROUTE $1 --on $FORMULA}"
+  if "$GCTK" bead arm "$1" --target "$ROUTE" --on "$FORMULA" --reason "refinery requeue: $2" >&2; then
+    echo "$PROG: $2; armed a deferred dispatch, which the deferred-dispatch order pours on its next pass" >&2
+    WENT="is armed to go to $ROUTE"
+    return 0
+  fi
+  "$HERE/human-gate.sh" --subject "$1" --key refinery-requeue-failed --message "The refinery sent $1 back to the pool ($REASON), but $2 and no deferred dispatch could be armed, so no polecat is building it. Pour it by hand: $hand, then clear this gate." >/dev/null \
+    || echo "$PROG: no refinery-requeue-failed gate landed on $1 either; pour it by hand: $hand" >&2
+  return 1
+}
+# sling <bead> [<by-hand>]: pour mol-polecat-work on <bead> for the pool. A
+# sling that fails is armed.
 sling() {
   local rc
   gc sling ${GC_RIG:+--rig "$GC_RIG"} "$ROUTE" "$1" --on "$FORMULA" </dev/null >&2
   rc=$?
-  [ "$rc" != 0 ] || return 0
-  if "$GCTK" bead arm "$1" --target "$ROUTE" --on "$FORMULA" \
-       --reason "refinery requeue: gc sling of $1 exited $rc" >&2; then
-    echo "$PROG: gc sling of $1 exited $rc; armed a deferred dispatch, which the deferred-dispatch order pours on its next pass" >&2
-    return 0
+  [ "$rc" != 0 ] || { WENT="went to $ROUTE"; return 0; }
+  arm "$1" "gc sling of $1 exited $rc" "${2:-}"
+}
+# send <child>: settle a rework child at its priority, because a pour copies
+# the priority it finds, then sling it. A child that does not settle is armed
+# rather than slung, and a person who pours it by hand settles it first.
+send() {
+  local err hand="$HERE/queue-priority.sh settle $1, then gc sling $ROUTE $1 --on $FORMULA"
+  if { err=$(pr_finishing_settle "$1" 2>&1 1>&3); } 3>&2; then
+    sling "$1" "$hand"
+    return
   fi
-  "$HERE/human-gate.sh" --subject "$1" --key refinery-requeue-failed --message "The refinery sent $1 back to the pool ($REASON), but gc sling exited $rc and no deferred dispatch could be armed, so no polecat is building it. Pour it by hand: gc sling $ROUTE $1 --on $FORMULA, then clear this gate." >/dev/null \
-    || echo "$PROG: no refinery-requeue-failed gate landed on $1 either; pour it by hand: gc sling $ROUTE $1 --on $FORMULA" >&2
-  return 1
+  arm "$1" "$1 did not settle at its priority ($(said "$err" queue-priority.sh))" "$hand"
 }
 
 KIND=$(bead_field issue_type)
@@ -151,20 +186,18 @@ if [ "$(bead_meta merge_result)" = pull_request_head_changed ] || [ "$KIND" = co
     gc bd update "$CHILD" --append-notes "Refinery, on $BEAD's branch $BRANCH: $REASON. This child is the rework on the branch, so nothing else is filed for it." </dev/null >/dev/null \
       || stop "the reason did not reach $CHILD, the rework child already on $BRANCH"
     if printf '%s' "$KIDS" | jq -e --arg c "$CHILD" --arg a "$BEAD" --arg b "$BRANCH" "$REFINERY_UNSENT_JQ"'any(.[]; .id == $c and refinery_unsent($a; $b))' >/dev/null 2>&1; then
-      # An unsent child is made whole before its sling: its blocks edge onto
-      # the bead, which a child filed before the edge rode the create can lack,
-      # and its priority. A failure here asks a person.
-      # bd refuses a second edge on a pair, so an add it refuses is read again.
-      # The refusal of each write is kept for the gate that asks a person.
+      # An unsent child gets its blocks edge onto the bead before it is sent,
+      # since a child filed before the edge rode the create can lack it. An
+      # edge that does not land asks a person. bd refuses a second edge on a
+      # pair, so an add it refuses is read again, and the add's refusal is kept
+      # for the gate.
       blocks_bead() { bd_json dep list "$BEAD" --direction=down -t blocks | jq -e --arg c "$1" 'type == "array" and any(.[]; .id == $c)' >/dev/null 2>&1; }
       if ! blocks_bead "$CHILD"; then
         ERR=$(gc bd dep "$CHILD" --blocks "$BEAD" </dev/null 2>&1 >/dev/null) || blocks_bead "$CHILD" \
           || ask "$CHILD" "its blocks edge onto $BEAD did not land ($(said "$ERR" bd)), and that edge is what holds $BEAD for its rework"
       fi
-      { ERR=$(pr_finishing_settle "$CHILD" 2>&1 1>&3); } 3>&2 \
-        || ask "$CHILD" "it did not settle at its priority ($(said "$ERR" queue-priority.sh)), and a pour copies the priority it finds"
-      sling "$CHILD" || exit 1
-      echo "$PROG: $CHILD, the rework child on $BRANCH, was filed and never sent on, so it was settled and slung to $ROUTE"
+      send "$CHILD" || exit 1
+      echo "$PROG: $CHILD, the rework child on $BRANCH, was filed and never sent on, so it $WENT"
     fi
     echo "$PROG: $CHILD is the rework on $BEAD's branch $BRANCH, so the reason went to its notes: $REASON"
     exit 0
@@ -184,9 +217,8 @@ if [ "$(bead_meta merge_result)" = pull_request_head_changed ] || [ "$KIND" = co
     [ -n "$CHILD" ] || stop "the rework child's create returned no id, and no unsent rework child of $BEAD is on $BRANCH, so none was filed"
     echo "$PROG: the rework child's create returned no id; $CHILD is the unsent rework child it filed on $BRANCH" >&2
   fi
-  pr_finishing_settle "$CHILD" >&2 || unsent "$CHILD" "it did not settle at its priority, and a pour copies the priority it finds"
-  sling "$CHILD" || exit 1
-  echo "$PROG: $BEAD keeps its PR${PR:+ $PR}, and its rework child $CHILD went to $ROUTE: $REASON"
+  send "$CHILD" || exit 1
+  echo "$PROG: $BEAD keeps its PR${PR:+ $PR}, and its rework child $CHILD $WENT: $REASON"
   exit 0
 fi
 

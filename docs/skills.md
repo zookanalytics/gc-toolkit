@@ -131,8 +131,8 @@ compatibility: <portability statement>           # see Axis 1
   number. Those belong in the body. A list of occasions belongs here when each
   item is something an agent sets out to do ("holding its merge until something
   is settled"), and in the body when each item is a part of the skill ("the two
-  binary verdicts"). A skill loaded only by name, such as a converse step from
-  its table, needs no more than a short identifier.
+  binary verdicts"). A skill loaded only by name, such as a converse action's
+  skill from the converse prompt's table, needs no more than a short identifier.
 - **`compatibility` declares the portability axis** — a recommended local
   convention (the spec treats the field as optional), so the boundary is
   legible without reading the body.
