@@ -47,12 +47,12 @@ logs.
 
 Per file, with a file's parts summed and a file matched by its path:
 
-- **macOS, 2026-10-12 to 2026-11-14:** 95 files new by name brought 1,290
-  test-seconds, 50 files gone by the end took 330 away, and the 172 files present
-  at both ends went from 2,306 to 3,769.
-- **Linux, 2026-09-06 to 2026-11-14:** the 114 files present at both ends went
-  from 408 to 2,395.
-- **The same 231 files, 2026-10-27 to 2026-11-14:** Linux 2,490 to 3,461, macOS
+- **macOS, 2026-10-12 to 2026-11-14:** 95 files new by path brought 1,260
+  test-seconds, 54 files gone by the end took 322 away, and the 168 files present
+  at both ends went from 2,314 to 3,799.
+- **Linux, 2026-09-06 to 2026-11-14:** the 83 files present at both ends went
+  from 411 to 2,441.
+- **The same 210 files, 2026-10-27 to 2026-11-14:** Linux 2,490 to 3,461, macOS
   4,982 to 4,373. Over the whole suite, Linux's summed test-seconds as a share of
   macOS's rose from 0.50 to 0.81 in those weeks. The Linux runner image moved
   from 20261021.618 to 20261103.629 in that time, and this design does not
@@ -69,16 +69,21 @@ Per file, with a file's parts summed and a file matched by its path:
 
 46e03c4ed and 1d744d59f are consecutive runs whose suites cost Linux within 1%
 of each other, and between them the macOS check's time moved by 1.35. One
-change touching the merge path landed between them (d3d1571d8). Per file,
-over the files of at least 10 s:
+change touching the merge path landed between them (d3d1571d8). Per run, a file
+or one of its parts, over the runs of at least 10 s in the first:
 
-| | Files | Median ratio | 5th percentile | 95th percentile |
+| | Runs | Median ratio | 5th percentile | 95th percentile |
 |---|---|---|---|---|
 | macOS | 100 | 1.27 | 1.04 | 1.62 |
 | Linux | 86 | 1.00 | 0.90 | 1.09 |
 
-Every successful main run from 2026-11-12 to 14 took the macOS check 26.8 to
-44.0 minutes and the Linux check 15.4 to 23.5.
+Every successful main run from 2026-11-12 to a4ee5ae43 ran the macOS suite 3
+parallel and took the macOS check 26.8 to 44.0 minutes, and the Linux check 15.4
+to 23.5. The next main run, 43568696149 at 45e9ddb41, got a macOS runner with
+five cores on the same image (macos-26-arm64 20261102.0473.1): 5 parallel,
+4,705 summed test-seconds in a 941 s suite, and a 16.4-minute job. The PR runs
+that started at 06:44Z and 07:08Z, either side of it, ran 3 parallel. Each
+job log's `run-tests: ... N parallel` line gives the count.
 
 ### Where the suite's time sits at a4ee5ae43
 
@@ -96,19 +101,31 @@ is the one `tools/measure.sh` gives its script: section 4 of
 | of which tk-1tfzr71.18 | 6 | 94 | 93 |
 | of which tk-1tfzr71.17 | 1 | 0 | 0 |
 | `merge.test.sh` (tk-1tfzr71.20) and `deferred-dispatch.test.sh` (tk-1tfzr71.16) | 2 | 211 | 185 |
-| Kept: the move's queued Features | 13 | 512 | 389 |
+| Suites the merge member's branch deletes that the plan's rows do not list (tk-1tfzr71.20) | 10 | 95 | 48 |
+| Kept: the move's queued Features and tasks | 13 | 512 | 389 |
 | Kept: `gc-helm.sh` suites no Feature moves | 10 | 209 | 143 |
 | Kept: engagement scripts no Feature names | 18 | 489 | 332 |
-| Kept: the rest, by subsystem: shared 533, review 288, merge 276, doctor 259, work 153, patrol 110, unplaced 109, feedback 41, engagement 11, keeper 10 | 178 | 1,790 | 1,365 |
+| Kept: the rest, by subsystem: shared 521, review 288, doctor 259, merge 193, work 153, patrol 110, unplaced 109, feedback 41, engagement 11, keeper 10 | 168 | 1,695 | 1,317 |
+
+The ten are `assets/scripts/<name>.test.sh` for check-set-normalize,
+find-work-gating-guard, mr-aware-rejection-failclosed, one-anchor-per-pr,
+pr-stack, preexisting-failure-dedup, refinery-human-gate-wiring,
+refinery-prep-worktree, rig-check-commands and unrecorded-direct-landing. Each
+is deleted on `integration/tk-1tfzr71.20` at 2f3f1c1d3, read with
+`git diff --name-status --diff-filter=D origin/main...origin/integration/tk-1tfzr71.20`.
+The other live integration branches delete no test file other than
+`deferred-dispatch.test.sh`.
 
 Spread of the 221 files the deletion plan keeps, merge.test.sh and
 deferred-dispatch.test.sh among them, on macOS: 14 files of 60 s or more hold
 1,378; 37 files of 20 to 59 s hold 1,135; 59 files of 5 to 19 s hold 541; 111
-files under 5 s hold 157. The median kept file takes 4 s.
+files under 5 s hold 157. Over the 209 kept files: 12 files of 60 s or more
+hold 1,167; 35 of 20 to 59 s hold 1,073; 54 of 5 to 19 s hold 510; 108 under
+5 s hold 155. The median kept file takes 4 s.
 
-Of the 219 kept files, 133 write a gc stub of their own (a line that redirects
-into a path ending in `/gc`). They hold 2,478 of the kept ground's 3,000 macOS
-test-seconds. 23 of the 219 call `harness_init` of `test-harness.sh`.
+Of the 209 kept files, 126 write a gc stub of their own (a line that redirects
+into a path ending in `/gc`). They hold 2,408 of the kept ground's 2,905 macOS
+test-seconds. 22 of the 209 call `harness_init` of `test-harness.sh`.
 
 ### What each check caught
 
@@ -132,7 +149,8 @@ name and `set -u` stopped the script.
 ### The Linux outlier
 
 `assets/scripts/step-number-citation.test.sh`, added by 88617e371 (#1411) on
-2026-11-06, took 244 s (2026-11-07) and 256 s (a4ee5ae43) on Linux, and 5 s on
+2026-11-06, took 244 s at a45da5bf9 (2026-11-07), and 204, 204, 232 and 256 s at
+c3d9f4e32, 46e03c4ed, 1d744d59f and a4ee5ae43, on Linux. It took 4 to 6 s on
 macOS. It reads every tracked text file in one `xargs awk` pass whose regular
 expression is built from every formula and skill name.
 
@@ -172,7 +190,7 @@ same store file, built for this measurement and not committed.
 
 The 24 suites were chosen from the costliest kept suites, leaving out
 `merge.test.sh`, `deferred-dispatch.test.sh`, `signoff.test.sh` and
-`pr-open.test.sh`. They hold 1,571 of the kept ground's 3,000 macOS
+`pr-open.test.sh`. They hold 1,571 of the kept ground's 2,905 macOS
 test-seconds. Each passed in every run below, except as noted.
 
 - **Plain run:** each suite under `/usr/bin/time -p`. Their walls summed 1,156 s,
@@ -257,7 +275,7 @@ anything in stubs, with `pr-facts.test.sh` beside them:
 | `review-workspace.test.sh` | 12 | 96 | 7% | 4% |
 | `blocker-holder.test.sh` | 12 | 45 | 5% | 4% |
 | `branch-end.test.sh` | 14 | 114 | 9% | 6% |
-| `pr-stack.test.sh` | 17 | 335 | 22% | 14% |
+| `pr-stack.test.sh`, deleted on the merge member's branch | 17 | 335 | 22% | 14% |
 | `scratch-reap.test.sh` | 30 | 0 | 0% | 0% |
 | `pr-open.test.sh` | 38 | 947 | 26% | 16% |
 | `pr-facts.test.sh`, retiring, all parts in one run | 812 | 21,860 | 35% | 24% |

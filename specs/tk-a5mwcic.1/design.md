@@ -13,17 +13,18 @@ profile taken on the host at that commit, unless the text names another source.
 
 ## What approving this decides
 
-Every merge waits for the macOS check. On main on 2026-11-13 and 14 it took
-26.8 to 36.2 minutes, and the epic's bar is five minutes for each required
-check.
+Every merge waits for the macOS check. On main from 2026-11-12 to 14 it took
+26.8 to 44.0 minutes on the runner's usual three cores, and the epic's bar is
+five minutes for each required check.
 
 - **The cause.** The checks are CPU-bound, and the CPU goes to starting
   processes: bash, jq and the bash stand-ins for gc. Five minutes on the macOS
   runner's three cores leaves room for about 530 test-seconds, and the suite
   sums 5,059.
 - **What the plans already in motion remove.** The deletion plan's whole files
-  hold 1,848 of the 5,059. The suites the plan keeps hold about 3,000 by
-  themselves, almost six times the budget.
+  hold 1,848 of the 5,059, and the merge path's and deferred dispatch's other
+  suites, which the epic's boundaries leave out, hold 306 more. The suites that
+  stay hold about 2,900 by themselves, five and a half times the budget.
 - **Why faster tests alone cannot reach it.** In the kept bash suites profiled,
   the scripts under test start 56% of the processes, and the test files and their
   stubs start the rest. A compiled fake and test code without jq remove about a
@@ -73,7 +74,7 @@ mostly helm's dependencies.
 
 ### The CPU goes to starting processes
 
-Those 24 suites hold 1,571 of the kept ground's 3,000 macOS test-seconds. Run
+Those 24 suites hold 1,571 of the kept ground's 2,905 macOS test-seconds. Run
 on the host with every common command counted, they started at least 180,166
 processes through PATH, and 16,394 stub processes more. jq was 36.5% of
 the counted starts, then cat, tr and bash at 6 to 8% each, and grep, git,
@@ -112,9 +113,9 @@ make 76 to 658 assertions each.
 On Linux the suite summed 464 test-seconds over 110 files on 2026-09-06, and
 4,115 over 263 files at a4ee5ae43. The macOS check, first run on 2026-10-08,
 summed 2,636 on 2026-10-12 and 5,059 at a4ee5ae43, net of the cost fixes that
-landed in between. Of that macOS rise, 1,290 test-seconds came from 95 files
-new by name in the month, and 1,463 from the 172 files present at both ends,
-which grew from 2,306 to 3,769. Files gone by the end took 330 away.
+landed in between. Of that macOS rise, 1,260 test-seconds came from 95 files
+new by path in the month, and 1,485 from the 168 files present at both ends,
+which grew from 2,314 to 3,799. The 54 files gone by the end took 322 away.
 
 New suites and heavier old ones each brought about half. Nothing in how a test
 is written bounds what one case costs, and nothing shows a PR what it adds to
@@ -125,14 +126,19 @@ the suite.
 | Part of the suite | Files | macOS | Linux |
 |---|---|---|---|
 | Whole files the deletion plan retires (`tools/deletion-plan.tsv`) | 42 | 1,848 | 1,701 |
-| Suites of partly retired code the epic's boundaries name: `merge.test.sh` (tk-1tfzr71.20) and `deferred-dispatch.test.sh` (tk-1tfzr71.16) | 2 | 211 | 185 |
-| **The kept suites, this epic's ground** | 219 | **3,000** | **2,229** |
+| The merge path's and deferred dispatch's other suites, which the epic's boundaries leave out: `merge.test.sh` (tk-1tfzr71.20), `deferred-dispatch.test.sh` (tk-1tfzr71.16), and ten suites the merge member's branch deletes that the plan's rows do not list | 12 | 306 | 233 |
+| **The kept suites, this epic's ground** | 209 | **2,905** | **2,181** |
 
-The kept ground alone is almost six times the macOS budget. Cutting call sites in
-the shared scripts does not move it: tk-nalm16x cut the scripts the suites run
-most, and its own paired runs measured the whole suite at 99.4% of main's. The
-time is spread across the suite. On macOS, 170 kept files of under 20 seconds
-each hold 698 test-seconds between them, more than the whole budget.
+The ten are suites of the merge path, such as `unrecorded-direct-landing.test.sh`
+and `pr-stack.test.sh`. The merge member's integration branch already deletes
+them, and the epic's boundaries leave the merge path's suites out, so they are
+not this epic's ground either.
+
+The kept ground alone is five and a half times the macOS budget. Cutting call
+sites in the shared scripts does not move it: tk-nalm16x cut the scripts the
+suites run most, and its own paired runs measured the whole suite at 99.4% of
+main's. The time is spread across the suite. On macOS, 162 kept files of under
+20 seconds each hold 665 test-seconds between them, more than the whole budget.
 
 ### The Linux outlier
 
@@ -201,9 +207,9 @@ A fault, such as a failed list or a failed update, stays a setting the test
 makes, as the harness's `STUB_*` settings are today.
 
 The fake is compiled because a call through it costs 3.2 to 4.7 ms against 12.7
-to 19.1 ms through the bash stub. It is one fake because 133 of the 219 kept
-suites each write a gc stub of their own. Those suites hold 2,478 of the kept
-ground's 3,000 macOS test-seconds. A stub that answers differently from bd has been
+to 19.1 ms through the bash stub. It is one fake because 126 of the 209 kept
+suites each write a gc stub of their own. Those suites hold 2,408 of the kept
+ground's 2,905 macOS test-seconds. A stub that answers differently from bd has been
 fixed one stub at a time: tk-8gradm4.3 lists ten such patches. One fake fixes
 each difference once, for every suite.
 
@@ -262,20 +268,27 @@ number below is derived from that bar and from a measurement.
 
 - **The spread between runs.** Two consecutive runs on main, whose suites cost
   the Linux check within 1% of each other, took the macOS check 26.8 and 36.2
-  minutes, a factor of 1.35. Between them a test file's macOS time moved by a
-  median of 1.27 times, and the 95th percentile was 1.62. The whole run moves
-  together, because the runner's own speed varies. On Linux the median was 1.00
-  and the 95th percentile 1.09.
+  minutes, a factor of 1.35. Between them the time of one test run, a file or
+  one of its parts, moved on macOS by a median of 1.27 times, and the 95th
+  percentile was 1.62. The whole run moves together, because the runner's own
+  speed varies. On Linux the median was 1.00 and the 95th percentile 1.09.
 - **The suite's share of the macOS check.** For the slowest run to end within
   five minutes, a typical run must end within 5 ÷ 1.35, which is about 3.7
-  minutes. The job spends 44 seconds before its suite starts, so the suite gets
-  about 178 seconds.
+  minutes. The job spends 44 seconds outside its suite, 37 of them before it
+  starts, so the suite gets about 178 seconds.
 - **The macOS budget.** The suite sums at most about 530 test-seconds, which is
-  three cores times 178 seconds, and no single run is longer than about 178
-  seconds. `tools/run-tests.sh` starts the largest files first, so the longest
-  run starts at once and must end within the suite's share.
+  three cores times 178 seconds. No single run is longer than about 178
+  seconds, because no run starts before the suite does. `tools/run-tests.sh`
+  starts the files with the most source first, as its proxy for the slowest.
+- **The runner's cores.** The budget is set for three cores, which every main
+  run from 2026-11-12 to a4ee5ae43 had. The next main run, at 45e9ddb41, got
+  five on the same image and took 16.4 minutes for 4,705 test-seconds, while
+  the PR runs on either side of it got three. The closure's backstop wants the
+  minutes to come from what the tests cost, not from more or larger runners,
+  so a run that gets more cores shows no progress, and the budget stays in
+  test-seconds on three.
 - **The Linux check.** Its spread is about 1.1, and its job spends about 15
-  seconds before its suite. That gives its suite about 258 seconds on four cores,
+  seconds outside its suite. That gives its suite about 258 seconds on four cores,
   about 1,030 test-seconds. The same suite costs Linux about three quarters of
   its macOS test-seconds, leaving out the outlier, so the macOS budget is the
   one that binds.
@@ -333,7 +346,7 @@ from the move:
    | Priority following | 78 | 46 | tk-ssm8qns.7 |
    | PR posts and the gh write guard | 76 | 57 | tk-ssm8qns.8 |
    | Dolt reclaim, and the epic, session and rig verbs | 9 | 5 | tk-ssm8qns.9, .16 |
-   | The rest of the kept shell, 178 files | 1,790 | 1,365 | the move's later domains |
+   | The rest of the kept shell, 168 files | 1,695 | 1,317 | the move's later domains |
 
 2. **Each move takes its shell suite with it.** The move deletes the suite with
    the shell it replaces, which is already rule 1 of a domain move. A bridge the
@@ -396,7 +409,7 @@ Each unit is its own change, filed as a Story once this design is approved.
 |---|---|---|---|
 | 1 | **Each PR shows what it does to the suite's time.** The test jobs keep each run's seconds, in the job's summary and as a run artifact. The PR's size comment shows, for each check, the summed test-seconds beside main's latest completed run, and the files added, removed and moved beyond the measured spread. | No seconds of its own. It makes every later unit's effect, and every regression, visible in its own PR. | — |
 | 2 | **`step-number-citation.test.sh` costs Linux what it costs macOS.** Confirm the GNU-side cause and remove it. | About 250 Linux test-seconds, 6% of the Linux check, and about a minute of its wall time. | — |
-| 3 | **The compiled fake gc and its contract test.** A Go program in `services/gctk` answers the gc command line that the harness's bash stub answers, over the same store files and fault settings, and `test-harness.sh` installs it. Its contract test runs the same calls against a scratch store of the bd the city runs, as the store adapter's acceptance test does. `docs/testing.md` states the approach for whoever writes a test. | Each harness stub call goes from 12.7–19.1 ms to 3.2–4.7 ms. The kept harness suites spend few seconds in stubs: of those profiled, only `pr-open.test.sh` and `pr-stack.test.sh` spend more than three, so the kept ground gains about 20 test-seconds here, and most of the fake's gain comes in units 4 and 5. While `pr-facts.test.sh` lives, its 35% stub share makes it about a quarter faster. | 1 |
+| 3 | **The compiled fake gc and its contract test.** A Go program in `services/gctk` answers the gc command line that the harness's bash stub answers, over the same store files and fault settings, and `test-harness.sh` installs it. Its contract test runs the same calls against a scratch store of the bd the city runs, as the store adapter's acceptance test does. `docs/testing.md` states the approach for whoever writes a test. | Each harness stub call goes from 12.7–19.1 ms to 3.2–4.7 ms. The kept harness suites spend few seconds in stubs: of those profiled, `pr-open.test.sh` spends about 10 and each of the others under 4, so the kept ground gains about 17 test-seconds here, and most of the fake's gain comes in units 4 and 5. While `pr-facts.test.sh` lives, its 35% stub share makes it about a quarter faster. | 1 |
 | 4 | **The engagement and conversation suites no Feature names move onto the fake:** stand-down, bead-rehome, converse-signoff, bead-context, conversation-merge-hold, first-reaction-dispose and converse-rework. | About 120 macOS test-seconds, projected from each suite's measured stub time and jq. | 3 |
 | 5 | **The work, shared and doctor suites with the most stub time move onto the fake:** work-submit, patrol-finding, check-armed-dispatch-owed, work-setup, feedback-miner, self-review-check and check-session-store-scope. | About 75 macOS test-seconds, projected the same way. | 3 |
 | 6 | **The macOS check runs the Go tests that start the host's tools:** gctk's host and git adapters, and the store adapter's tests that drive a stub gc. | It adds those packages' tests, each under a second on the go check, and their compiling, which for gctk took 4.3 s cold on the host. It closes the backstop gap in section 5. | — |
@@ -404,16 +417,27 @@ Each unit is its own change, filed as a Story once this design is approved.
 Once this design is approved, tk-ssm8qns also gets the cost order of section 4
 as a note, for its next checkpoint.
 
+Units 3 to 5 change files that two live integration branches change too. The
+deferred-dispatch member's (tk-1tfzr71.16) and the merge member's
+(tk-1tfzr71.20) both edit `test-harness.sh`, and between them they rewrite
+parts of nine of the suites units 4 and 5 name: stand-down, bead-rehome,
+converse-signoff, bead-context, conversation-merge-hold, first-reaction-dispose,
+converse-rework, work-submit and check-armed-dispatch-owed. Neither deletes
+one. No unit waits for them. Each unit merges main in first, builds beside a
+branch that has not landed, and plans the merge with whichever lands second.
+The projections come from main's copies of those suites, so each unit measures
+its suites again when it starts, and unit 1 shows what it saved.
+
 ### The path to the budget
 
 | Step | Who | macOS summed after it | Typical macOS job |
 |---|---|---|---|
 | Today, a4ee5ae43 | — | 5,059 | 28.9 min, measured |
 | The deletion plan's whole files leave | the tk-1tfzr71 lanes | 3,211 | about 18.6 min |
-| The partly retired suites the boundaries name leave | tk-1tfzr71.20, tk-1tfzr71.16 | 3,000 | about 17.4 min |
-| The first Delivery | this epic | about 2,790 | about 16 min |
-| The move's queued Features | tk-ssm8qns.7, .8, .9, .10, .15, .16 | about 2,280 | about 13 min |
-| `gc-helm.sh`'s other verbs, and the engagement scripts no Feature names yet | the move, in Features not yet filed | about 1,680 | about 10 min |
+| The merge path's and deferred dispatch's other suites leave | tk-1tfzr71.20, tk-1tfzr71.16 | 2,905 | about 16.9 min |
+| The first Delivery | this epic | about 2,700 | about 15.7 min |
+| The move's queued Features and tasks | tk-ssm8qns.7, .8, .9, .10, .15, .16 | about 2,190 | about 13 min |
+| `gc-helm.sh`'s other verbs, and the engagement scripts no Feature names yet | the move, in Features not yet filed | about 1,590 | about 9.6 min |
 | The rest of the kept shell | the move's later domains, with the fake for what stays | at most 530 | about 3.7 min |
 
 A typical job takes about the summed test-seconds divided by three, plus 44
