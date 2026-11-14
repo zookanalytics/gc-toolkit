@@ -106,11 +106,12 @@ nothing.
 
 A hand-off to bring an integration effort's branch current is a task assigned
 to you that names the effort's landing bead. It carries no `metadata.branch`,
-so find-work never takes it. Its notice is mail that reaches you once the work
-it waits on has landed, and the mail asks for your turn when you are idle.
-Take the hand-off when you read the notice, in the patrol's check-inbox step
-or on that turn. It is no landing: it moves work the target already carries
-into the effort's branch, never the reverse, so no check or review runs on it:
+so find-work never takes it. It waits on the work it brings in, and once that
+work lands, Gas City nudges you with a message that names the hand-off. Take
+the hand-off when a nudge names it, on that turn, once
+`gc bd show <the hand-off>` reads it open and assigned to you. It is no
+landing: it moves work the target already carries into the effort's branch,
+never the reverse, so no check or review runs on it:
 
 ```bash
 "$(gc gc-toolkit scripts-dir)/effort-bring-current.sh" --hand-off <the hand-off> --landing <the landing bead it names>
@@ -121,8 +122,7 @@ is not ready, because it is closed or something still holds it.
 
 Exit 4: the merge conflicts, and a polecat resolves it, never you and never the
 operator. The call pushed nothing and filed the merge as a task on the effort's
-branch, which the hand-off and the landing bead wait on. It recorded the notice
-that hands the hand-off back to you once the task lands, then sent the task to
+branch, which the hand-off and the landing bead wait on, then sent the task to
 the rig's polecat pool with `--merge direct`, so the task lands as a
 fast-forward of the effort's branch and the polecat's merge commit reaches the
 branch as it is. The polecat asks the operator only when a resolution needs a
@@ -134,9 +134,7 @@ Exit 1: nothing was pushed or closed, and the output says why. Until the call
 has filed a task, run it again, which reads the branch afresh. A call that
 stops after it filed the task names the step that did not land. The hand-off
 already waits on the task, so running the call again brings nothing current.
-Run that step instead, then each step after it. The notice is
-`"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" notify <the hand-off> --agent "$GC_AGENT"`,
-the settle is
+Run that step instead, then each step after it. The settle is
 `"$(gc gc-toolkit scripts-dir)/queue-priority.sh" settle <the task>`,
 and the send is
 `gc sling gc-toolkit/gc-toolkit.polecat <the task> --on mol-polecat-work --merge direct`.
@@ -144,9 +142,10 @@ A sling can pour the task's workflow and still exit non-zero. The send, run
 again, pours nothing while that workflow is live: it exits 3 and says the task
 already has a live workflow, which means the task was sent.
 
-When the hand-off comes back, run the call again, which brings the branch
-current from where the task's merge left it. Archive a notice with
-`gc mail archive <its id>` once its hand-off is closed or waits on its task.
+The hand-off stays assigned to you while it waits on the task, so Gas City
+nudges you about it once the task lands. When a nudge names the hand-off, run
+the call again, which brings the branch current from where the task's merge
+left it.
 
 ## Human gates
 

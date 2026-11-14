@@ -141,14 +141,18 @@ When the ruling leaves the subject to go where its arm or route already sends
 it, by the same method, keep them: sign off with `--ruled yes --no-wait` and
 send nothing yourself. Under any other ruling, one that sends it elsewhere or
 nowhere, withdraw them before the answer, with or without `--accept`. The block
-disarms an arm and clears a pool route. It prints its
-`carries no arm and no pool route` line only once each write has exited 0:
+disarms the subject and clears a pool route. The disarm runs whatever the read
+shows: it exits 0 once no arm remains, so an arm written after the read is
+removed too. The block prints its `carries no arm and no pool route` line only
+once each write has exited 0:
 ```bash
 WHY="<the ruling, one line>"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 ROW=$(gc bd show "$SUBJECT" --json) \
-  && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
-  && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
-  && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
+  && ROUTE=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.routed_to"] // "") | tostring else error("unread") end') \
+  && "$GCTK" bead disarm "$SUBJECT" --reason "$WHY" \
   && { [ -z "$ROUTE" ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
   && echo "$SUBJECT carries no arm and no pool route"
 ```
@@ -336,9 +340,12 @@ carry the same id prefix, the text before the first `-`, which names the
 store. Each call names the follow-up's rig, the one its pool reads: unpinned,
 a command that also names a city bead is answered from the city's store.
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 [ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ] \
   && gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
-  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
+  && "$GCTK" bead arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
 ```
 When the prefixes differ, the blocker is in another rig's store, where no
 edge can hold the follow-up, and the block writes nothing. Make the follow-up
@@ -348,9 +355,12 @@ lands, and the arm then sends the follow-up. The helper files the gate in the
 follow-up's own store, and the message's first line is the gate's title, cut
 at 140 characters, so keep that line to one plain sentence:
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 "$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
 <follow-up> waits for <blocker> in <its rig>. Clear this gate once <blocker> closes." \
-  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
+  && "$GCTK" bead arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
 ```
 
 **The validating closer is the return trip.** Once every wait the sign-off

@@ -25,19 +25,19 @@
 # hand-off and the landing bead wait on. It proves the polecat pool's route
 # first (pool-route.sh), so a pool no agent claims files nothing. The task's
 # create records the branch as its target and direct as its merge strategy. The
-# call then records the notice (deferred-dispatch.sh notify) that hands the
-# hand-off back to the refinery once the task lands, settles the task and slings
-# it to the pool on mol-polecat-work with --merge direct, because a sling
-# otherwise stamps the rig's default merge strategy over it. The task lands as a
-# fast-forward of the effort's branch, so the polecat's merge commit reaches the
-# branch as it is. A pull request lands by squash, which would leave the
-# target's commits out of the branch's history, so the hand-off would meet the
-# same conflict each time it came back. A create can write the task and still
-# answer no id, so the call then looks for the task among what the hand-off
-# waits on. A call that stops after it filed the task names the step that did
-# not land, and a call again finds the hand-off waiting on the task and brings
-# nothing current. Once the task lands, nothing is left to merge, and the next
-# call closes the hand-off.
+# call then settles the task and slings it to the pool on mol-polecat-work with
+# --merge direct, because a sling otherwise stamps the rig's default merge
+# strategy over it. The hand-off stays assigned to the refinery while it waits
+# on the task, so Gas City nudges the refinery about it once the task lands. The
+# task lands as a fast-forward of the effort's branch, so the polecat's merge
+# commit reaches the branch as it is. A pull request lands by squash, which
+# would leave the target's commits out of the branch's history, so the hand-off
+# would meet the same conflict each time it came back. A create can write the
+# task and still answer no id, so the call then looks for the task among what
+# the hand-off waits on. A call that stops after it filed the task names the
+# step that did not land, and a call again finds the hand-off waiting on the
+# task and brings nothing current. Once the task lands, nothing is left to
+# merge, and the next call closes the hand-off.
 #
 # The repository is the refinery's own worktree ($GC_DIR), a worktree of the
 # rig's clone.
@@ -130,15 +130,13 @@ The conflict is yours to resolve. Ask the operator only when a resolution needs 
       if [ -z "$TASK" ]; then
         TASK=$(gc bd show "$H" --json </dev/null | scrub \
           | jq -er --arg t "$TITLE" '[.[0].dependencies[]? | select(.dependency_type == "blocks" and .status != "closed" and .title == $t) | .id] | if length < 2 then .[0] // "" else error("more than one") end' 2>/dev/null) \
-          || halt "pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $LIST. The create of its task returned no id, and reading $H did not settle whether the create wrote it. gc bd show $H lists what it waits on: finish from the notice with the open task titled \"$TITLE\", or call again when it waits on none"
+          || halt "pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $LIST. The create of its task returned no id, and reading $H did not settle whether the create wrote it. gc bd show $H lists what it waits on: finish from the settle with the open task titled \"$TITLE\", or call again when it waits on none"
         [ -n "$TASK" ] || halt "pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $LIST, and the create of its task wrote nothing; call again"
       fi
-      "$HERE/deferred-dispatch.sh" notify "$H" --agent "${GC_AGENT:-}" >/dev/null \
-        || halt "pushed nothing and filed $TASK for the conflict in $LIST, but the notice on $H did not land; finish from the notice"
       "$HERE/queue-priority.sh" settle "$TASK" </dev/null >/dev/null \
-        || halt "pushed nothing, filed $TASK for the conflict in $LIST and recorded the notice on $H, but $TASK was not settled, so it was not sent; finish from the settle"
+        || halt "pushed nothing and filed $TASK for the conflict in $LIST, but $TASK was not settled, so it was not sent; finish from the settle"
       gc sling "$ROUTE" "$TASK" --on mol-polecat-work --merge direct </dev/null >/dev/null \
-        || halt "pushed nothing, filed $TASK for the conflict in $LIST, recorded the notice on $H and settled $TASK, but its sling exited non-zero; finish from the send"
+        || halt "pushed nothing, filed $TASK for the conflict in $LIST and settled it, but its sling exited non-zero; finish from the send"
       echo "$PROG: pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $LIST, so $TASK sends the merge to a polecat, and $H comes back to the refinery once $TASK lands"
       exit 4 ;;
     *) stop "git merge-tree could not merge origin/$TARGET into $BRANCH" ;;

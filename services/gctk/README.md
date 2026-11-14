@@ -15,6 +15,8 @@ through `gc bd` and the supervisor's API.
 | Command | What it does | Documented in |
 |---|---|---|
 | `bead holds` | what holds each bead named, from one read of the store: one status (blocked, held, unjudged or clear) with the waits behind it and whether each is the bead's own or an ancestor's, its own pending waits and when the last landed, why it is in flight, its arm, and its wait edges into another store, one JSON object per line, read from the store `--db` names or the one gc routes the first bead to | `gctk bead holds --help`, `internal/cli/bead.go`, `waits` |
+| `bead arm`, `bead disarm` | arm a bead to start by itself once nothing holds it, on a formula through a pool, or remove its arm, each in one write under the bead's dispatch lock | `gctk bead arm --help`, `gctk bead disarm --help`, `arm` |
+| `bead start-armed` | the deferred-dispatch order's pass: retire the arm of each closed or delivered bead, and start each armed bead the pool's own serve rule would serve and nothing bd cannot judge holds, exactly once, printing one JSON line per arm; `--dry-run` writes nothing | `gctk bead start-armed --help`, `arm`, [docs/deferred-dispatch.md](../../docs/deferred-dispatch.md) |
 | `epic` | actions taken on an epic: filing one with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic --help`, `internal/cli/epic.go` |
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
@@ -156,6 +158,9 @@ internal/ledger/     typed bead records: each key's declaration, one write per a
 internal/host/       the host adapter: the processes gctk starts and signals, the process
                      table, and the loopback ports and their listeners
 internal/host/fake/  the host adapter's in-memory fake, for the domains' tests
+internal/gascity/    the runtime adapter: gc sling, an agent's default formula from the city's
+                     config, the city's root, and the pack's scripts that ask a person
+internal/gascity/fake/  the runtime adapter's fake, which records each call and answers as a test says
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, the store's listing, and its blocked set
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
@@ -166,6 +171,9 @@ internal/gh/fake/    the GitHub adapter's in-memory fake, for the domains' tests
 internal/feedback/   the pack's one definition of feedback, pr-post.sh's feedback-def, run
                      through jq
 internal/rig/        rig's runner, its commit-keyed record store, and a copy of the rig's UI
+arm/                 the arm's verbs and its start: what arm refuses, the dispatch lock, and the
+                     steps that send each armed bead once
+arm/record/          the arm's keys, which it owns, the arm they decode to, and every write to them
 pr/                  the pr domain: whether the PR a bead owns is ready to merge at its
                      current revision, from the store, GitHub and the definition of
                      feedback; the account of the change its author records, the PR
@@ -189,7 +197,7 @@ key-registry.json    every declared key, generated from the declarations
 ```bash
 cd services/gctk && go test ./...          # every package
 cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write key-registry.json again
-cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd -run TestStoreAcceptance -v   # the city's bd on a scratch store
+cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd ./arm -run TestStoreAcceptance -v   # the city's bd on a scratch store
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
 bash assets/scripts/merge.test.sh          # merge through its bridge
 bash assets/scripts/epic.test.sh           # epic through its bridge

@@ -49,8 +49,9 @@
 # existing_pr stay, so the rework reuses the PR it may have. A live workflow
 # left on it is closed (gc workflow delete-source), and it is slung.
 #
-# A sling that fails arms a deferred dispatch, whose reconcile pass retries the
-# pour. An arm that fails too files a human gate keyed refinery-requeue-failed.
+# A sling that fails arms a deferred dispatch (gctk bead arm), which the
+# deferred-dispatch order pours on its next pass. An arm that fails too files a
+# human gate keyed refinery-requeue-failed.
 #
 # Exit: 0 sent back, or the reason reached the child already on the branch
 #       1 the work did not go back; the output says why. The bead stays with
@@ -67,6 +68,9 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=refinery-lib.sh
 . "$HERE/refinery-lib.sh" || { echo "$PROG: cannot source refinery-lib.sh beside this script" >&2; exit 1; }
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 FORMULA="mol-polecat-work"
 LIVE="open,in_progress,blocked,deferred,hooked,pinned"
@@ -121,9 +125,9 @@ sling() {
   gc sling ${GC_RIG:+--rig "$GC_RIG"} "$ROUTE" "$1" --on "$FORMULA" </dev/null >&2
   rc=$?
   [ "$rc" != 0 ] || return 0
-  if "$HERE/deferred-dispatch.sh" arm "$1" --target "$ROUTE" --sling-arg --on --sling-arg "$FORMULA" \
+  if "$GCTK" bead arm "$1" --target "$ROUTE" --on "$FORMULA" \
        --reason "refinery requeue: gc sling of $1 exited $rc" >&2; then
-    echo "$PROG: gc sling of $1 exited $rc; armed a deferred dispatch, whose reconcile pass retries the pour" >&2
+    echo "$PROG: gc sling of $1 exited $rc; armed a deferred dispatch, which the deferred-dispatch order pours on its next pass" >&2
     return 0
   fi
   "$HERE/human-gate.sh" --subject "$1" --key refinery-requeue-failed --message "The refinery sent $1 back to the pool ($REASON), but gc sling exited $rc and no deferred dispatch could be armed, so no polecat is building it. Pour it by hand: gc sling $ROUTE $1 --on $FORMULA, then clear this gate." >/dev/null \

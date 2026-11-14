@@ -550,21 +550,41 @@ shares only the word ([authority-map.md](authority-map.md)).
 
 ## Deferred dispatch residual
 
-- **Covers.** `assets/scripts/deferred-dispatch.sh`,
-  `orders/deferred-dispatch.toml`, the `gc.dispatch_when_ready` keys, and
+- **Covers.** `orders/deferred-dispatch.toml`, `services/gctk/arm`, whose
+  verbs `gctk bead arm`, `gctk bead disarm` and `gctk bead start-armed` every
+  caller of the arm runs, which holds the dispatch lock those verbs take on each
+  armed bead and the title token `arm:<bead>@<armed at>` its start pours under,
+  the `gc.dispatch_when_ready` keys, and
   [deferred-dispatch.md](deferred-dispatch.md).
 - **Stands in for.** A dispatch that waits for its bead's blockers, pouring the
-  bead's formula once nothing holds it.
-- **Evidence.** In `gastownhall/gascity`, nothing slings or pours a bead when its
-  blockers close. The bundled `core` pack's `cascade-nudge-on-blocker-close`
-  order runs on `bead.closed`, re-reads the closes with `gc events --since`, and
-  nudges each open dependent's assignee or routed pool with `gc session nudge`.
-  It slings nothing, and no core order or script calls `gc sling`
-  (`internal/bootstrap/packs/core/assets/scripts/cascade-nudge-on-blocker-close.sh`).
-- **Verified.** 2026-11-13, at `gastownhall/gascity` main cb9105579667 and
-  `gastownhall/beads` main 526c1c877e26.
-- **Retires when.** Gas City or bd pours a formula on a bead once its blockers
-  close.
+  bead's formula once nothing holds it, exactly once.
+- **Evidence.** In `gastownhall/gascity`, nothing pours a formula on a bead once
+  it is ready:
+  - No core order or script calls `gc sling`. The bundled `core` pack's
+    `cascade-nudge-on-blocker-close` order runs on `bead.closed`, re-reads the
+    closes with `gc events --since`, and nudges each dependent no other blocker
+    still holds with `gc session nudge`, and `nudge-on-route` nudges a routed
+    bead's target. Neither pours
+    (`internal/bootstrap/packs/core/assets/scripts/cascade-nudge-on-blocker-close.sh`,
+    `nudge-on-route.sh`).
+  - `gc sling` pours at once. Nothing in `internal/sling` reads a bead's
+    readiness before the pour, and `validateExistingBeadInQuerier`
+    (`internal/sling/sling_core.go`) checks only that the bead exists.
+  - Its launch check refuses a second pour of a formula only while the first
+    run is live (`checkLegacySourceWorkflowConflict` in
+    `internal/sling/sling_core.go`, and its exit 3 in `cmd/gc/cmd_sling.go`), and
+    nothing reports a run that has finished, so the start titles each pour with
+    its token and searches it after an earlier attempt.
+  - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
+    blocked bead runs before its blockers close, and #8832, native execution
+    admission loses current input readiness, whose fix is the open PR #8834.
+- **Verified.** 2026-11-14, at `gastownhall/gascity` main 67617358b1, with
+  #7163, #8832 and PR #8834 open and unmerged.
+- **Retires when.** Gas City holds a poured workflow's steps until its input
+  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
+  arm then becomes a plain `gc sling <pool> <bead> --on <formula>` at arm time,
+  and the order, the dispatch lock, the title token, the cap and
+  `doctor/check-armed-dispatch-owed` retire.
 
 ## Quota-park nudging
 

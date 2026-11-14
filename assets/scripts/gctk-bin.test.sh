@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Hermetic test for the gctk-bin block: the one line by which a formula step,
-# a skill's step, a prompt's step, a doctor check, and a script such as
-# deferred-dispatch.sh or review-evidence.sh find the gctk binary they call
-# directly, as $GCTK. Formula, skill and prompt text have no include mechanism,
-# so each caller carries the line in a `# >>> gctk-bin` block, and this holds
-# every copy to the one definition and runs it.
+# a skill's step, a prompt fragment's step or example, AGENTS.md's hold rule, a
+# doctor check, and a script such as await-ruling.sh or review-evidence.sh find
+# the gctk binary they call directly, as $GCTK. Formula, skill and prompt text
+# have no include mechanism, so each caller carries the line in a
+# `# >>> gctk-bin` block, and this holds every copy to the one definition and
+# runs it.
 #
 # run-tests-scope: tree
 #
@@ -29,8 +30,8 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 LINE='GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"'
 
 echo "# every copy is the one line"
-git -C "$ROOT" grep -l -F -e '# >>> gctk-bin' -- formulas skills template-fragments assets/scripts doctor ':!*.test.sh' > "$TMP/files"
-eq "$(tr '\n' ' ' < "$TMP/files")" "assets/scripts/bead-context.sh assets/scripts/converse-signoff.sh assets/scripts/deferred-dispatch.sh assets/scripts/demo-repo-artifact.sh assets/scripts/patrol-finding.sh assets/scripts/review-evidence.sh assets/scripts/rig-check-pre-existing.sh assets/scripts/rig-checks.sh assets/scripts/rig-mentions.sh assets/scripts/self-review-check.sh assets/scripts/work-gate.sh assets/scripts/work-submit.sh doctor/check-armed-dispatch-owed/run.sh doctor/check-step-terminal/run.sh doctor/check-wait-is-an-edge/run.sh formulas/mol-witness-patrol.toml skills/converse-epic-review/SKILL.md skills/converse-prep/SKILL.md skills/converse-recheck-premise/SKILL.md skills/work/integration-effort.md template-fragments/polecat-doctrine.template.md " \
+git -C "$ROOT" grep -l -F -e '# >>> gctk-bin' -- formulas skills assets/scripts doctor template-fragments AGENTS.md ':!*.test.sh' > "$TMP/files"
+eq "$(tr '\n' ' ' < "$TMP/files")" "AGENTS.md assets/scripts/await-ruling.sh assets/scripts/bead-context.sh assets/scripts/converse-signoff.sh assets/scripts/demo-repo-artifact.sh assets/scripts/finding.sh assets/scripts/first-reaction-dispose.sh assets/scripts/patrol-finding.sh assets/scripts/refinery-requeue.sh assets/scripts/review-evidence.sh assets/scripts/rig-check-pre-existing.sh assets/scripts/rig-checks.sh assets/scripts/rig-mentions.sh assets/scripts/self-review-check.sh assets/scripts/stand-down.sh assets/scripts/store-only-exit.sh assets/scripts/work-gate.sh assets/scripts/work-submit.sh doctor/check-armed-dispatch-owed/run.sh doctor/check-step-terminal/run.sh doctor/check-wait-is-an-edge/run.sh formulas/mol-design-convoy.toml formulas/mol-witness-patrol.toml skills/converse-continue/SKILL.md skills/converse-edit/SKILL.md skills/converse-epic-review/SKILL.md skills/converse-prep/SKILL.md skills/converse-recheck-premise/SKILL.md skills/converse-settle/SKILL.md skills/waits/SKILL.md skills/work/SKILL.md skills/work/integration-effort.md template-fragments/polecat-doctrine.template.md template-fragments/watch-dispatched-work.template.md " \
   "the block sits in the files that call gctk directly"
 while IFS= read -r f; do
   awk '/# >>> gctk-bin$/ {f = 1; n++; next} /# <<< gctk-bin$/ {f = 0; next} f {print n "\t" $0}' "$ROOT/$f" > "$TMP/copies"
@@ -53,7 +54,7 @@ for sh in $SHELLS; do
 done
 
 echo "# every caller sets GCTK through the block"
-git -C "$ROOT" grep -l -F -e '"$GCTK" ' -- formulas skills template-fragments assets/scripts doctor ':!*.test.sh' > "$TMP/callers"
+git -C "$ROOT" grep -l -F -e '"$GCTK" ' -- formulas skills assets/scripts doctor template-fragments AGENTS.md ':!*.test.sh' > "$TMP/callers"
 while IFS= read -r f; do
   grep -q -F -x -e '# >>> gctk-bin' "$ROOT/$f" && ok "$f: sets GCTK through the block" || bad "$f: calls \"\$GCTK\" with no gctk-bin block"
 done < "$TMP/callers"

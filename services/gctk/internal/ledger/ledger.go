@@ -121,8 +121,8 @@ func (w *Write) Title(title string) { w.title = title }
 // the bead.
 func (w *Write) Status(status string) { w.status = status }
 
-// Note appends text to the bead's notes in the same write. A second call
-// replaces the first.
+// Note appends text to the bead's notes in the same write, so the act and its
+// record land together or not at all. A later Note replaces an earlier one.
 func (w *Write) Note(text string) { w.note = text }
 
 // Guard makes the write land only while the bead still has status and assignee,

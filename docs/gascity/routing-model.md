@@ -10,7 +10,7 @@ acts on it, where upstream's docs do not already say it, or say it wrongly.
 Each section names its evidence and the date it was read. Where the city's
 gascity fork behaves differently from upstream main, the section says which
 is which. gc-toolkit's own dispatch conventions — withholding a sling until
-its blockers close, the notice a named-agent assignment owes, the load-context
+its blockers close, the form a named agent takes its work in, the load-context
 guard in its work formula — are [deferred-dispatch.md](../deferred-dispatch.md)
 and [pack-authoring.md](../pack-authoring.md).
 

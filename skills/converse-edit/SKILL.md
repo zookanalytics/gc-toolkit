@@ -104,15 +104,18 @@ holds the change.
 From the filing on, the subject waits on the change, so no pool takes the
 subject while you edit, and a dismiss leaves it waiting on the change. First
 withdraw the subject's arm and pool route, as the sign-off's case **New work
-carries it** does (the converse-settle step). The block prints its last line
+carries it** does (the converse-settle step). The disarm runs whatever the read
+shows, since it exits 0 once no arm remains. The block prints its last line
 only once each write has exited 0:
 
 ```bash
 WHY="the operator ruled that conversation $CONVERSATION make the change that carries it"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 ROW=$(gc bd show "$SUBJECT" --json) \
-  && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
-  && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
-  && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
+  && ROUTE=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.routed_to"] // "") | tostring else error("unread") end') \
+  && "$GCTK" bead disarm "$SUBJECT" --reason "$WHY" \
   && { [ -z "$ROUTE" ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
   && echo "$SUBJECT carries no arm and no pool route"
 ```
@@ -132,10 +135,13 @@ subject and what to check once it has, and keep its text, because the sign-off
 names it again:
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 gc bd update "$SUBJECT" --append-notes "## Close brief (held on $CHANGE, $(date -u +%Y-%m-%dT%H:%M:%SZ))
 <what the change's landing settles on the subject, and what to check once it has>" \
   && gc bd dep add "$SUBJECT" "$CHANGE" --type=blocks \
-  && "$CONV/deferred-dispatch.sh" arm "$SUBJECT" --target "$GC_RIG/gc-toolkit.polecat" --sling-arg --on --sling-arg mol-validate-close --reason "waits for $CHANGE, the change conversation $CONVERSATION makes; the validating closer checks it once that lands" \
+  && "$GCTK" bead arm "$SUBJECT" --target "$GC_RIG/gc-toolkit.polecat" --on mol-validate-close --reason "waits for $CHANGE, the change conversation $CONVERSATION makes; the validating closer checks it once that lands" \
   && gc bd label list "$SUBJECT"
 ```
 
@@ -397,7 +403,10 @@ to close a bead an open bead blocks, and the writer gives your hold way to its
 own edge onto the conversation:
 
 ```bash
-"$CONV/deferred-dispatch.sh" disarm <the subject that waits on it> --reason "the operator dropped $CHANGE in conversation $CONVERSATION" \
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead disarm <the subject that waits on it> --reason "the operator dropped $CHANGE in conversation $CONVERSATION" \
   && gc bd update "$CHANGE" --set-metadata gc.work_outcome=no-op \
   && "$CONV/bead-rehome.sh" --origin "$CHANGE" --successor "$CONVERSATION" --kind not-needed --note "<the operator's ruling, one sentence>"
 ```

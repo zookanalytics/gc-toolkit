@@ -136,7 +136,7 @@ CHILD=$(kid)
 eq "$(bstatus "$CHILD") $(bassignee "$CHILD") $(meta "$CHILD" rejection_reason)" "open  test TestX fails" "the child is filed whole and left open, unassigned"
 eq "$(cat "$STUB_HOLDS")" "p $CHILD" "…blocking the bead"
 hasnt "$(logged gc)" "sling" "it is not slung, since a pour copies the priority it finds"
-hasnt "$(logged scripts)" "deferred-dispatch" "…nor armed"
+hasnt "$(logged gctk)" "bead arm" "…nor armed"
 has "$OUT" "the refinery's next patrol sends it on" "the requeue says what sends it on"
 reset_logs
 find_work
@@ -302,12 +302,12 @@ work s polecat/s
 prepared s polecat/s
 STUB_SLING_RC=1 run --bead s --reason "test fails"
 eq "$RC" 0 "an armed retry counts as sent back"
-has "$(logged scripts)" "deferred-dispatch arm s --target rig-a/gc-toolkit.polecat --sling-arg --on --sling-arg mol-polecat-work" "a deferred dispatch is armed"
+has "$(logged gctk)" "bead arm s --target rig-a/gc-toolkit.polecat --on mol-polecat-work" "a deferred dispatch is armed"
 fresh
 branch_with polecat/s s.txt >/dev/null
 work s polecat/s
 prepared s polecat/s
-STUB_SLING_RC=1 STUB_DEFERRED_DISPATCH_RC=1 run --bead s --reason "test fails"
+STUB_SLING_RC=1 STUB_ARM_RC=1 run --bead s --reason "test fails"
 eq "$RC" 1 "a sling and an arm that both fail stop (exit 1)"
 has "$(logged scripts)" "human-gate --subject s --key refinery-requeue-failed" "a refinery-requeue-failed gate asks a person to pour it"
 

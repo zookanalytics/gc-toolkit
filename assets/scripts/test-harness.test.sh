@@ -84,9 +84,31 @@ store '[]'; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"
 
 # GCTK_* is out of that sweep: the pre-init build path is not collateral — a
 # blanket GC* unset would have taken GCTK_BUILT with it — and GCTK_BIN is pinned
-# to that build, never to the binary an inherited GCTK_BIN names.
+# to a wrapper that runs that build, never the binary an inherited GCTK_BIN
+# names. The wrapper sets HOLDS_STUB_READ for the arm's verbs alone, and names a
+# scratch city of the suite's own as gctk's city unless the suite names one. The
+# fake build prints what it was run with.
 eq "$GCTK_BUILT" "$TMP/gctk"  "harness_init preserves a pre-init GCTK_BUILT"
-eq "$GCTK_BIN"   "$TMP/gctk"  "harness_init pins GCTK_BIN to the suite's own build, over an inherited one"
+printf '#!/bin/sh\nprintf "%%s|%%s|%%s\\n" "$*" "${HOLDS_STUB_READ:-}" "${GC_CITY_PATH:-}"\n' > "$TMP/gctk" && chmod +x "$TMP/gctk"
+eq "$("$GCTK_BIN" bead holds tk-1)" "bead holds tk-1||$TMP/gctk-city" \
+   "harness_init pins GCTK_BIN to the suite's own build, over an inherited one"
+for verb in arm disarm start-armed; do
+  eq "$("$GCTK_BIN" bead "$verb" tk-1)" "bead $verb tk-1|1|$TMP/gctk-city" \
+     "…which runs bead $verb with HOLDS_STUB_READ set"
+done
+[ -d "$TMP/gctk-city/.gc" ] && ok "…in a scratch city of the suite's own" || bad "no scratch city at $TMP/gctk-city/.gc"
+eq "$(GC_CITY_PATH=/suite/city "$GCTK_BIN" bead start-armed)" "bead start-armed|1|/suite/city" \
+   "…unless the suite names a city"
+# A call made with HOLDS_STUB_READ set reaches holds-store.stub.sh, which
+# answers it from the stub store by bd's rule: an armed bead an open blocker
+# holds is not ready.
+store '[{"id":"tk-a","status":"open","issue_type":"task","title":"a","metadata":{"gc.dispatch_when_ready":"x"}},
+        {"id":"tk-b","status":"open","issue_type":"task","title":"b","metadata":{"gc.dispatch_when_ready":"x"}},
+        {"id":"tk-c","status":"open","issue_type":"task","title":"c","metadata":{}}]'
+printf 'tk-c|blocks|tk-b\n' > "$STUB_DEPS"
+eq "$(HOLDS_STUB_READ=1 gc bd ready --has-metadata-key gc.dispatch_when_ready --json | jq -c 'map(.id)')" '["tk-a"]' \
+   "the gc stub sends a call made with HOLDS_STUB_READ set to holds-store.stub.sh, over the stub store"
+store '[]'; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"
 
 # A suite that built nothing reaches no binary at all: lifecycle.sh refuses
 # under GCTK_BIN=none, and that refusal is what such a suite sees.
@@ -352,13 +374,13 @@ mk_sut_dir "$TMP/sut" "$HERE/lifecycle.sh"
 [ -f "$TMP/sut/gctk-resolve.sh" ] && ok "mk_sut_dir copies gctk-resolve.sh beside the SUT" || bad "mk_sut_dir left gctk-resolve.sh out"
 out="$(GCTK_BIN=none "$TMP/sut/lifecycle.sh" state tk-blk 2>&1)"
 hasnt "$out" "cannot source gctk-resolve.sh" "a copied lifecycle.sh sources gctk-resolve.sh from its private dir"
-# A copy of deferred-dispatch.sh runs a verb from its private dir: bd-lib.sh and
-# dispatch-path.sh are the libraries it sources by sibling path.
-mk_sut_dir "$TMP/sut-dd" "$HERE/deferred-dispatch.sh"
-[ -f "$TMP/sut-dd/dispatch-path.sh" ] && ok "mk_sut_dir copies dispatch-path.sh beside the SUT" || bad "mk_sut_dir left dispatch-path.sh out"
-out="$("$TMP/sut-dd/deferred-dispatch.sh" help 2>&1)"; rc=$?
-eq "$rc" "0" "a copied deferred-dispatch.sh runs a verb"
-hasnt "$out" "cannot source" "a copied deferred-dispatch.sh sources its libraries from its private dir"
+# A script that asks how a bead is dispatched, such as gc-helm.sh, sources
+# dispatch-path.sh by sibling path, so its copy sources from the private dir.
+mk_sut_dir "$TMP/sut-dp" "$HERE/gc-helm.sh"
+[ -f "$TMP/sut-dp/dispatch-path.sh" ] && ok "mk_sut_dir copies dispatch-path.sh beside the SUT" || bad "mk_sut_dir left dispatch-path.sh out"
+out="$(bash -c '. "$1/dispatch-path.sh" && printf "%s" "$DISPATCH_PATH_JQ"' _ "$TMP/sut-dp" 2>&1)"; rc=$?
+eq "$rc" "0" "the copied dispatch-path.sh sources from the SUT's private dir"
+[ -n "$out" ] && ok "…and sets the dispatch path's program" || bad "…and sets the dispatch path's program (it set none)"
 # pr-facts.sh sources the priority function's reading of a PR's approval.
 mk_sut_dir "$TMP/sut-pf" "$HERE/pr-facts.sh"
 [ -f "$TMP/sut-pf/priority-lib.sh" ] && ok "mk_sut_dir copies priority-lib.sh beside the SUT" || bad "mk_sut_dir left priority-lib.sh out"

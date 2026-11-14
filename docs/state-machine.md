@@ -58,7 +58,7 @@ stateDiagram-v2
 
   state "unanchored (merge_result absent, status open)" as UN {
     [*] --> filed
-    filed --> routed: gc sling / deferred-dispatch.sh
+    filed --> routed: gc sling / gctk bead start-armed
     routed --> claimed: gc hook --claim (runtime)
     claimed --> routed: witness patrol — dead session
     state "poured (gc.execution_routed_to)" as poured
@@ -194,7 +194,7 @@ exception and comes back keeps the posture its earlier head was read at until
 
 | From → To | Writer | Trigger |
 |---|---|---|
-| filed → routed | `gc sling` (runtime); `deferred-dispatch.sh` when blockers must close first | dispatch |
+| filed → routed | `gc sling` (runtime); the deferred-dispatch order's `gctk bead start-armed`, for a bead `gctk bead arm` armed, when blockers must close first | dispatch |
 | routed → claimed | `gc hook --claim` (runtime) | pool demand spawns a session |
 | claimed → routed | witness patrol (`mol-witness-patrol`) | session died with the claim held |
 | claimed → handed_off | `mol-polecat-work` submit step (ONE atomic `gc bd update`) | push verified on the remote |

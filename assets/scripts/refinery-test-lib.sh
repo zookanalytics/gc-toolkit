@@ -8,10 +8,11 @@
 #     of that clone, which GC_DIR names;
 #   - a SUT dir holding copies of the scripts under test and the libraries
 #     they source, beside stubs for the scripts they call but no suite here
-#     proves (human-gate.sh, deferred-dispatch.sh, patrol-finding.sh,
-#     pool-route.sh, lifecycle.sh, preexisting-failure.sh,
-#     rig-check-pre-existing.sh, stand-down.sh), each logging its argv;
+#     proves (human-gate.sh, patrol-finding.sh, pool-route.sh, lifecycle.sh,
+#     preexisting-failure.sh, rig-check-pre-existing.sh, stand-down.sh), each
+#     logging its argv;
 #   - fake gc, gh and gctk on PATH, over a JSON bead store ($STORE). The fake
+#     `gctk bead arm` writes nothing and exits $STUB_ARM_RC. The fake
 #     `gctk pr record` keeps the real one's guard: it writes nothing on a bead
 #     that is closed or assigned to anyone but the refinery, and exits 3. The
 #     fake `gctk pr compose` names, as riding the owner's PR, each bead whose
@@ -43,7 +44,7 @@ rt_init() {
   for f in bd-lib.sh refinery-lib.sh dispatch-path.sh gctk-resolve.sh branch-push.sh pr-post.sh "$@"; do
     cp "$here/$f" "$SUT/"; chmod +x "$SUT/$f"
   done
-  for f in human-gate deferred-dispatch patrol-finding lifecycle preexisting-failure rig-check-pre-existing stand-down pool-route queue-priority; do
+  for f in human-gate patrol-finding lifecycle preexisting-failure rig-check-pre-existing stand-down pool-route queue-priority; do
     [ -e "$SUT/$f.sh" ] || _rt_stub "$f"
   done
   export GC_QUEUE_PRIORITY_TOOL="$SUT/queue-priority.sh"
@@ -336,6 +337,8 @@ cat > "$BIN/gctk" <<'GCTK'
 #!/usr/bin/env bash
 echo "$*" >> "$LOGS/gctk.log"
 case "$1 $2" in
+  "bead arm")
+    exit "${STUB_ARM_RC:-0}" ;;
   "bead holds")
     shift 2
     for id in "$@"; do

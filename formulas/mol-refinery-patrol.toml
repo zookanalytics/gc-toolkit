@@ -105,11 +105,6 @@ gc mail inbox
 ```
 Archive a message once you have handled it, or once what it asks for is
 tracked work. Note anything relevant to merge work, such as a hold request.
-
-A notice for a hand-off that brings an integration effort's branch current
-names the hand-off, a task assigned to you, and the effort's landing bead. Take
-it now, with the call your prompt's "Bringing an effort's branch current"
-gives, and archive its notice once the hand-off is closed or waits on its gate.
 Then close this step."""
 
 [[steps]]
@@ -129,8 +124,8 @@ the rest it takes a rework child handed back before its anchor.
 
 Exit 0: the one line it printed is the bead this iteration acts for. Note it
 and close this step. Exit 3: no work. Write `IDLE: no work, exiting turn.` and
-end the turn; a polecat's hand-off wakes and nudges you, and deferred dispatch
-sends a notice once a bead assigned to you becomes ready. Exit 1: a read did
+end the turn; a polecat's hand-off wakes and nudges you, and Gas City nudges
+you once the last blocker of a bead assigned to you closes. Exit 1: a read did
 not answer; end the turn the same way, and the next patrol retries."""
 
 [[steps]]
