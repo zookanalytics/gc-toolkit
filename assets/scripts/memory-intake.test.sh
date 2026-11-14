@@ -343,6 +343,23 @@ eq "$(sed -n '1,/^<!-- \/memory-intake -->$/p' "$G1/MEMORY.md")" "$(sed -n '1,/^
 eq "$(sed -n '1,3p;4p' "$G2/MEMORY.md" | tr '\n' '|')" "---|title: index|---|<!-- memory-intake: rewritten from the gc-toolkit pack each run -->|" "the block follows front matter"
 eq "$(tail -1 "$G2/MEMORY.md")" "# Index" "and the index keeps the rest"
 
+echo "── a note whose name holds spaces is judged by the ref due gives ──"
+city spaces
+rig sp tk
+M=$(memdir "$B/rigs/sp")
+echo '[{"id": "tk-p1", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]' > "$B/rigs/sp/beads.json"
+printf 'A spaced lesson.\n' > "$M/my lesson.md"
+printf 'Another, spaced twice.\n' > "$M/two  spaces.md"
+run read
+R1=$(ref_of "my lesson.md"); R2=$(ref_of "two  spaces.md")
+has "$R1" "/my lesson.md@" "due gives the name as it is"
+apply_lines "$R1 waits tk-p1" "$R2 drop"
+eq "$RC" 0 "apply takes a decision on each"
+has "$OUT" "recorded $R1: waits on tk-p1" "a wait is recorded"
+has "$OUT" "removed $R2" "a drop is applied"
+eq "$([ -e "$M/my lesson.md" ] && echo kept || echo gone) $([ -e "$M/two  spaces.md" ] && echo kept || echo gone)" "kept gone" "and removes only the dropped note"
+eq "$(due_json --count)" 0 "nothing is due once judged"
+
 echo "── a directory that cannot be listed keeps its links and every judgment ──"
 city unread
 rig u tk

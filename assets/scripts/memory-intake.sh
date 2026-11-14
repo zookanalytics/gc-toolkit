@@ -1153,7 +1153,7 @@ apply_dir() {
 }
 
 cmd_apply() {
-  local src=${1:-} raw line ref verb arg ask extra key16 name h16 dir d store ok
+  local src=${1:-} raw line rest ref verb arg ask extra key16 name h16 dir d store ok
   [ -n "$src" ] && [ $# -eq 1 ] || { usage; return 2; }
   if [ "$src" = - ]; then raw=$(cat); else raw=$(cat -- "$src") || { err "cannot read $src"; return 1; }; fi
   load_city || return 1
@@ -1164,7 +1164,13 @@ cmd_apply() {
   : > "$WORK/apply.lines"
   while IFS= read -r line; do
     case "$line" in ''|'#'*) continue ;; esac
-    read -r ref verb arg ask extra <<< "$line"
+    # A note's name can hold spaces, so the ref runs to the @ and sixteen hex
+    # digits that end it, and the words after it are the decision.
+    ref=""; rest=""
+    if [[ "$line" =~ ^[[:space:]]*([0-9a-f]{16}/.*@[0-9a-f]{16})([[:space:]]+(.*))?$ ]]; then
+      ref=${BASH_REMATCH[1]}; rest=${BASH_REMATCH[3]}
+    fi
+    read -r verb arg ask extra <<< "$rest"
     key16=${ref%%/*}; name=${ref#*/}; h16=${name##*@}; name=${name%@*}
     ok=1
     [[ "$ref" == */*@* && "$key16" =~ ^[0-9a-f]{16}$ && "$h16" =~ ^[0-9a-f]{16}$ && -n "$name" && "$name" != */* ]] || ok=0
