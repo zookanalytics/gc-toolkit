@@ -33,7 +33,8 @@
 # next due), `removed/<name>@<hash>` (each removed unit's text) and `lock`. A
 # unit is due when the list does not hold it at its hash, or its date has
 # come, and is as old as its last change or that date. A note's list hash
-# leaves out its use lines. A unit is removed only once its text is kept, and
+# leaves out its use lines and what Claude Code writes in its front matter on
+# a save (LIST_AWK below). A unit is removed only once its text is kept, and
 # it is removed, or a note, an index or a collection note edited, only while it
 # is unchanged since it was read.
 #
@@ -402,6 +403,112 @@ FNR == 1 { emit(); hub = FILENAME; sub(/.*\//, "", hub) }
 { L[++nl] = $0 }
 END { emit() }'
 
+# A note's list hash reads the note as its writer wrote it, so that neither a
+# use line nor what Claude Code writes on a save changes it. Five keys in a
+# note's front matter are Claude Code's own: node_type, originSessionId,
+# modified, claudeCodeItem and typedTurn. Every save sets modified. A save of
+# front matter that holds no originSessionId stamps it and writes it again as
+# YAML: it quotes a value that needs it, makes the name a slug, moves the other
+# top-level keys under metadata ahead of metadata's own, and leaves one blank
+# line before the body. So LIST_AWK prints the front matter as values: the
+# name as that slug, then the description, then every other key but those
+# five, each unquoted. Then it prints the body without its leading blank lines
+# or its use lines. Claude Code leaves a note with no front matter alone, and
+# such a note prints without its use lines. With W set, each file goes to W and
+# its place among the files; without it, to standard output.
+LIST_AWK='
+function emit(s) { if (W == "") print s; else print s > out }
+function unquote(v,   n, o, i, c) {
+  sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); n = length(v)
+  if (n >= 2 && substr(v, 1, 1) == DQ && substr(v, n, 1) == DQ) {
+    o = ""
+    for (i = 2; i < n; i++) {
+      c = substr(v, i, 1)
+      if (c == "\\" && i < n - 1 && index(DQ "\\", substr(v, i + 1, 1)) > 0) c = substr(v, ++i, 1)
+      o = o c
+    }
+    return o
+  }
+  if (n >= 2 && substr(v, 1, 1) == SQ && substr(v, n, 1) == SQ) { v = substr(v, 2, n - 2); gsub(SQ SQ, SQ, v); return v }
+  return v
+}
+# key_val(s) sets K and V from a line that opens with a key, and is 0 for any
+# other line.
+function key_val(s,   c) {
+  sub(/^[ \t]+/, "", s)
+  if (!match(s, /:([ \t]|$)/)) return 0
+  K = substr(s, 1, RSTART - 1); V = substr(s, RSTART + 1); c = substr(K, 1, 1)
+  if (length(K) >= 2 && (c == DQ || c == SQ) && substr(K, length(K), 1) == c) K = substr(K, 2, length(K) - 2)
+  return K != ""
+}
+# front() prints the front matter held in F[1..nf]. A line that opens with no
+# key of its own belongs to the value of the key before it.
+function front(   i, s, ind, cind, meta, cur, nx, nc, nm, d) {
+  meta = 0; cind = ""; cur = ""; nx = 0; nc = 0; nm = ""; d = ""
+  for (i = 1; i <= nf; i++) {
+    s = F[i]
+    if (s ~ /^[ \t]*(#.*)?$/) continue
+    if (s !~ /^[ \t]/ && key_val(s)) {
+      meta = 0; cur = ""
+      if (K == "metadata" && V ~ /^[ \t]*(#.*)?$/) { meta = 1; cind = "" }
+      else if (K == "name") { nm = unquote(V); cur = "n" }
+      else if (K == "description") { d = unquote(V); cur = "d" }
+      else if (K in OWN) cur = "-"
+      else { XK[++nx] = K; XV[nx] = unquote(V); cur = "x" }
+      continue
+    }
+    if (meta && s ~ /^[ \t]/) {
+      ind = s; sub(/[^ \t].*$/, "", ind)
+      if (cind == "") cind = ind
+      if (ind == cind && key_val(s)) {
+        if (K in OWN) cur = "-"
+        else { CK[++nc] = K; CV[nc] = unquote(V); cur = "c" }
+        continue
+      }
+    }
+    sub(/^[ \t]+/, "", s)
+    if (cur == "n") nm = nm "\n" s
+    else if (cur == "d") d = d "\n" s
+    else if (cur == "x") XV[nx] = XV[nx] "\n" s
+    else if (cur == "c") CV[nc] = CV[nc] "\n" s
+  }
+  if (nm !~ /^[a-z0-9_-]+$/) { nm = tolower(nm); gsub(/[^a-z0-9]+/, "-", nm); sub(/^-+/, "", nm); sub(/-+$/, "", nm) }
+  if (nm != "") emit("name: " nm)
+  if (d != "") emit("description: " d)
+  for (i = 1; i <= nx; i++) if (XV[i] != "") emit("metadata " XK[i] ": " XV[i])
+  for (i = 1; i <= nc; i++) if (CV[i] != "") emit("metadata " CK[i] ": " CV[i])
+}
+function body(s) {
+  if (lead && s == "") return
+  lead = 0
+  if (s !~ RE) emit(s)
+}
+# finish() prints a file whose front matter never closed, which has none.
+function finish(   i) {
+  if (state != 1) return
+  state = 2; lead = 0; emit("---")
+  for (i = 1; i <= nf; i++) body(F[i])
+}
+BEGIN {
+  DQ = "\""; SQ = "\047"
+  split("node_type originSessionId modified claudeCodeItem typedTurn", o, " ")
+  for (i in o) OWN[o[i]] = 1
+  if (W != "") for (i = 1; i < ARGC; i++) idx[ARGV[i]] = i - 1
+}
+FNR == 1 { finish(); if (W != "") { if (out != "") close(out); out = W idx[FILENAME] }; state = 0; nf = 0; lead = 0 }
+{
+  s = $0; sub(/\r$/, "", s)
+  if (state == 0) { if (s ~ /^---[ \t]*$/) { state = 1; next }; state = 2 }
+  if (state == 1) {
+    if (s ~ /^---[ \t]*$/) { front(); emit("---"); state = 2; lead = 1 } else F[++nf] = s
+    next
+  }
+  body(s)
+}
+END { finish() }'
+# list_hash <file> — the hash the list holds for a whole note.
+list_hash() { LC_ALL=C awk -v W= -v RE="$USE_AWK_RE" "$LIST_AWK" "$1" | "${SHA[@]}" | cut -c1-64; }
+
 # incomplete <dir> — says that a scan of <dir> could not read a file it listed.
 incomplete() { err "cannot read every note in $1; nothing there is removed, and its list stays as it is"; }
 # scan <dir> <work> — the directory as <work>/files.tsv (name, hash, mtime of
@@ -438,12 +545,9 @@ scan() {
   # short of the listing is a file that could not be read.
   [ "$(grep -c . "$w/files.tsv")" = "${#all[@]}" ] || { incomplete "$dir"; return 1; }
   if [ "${#notes[@]}" -gt 0 ]; then
-    # A note's list hash leaves out its use lines.
+    # A note's list hash reads it as LIST_AWK prints it.
     for i in "${!notes[@]}"; do : > "$w/s/$i"; done
-    if ! LC_ALL=C awk -v W="$w/s/" -v RE="$USE_AWK_RE" '
-      BEGIN { for (j = 1; j < ARGC; j++) idx[ARGV[j]] = j - 1 }
-      FNR == 1 { if (out != "") close(out); out = W idx[FILENAME] }
-      $0 !~ RE { print > out }' "${notes[@]}"; then
+    if ! LC_ALL=C awk -v W="$w/s/" -v RE="$USE_AWK_RE" "$LIST_AWK" "${notes[@]}"; then
       incomplete "$dir"; return 1
     fi
     "${SHA[@]}" "$w"/s/* > "$w/base.out" 2>/dev/null
@@ -665,7 +769,7 @@ veto_unit() {
     printf '%s\n' "$line" > "$WORK/veto" || return 1
     rewrite "$dir/$name" veto_note "$WORK/veto" || return 1
   fi
-  VETO_HASH=$(LC_ALL=C awk -v RE="$USE_AWK_RE" '$0 !~ RE' "$dir/$name" | "${SHA[@]}" | cut -c1-64)
+  VETO_HASH=$(list_hash "$dir/$name")
   return 0
 }
 
@@ -1137,7 +1241,7 @@ apply_dir() {
       if ! grep -qF "$USE_MARK" "$dir/$name"; then
         rewrite "$dir/$name" append_use "$full"; rc=$?
         if [ "$rc" != 0 ] || [ "$REWROTE" != 1 ]; then say "refused $ref: it changed since it was listed; it stays and is due"; continue; fi
-        base=$(LC_ALL=C awk -v RE="$USE_AWK_RE" '$0 !~ RE' "$dir/$name" | "${SHA[@]}" | cut -c1-64)
+        base=$(list_hash "$dir/$name")
       fi
     fi
     drop_row "$w/rows" "$kind" "$name" "$base"

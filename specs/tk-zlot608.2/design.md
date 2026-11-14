@@ -353,7 +353,8 @@ A note is due from the first run that finds it, new or changed since the judge
 read it, and a note the judge kept for a moment that has not passed, or kept
 unsubstantiated, is due again from the date the judge set (sections 2 and 3). A
 use line a note gains does not change it for this purpose, because the hash the
-list keeps leaves out its use lines. The judge's own question, whether a note
+list keeps leaves out its use lines and what Claude Code rewrites in its front
+matter when an agent saves it. The judge's own question, whether a note
 can go away, decides whether a fresh note leaves, so no age decides when a note
 is read.
 

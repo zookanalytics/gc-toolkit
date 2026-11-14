@@ -154,7 +154,9 @@ and files a finding through `patrol-finding.sh` for a place it cannot
 resolve, where it reads and removes nothing.
 
 A note is due when the distiller has not judged it at its current text, or
-when the date the judge set for it has come. Due notes join the pending
+when the date the judge set for it has come. Its use lines, and what Claude
+Code rewrites in its front matter when an agent saves it, do not count as a
+change. Due notes join the pending
 observations, count toward the cadence gate, and are judged oldest first, at
 most `memory_notes_per_run` a run. The judge reads each note by the operator's
 three questions, as the rubric's memory section says. It drops a note that

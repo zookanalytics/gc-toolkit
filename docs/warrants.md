@@ -687,7 +687,7 @@ shares only the word ([authority-map.md](authority-map.md)).
     the lines that point at it.
   - The search is
     [specs/tk-zlot608.2/gas-city-search.md](../specs/tk-zlot608.2/gas-city-search.md).
-- **Verified.** 2026-11-14, at `gastownhall/gascity` main 13bb101b8f and
+- **Verified.** 2026-11-14, at `gastownhall/gascity` main cf33557276 and
   `gastownhall/beads` main 8cdfa796a8f5. Claude Code's memory page as read on
   2026-11-14.
 - **Retires when.** Gas City or bd ships a wait that can hold an agent's

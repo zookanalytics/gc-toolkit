@@ -123,6 +123,19 @@ setting() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }
 # origin_head <rig> <branch> — makes the rig's checkout a repository whose
 # origin/HEAD names <branch>, as a clone records its default branch.
 origin_head() { git -C "$B/rigs/$1" init -q && git -C "$B/rigs/$1" symbolic-ref refs/remotes/origin/HEAD "refs/remotes/origin/$2"; }
+# stamped <name> <body> — a note whose front matter carries Claude Code's
+# stamp, as Claude Code writes a note it has saved.
+stamped() {
+  printf -- '---\nname: %s\ndescription: "%s: a lesson"\nmetadata:\n  node_type: memory\n  type: feedback\n  originSessionId: 7c4d1d53-ce89-4d01-a65c-0710d826477c\n  modified: 2026-11-12T12:00:00.000Z\n---\n\n%s\n' "$1" "$1" "$2"
+}
+# save <note> <time> <line> — an agent's save of a stamped note through Claude
+# Code: the line added at its end, and the modified line of its front matter
+# set to <time>, as Claude Code 2.1.325 sets it on every Write or Edit.
+save() {
+  awk -v t="$2" '!d && /^  modified: / { $0 = "  modified: " t; d = 1 } { print }' "$1" > "$1.next" \
+    && printf '%s\n' "$3" >> "$1.next" && mv "$1.next" "$1"
+}
+due_of() { due_json | jq -r --arg n "$1" '[.[] | select(.memory_file | endswith("/" + $n)) | .memory_due] | join(" ")'; }
 
 # ── placement: each input that moves a directory or turns memory off ───────
 echo "── placement ──"
@@ -306,6 +319,85 @@ eq "$(due_json | jq -r '[.[] | select(.memory_file | endswith("/fresh.md"))] | l
 eq "$(MEMORY_INTAKE_NOW=1796212800 due_json | jq -r '.[] | select(.memory_file | endswith("/fresh.md")) | .memory_due')" "date" "it comes due on its date"
 printf 'A new line.\n' >> "$M/fresh.md"
 eq "$(due_json | jq -r '.[] | select(.memory_file | endswith("/fresh.md")) | .memory_due')" "changed" "any other change makes it due"
+
+REQ='<!-- memory-intake: use --> When this note steers your work, add a line at its end: used <YYYY-MM-DD>: <what it changed>'
+echo "── uses recorded through Claude Code's saves leave a note's date alone ──"
+stamped steer 'Take the lock path when two runs share a directory.' > "$M/steer.md"
+apply_lines "$(ref_of steer.md) next 2026-12-01 ask-use"
+eq "$(tail -1 "$M/steer.md")" "$REQ" "a stamped note gains the request at its end"
+save "$M/steer.md" 2026-11-16T09:00:00.000Z 'used 2026-11-16: chose the lock path'
+eq "$(grep '^  modified: ' "$M/steer.md")" "  modified: 2026-11-16T09:00:00.000Z" "a save moves the stamp"
+eq "$(due_of steer.md)" "" "a use recorded through a save does not make the note due"
+save "$M/steer.md" 2026-11-17T10:30:00.000Z 'used 2026-11-17: took the lock path again'
+eq "$(due_of steer.md)" "" "nor does the next day's"
+eq "$(MEMORY_INTAKE_NOW=1796212800 due_of steer.md)" "date" "it comes due on its date"
+for n in desc kind; do stamped "$n" "The $n lesson." > "$M/$n.md"; apply_lines "$(ref_of "$n.md") next 2026-12-01"; done
+sed -i.bak 's/^description: .*/description: "desc: a lesson its writer reworded"/; s/^  modified: .*/  modified: 2026-11-16T09:00:00.000Z/' "$M/desc.md"
+sed -i.bak 's/^  type: feedback$/  type: project/; s/^  modified: .*/  modified: 2026-11-16T09:00:00.000Z/' "$M/kind.md"
+rm -f "$M/desc.md.bak" "$M/kind.md.bak"
+eq "$(due_of desc.md) $(due_of kind.md)" "changed changed" "a save that changes its description or its type makes it due"
+
+echo "── a note's first save, which writes its front matter again, leaves its date alone ──"
+printf -- "---\nname: First Note\ntype: feedback\ndescription: It's the first lesson, with a comma\n---\nKeep the first path.\n" > "$M/first.md"
+apply_lines "$(ref_of first.md) next 2026-12-01 ask-use"
+# What Claude Code 2.1.325 wrote when an agent's Edit added a use line to this
+# note: the name as a slug, the description quoted, the top-level key under
+# metadata after node_type, the session and the time, and one blank line
+# before the body.
+cat > "$M/first.md" <<EOF
+---
+name: first-note
+description: "It's the first lesson, with a comma"
+metadata:
+  node_type: memory
+  type: feedback
+  originSessionId: b089ac48-23c5-4229-8129-5ed4f2560a4a
+  modified: 2026-11-16T09:00:00.000Z
+---
+
+Keep the first path.
+$REQ
+used 2026-11-16: kept the first path
+EOF
+eq "$(due_of first.md)" "" "the first save of a note with no stamp does not make it due"
+eq "$(MEMORY_INTAKE_NOW=1796212800 due_of first.md)" "date" "it comes due on its date"
+cat > "$M/keys.md" <<'EOF'
+---
+name: k-lists
+source: a top-level key before metadata
+description: Keys around the metadata block
+metadata:
+  type: reference
+tags:
+- alpha
+- beta
+---
+
+Body of k.
+EOF
+apply_lines "$(ref_of keys.md) next 2026-12-01"
+# And what it wrote for this one, whose top-level keys go under metadata ahead
+# of the keys metadata held.
+cat > "$M/keys.md" <<'EOF'
+---
+name: k-lists
+description: Keys around the metadata block
+metadata:
+  node_type: memory
+  source: a top-level key before metadata
+  tags:
+    - alpha
+    - beta
+  type: reference
+  originSessionId: c55fcbc0-c17f-4422-8ed9-3e5bce70d569
+  modified: 2026-11-14T22:37:54.595Z
+---
+
+Body of k.
+used 2026-11-16: probe three
+EOF
+eq "$(due_of keys.md)" "" "nor does one that moves its top-level keys and a list under metadata"
+
 
 echo "── decisions the script refuses ──"
 apply_lines "$RE next 2026-12-01 ask-use" "nonsense" "$RO next 2026-11-15" "$RO waits zz-1" "$RO waits tk-nope" "0000000000000000/old.md@0000000000000000 drop" "$RO drop extra"
@@ -532,6 +624,27 @@ cp "$M/v.md" "$B/v.before"; cp "$M/MEMORY.md" "$B/index.before"; cp "$M/hub-v.md
 run read
 hasnt "$OUT" "vetoed:" "a later run marks nothing again"
 eq "$(cmp -s "$M/v.md" "$B/v.before" && cmp -s "$M/MEMORY.md" "$B/index.before" && cmp -s "$M/hub-v.md" "$B/hub.before" && echo same)" "same" "and leaves each mark as it is"
+
+echo "── a waiting note that records a use through a save leaves once its fix lands ──"
+city usewait
+rig s tk
+M=$(memdir "$B/rigs/s")
+origin_head s main
+echo '[{"id": "tk-p1", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]' > "$B/rigs/s/beads.json"
+stamped wait 'Wait lesson.' > "$M/wait.md"
+run read
+apply_lines "$(ref_of wait.md) waits tk-p1"
+save "$M/wait.md" 2026-11-16T09:00:00.000Z 'used 2026-11-16: took the wait path'
+eq "$(due_json --count)" 0 "a use recorded through a save leaves the note waiting"
+cp "$M/wait.md" "$B/wait.before"
+cat > "$B/rigs/s/beads.json" <<'JSON'
+[{"id": "tk-p1", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "metadata": {"task_kind": "feedback-pattern", "proposal_bead": "tk-f1"}},
+ {"id": "tk-f1", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "main"}}]
+JSON
+run read
+has "$OUT" "waits ended: 1 unit(s) removed with a fix landed" "its wait ends once the fix lands"
+eq "$([ -e "$M/wait.md" ] && echo kept || echo gone)" "gone" "and the note leaves"
+eq "$(cat "$STATE"/*/removed/wait.md@*)" "$(cat "$B/wait.before")" "with its text kept, use line and all"
 
 echo "── a pattern whose edges were not read keeps its notes ──"
 city edges
