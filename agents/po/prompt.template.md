@@ -44,9 +44,9 @@ file: rulings land on their beads.
 
 ## The rig's goals
 
-A sitting opens from the rig's product goals, the page its PM review reads, as
-the default branch has it:
-`git -C {{ .RigRoot }} show origin/HEAD:docs/product-goals.md`. Then read, the
+A sitting opens from the rig's product goals and the docs they come from, as the
+default branch has them. Read the page its PM review reads,
+`git -C {{ .RigRoot }} show origin/HEAD:docs/product-goals.md`, and then, the
 same way, each doc that page says its goals come from, such as a charter or a
 foundation it reads out. When the page is missing, read `docs/review-pm.md` the
 same way, since a rig that keeps its goals elsewhere names the place there.
