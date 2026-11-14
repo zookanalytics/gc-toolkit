@@ -48,7 +48,10 @@
 # re-check's moot or benign close under stubs, and fails unless the close
 # settles a headline that still waits on a subject nothing holds any more,
 # leaves one that an open blocker holds, and closes the conversation only once
-# every read and write before it has answered. It pins that every skill and
+# every read and write before it has answered. It runs the edit skill's copy of a
+# UI against a tree whose committed demo guide names the app, and fails unless
+# the copy runs the guide's serve command, read the way a capture reads it, and
+# starts no copy for a guide that names none. It pins that every skill and
 # formula names a pack skill to load by its catalog name, never by its path, so
 # an agent in any tree loads the installed pack's copy.
 #
@@ -925,6 +928,80 @@ have "…and reads the polecat class's standards before the first edit" 'templat
 have "…shows the operator a copy of a UI change at an address of its own" 'GCTK_SCRIPTS_DIR="$CONV" "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --command "$SERVE"' "$EDIT"
 have "…with the city's publisher" '--publish-command "$(var ui_publish_command)" --address-pattern "$(var ui_address_pattern)"' "$EDIT"
 have "…and stops the copy" '( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )' "$EDIT"
+lacks "…and takes no serve command from the city's formula vars" 'ui_serve_command' "$EDIT" "the rig's demo guide is the one home of the command"
+echo "── a sitting's copy of a UI runs the command the tree's demo guide names ──"
+# The copy's block runs as written against a tree whose demo guide names the app,
+# reading it through the pack's own demo-engine-lib.sh, the reader a capture
+# given --guide uses. gc answers the formula's vars, and gctk records where it
+# runs and what it is given. A stale SERVE in the environment names nothing.
+LC="$TMP/live-copy"
+mkdir -p "$LC/bin" "$LC/city/.gc/services/gctk/bin" "$LC/tree/docs"
+cat >"$LC/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+[ "$*" = "formula show mol-rig-demo --rig rig-x --json" ] || { echo "gc: unexpected call: $*" >&2; exit 1; }
+printf '%s\n' '{"ok":true,"vars":[{"name":"ui_publish_command","rig_default":"publish $PORT"},{"name":"ui_address_pattern","rig_default":"https://host:$PORT/"}]}'
+STUB
+cat >"$LC/city/.gc/services/gctk/bin/gctk" <<'STUB'
+#!/usr/bin/env bash
+{ printf 'in %s\n' "$(pwd -P)"; printf 'scripts %s\n' "$GCTK_SCRIPTS_DIR"; printf '%s\n' "$@"; } >"$LC_LOG"
+printf '%s\n' '{"state":"running","address":"https://host:1/","port":1}'
+STUB
+chmod +x "$LC/bin/gc" "$LC/city/.gc/services/gctk/bin/gctk"
+git -C "$LC/tree" init -q
+LC_TREE=$(cd "$LC/tree" && pwd -P)
+# lc_guide <lines> — commit a demo guide whose section "Bring the app up" holds
+# those lines.
+lc_guide() {
+    printf '# Demo guide\n\n## Bring the app up\n\n%s\n' "$1" >"$LC/tree/docs/review-demo.md"
+    git -C "$LC/tree" add -A \
+        && git -C "$LC/tree" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q -m guide
+}
+# lc_run <shell> — one run of the block from no log; prints its stdout and stderr.
+lc_run() {
+    rm -f "$LC/log"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV CONV="$REPO/assets/scripts" TREE="$LC/tree" GC_RIG=rig-x \
+        GC_CITY_PATH="$LC/city" LC_LOG="$LC/log" SERVE=stale PATH="$LC/bin:$PATH" $1 "$LC/block" </dev/null 2>&1)
+}
+fenced_block "$EDIT" 'rig serve --command "$SERVE"' >"$LC/block"
+LC_WANT=$(printf 'in %s\nscripts %s\nrig\nserve\n--command\n%s\n--publish-command\n%s\n--address-pattern\n%s' \
+    "$LC_TREE" "$REPO/assets/scripts" 'cd app && exec ./serve' 'publish $PORT' 'https://host:$PORT/')
+lc_guide '**Serve:** `cd app && exec ./serve`'
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    out=$(lc_run "$run")
+    if [ "$(cat "$LC/log" 2>/dev/null)" = "$LC_WANT" ]; then
+        ok "($sh_) converse-edit: the copy runs the guide's serve command from the tree, with the city's publisher"
+    else
+        bad "($sh_) converse-edit: the copy runs the guide's serve command from the tree, with the city's publisher" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
+    fi
+done
+sed 's#exec ./serve#exec ./edited#' "$LC/tree/docs/review-demo.md" >"$LC/edited" && mv "$LC/edited" "$LC/tree/docs/review-demo.md"
+out=$(lc_run bash)
+if [ "$(cat "$LC/log" 2>/dev/null)" = "$LC_WANT" ]; then
+    ok "converse-edit: the copy reads the guide at the tree's commit, not an edit the commit does not hold"
+else
+    bad "converse-edit: the copy reads the guide at the tree's commit, not an edit the commit does not hold" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
+fi
+lc_guide '**Base URL:** `https://preview.example.com/`'
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    out=$(lc_run "$run")
+    if [ ! -e "$LC/log" ] && printf '%s\n' "$out" | grep -qF 'gives no serve command, so it offers no copy'; then
+        ok "($sh_) converse-edit: a guide that names no serve command starts no copy, and the block says so"
+    else
+        bad "($sh_) converse-edit: a guide that names no serve command starts no copy, and the block says so" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
+    fi
+done
+lc_guide '**Serve:** `cd app && exec ./serve`
+**Port:** `4000`'
+out=$(lc_run bash)
+if [ ! -e "$LC/log" ] && printf '%s\n' "$out" | grep -qF 'names **Port:**'; then
+    ok "converse-edit: a guide the reader refuses starts no copy, and the reader says why"
+else
+    bad "converse-edit: a guide the reader refuses starts no copy, and the reader says why" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
+fi
 echo "── a moot or benign close settles a headline that waits on nothing ──"
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The
