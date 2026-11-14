@@ -229,16 +229,16 @@ is the rig's, so it lives in the root [`AGENTS.md`](../AGENTS.md), which every
 session that works in a gc-toolkit worktree loads, or in one of the rig's docs
 or checks. It is never written into the pack content every rig runs.
 
-A review is where the two meet. It reads its values from the vars its run and
-each of its lanes are poured with, and every other piece either from the
-installed pack, as that checkout stands when the piece is read, or from the rig
-at the reviewed commit. The reviewed commit is the head a lane judges. It is
-set when the run picks the lane, and nothing moves it afterwards.
+A review is where the two meet. It takes its values from the part that starts
+it, and reads every other piece either from the installed pack, as that
+checkout stands when the piece is read, or from the rig at the reviewed commit.
+The reviewed commit is the head a check judges. It is fixed when the check
+starts, and nothing moves it afterwards.
 
 | What the reviewer uses | Where it comes from | Which version |
 |---|---|---|
-| The review's steps, the run's formula `mol-pr-review` and the lane formula `mol-pr-review-lane` | The pack's formulas. Each rig's `.beads/formulas` entry for one is a link Gas City makes into the installed pack. | The installed pack when the run is poured, or when it adds a lane. A poured step keeps its text. |
-| The review's values: the bead that owns the PR, its branch, the head and target the run is poured for, and each lane's check and head | The vars the landing order pours the run with, from the pending record it read, and the run's pick of each lane | Fixed at the pour, and for a lane when the run picks it |
+| The review's steps | The pack's formulas. Each rig's `.beads/formulas` entry for one is a link Gas City makes into the installed pack. | The installed pack when each formula is poured. A poured formula keeps its step text. |
+| The review's values: the bead that owns the PR, its branch and target, and each check with the head it judges | The landing order, which starts the review, and the review itself, which starts each check | Fixed when the review starts, and for each check when that check starts |
 | The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the var `gc sling` adds to every pour. | The installed pack when the reviewer loads it |
 | The specialist stance, the skill `gc-toolkit.specialist-stance`, held by arch, demo, pm and a check of the rig's own | The reviewer's skill catalog | The installed pack when the reviewer loads it |
 | The architecture-document standard, the skill `gc-toolkit.architecture-document`, which the arch method holds the rig's architecture document to | The reviewer's skill catalog | The installed pack when the reviewer loads it |
@@ -252,8 +252,9 @@ pack's check index and a rig's are layered. `review-checks.sh` resolves both
 for every reader of the index, not only the review, and every reader takes the
 rig's rows at the commit it judges. [skills.md](skills.md) states how a pack
 skill is named and surfaced, and `gc skill list` prints the file each catalog
-entry points at. The lane formula's method-load paragraph states which skill a
-lane loads, and what its reviewer does when the catalog has none.
+entry points at. The method-load paragraph of the formula a check runs states
+which skill the check loads, and what its reviewer does when the catalog has
+none.
 
 - **A rig supplies no skill to a review.** The review names the method and the
   stance under the pack's binding, and the catalog answers both from the
