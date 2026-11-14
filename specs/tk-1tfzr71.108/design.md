@@ -87,11 +87,12 @@ design makes the order the one path that admits work on a pending record
 Each order run already reads each record it checks and asks the evaluator
 whether its PR is ready. The order pours a run for a PR when the answer at the
 head the refinery validated includes `review` (no passed result for the live head
-and target), or when the bead carries an open ask (below). It pours only when
-nothing else writes the branch: no run is attached, no open bead other than an
-ask names the branch, and no conversation's gate is on the bead, since a sitting
-may be editing it. It pours none while a human gate holds the bead, because a
-gate asks a person and the next run starts from the answer (sections 6 and 7).
+and target), or when the bead carries an open ask the run can take (below). It
+pours only when nothing else writes the branch: no run is attached, no open bead
+other than an ask names the branch, and no conversation's gate is on the bead,
+since a sitting may be editing it. It pours none while a human gate holds the
+bead, because a gate asks a person and the next run starts from the answer
+(sections 6 and 7).
 The pour runs under the record lock the order already holds for that record:
 
 ```bash
@@ -147,7 +148,7 @@ subtree again as the next iteration. A step cannot combine `check` with `expand`
 | `review-loop` (template, checked) | the orchestrator | Holds one iteration per head the run judges. Its check is `gctk review passed <run>` (section 8). `max_attempts` is a formula var, 3 by default, the bound the pack's one check loop already uses (`mol-polecat-work`'s self-review). |
 | `triage` (child) | the review pool | Judges the iteration's head: the change since the last head that passed, or since the run's first head when the run's own repair pushed this one, or else the whole PR (section 2). Its output names the checks the head needs and whether the change is material. |
 | one lane per picked check | the review pool, or the check's own target | Bonded at runtime from triage's output, one `mol-pr-review-lane` per check. Each runs its check's method at the head in its own worktree and writes its verdict and findings as its output. |
-| `rule-and-repair` (child) | the fix pool (`<rig>/<binding>polecat`, where fixes and validation passes run today) | Rules every finding and every ask, answers them in the head's comment, and makes the round's fixes as one push (section 6). |
+| `rule-and-repair` (child) | the fix pool (`<rig>/<binding>polecat`, where fixes and validation passes run today) | Rules every finding and every ask the run can take, answers them in the head's comment, and makes the round's fixes as one push (section 6). |
 | `record` | the review pool | Writes the result for the head and the target, closes the asks the run answered, and removes the workspace. |
 
 The two pools are formula vars, `review_target` and `repair_target`, which the
@@ -227,14 +228,30 @@ in `review_checks`, a comma list from the check index. `gctk review ask <bead>
 - a must-fix point a sitting or the mechanik puts on another open PR
   (tk-bet1nt), filed with the command the `prs` skill gives.
 
-The run takes every open ask at each iteration, rules it with the findings, and
-closes it once a head it judged carries the fix, or answers why not. The
-landing order pours a run for an open ask even when the head already passed, so
-a comment on a passed PR becomes a round. An ask is a task bead held by its own
-edge, the shape the merge design gives work on a PR's branch, so no new bead kind
-comes with it. tk-1tfzr71.21's join can file Gas City's PR monitor repair beads in
-the same shape, unrouted, so the monitor's repair work joins the same queue
-rather than starting a writer of its own.
+The run takes every open ask it can take at each iteration, rules it with the
+findings, and closes it once a head it judged carries the fix, or answers why
+not. The landing order pours a run for such an ask even when the head already
+passed, so a comment on a passed PR becomes a round. An ask is a task bead that
+holds the PR's bead by its own `blocks` edge, the shape the merge design gives
+work on a PR's branch, so no new bead kind comes with it. tk-1tfzr71.21's join
+can file Gas City's PR monitor repair beads in the same shape, unrouted, so the
+monitor's repair work joins the same queue rather than starting a writer of its
+own.
+
+An ask can also wait on other work through an edge of its own, as a sitting's
+send-back that must wait on another bead does (tk-724u4pw). The run can take an
+ask only when nothing holds it, which `gctk bead holds <ask>` reads as `clear`
+([the bead holds contract](../../docs/gctk-architecture.md#the-bead-holds-contract)).
+A `waits-for` edge reads `unjudged`, which a caller that acts treats as a hold.
+`gctk review ask` files an ask with no parent, because an ask filed under the
+bead it blocks would read `held` through that bead for as long as it stays
+open. The order's pour and its ready transition, triage, the run's selection and
+the pass rule all read an ask by that one test (sections 2, 5, 6 and 8). An ask
+that waits therefore pours no run, is neither triaged nor taken, and fails no
+iteration, so it spends no attempt and files no gate. It still holds the PR
+through its own edge onto the bead, which the evaluator reads as a wait. Once
+nothing holds it, the order's next pass pours a run that takes it, at a passed
+head as at any other.
 
 ## 2. Triage at every head
 
@@ -258,17 +275,18 @@ each head its own repair pushes. It reads:
   hand, and the merge commit's message, where the worker writes what collided and
   what it decided (merge design, section 7). Otherwise, as at a PR's first judged
   head, the change is the whole PR.
-- **The asks** open on the bead, and the checks each sends back.
+- **The asks** open on the bead that the run can take (section 1), and the
+  checks each sends back.
 - **The check index** at the head, through `gctk review checks --at <head>`.
 
 It writes, as its output, the head, the checks the head needs and whether the
 change is material. The picks are closed over the index, as today. At a PR's
 first judged head the rig's first checks are picked whatever the diff, which is
 `correctness` today (the `check_set` default the refinery stamps on the old
-path). An ask's checks are picked whatever the change. A head whose change needs
-no further check, such as a small fix or a merge of the target that git made
-without help, picks none, and the head passes on the checks earlier heads ran and
-the rulings that answered them.
+path). The checks of an ask the run can take are picked whatever the change. A
+head whose change needs no further check, such as a small fix or a merge of the
+target that git made without help, picks none, and the head passes on the checks
+earlier heads ran and the rulings that answered them.
 
 `skills/review-triage/SKILL.md` says triage "never re-runs because the branch
 grew". On the new path it runs at every head by the ruling above. Section 3 says
@@ -336,12 +354,26 @@ it checks:
 1. When an approval it would dismiss carries comments the intake has not routed,
    it waits for the next pass, as `approval-withdraw.sh` does today, because a
    dismissal retires them unread (the lesson of tk-uos4onx).
-2. It dismisses each approval that stands and was given on another commit than
-   the withdrawal's head, a review's own `commit_id` being the commit it
-   approved, with the reason as the message and the city's mark, through
-   `gctk pr post`. No time is compared.
-3. It reads the reviews again, and closes the withdrawal only once GitHub shows
-   each of them dismissed.
+2. It dismisses each approval that stands and was given on a commit that does
+   not contain the withdrawal's head, with the reason as the message and the
+   city's mark, through `gctk pr post`. A review's own `commit_id` is the commit
+   it approved, and that commit contains the head when it is the head or
+   descends from it, which GitHub's compare of the two
+   (`compare/<withdraw_head>...<commit_id>`) reads as `identical` or `ahead`.
+   The order already reads the reviews through gctk's `gh` adapter, so the
+   compare is one more read of the same kind. An approval of the head, or of
+   any later head of the branch, saw the change and stands, because every push
+   onto a PR's branch on the new path is a fast-forward (merge design, section
+   1), so every later head contains it. That covers a person who approves the
+   repair's next head before the order carries out the withdrawal for the head
+   before it, and a retry, which reads the reviews again and reaches no
+   approval of a head that carries the change, so the withdrawal keeps no
+   record of the set it dismissed. On a branch a person rewrote through the
+   withdrawal's head, an approval of a rewritten head does not contain it and
+   is dismissed, which errs on the safe side. No time is compared, and a
+   compare GitHub does not answer leaves the withdrawal for the next pass.
+3. It reads the reviews again, and closes the withdrawal only once no approval
+   that stands was given on a commit that does not contain its head.
 4. When GitHub refuses a dismissal, it files a human gate on the bead, keyed
    `approval-withdraw-refused`, naming the reviews. The gate holds the PR until a
    person dismisses them or rules otherwise.
@@ -376,9 +408,11 @@ finish from where the PR stands.
   find it a draft and change nothing. A return to draft dismisses no approval.
 - **Ready.** The landing order marks a PR ready when the PR is a draft, its
   record is pending at the live head, a passed result names that head and the
-  target, and no run is attached to the bead. That is also how a draft that
-  someone else returned to draft is readied again once its lanes have passed. The
-  order does not wait for CI.
+  target, no run is attached to the bead and no ask the run can take is open on
+  it, so that the order has no run to pour for the PR. That is also how a draft
+  that someone else returned to draft is readied again once its lanes have
+  passed. The order does not wait for CI. An ask that something holds does not
+  keep the PR a draft, since it starts no round until a run takes it.
 
 This departs from the merge design's wording, "the review loop marks it ready".
 The run cannot tell whether the head it passed is the round's last: the refinery
@@ -388,15 +422,15 @@ run that marked its own head ready would start CI on a head the refinery then
 replaces, so the order makes the transition once the record names the head the
 run passed.
 
-A draft is no hold. A human gate on the bead, or `merge_hold`, still holds the PR
-after the order marks it ready, because the evaluator reads them as it always
-does.
+A draft is no hold. A human gate on the bead, an open ask, or `merge_hold` still
+holds the PR after the order marks it ready, because the evaluator reads them as
+it always does.
 
 ## 6. Rulings, and whose rule each follows
 
 The `rule-and-repair` step rules every finding a lane raised at the iteration's
-head and every ask open on the bead, by the rule its source carries, which
-`review-ruling` states:
+head and every ask open on the bead that the run can take (section 1), by the
+rule its source carries, which `review-ruling` states:
 
 - **A lane's finding** is ruled by that lane's own rule for what blocks, the
   What blocks section of its skill, with that lane's evidence in its worktree,
@@ -451,15 +485,15 @@ failing-check and conflict arms file their rework child as an ask the same way.
 `finding.sh` is not changed, and its row moves to the bead that retires the old
 path, which waits on tk-1tfzr71.21 (section 11). A comment that arrives after a
 pass starts a round of its own, since the landing order pours a run for an open
-ask.
+ask that nothing holds.
 
 **A must-fix point on another open PR** (tk-bet1nt, folded here by the operator's
 placement ruling of 2026-10-30). The operator's seed: "Ideally, it has a way to
 add a blocking bead that'll get processed just like any comment on the PR, code
 review feedback, etc." A sitting or the mechanik files an ask on the PR's bead
 with `gctk review ask`, from the command the `prs` skill gives. It holds the PR
-from that moment, and the next run rules it like a person's comment, unless it
-carries the operator's own ruling.
+from that moment, and the first run that can take it (section 1) rules it like a
+person's comment, unless it carries the operator's own ruling.
 
 ## 7. A run that ends without a result
 
@@ -501,8 +535,9 @@ re-offered it.
 - **An approval never stands in for a check.** The evaluator reads the review
   result and the approval as two conditions, and nothing reads an approval as a
   lane's green, so lane-state's GitHub-approval fallback has no successor. A
-  check an ask sends back is picked at the next judged head, and the head does
-  not pass until that check ran there and each of its findings was ruled.
+  check an ask sends back is picked at the first head judged once the run can
+  take the ask, and that head does not pass until the check ran there and each
+  of its findings was ruled.
 - **The projection.** `prstatus` renders the evaluator's `review` condition with
   the state of the run, read from the bead's `blocks` edges onto run roots: a run
   attached reads as the city's work in flight, a closed run with no result at the
@@ -529,15 +564,17 @@ member the review domain. Its verbs:
 **The pass rule.** `gctk review passed <run>` exits 0 when, in the iteration it
 checks, triage wrote the head it judged, every lane triage bonded wrote its
 verdict at that head, `rule-and-repair` ruled every finding and every ask it
-took, ruled nothing must-fix and pushed nothing, and no ask is open on the bead
-that the step did not take. Each finding the run ruled must-fix at an earlier
-head must also name the commit that fixes it. A finding declined by its lane's
-own rule counts as ruled, and so does a question put to a person, so the loop
-stops there rather than spend its attempts on a question only a person can
-settle, and `record` then writes no passed result while that gate is open
-(section 1). It exits 1 otherwise, so the next iteration triages the head the
-repair pushed. It exits 75 when the store does not answer. It reads only the
-store, because a check runs inside the control
+took, ruled nothing must-fix and pushed nothing, and every ask open on the bead
+that the run can take is one the step took. An ask that something holds counts
+for nothing here, so it spends no attempt, and its own edge holds the PR until
+nothing holds the ask and a later run takes it (section 1). Each finding the run
+ruled must-fix at an earlier head must also name the commit that fixes it. A
+finding declined by its lane's own rule counts as ruled, and so does a question
+put to a person, so the loop stops there rather than spend its attempts on a
+question only a person can settle, and `record` then writes no passed result
+while that gate is open (section 1). It exits 1 otherwise, so the next
+iteration triages the head the repair pushed. It exits 75 when the store does
+not answer. It reads only the store, because a check runs inside the control
 dispatcher with a `PATH` of the directories of bd, gc, dolt and jq plus the
 system's (`conditionPATH` in `internal/convergence/condition.go`), which has no
 `gh`. The steps' outputs carry the heads, so the check needs no GitHub read.
@@ -610,7 +647,7 @@ in under rule 1:
 | tk-pdc0ovc: a lane reads the body before its refresh | removes it | The refinery edits the body before it pushes the head (merge design, section 8), and a run starts only after the record names that head. |
 | tk-j5wrs and tk-8wg5eg9: the label and the board count different live work | removes it on the new path | Both render the evaluator, whose waits are the one in-flight set. Their close briefs hold once the old path retires. |
 | tk-7rquf68: the board's pre-open stall counts every lane | removes it | The phases and the stall reading go with the old path; the new path's board renders `prstatus`. |
-| tk-724u4pw: a sitting's rework cannot wait on another bead | removes it on the new path | An ask is filed, not slung, and it can carry its own `blocks` edge; the run takes only an ask nothing else holds. |
+| tk-724u4pw: a sitting's rework cannot wait on another bead | removes it on the new path | An ask is filed, not slung, and it can carry its own `blocks` edge. While that edge holds it, the order pours no run for it and no run takes it or fails on it, and once the edge lands the order's next pass pours one (section 1). |
 | tk-grjsnf6: a deferred follow-up on an integration PR pours from main | removes it | A deferral's bead takes the PR's target as its own `target`, so it starts from the branch the code lands on. |
 | tk-6bovoni: the guard reads git's default merge base over a rewritten main | removes the guard's half | Triage reads the change between two commits of one branch. The edge moves to the retirement bead, which deletes the guard; the supersession half stays on tk-1tfzr71.21. |
 | The re-filed ruling rework (PR #1480's window) | removes it | `gctk review ask` finds an ask of the same source and reason, open or closed, before it files. |
@@ -684,10 +721,10 @@ the city working. Until a rig cuts over, nothing on the new path runs there.
 
 | Unit | What it does | Waits on | Releases |
 |---|---|---|---|
-| 1. The review domain | `gctk review checks` and `gctk review guidance`, the port of `review-checks.sh`, with every caller moved and the shell deleted; `gctk review passed` with its pass rule and `--explain`; `gctk review record`, which takes `review_results`'s declaration from `ready_keys.go`; `gctk review ask`, with the key `review_checks` registered. Tests for each case of the pass rule: a lane's finding ruled must-fix and one declined by its lane's rule, a question put to a person, a repair that pushed, a must-fix finding of an earlier head with no commit that fixes it, an open ask not taken, an ask's check not run at the head, a store that does not answer; for `record`, a result replaced at the same head and target, `passed: false` for an exhausted loop and while a gate the run filed is open, and no result for a loop a hard failure closed; an ask filed twice by one source and reason, open and closed. | nothing | the formula (unit 3) |
-| 2. The draft cycle and the withdrawal | `gctk pr draft`; `gctk pr withdraw` with `withdraw_head` registered; in the landing order's pass, the withdrawal carried out (waiting for routing, dismissing with the mark by each review's commit, reading back, a gate on refusal) and the ready transition; the refinery's `mr` push runs `gctk pr draft` first. Tests show section 10's draft-cycle items of the merge design: a round's first push returns a ready PR to draft and later pushes change nothing; the order readies a draft whose passed result names its validated head with no run attached, whoever drafted it, and not one whose record is not pending at that head; a cycle stopped between any two steps finishes from where the PR stands; a return to draft dismisses no approval, and a PR approved before a round merges on that approval after it unless triage ruled the round's head material; a gate or `merge_hold` still holds a PR the order readied; a withdrawal waits while an approval it would dismiss carries unrouted comments, holds the PR until GitHub shows each approval dismissed, and files its gate when GitHub refuses. | nothing | unit 4 |
+| 1. The review domain | `gctk review checks` and `gctk review guidance`, the port of `review-checks.sh`, with every caller moved and the shell deleted; `gctk review passed` with its pass rule and `--explain`; `gctk review record`, which takes `review_results`'s declaration from `ready_keys.go`; `gctk review ask`, with the key `review_checks` registered. Tests for each case of the pass rule: a lane's finding ruled must-fix and one declined by its lane's rule, a question put to a person, a repair that pushed, a must-fix finding of an earlier head with no commit that fixes it, an untaken ask that nothing holds, which fails the check, and an ask an open bead holds, which neither fails it nor is taken, an ask's check not run at the head, a store that does not answer; for `record`, a result replaced at the same head and target, `passed: false` for an exhausted loop and while a gate the run filed is open, and no result for a loop a hard failure closed; an ask filed twice by one source and reason, open and closed, and an ask filed with no parent. | nothing | the formula (unit 3) |
+| 2. The draft cycle and the withdrawal | `gctk pr draft`; `gctk pr withdraw` with `withdraw_head` registered; in the landing order's pass, the withdrawal carried out (waiting for routing, dismissing with the mark each approval on a commit that does not contain the withdrawal's head, reading back, a gate on refusal) and the ready transition; the refinery's `mr` push runs `gctk pr draft` first. Tests show section 10's draft-cycle items of the merge design: a round's first push returns a ready PR to draft and later pushes change nothing; the order readies a draft whose passed result names its validated head with no run attached, whoever drafted it, and not one whose record is not pending at that head; a cycle stopped between any two steps finishes from where the PR stands; a return to draft dismisses no approval, and a PR approved before a round merges on that approval after it unless triage ruled the round's head material; a gate or `merge_hold` still holds a PR the order readied; a withdrawal waits while an approval it would dismiss carries unrouted comments, holds the PR until no approval that stands was given on a commit without its head, and files its gate when GitHub refuses; a withdrawal for a head, carried out after a person approved a later head, keeps that approval, keeps an approval of the head itself, and still dismisses an approval of a commit that does not contain the head. | nothing | unit 4 |
 | 3. The formula | First, a probe in a scratch city: `gc formula cook --attach` of a v2 formula whose template child carries `on_complete`, inside a `[template.check]` loop, with steps routed by `gc.run_target`, run over three iterations; its result picks `on_complete` or the static fallback (section 1). Then `mol-pr-review` and `mol-pr-review-lane`, each step calling a tested script within the step-size bound, which `formula-step-size.test.sh` learns to read in expansion templates and bonds; `review-workspace.sh` keyed by the run's root and the reap order with it; the shadow var; the skills' verdict sentences, triage's per-head method and material ruling, and the `review-ruling` skill (section 3). | unit 1 | unit 4 |
-| 4. Admission and asks | The landing order's pass pours a run (no passed result at the validated head, or an open ask; none attached; no other writer, rework child or conversation's gate, on the branch; no human gate on the bead), re-offers a run that ended without a result, and files `review-run-failed` at the second failure at one head since that gate last closed. The asks: the refinery's conflict path, `pr-facts.sh`'s three arms on a PR on the record, `converse-rework.sh` on such a PR, and the `prs` skill's command. `prstatus` renders the run's state; `refinery-lib.sh` leaves an ask alone. Tests: a head validated with no result gets one run and only one under overlapping passes; a run that ended without a result is poured again, and the second failure gets the gate; a cleared `review-run-failed` or `review-loop-exhausted` gate gets one more run; an open human gate on the bead keeps the order from pouring until it closes; an ask on a passed head starts a round; a sitting's open gate keeps the run off the branch; a person's batch is ruled by grade, a nit answered and not fixed, a fix outside the diff deferred to a bead with the PR's target. | units 2 and 3 | unit 5 |
+| 4. Admission and asks | The landing order's pass pours a run (no passed result at the validated head, or an open ask that nothing holds; none attached; no other writer, rework child or conversation's gate, on the branch; no human gate on the bead), re-offers a run that ended without a result, and files `review-run-failed` at the second failure at one head since that gate last closed. Its ready transition waits while an ask that nothing holds is open. The asks: the refinery's conflict path, `pr-facts.sh`'s three arms on a PR on the record, `converse-rework.sh` on such a PR, and the `prs` skill's command. `prstatus` renders the run's state; `refinery-lib.sh` leaves an ask alone. Tests: a head validated with no result gets one run and only one under overlapping passes; a run that ended without a result is poured again, and the second failure gets the gate; a cleared `review-run-failed` or `review-loop-exhausted` gate gets one more run; an open human gate on the bead keeps the order from pouring until it closes; an ask on a passed head starts a round; an ask an open bead holds, on a passed head, pours no run, files no gate and leaves the head's passed result, and the pass after that bead closes pours one run, which takes it; a draft with an open ask that nothing holds is not marked ready; a sitting's open gate keeps the run off the branch; a person's batch is ruled by grade, a nit answered and not fixed, a fix outside the diff deferred to a bead with the PR's target. | units 2 and 3 | unit 5 |
 | 5. Docs, warrants, the plan and the cutover script | The pages in section 9's last row; the account of a hand-resolved merge in the merge commit's message, in `mol-polecat-work`'s workspace-setup; the warrants' Covers lines; `review-cutover.sh` for the cutover beads; the deletion plan's rows moved to the retirement bead, with a note on it saying why; `built-once-target.md`'s Review section and the lane table. | units 1 to 4 | the landing |
 
 **Rule 2.** Every step of the two formulas calls tested scripts or gctk verbs and

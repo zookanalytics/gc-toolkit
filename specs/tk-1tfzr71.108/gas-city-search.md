@@ -111,12 +111,12 @@ deletes the shell.
 ## Asks (unit 1, unit 4)
 
 The need: a request for a change on a PR's branch, or for a check at its next
-head, held on the PR's bead and worked by the review run, never by a writer of its
-own.
+head, that holds the PR's bead and is worked by the review run, never by a
+writer of its own.
 
 - **bd's create with `--deps blocks:<bead>`** files the bead and its edge in one
-  write. **Composed**: an ask is a task bead held by its own edge, with the
-  existing `branch` key, and no new bead kind.
+  write. **Composed**: an ask is a task bead that holds the PR's bead by its own
+  edge, with the existing `branch` key, and no new bead kind.
 - **The PR monitor's repair bead** (`ensureGitHubPRRepairBead`) is routed and
   poured with the monitor's `repair_workflow` when it is filed, so it is a writer
   of its own. **Not covered** for an ask, which must stay unrouted so the run is
@@ -138,7 +138,10 @@ own.
   review (searched for `dismissals` and `dismiss`). **Not covered**: the landing
   order dismisses through GitHub's review dismissal, as `approval-withdraw.sh`
   does today, and `withdraw_head` is the new key that names the head the
-  withdrawal was filed for.
+  withdrawal was filed for. **Composed** for which approvals it dismisses:
+  GitHub's compare of that head with a review's `commit_id`
+  (`compare/<withdraw_head>...<commit_id>`) says whether the approved commit
+  contains the head, so the order walks no history of its own.
 
 ## The run's workspace and its reap (unit 3)
 
