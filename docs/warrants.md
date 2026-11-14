@@ -234,7 +234,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-13, at `gastownhall/gascity` main 189612d9a and
+- **Verified.** 2026-11-14, at `gastownhall/gascity` main 420b7bb65f and
   `gastownhall/beads` main 8cdfa796a (`BuildReadyWorkOrder` in
   `internal/storage/sqlbuild/ready.go` orders the priority policy by the bead's
   own priority), with bd 1.3.4 (7ef2fd05e).
@@ -578,7 +578,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-14, at `gastownhall/gascity` main 67617358b1, with
+- **Verified.** 2026-11-14, at `gastownhall/gascity` main 420b7bb65f, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
