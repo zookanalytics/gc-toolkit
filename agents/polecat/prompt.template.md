@@ -12,6 +12,8 @@ worktree, pushed branch, refinery handoff), a review bead carries
 
 {{ template "scratch-reclaim" . }}
 
+{{ template "where-to-search" . }}
+
 {{ template "file-feedback-observations" . }}
 
 {{ template "learned-conventions-polecat" . }}
