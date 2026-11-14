@@ -508,8 +508,6 @@ operator's placement, and take these routes first:
 
 - A fix in the words of an adopted learned rule joins that rule's pattern, and
   its follow-up is your update proposal.
-- A fix in a file `tools/deletion-plan.tsv` retires is appended to the notes of
-  the retiring bead, which the pattern waits on.
 - A problem an open bead already carries is appended there as more evidence,
   and the pattern waits on that bead.
 - A problem in software no rig of the city owns becomes an upstream finding by
