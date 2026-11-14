@@ -10,7 +10,7 @@ skill carries that change from the ruling to the refinery. The steps keep their
 own skills: the hold still records what the operator owes, each hand-back is
 still recorded before you post it, and the sign-off still closes the
 conversation. Each tool call starts a fresh shell, so set `CONV`,
-`CONVERSATION` and `SUBJECT` literally, from what step 1 found, at the top of
+`CONVERSATION` and `SUBJECT` literally, from the entry's output, at the top of
 every call below, and `CHANGE` and `TREE` too once the calls below have printed
 them.
 
@@ -61,7 +61,7 @@ thread first (the `converse-iterate-document` step).
 ## File the change and hold it, before the first edit
 
 First read who holds the subject: its assignee, its route and a run in flight,
-which step 4's prime showed and `"$CONV/bead-context.sh" "$SUBJECT"` shows
+which the prime showed (`converse-prep`) and `"$CONV/bead-context.sh" "$SUBJECT"` shows
 again. When a pool, a run or the refinery already holds it, tell the operator,
 and their ruling decides whether that work stops (the `work` skill, stopping
 work already sent) before you file anything. That reading informs the operator
@@ -376,7 +376,7 @@ answer it:
   conversation closes, and tell the operator what the rejection reason says.
   Their ruling decides whether the change goes to the pool (the `work` skill).
 - **The hold is missing.** `gc hook current` names another bead when this
-  session does not hold its conversation, and step 1's claim takes it again.
+  session does not hold its conversation, and the entry's claim takes it again.
   When the missing `blocks` edge onto the conversation is the only reason, add
   it as the filing does. Then run the call again.
 - **A hand-off cut short**: a write refused, or the call cut off, before the
@@ -430,13 +430,14 @@ through the sign-off's cases (the converse-settle step).
 - **The idle sleep** stops a session's process and never touches its disk, and
   it skips a sitting that holds its conversation, so you are not slept while you
   edit.
-- **A restart** runs your home's sync, which leaves the tree alone, and step 1's
-  restart rule re-opens the sitting at its hold. The conversation's record names
+- **A restart** runs your home's sync, which leaves the tree alone, and the
+  entry reads `interrupted` with the hold standing, which re-opens the sitting
+  at its hold (`converse-continue`). The conversation's record names
   the change: run Work's setup again, and it re-enters the tree.
 - **A sitting that must end with the change in flight**, for low context or
   because it was cut short, commits what the tree holds, records on the
-  conversation where the change stands, and hands the conversation back (the
-  prompt's low-context path). The conversation stays open, so the change stays
+  conversation where the change stands, and hands the conversation back
+  (`converse-settle`, ending early). The conversation stays open, so the change stays
   held, and the next sitting resumes it from the record. A sitting on another
   model has another home, and it enters the tree where the change records it:
 
