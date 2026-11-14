@@ -24,7 +24,9 @@
 # Covers, for the merge gate: a head that moves a render input without
 # re-rendering, named with its reason; a head that commits the fresh render,
 # judged on one render; a base already stale in a file the head leaves alone,
-# reported as base's and not held; a hand-edited render; an agent added without
+# reported as base's and not held; a revision checked against itself, naming
+# each file it is stale in on one render, and none when it is current; a
+# hand-edited render; an agent added without
 # its render and one removed with its render kept; a head that changes the
 # renderer, judged by the renderer it ships, against a control rendered by this
 # checkout's; no gc on PATH; a merge result that does not render; a merge result
@@ -263,6 +265,18 @@ hasnt "$out" "seed audit is current" "…without calling a tree current that is 
 has "$out" "stale-base is already stale in these files" "…and the staleness is reported as the base's"
 has "$out" "agents/beta.md" "…naming the stale file"
 eq "$(renders)" 2 "…which took a render of the base as well"
+
+# The landing order checks the default branch this way after a landing on it.
+echo "# a revision checked against itself names each file it is stale in, on one render"
+out=$(check_merge stale-base stale-base --base-stale-out "$TMP/base-stale.txt"); rc=$?
+eq "$rc" 0 "a stale revision checked against itself exits 0"
+eq "$(cat "$TMP/base-stale.txt")" "agents/beta.md" "…and --base-stale-out names each file it is stale in"
+has "$out" "stale-base is already stale in these files" "…reporting them as its own staleness"
+eq "$(renders)" 1 "…on one render, since its tree is the merge result"
+out=$(check_merge base base --base-stale-out "$TMP/base-stale.txt"); rc=$?
+eq "$rc" 0 "a current revision checked against itself exits 0"
+eq "$(wc -c < "$TMP/base-stale.txt" | tr -d ' ')" "0" "…naming no file"
+has "$out" "seed audit is current at the merge of base into base" "…and saying it is current"
 
 echo "# a hand-edited render is held"
 branch base hand-edit
