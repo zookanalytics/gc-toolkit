@@ -198,6 +198,10 @@ type Facts struct {
 	// rework or fix child, a validation pass, a review, a finding). Non-zero
 	// means the city is acting on the PR.
 	InFlightCount int
+	// MergeResult is metadata.merge_result, the anchor's landing state. A value
+	// pr.OnRecord names is a PR on Gas Town's pending record, which the pr
+	// domain's evaluator answers for and [Render] renders.
+	MergeResult string
 }
 
 // InFlightStatuses are the statuses at which a bead carrying anchor_bead is in
@@ -282,9 +286,12 @@ func Blocked(f Facts) bool {
 // derivation after the condition clears leaves it out. The merge freeze and the
 // rebase hold are not among them: they read needs-attention in [Derive] with no
 // held value of their own.
-func Held(f Facts) []Hold {
+func Held(f Facts) []Hold { return holdsOf(Reasons(f)) }
+
+// holdsOf is the held: value of each reason, once each, in their order.
+func holdsOf(reasons []Reason) []Hold {
 	var held []Hold
-	for _, r := range Reasons(f) {
+	for _, r := range reasons {
 		if !slices.Contains(held, r.Held) {
 			held = append(held, r.Held)
 		}

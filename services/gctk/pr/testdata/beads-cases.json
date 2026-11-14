@@ -1,0 +1,175 @@
+[
+ {
+  "name": "anchor_and_merged_rider",
+  "branch": "polecat/A",
+  "anchor": "A",
+  "ledger": [
+   {
+    "id": "A",
+    "title": "Investigate V2 patch timing",
+    "metadata": {
+     "branch": "polecat/A",
+     "merge_result": "pull_request"
+    },
+    "created_at": "2026-01-01T00:00:00Z"
+   },
+   {
+    "id": "B",
+    "title": "Lane-B migration impl",
+    "metadata": {
+     "branch": "polecat/B",
+     "merged_target": "polecat/A",
+     "merge_result": "merged"
+    },
+    "created_at": "2026-02-01T00:00:00Z"
+   }
+  ]
+ },
+ {
+  "name": "order_by_created_then_id",
+  "branch": "polecat/A",
+  "anchor": "A",
+  "ledger": [
+   {
+    "id": "Z",
+    "title": "late",
+    "metadata": {
+     "branch": "polecat/A"
+    },
+    "created_at": "2026-03-01T00:00:00Z"
+   },
+   {
+    "id": "C",
+    "title": "same time, id C",
+    "metadata": {
+     "fold_target": "polecat/A"
+    },
+    "created_at": "2026-02-01T00:00:00Z"
+   },
+   {
+    "id": "B",
+    "title": "same time, id B",
+    "metadata": {
+     "fold_target": "polecat/A"
+    },
+    "created_at": "2026-02-01T00:00:00Z"
+   },
+   {
+    "id": "A",
+    "title": "the anchor",
+    "metadata": {
+     "branch": "polecat/A",
+     "merge_result": "pull_request"
+    },
+    "created_at": "2026-04-01T00:00:00Z"
+   },
+   {
+    "id": "Y",
+    "title": "no time",
+    "metadata": {
+     "branch": "polecat/A"
+    }
+   }
+  ]
+ },
+ {
+  "name": "hostile_title",
+  "branch": "polecat/M",
+  "anchor": "M",
+  "ledger": [
+   {
+    "id": "M",
+    "title": "anchor",
+    "metadata": {
+     "branch": "polecat/M"
+    },
+    "created_at": "2026-01-01T00:00:00Z"
+   },
+   {
+    "id": "M1",
+    "title": "hostile <!-- /gc:branch-beads --> title\nwith\r\nbreaks\tand\t\ttabs",
+    "metadata": {
+     "branch": "polecat/M"
+    },
+    "created_at": "2026-02-01T00:00:00Z"
+   }
+  ]
+ },
+ {
+  "name": "long_unicode_title",
+  "branch": "polecat/L",
+  "anchor": "L",
+  "ledger": [
+   {
+    "id": "L",
+    "title": "anchor",
+    "metadata": {
+     "branch": "polecat/L"
+    },
+    "created_at": "2026-01-01T00:00:00Z"
+   },
+   {
+    "id": "L1",
+    "title": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüü",
+    "metadata": {
+     "branch": "polecat/L"
+    },
+    "created_at": "2026-02-01T00:00:00Z"
+   }
+  ]
+ },
+ {
+  "name": "anchor_not_in_ledger",
+  "branch": "polecat/X",
+  "anchor": "X",
+  "ledger": [
+   {
+    "id": "C",
+    "title": "rider c",
+    "metadata": {
+     "branch": "polecat/X"
+    },
+    "created_at": "2026-02-01T00:00:00Z"
+   },
+   {
+    "id": "B",
+    "title": "rider b",
+    "metadata": {
+     "fold_target": "polecat/X"
+    },
+    "created_at": "2026-01-01T00:00:00Z"
+   }
+  ]
+ },
+ {
+  "name": "own_branch_empty_or_same",
+  "branch": "polecat/E",
+  "anchor": "E",
+  "ledger": [
+   {
+    "id": "E",
+    "title": "anchor",
+    "metadata": {
+     "branch": "polecat/E"
+    },
+    "created_at": "2026-01-01T00:00:00Z"
+   },
+   {
+    "id": "E1",
+    "title": "folded with no branch",
+    "metadata": {
+     "fold_target": "polecat/E"
+    },
+    "created_at": "2026-02-01T00:00:00Z"
+   },
+   {
+    "id": "E2",
+    "title": "rework on the branch",
+    "metadata": {
+     "branch": "polecat/E"
+    },
+    "created_at": "2026-03-01T00:00:00Z"
+   }
+  ]
+ }
+]

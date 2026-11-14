@@ -80,39 +80,41 @@ meaning = "PR base moved externally; a human gate parks it for a person"
 
 [states.blocked]
 status = "open"
-meaning = "recorded existing_pr unusable, or a graduated convoy's zero-diff check could not run three patrols in a row; a human gate parks it for a person"
+meaning = "parked by the refinery behind a human gate: a target or branch origin does not carry, a strategy it does not land, or a PR it cannot take; still the refinery's, so clearing the gate hands it back"
 
 [states.refused_false_completion]
 status = "open"
-meaning = "the zero-diff check found no change on the branch; a human gate parks it for a person"
+meaning = "the zero-diff check found no change on the branch; parked by the refinery behind a human gate and still the refinery's, so clearing the gate hands it back"
 
-# Transitions. Every edge names its writer; the lifecycle writer performs the
-# write: gctk lifecycle, which lifecycle.sh execs and gctk merge runs in-process.
+# Transitions. Every edge names its writer. The lifecycle writer performs the
+# write, gctk lifecycle, which lifecycle.sh execs and gctk merge runs in-process,
+# on every edge but the two into a refinery park, which the park writes itself
+# with one gc bd update guarded on the assignee.
 # A self-edge (from == to) is always legal: an idempotent re-record.
 [[transition]]
 from = "unanchored"
 to = "pre_open_gate"
-writer = "formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh)"
+writer = "assets/scripts/refinery-land.sh, the refinery's merge-push step on a rig whose pending_through_merge is unset (via lifecycle.sh)"
 
 [[transition]]
 from = "unanchored"
 to = "pull_request"
-writer = "formulas/mol-refinery-patrol.toml merge-push, post-open path (via lifecycle.sh)"
+writer = "assets/scripts/refinery-land.sh, the refinery's merge-push step on a rig whose pending_through_merge is unset, for a bead that records an open PR (via lifecycle.sh)"
 
 [[transition]]
 from = "unanchored"
 to = "merged"
-writer = "formulas/mol-refinery-patrol.toml merge-push, direct strategy (via lifecycle.sh): FF push verified, record + close in one call"
+writer = "assets/scripts/direct-merge-push.sh, which the refinery's merge-push step runs for the direct strategy (via lifecycle.sh): FF push verified, record + close in one call"
 
 [[transition]]
 from = "unanchored"
 to = "blocked"
-writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable, or a graduated convoy's zero-diff check could not run three patrols in a row; via lifecycle.sh)"
+writer = "the refinery's parks, a guarded gc bd update after the park's human gate: refinery-prep.sh (a target or branch origin does not carry), refinery-land.sh (an unsupported strategy) and refinery-publish.sh (a recorded PR it cannot reuse, or one another account opened)"
 
 [[transition]]
 from = "unanchored"
 to = "refused_false_completion"
-writer = "formulas/mol-refinery-patrol.toml (the zero-diff check found no change on the branch; via lifecycle.sh)"
+writer = "refinery-land.sh's park, a guarded gc bd update after its human gate (the zero-diff check found no change on the branch)"
 
 [[transition]]
 from = "pre_open_gate"
@@ -122,7 +124,7 @@ writer = "assets/scripts/pr-open.sh"
 [[transition]]
 from = "pre_open_gate"
 to = "unanchored"
-writer = "assets/scripts/rejection-repool.sh (via lifecycle.sh), run from the rebase and handle-failures arms of formulas/mol-refinery-patrol.toml: a rejection back to the polecat pool, which a fresh mol-polecat-work pour rebuilds. Or formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
+writer = "the move of a parked bead to the refinery at its rig's cutover (via lifecycle.sh; specs/tk-1tfzr71.66/design.md, section 10). signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
 
 [[transition]]
 from = "pull_request"
@@ -142,7 +144,7 @@ writer = "assets/scripts/pr-facts.sh"
 [[transition]]
 from = "pull_request"
 to = "unanchored"
-writer = "assets/scripts/rejection-repool.sh (via lifecycle.sh), run from the rebase and handle-failures arms of formulas/mol-refinery-patrol.toml: a rejection back to the polecat pool, which a fresh mol-polecat-work pour rebuilds. Or formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
+writer = "human. The refinery's find-work leaves a bead at pull_request to the merge cadence, and signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
 
 [[transition]]
 from = "abandoned"
@@ -162,12 +164,12 @@ writer = "human"
 [[transition]]
 from = "blocked"
 to = "unanchored"
-writer = "human"
+writer = "human; or refinery-land.sh, for a bead its gate's clearing handed back, before a direct landing records it merged or, on a rig whose pending_through_merge is unset, before the old path parks it again (via lifecycle.sh); or refinery-requeue.sh, a guarded gc bd update that sends such a bead back to the pool when its prep conflicts or its gate fails"
 
 [[transition]]
 from = "refused_false_completion"
 to = "unanchored"
-writer = "human"
+writer = "human; or refinery-land.sh, for a bead its gate's clearing handed back, before a direct landing records it merged or, on a rig whose pending_through_merge is unset, before the old path parks it again (via lifecycle.sh); or refinery-requeue.sh, a guarded gc bd update that sends such a bead back to the pool when its prep conflicts or its gate fails"
 
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by
@@ -359,9 +361,11 @@ conversations = ["quiet", "outstanding", "answered"]
 # is not ends up dating a state that no longer holds, with nothing in either key
 # saying so.
 keys = ["pr.machine", "pr.conversation", "pr_posture"]
-# lifecycle.sh --set-dated is the only writer, and it applies one rule: preserve
-# the existing instant while the value and the oid both hold, stamp the current
-# one when either differs. Set, preserve and clear all fall out of it — the
+# lifecycle.sh --set-dated writes them, and pr-facts.sh's dated_value writes
+# pr_posture and pr.conversation on a bead at a value of Gas Town's pending
+# record, which no transition writes. Both apply one rule: preserve the
+# existing instant while the value and the oid both hold, stamp the current one
+# when either differs. Set, preserve and clear all fall out of it — the
 # reconcile cadence re-deriving the same verdict at the same head leaves the
 # instant alone, and a head move arrives with a fresh one no owed row reads.
 since_format = "RFC 3339 UTC"
@@ -427,13 +431,15 @@ keys = [
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
-  "pr_summary", "merge_record_failures", "zero_diff_check_failures", "fold_target", "artifact_url",
+  "merge_record_failures", "zero_diff_check_failures", "fold_target", "artifact_url",
   "opened_as_draft", "draft_readied",
   "bring_current_from", "bring_current_scope", "conflict_audit", "conflict_question",
   "bring_current_record", "bring_current_reopened", "bring_current_round_at",
   "bring_current_lifted_at",
   "direct_landing_sha",
 ]
+# A bead's PR summary, the account of what its change does, is the pr domain's
+# key, declared in services/gctk/pr and listed in services/gctk/key-registry.json.
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
 # `--to unanchored`), absent reads as `unanchored`, and its value is one of the
@@ -479,48 +485,52 @@ keys = [
 #   them to bind a bead to its live PR; a non-numeric pr_number is skipped, and an
 #   unparseable pr_url resolves to the fail-closed repo `?`. Never cleared.
 #   pr_number is an integer; pr_url is the canonical `scheme://host/owner/repo/pull/<n>`.
-# existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh
-#   and rework-child.sh stamp it on the rework child each files, equal to that
-#   child's pr_url; the refinery's rejection transition carries it through
-#   (mol-refinery-patrol.toml). Read by mol-refinery-patrol.toml to force the PR
-#   pipeline when set (merge_strategy flips to mr), and by pr-facts.sh and
+# existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh,
+#   rework-child.sh and refinery-requeue.sh stamp it on the rework child each
+#   files, equal to the PR the anchor owns; the refinery's requeue keeps it on a
+#   bead it sends back, and the pending record writes it (gctk pr record's first
+#   write, and the landing order's requeue of a changed head). Read by
+#   refinery-land.sh, which lands a bead that names one through its PR, by
+#   refinery-publish.sh as the PR to take, and by pr-facts.sh and
 #   rework-child.sh to verify the child each files. Absent means no PR to reuse.
-#   Never cleared. Value is a PR URL.
-# merge_strategy — how the refinery lands the branch. mol-refinery-patrol.toml
-#   resolves it once, in merge-push's merge-strategy-resolve block: `mr` opens
-#   and merges a PR, `direct` fast-forwards and pushes straight to the target,
-#   and `pr` is an alias normalized to `mr` on read. An absent key resolves to
-#   the default_merge_strategy var (default `direct`), and an empty value to
-#   `direct`. A bead that would land `direct` on the default branch, where a bead
-#   with no target lands, resolves to `mr`, so the default branch takes work
-#   only through a PR (docs/warrants.md). existing_pr forces the resolved mode
-#   up from `direct` at the refinery. `local`, which no pack writer stamps,
-#   passes through, and merge-push refuses it as unsupported. `mr` is stamped by
-#   pr-facts.sh, rework-child.sh, pre-open-rebase.sh and
-#   mol-feedback-distiller.toml. `pr` is written only by direct-merge-push.sh,
-#   auto-promoting a bead whose direct push was rejected for branch protection
-#   into the PR pipeline. Read by mol-refinery-patrol.toml, and read back by
-#   pr-facts.sh, rework-child.sh and pre-open-rebase.sh on the rework child each
-#   stamps. Never cleared. Enum `mr | pr | direct | local`.
+#   Cleared only by the pending record's publication (gctk pr record), which
+#   names the PR in the record's own keys. Value is a PR URL.
+# merge_strategy — how the refinery lands the branch, in Gas City's values.
+#   refinery-land.sh, the refinery's merge-push step, resolves it once: `mr`
+#   publishes a PR, `direct` fast-forwards and pushes straight to the target,
+#   and `pr`, an older spelling, reads as `mr`. An absent or empty key resolves
+#   to the rig's default_merge_strategy var, else `direct`. A bead that would
+#   land `direct` on the default branch, where a bead with no target lands,
+#   resolves to `mr`, so the default branch takes work only through a PR
+#   (docs/warrants.md), and existing_pr forces `mr` too. Any other value,
+#   `local` among them, parks the bead behind a human gate. `mr` is stamped by
+#   pr-facts.sh, rework-child.sh, pre-open-rebase.sh, refinery-requeue.sh and
+#   mol-feedback-distiller.toml, and by direct-merge-push.sh, promoting a bead
+#   whose direct push was refused for branch protection into the PR path. Read
+#   by refinery-land.sh, and read back by pr-facts.sh, rework-child.sh and
+#   pre-open-rebase.sh on the rework child each stamps. Never cleared. Enum
+#   `mr | pr | direct | local`.
 # prepare_mode — how the refinery brings a rework branch current before it lands.
 #   Every branch shape (per-bead `polecat/*`, and the shared `integration/*` a
 #   landing bead carries) is stamped `merge`: the branch is brought current by
 #   merging origin/<target> in, never rebased, so no shape is rewritten or
 #   force-pushed.
-#   Written by pr-facts.sh, pre-open-rebase.sh and mol-refinery-patrol.toml. The
+#   Written by pr-facts.sh and pre-open-rebase.sh. The
 #   prepare and resume paths merge the target in whatever the stamp says; an
 #   absent value resolves to merge too, so a dropped stamp cannot select a
 #   rewrite. A dispatch site reads the stamp back and routes a child only once it
 #   sticks, and pre-open-rebase.test.sh holds both dispatch sites to `merge`.
 #   Never cleared. Enum `rebase | merge`; only `merge` is stamped.
 # rejection_reason — why the last attempt bounced, embedding `head <oid>` so a
-#   later pass can tell which head it spoke for. Written by the refinery
-#   (pr-facts.sh, signoff.sh, pre-open-rebase.sh, mol-polecat-work.toml); read at
+#   later pass can tell which head it spoke for. Written by the refinery's
+#   requeue (refinery-requeue.sh), the landing order's requeue of a changed head
+#   (gctk pr reconcile), pr-facts.sh, signoff.sh, pre-open-rebase.sh and
+#   mol-polecat-work.toml; read at
 #   load-context to resume rather than redo, and by pr-facts.sh to dedup a child
 #   already covering a head. Cleared with `--unset` by the refinery's
 #   merge-push in each transition it makes on a hand-back (merged, unanchored,
-#   pre_open_gate, pull_request), and by the polecat once the merge its resume
-#   runs concludes. A stop before then, such as a question for a person, leaves
+#   pre_open_gate, pull_request), by the publication of a pending record (gctk pr
+#   record), and by the polecat once the merge its resume runs concludes. A stop before then, such as a question for a person, leaves
 #   it, so the bead's next run resumes again. Freeform instruction text.
 # graduation — RETIRED. `true`, set on a convoy bead when convoy graduation
 #   carried its integration branch to the default branch. Nothing writes or
@@ -528,23 +538,25 @@ keys = [
 #   branch. Registered so that residue on a pre-retirement bead reads as known,
 #   not as a stray.
 # blocked_reason — the human-readable reason an anchor sits in a human state
-#   (existing_pr unusable, a PR closed or retargeted out of band, a graduated
-#   convoy's zero-diff check that could not run). Written by pr-facts.sh and
-#   mol-refinery-patrol.toml; it is also a [holds] marker, so a live bead
-#   carrying it owes a blocks edge. Freeform.
+#   (a refinery park, a PR closed or retargeted out of band), and on the pending
+#   record why the bead is blocked: the merge it awaits, or the exception that
+#   holds it. Written by pr-facts.sh, the refinery's parks (refinery-prep.sh,
+#   refinery-land.sh, refinery-publish.sh) and the pending record's writers
+#   (gctk pr record, gctk pr reconcile); it is also a [holds] marker, so a live
+#   bead carrying it owes a blocks edge. Freeform.
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
 #   workspace-setup so a restart or witness recovery can find the work in flight.
 #   Absent means no worktree is recorded yet. Never cleared. Absolute path.
-# false_completion_suspected — the reason mol-refinery-patrol.toml refused to
-#   close a branch as merged when it carried no verified change against its
-#   target; written on the `refused_false_completion` transition for a person to
-#   read. Freeform reason.
-# zero_diff_check_failures — consecutive patrols whose zero-diff check could not
-#   run on this bead. mol-refinery-patrol.toml leaves the work with the refinery
-#   to retry until the count reaches three, then files a human gate and makes
-#   the work wait on it (await-ruling.sh), or parks a graduated convoy `blocked`
-#   on it. An integer (absent reads as 0), cleared with `--unset` by a check
-#   that runs and once that wait or park lands.
+# false_completion_suspected — RETIRED. The reason the refinery refused to close
+#   a branch as merged when it carried no verified change against its target.
+#   Nothing writes or reads it now: refinery-land.sh's park puts that reason in
+#   blocked_reason and in its human gate. Registered so that residue on a
+#   pre-retirement bead reads as known, not as a stray.
+# zero_diff_check_failures — RETIRED. Consecutive patrols whose zero-diff check
+#   could not run on a bead. Nothing writes or reads it now: refinery-land.sh
+#   stops on a check that cannot run and leaves the work with the refinery, and
+#   the next patrol tries again. Registered so that residue on a pre-retirement
+#   bead reads as known, not as a stray.
 # branch_ready / halt_reason / auto_push — the auto_push=false halt. auto_push is
 #   a caller input the submit step reads; when it is false the polecat records
 #   branch_ready=true and halt_reason=auto_push_false and stops without pushing or
@@ -552,12 +564,6 @@ keys = [
 #   product was store work. Absent auto_push means the normal push-and-hand-off
 #   path. Not cleared — the halt is terminal for that run. auto_push and
 #   branch_ready are boolean-ish; halt_reason is `auto_push_false | store_only`.
-# pr_summary — the account of what the diff does, rendered as the PR's
-#   `## Summary` by pr-open.sh, which falls back to the dispatch text and then a
-#   generic line when it is absent or blank. The polecat stamps it on the anchor
-#   at submit, and an integration effort's summary task stamps it on the effort's
-#   landing bead once the effort's work has landed. Never cleared. Freeform
-#   markdown.
 # merge_record_failures — consecutive failures to record a merged PR on this
 #   anchor. merge.sh and pr-facts.sh both perform that record and both retry
 #   every pass with no memory, so the count is the only thing that can tell a
@@ -566,8 +572,8 @@ keys = [
 #   by the record that lands.
 # fold_target — the branch a bead's work was folded directly onto, stamped by
 #   the polecat that folds one bead's fix onto another's branch instead of
-#   opening its own PR. pr-stack.sh reads it (`--metadata-field fold_target`) to
-#   count that bead in the branch's PR-body ledger as work already on the branch.
+#   opening its own PR. `gctk pr compose` reads it to count that bead in the
+#   branch's PR-body ledger as work already on the branch.
 #   No pack script writes it. Absent means nothing was folded. Never cleared. A
 #   branch name.
 # artifact_url — the delivered artifact a rework fix unit lands instead of a
@@ -1858,8 +1864,8 @@ keys = [
 #   first-reaction-dispose.sh on the reaction bead it closes,
 #   mol-validate-close, work-outcome.sh on every conversation close, the
 #   observation-filing recipes, and converse by hand. bead-rehome.sh reads it
-#   to confirm a no-op origin is disposable, pr-stack.sh drops a no-op row from
-#   a branch's ledger, and each falls back to the legacy bare `work_outcome`
+#   to confirm a no-op origin is disposable, `gctk pr compose` drops a no-op row
+#   from a branch's ledger, and each falls back to the legacy bare `work_outcome`
 #   alias. Absent leaves the
 #   disposition unstated. Never cleared.
 # configured_named_session — on a session bead, the authoritative "standing

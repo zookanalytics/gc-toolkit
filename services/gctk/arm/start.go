@@ -12,6 +12,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -189,7 +190,7 @@ func retireCase(r *ledger.Record) (Act, bool) {
 	if r.Status() == "closed" {
 		return Act{Action: ActRetire, Case: "closed", Why: "the bead closed with a dispatch still armed, so none is owed"}, true
 	}
-	if mr, _, _ := mergeResultKey.Get(r); strings.TrimSpace(mr) != "" {
+	if mr, _, _ := prrecord.Result.Get(r); strings.TrimSpace(mr) != "" {
 		return Act{Action: ActRetire, Case: "delivered",
 			Why: fmt.Sprintf("another path already delivered its work (merge_result=%s), so the arm retires without a sling", strings.TrimSpace(mr))}, true
 	}

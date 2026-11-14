@@ -6,15 +6,21 @@ description: The declared lifecycle of a unit of work — every state in lifecyc
 # The anchor state machine
 
 A unit of work has exactly one **anchor** bead. Its state is
-`status` × `merge_result`, and the state space is **declared, closed, and
-single-writer**: `lifecycle/lifecycle.toml` enumerates every state, every legal
-transition, and every pack-written metadata key, and
-`assets/scripts/lifecycle.sh` is the only thing that writes a transition: it
-validates, then makes one atomic `bd update` carrying every field of the
-transition, whose exit decides whether it landed. An unknown `merge_result`
-value is an error: `lifecycle.sh` names it and refuses to transition or reopen
-the bead, and `doctor/check-state-space` catches it. A bead closed while
-`merge_result` is a non-closed state is repaired by `lifecycle.sh reopen`
+`status` × `merge_result`, and every value `merge_result` takes is declared.
+Two records name the values. The machine in `lifecycle/lifecycle.toml`
+enumerates its states, its legal transitions and every pack-written metadata
+key, and `assets/scripts/lifecycle.sh` writes its transitions: it validates,
+then makes one atomic `bd update` carrying every field of the transition, whose
+exit decides whether it landed. The refinery's direct landing writes through
+it, and so does the old merge path, which a rig runs until its cutover. Gas
+Town's pending-through-merge record is the other, which `gctk`'s pr domain
+declares and writes on a rig on the new path, and no machine checks it
+([The pending record](#the-pending-record)). The refinery's parks write their
+value with one guarded `gc bd update` after the park's human gate. An unknown
+`merge_result` value is an error: `lifecycle.sh` names it and refuses to
+transition or reopen the bead, and `doctor/check-state-space` catches it. A
+bead closed while `merge_result` is a non-closed state of the machine is
+repaired by `lifecycle.sh reopen`
 (human-invoked; `merge_result` untouched).
 
 `lifecycle.sh` is the command every caller invokes, and `gctk lifecycle`
@@ -29,8 +35,11 @@ table declared here, and `assets/scripts/lifecycle.test.sh` holds it against
 **Mandate.** The anchor lifecycle: states, transitions, writers, the check
 vocabulary, and the merge condition.
 
-**Boundaries.** The cadence that drives the merge-side writers is
-[refinery-merge-cadence.md](refinery-merge-cadence.md). The invariants over
+**Boundaries.** The merge cadence that drives the old path's merge-side
+writers, and the landing order that drives the pending record's, are
+[refinery-merge-cadence.md](refinery-merge-cadence.md). The refinery's steps
+are `formulas/mol-refinery-patrol.toml` and the scripts each step calls. The
+invariants over
 this machine and their doctor checks are
 [component-model.md](component-model.md) §3. How completion propagates to a
 waiting conversation is [lifecycle-composition.md](lifecycle-composition.md).
@@ -39,8 +48,9 @@ waiting conversation is [lifecycle-composition.md](lifecycle-composition.md).
 
 No transition here is performed by a repair pass. Writers complete their own
 transitions in one atomic write; the only reactive edges respond to facts the
-pack does not write — GitHub closing or retargeting a PR (`pr-facts.sh`), a
-session dying (witness orphan recovery).
+pack does not write — GitHub closing or retargeting a PR (`pr-facts.sh`, or
+the landing order for a PR on the pending record), a session dying (witness
+orphan recovery).
 
 ```mermaid
 stateDiagram-v2
@@ -56,18 +66,21 @@ stateDiagram-v2
 
   claimed --> handed_off: mol-polecat-work submit (one atomic bd update)
   poured --> handed_off: the pour's mol-polecat-work submit
-  handed_off --> pre_open_gate: mol-refinery-patrol merge-push (lifecycle.sh)
-  handed_off --> pull_request: merge-push, post-open path (lifecycle.sh)
-  handed_off --> merged: merge-push, direct strategy (lifecycle.sh)
+  handed_off --> pre_open_gate: refinery-land.sh, old path (lifecycle.sh)
+  handed_off --> pull_request: refinery-land.sh, old path, a PR already open (lifecycle.sh)
+  handed_off --> merged: direct-merge-push.sh, direct strategy (lifecycle.sh)
+  handed_off --> pull_request_pending: refinery-publish.sh, new path (gctk pr record)
   pre_open_gate --> pull_request: pr-open.sh
+  pre_open_gate --> handed_off: the rig's cutover moves it to the refinery (lifecycle.sh)
   pull_request --> merged: merge.sh
   merged --> [*]
 
-  handed_off --> poured: rejection-repool.sh — rejection_reason, then a fresh mol-polecat-work pour
-  handed_off --> poured: await-ruling.sh — the zero-diff check could not run, then a pour once its gate is cleared
+  handed_off --> poured: refinery-requeue.sh — rejection_reason, then gc sling on mol-polecat-work
 
-  handed_off --> blocked: mol-refinery-patrol — existing_pr unusable, or a convoy's zero-diff check could not run
-  handed_off --> refused_false_completion: mol-refinery-patrol — no change found
+  handed_off --> blocked: the refinery's park — a branch or target missing, a strategy it does not land, a PR it cannot take
+  handed_off --> refused_false_completion: refinery-land.sh's park — no change found
+  blocked --> handed_off: its gate cleared, the refinery takes it again
+  refused_false_completion --> handed_off: its gate cleared, the refinery takes it again
   pull_request --> abandoned: pr-facts.sh — closed unmerged, no recorded disposition
   pull_request --> [*]: pr-facts.sh — closed unmerged, disposition pre-recorded (bead-rehome.sh)
   pull_request --> retargeted: pr-facts.sh — PR base moved
@@ -79,6 +92,9 @@ stateDiagram-v2
   retargeted --> [*]: human
 ```
 
+`pull_request_pending` is the pending record's first value, and
+[The pending record](#the-pending-record) draws the record's own transitions.
+
 `handed_off` is the unanchored bead after the polecat's single handoff write
 (branch recorded, assignee = refinery, `merge_result` still absent). `poured`
 is an unanchored bead a `mol-polecat-work` workflow is driving: it carries no
@@ -89,7 +105,9 @@ no queue reads (`assets/scripts/dispatch-path.sh`). The anchored states are the
 `merged_sha`, the landing the state names. The states that park an anchor for a
 person, `abandoned`, `retargeted`, `blocked` and `refused_false_completion`, stay
 open, held by the human gate their writer files on the bead, and the
-transition into one writes no route.
+transition into one writes no route. A refinery park keeps the bead assigned to
+the refinery behind the park's gate, which hands it back when a person clears
+it.
 
 The write that enters `merged` also records what the landing shipped, which is
 the work record the runtime's close gate checks: `gc.work_outcome=shipped`,
@@ -125,13 +143,14 @@ still at `status=open`.
 
 A route on a detached anchor is pool demand for work that is already in the
 merge queue. A worker claims it, the claim moves the bead out of
-`--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate from there. The
-clear has no exception, because a person's wait on an anchor is its human gate,
-which holds the anchor whatever its route.
+`--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate a
+`pull_request` anchor from there. The clear has no exception, because a
+person's wait on an anchor is its human gate, which holds the anchor whatever
+its route.
 
 An assignee is the same anchor still sitting in the refinery's own find-work
-queue, which is assignee-keyed and flags a `merge_result`-bearing bead it finds
-there rather than taking it. No component holds an anchor by assignee, and the
+queue, which is assignee-keyed and names and leaves a bead at either detached
+state rather than taking it. No component holds an anchor by assignee, and the
 polecat handoff pointer that put one there is spent the moment the anchor is
 gated. The clear stops at
 `status=open` for two reasons that agree. A live claim is a hold to escalate,
@@ -165,7 +184,11 @@ recorded ([steering.md](steering.md#pr-finishing-work)). So whichever writer
 makes such a transition leaves a record that no return to `pull_request` reads
 as settled, and an approval that no return counts until `pr-facts.sh` has read
 the PR again. A caller that writes the key itself keeps its own value, and a
-transition into a closed state writes none.
+transition into a closed state writes none. The rank reads the pending record's
+two open values as it reads `pull_request`, and the record's writers make no
+transition, so they clear neither key: a bead that leaves those values for an
+exception and comes back keeps the posture its earlier head was read at until
+`pr-facts.sh` reads the PR again.
 
 ## Transition table
 
@@ -175,9 +198,10 @@ transition into a closed state writes none.
 | routed → claimed | `gc hook --claim` (runtime) | pool demand spawns a session |
 | claimed → routed | witness patrol (`mol-witness-patrol`) | session died with the claim held |
 | claimed → handed_off | `mol-polecat-work` submit step (ONE atomic `gc bd update`) | push verified on the remote |
-| handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | checks armed, branch accepted |
-| handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
-| handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target, or found there by a later patrol through the bead's `direct_landing_sha` stamp; record + close in one call |
+| handed_off → pre_open_gate | `refinery-land.sh`, the refinery's merge-push step on a rig still on the old path, via `lifecycle.sh` | an `mr` bead whose gate passed, or whose every failure is tracked, and that records no open PR |
+| handed_off → pull_request | `refinery-land.sh` on a rig still on the old path, via `lifecycle.sh` | the same, for a bead that records a PR open from its branch |
+| handed_off → merged | `direct-merge-push.sh`, which the refinery's merge-push step runs for the `direct` strategy, via `lifecycle.sh` | FF merge pushed and verified on the target, or found there by a later patrol through the bead's `direct_landing_sha` stamp; record + close in one call |
+| handed_off → pull_request_pending | `refinery-publish.sh`, the merge-push step on a rig on the new path, through `gctk pr record` | the PR is published at the prepared head ([The pending record](#the-pending-record)) |
 | pre_open_gate → pull_request | `pr-open.sh` (cadence arm 3) | every `pre-open` check in `check_set` derives `green`; the PR opens as a draft when `check_set` names an `open-as-draft` check, else ready |
 | pull_request draft → ready | `pr-open.sh` (cadence arm 3, draft-to-ready) | every `pre-open` and `open-as-draft` check derives `green`; `gh pr ready` surfaces it. GitHub `isDraft` flips; `merge_result` stays `pull_request` |
 | pull_request → merged | `merge.sh` (cadence arm 2) | full authorization set validated (incl. the universal approval rule; a draft PR is skipped); close + record in one call |
@@ -185,17 +209,84 @@ transition into a closed state writes none.
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close human gate |
 | pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no gate |
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a human gate |
-| handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable, or a graduated convoy's zero-diff check could not run three patrols in a row. The human gate is filed first and holds the park, and the convoy's gate names git's error |
-| handed_off → refused_false_completion | `mol-refinery-patrol` | the zero-diff check found no change on the handed-off branch, and the target carries no `direct_landing_sha` stamp. The human gate is filed first and holds the park |
-| handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
-| handed_off → poured | `mol-refinery-patrol` merge-push, through `assets/scripts/await-ruling.sh` | the zero-diff check could not run three patrols in a row: a human gate names git's error and blocks the bead, which waits on it unassigned and armed, until clearing the gate pours a fresh `mol-polecat-work` run on it |
+| handed_off → blocked | the refinery's parks, one `gc bd update` guarded on the assignee, after the park's human gate: `refinery-prep.sh`, `refinery-land.sh`, `refinery-publish.sh` | a target or branch origin does not carry, a `merge_strategy` the refinery does not land, a recorded PR it cannot reuse, or a PR another account opened; the bead stays assigned to the refinery, and clearing the gate hands it back |
+| handed_off → refused_false_completion | `refinery-land.sh`'s park, as above | the zero-diff check found no change on the handed-off branch, and the target carries no `direct_landing_sha` stamp |
+| blocked / refused_false_completion → unanchored | `refinery-land.sh`, via `lifecycle.sh` | the park's gate was cleared, which handed the bead back, and a direct landing is about to record it `merged`, or the old path parks it again |
+| handed_off → poured | `refinery-requeue.sh`, from the refinery's rebase and handle-failures steps | a conflict with the target or a failure the branch caused, on a bead that records no open PR (`pull_request_head_changed`) and is not a convoy: one write guarded on the assignee and status reopens it unassigned with `rejection_reason` and clears the `merge_result` and `blocked_reason` a park or a half-written record left, and `gc sling` pours `mol-polecat-work` on it, keeping its branch and the PR it may reuse |
+| pre_open_gate → unanchored | the move of a parked bead to the refinery at its rig's cutover, via `lifecycle.sh` | the rig's switch is set; the bead is assigned to the refinery, which publishes it on the new path |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` files one
 routed rework child that blocks the anchor, with the reviewer's findings and the
 lane's validation pass beside it. The anchor stays `pull_request` (or
-`pre_open_gate`). The child's and the pass's `blocks` edges hold the merge, and
-so does the lane, since a request-changes close backs no lane.
+`pre_open_gate`, or its value on the pending record). The child's and the
+pass's `blocks` edges hold the merge, and so does the lane, since a
+request-changes close backs no lane.
+
+## The pending record
+
+On a rig on the new path, the bead that owns a PR carries Gas Town's
+pending-through-merge record, with Gas Town's values and their meanings
+(`gastown/commands/pr-merge-reconcile` in gascity-packs at 7f86098c04ea). The
+pack adds one value of its own, the exception `pull_request_merged_close_refused`,
+and keeps no other state beside the record. `services/gctk/pr/record`
+declares its keys and values. Two writers write it, and no machine checks
+them: the refinery's `mr` step publishes a PR's record through
+`gctk pr record`, and the landing order writes each later step through
+`gctk pr reconcile`
+([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
+The doctor checks the beads once they are written.
+
+```mermaid
+stateDiagram-v2
+  direction TB
+  [*] --> pull_request_pending: refinery-publish.sh (gctk pr record)
+  pull_request_pending --> pull_request_head_changed: landing order — the PR is open at another head
+  pull_request_head_changed --> pull_request_pending: the refinery validates the new head
+  pull_request_pending --> mr_merged: landing order — merged at the validated head, the commit on the target
+  mr_merged --> [*]
+  [*] --> pull_request_record_incomplete: landing order — a publication stopped between its two writes
+  pull_request_record_incomplete --> pull_request_pending: the refinery validates it again
+  pull_request_record_incomplete --> [*]: refinery-requeue.sh — the work goes back to the pool
+  pull_request_pending --> exception: landing order — see the table
+  exception --> [*]: a person, through the exception's gate
+```
+
+| Value | Status, assignee | Meaning |
+|---|---|---|
+| no record | — | The bead has not landed and owns no PR on the record. A bead the landing order sends back to the refinery keeps its record, and one the refinery sends back to the pool keeps the PR it may reuse as `existing_pr`, so absence never means "rejected": `rejection_reason` says that. |
+| `pull_request_pending` | `blocked`, the refinery | The PR is open at the head the refinery validated, and the bead waits on its merge. The record names the PR (`pr_url`, `pr_number`, `pr_repo`), the validated head (`pr_head_sha`), `pr_state=open`, the intended target (`merged_target`), `blocked_reason` and when the landing order last read it (`pr_last_checked_at`). |
+| `pull_request_head_changed` | open, the refinery | The PR is open at a head the refinery has not validated, such as after a person's push. The bead keeps `pr_head_sha` and records `existing_pr`, the head found (`observed_pr_head_sha`) and why (`rejection_reason`), and the refinery validates the new head and records it pending again, on the same PR. |
+| `mr_merged` | closed | The PR merged the validated head, and the merge commit is on the freshly fetched target. The record names `merged_sha`, `merged_target`, `pr_state=merged` and `pr_merged_at`. |
+| `pull_request_record_incomplete` | open, the refinery | A writer that died between the publication's two writes left the record half written, so the bead goes back to the refinery to be validated again, keeping the PR it may reuse. |
+| `pull_request_closed_unmerged` | `blocked` | The PR closed without merging. |
+| `pull_request_merged_unvalidated_head` | `blocked` | The PR merged a head the refinery did not validate. |
+| `pull_request_reconcile_invalid` | `blocked` | The PR's URL, number, branch or base no longer match the record, such as after a change of base, or the record does not read as one. |
+| `pull_request_merge_evidence_contradiction` | `blocked` | GitHub's merge facts contradict a recorded merge. |
+| `pull_request_legacy_closed_unverified` | `blocked` | A closed bead still carries the marker and records no verified merge, such as one that a close taking no lock reached between the publication's two writes. |
+| `pull_request_merged_close_refused` | `blocked` | The PR merged the validated head and the merge commit is on the target, but bd refused to close the bead, such as for an open child or a live blocker. The record keeps the merge's evidence, `merged_sha`, `merged_target` and `pr_merged_at`, and the gate tells a person to clear what holds the close, then close the bead as landed. Gas Town's record has no such value, since its run retries the close. |
+
+The `blocked` values after `mr_merged`'s row are the exceptions. Each keeps
+the bead open behind a human gate keyed by its value, so none releases the work
+that waits on the bead. A lookup that fails, a merge commit not yet on the
+fetched target, or a close the store failed for a reason of its own is recorded
+in `pr_reconcile_error` and read again by the next run, and it never closes the
+bead. `merged`, the machine's value, is
+the record of a `direct` landing on either path, and the doctor's landing
+checks (I2 and I5) read it and `mr_merged` alike as landed.
+
+`pr_reconcile_pending` is the marker that a reconciliation is still owed. The
+publication writes it first, with the PR the refinery may reuse
+(`existing_pr`), while the bead is still open, and then the whole record with
+the `blocked` status in one write, so a refinery that dies between them leaves
+an open bead that names its PR, never a blocked bead with half a record. The
+landing order clears the marker once the close lands, and it is never a review
+or approval fact. Every writer of the record takes the store's record lock, and
+`bead-rehome.sh`'s close takes it too and clears any marker it finds. Each
+write is guarded on the status and assignee the writer read, so a bead that a
+close or a release reached first gets no record, and a run leaves a bead that a
+release took from the refinery as the release left it, with its PR named in a
+note.
 
 ## Checks
 
@@ -205,20 +296,24 @@ is the spelling the rest of this pack uses). `approval` is a third name a
 check_set may carry, but it is a universal merge rule, not a check (below). The
 one resolver, `review-checks.sh --resolve --check-set <cs> --through <phase> --at <oid>`,
 reads the check index at the commit the reader judges, drops all three and
-returns the checks whose phase gates `<phase>`, so no reader re-derives that
-drop: `gate-ensure.sh`, `pr-open.sh`, `merge.sh`, `pr-facts.sh`,
-`review-outcome.sh`, `liveness-sweep.sh` and `bring-current-guard.sh` all ask it
-rather than tokenizing `check_set` themselves.
+returns the checks whose phase gates `<phase>`, so no reader of a stage
+transition re-derives that drop: `gate-ensure.sh`, `pr-open.sh`, `merge.sh`
+(through `gctk merge`), `pr-facts.sh`, `review-outcome.sh` and
+`liveness-sweep.sh` all ask it rather than tokenizing `check_set` themselves.
+`bring-current-guard.sh` judges no transition and asks no phase. It reads
+`check_set`'s names itself only to refuse a ruling that reopens a lane the
+anchor does not declare, and none of the three names counts as a lane there.
 
 Every other name is opaque to the machinery: gate-ensure dispatches whatever
 it finds there, `signoff.sh` records the verdict on that check's review bead,
 and `merge.sh` requires every such name to derive green. Which names an anchor starts with is
 configuration, not doctrine. Two writers put them there and neither reads the
-diff: `mol-refinery-patrol` stamps its `check_set` var on every transition
-into a gating state, and `gate-ensure.sh --default` normalizes an anchor whose
-set is absent or empty, taking its value from `REFINERY_RECONCILE_CHECK_SET`.
-No patrol pour passes `check_set`, so each patrol wisp renders it from the
-formula default as it stands when that wisp is poured.
+diff: the refinery's old-path park (`refinery-land.sh`) stamps the patrol's
+`check_set` var on every transition into a gating state, and
+`gate-ensure.sh --default` normalizes an anchor whose set is absent or empty,
+taking its value from `REFINERY_RECONCILE_CHECK_SET`. The park reads the var
+with `gc formula show --rig` at the step, so the rig's value wins, and else
+the formula's default as it stands then.
 The registry records the same value at `lifecycle/lifecycle.toml`
 `[gates] check_set_default`. Who may depart from it is
 [authority-map.md](authority-map.md).
@@ -266,6 +361,12 @@ rework child is dispatched, or the ruling on a conflicted bring-current round
 reopens the lane. The full lane state machine is
 [specs/tk-ztapg/review-cycle-architecture.md](../specs/tk-ztapg/review-cycle-architecture.md).
 
+On the pending record the lanes do not decide the merge. The evaluator counts
+a review result only for the PR's live head and target, read from the
+`review_results` that the review loop records for each head and target it
+judges. No loop writes them yet, so a PR on the record reads no review result,
+and no rig moves onto the record before the loop lands.
+
 `approval` is not a check and has no lane: it is a **universal merge rule**. `merge.sh` requires every PR to carry a latest APPROVED review by
 an account other than the city's, with a standing CHANGES_REQUESTED from any
 other account a veto. An approval stands across later pushes until it is
@@ -285,6 +386,13 @@ dismissal GitHub refuses cannot land the PR and an approval given after the
 round lands it. No `check_set` token arms it or opts out, and GitHub branch
 protection is an extra layer, not the authority.
 `lifecycle/lifecycle.toml` records the rule.
+On the pending record the evaluator applies the approval contract by GitHub's
+own eligibility instead. Each account's latest review that approves or requests
+changes counts when GitHub says the account can push to the repository, a later
+review that only comments leaves it standing, and a dismissed review counts
+for nothing. No account is excluded, the city's own included, though GitHub
+refuses an approval from the PR's author, which is the city's account, and no
+line of the city's own counts against an approval GitHub still shows.
 What the *reviewer* did short of a verdict is posture, not a check:
 see [Posture](#posture) below. **`signoff.sh` is the single writer of check
 verdicts** (component-model I7): it closes the review bead with
@@ -584,6 +692,20 @@ work on an unapproved PR comes before the verdict it leads to, and the verdict
 is what remains when neither stands. A hold that only a human can release reads
 `needs-attention` with no rule of its own.
 
+For a PR on the pending record, the status renders the evaluator's answer for
+its anchor, which reads the PR on GitHub, with the same precedence
+(`prstatus.Render`, which `gctk pr status` prints). It reads `merging` once the
+evaluator finds the PR ready, or approved with only the city's work left;
+`working` while it waits on the city's work and on an approval; `needs-review`
+when only an approval, or the lift of a request for changes, is left; and
+`needs-attention` when something only a person clears holds it. The `held:`
+reasons are the gates and the beads a person owes that the walk below names,
+and the review threads the evaluator finds waiting on the city's answer while
+no work of the city's acts on them. The merge pass's blocked verdict and its
+thread count are no reason there, since that pass reads only the old record.
+The draft flag is GitHub's, read through the evaluator as the city's work in
+progress, and `opened_as_draft` and `draft_readied` play no part.
+
 Beside the one `status:` value, a workflow-owned `held:` label names each thing
 that holds an open PR which the city will not clear on its own. Each value is a
 label of its own, so more than one can stand at once, and a PR nothing holds
@@ -856,7 +978,7 @@ up dating a state that no longer holds, with nothing in either key saying so.
 The one boundary crossing between the work and merge workflows is a single
 atomic write. There is nothing to reconstruct afterward: a session that dies
 before the write leaves a claimed bead the witness patrol re-routes; one that
-dies after it leaves a complete handoff the cadence picks up.
+dies after it leaves a complete handoff the refinery picks up.
 
 ```mermaid
 sequenceDiagram
@@ -864,18 +986,28 @@ sequenceDiagram
   participant P as polecat (mol-polecat-work)
   participant G as GitHub
   participant L as ledger
-  participant C as merge cadence (60s)
-  P->>G: git push origin polecat/BEAD
+  participant R as refinery (mol-refinery-patrol)
+  participant O as landing order (5m)
+  P->>G: push polecat/BEAD under the lease on the commit it read
   P->>G: git ls-remote — verify HEAD == remote
-  Note over P: push unverified ⇒ abort, keep the bead
+  Note over P: push refused or unverified ⇒ abort, keep the bead
   P->>L: handoff — branch, target,<br/>assignee=RIG/refinery, in ONE atomic gc bd update
   P->>P: claim-close + drain
-  C->>L: gate-ensure — check_set present, every check raisable
-  C->>L: merge-push → pre_open_gate (lifecycle.sh)
-  C->>G: pr-open.sh — gh pr create when every check in check_set derives green
-  C->>G: merge.sh — validate, merge --match-head-commit
-  C->>L: close + merged_sha, one lifecycle transition (gctk merge, in-process)
+  R->>L: find-work — nothing holds the bead, no other open bead works its branch
+  R->>G: prep — merge the target in, run the rig's gate
+  R->>G: mr — edit the PR's title and body, push the head under the lease,<br/>or push and open it as a draft
+  R->>L: gctk pr record — pull_request_pending, blocked, assigned to the refinery
+  O->>G: read the PR by its number; the evaluator decides it is ready
+  O->>G: mergePullRequest, pinned to the validated head (expectedHeadOid)
+  O->>L: mr_merged + close, once the merge commit is on the fetched target
 ```
+
+On a rig still on the old path, the `mr` step parks the bead at `pre_open_gate`
+instead, and the merge cadence takes it from there: `gate-ensure.sh` makes every
+check raisable, `pr-open.sh` opens the PR once every `pre-open` check derives
+green, and `merge.sh` validates the full authorization set, merges with
+`--match-head-commit` and closes the anchor with `merged_sha` in one lifecycle
+transition.
 
 ## Rejection and rework loops
 
@@ -888,19 +1020,28 @@ apart. A review bead carries `task_kind=review`. An anchor carries
 also narrows by `task_kind=review` or by title, so a marked child joins no
 review's result set.
 
-- **Rejection** (refinery judgment): the anchor's branch is not accepted.
-  `mol-refinery-patrol` hands the bead back through `rejection-repool.sh`: one
-  lifecycle transition writes `rejection_reason`, then a fresh
-  `mol-polecat-work` pour dispatches the rebuild. It is a pour, not a route on
-  the bead, because the bead is a member of its epic and bd's blocked flag
-  cascades down parent-child edges, while a poured workflow's root has no
-  parent, so a hold on the epic leaves the rebuild running. The bead rests
-  `poured`, and the polecat running the pour starts from the recorded reason.
-  The rejection never pours a convoy, such as a graduation's anchor, because a
-  run poured onto a convoy works on the beads it tracks. A convoy's rebuild is
-  poured onto its rebuild child instead, an ordinary task that carries the
-  reason, resumes the convoy's branch and blocks it, and merge-push anchors the
-  convoy once the child's work lands on the branch.
+- **Rejection** (refinery judgment): the branch conflicts with its target, or
+  the gate failed for a reason the branch caused. The refinery sends the work
+  back through `refinery-requeue.sh`, with the branch kept and a
+  `rejection_reason` the resumed worker starts from. A bead that records no open PR
+  goes back itself: one write, guarded on the assignee and status the refinery read,
+  reopens it unassigned with the reason, clearing any `merge_result` a park left,
+  and `gc sling` pours `mol-polecat-work`
+  on it, so it rests `poured`. It is a pour, not a route on the bead, because
+  the bead is a member of its epic and bd's blocked flag cascades down
+  parent-child edges, while a poured workflow's root has no parent, so a hold on
+  the epic leaves the rebuild running. A bead that records an open PR
+  (`pull_request_head_changed`) keeps its PR and its record, and a convoy, such
+  as a graduation's anchor, is never poured, because a run poured onto a convoy
+  works on the beads it tracks. Each comes back as a rework child instead: a
+  task on the same branch that carries the reason and blocks the bead, which
+  stays assigned to the refinery. A child filed and not sent on, as when its
+  settle fails, holds the bead until the refinery's next patrol sends it on
+  (`refinery-lib.sh`). The child's hand-back lands its work on the
+  branch: it records the bead's PR pending again at the new head, and a convoy
+  is the refinery's to take again once the child closes. One worker per branch: when an
+  open rework child is already on the branch, running or parked, the reason
+  goes to that child's notes and nothing else is filed.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
   and slings exactly one rework child through `rework-child.sh`, with the
   reviewer's findings and the lane's validation pass beside it. The validator
@@ -1250,6 +1391,11 @@ pool; a child a worker still holds (`in_progress`) or one an operator froze
 (`rebase_hold`) is left alone, and its hold then keeps the anchor open until it
 resolves. A close with no recorded disposition still transitions to `abandoned`
 and files the rework-or-close human gate.
+
+A PR on the pending record has no such path yet. `pr-facts.sh`'s close arm
+keeps to `pull_request`, so the landing order is the one reader of the record's
+close, and it reads no disposition marker: a PR retired through `pr-dispose.sh`
+leaves its bead behind the `pull_request_closed_unmerged` exception's gate.
 
 That drop reaches only the parked, branch-carrying children. The rest of the
 machine review scaffolding is a fix unit, the finding beads and the validation

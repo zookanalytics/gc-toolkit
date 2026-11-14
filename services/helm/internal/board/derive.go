@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
@@ -1621,13 +1622,12 @@ func preOpenCheckStall(a Anchor, blockers []Blocker, stale int, f Facts) (stalle
 	return true, a.UpdatedAt, lane, preOpenStallReason(blockers)
 }
 
-// checkLanes returns the review lanes a check_set declares, in declared order,
-// by the rule merge.sh and pr-open.sh apply (lanes_of, and the gates_of
-// pr-summary-region.sh defines): split on commas, strip every whitespace
-// character, and drop the tokens that name no lane. none and off are the
-// checkless opt-out, and approval is met by a GitHub review, which cannot exist
-// before the PR does. The drop is case-insensitive; a surviving name keeps its
-// case, because it names a lane and the check_name its reviews carry.
+// checkLanes returns the review lanes a check_set declares, in declared order:
+// split on commas, strip every whitespace character, and drop the tokens that
+// name no lane. none and off are the checkless opt-out, and approval is met by
+// a GitHub review, which cannot exist before the PR does. The drop is
+// case-insensitive; a surviving name keeps its case, because it names a lane
+// and the check_name its reviews carry.
 func checkLanes(checkSet string) []string {
 	var lanes []string
 	for _, tok := range strings.Split(checkSet, ",") {
@@ -2186,8 +2186,10 @@ const (
 )
 
 // mergeResultMerged is the merge_result the refinery records on the anchor it
-// closes for a landed PR — the lifecycle's one closed state, and the board's
-// signal that a resolved row merged rather than closed without merging.
+// closes for a landed PR on the old record, and on a direct landing — the
+// board's signal that a resolved row merged rather than closed without merging.
+// The landing order records [record.Merged] for a PR it merged on Gas Town's
+// pending record.
 const mergeResultMerged = "merged"
 
 // classifyPhases stamps a row's live state, whose move it is, from the shared
@@ -2428,7 +2430,7 @@ func terminalPRPhase(a Anchor) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
-	if a.Metadata[mdMergeResult] == mergeResultMerged {
+	if r := a.Metadata[mdMergeResult]; r == mergeResultMerged || r == record.Merged {
 		return PhaseMerged
 	}
 	return PhaseClosed

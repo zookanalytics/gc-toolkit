@@ -6,11 +6,11 @@
 #   direct-merge-push.sh --work <bead> --branch <branch> --target <target-branch>
 #                        [--delete-branch]
 #
-# The prepared head is the HEAD of the detached prep worktree the rebase step
-# staged at <rig git dir>/gc-refinery-prep, and it lands only for the bead and
-# branch that step staged: refinery-workspace.sh verify reads the record the
-# stage left in the worktree, and a <bead> or <branch> it does not name lands
-# and records nothing, before any fetch or stamp. It lands by commit id: the
+# The prepared head is the HEAD of the refinery's tree for <bead>, which the
+# rebase step staged under the refinery's own worktree ($GC_DIR), and it lands
+# only when that tree holds <branch> (refinery-lib.sh): a <bead> with no tree,
+# or one whose tree holds another branch, lands and records nothing, before any
+# fetch or stamp. It lands by commit id: the
 # push names that commit as the new value of refs/heads/<target>, so nothing is
 # checked out for the merge, no local branch moves, and nothing is left on disk
 # to remove. git accepts a push without --force only as a fast-forward of the
@@ -72,18 +72,19 @@
 # A push refused for branch protection (GH006, GH013, "protected branch",
 # "refusing to allow", "Changes must be made through a pull request",
 # "approving review", "Cannot update this protected ref") landed nothing, so it
-# promotes the bead to merge_strategy=pr and clears the stamp in one write, and
-# exits 3: the caller takes the mr path, and the prep worktree still holds the
-# prepared head for the PR push.
+# promotes the bead to merge_strategy=mr and clears the stamp in one write, and
+# exits 3: the caller takes the mr path, and the tree still holds the prepared
+# head for the PR push.
 #
 # It never drains the session; the caller decides what a failure ends.
 #
-# Called by mol-refinery-patrol's merge-push step when the bead's merge strategy
-# is direct, or when its zero-diff guard finds a stamped landing to record.
+# Called by refinery-land.sh, mol-refinery-patrol's merge-push step, when the
+# bead's merge strategy is direct, or when its zero-diff check finds a stamped
+# landing to record.
 # exit: 0 landed, verified and closed, whether or not a --delete-branch delete
 #       went through · 1 nothing landed or recorded, or a landing that could
 #       not be verified or recorded (the output says which; the stamp lets a
-#       later patrol record it) · 2 usage · 3 promoted to merge_strategy=pr
+#       later patrol record it) · 2 usage · 3 promoted to merge_strategy=mr
 #       (take the mr path) · 4 origin/<target> moved after the branch was
 #       prepared; nothing landed or recorded, though the bead can keep its
 #       stamp, which names a commit the target does not carry, so the
@@ -95,6 +96,8 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LC="$SCRIPTS_DIR/lifecycle.sh"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script; nothing landed"; exit 1; }
+# shellcheck source=refinery-lib.sh
+. "$SCRIPTS_DIR/refinery-lib.sh" || { echo "$PROG: cannot source refinery-lib.sh beside this script; nothing landed"; exit 1; }
 
 usage() { echo "usage: $PROG --work <bead> --branch <branch> --target <target-branch> [--delete-branch]" >&2; exit 2; }
 
@@ -124,16 +127,14 @@ case "$ATTEMPTS" in ''|*[!0-9]*) ATTEMPTS=3 ;; *) ATTEMPTS=$((10#$ATTEMPTS)) ;; 
 BACKOFF="${DIRECT_MERGE_PUSH_BACKOFF:-2}"
 case "$BACKOFF" in ''|*[!0-9]*) BACKOFF=2 ;; *) BACKOFF=$((10#$BACKOFF)) ;; esac
 
-# The rig root resolves through rig-root.sh, as the patrol's blocks resolve it,
-# so this script and the block that staged the prepared head name one
-# repository.
+# The rig root resolves through rig-root.sh: it is the checkout the landing's
+# record is checked in. Land only for the bead whose tree holds <branch>.
 RIG_ROOT=$("$SCRIPTS_DIR/rig-root.sh")
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; nothing landed"; exit 1; }
-COMMON=$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir) || { echo "no repository at $RIG_ROOT; nothing landed"; exit 1; }
-PREP_WT="$COMMON/gc-refinery-prep"
-# Land only for the bead and branch the prep worktree records it holds.
-HOLDS=$("$SCRIPTS_DIR/refinery-workspace.sh" verify --rig-root "$RIG_ROOT" --work "$WORK" --branch "$BRANCH" 2>&1) \
-  || { echo "${HOLDS:-refinery-workspace.sh could not read what the prep worktree holds}; nothing landed"; exit 1; }
+HOME_DIR=$(refinery_home) || { echo "the refinery's own worktree is unknown; nothing landed"; exit 1; }
+HOLDS=$(refinery_require "$HOME_DIR" "$WORK" "$BRANCH" 2>&1) || { echo "$HOLDS; nothing landed"; exit 1; }
+refinery_held "$HOME_DIR" "$WORK"
+PREP_WT="$PREP_TREE"
 
 fetch_target() { git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"; }
 carries() { git -C "$RIG_ROOT" merge-base --is-ancestor "$2" "$1" 2>/dev/null; }
@@ -194,8 +195,8 @@ elif carries "$PREPARED" "$TIP"; then
   if ! PUSH_OUT=$(git -C "$RIG_ROOT" push origin "$MERGED_SHA:refs/heads/$TARGET" 2>&1); then
     case "$PUSH_OUT" in
       *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|*"Changes must be made through a pull request"*|*"approving review"*|*"Cannot update this protected ref"*)
-        echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=pr."
-        gc bd update "$WORK" --set-metadata merge_strategy=pr --unset-metadata direct_landing_sha || { echo "could not record merge_strategy=pr on $WORK; nothing landed"; exit 1; }
+        echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=mr."
+        gc bd update "$WORK" --set-metadata merge_strategy=mr --unset-metadata direct_landing_sha || { echo "could not record merge_strategy=mr on $WORK; nothing landed"; exit 1; }
         exit 3 ;;
     esac
     NOW=""

@@ -2,8 +2,9 @@
 // holds it, on a formula, through a pool (docs/deferred-dispatch.md). It holds
 // the verbs `gctk bead arm`, `gctk bead disarm` and `gctk bead start-armed`,
 // what arm refuses, the dispatch lock all three hold on a bead, and the steps
-// the start takes on each armed bead. It asks waits what holds a bead and the
-// arm's record (arm/record) for its arm, and no domain asks it.
+// the start takes on each armed bead. It asks waits what holds a bead, the
+// arm's record (arm/record) for its arm, and the PR's record (pr/record) whether
+// another path delivered a bead's work, and no domain asks it.
 //
 // The arm is the one part of deferred dispatch Gas City cannot express: no
 // order or command of its pours a formula on a bead once its blockers close
@@ -24,14 +25,11 @@ import (
 )
 
 // The keys the arm reads and does not write. No domain owns any of them: the
-// runtime writes the pour's and the route, and lifecycle.sh, through gctk
-// lifecycle, writes merge_result, so each is declared read-only here and its
-// definition stays in lifecycle/lifecycle.toml or with Gas City.
+// runtime writes the pour's and the route, so each is declared read-only here
+// and its definition stays with Gas City.
 var (
 	routedToKey = ledger.ReadOnly("gc.routed_to", ledger.String,
 		"gctk bead arm refuses a routed bead, which is dispatched already.")
-	mergeResultKey = ledger.ReadOnly("merge_result", ledger.String,
-		"Another path has delivered the work of a bead that carries it, so the start retires its arm without a sling.")
 	rootBeadKey = ledger.ReadOnly("gc.root_bead_id", ledger.String,
 		"The start reads the fence of each bead poured under a root to tell a pour Gas City left unfinished.")
 	moleculeFailedKey = ledger.ReadOnly("molecule_failed", ledger.String,

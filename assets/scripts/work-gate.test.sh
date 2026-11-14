@@ -142,6 +142,13 @@ DONE_PERSON="1|UPDATE;GATE;CANCEL;DRAIN;"
 eq "$(run "$(row '{"status":"open","assignee":"","metadata":{}}')")" "0|" "fresh work (open, unassigned): passes"
 eq "$(run "$(row '{"status":"open","metadata":{}}')")" "0|" "open with no assignee at all: passes"
 eq "$(run "$(row '{"status":"open","assignee":"","metadata":{"branch":"polecat/tk-work"}}')")" "0|" "rework child (open, branch set, no merge_result): passes"
+# What refinery-requeue.sh leaves on a bead it sends back from a park: open,
+# unassigned, its branch, target, PR and reason kept, merge_result cleared
+# (refinery-requeue.test.sh). Left with the park's merge_result, it would read
+# as finished work.
+REQUEUED='"branch":"polecat/tk-work","target":"main","existing_pr":"https://github.com/zook/rig/pull/9","rejection_reason":"Conflicts with main at 1234567"'
+eq "$(run "$(row "{\"status\":\"open\",\"assignee\":\"\",\"metadata\":{$REQUEUED}}")")" "0|" "a parked bead the refinery's requeue sent back, its merge_result cleared: passes"
+eq "$(run "$(row "{\"status\":\"open\",\"assignee\":\"\",\"metadata\":{$REQUEUED,\"merge_result\":\"blocked\",\"blocked_reason\":\"parked\"}}")")" "$DONE_NOBODY" "…the same bead still carrying the park's merge_result: refused as finished"
 for self in "$SELF_NAME" "$SELF_ID" "$SELF_AGENT" "$SELF_ALIAS"; do
   eq "$(run "$(row "{\"status\":\"in_progress\",\"assignee\":\"$self\",\"metadata\":{}}")")" "0|" "in_progress under this session's '$self': passes"
 done

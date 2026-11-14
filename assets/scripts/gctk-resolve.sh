@@ -11,7 +11,8 @@
 # gctk_require execs `gctk <subcommand> "$@"` (lifecycle.sh, merge.sh, epic.sh).
 # When there is no binary to run, it names what is missing and exits 1, so it
 # never returns. GCTK_BIN=none names no binary and is refused like a missing
-# one.
+# one. A script that reads a command's answer and goes on (pr-open.sh,
+# refinery-publish.sh) asks gctk_path for the binary instead.
 #
 # Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
 # GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
@@ -50,6 +51,19 @@ _gctk_locate() {
     fi
     [ -z "$_gctk_city" ] || _gctk_bin="$_gctk_city/.gc/services/gctk/bin/gctk"
     return 0
+}
+
+# gctk_path prints the binary the chain names, for a script that calls a gctk
+# command and reads its answer rather than handing its process over. It prints
+# nothing and returns 1 when the chain names no executable binary: GCTK_BIN=none,
+# a path with no binary at it, or no city to look in.
+gctk_path() {
+    _gctk_locate
+    if [ "$_gctk_bin" != "none" ] && [ -n "$_gctk_bin" ] && [ -x "$_gctk_bin" ]; then
+        printf '%s\n' "$_gctk_bin"
+        return 0
+    fi
+    return 1
 }
 
 gctk_require() { # <subcommand> [args...]

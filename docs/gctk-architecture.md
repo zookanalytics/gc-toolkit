@@ -102,10 +102,12 @@ bead.
 | `gctk priority shift <bead> <±n>` | agent | raise or lower a bead against what it follows, and re-rank the queue, in one act | The native surface writes only an absolute priority, which carries no intent term, so the next settle reads it as drift and overwrites it. The stored shift is that term ([steering.md](steering.md#the-rule)). Its callers are sittings and the board. |
 | `gctk priority settle <bead>` | hook | give a bead the priority of what it follows before anything claims or pours it | A pour copies a bead's priority once, so the bead carries its derived priority before the pour. The pack's own writers run it before they make a bead claimable: filing follow-up work, a sling, a release, and the board's priority verb. |
 | `gctk priority reconcile` | order | re-settle the queued beads after raw writes no writer saw | The backstop of the shape the pack ships, ported and never replaced: the settle in the pack's writers, a rig-scoped pass every fifteen minutes that reads the queue and never the whole store, one lock per store, and the stored shift ([steering.md](steering.md#the-pass)). |
-| `gctk pr summary <bead>` | agent, hook | record what the change does, for its PR's summary | Gas Town's refinery fills a PR's summary from its bead's description, which is written before the work. This summary is written once the work is done, and says what the diff does. |
+| `gctk pr summary <bead>` | agent, hook | record what the change does, for its PR's summary and title, or read the summary recorded | Gas Town's refinery fills a PR's summary from its bead's description, which is written before the work. This summary is written once the work is done, and says what the diff does. The change's subject line rides the same write as the bead's title, since the PR's title is composed from it, and a reader of a PR's text asks the verb for the summary. |
 | `gctk pr compose <bead>` | hook | the PR's conventional-commit title and managed summary region, from the bead that owns it | Gas Town's refinery titles a PR with its bead's title and writes the body once, when it opens the PR. Compose puts the type prefix the repository's title check requires ahead of the title, and keeps a marked region of the body current with the summary while leaving the text people add. |
+| `gctk pr record <bead> --pr <url> --head <sha> --target <branch> --refinery <address>` | hook | record the PR the bead owns as pending until its merge is verified | Gas Town's refinery keeps this record (`gastown/commands/pr-merge-reconcile`), and no gastown release the city can take carries the command. The verb writes Gas Town's two writes under the store's record lock, each guarded on the status and assignee it read, so a bead that a close or a release reached first gets no record, where Gas Town's unguarded second write would reopen it as blocked. |
+| `gctk pr reconcile --refinery <address>` | order | land the PRs on the pending record: merge a ready one with its head pinned, close its bead once the merge commit is on the target, and send a changed head back to the refinery | Gas Town's refinery reconciles one record per find-work and merges nothing. The landing order (orders/pr-reconcile.toml) runs this with no agent, asks the evaluator whether each PR is ready, pins the merge request to the head it judged, reads a bounded number of records, the least recently checked first, and holds the store's record lock for one record at a time, so two runs that overlap act on one record one after the other. |
 | `gctk pr owner <pr>` | agent, order | which bead owns this PR | Nothing in Gas City's PR concept takes a GitHub event on an open PR to the bead that owns it, and the hop is what turns a review comment into work on that bead. |
-| `gctk pr status <bead>` | hook, order | where the PR stands: working, merging, needs-review or needs-attention | Nothing in Gas City gates a merge on approval or on required checks, so the pack reads both for the status label and the board. A pack writer that changes one of its inputs, opening the PR or recording a review verdict, sets the label in the same act. The order is the backstop: the merge cadence's pass walks the open beads that carry a PR, a set bounded by the open PRs, in a rotation that starts no bead past the pass's deadline, and writes a label only where its value changed. |
+| `gctk pr status <bead>` | hook, order | where the PR stands: working, merging, needs-review or needs-attention, with each condition not met for a PR on the pending record | Nothing in Gas City gates a merge on approval or on required checks, so the pack reads both for the status label and the board. For a PR on the pending record the status renders the pr domain's evaluator, the answer the landing order merges on, so the label and the merge read one definition. A pack writer that changes one of its inputs, such as the old path's opening of a PR or a review verdict's record, sets the label in the same act. The order is the backstop: the merge cadence's pass walks the open beads that carry a PR, a PR on the pending record among them, a set bounded by the open PRs, in a rotation that starts no bead past the pass's deadline, and writes a label only where its value changed. |
 | `gctk pr post <pr>` | agent, hook | post the city's comment, review or reply on a PR, carrying the city's mark | Every agent's `gh` token is one bot account, so a post's author cannot tell the city's notice from feedback. The mark can, and this one writer owns the mark and the definition of which posts are feedback. |
 | `gctk pr guard` | hook | refuse an agent's `gh` write outside the rig's own origin, or an unmarked post on it | Gas City scopes no agent's writes ([warrants.md](warrants.md#gh-write-containment)). The rule lives in the GitHub adapter, so gctk's own writes meet it, and the tool-use hook every agent carries applies it to the commands an agent types. |
 | `gctk epic create <title>` | agent | file an epic with its contract, each field in its own key | bd's create checks hold no issue type to a metadata key, so nothing native refuses an epic filed with no hypothesis, which [epics.md](epics.md) makes the one hard gate on an epic. The verb refuses such an epic, files the contract in the create itself, and, under an epic, files a Delivery, which carries no contract. |
@@ -121,7 +123,7 @@ bead.
 | `gctk seed check` | hook | whether the render is current | The pre-commit hook and a doctor check read it, so a stale audit is caught before it lands. |
 | `gctk dolt reclaim` | order | reclaim each store at or over the reclaim line | The reclaim line is a store's on-disk noms size of `GC_DOLT_RECLAIM_THRESHOLD_MIB`, 2048 MiB by default, the size at which Gas City's `dolt-noms-size` doctor check warns. The supervisor runs no Dolt GC, and scheduled compaction skips a store under its commit threshold ([warrants.md](warrants.md#dolt-reclaim)). |
 | `gctk version` | hook | the revision this binary was built from | The build stamps the module's subtree hash, so a doctor check can tell whether the deployed binary is the one the checkout builds. |
-| `gctk lifecycle`, `gctk merge` | hook | the anchor state machine and the pack's merge rule | Debt, in [the re-implementation register](#the-re-implementation-register). |
+| `gctk lifecycle`, `gctk merge` | hook | the old merge path's anchor state machine and merge rule | Debt, in [the re-implementation register](#the-re-implementation-register). |
 
 What each noun owns:
 
@@ -132,8 +134,10 @@ What each noun owns:
   priority of the epic it belongs to, a raise of specific work is a stored
   shift, and code computes both rather than a prompt. It stands on its warrant
   ([warrants.md](warrants.md#priority-following)).
-- **`pr`:** a bead's PR summary, and the title and managed summary region of its
-  PR. It starts from Gas City's own PR concept. Gas Town's refinery opens a PR
+- **`pr`:** a bead's PR summary, the title and managed summary region of its
+  PR, and Gas Town's pending-through-merge record on the bead that owns the PR,
+  with the store's record lock that each writer of the record takes. It starts
+  from Gas City's own PR concept. Gas Town's refinery opens a PR
   with a title and a body taken from its bead, Gas City's PR monitor and
   `gc github pr backfill` read a PR's readiness when something runs them, and
   a `gh:pr` gate resolves when its PR merges. A pr verb is only what those
@@ -267,14 +271,24 @@ Where gctk parallels Gas City's logic, it states why it is re-implemented, keeps
 the goal of staying in step with upstream, and carries the divergence risk as a
 stated burden.
 
-- **`lifecycle` and `merge`.** They carry the anchor state machine and the
-  pack's merge rule. They are re-implemented because the city runs the pack's
-  own refinery and imports no Gas Town pack, so Gas Town's refinery flow does
-  not run here. The goal is that the states they record stay the ones Gas
-  Town's refinery records, so that moving merging onto that flow under
-  GitHub's branch rules retires them (tk-1tfzr71.20). The risk is that a change
-  to Gas Town's refinery flow does not reach the pack's refinery before then, so
-  the two drift. They gain nothing new.
+- **`lifecycle` and `merge`.** They carry the anchor state machine and the old
+  merge path's merge rule. The machine checks each write `lifecycle.sh` makes,
+  the refinery's direct landing among them, and `merge` lands the PRs of a rig
+  not yet cut over onto the pending record. Gas Town's refinery checks no
+  transition and leaves the merge to a person. Neither gains anything new, and
+  once every rig has cut over, the old merge path's retirement (tk-1tfzr71.70)
+  deletes both and leaves `lifecycle.sh` a plain write of the value. The risk is
+  two paths at once: until the last rig cuts over, a change to how a PR lands
+  has two places to reach.
+- **`pr record` and `pr reconcile`.** They write Gas Town's pending-through-merge
+  record, with its values and their meanings
+  (`gastown/commands/pr-merge-reconcile` in gascity-packs at 7f86098c04ea). They
+  are re-implemented because no gastown release carries the command and the
+  city imports no gastown pack. The goal is that the record stays Gas Town's,
+  so a release that carries the command, refuses a bead that a close or a
+  release reached first and leaves a bead that a release took, replaces their
+  writes, and the pack keeps the readiness check and the merge request. The
+  risk is that Gas Town's record changes before then, and the two drift.
 - **The store adapter's compensations.** The `waits-for` error for a bead with
   a `waits-for` edge of its own and the marks read that checks bd's blocked
   listing ([The adapters](#the-adapters)) stand in for bd's own answers where
@@ -407,8 +421,9 @@ and CI runs those tests on every PR.
 |---|---|---|---|
 | store | the bead store | `gc bd` for writes, for reads that must see a fresh write and for the blocked set, the supervisor API for other reads | in-memory rows and edges, with the store's blocked answers set by the test |
 | git | git | one `git` command per call, in a named directory | a scratch repository |
-| github | GitHub | `gh` and the GitHub API | recorded responses |
-| runtime | Gas City | `gc` (sling, config, session, events, runtime), the supervisor API (runs, sessions), and the pack's scripts that ask a person | recorded responses |
+| github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
+| feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
+| runtime | Gas City | `gc` (sling, config, session, events, runtime), the supervisor API (runs, sessions), and the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh` | recorded responses |
 | host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start inside the sandbox a demo capture runs in | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
 
 The store's rules are the store's own. The store adapter asks the store whether
@@ -604,9 +619,14 @@ why a reader must know it, and the work that retires it.
   reads, so the key registry does not show it reading them. For the same
   reason `listing` hands `prstatus` each record's metadata whole, as the
   ledger renders it. A new pr verb takes neither shape. `prstatus` moves under
-  the pr domain, onto the ledger, with whichever of the merge member
-  (tk-1tfzr71.20) and the GitHub-intake member (tk-1tfzr71.21) rewrites its
-  facts.
+  the pr domain, onto the ledger, with the GitHub-intake member
+  (tk-1tfzr71.21), which rewrites its facts off the posture.
+- **The pr domain reads which posts are feedback through the pack's shell.**
+  Its evaluator asks the feedback adapter, which runs `pr-post.sh feedback-def`
+  through jq, because that script holds the one definition every reader of
+  feedback applies. The move of the city's PR posts into gctk (tk-ssm8qns.8)
+  brings the definition into the pr domain, whose post verb owns it, and the
+  adapter goes.
 - **The `/helm` board reads the store itself.** Its source
   (`services/helm/internal/source`) reads each rig's store through the
   embedded beads library or the supervisor's API and decodes the rows and keys
@@ -625,10 +645,11 @@ why a reader must know it, and the work that retires it.
   rig domain runs a check's command itself.
   `epic create` and `session title` also read beads through the store adapter,
   around the ledger. The runtime adapter (`internal/gascity`) holds only what
-  the arm's start asks of Gas City, and the host adapter only what a copy of a
-  rig's UI needs, so their tests stub `gc` on `PATH` or run real processes, and
-  none of them is the model for a new verb. tk-ssm8qns.16 puts them behind the
-  ledger and the adapters.
+  the arm's start and the landing order's human gates ask of Gas City, and the
+  host adapter only what a copy of a rig's UI needs, so the tests of these
+  verbs stub `gc` on `PATH` or run real processes, and none of these verbs is
+  the model for a new one. tk-ssm8qns.16 puts them behind the ledger and the
+  adapters.
 - **Readers outside the `bead` domain read the arm's keys.** The arm's record
   (`services/gctk/arm/record`) declares the arm's keys and is their one writer,
   but the scripts, doctor checks, skills and the helm board that read an arm
@@ -640,6 +661,6 @@ why a reader must know it, and the work that retires it.
   readers built now would be rebuilt then. The operator ruled this exception in
   conversation tk-au9jrqt. It retires with the arm.
 - **`lifecycle` and `merge` reach git, GitHub, the store and the pack's
-  scripts themselves.** They retire whole with tk-1tfzr71.20
-  ([the register](#the-re-implementation-register)), so they get no layering
-  work.
+  scripts themselves.** They retire whole with the old merge path
+  (tk-1tfzr71.70, [the register](#the-re-implementation-register)), so they get
+  no layering work.

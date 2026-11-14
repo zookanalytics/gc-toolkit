@@ -224,7 +224,8 @@ jq -c '[ .[]
 # RATE off recovered_at/recovered_count, so a re-recovered in-flight bead
 # puts a moot question to a person each cycle; dropping it here is what stops
 # both the re-dispatch and the question. Work in any of these states is not the
-# pool's: an in-flight PR (merge_result pre_open_gate/pull_request), a human route
+# pool's: an in-flight PR (merge_result pre_open_gate/pull_request, or
+# pull_request_pending/pull_request_head_changed on the pending record), a human route
 # (gc.routed_to=human), or a conversation: a task assigned to `human`, or to the
 # alias of its sitting, which names the task's own id, bare or qualified, or its
 # `c-` fallback (assets/scripts/conversation.sh, which downstream-court-skip.test.sh
@@ -243,6 +244,7 @@ jq -c '[ .[]
   | ((.assignee // "") | tostring) as $a
   | ((.id // "") | tostring) as $id
   | select($mr != "pre_open_gate" and $mr != "pull_request"
+           and $mr != "pull_request_pending" and $mr != "pull_request_head_changed"
            and $routed != "human")
   | select(((.issue_type // "") == "task"
             and ($a == "human"
@@ -314,7 +316,8 @@ so this one passes it, and in the liveness loop a drained owner would
 false-orphan it. Downstream-court-skip reads the state the bead already carries
 and drops it, so it never enters the liveness loop and is never marked.
 Work in any of these states is not the pool's to recover:
-- an in-flight PR — `merge_result` is `pre_open_gate` or `pull_request`;
+- an in-flight PR — `merge_result` is `pre_open_gate` or `pull_request`, or
+  `pull_request_pending` or `pull_request_head_changed` on the pending record;
 - a human route — `gc.routed_to=human`, the city's "no agent will take it"
   marker (a merge gate, an operator approval);
 - a conversation — a task assigned to `human` while it waits in the operator's
@@ -610,8 +613,10 @@ fi
 disposable — go to step 4. Otherwise salvage. The salvage push publishes to the
 worktree's origin, so gate it on `push-target-ok`, which refuses when the
 worktree's origin is not the owning origin (a husk points it at the wrong repo).
-A push of work that may already be on origin is idempotent and never loses
-commits, while `unknown` must never be read as gone:
+It goes under git's lease on what origin's branch holds when it reads it
+(`branch-push.sh`), so it never overwrites a push someone else made. A push of
+work that may already be on origin is idempotent and never loses commits, while
+`unknown` must never be read as gone:
 ```bash
 if [ "$IS_WORK_BEAD" != "1" ]; then
   echo "not a work bead (a review, or a graph.v2 step or root) — no worktree by construction; skipping salvage, straight to disposal." >&2
@@ -626,7 +631,7 @@ elif [ "$WORKTREE_SAFE" = "1" ] && "$BC" push-target-ok --worktree "$WORKTREE" -
   git add -A
   git commit -m "chore: salvage work from an orphaned agent (<bead>)" || true
   BRANCH=$(git branch --show-current)
-  git push origin HEAD
+  "${BC%/*}/branch-push.sh" --repo "$WORKTREE" --branch "$BRANCH" --head HEAD --from-origin
   gc bd update <bead> --set-metadata branch="$BRANCH"
 else
   echo "husk, wrong-origin, or missing work_dir — REFUSING salvage writes (see guards); nothing salvageable." >&2

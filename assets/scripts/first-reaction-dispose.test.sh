@@ -547,9 +547,9 @@ has "SLING " "$LOG" "(HANDOFFTOOL) …handing the bead over"
 #   (ACTREFINERY) --assign to the refinery or the keeper writes the agent as the
 #                 assignee in the release, routes nothing, and nudges it, since
 #                 the bead is ready now
-#   (REFFIND)     the refinery's own find-work listing, read from its patrol
-#                 formula, lists the bead as that release leaves it, and lists
-#                 nothing for a bead the release left unassigned
+#   (REFFIND)     the refinery's own find-work, the script its patrol's
+#                 find-work step runs, takes the bead as that release leaves
+#                 it, and takes nothing for a bead the release left unassigned
 #   (BLKREFINERY) --then-assign to the refinery writes the assignee beside the
 #                 wait, and sends no nudge while the bead waits
 #   (BLKREADY)    a --then-assign whose blocker has closed already, so that no
@@ -559,13 +559,16 @@ has "SLING " "$LOG" "(HANDOFFTOOL) …handing the bead over"
 #                 or written, and the refusal names the mail that reaches them
 #   (UNNAMED)     an agent the row does not name is refused the same way
 
-# The refinery's find-work listing as its patrol runs it, the line taken from
-# the formula's marked find-work-select block, over a store that holds tk-sub,
-# an open task with a branch, as the last release in the log left it: assigned
-# to the agent its --assign named, or to nobody.
-FIND_WORK="$(awk '/# >>> find-work-select$/{f=1;next} /# <<< find-work-select$/{f=0} f' "$HERE/../../formulas/mol-refinery-patrol.toml" | grep '^WORK_ROWS=' || true)"
-[ -n "$FIND_WORK" ] && ok "(REFFIND) the refinery's patrol formula carries its find-work listing" \
-    || bad "(REFFIND) no WORK_ROWS= line in mol-refinery-patrol.toml's find-work-select block"
+# The refinery's find-work as its patrol runs it: refinery-find-work.sh, which
+# the formula's find-work step calls, over a store that holds tk-sub, an open
+# task with a branch, as the last release in the log left it: assigned to the
+# agent its --assign named, or to nobody. Nothing holds it, and no other bead
+# works its branch.
+FIND_STEP="$(awk '/^id = "find-work"$/{f=1} f && /^\[\[steps\]\]$/{exit} f' "$HERE/../../formulas/mol-refinery-patrol.toml")"
+case "$FIND_STEP" in
+    *refinery-find-work.sh*) ok "(REFFIND) the refinery's patrol runs refinery-find-work.sh in its find-work step" ;;
+    *) bad "(REFFIND) mol-refinery-patrol.toml's find-work step does not run refinery-find-work.sh" ;;
+esac
 mkdir -p "$TMP/store-bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/store-bin/gc" <<'STORE'
 [ "$1 ${2:-}" = "bd list" ] || exit 2
@@ -579,9 +582,15 @@ else
 fi
 STORE
 chmod +x "$TMP/store-bin/gc"
-find_work() { # <agent> — the ids the agent's find-work listing returns
-  ( export PATH="$TMP/store-bin:$PATH" GC_RIG=gc-toolkit GC_AGENT="$1"; WORK_ROWS=""
-    eval "$FIND_WORK"; printf '%s' "$WORK_ROWS" | jq -r '.[].id' )
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/store-bin/gctk" <<'HOLDS'
+[ "$1 ${2:-}" = "bead holds" ] || exit 2
+shift 2
+for id in "$@"; do printf '{"id":"%s","status":"clear","waits":[]}\n' "$id"; done
+HOLDS
+chmod +x "$TMP/store-bin/gctk"
+find_work() { # <agent> — the bead the agent's find-work takes, or nothing
+  ( export PATH="$TMP/store-bin:$PATH" GC_RIG=gc-toolkit GC_AGENT="$1" GCTK_BIN="$TMP/store-bin/gctk"
+    "$HERE/refinery-find-work.sh" 2>/dev/null )
 }
 
 export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"status":"open","metadata":{"branch":"polecat/tk-sub"}}]'
@@ -596,10 +605,10 @@ has "NUDGE session nudge gc-toolkit/gc-toolkit.refinery tk-sub is assigned to yo
     "(ACTREFINERY) the refinery is nudged with the bead's id, since an assignee alone gives it no turn"
 before '^HELM takeaway' '^NUDGE ' "(ACTREFINERY) …once the release has assigned it"
 before '^NUDGE ' 'gc.reacted_by' "(ACTREFINERY) …and before the landed proof"
-eq "$(find_work gc-toolkit/gc-toolkit.refinery)" "tk-sub" "(REFFIND) the refinery's own find-work lists the bead the exit handed it"
+eq "$(find_work gc-toolkit/gc-toolkit.refinery)" "tk-sub" "(REFFIND) the refinery's own find-work takes the bead the exit handed it"
 
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --reaction-bead "$R"
-eq "$(find_work gc-toolkit/gc-toolkit.refinery)" "" "(REFFIND) …and lists nothing for a bead the release left unassigned, as a route leaves it"
+eq "$(find_work gc-toolkit/gc-toolkit.refinery)" "" "(REFFIND) …and takes nothing for a bead the release left unassigned, as a route leaves it"
 
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gascity/gascity-keeper.keeper --reaction-bead "$R"
 eq "$RC" "0" "(ACTREFINERY) the keeper takes the bead the same way"

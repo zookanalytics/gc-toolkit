@@ -142,8 +142,22 @@ case "$(printf '%s' "$WORK_JSON" | jq -r '.[0].status // ""' 2>/dev/null)" in
     echo "$PROG: $WORK is already closed, so there is nothing to stand down"
     exit 0 ;;
 esac
-[ "$(row_meta "$WORK_JSON" merge_result)" != pull_request ] \
-  || refuse "$WORK is an open PR, which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off."
+WORK_MR=$(row_meta "$WORK_JSON" merge_result)
+case "$WORK_MR" in
+  pull_request)
+    refuse "$WORK is an open PR, which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off." ;;
+  # A PR on the pending record at the head the refinery validated ends through
+  # the landing order: a closed PR is recorded as pull_request_closed_unmerged,
+  # behind a gate under that key.
+  pull_request_pending)
+    refuse "$WORK owns an open PR on the pending record ($WORK_MR), which is retired rather than stood down: close the PR, and the landing order records the close behind a human gate under the key pull_request_closed_unmerged, which a stand-down under that key answers." ;;
+  # A PR at a head the refinery has not validated waits on the refinery, and the
+  # landing order does not read it: the refinery's publication is what finds the
+  # PR closed, and it parks the bead behind a gate under
+  # refinery-invalid-existing-pr.
+  pull_request_head_changed)
+    refuse "$WORK owns an open PR at a head the refinery has not validated ($WORK_MR), which is retired rather than stood down: close the PR, and the refinery's next publication of $WORK finds it closed and parks $WORK behind a human gate under the key refinery-invalid-existing-pr, which a stand-down under that key answers. If its prep conflicts or its checks fail first, the refinery sends a rework child to the pool instead, which meets the closed PR at its own publication and parks under the same key: stand the child down, and the refinery then parks $WORK." ;;
+esac
 
 GATES=$(bd_human_gates "$WORK") || refuse "could not read the human gates of $WORK."
 OPEN_GATES=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY") \

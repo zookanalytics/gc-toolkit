@@ -78,6 +78,27 @@ has "$OUT" "c-4" "the pull_request husk is named"
 has "$OUT" "https://x/pr/4" "the stranded PR is named"
 has "$OUT" "c-5" "the pre_open_gate husk is named"
 
+# --- 2b. closed on the pending record -----------------------------------------
+store "$(bead c-r1 '{"merge_result":"pull_request_pending","pr_url":"https://x/pr/11"}')" \
+      "$(bead c-r2 '{"merge_result":"pull_request_head_changed","pr_url":"https://x/pr/12"}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "closed with an open PR on the pending record is an ERROR"
+has "$OUT" "c-r1" "the pending husk is named"
+has "$OUT" "https://x/pr/11" "…with its PR"
+has "$OUT" "c-r2" "the head-changed husk is named"
+has "$OUT" "the landing order records a PR's end only on a bead that is not closed" "…and why nothing lands it"
+has "$OUT" "gc bd update c-r1 --set-metadata merge_result=mr_merged --set-metadata merged_sha=<the full 40-character merge commit id> --set-metadata pr_state=merged --set-metadata pr_merged_at=<the PR's mergedAt>" \
+    "…and a merged PR's repair writes the whole mr_merged record the landing order settles, the sha in full"
+hasnt "$OUT" "lifecycle.sh" "…with repairs that do not go through the old record's machine"
+store "$(bead c-r3 '{"merge_result":"mr_merged","merged_sha":"abc123"}')" \
+      "$(bead c-r4 '{"merge_result":"pull_request_closed_unmerged"}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the landing order's mr_merged with its sha, and an exception a person closed, pass"
+store "$(bead c-r5 '{"merge_result":"mr_merged"}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "the landing order's mr_merged with NO merged_sha is a WARNING"
+has "$OUT" "c-r5" "…naming the unevidenced landing"
+
 # --- 3. merged with no evidence -----------------------------------------------
 store "$(bead c-6 '{"merge_result":"merged"}')"
 OUT=$(run_check); RC=$?
