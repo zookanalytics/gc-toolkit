@@ -48,7 +48,6 @@ var pkgLayer = map[string]struct {
 	"internal/daemon":        {adapter, "store"},
 	"internal/feedback":      {adapter, "feedback"},
 	"internal/git":           {adapter, "git"},
-	"internal/humangate":     {adapter, "humangate"},
 	"internal/gascity":       {adapter, "runtime"},
 	"internal/gascity/fake":  {adapter, "runtime"},
 	"internal/gh":            {adapter, "github"},

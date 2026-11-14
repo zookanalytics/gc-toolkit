@@ -10,11 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/humangate"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
@@ -213,7 +212,7 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 // at db, else the one gc routes the first of ids to, the record lock in that
 // store's .beads directory, GitHub through gh, the clone at $GC_RIG_ROOT else
 // the working directory, the pack's definition of feedback, loaded in that
-// clone, and the pack's scripts for human gates.
+// clone, and the runtime adapter for human gates.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -243,7 +242,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 			return rule, nil
 		},
 		Checkout: checkout{dir: dir},
-		Gates:    &gates{},
+		Gates:    gates{rt: gascity.New()},
 		Wait:     recordLockWait,
 	}, nil
 }
@@ -255,17 +254,16 @@ func (c checkout) OriginURL() (string, error)             { return git.OriginURL
 func (c checkout) FetchBranch(branch string) error        { return git.FetchBranch(c.dir, branch) }
 func (c checkout) Reaches(commit, b string) (bool, error) { return git.Reaches(c.dir, commit, b) }
 
-// gates files human gates through the pack's human-gate.sh, finding the scripts
-// directory when the first gate is filed.
-type gates struct{ g *humangate.Gates }
+// gates files human gates through the runtime adapter, which runs the pack's
+// human-gate.sh from the scripts directory GCTK_SCRIPTS_DIR names. A gate the
+// script does not file is an error carrying why: its exit and its last line, or
+// why it did not run.
+type gates struct{ rt gascity.Runtime }
 
-func (g *gates) File(subject, key, message string) error {
-	if g.g == nil {
-		scripts, err := feedback.ScriptsDir()
-		if err != nil {
-			return err
-		}
-		g.g = humangate.New(scripts)
+func (g gates) File(subject, key, message string) error {
+	res := g.rt.Script("human-gate.sh", "--subject", subject, "--key", key, "--message", message)
+	if f := res.Failure(); f != "" {
+		return fmt.Errorf("human gate on %s [%s]: %s", subject, key, f)
 	}
-	return g.g.File(subject, key, message)
+	return nil
 }

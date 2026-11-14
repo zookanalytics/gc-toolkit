@@ -423,8 +423,7 @@ and CI runs those tests on every PR.
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
-| human gate | the pack's one writer of a human gate, `human-gate.sh` | the script, from the pack's scripts directory | a double that records each gate filed |
-| runtime | Gas City | `gc` (sling, config, session, events, runtime), the supervisor API (runs, sessions), and the pack's scripts that ask a person | recorded responses |
+| runtime | Gas City | `gc` (sling, config, session, events, runtime), the supervisor API (runs, sessions), and the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh` | recorded responses |
 | host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start inside the sandbox a demo capture runs in | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
 
 The store's rules are the store's own. The store adapter asks the store whether
@@ -646,10 +645,11 @@ why a reader must know it, and the work that retires it.
   rig domain runs a check's command itself.
   `epic create` and `session title` also read beads through the store adapter,
   around the ledger. The runtime adapter (`internal/gascity`) holds only what
-  the arm's start asks of Gas City, and the host adapter only what a copy of a
-  rig's UI needs, so their tests stub `gc` on `PATH` or run real processes, and
-  none of them is the model for a new verb. tk-ssm8qns.16 puts them behind the
-  ledger and the adapters.
+  the arm's start and the landing order's human gates ask of Gas City, and the
+  host adapter only what a copy of a rig's UI needs, so the tests of these
+  verbs stub `gc` on `PATH` or run real processes, and none of these verbs is
+  the model for a new one. tk-ssm8qns.16 puts them behind the ledger and the
+  adapters.
 - **Readers outside the `bead` domain read the arm's keys.** The arm's record
   (`services/gctk/arm/record`) declares the arm's keys and is their one writer,
   but the scripts, doctor checks, skills and the helm board that read an arm
