@@ -184,10 +184,13 @@ skill file is unreadable, use the degraded three-rule core embedded in the
 step text and WARN on stderr.
 
 Work, per the rubric: dedup on (`obs.provenance`, `obs.category`); cluster
-observations onto **pattern beads** (`task_kind=feedback-pattern`, open,
-unrouted, home-rig store — the `triage-subject` idiom: a standing record,
-not claimable work; create one per new pattern); judge each cluster to one
-of the rubric's five outcomes (promote / hold / merge-into-existing-rule /
+observations onto **pattern beads** (`task_kind=feedback-pattern`, unrouted,
+home-rig store; create one per new pattern, and find the existing ones at any
+status). A pattern is backlog work this formula triages: open while it needs a
+decision, waiting on the follow-up it spawned through a `blocks` edge, deferred
+with a date while it gathers evidence, closed once resolved, and reopened when
+its feedback recurs. Every run leaves each pattern in one of those states.
+Judge each cluster to one of the rubric's five outcomes (promote / hold / merge-into-existing-rule /
 contest-existing-rule / discard-with-reason). Recompute and cache rollups on
 each pattern bead (`evidence_count`, `distinct_sources`, `first_seen`,
 `last_seen`, `rule.path`, `promoted_at`, …) — derived by query,
