@@ -166,17 +166,23 @@ its users to record each dated use for the judge's next look.
 
 A note on a pattern leaves once the pattern closes and a fix it spawned has
 landed on its repository's default branch. When the pattern closes with no fix
-landed, the note comes due again. No note leaves because of its age. The
-script keeps, for each directory, the list of the notes the judge kept, with
-each one's hash and what it waits on, and the text of each note it removed, in
-the pack's state directory. It removes a note only while the note is unchanged
-since the judge read it, and takes out the lines of the index and of a
-collection note (`hub-*.md`) that link a note no longer in the directory.
+landed, the note comes due again. When the operator vetoed a prompt-update the
+pattern spawned, by closing its PR unmerged, the run that ends the wait first
+marks the note: a line in it, and a mark on each line of the index or a
+collection note that points at it, say that the operator declined its rule, so
+agents stop following it before the judge reads the note again. No note leaves
+because of its age. The script keeps, for each directory, the list of the notes
+the judge kept, with each one's hash and what it waits on, and the text of each
+note it removed, in the pack's state directory. It removes a note only while the
+note is unchanged since the judge read it, and takes out the lines of the index
+and of a collection note (`hub-*.md`) that link a note no longer in the
+directory.
 
 Each run also writes a guidance block at the top of every index, from
 `assets/scripts/memory-guidance.md`. It tells agents what a note holds and how
 to write one so it can be acted on, and sends what is to be evaluated to an
-observation bead.
+observation bead. The same file holds the line that asks a note's users to
+record each use, and the words a veto's marks use.
 
 ## The promotion path
 

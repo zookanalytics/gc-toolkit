@@ -222,7 +222,9 @@ A note leaves in one of two ways, and never because of its age.
   note that waits on a bead in another rig's store leaves once that bead closes
   on a merge that has landed. A note whose pattern or bead closed with no fix
   landed does not leave: it is due again from the day the wait ended, and the
-  judge weighs it.
+  judge weighs it. When the operator vetoed a proposal the pattern spawned, the
+  run that ends the wait first marks the note, so agents stop following its
+  rule while it waits for the judge (below).
 
 A follow-up has landed when its merge is on its repository's default branch.
 Closing is not enough, because a follow-up placed under an integration effort
@@ -271,9 +273,16 @@ when the note next comes due. It leaves the other, that the list keep each
 note's use count so the most-used notes can later go to the operator as
 candidates for the pack. The uses stay in the note alone, where the judge reads
 them. The build makes one call of its own, which the operator did not rule on
-either. A note whose pattern closed after a veto is due again, and the judge
-weighs it with the veto as the operator's word on its rule, where the design as
-approved had it leave at the veto.
+either. Where the design as approved had a note leave at the veto, the build
+keeps it in memory, marked, for the judge to read again. In the run that ends
+the wait, the note gains a line, in the pack's words, saying that the operator
+declined its rule in the PR the line names and not to follow it. Each line of
+the index or a collection note that points at the note gains a short mark that
+says the same, and an entry of a collection note gains the line under its first
+line. The note is due again from the day the pattern closed, and since the veto
+settled its rule, the judge weighs what else it holds. Removing the note at the
+veto would also have taken out of memory anything else it held. A dismissal
+marks nothing, because its silence substantiates nothing.
 
 The operator's two concerns, in that cycle:
 

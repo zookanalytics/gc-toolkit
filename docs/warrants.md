@@ -671,8 +671,9 @@ shares only the word ([authority-map.md](authority-map.md)).
   and the text of each note it removed.
 - **Stands in for.** A lifecycle for an agent's memory note: a wait that holds
   a note, a file in Claude Code's memory directory, until the bead that carries
-  its lesson is done or a date comes, and the record of what the judge decided
-  about it.
+  its lesson is done or a date comes, the record of what the judge decided
+  about it, and a switch that stops one note steering agents once the operator
+  vetoes its rule.
 - **Evidence.**
   - In `gastownhall/gascity`, nothing reads or empties an agent's memory. No
     file outside the tests names `MEMORY.md`, auto memory or
@@ -687,12 +688,17 @@ shares only the word ([authority-map.md](authority-map.md)).
     value that `bd prime` injects into every session, with no wait.
   - Claude Code keeps memory files out of its retention sweep and expires or
     empties none of them ([memory](https://code.claude.com/docs/en/memory),
-    "Storage location").
+    "Storage location"). It turns memory off only for a whole session or
+    project, and `claudeMdExcludes` skips CLAUDE.md and rules files by path, not
+    a memory topic file ("Enable or disable auto memory", "Exclude specific
+    CLAUDE.md files"). So the intake marks a vetoed note in its own text and in
+    the lines that point at it.
   - The search is
     [specs/tk-zlot608.2/gas-city-search.md](../specs/tk-zlot608.2/gas-city-search.md).
-- **Verified.** 2026-11-14, at `gastownhall/gascity` main dc5486b999 and
-  `gastownhall/beads` main 8cdfa796a8f5. Claude Code's memory page as the
-  search read it on 2026-11-11.
+- **Verified.** 2026-11-14, at `gastownhall/gascity` main 13bb101b8f and
+  `gastownhall/beads` main 8cdfa796a8f5. Claude Code's memory page as read on
+  2026-11-14.
 - **Retires when.** Gas City or bd ships a wait that can hold an agent's
   memory note on a bead or a date, or Claude Code keeps a lifecycle for its
-  memory notes.
+  memory notes. The veto marks retire when Claude Code can switch off one
+  memory file.

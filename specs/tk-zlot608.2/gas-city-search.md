@@ -125,6 +125,47 @@ here is a note, which no edge can hold, and the wait would end only once someone
 ran `bd ship` after each fix closed. So the note's row on the list names that
 bead, and the run reads it from its store.
 
+## Stop a vetoed rule from steering agents
+
+When the operator vetoes a proposal a note's pattern spawned, the build keeps
+the note for the judge and stops its rule steering agents in the run that ends
+the wait (design.md, section 3). This need was searched on 2026-11-14, at Gas
+City upstream main 13bb101b8f, with Claude Code's memory page read that day.
+
+**Not covered: switching off one memory file.**
+
+- **Claude Code** turns auto memory off for a whole session or project
+  (`autoMemoryEnabled`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`) and moves the whole
+  directory (`autoMemoryDirectory`)
+  ([memory](https://code.claude.com/docs/en/memory), "Enable or disable auto
+  memory" and "Storage location"). Its `claudeMdExcludes` setting skips
+  CLAUDE.md and rules files by path ("Exclude specific CLAUDE.md files"), and
+  the page names no exclusion for a memory topic file. What loads at the start
+  of a session is the index, `MEMORY.md`, and Claude reads a topic file "on
+  demand using its standard file tools when it needs the information" ("How it
+  works"). Claude treats memory "as context, not enforced configuration"
+  ("CLAUDE.md vs auto memory"). So the words an agent reads are the lever: the
+  index and collection-note lines that point at the note, and the note's own
+  text.
+- **Gas City** has no primitive that reads or edits an agent's memory. No file
+  at upstream main 13bb101b8f names `MEMORY.md`, auto memory, `autoMemory` or
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, and its audit still defers agent memory
+  (`engdocs/archive/analysis/gastown-upstream-audit.md`, "22g. Agent memory").
+- **bd** can mark a bead, but a note is a file, so no bd state reaches it.
+
+**Covered: reading the veto.** The distiller's vetoed-PR sweep defines a veto as
+a prompt-update bead, closed when its PR opened with `merge_result` set to
+`pull_request`, whose PR GitHub reports closed unmerged (mol-feedback-distiller,
+load-and-gate section 4). The run already reads each follow-up's merge state and
+its PR's through `gh pr view` to tell whether a fix landed, so it tells a veto
+apart from the same read and adds no reader.
+
+So read-memory writes the marks itself, in the words `memory-guidance.md` holds,
+through the guarded edit it already makes to an index: each mark is written only
+while the file holds the text it was made from. The marks need no state of their
+own. The note's row clears its wait and is due from the day the pattern closed,
+as after a dismissal, and a mark already in a file is not written again.
+
 ## Keep the list and the removed notes' text
 
 **Covered: Gas City's pack state directory.** Gas City names one runtime
