@@ -6,3 +6,5 @@ When a note you used asks for a record of each use, add the dated line it asks f
 What is to be evaluated goes in a report, an observation bead the gc-toolkit.records skill files: corrective feedback from a review, a rework or the operator, feedback whose reach you cannot tell, and a change that needs approval. The state of open work goes on its bead's notes. Leave out what the pack already says.
 <!-- /memory-intake -->
 <!-- memory-intake: use --> When this note steers your work, add a line at its end: used <YYYY-MM-DD>: <what it changed>
+<!-- memory-intake: veto --> The operator declined this note's rule in <PR>, so do not follow it. Leave the note here: the learning loop reads it again for anything else it holds.
+<!-- memory-intake: veto mark --> (the operator declined its rule: do not follow it)

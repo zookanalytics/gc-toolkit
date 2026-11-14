@@ -34,12 +34,17 @@
 # unit is due when the list does not hold it at its hash, or its date has
 # come, and is as old as its last change or that date. A note's list hash
 # leaves out its use lines. A unit is removed only once its text is kept, and
-# it is removed, or an index or collection note edited, only while it is
-# unchanged since it was read.
+# it is removed, or a note, an index or a collection note edited, only while it
+# is unchanged since it was read.
 #
 # A note on a closed feedback pattern leaves once a fix the pattern spawned has
 # landed on its repository's default branch and none is still on its way, and
-# is due again from the day the pattern closed when none landed. A note that
+# is due again from the day the pattern closed when none landed. When none
+# landed and the operator vetoed a prompt-update the pattern spawned, by
+# closing its PR unmerged, the same run marks the note so agents stop
+# following its rule: the note gains the veto line under any front matter and
+# each pointer to it in the index and the collection notes gains the veto
+# mark, or an entry gains the veto line under its first line. A note that
 # waits on another bead leaves once that bead's merge lands, and is due again
 # when it closed with no merge. A merge into an integration effort's branch
 # lands with the effort's landing bead.
@@ -71,6 +76,10 @@ if [ -z "$MANAGED_SETTINGS" ]; then
 fi
 LIST_HEAD=$'#memory-intake list 1\tkind\tname\thash\tjudged\twait\tnext\twhy'
 USE_MARK='<!-- memory-intake: use -->'
+# The guidance file's veto line goes into a note whole; its veto mark line
+# gives, after the key, the text a pointer gains.
+VETO_MARK='<!-- memory-intake: veto -->'
+VETO_POINTER_KEY='<!-- memory-intake: veto mark -->'
 # A use line, as the awk programs below match it.
 USE_AWK_RE='^(- )?used [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
 LEVELS=(managed city local project user)
@@ -488,13 +497,15 @@ due_rows() {
 # the directory is taken out with the text that follows it, and a line left
 # with none goes. A listing that does not name the file being edited was not
 # read, and nothing is taken out on it.
-PRUNE_AWK="$BOUNDARY_AWK"'
+TARGET_AWK='
 function target(s,   t) {
   if (s ~ /^\[\[/) { t = substr(s, 3); t = substr(t, 1, index(t, "]]") - 1); sub(/\|.*/, "", t); sub(/#.*/, "", t); if (t !~ /\.md$/) t = t ".md"; return t }
   t = s; sub(/^\[[^]]*\]\(/, "", t); t = substr(t, 1, index(t, ")") - 1)
   sub(/^</, "", t); sub(/>$/, "", t); sub(/#.*/, "", t); sub(/[ \t].*/, "", t)
   return t
 }
+'
+PRUNE_AWK="$BOUNDARY_AWK$TARGET_AWK"'
 function gone(s,   t) { t = target(s); if (t == "" || t ~ /[\/:]/ || t !~ /\.md$/) return 0; return !(t in present) }
 BEGIN { while ((getline x < NAMES) > 0) present[x] = 1; if (!(SELF in present)) { unread = 1; exit 2 } }
 { L[NR] = $0 }
@@ -513,10 +524,34 @@ END {
 }'
 prune_links() { LC_ALL=C awk -v NAMES="$1" -v SELF="$2" "$PRUNE_AWK"; }
 
-DROP_ENTRY_AWK="$BOUNDARY_AWK"'
-BEGIN { while ((getline x < ENTRY) > 0) E[++m] = x }
+# Each pointer to the note NOTE gains, after its text and only once, the veto
+# mark the file MARK holds.
+MARK_AWK="$BOUNDARY_AWK$TARGET_AWK"'
+BEGIN { if ((getline mark < MARK) <= 0 || mark == "") { unread = 1; exit 2 } }
 { L[NR] = $0 }
 END {
+  if (unread) exit 2
+  for (i = 1; i <= NR; i++) {
+    if (substr(L[i], 1, 2) != "- ") { print L[i]; continue }
+    if (!pointer(NR, i)) { e = entry_end(NR, i); for (x = i; x <= e; x++) print L[x]; i = e; continue }
+    n = split(substr(L[i], 3), seg, / · /); out = ""
+    for (j = 1; j <= n; j++) {
+      if (link_start(seg[j]) && target(seg[j]) == NOTE && !index(seg[j], mark)) seg[j] = seg[j] " " mark
+      out = (j > 1 ? out " · " : "") seg[j]
+    }
+    print "- " out
+  }
+}'
+mark_pointers() { LC_ALL=C awk -v NOTE="$1" -v MARK="$2" "$MARK_AWK"; }
+
+# ENTRY names a file that holds one entry's lines. The first entry of the
+# collection note that holds the same lines is taken out, or, when ADD names a
+# file, gains the line that file holds under its own first line.
+ENTRY_EDIT_AWK="$BOUNDARY_AWK"'
+BEGIN { while ((getline x < ENTRY) > 0) E[++m] = x; if (ADD != "" && (getline add < ADD) <= 0) { unread = 1; exit 2 } }
+{ L[NR] = $0 }
+END {
+  if (unread) exit 2
   done = 0
   for (i = 1; i <= NR; i++) {
     if (done || substr(L[i], 1, 2) != "- ") { print L[i]; continue }
@@ -524,11 +559,12 @@ END {
     same = (e - i + 1 == m)
     for (x = 0; same && x < m; x++) if (L[i + x] != E[x + 1]) same = 0
     if (same) done = 1
-    else for (x = i; x <= e; x++) print L[x]
+    if (!same || ADD != "") for (x = i; x <= e; x++) { print L[x]; if (same && x == i) print add }
     i = e
   }
 }'
-drop_entry() { LC_ALL=C awk -v ENTRY="$1" "$DROP_ENTRY_AWK"; }
+drop_entry() { LC_ALL=C awk -v ENTRY="$1" -v ADD= "$ENTRY_EDIT_AWK"; }
+add_to_entry() { LC_ALL=C awk -v ENTRY="$1" -v ADD="$2" "$ENTRY_EDIT_AWK"; }
 
 # tidy <dir> <state dir> — takes the pointers to notes no longer in the
 # directory out of the index and every collection note, and removes, with its
@@ -566,6 +602,57 @@ tidy() {
   return "$fail"
 }
 
+# --- a vetoed rule --------------------------------------------------------------
+# The veto line the file LINE holds goes into a note under its front matter, or
+# first when it has none.
+VETO_NOTE_AWK='
+BEGIN { if ((getline v < LINE) <= 0) { unread = 1; exit 2 } }
+{ L[NR] = $0 }
+END {
+  if (unread) exit 2
+  f = 0
+  if (NR > 0 && L[1] == "---") { for (j = 2; j <= NR && L[j] != "---"; j++) ; if (j <= NR) f = j }
+  for (i = 1; i <= f; i++) print L[i]
+  print v
+  for (i = f + 1; i <= NR; i++) print L[i]
+}'
+veto_note() { LC_ALL=C awk -v LINE="$1" "$VETO_NOTE_AWK"; }
+
+# veto_unit <dir> <kind> <name> <entry file> <PR> — marks a unit whose rule the
+# operator vetoed in <PR>, so agents stop following it. A note gains the veto
+# line, naming <PR>, and each pointer to it in the index and the collection
+# notes gains the veto mark. An entry, found by the text the judge read, gains
+# the veto line under its first line. A unit that holds a veto line already
+# gains none. VETO_HASH is the unit's list hash once it is marked. 0 marked; 2
+# the note is gone, or its collection note no longer holds the entry; 1 a file
+# could not be written or kept changing.
+VETO_HASH=""
+veto_unit() {
+  local dir=$1 kind=$2 name=$3 ef=$4 line f
+  VETO_HASH=""
+  line=${VETO_LINE//"<PR>"/"$5"}
+  [ -f "$dir/$name" ] || return 2
+  if [ "$kind" = entry ]; then
+    if grep -qF "$VETO_MARK" "$ef"; then VETO_HASH=$(sha_file "$ef"); return 0; fi
+    printf '  %s\n' "$line" > "$WORK/veto" || return 1
+    rewrite "$dir/$name" add_to_entry "$ef" "$WORK/veto" || return 1
+    [ "$REWROTE" = 1 ] || return 2
+    VETO_HASH=$(add_to_entry "$ef" "$WORK/veto" < "$ef" | "${SHA[@]}" | cut -c1-64)
+    return 0
+  fi
+  printf '%s\n' "$VETO_POINTER" > "$WORK/veto.mark" || return 1
+  for f in "$dir/MEMORY.md" "$dir"/hub-*.md; do
+    [ -f "$f" ] || continue
+    rewrite "$f" mark_pointers "$name" "$WORK/veto.mark" || return 1
+  done
+  if ! grep -qF "$VETO_MARK" "$dir/$name"; then
+    printf '%s\n' "$line" > "$WORK/veto" || return 1
+    rewrite "$dir/$name" veto_note "$WORK/veto" || return 1
+  fi
+  VETO_HASH=$(LC_ALL=C awk -v RE="$USE_AWK_RE" '$0 !~ RE' "$dir/$name" | "${SHA[@]}" | cut -c1-64)
+  return 0
+}
+
 # --- the guidance block -------------------------------------------------------
 # The block goes at the top of the index, after any front matter, in place of
 # the block an earlier run wrote, with one blank line before the rest. A block
@@ -596,12 +683,16 @@ END {
   }
 }'
 guide_edit() { LC_ALL=C awk -v BLOCK="$WORK/block" "$GUIDE_AWK"; }
-USE_LINE=""
+USE_LINE=""; VETO_LINE=""; VETO_POINTER=""
 load_guidance() {
   [ -r "$GUIDANCE" ] || { err "$GUIDANCE is missing"; return 1; }
   awk '{ print } $0 == "<!-- /memory-intake -->" { exit }' "$GUIDANCE" > "$WORK/block"
   grep -qx '<!-- /memory-intake -->' "$WORK/block" || { err "$GUIDANCE has no end to its block"; return 1; }
   USE_LINE=$(grep -F -m1 "$USE_MARK" "$GUIDANCE") || { err "$GUIDANCE has no use line"; return 1; }
+  VETO_LINE=$(grep -F -m1 "$VETO_MARK" "$GUIDANCE") || { err "$GUIDANCE has no veto line"; return 1; }
+  VETO_POINTER=$(grep -F -m1 "$VETO_POINTER_KEY" "$GUIDANCE") || { err "$GUIDANCE has no veto mark"; return 1; }
+  VETO_POINTER=${VETO_POINTER#*"$VETO_POINTER_KEY"}; VETO_POINTER=${VETO_POINTER# }
+  [ -n "$VETO_POINTER" ] || { err "$GUIDANCE has no veto mark"; return 1; }
 }
 # guide <dir> — writes the guidance block into the index, making the index
 # when there is none. GUIDED says whether it wrote.
@@ -649,12 +740,13 @@ pr_state() {
     || echo unknown
 }
 # landed <store> <bead row> [depth] — sets LANDED: landed (its merge is on its
-# repository's default branch), none (it closed with no merge on the way
-# there), or pending.
-LANDED=pending
+# repository's default branch), vetoed (a prompt-update whose PR closed
+# unmerged, which the distiller reads as the operator's veto; VETOED_PR names
+# the PR), none (it closed with no merge on the way there), or pending.
+LANDED=pending; VETOED_PR=""
 landed() {
   local store=$1 j=$2 depth=${3:-0} mr tgt url st lid def
-  LANDED=pending
+  LANDED=pending; VETOED_PR=""
   [ "$(field "$j" '.status // ""')" = closed ] || return 0
   mr=$(field "$j" '.metadata.merge_result // ""')
   case "$mr" in
@@ -665,7 +757,10 @@ landed() {
       st=${PR_STATE[$url]}
       case "$st" in
         "MERGED "*) tgt=${st#MERGED } ;;
-        CLOSED*) LANDED=none; return 0 ;;
+        CLOSED*)
+          LANDED=none
+          if [ "$(field "$j" '.metadata.task_kind // ""')" = prompt-update ]; then LANDED=vetoed; VETOED_PR=$(one_line "$url"); fi
+          return 0 ;;
         *) return 0 ;;
       esac ;;
     *) LANDED=none; return 0 ;;
@@ -681,11 +776,13 @@ landed() {
   esac
   return 0
 }
-# decide <id> — sets DECISION: wait, left (a fix landed), or
+# decide <id> — sets DECISION: wait, left (a fix landed),
+# vetoed<US><date><US><why><US><PR> (a pattern done with no fix landed, after
+# the operator vetoed a prompt-update it spawned in <PR>), or
 # ended<US><date><US><why> (done with no fix landed).
 DECISION="wait"
 decide() {
-  local id=$1 store j f any=0 day why reason deps
+  local id=$1 store j f any=0 veto="" day why reason deps
   local -a ups=()
   DECISION="wait"
   store=${STORE_OF[${id%%-*}]:-}
@@ -712,22 +809,28 @@ decide() {
     for f in "${ups[@]}"; do
       [ "${BEAD[$store|$f]}" = - ] && continue
       landed "$store" "${BEAD[$store|$f]}"
-      case "$LANDED" in pending) return 0 ;; landed) any=1 ;; esac
+      case "$LANDED" in pending) return 0 ;; landed) any=1 ;; vetoed) veto=${veto:-$VETOED_PR} ;; esac
     done
     if [ "$any" = 1 ]; then DECISION=left; return 0; fi
-    why="waited on $id, which closed with no fix landed${reason:+: $reason}"
+    why="waited on $id, which closed with no fix landed"
   else
     landed "$store" "$j"
     case "$LANDED" in landed) DECISION=left; return 0 ;; pending) return 0 ;; esac
-    why="waited on $id, which closed with no merge${reason:+: $reason}"
+    why="waited on $id, which closed with no merge"
   fi
-  DECISION="ended$US$day$US$(one_line "$why")"
+  if [ -n "$veto" ]; then
+    DECISION="vetoed$US$day$US$(one_line "$why after the operator vetoed $veto${reason:+: $reason}")$US$veto"
+    return 0
+  fi
+  DECISION="ended$US$day$US$(one_line "$why${reason:+: $reason}")"
 }
 
 # settle — ends each wait that is done. A unit whose fix landed is removed
 # with its text kept, and one whose wait ended with no fix is due again from
-# the day it ended. SETTLED_LEFT and SETTLED_DUE count them.
-SETTLED_LEFT=0; SETTLED_DUE=0
+# the day it ended. One whose rule the operator vetoed is marked first, and its
+# wait stays until it is. SETTLED_LEFT and SETTLED_DUE count them, and
+# SETTLED_VETOED those of the due that were marked.
+SETTLED_LEFT=0; SETTLED_DUE=0; SETTLED_VETOED=0
 settle() {
   local dir sd wait store rc=0
   declare -A OUTCOME=() BY_STORE=()
@@ -757,11 +860,11 @@ settle() {
   return "$rc"
 }
 settle_dir() {
-  local dir=$1 sd=$2 plan=$3 w="$WORK/settle" kind name hash wait out day why unit full ef r rc=0
+  local dir=$1 sd=$2 plan=$3 w="$WORK/settle" kind name hash wait out day why pr unit full ef nh r rc=0
   lock_dir "$sd" "$dir" || return 1
   scan "$dir" "$w" || { unlock_dir; return 1; }
   list_rows "$sd" > "$w/rows"
-  while IFS="$US" read -r kind name hash wait out day why; do
+  while IFS="$US" read -r kind name hash wait out day why pr; do
     # The row must still be the one the plan read.
     awk -F'\t' -v k="$kind" -v n="$name" -v h="$hash" -v wt="$wait" '$1 == k && $2 == n && $3 == h && $5 == wt { f = 1 } END { exit !f }' "$w/rows" || continue
     if [ "$out" = left ]; then
@@ -780,8 +883,26 @@ settle_dir() {
       drop_row "$w/rows" "$kind" "$name" "$hash"
       SETTLED_LEFT=$((SETTLED_LEFT + 1))
     else
-      awk -F'\t' -v OFS='\t' -v k="$kind" -v n="$name" -v h="$hash" -v d="$day" -v y="$why" \
-        '$1 == k && $2 == n && $3 == h { $5 = ""; $6 = d; $7 = y } { print }' "$w/rows" > "$w/rows.next" && mv -f "$w/rows.next" "$w/rows"
+      # A vetoed rule is marked in the note as it stands, or in the entry the
+      # judge read, and the row takes the unit's hash once it is marked.
+      nh=$hash
+      if [ "$out" = vetoed ]; then
+        ef=""
+        if [ "$kind" = entry ]; then
+          unit=$(awk -F'\t' -v n="$name" -v h="$hash" '$1 == "entry" && $2 == n && $3 == h { print; exit }' "$w/units.tsv")
+          [ -n "$unit" ] || continue
+          IFS="$US" read -r _ _ _ _ _ ef <<< "$(printf '%s' "$unit" | to_us)"
+        fi
+        veto_unit "$dir" "$kind" "$name" "$ef" "$pr"; r=$?
+        case $r in
+          0) nh=$VETO_HASH ;;
+          2) continue ;;
+          *) err "$dir/$name is not marked as vetoed, so it waits until a run marks it: a file could not be written, or it kept changing"; rc=1; continue ;;
+        esac
+        SETTLED_VETOED=$((SETTLED_VETOED + 1))
+      fi
+      awk -F'\t' -v OFS='\t' -v k="$kind" -v n="$name" -v h="$hash" -v nh="$nh" -v d="$day" -v y="$why" \
+        '$1 == k && $2 == n && $3 == h { $3 = nh; $5 = ""; $6 = d; $7 = y } { print }' "$w/rows" > "$w/rows.next" && mv -f "$w/rows.next" "$w/rows"
       SETTLED_DUE=$((SETTLED_DUE + 1))
     fi
   done < <(to_us < "$plan")
@@ -877,9 +998,10 @@ cmd_read() {
     counts=$(awk -F'\t' '{ c[$1]++ } END { printf "%d notes and %d entries", c["note"], c["entry"] }' "$w/units.tsv")
     say "${DIR_NAMES[$dir]}: $counts; links to gone notes taken out of $LINKS file(s)$([ "$GUIDED" = 1 ] && printf '; guidance block rewritten')"
   done
-  SETTLED_LEFT=0; SETTLED_DUE=0
+  SETTLED_LEFT=0; SETTLED_DUE=0; SETTLED_VETOED=0
   settle || rc=1
   say "waits ended: $SETTLED_LEFT unit(s) removed with a fix landed, their text kept; $SETTLED_DUE due again with no fix landed"
+  [ "$SETTLED_VETOED" = 0 ] || say "vetoed: $SETTLED_VETOED of those due again marked, so agents stop following the rule the operator vetoed"
   say "$(due_all | grep -c .) due"
   return "$rc"
 }

@@ -483,7 +483,7 @@ outcome:
   was dismissed with no recurrence is read this way too, since a working note
   prevents the recurrence the hold waits for, and that silence substantiates
   nothing. A veto is not such silence: it is the operator's word on the rule
-  the note states.
+  the note states, and When a note leaves says how you read such a note.
 
 ### A note on a pattern
 
@@ -528,11 +528,22 @@ it goes, or when what it waits on is done. read-memory removes a note on a
 pattern once the pattern closes and a fix it spawned has landed on its
 repository's default branch, and a merge into an integration effort's branch
 lands with the effort's landing bead. When the pattern closes with no fix
-landed, as a dismissal or after a veto, the note is due again from that day and
-`memory_prior` says why. A note that waits on a bead in another rig's store
-leaves once that bead's merge has landed, and is due again when it closed with
-no merge. No note leaves because of its age, and each removed note's text is
-kept in the intake's state directory.
+landed, the note is due again from that day and `memory_prior` says why. A
+dismissal leaves the note as it is.
+
+A veto is a prompt-update the pattern spawned whose PR closed unmerged, as
+load-and-gate's vetoed-PR sweep reads it. After a veto, read-memory marks the
+note in the same run, so agents stop following its rule before you reach it.
+The note gains a line that names the PR, each line of the index or a
+collection note that points at it gains a mark, and an entry gains the line
+under its first line. When a vetoed note comes due, the veto has settled its
+rule, so judge what else it holds by the three questions. Drop it when nothing
+else in it is worth keeping. A note you keep keeps its mark.
+
+A note that waits on a bead in another rig's store leaves once that bead's
+merge has landed, and is due again when it closed with no merge. No note leaves
+because of its age, and each removed note's text is kept in the intake's state
+directory.
 
 ### Decision lines
 

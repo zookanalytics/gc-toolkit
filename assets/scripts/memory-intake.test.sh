@@ -415,6 +415,68 @@ echo '{"https://example.test/pull/5": {"state": "MERGED", "baseRefName": "main"}
 run read
 eq "$(left b.md f.md)" "b.md:gone f.md:gone " "once the landing bead merges, and once the PR merges into the default branch"
 
+echo "── a veto marks the note, its pointers and an entry in the run that ends the wait ──"
+city veto
+rig v tk
+M=$(memdir "$B/rigs/v")
+VL=$(grep -F '<!-- memory-intake: veto -->' "$HERE/memory-guidance.md" | sed 's|<PR>|https://example.test/pull/7|')
+VM=$(grep -F '<!-- memory-intake: veto mark -->' "$HERE/memory-guidance.md" | sed 's|^<!-- memory-intake: veto mark --> ||')
+printf -- '---\nname: v\n---\nV lesson: do the vetoed thing.\n' > "$M/v.md"
+for n in d e k; do printf '%s lesson.\n' "$n" > "$M/$n.md"; done
+printf -- '- [[v]] (V): see v\n- (no file) An entry on P7.\n  - its detail\n' > "$M/hub-v.md"
+printf '# Memory Index\n\n- [V](v.md) — v · [D](d.md) — d\n- [E](e.md) — e\n- [Hub](hub-v.md) — topics\n' > "$M/MEMORY.md"
+cat > "$B/rigs/v/beads.json" <<'JSON'
+[{"id": "tk-p7", "status": "open", "metadata": {"task_kind": "feedback-pattern"}},
+ {"id": "tk-p8", "status": "open", "metadata": {"task_kind": "feedback-pattern"}},
+ {"id": "tk-p9", "status": "open", "metadata": {"task_kind": "feedback-pattern"}},
+ {"id": "tk-p10", "status": "open", "metadata": {"task_kind": "feedback-pattern"}}]
+JSON
+run read
+apply_lines "$(ref_of v.md) waits tk-p7" "$(due_json | jq -r '.[] | select(.memory_kind == "entry") | .memory_ref') waits tk-p7" \
+  "$(ref_of d.md) waits tk-p8" "$(ref_of k.md) waits tk-p9" "$(ref_of e.md) waits tk-p10"
+eq "$RC" 0 "each unit waits on its pattern"
+printf 'V lesson, edited after it was judged.\n' >> "$M/v.md"
+cat > "$B/rigs/v/beads.json" <<'JSON'
+[{"id": "tk-p7", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "close_reason": "resolved: follow-ups closed", "metadata": {"task_kind": "feedback-pattern", "proposal_bead": "tk-f7"}},
+ {"id": "tk-f7", "status": "closed", "metadata": {"task_kind": "prompt-update", "merge_result": "pull_request", "pr_url": "https://example.test/pull/7"}},
+ {"id": "tk-p8", "status": "closed", "closed_at": "2026-11-13T09:00:00Z", "close_reason": "dismissed: the hold's window passed", "metadata": {"task_kind": "feedback-pattern"}},
+ {"id": "tk-p9", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "metadata": {"task_kind": "feedback-pattern", "proposal_bead": "tk-f9", "eng_bead": "tk-g9"}},
+ {"id": "tk-f9", "status": "closed", "metadata": {"task_kind": "prompt-update", "merge_result": "pull_request", "pr_url": "https://example.test/pull/9"}},
+ {"id": "tk-g9", "status": "closed", "metadata": {"merge_result": "merged", "merged_target": "main"}},
+ {"id": "tk-p10", "status": "closed", "closed_at": "2026-11-14T10:00:00Z", "metadata": {"task_kind": "feedback-pattern", "proposal_bead": "tk-f10"}},
+ {"id": "tk-f10", "status": "closed", "metadata": {"task_kind": "task", "merge_result": "pull_request", "pr_url": "https://example.test/pull/10"}}]
+JSON
+echo '{"https://example.test/pull/7": {"state": "CLOSED", "baseRefName": "main"}, "https://example.test/pull/9": {"state": "CLOSED", "baseRefName": "main"}, "https://example.test/pull/10": {"state": "CLOSED", "baseRefName": "main"}}' > "$STUB_PRS"
+chmod 500 "$M"   # nothing in the directory can be written
+run read
+chmod 700 "$M"
+has "$ERR" "$M/v.md is not marked as vetoed, so it waits until a run marks it" "a note that cannot be marked says so"
+eq "$RC" 1 "and fails the run"
+hasnt "$(cat "$M/v.md")" "memory-intake: veto" "it stays unmarked"
+eq "$(due_json | jq -r '.[] | select(.memory_file | endswith("/v.md")) | .memory_due + " / " + .memory_prior')" "changed / waited on tk-p7" "and keeps its wait"
+run read
+eq "$RC" 0 "the next run marks it"
+has "$OUT" "waits ended: 1 unit(s) removed with a fix landed, their text kept; 2 due again with no fix landed" "and counts what it marks among the due"
+has "$OUT" "vetoed: 2 of those due again marked" "and says how many it marked"
+eq "$(cat "$M/v.md")" "$(printf -- '---\nname: v\n---\n%s\nV lesson: do the vetoed thing.\nV lesson, edited after it was judged.' "$VL")" \
+  "the note gains the veto line under its front matter, though it changed since it was judged"
+has "$(cat "$M/MEMORY.md")" "- [V](v.md) — v $VM · [D](d.md) — d" "its index pointer gains the veto mark, and the pointer beside it does not"
+has "$(cat "$M/hub-v.md")" "- [[v]] (V): see v $VM" "and so does its collection-note pointer"
+eq "$(sed -n '2,4p' "$M/hub-v.md")" "$(printf -- '- (no file) An entry on P7.\n  %s\n  - its detail' "$VL")" "an entry gains the veto line under its first line"
+eq "$(left k.md d.md e.md)" "k.md:gone d.md:kept e.md:kept " "a fix that landed beside a vetoed proposal removes its note"
+hasnt "$(cat "$M/d.md" "$M/e.md")" "memory-intake: veto" "a dismissal, and a closed PR that is no prompt-update, mark no note"
+eq "$(grep -F '(e.md)' "$M/MEMORY.md")" "- [E](e.md) — e" "and no pointer"
+DUE=$(due_json)
+eq "$(printf '%s' "$DUE" | jq -r '[.[] | (.memory_file | split("/") | last) + ":" + .memory_due] | join(" ")')" "d.md:date e.md:date hub-v.md:date v.md:date" \
+  "each unit whose wait ended with no fix landed is due, the marked ones at the hash they hold now"
+eq "$(printf '%s' "$DUE" | jq -r '.[] | select(.memory_file | endswith("/v.md")) | .created_at + " / " + .memory_prior')" \
+  "2026-11-14T00:00:00Z / waited on tk-p7, which closed with no fix landed after the operator vetoed https://example.test/pull/7: resolved: follow-ups closed" \
+  "as old as the day the pattern closed, saying the operator vetoed it"
+cp "$M/v.md" "$B/v.before"; cp "$M/MEMORY.md" "$B/index.before"; cp "$M/hub-v.md" "$B/hub.before"
+run read
+hasnt "$OUT" "vetoed:" "a later run marks nothing again"
+eq "$(cmp -s "$M/v.md" "$B/v.before" && cmp -s "$M/MEMORY.md" "$B/index.before" && cmp -s "$M/hub-v.md" "$B/hub.before" && echo same)" "same" "and leaves each mark as it is"
+
 echo "── a pattern whose edges were not read keeps its notes ──"
 city edges
 rig s tk

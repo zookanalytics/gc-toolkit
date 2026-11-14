@@ -121,9 +121,10 @@ Off the pack's home rig it prints `off-home` and changes nothing. On it, it
 places the memory directory of each of the city's rigs and of its root as
 Claude Code does, files a finding for a place it cannot resolve, removes each
 note whose fix has landed and keeps its text, makes a note due again when its
-wait ended with no fix landed, takes out the index and collection-note lines
-that link a note no longer there, rewrites each index's guidance block, and
-prints how many notes are due. load-and-gate seeds the pending set with them.
+wait ended with no fix landed, first marking one whose rule the operator vetoed
+so agents stop following it, takes out the index and collection-note lines that
+link a note no longer there, rewrites each index's guidance block, and prints
+how many notes are due. load-and-gate seeds the pending set with them.
 A non-zero exit names what it could not do, and the run goes on.
 
 Then close this step (non-terminal: the same session then takes load-and-gate
