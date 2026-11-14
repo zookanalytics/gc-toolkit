@@ -60,9 +60,11 @@
 # every read and write before it has answered. It runs the edit skill's copy of a
 # UI under a stub gc, and fails unless the copy runs the command the rig declares
 # as its ui_serve_command, as written, from the tree, with the city's publisher,
-# and starts no copy for a rig that declares none. It pins that every skill and
-# formula names a pack skill to load by its catalog name, never by its path, so
-# an agent in any tree loads the installed pack's copy.
+# and starts no copy for a rig that declares none. It pins that the demo:capture
+# skill and the demo check read that command for a capture of the rig's app. It
+# pins that every skill and formula names a pack skill to load by its catalog
+# name, never by its path, so an agent in any tree loads the installed pack's
+# copy.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc. The one case
@@ -1203,6 +1205,16 @@ for sh_ in $shells; do
         bad "($sh_) converse-edit: a rig that declares no ui_serve_command gets no copy, and the block says so" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
     fi
 done
+# A capture of a rig's own app takes the same command the copy runs: the
+# demo:capture skill reads it for a rig, and its Demo a PR and the demo check
+# pass it to the capture as --serve.
+DEMO_SKILL="$REPO/skills/demo-capture/SKILL.md"
+DEMO_CHECK="$REPO/skills/review-demo/SKILL.md"
+START_READ='SERVE=$(gc formula show mol-rig-demo --rig <rig> --json | jq -r '"'"'[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty'"'"')'
+have "the demo:capture skill reads a rig's start command, its ui_serve_command" "$START_READ" "$DEMO_SKILL"
+have "…and its Demo a PR captures a page script with it" 'rig-demo-capture.sh" --script <script.md> --output <clip.mp4> --serve "$SERVE" --cwd .' "$DEMO_SKILL"
+have "the demo check's capture reads the same command" "$START_READ" "$DEMO_CHECK"
+have "…and serves it from the reviewed worktree" 'Give it as `--serve "$SERVE" --cwd <worktree>`.' "$DEMO_CHECK"
 echo "── a moot or benign close settles a headline that waits on nothing ──"
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The

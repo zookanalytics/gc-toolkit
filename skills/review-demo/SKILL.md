@@ -137,25 +137,32 @@ reports whether the `gh` it needs is present.
   the anchor and the diff. Keep the script and the clip in the review workspace.
 
   The app target is the draft's preview, `--base-url <url>`, where one deploys.
-  Otherwise serve the reviewed worktree, so the clip shows the reviewed commit.
-  When the rig's guide names its app under `## Bring the app up`,
-  `--guide <worktree>` takes that app from the reviewed commit. Otherwise name
-  it: `--serve-dir <worktree>/<dir>` for a static build, or
-  `--serve "<command>" --cwd <worktree>` for an app a command serves, which
-  runs as a copy that `gctk rig serve` runs from the worktree, inside the
-  capture's sandbox, on a free port of its own that the command gets as
-  `$PORT`. When the rig's guidance serves its app on this host from
-  `<worktree>`, give its `--base-url`, unless `city.toml` sets
-  `app_reads_city = "true"` for the rig. The capture refuses any other URL on
-  this host and says why. A terminal script, one that declares
-  `**Terminal:**`, brings up no app: give it `--cwd <worktree>`, or
-  `--guide <worktree>` to start its shell where the guide says. Exit 0 is a
-  clip in which every step's proof held, exit 3 is a clip in which at least one
-  step failed its proof, and exit 1 is no clip. The last line names the clip
-  and says whether it is narrated. Narration needs `OPENAI_API_KEY` in the
-  session. Without it the clip is silent and captioned, and it still shows the
-  change. `doctor/check-demo-toolchain` reports which parts of the capture
-  toolchain resolve in this session.
+  Otherwise serve the reviewed worktree, so the clip shows the reviewed commit,
+  with the command the rig declares as its `ui_serve_command`
+  (`gc-toolkit.demo-capture`, "The rig's start command"):
+
+  ```bash
+  SERVE=$(gc formula show mol-rig-demo --rig <rig> --json | jq -r '[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty')
+  ```
+
+  Give it as `--serve "$SERVE" --cwd <worktree>`. It runs as a copy that
+  `gctk rig serve` runs from the worktree, inside the capture's sandbox, on a
+  free port of its own that the command gets as `$PORT`. An empty `SERVE` is a
+  rig that declares no command, whose guidance names its app: give
+  `--serve-dir <worktree>/<dir>` for a static build, or
+  `--serve "<command>" --cwd <worktree>` for a command it names. When the rig's
+  guidance serves its app on this host from `<worktree>`, give its
+  `--base-url`, unless `city.toml` sets `app_reads_city = "true"` for the rig.
+  The capture refuses any other URL on this host and says why. A terminal
+  script, one that declares `**Terminal:**`, brings up no app: give it
+  `--cwd`, naming the directory in `<worktree>` where the guide says its shell
+  starts, or `<worktree>` itself. Exit 0 is a clip in which every step's proof
+  held, exit 3 is a clip in which at least one step failed its proof, and exit
+  1 is no clip. The last line names the clip and says whether it is narrated.
+  Narration needs `OPENAI_API_KEY` in the session. Without it the clip is
+  silent and captioned, and it still shows the change.
+  `doctor/check-demo-toolchain` reports which parts of the capture toolchain
+  resolve in this session.
 
 - `repo-artifact`: list the visuals the reviewed commit already carries.
 
@@ -199,12 +206,10 @@ reports whether the `gh` it needs is present.
   changes the size from that step on.
   A `--serve` command's copy takes a free port of its own, for a screenshot as
   for a video. A worktree has one copy, so take its captures one after another.
-  `--guide <worktree>` takes the app from the rig's guide here too.
   `--selector <css>` captures one element instead of the viewport, and
   `--full-page` captures the whole page. For a terminal, the engine types the
   command at a bash prompt in a terminal of its own, whose shell starts in
-  `--cwd`, or under `--guide <worktree>` where the guide says, so a relative
-  path runs the reviewed commit's script. The capture
+  `--cwd`, so a relative path runs the reviewed commit's script. The capture
   shows the command after a `$` prompt, then what it printed, or the screen a
   full-screen program it starts draws. A command that waits for input is no
   capture, and one that pages a long output in a terminal, such as `git log`,

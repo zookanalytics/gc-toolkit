@@ -1,6 +1,6 @@
 ---
 name: demo:capture
-description: Use when you need to record a narrated, captioned video demo (an MP4) of a rig's app from a demo script, demo a PR, or write the demo guide a rig keeps in its docs/review-demo.md.
+description: Use when you need to record a narrated, captioned video demo (an MP4) of a rig's app from a demo script, demo a PR, or write the demo guide a rig keeps in its docs/review-demo.md or the start command it declares for its app.
 ---
 
 # Demo Capture (SprintShow engine)
@@ -57,11 +57,12 @@ nothing:
 
 ## The rig's demo guide
 
-A rig says how to demo it in one file, `docs/review-demo.md`, and every demo
-path reads it at the commit the demo shows: the `demo` review check, the drafter
-`gc-toolkit.gc-demo-script`, `mol-rig-demo`, and [Demo a PR](#demo-a-pr). A rig
-that keeps none is demoed in the generic shape each path falls back to, and a
-page script then names its app with flags.
+A rig says how to demo it in one file, `docs/review-demo.md`, and the demo
+paths read it at the commit the demo shows: the `demo` review check, the drafter
+`gc-toolkit.gc-demo-script`, which `mol-rig-demo` runs, and
+[Demo a PR](#demo-a-pr). The guide is plain text for whoever writes and captures
+a script, and no script reads lines out of it. A rig that keeps none is demoed
+in the generic shape each path falls back to.
 
 The guide holds these sections, under these headings, so that every path finds
 the same thing in the same place:
@@ -69,45 +70,55 @@ the same thing in the same place:
 - `## Surfaces`: each surface a person sees, such as a page, a terminal
   session, markdown the rig posts or a message its app sends, and the files
   that draw it.
-- `## Bring the app up`: how a capture brings the app up, in the options a
-  capture takes, one line each:
-
-  ```markdown
-  **Serve:** `cd web && npm ci && npm run dev -- --port $PORT`
-  **Cwd:** `cli`
-  ```
-
-  `**Serve:**` names a command that brings the app up. A capture runs it as a
-  copy that `gctk rig serve` runs from the root of a worktree that holds only
-  what the rig commits, on a free port of its own that the command gets as
-  `$PORT`. So the command changes into the app's directory, installs what it
-  needs, and serves on `$PORT`. `**Serve dir:**` names a static directory
-  instead, which the engine's own server serves on the port `**Port:**` names,
-  or on a free one, and `**Base URL:**` names an app already running. Name at
-  most one of the three, and none for a rig whose surfaces are terminal
-  sessions. `**Port:**` goes only beside `**Serve dir:**`. `**Cwd:**` names the
-  directory a terminal script's shell starts in. Each value is one code span,
-  and each directory is relative to the root of the repository and lies in it. A
-  capture refuses a guide whose directory leads out of the repository, by an
-  absolute path, `..` or a symlink, because a capture reads and writes where
-  each directory it is given leads. The section's prose says what the lines
-  cannot, such as how long the app takes to start.
+- `## Bring the app up`: what the rig's
+  [start command](#the-rigs-start-command) serves, and what a capture needs
+  beyond it, such as how long the app takes to start, where a terminal
+  script's shell starts, or how to capture an app the command does not serve.
 - `## A known state`: how a script puts the app in a known state, such as the
-  start path a page script opens with `**Start:**`, and the fixture data, seed
-  or scenario behind it.
+  start path a page script opens on, and the fixture data, seed or scenario
+  behind it.
 - `## Sign-in`: how a script signs in, or that the app has none.
 - `## Worked examples`: scripts and captures the rig keeps, to copy from.
 
 A rig adds sections of its own, such as the design and writing standards the
 `demo` check reviews screens against, or how a run shows the messages its app
 sends. gc-toolkit's own `docs/review-demo.md` is a worked example of a guide.
+Every path reads the guide at the commit it shows, as the pack reads all of a
+rig's review guidance, so an edit to the guide counts once it is committed.
 
-The capture scripts read the lines under `## Bring the app up` themselves:
-given `--guide <worktree>`, a capture takes the app that the guide in that
-worktree names. Every path reads the guide at the commit it shows, as the pack
-reads all of a rig's review guidance, so an edit to the guide counts once it
-is committed. The rest of the guide is for whoever writes and captures the
-script.
+## The rig's start command
+
+A rig declares the command that starts its app as `ui_serve_command`, among its
+`[rigs.formula_vars]` in the town's `city.toml`, beside its check commands. A
+page capture of the rig's own app runs it, from `mol-rig-demo`, the `demo`
+check or [Demo a PR](#demo-a-pr), and so does a sitting's live copy of the
+rig's UI. Each reads it for the rig and passes it on, a capture as
+`--serve "$SERVE" --cwd <worktree>`:
+
+```bash
+SERVE=$(gc formula show mol-rig-demo --rig <rig> --json | jq -r '[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty')
+```
+
+`SERVE` is empty for a rig that declares none. A page capture of such a rig
+names its app as the guide's `## Bring the app up` says, with `--serve-dir` or
+`--base-url`. A terminal script brings up no app, so it takes no start command.
+
+The command runs as a copy that `gctk rig serve` runs, with bash at the top of
+the checkout it is started from, such as a worktree at the commit a capture
+shows, inside the capture's sandbox. The copy gets a free loopback port of its
+own as `$PORT`, and it is up once it answers there. So the command:
+
+- changes into the app's directory and installs what it needs, because a
+  capture's worktree holds only what the rig commits;
+- serves on `$PORT`, so a dev server whose config pins a port takes `$PORT` on
+  its command line, such as `cd web && npm ci && npm run dev -- --port $PORT`;
+- hard-codes no port, because each run gets a port of its own;
+- serves the app on fixture data, because the sandbox keeps the live city out
+  of reach;
+- runs a program the repository keeps, so a run starts the app of the commit
+  it runs from, as a rig's test command runs the tests of its commit. The rig
+  declares one command for all its branches, so it names an entry point every
+  branch carries.
 
 ## Lint before you capture
 
@@ -172,25 +183,24 @@ formula step drive it the same way. Its `--help` lists every flag:
 
 ```bash
 assets/scripts/rig-demo-capture.sh --script demo.md --output <out.mp4> \
-  [ --serve-dir <dir> | --serve "<cmd>" | --base-url <url> | --guide <worktree> ] [--mode proof] [--no-narrate]
+  [ --serve-dir <dir> | --serve "<cmd>" | --base-url <url> ] [--mode proof] [--no-narrate]
 ```
 
-A page script needs its app. Name it with one of the three flags, or give
-`--guide <worktree>`, which takes the app the rig's guide in that worktree
-names. A terminal script takes none of them, and its shell starts in `--cwd`,
-or under `--guide` in the directory the guide names. A `--serve` command runs
-as a copy on a free port of its own, which it gets as `$PORT`, as a
-screenshot's command does.
+A page script needs its app, named with one of the three flags, such as
+`--serve "$SERVE" --cwd <worktree>` for the rig's
+[start command](#the-rigs-start-command). A terminal script takes none of them,
+and its shell starts in `--cwd`. A `--serve` command runs as a copy on a free
+port of its own, which it gets as `$PORT`, as a screenshot's command does.
 
 `mol-rig-demo` runs that call as a pool workflow against any rig. It turns the
 scenario into a script (a ready one, or one written from a bead with
 `gc-demo-script`), captures, delivers the clip to a PR or records its path, and
 closes the bead it was poured on. `gc formula show mol-rig-demo` prints the
 pour line and every input. A pour names at most one app target (`serve_dir`,
-`serve_cmd`, or `base_url`), and a pour that names none takes the app the
-rig's guide names. The sandbox refuses a rig's own checkout, so the app runs
+`serve_cmd`, or `base_url`), and a page script whose pour names none takes the
+rig's start command. The sandbox refuses a rig's own checkout, so the app runs
 from a detached worktree of it at its HEAD, which holds only what the rig
-commits, and the guide is read in that worktree.
+commits.
 The `demo` review check makes the call inside the review
 instead of pouring the mol (`gc-toolkit.review-demo`).
 
@@ -234,13 +244,18 @@ the clip are working files, and neither is committed.
    the app defines, such as the scenario a start path arms, so check each one
    against the source the guide names.
 5. **Capture it** from the worktree's root, writing the clip outside the
-   worktree:
+   worktree. A page script takes the rig's
+   [start command](#the-rigs-start-command), read into `SERVE` as that section
+   shows:
 
    ```bash
-   "$(gc <binding> scripts-dir)/rig-demo-capture.sh" --script <script.md> --output <clip.mp4> --guide .
+   "$(gc <binding> scripts-dir)/rig-demo-capture.sh" --script <script.md> --output <clip.mp4> --serve "$SERVE" --cwd .
    ```
 
-   Exit 0 is a clip in which every step's proof held. Exit 3 is a clip in
+   On a rig that declares no start command, name the app as the guide's
+   `## Bring the app up` says instead. A terminal script takes `--cwd` alone,
+   naming where that section says its shell starts, or `.` for the worktree's
+   root. Exit 0 is a clip in which every step's proof held. Exit 3 is a clip in
    which a step failed its proof. Read which step failed and whether the
    change or the script is wrong. Correct a wrong script and capture again, and
    report a change that fails instead of attaching the clip as its demo. Exit 1

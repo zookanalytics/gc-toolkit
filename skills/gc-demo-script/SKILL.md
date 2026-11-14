@@ -86,8 +86,9 @@ The `gc-toolkit.demo-capture` skill says what a guide holds. Keep from it:
 
 - `## Surfaces`: what a person sees, and the files that draw each surface.
   Phase B sorts the diff by them.
-- `## Bring the app up`: whether a surface is a page or a terminal session.
-  The capture takes the app from these lines, so the script names no app.
+- `## Bring the app up`: whether a surface is a page or a terminal session,
+  and where a terminal script's shell starts. The capture starts the app from
+  the rig's declared start command, so the script names no app.
 - `## A known state`: the start path and the fixture data a script opens on.
 - `## Sign-in`: the steps a script signs in with, or that the app has none.
 - `## Worked examples`: the rig's own scripts, whose actions and assertions
@@ -488,8 +489,8 @@ listing them before the "To capture" line.
 This skill intentionally does NOT invoke `demo:capture`.
 The caller is responsible for the handoff: the `gc-toolkit.demo-capture`
 skill's "Demo a PR" adapts, lints and captures the draft, and `mol-rig-demo`
-captures it in its next step. Either capture can take the app from the rig's
-guide.
+captures it in its next step. Either capture starts the app from the rig's
+declared start command.
 
 This matches how `demo:epic` separates script generation from execution,
 and lets a caller review the script before committing to a long-running
