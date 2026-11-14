@@ -895,12 +895,15 @@ keys = [
   # Set once the post lands, so a later pass leaves the finding alone until it
   # closes.
   "finding.pr_comment",
-  # Set by the same write-back once a posted finding has closed and its comment
-  # carries the answer: `1` when it was answered and its thread, if it has one,
-  # is resolved, carries a later post that is feedback, or stays open
-  # for the operator because the finding was declined or deferred, and `gone`
-  # when the comment had been removed from the PR and nothing was left to
-  # answer. A finding carrying it costs the write-back no GitHub read.
+  # Set by the same write-back once a posted finding has closed, its comment
+  # carries the answer, and its thread, if it has one, is resolved or carries a
+  # later post that is feedback: `settled` for a declined or deferred finding,
+  # `1` for any other. `gone` when the comment had been removed from the PR and
+  # nothing was left to answer. A declined or deferred finding recorded `1` can
+  # still have its thread open, behind an answer carrying the open line, so the
+  # write-back answers it again, which resolves that thread, and records it
+  # `settled`. Any other finding carrying it costs the write-back no GitHub
+  # read.
   "finding.pr_answered",
   # The claimable follow-up bead a deferred finding files to carry the later work,
   # set by finding.sh as the deferral runs. It carries the objection and the
