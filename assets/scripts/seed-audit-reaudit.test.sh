@@ -10,10 +10,13 @@
 # mol-polecat-work to the pool route, with the stdout line its callers quote;
 # one live re-audit per base, whether dispatched, held, armed to re-sling once
 # its wait clears, or never dispatched (adopted and slung), while a closed one
-# or another base's files beside it; the stops that dispatch nothing (an
-# unanswered dedup query, a refused create, an unsettled priority, a sling that
-# fails), each leaving what a retry adopts; and every metadata key it writes
-# registered in lifecycle.toml.
+# or another base's files beside it; one call at a time per store, under the
+# lock in the .beads directory gc bd where names, so a call that overlaps
+# another's dedup read files nothing and the two file one re-audit, and no
+# process a call's gc or scripts leave running holds the lock; the stops that
+# dispatch nothing (an unanswered dedup query, a refused create, an unsettled
+# priority, a sling that fails, a store gc names none of), each leaving what a
+# retry adopts; and every metadata key it writes registered in lifecycle.toml.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,6 +43,12 @@ cat > "$BIN/gc" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
+# STUB_DAEMON leaves a process running past the call, as a gc that brings up a
+# Dolt server does, and names it in that file for the case to stop.
+if [ -n "${STUB_DAEMON:-}" ]; then
+  sleep 30 </dev/null >/dev/null 2>&1 &
+  echo "$!" >> "$STUB_DAEMON"
+fi
 if [ "${1:-}" = "sling" ]; then
   # A graph.v2 pour retires gc.routed_to and stamps gc.execution_routed_to=<pool>,
   # unless the case says the sling fails.
@@ -65,6 +74,9 @@ fi
 [ "${1:-}" = "bd" ] || exit 0
 shift
 case "${1:-}" in
+  where)
+    [ -z "${STUB_WHERE_FAIL:-}" ] || { echo "Error: no beads database found" >&2; exit 1; }
+    printf '{"path":"%s","prefix":"re"}\n' "${STUB_BEADS:?}" ;;
   show)
     out=$(jq -c --arg id "$2" '[.[] | select(.id == $id)]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then echo '{"error":"no issues found"}'
@@ -117,19 +129,38 @@ case "${1:-}" in
       out=$(printf '%s' "$out" | jq -c --arg k "${f%%=*}" --arg v "${f#*=}" \
         '[ .[] | select(((((.metadata // {})[$k]) // "") | tostring) == $v) ]')
     done
+    # STUB_LIST_HOLD holds the read's answer, taken from the store as it stood,
+    # until the case removes that file, and marks the read with <file>.read, so
+    # a second call can act in between.
+    if [ -n "${STUB_LIST_HOLD:-}" ]; then
+      : > "$STUB_LIST_HOLD.read"
+      while [ -e "$STUB_LIST_HOLD" ]; do sleep 0.05; done
+    fi
     printf '%s\n' "$out" ;;
 esac
 STUB
 chmod +x "$BIN/gc"
 # The priority writer, logged into the same call log so a case reads its order
 # against the sling; STUB_SETTLE_RC makes it refuse.
-printf '#!/usr/bin/env bash\nprintf "settle %%s\\n" "$2" >> "${STUB_GC_LOG:?}"\n[ -z "${STUB_SETTLE_RC:-}" ] || { echo "queue-priority: settle: could not take the priority lock" >&2; exit "$STUB_SETTLE_RC"; }\n' > "$BIN/queue-priority"
+cat > "$BIN/queue-priority" <<'STUB'
+#!/usr/bin/env bash
+printf 'settle %s\n' "$2" >> "${STUB_GC_LOG:?}"
+if [ -n "${STUB_DAEMON:-}" ]; then
+  sleep 30 </dev/null >/dev/null 2>&1 &
+  echo "$!" >> "$STUB_DAEMON"
+fi
+[ -z "${STUB_SETTLE_RC:-}" ] || { echo "queue-priority: settle: could not take the priority lock" >&2; exit "$STUB_SETTLE_RC"; }
+STUB
 chmod +x "$BIN/queue-priority"
 export PATH="$BIN:$PATH"
 export GC_RIG="gc-toolkit"
 export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
 export STUB_STORE="$TMP/store.json" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
-unset STUB_LIST_FAIL STUB_SETTLE_RC STUB_SLING_FAIL STUB_CREATE_FAIL
+# The store's .beads directory, where the re-audit lock lives.
+export STUB_BEADS="$TMP/rig/.beads"
+mkdir -p "$STUB_BEADS"
+LOCKFILE="$STUB_BEADS/seed-audit-reaudit.lock"
+unset STUB_LIST_FAIL STUB_SETTLE_RC STUB_SLING_FAIL STUB_CREATE_FAIL STUB_WHERE_FAIL STUB_LIST_HOLD STUB_DAEMON
 
 # The checkout the writer runs in: its origin/HEAD names the default branch.
 repo() { # <dir> <default branch>
@@ -263,12 +294,69 @@ OUT=$(run --base main 2>/dev/null); RC=$?
 eq "$OUT" "re-1 $ROUTE filed" "a closed re-audit, and another base's live one, leave this base none"
 eq "$(meta re-1 seed_audit_reaudit)" "main" "…so one is filed for it"
 
+echo "# --- one call at a time per store ---"
+reset
+rm -f "$LOCKFILE"
+OUT=$(run --base main 2>/dev/null)
+eq "$OUT" "re-1 $ROUTE filed" "a call files under the store's re-audit lock"
+if [ -f "$LOCKFILE" ]; then ok "…kept in the .beads directory gc bd where names"
+else bad "…kept in the .beads directory gc bd where names (no $LOCKFILE)"; fi
+WHERE_AT=$(grep -n '^bd where' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+LIST_AT=$(grep -n '^bd list' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$WHERE_AT" ] && [ -n "$LIST_AT" ] && [ "$WHERE_AT" -lt "$LIST_AT" ]; then
+  ok "…named before the dedup read"
+else bad "…named before the dedup read (where at '${WHERE_AT:-none}', list at '${LIST_AT:-none}')"; fi
+if flock -n "$LOCKFILE" true; then ok "…and freed by the call's exit"; else bad "…and freed by the call's exit"; fi
+
+# Another call holds the lock until the case lets it go.
+reset
+: > "$TMP/keep"
+( exec 8>>"$LOCKFILE"; flock 8; : > "$TMP/locked"; while [ -e "$TMP/keep" ]; do sleep 0.05; done ) &
+HOLDER=$!
+n=0; until [ -e "$TMP/locked" ] || [ "$n" -ge 100 ]; do sleep 0.05; n=$((n + 1)); done
+OUT=$(run --base main "${PAGES[@]}" 2>&1); RC=$?
+rm -f "$TMP/keep" "$TMP/locked"; wait "$HOLDER"
+eq "$RC" "2" "a call that finds the store's re-audit lock held exits 2"
+has "$OUT" "another call holds the store's re-audit lock ($LOCKFILE) while it reads or writes main's re-audit" "…naming the lock"
+eq "$(calls '^bd list')|$(beads)|$(calls '^sling ')" "0|0|0" "…before its dedup read, filing and slinging nothing"
+
+# Two calls overlap: the first reads no live bead and is held there, and the
+# second runs while it is. Without the lock both read none, and each files and
+# slings a re-audit.
+reset
+: > "$TMP/hold"
+( STUB_LIST_HOLD="$TMP/hold" run --base main "${PAGES[@]}" >"$TMP/first.out" 2>/dev/null; echo "$?" >"$TMP/first.rc" ) &
+FIRST=$!
+n=0; until [ -e "$TMP/hold.read" ] || [ "$n" -ge 100 ]; do sleep 0.05; n=$((n + 1)); done
+OUT=$(run --base main "${PAGES[@]}" 2>&1); RC=$?
+rm -f "$TMP/hold" "$TMP/hold.read"; wait "$FIRST"
+eq "$RC" "2" "a call that overlaps another's dedup read exits 2"
+has "$OUT" "this call filed nothing, and a retry reads what that call left" "…saying a retry reads what the other call left"
+eq "$(cat "$TMP/first.rc")|$(cat "$TMP/first.out")" "0|re-1 $ROUTE filed" "…while the call holding the lock files the base's re-audit"
+eq "$(beads)|$(calls '^bd create')|$(calls '^sling ')" "1|1|1" "…one bead, one create and one sling between them"
+OUT=$(run --base main 2>/dev/null)
+eq "$OUT" "re-1 $ROUTE in-flight" "…and a retry reads it in flight"
+
+reset
+rm -f "$TMP/daemons"
+OUT=$(STUB_DAEMON="$TMP/daemons" run --base main 2>/dev/null)
+eq "$OUT" "re-1 $ROUTE filed" "a call whose gc and scripts leave processes running files its re-audit"
+if flock -n "$LOCKFILE" true; then ok "…and none of those processes holds the lock once it exits"
+else bad "…and none of those processes holds the lock once it exits"; fi
+while read -r pid; do kill "$pid" 2>/dev/null; done < "$TMP/daemons"
+
 echo "# --- stops that dispatch nothing ---"
 reset
 OUT=$(STUB_LIST_FAIL=1 run --base main 2>&1); RC=$?
 eq "$RC" "2" "a dedup query that does not answer exits 2"
 has "$OUT" "dedup query failed" "…saying why"
 eq "$(beads)" "0" "…and files nothing"
+
+reset
+OUT=$(STUB_WHERE_FAIL=1 run --base main 2>&1); RC=$?
+eq "$RC" "2" "a store gc bd where does not name exits 2"
+has "$OUT" "gc bd where named no store here" "…saying no lock can hold its re-audits"
+eq "$(calls '^bd list')|$(beads)" "0|0" "…reading and filing nothing"
 
 reset
 OUT=$(STUB_SETTLE_RC=1 run --base main 2>&1); RC=$?
