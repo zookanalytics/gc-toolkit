@@ -1,10 +1,10 @@
 // Package epic answers which closes and shifts of a rig's epics the rig's po
 // has not weighed yet (docs/epics.md). The po weighs each one at its portfolio
 // sync, since a close or a shift can change what the rig works on and in what
-// order, and it marks each epic it weighs in the sync's note on the epic
-// (skills/portfolio-sync/SKILL.md). An epic answers by its own mark, so a
-// sitting that ends before it marks every epic leaves the rest for the next
-// sync.
+// order, and it marks each epic it weighs, in the sync's note on the epic, with
+// the time of the read it weighed from (skills/portfolio-sync/SKILL.md). An
+// epic answers by its own mark, so a sitting that ends before it marks every
+// epic leaves the rest for the next sync.
 //
 // A close is the epic's own: its close time and reason. A shift is a ruling on
 // the epic's hypothesis, which an epic review records in the epic's ruling keys
@@ -41,8 +41,9 @@ var (
 			"so a shift a later ruling followed still reads (skills/converse-epic-review/SKILL.md). An epic that "+
 			"carries none records no shift beyond its ruling keys.")
 	weighedAtKey = ledger.ReadOnly("epic_weighed_at", ledger.String,
-		"When the rig's po last weighed an epic at a portfolio sync, written with the sync's note on the epic "+
-			"(skills/portfolio-sync/SKILL.md). An epic that carries none has not been weighed.")
+		"The time of the read the rig's po last weighed an epic from at a portfolio sync, the time gctk epic "+
+			"unweighed prints first, written with the sync's note on the epic (skills/portfolio-sync/SKILL.md). "+
+			"An epic that carries none has not been weighed.")
 )
 
 // The kinds of change a portfolio sync weighs.
@@ -71,16 +72,18 @@ type Change struct {
 	// the UTC day the operator made it, "" when its time names none. Both are
 	// empty for a close, and for a shift that is the epic's latest ruling.
 	Then, ThenOn string
-	// Weighed is the day, YYYY-MM-DD in UTC, a portfolio sync last weighed the
-	// epic, "" when none has.
+	// Weighed is the UTC day, YYYY-MM-DD, of the read a portfolio sync last
+	// weighed the epic from, "" when none has.
 	Weighed string
 }
 
 // Unweighed returns, oldest first, each close and each latest shift of the
 // epics the store holds that no portfolio sync has weighed: each one made on or
 // after the day a sync last weighed its epic, or every one when none has. A
-// mark carries the time the sync noted the epic, while the sync's read of the
-// epics comes before it, so a change on the mark's day lists again.
+// mark carries the time of the read the sync weighed the epic from, so a change
+// after that read lists. One made earlier on the mark's day lists again. That
+// keeps a change the read did not show though its time comes before the read,
+// since a change's writer stamps its time before the write lands.
 //
 // An epic's latest shift is its latest ruling when that is a shift, and the
 // shift's own time once a later ruling followed it, so a shift a later review

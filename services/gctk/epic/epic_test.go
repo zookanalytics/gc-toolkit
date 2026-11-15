@@ -182,7 +182,8 @@ func TestUnweighedLeavesAnEpicASittingDidNotReach(t *testing.T) {
 }
 
 // A mark takes a close from the day before it off the list, and one on its own
-// day lists again, since the sync's read came before the mark.
+// day lists again, since a change's time can come before a read that did not
+// show it.
 func TestUnweighedListsAChangeOnItsMarksDayAgain(t *testing.T) {
 	today := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
 	mark := keys(hyp, "epic_weighed_at", today.Add(18*time.Hour).Format(time.RFC3339))

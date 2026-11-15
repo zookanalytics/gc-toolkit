@@ -6,24 +6,50 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
-// runUnweighed prints what the store's epics answer, and returns its exit,
-// stdout and stderr.
-func runUnweighed(s *fake.Store) (int, string, string) {
+// readAt is the time a test's read takes, unless the test names another, and
+// readLine the first line that read prints.
+var (
+	readAt   = time.Date(2026, 11, 18, 9, 30, 0, 0, time.UTC)
+	readLine = unweighedReadAt + readAt.Format(time.RFC3339) + "\n"
+)
+
+// pinUnweighedClock makes the command's clock answer from clock until the test
+// ends.
+func pinUnweighedClock(t *testing.T, clock func() time.Time) {
+	t.Helper()
+	restore := now
+	now = clock
+	t.Cleanup(func() { now = restore })
+}
+
+// runUnweighed prints what the store's epics answer, read at readAt, and
+// returns its exit, stdout and stderr.
+func runUnweighed(t *testing.T, s *fake.Store) (int, string, string) {
+	t.Helper()
+	return runUnweighedAt(t, s, readAt)
+}
+
+// runUnweighedAt prints what the store's epics answer, read at when, and
+// returns its exit, stdout and stderr.
+func runUnweighedAt(t *testing.T, s *fake.Store, when time.Time) (int, string, string) {
+	t.Helper()
+	pinUnweighedClock(t, func() time.Time { return when })
 	var out, errb bytes.Buffer
 	code := epicUnweighed(ledger.New(s), &out, &errb)
 	return code, out.String(), errb.String()
 }
 
-// Each change prints on one line: its time, its epic, what happened, the day a
-// sync last weighed the epic or that none has, the ruling that followed a
-// shift, and the reason, with each control character a space and a reason the
-// store records none of said.
+// The first line is the time of the read. Each change then prints on one line:
+// its time, its epic, what happened, the day a sync last weighed the epic or
+// that none has, the ruling that followed a shift, and the reason, with each
+// control character a space and a reason the store records none of said.
 func TestEpicUnweighedPrintsEachChangeOnALine(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "e1", Status: "closed", IssueType: "epic", ClosedAt: "2026-11-14T00:00:00Z",
@@ -36,8 +62,9 @@ func TestEpicUnweighedPrintsEachChangeOnALine(t *testing.T) {
 		"epic_shifted_at": "2026-11-15T02:00:00Z"}})
 	s.Put(fake.Bead{ID: "e4", Status: "closed", IssueType: "epic", ClosedAt: "2026-11-17T00:00:00Z",
 		Metadata: map[string]string{"epic_hypothesis": "h"}})
-	code, out, errs := runUnweighed(s)
+	code, out, errs := runUnweighed(t, s)
 	want := strings.Join([]string{
+		"Read at 2026-11-18T09:30:00Z",
 		"2026-11-14T00:00:00Z e1 closed, never weighed: held: its signal showed",
 		"2026-11-15T01:00:00Z e2 shifted, last weighed 2026-11-13: re-aimed",
 		"2026-11-15T02:00:00Z e3 shifted, never weighed, then ruled continue on 2026-11-16: on the new course",
@@ -48,27 +75,76 @@ func TestEpicUnweighedPrintsEachChangeOnALine(t *testing.T) {
 	}
 }
 
-// With nothing to weigh it prints the one line that says so, which an empty rig
-// answers too.
+// With nothing to weigh it prints the time of the read and the one line that
+// says so, which an empty rig answers too.
 func TestEpicUnweighedSaysWhenThereIsNothingToWeigh(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "e1", Status: "closed", IssueType: "epic", ClosedAt: "2026-11-01T00:00:00Z",
 		Metadata: map[string]string{"epic_hypothesis": "h", "epic_weighed_at": "2026-11-02T00:00:00Z"}})
 	for name, store := range map[string]*fake.Store{"every change weighed": s, "an empty rig": fake.New()} {
-		if code, out, errs := runUnweighed(store); code != 0 || out != unweighedNone+"\n" || errs != "" {
-			t.Errorf("%s: exit %d, stdout %q, stderr %q; want exit 0 and the line that says nothing changed", name, code, out, errs)
+		if code, out, errs := runUnweighed(t, store); code != 0 || out != readLine+unweighedNone+"\n" || errs != "" {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q; want exit 0, the time of the read and the line that says nothing changed", name, code, out, errs)
 		}
 	}
 }
 
-// A store that does not answer prints nothing on stdout, says so on stderr and
-// exits 1, since a list it could not read is not an empty one.
+// A store that does not answer prints nothing on stdout, the time included,
+// says so on stderr and exits 1, since a list it could not read is not an empty
+// one.
 func TestEpicUnweighedStopsWhenTheStoreDoesNotAnswer(t *testing.T) {
 	s := fake.New()
 	s.FindErr = &gcbd.ReadError{Reason: "the listing did not answer"}
-	code, out, errs := runUnweighed(s)
+	code, out, errs := runUnweighed(t, s)
 	if code != unweighedExitNoStore || out != "" || !strings.Contains(errs, "did not read") || !strings.Contains(errs, "run it again") {
 		t.Errorf("exit %d, stdout %q, stderr %q; want exit 1, nothing on stdout and a line that says the epics did not read", code, out, errs)
+	}
+}
+
+// The command reads its clock before the store answers, so each change the
+// read did not show was written after the time it prints.
+func TestEpicUnweighedTakesItsTimeBeforeTheStoreAnswers(t *testing.T) {
+	s := fake.New()
+	findsAtClock := -1
+	pinUnweighedClock(t, func() time.Time { findsAtClock = len(s.Finds()); return readAt })
+	var out, errb bytes.Buffer
+	if code := epicUnweighed(ledger.New(s), &out, &errb); code != 0 || out.String() != readLine+unweighedNone+"\n" {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
+	}
+	if findsAtClock != 0 || len(s.Finds()) != 1 {
+		t.Errorf("the clock was read after %d of the store's %d reads; want it read before the one read", findsAtClock, len(s.Finds()))
+	}
+}
+
+// A sync reads late on one day, the epic shifts after the read, and the sync
+// notes its ruling on the epic after midnight, marking it with the read's time
+// as the portfolio-sync skill does. The next sync lists the shift, which no
+// sync saw. A mark at the note's own time would take it off that list.
+func TestEpicUnweighedListsWhatASyncAcrossMidnightDidNotRead(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "e1", Status: "open", IssueType: "epic", Metadata: map[string]string{"epic_hypothesis": "h"}})
+	_, out, _ := runUnweighedAt(t, s, time.Date(2026, 11, 14, 23, 50, 0, 0, time.UTC))
+	first, _, _ := strings.Cut(out, "\n")
+	read, ok := strings.CutPrefix(first, unweighedReadAt)
+	if !ok || out != first+"\n"+unweighedNone+"\n" {
+		t.Fatalf("the sync's read printed %q; want its time, then nothing to weigh", out)
+	}
+
+	shiftedAndMarked := func(mark string) fake.Bead {
+		return fake.Bead{ID: "e1", Status: "open", IssueType: "epic", Metadata: map[string]string{"epic_hypothesis": "h",
+			"epic_ruling": "shift", "epic_ruling_at": "2026-11-14T23:55:00Z", "epic_shifted_at": "2026-11-14T23:55:00Z",
+			"epic_ruling_reason": "re-aimed after the read", "epic_weighed_at": mark}}
+	}
+	nextSync := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
+	s.Put(shiftedAndMarked(read))
+	code, out, errs := runUnweighedAt(t, s, nextSync)
+	want := "Read at 2026-11-15T09:00:00Z\n2026-11-14T23:55:00Z e1 shifted, last weighed 2026-11-14: re-aimed after the read\n"
+	if code != 0 || out != want || errs != "" {
+		t.Errorf("the next sync's read: exit %d, stdout %q, stderr %q; want exit 0 and stdout %q", code, out, errs, want)
+	}
+
+	s.Put(shiftedAndMarked("2026-11-15T00:05:00Z"))
+	if _, out, _ := runUnweighedAt(t, s, nextSync); out != "Read at 2026-11-15T09:00:00Z\n"+unweighedNone+"\n" {
+		t.Errorf("marked at the note's own time, the next read printed %q; want the shift gone, which is why a sync marks with the read's time", out)
 	}
 }
 
@@ -110,9 +186,10 @@ func stubUnweighed(t *testing.T, rows string) string {
 // read, which lists the store's epics, closed ones included.
 func TestEpicUnweighedReadsTheStoreOfTheRigNamed(t *testing.T) {
 	log := stubUnweighed(t, `[{"id":"tk-e","status":"closed","issue_type":"epic","closed_at":"2026-11-14T00:00:00Z","close_reason":"held","metadata":{"epic_hypothesis":"h"}}]`)
+	pinUnweighedClock(t, func() time.Time { return readAt })
 	var out, errb bytes.Buffer
 	code := Run([]string{"epic", "unweighed", "--rig", "gc-toolkit"}, "test", &out, &errb)
-	if code != 0 || out.String() != "2026-11-14T00:00:00Z tk-e closed, never weighed: held\n" {
+	if code != 0 || out.String() != readLine+"2026-11-14T00:00:00Z tk-e closed, never weighed: held\n" {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
 	}
 	raw, err := os.ReadFile(log)

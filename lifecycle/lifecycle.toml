@@ -1481,10 +1481,10 @@ keys = [
 #   ruling and left standing by a later continue or close, so the rig's po
 #   still weighs the shift at its next portfolio sync. Absent records no shift
 #   beyond the ruling's own keys.
-# epic_weighed_at — when the rig's po last weighed the epic at a portfolio
-#   sync, stamped with the sync's note on the epic. A close or shift on or
-#   after its day lists at the next sync. Absent means no sync has weighed the
-#   epic.
+# epic_weighed_at — the time of the read the rig's po last weighed the epic
+#   from at a portfolio sync, which `gctk epic unweighed` prints first, stamped
+#   with the sync's note on the epic. A close or shift on or after its day
+#   lists at the next sync. Absent means no sync has weighed the epic.
 
 [metadata.human_surface]
 keys = [

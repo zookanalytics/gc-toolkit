@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the portfolio sync's read of what its epics closed and shifted
-description: Use when you review `gctk epic unweighed`, the epic_shifted_at stamp the epic review's ruling write adds, or the epic_weighed_at mark the portfolio sync's note adds, and need the bd and Gas City primitives they compose, the ones searched that do not cover the read, why bd's audit history does not carry an epic's past rulings into every rig's store, and why the surface is one verb and two keys rather than a parse of note headings.
+description: Use when you review `gctk epic unweighed`, the epic_shifted_at stamp the epic review's ruling write adds, or the epic_weighed_at mark the portfolio sync's note adds with the time the verb prints first, and need the bd and Gas City primitives they compose, the ones searched that do not cover the read or give it a time, why bd's audit history does not carry an epic's past rulings into every rig's store, and why the surface is one verb and two keys rather than a parse of note headings.
 ---
 
 # Gas City search: what a rig's epics closed and shifted since a sync weighed each
@@ -10,7 +10,8 @@ sync has weighed yet, each epic by its own mark, and a shift still counts after
 a later review continues the epic. The change adds one verb, `gctk epic
 unweighed`, and two metadata keys: `epic_shifted_at`, which the epic review's
 ruling write stamps on a shift, and `epic_weighed_at`, which the sync's note
-stamps on each epic it weighs. bd citations are at bd v1.3.4
+stamps on each epic it weighs with the time the verb printed first, the time
+it read the epics. bd citations are at bd v1.3.4
 (`github.com/steveyegge/beads`), the version upstream `gastownhall/gascity` pins
 in its `go.mod` at commit `b841cd14f9bc`, and Gas City citations are at that
 commit.
@@ -21,7 +22,9 @@ commit.
   `gc bd --db <store> list --type epic --all --json --limit 0` returns each of
   the rig's epics, closed ones included, with its status, close time and close
   reason, its metadata, and its parent-child edges. The verb reads nothing else
-  from the store, through gctk's store adapter and ledger.
+  from the store, through gctk's store adapter and ledger. `gc bd` hands the
+  list to the bd binary for the store's scope (`cmd/gc/cmd_bd.go`, `doBd`), so
+  the rows are the store's answer at the time of the read.
 - **bd's metadata write, as both stamps.** Each key is one more
   `--set-metadata` on a write a skill already makes: the epic review's ruling
   write, and the sync's note on the epic. bd folds every `--set-metadata` of a
@@ -77,6 +80,20 @@ commit.
   (`internal/events/events.go`, its package comment and `EventsRotated`), so it
   keeps no history a read can count. No Gas City primitive models an epic's
   review or a portfolio sync.
+- **A time or a store version that a read returns with its rows**, for the sync
+  to mark each epic with, so that a change the read did not show stays on the
+  next sync's list. bd's list answers with its rows alone: its JSON output is
+  the page's items (`cmd/bd/list.go`, `runListCore`). `bd vc status --json`
+  prints the store's current commit (`cmd/bd/vc.go`, `vcStatusCmd`), but it
+  refuses in proxied-server mode, the default above for a rig added fresh.
+  Where it answers, a commit read in a call of its own before the list bounds
+  the read no better than a time taken there, and telling what changed on an
+  epic since that commit takes a `bd show --as-of` read of each epic
+  (`cmd/bd/show_children.go`, `showIssueAsOf`). bd's list filters
+  `--updated-after` and `--closed-after` select rows by a time the caller
+  already holds (`cmd/bd/list.go`, the flags its `init` declares), and return
+  none. So the verb reads its own clock before it asks the store, and prints
+  that time first.
 
 ## Why the surface is one verb and two keys
 
@@ -91,7 +108,10 @@ commit.
   lands with the shift or not at all.
 - **`epic_weighed_at`** is the sync's mark as a value on the epic, stamped in
   the write of the sync's note, so the verb reads a time where it would
-  otherwise scan the notes for a heading.
+  otherwise scan the notes for a heading. Its value is the time the verb
+  printed for the read the sync weighed from, which comes before the store
+  answered, so a change made between that read and the note stays on the next
+  sync's list.
 - **Both keys stay shell's.** The skills write them through `gc bd update`, as
   they write the ruling's other keys, so `lifecycle/lifecycle.toml` registers
   them under `[metadata.epic_stewardship]` and the `epic` package declares them

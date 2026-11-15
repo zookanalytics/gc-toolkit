@@ -113,7 +113,7 @@
     "readers": [
       "epic"
     ],
-    "doc": "When the rig's po last weighed an epic at a portfolio sync, written with the sync's note on the epic (skills/portfolio-sync/SKILL.md). An epic that carries none has not been weighed."
+    "doc": "The time of the read the rig's po last weighed an epic from at a portfolio sync, the time gctk epic unweighed prints first, written with the sync's note on the epic (skills/portfolio-sync/SKILL.md). An epic that carries none has not been weighed."
   },
   {
     "name": "existing_pr",

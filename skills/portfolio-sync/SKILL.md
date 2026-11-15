@@ -35,8 +35,9 @@ That ruling is the operator's, made in the review and never in this sitting,
 but a close or a shift can change what the rig works on and in what order, so
 weigh each one. This lists, oldest first, each close and each latest shift of
 the rig's epics that no sync has weighed, with the day a sync last weighed each
-epic. A read that exits non-zero has listed nothing, so run it again before you
-weigh any change:
+epic, after a first line that names the time it read them, which section 4
+marks each epic with. A read that exits non-zero has listed nothing, so run it
+again before you weigh any change:
 
 ```bash
 # >>> gctk-bin
@@ -48,13 +49,13 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 For each epic listed, read each `## Epic review` block in its notes dated on or
 after the day its line says a sync last weighed it, or every one when none has,
 for what the rulings moved. A change made on the day its epic was last weighed
-lists again, so read that day's note for what the sync made of it. A later
-review can continue an epic on the course a shift set, so weigh the shift even
-when its line names the continue that followed it. A close can send the epic's
-work to another epic, and a shift changes an epic's course and can change its
-hypothesis. Say what each changes in the portfolio, such as a parked epic to
-bring forward now that a worked one has closed, or a priority that no longer
-fits a shifted epic, and propose the move.
+lists again, so read the last sync's note on the epic for what that sync made
+of it. A later review can continue an epic on the course a shift set, so weigh
+the shift even when its line names the continue that followed it. A close can
+send the epic's work to another epic, and a shift changes an epic's course and
+can change its hypothesis. Say what each changes in the portfolio, such as a
+parked epic to bring forward now that a worked one has closed, or a priority
+that no longer fits a shifted epic, and propose the move.
 
 ## 3. Name the epics due a review
 
@@ -79,12 +80,15 @@ by your prompt's "Sequencing: WSJF", with what sections 2 and 3 found. Each
 piece fits one screen and carries a recommendation for each epic.
 
 Note each ruling on its bead under the sync's date, with the operator's reason
-in their words, and on an epic mark it weighed in the same write. On each epic
-that section 2 listed, note too what the sync made of its close or shift, even
-when nothing moved, because its mark is what takes that change off the next
-sync's list:
+in their words, and on an epic mark it weighed in the same write. Mark it with
+the time on the first line of section 2's read, the earliest such time when you
+ran the read more than once. A change made after the read is one this sync has
+not seen, and a mark at any later time, such as the note's own, takes it off
+the next sync's list. On each epic that section 2 listed, note too what the
+sync made of its close or shift, even when nothing moved, because its mark is
+what takes that change off the next sync's list:
 
 ```bash
 gc bd --rig <rig> update <epic> --append-notes "Portfolio sync, po sitting $(date -u +%Y-%m-%d): <ruling: reason>" \
-  --set-metadata epic_weighed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  --set-metadata epic_weighed_at="<the read's time>"
 ```
