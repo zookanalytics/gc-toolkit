@@ -113,12 +113,15 @@ export PATH="$BIN:$PATH" GCTK_BIN="$BIN/gctk" REVIEW_WORKSPACE_DIR="$TMP/ws"
 mkdir -p "$REVIEW_WORKSPACE_DIR"
 WS="$TMP/ws/gc-review-tk-run"
 
-# facts <ref> <output> <iteration> [shadow] — the held step's facts.
+# facts <ref> <output> <iteration> [shadow] [<change from> <why>] — the held
+# step's facts, the change the whole PR unless a base and its rule are given.
 facts() {
     jq -n --arg ref "$1" --arg out "$2" --argjson n "$3" --argjson shadow "${4:-false}" --arg h "$HEAD1" \
+        --arg from "${5:-}" --arg why "${6:-the whole PR}" \
         '{step: "tk-step", ref: $ref, output: $out, iteration: $n, run: "tk-run", pr_bead: "tk-pr",
           pr: "https://github.com/o/r/pull/7", branch: "polecat/tk-pr", target: "main", first_head: $h,
-          head: $h, shadow: $shadow, change: {head: $h, why: "the whole PR"}}' > "$STUB_FACTS"
+          head: $h, shadow: $shadow,
+          change: ({head: $h, why: $why} + (if $from == "" then {} else {from: $from} end))}' > "$STUB_FACTS"
 }
 run() { : > "$LOG"; OUT=$(bash "$SD/review-run.sh" "$@" 2>&1); RC=$?; }
 called() { grep -c -- "$1" "$LOG"; }
@@ -330,6 +333,12 @@ run triage
 eq "$RC" 0 "triage reads"
 eq "$(git -C "$WS/triage/wt" rev-parse HEAD 2>/dev/null)" "$HEAD1" "in its own worktree at the head"
 has "$OUT" "The change to judge: git diff origin/main...$HEAD1 (the whole PR)" "and prints the change and the rule that chose it"
+facts review-loop.iteration.1.triage triage 1 false "$HEAD1" "the head already passed into its target"
+run triage
+eq "$RC" 0 "triage reads at a head that already passed"
+has "$OUT" "== The change to judge: none, because the head already passed into its target: pick only the checks an ask open on tk-pr sends back" \
+    "and says there is no change to judge, so it picks only what an ask sends back"
+hasnt "$OUT" "git diff" "and prints no diff to judge"
 facts mol-pr-review-lane.review-loop.iteration.1.triage.item.1.lane lane 1
 run lane --check arch
 eq "$RC" 0 "a lane reads"

@@ -164,6 +164,10 @@ print_run() {
 print_change() { # <worktree>
     local from why range
     from=$(fact .change.from); why=$(fact .change.why)
+    if [ "$from" = "$HEAD" ]; then
+        printf '%s\n' "== The change to judge: none, because $why: pick only the checks an ask open on $PR_BEAD sends back"
+        return 0
+    fi
     if [ -n "$from" ]; then
         range="$from..$HEAD"
         git -C "$1" cat-file -e "$from^{commit}" 2>/dev/null || git -C "$1" fetch --quiet --no-tags origin "$from" || die 2 "cannot fetch $from"

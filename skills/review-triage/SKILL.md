@@ -32,9 +32,10 @@ Three inputs, in this order.
 3. **The change, at the reviewed commit** — the formula names the change and
    its base. A review bead's is the whole PR, `git diff --stat
    origin/<review_base>...HEAD` in `<worktree>`. A review run's read prints the
-   change at its head: since the last head that passed, the run's own repair
-   since its first head, which you read with the rulings its push answers, or
-   else the whole PR. Read its stat first, then skim the files the stat names.
+   change at its head: none at a head that already passed into the run's
+   target, since the last head that passed, the run's own repair since its
+   first head, which you read with the rulings its push answers, or else the
+   whole PR. Read its stat first, then skim the files the stat names.
    A skim is the method here; reading every hunk is the specialist reviewer's
    job, not yours.
 
@@ -211,7 +212,10 @@ writes it as its step's output: the head it judged, each check it picks as one
 picked the common case, and whether the change is `material`. At the PR's first
 judged head the rig's first check, `correctness`, is picked whatever the diff,
 and the checks an ask the run can take sends back are picked whatever the
-change. The rest of this section is a review bead's verdict, whose
+change. At a head that already passed into the run's target, the read says
+there is no change to judge, because its checks ran and their findings were
+ruled: pick only the checks an ask the run can take sends back, and nothing
+when no ask sends one. The rest of this section is a review bead's verdict, whose
 formula's one `signoff.sh` call carries the verdict and the widening together,
 `approve` with these flags:
 

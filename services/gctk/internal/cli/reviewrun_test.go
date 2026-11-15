@@ -92,6 +92,22 @@ func TestReviewStepFacts(t *testing.T) {
 	if code := reviewStepIn(ledger.New(s), "tk-x", false, false, nil, &out, &errb); code != 3 {
 		t.Errorf("a bead that is no run's step = exit %d; want 3", code)
 	}
+
+	// At a head that already passed into the run's target, the change is none,
+	// from the head to itself, which triage's read prints as nothing to judge.
+	pr, _ := s.Row("tk-pr")
+	pr.Metadata["review_results"] = `[{"head":"` + runHead + `","target":"main","passed":true}]`
+	s.Put(pr)
+	out.Reset()
+	if code := reviewStepIn(ledger.New(s), "tk-tri", false, false, nil, &out, &errb); code != 0 ||
+		!strings.Contains(out.String(), "change: none at "+runHead+": "+review.ChangeNone+"\n") {
+		t.Errorf("triage's facts at a passed head = exit %d: %s%s", code, out.String(), errb.String())
+	}
+	out.Reset()
+	if code := reviewStepIn(ledger.New(s), "tk-tri", false, true, nil, &out, &errb); code != 0 ||
+		!strings.Contains(out.String(), `"change":{"from":"`+runHead+`","head":"`+runHead+`","why":"`+review.ChangeNone+`"}`) {
+		t.Errorf("triage's JSON facts at a passed head = exit %d: %s%s", code, out.String(), errb.String())
+	}
 }
 
 // output prints an output that stands and refuses one that does not.

@@ -146,7 +146,7 @@ subtree again as the next iteration. A step cannot combine `check` with `expand`
 |---|---|---|
 | `prepare` | the review pool (`<rig>/<binding>polecat-codex`, where reviews run today) | Reads the record and the PR, and stops the run with no result when the PR's head is no longer the run's head. Makes the run's workspace (below). |
 | `review-loop` (template, checked) | the orchestrator | Holds one iteration per head the run judges. Its check is `gctk review passed <run>` (section 8). `max_attempts` is a formula var, 3 by default, the bound the pack's one check loop already uses (`mol-polecat-work`'s self-review). |
-| `triage` (child) | the review pool | Judges the iteration's head: the change since the last head that passed, or since the run's first head when the run's own repair pushed this one, or else the whole PR (section 2). Its output names the checks the head needs and whether the change is material. |
+| `triage` (child) | the review pool | Judges the iteration's head: nothing at a head that already passed, the change since the last head that passed, or since the run's first head when the run's own repair pushed this one, or else the whole PR (section 2). Its output names the checks the head needs and whether the change is material. |
 | one lane per picked check | the review pool, or the check's own target | Bonded at runtime from triage's output, one `mol-pr-review-lane` per check. Each runs its check's method at the head in its own worktree and writes its verdict and findings as its output. |
 | `rule-and-repair` (child) | the fix pool (`<rig>/<binding>polecat`, where fixes and validation passes run today) | Rules every finding and every ask the run can take, answers them in the head's comment, and makes the round's fixes as one push (section 6). |
 | `record` | the review pool | Writes the result for the head and the target, closes the asks the run answered, and removes the workspace. |
@@ -265,8 +265,12 @@ fixes still need no recheck."
 In the run, triage judges each head the run reaches, the run's first head and
 each head its own repair pushes. It reads:
 
-- **The change.** At a head with a passed result behind it on the branch, the
-  change is `git diff <last passed head>..<head>`, two commits of one branch, so
+- **The change.** At a head that already carries a passed result for the run's
+  target, there is no change to judge, because its checks ran and their
+  findings were ruled there, as when the order pours a run for an ask at a
+  passed head (section 1). The read says so, and triage picks only the checks
+  an ask the run can take sends back. At a head with a passed result behind it
+  on the branch, the change is `git diff <last passed head>..<head>`, two commits of one branch, so
   no rewrite of the target moves it. At a head the run's own repair pushed with no
   passed head behind it, as in a PR's first round, the change is the repair,
   `git diff <the run's first head>..<head>`, read with the rulings it answers, so

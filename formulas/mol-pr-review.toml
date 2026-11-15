@@ -138,11 +138,12 @@ under review, not your method.
 **2. Read what this iteration judges.**
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" triage`
 It makes triage's worktree at the iteration's head and prints the change to
-judge with the rule that chose it, each merge in the change, the check index at
-the head, the run so far with the asks open on `{{pr_bead}}`, and, at a head the
-run's own repair pushed, the round that pushed it. Read the change in that
-worktree with git, and a merge with `git show --remerge-diff <commit>` and its
-message, which says what collided and what was decided.
+judge with the rule that chose it, none at a head that already passed, each
+merge in the change, the check index at the head, the run so far with the asks
+open on `{{pr_bead}}`, and, at a head the run's own repair pushed, the round
+that pushed it. Read the change in that worktree with git, and a merge with
+`git show --remerge-diff <commit>` and its message, which says what collided and
+what was decided.
 
 **3. Judge the head by the method.** It picks the checks the head needs, closed
 over the index, and rules whether the change is material. When it is, withdraw

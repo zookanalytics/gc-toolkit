@@ -25,9 +25,11 @@ import (
 // and the same head again when that round pushed nothing.
 //
 // The change triage reads at a head is, in order of the first that applies:
-// the change since the nearest earlier head of the branch that a run passed at
-// for the same target; the run's own repair, from its first head, at a head the
-// repair pushed; and the whole PR, from where it left the target.
+// none, at a head a run already passed at for the same target, where triage
+// picks only the checks an ask sends back; the change since the nearest
+// earlier head of the branch that a run passed at for the same target; the
+// run's own repair, from its first head, at a head the repair pushed; and the
+// whole PR, from where it left the target.
 
 // The step names of a review run whose outputs the run reads: the last part of
 // the step's gc.step_ref, as Gas City writes it at every iteration.
@@ -205,31 +207,41 @@ func (run *Run) HeadOf(n int) string {
 	return head
 }
 
-// Change is the change triage reads at a head: From..Head, or the whole PR
-// from where it left the target when From is "". Why names which rule chose
-// it.
+// Change is the change triage reads at a head: From..Head, none when From is
+// the head itself, or the whole PR from where it left the target when From is
+// "". Why names which rule chose it.
 type Change struct {
 	From, Head, Why string
 }
 
 // The rules that choose a change.
 const (
+	ChangeNone        = "the head already passed into its target"
 	ChangeSincePassed = "since the last head that passed"
 	ChangeRepair      = "the run's own repair, since its first head"
 	ChangeWhole       = "the whole PR"
 )
 
+// None reports whether the change is empty: the head already passed, so no
+// change is left to judge.
+func (c Change) None() bool { return c.From != "" && c.From == c.Head }
+
 func (c Change) String() string {
-	if c.From == "" {
+	switch {
+	case c.None():
+		return fmt.Sprintf("none at %s: %s", c.Head, c.Why)
+	case c.From == "":
 		return fmt.Sprintf("the whole PR at %s, from where it left its target", c.Head)
 	}
 	return fmt.Sprintf("%s..%s, %s", c.From, c.Head, c.Why)
 }
 
-// ChangeAt is the change triage reads at head, for the run's target: since
+// ChangeAt is the change triage reads at head, for the run's target: none
+// when a passed result names the head itself for that target, so a run poured
+// for an ask at a passed head judges only what the ask sends back; else since
 // the nearest earlier head of the branch a passed result names for that
-// target, else the run's own repair since its first head when the head is not
-// the first, else the whole PR. Results are the entries on the bead that owns
+// target; else the run's own repair since its first head when the head is not
+// the first; else the whole PR. Results are the entries on the bead that owns
 // the PR. repos are the checkouts that can answer which commit descends from
 // which; the head is fetched from origin by its id when none of them holds it,
 // and a read that fails is an error, because a wrong change is a wrong triage.
@@ -242,7 +254,11 @@ func ChangeAt(run *Run, results []Result, repos []string, head string) (Change, 
 	}
 	var passed []string
 	for _, r := range results {
-		if r.Passed && r.Target == run.Target && r.Head != head && git.IsObjectID(r.Head) {
+		switch {
+		case !r.Passed || r.Target != run.Target:
+		case r.Head == head:
+			return Change{From: head, Head: head, Why: ChangeNone}, nil
+		case git.IsObjectID(r.Head):
 			passed = append(passed, r.Head)
 		}
 	}

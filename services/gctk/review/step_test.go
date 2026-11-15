@@ -108,10 +108,11 @@ func TestTheHeadEachIterationJudges(t *testing.T) {
 	}
 }
 
-// Triage reads the change since the nearest earlier head a run passed at for
-// the target, else the run's own repair since its first head, else the whole
-// PR. A passed result for another target, one that failed, and one off the
-// branch are none of them.
+// Triage reads nothing at a head a run already passed at for the target, else
+// the change since the nearest earlier head a run passed at for the target,
+// else the run's own repair since its first head, else the whole PR. A passed
+// result for another target, one that failed, and one off the branch are none
+// of them.
 func TestTheChangeTriageReads(t *testing.T) {
 	r := newHeadRepo(t)
 	run := &review.Run{Root: root, PRBead: prBead, Head: r.h1, Target: target}
@@ -137,6 +138,14 @@ func TestTheChangeTriageReads(t *testing.T) {
 		{"a passed head the clone does not hold, which no origin serves", []review.Result{
 			{Head: strings.Repeat("ab", 20), Target: target, Passed: true}}, r.h2,
 			review.Change{From: r.h1, Head: r.h2, Why: review.ChangeRepair}},
+		{"the first head, which already passed", []review.Result{{Head: r.h1, Target: target, Passed: true}}, r.h1,
+			review.Change{From: r.h1, Head: r.h1, Why: review.ChangeNone}},
+		{"a head that passed, with a pass behind it", []review.Result{{Head: r.h1, Target: target, Passed: true},
+			{Head: r.h2, Target: target, Passed: true}}, r.h2, review.Change{From: r.h2, Head: r.h2, Why: review.ChangeNone}},
+		{"a head that passed for another target", []review.Result{{Head: r.h1, Target: "release", Passed: true}}, r.h1,
+			review.Change{Head: r.h1, Why: review.ChangeWhole}},
+		{"a head whose result did not pass", []review.Result{{Head: r.h1, Target: target}}, r.h1,
+			review.Change{Head: r.h1, Why: review.ChangeWhole}},
 	}
 	for _, c := range cases {
 		got, err := review.ChangeAt(run, c.results, repos, c.head)
@@ -146,6 +155,13 @@ func TestTheChangeTriageReads(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s: the change is %+v; want %+v", c.name, got, c.want)
 		}
+		if got.None() != (c.want.Why == review.ChangeNone) {
+			t.Errorf("%s: the change reads as none: %t", c.name, got.None())
+		}
+	}
+	// A head that passed needs no clone: nothing behind it is read.
+	if got, err := review.ChangeAt(run, []review.Result{{Head: r.h2, Target: target, Passed: true}}, nil, r.h2); err != nil || !got.None() {
+		t.Errorf("a passed head with no repository = %+v, %v; want none", got, err)
 	}
 	if _, err := review.ChangeAt(run, []review.Result{{Head: r.h1, Target: target, Passed: true}}, nil, r.h2); err == nil {
 		t.Error("with no repository to read the heads in, the change reads; want an error")
