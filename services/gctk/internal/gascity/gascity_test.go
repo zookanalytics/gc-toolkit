@@ -229,3 +229,42 @@ func TestScriptRunsFromThePacksScriptsDirectory(t *testing.T) {
 		t.Fatalf("a city with no scripts directory answered %+v", r)
 	}
 }
+
+// A city In a directory starts every command there, its scripts and gc alike,
+// and a relative scripts directory still names the one it named from the
+// process's working directory. The city it came from runs where the process
+// does.
+func TestInStartsEveryCommandInItsDirectory(t *testing.T) {
+	base := t.TempDir()
+	log := filepath.Join(base, "where")
+	stub := "#!/bin/sh\npwd -P >> '" + log + "'\n"
+	if err := os.MkdirAll(filepath.Join(base, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"scripts/human-gate.sh", "gc"} {
+		if err := os.WriteFile(filepath.Join(base, p), []byte(stub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(base)
+	there := t.TempDir()
+	from := &City{bin: filepath.Join(base, "gc"), scriptsDir: "scripts"}
+	c := from.In(there)
+	if r := c.Script("human-gate.sh"); r.Code != 0 {
+		t.Fatalf("the script in a relative scripts directory answered %+v", r)
+	}
+	c.Sling(Sling{Target: "rig/rig.polecat", Bead: "tk-1", Formula: "mol-polecat-work", Title: "the work"})
+	from.Script("human-gate.sh")
+	resolvedThere, err := filepath.EvalSymlinks(there)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(log)
+	if want := resolvedThere + "\n" + resolvedThere + "\n" + resolvedBase + "\n"; string(raw) != want {
+		t.Fatalf("the commands ran in %q, want %q", raw, want)
+	}
+}

@@ -341,11 +341,24 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   open children, which a gate on the bead would pause. `gc-helm engage` takes
   the bead's conversation, or files one, and spawns a manual `converse-<model>`
   session under an alias that names it: the sitting. The sitting claims its
-  conversation with a plain `gc hook --claim`, holds for the operator, answers
-  each gate the operator rules on through its conversation's reply, and signs
-  off by resolving those gates and closing the conversation, which ends its
-  session. A sitting cut short hands the conversation back to the queue, and
-  the next engagement resumes it from the record.
+  conversation, holds for the operator, answers each gate the operator rules on
+  through its conversation's reply, and signs off by resolving those gates and
+  closing the conversation, which ends its session. When a ruling sends work,
+  the sitting and the operator choose whether it ends at that hand-off or stays
+  until the work returns
+  ([human-engagement.md](human-engagement.md#a-sitting-that-stays-for-the-return)).
+  Gas City sleeps a sitting that stays, and when the work closes it wakes the
+  sitting with its thread, or sends a sitting still up a notice that the work
+  closed. The board shows a conversation its sitting stays in, and the pull
+  request whose merge it holds, as waiting on that work, not as asks of the
+  operator. On its return the sitting compares
+  what landed with what was agreed and tells the operator where it departs. It
+  passes and fails nothing: the work's own checks give the verdicts, and the
+  subject closes as it would after a hand-off, such as through the validating
+  closer the stay armed (`mol-validate-close`,
+  [component-model.md](component-model.md#4-where-each-component-sits)). A
+  sitting cut short hands the conversation back to the queue, and the next
+  engagement resumes it from the record.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
@@ -465,9 +478,8 @@ why a reader must know it, and the work that retires it.
   machine, so steps 6 to 8 are not what runs there today. Each rig's cutover
   bead moves the rig onto the pending record once the review loop
   (tk-1tfzr71.22) lands, along with the board's phase of a pending PR by the
-  evaluator's answer (tk-1tfzr71.88), a sitting's retirement of one
-  (tk-1tfzr71.89) and, for gc-toolkit, the seed audit's re-render after a
-  landing (tk-1tfzr71.92). The retirement bead (tk-1tfzr71.70), which waits on
+  evaluator's answer (tk-1tfzr71.88) and a sitting's retirement of one
+  (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which waits on
   every cutover, deletes the old path once no open bead is on it.
 - **The merge cadence still admits work on a pending record.** It files work
   for a PR on the pending record beside the landing order

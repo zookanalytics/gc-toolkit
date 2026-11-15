@@ -53,7 +53,10 @@ A bead may be routed or armed to a work pool only when one of these holds:
 - it is the seed audit's re-audit, the one bead `seed-audit-reaudit.sh` slings
   to re-render the default branch's `generated/seed-audit` once the merge gate
   finds files there that the `gc` binary moved, a route the operator made
-  standing ([refinery-merge-cadence.md](refinery-merge-cadence.md)).
+  standing ([refinery-merge-cadence.md](refinery-merge-cadence.md)), or once
+  the landing order finds files stale there after a landing, the re-render
+  after landing the operator approved in the merge design's call 1
+  ([design.md](../specs/tk-1tfzr71.66/design.md#what-the-operator-approves)).
 
 Every other bead waits for placement. A bead held this way is open and
 unassigned, carries Gas City's `hold:mayor` label, and has no route and no arm.

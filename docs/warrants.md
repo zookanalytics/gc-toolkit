@@ -460,7 +460,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   waits on an answer.
 - **Evidence.**
   - In `gastownhall/gascity`, the `gc` binary's pull request readiness monitor
-    reads each open PR's draft flag, merge state, head and check rollup
+    reads each open PR's author, draft flag, merge state, head and check rollup
     (`pullRequestsQuery` in `internal/githubmonitor/client.go`, and
     `classifyPullRequest` in `internal/githubmonitor/monitor.go`), and records
     its class on a repair bead it files. No source under `cmd/`, `internal/` or
