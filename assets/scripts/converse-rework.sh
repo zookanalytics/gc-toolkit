@@ -68,6 +68,11 @@ _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=git-lib.sh
 . "$_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 2; }
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
+# The ask a ruling files on the pending record is gctk's, from the binary the
+# city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 DIE_STATUS=2
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
@@ -139,9 +144,6 @@ REASON="operator ruling (conversation $RULING_BEAD): $RULING"
 
 case "$MERGE_RESULT" in
   pull_request_pending|pull_request_head_changed)
-    # >>> gctk-bin
-    GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
-    # <<< gctk-bin
     ASK_ARGS=(review ask "$ANCHOR" --reason "$REASON" --source "$RULING_BEAD")
     for c in "${CHECKS[@]+"${CHECKS[@]}"}"; do ASK_ARGS+=(--check "$c"); done
     ASK_OUT=$("$GCTK" "${ASK_ARGS[@]}" 2>&1) \
