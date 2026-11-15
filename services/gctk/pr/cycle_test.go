@@ -452,6 +452,25 @@ func TestAnApprovalWhoseCompareGitHubRefusesIsDismissed(t *testing.T) {
 	}
 }
 
+// A withdrawal is a plain task, so the runtime's work-record gate reads its
+// close, and once enforced it refuses a close that names no outcome. A
+// withdrawal carried out, with an approval to dismiss or none, closes with a
+// no-op record the gate takes.
+func TestACarriedOutWithdrawalClosesWithANoOpWorkRecord(t *testing.T) {
+	for _, reviews := range [][]gh.Review{{approved(100, "operator", older)}, nil} {
+		d := newCycle(t)
+		d.store.WorkRecordGate = true
+		d.pr.Reviews = reviews
+		id := d.withdraw(t, head)
+		d.once(t)
+		b, _ := d.store.Row(id)
+		if b.Status != "closed" || b.Metadata["gc.work_outcome"] != "no-op" {
+			t.Fatalf("with %d approval(s) to dismiss, the withdrawal is %s with work outcome %q",
+				len(reviews), b.Status, b.Metadata["gc.work_outcome"])
+		}
+	}
+}
+
 // When GitHub refuses a dismissal, the withdrawal files a human gate on the
 // bead naming the reviews, and stays open until a person dismisses them.
 func TestAWithdrawalFilesItsGateWhenGitHubRefuses(t *testing.T) {

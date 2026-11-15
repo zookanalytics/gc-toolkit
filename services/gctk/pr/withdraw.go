@@ -337,9 +337,12 @@ func (u *run) carryOne(s state, host string, hub Hub, p *gh.PullRequest, w withd
 		note += fmt.Sprintf("it dismissed %s of PR #%d, and no approval stands on a commit without %s.",
 			reviewNames(targets), p.Number, short(w.head))
 	}
+	// A withdrawal is a plain task, whose close the runtime's work-record gate
+	// reads. Carrying it out ships no commit, so its record is no-op.
 	cw := u.Ledger.Write(w.id)
 	cw.Guard(w.status, w.assignee)
 	cw.Status("closed")
+	cw.WorkRecord("no-op", "", "")
 	cw.Note(note)
 	if err := u.Ledger.Commit(cw); err != nil {
 		return waits("the withdrawal's close did not land: " + err.Error())

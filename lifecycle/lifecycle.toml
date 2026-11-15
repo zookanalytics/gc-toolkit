@@ -1880,7 +1880,10 @@ keys = [
 #   writes gc.work_commit (merged_sha) and gc.work_branch (merged_target) from
 #   the landing it records, when that landing names both.
 #   mol-refinery-patrol.toml's rework hand-back close writes them from the head
-#   it read back from origin and the branch that head is on. bead-rehome.sh
+#   it read back from origin and the branch that head is on. `gctk review
+#   record`'s close of an ask an earlier round of the run fixed writes them from
+#   the fix's commit and the PR's branch, which the repair pushed that commit
+#   onto from a worktree of the rig checkout. bead-rehome.sh
 #   reads gc.work_dir and gc.work_commit — with the pack-written bare work_dir
 #   defined in merge_identity — as proof a run produced work before a duplicate
 #   or fixed-upstream close.
@@ -1897,11 +1900,14 @@ keys = [
 #   like gc.outcome: the runtime's work-record gate checks it when a plain task
 #   bead closes, and warns on a missing or unknown value unless
 #   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `shipped`
-#   from the lifecycle writer's transition into `merged` and from
-#   mol-refinery-patrol.toml's rework hand-back close, and `no-op` from
+#   from the lifecycle writer's transition into `merged`, from
+#   mol-refinery-patrol.toml's rework hand-back close and from `gctk review
+#   record`'s close of an ask an earlier round fixed, and `no-op` from
 #   the proactive prompt's clause on a leftover reaction bead it closes,
 #   mol-validate-close, work-outcome.sh on every conversation close, the
-#   observation-filing recipes, and converse by hand. bead-rehome.sh reads it
+#   observation-filing recipes, `gctk review record`'s close of any other ask
+#   the run answered, the landing order's close of a withdrawal it carried out,
+#   and converse by hand. bead-rehome.sh reads it
 #   to confirm a no-op origin is disposable, `gctk pr compose` drops a no-op row
 #   from a branch's ledger, and each falls back to the legacy bare `work_outcome`
 #   alias. Absent leaves the

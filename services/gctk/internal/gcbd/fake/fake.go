@@ -83,6 +83,19 @@ type Store struct {
 	// update stamps nothing, and a test names a close time itself.
 	CloseTime string
 
+	// WorkRecordGate, when set, refuses an update that closes a plain task bead
+	// as Gas City's work-record gate refuses it under GC_WORK_RECORD_ENFORCE,
+	// which gc bd runs before it hands bd the update, so it is the door's rule
+	// and not the store's: the work record the bead carries with the update's
+	// keys applied names no gc.work_outcome, or one that is not shipped, no-op,
+	// blocked or abandoned, or a shipped one with no gc.work_commit or no
+	// gc.work_branch (Gated and ValidateOnClose in internal/workrecord/gate.go,
+	// and evaluateWorkRecordCloseGate in cmd/gc/work_record_gate.go, at Gas City
+	// upstream e9a628c500). The gate's last test, whether the branch reaches the
+	// commit, asks a rig's checkout, which the fake does not hold. A refused
+	// update writes nothing.
+	WorkRecordGate bool
+
 	finds []gcbd.Query
 }
 
@@ -357,9 +370,68 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 			return "", fmt.Errorf("fake store: update takes no %s", name)
 		}
 	}
+	if s.WorkRecordGate && closesStatus(args) && workRecordGated(s.rows[id]) {
+		if why := workRecordRefusal(b.Metadata); why != "" {
+			return "", fmt.Errorf("fake store: work-record gate (enforced): close of %s: %s", id, why)
+		}
+	}
 	s.rows[id] = b
 	s.writes = append(s.writes, Write{ID: id, Args: slices.Clone(args)})
 	return "", nil
+}
+
+// closesStatus reports whether an update's arguments move the bead to closed.
+func closesStatus(args []string) bool {
+	closes := false
+	for i := 0; i < len(args); i++ {
+		if v, ok := strings.CutPrefix(args[i], "--status="); ok {
+			closes = strings.EqualFold(v, "closed")
+		} else if args[i] == "--status" && i+1 < len(args) {
+			i++
+			closes = strings.EqualFold(args[i], "closed")
+		}
+	}
+	return closes
+}
+
+// workRecordGated reports whether the work-record gate reads the close of b: a
+// task, or a bead of no type, that carries no gc.kind, gc.step_id or
+// gc.step_ref.
+func workRecordGated(b Bead) bool {
+	if t := strings.TrimSpace(b.IssueType); t != "" && t != "task" {
+		return false
+	}
+	for _, k := range []string{"gc.kind", "gc.step_id", "gc.step_ref"} {
+		if strings.TrimSpace(b.Metadata[k]) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// workRecordRefusal is why the work-record gate refuses a close whose bead
+// carries meta once the update lands, "" when it does not.
+func workRecordRefusal(meta map[string]string) string {
+	outcome := strings.TrimSpace(meta["gc.work_outcome"])
+	switch outcome {
+	case "":
+		return "missing gc.work_outcome"
+	case "no-op", "blocked", "abandoned":
+		return ""
+	case "shipped":
+	default:
+		return fmt.Sprintf("invalid gc.work_outcome=%q", outcome)
+	}
+	var missing []string
+	for _, k := range []string{"gc.work_commit", "gc.work_branch"} {
+		if strings.TrimSpace(meta[k]) == "" {
+			missing = append(missing, k)
+		}
+	}
+	if len(missing) > 0 {
+		return "gc.work_outcome=shipped requires " + strings.Join(missing, " and ")
+	}
+	return ""
 }
 
 // Creates returns every create the store took, in order.

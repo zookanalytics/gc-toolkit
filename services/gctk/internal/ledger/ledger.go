@@ -131,15 +131,21 @@ func (w *Write) Note(text string) { w.note = text }
 
 // WorkRecord gives the bead the runtime's work record in the same write: its
 // outcome, which reads shipped for work that landed and no-op for none, and,
-// unless commit is empty, the commit that carries the work. The keys are Gas
-// City's (gc.work_outcome and gc.work_commit, lifecycle/lifecycle.toml,
+// unless commit is empty, the commit that carries the work and, unless branch
+// is empty, the branch that commit is on. The keys are Gas City's
+// (gc.work_outcome, gc.work_commit and gc.work_branch, lifecycle/lifecycle.toml,
 // [metadata.runtime_owned]), whose work-record gate reads them as a plain task
 // bead closes, so no domain declares them, and the act that closes such a bead
-// sets them here.
-func (w *Write) WorkRecord(outcome, commit string) {
+// sets them here. Under GC_WORK_RECORD_ENFORCE the gate refuses a close that
+// names no outcome, and a shipped one that names no commit or no branch, or a
+// commit the branch does not reach.
+func (w *Write) WorkRecord(outcome, commit, branch string) {
 	w.set("gc.work_outcome", outcome)
 	if commit != "" {
 		w.set("gc.work_commit", commit)
+		if branch != "" {
+			w.set("gc.work_branch", branch)
+		}
 	}
 }
 

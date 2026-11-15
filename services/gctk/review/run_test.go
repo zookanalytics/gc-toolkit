@@ -424,11 +424,14 @@ func TestNoResultForAHardFailure(t *testing.T) {
 	}
 }
 
-// The asks the last round answered close with their work record, an ask fixed
-// at an earlier head as shipped with its commit; a shadow run writes nothing.
+// The asks the last round answered close with their work record, which the
+// runtime's enforced work-record gate takes: an ask fixed at an earlier head
+// as shipped with its commit on the PR's branch, any other as no-op; a shadow
+// run writes nothing.
 func TestRecordClosesTheAsksTheRunAnswered(t *testing.T) {
 	setup := func(shadow bool) *world {
 		w := newWorld(t)
+		w.store.WorkRecordGate = true
 		if shadow {
 			r, _ := w.store.Row(root)
 			r.Metadata["gc.var.shadow"] = "true"
@@ -463,8 +466,12 @@ func TestRecordClosesTheAsksTheRunAnswered(t *testing.T) {
 			t.Fatalf("%s reads %+v; want it closed with its work record", id, row)
 		}
 	}
-	if row, _ := w.store.Row("tk-fixed"); row.Metadata["gc.work_commit"] != fix {
-		t.Fatalf("the fixed ask's work commit reads %q", row.Metadata["gc.work_commit"])
+	if row, _ := w.store.Row("tk-fixed"); row.Metadata["gc.work_commit"] != fix || row.Metadata["gc.work_branch"] != branch {
+		t.Fatalf("the fixed ask's work record names commit %q on branch %q; want %s on %s",
+			row.Metadata["gc.work_commit"], row.Metadata["gc.work_branch"], fix, branch)
+	}
+	if row, _ := w.store.Row("tk-nit"); row.Metadata["gc.work_outcome"] != "no-op" || row.Metadata["gc.work_branch"] != "" {
+		t.Fatalf("the declined ask's work record reads %+v; want no-op, naming no branch", row.Metadata)
 	}
 	if row, _ := w.store.Row("tk-asked"); row.Status != "open" {
 		t.Fatalf("the ask put to a person closed")

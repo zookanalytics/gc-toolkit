@@ -140,6 +140,10 @@ func Record(l *ledger.Ledger, dir string, wait time.Duration, id string) (*Recor
 	if err != nil {
 		return out, err
 	}
+	// A fixed ask's commit is on the PR's branch, which the repair pushed it
+	// onto from a worktree of the rig's checkout, so the checkout's origin ref
+	// of the branch reaches it where the runtime's work-record gate asks.
+	branch := view(record.Branch, owner)
 	for _, a := range answered {
 		i := slices.IndexFunc(asks, func(o Ask) bool { return o.ID == a.ID })
 		if i < 0 || !asks[i].Open() {
@@ -147,7 +151,7 @@ func Record(l *ledger.Ledger, dir string, wait time.Duration, id string) (*Recor
 		}
 		w := l.Write(a.ID)
 		w.Status("closed")
-		w.WorkRecord(a.Outcome, a.Commit)
+		w.WorkRecord(a.Outcome, a.Commit, branch)
 		w.Note(fmt.Sprintf("Answered by review run %s at %s into %s: %s.", run.Root, head, run.Target, a.Ruling))
 		if err := l.Commit(w); err != nil {
 			return out, fmt.Errorf("the result landed and ask %s did not close: %w", a.ID, err)

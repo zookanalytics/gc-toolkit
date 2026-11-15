@@ -386,9 +386,10 @@ Nothing outside it parses a metadata value or spells a key's name.
 - **One act is one write.** A verb's change of state is one `bd update`,
   create or close, carrying every key the act sets, so the act lands whole or
   not at all. A write that exits non-zero has failed, and no caller discards
-  that status. A close carries the runtime's work record, `gc.work_outcome` and
-  `gc.work_commit`, which Gas City's close reads and no domain owns, so the
-  ledger sets them as part of the act that closes the bead.
+  that status. A close carries the runtime's work record, `gc.work_outcome`,
+  and for work that shipped `gc.work_commit` and `gc.work_branch`, which Gas
+  City's close reads and no domain owns, so the ledger sets them as part of the
+  act that closes the bead.
 - **A write's exit decides whether it landed.** Nothing reads a write back to
   confirm it, before an act that cannot be undone or anywhere else, so a close,
   a push, a dismissal or a sling that rests on a write goes ahead once the write
@@ -438,7 +439,7 @@ and CI runs those tests on every PR.
 
 | Adapter | Outside system | How it reaches it | Its fake |
 |---|---|---|---|
-| store | the bead store | `gc bd` for writes, for reads that must see a fresh write and for the blocked set, the supervisor API for other reads | in-memory rows and edges, with the store's blocked answers set by the test |
+| store | the bead store | `gc bd` for writes, for reads that must see a fresh write and for the blocked set, the supervisor API for other reads | in-memory rows and edges, with the store's blocked answers set by the test, and the work-record close gate `gc bd` enforces under `GC_WORK_RECORD_ENFORCE` when a test turns it on |
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
