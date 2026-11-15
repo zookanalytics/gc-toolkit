@@ -78,9 +78,12 @@ and its other checks.
 
 New logic the pack runs is written in Go, in gctk, in the shape
 [gctk-architecture.md](docs/gctk-architecture.md) sets, and a change adds no
-new script for it. An order names gctk in its `exec` line, and a new file that
-a caller requires, such as the `run.sh` Gas City runs for a doctor check, does
-nothing but call gctk. Tooling that runs only on this repository, such as its
+new script for it. An exec order names gctk in its `exec` line, and a new file
+that a caller requires, such as the `run.sh` Gas City runs for a doctor check,
+does nothing but call gctk. The helm board's own code, such as its web page and
+its ranking, stays in its service, under
+[the board's composition](docs/gctk-architecture.md#compositions) in
+gctk-architecture.md. Tooling that runs only on this repository, such as its
 lint detectors and its test runner, is outside this rule.
 
 A script that already exists takes a fix in place, where a fix corrects what
