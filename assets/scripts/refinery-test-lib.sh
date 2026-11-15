@@ -18,6 +18,9 @@
 #     `gctk pr record` keeps the real one's guard: it writes nothing on a bead
 #     that is closed or assigned to anyone but the refinery, and exits 3. The
 #     fake `gctk pr draft` logs its call and exits $STUB_DRAFT_RC, 0 when unset.
+#     The fake `gctk review ask` files an ask on the bead's branch, with the
+#     bead's blocks edge onto it, or finds one of the same reason, and exits
+#     $STUB_ASK_RC with nothing filed when that is set.
 #     The fake `gctk pr compose` names, as riding the owner's PR, each bead whose
 #     landing onto the owner's branch the lifecycle stub logged, and the fake
 #     `gh pr edit` keeps the body it gives PR #<n> as $GH_DIR/edit_<n>.md. The
@@ -384,6 +387,19 @@ riding: $riders}"
       '{title: $t, body: $b, summary: $o, branch_beads: "single", branch_bead_count: 1}' ;;
   "pr draft")
     exit "${STUB_DRAFT_RC:-0}" ;;
+  "review ask")
+    rc="${STUB_ASK_RC:-0}"
+    [ "$rc" = 0 ] || { echo "gctk review ask: $3: the store did not answer" >&2; exit "$rc"; }
+    bead="$3"; shift 3; reason=""
+    while [ $# -gt 0 ]; do case "$1" in --reason) reason="$2"; shift ;; esac; shift; done
+    branch=$(jq -r --arg id "$bead" '[ .[] | select(.id == $id) ][0].metadata.branch // ""' "$STORE")
+    found=$(jq -r --arg b "$branch" --arg r "$reason" '[ .[] | select(.metadata.branch == $b and (.description // "") == $r and (.assignee // "") == "") ][0].id // ""' "$STORE")
+    [ -z "$found" ] || { echo "$found found"; exit 0; }
+    id="$bead-ask-$(jq 'length' "$STORE")"
+    jq --arg id "$id" --arg b "$branch" --arg r "$reason" '. + [{id: $id, title: ("Review ask: " + $r), status: "open", assignee: "",
+      issue_type: "task", notes: "", description: $r, metadata: {branch: $b}}]' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+    echo "$bead $id" >> "$STUB_HOLDS"
+    echo "$id filed" ;;
   "pr record")
     bead="$3"; shift 3; url=""; head=""; target=""; refinery=""
     while [ $# -gt 0 ]; do

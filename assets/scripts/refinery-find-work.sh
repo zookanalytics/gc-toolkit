@@ -20,6 +20,9 @@
 #     works nothing. Once nothing holds it, it is neither a wait on its bead
 #     nor a writer of the bead's branch, so the bead is taken as if the child
 #     were not there, and the bead's prep sends the child on.
+#   - An ask on the bead's PR (refinery-lib.sh) is the review run's work, never
+#     the refinery's. It is neither a wait on the bead nor a writer of its
+#     branch, so the bead is taken as if the ask were not there.
 #
 # A bead on the old path's cadence, merge_result pull_request or
 # pre_open_gate, is the cadence's to drive, never this queue's, so it is named
@@ -97,10 +100,14 @@ if [ "$(printf '%s' "$SENDS" | jq 'length')" != 0 ]; then
   UNSENT=$(judge "$SENDS" "$KHOLDS" | jq -c '[ .[] | select(.holds.status == "clear") | {id, anchor} ]' 2>/dev/null)
   printf '%s' "$UNSENT" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "gctk bead holds did not answer for every unsent rework child"
 fi
-JUDGED=$(printf '%s\n%s' "$JUDGED" "$UNSENT" | jq -sc '.[1] as $u | [ .[0][] | .id as $id
+# A bead's asks (refinery-lib.sh), as .asks: the review run's work, so they
+# neither hold the bead nor work its branch.
+JUDGED=$(printf '%s\n%s\n%s' "$JUDGED" "$UNSENT" "$BUSY" | jq -sc "$REFINERY_ASK_JQ"'.[1] as $u | .[2] as $busy | [ .[0][] | .id as $id
+  | ((.metadata.branch // "") | tostring) as $b
   | ([ $u[] | select(.anchor == $id) | .id ]) as $mine
-  | ([ (.holds.waits // [])[] | ((.id // "") | tostring) | select(. as $w | ($mine | index($w)) == null) ]) as $other
-  | . + {unsent: $mine, held: (.holds.status != "clear" and (((.holds.waits // []) | length) == 0 or ($other | length) > 0)),
+  | ([ $busy[] | select(.id != $id) | select(refinery_ask($b)) | .id ] | unique) as $asks
+  | ([ (.holds.waits // [])[] | ((.id // "") | tostring) | select(. as $w | (($mine + $asks) | index($w)) == null) ]) as $other
+  | . + {unsent: $mine, asks: $asks, held: (.holds.status != "clear" and (((.holds.waits // []) | length) == 0 or ($other | length) > 0)),
          waits_on: ($other[0] // "?")} ]' 2>/dev/null)
 printf '%s' "$JUDGED" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "what holds the beads could not be weighed"
 HELD=$(printf '%s' "$JUDGED" | jq -r '[ .[] | select(.held) | .id + " waits on " + .waits_on ] | join("; ")')
@@ -109,15 +116,15 @@ CLEAR=$(printf '%s' "$JUDGED" | jq -c '[ .[] | select(.held | not) ]')
 
 WAITING=$(printf '%s' "$JUDGED" | jq -c '[ .[].id ]')
 # A writer of a bead's branch is any open bead on it but the bead itself, the
-# one it names as its anchor and its unsent rework children, unless the bead
-# waits here too.
+# one it names as its anchor, its unsent rework children and its asks, unless
+# the bead waits here too.
 RANKED=$(printf '%s\n%s\n%s' "$CLEAR" "$BUSY" "$WAITING" | jq -sc '
   .[0] as $clear | .[1] as $busy | .[2] as $waiting
   | [ $clear[] | . as $b
       | ((.metadata.anchor_bead // "") | tostring) as $anchor
       | ([ $busy[] | select(((.metadata.branch // "") | tostring) == (($b.metadata.branch // "") | tostring))
            | select(.id != $b.id and .id != $anchor)
-           | select(.id as $i | ($b.unsent | index($i)) == null)
+           | select(.id as $i | (($b.unsent + $b.asks) | index($i)) == null)
            | select(.id as $i | ($waiting | index($i)) == null) | .id ] | unique) as $writers
       | . + {writers: $writers,
              rank: (if ((.metadata.task_kind // "") | tostring) == "rework" and $anchor != "" then 0 else 1 end)} ]' 2>/dev/null)

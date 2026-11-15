@@ -55,6 +55,26 @@ REFINERY_UNSENT_JQ="$DISPATCH_PATH_JQ"'
       and ((has_dispatch_path or has_dispatch_hold) | not);
 '
 
+# An ask on a bead's PR (`gctk review ask`): an open task that names the bead's
+# branch, with no assignee, no route and no task_kind. The review run works it,
+# and it holds the PR's merge through its own blocks edge onto the bead. The
+# refinery leaves it alone: it is neither a wait that keeps the refinery from
+# taking the bead nor a writer of the bead's branch, so a head the landing order
+# sent back with an ask open is still validated and published, and the order
+# pours the run that takes the ask once the record names that head.
+#   jq "$REFINERY_ASK_JQ"' map(select(refinery_ask($branch))) '
+# shellcheck disable=SC2034  # read by the scripts that source this file
+REFINERY_ASK_JQ='
+  def refinery_ask($branch):
+    (.metadata // {}) as $m
+    | ((.status // "") | tostring) == "open"
+      and ((.issue_type // .type // "") | tostring) == "task"
+      and (($m.branch // "") | tostring) == $branch
+      and ((.assignee // "") | tostring) == ""
+      and (($m["gc.routed_to"] // "") | tostring) == ""
+      and (($m.task_kind // "") | tostring) == "";
+'
+
 # refinery_home — the refinery's own worktree, from GC_DIR, printed as a
 # physical path. Non-zero, with a line on stderr, when GC_DIR is unset or is not
 # the top of a git worktree, since a prep tree under any other directory would

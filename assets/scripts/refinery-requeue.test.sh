@@ -13,10 +13,14 @@
 #     validated again, goes back with its merge_result and blocked_reason
 #     cleared, since the work gate refuses a bead that carries one, and keeps
 #     the PR it may reuse;
-#   - a bead that records an open PR keeps it and comes back as its rework
-#     child: a task with the work order, joined to the bead and blocking it
-#     through edges in its create, settled and slung, while the bead stays with
-#     the refinery;
+#   - a bead that owns an open PR on the record keeps it, and its branch goes
+#     to the review run: the PR is recorded pending at the head the prep read,
+#     and an ask with the reason is filed on the bead, with no rework child; a
+#     record that does not land writes nothing else, and an ask that does not
+#     land asks a person to file it;
+#   - a convoy keeps what it carries and comes back as its rework child: a task
+#     with the work order, joined to the bead and blocking it through edges in
+#     its create, settled and slung, while the bead stays with the refinery;
 #   - a child that does not settle, or whose sling fails, is armed for the
 #     deferred-dispatch order, which sends it with no wake of the refinery, and
 #     the next patrol's find-work leaves the bead to it. A child that does not
@@ -61,6 +65,8 @@ run() { OUT=$("$SUT/refinery-requeue.sh" "$@" 2>&1); RC=$?; }
 find_work() { NAMED=$("$SUT/refinery-find-work.sh" 2>"$TMP/fw-err"); FW_RC=$?; FW_ERR=$(cat "$TMP/fw-err"); }
 prep() { PREP_OUT=$("$SUT/refinery-prep.sh" "$@" 2>&1); PREP_RC=$?; }
 kid() { jq -r '[ .[] | select(.metadata.task_kind == "rework") ][0].id // ""' "$STORE"; }
+# convoy <id>: the bead is a convoy, which comes back as its rework child.
+convoy() { jq --arg id "$1" 'map(if .id == $id then .issue_type = "convoy" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"; }
 # qp_refuses: a settle the priority lock refuses, at $TMP/qp-refuses, for
 # GC_QUEUE_PRIORITY_TOOL.
 qp_refuses() {
@@ -115,10 +121,50 @@ eq "$(meta v merge_result)" "<absent>" "its merge_result is cleared"
 eq "$(meta v existing_pr)" "https://github.com/zook/rig/pull/53" "it keeps the PR it may reuse"
 hasnt "$(logged gc)" "bd create" "no rework child is filed for either"
 
-echo "# a bead that records an open PR comes back as its rework child"
+echo "# a bead that owns an open PR on the record sends its branch to the review run as an ask"
 fresh
 branch_with polecat/p p.txt >/dev/null
 work p polecat/p '{"merge_result":"pull_request_head_changed","pr_url":"https://github.com/zook/rig/pull/7","existing_pr":"https://github.com/zook/rig/pull/7"}'
+prepared p polecat/p
+READ=$(git -C "$HOME_DIR/worktrees/p" rev-parse refs/worktree/refinery/polecat/p)
+run --bead p --reason "Conflicts with main at abc"
+eq "$RC" 0 "the requeue exits 0"
+eq "$(kid)" "" "no rework child is filed"
+has "$(logged gctk)" "pr record p --pr https://github.com/zook/rig/pull/7 --head $READ --target main --refinery rig-a/gc-toolkit.refinery" "the PR is recorded pending at the head the prep read"
+eq "$(bstatus p) $(meta p merge_result) $(meta p pr_head_sha)" "blocked pull_request_pending $READ" "…so the landing order reads the record at that head"
+ASK=$(jq -r '[ .[] | select((.title // "") | startswith("Review ask: ")) ][0].id // ""' "$STORE")
+[ -n "$ASK" ] && rt_ok "an ask is filed" || rt_bad "an ask is filed"
+eq "$(meta "$ASK" branch)" "polecat/p" "…naming the PR's branch"
+has "$(logged gctk)" "review ask p --reason Conflicts with main at abc" "…with the reason"
+has "$(cat "$STUB_HOLDS")" "p $ASK" "the bead waits on its ask"
+hasnt "$(logged gc)" "sling" "nothing is slung, since the review run is the branch's one writer"
+has "$OUT" "takes its ask $ASK" "the requeue names the ask"
+
+echo "# a record that does not land files no ask, and the bead stays with the refinery"
+fresh
+branch_with polecat/p p.txt >/dev/null
+work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/7"}'
+prepared p polecat/p
+STUB_RECORD_RC=2 run --bead p --reason "Conflicts with main at abc"
+eq "$RC" 1 "a record that does not land stops the requeue (exit 1)"
+hasnt "$(logged gctk)" "review ask" "no ask is filed"
+eq "$(bstatus p) $(bassignee p) $(meta p merge_result)" "open rig-a/gc-toolkit.refinery pull_request_head_changed" "the bead stays with the refinery as it was"
+
+echo "# an ask that does not land asks a person to file it"
+fresh
+branch_with polecat/p p.txt >/dev/null
+work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/7"}'
+prepared p polecat/p
+STUB_ASK_RC=2 run --bead p --reason "test TestX fails"
+eq "$RC" 1 "an ask that does not land stops the requeue (exit 1)"
+has "$(logged scripts)" "human-gate --subject p --key refinery-requeue-failed" "a gate on the bead asks a person"
+has "$(logged scripts)" "review ask p --reason" "…naming the ask to file by hand"
+
+echo "# a convoy comes back as its rework child"
+fresh
+branch_with polecat/p p.txt >/dev/null
+work p polecat/p '{"pr_url":"https://github.com/zook/rig/pull/7","existing_pr":"https://github.com/zook/rig/pull/7"}'
+convoy p
 prepared p polecat/p
 run --bead p --reason "Conflicts with main at abc"
 eq "$RC" 0 "the requeue exits 0"
@@ -136,12 +182,13 @@ eq "$(meta "$CHILD" priority_shift)" "-1" "…born one level sooner than the bea
 eq "$(cat "$STUB_HOLDS")" "p $CHILD" "the bead waits on its child"
 has "$(logged scripts)" "queue-priority settle $CHILD" "it is settled at its priority before the sling"
 has "$(logged gc)" "rig-a/gc-toolkit.polecat $CHILD --on mol-polecat-work" "the child is slung"
-eq "$(bstatus p) $(bassignee p) $(meta p merge_result)" "open rig-a/gc-toolkit.refinery pull_request_head_changed" "the bead keeps its record and stays with the refinery"
+eq "$(bstatus p) $(bassignee p)" "open rig-a/gc-toolkit.refinery" "the convoy stays with the refinery"
 
 echo "# a child that does not settle is armed, so the deferred-dispatch order sends it on"
 fresh_patrol
 branch_with polecat/p p.txt >/dev/null
 work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/7"}'
+convoy p
 prepared p polecat/p
 qp_refuses
 GC_QUEUE_PRIORITY_TOOL="$TMP/qp-refuses" run --bead p --reason "test TestX fails"
@@ -183,6 +230,7 @@ echo "# a child whose sling fails is armed, and one that does not arm either ask
 fresh
 branch_with polecat/p p.txt >/dev/null
 work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+convoy p
 prepared p polecat/p
 STUB_SLING_RC=1 run --bead p --reason "lint fails"
 eq "$RC" 0 "a child armed after its sling fails counts as sent back (exit 0)"
@@ -193,6 +241,7 @@ has "$(logged gctk)" "gc sling of $CHILD exited 1" "…naming the sling's exit"
 fresh
 branch_with polecat/p p.txt >/dev/null
 work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+convoy p
 prepared p polecat/p
 STUB_QUEUE_PRIORITY_RC=1 STUB_ARM_RC=1 run --bead p --reason "lint fails"
 eq "$RC" 1 "a child that neither settles nor arms stops the requeue (exit 1)"
@@ -218,6 +267,7 @@ echo "# a create the store refuses files nothing, and the bead is taken as it wa
 fresh_patrol
 branch_with polecat/f f.txt >/dev/null
 work f polecat/f '{"merge_result":"pull_request_head_changed"}'
+convoy f
 prepared f polecat/f
 STUB_BD_CREATE_FAIL=1 run --bead f --reason "lint fails"
 eq "$RC" 1 "a refused create stops the requeue (exit 1)"
@@ -230,6 +280,7 @@ echo "# a create whose reply was lost is found among the bead's children and sen
 fresh
 branch_with polecat/l l.txt >/dev/null
 work l polecat/l '{"merge_result":"pull_request_head_changed"}'
+convoy l
 prepared l polecat/l
 STUB_CREATE_REPLY_LOST=1 run --bead l --reason "lint fails"
 eq "$RC" 0 "the requeue exits 0"

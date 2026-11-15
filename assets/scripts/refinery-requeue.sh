@@ -10,8 +10,19 @@
 # (refinery-lib.sh), so a bead named from a stale variable gets no write. The
 # work goes back one of two ways.
 #
-# A bead that records an open PR (merge_result=pull_request_head_changed), or a
-# convoy, which gc sling would take as its run's input convoy rather than its
+# A bead that owns an open PR on the record (merge_result=
+# pull_request_head_changed) keeps its PR, and its branch has one writer, the
+# review run (specs/tk-1tfzr71.108/design.md, section 1), so the work goes to the
+# run as an ask (`gctk review ask`) with the reason, in place of a rework child.
+# The landing order pours a run only for a record pending at the PR's head, and
+# it cleared this record's marker when it sent the head back, so the PR is first
+# recorded pending at the head the prep read (`gctk pr record`), which the run
+# then judges. A record that does not land writes nothing else, and the bead
+# stays with the refinery for its next patrol. An ask that does not land after
+# it files a human gate keyed refinery-requeue-failed on the bead, which asks a
+# person to file it and keeps the order from pouring a run meanwhile.
+#
+# A convoy, which gc sling would take as its run's input convoy rather than its
 # work, keeps what it carries and comes back as a rework child: a task on the
 # same branch, with task_kind=rework, anchor_bead, branch, target,
 # rejection_reason, merge_strategy=mr and the PR as existing_pr. The child is
@@ -40,7 +51,8 @@
 #
 # One worker per branch: when an open rework child of the bead is already on
 # the branch, running or parked, the reason goes to that child's notes and
-# nothing else is filed. An unsent child among them is sent on as a new child
+# nothing else is filed, a bead on the record's included, whose child was filed
+# before its PR's branch had a review run to write it. An unsent child among them is sent on as a new child
 # is, once its blocks edge onto the bead is written when it lacks one, as a
 # child filed before the edge rode the create can. When that edge does not
 # land, the run files a human gate keyed refinery-requeue-failed on the child
@@ -63,8 +75,8 @@
 # gate keyed refinery-requeue-failed, which asks a person to pour the work by
 # hand.
 #
-# Exit: 0 sent back or armed to go back, or the reason reached the child
-#         already on the branch
+# Exit: 0 sent back or armed to go back, sent to the review run as an ask, or
+#         the reason reached the child already on the branch
 #       1 the work did not go back; the output says why. The bead stays with
 #         the refinery: its next patrol retries the requeue, or sends on the
 #         unsent child this run filed, and a refinery-requeue-failed gate the
@@ -200,6 +212,29 @@ if [ "$(bead_meta merge_result)" = pull_request_head_changed ] || [ "$KIND" = co
       echo "$PROG: $CHILD, the rework child on $BRANCH, was filed and never sent on, so it $WENT"
     fi
     echo "$PROG: $CHILD is the rework on $BEAD's branch $BRANCH, so the reason went to its notes: $REASON"
+    exit 0
+  fi
+  if [ "$KIND" != convoy ]; then
+    [ -n "$PR" ] || stop "$BEAD owns an open PR on the record but names none (existing_pr and pr_url are empty)"
+    RRC=0
+    ROUT=$(GC_RIG_ROOT="$HOME_DIR" "$GCTK" pr record "$BEAD" --pr "$PR" --head "$PREP_READ" --target "$TARGET" \
+      --refinery "$GC_AGENT" </dev/null 2>&1) || RRC=$?
+    case "$RRC" in
+      0) ;;
+      3) echo "$PROG: $BEAD changed after it was read, so it was left as it is: $(said "$ROUT" "gctk pr record")" >&2
+         exit 3 ;;
+      *) stop "the record of $PR as pending at $PREP_READ did not land ($(said "$ROUT" "gctk pr record")), and the landing order pours the run that takes an ask only for a record pending at the PR's head" ;;
+    esac
+    ARC=0
+    AOUT=$("$GCTK" review ask "$BEAD" --reason "$REASON" </dev/null 2>&1) || ARC=$?
+    if [ "$ARC" != 0 ]; then
+      HAND="$GCTK review ask $BEAD --reason $(printf '%q' "$REASON")"
+      "$HERE/human-gate.sh" --subject "$BEAD" --key refinery-requeue-failed --message "The refinery recorded $PR as pending at $PREP_READ to send $BEAD's branch $BRANCH back to its review run ($REASON), but the ask the run takes did not land ($(said "$AOUT" "gctk review ask")), so nothing works it, and the landing order pours no run while this gate stands. File it by hand: $HAND, then clear this gate." >/dev/null \
+        || echo "$PROG: no refinery-requeue-failed gate landed on $BEAD either; file the ask by hand: $HAND" >&2
+      echo "$PROG: $PR is recorded pending at $PREP_READ, and the ask for $BEAD's branch did not land ($(said "$AOUT" "gctk review ask")), so a refinery-requeue-failed gate asks a person to file it" >&2
+      exit 1
+    fi
+    echo "$PROG: $BEAD keeps its PR $PR, recorded pending at $PREP_READ, and the review run the landing order pours takes its ask ${AOUT%% *}: $REASON"
     exit 0
   fi
   ORDER=$(jq -nc --arg a "$BEAD" --arg b "$BRANCH" --arg t "$TARGET" --arg r "$REASON" --arg p "$PR" \
