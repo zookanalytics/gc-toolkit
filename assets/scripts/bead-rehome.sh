@@ -322,6 +322,21 @@ bd_at() {
     fi
 }
 
+# bd_at_json <repo-path> <bd args...> — bd_at's answer as
+# `| grep -a -vE '^gc bd:' | scrub` leaves it: the `gc bd:` notice a store can
+# print on stdout dropped, and the control bytes scrubbed. A read with no
+# control byte and no notice at its start is one line that the two leave as it
+# is, so only another read goes through them. It exits 0, since every caller
+# judges the answer rather than the read's status.
+bd_at_json() {
+    local raw
+    { raw=$(bd_at "$@" 2>/dev/null) || :; } 2>/dev/null
+    case "$raw" in
+        *[[:cntrl:]]*|'gc bd:'*) printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub || : ;;
+        *) printf '%s' "$raw" ;;
+    esac
+}
+
 # The store's record lock (the header's rule), taken on fd 9 before the origin
 # is read and held through the close. PR_RECORD_LOCK_WAIT_SECS bounds the wait:
 # a run of the landing order holds the lock for one record at a time, and its
@@ -345,8 +360,7 @@ release_record_lock() { exec 9>&-; }
 # templates are listed too, so no bead reads as absent for its type. Empty when
 # the store does not hold the bead or does not answer.
 bead_row() {
-    bd_at "$1" list --id "$2" --all --include-gates --include-infra --include-templates --json --limit 0 2>/dev/null \
-        | grep -a -vE '^gc bd:' | scrub \
+    bd_at_json "$1" list --id "$2" --all --include-gates --include-infra --include-templates --json --limit 0 \
         | jq -c --arg id "$2" '[ .[]? | select(((.id // "") | tostring) == $id) ] | select(length == 1)' 2>/dev/null || true
 }
 
@@ -414,8 +428,7 @@ fi
 # bd's preview of a create, which writes nothing. An answer that does not read
 # leaves it empty, and close_guard holds an assigned origin.
 if [ -z "$ACTOR" ] && [ -n "$JUDGED_ASSIGNEE" ]; then
-    ACTOR=$(bd_at "$ORIGIN_PATH" create "bead-rehome actor read" --dry-run --json 2>/dev/null \
-        | grep -a -vE '^gc bd:' | scrub \
+    ACTOR=$(bd_at_json "$ORIGIN_PATH" create "bead-rehome actor read" --dry-run --json \
         | jq -r 'if type == "array" then .[0] else . end | (.created_by // "") | tostring' 2>/dev/null || true)
 fi
 
@@ -565,7 +578,7 @@ except_key_holds() { # <origin-row>
     # live blocker and every open child holds the close, and with one standing
     # the gates stay open and nothing closes. Any other blocker that is closed or
     # pinned holds nothing, as in bd.
-    blk_json=$(bd_at "$ORIGIN_PATH" dep list "$ORIGIN" --type blocks --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
+    blk_json=$(bd_at_json "$ORIGIN_PATH" dep list "$ORIGIN" --type blocks --json)
     if ! printf '%s' "$blk_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
         HOLD_UNREAD="its blockers did not read, so whether anything${EXCEPT_KEY:+ besides its own [$EXCEPT_KEY] gates} holds the close is unknown"
         return 0
@@ -577,7 +590,7 @@ except_key_holds() { # <origin-row>
               | select(($k != "" and open_human_gate($k) and ((.assignee // "") | tostring) == "") | not)
               | select((.id // "") != $dropped)
               | .id ] | join(" ")' 2>/dev/null || true)
-    kids_json=$(bd_at "$ORIGIN_PATH" list --parent "$ORIGIN" --include-gates --include-infra --include-templates --json --limit 1 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
+    kids_json=$(bd_at_json "$ORIGIN_PATH" list --parent "$ORIGIN" --include-gates --include-infra --include-templates --json --limit 1)
     if ! printf '%s' "$kids_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
         HOLD_UNREAD="its children did not read, so whether an open child holds the close is unknown"
         return 0
@@ -618,8 +631,7 @@ close_guard() {
 # origin's store, whose edges carry `type` and `depends_on_id`, or nothing when
 # the store does not answer.
 list_rows() {
-    bd_at "$ORIGIN_PATH" list --id "$(printf '%s' "$1" | tr ' ' ',')" --all --include-gates --include-infra --include-templates --json --limit 0 2>/dev/null \
-        | grep -a -vE '^gc bd:' | scrub || true
+    bd_at_json "$ORIGIN_PATH" list --id "${1// /,}" --all --include-gates --include-infra --include-templates --json --limit 0
 }
 
 # carry_plan — the waits a duplicate's close would end before its canonical
@@ -637,7 +649,7 @@ carry_plan() {
     if [ "$sstatus" = closed ] || [ "$soutcome" = shipped ]; then
         CARRY_NONE="$SUCCESSOR has closed or shipped, so a wait on $ORIGIN may end with its close"; return 0
     fi
-    up_json=$(bd_at "$ORIGIN_PATH" dep list "$ORIGIN" --direction=up --type blocks --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
+    up_json=$(bd_at_json "$ORIGIN_PATH" dep list "$ORIGIN" --direction=up --type blocks --json)
     # The canonical's own wait on the duplicate ends with the close: the work it
     # waits for is its own.
     if ! waiting=$(printf '%s' "$up_json" | jq -er --arg s "$SUCCESSOR" '
