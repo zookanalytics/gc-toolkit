@@ -234,7 +234,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-14, at `gastownhall/gascity` main 420b7bb65f and
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main 8e7d91b583 and
   `gastownhall/beads` main 8cdfa796a (`BuildReadyWorkOrder` in
   `internal/storage/sqlbuild/ready.go` orders the priority policy by the bead's
   own priority), with bd 1.3.4 (7ef2fd05e).
