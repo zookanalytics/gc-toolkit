@@ -886,6 +886,18 @@ refinery, and each write is guarded on the status and assignee it read. A bead
 that a release took from the refinery has its marker cleared and its PR named
 in a note, and nothing else written.
 
+**The PR's labels.** Each check that reads a PR writes its `status:` and
+`held:` labels through `pr-status-label.sh`, by the state the read found:
+`reconcile` for a PR open, and `clear` for one merged or closed
+([state-machine.md](state-machine.md#the-status-label-github-projection)). It
+passes the labels the read found on the PR, so the script reads none itself. A
+check's call runs once its write has landed, with the lock free. A merge's
+clear runs before the write that closes the bead, and an exception's call once
+its gate files, and each keeps the marker until it lands, so a later run reads
+the PR again and makes the call. An exception whose check read no PR reads it
+for its labels, and a record whose URL names no PR in the rig's repository gets
+none. No call starts past the run's deadline.
+
 **The seed audit after a landing.** In a rig whose clone carries
 `generated/seed-audit`, a run that closes a bead on a merge into the rig's
 default branch, the branch `origin/HEAD` names, then checks that branch's seed

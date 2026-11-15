@@ -14,7 +14,11 @@
 # needs-attention. pr-facts.sh's full pass recomputes both for each open PR its
 # paced walk reaches, from the anchor's posture, holds, human gates, blockers,
 # the merge cadence's verdict and its count of review threads waiting on the
-# city's answer, draft stage and live work. Both come off once the PR merges or closes, where
+# city's answer, draft stage and live work. The landing order (gctk pr
+# reconcile) recomputes both at each check of a PR on Gas Town's pending record,
+# passing the labels its read of the PR found, and takes them off one it finds
+# merged or closed, keeping the record's marker until the clear lands. On the
+# old path both come off once the PR merges or closes, where
 # GitHub's own Merged or Closed state takes over: pr-facts.sh clears them when it
 # records a merge or a close, and gctk merge when it merges, each before its
 # record. A clear that does not land is recorded on the anchor as

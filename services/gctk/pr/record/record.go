@@ -223,8 +223,9 @@ func Revalidate(w *ledger.Write, reason, now string) {
 
 // Except records one of the exceptions: the bead blocked, merge_result the
 // exception, the PR's state and why. The marker stays until the verb has filed
-// the human gate keyed by the exception and cleared it (Unmark), so a run that
-// stops between the two leaves the gate for the next run to file.
+// the human gate keyed by the exception and written the PR's labels, and then
+// cleared it (Finish), so a run that stops between them leaves what it did not
+// make for the next run.
 func Except(w *ledger.Write, result, state, reason, now string) {
 	w.Status("blocked")
 	mergeResultKey.Set(w, result)
@@ -251,8 +252,11 @@ type Landing struct {
 
 // Land records the verified merge and closes the bead in one write, the marker
 // cleared as the close lands, since the pack runs no artifact cleanup after the
-// close. note rides the close as its reason, which bd's update does not set.
-func Land(w *ledger.Write, l Landing, now, note string) {
+// close. owed, when given, is why a call the landing owes did not land, such as
+// the clear of the PR's labels: the marker then stays, with owed as the record's
+// error, so a later run reads the closed bead and makes the call. note rides the
+// close as its reason, which bd's update does not set.
+func Land(w *ledger.Write, l Landing, now, note, owed string) {
 	w.Status("closed")
 	mergeResultKey.Set(w, Merged)
 	mergedSHAKey.Set(w, l.MergedSHA)
@@ -260,20 +264,33 @@ func Land(w *ledger.Write, l Landing, now, note string) {
 	prStateKey.Set(w, "merged")
 	mergedAtKey.Set(w, l.MergedAt)
 	checkedAtKey.Set(w, now)
-	for _, k := range []ledger.Key[string]{rejectionReasonKey, reconcileErrorKey, blockedReasonKey, pendingKey} {
+	for _, k := range []ledger.Key[string]{rejectionReasonKey, blockedReasonKey} {
 		k.Clear(w)
+	}
+	if owed != "" {
+		reconcileErrorKey.Set(w, owed)
+	} else {
+		reconcileErrorKey.Clear(w)
+		pendingKey.Clear(w)
 	}
 	w.Note(note)
 }
 
-// Unmark clears the marker and nothing else, on a bead whose record needs no
-// further run: one a release took from the refinery, which keeps its state, and
-// one closed on a verified merge. note, when given, names the PR on the bead.
+// Unmark clears the marker and nothing else, on a bead a release took from the
+// refinery, which keeps its state. note, when given, names the PR on the bead.
 func Unmark(w *ledger.Write, note string) {
 	pendingKey.Clear(w)
 	if note != "" {
 		w.Note(note)
 	}
+}
+
+// Finish clears the marker and the error an earlier run left, on a bead whose
+// record needs no further run once the last call it owed has landed: one closed
+// on a verified merge, and an exception behind its human gate.
+func Finish(w *ledger.Write) {
+	pendingKey.Clear(w)
+	reconcileErrorKey.Clear(w)
 }
 
 // Valid reports whether p names a PR the record can hold: a URL on a host,

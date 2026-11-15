@@ -540,6 +540,23 @@ resetlog
 eq "$?" "2" "clear exits 2 when the PR's labels cannot be read"
 hasnt "$(ghlog)" "pr edit" "…and writes nothing"
 
+# A lone comma names no label: the landing order passes one for a PR its read
+# found carrying none, so neither verb reads the PR's labels itself.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}}]'
+: > "$STUB_DEPS"
+pv 66 '[]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 66 --repo "$REPO" --current-labels ","
+eq "$?" "0" "a reconcile given a lone comma exits 0"
+hasnt "$(ghlog)" "pr view" "…and reads no PR's labels itself"
+eq "$(pv_labels 66)" "status: merging" "…and writes the status label onto a PR that carries none"
+pv 67 '[]'
+resetlog
+"$SUT" clear --pr 67 --repo "$REPO" --current-labels ","
+eq "$?" "0" "a clear given a lone comma exits 0"
+hasnt "$(ghlog)" "pr view" "…and reads no PR's labels itself"
+hasnt "$(ghlog)" "pr edit" "…and writes nothing"
+
 echo "---"
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -284,8 +284,11 @@ the `blocked` status in one write, so a refinery that dies between them leaves
 an open bead that names its PR, never a blocked bead with half a record. The
 landing order reads a record whose marker is `true` while its bead is open,
 blocked or closed, and clears the marker once the record owes no further run:
-the bead closed on a verified merge, went back to the refinery or was released
-from it, or met an exception whose human gate is filed. A bead at any other
+the bead closed on a verified merge, or met an exception whose human gate is
+filed, each once its PR's labels are written, or it went back to the refinery
+or was released from it. A call of the label's writer that a merge or an
+exception did not land keeps the marker, with why in `pr_reconcile_error`, so
+a later run reads the PR again and makes the call. A bead at any other
 status, such as one claimed or deferred, keeps its marker, and no run reads it.
 The marker is never a review or approval fact. On an open or blocked bead whose
 marker is `true`, the record's `blocked_reason` waits on the order's next run,
@@ -819,6 +822,14 @@ anchor's `pr_url` names, so a write that records the key on an anchor with no
 `pr_url` records the live PR's url beside it, the one its writer validated
 against origin.
 
+On Gas Town's pending record, the landing order takes the labels off a PR its
+check finds merged or closed: before the write that records the merge and
+closes the bead, once the gate files at an exception, and once the write lands
+at a retry. When the clear at a merge or an exception does not land, the bead
+keeps the record's marker, `pr_reconcile_pending`, with why in
+`pr_reconcile_error`, and a later run reads the PR again, takes the labels off,
+and then clears the marker.
+
 An open human gate holds the anchor through its `blocks` edge onto it, read by
 `bd_human_gates` in `assets/scripts/bd-lib.sh`: the bead's `blocks` edges, kept
 to the gates whose await type is human. The merge pass's finalize gate
@@ -857,7 +868,10 @@ readied it, reads like any other PR.
 every call that derives one writes the other. `pr-open.sh` sets the labels when
 it opens a PR and when it records a draft ready, whether it flipped the draft or
 found it already ready, and `signoff.sh` re-derives them on each of the city's
-own verdicts. A human's review moves them in the merge cadence's posture and
+own verdicts. The landing order re-derives them at each check that finds a PR
+on Gas Town's pending record open, given the labels its read of the PR found:
+once the check's write has landed, and at an exception once its gate files, so
+the labels name the gate. A human's review moves them in the merge cadence's posture and
 feedback arms, in the pass that records the review. The posture arm re-derives
 the labels for an anchor whose posture value it changes: an approval, a comment,
 a change request, or a dismissal. The feedback arm re-derives them for an anchor
@@ -873,9 +887,11 @@ since its last visit, then rotates through the rest until its deadline, and a
 PR it does not reach waits for a later pass.
 
 Nothing re-derives the labels when a human gate or a blocker is filed or cleared,
-and such a change does not put its anchor first in that walk. The labels follow it on the
+other than the gate the landing order files at an exception, and such a change
+does not put its anchor first in that walk. The labels follow it on the
 next full pass that reaches the anchor: within one reconcile pass while the walk
 reaches every open PR, and after more passes when the deadline stops it short.
+A PR on the pending record also follows it at the landing order's next check.
 The labels likewise read the machine verdict and the thread count the last merge
 pass recorded, so they follow a new verdict, or a thread answered or resolved, on
 the next pass that derives them after the merge pass's visit. Every write is
