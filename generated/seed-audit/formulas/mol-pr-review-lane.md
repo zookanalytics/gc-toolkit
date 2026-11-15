@@ -9,8 +9,7 @@ store and the run's workspace, never through text the run was poured with.
 
 
 Variables:
-  {{binding_name}}: The same binding with no dot, which names the pack's commands (gc <binding_name> scripts-dir). (default=gc-toolkit)
-  {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names. (default=gc-toolkit.)
+  {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names, and with no dot the name of its commands. The bond passes it, as a bond compiles with only the vars it lists. (default=gc-toolkit.)
   {{check}}: The check this lane runs, a name from the check index at the head. (default=)
   {{head}}: The head the lane reviews, the head triage judged. (default=)
   {{review_target}}: The pool the lane runs on, the run's review pool. (default=)

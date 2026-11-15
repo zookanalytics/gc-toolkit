@@ -26,12 +26,8 @@ description = "The pool the lane runs on, the run's review pool."
 default = ""
 
 [vars.binding_prefix]
-description = "The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names."
+description = "The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names, and with no dot the name of its commands. The bond passes it, as a bond compiles with only the vars it lists."
 default = "gc-toolkit."
-
-[vars.binding_name]
-description = "The same binding with no dot, which names the pack's commands (gc <binding_name> scripts-dir)."
-default = "gc-toolkit"
 
 [[template]]
 id = "{target}.lane"
@@ -51,9 +47,7 @@ change under review, not your method. When your catalog has no such skill:
   declared nowhere, so the operator decides whether it stays.
 
 **2. Read what the lane reads.**
-```bash
-"$(gc {binding_name} scripts-dir)/review-run.sh" lane --check {check}
-```
+`"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/review-run.sh" lane --check {check}`
 It makes the lane's worktree at `{head}` and prints the PR as published, the
 change, the rig's guidance for `{check}` at that head, which adds to the method
 and never replaces it, and what gctk rig recorded there. Read and run in the
@@ -70,9 +64,7 @@ commit), its `message`, its `severity`, `category` and `failure_scenario` as the
 method grades them, and its `verification`. A decision that is the operator's
 to make goes in `needs_you`, not in a finding. A demo lane delivers its capture
 to the PR, and a shadow run keeps it in the workspace:
-```bash
-"$(gc {binding_name} scripts-dir)/review-run.sh" deliver --file "<the capture>"
-```
+`"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/review-run.sh" deliver --file "<the capture>"`
 
 **4. Write the output** to `output.json` in the lane's part of the workspace:
 `review` reading `lane`, `check` reading `{check}`, `head` reading `{head}`,
@@ -80,17 +72,13 @@ to the PR, and a shadow run keeps it in the workspace:
 lane its `visual` and `visual_fallback_from`. The method's trail, the lines its
 verdict section names, goes in `trail.md` beside it, where the round reads it.
 Then check and write it:
-```bash
-"$(gc {binding_name} scripts-dir)/review-run.sh" output --check {check}
-```
+`"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/review-run.sh" output --check {check}`
 Exit 3 prints why the output does not stand, such as a correctness approve on a
 change that edits its own review guidance, which names the edit in `needs_you`:
 correct the file and run it again.
 
 **5. Close this step.** The run's rule-and-repair rules the lane's findings.
-```bash
-"$(gc {binding_name} scripts-dir)/claim-close.sh" --step review-loop
-```
+`"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
 
 **Exit criteria:** the method applied at `{head}`, the output written, this
 step closed.

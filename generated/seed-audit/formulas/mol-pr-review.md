@@ -29,8 +29,7 @@ Hard rules, in force for every step:
 
 
 Variables:
-  {{binding_name}}: The same binding with no dot, which names the pack's commands (gc <binding_name> scripts-dir). Sling adds it to every pour, and a cooked run is passed it. (default=gc-toolkit)
-  {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog. Sling adds it to every pour, and a cooked run is passed it. (default=gc-toolkit.)
+  {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog, and with no dot the name of its commands. Sling adds it to every pour, and a cooked run is passed it, as gc formula cook passes only its --var flags. (default=gc-toolkit.)
   {{branch}}: The PR's branch, as the bead's record names it. (default=)
   {{head}}: The head the refinery validated, the run's first head. Nothing moves it. (default=)
   {{max_attempts}}: The loop's bound: the heads one run judges, each iteration one head. (default=3)

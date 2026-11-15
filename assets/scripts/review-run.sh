@@ -84,14 +84,14 @@ done
 
 # shellcheck source=gctk-resolve.sh
 . "$HERE/gctk-resolve.sh" || die 1 "cannot source gctk-resolve.sh beside this script"
-GCTK=$(gctk_path) || die 2 "no gctk binary to read the run with"
+gctk=$(gctk_path) || die 2 "no gctk binary to read the run with"
 
 # The step this session holds, and the run's facts for it.
 ID=$(gc hook current --id-only </dev/null 2>/dev/null) && [ -n "$ID" ] \
     || die 3 "gc hook current names no bead this session claimed; claim the step with gc hook --claim --json"
 step_facts() {
     local out rc
-    out=$("$GCTK" review step "$ID" --json 2>&1); rc=$?
+    out=$("$gctk" review step "$ID" --json 2>&1); rc=$?
     case "$rc" in
         0) FACTS=$out ;;
         3) die 3 "${out#gctk review step: }" ;;
@@ -171,9 +171,9 @@ print_change() { # <worktree>
 # run once the refinery validates the PR's live head.
 cmd_prepare() {
     local out rc ref
-    out=$("$GCTK" review step "$ID" --json --prepare 2>&1); rc=$?
+    out=$("$gctk" review step "$ID" --json --prepare 2>&1); rc=$?
     if [ "$rc" = 3 ]; then
-        ref=$("$GCTK" review step "$ID" --json 2>/dev/null | jq -r '.ref // empty')
+        ref=$("$gctk" review step "$ID" --json 2>/dev/null | jq -r '.ref // empty')
         [ "$ref" = mol-pr-review.prepare ] || die 3 "${out#gctk review step: }"
         echo "$PROG: ${out#gctk review step: }" >&2
         "$HERE/decline.sh" --step mol-pr-review.prepare --reason "${out#gctk review step: }" \
@@ -194,12 +194,12 @@ cmd_triage() {
     print_run
     print_change "$wt"
     printf '%s\n' "== The check index at $HEAD"
-    (cd "$wt" && "$GCTK" review checks --at "$HEAD") || die 2 "the check index at $HEAD did not read"
+    (cd "$wt" && "$gctk" review checks --at "$HEAD") || die 2 "the check index at $HEAD did not read"
     printf '%s\n' "== The run so far, and the asks open on $PR_BEAD"
-    "$GCTK" review passed "$ID" --explain || true
+    "$gctk" review passed "$ID" --explain || true
     if [ "$N" -gt 1 ]; then
         printf '%s\n' "== The round before, whose push this head may be"
-        "$GCTK" review passed "$ID" --iteration "$((N - 1))" --explain || true
+        "$gctk" review passed "$ID" --iteration "$((N - 1))" --explain || true
     fi
     printf '%s\n' "== Triage's worktree: $wt" "== Write the output to: ${wt%/wt}/output.json"
 }
@@ -215,7 +215,7 @@ cmd_lane() {
     printf '%s\n' "== The change: git diff origin/$TARGET...HEAD in the worktree"
     git -C "$wt" diff --stat "origin/$TARGET...HEAD" || die 2 "the diff did not read"
     printf '%s\n' "== The rig's guidance for $CHECK at $HEAD, empty when it keeps none"
-    (cd "$wt" && "$GCTK" review guidance "$CHECK" --at "$HEAD") || die 2 "the guidance did not read"
+    (cd "$wt" && "$gctk" review guidance "$CHECK" --at "$HEAD") || die 2 "the guidance did not read"
     printf '%s\n' "== What gctk rig recorded at $HEAD"
     "$HERE/review-evidence.sh" --anchor "$PR_BEAD" --commit "$HEAD" --worktree "$wt" || die 2 "the evidence did not read"
     printf '%s\n' "== The lane's worktree: $wt" "== The lane's files, its capture and its output among them: ${wt%/wt}" \
@@ -228,7 +228,7 @@ cmd_repair() {
     wt=$(worktree --repair)
     print_run
     printf '%s\n' "== The round to rule"
-    "$GCTK" review passed "$ID" --explain || true
+    "$gctk" review passed "$ID" --explain || true
     printf '%s\n' "== Each lane's files, its evidence on disk"
     for d in "$WS"/lane-*; do [ -d "$d" ] && printf '%s\n' "$d"; done
     printf '%s\n' "== The run's worktree, at the head: $wt" "== Write the output to: ${wt%/wt}/output.json"
@@ -246,7 +246,7 @@ cmd_output() {
     [ -s "$FILE" ] || die 64 "$FILE holds no output; write it there first"
     local json rc writes=()
     [ "$SHADOW" = true ] && [ "$STEP" = rule-and-repair ] && writes=(--writes "$SHADOW_WRITES")
-    json=$("$GCTK" review output "$ID" --file "$FILE" ${writes[@]+"${writes[@]}"}); rc=$?
+    json=$("$gctk" review output "$ID" --file "$FILE" ${writes[@]+"${writes[@]}"}); rc=$?
     case "$rc" in
         0) ;;
         3) exit 3 ;;
@@ -261,7 +261,7 @@ cmd_withdraw() {
     [ -n "$REASON" ] || usage
     load; owns triage
     if [ "$SHADOW" = true ]; then would "withdraw: the approvals given before $HEAD: $REASON"; return 0; fi
-    "$GCTK" pr withdraw "$PR_BEAD" --head "$HEAD" --reason "$REASON"
+    "$gctk" pr withdraw "$PR_BEAD" --head "$HEAD" --reason "$REASON"
 }
 
 cmd_push() {
@@ -277,7 +277,7 @@ cmd_push() {
         return 0
     fi
     local rc
-    (cd "$wt" && "$GCTK" pr draft "$PR_BEAD"); rc=$?
+    (cd "$wt" && "$gctk" pr draft "$PR_BEAD"); rc=$?
     case "$rc" in
         0) ;;
         3) die 3 "gctk pr draft refused, so nothing is pushed" ;;
@@ -291,7 +291,7 @@ cmd_push() {
 cmd_post() {
     load; owns rule-and-repair
     local body file mark host repo number id
-    body=$("$GCTK" review comment "$RUN" --iteration "$N") || die 2 "the head's comment did not render"
+    body=$("$gctk" review comment "$RUN" --iteration "$N") || die 2 "the head's comment did not render"
     if [ -z "$body" ]; then echo "$PROG: nothing to answer at $HEAD, so nothing is posted"; return 0; fi
     if [ "$SHADOW" = true ]; then
         printf '%s\n' "$body"
@@ -333,7 +333,7 @@ cmd_defer() {
     gc bd dep add "$new" "$PR_BEAD" --type=blocks >/dev/null || die 1 "$new is filed and its wait on $PR_BEAD did not land"
     pool=$(gc bd show "$RUN" --json 2>/dev/null | jq -r '.[0].metadata["gc.var.repair_target"] // empty')
     [ -n "$pool" ] || die 1 "$new waits on $PR_BEAD and is not armed: the run names no repair pool"
-    "$GCTK" bead arm "$new" --target "$pool" --on mol-polecat-work \
+    "$gctk" bead arm "$new" --target "$pool" --on mol-polecat-work \
         --reason "deferred by review run $RUN: a fix outside the diff of $PR, started once $PR_BEAD lands" >/dev/null \
         || die 1 "$new waits on $PR_BEAD and its arm did not land"
     echo "$new"
@@ -359,7 +359,7 @@ cmd_deliver() {
 cmd_record() {
     load; owns record
     local out rc
-    out=$("$GCTK" review record "$RUN" 2>&1); rc=$?
+    out=$("$gctk" review record "$RUN" 2>&1); rc=$?
     printf '%s\n' "$out"
     case "$rc" in
         0) ;;
@@ -370,7 +370,7 @@ cmd_record() {
     last=$(printf '%s\n' "$out" | sed -n 's/.*: the loop exhausted its attempts at \([0-9a-f]*\)$/\1/p' | head -1)
     if [ -n "$last" ]; then
         local explain
-        explain=$("$GCTK" review passed "$RUN" --explain 2>&1)
+        explain=$("$gctk" review passed "$RUN" --explain 2>&1)
         if [ "$SHADOW" = true ]; then
             echo "shadow run: wrote nothing: gate review-loop-exhausted on $PR_BEAD, at $last"
         else

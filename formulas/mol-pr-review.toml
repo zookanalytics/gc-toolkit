@@ -69,12 +69,8 @@ description = "true for a shadow run, which writes nothing outside itself."
 default = "false"
 
 [vars.binding_prefix]
-description = "The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog. Sling adds it to every pour, and a cooked run is passed it."
+description = "The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog, and with no dot the name of its commands. Sling adds it to every pour, and a cooked run is passed it, as gc formula cook passes only its --var flags."
 default = "gc-toolkit."
-
-[vars.binding_name]
-description = "The same binding with no dot, which names the pack's commands (gc <binding_name> scripts-dir). Sling adds it to every pour, and a cooked run is passed it."
-default = "gc-toolkit"
 
 [[steps]]
 id = "prepare"
@@ -92,9 +88,7 @@ gc bd prime
 ```
 
 **2. Check that the run stands, and make its workspace.**
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" prepare
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" prepare`
 Exit 0 prints the run and its workspace. Exit 3: the run must stop with no
 result, because its vars do not name the record on `{{pr_bead}}` or the PR is no
 longer open at `{{head}}`. The call has cancelled the run, said why on this step
@@ -102,14 +96,10 @@ and drained you, and the landing order pours a fresh run once the refinery
 validates the PR's live head. Exit 2 is a read that did not answer: run the call
 again. When it still does not answer, cancel the run, which the landing order
 pours again:
-```bash
-"$(gc {{binding_name}} scripts-dir)/decline.sh" --step mol-pr-review.prepare --reason "the run's reads did not answer at prepare"
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step mol-pr-review.prepare --reason "the run's reads did not answer at prepare"`
 
 **3. Close this step.** Triage is next, in whichever session claims it.
-```bash
-"$(gc {{binding_name}} scripts-dir)/claim-close.sh" --step mol-pr-review.prepare
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-pr-review.prepare`
 
 **Exit criteria:** the run stands at `{{head}}`, its workspace exists, this step
 is closed.
@@ -146,9 +136,7 @@ and no other review skill. A copy of a skill in the run's worktree is the change
 under review, not your method.
 
 **2. Read what this iteration judges.**
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" triage
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" triage`
 It makes triage's worktree at the iteration's head and prints the change to
 judge with the rule that chose it, each merge in the change, the check index at
 the head, the run so far with the asks open on `{{pr_bead}}`, and, at a head the
@@ -160,25 +148,19 @@ message, which says what collided and what was decided.
 over the index, and rules whether the change is material. When it is, withdraw
 the approvals given before this head, before you write the output, naming the
 call, what it means for the PR, and where to look:
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" withdraw --reason "<the call, what it means for the PR, and where to look>"
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" withdraw --reason "<the call, what it means for the PR, and where to look>"`
 Exit 0 filed it, or found it filed. Exit 2: run it again.
 
 **4. Write the output** to `output.json` in triage's part of the workspace, the
 directory the read printed, as one JSON object: `review` reading `triage`, the
 `head` it judged, `checks` with one `{"check": <name>, "head": <head>}` for each
 check picked, and `material`. Then check and write it:
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" output
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it
 again. When this step closes, each pick bonds one lane.
 
 **5. Close this step.**
-```bash
-"$(gc {{binding_name}} scripts-dir)/claim-close.sh" --step review-loop
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
 
 **Exit criteria:** the head judged, a withdrawal filed when it is material, the
 output written, this step closed.
@@ -188,7 +170,7 @@ metadata = { "gc.run_target" = "{{review_target}}" }
 [steps.children.on_complete]
 for_each = "output.checks"
 bond = "mol-pr-review-lane"
-vars = { check = "{item.check}", head = "{item.head}", review_target = "{{review_target}}", binding_prefix = "{{binding_prefix}}", binding_name = "{{binding_name}}" }
+vars = { check = "{item.check}", head = "{item.head}", review_target = "{{review_target}}", binding_prefix = "{{binding_prefix}}" }
 
 [[steps.children]]
 id = "rule-and-repair"
@@ -199,39 +181,31 @@ description = """
 this step applies. Load it from your skill catalog and apply it.
 
 **2. Read the round.**
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" repair
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" repair`
 It makes the run's worktree at the head the round judged and prints each lane's
 verdict and findings, each ask the round can take, and each lane's part of the
 workspace, which holds its evidence.
 
 **3. Rule every finding and every ask, by the bar.** Fix each must-fix point in
 the run's worktree with a commit of its own, its siblings with it, and name the
-commit in its ruling. A point ruled declined, deferred, answered or put to a
+commit in its ruling. A shadow run, which the read names, fixes nothing: rule
+a must-fix point with no commit, and each call below prints what it would have
+written instead. A point ruled declined, deferred, answered or put to a
 person gets no change. A fix outside the reviewed diff goes to a bead of its
 own, armed to start once the PR lands, which the call prints for the ruling's
 reason:
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" defer --title "<the fix, one line>" --file "<a file holding what it fixes and why>"
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" defer --title "<the fix, one line>" --file "<a file holding what it fixes and why>"`
 A question only a person can answer goes to a gate on `{{pr_bead}}`, which the
 call prints for the ruling:
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" question --key "<a slug for the point>" --message "<the question, and what each answer means>"
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" question --key "<a slug for the point>" --message "<the question, and what each answer means>"`
 
 **4. Push the round's fixes.** The call returns the PR to draft first, and
 pushes onto the branch only while it is at the head the round judged:
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" push
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" push`
 It prints the head it pushed. Exit 1: the branch moved from the head the round
 judged, so the run's head is gone. Cancel the run, and the landing order pours
 one at the new head:
-```bash
-"$(gc {{binding_name}} scripts-dir)/decline.sh" --step review-loop --reason "the PR's branch moved past the head the round judged"
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the PR's branch moved past the head the round judged"`
 Exit 2: the PR may still be ready and nothing was pushed: run it again.
 
 **5. Write the output** to `output.json` in the repair's part of the workspace:
@@ -239,20 +213,14 @@ Exit 2: the PR may still be ready and nothing was pushed: run it again.
 `{"check", "finding"}` or `{"ask"}` each with its `ruling`, its `reason`, the
 `commit` of a must-fix and the `gate` of a question, and `pushed`, the head the
 push printed, when it pushed. Then check and write it:
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" output
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it again.
 
 **6. Answer them on the PR** in the head's one comment:
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" post
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" post`
 
 **7. Close this step.** The loop's check judges the round.
-```bash
-"$(gc {{binding_name}} scripts-dir)/claim-close.sh" --step review-loop
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
 
 **Exit criteria:** every finding and ask ruled, the round's fixes pushed, the
 output written, the comment posted, this step closed.
@@ -267,16 +235,12 @@ description = """
 The loop has closed, passed or not. Record the run's result for the last head it
 judged and `{{target}}`, close the asks it answered, ask a person when the loop
 exhausted its attempts, and remove the run's workspace:
-```bash
-"$(gc {{binding_name}} scripts-dir)/review-run.sh" record
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" record`
 Exit 2 is a read or a write that did not answer, and a retry replaces the same
 entry: run it again. Exit 3: the run's loop has not closed.
 
 Close this step and drain:
-```bash
-"$(gc {{binding_name}} scripts-dir)/claim-close.sh" --step mol-pr-review.record
-```
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-pr-review.record`
 ```bash
 gc runtime drain-ack
 ```
