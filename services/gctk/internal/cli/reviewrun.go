@@ -12,7 +12,6 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
@@ -61,13 +60,9 @@ func newReviewStepCmd(stdout, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-// prReader reads a PR, the one GitHub read the step verb makes.
-type prReader interface {
-	PullRequest(repo string, number int) (*gh.PullRequest, error)
-}
-
-// prReaderFor is the reader of a PR on host, gh's by default.
-var prReaderFor = func(host string) prReader { return gh.New(host) }
+// reviewGitHubFor is GitHub on host as a run's prepare reads it, gh's by
+// default.
+var reviewGitHubFor = func(host string) review.GitHub { return gh.New(host) }
 
 // stepFacts is what the step verb prints.
 type stepFacts struct {
@@ -115,30 +110,10 @@ func reviewStepIn(l *ledger.Ledger, bead string, prepare, asJSON bool, repos []s
 		PRBead: run.PRBead, PR: st.PR(), Branch: st.Branch, Target: run.Target, FirstHead: run.Head,
 		Head: run.Head, Shadow: run.Shadow}
 	if prepare {
-		if why := st.Mismatch(); why != "" {
-			fmt.Fprintf(stderr, "gctk review step: run %s must stop with no result: %s\n", run.Root, why)
-			return 3
-		}
-		host, repo, number, ok := record.ParseURL(st.PR())
-		if !ok {
-			fmt.Fprintf(stderr, "gctk review step: run %s must stop with no result: %q is not a PR's URL\n", run.Root, st.PR())
-			return 3
-		}
-		pr, err := prReaderFor(host).PullRequest(repo, number)
+		why, err := st.MustStop(reviewGitHubFor)
 		if err != nil {
-			fmt.Fprintf(stderr, "gctk review step: GitHub did not answer for %s: %v\n", st.PR(), err)
+			fmt.Fprintf(stderr, "gctk review step: %v\n", err)
 			return 2
-		}
-		var why string
-		switch {
-		case pr.State != "OPEN":
-			why = fmt.Sprintf("the PR is %s", strings.ToLower(pr.State))
-		case pr.HeadRefOid != run.Head:
-			why = fmt.Sprintf("the PR's head is %s, no longer the run's head %s", pr.HeadRefOid, run.Head)
-		case pr.HeadRefName != st.Branch:
-			why = fmt.Sprintf("the PR is from %s, not the branch %s", pr.HeadRefName, st.Branch)
-		case pr.BaseRefName != run.Target:
-			why = fmt.Sprintf("the PR merges into %s, not the run's target %s", pr.BaseRefName, run.Target)
 		}
 		if why != "" {
 			fmt.Fprintf(stderr, "gctk review step: run %s must stop with no result: %s\n", run.Root, why)

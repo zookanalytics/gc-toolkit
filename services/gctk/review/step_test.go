@@ -2,12 +2,16 @@ package review_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
+	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
@@ -169,17 +173,49 @@ func TestAStepNamesItsOutputAndIteration(t *testing.T) {
 	}
 }
 
+// openPR is GitHub holding the PR the bead names once its pr_url is set, open
+// from the bead's branch into its target at the run's head, and that PR, for a
+// test to change.
+func openPR() (*ghfake.GitHub, *ghfake.PR) {
+	g := ghfake.New("")
+	p := &ghfake.PR{Facts: gh.PullRequest{Repository: "o/r", Number: 7, State: "OPEN", HeadRefOid: h1,
+		HeadRefName: branch, BaseRefName: target}}
+	g.Put(p)
+	return g, p
+}
+
+// mustStop is why the run must stop, as a step of its first iteration asks it
+// of the GitHub github returns for a host.
+func (w *world) mustStop(github func(host string) review.GitHub) (string, error) {
+	w.t.Helper()
+	st, err := review.ReadStep(w.ledger(), w.step(1, "triage"))
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	return st.MustStop(github)
+}
+
+// on is a GitHub factory that answers every host from g.
+func on(g *ghfake.GitHub) func(string) review.GitHub {
+	return func(string) review.GitHub { return g }
+}
+
 // A run's vars name the bead's record when its head is the head the record
-// validated, its target the record's and its branch var the bead's branch. A
-// shadow run judges a PR whose bead is on no record, and needs only the PR.
+// validated, its target the record's and its branch var the bead's branch, and
+// a run whose vars do not stops before it reads GitHub. A shadow run judges a
+// PR whose bead is on no record, and needs only the PR.
 func TestARunsVarsNameTheRecord(t *testing.T) {
 	mismatch := func(w *world) string {
 		t.Helper()
-		st, err := review.ReadStep(w.ledger(), w.step(1, "triage"))
+		g, _ := openPR()
+		why, err := w.mustStop(on(g))
 		if err != nil {
 			t.Fatal(err)
 		}
-		return st.Mismatch()
+		if reads := g.Reads(); why != "" && len(reads) > 0 {
+			t.Errorf("a run that stops for %q read GitHub first: %v", why, reads)
+		}
+		return why
 	}
 	setPR := func(w *world, k, v string) {
 		pr, _ := w.store.Row(prBead)
@@ -228,6 +264,70 @@ func TestARunsVarsNameTheRecord(t *testing.T) {
 	setPR(w, "pr_url", "")
 	if got := mismatch(w); !strings.Contains(got, "names no PR") {
 		t.Errorf("a shadow run on a bead with no PR reads %q", got)
+	}
+}
+
+// A run whose vars name the record goes on while GitHub's PR, read on the host
+// its URL names, is open from the bead's branch into the run's target at the
+// run's head. It stops with no result when the PR is closed or merged, its head
+// moved, it is from another branch or it merges into another target, and when
+// the bead names no PR's URL. A GitHub that does not answer is a read error,
+// not a reason to stop.
+func TestARunStopsUnlessThePRIsOpenAtItsHead(t *testing.T) {
+	withURL := func(url string) *world {
+		w := newWorld(t)
+		pr, _ := w.store.Row(prBead)
+		pr.Metadata["pr_url"] = url
+		w.store.Put(pr)
+		return w
+	}
+	const url = "https://github.com/o/r/pull/7"
+	g, _ := openPR()
+	var hosts []string
+	why, err := withURL(url).mustStop(func(host string) review.GitHub {
+		hosts = append(hosts, host)
+		return g
+	})
+	if why != "" || err != nil {
+		t.Errorf("a run at its open PR's head stops for %q, %v", why, err)
+	}
+	if !slices.Equal(hosts, []string{"github.com"}) {
+		t.Errorf("the run asked GitHub on %v; want the URL's host, github.com", hosts)
+	}
+	for _, c := range []struct {
+		name   string
+		change func(*ghfake.PR)
+		why    string
+	}{
+		{"closed", func(p *ghfake.PR) { p.Facts.State = "CLOSED" }, "the PR is closed"},
+		{"merged", func(p *ghfake.PR) { p.Facts.State = "MERGED" }, "the PR is merged"},
+		{"whose head moved", func(p *ghfake.PR) { p.Facts.HeadRefOid = h2 },
+			"the PR's head is " + h2 + ", no longer the run's head " + h1},
+		{"from another branch", func(p *ghfake.PR) { p.Facts.HeadRefName = "polecat/other" },
+			"the PR is from polecat/other, not the branch " + branch},
+		{"into another target", func(p *ghfake.PR) { p.Facts.BaseRefName = "release" },
+			"the PR merges into release, not the run's target " + target},
+	} {
+		g, p := openPR()
+		c.change(p)
+		if why, err := withURL(url).mustStop(on(g)); why != c.why || err != nil {
+			t.Errorf("a PR %s: the run stops for %q, %v; want %q", c.name, why, err, c.why)
+		}
+	}
+	g, _ = openPR()
+	why, err = withURL("https://github.com/o/r/issues/7").mustStop(on(g))
+	if want := `"https://github.com/o/r/issues/7" is not a PR's URL`; why != want || err != nil {
+		t.Errorf("a bead whose URL is an issue's: the run stops for %q, %v; want %q", why, err, want)
+	}
+	if reads := g.Reads(); len(reads) > 0 {
+		t.Errorf("a bead with no PR's URL read GitHub: %v", reads)
+	}
+	limited := errors.New("rate limited")
+	g, _ = openPR()
+	g.Fail["PullRequest"] = limited
+	why, err = withURL(url).mustStop(on(g))
+	if why != "" || !errors.Is(err, limited) {
+		t.Errorf("a GitHub that does not answer: the run stops for %q, %v; want the read's error", why, err)
 	}
 }
 

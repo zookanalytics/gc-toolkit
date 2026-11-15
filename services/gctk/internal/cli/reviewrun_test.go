@@ -9,6 +9,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
+	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
@@ -39,50 +40,42 @@ func runStore() *fake.Store {
 	return s
 }
 
-type stubPR struct {
-	pr  *gh.PullRequest
-	err error
-}
-
-func (s stubPR) PullRequest(string, int) (*gh.PullRequest, error) { return s.pr, s.err }
-
-func withPR(t *testing.T, pr *gh.PullRequest, err error) {
+// withGitHub has a run's prepare read GitHub from g, on every host.
+func withGitHub(t *testing.T, g *ghfake.GitHub) {
 	t.Helper()
-	was := prReaderFor
-	prReaderFor = func(string) prReader { return stubPR{pr, err} }
-	t.Cleanup(func() { prReaderFor = was })
+	was := reviewGitHubFor
+	reviewGitHubFor = func(string) review.GitHub { return g }
+	t.Cleanup(func() { reviewGitHubFor = was })
 }
 
-// prepare goes on while the run's vars name the record and GitHub's PR is open
-// from its branch at its head, and stops the run with no result otherwise.
+// prepare exits 0 while the run may go on, 3 with the reason when it must stop
+// with no result, and 2 when GitHub does not answer, in the lines
+// review-run.sh's prepare reads. The domain's tests hold each reason a run
+// stops for.
 func TestReviewStepPrepare(t *testing.T) {
-	open := &gh.PullRequest{State: "OPEN", HeadRefOid: runHead, HeadRefName: "polecat/tk-pr", BaseRefName: "main"}
-	run := func(s *fake.Store) (int, string) {
+	g := ghfake.New("")
+	p := &ghfake.PR{Facts: gh.PullRequest{Repository: "o/r", Number: 7, State: "OPEN", HeadRefOid: runHead,
+		HeadRefName: "polecat/tk-pr", BaseRefName: "main"}}
+	g.Put(p)
+	withGitHub(t, g)
+	run := func() (int, string, string) {
 		var out, errb bytes.Buffer
-		code := reviewStepIn(ledger.New(s), "tk-prep", true, false, nil, &out, &errb)
-		return code, out.String() + errb.String()
+		code := reviewStepIn(ledger.New(runStore()), "tk-prep", true, false, nil, &out, &errb)
+		return code, out.String(), errb.String()
 	}
-	withPR(t, open, nil)
-	if code, out := run(runStore()); code != 0 || !strings.Contains(out, "first head "+runHead) {
-		t.Errorf("a run poured from its record at the PR's head = exit %d: %s", code, out)
+	if code, out, errs := run(); code != 0 || !strings.Contains(out, "first head "+runHead) || errs != "" {
+		t.Errorf("a run poured from its record at the PR's head = exit %d: %s%s", code, out, errs)
 	}
-	moved := *open
-	moved.HeadRefOid = runNext
-	withPR(t, &moved, nil)
-	if code, out := run(runStore()); code != 3 || !strings.Contains(out, "no longer the run's head") {
-		t.Errorf("a PR whose head moved = exit %d: %s; want 3", code, out)
+	p.Facts.HeadRefOid = runNext
+	want := "gctk review step: run tk-run must stop with no result: the PR's head is " + runNext +
+		", no longer the run's head " + runHead + "\n"
+	if code, out, errs := run(); code != 3 || errs != want || out != "" {
+		t.Errorf("a PR whose head moved = exit %d: %s%s; want 3 and %q", code, out, errs, want)
 	}
-	withPR(t, open, nil)
-	s := runStore()
-	pr, _ := s.Row("tk-pr")
-	pr.Metadata["pr_head_sha"] = runNext
-	s.Put(pr)
-	if code, out := run(s); code != 3 || !strings.Contains(out, "validated head") {
-		t.Errorf("a run whose head is not the record's = exit %d: %s; want 3", code, out)
-	}
-	withPR(t, nil, errors.New("rate limited"))
-	if code, _ := run(runStore()); code != 2 {
-		t.Errorf("a GitHub that does not answer = exit %d; want 2", code)
+	g.Fail["PullRequest"] = errors.New("rate limited")
+	want = "gctk review step: GitHub did not answer for https://github.com/o/r/pull/7: rate limited\n"
+	if code, out, errs := run(); code != 2 || errs != want || out != "" {
+		t.Errorf("a GitHub that does not answer = exit %d: %s%s; want 2 and %q", code, out, errs, want)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
@@ -13,6 +14,11 @@ import (
 // A step of a review run reads what its iteration judges: the run it belongs
 // to, the PR the run judges, the iteration it runs in, the head that iteration
 // judges and the change triage reads there.
+//
+// Before a run judges anything, its prepare asks whether the run must stop
+// with no result: when its vars do not name the record the bead that owns the
+// PR carries, or when GitHub's PR is not open from the bead's branch into the
+// run's target at the run's head.
 //
 // The head of iteration 1 is the run's first head, the head the refinery
 // validated. Each later iteration judges the head the round before it pushed,
@@ -109,12 +115,52 @@ func (st *Step) PR() string {
 	return st.Record.ExistingPR
 }
 
-// Mismatch is why the run's vars do not name the record the bead that owns
+// GitHub is the one read a run's prepare makes of GitHub, the PR the run
+// judges, which the gh adapter's Client carries out and its fake answers.
+type GitHub interface {
+	PullRequest(repo string, number int) (*gh.PullRequest, error)
+}
+
+// MustStop is why the run must stop with no result, "" when it may go on: its
+// vars do not name the record the bead that owns the PR carries, the PR the
+// bead names is not a PR's URL, or GitHub's PR is not open, its head is not
+// the run's head, it is from another branch or it merges into another target.
+// It reads the PR once the vars name the record, through the GitHub that
+// github returns for the host the URL names. A read of the PR that fails is
+// an error, since whether the run stands is then unknown.
+func (st *Step) MustStop(github func(host string) GitHub) (string, error) {
+	if why := st.mismatch(); why != "" {
+		return why, nil
+	}
+	url := st.PR()
+	host, repo, number, ok := record.ParseURL(url)
+	if !ok {
+		return fmt.Sprintf("%q is not a PR's URL", url), nil
+	}
+	pr, err := github(host).PullRequest(repo, number)
+	if err != nil {
+		return "", fmt.Errorf("GitHub did not answer for %s: %w", url, err)
+	}
+	run := st.Run
+	switch {
+	case pr.State != "OPEN":
+		return fmt.Sprintf("the PR is %s", strings.ToLower(pr.State)), nil
+	case pr.HeadRefOid != run.Head:
+		return fmt.Sprintf("the PR's head is %s, no longer the run's head %s", pr.HeadRefOid, run.Head), nil
+	case pr.HeadRefName != st.Branch:
+		return fmt.Sprintf("the PR is from %s, not the branch %s", pr.HeadRefName, st.Branch), nil
+	case pr.BaseRefName != run.Target:
+		return fmt.Sprintf("the PR merges into %s, not the run's target %s", pr.BaseRefName, run.Target), nil
+	}
+	return "", nil
+}
+
+// mismatch is why the run's vars do not name the record the bead that owns
 // the PR carries, "" when they do: the run's head is the head the record
 // validated, its target the record's, and its branch var, when it names one,
 // the bead's branch. A shadow run judges a PR whose bead may be on no record,
 // so it needs only the PR, its branch and a head.
-func (st *Step) Mismatch() string {
+func (st *Step) mismatch() string {
 	run, rec := st.Run, st.Record
 	switch {
 	case !git.IsObjectID(run.Head):
