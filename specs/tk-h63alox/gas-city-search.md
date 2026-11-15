@@ -92,8 +92,8 @@ commit.
   (`cmd/bd/show_children.go`, `showIssueAsOf`). bd's list filters
   `--updated-after` and `--closed-after` select rows by a time the caller
   already holds (`cmd/bd/list.go`, the flags its `init` declares), and return
-  none. So the verb reads its own clock before it asks the store, and prints
-  that time first.
+  no time of their own. So the verb reads its own clock before it asks the
+  store, and prints that time first.
 
 ## Why the surface is one verb and two keys
 

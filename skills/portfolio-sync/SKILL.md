@@ -83,7 +83,7 @@ Note each ruling on its bead under the sync's date, with the operator's reason
 in their words, and on an epic mark it weighed in the same write. Mark it with
 the time on the first line of section 2's read, the earliest such time when you
 ran the read more than once. A change made after the read is one this sync has
-not seen, and a mark at any later time, such as the note's own, takes it off
+not seen, and a mark at any later time, such as the note's own, can take it off
 the next sync's list. On each epic that section 2 listed, note too what the
 sync made of its close or shift, even when nothing moved, because its mark is
 what takes that change off the next sync's list:
