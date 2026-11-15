@@ -439,7 +439,7 @@ bead is open.
 
 | # | Unit | What it builds | Settles | Waits on |
 |---|---|---|---|---|
-| 1 | feat(gctk): have the landing order read every PR it owns in one request and act only on what differs | The pass's read in gctk's GitHub adapter (one aliased request per repository, with `isRequired` per PR and the label search as a second field). The saved read's state part written from it, and what tells that feedback moved kept beside the feedback part. The run reads the store once and GitHub once per repository, decides each record in memory, and acts under the lock only where the decision names an act, with the whole read only for moved feedback or a PR that reads ready. Every owned PR on the record is observed, marker or not. The order runs every 2 minutes with `--budget 90s` and no `--count`. `pr_last_checked_at` is written only by a write the order makes. The docs the behavior changes: refinery-merge-cadence.md's landing order, state-machine.md's pending record, gctk-architecture.md, services/gctk/README.md, the order's header, and the saved read's warrant and key registry entry. | questions 1, 2, 3 and 7 | tk-1tfzr71.132 and tk-1tfzr71.22 |
+| 1 | feat(gctk): have the landing order read every PR it owns in one request and act only on what differs | The pass's read in gctk's GitHub adapter (one aliased request per repository, with `isRequired` per PR and the label search as a second field). The saved read's state part written from it, and what tells that feedback moved kept beside the feedback part. The run reads the store once and GitHub once per repository, decides each record in memory, and acts under the lock only where the decision names an act, with the whole read only for moved feedback or a PR that reads ready. Every owned PR on the record is observed, marker or not. The order runs every 2 minutes with `--budget 90s` and no `--count`. `pr_last_checked_at` is written only by a write the order makes. The docs the behavior changes: refinery-merge-cadence.md's landing order, state-machine.md's pending record, gctk-architecture.md, services/gctk/README.md, the order's header, the saved read's warrant and key registry entry, and docs/architecture.md's Debt entry, narrowed to saying that the order writes no label. | questions 1, 2, 3 and 7 | tk-1tfzr71.132 and tk-1tfzr71.22 |
 | 2 | feat(gctk): keep each PR's status labels equal to what the store derives | The comparison over every PR the city owns and every PR the search finds, written through `pr-status-label.sh`'s `reconcile` and `clear`, at most 10 clears a pass of PRs the store does not own, with nothing recording a write that failed. The landing order's merge path makes no label call. `pr-status-label.sh`'s header names the comparison as its caller. docs/architecture.md drops the Debt entry this design adds. | questions 4 and 5, tk-1tfzr71.91, and the label half of tk-1tfzr71.140 | unit 1, and tk-1tfzr71.132 while it is open |
 
 Unit 1 changes no label, so between the two units the labels stand as they do on
@@ -493,7 +493,10 @@ wording moved, the reason follows.
 6. docs/architecture.md, docs/built-once-target.md and
    docs/refinery-merge-cadence.md say so. *(The sitting's "the merge design": a
    spec records one moment, so the living doc that owns the landing order's
-   runtime says it.)*
+   runtime says it. docs/architecture.md states only the responsibility the
+   landing order takes on, that it observes every PR the city owns and
+   maintains each one's labels. How the order carries it out belongs in the
+   runtime doc.)*
 
 ## 13. Pages this design changes
 
