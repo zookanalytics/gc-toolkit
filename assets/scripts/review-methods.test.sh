@@ -4,7 +4,8 @@
 #
 #   - Every row of the pack's review-checks.toml has skills/review-<check>/,
 #     whose SKILL.md is named review-<check> and has a `## The verdict` section,
-#     and every skills/review-* directory has a row.
+#     and every skills/review-* directory has a row, but review-ruling, the bar
+#     the review run's rule-and-repair step loads, which is no check's.
 #   - Every signoff.sh flag a check's verdict section names is one signoff.sh
 #     accepts, and every skill a check's skill says to load is one the pack ships.
 #     Every field signoff.sh checks a finding set for is one the correctness
@@ -170,8 +171,18 @@ while IFS= read -r c; do
       || bad "$c: the skill it says to load, gc-toolkit.$s, ships"
   done
 done <<< "$NAMES"
+# review-ruling is the one review skill that is no check's method: the bar the
+# review run's rule-and-repair step applies, which the step loads by name.
 for d in "$ROOT"/skills/review-*/; do
   c=$(basename "$d"); c=${c#review-}
+  if [ "$c" = ruling ]; then
+    grep -qxF -- ruling <<< "$NAMES" && bad "ruling is no check, so the pack's index declares none" \
+      || ok "ruling is no check, so the pack's index declares none"
+    grep -qF '{{binding_prefix}}review-ruling' "$ROOT/formulas/mol-pr-review.toml" \
+      && ok "skills/review-ruling is the bar mol-pr-review's rule-and-repair loads" \
+      || bad "skills/review-ruling is the bar mol-pr-review's rule-and-repair loads"
+    continue
+  fi
   grep -qxF -- "$c" <<< "$NAMES" && ok "skills/review-$c has a row in the pack's index" \
     || bad "skills/review-$c has a row in the pack's index"
 done

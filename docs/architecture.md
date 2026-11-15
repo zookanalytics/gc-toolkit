@@ -265,7 +265,10 @@ none.
 - **A rig's guidance is read at the reviewed commit, not from the rig's
   default branch,** so a branch is judged against the guidance it carries. A
   guidance fix merged on the default branch reaches an open PR when that PR
-  next merges its base.
+  next merges its base. So a correctness approve of a branch that edits its own
+  guidance, `review-checks.toml` or a `docs/review-*.md`, names the edit to the
+  person who approves the merge, and the verdict's write refuses one that does
+  not.
 - **When gc-toolkit reviews itself, the pack and the rig are the same files at
   two commits.** A branch that edits a check's method, the specialist stance, a
   review formula or a script the review calls is reviewed under the installed
@@ -503,10 +506,8 @@ why a reader must know it, and the work that retires it.
   records its verdict and files its findings, and a validation pass rules them
   for a rework child to fix, so step 7 is not what runs there. On that path a
   check no index declares is approved with `--needs-you`, so the operator
-  decides whether it stays in the anchor's `check_set`, and `signoff.sh`
-  refuses a correctness approve on a change that edits its own review guidance
-  until `--needs-you` names the edit to the person who approves the merge. The
-  review run is not built yet. The review-lanes member (tk-1tfzr71.22) builds
+  decides whether it stays in the anchor's `check_set`. The review run is not
+  built yet. The review-lanes member (tk-1tfzr71.22) builds
   it in the units its implementation child (tk-1tfzr71.109) files. Each rig's
   cutover bead then moves the rig onto it, and a retirement bead that child
   files deletes the old path once every rig has moved and the GitHub intake
