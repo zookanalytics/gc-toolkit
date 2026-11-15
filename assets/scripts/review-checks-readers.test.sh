@@ -15,6 +15,9 @@
 # A fixture of each read shape proves the scan finds it, and a fixture of
 # names proves it reads past them.
 #
+# The demo paths that read the rig's demo guide each ask the one reader, and a
+# check names each of them, so a path that stops asking fails here.
+#
 # A check is declared in an index and nowhere else, so no script or formula
 # lists two or more of the pack's checks, the names taken from the pack's
 # index, except where the default check_set is configured. A fixture of each
@@ -154,6 +157,18 @@ cp docs/arch.md docs/pm.md
 TRIAGE_GATE=triage
 FIXTURE
 eq "$(lists "$TMP/not-lists.sh")" "" "a comment, skill names, file names and one check are not lists"
+
+# The rig's docs/review-demo.md is also its demo guide, plain text that the demo
+# paths read at the commit they show. The drafter's skill and mol-rig-demo's
+# prepare-script, which hands the drafter that commit, each ask the one reader.
+DEMO_READ='review-checks.sh" --extension demo --at'
+for f in skills/gc-demo-script/SKILL.md formulas/mol-rig-demo.toml; do
+  if grep -qF -- "$DEMO_READ" "$ROOT/$f"; then
+    ok "$f reads the demo guide through review-checks.sh --extension demo, at a commit"
+  else
+    bad "$f reads the demo guide through review-checks.sh --extension demo, at a commit" "no '$DEMO_READ' in it"
+  fi
+done
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

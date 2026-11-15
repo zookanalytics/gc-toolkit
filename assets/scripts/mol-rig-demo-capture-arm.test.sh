@@ -20,11 +20,17 @@
 # and a stub decline script. No live city, browser, or network.
 #
 # A capture's sandbox refuses a rig's own checkout, so the app runs from a
-# detached worktree of it, which the step's rig-demo-app-root region makes. The
-# last cases run that region and the capture block with the real capture, sandbox
-# library and workspace scripts, against a fixture city, a stub engine, a stub
+# detached worktree of it, which the step's rig-demo-app-root region makes. A
+# pour names at most one app target, which the rig-demo-app-target region
+# counts, and a page script whose pour names none takes the command the rig
+# declares as its ui_serve_command, which a stub gc answers. The last cases run
+# those two regions and the capture block with the real capture, sandbox library
+# and workspace scripts, against a fixture city, a stub engine, a stub
 # sandbox-exec that keeps the profile it was handed, and a stub gctk that runs a
 # copy's serve command through the library's sandbox, as gctk rig serve does.
+# The stub engine types a terminal script's run lines into one bash that starts
+# in --cwd, as the engine's own terminal does, so a case shows where a script's
+# commands run.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,7 +56,7 @@ awk -v m="$MARKER" '
   $0 ~ ("# <<< " m "$") {f=0}
   f' "$TOML" \
   | sed -e 's/{{rig_name}}/demo-rig/g' -e 's/{{capture_mode}}/walkthrough/g' \
-        -e 's/{{serve_port}}/5173/g' -e 's/{{narrate}}/true/g' \
+        -e 's/{{serve_port}}//g' -e 's/{{narrate}}/true/g' \
         -e 's/{{binding_prefix}}/gc-toolkit./g' > "$TMP/block.sh"
 
 echo "# the region extracts as runnable bash"
@@ -114,7 +120,7 @@ run() {
   local rc=0
   ( cd "$TMP/cwd" &&
     REQUEST_BEAD=tk-req SCRIPT_PATH="$TMP/cwd/walkthrough.md" OUT="$OUT" \
-    SERVE_DIR="$TMP/cwd/site" SERVE_CMD="" BASE_URL="" APP_ROOT="$TMP/cwd" \
+    SERVE_DIR="${RUN_SERVE_DIR-$TMP/cwd/site}" SERVE_CMD="" BASE_URL="" APP_ROOT="$TMP/cwd" \
     SCRIPTS="$TMP/pack/assets/scripts" \
     FAKE_LOG="$TMP/log" FAKE_DIR="$TMP" FAKE_CAPTURE_RC="$2" \
     FAKE_DECLINE_RC="${FAKE_DECLINE_RC:-0}" \
@@ -146,9 +152,29 @@ for MODE in strict plain; do
 
   echo "# $MODE shell: a decline that does not land still ends the block"
   eq "$(FAKE_DECLINE_RC=1 run "$MODE" 3)" "1|CAPTURE;UPDATE;DECLINE;" "$MODE: the block exits 1 and does not drain"
+
+  echo "# $MODE shell: with no app target, as a terminal script has, the capture gets the worktree for its shell"
+  eq "$(RUN_SERVE_DIR="" run "$MODE" 0)" "0|CAPTURE;UPDATE;" "$MODE: the capture runs and the clip is recorded"
+  has "$(cat "$TMP/capture.argv")" "--cwd $TMP/cwd" "$MODE: the capture's shell starts in the worktree"
+  case "$(cat "$TMP/capture.argv")" in
+    *--serve*|*--base-url*|*--port*) bad "$MODE: and it names no app" "$(cat "$TMP/capture.argv")" ;;
+    *) ok "$MODE: and it names no app" ;;
+  esac
 done
 
-# --- The app root, through the real capture and its sandbox. ---------------------
+# --- The app target and root, through the real capture and its sandbox. ---------
+TARGET_MARKER=rig-demo-app-target
+awk -v m="$TARGET_MARKER" '
+  $0 ~ ("# >>> " m "$") {f=1; next}
+  $0 ~ ("# <<< " m "$") {f=0}
+  f' "$TOML" | sed -e 's/{{rig_name}}/demo-rig/g' -e 's/{{binding_prefix}}/gc-toolkit./g' > "$TMP/app-target.sh"
+echo "# the app target's region extracts as runnable bash"
+[ -s "$TMP/app-target.sh" ] && ok "extracted between the $TARGET_MARKER markers" || bad "extraction EMPTY: the $TARGET_MARKER markers are missing"
+eq "$(grep -c "^# >>> $TARGET_MARKER\$" "$TOML")" "1" "exactly one $TARGET_MARKER region"
+case "$(cat "$TMP/app-target.sh")" in
+  *'{{'*) bad "a pour var the test does not render in $TARGET_MARKER" ;;
+  *)      ok  "every pour var in $TARGET_MARKER is rendered" ;;
+esac
 APP_MARKER=rig-demo-app-root
 awk -v m="$APP_MARKER" '
   $0 ~ ("# >>> " m "$") {f=1; next}
@@ -157,20 +183,28 @@ awk -v m="$APP_MARKER" '
 echo "# the app root's region extracts as runnable bash"
 [ -s "$TMP/app-root.sh" ] && ok "extracted between the $APP_MARKER markers" || bad "extraction EMPTY: the $APP_MARKER markers are missing"
 eq "$(grep -c "^# >>> $APP_MARKER\$" "$TOML")" "1" "exactly one $APP_MARKER region"
-{ printf 'set -euo pipefail\n'; cat "$TMP/app-root.sh" "$TMP/block.sh"; } > "$TMP/app-strict.sh"
-cat "$TMP/app-root.sh" "$TMP/block.sh" > "$TMP/app-plain.sh"
-bash -n "$TMP/app-plain.sh" && ok "the two regions run as one script" || bad "the two regions failed bash -n"
+{ printf 'set -euo pipefail\n'; cat "$TMP/app-target.sh" "$TMP/app-root.sh" "$TMP/block.sh"; } > "$TMP/app-strict.sh"
+cat "$TMP/app-target.sh" "$TMP/app-root.sh" "$TMP/block.sh" > "$TMP/app-plain.sh"
+bash -n "$TMP/app-plain.sh" && ok "the three regions run as one script" || bad "the three regions failed bash -n"
 
-# A city whose one rig is a git repository holding a store and a committed site.
+# A city whose one rig is a git repository holding a store, a committed site,
+# and a report that runs from the directory below the root that holds it.
 CITY="$TMP/city"; RIG="$CITY/rigs/demo-rig"; WS="$TMP/ws"; WT="$WS/gc-review-tk-req/wt"
-mkdir -p "$RIG/.beads" "$RIG/site" "$TMP/home" "$WS"
+mkdir -p "$RIG/.beads" "$RIG/site" "$RIG/tools" "$TMP/home" "$WS"
 printf '<!doctype html><title>x</title>\n' > "$RIG/site/index.html"
+printf 'echo report from tools\n' > "$RIG/tools/report.sh"
 printf '.beads/\n' > "$RIG/.gitignore"
 git -C "$RIG" init -q
-git -C "$RIG" add .gitignore site
+git -C "$RIG" add .gitignore site tools
 git -C "$RIG" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q -m init
 RIG_HEAD="$(git -C "$RIG" rev-parse HEAD)"
 printf '# Demo: fixture\n\n**Start:** `/`\n' > "$TMP/cwd/walkthrough.md"
+printf '# Demo: a report\n\n**Terminal:**\n\n## Steps\n\n1. **It prints**\n   `run true`\n' > "$TMP/cwd/terminal.md"
+# A rig's guide says the report runs in tools/, so its script changes into tools
+# in its first step, as the drafter writes it. The same script without that
+# step runs from the root.
+printf '# Demo: the report\n\n**Terminal:**\n\n## Steps\n\n1. **It prints the report**\n   `run cd tools`\n   `run sh report.sh`\n' > "$TMP/cwd/subdir.md"
+printf '# Demo: the report\n\n**Terminal:**\n\n## Steps\n\n1. **It prints the report**\n   `run sh report.sh`\n' > "$TMP/cwd/subdir-no-cd.md"
 
 # The stubs these cases add. The engine lints clean and writes the clip it is
 # told to; sandbox-exec keeps the profile and runs the engine; node says no
@@ -179,7 +213,8 @@ printf '# Demo: fixture\n\n**Start:** `/`\n' > "$TMP/cwd/walkthrough.md"
 case "${1:-}" in
   lint) exit 0 ;;
   run) printf '%s\n' "$*" >> "$FAKE_DIR/engine.argv"
-       o=""; p=""; for a in "$@"; do [ "$p" = "-o" ] && o="$a"; p="$a"; done
+       o=""; c=""; p=""; for a in "$@"; do [ "$p" = "-o" ] && o="$a"; [ "$p" = "--cwd" ] && c="$a"; p="$a"; done
+       sed -n 's/^[[:space:]]*`run \(.*\)`[[:space:]]*$/\1/p' "$2" | ( cd "${c:-.}" && bash ) > "$FAKE_DIR/terminal.out" 2>&1
        printf 'clip' > "$o" ;;
 esac
 exit 0
@@ -225,11 +260,14 @@ case "$*" in
 esac
 LSOF
 chmod +x "$TMP/bin/engine" "$TMP/bin/sandbox-exec" "$TMP/bin/node" "$CITY/.gc/services/gctk/bin/gctk" "$TMP/bin/lsof"
-# gc adds the rig list the sandbox denies by, here.
+# gc adds the rig list the sandbox denies by, and the rig's formula vars, whose
+# ui_serve_command is FAKE_UI_SERVE, unset when that is empty.
 { printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "rig list")          printf '{"rigs":[{"name":"demo-rig","path":"%s"}]}\n' "$FAKE_RIG" ;;
+  "formula show")      printf '%s\n' "$*" >> "$FAKE_DIR/formula.argv"
+                       jq -n --arg c "${FAKE_UI_SERVE:-}" '{ok: true, vars: [{name: "app_reads_city", default: "false", rig_default: null}, {name: "ui_serve_command", default: "", rig_default: (if $c == "" then null else $c end)}]}' ;;
   "bd update")         printf 'UPDATE\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "$FAKE_DIR/gc.argv" ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG" ;;
 esac
@@ -239,14 +277,14 @@ GC
 # pour <strict|plain> <serve_dir> <serve_cmd> <base_url> [rig path] prints
 # "<rc>|<ordered verb log>", with no workspace left by an earlier case.
 pour() {
-  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/decline.argv"; : > "$TMP/gctk.argv"
-  rm -f "$TMP/profile" "$TMP/copy-profile" "$TMP/copy-dir"
+  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/decline.argv"; : > "$TMP/gctk.argv"; : > "$TMP/formula.argv"
+  rm -f "$TMP/profile" "$TMP/copy-profile" "$TMP/copy-dir" "$TMP/terminal.out"
   REVIEW_WORKSPACE_DIR="$WS" "$HERE/review-workspace.sh" remove --review-bead tk-req >/dev/null
   local rc=0
   ( cd "$TMP/cwd" && env -i PATH="$PATH" HOME="$TMP/home" TMPDIR="$TMP" GC_CITY_PATH="$CITY" GIT_CEILING_DIRECTORIES="$TMP" \
       REVIEW_WORKSPACE_DIR="$WS" SPRINTSHOW_BIN="$TMP/bin/engine" STUB_PACK="$TMP/pack" \
-      FAKE_LOG="$TMP/log" FAKE_DIR="$TMP" FAKE_RIG="$RIG" FAKE_DECLINE_RC=0 \
-      REQUEST_BEAD=tk-req SCRIPT_PATH="$TMP/cwd/walkthrough.md" OUT="$OUT" \
+      FAKE_LOG="$TMP/log" FAKE_DIR="$TMP" FAKE_RIG="$RIG" FAKE_DECLINE_RC=0 FAKE_UI_SERVE="${FAKE_UI_SERVE-}" \
+      REQUEST_BEAD=tk-req SCRIPT_PATH="${POUR_SCRIPT:-$TMP/cwd/walkthrough.md}" OUT="$OUT" \
       SERVE_DIR="$2" SERVE_CMD="$3" BASE_URL="$4" RIG_PATH="${5-$RIG}" \
       SCRIPTS="$HERE" \
       bash "$TMP/app-$1.sh" ) > "$TMP/out" 2>&1 || rc=$?
@@ -274,6 +312,7 @@ for MODE in strict plain; do
     *) ok "$MODE: the copy's sandbox keeps the rig's checkout shut" ;;
   esac
   has "$(cat "$TMP/gctk.argv")" "rig serve --stop (in $WT)" "$MODE: and the capture stops the copy"
+  eq "$(cat "$TMP/formula.argv")" "" "$MODE: a pour that names its app reads no var of the rig's"
 
   echo "# $MODE shell: a relative serve_dir resolves against that worktree"
   eq "$(pour "$MODE" "site" "" "")" "0|UPDATE;" "$MODE: the capture passes the sandbox"
@@ -294,6 +333,52 @@ for MODE in strict plain; do
   has "$(cat "$TMP/decline.argv")" "--subject tk-req --key rig-demo-capture-failed" "$MODE: the gate blocks the request bead"
   has "$(cat "$TMP/decline.argv")" "no worktree of demo-rig could be made" "$MODE: and says no worktree could be made"
   eq "$(cat "$TMP/engine.argv")" "" "$MODE: the engine never runs"
+
+  echo "# $MODE shell: a page script's pour that names no app target takes the rig's ui_serve_command, served from the worktree"
+  eq "$(FAKE_UI_SERVE='npm run dev -- --port $PORT' pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the capture passes the sandbox, and the clip is recorded"
+  has "$(cat "$TMP/formula.argv")" "formula show mol-rig-demo --rig demo-rig --json" "$MODE: gc reads the declared command for the rig being demoed"
+  has "$(cat "$TMP/gctk.argv")" 'rig serve --command npm run dev -- --port $PORT (in '"$WT)" "$MODE: gctk rig serve runs it as written in the worktree, \$PORT left for the copy"
+  has "$(cat "$TMP/engine.argv")" "--base-url http://127.0.0.1:50200/" "$MODE: the engine records the copy"
+  eq "$(git -C "$WT" rev-parse HEAD)" "$RIG_HEAD" "$MODE: which is at the rig's HEAD"
+  eq "$(cat "$TMP/decline.argv")" "" "$MODE: and nothing declines"
+
+  echo "# $MODE shell: a page script's pour on a rig that declares no ui_serve_command declines with the capture's gate"
+  eq "$(FAKE_UI_SERVE="" pour "$MODE" "" "" "")" "1|UPDATE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"
+  has "$(cat "$TMP/out")" "exactly one of --serve-dir / --serve / --base-url (got 0)" "$MODE: the capture refuses a page script with no app"
+  has "$(cat "$TMP/decline.argv")" "--subject tk-req --key rig-demo-capture-failed" "$MODE: the gate blocks the request bead under the capture key"
+  has "$(cat "$TMP/decline.argv")" "neither the pour nor the rig's ui_serve_command named the app a page script drives" "$MODE: and says nothing named the app"
+  eq "$(cat "$TMP/engine.argv")" "" "$MODE: the engine never runs"
+
+  echo "# $MODE shell: a terminal script's pour names no app, and its shell starts in the worktree, though the rig declares a command"
+  eq "$(POUR_SCRIPT="$TMP/cwd/terminal.md" FAKE_UI_SERVE="npm run dev" pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the terminal capture passes the sandbox, and the clip is recorded"
+  has "$(cat "$TMP/engine.argv")" "--cwd $WT" "$MODE: its shell starts in the worktree"
+  case "$(cat "$TMP/engine.argv")" in
+    *--serve*|*--base-url*|*--port*) bad "$MODE: and the engine is given no app" "$(cat "$TMP/engine.argv")" ;;
+    *) ok "$MODE: and the engine is given no app" ;;
+  esac
+  eq "$(cat "$TMP/formula.argv")" "" "$MODE: no var of the rig's is read for it"
+  case "$(cat "$TMP/gctk.argv")" in
+    *"rig serve --command"*) bad "$MODE: and no copy is started" "$(cat "$TMP/gctk.argv")" ;;
+    *) ok "$MODE: and no copy is started" ;;
+  esac
+
+  echo "# $MODE shell: a terminal script whose commands run below the root changes into their directory in its first step"
+  eq "$(POUR_SCRIPT="$TMP/cwd/subdir.md" pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the terminal capture passes the sandbox, and the clip is recorded"
+  has "$(cat "$TMP/engine.argv")" "--cwd $WT" "$MODE: its shell starts at the worktree's root"
+  eq "$(cat "$TMP/terminal.out" 2>/dev/null)" "report from tools" "$MODE: and its commands run in tools/, from the rig's HEAD"
+  POUR_SCRIPT="$TMP/cwd/subdir-no-cd.md" pour "$MODE" "" "" "" >/dev/null
+  has "$(cat "$TMP/terminal.out" 2>/dev/null)" "report.sh" "$MODE: the same commands with no first step run from the root, where no report is found"
+  case "$(cat "$TMP/terminal.out" 2>/dev/null)" in
+    *"report from tools"*) bad "$MODE: and print no report" "$(cat "$TMP/terminal.out")" ;;
+    *) ok "$MODE: and print no report" ;;
+  esac
+
+  echo "# $MODE shell: a pour that names two app targets declines before anything is made"
+  eq "$(pour "$MODE" "site" "" "https://preview.example.com")" "1|UPDATE;DECLINE;" "$MODE: it notes the malformed pour, declines, and exits 1"
+  has "$(cat "$TMP/decline.argv")" "--subject tk-req --key rig-demo-ambiguous-app-target" "$MODE: the gate blocks the request bead under the app-target key"
+  has "$(cat "$TMP/decline.argv")" "got 2 of serve_dir / serve_cmd / base_url" "$MODE: and counts the targets"
+  eq "$(cat "$TMP/engine.argv")" "" "$MODE: the engine never runs"
+  [ ! -e "$WS/gc-review-tk-req" ] && ok "$MODE: and no workspace is made" || bad "$MODE: and no workspace is made"
 
   echo "# $MODE shell: a checkout no worktree can be made from does the same"
   eq "$(pour "$MODE" "" "npm run dev" "" "$TMP/cwd")" "1|UPDATE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"

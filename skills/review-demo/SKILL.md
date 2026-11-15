@@ -32,10 +32,13 @@ The anchor `<anchor_bead>` for what the change is for, then the diff at
 `<reviewed_oid>`, in `<worktree>`: `git diff origin/<review_base>...HEAD`. The
 draft PR, `<review_pr_url>`, and its preview where the rig's host deploys one.
 The rig's guidance for this check, the reviewed commit's `docs/review-demo.md`,
-which the review formula printed when the commit carries one: a rig names its
-own visual surfaces there, how to serve its app for a capture, and how a run of
-its app shows the messages it sends. A rig can also name its design and writing
-standards there, and the states to capture for each screen or message.
+which the review formula printed when the commit carries one. It is also the
+rig's demo guide, which the drafter and `mol-rig-demo` read, and the
+`gc-toolkit.demo-capture` skill says what it holds: the rig's visual surfaces,
+how a capture brings its app up, how a script puts it in a known state and
+signs in, and worked examples. A rig names there how a run of its app shows the
+messages it sends. A rig can also name its design and writing standards there,
+and the states to capture for each screen or message.
 
 ### When it runs
 
@@ -134,17 +137,31 @@ reports whether the `gh` it needs is present.
   the anchor and the diff. Keep the script and the clip in the review workspace.
 
   The app target is the draft's preview, `--base-url <url>`, where one deploys.
-  Otherwise serve the reviewed worktree, so the clip shows the reviewed commit:
+  Otherwise serve the reviewed worktree, so the clip shows the reviewed commit,
+  with the command the rig declares as its `ui_serve_command`
+  (`gc-toolkit.demo-capture`, "The rig's start command"). A review runs in the
+  rig's own pool, so read it for the session's rig:
+
+  ```bash
+  SERVE=$(gc formula show mol-rig-demo --rig "${GC_RIG:-}" --json | jq -r '[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty')
+  ```
+
+  Give it as `--serve "$SERVE" --cwd <worktree>`. It runs as a copy that
+  `gctk rig serve` runs from the worktree, inside the capture's sandbox, on a
+  free port of its own that the command gets as `$PORT`. An empty `SERVE` is a
+  rig that declares no command, whose guidance names its app: give
   `--serve-dir <worktree>/<dir>` for a static build, or
-  `--serve "<command>" --cwd <worktree>` for an app a command serves, which
-  runs as a copy that `gctk rig serve` runs from the worktree, inside the
-  capture's sandbox, on a free port of its own that the command gets as
-  `$PORT`. When the rig's guidance serves its app on this host from
-  `<worktree>`, give its `--base-url`, unless `city.toml` sets
-  `app_reads_city = "true"` for the rig. The capture refuses any other URL on
-  this host and says why. Exit 0 is a clip in which every step's proof held,
-  exit 3 is a clip in which at least one step failed its proof, and exit 1 is
-  no clip. The last line names the clip and says whether it is narrated.
+  `--serve "<command>" --cwd <worktree>` for a command it names. When the rig's
+  guidance serves its app on this host from `<worktree>`, give its
+  `--base-url`, unless `city.toml` sets `app_reads_city = "true"` for the rig.
+  The capture refuses any other URL on this host and says why. A terminal
+  script, one that declares `**Terminal:**`, brings up no app: give it
+  `--cwd <worktree>`, the root its shell starts in on every demo path. When the
+  guide says its commands run in a directory below the root, the script's first
+  step changes into it, as the drafter writes it. Exit 0 is a clip in which
+  every step's proof held, exit 3 is a clip in which at least one step failed
+  its proof, and exit 1 is no clip. The last line names the clip and says
+  whether it is narrated.
   Narration needs `OPENAI_API_KEY` in the session. Without it the clip is
   silent and captioned, and it still shows the change.
   `doctor/check-demo-toolchain` reports which parts of the capture toolchain
