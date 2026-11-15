@@ -79,7 +79,7 @@ as it rules a person's comment:
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-"$GCTK" review ask <the PR's anchor> --reason "<what must change, why, and what done looks like>" --source <the bead the point came from>
+"$GCTK" review ask <the anchor of the PR> --reason "<what must change, why, and what done looks like>" --source <the bead the point came from>
 ```
 
 Add `--check <check>` for each check the point sends back. Exit 0 prints
