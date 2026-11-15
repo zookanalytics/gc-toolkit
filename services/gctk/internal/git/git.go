@@ -201,3 +201,34 @@ func Reaches(dir, commit, branch string) (bool, error) {
 	}
 	return false, fmt.Errorf("git merge-base: %w", err)
 }
+
+// DefaultBranch is the branch origin's HEAD names in the clone dir sits in,
+// refs/remotes/origin/HEAD, which a clone sets to the branch origin checks out.
+// A clone whose origin/HEAD names no branch of origin has none, an error.
+func DefaultBranch(dir string) (string, error) {
+	out, err := Output(dir, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", fmt.Errorf("origin/HEAD names no branch in the clone: %w", err)
+	}
+	ref := strings.TrimSpace(out)
+	branch, ok := strings.CutPrefix(ref, "refs/remotes/origin/")
+	if !ok || !ValidBranch(branch) {
+		return "", fmt.Errorf("origin/HEAD names %q, which is no branch of origin", ref)
+	}
+	return branch, nil
+}
+
+// Tip is the commit origin's branch names as the clone dir sits in last fetched
+// it, refs/remotes/origin/<branch> named in full, so a local branch or tag of
+// the same name cannot stand in for it. A branch the clone never fetched has
+// none, an error.
+func Tip(dir, branch string) (string, error) {
+	if !ValidBranch(branch) {
+		return "", fmt.Errorf("git rev-parse: %q is not a branch name", branch)
+	}
+	out, err := Output(dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("origin/%s names no commit in the clone: %w", branch, err)
+	}
+	return strings.TrimSpace(out), nil
+}
