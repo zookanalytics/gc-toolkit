@@ -190,7 +190,10 @@ contract (a grade of P0, P1 or P2, which every correctness finding carries,
 with a category and a failure_scenario; on a P0 or P1 a verification opening
 CONFIRMED or PLAUSIBLE; never a REFUTED candidate), an approve that carries a
 blocking finding (a P0, a P1 or an ungraded one) and a request-changes that
-carries none, a ruling of a finding no lane
+carries none, a demo verdict with no visual decision or one its rules refuse
+(none only with an approve; a fallback, screenshot or video, costlier than the
+modality delivered), a visual on another check's verdict, a ruling of a finding
+no lane
 raised or of an ask the round cannot take, a finding or an ask left unruled, a
 must-fix with no fixing commit, a commit on a ruling that changes no code, a
 question with no gate, and a fix for an ask an earlier round of the run

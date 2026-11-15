@@ -43,6 +43,19 @@ func TestTheHeadsComment(t *testing.T) {
 			t.Errorf("the comment lacks %q:\n%s", want, got)
 		}
 	}
+	w2 := newWorld(t)
+	w2.output(triage(1, h1, "demo"))
+	demo := lane(1, "demo", h1, review.VerdictApprove)
+	demo.Visual, demo.VisualFallbackFrom = "repo-artifact", "video"
+	w2.output(demo)
+	w2.output(repair(1, h1, ""))
+	run2, err := review.ReadRun(w2.ledger(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := review.Comment(run2, 1, nil); !strings.Contains(got, "demo Visual: repo-artifact (author-committed; fallback from video)") {
+		t.Errorf("a demo verdict's comment does not name its visual:\n%s", got)
+	}
 	if !strings.HasPrefix(got, review.Mark(root, h1)+"\n") {
 		t.Errorf("the comment does not open with its mark:\n%s", got)
 	}

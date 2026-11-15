@@ -48,6 +48,11 @@ func Comment(run *Run, n int, asks []Ask) string {
 			fmt.Fprintf(&b, "**Needs you (%s):** %s\n\n", ln.Check, oneLine(ln.NeedsYou))
 		}
 	}
+	for _, ln := range it.Lanes {
+		if ln.Visual != "" {
+			fmt.Fprintf(&b, "%s Visual: %s\n\n", ln.Check, visualLine(ln))
+		}
+	}
 	if len(it.Lanes) > 0 {
 		fmt.Fprintln(&b, "| Check | Verdict | Findings | Ruled |")
 		fmt.Fprintln(&b, "|---|---|---|---|")
@@ -224,6 +229,24 @@ func answer(r Ruling, ok bool, rp *Repair, shadow bool) string {
 		return fmt.Sprintf("Put to you through %s: %s", r.Gate, reason)
 	}
 	return fmt.Sprintf("Ruled %s: %s", r.Ruling, reason)
+}
+
+// visualLine says what kind of visual a demo verdict rests on: its modality,
+// with a repo-artifact read as author-committed, since a committed visual is
+// what an author recorded and not a capture of the reviewed commit, and the
+// modality a fallback stands in for.
+func visualLine(ln Lane) string {
+	var notes []string
+	if ln.Visual == "repo-artifact" {
+		notes = append(notes, "author-committed")
+	}
+	if ln.VisualFallbackFrom != "" {
+		notes = append(notes, "fallback from "+ln.VisualFallbackFrom)
+	}
+	if len(notes) == 0 {
+		return ln.Visual
+	}
+	return fmt.Sprintf("%s (%s)", ln.Visual, strings.Join(notes, "; "))
 }
 
 // short is a commit's first twelve characters.

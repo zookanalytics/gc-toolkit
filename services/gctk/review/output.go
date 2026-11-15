@@ -190,6 +190,9 @@ func laneOutput(run *Run, n int, req OutputRequest) (*Lane, error) {
 	if ln.Findings == nil {
 		ln.Findings = []Finding{}
 	}
+	if why := visual(&ln); why != "" {
+		return nil, refuse("%s", why)
+	}
 	if strings.EqualFold(ln.Check, "correctness") && ln.Verdict == VerdictApprove && strings.TrimSpace(ln.NeedsYou) == "" {
 		edits, err := GuidanceEdits(IndexSources{Repos: req.Repos}, run.Target, ln.Head)
 		switch {
@@ -290,6 +293,42 @@ func contract(f *Finding, check string) string {
 		return "its verification is REFUTED, and a refuted candidate is not a finding: leave it out, and keep its refutation in the trail"
 	case (g == "P0" || g == "P1") && !confirmedVerification.MatchString(verification):
 		return fmt.Sprintf("a %s carries a verification that opens CONFIRMED or PLAUSIBLE and then the evidence", g)
+	}
+	return ""
+}
+
+// visual is why a lane's visual decision does not stand, "" when it does,
+// with each modality written lower-case. The demo check records its decision
+// on every verdict: none when the change needs no visual, which leaves the
+// check nothing to block on and so goes with an approve only, else the
+// modality delivered. A fallback names the modality that fits and could not be
+// produced here, screenshot or video, which costs more than the one delivered:
+// repo-artifact, then screenshot, then video. No other check records one.
+func visual(ln *Lane) string {
+	ln.Visual = strings.ToLower(strings.TrimSpace(ln.Visual))
+	ln.VisualFallbackFrom = strings.ToLower(strings.TrimSpace(ln.VisualFallbackFrom))
+	if !strings.EqualFold(ln.Check, "demo") {
+		if ln.Visual != "" || ln.VisualFallbackFrom != "" {
+			return fmt.Sprintf("only the demo check records a visual decision, and this lane is %s", ln.Check)
+		}
+		return ""
+	}
+	cost := map[string]int{"repo-artifact": 1, "screenshot": 2, "video": 3}
+	switch {
+	case ln.Visual == "":
+		return "the demo check records its visual decision on every verdict: none, repo-artifact, screenshot or video"
+	case ln.Visual != "none" && cost[ln.Visual] == 0:
+		return fmt.Sprintf("the visual reads %q, not none, repo-artifact, screenshot or video", ln.Visual)
+	case ln.Visual == "none" && ln.Verdict != VerdictApprove:
+		return "a visual of none says the change needs no visual, which leaves the demo check nothing to block on, so it goes with an approve only"
+	case ln.VisualFallbackFrom == "":
+		return ""
+	case ln.VisualFallbackFrom != "screenshot" && ln.VisualFallbackFrom != "video":
+		return fmt.Sprintf("the visual fallback reads %q, not screenshot or video, the modality that fits", ln.VisualFallbackFrom)
+	case ln.Visual == "none":
+		return "a fallback names the modality a delivered visual stands in for, and a visual of none delivers none"
+	case cost[ln.Visual] >= cost[ln.VisualFallbackFrom]:
+		return fmt.Sprintf("a fallback is cheaper than the modality it stands in for, so %s cannot be a fallback from %s", ln.Visual, ln.VisualFallbackFrom)
 	}
 	return ""
 }

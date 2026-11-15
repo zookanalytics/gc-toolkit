@@ -76,8 +76,10 @@ to the PR, and a shadow run keeps it in the workspace:
 
 **4. Write the output** to `output.json` in the lane's part of the workspace:
 `review` reading `lane`, `check` reading `{check}`, `head` reading `{head}`,
-`verdict`, `findings`, and `needs_you` when it names a decision. Then check and
-write it:
+`verdict`, `findings`, `needs_you` when it names a decision, and for a demo
+lane its `visual` and `visual_fallback_from`. The method's trail, the lines its
+verdict section names, goes in `trail.md` beside it, where the round reads it.
+Then check and write it:
 ```bash
 "$(gc {binding_name} scripts-dir)/review-run.sh" output --check {check}
 ```

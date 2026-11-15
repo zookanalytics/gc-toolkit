@@ -134,6 +134,44 @@ func TestALanesFindingContract(t *testing.T) {
 	}
 }
 
+// A demo lane's verdict carries its visual decision, none only with an
+// approve, and a fallback cheaper than the modality it stands in for. No other
+// lane records one.
+func TestADemoLanesVisual(t *testing.T) {
+	w := newWorld(t)
+	w.output(triage(1, h1, "demo", "arch"))
+	st := w.step(1, "lane")
+	demo := func(verdict, visual, from string) review.Lane {
+		ln := lane(1, "demo", h1, verdict)
+		if verdict == review.VerdictRequestChanges {
+			ln = lane(1, "demo", h1, verdict, "D1")
+		}
+		ln.Visual, ln.VisualFallbackFrom = visual, from
+		return ln
+	}
+	var got review.Lane
+	if err := w.check(st, demo(review.VerdictApprove, "Screenshot", "video"), &got); err != nil ||
+		got.Visual != "screenshot" || got.VisualFallbackFrom != "video" {
+		t.Errorf("a screenshot standing in for a video = %v, %q from %q", err, got.Visual, got.VisualFallbackFrom)
+	}
+	for _, c := range []struct {
+		ln  review.Lane
+		why string
+	}{
+		{demo(review.VerdictApprove, "", ""), "records its visual decision on every verdict"},
+		{demo(review.VerdictApprove, "gif", ""), "not none, repo-artifact, screenshot or video"},
+		{demo(review.VerdictRequestChanges, "none", ""), "goes with an approve only"},
+		{demo(review.VerdictApprove, "video", "screenshot"), "a fallback is cheaper"},
+		{demo(review.VerdictApprove, "none", "video"), "a visual of none delivers none"},
+		{demo(review.VerdictApprove, "screenshot", "repo-artifact"), "not screenshot or video"},
+	} {
+		mustRefuse(t, w.check(st, c.ln, nil), c.why)
+	}
+	arch := lane(1, "arch", h1, review.VerdictApprove)
+	arch.Visual = "screenshot"
+	mustRefuse(t, w.check(st, arch, nil), "only the demo check records a visual decision")
+}
+
 // A correctness approve on a change that edits its own review guidance is
 // refused until needs_you names the edit. Paths that cannot be listed leave
 // the edit unchecked, and needs_you says so. Another check's approve, and a
