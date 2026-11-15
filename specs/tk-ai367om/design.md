@@ -243,11 +243,11 @@ reads `working`, or `merging` when an approval from an earlier round still stand
 on it and no conversation that stays holds its merge (`Render`). `gctk pr status`
 names the sitting's reading at the head among the conditions not met. The rig
 board renders the PR from the same facts, with the reading as the city's work in
-flight, and the conversation's own row as its stay. Once the reading is posted, the PR shows it,
-the order marks a draft ready, CI runs, and the label turns to `needs-review`, or
-to `merging` on a PR that an approval still stands on. A stay that holds for the
-operator's answer reads as a person's move: the PR's label reads
-`needs-attention`, held by that conversation.
+flight, and the conversation's own row as its stay. Once the reading is posted,
+the PR shows it, the order marks a draft ready and CI runs, and the label turns
+to `needs-review`, or to `merging` on a PR that an approval still stands on. A
+stay that holds for the operator's answer reads as a person's move: the PR's
+label reads `needs-attention`, held by that conversation.
 
 **What the hold does not cover.**
 
@@ -303,10 +303,11 @@ on it. On a draft, that is the pass on which the PR would leave draft but for th
 reading. On a PR that is ready already, which `decide` takes to the evaluator
 without consulting `readyBar`, it is the pass that finds the round over at a head
 the PR was ready at. It marks the waits of each stay that owes its reading and
-waits open: those in state `pending` whose `dep_ids` name the PR's bead and whose `session_id` is the stay's sitting
-(`gc wait list --json`), the session `gc session list --json` lists with the
-conversation's assignee as its `alias`. A wait another session registered on the
-bead is left to turn ready when the bead closes. Gas City wakes the session for
+waits open: those in state `pending` whose `dep_ids` name the PR's bead and
+whose `session_id` is the stay's sitting (`gc wait list --json`), the session
+`gc session list --json` lists with the conversation's assignee as its `alias`.
+A wait another session registered on the bead is left to turn ready when the
+bead closes. Gas City wakes the session for
 a ready wait (the `wait-ready` reason in `cmd/gc/compute_awake_set.go`) and
 delivers its note as a queued nudge, `Wait satisfied (<wait>): <note>`
 (`dispatchReadyWaitNudgesWithSnapshot` in `cmd/gc/cmd_wait.go`). The prompt runs

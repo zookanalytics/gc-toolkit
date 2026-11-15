@@ -8,8 +8,9 @@ description: Use when you review or build a unit of the design in specs/tk-ai367
 The design brings a staying sitting back when its PR is ready for the operator's
 approval, holds the PR until the sitting's reading of its latest ruling is on it,
 as a draft or by its merge, and has the sitting read again in each round. Its
-surface is listed in the design's section 8. This record names, for each piece, the primitive it composes and what else was
-searched. Gas City citations are at upstream `gastownhall/gascity` main
+surface is listed in the design's section 8. This record names, for each piece,
+the primitive it composes and what else was searched. Gas City citations are at
+upstream `gastownhall/gascity` main
 8e7d91b583, bd citations at beads v1.3.4, and the pack's at main 5d4c3b4cf and
 `integration/tk-1tfzr71.22` 04d8dad0d. The searches made for the stay before
 this one are `specs/tk-pb9wnr3/gas-city-search.md` (the stay of PR #1480) and
@@ -217,11 +218,11 @@ city's posts and appends the city's mark, so the feedback intake never counts th
 post (`assets/scripts/pr-post.sh`, `own-def`). The body opens with a marker that
 names the conversation, the stay's round and the head, the way the city already
 marks a purpose post, as the sitting reminder's `<!-- gc:sitting:<task> -->`
-does. The evaluator
-reads the PR's conversation comments on each pass (`GitHub.IssueComments` in
-`services/gctk/pr/pr.go`). The landing order consults `readyBar` before the
-evaluator runs (`decide` in `services/gctk/pr/landing.go`), so under call 1 (a)
-its draft arm reads the comments once more, only for a PR whose bead has a stay.
+does. The evaluator reads the PR's conversation comments on each pass
+(`GitHub.IssueComments` in `services/gctk/pr/pr.go`). The landing order consults
+`readyBar` before the evaluator runs (`decide` in `services/gctk/pr/landing.go`),
+so under call 1 (a) its draft arm reads the comments once more, only for a PR
+whose bead has a stay.
 Only a post of the city's own counts, by `pr-post.sh own-def`'s `gc_city_own`,
 so a marker anyone else writes releases nothing. `pr-post.sh edit` rewrites a
 reading in place when a return restarts.
@@ -273,15 +274,17 @@ mode writes what the stay now needs.
   short before it registered its wait again, or its wait's note failed to reach
   it, still stays, so its PR does not merge, and a draft stays a draft, until
   the operator engages or dismisses the conversation. The condition names it.
+  Gas City closes a session only when a person or a prune asks, and the pack
+  adds no sweep for it.
 - **An operator who has opened a stay's conversation and not yet spoken in it.**
   Between engage's attach and the operator's first turn nothing holds the merge
-  for the exchange to come (the design, section 2). Gas City closes a session
-  only when a person or a prune asks, and the pack adds no sweep for it.
+  for the exchange to come (the design, section 2).
 - **A rework of a PR whose anchor has no open input convoy**, such as a change a
   sitting edited and handed over through `work-submit.sh`, waits on the ruling's
   ask and comes back at the review run's `record`, a step before the readiness.
-- **A person's own toggle** of the draft flag passes the hold, as it passes the
-  draft cycle.
+- **A person's own toggle** of the draft flag passes the draft, as it passes the
+  draft cycle, and the evaluator's condition still holds the merge until the
+  reading is on the PR.
 - **A rig on the old review path** has no ready transition, and the code nearest
   one, `gate-ensure.sh`, is on the deletion plan with tk-1tfzr71.22, so it gets no
   new work. Stays there come back as they do on main.
