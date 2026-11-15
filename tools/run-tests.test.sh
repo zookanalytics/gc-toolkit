@@ -76,8 +76,8 @@
 #     belongs, and a PATH beside --affected are usage errors;
 #   - under a bash older than 5.1 the runner runs no suite, whatever it was
 #     asked, and exits 2 with one line naming that bash, while the same calls
-#     under the bash on PATH select and run. A host whose /bin/bash is 5.1 or
-#     later has no older bash to run it under, and skips the case.
+#     under the bash on PATH select and run. The case runs the runner under
+#     /bin/bash, so a host whose /bin/bash is 5.1 or later skips it.
 #
 # Hermetic: runs a copy of the runner over throwaway fixture *.test.sh files
 # whose pass/fail is driven by a per-file invocation counter, so "fails the
@@ -929,7 +929,7 @@ case "$old" in
     alist --affected base
     eq "$LIST" "$WANT" "the same --affected under the bash on PATH lists the change's subset"
     ;;
-  *) printf '  SKIP  bash older than 5.1: %s is bash %s\n' "$OLD_BASH" "${old:-unknown}" ;;
+  *) printf '  SKIP  %s is bash %s, so the runner was not run under a bash older than 5.1\n' "$OLD_BASH" "${old:-unknown}" ;;
 esac
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"
