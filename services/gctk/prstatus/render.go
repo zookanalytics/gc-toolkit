@@ -7,10 +7,11 @@ import (
 )
 
 // Render returns where a PR on Gas Town's pending record stands, in the status
-// vocabulary, from the evaluator's answer for its anchor ([pr.Ready]) and the
-// facts [Read] gathers about the anchor, whose walk names the human gates and
-// the beads a person owes the next move on. The precedence is Derive's:
-// needs-attention > merging > working > needs-review.
+// vocabulary, from the evaluator's answer for its anchor and the facts [Read]
+// gathers about the anchor, whose walk names the human gates and the beads a
+// person owes the next move on. A display asks the evaluator over the GitHub
+// read the landing order saved on the bead ([pr.FromStore]). The precedence is
+// Derive's: needs-attention > merging > working > needs-review.
 //
 //   - needs-attention: something only a person clears holds the PR. It is one
 //     of [RenderReasons], a hold set by hand, a PR that is not open or not the
@@ -25,7 +26,9 @@ import (
 //     settles.
 //   - working: the PR waits on the city's work and on an approval, or a
 //     conversation whose sitting stays for work holds it, approved or not, as
-//     Derive reads it ([Facts.Staying]).
+//     Derive reads it ([Facts.Staying]). A PR whose GitHub side is not read at
+//     the head the store holds ([pr.KindGitHubUnread]) reads working too: the
+//     landing order's next check is the next move, and no approval is known.
 //   - needs-review: only an approval is left, or a request for changes that
 //     the account that made it has to lift.
 func Render(a pr.Answer, f Facts) State {
@@ -35,7 +38,7 @@ func Render(a pr.Answer, f Facts) State {
 	if len(RenderReasons(a, f)) > 0 {
 		return NeedsAttention
 	}
-	var person, approval, city bool
+	var person, approval, city, unread bool
 	mergeState := ""
 	for _, c := range a.Conditions {
 		switch c.Kind {
@@ -45,6 +48,8 @@ func Render(a pr.Answer, f Facts) State {
 			approval = true
 		case pr.KindMergeState:
 			mergeState = c.Value
+		case pr.KindGitHubUnread:
+			unread = true
 		default:
 			city = true
 		}
@@ -52,6 +57,8 @@ func Render(a pr.Answer, f Facts) State {
 	switch {
 	case person:
 		return NeedsAttention
+	case unread:
+		return Working
 	case !approval && !city && mergeState != "" && mergeState != "UNKNOWN":
 		return NeedsAttention
 	case len(f.Staying) > 0:

@@ -1,8 +1,10 @@
 package pr_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"slices"
@@ -824,6 +826,249 @@ func TestAPRMergedIntoAnotherBaseIsNotLanded(t *testing.T) {
 	if b.Status != "blocked" || b.Metadata["merge_result"] != record.Invalid {
 		t.Fatalf("a merge into another base left the bead %s, %s", b.Status, b.Metadata["merge_result"])
 	}
+}
+
+// --- the GitHub read each check saves -----------------------------------------
+
+// savedRead is the GitHub read on the bead's row, nil when it carries none.
+func savedRead(t *testing.T, b fake.Bead) *pr.GitHubRead {
+	t.Helper()
+	raw, held := b.Metadata["pr_github_read"]
+	if !held {
+		return nil
+	}
+	var read pr.GitHubRead
+	if err := json.Unmarshal([]byte(raw), &read); err != nil {
+		t.Fatalf("the saved read %q does not decode: %v", raw, err)
+	}
+	return &read
+}
+
+// displayed is what a display derives over the store as the run left it.
+func (d *land) displayed(t *testing.T) pr.Answer {
+	t.Helper()
+	ans, err := pr.FromStore(ledger.New(d.store), bead)
+	if err != nil {
+		t.Fatalf("FromStore: %v", err)
+	}
+	return ans
+}
+
+// ofRead fails unless the bead's row carries a read made at h, stamped by the
+// run's clock as the check's own write is, in the write that recorded it.
+func ofRead(t *testing.T, d *land, h string) *pr.GitHubRead {
+	t.Helper()
+	b := d.row(t)
+	read := savedRead(t, b)
+	if read == nil {
+		t.Fatalf("the check saved no GitHub read: %v", b.Metadata)
+	}
+	if read.Head != h || read.ReadAt != b.Metadata["pr_last_checked_at"] || read.Number != 7 || read.Repository != repo {
+		t.Fatalf("the read is of %s#%d at %s, read at %s, want #7 at %s read at %s", read.Repository, read.Number,
+			read.Head, read.ReadAt, h, b.Metadata["pr_last_checked_at"])
+	}
+	ws := d.store.Writes()
+	last := strings.Join(ws[len(ws)-1].Args, " ")
+	if !strings.Contains(last, "pr_github_read=") || !strings.Contains(last, "pr_last_checked_at=") {
+		t.Fatalf("the read did not ride the write that recorded the check: %s", last)
+	}
+	return read
+}
+
+func TestACheckOfAPRNotReadySavesItsRead(t *testing.T) {
+	d := newLand(t)
+	d.pr.Reviews = nil
+	is(t, d.once(t), pr.ActChecked)
+	read := ofRead(t, d, head)
+	if len(read.Approvers) != 0 || read.State != "OPEN" || read.MergeState != "CLEAN" {
+		t.Fatalf("the read %+v is not GitHub's side as the check found it", read)
+	}
+	only(t, d.displayed(t), pr.KindApproval)
+}
+
+// The request rests on the answer the run made over its own read, and the read
+// is written after it, in the check's write.
+func TestARequestSavesTheReadAfterTheRequest(t *testing.T) {
+	d := newLand(t)
+	d.github.OnMerge = func(_ string, p *ghfake.PR, h string) error {
+		if b, _ := d.store.Row(bead); savedRead(t, b) != nil {
+			t.Errorf("a read was saved before the merge request")
+		}
+		p.Facts.State, p.Facts.MergeCommit, p.Facts.MergedAt = "MERGED", merged, "2026-11-12T08:30:00Z"
+		return nil
+	}
+	is(t, d.once(t), pr.ActRequested)
+	ofRead(t, d, head)
+	isReady(t, d.displayed(t))
+}
+
+func TestARefusedRequestSavesTheReadWithItsRetry(t *testing.T) {
+	d := newLand(t)
+	d.github.OnMerge = func(string, *ghfake.PR, string) error { return errors.New("github: timeout awaiting response") }
+	is(t, d.once(t), pr.ActRetry)
+	ofRead(t, d, head)
+	if d.row(t).Metadata["pr_reconcile_error"] == "" {
+		t.Fatal("the refused request recorded no error")
+	}
+}
+
+// A PR in its base's merge queue is observed and decided nothing: its read is
+// saved whole, and nothing is asked of GitHub.
+func TestAQueuedPRsCheckSavesItsRead(t *testing.T) {
+	d := newLand(t)
+	d.pr.Facts.MergeQueueEnabled, d.pr.Facts.InMergeQueue = true, true
+	is(t, d.once(t), pr.ActChecked)
+	if len(d.github.Asks()) != 0 {
+		t.Fatalf("a queued PR was asked %v", asks(d.github))
+	}
+	ofRead(t, d, head)
+	if reads := d.github.Reads(); !slices.Contains(reads, "Reviews") || !slices.Contains(reads, "IssueComments") {
+		t.Fatalf("the queued PR's check read %v, want GitHub's whole side", reads)
+	}
+	readsThePROnce(t, d)
+	isReady(t, d.displayed(t))
+}
+
+// readsThePROnce fails unless the run read the PR once: the rest of GitHub's
+// side is read about the PR the run read first.
+func readsThePROnce(t *testing.T, d *land) {
+	t.Helper()
+	n := 0
+	for _, r := range d.github.Reads() {
+		if r == "PullRequest" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the run read the PR %d times, want once: %v", n, d.github.Reads())
+	}
+}
+
+// A requeue saves the read made at the head it found, which stays the store's
+// head until the refinery publishes again.
+func TestARequeueSavesTheReadAtTheHeadItFound(t *testing.T) {
+	d := newLand(t)
+	d.pr.Facts.HeadRefOid = other
+	is(t, d.once(t), pr.ActRequeued)
+	ofRead(t, d, other)
+	readsThePROnce(t, d)
+	a := d.displayed(t)
+	only(t, a, pr.KindHead, pr.KindReview)
+	if a.Head != other {
+		t.Fatalf("a display judged head %q, want the head the requeue found, %s", a.Head, other)
+	}
+}
+
+// A read that fails partway saves nothing: the retry is written as for any read
+// that did not answer, and the bead keeps the read its last whole check made.
+func TestAReadThatFailsAfterThePRsReadKeepsTheLastWholeRead(t *testing.T) {
+	for _, failing := range []string{"PullRequest", "CheckSuites", "Reviews", "Login", "ReviewThreads", "IssueComments", "the definition"} {
+		for _, path := range []string{"a check", "the queue", "a requeue"} {
+			t.Run(failing+" at "+path, func(t *testing.T) {
+				d := newLand(t)
+				d.pr.Reviews = nil
+				is(t, d.once(t), pr.ActChecked)
+				before := d.row(t).Metadata["pr_github_read"]
+				switch path {
+				case "the queue":
+					d.pr.Facts.MergeQueueEnabled, d.pr.Facts.InMergeQueue = true, true
+				case "a requeue":
+					d.pr.Facts.HeadRefOid = other
+				}
+				if failing == "the definition" {
+					d.rule.err = errors.New("jq: failed")
+				} else {
+					d.github.Fail[failing] = errors.New("github: HTTP 502")
+				}
+				is(t, d.once(t), pr.ActRetry)
+				b := d.row(t)
+				if b.Metadata["pr_github_read"] != before {
+					t.Fatalf("the saved read moved on a read that failed:\n%s\nwas\n%s", b.Metadata["pr_github_read"], before)
+				}
+				meta(t, b, map[string]string{"merge_result": record.Pending, "pr_state": "lookup_failed",
+					"pr_reconcile_pending": "true"})
+				if b.Status != "blocked" || b.Metadata["pr_reconcile_error"] == "" {
+					t.Fatalf("the retry left the bead %s with error %q", b.Status, b.Metadata["pr_reconcile_error"])
+				}
+			})
+		}
+	}
+}
+
+// A writer that takes no lock can leave the record lacking a part between the
+// run's read of the bead and the evaluator's own, which then reads no GitHub.
+// The check is recorded, and the bead keeps the read its last whole check made.
+func TestACheckThatMadeNoReadKeepsTheLastWholeRead(t *testing.T) {
+	d := newLand(t)
+	d.pr.Reviews = nil
+	is(t, d.once(t), pr.ActChecked)
+	before := d.row(t).Metadata["pr_github_read"]
+	if before == "" {
+		t.Fatal("the first check saved no read")
+	}
+	moved := false
+	d.github.OnRead = func(method string, _ *ghfake.PR) {
+		if method != "PullRequest" || moved {
+			return
+		}
+		moved = true
+		b, _ := d.store.Row(bead)
+		b.Metadata = maps.Clone(b.Metadata)
+		delete(b.Metadata, "merged_target")
+		d.store.Put(b)
+	}
+	n := len(d.github.Reads())
+	out := d.once(t)
+	is(t, out, pr.ActChecked)
+	if out.Detail != "not ready: record" {
+		t.Fatalf("the check reads %q, want the record's gap alone", out.Detail)
+	}
+	if reads := d.github.Reads()[n:]; !slices.Equal(reads, []string{"PullRequest"}) {
+		t.Fatalf("the run read %v, want the PR's read alone", reads)
+	}
+	if got := d.row(t).Metadata["pr_github_read"]; got != before {
+		t.Fatalf("a check that made no read saved\n%s\nover the last whole read\n%s", got, before)
+	}
+}
+
+// Nothing in the merge's path reads the saved read: the run decides over the
+// read it makes, whatever the bead carries (section 6).
+func TestTheMergeActsOnTheRunsOwnReadNeverTheSavedOne(t *testing.T) {
+	save := func(t *testing.T, d *land, read pr.GitHubRead) {
+		t.Helper()
+		raw, err := json.Marshal(read)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.md["pr_github_read"] = string(raw)
+		d.put("blocked", refinery)
+	}
+	readyRead := pr.GitHubRead{ReadAt: "2026-11-12T08:00:00Z", URL: prURL, Number: 7, Repository: repo,
+		HeadBranch: branch, Base: "main", Head: head, State: "OPEN", MergeState: "CLEAN",
+		Checks:    []pr.RequiredRun{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS"}},
+		Approvers: []string{"operator"}, Requesters: []string{}, Awaiting: []string{}}
+	t.Run("a saved read that is ready, while GitHub holds the PR, gets no request", func(t *testing.T) {
+		d := newLand(t)
+		save(t, d, readyRead)
+		isReady(t, d.displayed(t))
+		d.pr.Reviews = nil
+		is(t, d.once(t), pr.ActChecked)
+		if len(d.github.Asks()) != 0 {
+			t.Fatalf("asked %v on a saved read while GitHub holds the PR", asks(d.github))
+		}
+		only(t, d.displayed(t), pr.KindApproval)
+	})
+	t.Run("a saved read that holds the PR, while GitHub's facts are ready, gets the request", func(t *testing.T) {
+		d := newLand(t)
+		held := readyRead
+		held.Approvers = []string{}
+		save(t, d, held)
+		only(t, d.displayed(t), pr.KindApproval)
+		is(t, d.once(t), pr.ActRequested)
+		if got := asks(d.github); !slices.Equal(got, []string{"MergePullRequest PR_7 " + head}) {
+			t.Fatalf("asked %v, want one merge pinned to %s", got, head)
+		}
+	})
 }
 
 // --- the seed audit after a landing --------------------------------------------
