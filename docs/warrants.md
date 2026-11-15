@@ -118,8 +118,8 @@ shares only the word ([authority-map.md](authority-map.md)).
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-13, at `gastownhall/gascity` main dba20336e and
-  `gastownhall/gascity-packs` main 1f6d8e41c.
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main a1eb65702 and
+  `gastownhall/gascity-packs` main 0f07496d2.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
   is planned for the merge resume, since the refinery brings every branch current
@@ -648,8 +648,8 @@ shares only the word ([authority-map.md](authority-map.md)).
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-12, at `gastownhall/gascity` main 1f0c10495b1c,
-  `gastownhall/beads` main e51a90036718 and `gastownhall/gascity-packs` main
-  1f6d8e41c5b0.
+- **Verified.** 2026-11-14, at `gastownhall/gascity` main cf33557276ef,
+  `gastownhall/beads` main 8cdfa796a8f5 and `gastownhall/gascity-packs` main
+  0f07496d2fa4.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.

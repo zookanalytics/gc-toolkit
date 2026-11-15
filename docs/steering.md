@@ -81,11 +81,11 @@ Each writer that files or disposes new work follows the rule.
   reacts to every finding, because its card is the triage that backlog
   refinement reads.
   Its actionable exit routes a member, PR-finishing work or a confirmed
-  emergency. It holds any other bead with
-  `gc bd set-state <bead> hold=mayor --reason "<why it was held>"` and releases
-  it with no route. The blocked exit's `--then-route` arms a dispatch only for a
-  bead the rule admits. Any other bead it holds, and arms nothing, while its wait
-  still lands as a `blocks` edge. The close exit keeps its validating closer,
+  emergency. It releases any other bead with no route, then holds it with
+  `gc bd set-state <bead> hold=mayor --reason "<why it was held>"`. The blocked
+  exit's `--then-route` arms a dispatch only for a bead the rule admits. Any
+  other bead it holds, and arms nothing, while its wait still lands as a
+  `blocks` edge. The close exit keeps its validating closer,
   because a close shrinks the queue, whether it slings the closer now or arms it
   for when the bead that ends its job lands (`--waiting-on`). Work that is a
   named agent's own (`--assign`, `--then-assign`) is not pool work, so the rule
@@ -110,10 +110,13 @@ Each writer that files or disposes new work follows the rule.
 - **The po**, in a sitting and only once the operator agrees, holds a bead with
   `gc bd set-state <bead> hold=mayor --reason "<the operator's reason>"`.
 
-No held bead is ever readable without its label. The witness and the distiller
-write it in the create, which is the bead's own record of it. The first reaction
-and the po write it with `set-state`, which records the reason in an event bead.
-The first reaction writes it before the release, which waits on that write's
+The witness and the distiller write the label in the create, which is the
+bead's own record of it. The first reaction and the po write it with
+`set-state`, which records the reason in an event bead. The first reaction
+writes it last, after the release and after intake's note, because the check a
+re-offered reaction runs first refuses a held bead. A worker cut off before the
+label lands leaves the bead released under its headline, which no pool is
+offered and the scan passes over, and the reaction's next worker finishes the
 exit.
 
 ## The emergency check
@@ -175,7 +178,7 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
 - `doctor/check-po-queue-only` takes a bead routed or assigned to the po as
   reaching it only when no hold holds it, because Gas City serves a held bead
   to no seat;
-- the proactive scan files no first reaction for a held bead, because its next
+- the proactive scan slings no first reaction on a held bead, because its next
   move is the sitting's, and its sling refuses one held after the scan read it
   or named to the sling directly;
 - the deferred-dispatch pass slings no armed bead while it is held, because a
@@ -263,8 +266,11 @@ A hold also lifts these ways:
   bead that retires its code, through a `blocks` edge and its validating
   closer's arm, takes this write too, because deferred dispatch fires a held
   bead's arm only once its hold lifts. A bead lifted with nothing else
-  written is raw input again, so the proactive scan reacts to it when intake is
-  on, and the liveness sweep names it until then.
+  written is raw input again unless a first reaction held it: the proactive
+  scan reacts to it when intake is on, and the liveness sweep names it until
+  then. A bead a first reaction held keeps that reaction's headline, which
+  keeps the scan off it, so it takes another reaction only when someone asks
+  for one.
 - A close leaves the label on a closed bead, which nothing reads.
 
 `gc bd set-state` cannot lift a hold, because it refuses an empty value. A bead
@@ -280,6 +286,14 @@ bead out. So a park on an epic takes the epic and every member under it out of
 `bd ready`. What a park holds needs no reader to tell it from any other
 blocker. The rig board tells a park apart only to leave parked work out of what
 Needs you counts ([below](#what-reads-a-park-as-a-fault)).
+
+Across a rig's epics, a park separates whether the rig works on an epic from
+where the epic ranks. An epic nothing parks is one the rig works on now, and
+every other epic is parked, with what releases it. Priority ranks the epics
+within each group. How many epics the rig works on is the operator's choice as
+they prioritize, never a count. The rig's po brings these parks and priorities
+to the operator in its portfolio sync
+([human-engagement.md](human-engagement.md#a-po-sitting)).
 
 ### Parking a bead
 
