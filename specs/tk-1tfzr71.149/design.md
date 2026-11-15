@@ -32,9 +32,10 @@ Approving this design gives the landing order one pass every 2 minutes that
 reads every PR the city owns in one GitHub request per repository, compares what
 it finds with the store, and acts only where the two differ:
 
-- It saves the facts that changed on the PR's bead, so every display is current
-  within one pass. A base branch that moves and changes every PR's merge state
-  costs no extra request.
+- It saves a PR's state, head, merge state and required checks on its bead when
+  they change, before any other act, so every display shows them within one pass
+  for up to hundreds of PRs at once. A base branch that moves and changes every
+  PR's merge state costs no extra request.
 - It reads a PR in full only when its feedback moved or it reads ready to merge,
   and that read is the merge's own fresh read.
 - It lands a PR that merged, sends back one at a new head, and gates the
@@ -48,8 +49,9 @@ the hour's 5,000 GitHub points and 4 seconds, and writes no PR's bead.
 
 Decisions to check, each settled here unless you say otherwise:
 
-1. **One order.** The acts run in the same pass, after the compare, and start
-   no later than 90 seconds into a run. A second order would have to read GitHub
+1. **One order.** The acts run in the same pass, after the compare. The saved
+   state of every changed PR is written first, and every other act starts no
+   later than 90 seconds into a run. A second order would have to read GitHub
    again, since Gas City passes nothing from one order to another, and a
    condition order's check would run every 30-second lane pass with nothing
    passed to its run ([section 2](#2-what-runs-the-targeted-work)).
@@ -89,9 +91,9 @@ which). Each field reads:
 - **Its required checks at the head:** the latest run of each check in each
   suite, through `isRequired(pullRequestNumber: N)` at the field's own number,
   the shape of gctk's checks query today.
-- **What tells that its feedback moved:** the newest review's id and the number
-  of reviews, the newest conversation comment's id, which review threads are
-  unresolved, and the review decision.
+- **What tells that its feedback moved:** the newest review's id, the number of
+  reviews and the number of dismissed reviews, the newest conversation comment's
+  id, which review threads are unresolved, and the review decision.
 - **Its labels.**
 
 A PR is changed when the pass's read differs from the read saved on its bead in
@@ -115,11 +117,19 @@ author of every post. For those it returns what tells that they moved:
   observed.
 - **A conversation comment.** The newest conversation comment's id moves.
 - **A thread a person resolves or reopens.** The set of unresolved threads moves.
-- **An approval dismissed.** The review decision moves.
+- **A review dismissed.** The number of dismissed reviews grows. GitHub dismisses
+  only an approval or a change request, and the dismissal changes that review's
+  state in place, so its id stays and the number of reviews still counts it.
 
 An edit of a post's text moves none of them, as no receipt today keys on edits.
-When any of them moved, the comparison takes the PR's whole read
-([section 3](#3-the-saved-read)).
+When any of them moved, or the review decision did, the comparison takes the
+PR's whole read ([section 3](#3-the-saved-read)).
+
+The review decision is a sign only of GitHub's own verdict on a PR's reviews,
+which also follows the repository's review rules, so it can move with no review
+moving. It cannot stand for a dismissal, because it weighs every account's
+reviews: it stays approved while another account's approval stands, and asks for
+changes while any change request stands.
 
 A PR whose checks or threads overflow the read's page, shown by `hasNextPage`,
 counts as changed, and its whole read pages them.
@@ -127,7 +137,8 @@ counts as changed, and its whole read pages them.
 ## 2. What runs the targeted work
 
 One order runs it: the landing order (`orders/pr-reconcile.toml`, `gctk pr
-reconcile`). Each run reads, compares, then acts within a budget:
+reconcile`). Each run reads, compares, saves each changed PR's state, then acts
+within a budget:
 
 1. **Read the store in one listing** of every live bead
    (services/gctk/listing). It gives the PRs the city owns, the pending records,
@@ -139,21 +150,27 @@ reconcile`). Each run reads, compares, then acts within a budget:
 3. **Compare in memory and write nothing.** For each record it computes the act
    the store and GitHub's side imply, the same decision a check makes today, with
    GitHub's side taken from the pass's read and the saved read.
-4. **Act, one record at a time under the record lock,** each act guarded on the
+4. **Save the state of each changed PR,** one record at a time under the record
+   lock: a read of the bead, then one write of its saved read with the state part
+   refreshed, guarded on the status and assignee that read shows. No budget stops
+   these writes, so every changed PR's state is saved in the pass that read it,
+   at up to about 0.8 seconds a PR, and only a run's timeout could cut them short
+   ([section 7](#7-the-interval-and-the-bound)).
+5. **Act, one record at a time under the record lock,** each act guarded on the
    status and assignee read under it, as today. The order is store-only acts,
-   then lands, requeues and exceptions, then the saved read's state where it
-   differs, then whole reads and merge requests, then labels, over a second
-   listing that sees those writes ([section 4](#4-the-label-comparisons-reach)).
-   Within each kind the record least recently checked goes first. No act starts
-   after 90 seconds. An act not reached stays a difference, and the next pass
-   finds it.
+   then lands, requeues and exceptions, then whole reads and merge requests, then
+   labels, over a second listing that sees those writes
+   ([section 4](#4-the-label-comparisons-reach)). Within each kind the record
+   least recently checked goes first. No act starts more than 90 seconds after
+   the run did, and the state writes' time counts in those 90 seconds. An act not
+   reached stays a difference, and the next pass finds it.
 
 Measured costs:
 
 | Pass | GitHub | Writes to PRs' beads | Time |
 |---|---|---|---|
 | Nothing changed | 1 request per repository, about 4 points here | none | about 4 s |
-| A base move changes N PRs' merge state | the same request | N saved reads, and a label write for each PR whose derived label changed | 4 s plus the writes |
+| A base move changes N PRs' merge state | the same request | N saved reads, and a label write for each PR whose derived label changed | 4 s, plus up to 0.8 s a saved read and the label writes |
 | M PRs' feedback moved | the request, plus M whole reads of six calls and about 5 points each | M | about 4 s plus 4.4 s and a write each |
 | Today, per run | up to 20 whole reads | up to 20 | up to about 140 s |
 
@@ -173,8 +190,10 @@ The other two candidates fail on facts of Gas City as shipped (gas-city-search.m
 
 So the operator's asynchrony comes from the shape of one pass. The pass reads
 before it acts and acts only on differences. Its acts are bounded, so the next
-read is never more than one interval and one budget away. Work it leaves is a
-difference, never a queue entry.
+read is never more than one interval and one budget away, unless so many PRs
+change at once that their state writes alone outlast the budget
+([section 7](#7-the-interval-and-the-bound)). Work it leaves is a difference,
+never a queue entry.
 
 Gas City closes a run's tracking bead two minutes after it is made, whether or
 not the run still works (`runOrderTrackingSweepWatchdog`, stale after
@@ -203,23 +222,30 @@ holds the field. Only a PR whose feedback moved, or that reads ready to merge,
 takes the whole read it takes today (`observe`: the PR, its check suites,
 reviews, login, review threads and conversation comments).
 
-- **Every field the pass's read holds** is written from it when it differs: the
-  identity, head, state, draft flag, merge state and required checks. A base move
-  or a check that finishes is saved within the pass that sees it, at no extra
-  request, however many PRs change.
+- **Every field the pass's read holds** is written from it when it differs,
+  before any budgeted act: the identity, head, state, draft flag, merge state and
+  required checks. A base move or a check that finishes is saved within the pass
+  that sees it, at no extra request, for as many changed PRs as a run's timeout
+  lets it write, about 360 ([section 7](#7-the-interval-and-the-bound)).
 - **The feedback part,** the approvers, requesters, newest feedback, threads
   waiting on the city and the provenance instant it applied, is written only by a
-  whole read. The saved read keeps beside it what the pass's read showed of the
-  feedback when that whole read was made, so the next pass can tell whether it
-  moved.
+  whole read, an act the budget bounds. The saved read keeps beside it the signs
+  of moved feedback that the pass's read showed when that whole read was made:
+  the newest review's id, the number of reviews and of dismissed reviews, the
+  newest conversation comment's id, the unresolved threads and the review
+  decision. So the next pass can tell whether the feedback moved since, and signs
+  that moved in a pass whose budget reached no whole read of the PR still differ
+  at the next.
 - **`read_at` is the time of the read that last changed it.** A pass that finds
   nothing changed leaves the saved read as it is, so `read_at` no longer tells
   when GitHub was last looked at ([section 6](#6-the-age-of-a-displays-facts)).
 
 The two parts stay one key with one writer, the landing order, in the write that
-records each act. Each part is current as of the last pass: the state part was
-read by it, and the feedback part is confirmed by the comparison of what tells
-that it moved.
+records each act. The state part is current as of the last pass, which read it
+and saved it before any budgeted act. The feedback part is current as of the
+last pass whose comparison found its signs unmoved. When they moved, a whole read
+refreshes it, in that pass if its budget reaches the PR and otherwise in a later
+one.
 
 A required check is told from the others by aliasing one `pullRequest` field per
 PR, each passing its own number to `isRequired`. Measured: one request read
@@ -299,7 +325,7 @@ operator reads.
 
 An open PR that no live bead owns loses the city's labels. One open between
 `pr-open.sh`'s create and its record of `pr_url` can lose its first label for one
-pass, and the next pass writes it back.
+pass, and a later pass writes it back.
 
 ## 5. The label's other callers
 
@@ -348,8 +374,21 @@ records, which the implementation child files only if the operator asks.
 ## 7. The interval and the bound
 
 The order runs every 2 minutes (`interval = "2m"`), with its 300-second timeout.
-No act starts after 90 seconds (`--budget 90s`), so a run normally ends before
-Gas City's watchdog would let the next one start beside it.
+Its state writes come first, and no other act starts more than 90 seconds after
+the run did (`--budget 90s`), so a run normally ends before Gas City's watchdog
+would let the next one start beside it.
+
+The state writes are not under the budget, but their time counts in its 90
+seconds. Each is a read of the bead and a guarded write under the record lock,
+measured at 0.49 to 0.81 seconds as the host's load rose
+([section 14](#14-facts-this-design-rests-on)). The 15 open PRs one repository
+has today take at most about 12 seconds when all change at once, as a base move
+can make them, after the listing and the read's 3 to 7 seconds. That time comes
+out of the budgeted acts, so the run ends when it would have. At the slowest
+state write measured, the writes alone would outlast two minutes only past about
+140 changed PRs, and the run's timeout only past about 360, which leaves the rest
+to the next pass. A run that outlasts two minutes stays safe
+([section 2](#2-what-runs-the-targeted-work)).
 
 The bound on records per run goes (`--count`). A run decides every record from
 one listing and reads every owned PR in one request, so no record waits for a
@@ -394,7 +433,8 @@ pass's read and the saved read. A record whose decision names one of the acts
 gets it under the lock. Each act keeps its own GitHub write pinned to the head it
 names, as that branch builds it: the ready mark, a dismissal, the compare a
 withdrawal makes. So a review run's result, a filed ask or a withdrawal reaches
-its act within one pass, with no change on GitHub needed to start it.
+its act in the first pass whose budget reaches the record, with no change on
+GitHub needed to start it.
 
 | Unit | Composes with tk-1tfzr71.22 | Waits on |
 |---|---|---|
@@ -439,7 +479,7 @@ bead is open.
 
 | # | Unit | What it builds | Settles | Waits on |
 |---|---|---|---|---|
-| 1 | feat(gctk): have the landing order read every PR it owns in one request and act only on what differs | The pass's read in gctk's GitHub adapter (one aliased request per repository, with `isRequired` per PR and the label search as a second field). The saved read's state part written from it, and what tells that feedback moved kept beside the feedback part. The run reads the store once and GitHub once per repository, decides each record in memory, and acts under the lock only where the decision names an act, with the whole read only for moved feedback or a PR that reads ready. Every owned PR on the record is observed, marker or not. The order runs every 2 minutes with `--budget 90s` and no `--count`. `pr_last_checked_at` is written only by a write the order makes. The docs the behavior changes: refinery-merge-cadence.md's landing order, state-machine.md's pending record, gctk-architecture.md, services/gctk/README.md, the order's header, the saved read's warrant and key registry entry, and docs/architecture.md's Debt entry, narrowed to saying that the order writes no label. | questions 1, 2, 3 and 7 | tk-1tfzr71.132 and tk-1tfzr71.22 |
+| 1 | feat(gctk): have the landing order read every PR it owns in one request and act only on what differs | The pass's read in gctk's GitHub adapter (one aliased request per repository, with `isRequired` per PR and the label search as a second field). The saved read's state part written from it for every changed PR before any budgeted act, and what tells that feedback moved, the number of dismissed reviews among it, kept beside the feedback part. The run reads the store once and GitHub once per repository, decides each record in memory, and acts under the lock only where the decision names an act, with the whole read only for moved feedback or a PR that reads ready. Every owned PR on the record is observed, marker or not. The order runs every 2 minutes, with `--budget 90s` over every act but the state writes, and no `--count`. `pr_last_checked_at` is written only by a write the order makes. The docs the behavior changes: refinery-merge-cadence.md's landing order, state-machine.md's pending record, gctk-architecture.md, services/gctk/README.md, the order's header, the saved read's warrant and key registry entry, and docs/architecture.md's Debt entry, narrowed to saying that the order writes no label. | questions 1, 2, 3 and 7 | tk-1tfzr71.132 and tk-1tfzr71.22 |
 | 2 | feat(gctk): keep each PR's status labels equal to what the store derives | The comparison over every PR the city owns and every PR the search finds, written through `pr-status-label.sh`'s `reconcile` and `clear`, at most 10 clears a pass of PRs the store does not own, with nothing recording a write that failed. The landing order's merge path makes no label call. `pr-status-label.sh`'s header names the comparison as its caller. docs/architecture.md drops the Debt entry this design adds. | questions 4 and 5, tk-1tfzr71.91, and the label half of tk-1tfzr71.140 | unit 1, and tk-1tfzr71.132 while it is open |
 
 Unit 1 changes no label, so between the two units the labels stand as they do on
@@ -473,13 +513,16 @@ operator accepted for that effort.
 The initiative's proposed done criteria, as this design holds them. Where the
 wording moved, the reason follows.
 
-1. For every PR the city owns, a change on GitHub to its state, head, draft flag,
-   merge state, required checks or review decision reaches the saved read within
-   one pass, however many PRs are open or change at once. A change to its
-   feedback, a review, a comment or a thread's resolution, reaches it within one
-   pass for as many PRs as one pass's budget reads, and the rest in the passes
-   after. *(The feedback read is per PR, so its count, not the open count, can
-   span passes.)*
+1. For every PR the city owns, a change on GitHub to its identity, head, state,
+   draft flag, merge state or required checks reaches the saved read within one
+   pass, for as many changed PRs as a run's timeout lets it write, about 360
+   ([section 7](#7-the-interval-and-the-bound)). A change to its feedback, a
+   review, a comment, a dismissed review or a thread's resolution, reaches it
+   within one pass for as many PRs as one pass's budget reads, and the rest in
+   the passes after. A dismissed review is a change to its feedback even when the
+   review decision stays as it was. *(The feedback read is per PR, so its count,
+   not the open count, can span passes. The state writes come before the budget,
+   so only a run's timeout bounds them.)*
 2. A pass in which nothing changed makes one GitHub request per repository and
    writes no PR's bead. Gas City still writes its tracking bead for the run.
 3. A PR's labels on GitHub are the ones the store derives, and a label that
@@ -529,6 +572,18 @@ texts are in the commands below.
   was submitted up to 15 minutes after it was started, and no review sat out of
   the order of its id, its creation or its submission. So where the list puts a
   review started before another and submitted after it was not seen.
+- **The number of dismissed reviews.** The same request with
+  `reviews(states: [DISMISSED]){totalCount}` on each PR read 12 PRs, #1505 and
+  #1521 to #1532 less #1522 (5 open, 7 merged), for 3 points with no errors, in
+  2.70, 3.52 and 6.53 seconds. It counted one dismissed review on open #1525 and
+  #1527 and on merged #1505, and none on the rest. On those three, the reviews
+  counted state by state (approved, changes requested, commented, dismissed and
+  pending) sum to the number of reviews, so that number counts a dismissed review
+  and a dismissal leaves it as it was. GitHub's schema says
+  `dismissPullRequestReview` "Dismisses an approved or rejected pull request
+  review", and gives `reviewDecision` as "The current status of this pull request
+  with respect to code review", whose `REVIEW_REQUIRED` reads "A review is
+  required before the pull request can be merged".
 - **The open list.** `repository.pullRequests(states: OPEN, first: 100)` with
   labels, newest review and comment, threads and check contexts read 9 PRs in
   2.16 s for 6 points. Run against each of the city's six repositories it found
@@ -552,6 +607,14 @@ texts are in the commands below.
   in 0.45 s. Of them, 11 name a PR: 9 anchors with `merge_result=pull_request`
   and 2 rework children with `anchor_bead`. None is on the pending record, and
   none carries a saved read.
+- **A state write.** A read of one bead by its id (`gc bd list --id <id> --all
+  --json`, run bare and with the flags gctk's ledger adds to include every kind
+  of bead) and a metadata write guarded on its status and assignee
+  (`gc bd update <id> --if-status=<s> --if-assignee=<a> --set-metadata
+  <key>=<value>`), the two store calls an act makes under the record lock, took
+  0.49 to 0.81 seconds together over ten runs, as the city host's load average
+  went from 10 to 18. The write alone took 0.32 to 0.56 seconds over fifteen
+  runs.
 - **The allowance.** At 21:24:44Z the account had used 282 GraphQL points in an
   hour that resets at 22:16:27Z, and 826 REST calls in one that resets at
   22:13:02Z, of 5,000 each.
@@ -569,6 +632,7 @@ Gas City's facts are in [gas-city-search.md](gas-city-search.md).
 #     baseRefName mergeStateStatus isInMergeQueue isMergeQueueEnabled mergedAt
 #     mergeCommit{oid} reviewDecision labels(first:20){nodes{name}}
 #     reviews(last:1){totalCount nodes{fullDatabaseId}}
+#     dismissed: reviews(states:[DISMISSED]){totalCount}
 #     comments(last:1){nodes{fullDatabaseId}}
 #     reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved}}
 #     commits(last:1){nodes{commit{oid checkSuites(first:20){pageInfo{hasNextPage}

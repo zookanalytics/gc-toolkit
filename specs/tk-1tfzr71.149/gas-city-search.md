@@ -126,10 +126,11 @@ read. Nothing may be queued that a failure could strand.
   from city.toml without editing the pack.
 
 Conclusion: the existing cooldown exec order, `orders/pr-reconcile.toml`, runs
-the pass. Its interval goes to 2 minutes, and its acts start no later than 90
-seconds into a run, so a run normally ends before the watchdog would let the next
-start beside it. The record lock makes an overlap safe. What a pass leaves undone
-stays a difference the next pass finds, so nothing is queued.
+the pass. Its interval goes to 2 minutes. It saves each changed PR's state
+first, and its other acts start no later than 90 seconds into a run, so a run
+normally ends before the watchdog would let the next start beside it. The record
+lock makes an overlap safe. What a pass leaves undone stays a difference the next
+pass finds, so nothing is queued.
 
 ## The saved read's new fields (unit 1)
 
