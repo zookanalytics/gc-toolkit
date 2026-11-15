@@ -658,14 +658,14 @@ keys = [
 # direct_landing_sha — the commit a direct landing pushes, stamped by
 #   direct-merge-push.sh before the push, which waits on the stamp's exit, so a
 #   landing whose record fails stays provable to a later patrol. Read by
-#   mol-refinery-patrol.toml's zero-diff guard: a branch with no change against
+#   refinery-land.sh's zero-diff guard: a branch with no change against
 #   a target that carries the stamp goes down the direct path instead of being
 #   refused as a false completion, and direct-merge-push.sh records the landing
 #   at the stamp. A stamp whose push did not land names a commit the target does
 #   not carry, so the guard ignores it, and the next landing overwrites it.
 #   Absent means no direct push waits on its record. Cleared by the merged
 #   transition that records the landing, and by the write that promotes the
-#   bead to merge_strategy=pr after a push refused for branch protection. An
+#   bead to merge_strategy=mr after a push refused for branch protection. An
 #   oid.
 
 [metadata.gates]
