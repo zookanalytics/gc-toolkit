@@ -352,9 +352,10 @@ landing.
 A park leaves a rejected handoff running too. When the refinery sends a
 handed-off bead back, `refinery-requeue.sh` records the `rejection_reason` on it
 and dispatches the rebuild through `gc sling` as a fresh `mol-polecat-work`
-pour. A bead that records an open PR (`pull_request_head_changed`), or a convoy,
-keeps what it carries, and the reason and the pour go to a rework child on its
-branch instead. The cascade
+pour. A bead that records an open PR (`pull_request_head_changed`) keeps what it
+carries, and the reason goes to the PR's review run as an ask, which the landing
+order pours a run for. A convoy keeps what it carries too, and the reason and the
+pour go to a rework child on its branch instead. The cascade
 does not reach a poured workflow, and the rejected bead is in flight, so
 load-context holds it only by its own waits and the rebuild runs. When that
 sling fails, the script arms a retry. Deferred dispatch slings it once bd reports
@@ -540,17 +541,21 @@ by the write.
 PR-finishing work carries an anchor's built branch to its merge. Its creators
 are the scripts that make it claimable:
 
-- `gate-ensure.sh` slings the reviews it files, and the validation passes that
-  `pr-facts.sh` and `signoff.sh` file.
+- On the old review path, `gate-ensure.sh` slings the reviews it files, and the
+  validation passes that `pr-facts.sh` and `signoff.sh` file.
 - `pr-facts.sh` routes the merge-in of an approved PR that conflicts, the fix
-  for a red required check, and the comment rework.
+  for a red required check, and the comment rework. On a PR on the pending
+  record it files each as an ask instead.
 - `pre-open-rebase.sh` routes the merge-in before a PR exists.
-- `rework-child.sh` slings the rework that a review verdict or an operator
-  ruling asks for.
+- On the old review path, `rework-child.sh` slings the rework that a review
+  verdict or an operator ruling asks for.
 - `refinery-requeue.sh` slings the rework the refinery sends back on the branch
-  of a bead that keeps its open PR, or of a convoy.
+  of a convoy, where a bead that keeps its open PR gets an ask instead.
 
-Each child carries `anchor_bead` and follows its anchor.
+Each child carries `anchor_bead` and follows its anchor. A review run and its
+asks are no children. The landing order pours the run onto the anchor itself,
+so the run's steps follow the anchor's own priority through the run's root, at
+shift 0, and an ask is neither routed nor claimed, since only a run takes it.
 
 **It never has a parent.** Each child is joined to its anchor with a `blocks`
 edge and a membership edge, never a parent-child edge, so no cascade reaches
