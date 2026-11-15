@@ -104,8 +104,8 @@ every other kind.
 ## The landing order's write of the status label (unit 3)
 
 The need: the PR's `status:` and `held:` labels keep a writer once
-`pr-facts.sh` retires, from the same rule every display runs, and come off when
-the landing order records the PR merged or closed.
+`pr-facts.sh` retires, from the same rule every display runs, and come off once
+the landing order finds the PR merged or closed.
 
 - **Gas City** writes no label on a PR. Its Go's label writes are bead labels
   through bd (`--add-label` in `cmd/gc/cmd_bd_by_id.go` and
@@ -124,8 +124,9 @@ the landing order records the PR merged or closed.
 What unit 3 composes: the pack's one writer of those labels,
 `assets/scripts/pr-status-label.sh`, which derives through `gctk pr status`
 and writes only a label that differs, called by the landing order through
-gctk's runtime adapter after each check, with the PR's labels from the check's
-own read of the PR. The read gains one field, the PR's labels, and no call of
-its own. The clear at a merge or a close is that script's `clear` verb, and its
-retry rides the record's marker, which Gas Town's record already keeps while a
-close's cleanup is owed (`pr_reconcile_pending`).
+gctk's runtime adapter at each check, with the PR's labels from the check's own
+read of the PR. The read gains one field, the PR's labels, and no call of its
+own. The clear at a merge or a close is that script's `clear` verb. A call that
+did not land at a merge or an exception is made again by a later run while the
+bead keeps the record's marker, which Gas Town's record already keeps while a
+reconciliation is owed (`pr_reconcile_pending`).
