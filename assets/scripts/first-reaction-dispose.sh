@@ -138,10 +138,13 @@ Usage:
   closer is then DEFERRED: the bead waits on each through a `blocks` edge, and
   a deferred dispatch is armed, so the deferred-dispatch order slings
   mol-validate-close once they have all closed, and the closer checks that
-  their landing did end the job. gctk bead arm refuses a bead with a wait edge
-  onto a bead its store does not hold, since such an edge holds nothing: a
-  person closes the subject once that bead lands instead (--disposition ruling
-  asks them).
+  their landing did end the job. Before its first write the exit reads what
+  holds the subject and each bead it names (gctk bead holds). A bead the
+  subject's store does not hold, such as one in another store, is refused,
+  because an edge onto it holds nothing: a person closes the subject once that
+  bead lands instead (--disposition ruling asks them). A subject with a wait
+  edge into another store takes no write either, since gctk bead arm refuses
+  to arm it.
   --waiting-on (blocked) names a bead the subject waits on. --blocker files
   the bead the subject is waiting on, when the wait is not a bead yet, and the
   same create writes the subject's wait on it. A pending wait of the subject's
@@ -149,8 +152,9 @@ Usage:
   waits on the bead an earlier run filed, wherever that run stopped.
   Before its first write the blocked exit reads what holds the subject
   (gctk bead holds), and a subject with a wait edge into another store, which
-  holds nothing, takes no write. The release refuses a --waiting-on in another
-  store itself.
+  holds nothing, takes no write. The same read names each --waiting-on, and
+  a bead the subject's store does not hold, such as one in another store, is
+  refused before anything is written, because its edge would hold nothing.
   --then-route arms the deferred dispatch that slings the subject when the
   blocker closes (gctk bead arm). An arm that does not land fails the exit,
   and a re-run resumes it.
@@ -312,11 +316,12 @@ case "$DISPOSITION" in
         for w in $WAITING; do
             [ "$w" != "$BEAD" ] || usage_die "--waiting-on $w is the bead itself"
         done
-        # The arm is part of this exit's write-back when the closer waits, and
-        # with no tool to record it the exit cannot land, so it does not start.
+        # A close that waits reads what holds the subject and its waits before
+        # its first write, and arms through the same binary, so with no tool it
+        # cannot land and does not start.
         if [ -n "$WAITING" ]; then
             [ -x "$GCTK" ] \
-                || die "a deferred close needs gctk to arm the validating closer for when $BEAD's wait lifts, and there is no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is). Nothing was written. Restore it and re-run this command."
+                || die "a deferred close reads what holds $BEAD and each bead it waits on through gctk bead holds before it writes, and arms the validating closer through gctk bead arm, and there is no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is). Nothing was written. Restore it and re-run this command."
         fi
         ;;
     blocked)
@@ -726,23 +731,38 @@ if [ -n "$DRY" ]; then
     exit 0
 fi
 
-# ── What holds the subject, read before the blocked exit writes ──────
+# ── What holds the subject and its waits, read before the first write ──
 # The waits are read, never computed: gctk bead holds lists the subject's own
 # pending waits and its wait edges into another store (foreign), which hold
 # nothing, since bd keeps an edge onto a bead its store does not hold and the
-# edge holds nothing. A subject that carries one would read as waiting while
-# nothing holds it, so the exit refuses it before its first write and names the
-# edge. The waits the release adds are refused across stores by
-# gc-helm.sh takeaway itself, and gctk bead arm refuses a bead with a foreign
-# edge. A read that does not answer leaves both unknown, so nothing is written.
+# edge holds nothing. The blocked exit and a close that waits each write wait
+# edges, so each reads it before its first write. The read names each
+# --waiting-on beside the subject and answers a bead the subject's store does
+# not hold, such as one in another store, with an error line. An edge onto that
+# bead would hold nothing, so the call is refused as malformed. A subject that
+# carries a foreign edge would read as waiting while nothing holds it, and
+# gctk bead arm refuses it, so the exit refuses it and names the edge. A read
+# that does not answer for the subject leaves all of this unknown, so nothing
+# is written.
 HOLDS_LINE=""
-if [ "$DISPOSITION" = "blocked" ]; then
-    # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
-    HOLDS_LINE=$("$GCTK" bead holds $BD_DB_ARGS "$BEAD" </dev/null 2>/dev/null | scrub \
-        | jq -c --arg b "$BEAD" 'select(type == "object" and .id == $b and (has("error") | not)
+if [ "$DISPOSITION" = "blocked" ] || { [ "$DISPOSITION" = "close" ] && [ -n "$WAITING" ]; }; then
+    # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields, and $WAITING to bead ids
+    HOLDS_ALL=$("$GCTK" bead holds $BD_DB_ARGS "$BEAD" $WAITING </dev/null 2>/dev/null | scrub \
+        | jq -sc '[ .[] | select(type == "object") ]' 2>/dev/null)
+    HOLDS_LINE=$(printf '%s' "$HOLDS_ALL" | jq -c --arg b "$BEAD" '.[]? | select(.id == $b and (has("error") | not)
                                        and (.pending | type) == "array" and (.foreign | type) == "array")' 2>/dev/null | head -n 1)
     [ -n "$HOLDS_LINE" ] \
-        || die "could not read what holds $BEAD (gctk bead holds did not answer for it), so whether it carries a wait edge into another store is unknown and nothing was written. Re-run this command once the store answers."
+        || die "could not read what holds $BEAD (gctk bead holds did not answer for it), so whether it carries a wait edge into another store, and whether its store holds each bead it would wait on, is unknown and nothing was written. Re-run this command once the store answers."
+    for w in $WAITING; do
+        _wline=$(printf '%s' "$HOLDS_ALL" | jq -c --arg w "$w" '[ .[]? | select(.id == $w) ] | .[0] // empty' 2>/dev/null)
+        [ -n "$_wline" ] \
+            || die "could not read whether $BEAD's store holds $w (gctk bead holds gave no line for it), so nothing was written. Re-run this command once the store answers."
+        _werr=$(printf '%s' "$_wline" | jq -r '.error // ""' 2>/dev/null)
+        [ -n "$_werr" ] || continue
+        [ "$DISPOSITION" != "close" ] \
+            || usage_die "--waiting-on $w is not a bead $BEAD's store holds ($_werr), so an edge onto it would hold nothing and could not hold $BEAD until $w lands. Nothing was written. When $w is a bead in another store, a person closes $BEAD once it lands instead: put that to the operator with --disposition ruling."
+        usage_die "--waiting-on $w is not a bead $BEAD's store holds ($_werr), so an edge onto it would hold nothing. Nothing was written. When $w is a bead in another store, wait on a bead in ${BEAD%%-*}'s store that names it instead, which --blocker \"<title>\" files."
+    done
     _foreign=$(printf '%s' "$HOLDS_LINE" | jq -r '[ .foreign[]? | "\(.id) (\(.type // "blocks"))" ] | join(", ")' 2>/dev/null || printf '')
     if [ -n "$_foreign" ]; then
         _first=$(printf '%s' "$HOLDS_LINE" | jq -r '.foreign[0].id // ""' 2>/dev/null || printf '')

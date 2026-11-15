@@ -243,17 +243,28 @@ cat > "$TMP/gctk" <<'GCTK'
 printf 'GCTK %s\n' "$*" >> "$FAKE_LOG"
 case "$1 ${2:-}" in
   "bead holds")
-    # What holds the bead, one line, as gctk bead holds prints it. FAKE_HOLDS_JSON
-    # is the line; unset, the bead waits on what the creates above recorded, and
-    # is clear when they recorded nothing. FAKE_HOLDS_FAILS is a store that did
-    # not answer, which prints the bead's error line and exits 1.
-    shift 2; _id=""
-    while [ $# -gt 0 ]; do case "$1" in --db) shift 2 ;; --db=*) shift ;; *) _id="$1"; shift ;; esac; done
-    if [ -n "${FAKE_HOLDS_FAILS:-}" ]; then printf '{"id":"%s","error":"the store did not answer"}\n' "$_id"; exit 1; fi
-    if [ -n "${FAKE_HOLDS_JSON:-}" ]; then printf '%s\n' "$FAKE_HOLDS_JSON"
-    elif [ -s "$FAKE_STATE.pending" ]; then
-      jq -sc --arg id "$_id" '{id: $id, status: "blocked", waits: ., pending: ., last_landed: "", in_flight: "", arm: null, foreign: []}' "$FAKE_STATE.pending"
-    else printf '{"id":"%s","status":"clear","waits":[],"pending":[],"last_landed":"","in_flight":"","arm":null,"foreign":[]}\n' "$_id"; fi ;;
+    # What holds each bead named, one line per bead in the order named, as gctk
+    # bead holds prints it. The first is the subject: FAKE_HOLDS_JSON is its
+    # line; unset, it waits on what the creates above recorded, and is clear
+    # when they recorded nothing. Each other bead is a wait the caller names,
+    # clear when the store holds it. The store holds a tk- bead unless
+    # FAKE_HOLDS_MISSING names it, and no bead of another prefix, so such a bead
+    # prints its error line and the command exits 1. FAKE_HOLDS_FAILS is a store
+    # that did not answer, which prints every bead's error line and exits 1.
+    shift 2; _ids=""
+    while [ $# -gt 0 ]; do case "$1" in --db) shift 2 ;; --db=*) shift ;; *) _ids="$_ids $1"; shift ;; esac; done
+    _rc=0; _subject=1
+    for _id in $_ids; do
+      if [ -n "${FAKE_HOLDS_FAILS:-}" ]; then printf '{"id":"%s","error":"the store did not answer"}\n' "$_id"; _rc=1
+      elif [ -n "$_subject" ] && [ -n "${FAKE_HOLDS_JSON:-}" ]; then printf '%s\n' "$FAKE_HOLDS_JSON"
+      elif [ -n "$_subject" ] && [ -s "$FAKE_STATE.pending" ]; then
+        jq -sc --arg id "$_id" '{id: $id, status: "blocked", waits: ., pending: ., last_landed: "", in_flight: "", arm: null, foreign: []}' "$FAKE_STATE.pending"
+      elif [ -z "$_subject" ] && case "$_id" in tk-*) case " ${FAKE_HOLDS_MISSING:-} " in *" $_id "*) true ;; *) false ;; esac ;; *) true ;; esac; then
+        printf '{"id":"%s","error":"the store'"'"'s read could not answer %s: the store holds no such bead"}\n' "$_id" "$_id"; _rc=1
+      else printf '{"id":"%s","status":"clear","waits":[],"pending":[],"last_landed":"","in_flight":"","arm":null,"foreign":[]}\n' "$_id"; fi
+      _subject=""
+    done
+    exit "$_rc" ;;
   "bead arm")
     # FAKE_ARM_FAILS models an arm gctk bead arm refuses: it names why on
     # stderr and exits 1. gctk bead arm refuses on gc.routed_to and status, NOT
@@ -793,8 +804,9 @@ eq "$LOG" "" "(UNNAMED) …before anything is read or written"
 #                subject's store, and a read that does not answer writes nothing
 #   (BLKFOREIGN) a subject with a wait edge into another store takes no write,
 #                and the refusal names the edge and its removal
-#   (BLKCROSS)   a --waiting-on in another store is refused by the release
-#                itself, which writes nothing
+#   (BLKCROSS)   a --waiting-on the subject's store does not hold, such as one
+#                in another store, is refused before anything is written, so a
+#                --blocker or an emergency riding along writes nothing either
 #   (BLKSELF)    a bead never waits on itself
 #   (BLKNEW)     --blocker files the missing bead and waits on it, the wait
 #                riding the bead's create
@@ -836,12 +848,31 @@ has "gc bd dep remove tk-sub ra-elsewhere" "$ERR" "(BLKFOREIGN) …and its remov
 eq "$(writes)" "" "(BLKFOREIGN) …before anything is written"
 unset FAKE_HOLDS_JSON
 
-# The real gc-helm.sh writes the waits, and it refuses one in another store.
-real_helm_run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on ra-foreign --run "$ROOT"
-eq "$RC" "4" "(BLKCROSS) a blocker in another store fails the exit"
-has "lives in another store than tk-sub" "$ERR" "(BLKCROSS) …refused by the release, which writes the wait"
-hasnt "DEP bd dep add" "$LOG" "(BLKCROSS) …so no edge is written"
-hasnt "GCTK bead arm" "$LOG" "(BLKCROSS) …and nothing is armed"
+# The read of what holds the subject names each --waiting-on, and the store
+# answers a bead it does not hold with an error line, so the exit refuses the
+# wait before its first write. The --blocker it would file and an emergency's
+# P0, both written before the release that writes the wait, land no more than
+# the wait does.
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on ra-foreign --run "$ROOT"
+eq "$RC" "2" "(BLKCROSS) a blocker in another store is refused"
+has "GCTK bead holds tk-sub ra-foreign" "$LOG" "(BLKCROSS) …which the read of what holds the subject names"
+eq "$(writes)" "" "(BLKCROSS) …before anything is written"
+has "the store holds no such bead" "$ERR" "(BLKCROSS) …saying the store does not hold it"
+has "store that names it instead" "$ERR" "(BLKCROSS) …and naming the remedy"
+FAKE_HOLDS_MISSING=tk-gone run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-gone --run "$ROOT"
+eq "$RC" "2" "(BLKCROSS) a blocker this store does not hold is refused the same way"
+eq "$(writes)" "" "(BLKCROSS) …writing nothing"
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --blocker "Migrate the seed schema" \
+    --waiting-on ra-foreign --run "$ROOT"
+eq "$RC" "2" "(BLKCROSS) a --blocker beside a wait in another store is refused too"
+eq "$(writes)" "" "(BLKCROSS) …filing no blocker"
+mkdir -p "$TMP/rig/.beads"
+FAKE_RIG_PATH="$TMP/rig" FAKE_ORIGIN_URL="git@github.com:zook/repo.git" FAKE_GH=red FAKE_SHOW_JSON="$UNPLACED" \
+    run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on ra-foreign \
+    --then-route gc-toolkit/gc-toolkit.polecat --emergency test-macos --run "$ROOT"
+eq "$RC" "2" "(BLKCROSS) an emergency waiting on a bead in another store is refused"
+has "GH api repos/zook/repo/commits/main/check-runs" "$LOG" "(BLKCROSS) …once its claim is checked"
+eq "$(writes)" "" "(BLKCROSS) …writing no P0"
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-sub --run "$ROOT"
 eq "$RC" "2" "(BLKSELF) a bead cannot wait on itself"
@@ -1506,7 +1537,9 @@ unset FAKE_SHOW_JSON FAKE_DEPS_JSON
 #   (CLOSEREOFFER) a live closer already on the subject is its closer, so the
 #                  exit lands with no second
 #   (CLOSEWAIT)    a close that waits holds the subject on each bead and arms
-#                  the closer for when they close
+#                  the closer for when they close. A wait the subject's store
+#                  does not hold, or a subject with a wait edge into another
+#                  store, is refused before anything is written
 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "already fixed, nothing to merge" --takeaway "close: fixed in #123" --run "$ROOT"
 eq "$RC" "0" "(CLOSE) the close exit succeeds"
 has "SLING sling --rig gc-toolkit gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close" "$LOG" \
@@ -1596,11 +1629,40 @@ FAKE_ARM_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" -
 eq "$RC" "4" "(CLOSEWAIT) a failed arm is a runtime failure"
 has "the validating closer was not armed" "$ERR" "(CLOSEWAIT) …saying so"
 
-# A bead another store holds makes an edge that holds nothing, and gctk bead
-# arm refuses a bead with such an edge: the remedy is a person's close.
-FAKE_ARM_FAILS=1 FAKE_ARM_WHY="tk-sub has a wait edge onto ra-foreign, a bead its store does not hold" \
-    GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on ra-foreign --run "$ROOT"
-eq "$RC" "4" "(CLOSEWAIT) a close that waits on a bead in another store is refused at the arm"
+# The read of what holds the subject names each bead the close waits on, and
+# the store answers a bead it does not hold with an error line. An edge onto
+# that bead would hold nothing, so the close is refused before its first write,
+# the close brief, and the remedy is a person's close. Every wait is read
+# before that write, so a wait in this store named first is not written either.
+GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on ra-foreign --run "$ROOT"
+eq "$RC" "2" "(CLOSEWAIT) a close that waits on a bead in another store is refused"
+has "GCTK bead holds tk-sub ra-foreign" "$LOG" "(CLOSEWAIT) …which the read of what holds the subject names"
+eq "$(writes)" "" "(CLOSEWAIT) …before anything is written"
+has "the store holds no such bead" "$ERR" "(CLOSEWAIT) …saying the store does not hold it"
+has "--disposition ruling" "$ERR" "(CLOSEWAIT) …and a person's close as the remedy"
+GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-a --waiting-on ra-foreign --run "$ROOT"
+eq "$RC" "2" "(CLOSEWAIT) a wait in another store named after one in this store is refused"
+eq "$(writes)" "" "(CLOSEWAIT) …holding the subject on neither"
+FAKE_HOLDS_MISSING=tk-gone GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-gone --run "$ROOT"
+eq "$RC" "2" "(CLOSEWAIT) a wait on a bead this store does not hold is refused the same way"
+eq "$(writes)" "" "(CLOSEWAIT) …writing nothing"
+
+# A subject that already carries a wait edge into another store holds nothing
+# on it, and gctk bead arm refuses to arm it, so the same read refuses it
+# before the first write and names the edge.
+FAKE_HOLDS_JSON='{"id":"tk-sub","status":"clear","waits":[],"pending":[],"foreign":[{"id":"ra-elsewhere","type":"blocks"}]}' \
+    GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --run "$ROOT"
+eq "$RC" "4" "(CLOSEWAIT) a subject with a wait edge into another store is refused"
+has "carries a wait edge into another store (ra-elsewhere (blocks)), which holds nothing" "$ERR" "(CLOSEWAIT) …naming the edge"
+has "gc bd dep remove tk-sub ra-elsewhere" "$ERR" "(CLOSEWAIT) …and its removal"
+eq "$(writes)" "" "(CLOSEWAIT) …before anything is written"
+
+# An edge into another store added between the read and the arm is one the arm
+# refuses after the exit's writes, so the exit carries the arm's reason and
+# names the edge's removal and a person's close.
+FAKE_ARM_FAILS=1 FAKE_ARM_WHY="tk-sub has a wait edge onto ra-elsewhere, a bead its store does not hold" \
+    GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --run "$ROOT"
+eq "$RC" "4" "(CLOSEWAIT) an arm refused for a foreign edge added after the read fails the exit"
 has "a bead its store does not hold" "$ERR" "(CLOSEWAIT) …carrying the arm's reason"
 has "gc bd dep remove tk-sub <that bead>" "$ERR" "(CLOSEWAIT) …naming the edge's removal"
 has "--disposition ruling" "$ERR" "(CLOSEWAIT) …and a person's close as the remedy"
