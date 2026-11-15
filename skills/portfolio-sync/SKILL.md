@@ -28,57 +28,29 @@ prompt's "Reads". An epic's frontier names the park that holds it, when one
 does. Its horizon counts the work directly under it, open, closed, advancing
 and stuck, and counts an open Delivery as stuck, because no pool takes an epic.
 
-## 2. Weigh each epic closed or shifted since a sync last noted it
+## 2. Weigh each epic closed or shifted since a sync last weighed it
 
 A review of an epic rules continue, shift or close on the epic's own evidence.
 That ruling is the operator's, made in the review and never in this sitting,
 but a close or a shift can change what the rig works on and in what order, so
-weigh each one. A sync notes each epic it weighs, under the sync's date
-(section 4), so an epic's newest such note dates the last sync that weighed it.
-This lists, oldest first, each close and each shift made on or after that date,
-and each one on an epic with no such note, so a rig's first sync lists every
-one. It reads each shift from the `## Epic review` block the review records in
-the epic's notes. The epic's `epic_ruling` key holds only its latest ruling, so
-a review that continues the epic after a shift leaves no shift there. A sitting
-that ends before it notes every epic it listed leaves the rest on the next
-sync's list. A note and a review's block carry their day only, so a
-change made on the day its epic was last noted lists again: read that note for
-what the sync made of it. The list leaves out Deliveries, the epics under
-another of the rig's epics with no hypothesis of their own, whose close is one
-of the writes of their epic's ruling. When the store does not answer, it lists
-nothing and says so, since a list it could not read is not an empty one:
+weigh each one. This lists, oldest first, each close and each latest shift of
+the rig's epics that no sync has weighed, with the day a sync last weighed each
+epic. A read that exits non-zero has listed nothing, so run it again before you
+weigh any change:
 
 ```bash
-# >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
-# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
-# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
-# dropping a structural LF or TAB just minifies.
-scrub() { tr -d '\000-\037'; }
-# <<< control-char-scrub
-EPICS=$(gc bd --rig <rig> list --type epic --all --limit 0 --json) \
-  && EPICS=$(printf '%s' "$EPICS" | scrub) \
-  && printf '%s' "$EPICS" | jq -e 'type == "array"' >/dev/null \
-  || { echo "The rig's epics did not read, so what closed or shifted is unknown. Run this again before you weigh any change." >&2; exit 1; }
-printf '%s' "$EPICS" | jq -r '
-  (reduce .[] as $e ({}; .[$e.id] = true)) as $epic
-  | [.[] | select(($epic[.parent // ""] | not) or (.metadata.epic_hypothesis // "") != "")
-    | ([(.notes // "") | scan("Portfolio sync, po sitting ([0-9]{4}-[0-9]{2}-[0-9]{2})") | .[0]] | max // "") as $noted
-    | (select(.status == "closed" and (.closed_at // "") >= $noted)
-        | {at: .closed_at, line: "\(.closed_at) \(.id) closed: \(.close_reason // "")"}),
-      (.id as $id | ("\n" + (.notes // "")) | split("\n## Epic review, ")[1:][]
-        | {at: .[0:10], ruling: (([split("\n")[] | select(startswith("Ruling: "))][0] // "")[8:])}
-        | select(.at >= $noted and (.ruling | startswith("shift")))
-        | {at, line: "\(.at) \($id) shifted: \(.ruling | sub("^shift[.:]? *"; ""))"})]
-  | sort_by(.at)
-  | if length == 0 then "No epic has closed or shifted since a sync last noted it."
-    else .[].line end'
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" epic unweighed --rig <rig>
 ```
 
 For each epic listed, read each `## Epic review` block in its notes dated on or
-after its newest sync note, or every one when it has none, for what the rulings
-moved. A later review can continue an epic on the course a shift set, so weigh
-the shift even when the newest ruling is continue. A close can send the epic's
+after the day its line says a sync last weighed it, or every one when none has,
+for what the rulings moved. A change made on the day its epic was last weighed
+lists again, so read that day's note for what the sync made of it. A later
+review can continue an epic on the course a shift set, so weigh the shift even
+when its line names the continue that followed it. A close can send the epic's
 work to another epic, and a shift changes an epic's course and can change its
 hypothesis. Say what each changes in the portfolio, such as a parked epic to
 bring forward now that a worked one has closed, or a priority that no longer
@@ -107,10 +79,12 @@ by your prompt's "Sequencing: WSJF", with what sections 2 and 3 found. Each
 piece fits one screen and carries a recommendation for each epic.
 
 Note each ruling on its bead under the sync's date, with the operator's reason
-in their words. On each epic that section 2 listed, note too what the sync made
-of its close or shift, even when nothing moved, because the next sync's read
-looks for that note on the epic itself:
+in their words, and on an epic mark it weighed in the same write. On each epic
+that section 2 listed, note too what the sync made of its close or shift, even
+when nothing moved, because its mark is what takes that change off the next
+sync's list:
 
 ```bash
-gc bd --rig <rig> update <bead> --append-notes "Portfolio sync, po sitting $(date -u +%Y-%m-%d): <ruling: reason>"
+gc bd --rig <rig> update <epic> --append-notes "Portfolio sync, po sitting $(date -u +%Y-%m-%d): <ruling: reason>" \
+  --set-metadata epic_weighed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```

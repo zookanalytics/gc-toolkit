@@ -224,9 +224,12 @@ closes wait on.** Whatever the ruling, record each contract field it sets in its
 own key: a change the operator took, a field they stated, or a shift's new aim.
 Leave out the line of each field the ruling does not set. A proposal the
 operator did not take stays out of the keys, and the block says what became of
-it. `epic_ruling_at` is when the operator ruled, which is now, and
-`epic_ruling_evidence` names each human gate the ruling clears. Those are among
-the gates the conversation replies to, which this lists:
+it. `epic_ruling_at` is when the operator ruled, which is now. On a shift,
+`epic_shifted_at` is that time too, and a continue or a close leaves its line
+out, so the po's next portfolio sync still weighs the shift once a later review
+has continued or closed the epic. `epic_ruling_evidence` names each human gate
+the ruling clears. Those are among the gates the conversation replies to, which
+this lists:
 ```bash
 gc bd list --id "$CONVERSATION" --all --json | jq -r '[.[0].dependencies[]? | select(.type == "replies-to") | .depends_on_id] | join(" ")'
 ```
@@ -239,6 +242,7 @@ gc bd update "$EPIC" --set-metadata epic_hypothesis="<the sentence: for whom, wh
   --set-metadata epic_ruling=<continue|shift|close> \
   --set-metadata epic_ruling_reason="<why; on a close, the outcome>" \
   --set-metadata epic_ruling_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --set-metadata epic_shifted_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --set-metadata epic_ruling_by="$GC_SESSION_NAME" \
   --set-metadata epic_ruling_evidence="<each gate the ruling clears, separated by spaces>"
 ```
