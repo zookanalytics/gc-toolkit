@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
@@ -28,7 +29,7 @@ func TestTableRows(t *testing.T) {
 	decision := prstatus.Blocker{ID: "tk-d", Title: "pick one", Status: "open", IssueType: "decision"}
 	// A merge anchor whose pull request waits on a person's review, as
 	// prstatus.Holding names it among the beads a person owes.
-	pr := prstatus.Blocker{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
+	owesReview := prstatus.Blocker{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
 		Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "7"}}
 	prWait := waits.Wait{ID: "tk-pr", Type: "blocks", Title: "land the change", Status: "open", IssueType: "task"}
 	// Where queue placed the bead: in a place the city takes as things stand,
@@ -69,11 +70,11 @@ func TestTableRows(t *testing.T) {
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on your answer"},
 		{name: "a bead behind another bead's pull request names that bead, never its words",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(prWait),
-				holding: &prstatus.Holds{Owed: []prstatus.Blocker{pr}}},
+				holding: &prstatus.Holds{Owed: []prstatus.Blocker{owesReview}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on tk-pr"},
 		{name: "a bead behind a pull request and other work names each wait",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(workWait, prWait),
-				holding: &prstatus.Holds{Owed: []prstatus.Blocker{pr}}},
+				holding: &prstatus.Holds{Owed: []prstatus.Blocker{owesReview}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on tk-other, tk-pr"},
 		{name: "a person's move further along names the wait and ends on what Holding returned first",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(workWait),
@@ -102,8 +103,22 @@ func TestTableRows(t *testing.T) {
 			out: outInFlight, group: GroupQueued, signal: "In flight", note: "gc-toolkit/gc-toolkit.polecat-1"},
 		{name: "in flight with an open pull request names it and where it stands",
 			in: tableInput{b: bead{ID: "tk-w", Status: "open", MergeResult: "pull_request", PRNumber: "12"}, kind: KindWork,
-				holds: &waits.Holds{Status: waits.Clear, InFlight: "carries merge_result"}, facts: &prstatus.Facts{InFlightCount: 1}},
+				holds: &waits.Holds{Status: waits.Clear, InFlight: "carries merge_result"}, facts: &prFacts{facts: prstatus.Facts{InFlightCount: 1}}},
 			out: outPullRequest, group: GroupQueued, signal: "Pull request #12", note: "working"},
+		{name: "the blocked status Gas Town's pending record writes holds nothing, so its pull request stands in the queue",
+			in: tableInput{b: bead{ID: "tk-w", Status: "blocked", MergeResult: "pull_request_pending", PRNumber: "12"}, kind: KindWork,
+				holds: &waits.Holds{Status: waits.Clear, InFlight: "carries merge_result"},
+				facts: &prFacts{facts: prstatus.Facts{MergeResult: "pull_request_pending"}, answer: &pr.Answer{Ready: true}}},
+			out: outPullRequest, group: GroupQueued, signal: "Pull request #12", note: "merging"},
+		{name: "a changed head the record holds blocked reads the same",
+			in: tableInput{b: bead{ID: "tk-w", Status: "blocked", MergeResult: "pull_request_head_changed", PRNumber: "12"}, kind: KindWork,
+				holds: &waits.Holds{Status: waits.Clear, InFlight: "carries merge_result"},
+				facts: &prFacts{facts: prstatus.Facts{MergeResult: "pull_request_head_changed"},
+					answer: &pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindGitHubUnread}}}}},
+			out: outPullRequest, group: GroupQueued, signal: "Pull request #12", note: "working"},
+		{name: "a bead blocked on the old record reads as the store's word",
+			in:  tableInput{b: bead{ID: "tk-w", Status: "blocked", MergeResult: "pull_request", PRNumber: "12"}, kind: KindWork, holds: clear},
+			out: outNotOpen, group: GroupNotMoving, signal: "blocked"},
 		{name: "armed and clear is queued",
 			in:  tableInput{b: work, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: taken},
 			out: outQueued, group: GroupQueued, signal: "Queued"},
@@ -165,15 +180,15 @@ func TestTableRows(t *testing.T) {
 func TestAsks(t *testing.T) {
 	noGate := func(string) bool { return false }
 	openGate := func(id string) bool { return id == "tk-g" }
-	needsReview := &prstatus.Facts{}
-	working := &prstatus.Facts{InFlightCount: 1}
+	needsReview := &prFacts{}
+	working := &prFacts{facts: prstatus.Facts{InFlightCount: 1}}
 	cases := []struct {
 		name        string
 		b           bead
 		kind        Kind
 		conv, convA string
 		gateOpen    func(string) bool
-		facts       *prstatus.Facts
+		facts       *prFacts
 		open, all   int
 		stay        bool
 		want        *askAnswer
