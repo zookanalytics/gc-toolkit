@@ -834,14 +834,17 @@ it leads to, and the verdict is what remains when neither stands. A hold that on
 `needs-attention` with no rule of its own.
 
 For a PR on the pending record, the status renders the evaluator's answer for
-its anchor, which reads the PR on GitHub, with the same precedence
-(`prstatus.Render`, which `gctk pr status` prints). It reads `merging` once the
-evaluator finds the PR ready, or approved with only the city's work left;
-`working` while it waits on the city's work and on an approval; `needs-review`
-when only an approval, or the lift of a request for changes, is left; and
+its anchor, with the same precedence (`prstatus.Render`, which `gctk pr status`
+prints). The evaluator decides over the store as it stands and the GitHub read
+the landing order saved on the bead, and reads nothing on GitHub, so the label
+and the rig board give one answer. It reads `merging` once the evaluator finds
+the PR ready, or approved with only the city's work left; `working` while it
+waits on the city's work and on an approval, or while the landing order has yet
+to read the PR on GitHub at the head the store holds; `needs-review` when only
+an approval, or the lift of a request for changes, is left; and
 `needs-attention` when something only a person clears holds it. The `held:`
 reasons are the gates and the beads a person owes that the walk below names,
-and the review threads the evaluator finds waiting on the city's answer while
+and the review threads the saved read finds waiting on the city's answer while
 no work of the city's acts on them. It also reads `needs-attention`, with no
 `held:` value, when the city's own review machinery has failed
 ([The machine axis](#the-machine-axis)). A review run's question to a person,

@@ -557,9 +557,23 @@ command -v gc >/dev/null 2>&1 || die "gc is required"
 CONV_ROW=$(gc bd list --id "$CONVERSATION" --all --json 2>/dev/null | grep -av '^gc bd:' | scrub \
   | jq -ce --arg c "$CONVERSATION" 'if type == "array" then (map(objects | select((.id // "") == $c)) | first // empty) else error("unread") end' 2>/dev/null)
 [ -n "$CONV_ROW" ] || stopped "conversation $CONVERSATION could not be read, and its row names the subject and the gates this sign-off answers; nothing was written"
-printf '%s' "$CONV_ROW" | jq -e "$CONVERSATION_JQ"'conversation' >/dev/null 2>&1 \
+# What the sign-off reads off that row, in one jq: whether it is a conversation,
+# the bead it tracks, its status and holder, and the gates it replies to, one id
+# a line. Each reads as `jq -r` prints it, less the newlines that end it, and
+# with an object or array in compact form.
+IS_CONVERSATION=""; TRACKED=""; CONV_STATUS=""; HOLDER=""; REPLIES=""
+eval "$(printf '%s' "$CONV_ROW" | jq -r "$CONVERSATION_JQ"'
+  def field($name; f):
+    "\($name)=\([try (f | if type == "string" then . else tojson end) catch ""] | join("\n") | sub("\n+\\z"; "") | @sh)";
+  field("IS_CONVERSATION"; conversation),
+  field("TRACKED"; conversation_subjects[0]),
+  field("CONV_STATUS"; (.status // "") | ascii_downcase),
+  field("HOLDER"; (.assignee // "") | tostring),
+  field("REPLIES"; [ .dependencies[]? | objects
+    | select(((.type // .dependency_type) // "") == "replies-to")
+    | ((.depends_on_id // .id) // "") | select(. != "") ] | unique | .[])' 2>/dev/null)"
+[ "$IS_CONVERSATION" = true ] \
   || die "$CONVERSATION is not a conversation (a task that tracks one bead, assigned to human or to the alias that names its id); nothing was written"
-TRACKED=$(printf '%s' "$CONV_ROW" | jq -r "$CONVERSATION_JQ"'conversation_subjects[0]')
 if [ -n "$SUBJECT" ] && [ "$SUBJECT" != "$TRACKED" ]; then
   die "--subject $SUBJECT is not the bead conversation $CONVERSATION tracks ($TRACKED), and its record goes on that bead alone; nothing was written"
 fi
@@ -575,11 +589,6 @@ case " $WAIT_IDS " in
   *" $SUBJECT "*)
     die "--waiting-on $SUBJECT names the subject itself, which waits on nothing of its own${STAY:+, and conversation $CONVERSATION cannot wait on it, because it tracks $SUBJECT and bd keeps one edge from a bead onto another}; nothing was written. A ruling that sends the subject itself as the work, or takes its recommendation, signs off with --no-wait${STAY:+ and without --stay, so the sitting ends at the hand-off}" ;;
 esac
-CONV_STATUS=$(printf '%s' "$CONV_ROW" | jq -r '(.status // "") | ascii_downcase')
-HOLDER=$(printf '%s' "$CONV_ROW" | jq -r '(.assignee // "") | tostring')
-REPLIES=$(printf '%s' "$CONV_ROW" | jq -r '[ .dependencies[]? | objects
-    | select(((.type // .dependency_type) // "") == "replies-to")
-    | ((.depends_on_id // .id) // "") | select(. != "") ] | unique | .[]')
 for g in "${LEAVE[@]+"${LEAVE[@]}"}"; do
   printf '%s\n' "$REPLIES" | grep -qxF -- "$g" \
     || die "--leave $g names a gate conversation $CONVERSATION does not reply to; nothing was written"
@@ -591,11 +600,13 @@ done
 [ "$PR_ANSWER" != retire ] || [ -n "$SUCCESSOR" ] || SUCCESSOR="$CONVERSATION"
 # Each gate the conversation replies to, read now: a gate that does not read
 # could be one still open, so the sign-off stops before it writes anything.
-GATES_JSON='[]'
+# GATES_JSON is the array of their rows, each the one line show_row prints.
+GATES_JSON=""
 for g in $REPLIES; do
   GROW=$(show_row "$g") || stopped "gate $g, which conversation $CONVERSATION replies to, could not be read; nothing was written"
-  GATES_JSON=$(printf '%s' "$GATES_JSON" | jq -c --argjson r "$GROW" '. + [$r]')
+  GATES_JSON="${GATES_JSON:+$GATES_JSON,}$GROW"
 done
+GATES_JSON="[$GATES_JSON]"
 # The gates the ruling answers: those --answer names, or else each one the
 # conversation replies to. Step 3 skips the ones --leave names, and resolves the
 # rest with ANSWER.

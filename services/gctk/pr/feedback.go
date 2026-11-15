@@ -43,15 +43,13 @@ func mark(v string) int64 {
 	return n
 }
 
-// unhandled is one condition for each id space that holds feedback the
-// receipts do not cover: a review, an inline comment or a conversation comment
-// that the intake counts, newer than its space's watermark and, for reviews and
-// inline comments, past the mark the threads have answered through. The intake
-// counts what the definition reads as feedback, and of a review only a message
-// that comments or requests changes and carries text, so a review that approves
-// holds nothing by its message, and neither does feedback the definition
-// leaves out.
-func unhandled(rule Feedback, self, since string, rc receipts, reviews []gh.Review, threads []gh.Thread, comments []gh.IssueComment) ([]Condition, error) {
+// newestFeedback is the highest feedback id in each id space, by the
+// definition, which reads the text of every post: a review, an inline comment
+// or a conversation comment the intake counts. Of a review the intake counts
+// only a message that comments or requests changes and carries text, so a
+// review that approves counts nothing by its message, and neither does feedback
+// the definition leaves out.
+func newestFeedback(rule Feedback, self, since string, reviews []gh.Review, threads []gh.Thread, comments []gh.IssueComment) (NewestFeedback, error) {
 	var revs []feedback.Review
 	counted := map[int64]bool{}
 	for _, v := range reviews {
@@ -62,7 +60,7 @@ func unhandled(rule Feedback, self, since string, rc receipts, reviews []gh.Revi
 	}
 	reviewIDs, err := rule.Reviews(self, since, revs)
 	if err != nil {
-		return nil, err
+		return NewestFeedback{}, err
 	}
 	var inline []feedback.Comment
 	for _, t := range threads {
@@ -72,7 +70,7 @@ func unhandled(rule Feedback, self, since string, rc receipts, reviews []gh.Revi
 	}
 	commentIDs, err := rule.Comments(self, since, inline)
 	if err != nil {
-		return nil, err
+		return NewestFeedback{}, err
 	}
 	var convo []feedback.Comment
 	for _, c := range comments {
@@ -80,22 +78,32 @@ func unhandled(rule Feedback, self, since string, rc receipts, reviews []gh.Revi
 	}
 	issueIDs, err := rule.IssueComments(self, since, convo)
 	if err != nil {
-		return nil, err
+		return NewestFeedback{}, err
 	}
+	return NewestFeedback{Review: newest(reviewIDs, 0, counted), Inline: newest(commentIDs, 0, nil),
+		Conversation: newest(issueIDs, 0, nil)}, nil
+}
+
+// unhandled is one condition for each id space whose newest feedback the
+// receipts do not cover: newer than the space's watermark and, for reviews and
+// inline comments, past the mark the threads have answered through. The
+// receipts are the store's and move when the intake routes feedback, so the
+// compare is made at each read.
+func unhandled(rc receipts, n NewestFeedback) []Condition {
 	var out []Condition
-	if id := newest(reviewIDs, max(rc.review, rc.reviewAnswered), counted); id > 0 {
+	if id := newest([]int64{n.Review}, max(rc.review, rc.reviewAnswered), nil); id > 0 {
 		out = append(out, Condition{Kind: KindFeedback,
 			Detail: fmt.Sprintf("review %d is feedback past the review watermark that the intake has not handled", id)})
 	}
-	if id := newest(commentIDs, max(rc.comment, rc.commentAnswered), nil); id > 0 {
+	if id := newest([]int64{n.Inline}, max(rc.comment, rc.commentAnswered), nil); id > 0 {
 		out = append(out, Condition{Kind: KindFeedback,
 			Detail: fmt.Sprintf("inline comment %d is feedback past the comment watermark that the intake has not handled", id)})
 	}
-	if id := newest(issueIDs, rc.issueComment, nil); id > 0 {
+	if id := newest([]int64{n.Conversation}, rc.issueComment, nil); id > 0 {
 		out = append(out, Condition{Kind: KindFeedback,
 			Detail: fmt.Sprintf("conversation comment %d is feedback past the conversation watermark that the intake has not handled", id)})
 	}
-	return out, nil
+	return out
 }
 
 // unrouted is the ids of the inline comments that dismissing the reviews named
@@ -144,9 +152,9 @@ func newest(ids []int64, floor int64, only map[int64]bool) int64 {
 	return top
 }
 
-// awaiting is one condition for each review thread that waits on the city's
-// answer, by the definition.
-func awaiting(rule Feedback, self, since string, threads []gh.Thread) ([]Condition, error) {
+// awaiting is the ids of the review threads that wait on the city's answer, by
+// the definition.
+func awaiting(rule Feedback, self, since string, threads []gh.Thread) ([]string, error) {
 	var ts []feedback.Thread
 	for _, t := range threads {
 		ft := feedback.Thread{ID: t.ID, Resolved: t.Resolved}
@@ -155,15 +163,7 @@ func awaiting(rule Feedback, self, since string, threads []gh.Thread) ([]Conditi
 		}
 		ts = append(ts, ft)
 	}
-	ids, err := rule.Awaiting(self, since, ts)
-	if err != nil {
-		return nil, err
-	}
-	var out []Condition
-	for _, id := range ids {
-		out = append(out, Condition{Kind: KindThread, Value: id, Detail: fmt.Sprintf("review thread %s waits on the city's answer", id)})
-	}
-	return out, nil
+	return rule.Awaiting(self, since, ts)
 }
 
 func reviewOf(v gh.Review) feedback.Review {

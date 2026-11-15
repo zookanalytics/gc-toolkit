@@ -48,6 +48,18 @@
 // after the set empties. Nor does it read GitHub's draft flag: a draft the city
 // opened is known by its markers, and a draft someone else made reads like any
 // other PR.
+//
+// A PR on Gas Town's pending record ([pr.OnRecord]) stands where the pr
+// domain's evaluator says, in the same vocabulary: [Render], [RenderHeld] and
+// [RenderReasons] read its answer beside the facts [Read] gathers. `gctk pr
+// status`, and through it the labels and engage, and the rig board
+// (services/helm/internal/rigboard) ask the evaluator over the GitHub read the
+// landing order saved on the PR's bead and the store as it stands
+// ([pr.FromStore]), so none of them reads GitHub, and a change in the city
+// shows at its next read. A PR whose saved read is absent, or is not of the PR
+// at the head the store holds, reads working until the landing order's next
+// check, unless something only a person clears holds it, which reads
+// needs-attention.
 package prstatus
 
 import (

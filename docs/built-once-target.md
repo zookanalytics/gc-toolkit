@@ -127,10 +127,11 @@ finding on a PR stays a record the operator rules on.
 The pack's own refinery lands a branch directly or publishes it as a PR, and
 Gas Town's pending-through-merge record keeps the work's bead open until the
 merge is verified on the target. The pack adds one approval contract for every PR the
-city opens, on any target, in one evaluator of the PR's readiness that the
-board and the merge read, a merge request pinned to the head the evaluator
-judged, the PR's managed summary and title, and the step that takes a GitHub
-event to the bead that owns it.
+city opens, on any target, in one evaluator of the PR's readiness. The merge
+runs it on a fresh read of GitHub, and every display runs it on the GitHub read
+the landing order saves at each check. The pack also adds a merge request
+pinned to the head the evaluator judged, the PR's managed summary and title,
+and the step that takes a GitHub event to the bead that owns it.
 
 The trade: the pack's transition machine, its second copy of the approval
 rule, the merge cadence's arms with their lock, cursors and crash detection,

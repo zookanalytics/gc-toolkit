@@ -10,8 +10,9 @@ import (
 
 // Render puts the evaluator's answer in the status vocabulary, by Derive's
 // precedence: what a person must clear, then an approved PR the city lands
-// unless a conversation stays for work, then the city's work, then the
-// approval alone.
+// unless a conversation stays for work, then the city's work, a side of
+// GitHub's the landing order has yet to read among it, then the approval
+// alone.
 func TestRenderTheEvaluatorsAnswer(t *testing.T) {
 	cond := func(k pr.Kind, value string) pr.Condition { return pr.Condition{Kind: k, Value: value} }
 	staying := prstatus.Facts{Staying: []prstatus.Blocker{{ID: "tk-conv", Title: "a conversation that stays for its work"}}}
@@ -77,6 +78,22 @@ func TestRenderTheEvaluatorsAnswer(t *testing.T) {
 			false, []pr.Condition{cond(pr.KindCheckPending, "test")},
 			prstatus.Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: prstatus.CauseBlocker,
 				PRUnansweredThreads: "2@oid"}, prstatus.Merging},
+		{"a PR whose GitHub side is unread is working, since no approval is known",
+			false, []pr.Condition{cond(pr.KindGitHubUnread, "")}, prstatus.Facts{}, prstatus.Working},
+		{"an unread PR beside the city's work is working",
+			false, []pr.Condition{cond(pr.KindGitHubUnread, ""), {Kind: pr.KindInFlight, ID: "tk-k"}}, prstatus.Facts{},
+			prstatus.Working},
+		{"an unread PR a conversation whose sitting stays for work holds is working",
+			false, []pr.Condition{cond(pr.KindGitHubUnread, ""), {Kind: pr.KindWait, ID: "tk-conv"}}, staying, prstatus.Working},
+		{"an unread PR beside a human gate needs attention",
+			false, []pr.Condition{cond(pr.KindGitHubUnread, ""), {Kind: pr.KindWait, ID: "gate"}},
+			prstatus.Facts{Gates: []prstatus.Blocker{{ID: "gate", Title: "decide"}}}, prstatus.NeedsAttention},
+		{"an unread PR beside a bead a person owes needs attention",
+			false, []pr.Condition{cond(pr.KindGitHubUnread, ""), {Kind: pr.KindWait, ID: "tk-owed"}},
+			prstatus.Facts{Owed: []prstatus.Blocker{{ID: "tk-owed", Title: "answer the question"}}}, prstatus.NeedsAttention},
+		{"an unread PR a hold set by hand holds needs attention",
+			false, []pr.Condition{cond(pr.KindGitHubUnread, ""), cond(pr.KindHold, "")}, prstatus.Facts{},
+			prstatus.NeedsAttention},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -114,6 +131,14 @@ func TestRenderReasons(t *testing.T) {
 	if got := prstatus.RenderHeld(a, f); !reflect.DeepEqual(got, wantHeld) {
 		t.Fatalf("RenderHeld = %v, want %v", got, wantHeld)
 	}
+	t.Run("an unread side names no thread, so only what the walk finds holds the PR", func(t *testing.T) {
+		unread := pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindGitHubUnread}, {Kind: pr.KindWait, ID: "tk-gate"}}}
+		want := []prstatus.Reason{{Held: prstatus.HeldGate, ID: "tk-gate", Title: "decide the scope"}}
+		gated := prstatus.Facts{Gates: f.Gates}
+		if got := prstatus.RenderReasons(unread, gated); !reflect.DeepEqual(got, want) {
+			t.Fatalf("RenderReasons = %+v, want %+v", got, want)
+		}
+	})
 	t.Run("a stay's wait acts on no thread, so the thread holds", func(t *testing.T) {
 		stay := prstatus.Facts{Staying: []prstatus.Blocker{{ID: "tk-conv", Title: "a conversation that stays for its work"}}}
 		a := pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindThread, Value: "T1"}, {Kind: pr.KindWait, ID: "tk-conv"}}}
