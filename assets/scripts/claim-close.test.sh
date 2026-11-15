@@ -72,7 +72,11 @@ seed() {
   {"id":"live-impl","status":"in_progress","assignee":"slot-session","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"live-root"}},
   {"id":"live-next","status":"in_progress","assignee":"slot-session","metadata":{"gc.step_ref":"mol-polecat-work.submit-and-exit","gc.root_bead_id":"live-root"}},
   {"id":"plain","status":"in_progress","assignee":"slot-session","metadata":{}},
-  {"id":"iter-2","status":"in_progress","assignee":"slot-session","metadata":{"gc.step_ref":"self-review.iteration.2"}},
+  {"id":"iter-1","status":"in_progress","assignee":"slot-session","metadata":{"gc.step_ref":"self-review.iteration.1"}},
+  {"id":"iter-2","status":"in_progress","assignee":"slot-session","metadata":{"gc.step_ref":"mol-polecat-work.self-review.iteration.2"}},
+  {"id":"member-1","status":"in_progress","assignee":"slot-session","metadata":{"gc.step_ref":"review-loop.iteration.1.triage"}},
+  {"id":"lane-2","status":"in_progress","assignee":"slot-session","metadata":{"gc.step_ref":"mol-pr-review-lane.mol-pr-review.review-loop.iteration.2.triage.item.1.lane"}},
+  {"id":"other-loop","status":"in_progress","assignee":"slot-session","metadata":{"gc.step_ref":"mol-x.pre-review-loop.iteration.2.triage"}},
   {"id":"gone","status":"closed","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.implement"}},
   {"id":"foreign","status":"in_progress","assignee":"other-session","metadata":{"gc.step_ref":"mol-polecat-work.implement"}},
   {"id":"released","status":"open","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.implement"}},
@@ -112,13 +116,23 @@ eq "$RC" 2 "a plain routed bead refuses"
 eq "$(status_of plain)" in_progress "the plain bead stays as it was"
 
 # --- a check loop's iteration closes by the loop's name -------------------------
-seed; export FAKE_HOOK_CURRENT=iter-2
-run --step self-review
-eq "$RC" 0 "an iteration closes by its loop's name"
-eq "$(status_of iter-2)" closed "the iteration is closed"
+# A run's first iteration carries the loop's bare name and each later one the
+# formula's name before it, as Gas City writes them; a step inside an iteration,
+# and a lane bonded there under its own formula's name, carry the same.
+for b in iter-1 iter-2 member-1 lane-2; do
+  case "$b" in iter-*) loop=self-review ;; *) loop=review-loop ;; esac
+  seed; export FAKE_HOOK_CURRENT="$b"
+  run --step "$loop"
+  eq "$RC" 0 "$b closes by its loop's name, $loop"
+  eq "$(status_of "$b")" closed "$b is closed"
+done
 seed; export FAKE_HOOK_CURRENT=iter-2
 run --step self
 eq "$RC" 2 "a prefix of the loop's name is not its name"
+seed; export FAKE_HOOK_CURRENT=other-loop
+run --step review-loop
+eq "$RC" 2 "a loop whose name only ends in the loop's name is another loop"
+eq "$(status_of other-loop)" in_progress "so its member stays open"
 seed; export FAKE_HOOK_CURRENT=live-impl
 run --step mol-polecat-work
 eq "$RC" 2 "a formula's name is not one of its steps"

@@ -105,13 +105,15 @@ type Finding struct {
 
 // Repair is what rule-and-repair writes: the head it ruled at, a ruling for
 // each finding and each ask it took, and the head its push made, "" when it
-// pushed nothing.
+// pushed nothing. A shadow run's round also writes what it would have written
+// outside the run.
 type Repair struct {
 	Review    string   `json:"review"`
 	Iteration int      `json:"iteration"`
 	Head      string   `json:"head"`
 	Rulings   []Ruling `json:"rulings"`
 	Pushed    string   `json:"pushed,omitempty"`
+	Shadow    *Shadow  `json:"shadow,omitempty"`
 }
 
 // Ruling is how the round ruled one finding, named by its lane's check and its
@@ -185,13 +187,14 @@ func ReadRun(l *ledger.Ledger, id string) (*Run, error) {
 	}
 	slices.SortFunc(members, func(a, b *ledger.Record) int { return strings.Compare(a.ID, b.ID) })
 	for _, m := range members {
-		if strings.EqualFold(str(kindKey, m), "ralph") {
+		kind := str(kindKey, m)
+		if strings.EqualFold(kind, "ralph") {
 			if run.Loop != nil {
 				return nil, &NotARun{ID: id, Why: fmt.Sprintf("its root %s has two loops, %s and %s", root.ID, run.Loop.ID, m.ID)}
 			}
 			run.Loop = m
 		}
-		if raw := str(outputKey, m); raw != "" {
+		if raw := str(outputKey, m); raw != "" && worked(kind) {
 			if why := run.add(raw); why != "" {
 				run.Broken = append(run.Broken, m.ID+": "+why)
 			}
@@ -199,6 +202,13 @@ func ReadRun(l *ledger.Ledger, id string) (*Run, error) {
 	}
 	return run, nil
 }
+
+// worked reports whether a bead of the gc.kind kind is a step a worker closes,
+// whose output is that step's own: one that carries no kind, or reads task.
+// Gas City copies an iteration's output onto the beads that settle it, the
+// iteration's scope bead and, once its check passes, the loop's control bead,
+// and a copy is no step's output.
+func worked(kind string) bool { return kind == "" || strings.EqualFold(kind, "task") }
 
 // one is the bead id names, closed or not.
 func one(l *ledger.Ledger, id string) (*ledger.Record, error) {

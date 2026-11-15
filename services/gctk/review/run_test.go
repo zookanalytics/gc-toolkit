@@ -163,6 +163,38 @@ func TestAFindingRuledMustFixAndOneDeclined(t *testing.T) {
 	mustFail(t, w.passed(0), "correctness finding F1 is not ruled")
 }
 
+// Gas City copies an iteration's output onto the beads that settle it: the
+// iteration's scope bead, and the loop's control bead once its check passes.
+// A copy is not a second output of its step, so the iteration still passes. A
+// step bead whose kind reads task, as a later iteration's steps do, writes its
+// own.
+func TestTheCopiesOnAnIterationsSettlingBeadsAreNotOutputs(t *testing.T) {
+	w := newWorld(t)
+	w.passing()
+	copied, err := json.Marshal(repair(1, h1, "", finding("correctness", "F1", review.RulingDeclined)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.store.Put(bead{ID: "tk-scope", Status: "closed", IssueType: "task", Metadata: map[string]string{
+		"gc.kind": "scope", "gc.root_bead_id": root, "gc.output_json": string(copied),
+	}})
+	lp, _ := w.store.Row(loopID)
+	lp.Metadata["gc.output_json"] = string(copied)
+	w.store.Put(lp)
+	mustPass(t, w.passed(1))
+
+	w = newWorld(t)
+	w.passing()
+	raw, err := json.Marshal(triage(1, h1, "correctness"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.store.Put(bead{ID: "tk-task", Status: "closed", IssueType: "task", Metadata: map[string]string{
+		"gc.kind": "task", "gc.root_bead_id": root, "gc.output_json": string(raw),
+	}})
+	mustFail(t, w.passed(1), "iteration 1 has a second triage output")
+}
+
 // A question put to a person through a gate counts as ruled, so the loop stops
 // there rather than spend its attempts. One that names no gate does not.
 func TestAQuestionPutToAPerson(t *testing.T) {
