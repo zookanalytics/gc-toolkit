@@ -885,6 +885,27 @@ refinery, and each write is guarded on the status and assignee it read. A bead
 that a release took from the refinery has its marker cleared and its PR named
 in a note, and nothing else written.
 
+**The seed audit after a landing.** In a rig whose clone carries
+`generated/seed-audit`, a run that closes a bead on a merge into the rig's
+default branch, the branch `origin/HEAD` names, then checks that branch's seed
+audit with the record lock released. It reads the branch at its tip as the run
+fetched it to verify the merge, so the check judges that merge and every one
+after it, and a tip that one landing in a run has checked is not checked again
+in that run. `render-seed-audit.sh --check-merge <tip> <tip>` renders the tip's
+tree once and names each file the tip commits other than as rendered, and the
+run hands those files to `seed-audit-reaudit.sh`, which slings the one bead that
+re-renders the default branch and lands the new text in a pull request of its
+own. The writer runs in the rig's clone, whose `origin/HEAD` it reads, and holds
+a lock of its own from its read of the live re-renders to its sling, a `flock`
+on `seed-audit-reaudit.lock` in the store's `.beads` directory, so two runs that
+land on the default branch at once file one re-render between them. A call that
+finds the lock held files nothing. The check holds no PR, so until that
+re-render lands, a PR's diff can show render lines it did not change. A check
+that does not run holds nothing either: when the default branch or its tip does
+not read, the render does not complete, the writer dispatches nothing, or the
+run has reached its deadline, the next landing on the branch checks again. The
+landing's line says what the check found.
+
 **Reading what a run did.** Each record's outcome prints on a line of its own,
 `<bead> <action>: <detail>`. `gc order history pr-reconcile` lists the runs
 with their exits: 0 when every record read was handled, and 2 when the listing
