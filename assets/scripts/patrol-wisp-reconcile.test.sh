@@ -39,6 +39,10 @@
 #   - POUR (formulas/mol-<agent>-patrol.toml, `patrol-wisp-pour`) — a failed
 #     assign rolls the pour back and refuses to burn the current wisp.
 #
+# The refinery's pour is no block of text but a script, `refinery-patrol.sh
+# next`, whose own suite (refinery-patrol.test.sh) runs its guard, so this
+# suite checks the refinery's reconcile alone.
+#
 # No live city, Dolt, network, or wisps — only jq and a tmpdir.
 set -euo pipefail
 
@@ -292,16 +296,24 @@ fx() {
 # --- Per-agent contracts. ----------------------------------------------------
 # Fields: agent | scope (rig|city) | happy-path pour result | assign-fails
 # rollback result | does the pour snippet also resolve and burn the CURRENT
-# wisp? The refinery, witness, and deacon all do it in the same block, so every
-# agent's snippet burns its own current wisp on the happy
-# path. The per-rig witness and refinery stamp gc.rig before the assign (two
-# updates), and the witness then defers its next wisp (a third); a failed assign
-# exits before that defer. The city-singleton deacon takes no rig scope, so it
-# only assigns (one update).
+# wisp? The witness and deacon both do it in the same block, so each snippet
+# burns its own current wisp on the happy path. The per-rig witness stamps
+# gc.rig before the assign (two updates) and then defers its next wisp (a
+# third); a failed assign exits before that defer. The city-singleton deacon
+# takes no rig scope, so it only assigns (one update). The refinery has no pour
+# block, so its pour fields are `-`.
 AGENTS=(
   "witness  rig  0|w-cur|w-new,w-new,w-new 1|w-new|w-new,w-new yes"
   "deacon   city 0|w-cur|w-new       1|w-new|w-new       yes"
-  "refinery rig  0|w-cur|w-new,w-new 1|w-new|w-new,w-new yes"
+  "refinery rig  -                   -                   -"
+)
+# The files the loop reads through paths it builds from each agent's name.
+# run-tests --affected selects a suite only by a path it names, so they are
+# named here, and the loop fails on a file it reads that this list leaves out.
+READS=(
+  agents/witness/prompt.template.md formulas/mol-witness-patrol.toml
+  agents/deacon/prompt.template.md formulas/mol-deacon-patrol.toml
+  agents/refinery/prompt.template.md
 )
 
 for SPEC in "${AGENTS[@]}"; do
@@ -323,15 +335,27 @@ for SPEC in "${AGENTS[@]}"; do
   echo
   echo "== $AGENT =="
 
+  NEEDS="${PROMPT#"$ROOT"/}"
+  [ "$POUR_OK" = - ] || NEEDS="$NEEDS ${TOML#"$ROOT"/}"
+  for F in $NEEDS; do
+    case " ${READS[*]} " in
+      *" $F "*) ok "$AGENT: READS names $F" ;;
+      *) bad "$AGENT: READS leaves out $F, so run-tests --affected cannot select this suite when it changes" ;;
+    esac
+  done
+
   RECONCILE="$(extract patrol-wisp-reconcile "$PROMPT")"
-  POUR="$(extract patrol-wisp-pour "$TOML")"
+  POUR=""
+  [ "$POUR_OK" = - ] || POUR="$(extract patrol-wisp-pour "$TOML")"
 
   [ -n "$RECONCILE" ] \
     && ok "$AGENT: reconcile extracted between patrol-wisp-reconcile markers" \
     || bad "$AGENT: reconcile extraction EMPTY — markers missing from $PROMPT"
-  [ -n "$POUR" ] \
-    && ok "$AGENT: pour guard extracted between patrol-wisp-pour markers" \
-    || bad "$AGENT: pour extraction EMPTY — markers missing from $TOML"
+  if [ "$POUR_OK" != - ]; then
+    [ -n "$POUR" ] \
+      && ok "$AGENT: pour guard extracted between patrol-wisp-pour markers" \
+      || bad "$AGENT: pour extraction EMPTY — markers missing from $TOML"
+  fi
 
   printf '%s\n' "$RECONCILE" > "$TMP/reconcile.sh"
   printf '%s\n' "$POUR"      > "$TMP/pour.sh"
@@ -340,9 +364,11 @@ for SPEC in "${AGENTS[@]}"; do
   bash -n "$TMP/reconcile.sh" \
     && ok "$AGENT: extracted reconcile is syntactically valid bash" \
     || bad "$AGENT: extracted reconcile failed bash -n"
-  bash -n "$TMP/pour.sh" \
-    && ok "$AGENT: extracted pour guard is syntactically valid bash" \
-    || bad "$AGENT: extracted pour guard failed bash -n"
+  if [ "$POUR_OK" != - ]; then
+    bash -n "$TMP/pour.sh" \
+      && ok "$AGENT: extracted pour guard is syntactically valid bash" \
+      || bad "$AGENT: extracted pour guard failed bash -n"
+  fi
 
   # --- Reconcile. ------------------------------------------------------------
   eq "$(run_reconcile "$(fx "$FX_LEAK")")" "w-run|w-orph" \
@@ -451,46 +477,48 @@ for SPEC in "${AGENTS[@]}"; do
        "$AGENT: the startup pour names the city store"
   fi
 
-  # --- Pour guard. -----------------------------------------------------------
-  eq "$(run_pour 0 0 0 w-cur)" "$POUR_OK" \
-     "$AGENT: happy path: pours and assigns the new wisp"
+  if [ "$POUR_OK" != - ]; then
+    # --- Pour guard. -----------------------------------------------------------
+    eq "$(run_pour 0 0 0 w-cur)" "$POUR_OK" \
+       "$AGENT: happy path: pours and assigns the new wisp"
 
-  # THE CORE GUARD: a failed assign must roll the pour back and report failure,
-  # so the current wisp is never burned. Leaking w-new here IS the bug.
-  eq "$(run_pour 1 0 0 w-cur)" "$POUR_FAIL" \
-     "$AGENT: REGRESSION: a failed assign rolls the poured wisp back, exits non-zero, and burns no current wisp"
+    # THE CORE GUARD: a failed assign must roll the pour back and report failure,
+    # so the current wisp is never burned. Leaking w-new here IS the bug.
+    eq "$(run_pour 1 0 0 w-cur)" "$POUR_FAIL" \
+       "$AGENT: REGRESSION: a failed assign rolls the poured wisp back, exits non-zero, and burns no current wisp"
 
-  # A pour that yields no id must not be assigned, must not be burned, and must
-  # still stop the current wisp from being burned.
-  eq "$(run_pour 0 1 0 w-cur)" "1||" \
-     "$AGENT: an empty pour exits non-zero without assigning or burning"
+    # A pour that yields no id must not be assigned, must not be burned, and must
+    # still stop the current wisp from being burned.
+    eq "$(run_pour 0 1 0 w-cur)" "1||" \
+       "$AGENT: an empty pour exits non-zero without assigning or burning"
 
-  # Rollback is best-effort: if the burn also fails, the guard still exits
-  # non-zero. The stray is then the title-scoped reconcile's problem — which is
-  # exactly why that half of the fix has to be assignee-blind.
-  eq "$(run_pour 1 0 1 w-cur)" "$POUR_FAIL" \
-     "$AGENT: a failed rollback burn still exits non-zero (reconcile is the backstop)"
+    # Rollback is best-effort: if the burn also fails, the guard still exits
+    # non-zero. The stray is then the title-scoped reconcile's problem — which is
+    # exactly why that half of the fix has to be assignee-blind.
+    eq "$(run_pour 1 0 1 w-cur)" "$POUR_FAIL" \
+       "$AGENT: a failed rollback burn still exits non-zero (reconcile is the backstop)"
 
-  # --- Resolving the CURRENT wisp, for the snippet that burns it itself. ------
-  if [ "$BURNS_CURRENT" = "yes" ]; then
-    # GC_BEAD_ID is empty on every fresh session, so the fallback query is the
-    # live path, not a spare. It must find OUR patrol wisp: not the unowned
-    # same-title orphan (reconcile's job, not this step's), and not our
-    # in-progress non-patrol molecule.
-    eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")")" "$POUR_OK" \
-       "$AGENT: REGRESSION: with GC_BEAD_ID unset the fallback resolves our own patrol wisp and burns it"
+    # --- Resolving the CURRENT wisp, for the snippet that burns it itself. ------
+    if [ "$BURNS_CURRENT" = "yes" ]; then
+      # GC_BEAD_ID is empty on every fresh session, so the fallback query is the
+      # live path, not a spare. It must find OUR patrol wisp: not the unowned
+      # same-title orphan (reconcile's job, not this step's), and not our
+      # in-progress non-patrol molecule.
+      eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")")" "$POUR_OK" \
+         "$AGENT: REGRESSION: with GC_BEAD_ID unset the fallback resolves our own patrol wisp and burns it"
 
-    # CONTROL, so the assertion above cannot pass for the wrong reason: put the
-    # pre-fix query shape back and watch the same fixture leak. `--type=wisp` is
-    # refused by bd, so the current wisp never resolves — the next wisp is
-    # poured and assigned, and the old one is left behind. That is the leak.
-    sed 's/--type=molecule --include-infra --limit=0/--type=wisp --limit=1/' \
-      "$TMP/pour.sh" > "$TMP/pour-mutated.sh"
-    if cmp -s "$TMP/pour.sh" "$TMP/pour-mutated.sh"; then
-      bad "$AGENT: control did not mutate the fallback query — its shape changed, re-check the sed"
-    else
-      eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")" "$TMP/pour-mutated.sh")" "1||${POUR_OK##*|}" \
-         "$AGENT: CONTROL: the pre-fix --type=wisp fallback leaves the current wisp unburned"
+      # CONTROL, so the assertion above cannot pass for the wrong reason: put the
+      # pre-fix query shape back and watch the same fixture leak. `--type=wisp` is
+      # refused by bd, so the current wisp never resolves — the next wisp is
+      # poured and assigned, and the old one is left behind. That is the leak.
+      sed 's/--type=molecule --include-infra --limit=0/--type=wisp --limit=1/' \
+        "$TMP/pour.sh" > "$TMP/pour-mutated.sh"
+      if cmp -s "$TMP/pour.sh" "$TMP/pour-mutated.sh"; then
+        bad "$AGENT: control did not mutate the fallback query — its shape changed, re-check the sed"
+      else
+        eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")" "$TMP/pour-mutated.sh")" "1||${POUR_OK##*|}" \
+           "$AGENT: CONTROL: the pre-fix --type=wisp fallback leaves the current wisp unburned"
+      fi
     fi
   fi
 

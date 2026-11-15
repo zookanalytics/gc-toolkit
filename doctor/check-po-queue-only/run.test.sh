@@ -280,7 +280,7 @@ runs '{"root":"al-run1","convoy":"al-cv1","bead":"al-q6","formula":"mol-polecat-
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a queued bead something already sends is an ERROR"
 has "$OUT" "queued bead al-q4 is armed for dispatch to alpha/gc-toolkit.polecat" "an arm on a queued bead is named"
-has "$OUT" "deferred-dispatch.sh disarm al-q4" "…with the disarm"
+has "$OUT" "gctk bead disarm al-q4 --reason" "…with the disarm"
 has "$OUT" "queued bead hq-q5 is assigned to someone" "an assignee on a queued bead is named"
 has "$OUT" "queued bead al-q6 is worked by live run al-run1 (mol-polecat-work)" "a live run working a queued bead is named"
 has "$OUT" "gc-helm.sh place al-q6 --under <parent> or --standalone" "…with the placement that finishes it"
@@ -302,7 +302,7 @@ hasnt "$Q8" "disarm" "…and no disarm, which would drop the check"
 hasnt "$Q8" "gc-helm.sh place" "…and no placement"
 Q9=$(line_of "$OUT" "al-q9")
 has "$Q9" "queued bead al-q9 is armed for dispatch to alpha/gc-toolkit.polecat" "an arm on another formula keeps the placement remedy"
-has "$Q9" "deferred-dispatch.sh disarm al-q9" "…and its disarm"
+has "$Q9" "gctk bead disarm al-q9 --reason" "…and its disarm"
 has "$(line_of "$OUT" "al-q10")" "armed for its validating closer (mol-validate-close)" "the --on=<formula> spelling names the closer too"
 # bd removes a label by its exact text, so the lift names each spelling of the
 # hold the bead carries, and only those.

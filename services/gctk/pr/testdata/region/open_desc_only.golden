@@ -1,0 +1,11 @@
+## Summary
+
+Build the widget.
+Keep the gadget's tests.
+
+## Refinery handoff
+
+- Issue: `tk-a1`
+- Source branch: `polecat/tk-a1`
+- Target: `main`
+- Gates `correctness,triage` signed off pre-open at `abcdef12`. For CI status, see the PR checks.

@@ -404,7 +404,7 @@ func TestScheduled(t *testing.T) {
 		{name: "armed", h: armed, want: true},
 		{name: "routed", routedTo: "gc-toolkit/gc-toolkit.polecat", want: true},
 		{name: "assigned", assignee: "gc-toolkit/gc-toolkit.mechanik", want: true},
-		{name: "a notice owed is no arm", h: waits.Holds{Arm: &waits.Arm{Notify: "mechanik"}}, want: false},
+		{name: "an arm that names no target sends nothing", h: waits.Holds{Arm: &waits.Arm{Target: " "}}, want: false},
 		{name: "nothing", routedTo: " ", assignee: "", want: false},
 		{name: "armed and held for the Product Owner", h: armed, labels: []string{"hold:mayor"}, want: false},
 		{name: "routed and held outside the store", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"hold:external"}, want: false},

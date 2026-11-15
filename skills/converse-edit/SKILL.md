@@ -10,7 +10,7 @@ skill carries that change from the ruling to the refinery. The steps keep their
 own skills: the hold still records what the operator owes, each hand-back is
 still recorded before you post it, and the sign-off still closes the
 conversation. Each tool call starts a fresh shell, so set `CONV`,
-`CONVERSATION` and `SUBJECT` literally, from what step 1 found, at the top of
+`CONVERSATION` and `SUBJECT` literally, from the entry's output, at the top of
 every call below, and `CHANGE` and `TREE` too once the calls below have printed
 them.
 
@@ -61,7 +61,7 @@ thread first (the `converse-iterate-document` step).
 ## File the change and hold it, before the first edit
 
 First read who holds the subject: its assignee, its route and a run in flight,
-which step 4's prime showed and `"$CONV/bead-context.sh" "$SUBJECT"` shows
+which the prime showed (`converse-prep`) and `"$CONV/bead-context.sh" "$SUBJECT"` shows
 again. When a pool, a run or the refinery already holds it, tell the operator,
 and their ruling decides whether that work stops (the `work` skill, stopping
 work already sent) before you file anything. That reading informs the operator
@@ -104,15 +104,18 @@ holds the change.
 From the filing on, the subject waits on the change, so no pool takes the
 subject while you edit, and a dismiss leaves it waiting on the change. First
 withdraw the subject's arm and pool route, as the sign-off's case **New work
-carries it** does (the converse-settle step). The block prints its last line
+carries it** does (the converse-settle step). The disarm runs whatever the read
+shows, since it exits 0 once no arm remains. The block prints its last line
 only once each write has exited 0:
 
 ```bash
 WHY="the operator ruled that conversation $CONVERSATION make the change that carries it"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 ROW=$(gc bd show "$SUBJECT" --json) \
-  && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
-  && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
-  && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
+  && ROUTE=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.routed_to"] // "") | tostring else error("unread") end') \
+  && "$GCTK" bead disarm "$SUBJECT" --reason "$WHY" \
   && { [ -z "$ROUTE" ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
   && echo "$SUBJECT carries no arm and no pool route"
 ```
@@ -132,10 +135,13 @@ subject and what to check once it has, and keep its text, because the sign-off
 names it again:
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 gc bd update "$SUBJECT" --append-notes "## Close brief (held on $CHANGE, $(date -u +%Y-%m-%dT%H:%M:%SZ))
 <what the change's landing settles on the subject, and what to check once it has>" \
   && gc bd dep add "$SUBJECT" "$CHANGE" --type=blocks \
-  && "$CONV/deferred-dispatch.sh" arm "$SUBJECT" --target "$GC_RIG/gc-toolkit.polecat" --sling-arg --on --sling-arg mol-validate-close --reason "waits for $CHANGE, the change conversation $CONVERSATION makes; the validating closer checks it once that lands" \
+  && "$GCTK" bead arm "$SUBJECT" --target "$GC_RIG/gc-toolkit.polecat" --on mol-validate-close --reason "waits for $CHANGE, the change conversation $CONVERSATION makes; the validating closer checks it once that lands" \
   && gc bd label list "$SUBJECT"
 ```
 
@@ -370,7 +376,7 @@ answer it:
   conversation closes, and tell the operator what the rejection reason says.
   Their ruling decides whether the change goes to the pool (the `work` skill).
 - **The hold is missing.** `gc hook current` names another bead when this
-  session does not hold its conversation, and step 1's claim takes it again.
+  session does not hold its conversation, and the entry's claim takes it again.
   When the missing `blocks` edge onto the conversation is the only reason, add
   it as the filing does. Then run the call again.
 - **A hand-off cut short**: a write refused, or the call cut off, before the
@@ -397,7 +403,10 @@ to close a bead an open bead blocks, and the writer gives your hold way to its
 own edge onto the conversation:
 
 ```bash
-"$CONV/deferred-dispatch.sh" disarm <the subject that waits on it> --reason "the operator dropped $CHANGE in conversation $CONVERSATION" \
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead disarm <the subject that waits on it> --reason "the operator dropped $CHANGE in conversation $CONVERSATION" \
   && gc bd update "$CHANGE" --set-metadata gc.work_outcome=no-op \
   && "$CONV/bead-rehome.sh" --origin "$CHANGE" --successor "$CONVERSATION" --kind not-needed --note "<the operator's ruling, one sentence>"
 ```
@@ -421,13 +430,14 @@ through the sign-off's cases (the converse-settle step).
 - **The idle sleep** stops a session's process and never touches its disk, and
   it skips a sitting that holds its conversation, so you are not slept while you
   edit.
-- **A restart** runs your home's sync, which leaves the tree alone, and step 1's
-  restart rule re-opens the sitting at its hold. The conversation's record names
+- **A restart** runs your home's sync, which leaves the tree alone, and the
+  entry reads `interrupted` with the hold standing, which re-opens the sitting
+  at its hold (`converse-continue`). The conversation's record names
   the change: run Work's setup again, and it re-enters the tree.
 - **A sitting that must end with the change in flight**, for low context or
   because it was cut short, commits what the tree holds, records on the
-  conversation where the change stands, and hands the conversation back (the
-  prompt's low-context path). The conversation stays open, so the change stays
+  conversation where the change stands, and hands the conversation back
+  (`converse-settle`, ending early). The conversation stays open, so the change stays
   held, and the next sitting resumes it from the record. A sitting on another
   model has another home, and it enters the tree where the change records it:
 

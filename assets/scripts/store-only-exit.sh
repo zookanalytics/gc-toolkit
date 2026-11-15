@@ -34,10 +34,10 @@
 #     claimed, `gc hook current` reads it back, and the step names its run's
 #     root in gc.root_bead_id; run-lib.sh confirms that run is live and works
 #     the bead over --convoy;
-#   * deferred-dispatch.sh arms mol-validate-close on the pool this run
-#     executes on (gc.execution_routed_to, else gc.routed_to), and its
-#     reconcile pass slings it once nothing holds the bead.
-# The arm refuses a claimed or routed bead, and reconcile never slings over an
+#   * `gctk bead arm` arms mol-validate-close on the pool this run executes on
+#     (gc.execution_routed_to, else gc.routed_to), and the deferred-dispatch
+#     order slings it once nothing holds the bead.
+# The arm refuses a claimed or routed bead, and the start never slings over an
 # assignee, so --done needs the bead open, unassigned and unrouted, the shape
 # Gas City leaves the bead a graph.v2 run works.
 #
@@ -136,7 +136,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=run-lib.sh
 . "${GC_RUN_LIB:-$SCRIPT_DIR/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 1; }
-DEFERRED="${GC_DEFERRED_DISPATCH_TOOL:-$SCRIPT_DIR/deferred-dispatch.sh}"
+# The arm's verb is gctk's, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 # run-lib.sh's reader: bd's own arguments, against the store gc bd answers from.
 store_read() { gc bd "$@"; }
@@ -186,7 +189,7 @@ case "$POOL" in
     echo "$PROG: $BEAD names no rig-qualified pool its run executes on (gc.execution_routed_to and gc.routed_to gave '$POOL'), so there is no pool to arm its validating closer on; nothing was written" >&2
     exit 1 ;;
 esac
-[ -x "$DEFERRED" ] || { echo "$PROG: deferred-dispatch.sh not found at $DEFERRED; nothing was written" >&2; exit 1; }
+[ -x "$GCTK" ] || { echo "$PROG: no gctk binary at '$GCTK' to arm the validating closer with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is); nothing was written" >&2; exit 1; }
 STEP=$(gc hook current --id-only </dev/null 2>/dev/null) || STEP=""
 case "$STEP" in
   ''|*[!A-Za-z0-9._-]*)
@@ -226,7 +229,7 @@ if ! gc bd dep add "$BEAD" "$ROOT" --type=blocks </dev/null >/dev/null 2>&1; the
   exit 1
 fi
 
-if ! ARM_OUT=$("$DEFERRED" arm "$BEAD" --target "$POOL" --sling-arg --on --sling-arg "$CLOSER" \
+if ! ARM_OUT=$("$GCTK" bead arm "$BEAD" --target "$POOL" --on "$CLOSER" \
     --reason "store-only exit: its record finishes it, which $CLOSER re-checks" 2>&1 </dev/null); then
   echo "$PROG: the validating closer was not armed on $BEAD: $ARM_OUT" >&2
   exit 1

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test: a patrol chain carries only the vars its startup pour chose.
 #
-# Each patrol (witness, deacon, refinery) is a chain of --root-only wisps. The
+# Each patrol (witness, deacon) is a chain of --root-only wisps. The
 # agent prompt's startup pour mints the first wisp, and each wisp's
 # next-iteration step pours the next. bd renders a var the pour omits as the
 # formula's declared default read at that pour, and a var the pour passes as
@@ -15,15 +15,14 @@
 #       is carried; a var it leaves to the formula default is not. The prompt's
 #       step read passes the startup pour's vars with their values, so a step's
 #       text renders as the wisp runs it.
-#   (C) CHAIN. A refinery chain started under one check_set and
-#       default_merge_strategy default renders the new defaults on its next
-#       wisp once the formula defaults change, and the merge-push stamp
-#       (`check-set-normalize`) stamps the new check_set. A witness chain, whose
-#       formula declares only the var its startup pour passes, still pours and
-#       renders its next wisp. Every var the next-iteration pour names is
-#       read off the current wisp's rendered root, the surface the agent
-#       substitutes from. A CONTROL puts the forwarded vars back and shows the
-#       chain keeping the old values.
+#   (C) CHAIN. A witness chain, whose formula declares only the var its
+#       startup pour passes, still pours and renders its next wisp. Every var
+#       the next-iteration pour names is read off the current wisp's rendered
+#       root, the surface the agent substitutes from.
+#
+# The refinery's next pour is refinery-patrol.sh's, and refinery-patrol.test.sh
+# holds it to the startup pour's vars. This suite holds the refinery prompt's
+# step read to them.
 #
 # No live city, Dolt or network. A stub `gc` renders each wisp the way bd
 # renders a --root-only wisp: the formula's top-level description, with each
@@ -184,7 +183,7 @@ substitute() {
 }
 
 # --- (P) Parity of the three pour sites. ------------------------------------
-for AGENT in witness deacon refinery; do
+for AGENT in witness deacon; do
   TITLE="mol-$AGENT-patrol"
   PROMPT="$ROOT/agents/$AGENT/prompt.template.md"
   TOML="$ROOT/formulas/$TITLE.toml"
@@ -211,6 +210,18 @@ for AGENT in witness deacon refinery; do
   eq "$(printf '%s\n' "$READ" | var_args)" "$(printf '%s\n' "$STARTUP" | var_args)" \
     "$AGENT: the step read passes the startup pour's vars and values"
 done
+
+# The loop leaves the refinery out, since its next pour is refinery-patrol.sh's,
+# but its prompt's step read still passes the startup pour's vars and values.
+echo
+echo "== refinery: step read =="
+PROMPT="$ROOT/agents/refinery/prompt.template.md"
+STARTUP="$(pour_line mol-refinery-patrol < "$PROMPT")"
+READ="$(read_line mol-refinery-patrol < "$PROMPT")"
+eq "$(printf '%s\n' "$STARTUP" | grep -c .)" "1" "refinery: the prompt carries exactly one startup pour"
+eq "$(printf '%s\n' "$READ" | grep -c .)" "1" "refinery: the prompt carries exactly one step read"
+eq "$(printf '%s\n' "$READ" | var_args)" "$(printf '%s\n' "$STARTUP" | var_args)" \
+  "refinery: the step read passes the startup pour's vars and values"
 
 # --- (C) A chain picks up a changed default on its next wisp. ---------------
 # chain <agent> <var=old=new>... — start a chain under the old defaults with
@@ -251,40 +262,6 @@ chain() {
     && ok "$agent: the next-iteration pour minted the next wisp" \
     || bad "$agent: the next-iteration pour minted nothing"
 }
-
-echo
-echo "== refinery: chain =="
-chain refinery 'check_set=codex=correctness,triage,pm' 'default_merge_strategy=direct=pr'
-eq "$(root_value "$NEXT" check_set)" "correctness,triage,pm" \
-  "refinery: REGRESSION: the next wisp renders the changed check_set default"
-eq "$(root_value "$NEXT" default_merge_strategy)" "pr" \
-  "refinery: REGRESSION: the next wisp renders the changed default_merge_strategy default"
-
-# The stamp reads the wisp's check_set through the line that precedes the
-# normalize block; run that line and the block as the next wisp's merge-push.
-LIVE="$TMP/formulas/mol-refinery-patrol.toml"
-STAMP_SRC="$(awk '/# >>> check-set-normalize$/ {print prev; exit} {prev = $0}' "$LIVE")"
-eq "$STAMP_SRC" 'CHECK_SET="{{check_set}}"' "refinery: the stamp reads the wisp's check_set var"
-{ printf '%s\n' "$STAMP_SRC"; extract check-set-normalize "$LIVE"; printf '%s\n' 'printf "%s\n" "$CHECK_SET"'; } > "$TMP/stamp.sh"
-substitute "$TMP/stamp.sh" "$NEXT" "$LIVE" >/dev/null
-eq "$(bash "$TMP/stamp.sh")" "correctness,triage,pm" \
-  "refinery: REGRESSION: the next wisp stamps the changed check_set on its anchors"
-
-# CONTROL: put the policy vars back on the next-iteration pour. The chain then
-# carries the first wisp's values past the default change.
-sed '/gc bd mol wisp mol-refinery-patrol /s/ --json / --var default_merge_strategy={{default_merge_strategy}} --var check_set={{check_set}} --json /' \
-  "$LIVE" > "$TMP/control.toml"
-if cmp -s "$LIVE" "$TMP/control.toml"; then
-  bad "refinery: control did not re-add the forwarded vars — the pour line changed shape, re-check the sed"
-else
-  extract patrol-wisp-pour "$TMP/control.toml" > "$TMP/control.sh"
-  substitute "$TMP/control.sh" "$FIRST" "$LIVE" >/dev/null
-  CONTROL="$(run_sh "$TMP/control.sh" "$FIRST")"
-  eq "$(root_value "$CONTROL" check_set)" "codex" \
-    "refinery: CONTROL: forwarding check_set keeps the first wisp's codex past the default change"
-  eq "$(root_value "$CONTROL" default_merge_strategy)" "direct" \
-    "refinery: CONTROL: forwarding default_merge_strategy keeps the first wisp's value"
-fi
 
 echo
 echo "== witness: chain =="

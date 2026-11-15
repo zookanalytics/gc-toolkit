@@ -109,7 +109,7 @@ defect only on a line some test executes.
   `[ … ] && x=1` fails there.
 - **Unreadable is not empty.** A read whose emptiness decides anything checks
   its exit status, and an unreadable answer holds or fails closed
-  (`assets/scripts/deferred-dispatch.sh`, `bd_list` in `assets/scripts/bd-lib.sh`).
+  (`doctor/check-armed-dispatch-owed/run.sh`, `bd_list` in `assets/scripts/bd-lib.sh`).
   A `gc bd list … | jq …` without pipefail reads a store that did not answer as
   an empty list. `gc bd … --json` can carry a raw control byte inside a note,
   which makes jq refuse the whole payload, so store text goes through the
@@ -121,7 +121,7 @@ defect only on a line some test executes.
   behind a large here-string, so the loop runs zero times and the caller
   reports nothing found, and no detector flags the shape. A helper whose side effects the caller needs answers in a
   variable instead of on stdout, as `mktemp_tracked` in
-  `assets/scripts/deferred-dispatch.sh` answers in `REPLY`.
+  `assets/scripts/queue-priority.sh` answers in `REPLY`.
 - **bd metadata in jq.** bd infers a scalar's type at `--set-metadata`, so
   `k=1` stores a number and `k=true` a boolean, and a comparison with a string
   takes `tostring` first. `id-read-unguarded.sh` flags `.id // .[0].id` on a bd

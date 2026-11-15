@@ -10,7 +10,7 @@ acts on it, where upstream's docs do not already say it, or say it wrongly.
 Each section names its evidence and the date it was read. Where the city's
 gascity fork behaves differently from upstream main, the section says which
 is which. gc-toolkit's own dispatch conventions — withholding a sling until
-its blockers close, the notice a named-agent assignment owes, the load-context
+its blockers close, the form a named agent takes its work in, the load-context
 guard in its work formula — are [deferred-dispatch.md](../deferred-dispatch.md)
 and [pack-authoring.md](../pack-authoring.md).
 
@@ -204,8 +204,8 @@ differently from a plain sling:
   launch lock the lookup and the pour run under is keyed by the convoy. A
   formula that works one bead, such as `mol-polecat-work`, takes the one bead
   its input convoy tracks and refuses any other count. So the refinery's
-  rejection pours no convoy: it rebuilds a rejected graduation on the
-  graduation's rebuild child (`assets/scripts/rejection-repool.sh`).
+  requeue pours no convoy: it sends a rejected graduation back as a rework
+  child on the graduation's branch (`assets/scripts/refinery-requeue.sh`).
 - **A poured node withholds delivery** in `gc.deferred_routed_to`,
   `gc.deferred_execution_routed_to` and, for a node with an assignee,
   `gc.deferred_assignee`, each promoted into its live key when the node

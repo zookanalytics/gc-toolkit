@@ -98,11 +98,14 @@ S
 # keeps. A read naming a bead the suite gives a dep-list fixture starts the
 # store: that bead, open and carrying the fixture's edges, each far bead the
 # fixture names, and a bare open row for any other bead the read names. Every
-# later read of the same call answers from it. A-PROBEDEAD and A-PROBEJUNK fail
-# the read, as they fail the dep list.
+# later read answers from it, and a bead it has no row for gets a bare open one.
+# A-PROBEDEAD and A-PROBEJUNK fail every read but a disarm's, which carries
+# HOLDS_DISARM, as they fail the dep list, so their blocker probe fails alone.
 if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
   shift
-  case " $* " in *A-PROBEDEAD*|*A-PROBEJUNK*) echo "gc bd: simulated read failure" >&2; exit 1 ;; esac
+  if [ -z "${HOLDS_DISARM:-}" ]; then
+    case " $* " in *A-PROBEDEAD*|*A-PROBEJUNK*) echo "gc bd: simulated read failure" >&2; exit 1 ;; esac
+  fi
   hs="$FAKE_DEPLISTS/.holds-store.json"
   asked=$(printf '%s\n' "$@" | awk 'p { print; exit } $0 == "--id" { p = 1 }')
   fixtures=""
@@ -115,6 +118,10 @@ if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
       done
       jq -nc --arg ids "$asked" '[ $ids | split(",")[] | select(. != "") | {id: ., status: "open"} ]'
     } | jq -s -c 'add // [] | unique_by(.id)' > "$hs"
+  else
+    jq -c --arg ids "$asked" '. as $rows
+      | $rows + [ $ids | split(",")[] | select(. != "") | select(. as $i | $rows | any(.id == $i) | not) | {id: ., status: "open"} ]' \
+      "$hs" > "$hs.n" && mv "$hs.n" "$hs"
   fi
   HOLDS_STORE="$hs" exec "${HOLDS_STUB:?}" answer "$@"
 fi
@@ -226,6 +233,7 @@ case "$1 ${2:-}" in
     else printf '{"children":[]}\n'; fi ;;
   "bd update")
     printf '%s\n' "$*" >> "$FAKE_UPDATES"
+    printf 'update %s\n' "$3" >> "${FAKE_ORDER:-/dev/null}"
     # A store that rejects the write. NOPIN stands for every reason a write on
     # a bead fails to land, and FAKE_UPDATE_RC refuses every update.
     case "$3" in *NOPIN*) exit 1 ;; esac
@@ -361,8 +369,21 @@ mkdir -p "$TMP/rig-a/.beads" "$TMP/deplists"
 # What holds a bead is the answer of gctk bead holds, built from this checkout
 # and run over the dep-list fixtures below.
 export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
-GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
-export GCTK_BIN
+GCTK_BUILT="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+# The arm's verb runs that build too. Each disarm is logged in FAKE_ORDER among
+# the writes it comes before, FAKE_DISARM_RC fails it, and it runs with
+# HOLDS_DISARM set.
+cat > "$TMP/bin/gctk-logged" <<GCTKW
+#!/usr/bin/env bash
+if [ "\${1:-} \${2:-}" = "bead disarm" ]; then
+  printf 'disarm %s\n' "\${3:-}" >> "\${FAKE_ORDER:-/dev/null}"
+  [ -z "\${FAKE_DISARM_RC:-}" ] || { echo "gctk bead disarm: the arm on \${3:-} was not cleared: simulated" >&2; exit "\$FAKE_DISARM_RC"; }
+  HOLDS_DISARM=1 exec "$GCTK_BUILT" "\$@"
+fi
+exec "$GCTK_BUILT" "\$@"
+GCTKW
+chmod +x "$TMP/bin/gctk-logged"
+export GCTK_BIN="$TMP/bin/gctk-logged"
 : > "$TMP/convoy-calls"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
@@ -833,8 +854,10 @@ grep -q "gc.routed_to=$POOL" "$TMP/updates" \
   || ok "(ROUTE) …and no update writes the pool route"
 eq "$(cat "$TMP/slings")" "sling $POOL A-PARKED --no-formula --no-convoy" \
    "(ROUTE) the pool is reached through gc sling, raw: no formula poured, no convoy filed"
-eq "$(cat "$TMP/order")" "cancel root-PARKED
-sling A-PARKED" "(ROUTE) …once the run beneath the bead has ended"
+eq "$(cat "$TMP/order")" "disarm A-PARKED
+update A-PARKED
+cancel root-PARKED
+sling A-PARKED" "(ROUTE) …once the run beneath the bead has ended, after the release write, which follows the disarm"
 case "$RLINE" in
   *"--status=open"*"--assignee="*) ok "(ROUTE) …in the same write that reopens and unassigns" ;;
   *) bad "(ROUTE) the release halves split off the route write: ${RLINE:-<none>}" ;;
@@ -941,6 +964,39 @@ eq "$(wc -l < "$TMP/deps" | tr -d ' ')|$(wc -l < "$FAKE_CANCELS" | tr -d ' ')" "
 URC=0
 FAKE_UPDATE_RC=1 sh "$SCRIPT" takeaway A-PARKED "refused" --release --route "$POOL" >/dev/null 2>&1 || URC=$?
 eq "$URC|$(wc -l < "$TMP/slings" | tr -d ' ')" "4|0" "(REFUSED) …and a --route whose release was refused is never slung"
+
+# ── takeaway --release removes the arm first ─────────────────────────────────
+#   (DISARM)      the release's first write is the disarm, carrying the headline
+#                 as its reason; a bare headline removes no arm
+#   (DISARMFAIL)  a disarm that does not land fails the verb with nothing else
+#                 written: no headline, no edge, no run ended and no sling
+: > "$TMP/updates"; : > "$TMP/order"; : > "$FAKE_CANCELS"; : > "$TMP/slings"
+DRC=0
+sh "$SCRIPT" takeaway A-PARKED "stopped — the work moved" --release --no-wait >/dev/null 2>"$TMP/derr" || DRC=$?
+eq "$DRC" "0" "(DISARM) a release exits 0"
+eq "$(head -n1 "$TMP/order")" "disarm A-PARKED" "(DISARM) …and its first write is the disarm"
+: > "$TMP/order"
+sh "$SCRIPT" takeaway A-PARKED "a headline alone" >/dev/null 2>&1 || true
+grep -q '^disarm' "$TMP/order" \
+  && bad "(DISARM) a bare headline removed an arm: $(cat "$TMP/order")" \
+  || ok "(DISARM) a bare headline removes no arm"
+: > "$TMP/updates"; : > "$TMP/order"; : > "$FAKE_CANCELS"; : > "$TMP/slings"; : > "$TMP/deps"
+DRC=0
+FAKE_DISARM_RC=1 sh "$SCRIPT" takeaway A-PARKED "parked on the child" --release \
+   --waiting-on A-BLOCKED >"$TMP/dout" 2>"$TMP/derr" || DRC=$?
+eq "$DRC" "4" "(DISARMFAIL) a disarm that does not land is a verb runtime failure"
+grep -q 'that disarm did not land' "$TMP/derr" \
+  && ok "(DISARMFAIL) …and says the disarm did not land" \
+  || bad "(DISARMFAIL) the failed disarm was silent (stderr: $(cat "$TMP/derr"))"
+grep -q 'the arm on A-PARKED was not cleared' "$TMP/derr" \
+  && ok "(DISARMFAIL) …with gctk's reason" \
+  || bad "(DISARMFAIL) gctk's reason was lost (stderr: $(cat "$TMP/derr"))"
+eq "$(grep -c . "$TMP/updates" || true)|$(grep -c . "$TMP/deps" || true)|$(grep -c . "$FAKE_CANCELS" || true)" "0|0|0" \
+   "(DISARMFAIL) …with no headline, no edge and no run ended"
+DRC=0
+FAKE_DISARM_RC=1 sh "$SCRIPT" takeaway A-PARKED "routed on" --release --route "$POOL" >/dev/null 2>&1 || DRC=$?
+eq "$DRC|$(grep -c . "$TMP/updates" || true)|$(grep -c . "$TMP/slings" || true)" "4|0|0" \
+   "(DISARMFAIL) …and a --route whose disarm did not land is never slung"
 
 # ── takeaway --waiting-on in another store: refused before anything is written ─
 # An id's prefix names its store, and bd stores an edge onto another store's
@@ -1748,6 +1804,18 @@ live_store_intact() {
   exit 1
 }
 
+# The arm's verb over this store: no bead here carries an arm, so a disarm
+# writes nothing, and it logs where it ran among the store's writes. gctk's
+# other reads do not answer here, as for a store gctk cannot read.
+cat > "$LIVE/bin/gctk" <<'GCTKL'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  "bead disarm") printf 'disarm %s\n' "${3:-}" >> "$LIVE_LOG"; echo "${3:-} carries no arm, so nothing was written" ;;
+  *) exit 1 ;;
+esac
+GCTKL
+chmod +x "$LIVE/bin/gctk"
+SAVED_GCTK_BIN="$GCTK_BIN"; export GCTK_BIN="$LIVE/bin/gctk"
 SAVED_PATH="$PATH"; PATH="$LIVE/bin:$PATH"
 SAVED_CANCEL_TOOL="$GC_RUN_CANCEL_TOOL"; unset GC_RUN_CANCEL_TOOL
 export GC_CITY_PATH="$LIVE/town" GC_HOME="$LIVE/gchome"; mkdir -p "$GC_HOME"
@@ -1780,6 +1848,8 @@ eq "$(field root-LIVE gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
 
 # The disposition itself still lands whole.
 eq "$(field A-LIVE status)" "open"  "(LIVESTEP) the anchor is released"
+eq "$(grep -m1 -E '^(disarm|update|dep|sling|nudge) ' "$LIVE_LOG")" "disarm A-LIVE" \
+   "(LIVESTEP) …after its arm is removed, the release's first write"
 eq "$(field A-LIVE assignee)" ""    "(LIVESTEP) …and unassigned"
 eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 
@@ -1897,7 +1967,7 @@ eq "$GRC" "1" "(DISKGUARD) the flag aborts the LIVE block, not a verdict on stal
 grep -q 'disk-pressure' <<< "$GOUT" \
   && ok "(DISKGUARD) …and the abort names disk pressure, not a gc-helm.sh fault" \
   || bad "(DISKGUARD) the abort is unexplained (out: $GOUT)"
-PATH="$SAVED_PATH"; export GC_RUN_CANCEL_TOOL="$SAVED_CANCEL_TOOL"; unset GC_CITY_PATH GC_HOME
+PATH="$SAVED_PATH"; export GC_RUN_CANCEL_TOOL="$SAVED_CANCEL_TOOL" GCTK_BIN="$SAVED_GCTK_BIN"; unset GC_CITY_PATH GC_HOME
 
 # ── the rig-enumeration helper restores the caller's trap table ──────────────
 # A trap is process-global: one installed inside a helper and left there

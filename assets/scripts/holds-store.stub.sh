@@ -10,10 +10,13 @@
 #       environment. A suite exports that path as GCTK_BIN, and GC_NO_API=1, so
 #       the script under test runs the build and every read stays on `gc bd`.
 #       The suite's own `gc` stub sends a call made with HOLDS_STUB_READ set to
-#       `answer`, since only gctk's reads carry it. The wrapper also answers the
+#       `answer`, since only gctk's calls carry it. The wrapper also answers the
 #       `gc rig list --json` an unpinned read routes by, with $HOLDS_RIGS when
-#       set and else no store, so such a read stays on the store `where` names;
-#       every other call goes to the suite's `gc`. Exits 1 with the reason when
+#       set and else no store, so such a read stays on the store `where` names,
+#       and `gc config show --json`, with $HOLDS_CONFIG when set and else a
+#       config that names no agent; every other call goes to the suite's `gc`.
+#       It names a scratch city beside the build as gctk's city, so the arm's
+#       dispatch locks never land in a live city. Exits 1 with the reason when
 #       there is no Go toolchain or the build fails.
 #
 #   holds-store.stub.sh answer [--db <path>] <verb> [<args>...]
@@ -25,10 +28,18 @@
 #       for one onto a bead in another store, as does an edge onto an id no row
 #       has. A closed row that names no closed_at carries one, as every bead bd
 #       closes does. The verbs are the store adapter's reads:
-#         list   the rows --id, --has-metadata-key, --metadata-field, --parent
-#                and --all select, each edge in the listing shape, every edge
-#                kept; --parent selects the rows whose own parent-child edge
-#                names it
+#         list   the rows --id, --has-metadata-key, --metadata-field, --parent,
+#                --title-contains and --all select, each edge in the listing
+#                shape, every edge kept; --parent selects the rows whose own
+#                parent-child edge names it
+#         ready  the open rows --has-metadata-key selects that `blocked` does
+#                not hold, unassigned under --unassigned, of no type an
+#                --exclude-type names and with no label an --exclude-label
+#                names, in the listing shape; $HOLDS_READY, when set, is
+#                answered verbatim
+#         update the write: each --set-metadata k=v, --unset-metadata k,
+#                --status and --append-notes applied to the row in
+#                $HOLDS_STORE, which a bead it does not hold refuses
 #         blocked  the store's blocked listing, by bd's rule over the rows: a
 #                live bead (neither closed nor pinned) is blocked by a blocks or
 #                conditional-blocks edge onto a live bead in this store, by a
@@ -65,12 +76,17 @@ if [ "${1:-} ${2:-}" = "rig list" ]; then
   if [ -n "${HOLDS_RIGS:-}" ]; then printf '%s\n' "$HOLDS_RIGS"; else printf '%s\n' '{"rigs":[]}'; fi
   exit 0
 fi
+if [ "${1:-} ${2:-}" = "config show" ]; then
+  if [ -n "${HOLDS_CONFIG:-}" ]; then printf '%s\n' "$HOLDS_CONFIG"; else printf '%s\n' '{"ok":true,"config":{"Agents":[]}}'; fi
+  exit 0
+fi
 PATH="$HOLDS_PATH"; export PATH
 exec "$HOLDS_NEXT_GC" "$@"
 SHIM
     chmod +x "$dir/shim/gc" || exit 1
-    printf '#!/bin/sh\nHOLDS_NEXT_GC=$(command -v gc) || HOLDS_NEXT_GC=/no-gc-on-path\nHOLDS_PATH="$PATH"\nexport HOLDS_NEXT_GC HOLDS_PATH\nPATH="%s:$PATH" HOLDS_STUB_READ=1 exec %s "$@"\n' \
-      "$dir/shim" "$dir/gctk-real" > "$dir/gctk" && chmod +x "$dir/gctk" || exit 1
+    mkdir -p "$dir/city/.gc" || exit 1
+    printf '#!/bin/sh\nHOLDS_NEXT_GC=$(command -v gc) || HOLDS_NEXT_GC=/no-gc-on-path\nHOLDS_PATH="$PATH"\nexport HOLDS_NEXT_GC HOLDS_PATH\nPATH="%s:$PATH" HOLDS_STUB_READ=1 GC_CITY_PATH="%s" GC_CITY= GC_CITY_ROOT= exec %s "$@"\n' \
+      "$dir/shim" "$dir/city" "$dir/gctk-real" > "$dir/gctk" && chmod +x "$dir/gctk" || exit 1
     printf '%s\n' "$dir/gctk"
     exit 0 ;;
   answer) shift ;;
@@ -134,9 +150,11 @@ EDGES='
 
 case "$verb" in
   list)
-    ids=""; key=""; field=""; parent=""; all=0
+    ids=""; key=""; field=""; parent=""; title=""; all=0
     while [ $# -gt 0 ]; do
       case "$1" in
+        --title-contains) shift; title="${1:-}" ;;
+        --title-contains=*) title="${1#--title-contains=}" ;;
         --id) shift; ids="${1:-}" ;;
         --id=*) ids="${1#--id=}" ;;
         --has-metadata-key) shift; key="${1:-}" ;;
@@ -149,7 +167,7 @@ case "$verb" in
       esac
       shift || true
     done
-    jq -c --rawfile d "$deps" --arg ids "$ids" --arg key "$key" --arg field "$field" --arg parent "$parent" --argjson all "$all" "$EDGES"'
+    jq -c --rawfile d "$deps" --arg ids "$ids" --arg key "$key" --arg field "$field" --arg parent "$parent" --arg title "$title" --argjson all "$all" "$EDGES"'
       ($ids | if . == "" then [] else split(",") end) as $want
       | ($field | if . == "" then null else (index("=")) as $i | {k: .[:$i], v: .[$i + 1:]} end) as $f
       | rows($d)
@@ -158,6 +176,7 @@ case "$verb" in
           | select($key == "" or ((.metadata // {}) | has($key)))
           | select($f == null or ((((.metadata // {})[$f.k]) // "") | tostring) == $f.v)
           | select($parent == "" or any(._edges[]; .type == "parent-child" and .id == $parent))
+          | select($title == "" or (((.title // "") | tostring) | contains($title)))
           | select($all == 1 or ((.status // "open") != "closed"))
           | .id as $self
           | .dependencies = [ ._edges[] | {issue_id: $self, depends_on_id: .id, type} ]
@@ -177,6 +196,58 @@ case "$verb" in
     ;;
   where)
     jq -nc --arg p "${HOLDS_WHERE:-/stub/.beads}" '{path: $p, prefix: "stub", schema_version: 1}'
+    ;;
+  ready)
+    if [ -n "${HOLDS_READY:-}" ]; then printf '%s\n' "$HOLDS_READY"; exit 0; fi
+    key=""; unassigned=0; types="[]"; labels="[]"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --has-metadata-key) shift; key="${1:-}" ;;
+        --has-metadata-key=*) key="${1#--has-metadata-key=}" ;;
+        --unassigned) unassigned=1 ;;
+        --exclude-type) shift; types=$(jq -c --arg t "${1:-}" '. + [$t]' <<< "$types") ;;
+        --exclude-type=*) types=$(jq -c --arg t "${1#--exclude-type=}" '. + [$t]' <<< "$types") ;;
+        --exclude-label) shift; labels=$(jq -c --arg l "${1:-}" '. + [$l]' <<< "$labels") ;;
+        --exclude-label=*) labels=$(jq -c --arg l "${1#--exclude-label=}" '. + [$l]' <<< "$labels") ;;
+      esac
+      shift || true
+    done
+    jq -c --rawfile d "$deps" --arg key "$key" --argjson un "$unassigned" --argjson types "$types" --argjson labels "$labels" "$EDGES"'
+      rows($d) | (blocked_map) as $held
+      | [ .[]
+          | select(((.status // "open") | ascii_downcase) == "open")
+          | select($held[.id] == null)
+          | select($key == "" or ((.metadata // {}) | has($key)))
+          | select($un == 0 or (((.assignee // "") | tostring) == ""))
+          | select(((.issue_type // "") | tostring) as $t | ($types | index($t)) == null)
+          | select(all((.labels // [])[]?; . as $l | ($labels | index($l)) == null))
+          | .id as $self
+          | .dependencies = [ ._edges[] | {issue_id: $self, depends_on_id: .id, type} ]
+          | del(._edges) ]' "$store"
+    ;;
+  update)
+    id="${1:-}"; shift || true
+    tmp="$store.update.$$"
+    jq -e --arg id "$id" 'any(.[]; .id == $id)' "$store" >/dev/null 2>&1 || { echo "gc bd: no issue found matching $id" >&2; exit 1; }
+    sets="[]"; unsets="[]"; notes=""; status=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --set-metadata) shift; sets=$(jq -c --arg kv "${1:-}" '. + [$kv]' <<< "$sets") ;;
+        --unset-metadata) shift; unsets=$(jq -c --arg k "${1:-}" '. + [$k]' <<< "$unsets") ;;
+        --append-notes) shift; notes="${1:-}" ;;
+        --status) shift; status="${1:-}" ;;
+      esac
+      shift || true
+    done
+    jq -c --arg id "$id" --argjson sets "$sets" --argjson unsets "$unsets" --arg n "$notes" --arg st "$status" '
+      map(if .id != $id then . else
+            reduce $sets[] as $kv (.; ($kv | index("=")) as $i | .metadata[$kv[:$i]] = $kv[$i + 1:])
+            | reduce $unsets[] as $k (.; .metadata |= ((. // {}) | del(.[$k])))
+            | (if $n == "" then . else .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) end)
+            | (if $st == "" then . else .status = $st end)
+          end)' "$store" > "$tmp" || { rm -f "$tmp"; exit 1; }
+    mv "$tmp" "$store" || exit 1
+    echo "updated $id"
     ;;
   *) echo "holds-store.stub.sh: gctk reads no '$verb'" >&2; exit 2 ;;
 esac

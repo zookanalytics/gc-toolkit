@@ -22,8 +22,8 @@
 # doctor/check-blocked-work-armed/run.test.sh,
 # doctor/check-step-terminal/run.test.sh,
 # doctor/check-armed-dispatch-owed/run.test.sh,
-# doctor/check-po-queue-only/run.test.sh, deferred-dispatch.test.sh,
-# liveness-classify.test.sh, liveness-recheck.test.sh).
+# doctor/check-po-queue-only/run.test.sh, liveness-classify.test.sh,
+# liveness-recheck.test.sh).
 # Reads the repo only; no gc, no city, no network.
 set -uo pipefail
 
@@ -131,13 +131,11 @@ for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/che
          assets/scripts/gc-helm.sh; do
     sources "$r"; asks "$r" has_dispatch_path
 done
-for r in assets/scripts/deferred-dispatch.sh doctor/check-armed-dispatch-owed/run.sh \
-         assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck.sh \
+for r in assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck.sh \
          assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
     sources "$r"
 done
-for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh assets/scripts/deferred-dispatch.sh \
-         doctor/check-armed-dispatch-owed/run.sh assets/scripts/liveness-classify.sh \
+for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh assets/scripts/liveness-classify.sh \
          assets/scripts/liveness-recheck.sh assets/scripts/gc-helm.sh doctor/check-po-queue-only/run.sh; do
     asks "$r" has_dispatch_hold
 done

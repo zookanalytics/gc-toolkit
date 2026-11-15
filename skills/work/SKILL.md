@@ -189,9 +189,9 @@ polecat pool is `mol-polecat-work`.
   the bead itself, for work whose method the bead carries. It needs both flags,
   because without them the sling pours the pool's default formula and files a
   convoy for the bead, and it is never a `gc.routed_to` written by hand. Arming
-  the bead (`deferred-dispatch.sh arm`) has the deferred-dispatch order sling it
-  once nothing holds it. Send it one way, and disarm an armed bead before you
-  send it another. Any two start two workers on one branch.
+  the bead (`gctk bead arm`, the waits skill) has the deferred-dispatch order
+  sling it once nothing holds it. Send it one way, and disarm an armed bead
+  before you send it another. Any two start two workers on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
   blocker closes, and it ends the run on a bead that carries a `merge_result`
@@ -218,15 +218,43 @@ Sign off by the case that fits (the converse-settle step):
 
 ## Send a bead to a named agent
 
-The mechanik, deacon, witness, refinery and keeper are named agents. Assign the
-bead to the agent by the qualified name `gc agent list` prints, then notify it,
-because an idle named agent acts on the bead only once notified
-(`docs/deferred-dispatch.md`):
+The mechanik, deacon, witness, refinery and keeper are named agents. Address
+one by the qualified name `gc agent list` prints, in the form it finds its work
+by (`docs/deferred-dispatch.md`). A bead is ready when bd reports it so, which
+this answers:
+`gc bd --rig <rig> ready --brief --json --limit 0 | jq -e --arg b <bead> 'any(.[]; .id == $b)'`.
 
-```bash
-gc bd update <bead> --assignee <qualified-name> \
-  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>
-```
+- **The mechanik claims through its hook**, so hand the bead over with Gas
+  City's route. A route alone gives a running agent no turn, so nudge the
+  agent too when the bead is ready:
+
+  ```bash
+  gc sling <qualified-name> <bead> --no-formula --no-convoy \
+    && gc session nudge <qualified-name> "<bead> is routed to you and ready"
+  ```
+
+  A bead that still waits on a blocker takes the route alone, and Gas City
+  nudges the agent when the blocker closes.
+- **The refinery and the keeper list the beads assigned to them**, which a
+  route never reaches, so assign the bead, and nudge the agent when the bead
+  is ready:
+
+  ```bash
+  gc bd update <bead> --assignee <qualified-name> \
+    && gc session nudge <qualified-name> "<bead> is assigned to you and ready"
+  ```
+
+  A bead that still waits takes the assignee alone, and Gas City nudges the
+  agent when its blocker closes. The refinery takes an integration effort's
+  landing bead and its bring-current hand-off, which `integration-effort.md`
+  files.
+- **The deacon and the witness patrol**, and each one's hook offers only its
+  patrol's own wisp, so neither takes a bead. Send what one of them must act
+  on as mail, which its patrol reads every cycle:
+
+  ```bash
+  gc mail send <qualified-name> -s "<what it must do>" -m "<the bead, and what to do about it>"
+  ```
 
 ## Stand up an integration effort
 
@@ -302,10 +330,11 @@ name the formula and why you chose it.
 - **Stop it.**
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<why it stops>" --release --no-wait`
   stops any workflow running on the bead and leaves the bead open, unassigned
-  and routed to no pool, with that sentence as its headline. It leaves a
-  deferred-dispatch arm in place, and an armed bead is sent again once nothing
-  holds it, so disarm it first (the waits skill). When the bead now waits on
-  something, pass `--waiting-on <bead>` in place of `--no-wait`.
+  and routed to no pool, with that sentence as its headline. Its first write
+  removes the bead's deferred-dispatch arm, so the order does not send the bead
+  again once nothing holds it, and a disarm that does not land stops the
+  release with nothing else written. When the bead now waits on something, pass
+  `--waiting-on <bead>` in place of `--no-wait`.
   A claim a live session holds is not taken from it: the release writes the
   headline and any wait, nudges the holder to stop and give the bead back, and
   exits 4 naming the holder. If the holder dies before it gives the bead back,
@@ -317,9 +346,11 @@ name the formula and why you chose it.
   `--no-wait`.
 - **Send it elsewhere.** Name where it goes in the same call:
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
-  For a named agent, pass `--assign <named-agent>` in place of
-  `--route <rig>/<pool>`, then notify it:
-  `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <named-agent>`.
+  For the refinery or the keeper, pass `--assign <named-agent>` in place of
+  `--route <rig>/<pool>`, which writes the assignee in the release, then nudge
+  it once the bead is ready, as Send a bead to a named agent says. For the
+  mechanik, the deacon or the witness, release the bead with neither and send
+  it as that section says.
 - **Withdraw a recommendation** the bead should not take, keeping the bead open
   for discussion:
   `SUBJECT=<bead> CONVERSATION=<conversation> "$(gc <binding> scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
@@ -371,7 +402,13 @@ Before you run it:
   skill), which closes the PR too: a bare `gc bd close` on a bead whose
   `merge_result` is not a closed state leaves its PR unlanded.
 - Disarm an armed bead, so that a wait cleared before the close cannot send
-  it: `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
+  it:
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead disarm <bead> --reason "<why>"
+```
 - In a sitting, close a subject only on the operator's agreement, and only
   after the sign-off, which answers the gates the ruling settles.
 

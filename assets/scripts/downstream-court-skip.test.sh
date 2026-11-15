@@ -15,7 +15,8 @@
 # set before the liveness loop is what stops both the re-dispatch and the question.
 #
 # Work in any of these states is not the pool's to recover:
-#   * an in-flight PR      — merge_result is pre_open_gate or pull_request;
+#   * an in-flight PR      — merge_result is pre_open_gate or pull_request, or
+#                            pull_request_pending or pull_request_head_changed;
 #   * a human route        — gc.routed_to=human;
 #   * a conversation       — a task assigned to `human` or to the alias of its
 #                            sitting, which names the task's own id
@@ -98,6 +99,8 @@ pipeline() {
 # --- Each state, dropped or kept. --------------------------------------------
 # d1  merge_result pre_open_gate           -> DROP (in-flight, pre-open codex gate)
 # d2  merge_result pull_request            -> DROP (in-flight, open PR)
+# d5  merge_result pull_request_pending    -> DROP (in-flight, open PR on the pending record)
+# d6  merge_result pull_request_head_changed -> DROP (in-flight, its new head with the refinery)
 # d4  gc.routed_to human                   -> DROP (a person owns it)
 # k1  merge_result merged                  -> KEEP (landed; recovery's merge check closes it)
 # k2  merge_result empty                   -> KEEP (no PR — the pool's to recover)
@@ -107,13 +110,15 @@ FIX='[
   {"id":"d1","metadata":{"merge_result":"pre_open_gate"}},
   {"id":"d2","metadata":{"merge_result":"pull_request"}},
   {"id":"d4","metadata":{"gc.routed_to":"human"}},
+  {"id":"d5","metadata":{"merge_result":"pull_request_pending"}},
+  {"id":"d6","metadata":{"merge_result":"pull_request_head_changed"}},
   {"id":"k1","metadata":{"merge_result":"merged"}},
   {"id":"k2","metadata":{"merge_result":""}},
   {"id":"k3","assignee":"gc-toolkit/gc-toolkit.rictus"},
   {"id":"k4","metadata":{"pr.machine":"progressing@abc123@2026-09-05T00:00:00Z"}}
 ]'
 eq "$(keep "$FIX")" "k1,k2,k3,k4" \
-   "drops in-flight PR (pre_open_gate/pull_request) and human gate; keeps merged/empty/absent and a stale progressing stamp"
+   "drops in-flight PR (pre_open_gate/pull_request, and the pending record's two values) and human gate; keeps merged/empty/absent and a stale progressing stamp"
 
 # pr.machine is not consulted now, whatever its state segment: only an anchor
 # merge_result or a human gate drops a bead. A `progressing` stamp with no anchor

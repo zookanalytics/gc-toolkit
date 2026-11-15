@@ -1,0 +1,11 @@
+<!-- gc:pr-summary -->
+## Summary
+
+New summary.
+
+## Refinery handoff
+
+- Issue: `tk-a1`
+- Head `abcdef12`; gates `correctness`; see the PR checks for current status.
+<!-- /gc:pr-summary -->
+Plain paragraph, not a bullet.

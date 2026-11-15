@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # test-harness.sh — shared stub fixtures for the merge-cadence test suites.
 # Sourced by *.test.sh (never run as a suite itself). Provides stub gc/gh/git
-# binaries over a JSON bead store plus assertion helpers, following the
-# deferred-dispatch.test.sh pattern: stubs log invocations and serve canned
-# JSON; tests assert on the logs, the store, and exit codes.
+# binaries over a JSON bead store plus assertion helpers: stubs log invocations
+# and serve canned JSON, and tests assert on the logs, the store, and exit
+# codes.
 # Contract: caller sets TMP (tempdir); harness_init installs stubs on PATH and
 # exports STUB_* env the stubs read, and GC_QUEUE_PRIORITY_TOOL, this tree's
 # priority writer over the stub store. No live city, network, gc, bd or gh: the
@@ -60,8 +60,22 @@ harness_init() {
   # suites run from a tree INSIDE a live city, so left alone a suite would test
   # whichever binary that city last built. A suite that built nothing reaches no
   # binary at all: lifecycle.sh, merge.sh and epic.sh refuse under
-  # GCTK_BIN=none, and pr-status-label.sh derives nothing.
-  export GCTK_BIN="${GCTK_BUILT:-none}"
+  # GCTK_BIN=none, and pr-status-label.sh derives nothing. The pin runs the
+  # arm's verbs (bead arm, disarm and start-armed) with HOLDS_STUB_READ set, so
+  # the gc stub answers their calls through holds-store.stub.sh, whose reads
+  # keep bd's rule over this store, and with a scratch city of the suite's own
+  # when nothing names one, for the lock they take under the city's runtime
+  # directory: the sweep above cleared the session's, and the ambient city is a
+  # live one.
+  export GCTK_BIN=none
+  if [ -n "${GCTK_BUILT:-}" ]; then
+    mkdir -p "$TMP/gctk-city/.gc"
+    {
+      printf '#!/bin/sh\n'
+      printf 'case "${1:-} ${2:-}" in "bead arm"|"bead disarm"|"bead start-armed") HOLDS_STUB_READ=1; export HOLDS_STUB_READ ;; esac\n'
+      printf 'GC_CITY_PATH="${GC_CITY_PATH:-%s}" exec '"'"'%s'"'"' "$@"\n' "$TMP/gctk-city" "$GCTK_BUILT"
+    } > "$TMP/gctk-pin" && chmod +x "$TMP/gctk-pin" && GCTK_BIN="$TMP/gctk-pin"
+  fi
   [ -z "${GCTK_BUILD_ERR:-}" ] || bad "$GCTK_BUILD_ERR"
   # Pin the gctk read seam to the stubbed `gc` for the same reason: `gctk`'s
   # bead reads prefer the running supervisor's API, and these suites run inside
@@ -70,6 +84,9 @@ harness_init() {
   # `gc bd` subprocess the stub serves (services/gctk/internal/daemon).
   export GC_NO_API=1
   export STUB_STORE="$TMP/beads.json"
+  # The answers the arm's verbs take (harness_init's gctk pin).
+  STUB_HOLDS_ANSWER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/holds-store.stub.sh"
+  export STUB_HOLDS_ANSWER
   export STUB_DEPS="$TMP/deps.txt"
   export STUB_KV="$TMP/kv.txt"
   export STUB_GC_LOG="$TMP/gc.log"
@@ -194,11 +211,11 @@ mk_sut_dir() { # <dir> <file>...
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
   # retires, review-answer.sh, what the living answer to a review shows,
   # dispatch-path.sh, the one definition of a dispatch path and a label hold,
-  # which deferred-dispatch.sh sources, priority-lib.sh, the priority function,
-  # whose reading of a PR's approval pr-facts.sh sources, git-lib.sh, the one
-  # read of a branch's head on origin, which gate-ensure.sh and signoff.sh
-  # source, and run-lib.sh, the one reader of a run's link to its bead, are
-  # sourced by sibling path the same way.
+  # which gc-helm.sh sources to ask how a bead is dispatched, priority-lib.sh,
+  # the priority function, whose reading of a PR's approval pr-facts.sh
+  # sources, git-lib.sh, the one read of a branch's head on origin, which
+  # gate-ensure.sh and signoff.sh source, and run-lib.sh, the one reader of a
+  # run's link to its bead, are sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
   [ -f "$here/review-answer.sh" ] && cp "$here/review-answer.sh" "$d/"
@@ -344,6 +361,23 @@ case "$sub" in
     fi
     echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
+# The arm's verbs run gctk with HOLDS_STUB_READ set (harness_init's pin), and
+# holds-store.stub.sh answers their every call from this store by bd's rule,
+# over edge rows in the shape this stub keeps.
+if [ -n "${HOLDS_STUB_READ:-}" ]; then
+  HOLDS_STORE="$S" HOLDS_DEPS="$D" exec "${STUB_HOLDS_ANSWER:?}" answer "$@"
+fi
+# A read pinned to a store names it with bd's --db ahead of the verb. The stub
+# serves one store, so it drops the pin, and `bd where` names that store, at
+# no prefix, as the one gc resolves here.
+case "${1:-}" in
+  --db) shift 2 || shift ;;
+  --db=*) shift ;;
+esac
+if [ "${1:-}" = where ]; then
+  jq -nc --arg p "${S%/*}/.beads" '{path: $p, prefix: ""}'
+  exit 0
+fi
 verb="${1:-}"; shift || true
 # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
 # child A parent-childs parent B). Dependency orientation per type:

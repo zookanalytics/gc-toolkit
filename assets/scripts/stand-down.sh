@@ -10,10 +10,12 @@
 # wait. bd refuses to close a bead an open gate blocks, and clearing the gate
 # first makes the bead ready, which is what the arm waits for. This runs the one
 # order that does end it:
-#   1. It removes the arm, and any notice owed, through deferred-dispatch.sh
-#      disarm, whose exit says the arm is gone. The reconcile pass reads an arm
-#      again just before it slings, so a pass that reads the gate closed reads
-#      the arm gone, and it retires an arm it finds on a closed bead.
+#   1. It removes the arm through `gctk bead disarm`, whose exit says the arm
+#      is gone, whether or not the bead carried one. The disarm takes
+#      the bead's dispatch lock, which the deferred-dispatch start holds while
+#      it sends the bead and reads the arm again under, so a start that reads
+#      the gate closed reads the arm gone, and it retires an arm it finds on a
+#      closed bead.
 #   2. It ends the run beneath the bead and clears the bead's route and session
 #      pins through gc-helm.sh takeaway --release --no-wait, whose exit says the
 #      release landed, so the bead is left with no route. So nothing is still
@@ -123,7 +125,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=work-outcome.sh
 . "$SCRIPT_DIR/work-outcome.sh" || { echo "$PROG: cannot source work-outcome.sh beside this script" >&2; exit 1; }
-DEFERRED="$SCRIPT_DIR/deferred-dispatch.sh"
+# The disarm is gctk's, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 HELM="$SCRIPT_DIR/gc-helm.sh"
 REHOME="$SCRIPT_DIR/bead-rehome.sh"
 
@@ -137,8 +142,22 @@ case "$(printf '%s' "$WORK_JSON" | jq -r '.[0].status // ""' 2>/dev/null)" in
     echo "$PROG: $WORK is already closed, so there is nothing to stand down"
     exit 0 ;;
 esac
-[ "$(row_meta "$WORK_JSON" merge_result)" != pull_request ] \
-  || refuse "$WORK is an open PR, which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off."
+WORK_MR=$(row_meta "$WORK_JSON" merge_result)
+case "$WORK_MR" in
+  pull_request)
+    refuse "$WORK is an open PR, which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off." ;;
+  # A PR on the pending record at the head the refinery validated ends through
+  # the landing order: a closed PR is recorded as pull_request_closed_unmerged,
+  # behind a gate under that key.
+  pull_request_pending)
+    refuse "$WORK owns an open PR on the pending record ($WORK_MR), which is retired rather than stood down: close the PR, and the landing order records the close behind a human gate under the key pull_request_closed_unmerged, which a stand-down under that key answers." ;;
+  # A PR at a head the refinery has not validated waits on the refinery, and the
+  # landing order does not read it: the refinery's publication is what finds the
+  # PR closed, and it parks the bead behind a gate under
+  # refinery-invalid-existing-pr.
+  pull_request_head_changed)
+    refuse "$WORK owns an open PR at a head the refinery has not validated ($WORK_MR), which is retired rather than stood down: close the PR, and the refinery's next publication of $WORK finds it closed and parks $WORK behind a human gate under the key refinery-invalid-existing-pr, which a stand-down under that key answers. If its prep conflicts or its checks fail first, the refinery sends a rework child to the pool instead, which meets the closed PR at its own publication and parks under the same key: stand the child down, and the refinery then parks $WORK." ;;
+esac
 
 GATES=$(bd_human_gates "$WORK") || refuse "could not read the human gates of $WORK."
 OPEN_GATES=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY") \
@@ -186,13 +205,15 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+[ -x "$GCTK" ] || refuse "There is no gctk binary at '$GCTK' to remove the arm with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is)."
+
 # Each step below is one a re-run takes again, so a stop names what stands.
 stopped() { echo "$PROG: $1 Re-run this command once that is repaired." >&2; exit 1; }
 
-if [ -n "$(row_meta "$WORK_JSON" gc.dispatch_when_ready)$(row_meta "$WORK_JSON" gc.notify_when_ready)" ]; then
-  "$DEFERRED" disarm "$WORK" --reason "stand-down: $RULING" >/dev/null \
-    || stopped "the arm on $WORK was not removed, so no gate was answered."
-fi
+# The disarm runs with no read of the arm first: it exits 0 once no arm remains,
+# and an arm written after the read above is removed too.
+"$GCTK" bead disarm "$WORK" --reason "stand-down: $RULING" >/dev/null \
+  || stopped "the arm on $WORK was not removed, so no gate was answered."
 
 "$HELM" takeaway "$WORK" "Stood down on a person's ruling, so nothing builds it" --release --no-wait \
   || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, or a live session still holds its claim, as gc-helm.sh says above, so no gate was answered."

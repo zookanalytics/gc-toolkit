@@ -190,11 +190,10 @@ hasnt "$OUT" "would file a reaction bead" "(SUBJECT-ABSENT) …nothing dispatche
 # --- a bead with a dispatch path is not a scan candidate --------------------
 # A route or an arm already decides a bead's dispatch. An armed bead is ready,
 # unassigned and unrouted from its own blockers' close until the next
-# deferred-dispatch reconcile pass, so the arm is all that sets it apart from
-# raw input. tk-armed carries the record deferred-dispatch.sh arm writes.
-# tk-capped is an arm the reconcile pass stopped retrying at its failure cap,
-# which waits on the human gate the cap filed. One more bead per dispatch-path key
-# carries only that key. The keys are read from the shared definition, so a key
+# deferred-dispatch order's pass, so the arm is all that sets it apart from raw
+# input. tk-armed carries the record gctk bead arm writes. tk-capped is an arm
+# the pass stopped retrying at its failure cap, which waits on the human gate
+# the cap filed. One more bead per dispatch-path key carries only that key. The keys are read from the shared definition, so a key
 # added there is covered here with no edit to this file. tk-blank carries every
 # key with a blank value, which names no queue and no sling target, so it is
 # raw input like tk-raw. All pass every other clause (task type, a description,

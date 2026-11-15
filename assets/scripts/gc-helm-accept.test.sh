@@ -20,9 +20,11 @@
 # its fixtures):
 #   (STALE)    a recommendation beside a review gate: Accept refuses and names
 #              the review gate, writing nothing
-#   (ACCEPT)   with the recommendation's gate the last one open, Accept records
-#              the acceptance's dispatch input on the gate, answers the gate
-#              alone, slings with the token in the root's title and records
+#   (ACCEPT)   with the recommendation's gate the last one open, Accept removes
+#              the bead's arm first, records the acceptance's dispatch input on
+#              the gate, answers the gate alone, slings with the token in the
+#              root's title and records
+#   (DISARM-FAIL) a disarm that does not land answers no gate and writes nothing
 #   (LATE)     a gate filed after the live read stops the dispatch and reopens
 #              the recommendation's gate
 #   (EARLIER)  a sitting's answer that reaches the gate first stands: nothing is
@@ -293,7 +295,21 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
-export PATH="$TMP/bin:$PATH"
+# --- gctk stub -----------------------------------------------------------------
+# The arm's verb. No bead here carries an arm, so a disarm writes nothing; it is
+# appended to $CALLS among the writes it comes before, and DISARM_RC fails it.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gctk" <<'GCTK'
+case "${1:-} ${2:-}" in
+  "bead disarm")
+    printf 'gctk bead disarm %s\n' "${3:-}" >> "$CALLS"
+    [ -z "${DISARM_RC:-}" ] || { echo "gctk bead disarm: the arm on ${3:-} was not cleared: simulated" >&2; exit "$DISARM_RC"; }
+    echo "${3:-} carries no arm, so nothing was written" ;;
+  *) echo "gctk stub: unsupported '$*'" >&2; exit 2 ;;
+esac
+GCTK
+chmod +x "$TMP/bin/gctk"
+
+export PATH="$TMP/bin:$PATH" GCTK_BIN="$TMP/bin/gctk"
 export STORE="$TMP/store" CALLS="$TMP/calls" LINGERERS="$TMP/lingerers" CITY_ROOT="$TMP/city"
 export GC_CITY_PATH="$TMP/city" ACC_BEAD=tk-anc
 unset GC_HELM_FIXTURE GC_CITY GC_CITY_ROOT GC_RIG BEADS_DIR 2>/dev/null || true
@@ -345,7 +361,8 @@ token_of(){ field "$1" close_reason | sed -n 's/^ruled: accepted [^ ]* accept:\(
 roots()   { cat "$STORE"/b/tk-root*.json 2>/dev/null | jq -s --arg t "${1:-}" '[ .[] | select((.title | contains($t))) ] | length'; }
 live_roots() { cat "$STORE"/b/tk-root*.json 2>/dev/null | jq -s --arg t "${1:-}" '[ .[] | select((.title | contains($t)) and .status != "closed" and (.metadata.molecule_failed // "") != "true") ] | length'; }
 slings()  { grep -c '^sling ' "$CALLS" 2>/dev/null || true; }
-writes()  { grep -c -v '^sling refused' "$CALLS" 2>/dev/null || true; }
+# A disarm writes nothing on a bead with no arm, as every bead here is.
+writes()  { grep -c -v -E '^(sling refused|gctk bead disarm)' "$CALLS" 2>/dev/null || true; }
 lock_free() { flock -n "$(LOCKFILE "${1:-tk-anc}")" true; }
 # lock_free_soon — the lock is free within 5s: a killed process's descriptors
 # close as it exits, a moment after its parent's wait returns.
@@ -424,10 +441,19 @@ case "$(cat "$CALLS")" in
   *) bad "(ACCEPT) the dispatch input should be recorded before the resolve (calls: $(cat "$CALLS"))" ;;
 esac
 hasnt "$(cat "$CALLS")" "bd close" "(ACCEPT) Accept runs no dismiss"
+eq "$(head -n1 "$CALLS")" "gctk bead disarm tk-anc" "(ACCEPT) its first write removes the bead's arm"
 : > "$CALLS"; run_accept tk-anc
 eq "$RC" 2 "(DISPATCHED) an Accept run after the first one's record exits 2"
 has "$OUT" "was dispatched (mol-fix)" "(DISPATCHED) …because the recommendation is dispatched"
 eq "$(writes)" 0 "(DISPATCHED) …and writes nothing"
+
+echo "# a disarm that does not land answers no gate and dispatches nothing"
+rec; DISARM_RC=1 run_accept tk-anc
+eq "$RC" 4 "(DISARM-FAIL) an Accept whose disarm does not land exits 4"
+has "$OUT" "that disarm did not land" "(DISARM-FAIL) …saying so"
+has "$OUT" "the arm on tk-anc was not cleared" "(DISARM-FAIL) …with gctk's reason"
+eq "$(field tk-rec status)" "open" "(DISARM-FAIL) …the recommendation's gate stays open"
+eq "$(writes)/$(slings)" "0/0" "(DISARM-FAIL) …and nothing is written or slung"
 
 echo "# an acceptance whose record the store refuses answers no gate and dispatches nothing"
 rec; REFUSE_UPDATE_MATCH='gc.acceptance=' run_accept tk-anc

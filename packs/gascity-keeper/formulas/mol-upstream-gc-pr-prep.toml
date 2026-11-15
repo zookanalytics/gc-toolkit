@@ -15,7 +15,7 @@ self-review chain with cherry-pick / scrub / test / push / draft / handback.
 Every abort path (a roster with no gascity rig, cherry-pick conflict, test
 failure, push race) hands the bead back open and assigned to the keeper, with no
 route, and mails the keeper and the operator. The keeper's mail requests its
-turn (`--notify`), which is the notice the assignment owes, so the bead is never
+turn (`--notify`), the nudge a bead assigned to the keeper needs, so the bead is never
 stranded `in_progress` on the drained session."""
 formula = "mol-upstream-gc-pr-prep"
 extends = ["mol-polecat-base"]

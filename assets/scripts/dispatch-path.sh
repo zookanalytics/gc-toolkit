@@ -3,8 +3,8 @@
 # says how a bead will be dispatched, so whoever set it has already decided that
 # dispatch. Two keys each give a bead one. gc.routed_to names a pool queue,
 # which serves the bead once bd reports it ready. gc.dispatch_when_ready is an
-# arm (deferred-dispatch.sh arm), which the deferred-dispatch order slings once
-# nothing holds the bead, by the answer of `gctk bead holds`.
+# arm (gctk bead arm), which the deferred-dispatch order slings once nothing
+# holds the bead, by the answer of `gctk bead holds`.
 # gc.execution_routed_to is not one: it is execution provenance a formula pour
 # leaves, and no queue reads it.
 #
@@ -22,16 +22,19 @@
 # react only to input that has none, and the doctor checks
 # check-blocked-work-armed, which flags blocked work that has none, and
 # check-step-terminal, which counts a step as offerable only when it has one.
+# refinery-lib.sh asks both questions of a rework child the refinery's requeue
+# filed: one with no dispatch path and no hold is one the patrol sends on.
 # The readers that leave a held bead alone source it too: the proactive scan and
 # sling, which file no first reaction for one; check-blocked-work-armed, which
-# owes one no arm; deferred-dispatch.sh's reconcile, which slings no armed bead
-# while it is held, because a sling reads no hold, and
-# check-armed-dispatch-owed, which owes such an arm no dispatch for the same
-# reason; check-po-queue-only, which reads a bead routed or assigned to the po
-# as reaching it only when no hold holds it, since a held bead reaches no seat;
-# and the liveness classifier (liveness-classify.sh, which liveness-sweep.sh and
-# its precheck compose) and the re-check a liveness gate's message carries
-# (liveness-recheck.sh), which name the hold as a wait.
+# owes one no arm; check-po-queue-only, which reads a bead routed or assigned to
+# the po as reaching it only when no hold holds it, since a held bead reaches no
+# seat; and the liveness classifier (liveness-classify.sh, which
+# liveness-sweep.sh and its precheck compose) and the re-check a liveness gate's
+# message carries (liveness-recheck.sh), which name the hold as a wait.
+# The deferred-dispatch order's start (gctk bead start-armed) reads no row here:
+# it selects armed beads by Gas City's own serve rule and holds one carrying a
+# hold label in any case, as Gas City's hook does, and check-armed-dispatch-owed
+# reads its dry run.
 # gc-helm.sh sources it to place a held bead: place reports a bead with no hold
 # that a route or an arm already dispatches as placed, and refuses one that
 # another hold also holds. place, and takeaway and accept when they send a bead

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -141,4 +142,93 @@ func (c *Checkout) PutBack() (string, error) {
 		return "", err
 	}
 	return c.Dirty()
+}
+
+// OriginURL reads the URL of the remote named origin in the clone dir sits in.
+func OriginURL(dir string) (string, error) {
+	out, err := Output(dir, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// ValidBranch reports whether name is a branch name git accepts.
+func ValidBranch(name string) bool {
+	if name == "" {
+		return false
+	}
+	return exec.Command("git", "check-ref-format", "refs/heads/"+name).Run() == nil
+}
+
+// FetchBranch fetches branch from origin into refs/remotes/origin/<branch> in
+// the clone dir sits in, forced, so the ref names the tip origin holds now.
+func FetchBranch(dir, branch string) error {
+	if !ValidBranch(branch) {
+		return fmt.Errorf("git fetch: %q is not a branch name", branch)
+	}
+	_, err := Output(dir, "fetch", "--no-tags", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch)
+	return err
+}
+
+// Reaches reports whether commit is reachable from origin's branch as the clone
+// dir sits in last fetched it, refs/remotes/origin/<branch> named in full, so a
+// local branch or tag of the same name cannot stand in for it. It reads the
+// history git stores, with replace refs and the grafts file ignored, since
+// either rewrites what merge-base sees. A commit the clone does not hold is not
+// reachable. An error is a read that did not answer.
+func Reaches(dir, commit, branch string) (bool, error) {
+	if !IsObjectID(commit) {
+		return false, fmt.Errorf("git merge-base: %q is not a full object name", commit)
+	}
+	cmd := exec.Command("git", "--no-replace-objects", "-C", dir, "merge-base", "--is-ancestor", commit,
+		"refs/remotes/origin/"+branch)
+	cmd.Env = append(os.Environ(), "GIT_GRAFT_FILE="+os.DevNull)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &ee) && ee.ExitCode() == 1:
+		return false, nil
+	case errors.As(err, &ee) && strings.Contains(stderr.String(), "Not a valid commit name "+commit):
+		return false, nil
+	}
+	if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		return false, fmt.Errorf("git merge-base: %s", msg)
+	}
+	return false, fmt.Errorf("git merge-base: %w", err)
+}
+
+// DefaultBranch is the branch origin's HEAD names in the clone dir sits in,
+// refs/remotes/origin/HEAD, which a clone sets to the branch origin checks out.
+// A clone whose origin/HEAD names no branch of origin has none, an error.
+func DefaultBranch(dir string) (string, error) {
+	out, err := Output(dir, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", fmt.Errorf("origin/HEAD names no branch in the clone: %w", err)
+	}
+	ref := strings.TrimSpace(out)
+	branch, ok := strings.CutPrefix(ref, "refs/remotes/origin/")
+	if !ok || !ValidBranch(branch) {
+		return "", fmt.Errorf("origin/HEAD names %q, which is no branch of origin", ref)
+	}
+	return branch, nil
+}
+
+// Tip is the commit origin's branch names as the clone dir sits in last fetched
+// it, refs/remotes/origin/<branch> named in full, so a local branch or tag of
+// the same name cannot stand in for it. A branch the clone never fetched has
+// none, an error.
+func Tip(dir, branch string) (string, error) {
+	if !ValidBranch(branch) {
+		return "", fmt.Errorf("git rev-parse: %q is not a branch name", branch)
+	}
+	out, err := Output(dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("origin/%s names no commit in the clone: %w", branch, err)
+	}
+	return strings.TrimSpace(out), nil
 }

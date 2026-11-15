@@ -93,6 +93,20 @@ func declare[T any](name string, c Codec[T], doc string, readOnly bool, opts []O
 // set. Only the owner holds the Key to ask it.
 func (k Key[T]) Name() string { return k.decl.name }
 
+// View is a key's reading face, which its owner exports to another domain whose
+// question is the key's value itself, so that domain reads the key through the
+// owner's one declaration and cannot write it.
+type View[T any] struct{ key Key[T] }
+
+// View returns the key's reading face.
+func (k Key[T]) View() View[T] { return View[T]{key: k} }
+
+// Get returns the key's value on r, as Key.Get does.
+func (v View[T]) Get(r *Record) (T, bool, error) { return v.key.Get(r) }
+
+// Name is the key's current spelling, for a message.
+func (v View[T]) Name() string { return v.key.Name() }
+
 // Get returns the key's value on r: its current spelling, else its first alias
 // the row holds. ok is false when the row holds neither. A value that does not
 // decode is an error.

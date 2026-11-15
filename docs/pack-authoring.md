@@ -430,11 +430,11 @@ deacon). See [gascity/agent-types.md, Variant A](gascity/agent-types.md#variant-
 ### Work routing visibility
 
 Patrol wisps are *produced* by the patrol cycle itself and recovered through
-the assignee tiers, not consumed from a routed pool. Outside work that needs a
-specific patrol agent to act is assigned to it — `bd update <bead> --assignee
-<patrol-qualified-name>` — with the notice every named-agent assignment owes
-([deferred-dispatch.md](deferred-dispatch.md#work-assigned-to-a-named-agent-owes-a-notice)),
-the same convention the pack follows for any named agent.
+the assignee tiers, not consumed from a routed pool. Outside work reaches a
+patrol agent in the form it finds its work by
+([deferred-dispatch.md](deferred-dispatch.md#a-named-agent-hears-through-gas-citys-hand-off)):
+the refinery's patrol takes a bead assigned to it, and the deacon and the
+witness, whose hooks answer their own patrol wisps, take mail.
 
 ### Examples in the wild
 

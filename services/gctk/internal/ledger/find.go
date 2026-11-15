@@ -9,9 +9,9 @@ import (
 
 // Selection is the beads one Find reads: the beads named, the beads that carry a
 // declared key, the beads whose key holds one value, the beads the store lists
-// under a parent, or every bead. It reads live beads alone unless WithClosed
-// widens it. A key's selection matches its current spelling, not its legacy
-// aliases.
+// under a parent, the beads whose title holds a text, or every bead. It reads
+// live beads alone unless WithClosed widens it. A key's selection matches its
+// current spelling, not its legacy aliases.
 type Selection struct {
 	q    gcbd.Query
 	none bool
@@ -31,6 +31,11 @@ func Every() Selection { return Selection{q: gcbd.Query{Every: true}} }
 // keeps a child by its record's Parents.
 func Under(parent string) Selection {
 	return Selection{q: gcbd.Query{Parent: parent}, none: parent == ""}
+}
+
+// Titled selects the beads whose title holds text.
+func Titled(text string) Selection {
+	return Selection{q: gcbd.Query{TitleContains: text}, none: text == ""}
 }
 
 // Carrying selects the beads that carry k.
@@ -68,9 +73,35 @@ func (l *Ledger) Find(s Selection) ([]*Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	return records(rows), nil
+}
+
+// ServeRule is a pool's serve rule as bd's ready read takes it: unassigned
+// beads alone when Unassigned is set, and none of the issue types or labels it
+// leaves out, each compared exactly.
+type ServeRule struct {
+	Unassigned    bool
+	ExcludeTypes  []string
+	ExcludeLabels []string
+}
+
+// Ready reads the beads that carry k that the store reports ready under rule,
+// by bd's own readiness, in the order the store gives them. Each record's
+// edges are the listing's, as Find's are. A read that fails returns its
+// *ReadError.
+func Ready[T any](l *Ledger, k Key[T], rule ServeRule) ([]*Record, error) {
+	rows, err := l.store.Ready(gcbd.ReadyQuery{HasKey: k.decl.name, Unassigned: rule.Unassigned,
+		ExcludeTypes: slices.Clone(rule.ExcludeTypes), ExcludeLabels: slices.Clone(rule.ExcludeLabels)})
+	if err != nil {
+		return nil, err
+	}
+	return records(rows), nil
+}
+
+func records(rows []gcbd.Bead) []*Record {
 	out := make([]*Record, len(rows))
 	for i := range rows {
 		out[i] = &Record{ID: rows[i].ID, row: &rows[i]}
 	}
-	return out, nil
+	return out
 }

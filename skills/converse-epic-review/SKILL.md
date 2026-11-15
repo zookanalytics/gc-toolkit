@@ -89,8 +89,8 @@ Then read or run what the epic has of these:
   capability is deleted to move a measure;
 - each landed Delivery's `Aim:` line, against what its landing showed;
 - the epic's other open work: each open Delivery, each member under the epic
-  itself, and each PR in flight under either, a member at
-  `merge_result=pull_request`.
+  itself, and each PR in flight under either, a member at `merge_result`
+  `pull_request`, `pull_request_pending` or `pull_request_head_changed`.
 
 A checkpoint reads every Delivery landed by now and closes them all under its
 one ruling.
@@ -353,10 +353,10 @@ one. Each item goes one of three ways:
   disposition writer:
   `"$CONV/bead-rehome.sh" --origin <bead> --successor <new bead> --kind re-homed --note "<the ruling, one sentence>"`.
   The writer refuses a bead a human gate holds, and the gate's answer would
-  send that bead on in this store. So disarm and release such a bead first,
-  then answer its gate on a call of its own, as write 2 answers one, and run
-  the writer last:
-  `"$CONV/deferred-dispatch.sh" disarm <bead> --reason "<the ruling, one sentence>" && "$CONV/gc-helm.sh" takeaway <bead> "<the ruling, one sentence>" --release --no-wait`.
+  send that bead on in this store. So release such a bead first, a release
+  whose first write removes the bead's arm, then answer its gate on a call of
+  its own, as write 2 answers one, and run the writer last:
+  `"$CONV/gc-helm.sh" takeaway <bead> "<the ruling, one sentence>" --release --no-wait`.
   A Delivery never moves whole, because its aim answers this epic's hypothesis,
   so its Stories move one by one.
 - **Work worth doing on its own moves out to ordinary flow** with no parent:

@@ -1,64 +1,53 @@
 Formula: mol-refinery-patrol
-Description: Refinery patrol loop — merge JUDGMENT only. Poured as a root-only wisp:
+Description: Refinery patrol loop, on Gas Town's steps. Poured as a root-only wisp:
 
   gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}}
   gc bd update $WISP --assignee=$GC_AGENT
 
-The pour passes the rig's identity and nothing else, so the merge policy is
-the formula's default as it stood when this wisp was poured. It is rendered
-here for the steps that read it:
+Each wisp is ONE iteration: take one work bead assigned to you, bring its
+branch current with its target by merge, run the rig's checks, then land it,
+publish its PR or send it back, pour the next wisp and burn this one. Steps are
+not materialized; read each step as you reach it. On a crash, re-derive where
+you were from git and bead state.
 
-  default_merge_strategy={{default_merge_strategy}}
-  check_set={{check_set}}
+Work beads flow directly: a polecat sets `branch` and `target` on its work
+bead and assigns it to you. Every step makes one call to a tested pack script
+and passes it the bead it acts for; each script refuses a bead whose branch is
+not the one checked out in your tree for it (`refinery-lib.sh`). Resolve the
+scripts at shell runtime, since formula bodies get no {{.ConfigDir}}:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/<script>"`.
 
-Each wisp is ONE iteration: find one assigned work bead, prepare its branch,
-run the rig's checks, decide (land / gate / reject), pour the next wisp,
-burn this one. Steps are not materialized; read each description as you
-reach it. On crash, re-derive position from git and bead state.
-
-Everything downstream of the gating handoff — check arming and review
-dispatch, PR opening, the merge itself, external PR facts — is the
-refinery-reconcile ORDER's (60s, no session). This formula never runs those
-passes: docs/refinery-merge-cadence.md.
-
-State writes: every merge_result transition goes through
-assets/scripts/lifecycle.sh (one atomic validated write per transition);
-every human gate goes through assets/scripts/human-gate.sh (one open gate
-per bead and situation key). Resolve both at shell runtime — formula bodies
-get no {{.ConfigDir}}:
-
-    LC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/lifecycle.sh" && [ -x "$LC" ] || LC=""
-
-Marked blocks are extracted and executed by their tests
-(find-work-gating-guard, mr-aware-rejection-failclosed,
-preexisting-failure-dedup, check-set-normalize, one-anchor-per-pr,
-patrol-wisp-reconcile, patrol-pour-vars, rig-check-commands, refinery-gate) — keep
-markers and keep the blocks backslash-free (TOML eats line-ending
-backslashes).
+The merge strategy is the bead's `merge_strategy`: `direct` lands by a
+fast-forward push, and `mr` publishes a pull request. On a rig whose
+`pending_through_merge` formula var is "true", the PR's bead stays open on Gas
+Town's pending-through-merge record until the landing order (orders/
+pr-reconcile.toml) verifies its merge; on any other rig the merge cadence
+(the refinery-reconcile order) opens and merges it. Neither is yours to run:
+docs/refinery-merge-cadence.md.
 
 Variables:
-  {{auto_ff_rig_main}}: After a direct merge, best-effort fast-forward the rig's canonical checkout when it is on the target branch with a clean tree. Never blocks the merge. (default=true)
-  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol hands a rejected bead back to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route, and rejection-repool.sh files a human gate in place of the pour. (default=gc-toolkit.)
+  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol sends a bead back to the polecat pool, and an empty prefix names <rig>/polecat instead of <rig>/gc-toolkit.polecat, which no pool claims. (default=gc-toolkit.)
   {{build_command}}: Build command. Empty = skip. (default=)
-  {{check_set}}: Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each a lane that must derive green (lane-state.sh) before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing. Approval is not a check_set token — it is a universal merge rule (merge.sh requires every PR to carry a standing non-city APPROVED review), armed for every anchor and named by no token here. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured, and a changed default reaches the next wisp. (default=correctness,triage)
-  {{default_merge_strategy}}: Default when metadata.merge_strategy is unset: 'direct' = FF + push to target; 'mr'/'pr' = gated PR pipeline. Whatever this default says, merge-push's merge-strategy-resolve block resolves a bead that would land direct on target_branch to mr, so target_branch takes work only through a PR. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured. (default=direct)
-  {{delete_merged_branches}}: Delete source branches after a direct merge. (default=true)
+  {{check_set}}: The merge cadence's gating check set, stamped on a bead the old path parks for the cadence: a comma list of checks, each a lane that must derive green before merge.sh lands the PR. 'none' is stamped as itself, and an empty value recovers this default. Read only while pending_through_merge is unset. (default=correctness,triage)
+  {{default_merge_strategy}}: The strategy for a bead that names none: 'direct' lands by a fast-forward push, 'mr' publishes a PR. Whatever this says, a bead that would land direct on the rig's default branch takes mr, so the default branch takes work only through a PR (docs/warrants.md). The merge-push step reads the rig's value, else this default. (default=direct)
+  {{delete_merged_branches}}: Delete a branch from origin once its direct landing is recorded. (default=true)
   {{lint_command}}: Lint command. Empty = skip. (default=)
-  {{rig_name}}: Rig this patrol serves; injected by the pour (forwarded verbatim by next-iteration). Declared so the {{rig_name}} token in the pour commands resolves instead of surviving literally. (default=)
-  {{run_tests}}: Whether to run tests before merging. (default=true)
+  {{pending_through_merge}}: Whether the rig is on the new path: 'true' has the merge-push step publish an mr bead's PR and record it pending until the landing order verifies its merge. Any other value keeps the old path, where the bead parks for the merge cadence. A rig sets it in its [rigs.formula_vars] at its cutover, and the merge-push step reads the rig's value. (default=false)
+  {{rig_name}}: Rig this patrol serves; injected by the pour and forwarded by next-iteration. Declared so the {{rig_name}} token in the pour command resolves. (default=)
+  {{run_tests}}: Whether the gate runs test_command. (default=true)
   {{setup_command}}: Setup/install command. Empty = skip. (default=)
-  {{target_branch}}: Default target branch for merges. (default=main)
+  {{target_branch}}: The rig's default branch, which a bead with no target lands on. (default=main)
   {{test_command}}: Test command (when run_tests is true). (default=)
   {{typecheck_command}}: Type check command. Empty = skip. (default=)
 
 Steps (10):
   ├── mol-refinery-patrol.validate-identity: Validate canonical agent identity
   ├── mol-refinery-patrol.check-inbox: Check mail [needs: mol-refinery-patrol.validate-identity]
-  ├── mol-refinery-patrol.find-work: Find next work bead assigned to me [needs: mol-refinery-patrol.check-inbox]
-  ├── mol-refinery-patrol.rebase: Prepare the branch on its target [needs: mol-refinery-patrol.find-work]
+  ├── mol-refinery-patrol.find-work: Find the next work bead assigned to you [needs: mol-refinery-patrol.check-inbox]
+  ├── mol-refinery-patrol.rebase: Bring the branch current with its target [needs: mol-refinery-patrol.find-work]
   ├── mol-refinery-patrol.run-tests: Run quality checks and tests [needs: mol-refinery-patrol.rebase]
   ├── mol-refinery-patrol.handle-failures: Handle quality check or test failures [needs: mol-refinery-patrol.run-tests]
-  ├── mol-refinery-patrol.merge-push: Merge and push (direct) or transition to gating (mr) [needs: mol-refinery-patrol.handle-failures]
+  ├── mol-refinery-patrol.merge-push: Land the branch, or publish its PR [needs: mol-refinery-patrol.handle-failures]
   ├── mol-refinery-patrol.patrol-summary: Record patrol cycle summary [needs: mol-refinery-patrol.merge-push]
-  ├── mol-refinery-patrol.next-iteration: Pour next iteration and loop [needs: mol-refinery-patrol.patrol-summary]
+  ├── mol-refinery-patrol.next-iteration: Pour the next iteration and loop [needs: mol-refinery-patrol.patrol-summary]
   └── mol-refinery-patrol.workflow-finalize: Finalize workflow [needs: mol-refinery-patrol.next-iteration]

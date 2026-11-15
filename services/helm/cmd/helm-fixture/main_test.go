@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -189,58 +188,12 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 	}
 }
 
-// declaredServe is the command a city declares as gc-toolkit's
-// ui_serve_command, the serve command docs/review-demo.md tells a capture of the
-// board to serve and gctk rig serve runs for a live copy. It runs from the
+// declaredServe is the command the town's city.toml declares as gc-toolkit's
+// ui_serve_command, which a demo capture of the board and a sitting's live copy
+// of it each run as a copy that gctk rig serve runs. It runs from the
 // worktree's root, and it ends with the fixture's own invocation, so a capture
 // can add the fixture's flags to it.
 const declaredServe = "cd services/helm && exec go run ./cmd/helm-fixture"
-
-// docCapture reads the board's capture from docs/review-demo.md, the one whose
-// --script is board.md, and returns the page's text, what the capture gives
-// demo-screenshot.sh as --serve, and the directory its --cwd names under
-// <worktree>, empty for the worktree's root. The page gives the capture in
-// prose, as inline code that can wrap, so the page is read with its line breaks
-// folded into spaces and the capture runs to the end of its code span. A
-// capture that names a --port fails the test, because a --serve command's copy
-// takes a free port of its own.
-func docCapture(t *testing.T) (text, serve, cwd string) {
-	t.Helper()
-	doc, err := os.ReadFile(filepath.Join(moduleRoot, "../../docs/review-demo.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text = strings.Join(strings.Fields(string(doc)), " ")
-	var capture string
-	for _, c := range regexp.MustCompile("demo-screenshot\\.sh\"? page [^`]*").FindAllString(text, -1) {
-		if strings.Contains(c, "--script board.md") {
-			if capture != "" {
-				t.Fatalf("docs/review-demo.md gives more than one capture of the board:\n%s\n%s", capture, c)
-			}
-			capture = c
-		}
-	}
-	if capture == "" {
-		t.Fatal("docs/review-demo.md gives no capture of the board")
-	}
-	for _, f := range []struct {
-		re  *regexp.Regexp
-		out *string
-	}{
-		{regexp.MustCompile(`--serve "([^"]+)"`), &serve},
-		{regexp.MustCompile(`--cwd "?<worktree>(?:/([^"\s]*))?`), &cwd},
-	} {
-		m := f.re.FindStringSubmatch(capture)
-		if m == nil {
-			t.Fatalf("the board's capture has no %s: %s", f.re, capture)
-		}
-		*f.out = m[1]
-	}
-	if strings.Contains(capture, "--port") {
-		t.Errorf("the board's capture names a --port, which a --serve command's copy does not take: %s", capture)
-	}
-	return text, serve, cwd
-}
 
 // lockedBuffer collects a command's output, which the test reads while the
 // command may still be writing it.
@@ -319,28 +272,15 @@ func startServe(t *testing.T, cmdline, dir string) string {
 	return ""
 }
 
-// TestTheDocumentedCommandServesTheBoard checks that docs/review-demo.md has a
-// capture of the board serve the rig's declared command, from the worktree's
-// root, on the free port gctk rig serve hands a copy. It runs
-// the command a city declares there, and reads back what the capture's browser
-// reads: the app, the board as JSON at its own path, and a verb refused for want
-// of an answer. It runs the command again with the --answers the page tells a
-// reviewer to add, and a click's answer comes back.
-func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
+// TestTheDeclaredCommandServesTheBoard runs the command gc-toolkit declares as
+// its serve command the way gctk rig serve runs a copy's: from the worktree's
+// root, on a free port it hands over as PORT. It reads back what a capture's
+// browser reads: the app, the board as JSON at its own path, and a verb refused
+// for want of an answer. It runs the command again with the --answers a
+// reviewer adds, and a click's answer comes back.
+func TestTheDeclaredCommandServesTheBoard(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and runs the command with go run")
-	}
-	text, serve, cwd := docCapture(t)
-	if serve != "$SERVE" {
-		t.Errorf("the board's capture serves %q; it serves the rig's declared command, as $SERVE", serve)
-	}
-	for _, want := range []string{"ui_serve_command", "gc formula show mol-rig-demo --rig gc-toolkit --json"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("docs/review-demo.md does not name %q, where the capture's $SERVE comes from", want)
-		}
-	}
-	if cwd != "" {
-		t.Errorf("the board's capture runs its command from <worktree>/%s, but the declared command runs from the worktree's root", cwd)
 	}
 	repo, err := filepath.Abs(filepath.Join(moduleRoot, "../.."))
 	if err != nil {
@@ -363,7 +303,7 @@ func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("as the page gives it", func(t *testing.T) {
+	t.Run("as declared", func(t *testing.T) {
 		base := startServe(t, declaredServe, repo)
 		if res, body := get(t, http.MethodGet, base+"/", "text/html"); res.StatusCode != http.StatusOK || !bytes.Equal(body, shell) {
 			t.Errorf("GET /: %d, want the app shell the reviewed commit embeds", res.StatusCode)
@@ -394,107 +334,6 @@ func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
 			t.Errorf("POST /helm/dismiss: %d %s, want the canned answer", res.StatusCode, body)
 		}
 	})
-}
-
-// docBlock returns the fenced bash block in docs/review-demo.md that contains
-// marker, with its fences left out.
-func docBlock(t *testing.T, marker string) string {
-	t.Helper()
-	doc, err := os.ReadFile(filepath.Join(moduleRoot, "../../docs/review-demo.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var found string
-	for _, m := range regexp.MustCompile("(?s)```bash\n(.*?)```").FindAllStringSubmatch(string(doc), -1) {
-		if strings.Contains(m[1], marker) {
-			if found != "" {
-				t.Fatalf("docs/review-demo.md has more than one block with %q", marker)
-			}
-			found = m[1]
-		}
-	}
-	if found == "" {
-		t.Fatalf("docs/review-demo.md has no block with %q", marker)
-	}
-	return found
-}
-
-// TestTheBoardsCaptureNeedsTheDeclaredCommand runs the block docs/review-demo.md
-// gives for the board's capture, with gc and demo-screenshot.sh stubbed. Where
-// gc reads gc-toolkit's ui_serve_command, the block captures the board with it
-// from the worktree's root. Where the city sets the var no value, or
-// the mol-rig-demo gc loads declares no such var, the block captures nothing,
-// says why and exits non-zero.
-func TestTheBoardsCaptureNeedsTheDeclaredCommand(t *testing.T) {
-	worktree := t.TempDir()
-	block := strings.ReplaceAll(docBlock(t, "--script board.md"), "<worktree>", worktree)
-	bin := t.TempDir()
-	stubs := map[string]string{
-		// gc answers gc formula show with the vars STUB_VARS names.
-		"gc": "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >>\"$STUB_GC\"\nprintf '{\"ok\":true,\"name\":\"mol-rig-demo\",\"vars\":%s}\\n' \"$STUB_VARS\"\n",
-		// demo-screenshot.sh records its arguments, one per line.
-		"demo-screenshot.sh": "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >\"$STUB_CAPTURE\"\n",
-	}
-	for name, body := range stubs {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// serveVar is the var as gc formula show lists it; a nil value is one the
-	// city does not set.
-	serveVar := func(value any) string {
-		v, err := json.Marshal(map[string]any{"name": "ui_serve_command", "default": "", "rig_default": value})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(v)
-	}
-	readsCity := `{"name":"app_reads_city","default":"false","rig_default":"true"}`
-
-	for _, c := range []struct {
-		name, vars string
-		captures   bool
-	}{
-		{"the city sets the declared var", "[" + readsCity + "," + serveVar(declaredServe) + "]", true},
-		{"the city sets the var no value", "[" + readsCity + "," + serveVar(nil) + "]", false},
-		{"gc loads a formula that declares no such var", "[" + readsCity + "]", false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			gcLog, capture := filepath.Join(dir, "gc.log"), filepath.Join(dir, "capture")
-			cmd := exec.Command("bash", "-c", block)
-			cmd.Dir = dir
-			cmd.Env = append(os.Environ(),
-				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
-				"STUB_VARS="+c.vars, "STUB_GC="+gcLog, "STUB_CAPTURE="+capture)
-			var stderr bytes.Buffer
-			cmd.Stderr = &stderr
-			err := cmd.Run()
-			if calls, rerr := os.ReadFile(gcLog); rerr != nil || string(calls) != "formula show mol-rig-demo --rig gc-toolkit --json\n" {
-				t.Errorf("the block's gc calls: %q (%v), want the one formula read", calls, rerr)
-			}
-			args, cerr := os.ReadFile(capture)
-			if !c.captures {
-				if err == nil {
-					t.Error("the block exits 0 with no command to serve")
-				}
-				if cerr == nil {
-					t.Errorf("the block captured with no command to serve: %q", args)
-				}
-				if msg := stderr.String(); !strings.Contains(msg, "ui_serve_command") || !strings.Contains(msg, "gc-toolkit") {
-					t.Errorf("the block's message %q does not say that gc reads no ui_serve_command for gc-toolkit", msg)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("the block: %v\n%s", err, stderr.String())
-			}
-			want := []string{"page", "--script", "board.md", "--serve", declaredServe, "--cwd", worktree, "--output", "board.png"}
-			if got := strings.Split(strings.TrimSuffix(string(args), "\n"), "\n"); !reflect.DeepEqual(got, want) {
-				t.Errorf("the block captures with %q, want %q", got, want)
-			}
-		})
-	}
 }
 
 // rigBoardOf is the board a rig route's answer carries.

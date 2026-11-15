@@ -5,6 +5,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-finding-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 unset GC_RIG 2>/dev/null || true
+# A deferral arms its follow-up through gctk bead arm.
+harness_build_gctk
 harness_init
 SUT="$HERE/finding.sh"
 
@@ -869,14 +871,15 @@ has "$(deps)" "tk-ancR|blocks|$RLFU" "…and gated behind the anchor"
 
 # The ruling fails at the arm: the follow-up is filed, and its gate rode the
 # create, so it waits behind the anchor unarmed. The retry reuses it and arms it.
-cat > "$TMP/dispatch-fail.sh" <<'STUB'
+# The arm fails and every other gctk call runs the suite's own build.
+cat > "$TMP/arm-fail.sh" <<STUB
 #!/usr/bin/env bash
-echo "deferred-dispatch: simulated arm failure" >&2
-exit 1
+[ "\${1:-} \${2:-}" = "bead arm" ] && { echo "gctk bead arm: simulated arm failure" >&2; exit 1; }
+exec "$GCTK_BIN" "\$@"
 STUB
-chmod +x "$TMP/dispatch-fail.sh"
+chmod +x "$TMP/arm-fail.sh"
 RA=$(upsert_r arm "fail at the arm")
-GC_DEFERRED_DISPATCH_SH="$TMP/dispatch-fail.sh" "$SUT" set-disposition --finding "$RA" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
+GCTK_BIN="$TMP/arm-fail.sh" "$SUT" set-disposition --finding "$RA" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
 eq "$rc|$(meta "$RA" 'finding.disposition')" "2|unvalidated" "a deferral whose arm fails exits 2 and leaves the finding unvalidated"
 RAFU=$(followups "$RA")
 eq "$(printf '%s\n' "$RAFU" | grep -c .)|$(meta "$RAFU" 'gc.dispatch_when_ready')" "1|<absent>" "…with its one follow-up filed but not armed"
@@ -998,7 +1001,7 @@ HC=$(must_fix_h create "defer past a refused follow-up create")
 STUB_CREATE_FAIL=1 defer_h "$HC" 2>/dev/null; rc=$?
 still_holds "$HC" "$rc" "a deferral whose follow-up create is refused"
 HA=$(must_fix_h arm "defer past a failed arm")
-GC_DEFERRED_DISPATCH_SH="$TMP/dispatch-fail.sh" defer_h "$HA" 2>/dev/null; rc=$?
+GCTK_BIN="$TMP/arm-fail.sh" defer_h "$HA" 2>/dev/null; rc=$?
 still_holds "$HA" "$rc" "a deferral whose arm fails"
 HR=$(must_fix_h reply "defer past a refused reply")
 STUB_UPDATE_FAIL="$HR" defer_h "$HR" 2>/dev/null; rc=$?

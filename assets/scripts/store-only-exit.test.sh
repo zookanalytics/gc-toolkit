@@ -13,16 +13,16 @@
 #     the tree the bead's work_dir names, else the current directory;
 #   * nothing to land and no brief: exit 0, nothing written;
 #   * --done: the brief lands in the bead's notes, then the bead is blocked by
-#     its run's root, then the real deferred-dispatch.sh arms mol-validate-close
-#     on the pool the run executes on;
+#     its run's root, then the real `gctk bead arm` arms mol-validate-close on
+#     the pool the run executes on;
 #   * the run is the one this session executes: the root that `gc hook
 #     current`'s step names, which run-lib.sh is asked about, so a second live
 #     run over the convoy holds nothing;
 #   * every --done precondition refuses before anything is written: a claimed,
 #     routed or closed bead, no rig-qualified pool, no claimed step, a step that
 #     names no root, a run that has ended, works another bead or is poured over
-#     another convoy, a run read that fails, no deferred-dispatch.sh, an
-#     unreadable bead;
+#     another convoy, a run read that fails, no gctk binary, an unreadable
+#     bead;
 #   * a write that does not land exits 1 and stops what follows it;
 #   * a re-run converges on one edge and the arm;
 #   * the brief's header is the one mol-validate-close reads;
@@ -68,6 +68,20 @@ mkdir -p "$TMP/bin"
 set -u
 S="${FAKE_STORE:?}"; D="${FAKE_DEPS:?}"
 printf '%s\n' "$*" >> "${GC_LOG:?}"
+# gctk's calls, made by the arm store-only-exit.sh asks of it, answer from this
+# store through holds-store.stub.sh, and $FAKE_ARM_WRITE_FAIL refuses the
+# arm's write there too. A deps row here names the waiter first, as dep add
+# does, where the stub's blocks row names the blocker first.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  if [ -n "${FAKE_ARM_WRITE_FAIL:-}" ]; then
+    for x in "$@"; do
+      case "$x" in gc.dispatch_when_ready=*) echo "bd: store fault writing the arm (stub)" >&2; exit 1 ;; esac
+    done
+  fi
+  awk -F'|' -v OFS='|' '$2 == "blocks" { print $3, $2, $1; next } { print }' "$D" > "$D.holds"
+  HOLDS_STORE="$S" HOLDS_DEPS="$D.holds" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 case "${1:-} ${2:-}" in
   "gc-toolkit scripts-dir")
     printf '%s\n' "${FAKE_SCRIPTS_DIR:?}"; exit 0 ;;
@@ -169,6 +183,13 @@ export FAKE_STORE="$TMP/store.json" FAKE_DEPS="$TMP/deps.txt" GC_LOG="$TMP/gc.lo
   FAKE_TRACE="$TMP/trace" FAKE_SCRIPTS_DIR="$HERE" FAKE_HOOK_CURRENT="tk-step"
 export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" RUN_LIB_STUB_FAIL="" \
   RUN_LIB_STUB_LOG="$TMP/run-lib.log"
+# The arm is gctk's, so the suite builds gctk from this checkout and runs it
+# over the store above. The config it reads names
+# the pool's default formula, for an arm that names none.
+HOLDS_STUB="$HERE/holds-store.stub.sh"
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no arm can be made"; exit 1; }
+HOLDS_CONFIG=$(jq -nc '{ok: true, config: {Agents: [{Name: "polecat", Dir: "gc-toolkit", DefaultSlingFormula: "mol-polecat-work"}]}}')
+export GCTK_BIN HOLDS_STUB HOLDS_CONFIG GC_NO_API=1
 
 POOL="gc-toolkit/gc-toolkit.polecat"
 LIVE_RUN='{"root":"tk-root","convoy":"tk-cv","bead":"tk-work","formula":"mol-polecat-work","live":true}'
@@ -315,8 +336,8 @@ reset; jq -c 'map(if .id == "tk-step" then .metadata["gc.root_bead_id"] = "hq-ro
 printf '[%s]\n' "${LIVE_RUN/tk-root/hq-root}" > "$RUN_LIB_STUB_RUNS"
 run "${DONE_ARGS[@]}"; refused "a run root in another store, where an edge onto it would hold nothing" "the run's root hq-root is in another store than tk-work"
 reset
-OUT=$(GC_DEFERRED_DISPATCH_TOOL="$TMP/missing.sh" "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
-refused "no deferred-dispatch.sh" "deferred-dispatch.sh not found"
+OUT=$(GCTK_BIN="$TMP/missing-gctk" "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
+refused "no gctk binary" "no gctk binary at '$TMP/missing-gctk'"
 reset
 OUT=$(FAKE_SHOW_FAIL=1 "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
 refused "an unreadable bead" "could not read tk-work"

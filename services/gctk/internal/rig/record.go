@@ -55,7 +55,7 @@ const (
 )
 
 // dirName is the record directory under the git common directory, beside the
-// refinery's gc-refinery-gate and gc-refinery-prep.
+// refinery's gc-refinery-gate.
 const dirName = "gc-rig-checks"
 
 // Record is one check's result at one commit, written by the run itself.

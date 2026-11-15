@@ -26,12 +26,13 @@
 # the witness both act on a released bead that still carries a session pin.
 #
 # The bead the summary and a retitle belong on is the anchor: the open bead that
-# carries a merge_result for this branch, which pr-open.sh, pr-stack.sh and merge.sh
-# read. On fresh work that is this bead. A convoy's rebuild child, a rework that
+# carries a merge_result for this branch, which pr-open.sh, the refinery and
+# merge.sh read. On fresh work that is this bead. A convoy's rebuild child, a rework that
 # answers no review and no ruling, has the convoy it names, as merge-push resolves
 # it. A rework child's metadata.anchor_bead answers when the branch list cannot.
-# A write to the anchor is its own write, ahead of the handoff, because a failure
-# to land it costs the PR a current body or title, not the handoff.
+# The summary and a retitle go onto the anchor in one write, `gctk pr summary`,
+# which the pr domain owns. It is its own write, ahead of the handoff, because a
+# failure to land it costs the PR a current body or title, not the handoff.
 #
 # The handoff is three writes, not one, because bd's claim guard refuses a write
 # that reassigns a bead while it is in_progress, and that refusal rolls back
@@ -188,6 +189,10 @@ SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SCRIPT_DIR/work-lib.sh"
 # shellcheck source=run-lib.sh
 . "${GC_RUN_LIB:-$SCRIPT_DIR/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 1; }
+# The summary and a retitle are recorded through gctk's pr domain.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 work_resolve "$CONVOY" "$BEAD"
 case $? in
@@ -385,10 +390,24 @@ if [ "$(printf '%s' "$WORK_ROW" | jq -r '.[0].metadata | if has("auto_push") the
   exit 0
 fi
 
-# Where the bring-current guard starts reading when no resume recorded a start.
-PRE_PUSH_HEAD=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
-if ! git push origin HEAD; then
-  echo "PUSH FAILED: $WORK_ID stays with this run. A non-fast-forward rejection means the branch moved under you; re-fetch, MERGE origin in, and retry. Never force-push: branches are brought current by merge, never rebase." >&2
+# The commit origin's branch holds as this run reads it: the push goes under the
+# lease on it (branch-push.sh), so a push someone made after this read is never
+# overwritten, and it is where the bring-current guard starts reading when no
+# resume recorded a start. ls-remote --exit-code exits 2 for a branch origin
+# does not carry, a branch that must not exist yet, as branch-push.sh's
+# --from-origin reads it. Any other exit is a read that did not answer, which
+# says nothing about the branch, so nothing is pushed.
+LS_OUT=$(git ls-remote --exit-code --heads origin "refs/heads/$CURRENT_BRANCH" 2>&1)
+case $? in
+  0) PRE_PUSH_HEAD=$(printf '%s' "$LS_OUT" | awk 'NR == 1 { print $1 }'); LEASE=(--from "$PRE_PUSH_HEAD") ;;
+  2) PRE_PUSH_HEAD=""; LEASE=(--new) ;;
+  *)
+    echo "ORIGIN UNREAD: $CURRENT_BRANCH on origin did not read, so nothing was pushed and $WORK_ID stays with this run. Whether the branch is there is unknown, not absent; re-run submit-and-exit once origin answers: $(printf '%s' "$LS_OUT" | tr -s '[:space:]' ' ')" >&2
+    work_drain
+    exit 1 ;;
+esac
+if ! "$SCRIPT_DIR/branch-push.sh" --repo "$PWD" --branch "$CURRENT_BRANCH" --head HEAD "${LEASE[@]}"; then
+  echo "PUSH FAILED: $WORK_ID stays with this run. A branch that moved under you, or a head that does not hold it, means: re-fetch, MERGE origin in, and retry. Never force-push: branches are brought current by merge, never rebase." >&2
   work_drain
   exit 1
 fi
@@ -433,21 +452,16 @@ elif ! grep -qxF "$REFINERY_TARGET" <<< "$ROSTER"; then
   exit 1
 fi
 
-PR_SUMMARY=""
-if [ -s "${SUMMARY_FILE:-/dev/null}" ]; then PR_SUMMARY=$(cat "$SUMMARY_FILE"); fi
+# A summary file of whitespace alone writes no summary, and the retitle still goes.
+ACCOUNT=()
+if [ -s "${SUMMARY_FILE:-/dev/null}" ] && [ -n "$(tr -d '[:space:]' < "$SUMMARY_FILE")" ]; then
+  ACCOUNT+=(--file "$SUMMARY_FILE")
+fi
+if [ -n "$(printf '%s' "$TITLE" | tr -d '[:space:]')" ]; then ACCOUNT+=(--title "$TITLE"); fi
+if [ "${#ACCOUNT[@]}" -gt 0 ] && ! ACCOUNT_ERR=$("$GCTK" pr summary "${ANCHOR:-$WORK_ID}" "${ACCOUNT[@]}" 2>&1 </dev/null); then
+  echo "the summary and retitle given did not reach ${ANCHOR:-$WORK_ID}, so its PR keeps the body and title it would have without them: ${ACCOUNT_ERR:-gctk pr summary exited non-zero}" >&2
+fi
 HANDOFF_META=(--set-metadata "target=$LANDING_TARGET" --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name)
-if [ -n "$PR_SUMMARY" ]; then
-  if [ -n "$ANCHOR" ]; then
-    gc bd update "$ANCHOR" --set-metadata "pr_summary=$PR_SUMMARY" </dev/null >/dev/null \
-      || echo "pr_summary did not reach anchor $ANCHOR; its PR body falls back to the dispatch text" >&2
-  else
-    HANDOFF_META+=(--set-metadata "pr_summary=$PR_SUMMARY")
-  fi
-fi
-if [ -n "$(printf '%s' "$TITLE" | tr -d '[:space:]')" ]; then
-  gc bd update "${ANCHOR:-$WORK_ID}" --title "$TITLE" </dev/null >/dev/null \
-    || echo "the retitle did not reach ${ANCHOR:-$WORK_ID}; the PR title stays composed from the title it has" >&2
-fi
 
 if ! { gc bd update "$WORK_ID" "${HANDOFF_META[@]}" --append-notes "$NOTES" </dev/null >/dev/null \
     && gc bd update "$WORK_ID" --status=open </dev/null >/dev/null \

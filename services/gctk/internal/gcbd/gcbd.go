@@ -609,13 +609,25 @@ func (b *Bead) blocksEdges() (edges []Bead, ok bool) {
 	return edges, true
 }
 
+// ErrGuard is the error of an update whose --if-status or --if-assignee no
+// longer held when bd checked it in the write's own transaction: bd wrote
+// nothing and exited 13, its code for a guard alone refusing the write.
+var ErrGuard = errors.New("the bead no longer has the status or assignee the write was guarded on")
+
+// guardExit is bd update's exit when every failure is a stale guard.
+const guardExit = 13
+
 // Update runs one `gc bd update`, returning its combined output. Callers pass
 // the whole transition in a single call: a partial write is the failure mode
-// the atomic update exists to prevent.
+// the atomic update exists to prevent. An update a guard refused returns an
+// error that is ErrGuard, and still carries the exit.
 func (c *Client) Update(id string, args ...string) (string, error) {
 	full := append([]string{"bd", "update", id}, args...)
 	cmd := c.command(full...)
 	out, err := cmd.CombinedOutput()
+	if err != nil && ExitCode(err) == guardExit {
+		err = fmt.Errorf("%w: %w", ErrGuard, err)
+	}
 	return strings.TrimRight(string(out), "\n"), err
 }
 

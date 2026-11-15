@@ -224,10 +224,9 @@ The pack's checks, and what a failure means:
 | `check-gate-marker-provenance` | every closed approve review backing a lane on an open gating anchor records the outcome its writer stamps, `gc.outcome=recorded` or `superseded` (I7 depth) | an approve verdict whose outcome was never recorded, which still derives its lane green |
 | `check-step-terminal` | no offerable step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
 | `check-pour-text-current` | a running molecule executes the formula text that is current when it runs (I9) | a rig checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref, or a formula edited after a live molecule was poured |
-| `check-cadence-live` | every pack order fired within its cadence window (three intervals, or one trip of the order dispatch rotation when longer), a `gctk` binary is deployed for `lifecycle.sh` and `merge.sh` to exec, and `flock` resolves for the pass locks `refinery-reconcile` and `deferred-dispatch` take (I10) | order not registered for a rig, the controller is down, the `gctk-build` order has never published a binary, or `flock` is missing from `PATH` |
+| `check-cadence-live` | every pack order fired within its cadence window (three intervals, or one trip of the order dispatch rotation when longer), a `gctk` binary is deployed for `lifecycle.sh` and `merge.sh` to exec, and `flock` resolves for the pass lock `refinery-reconcile` takes (I10) | order not registered for a rig, the controller is down, the `gctk-build` order has never published a binary, or `flock` is missing from `PATH` |
 | `check-claim-advancing` | every step a pool should run is advancing: a claimed step is held by a running session still producing output, and an offered step has been claimed (I11) | a claimed step whose holder is gone or stalled past the bound, or a routed open step a live pool session leaves unclaimed |
 | `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
-| `check-refinery-patrol-live` | a refinery whose find-work queue has held a bead past the bound (default 60m) has written its `mol-refinery-patrol` wisp within that bound (I14) | a refinery session working outside its patrol loop, or none running, while handed-off work waits in its queue |
 | `check-epic-closed-implies-ruled` | a closed epic other than a Delivery was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (a duplicates or supersedes edge onto its successor); a Delivery, an epic whose parent is an epic and that carries no hypothesis, is exempt, because its epic carries the ruling (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
 | `check-po-queue-only` | each rig's po receives nothing but its queue: no bead that a hold does not hold is routed or assigned to it, no mail to it waits unread, and every bead in its queue is new work that nothing has sent (I16) | a path that sends the po work: a route, an assignment, `gc sling <po> --on <formula>`, mail from any sender, or `hold:mayor` set on PR-finishing work, on a bead with a landing state, or on a bead an arm, an assignee or a live run already sends |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config; no order registered with no rig declares `scope = "rig"` | a rename that missed a reference, or a `scope = "rig"` order file where Gas City reads city-level orders, such as the city's own `orders/` |
@@ -287,22 +286,25 @@ for a clone that carries no render yet.
 The hook keeps a branch current against its own base, which is not the same as
 keeping the landing branch current: the artifact is rendered from the whole
 source tree, so a PR whose render predates a prompt input the base has since
-gained lands over that input. `merge.sh` refuses such a merge, using
-`render-seed-audit.sh --check-merge`, which renders the tree `git merge-tree`
-writes. So the host that runs the refinery's merges needs `gc` on its PATH and
-git 2.38 or newer.
+gained lands over that input. Until a rig's cutover onto the pending record,
+`merge.sh` refuses such a merge, using `render-seed-audit.sh --check-merge`,
+which renders the tree `git merge-tree` writes. On the pending record the
+landing order lets it land, and then checks the default branch with the same
+mode, run on the branch's tip against itself. So the host that runs the
+refinery's merges and the landing order needs `gc` on its PATH and git 2.38 or
+newer.
 
 A commit carries the renders its branch moves. The hook renders `--since` the
 branch's fork point from the default branch, so a file whose text moved with
 the `gc` binary, and not with the branch, stays as the fork point has it. That
-text lands in a pull request of its own: the merge gate hands the files the
-default branch is stale in to `seed-audit-reaudit.sh`, which slings one bead to
-re-render them. A file that a branch re-rendered itself, as that bead does, is
-the branch's adoption of gc's text, and later commits render it fresh, so a
-newer `gc` renews the adoption rather than undoing it. `INDEX.md` lists every
-page, so a commit that moves the index, by adding an agent for example, also
-carries a page that `gc` added or removed, and the index lists no page the
-commit leaves out.
+text lands in a pull request of its own: the merge gate, or the landing order
+after a landing, hands the files the default branch is stale in to
+`seed-audit-reaudit.sh`, which slings one bead to re-render them. A file that a
+branch re-rendered itself, as that bead does, is the branch's adoption of gc's
+text, and later commits render it fresh, so a newer `gc` renews the adoption
+rather than undoing it. `INDEX.md` lists every page, so a commit that moves the
+index, by adding an agent for example, also carries a page that `gc` added or
+removed, and the index lists no page the commit leaves out.
 
 ### Smoke test
 
