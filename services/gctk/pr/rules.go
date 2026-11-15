@@ -45,27 +45,23 @@ var (
 	silentConclusions  = []string{"SKIPPED", "CANCELLED"}
 )
 
-// checks reads each check run the PR requires, across the check suites at its
-// head, by the rule for required checks: each suite holds the check's latest
-// result, a re-run's in place of the attempt it re-ran. A skipped or cancelled
-// result counts for nothing, since neither says how the job fared at the head.
-// The check passes when a result is left and every result left completed as
-// success or neutral. A failed result holds the PR. A check with no result left,
-// or one still running, holds it until a run reports. A required commit status
-// has no check suite and is left to the merge state. No time is compared.
-func checks(suites []gh.CheckSuite) []Condition {
+// checks reads the results of each check run the PR requires at its head, as
+// the check suites there hold them (requiredRuns), by the rule for required
+// checks: each suite holds the check's latest result, a re-run's in place of
+// the attempt it re-ran. A skipped or cancelled result counts for nothing,
+// since neither says how the job fared at the head. The check passes when a
+// result is left and every result left completed as success or neutral. A
+// failed result holds the PR. A check with no result left, or one still
+// running, holds it until a run reports. A required commit status has no check
+// suite and is left to the merge state. No time is compared.
+func checks(runs []RequiredRun) []Condition {
 	var names []string
-	results := map[string][]gh.CheckRun{}
-	for _, s := range suites {
-		for _, r := range s.Runs {
-			if !r.Required {
-				continue
-			}
-			if _, seen := results[r.Name]; !seen {
-				names = append(names, r.Name)
-			}
-			results[r.Name] = append(results[r.Name], r)
+	results := map[string][]RequiredRun{}
+	for _, r := range runs {
+		if _, seen := results[r.Name]; !seen {
+			names = append(names, r.Name)
 		}
+		results[r.Name] = append(results[r.Name], r)
 	}
 	sort.Strings(names)
 	var out []Condition

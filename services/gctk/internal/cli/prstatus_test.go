@@ -3,10 +3,10 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -540,107 +540,219 @@ func TestPRStatusUsageErrors(t *testing.T) {
 	}
 }
 
-// An anchor on Gas Town's pending record reads the evaluator's answer, which
-// prstatus renders, and prints each condition not met.
-func TestPRStatusOnThePendingRecord(t *testing.T) {
-	onRecord := `[{"id":"tk-a","status":"blocked","metadata":{"merge_result":"pull_request_pending"}}]`
-	answer := func(a pr.Answer, err error) {
-		t.Helper()
-		prev := evaluateReady
-		evaluateReady = func(anchor string) (pr.Answer, error) {
-			if anchor != "tk-a" {
-				t.Fatalf("evaluated %q, want tk-a", anchor)
-			}
-			a.Bead = anchor
-			return a, err
-		}
-		t.Cleanup(func() { evaluateReady = prev })
+// stPR is the PR st-1 owns on Gas Town's pending record.
+const stPR = "https://github.com/acme/widgets/pull/7"
+
+// savedRead is the GitHub read the landing order saves of st-1's PR at the head
+// the refinery validated: open, approved, CLEAN, its required check passed and
+// nothing waiting on the city. edit changes it before it is saved.
+func savedRead(t *testing.T, edit func(*pr.GitHubRead)) string {
+	t.Helper()
+	r := &pr.GitHubRead{ReadAt: "2026-11-15T09:00:00Z", URL: stPR, Number: 7, Repository: "acme/widgets",
+		HeadBranch: "polecat/st-1", Base: "main", Head: validated, State: "OPEN", MergeState: "CLEAN",
+		Checks:    []pr.RequiredRun{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS"}},
+		Approvers: []string{"operator"}, Requesters: []string{}, Awaiting: []string{}}
+	if edit != nil {
+		edit(r)
 	}
-	notReady := pr.Answer{Head: "abc", Target: "main", Conditions: []pr.Condition{
-		{Kind: pr.KindApproval, Detail: "no approval stands from an account that can push to the repository"},
-		{Kind: pr.KindReview, Detail: "no review result passed at head abc into main"},
-	}}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
 
-	t.Run("prints the rendered status, then each condition not met", func(t *testing.T) {
-		stubGC(t, onRecord, `[]`)
-		answer(notReady, nil)
-		want := "working\napproval: no approval stands from an account that can push to the repository\nreview: no review result passed at head abc into main\n"
-		if out, code := derive(t, "tk-a"); code != 0 || out != want {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, want)
+// pendingStore is a store whose st-1 owns PR 7 on Gas Town's pending record, at
+// the blocked status the record writes, with its record whole, a review result
+// passed at the validated head and the read savedRead saves. md changes its
+// metadata, where a nil value leaves the key off, deps are its own edges in a
+// show's shape, and others are the store's other rows.
+func pendingStore(t *testing.T, md map[string]any, deps []map[string]any, others ...map[string]any) string {
+	t.Helper()
+	rec := map[string]any{
+		"merge_result": "pull_request_pending", "pr_url": stPR, "pr_number": "7", "pr_repo": "acme/widgets",
+		"pr_head_sha": validated, "merged_target": "main", "branch": "polecat/st-1",
+		"review_results": `[{"head":"` + validated + `","target":"main","passed":true}]`,
+		"pr_github_read": savedRead(t, nil),
+	}
+	for k, v := range md {
+		if v == nil {
+			delete(rec, k)
+			continue
 		}
-	})
+		rec[k] = v
+	}
+	row := map[string]any{"id": "st-1", "title": "the work", "status": "blocked", "metadata": rec}
+	if deps != nil {
+		row["dependencies"] = deps
+	}
+	raw, err := json.Marshal(append([]map[string]any{row}, others...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
 
-	t.Run("--json carries the answer beside the status", func(t *testing.T) {
-		stubGC(t, onRecord, `[]`)
-		answer(notReady, nil)
-		out, code := derive(t, "tk-a", "--json")
-		var got struct {
-			Status     string         `json:"status"`
-			Ready      *bool          `json:"ready"`
-			Head       string         `json:"head"`
-			Target     string         `json:"target"`
-			Conditions []pr.Condition `json:"conditions"`
+// pendingDerive runs `gctk pr status st-1` with extra over store, through the
+// store stub, with a gh on PATH and a pr-post.sh in the scripts directory that
+// each record their call. A PR on the pending record is derived from the store
+// alone, so the test fails if either is called.
+func pendingDerive(t *testing.T, store string, extra ...string) (string, int) {
+	t.Helper()
+	bin, scripts := t.TempDir(), t.TempDir()
+	calls := filepath.Join(t.TempDir(), "calls")
+	record := func(name string) string {
+		return "#!/bin/sh\nprintf '" + name + " %s\\n' \"$*\" >> \"$OUTSIDE_CALLS\"\nexit 1\n"
+	}
+	for path, body := range map[string]string{
+		filepath.Join(bin, "gc"):             storeStub,
+		filepath.Join(bin, "gh"):             record("gh"),
+		filepath.Join(scripts, "pr-post.sh"): record("pr-post.sh"),
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
 		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GCTK_SCRIPTS_DIR", scripts)
+	t.Setenv("OUTSIDE_CALLS", calls)
+	t.Setenv("STUB_STORE", store)
+	var out, errbuf bytes.Buffer
+	code := Run(append([]string{"pr", "status", "st-1"}, extra...), "", &out, &errbuf)
+	if raw, err := os.ReadFile(calls); err == nil {
+		t.Fatalf("gctk pr status called outside the store:\n%s", raw)
+	}
+	return out.String(), code
+}
+
+// An anchor on Gas Town's pending record reads the evaluator's answer over the
+// GitHub read the landing order saved on it, which prstatus renders, and the
+// command prints each condition not met, once for each status. It reads
+// neither GitHub nor the definition of feedback.
+func TestPRStatusOnThePendingRecord(t *testing.T) {
+	const other = "2222222222222222222222222222222222222222"
+	noApproval := "approval: no approval stands from an account that can push to the repository\n"
+	unread := func(head string) string {
+		return "github-unread: GitHub's side of the PR is not read at the head the store holds, " + head + ": "
+	}
+	unapproved := func(r *pr.GitHubRead) { r.Approvers = []string{} }
+	type derived struct {
+		Status     string            `json:"status"`
+		Held       []string          `json:"held"`
+		Reasons    []prstatus.Reason `json:"reasons"`
+		Ready      *bool             `json:"ready"`
+		Head       *string           `json:"head"`
+		Target     *string           `json:"target"`
+		Conditions []pr.Condition    `json:"conditions"`
+	}
+	decode := func(t *testing.T, store string) derived {
+		t.Helper()
+		out, code := pendingDerive(t, store, "--json")
+		var got derived
 		if code != 0 || json.Unmarshal([]byte(out), &got) != nil {
 			t.Fatalf("derive --json = (%q, %d)", out, code)
 		}
-		if got.Status != "working" || got.Ready == nil || *got.Ready || got.Head != "abc" || got.Target != "main" ||
-			!slices.Equal(got.Conditions, notReady.Conditions) {
-			t.Fatalf("derive --json = %s", out)
-		}
-	})
-
-	t.Run("a ready PR reads merging, with no condition", func(t *testing.T) {
-		stubGC(t, onRecord, `[]`)
-		answer(pr.Answer{Ready: true, Head: "abc", Target: "main"}, nil)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "merging\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "merging\n")
-		}
-		out, _ := derive(t, "tk-a", "--json")
-		if !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"conditions":[]`) {
-			t.Fatalf("derive --json = %s, want ready with an empty conditions array", out)
-		}
-	})
-
-	t.Run("a review thread waiting on the city's answer reads held: review", func(t *testing.T) {
-		stubGC(t, onRecord, `[]`)
-		answer(pr.Answer{Head: "abc", Target: "main", Conditions: []pr.Condition{
-			{Kind: pr.KindThread, Value: "T1", Detail: "review thread T1 waits on the city's answer"},
-		}}, nil)
-		want := "needs-attention\nthread: review thread T1 waits on the city's answer\n"
-		if out, code := derive(t, "tk-a"); code != 0 || out != want {
+		return got
+	}
+	plain := func(t *testing.T, store, want string) {
+		t.Helper()
+		if out, code := pendingDerive(t, store); code != 0 || out != want {
 			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, want)
 		}
-		out, _ := derive(t, "tk-a", "--json")
-		if !strings.Contains(out, `"held":["review"]`) ||
-			!strings.Contains(out, `"reasons":[{"held":"review","id":"","title":"1 review thread waits on the city's answer"}]`) {
-			t.Fatalf("derive --json = %s, want held: review with the thread's reason", out)
+	}
+
+	t.Run("a ready PR reads merging, with no condition, judged at the saved read's head", func(t *testing.T) {
+		store := pendingStore(t, nil, nil)
+		plain(t, store, "merging\n")
+		got := decode(t, store)
+		if got.Status != "merging" || got.Ready == nil || !*got.Ready || got.Head == nil || *got.Head != validated ||
+			got.Target == nil || *got.Target != "main" || got.Conditions == nil || len(got.Conditions) != 0 {
+			t.Fatalf("derive --json = %+v, want ready at %s into main with an empty conditions array", got, validated)
+		}
+	})
+
+	t.Run("an unapproved PR the review loop has yet to pass reads working, then each condition not met", func(t *testing.T) {
+		store := pendingStore(t, map[string]any{"review_results": nil, "pr_github_read": savedRead(t, unapproved)}, nil)
+		plain(t, store, "working\n"+noApproval+"review: no review result passed at head "+validated+" into main\n")
+	})
+
+	t.Run("a PR waiting on an approval alone reads needs-review", func(t *testing.T) {
+		plain(t, pendingStore(t, map[string]any{"pr_github_read": savedRead(t, unapproved)}, nil), "needs-review\n"+noApproval)
+	})
+
+	t.Run("a review thread waiting on the city's answer reads needs-attention, held: review", func(t *testing.T) {
+		store := pendingStore(t, map[string]any{"pr_github_read": savedRead(t, func(r *pr.GitHubRead) {
+			r.Awaiting = []string{"T1"}
+		})}, nil)
+		plain(t, store, "needs-attention\nthread: review thread T1 waits on the city's answer\n")
+		got := decode(t, store)
+		if !slices.Equal(got.Held, []string{"review"}) || !reflect.DeepEqual(got.Reasons,
+			[]prstatus.Reason{{Held: prstatus.HeldReview, Title: "1 review thread waits on the city's answer"}}) {
+			t.Fatalf("derive --json = %+v, want held: review with the thread's reason", got)
+		}
+	})
+
+	t.Run("a failed required check reads needs-attention", func(t *testing.T) {
+		store := pendingStore(t, map[string]any{"pr_github_read": savedRead(t, func(r *pr.GitHubRead) {
+			r.Checks = []pr.RequiredRun{{Name: "test", Status: "COMPLETED", Conclusion: "FAILURE"}}
+		})}, nil)
+		plain(t, store, "needs-attention\ncheck-failed: required check test has a result at the head that did not pass (FAILURE)\n")
+	})
+
+	t.Run("a PR with no read saved reads working, GitHub's side unread and no head judged", func(t *testing.T) {
+		store := pendingStore(t, map[string]any{"pr_github_read": nil}, nil)
+		plain(t, store, "working\n"+unread(validated)+"no read of GitHub is saved on the bead\n")
+		got := decode(t, store)
+		if got.Status != "working" || got.Ready == nil || *got.Ready || got.Head != nil || got.Target != nil ||
+			len(got.Conditions) != 1 || got.Conditions[0].Kind != pr.KindGitHubUnread {
+			t.Fatalf("derive --json = %+v, want working on github-unread alone, with no head or target", got)
+		}
+	})
+
+	t.Run("a head the refinery published after the read reads working until the landing order reads it", func(t *testing.T) {
+		plain(t, pendingStore(t, map[string]any{"pr_head_sha": other}, nil),
+			"working\n"+unread(other)+"the read is at head "+validated+"\n")
+	})
+
+	t.Run("an unread side beside a human gate reads needs-attention, held: gate", func(t *testing.T) {
+		t.Setenv("STUB_BLOCKED", `[{"id":"st-1","blocked_by":["st-g"]}]`)
+		t.Setenv("STUB_MARKS", `[{"id":"st-1"}]`)
+		store := pendingStore(t, map[string]any{"pr_github_read": nil},
+			[]map[string]any{{"id": "st-g", "dependency_type": "blocks", "title": "which way?", "status": "open",
+				"issue_type": "gate", "await_type": "human"}},
+			map[string]any{"id": "st-g", "title": "which way?", "status": "open", "issue_type": "gate",
+				"await_type": "human", "assignee": "human"})
+		out, code := pendingDerive(t, store)
+		if code != 0 || !strings.HasPrefix(out, "needs-attention\n"+unread(validated)) ||
+			!strings.Contains(out, "\nwait: the bead waits on st-g") {
+			t.Fatalf("derive = (%q, %d), want needs-attention on github-unread and the wait on st-g", out, code)
+		}
+		got := decode(t, store)
+		if !slices.Equal(got.Held, []string{"gate"}) ||
+			!reflect.DeepEqual(got.Reasons, []prstatus.Reason{{Held: prstatus.HeldGate, ID: "st-g", Title: "which way?"}}) {
+			t.Fatalf("derive --json = %+v, want held: gate naming st-g", got)
 		}
 	})
 
 	t.Run("the merge pass's verdict and thread count, left from the old record, hold nothing", func(t *testing.T) {
-		stubGC(t, `[{"id":"tk-a","status":"blocked","metadata":{"merge_result":"pull_request_head_changed",`+
-			`"pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker","pr.unanswered_threads":"2@abc"}}]`, `[]`)
-		answer(notReady, nil)
-		out, code := derive(t, "tk-a", "--json")
-		if code != 0 || !strings.Contains(out, `"status":"working"`) || !strings.Contains(out, `"held":[]`) ||
-			!strings.Contains(out, `"reasons":[]`) {
-			t.Fatalf("derive --json = (%q, %d), want working with nothing held", out, code)
+		store := pendingStore(t, map[string]any{"review_results": nil, "pr_github_read": savedRead(t, unapproved),
+			"pr_posture": "approved@abc@t", "pr.machine": "blocked@abc@t", "pr.machine_cause": "blocker",
+			"pr.unanswered_threads": "2@abc"}, nil)
+		got := decode(t, store)
+		if got.Status != "working" || len(got.Held) != 0 || got.Held == nil || len(got.Reasons) != 0 || got.Reasons == nil {
+			t.Fatalf("derive --json = %+v, want working with nothing held", got)
 		}
 	})
 
-	t.Run("an evaluation that fails derives nothing", func(t *testing.T) {
-		stubGC(t, onRecord, `[]`)
-		answer(pr.Answer{}, errors.New("github: unreachable"))
-		if out, code := derive(t, "tk-a"); code != 2 || out != "" {
+	t.Run("a saved read that does not decode derives nothing", func(t *testing.T) {
+		store := pendingStore(t, map[string]any{"pr_github_read": "{not json"}, nil)
+		if out, code := pendingDerive(t, store); code != 2 || out != "" {
 			t.Fatalf("derive = (%q, %d), want (\"\", 2)", out, code)
 		}
 	})
 
-	t.Run("an anchor off the record is not evaluated, and its --json carries no answer", func(t *testing.T) {
-		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]`, `[]`)
-		answer(pr.Answer{}, errors.New("evaluated an anchor off the record"))
-		out, code := derive(t, "tk-a", "--json")
+	t.Run("an anchor off the record reads its recorded facts, and its --json carries no answer", func(t *testing.T) {
+		out, code := pendingDerive(t, `[{"id":"st-1","status":"open","metadata":{"merge_result":"pull_request"}}]`, "--json")
 		if code != 0 || strings.Contains(out, `"ready"`) || strings.Contains(out, `"conditions"`) {
 			t.Fatalf("derive --json = (%q, %d), want the derivation alone", out, code)
 		}
@@ -712,37 +824,4 @@ func readsDeclared(t *testing.T, f pr.Feedback) bool {
 	}
 	t.Fatalf("feedback %v, want [2] where the prefix is declared or [1 2] where it is not", ids)
 	return false
-}
-
-// routeStub answers the two reads that route a bead to its store: bd where
-// names rig A's store, the one the directory gctk runs in resolves, and rig
-// list names rig A's and rig B's.
-const routeStub = `#!/bin/sh
-case "$1 $2" in
-"bd where") printf '{"path":"%s/.beads","prefix":"ra"}\n' "$STUB_RIG_A" ;;
-"rig list") printf '{"rigs":[{"name":"a","prefix":"ra","path":"%s"},{"name":"b","prefix":"rb","path":"%s"}]}\n' "$STUB_RIG_A" "$STUB_RIG_B" ;;
-*) echo "stub gc: no answer for $*" >&2; exit 2 ;;
-esac
-`
-
-// The evaluator loads the definition of feedback in the checkout of the rig
-// whose store holds the anchor, so it reads that rig's declaration, whatever
-// directory gctk runs in: here rig A's store is the one gc resolves, and the
-// test runs in this checkout, neither of which declares the prefix.
-func TestPRStatusLoadsTheDefinitionInTheAnchorsRig(t *testing.T) {
-	packScripts(t)
-	rigA, rigB, bin := declaringRig(t, ""), declaringRig(t, declared), t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(routeStub), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("STUB_RIG_A", rigA)
-	t.Setenv("STUB_RIG_B", rigB)
-	src, err := readySources("rb-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !readsDeclared(t, src.Feedback) {
-		t.Fatal("the definition did not read the declaration of rig B, whose store holds rb-1")
-	}
 }
