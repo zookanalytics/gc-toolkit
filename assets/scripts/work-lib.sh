@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# work-lib.sh — what mol-polecat-work's step scripts share. Sourced, never
+# work-lib.sh — what mol-polecat-work's step scripts share, with the test of a
+# branch's writer that the refinery's find-work reads too. Sourced, never
 # executed.
 #
 # A step script reads its work bead once, through work_read, and passes the
@@ -16,6 +17,10 @@
 #   work_is_self <name>           whether <name> is one this session goes by
 #   work_owner_listed <name>      how many listed sessions go by <name>, "" when
 #                                 the list cannot be read
+#   work_writing <bead> <status> <assignee>
+#                                 whether someone writes the bead's branch now:
+#                                 0 yes, 1 no, 2 the runs that work it did not
+#                                 read
 #   work_outage <what>            stops the step, having asked nothing
 #   work_stop_with_gate <key> <message> <reason>
 #                                 a person must rule before the work goes on, so
@@ -39,8 +44,8 @@
 #
 # A caller sets PROG and SCRIPT_DIR before it sources this file, and STEP and
 # FORMULA before it calls work_stop_with_gate. It sources run-lib.sh before it
-# calls work_held_by_proof. WORK_READ_TRIES and WORK_READ_WAIT bound
-# the retry; a suite sets the wait to 0.
+# calls work_held_by_proof or work_writing. WORK_READ_TRIES and WORK_READ_WAIT
+# bound the retry; a suite sets the wait to 0.
 
 WORK_READ_TRIES="${WORK_READ_TRIES:-3}"
 WORK_READ_WAIT="${WORK_READ_WAIT:-5}"
@@ -144,6 +149,23 @@ work_held_stop() {
 
 # The reader run-lib.sh's verbs call: bd's own arguments, against this store.
 work_bd() { gc bd "$@"; }
+
+# One writer per branch has two halves, and this is the test both read of
+# whether someone writes a bead's branch now: a live run works the bead
+# (run-lib.sh), or a session the list names, other than this one, holds its
+# in_progress claim. A bead open under a live name is handed off, not written,
+# and a list that cannot be read proves nobody gone. work-setup.sh waits behind
+# a sibling whose tree holds the branch while this finds the sibling writing.
+# The refinery's find-work counts a bead that waits on the one it would take as
+# a writer of that one's branch only while this finds it writing, since it
+# cannot start before that one closes.
+work_writing() { # <bead> <status> <assignee>
+  local runs
+  runs=$(run_lib runs work_bd "$1") || return 2
+  printf '%s' "$runs" | jq -e 'any(.[]; .live)' >/dev/null 2>&1 && return 0
+  [ "$2" = in_progress ] && [ -n "$3" ] && ! work_is_self "$3" || return 1
+  [ "$(work_owner_listed "$3")" != 0 ]
+}
 
 # The sitting holds the work bead when gc hook current names its conversation
 # and the bead has a blocks edge onto it, which keeps every pool off the bead
