@@ -32,8 +32,8 @@ func TestTheHeadsComment(t *testing.T) {
 	got := review.Comment(run, 1, asks)
 	for _, want := range []string{
 		review.Mark(root, h1),
-		"| correctness | approve | 1 declined |",
-		"| arch | request-changes | 1 must-fix |",
+		"| correctness | approve | 1 P1 | 1 declined |",
+		"| arch | request-changes | 1 P1 | 1 must-fix |",
 		"correctness approved, arch requested changes",
 		"Declined, and the head carries no change for it: a nit",
 		"Fixed by `" + fix[:12] + "`, which `" + h2[:12] + "` carries: the boundary leaks",

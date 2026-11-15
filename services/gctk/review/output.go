@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -161,7 +162,9 @@ func laneOutput(run *Run, n int, req OutputRequest) (*Lane, error) {
 		return nil, refuse("the verdict reads %q, not %s or %s", ln.Verdict, VerdictApprove, VerdictRequestChanges)
 	}
 	ids := map[string]bool{}
-	for _, f := range ln.Findings {
+	blocking := 0
+	for i := range ln.Findings {
+		f := &ln.Findings[i]
 		switch {
 		case strings.TrimSpace(f.ID) == "":
 			return nil, refuse("a finding names no id, so no ruling can answer it")
@@ -171,6 +174,18 @@ func laneOutput(run *Run, n int, req OutputRequest) (*Lane, error) {
 			return nil, refuse("finding %s needs its locus and its message", f.ID)
 		}
 		ids[f.ID] = true
+		if why := contract(f, ln.Check); why != "" {
+			return nil, refuse("finding %s: %s", f.ID, why)
+		}
+		if f.Severity != "P2" {
+			blocking++
+		}
+	}
+	switch {
+	case ln.Verdict == VerdictApprove && blocking > 0:
+		return nil, refuse("an approve carries no blocking finding, and this set carries %d: a P0, a P1 or a finding with no grade", blocking)
+	case ln.Verdict == VerdictRequestChanges && blocking == 0:
+		return nil, refuse("request-changes needs a blocking finding, and this set carries none; when only P2s remain, the lane approves")
 	}
 	if ln.Findings == nil {
 		ln.Findings = []Finding{}
@@ -253,6 +268,36 @@ func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair
 	}
 	return &rp, nil
 }
+
+// contract is why a lane's finding breaks the finding contract, "" when it
+// keeps it, with its grade written upper-case: a grade is P0, P1 or P2, and
+// every correctness finding carries one; a graded finding names its category
+// and its failure scenario; a P0 or a P1 carries a verification that opens
+// CONFIRMED or PLAUSIBLE and then the evidence; and a candidate whose
+// verification is REFUTED is no finding at any grade. A P2 does not block, and
+// a finding with no grade does.
+func contract(f *Finding, check string) string {
+	f.Severity = strings.ToUpper(strings.TrimSpace(f.Severity))
+	verification := strings.TrimSpace(f.Verification)
+	switch g := f.Severity; {
+	case g != "" && g != "P0" && g != "P1" && g != "P2":
+		return fmt.Sprintf("its severity reads %q, not P0, P1 or P2", g)
+	case g == "" && strings.EqualFold(check, "correctness"):
+		return "it has no severity, and every correctness finding is graded"
+	case g != "" && (strings.TrimSpace(f.Category) == "" || strings.TrimSpace(f.FailureScenario) == ""):
+		return "a graded finding names its category and its failure_scenario"
+	case refutedVerification.MatchString(verification):
+		return "its verification is REFUTED, and a refuted candidate is not a finding: leave it out, and keep its refutation in the trail"
+	case (g == "P0" || g == "P1") && !confirmedVerification.MatchString(verification):
+		return fmt.Sprintf("a %s carries a verification that opens CONFIRMED or PLAUSIBLE and then the evidence", g)
+	}
+	return ""
+}
+
+var (
+	refutedVerification   = regexp.MustCompile(`(?i)^REFUTED([^[:alnum:]]|$)`)
+	confirmedVerification = regexp.MustCompile(`(?i)^(CONFIRMED|PLAUSIBLE)[^[:alnum:]]+[^[:space:]]`)
+)
 
 // checkRuling is why one ruling of iteration it's round does not stand: a
 // subject no lane raised and no ask the round can take, a ruling outside the

@@ -2,6 +2,7 @@ package review
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -48,10 +49,14 @@ func Comment(run *Run, n int, asks []Ask) string {
 		}
 	}
 	if len(it.Lanes) > 0 {
-		fmt.Fprintln(&b, "| Check | Verdict | Findings |")
-		fmt.Fprintln(&b, "|---|---|---|")
+		fmt.Fprintln(&b, "| Check | Verdict | Findings | Ruled |")
+		fmt.Fprintln(&b, "|---|---|---|---|")
 		for _, ln := range it.Lanes {
-			fmt.Fprintf(&b, "| %s | %s | %s |\n", ln.Check, ln.Verdict, tally(ln, rp))
+			g := grades(ln)
+			if g == "" {
+				g = "none"
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", ln.Check, ln.Verdict, g, tally(ln, rp))
 		}
 		fmt.Fprintln(&b)
 	}
@@ -59,8 +64,8 @@ func Comment(run *Run, n int, asks []Ask) string {
 		if len(ln.Findings) == 0 {
 			continue
 		}
-		fmt.Fprintf(&b, "<details><summary>%s: %s, %d finding(s)</summary>\n\n", ln.Check, ln.Verdict, len(ln.Findings))
-		for _, f := range ln.Findings {
+		fmt.Fprintf(&b, "<details><summary>%s: %s, %s</summary>\n\n", ln.Check, ln.Verdict, grades(ln))
+		for _, f := range bySeverity(ln.Findings) {
 			grade := f.Severity
 			if grade == "" {
 				grade = "ungraded"
@@ -131,6 +136,40 @@ func summary(it *Iteration, shadow bool) string {
 		return ran + "."
 	}
 	return ran + ". The round " + strings.Join(did, ", ") + "."
+}
+
+// bySeverity is the findings, the most severe first, in the lane's order
+// within a grade, an ungraded one after the P2s.
+func bySeverity(fs []Finding) []Finding {
+	out := slices.Clone(fs)
+	slices.SortStableFunc(out, func(a, b Finding) int { return rank(a.Severity) - rank(b.Severity) })
+	return out
+}
+
+func rank(grade string) int {
+	if i := slices.Index([]string{"P0", "P1", "P2"}, strings.ToUpper(grade)); i >= 0 {
+		return i
+	}
+	return 3
+}
+
+// grades is a lane's findings counted per grade, as in "1 P1, 2 P2".
+func grades(ln Lane) string {
+	count := map[string]int{}
+	for _, f := range ln.Findings {
+		g := strings.ToUpper(f.Severity)
+		if g == "" {
+			g = "ungraded"
+		}
+		count[g]++
+	}
+	var out []string
+	for _, g := range []string{"P0", "P1", "P2", "ungraded"} {
+		if count[g] > 0 {
+			out = append(out, fmt.Sprintf("%d %s", count[g], g))
+		}
+	}
+	return strings.Join(out, ", ")
 }
 
 // tally is a lane's findings by how the round ruled them.

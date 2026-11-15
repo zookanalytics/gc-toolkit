@@ -83,6 +83,57 @@ func TestALaneOutput(t *testing.T) {
 	mustRefuse(t, w.check(st, ln, nil), "needs its locus and its message")
 }
 
+// A lane's findings keep the finding contract: a grade of P0, P1 or P2, which
+// every correctness finding carries, and with it a category and a failure
+// scenario; a P0 or P1 verified CONFIRMED or PLAUSIBLE; no REFUTED candidate.
+// An approve carries no blocking finding, and request-changes at least one.
+func TestALanesFindingContract(t *testing.T) {
+	w := newWorld(t)
+	w.output(triage(1, h1, "correctness", "arch"))
+	st := w.step(1, "lane")
+	with := func(check, verdict string, edit func(*review.Finding)) review.Lane {
+		ln := lane(1, check, h1, verdict, "F1")
+		edit(&ln.Findings[0])
+		return ln
+	}
+	keep := func(*review.Finding) {}
+	var got review.Lane
+	if err := w.check(st, with("correctness", review.VerdictRequestChanges, func(f *review.Finding) { f.Severity = "p1" }), &got); err != nil ||
+		got.Findings[0].Severity != "P1" {
+		t.Errorf("a lower-case grade = %v, %q; want it to stand, upper-cased", err, got.Findings[0].Severity)
+	}
+	p2 := func(f *review.Finding) { f.Severity = "P2"; f.Verification = "" }
+	if err := w.check(st, with("correctness", review.VerdictApprove, p2), nil); err != nil {
+		t.Errorf("an approve carrying a P2 is refused: %v", err)
+	}
+	if err := w.check(st, with("arch", review.VerdictRequestChanges, func(f *review.Finding) {
+		f.Severity, f.Category, f.FailureScenario, f.Verification = "", "", "", ""
+	}), nil); err != nil {
+		t.Errorf("another check's ungraded finding, which blocks, is refused: %v", err)
+	}
+	for _, c := range []struct {
+		name    string
+		check   string
+		verdict string
+		edit    func(*review.Finding)
+		why     string
+	}{
+		{"an approve with a P1", "correctness", review.VerdictApprove, keep, "an approve carries no blocking finding"},
+		{"request-changes with only a P2", "correctness", review.VerdictRequestChanges, p2, "request-changes needs a blocking finding"},
+		{"an ungraded correctness finding", "correctness", review.VerdictRequestChanges, func(f *review.Finding) { f.Severity = "" },
+			"every correctness finding is graded"},
+		{"a grade outside the set", "arch", review.VerdictRequestChanges, func(f *review.Finding) { f.Severity = "high" }, "not P0, P1 or P2"},
+		{"a graded finding with no category", "arch", review.VerdictRequestChanges, func(f *review.Finding) { f.Category = "" },
+			"names its category and its failure_scenario"},
+		{"a refuted candidate", "correctness", review.VerdictRequestChanges, func(f *review.Finding) { f.Verification = "REFUTED: no" },
+			"a refuted candidate is not a finding"},
+		{"a P1 with no evidence", "correctness", review.VerdictRequestChanges, func(f *review.Finding) { f.Verification = "I think so" },
+			"opens CONFIRMED or PLAUSIBLE"},
+	} {
+		mustRefuse(t, w.check(st, with(c.check, c.verdict, c.edit), nil), c.why)
+	}
+}
+
 // A correctness approve on a change that edits its own review guidance is
 // refused until needs_you names the edit. Paths that cannot be listed leave
 // the edit unchecked, and needs_you says so. Another check's approve, and a

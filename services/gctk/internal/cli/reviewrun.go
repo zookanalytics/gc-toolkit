@@ -185,7 +185,12 @@ review field says.
 It fills in the iteration the step runs in and an empty list of picks,
 findings or rulings, and refuses an output the run would read as not written
 or as a slip: another step's shape, another iteration, another head, a pick or
-a finding twice, a lane triage did not pick, a ruling of a finding no lane
+a finding twice, a lane triage did not pick, a finding that breaks the finding
+contract (a grade of P0, P1 or P2, which every correctness finding carries,
+with a category and a failure_scenario; on a P0 or P1 a verification opening
+CONFIRMED or PLAUSIBLE; never a REFUTED candidate), an approve that carries a
+blocking finding (a P0, a P1 or an ungraded one) and a request-changes that
+carries none, a ruling of a finding no lane
 raised or of an ask the round cannot take, a finding or an ask left unruled, a
 must-fix with no fixing commit, a commit on a ruling that changes no code, a
 question with no gate, and a fix for an ask an earlier round of the run
