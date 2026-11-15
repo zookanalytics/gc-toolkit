@@ -366,12 +366,12 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   has no draft to keep, so its merge waits for the reading instead. A sitting
   that stays on after a reading lifts its conversation's hold on the PR's
   merge, so the operator's approval decides. A sitting the operator speaks to
-  again holds its conversation, and the PR does not merge until the operator
-  rules. The board shows a conversation its sitting stays in, and the pull
-  request whose merge it holds, as waiting on that work, not as asks of the
-  operator. The sitting passes and fails nothing: the work's own checks give
-  the verdicts, and the subject closes as it would after a hand-off, such as
-  through the validating
+  again holds its conversation, so a PR whose merge the landing order has not
+  yet requested does not merge until the operator rules. The board shows a
+  conversation its sitting stays in, and the pull request whose merge it
+  holds, as waiting on that work, not as asks of the operator. The sitting
+  passes and fails nothing: the work's own checks give the verdicts, and the
+  subject closes as it would after a hand-off, such as through the validating
   closer the stay armed (`mol-validate-close`,
   [component-model.md](component-model.md#4-where-each-component-sits)). A
   sitting cut short hands the conversation back to the queue, and the next

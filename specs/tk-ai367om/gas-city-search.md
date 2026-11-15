@@ -202,9 +202,15 @@ state or record comes with it.
 (`gc bd update --if-assignee --if-status open --status in_progress`, in
 `converse-stay`) and the hold's record (`converse-hold`), which a sitting already
 makes when it must ask the operator something, and which the entry already reads
-as a hold that stands (`converse-entry.sh`). The stay is then in progress, which
-the evaluator's condition holds. What the skills say is no surface. The surface
-this needs is the condition's clause for a stay in progress.
+as a hold that stands (`converse-entry.sh`). The claim-back carries the hold's
+`holding:` line as its `--append-notes`, because bd applies an update's guard
+and every change it carries as one update (`cmd/bd/update.go`, where the guards
+ride the operation itself), so a restart never finds the conversation claimed
+under its `staying:` line, which the entry reads as a stay that stopped short.
+The return's hold makes the same write (the design, section 3, step 3). The stay
+is then in progress, which the evaluator's condition holds. What the skills say
+is no surface. The surface this needs is the condition's clause for a stay in
+progress.
 
 **What else was searched.**
 
@@ -223,6 +229,19 @@ this needs is the condition's clause for a stay in progress.
   field that `gc-helm.sh` reads from `gc session list --json`. The evaluator
   would read Gas City's sessions on every pass and every board read, and a tab
   left attached would hold the PR with nothing on the record to say why.
+- **GitHub's `dequeuePullRequest`**, which removes a pull request from its
+  base's merge queue (GitHub's GraphQL reference, mutations; the pack's gh
+  client carries only `enqueuePullRequest`, in
+  `services/gctk/internal/gh/gh.go`). The landing order leaves a PR in its
+  base's merge queue to GitHub, and `decide` in `services/gctk/pr/landing.go`
+  returns before the evaluator for one, so no condition the evaluator reads
+  reaches a queued PR, and a hold that starts once the PR is queued holds its
+  conversation but not the merge. A dequeue from the order would be mechanism
+  for a case no rig in the city has: none has a merge queue on its default
+  branch (GitHub's `repository.mergeQueue`, read for each rig on 2026-11-15). It
+  would also reach the PR only at the order's next pass, and would serve this
+  one condition of the evaluator's while every other one stops at the queue. The
+  design states the boundary instead (section 2, What the hold does not cover).
 
 ## The record of a reading: the PR comment
 
@@ -264,7 +283,11 @@ and the wait's note reaches the prompt stream, not a script. So the entry reads
 the record, as it already does for `waiting` and `returned`: it asks
 `gctk pr status <bead> --json` whether the PR waits at its head for this
 conversation's reading. The rule lives once, in gctk's pr domain, which the order
-reads too, so the entry decides none of it itself.
+reads too, so the entry decides none of it itself. `owed` names a stay whose
+reading is not on the PR whether its conversation is open or in progress, so a
+conversation that holds reads `ready` from the same read while its reading is
+owed, as after a return cut short between recording its hold and posting its
+reading.
 
 **What else was searched.** Reading the PR on GitHub from the entry, through
 `gh`, would put a second copy of the hold's rule in shell. The `reading` key is
@@ -336,3 +359,11 @@ adds the `MOVE` value to the entry's output and no record.
 - **A rig on the old review path** has no ready transition, and the code nearest
   one, `gate-ensure.sh`, is on the deletion plan with tk-1tfzr71.22, so it gets no
   new work. Stays there come back as they do on main.
+- **A PR whose merge the landing order has requested already.** A claim that
+  lands after the order's read of the stays in a pass does not stop that pass's
+  request, and on a base that requires a merge queue GitHub merges a queued PR
+  once the queue's checks pass, whatever the sitting holds. The order requests
+  the merge only once every stay's reading of its current round at the head is
+  on the PR and none is in progress. No rig in the city has a merge queue on its
+  default branch (The hold while the operator talks with the sitting again,
+  above).
