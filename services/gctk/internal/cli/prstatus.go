@@ -243,13 +243,14 @@ func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
 var evaluateReady = evaluate
 
 // evaluate asks the pr domain's evaluator whether the PR anchor owns is ready,
-// over readySources.
+// over readySources, and leaves the GitHub read it made unsaved.
 func evaluate(anchor string) (pr.Answer, error) {
 	src, err := readySources(anchor)
 	if err != nil {
 		return pr.Answer{}, err
 	}
-	return pr.Ready(src, anchor)
+	ans, _, err := pr.Ready(src, anchor)
+	return ans, err
 }
 
 // readySources are what the evaluator reads for the PR anchor owns: the store

@@ -18,7 +18,10 @@ import (
 // and the landing order's runs read each record with Reconcile: they request
 // the merge of a PR the evaluator finds ready, close the bead once the merge
 // commit is on the target, send a changed head back to the refinery, and keep
-// the exceptions blocked behind a human gate. Both take the store's record
+// the exceptions blocked behind a human gate. Each check of an open PR saves
+// GitHub's side of it on the bead, whole, in the write that records the check
+// (specs/tk-1tfzr71.134/design.md, section 3), and nothing the run acts on
+// reads that saved read back. Both take the store's record
 // lock, Record across both of its writes and a run for one record at a time,
 // and every write they make carries bd's guards on the status and the assignee
 // read under the lock, so neither writes over a bead that a close or a release
@@ -89,13 +92,7 @@ type Landing struct {
 
 // stamp is the time a write records, RFC 3339 UTC to the second, the form whose
 // order is its text's order.
-func (l Landing) stamp() string {
-	now := time.Now
-	if l.Now != nil {
-		now = l.Now
-	}
-	return now().UTC().Format("2006-01-02T15:04:05Z")
-}
+func (l Landing) stamp() string { return stamp(l.Now) }
 
 // Refusal is a publication the bead's state refused: it was closed, or not the
 // refinery's, when the publication read it, or it moved between that read and a
@@ -329,6 +326,18 @@ type landedMerge struct {
 	bead, number, target string
 }
 
+// rule is the definition of feedback, loaded the first time a record needs it.
+func (u *run) rule() (Feedback, error) {
+	if u.feedback == nil {
+		rule, err := u.Feedback()
+		if err != nil {
+			return nil, err
+		}
+		u.feedback = rule
+	}
+	return u.feedback, nil
+}
+
 // login is the login the city's account acts as on host, read from hub the
 // first time a record on that host needs it, and kept for the rest of the run.
 func (u *run) login(host string, hub Hub) (string, error) {
@@ -365,9 +374,11 @@ func (h readHub) PullRequest(repo string, number int) (*gh.PullRequest, error) {
 
 func (h readHub) Login() (string, error) { return h.login() }
 
-// state is one record as a run read it under the lock.
+// state is one record as a run read it under the lock, with the provenance
+// instant the definition of feedback is applied from.
 type state struct {
 	id, status, assignee, branch string
+	since                        string
 	rec                          record.Record
 	now                          string
 }
@@ -397,8 +408,12 @@ func (u *run) one(id string) (RunOutcome, error) {
 	if err != nil {
 		return RunOutcome{Bead: id, Action: ActFailed, Detail: "the branch did not read: " + err.Error()}, nil
 	}
-	s := state{id: id, status: r.Status(), assignee: r.Assignee(), branch: strings.TrimSpace(branch), rec: rec,
-		now: u.stamp()}
+	since, _, err := provenanceKey.Get(r)
+	if err != nil {
+		return RunOutcome{Bead: id, Action: ActFailed, Detail: "the provenance instant did not read: " + err.Error()}, nil
+	}
+	s := state{id: id, status: r.Status(), assignee: r.Assignee(), branch: strings.TrimSpace(branch),
+		since: strings.TrimSpace(since), rec: rec, now: u.stamp()}
 	switch {
 	case s.status == "closed":
 		return u.closed(s), nil
@@ -547,9 +562,14 @@ func (u *run) blocked(s state) RunOutcome {
 			return u.contradiction(s, fmt.Sprintf("%s recorded a merge at %s, and GitHub reports the PR open", s.id, r.MergedSHA))
 		}
 		if p.HeadRefOid != r.Head {
+			gr, out, ok := u.observeAlone(s, host, hub, p, retry)
+			if !ok {
+				return out
+			}
 			reason := fmt.Sprintf("PR head changed after refinery validation (%s -> %s); quality gates must run again", r.Head, p.HeadRefOid)
 			w := u.Ledger.Write(s.id)
 			record.Requeue(w, r.URL, p.HeadRefOid, reason, s.now)
+			githubReadKey.Set(w, gr)
 			return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: reason})
 		}
 		return u.decide(s, host, hub, p, retry)
@@ -564,36 +584,60 @@ func (u *run) blocked(s state) RunOutcome {
 	return retry("unknown", fmt.Sprintf("GitHub returned unknown PR state %q; will retry", p.State))
 }
 
+// observeAlone reads GitHub's side of the PR blocked read a moment before, at
+// the head it found, for a check that decides nothing: a PR in its base's merge
+// queue, or one open at another head. It reads through readHub, which answers
+// the PR with that read and the login with the run's own. A read that does not
+// answer, or a definition of feedback that does not load, writes the retry and
+// leaves the GitHub read the bead holds, and ok is false.
+func (u *run) observeAlone(s state, host string, hub Hub, p *gh.PullRequest, retry func(string, string) RunOutcome) (gr *GitHubRead, out RunOutcome, ok bool) {
+	rule, err := u.rule()
+	if err != nil {
+		return nil, retry("lookup_failed", "the definition of feedback did not load; will retry: "+err.Error()), false
+	}
+	read := readHub{Hub: hub, pr: p, login: func() (string, error) { return u.login(host, hub) }}
+	gr, err = observe(read, rule, s.rec.Repo, p.Number, s.since, u.stamp())
+	if err != nil {
+		return nil, retry("lookup_failed", fmt.Sprintf("GitHub's side of the PR at %s did not read; will retry: %v", p.HeadRefOid, err)), false
+	}
+	return gr, RunOutcome{}, true
+}
+
 // decide asks the evaluator whether a PR open at the validated head is ready,
 // and asks GitHub to merge one that is, pinned to the head the answer judged,
 // or to add it to its base's merge queue where the base requires one. A PR
-// already in the queue has its merge requested. The evaluator reads the PR as
-// blocked read it a moment before, and the run's login (readHub). Whatever
-// GitHub answers, the next run reads the PR again by its number.
+// already in the queue has its merge requested, and is only observed. The
+// evaluator reads the PR as blocked read it a moment before, and the run's
+// login (readHub). Each write the check makes carries the GitHub read it made,
+// after the request where it makes one, and a read that does not answer leaves
+// the read the bead holds. Whatever GitHub answers, the next run reads the PR
+// again by its number.
 func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry func(string, string) RunOutcome) RunOutcome {
 	nodeID, inQueue, queue := p.ID, p.InMergeQueue, p.MergeQueueEnabled
-	checked := func(detail string) RunOutcome {
+	checked := func(gr *GitHubRead, detail string) RunOutcome {
 		w := u.Ledger.Write(s.id)
 		record.Checked(w, "open", s.now)
+		githubReadKey.Set(w, gr)
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActChecked, Detail: detail})
 	}
 	if inQueue {
-		return checked("the PR is in its base's merge queue, which holds its merge request")
-	}
-	if u.feedback == nil {
-		rule, err := u.Feedback()
-		if err != nil {
-			return retry("lookup_failed", "the definition of feedback did not load; will retry: "+err.Error())
+		gr, out, ok := u.observeAlone(s, host, hub, p, retry)
+		if !ok {
+			return out
 		}
-		u.feedback = rule
+		return checked(gr, "the PR is in its base's merge queue, which holds its merge request")
+	}
+	rule, err := u.rule()
+	if err != nil {
+		return retry("lookup_failed", "the definition of feedback did not load; will retry: "+err.Error())
 	}
 	read := readHub{Hub: hub, pr: p, login: func() (string, error) { return u.login(host, hub) }}
-	ans, err := Ready(Sources{Ledger: u.Ledger, GitHub: func(h string) GitHub {
+	ans, gr, err := Ready(Sources{Ledger: u.Ledger, GitHub: func(h string) GitHub {
 		if h == host {
 			return read
 		}
 		return u.Hub(h)
-	}, Feedback: u.feedback}, s.id)
+	}, Feedback: rule, Now: u.Now}, s.id)
 	if err != nil {
 		return retry("lookup_failed", "the evaluator's read did not answer; will retry: "+err.Error())
 	}
@@ -602,7 +646,7 @@ func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry fun
 		for _, c := range ans.Conditions {
 			not = append(not, string(c.Kind))
 		}
-		return checked("not ready: " + strings.Join(slices.Compact(not), ", "))
+		return checked(gr, "not ready: "+strings.Join(slices.Compact(not), ", "))
 	}
 	// The merge request is the one act no guard can take back, so the bead is
 	// read once more just before it: a close or a release that took no lock and
@@ -625,10 +669,12 @@ func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry fun
 		w := u.Ledger.Write(s.id)
 		why := fmt.Sprintf("the %s request at %s was refused or not answered; the next run reads the PR again: %v", method, ans.Head, err)
 		record.Retry(w, "open", why, s.now)
+		githubReadKey.Set(w, gr)
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: why})
 	}
 	w := u.Ledger.Write(s.id)
 	record.Checked(w, "open", s.now)
+	githubReadKey.Set(w, gr)
 	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRequested,
 		Detail: fmt.Sprintf("ready: the %s is requested at %s into %s", method, ans.Head, ans.Target)})
 }

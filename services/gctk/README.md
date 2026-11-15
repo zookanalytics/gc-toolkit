@@ -25,7 +25,7 @@ through `gc bd` and the supervisor's API.
 | `pr summary` | the account of what a change does, for its PR: the bead's PR summary and the change's subject line as its title, recorded in one write whose exit decides, or the summary recorded, printed for a reader of the PR's text | `gctk pr summary --help`, `internal/cli/prsummary.go`, `pr` |
 | `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
 | `pr record` | the refinery's record of the PR a bead owns as pending until its merge is verified, in Gas Town's two writes under the store's record lock, each guarded on the status and assignee it read, so a bead that a close or a release reached first gets no record | `gctk pr record --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
-| `pr reconcile` | one run of the landing order over the store's pending records, the least recently checked first, each under the store's record lock: a ready PR merged with its head pinned, a bead closed once its merge commit is on the target, a changed head sent back to the refinery, and each exception kept blocked behind a human gate | `gctk pr reconcile --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
+| `pr reconcile` | one run of the landing order over the store's pending records, the least recently checked first, each under the store's record lock: a ready PR merged with its head pinned, a bead closed once its merge commit is on the target, a changed head sent back to the refinery, each exception kept blocked behind a human gate, and the GitHub read each check of an open PR made saved on its bead | `gctk pr reconcile --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit, and running a copy of its UI from a checkout for a demo capture or a person | `gctk rig --help`, `internal/cli/rig.go`, `internal/cli/rig_serve.go`, `internal/rig` |
 | `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session --help`, `internal/cli/session.go` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
@@ -177,7 +177,8 @@ arm/                 the arm's verbs and its start: what arm refuses, the dispat
 arm/record/          the arm's keys, which it owns, the arm they decode to, and every write to them
 pr/                  the pr domain: whether the PR a bead owns is ready to merge at its
                      current revision, from the store, GitHub and the definition of
-                     feedback; the account of the change its author records, the PR
+                     feedback, or from the store and the GitHub read the landing order
+                     saved there; the account of the change its author records, the PR
                      summary; and what the PR's title and body say: its title, and its
                      body's managed summary region and branch-beads section, with the
                      renders they replaced pinned under testdata

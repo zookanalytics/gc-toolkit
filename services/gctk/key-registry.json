@@ -302,6 +302,12 @@
     "doc": "The highest inline comment id the intake has routed. A value that is not a whole number reads as 0."
   },
   {
+    "name": "pr_github_read",
+    "type": "json",
+    "owner": "pr",
+    "doc": "GitHub's side of a PR on Gas Town's pending record as the landing order last read it whole, one JSON object on the bead that owns the PR: read_at; since, the provenance instant the definition of feedback was applied with; the PR's url, number, repository, head_branch and base; its head, state, draft and merge_state; checks, the required check runs at that head as {name, status, conclusion}; approvers and requesters, the accounts that can push whose approval or request for changes stands; feedback, the newest feedback id in each id space as {review, inline, conversation}; and awaiting, the review threads waiting on the city's answer. The landing order writes it in the write that records each check of an open PR, and a read that fails partway leaves the last whole one. It holds no answer. The pr evaluator decides over it for a display, as current only while it names the record's repository and number, its head is the head the store holds (observed_pr_head_sha on a changed head, pr_head_sha otherwise) and its since is the bead's pr_provenance_since. Absent or not current, GitHub's side of the PR reads as unread."
+  },
+  {
     "name": "pr_head_sha",
     "type": "string",
     "owner": "pr/record",
