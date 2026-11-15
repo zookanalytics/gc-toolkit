@@ -1409,14 +1409,31 @@ clock.
 ### A sitting that stays for the return
 
 A sitting that sends work agrees with the operator whether it ends at its
-hand-off or stays until that work returns. The converse prompt has it recommend
-staying when the discussion will help judge the result, because what was
-agreed holds more than the work's brief carries, and ending when the brief and
-the work's ordinary checks suffice. It puts the choice to the operator with its
+hand-off or stays until that work returns, and tells them when a stay would
+come back. A return after the merge comes too late to change the work except
+through another PR, so the converse prompt has the sitting recommend ending at
+the hand-off when the stay would come back after the merge, with what was
+agreed written into the work's brief in full. Otherwise it recommends staying
+when the discussion will help judge the result, because what was agreed holds
+more than the work's brief carries, and ending when the brief and the work's
+ordinary checks suffice. It puts the choice to the operator with its
 recommendation, so they need not know to ask, and never stays without their
 agreement. The return compares what landed with what was agreed and tells the
 operator where it departs. It passes and fails nothing: the work's own checks
 give the verdicts, and the subject closes as it would after a hand-off.
+
+A stay comes back when the work it waits on closes, and when that is depends on
+what the ruling sends:
+
+- **A rework of the PR under discussion** closes once the refinery lands it on
+  the PR's branch. The stay comes back then, before the merge, which waits for
+  the return because the open conversation still holds it. The PR's checks
+  review the reworked branch again once the rework lands.
+- **New work that opens its own PR** closes only once the refinery has
+  verified that PR's merge, so the stay comes back after the merge.
+- **Work that opens no PR of its own** closes when it is done, as a report
+  does, or once it lands, as a part of an integration effort does on the
+  effort's branch. The stay comes back at that close.
 
 A sitting that stays carries out the ruling with `converse-signoff.sh --stay`.
 That first appends a `staying:` line to the conversation's notes, then writes
