@@ -465,6 +465,16 @@ tk-lv4r5mv wrote these passages for the old path, and they are on main. The word
 unit rewrites them once, on the effort's branch brought current with main
 (sections 9 and 10).
 
+This design's own change states the rule in `docs/architecture.md`, at the
+document's altitude, because a design that moves the architecture changes that
+document. Its "How humans engage" says when a stay comes back and what the
+landing order holds for the reading, step 9 of its "How work moves" names the
+wake beside the close, and its Debt names the gap until the build lands, with
+tk-vrg93t0 as the work that retires it. The words unit narrows that Debt entry
+to the rigs still on the old review path. It also gives
+`docs/lifecycle-composition.md`, which calls `closed` the one signal the waiting
+side keys on, the exception step 9 names.
+
 ## 8. The surface this adds
 
 Each item's search is in [gas-city-search.md](gas-city-search.md).
@@ -498,7 +508,7 @@ waits a stay registers, which nothing there marks ready.
 |---|---|---|---|
 | 1. The reading rule, the hold and the wake | First, a probe in a scratch city: a session wait with no `--sleep` on a sleeping session, marked ready with `gc wait ready`, wakes the session and delivers its note, and an attach to the sleeping session cancels it. Then, in the pr domain: the stays on a bead, read from the store (section 2); each stay's reading at a head, read from the PR's comments by the marker; `readyBar`'s clause; in the landing order's pass, the wake through the Gas City adapter's `gc session list --json`, `gc wait list --json` and `gc wait ready`, which marks only the waits of the stays that owe their reading; `gctk pr status --json`'s `reading` key; `prstatus` renders a stay that owes its reading as the city's work and a stay in progress as a person's move. Tests, one per row of section 1's table: the hold and the wake for new work through a `blocks` edge, for a rework and for the subject through an open input convoy, nothing for a closed convoy or for a conversation that tracks the bead and stays for other work, and nothing for work with no PR; a stay in progress holds the draft and is not woken; every stay's reading at the head lets the PR leave draft; a reading at an earlier head does not; a person's toggle to ready is left alone; a wait already ready is not marked again; a wait another session registered on the bead is left alone; a store or GitHub read that fails leaves the draft and is retried. | tk-1tfzr71.22 | unit 2 |
 | 2. The stay and the entry | `converse-signoff.sh --stay`: the session wait on each PR's bead; the subject's convoy wait and its refusals, from PR #1515's head with its open-convoy fix; the rework stay's convoy wait on a PR on the record, and the ask when the anchor has no open convoy; on the old path, the waits as they are; a sign-off that ends a stay cancels its waits. `converse-entry.sh`: `ready` with `READING` and `READ`, read from `gctk pr status --json`; `WAIT` on `waiting`; the restarts of section 3's return. Tests, one per row: what the sign-off writes for each, the entry's answer before, during and after a reading, a second wake at a head already read, a missing wait after an attach and at a `ready` wake, a return cut short after it registered its wait again, and a restart between each two steps of the return. | unit 1 | unit 3 |
-| 3. The words | The converse prompt's "End or stay?" and its entry table, and its seven renders; `converse-stay`, `converse-settle` and `converse-hold` (section 7); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; the skill-needs pins of the table and of each example's call through the real parsers; `docs/architecture.md` where it describes the stay. | unit 2 | the landing |
+| 3. The words | The converse prompt's "End or stay?" and its entry table, and its seven renders; `converse-stay`, `converse-settle` and `converse-hold` (section 7); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; `docs/lifecycle-composition.md`'s close signal; the skill-needs pins of the table and of each example's call through the real parsers; the stay's Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path (section 7). | unit 2 | the landing |
 
 The initiative's "Done when" asks for a test of each row of the table. Units 1
 and 2 hold the rows in their suites, and unit 3 pins them in the words.

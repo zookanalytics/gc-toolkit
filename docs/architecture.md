@@ -161,7 +161,9 @@ performer; the full transition table with writers is
    at the head the refinery validated, once the evaluator reads the PR ready,
    and closes the bead once the merge commit is on the target
    ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
-9. **Close propagates.** `closed` is the one signal waiting parties key on
+9. **Close propagates.** Apart from the wake that brings a staying sitting
+   back to read its PR ([How humans engage](#how-humans-engage)), `closed` is
+   the one signal waiting parties key on
    ([lifecycle-composition.md](lifecycle-composition.md)). A landing closes a
    bead as *landed and verified*. A disposition closes one that did not land, through
    `bead-rehome.sh`, and names in bd's own `duplicates` or `supersedes` edge the
@@ -333,8 +335,9 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   it blocks.
 - **A conversation is a task about one subject.** It tracks its subject,
   replies to each human gate it answers through bd's `replies-to` edge, and
-  blocks nothing but an open PR's anchor, whose merge it holds until it closes,
-  and the change its sitting makes, which it holds until the hand-off.
+  blocks nothing but an open PR's anchor, whose merge it holds until it closes
+  or its sitting lifts the hold, and the change its sitting makes, which it
+  holds until the hand-off.
   It waits in the operator's queue, assigned to `human`, until
   the operator engages it. `gc-helm.sh open` files one, and so do the
   operator's intake, `operator-intake.sh`, and a caller asking about a bead with
@@ -347,14 +350,22 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   the sitting and the operator choose whether it ends at that hand-off or stays
   until the work returns
   ([human-engagement.md](human-engagement.md#a-sitting-that-stays-for-the-return)).
-  Gas City sleeps a sitting that stays, and when the work closes it wakes the
-  sitting with its thread, or sends a sitting still up a notice that the work
-  closed. The board shows a conversation its sitting stays in, and the pull
-  request whose merge it holds, as waiting on that work, not as asks of the
-  operator. On its return the sitting compares
-  what landed with what was agreed and tells the operator where it departs. It
-  passes and fails nothing: the work's own checks give the verdicts, and the
-  subject closes as it would after a hand-off, such as through the validating
+  A stay comes back at the operator's next decision about its work, never
+  after it, and Gas City sleeps the sitting until then: it wakes the sitting
+  with its thread, or sends a sitting still up a notice. On each return the
+  sitting compares the work with what was agreed and tells the operator where
+  it departs. Work that opens no PR brings the sitting back when it closes.
+  For work that opens a PR, that decision is the approval, in every round.
+  When the PR would be ready for approval, the landing order keeps it a draft
+  and has the sitting woken. The order marks the PR ready only once the
+  sitting has posted that comparison on the PR as its reading, and the
+  operator has answered anything the reading leaves them to answer. A sitting
+  that stays on after a reading lifts its conversation's hold on the PR's
+  merge, so the operator's approval decides. The board shows a conversation
+  its sitting stays in, and the pull request whose merge it holds, as waiting
+  on that work, not as asks of the operator. The sitting passes and fails
+  nothing: the work's own checks give the verdicts, and the subject closes as
+  it would after a hand-off, such as through the validating
   closer the stay armed (`mol-validate-close`,
   [component-model.md](component-model.md#4-where-each-component-sits)). A
   sitting cut short hands the conversation back to the queue, and the next
@@ -486,6 +497,14 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
+- **A stay comes back only when its work closes.** For new work that opens its
+  own PR, that is after the merge, too late to change the work except through
+  another PR, and a stay on the conversation's own subject is refused. Nothing
+  holds a PR for a sitting's reading, or wakes the sitting when the PR would be
+  ready for approval. The effort tk-vrg93t0 builds the stay that
+  [How humans engage](#how-humans-engage) describes once the review loop
+  (tk-1tfzr71.22) lands, and a rig still on the old review path has it from
+  its cutover onto the pending record.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
