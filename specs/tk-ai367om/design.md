@@ -518,13 +518,15 @@ return then runs again. It registers only the waits `WAIT` names as missing. Its
 lift can run again, because bd's `dep remove` confirms the same way whether or
 not the edge is still there (`cmd/bd/dep.go` at beads v1.3.4). A conversation
 that holds already makes no second claim. Once the post has landed, the stay
-owes nothing. A restart on the clean path then reads `waiting`, and the sitting
-ends its turn with nothing said and nothing recorded, as `converse-stay` has it
-while the work is out. Only the return's hand-back is lost: the operator's tab
-prints the stay's last recorded hand-back, and the reading on the PR says what
-the return found. A restart on the held path reads as the hold that stands,
-whose `holding:` line step 3 wrote, and the sitting takes the hold up again from
-the record (`converse-continue`, After a restart). The suite holds each case.
+owes nothing. A restart on the clean path then reads `waiting`: the sitting
+registers each wait `WAIT` names as `missing`, so the next round can wake it,
+and ends its turn with nothing said and nothing recorded, as `converse-stay`
+has it while the work is out. Only the return's hand-back is lost: the
+operator's tab prints the stay's last recorded hand-back, and the reading on the
+PR says what the return found. A restart on the held path reads as the hold that
+stands, whose `holding:` line step 3 wrote, and the sitting takes the hold up
+again from the record (`converse-continue`, After a restart). The suite holds
+each case.
 
 **The return at `returned`.** The work closed: its PR merged, or it closed without
 one. The return reads how it closed. When the PR merged at a head this
