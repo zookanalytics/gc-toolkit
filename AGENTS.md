@@ -77,27 +77,32 @@ and its other checks.
 ## New pack code is written in Go, in gctk
 
 New logic the pack runs is written in Go, in gctk, in the shape
-[gctk-architecture.md](docs/gctk-architecture.md) sets, and a change adds no
-new script for it. An exec order names gctk in its `exec` line, and a new file
-that a caller requires, such as the `run.sh` Gas City runs for a doctor check,
-does nothing but call gctk. The helm board's own code, such as its web page and
-its ranking, stays in its service, under
-[the board's composition](docs/gctk-architecture.md#compositions) in
+[gctk-architecture.md](docs/gctk-architecture.md) sets, unless gctk cannot hold
+it or is inappropriate for it. Where gctk holds the logic, an exec order names
+gctk in its `exec` line, and a new file that a caller requires, such as the
+`run.sh` Gas City runs for a doctor check, does nothing but call gctk. The helm
+board's own code, such as its web page and its ranking, stays in its service,
+under [the board's composition](docs/gctk-architecture.md#compositions) in
 gctk-architecture.md. Tooling that runs only on this repository, such as its
 lint detectors and its test runner, is outside this rule.
 
 A script that already exists takes a fix in place, where a fix corrects what
-the script does and adds no verb, mode or key to it. Anything more is new code.
-An intent moves into gctk whole, by the
+the script does and adds no verb, mode or key to it. A change that needs more
+from a script grows it only where gctk cannot hold the growth or is
+inappropriate for it. Otherwise the change moves the intent it extends into
+gctk whole, by the
 [rules a domain move follows](docs/gctk-architecture.md#the-rules-a-domain-move-follows),
-so a change that needs more from a script moves the intent it extends into
-gctk, or waits on a bead that already moves that intent. Code the deletion plan
-retires takes neither, because it
+or waits on a bead that already moves that intent. Code the deletion plan
+retires takes neither a fix nor growth, because it
 [gets no new work](#code-the-deletion-plan-retires-gets-no-new-work).
 
-A design that would add a script, or grow one past a fix, says why gctk cannot
-hold the logic, and a review sends back a change that does either without that
-reason.
+Logic gctk cannot hold includes the build that produces its own binary, and
+logic it is inappropriate for includes code that only configures another tool,
+such as the tmux key bindings each agent session installs. A change that adds a
+script, or grows one past a fix, says in a sentence of its design or its PR
+summary why gctk cannot hold that logic or is inappropriate for it. A review
+sends the change back when the sentence is missing or gives only a preference,
+such as bash being quicker to write, and asks for nothing more.
 
 ## A change to the pack's behavior names the foundation belief or goal it serves
 
