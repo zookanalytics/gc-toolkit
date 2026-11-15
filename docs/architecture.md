@@ -189,7 +189,7 @@ A converse sitting can take steps 4 and 5 itself, on the operator's ruling in
 the sitting, for a change whose next step is the operator's reaction.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a provider quota park, a `gc` build that moves the text the seed
+session dying, a `gc` build that moves the text the seed
 audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
 the cadence), or the landing order for a PR on the pending record, records PR
 events and files a human gate, the witness patrol
