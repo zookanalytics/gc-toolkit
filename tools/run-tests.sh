@@ -141,6 +141,11 @@
 # reach an exit 0 having run nothing. So under an older bash the runner stops
 # before it reads its arguments, and exits 2 with a line naming that bash.
 #
+# Every file starts with the first bash on PATH, and a file can fail the same
+# way. Under bash 3.2 a suite whose opening lines need bash 4 can exit 0 having
+# run none of its assertions. So before it starts a file, the runner holds that
+# bash to the same floor, and exits 2 with a line naming it.
+#
 # Exit: 0 every file passed, or passed on a serial re-run, or the subset was
 # empty; 1 one or more failed serially too; 2 a usage or enumeration error,
 # such as a BASE git cannot read, or a bash older than 5.1.
@@ -486,6 +491,16 @@ export TMPDIR="$tmp_real"
 [ -x "$ROOT/tools/test-floor/gc" ] || {
   echo "run-tests: no test floor at $ROOT/tools/test-floor; not running" >&2; exit 2; }
 export PATH="$ROOT/tools/test-floor:$PATH"
+
+# The bash every file starts with, held to the runner's own floor (see the
+# header). It is the first bash on PATH, the one spawn's `bash` finds.
+file_bash="$(command -v bash)"
+file_bash_v="$(bash -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]} $BASH_VERSION"' 2>/dev/null)"
+case "$file_bash_v" in
+  [0-4].*|5.0\ *)
+    echo "run-tests: each file starts with the first bash on PATH, and $file_bash is bash ${file_bash_v#* }, older than 5.1, so nothing ran" >&2
+    exit 2 ;;
+esac
 
 # The caller's variables every file runs without, and the one value handed on
 # (see the header). The runner is the only source of RUN_TESTS_GC_BIN, so one

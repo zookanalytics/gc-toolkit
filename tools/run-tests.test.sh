@@ -75,9 +75,11 @@
 #   - a BASE git cannot read, a missing BASE, an option or a range where BASE
 #     belongs, and a PATH beside --affected are usage errors;
 #   - under a bash older than 5.1 the runner runs no suite, whatever it was
-#     asked, and exits 2 with one line naming that bash, while the same calls
-#     under the bash on PATH select and run. The case runs the runner under
-#     /bin/bash, so a host whose /bin/bash is 5.1 or later skips it.
+#     asked, and exits 2 with one line naming that bash. Under a newer bash it
+#     starts no suite either when the older bash comes first on PATH, and says
+#     so in one line. The same calls under the bash on PATH select and run. The
+#     case's older bash is /bin/bash, so a host whose /bin/bash is 5.1 or later
+#     skips it.
 #
 # Hermetic: runs a copy of the runner over throwaway fixture *.test.sh files
 # whose pass/fail is driven by a per-file invocation counter, so "fails the
@@ -909,7 +911,8 @@ OLD_BASH=/bin/bash
 old="$("$OLD_BASH" -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"' 2>/dev/null)"
 case "$old" in
   [0-4].*|5.0)
-    refused="run-tests: needs bash 5.1 or later, and $OLD_BASH is bash $("$OLD_BASH" -c 'echo "$BASH_VERSION"'), so nothing ran"
+    old_version="$("$OLD_BASH" -c 'echo "$BASH_VERSION"')"
+    refused="run-tests: needs bash 5.1 or later, and $OLD_BASH is bash $old_version, so nothing ran"
     reset_state
     OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$OLD_BASH" "$RUNNER_COPY" -j 2 -t 30 "$FIX/ran.test.sh" 2>&1)"; RC=$?
     eq "$RC" 2 "a run under bash $old is refused"
@@ -922,6 +925,14 @@ case "$old" in
     OUT="$("$OLD_BASH" "$AREPO/tools/run-tests.sh" --list --affected base 2>&1)"; RC=$?
     eq "$RC" 2 "--list under bash $old is refused too"
     eq "$OUT" "$refused" "…listing nothing"
+    # The test's own bash runs the runner, and the older bash comes first on PATH.
+    mkdir -p "$TMP/old-first"; ln -s "$OLD_BASH" "$TMP/old-first/bash"
+    reset_state
+    OUT="$(PATH="$TMP/old-first:$PATH" RUNTESTS_FIXTURE_STATE="$STATE" "$BASH" "$RUNNER_COPY" -j 2 -t 30 "$FIX/ran.test.sh" 2>&1)"; RC=$?
+    eq "$RC" 2 "a run whose first bash on PATH is bash $old is refused under a newer bash too"
+    eq "$OUT" "run-tests: each file starts with the first bash on PATH, and $TMP/old-first/bash is bash $old_version, older than 5.1, so nothing ran" \
+      "…with one line naming the bash on PATH"
+    eq "$(ls "$STATE")" "" "…and starts no suite"
     reset_state
     run "$FIX/ran.test.sh"
     eq "$RC" 0 "the same run under the bash on PATH passes"
