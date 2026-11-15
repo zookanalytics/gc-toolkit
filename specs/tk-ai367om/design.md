@@ -102,7 +102,7 @@ the work closes. Section 3 adds the wake at readiness beside it.
 | The ruling sends | The PR's bead the stay watches | The conversation's wait in the store | It comes back |
 |---|---|---|---|
 | New work that opens its own PR | the work's bead | a `blocks` edge onto that bead, as today | at each readiness of the PR, and when the bead closes |
-| A rework of the PR under discussion | that PR's anchor, the conversation's subject | a `blocks` edge onto an open input convoy that tracks the anchor, or onto the ruling's ask until the PR's first review run pours that convoy | at the readiness that ends the rework's round, at each later one, and when the anchor closes |
+| A rework of the PR under discussion | that PR's anchor, the conversation's subject | a `blocks` edge onto an open input convoy that tracks the anchor, or, before the PR's first review run, onto the ruling's ask until a run closes it | at the readiness that ends the rework's round, at each later one, and when the anchor closes |
 | The conversation's own subject | the subject | a `blocks` edge onto the open input convoy of the subject's dispatch (section 5) | at each readiness of the subject's PR, and when the subject closes |
 | Work that opens no PR, or closes without one | none | a `blocks` edge onto the work, as today | when it closes |
 
@@ -200,8 +200,9 @@ The order reads the stays from the store: B's dependents through bd's edges
 (`bd dep list --direction=up`), the rows of those that read as conversations
 (`conversation.IsCandidate`), the dependents of each such convoy among them, and
 each conversation among an ask's dependents whose newest `staying:` line names
-that ask. Nothing new is recorded for this: the edges are the ones section 1's table writes, and
-the lines are the ones the stay's round is read from (The stay's round, below).
+that ask. Nothing new is recorded for this: the edges are the ones section 1's
+table writes, and the lines are the ones the stay's round is read from (The
+stay's round, below).
 A conversation that tracks B and stays for other work reaches B through no edge
 of its own, so it owes B nothing.
 
@@ -418,7 +419,7 @@ waits on open work, which the entry reads as a stay that stopped short, or at
 with nothing holding it, which reads as ready work, but its sitting is awake and
 writes the edge next. A restart between them wakes the sitting to the same
 entry, since the stay still owes its move, and `converse-stay` makes the move
-again, its status write changing nothing.
+again, its status write dropping the claim that entry took.
 
 At `waiting` the sitting then sleeps again, and reads, posts and tells nothing.
 At `ready` it goes on to the return below. The move writes no `staying:` line, so
@@ -426,14 +427,14 @@ the stay's round stays the one its sign-off started, and the reading at the
 round's end answers that round. From then on the stay waits as section 1's
 rework row says, so every round of section 4 applies to it.
 
-Until the move, a conversation that holds the PR's merge waits on nothing open,
-so the landing order reads it as holding the bead rather than staying, and pours
-no run on it (`heldBy`). The move's edge lets the next pass pour, which a later
-head in the round, such as a merge of the target, needs. When the ask has closed
-and no open input convoy tracks the PR's bead, no run took the ask, because a run
-that takes one has poured such a convoy, so the ask closed without a run, as
-when a person closes it: the stay owes no move, and the entry answers
-`returned`.
+From the ask's close until the move, the conversation, which holds the PR's
+merge, waits on nothing open, so the landing order reads it as holding the bead
+rather than staying, and pours no run on it (`heldBy`). The move's edge lets the
+next pass pour, which a later head in the round, such as a merge of the target,
+needs. When the ask has closed and no open input convoy tracks the PR's bead, no
+run took the ask, because a run that takes one has poured such a convoy, so the
+ask closed without a run, as when a person closes it: the stay owes no move, and
+the entry answers `returned`.
 
 **The return at `ready`.** `converse-stay`'s return gains a reading, in this
 order:
@@ -641,10 +642,10 @@ comes back, by section 1's table, with the old path's rows until a rig cuts over
   will help the operator judge the result before they approve, and ending at the
   hand-off where the rig's path brings the stay back after the merge. Its table of
   entries gains `ready`, and it runs the entry on a `Wait satisfied` notice.
-- **`converse-stay`**: the stay's session wait, `ready`, the return's reading,
-  staying on, every round, the hold while the operator talks with the sitting
-  again in place of today's "Do not hold" for a stay on a PR, and what ends the
-  stay.
+- **`converse-stay`**: the stay's session wait, the move (section 3), `ready`,
+  the return's reading, staying on, every round, the hold while the operator
+  talks with the sitting again in place of today's "Do not hold" for a stay on a
+  PR, and what ends the stay.
 - **`converse-settle`**: the order of a sitting that sends its subject and stays
   (section 5), and that a stay on a PR's work keeps the PR from merging, and a
   draft a draft, until its reading is on it.
@@ -717,7 +718,7 @@ waits a stay registers, which nothing there marks ready.
 |---|---|---|---|
 | 1. The reading rule, the hold and the wake | First, a probe in a scratch city: a session wait with no `--sleep` on a sleeping session, marked ready with `gc wait ready`, wakes the session and delivers its note, and an attach to the sleeping session cancels it. Then, in the pr domain: the stays on a bead, read from the store, and each stay's round, read from its conversation's `staying:` lines (section 2); each stay's reading of its round at a head, read from the PR's comments by the marker; the evaluator's condition and `readyBar`'s clause; in the landing order's pass, the wake at a round's end, on a draft or on a PR that is ready already, through the Gas City adapter's `gc session list --json`, `gc wait list --json` and `gc wait ready`, which marks only the waits of the stays that owe their reading; `gctk pr status --json`'s `reading` key; `prstatus` renders a stay that owes its reading as the city's work and a stay in progress as a person's move. Tests, one per row of section 1's table: the hold and the wake for new work through a `blocks` edge, for a rework and for the subject through an open input convoy, for a rework through an ask on the bead before its first review run, both while the ask is open and after it has closed, nothing for a closed convoy, nothing for an ask the conversation's newest `staying:` line no longer names or for a conversation that tracks the bead and stays for other work, and nothing for work with no PR; a stay in progress holds the draft and the merge of a ready PR, and is not woken; every stay's reading of its current round at the head lets the PR leave draft and meets the condition; a reading at an earlier head, or of an earlier round at the same head, does not; a send-back whose ask the run declines, defers or answers with no push owes the new round's reading, so on a ready PR an approval of an earlier round does not merge it until that reading is on it, and the order marks the stay's wait ready at the round's end; an ask someone else put on the PR that ends with no push owes no new reading; a person's toggle to ready is left alone and the merge still waits; a wait already ready is not marked again; a wait another session registered on the bead is left alone; a store or GitHub read that fails leaves the draft and is retried. | tk-1tfzr71.22 | unit 2 |
 | 2. The stay and the entry | `converse-signoff.sh --stay`: the session wait on each PR's bead; the subject's convoy wait and its refusals, from PR #1515's head with its open-convoy fix; the rework stay's convoy wait on a PR on the record, and the ask when the anchor has no open convoy; on the old path, the waits as they are; a sign-off that ends a stay cancels its waits. `converse-entry.sh`: `ready` with `READING`, its round included, and `READ`, read from `gctk pr status --json`; `WAIT` on `waiting`; `MOVE` on a stay that owes its move; the restarts of section 3's return. Tests, one per row: what the sign-off writes for each, the sign-off's wait on the ask with its session wait on the anchor when the anchor has no open convoy, `waiting` and `ready` with `MOVE` once the ask has closed, the move's status write, edge and wait, `returned` when the ask closed with no open convoy, a restart between the move's status write and its edge, the entry's answer before, during and after a reading, a second wake at a head already read in the round, `ready` for a new round at the head the last reading read, a stopped stay run again, which counts one round more before any reading, a missing wait after an attach and at a `ready` wake, a return cut short after it registered its wait again, and a restart between each two steps of the return. | unit 1 | unit 3 |
-| 3. The words | The converse prompt's "End or stay?" and its entry table, and its seven renders; `converse-stay`, its hold while the operator talks with the sitting again included, `converse-settle` and `converse-hold` (section 7); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; `docs/lifecycle-composition.md`'s close signal; the skill-needs pins of the table and of each example's call through the real parsers; the stay's Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path (section 7). | unit 2 | the landing |
+| 3. The words | The converse prompt's "End or stay?" and its entry table, and its seven renders; `converse-stay`, its move and its hold while the operator talks with the sitting again included, `converse-settle` and `converse-hold` (section 7); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; `docs/lifecycle-composition.md`'s close signal; the skill-needs pins of the table and of each example's call through the real parsers; the stay's Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path (section 7). | unit 2 | the landing |
 
 The initiative's "Done when" asks for a test of each row of the table. Units 1
 and 2 hold the rows in their suites, and unit 3 pins them in the words.
