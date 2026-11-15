@@ -56,18 +56,42 @@ exit
 - **A reaction bead** (`task_kind=reaction`). It is a first reaction filed as a
   bead of its own, which tracks its subject and names it in
   `gc.reaction_subject`. No code in the pack files one, and no reaction is owed
-  to the bead itself, so close it as a no-op. Its subject is owed one unless it
-  carries `gc.reacted_by` naming this bead, which says that bead's exit landed,
-  so sling the subject a reaction through the sling verb, whose refusals decide
-  whether it takes one. Then drain:
+  to the bead itself. Its subject is owed one unless it carries `gc.reacted_by`
+  naming this bead, which says that bead's exit landed, so sling the subject a
+  reaction through the sling verb, whose refusals decide whether it takes one.
+  The bead is the only record that its subject is owed a reaction, and the scan
+  never offers a member of an epic, so close the bead as a no-op only once an
+  answer settles what is owed: a sling that landed, a refusal (exit 3 to 6), a
+  subject that carries `gc.reacted_by` naming the bead, or no subject the
+  stores hold. A read that does not answer and a sling that fails settle
+  nothing, so the block hands the bead back to the pool, which offers it again.
+  Then drain:
   ```bash
   R=<bead_id>
-  SUBJECT=$(gc bd show "$R" --json | jq -r '.[0].metadata["gc.reaction_subject"] // ""')
-  [ -n "$SUBJECT" ] || SUBJECT=$(gc bd dep list "$R" --json | jq -r '[.[]? | select(((.dependency_type // .type) // "") == "tracks") | (.id // .depends_on_id)] | .[0] // ""')
-  REACTED_BY=""
-  [ -z "$SUBJECT" ] || REACTED_BY=$(gc bd show "$SUBJECT" --json | jq -r '.[0].metadata["gc.reacted_by"] // ""')
-  gc bd update "$R" --set-metadata gc.outcome=moot --set-metadata gc.work_outcome=no-op --status=closed --append-notes "Closed as a no-op: a reaction bead is owed no reaction of its own, and its subject's reaction is a run of mol-first-reaction."
-  [ -z "$SUBJECT" ] || [ "$REACTED_BY" = "$R" ] || "$(gc gc-toolkit scripts-dir)/../../tools/gc-proactive.sh" sling "$SUBJECT"
+  SCRIPTS="$(gc gc-toolkit scripts-dir)"
+  # The one row the stores hold under an id, {} for none, and a non-zero exit for a list that does not answer.
+  row() { gc bd list --id "$1" --all --include-infra --include-gates --json --limit 0 2>/dev/null | grep -a -vE '^gc bd:' | tr -d '\000-\037' | jq -ce --arg id "$1" 'if type != "array" then error("unread") elif length == 0 then {} elif length == 1 and .[0].id == $id then .[0] else error("unread") end'; }
+  WHY=""
+  if RROW=$(row "$R") && [ "$RROW" != "{}" ]; then
+    SUBJECT=$(printf '%s' "$RROW" | jq -r '(.metadata["gc.reaction_subject"] // "") as $s | if $s != "" then $s else ([.dependencies[]? | select(.type == "tracks") | .depends_on_id] | .[0] // "") end')
+    if [ -z "$SUBJECT" ]; then WHY="it names no subject"
+    elif SROW=$(row "$SUBJECT"); then
+      if [ "$SROW" = "{}" ]; then WHY="no store holds its subject $SUBJECT"
+      elif [ "$(printf '%s' "$SROW" | jq -r '.metadata["gc.reacted_by"] // ""')" = "$R" ]; then WHY="its subject $SUBJECT carries gc.reacted_by=$R, so its exit landed"
+      else
+        RC=0; "$SCRIPTS/../../tools/gc-proactive.sh" sling "$SUBJECT" || RC=$?
+        case "$RC" in
+          0) WHY="a first reaction is slung on its subject $SUBJECT" ;;
+          3|4|5|6) WHY="its subject $SUBJECT takes no first reaction (gc-proactive.sh sling exit $RC)" ;;
+        esac
+      fi
+    fi
+  fi
+  if [ -n "$WHY" ]; then
+    gc bd update "$R" --set-metadata gc.outcome=moot --set-metadata gc.work_outcome=no-op --status=closed --append-notes "Closed as a no-op: $WHY. A reaction bead is owed no reaction of its own, and its subject's reaction is a run of mol-first-reaction."
+  else
+    "$SCRIPTS/hand-back.sh" "$R"
+  fi
   gc runtime drain-ack
   ```
 - **The bare subject** (neither of those). A sling of this pool that poured no
