@@ -59,6 +59,7 @@
     "name": "epic_hypothesis",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "An epic's one-sentence hypothesis (docs/epics.md). An epic under an epic that carries none is a Delivery."
@@ -75,6 +76,7 @@
     "name": "epic_ruling",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "The latest ruling on an epic's hypothesis: continue, shift or close (docs/epics.md)."
@@ -83,6 +85,7 @@
     "name": "epic_ruling_at",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "When the operator made the latest ruling on an epic."
@@ -91,9 +94,26 @@
     "name": "epic_ruling_reason",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "Why the latest ruling on an epic was made, written with it."
+  },
+  {
+    "name": "epic_shifted_at",
+    "type": "string",
+    "readers": [
+      "epic"
+    ],
+    "doc": "When the operator last ruled shift on an epic, written with that ruling and left standing by a later one, so a shift a later ruling followed still reads (skills/converse-epic-review/SKILL.md). An epic that carries none records no shift beyond its ruling keys."
+  },
+  {
+    "name": "epic_weighed_at",
+    "type": "string",
+    "readers": [
+      "epic"
+    ],
+    "doc": "When the rig's po last weighed an epic at a portfolio sync, written with the sync's note on the epic (skills/portfolio-sync/SKILL.md). An epic that carries none has not been weighed."
   },
   {
     "name": "existing_pr",

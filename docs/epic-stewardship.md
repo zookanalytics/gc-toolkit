@@ -67,6 +67,8 @@ the hypothesis, the ruling, and its reason.
 | `epic_ruling` | the latest ruling: `continue`, `shift`, or `close` |
 | `epic_ruling_reason` | why the latest ruling was made; on `close`, the outcome |
 | `epic_ruling_at` / `epic_ruling_by` / `epic_ruling_evidence` | when the operator ruled, who recorded it, and the human gate whose resolve carried the ruling |
+| `epic_shifted_at` | when the operator last ruled shift, which a later ruling leaves standing, so the po's next portfolio sync still weighs the shift |
+| `epic_weighed_at` | when the rig's po last weighed the epic at a portfolio sync, stamped with the sync's note on it |
 
 ## Closing an epic: the before-close enforcement
 

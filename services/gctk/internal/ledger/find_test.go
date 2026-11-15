@@ -10,7 +10,9 @@ import (
 )
 
 // A selection by key reads the key by its declared name, so the domain that
-// declared it never spells it, and a selection by id with no ids reads nothing.
+// declared it never spells it, a selection by type keeps that issue type
+// alone, and a selection by id with no ids, or by type with none, reads
+// nothing.
 func TestFindSelectsByTheDeclaredKey(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "root", Status: "in_progress", IssueType: "task", Metadata: map[string]string{"gc.x": "cv"},
@@ -33,6 +35,7 @@ func TestFindSelectsByTheDeclaredKey(t *testing.T) {
 		{"the beads that carry the key", Carrying(k), []string{"root"}},
 		{"the beads whose key holds a value, closed ones too", Matching(k, "cv").WithClosed(), []string{"old", "root"}},
 		{"the beads named", ByID("root", "gone"), []string{"root"}},
+		{"the beads of one type", Typed("task"), []string{"root"}},
 	} {
 		got, err := l.Find(tc.sel)
 		if err != nil || !slices.Equal(ids(got), tc.want) {
@@ -46,6 +49,9 @@ func TestFindSelectsByTheDeclaredKey(t *testing.T) {
 	before := len(s.Finds())
 	if rs, err := l.Find(ByID()); rs != nil || err != nil || len(s.Finds()) != before {
 		t.Errorf("a selection of no ids = %v, %v after %d reads; want nothing read", rs, err, len(s.Finds())-before)
+	}
+	if rs, err := l.Find(Typed("")); rs != nil || err != nil || len(s.Finds()) != before {
+		t.Errorf("a selection of no type = %v, %v after %d reads; want nothing read", rs, err, len(s.Finds())-before)
 	}
 	s.FindErr = &gcbd.ReadError{Reason: "gc bd list exited 1"}
 	var re *ReadError
