@@ -126,7 +126,8 @@
 #   (SUSPENDED, CTRL-*) a suspended rig or a down controller refuses first
 #   (IA-*)    the interactive prompts: subject, conversation or starter, model,
 #             skill
-#   (NEWSUBJ*) --new-subject files a marked subject and its one conversation
+#   (NEWSUBJ*) --new-subject files a subject assigned to human, then its one
+#             conversation, and hands the subject to that conversation
 #   (SKILL*)  --skill files a new conversation whose ask is the lens brief
 #   (HOLD-*)  what holds a bead, read through gctk: an engage of the bead names
 #             each open human gate and each bead a person has to clear, with how
@@ -346,10 +347,15 @@ case "$1 ${2:-}" in
         jq -n '[{id:"tk-gate", title:"Approve the rollout", description:"Gate on the waiting bead.", status:"open", issue_type:"gate", await_type:"human", await_id:"rollout"}]' ;;
       *)
         # $SUBJ_STATUS is the status every other bead reads, open by default,
-        # and $SUBJ_META its metadata, none by default.
+        # and $SUBJ_META its metadata, none by default. A subject --new-subject
+        # created reads its own metadata and assignee instead.
+        _md="${SUBJ_META:-"{}"}"; _as=""
+        if [ "$id" = "${NEW_SUBJECT_ID:-tk-newsubj}" ] && [ -f "$ST/newsubj.metadata" ]; then
+          _md="$(cat "$ST/newsubj.metadata")"; _as="$(cat "$ST/$id.assignee" 2>/dev/null)"
+        fi
         jq -n --arg i "$id" --arg t "${SUBJ_TITLE:-the subject under engagement}" --arg st "${SUBJ_STATUS:-open}" \
-              --argjson md "${SUBJ_META:-"{}"}" \
-          '[{id:$i, title:$t, status:$st, issue_type:"task", priority:2, assignee:"", metadata:$md}]' ;;
+              --argjson md "$_md" --arg as "$_as" \
+          '[{id:$i, title:$t, status:$st, issue_type:"task", priority:2, assignee:$as, metadata:$md}]' ;;
     esac ;;
   "bd list")
     _id=""; _prev=""
@@ -585,11 +591,17 @@ case "$1 ${2:-}" in
             -d) printf '%s' "$a" > "$ST/newsubj.description" ;;
             --metadata) printf '%s' "$a" > "$ST/newsubj.metadata" ;;
             --db) printf '%s' "$a" > "$ST/newsubj.db" ;;
+            --assignee) printf '%s' "$a" > "$ST/newsubj.assignee" ;;
           esac
           _p="$a"
         done
         if [ -n "${SUBJ_CREATE_FAIL:-}" ]; then jq -n '{error:"store write refused"}'
-        else jq -n --arg i "${NEW_SUBJECT_ID:-tk-newsubj}" '{id:$i}'; fi ;;
+        else
+          # The subject's row reads back what its create wrote, and the update
+          # above writes its assignee as it does a conversation's.
+          printf '%s' "$(cat "$ST/newsubj.assignee" 2>/dev/null)" > "$ST/${NEW_SUBJECT_ID:-tk-newsubj}.assignee"
+          jq -n --arg i "${NEW_SUBJECT_ID:-tk-newsubj}" '{id:$i}'
+        fi ;;
     esac ;;
   "bd close")
     printf 'bd close %s\n' "$*" >> "$CALLS" ;;
@@ -1817,13 +1829,18 @@ hasnt "$CALLED" "bd create" "(IA-REASON-TEMPLATE) …and nothing filed"
 
 echo "# --new-subject: file a fresh subject in a chosen rig, then engage it"
 # One-shot: --rig names the rig, the positional is the subject title. The subject
-# is created with gc.origin=operator in that rig's .beads store, then its one
-# conversation is filed and a sitting spawned. That conversation's tracks edge
-# is what keeps a first reaction off the subject, so no marker rides the create.
+# is created with gc.origin=operator in that rig's .beads store, assigned to
+# human so no first reaction starts on it before its conversation exists, then
+# its one conversation is filed, the subject is handed to it, and a sitting is
+# spawned. From then the conversation's tracks edge keeps a first reaction off
+# the subject, so no marker rides the create.
 run_fresh "ship the new intake flow" --new-subject --rig gc-toolkit --no-input --no-attach
 eq "$RC" 0 "(NEWSUBJ) --new-subject --rig --no-input exits 0"
 has "$(cat "$STATE_DIR/newsubj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ) the subject is created with gc.origin=operator (honest origin)"
 hasnt "$(cat "$STATE_DIR/newsubj.metadata")" 'reaction_owned' "(NEWSUBJ) …and no reaction marker"
+eq "$(cat "$STATE_DIR/newsubj.assignee" 2>/dev/null)" "human" "(NEWSUBJ) …assigned to human in its create"
+eq "$(cat "$STATE_DIR/tk-newsubj.assignee" 2>/dev/null)" "" "(NEWSUBJ) …and handed to its conversation once that is filed"
+has "$(printf '%s\n' "$CALLED" | grep 'update tk-newsubj' || true)" "--if-status open --if-assignee human --assignee" "(NEWSUBJ) …in one write guarded on the state it was filed in"
 eq "$(cat "$STATE_DIR/newsubj.db")" "$TMP/rig/.beads" "(NEWSUBJ) …in the chosen rig's store (cross-rig create)"
 eq "$(cat "$STATE_DIR/newsubj.title")" "ship the new intake flow" "(NEWSUBJ) …titled with the question, which is short"
 has "$OUT" "filed subject tk-newsubj in rig 'gc-toolkit'" "(NEWSUBJ) reports the filed subject"
@@ -1883,13 +1900,14 @@ echo "# --new-subject whose post-create gate aborts still files the subject's on
 # --template gates). An abort there must not leave the operator-origin subject
 # with no conversation: nothing else puts the operator's question to them. So
 # the backstop files the one conversation itself in the operator's queue (via
-# cmd_open, carrying the opener), and its tracks edge keeps a first reaction off
-# the subject, exactly as a successful engage's does.
+# cmd_open, carrying the opener) and hands the subject to it, so its tracks edge
+# keeps a first reaction off the subject, exactly as a successful engage's does.
 run_fresh "topic after a bad model" --new-subject --rig gc-toolkit --model bogus --no-input --no-attach
 eq "$RC" 2 "(NEWSUBJ-ABORT) a post-create --model abort exits 2"
 has "$(cat "$STATE_DIR/newsubj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ-ABORT) the subject was already created (the abort is post-create)"
 CONV_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--deps tracks:' | head -n1)"
 has "$CONV_CREATE" "topic after a bad model" "(NEWSUBJ-ABORT) …so the backstop files the subject's one conversation, carrying its opener"
+eq "$(cat "$STATE_DIR/tk-newsubj.assignee" 2>/dev/null)" "" "(NEWSUBJ-ABORT) …and hands the subject to it"
 has "$OUT" "waiting in the operator's queue" "(NEWSUBJ-ABORT) …and tells the operator it waits in their queue to engage"
 hasnt "$CALLED" "session new" "(NEWSUBJ-ABORT) …and nothing was spawned"
 

@@ -69,11 +69,23 @@
 #                 from the question's opening, the question unchanged in its
 #                 description, with no reaction marker, then its conversation, whose
 #                 ask is the question unchanged; --json's last answer names both
+#   (NEWSUBJ-OWNED) the subject is filed assigned to human, in its create
+#   (NEWSUBJ-HANDOFF) once its conversation is filed, open hands the subject to
+#                 it, clearing the assignee in one write guarded on the state
+#                 the subject was filed in
 #   (NEWSUBJ-EARLY) --json answers the subject the moment it is filed, before
 #                 open reads anything after it, so a caller that stops waiting
 #                 there still knows it
 #   (NEWSUBJ-PART) a subject filed whose conversation is not says so, names the
-#                 subject on stderr and in --json, and exits 4
+#                 subject on stderr and in --json, exits 4, and stays assigned
+#                 to human
+#   (NEWSUBJ-RERUN) a re-run onto that subject files its conversation and hands
+#                 the subject to it
+#   (NEWSUBJ-HANDOFF-FAIL) a hand-off the store refuses exits 4 after the
+#                 conversation is filed, the subject staying assigned to human,
+#                 and a re-run joins that conversation and hands the subject over
+#   (HANDOFF-ONLY) a bead assigned to human with no operator origin, and an
+#                 operator topic assigned to someone else, keep their assignee
 #   (NEWSUBJ-RIG) no --rig, an unknown rig and a rig that carries no converse
 #                 are refused before anything is created; --rig without
 #                 --new-subject is refused
@@ -147,10 +159,25 @@ case "$1 ${2:-}" in
     else
       printf '%s' "$title" > "$STATE/subj.title"; printf '%s' "$desc" > "$STATE/subj.description"
       arg_after --metadata "$@" > "$STATE/subj.metadata"; arg_after --db "$@" > "$STATE/subj.db"
-      jq --arg t "$title" '. + [{id:"tk-newsubj", issue_type:"task", status:"open", title:$t}]' "$STATE/tk.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/tk.json"
+      arg_after --assignee "$@" > "$STATE/subj.assignee"
+      jq --arg t "$title" --arg a "$(cat "$STATE/subj.assignee")" --argjson md "$(cat "$STATE/subj.metadata")" \
+        '. + [{id:"tk-newsubj", issue_type:"task", status:"open", title:$t, assignee:$a, metadata:$md}]' "$STATE/tk.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/tk.json"
       echo '{"id":"tk-newsubj"}'
     fi ;;
-  "bd update"|"bd close") : ;;
+  "bd update")
+    # An update that writes an assignee is applied to the row, behind bd's
+    # --if-status and --if-assignee guards: a mismatch writes nothing and exits
+    # 13. $UPDATE_FAIL refuses it. Any other update changes nothing here.
+    shift 2; id="$1"; p="${id%%-*}"
+    case " $* " in *" --assignee "*) ;; *) exit 0 ;; esac
+    [ -n "${UPDATE_FAIL:-}" ] && { echo "Error: the store refused the write" >&2; exit 1; }
+    _st=$(jq -r --arg i "$id" 'first(.[] | select(.id == $i) | .status // "open") // ""' "$STATE/$p.json")
+    _as=$(jq -r --arg i "$id" 'first(.[] | select(.id == $i) | .assignee // "") // ""' "$STATE/$p.json")
+    _want_st=$(arg_after --if-status "$@"); _want_as=$(arg_after --if-assignee "$@")
+    case " $* " in *" --if-status "*) [ "$_st" = "$_want_st" ] || exit 13 ;; esac
+    case " $* " in *" --if-assignee "*) [ "$_as" = "$_want_as" ] || exit 13 ;; esac
+    jq --arg i "$id" --arg a "$(arg_after --assignee "$@")" 'map(if .id == $i then .assignee = $a else . end)' "$STATE/$p.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/$p.json" ;;
+  "bd close") : ;;
   *) echo "stub gc: unhandled: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -432,8 +459,17 @@ eq "$RC" 0 "(NEWSUBJ) a new subject files, exit 0"
 eq "$(printf '%s\n' "$OUT" | tail -n 1)" '{"subject":"tk-newsubj","conversation":"tk-newconv","filed":true}' "(NEWSUBJ) --json's last answer names the subject and its conversation"
 eq "$(printf '%s\n' "$OUT" | head -n 1)" '{"subject":"tk-newsubj","conversation":"","filed":false}' "(NEWSUBJ) …after the subject's own answer"
 eq "$(cat "$STATE/subj.db")" "$TMP/rig/.beads" "(NEWSUBJ) the subject is filed in the --rig rig's store"
-hasnt "$(cat "$STATE/subj.metadata")" 'reaction_owned' "(NEWSUBJ) …with no reaction marker: its conversation keeps a first reaction off it"
+hasnt "$(cat "$STATE/subj.metadata")" 'reaction_owned' "(NEWSUBJ) …with no reaction marker"
 has "$(cat "$STATE/subj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ) …with the operator as its origin"
+eq "$(cat "$STATE/subj.assignee")" "human" "(NEWSUBJ-OWNED) …assigned to human in its create, so no first reaction starts on it before its conversation exists"
+subj_assignee() { jq -r 'first(.[] | select(.id == "tk-newsubj") | .assignee // "") // "absent"' "$STATE/tk.json"; }
+eq "$(subj_assignee)" "" "(NEWSUBJ-HANDOFF) once its conversation is filed, the subject is handed to it: the assignee is cleared"
+has "$(grep '^bd update tk-newsubj' "$CALLS" || true)" "--if-status open --if-assignee human --assignee" "(NEWSUBJ-HANDOFF) …in one write guarded on the state the subject was filed in"
+CONV_AT=$(grep -n -m1 '^bd create .*--deps tracks:tk-newsubj' "$CALLS" | cut -d: -f1 || true)
+HANDOFF_AT=$(grep -n -m1 '^bd update tk-newsubj' "$CALLS" | cut -d: -f1 || true)
+{ [ -n "$CONV_AT" ] && [ -n "$HANDOFF_AT" ] && [ "$CONV_AT" -lt "$HANDOFF_AT" ]; } \
+  && ok "(NEWSUBJ-HANDOFF) …after the conversation that keeps a first reaction off it is filed" \
+  || bad "(NEWSUBJ-HANDOFF) the hand-off should follow the conversation's create (create at ${CONV_AT:-none}, hand-off at ${HANDOFF_AT:-none})"
 case "$(cat "$STATE/subj.description")" in
   "$Q"$'\n\n---\n'*) ok "(NEWSUBJ) the subject's description opens with the question, unchanged" ;;
   *) bad "(NEWSUBJ) the subject's description should open with the question unchanged" ;;
@@ -459,6 +495,34 @@ eq "$RC" 4 "(NEWSUBJ-PART) a conversation that is not filed exits 4"
 eq "$(printf '%s\n' "$OUT" | tail -n 1)" '{"subject":"tk-newsubj","conversation":"","filed":false}' "(NEWSUBJ-PART) --json's last answer names the subject that was filed"
 has "$ERR" "subject tk-newsubj was filed, but its conversation was not" "(NEWSUBJ-PART) …and so does stderr"
 has "$ERR" "gc-helm open tk-newsubj --reason" "(NEWSUBJ-PART) …with the re-run onto it"
+eq "$(subj_assignee)" "human" "(NEWSUBJ-PART) …and the subject stays assigned to human, so no first reaction takes it up while it owes its conversation"
+run open tk-newsubj --reason "a question" --json
+eq "$RC" 0 "(NEWSUBJ-RERUN) the re-run onto the subject files its conversation, exit 0"
+eq "$(printf '%s\n' "$OUT" | tail -n 1)" '{"subject":"tk-newsubj","conversation":"tk-newconv","filed":true}' "(NEWSUBJ-RERUN) …and names it"
+eq "$(subj_assignee)" "" "(NEWSUBJ-RERUN) …and hands the subject to it"
+
+echo "# a hand-off the store refuses stops open, and a re-run onto the subject completes it"
+seed; UPDATE_FAIL=1 run open --new-subject --rig gc-toolkit --reason "a question" --json
+eq "$RC" 4 "(NEWSUBJ-HANDOFF-FAIL) a refused hand-off exits 4"
+eq "$(printf '%s\n' "$OUT" | tail -n 1)" '{"subject":"tk-newsubj","conversation":"tk-newconv","filed":true}' "(NEWSUBJ-HANDOFF-FAIL) …after the conversation is filed and answered"
+has "$ERR" "the store refused the write that hands tk-newsubj to it" "(NEWSUBJ-HANDOFF-FAIL) …saying which write"
+has "$ERR" "gc-helm open tk-newsubj" "(NEWSUBJ-HANDOFF-FAIL) …and the re-run that completes it"
+eq "$(subj_assignee)" "human" "(NEWSUBJ-HANDOFF-FAIL) …and the subject stays assigned to human, which keeps every first reaction off it"
+run open tk-newsubj --json
+eq "$RC" 0 "(NEWSUBJ-HANDOFF-FAIL) the re-run exits 0"
+eq "$(printf '%s\n' "$OUT" | tail -n 1)" '{"subject":"tk-newsubj","conversation":"tk-newconv","filed":false}' "(NEWSUBJ-HANDOFF-FAIL) …joining the conversation the first run filed, filing no second"
+eq "$(subj_assignee)" "" "(NEWSUBJ-HANDOFF-FAIL) …and hands the subject to it"
+
+echo "# open hands over only a subject create_subject filed"
+seed
+jq '. + [{id:"tk-visit", issue_type:"task", status:"open", assignee:"human", title:"assigned to human by hand", metadata:{}},
+         {id:"tk-opsubj", issue_type:"task", status:"open", assignee:"someone", title:"an operator topic someone took", metadata:{"gc.origin":"operator"}}]' \
+  "$STATE/tk.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/tk.json"
+run open tk-visit --reason "q"
+eq "$RC" 0 "(HANDOFF-ONLY) a conversation on a bead assigned to human with no operator origin files"
+run open tk-opsubj --reason "q"
+eq "$RC" 0 "(HANDOFF-ONLY) …and on an operator topic assigned to someone else"
+hasnt "$(cat "$CALLS")" "--if-assignee human --assignee" "(HANDOFF-ONLY) …and neither bead's assignee is written"
 
 echo "# the rig of a new subject is the operator's, and is checked before anything is created"
 seed; run open --new-subject --reason "q" --json

@@ -668,10 +668,15 @@ one-line command prompt. `gc-helm open --new-subject --rig <rig>` files the
 subject and its conversation without starting a sitting, which is how the form
 saves a new topic before it starts one.
 
-The subject's one conversation keeps a first reaction off it.
-`tools/gc-proactive.sh sling` refuses a bead an open conversation tracks, and a
-reaction's first act asks the same refusal, so a reaction slung in the moment
-before the conversation is filed stands down once it starts. The engage is the
+No first reaction takes the subject. It is filed assigned to `human`, the
+operator who asked, so in the moment before its conversation exists the scan,
+which reads only unassigned beads, passes it over, and
+`tools/gc-proactive.sh sling` refuses it, as a reaction's first act does. Once
+the conversation is filed, open hands the subject to it: one write, guarded on
+that assignee, clears it, and from then on the open conversation keeps a first
+reaction off the subject, because the sling refuses a bead an open
+conversation tracks. A write the store refuses leaves the subject assigned to
+`human`, and a re-run of `gc-helm open` on it hands it over. The engage is the
 reaction, and once the conversation's sitting signs off, the headline its
 sign-off writes keeps the scan off the subject. If a later step refuses the
 live spawn, a bad model or a suspended rig, the subject's one conversation

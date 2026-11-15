@@ -201,9 +201,11 @@ one conversation and engages it, all in one gesture. The positional text, or
 --reason without one, is the question: the subject's description keeps it
 unchanged with a provenance line after it, its title is the label
 conversation_title derives from its opening, and absent --reason or
---template it is the conversation's opener too. The one conversation engage
-files tracks the subject, so a first reaction refuses the subject rather than
-put it to the operator a second time.
+--template it is the conversation's opener too. The subject is filed assigned
+to human, so no first reaction starts on it before its conversation exists.
+Once the one conversation engage files tracks the subject, the subject is
+handed to it, and a first reaction refuses the subject rather than put it to
+the operator a second time.
 
 A bare gc-helm on a terminal opens engage's form on starting a conversation.
 The form's pages are tabs at its top: starting a conversation (Ctrl+N),
@@ -2938,6 +2940,33 @@ open_join() {
     return 0
 }
 
+# open_handoff <subject> <subject-row> — hand a subject create_subject filed to
+# the conversation that now tracks it. create_subject files the subject open,
+# assigned to `human` and carrying gc.origin=operator, so no first reaction
+# can start on it before its conversation exists. Once one does, the open
+# conversation keeps a first reaction off the subject, and the assignee goes in
+# one write, guarded on that status and assignee, so a claim or a close that
+# lands after open read the subject refuses the write and leaves the bead to
+# it. A conversation is the only other bead assigned to `human`, and open never
+# files one about a conversation, so the row as open read it tells this
+# subject from any other, which open leaves as it is. Returns 1 when the store
+# refuses the write, which it says on stderr: the subject then stays assigned
+# to `human`, which keeps every first reaction off it, and a re-run of open
+# finds the conversation and hands the subject to it.
+open_handoff() {
+    printf '%s' "$2" | jq -e '
+        ((.status // "") | tostring) == "open"
+        and ((.assignee // "") | tostring) == "human"
+        and (((.metadata // {})["gc.origin"] // "") | tostring) == "operator"' >/dev/null 2>&1 || return 0
+    _oh_rc=0
+    gc bd update "$1" --if-status open --if-assignee human --assignee "" >/dev/null 2>&1 || _oh_rc=$?
+    case "$_oh_rc" in
+        0|13) return 0 ;;
+        *) echo "$PROG: open: conversation $CONV tracks $1, but the store refused the write that hands $1 to it (gc bd update exited $_oh_rc), so $1 stays assigned to human, which keeps every first reaction off it. Re-run once the store answers, which hands it over: $PROG open $1" >&2
+           return 1 ;;
+    esac
+}
+
 # ── Verb: open ───────────────────────────────────────────────────────
 # File a CONVERSATION about the bead in the operator's queue: an ordinary task
 # that tracks the bead, assigned to `human`, holding no session until the
@@ -2974,7 +3003,10 @@ open_join() {
 # wait on files the conversation about that bead, as engage took it (take_bead).
 # --new-subject files the subject first, in the --rig rig (create_subject): the
 # positional text, or --reason without one, is the question it is about, and the
-# conversation's ask. With --json, open answers the subject the moment it is
+# conversation's ask. Such a subject is filed assigned to `human`, and once a
+# conversation about it is filed or joined, open hands the subject to that
+# conversation (open_handoff), whichever open run gets there, a re-run onto the
+# subject included. With --json, open answers the subject the moment it is
 # filed, before any read that can stall, so a caller that stops waiting, as the
 # conversation form does at its deadline, still knows the subject, and the last
 # answer open prints is the one that counts. A subject filed whose conversation
@@ -3004,12 +3036,12 @@ open_new_subject_report() {
     _onsr_rc=$?
     [ -n "$_open_new_subject_bead" ] || return "$_onsr_rc"
     trap - EXIT
-    echo "$PROG: open: subject $_open_new_subject_bead was filed, but its conversation was not. File it onto the subject, not as a new one: $PROG open $_open_new_subject_bead --reason \"<the question>\"" >&2
+    echo "$PROG: open: subject $_open_new_subject_bead was filed, but its conversation was not. It stays assigned to human until one is, so no first reaction takes it up. File it onto the subject, not as a new one: $PROG open $_open_new_subject_bead --reason \"<the question>\"" >&2
     return "$_onsr_rc"
 }
 cmd_open() {
     bead=""; open_reason=""; open_body=""; open_allow_dup=""; open_json=""; OPEN_FILED=""
-    open_new_subject=0; open_rig=""; open_if_subject=""; open_conv=""; open_from=""; open_sitting=""
+    open_new_subject=0; open_rig=""; open_if_subject=""; open_conv=""; open_from=""; open_sitting=""; open_subject_row=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --new-subject) open_new_subject=1; shift ;;
@@ -3118,6 +3150,7 @@ cmd_open() {
         exit 4
     fi
     subject_clean="$VS_PAYLOAD"
+    open_subject_row="$VS_ROW"
 
     # A DONE-band row is a finished item, not open work. Filing a fresh
     # conversation on a closed subject is how a settled question gets
@@ -3198,6 +3231,7 @@ $open_body"
                 echo "$PROG: conversation $existing is already open for $bead — waiting in the operator's queue until an operator engages it."
                 echo "       Engage it when ready: $PROG engage $bead"
             fi
+            open_handoff "$bead" "$open_subject_row" || exit 4
             return 0
         done
     fi
@@ -3301,6 +3335,7 @@ $gate_desc}"
     bust_cache
     open_edges "$CONV" "is filed on $bead" || exit 4
     [ "$open_again" = 0 ] || conversation_note_others open "$CONV" "$open_others" "$TAKE_GATE"
+    open_handoff "$bead" "$open_subject_row" || exit 4
 
     # One sentence reports a conversation that holds the concern, filed by this
     # open or by an earlier one, and it is the sentence helm-svc's board reads
@@ -4674,11 +4709,14 @@ engage_resolve_skill() {
 # unchanged, newlines included, with a provenance line after it, and the title
 # is the short label conversation_title derives from its opening, because a
 # question is not a title and bd refuses a title over 500 bytes. The caller
-# files the subject's one conversation itself, and that conversation's tracks
-# edge is what keeps a first reaction off the subject: tools/gc-proactive.sh
-# sling refuses a bead an open conversation tracks, and a reaction's own first
-# act asks the same refusal, so a reaction slung before the conversation is
-# filed stands down once it starts. gc.origin=operator is the honest origin.
+# files the subject's one conversation itself, through open, so the subject
+# exists for a moment before anything tracks it. It is filed assigned to
+# `human`, the operator who asked, in the create itself, so no first reaction
+# can start on it in that moment: the scan reads only unassigned beads, and
+# tools/gc-proactive.sh sling refuses an assigned one, as a reaction's own
+# first act does. Once its conversation is filed, open hands the subject to it
+# (open_handoff), and from then the open conversation keeps a first reaction
+# off it. gc.origin=operator is the honest origin.
 create_subject() {
     _cs_verb="$1"; _cs_rig="$2"; _cs_text="$3"
     enumerate_rigs
@@ -4709,7 +4747,7 @@ create_subject() {
 ---
 Operator-initiated conversation subject, filed by \`$PROG $_cs_verb --new-subject\`. The text above is the operator's question as typed, and the title is a label derived from its opening."
     _cs_json=$(gc bd create -t task --title "$_cs_title" -d "$_cs_body" \
-        --metadata '{"gc.origin":"operator"}' \
+        --metadata '{"gc.origin":"operator"}' --assignee human \
         --db "$_cs_path/.beads" --json 2>/dev/null || true)
     bead=$(printf '%s' "$_cs_json" | scrub | jq -r 'if type=="array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     if [ -z "$bead" ] || [ "$bead" = "null" ]; then
@@ -4731,13 +4769,12 @@ Operator-initiated conversation subject, filed by \`$PROG $_cs_verb --new-subjec
 # (a suspended rig, a downed controller, an unknown --template or --model, a
 # store read that will not confirm the bead), and until the conversation is
 # filed an abort would leave this operator-origin subject owing a conversation
-# that nothing supplies: its own stand-down marker hides it from the async
-# worker, and even unmarked a first reaction does not file one for
-# gc.origin=operator. So the abort backstop is armed the instant the subject
-# exists, and engage_new_subject_cleanup files that one conversation itself on
-# exit; cmd_engage disarms it once the conversation is filed. enumerate_rigs
-# already set and cleared its own trap and memoizes on every later call, so it
-# never clobbers this one.
+# that nothing supplies: it is assigned to `human` until its conversation owns
+# it, so no first reaction takes it up. So the abort backstop is armed the
+# instant the subject exists, and engage_new_subject_cleanup files that one
+# conversation itself on exit; cmd_engage disarms it once the conversation is
+# filed. enumerate_rigs already set and cleared its own trap and memoizes on
+# every later call, so it never clobbers this one.
 engage_create_subject() {
     [ -n "$new_subject_title" ] || new_subject_title="$engage_reason"
     if [ -z "$engage_template" ] && [ "$engage_reason_set" = 0 ]; then
@@ -4751,19 +4788,17 @@ engage_create_subject() {
 }
 
 # engage_new_subject_cleanup — the abort backstop for --new-subject, armed by
-# engage_create_subject the instant the marked subject exists and disarmed by
+# engage_create_subject the instant the subject exists and disarmed by
 # cmd_engage once the conversation is filed. While armed, any exit (an abort
 # gate or a signal) means the live engage stopped before cmd_engage filed the
-# subject's one conversation. The subject still owes it and the async worker
-# will not supply it — the stand-down marker hides it from the scan, and even
-# unmarked a first reaction files none for an operator-origin bead. So file the
-# one conversation here with cmd_open, the same path the happy flow uses: it
-# resolves the subject's rig from its id, joins a conversation already in the
-# queue, and files the conversation in the operator's queue. The marker is LEFT
-# set, exactly as a successful engage leaves it, so the async worker still
-# stands down rather than filing a second. Run cmd_open in a subshell so its
-# own exits cannot abort this trap, and disarm first so it cannot re-enter. A no-op
-# when nothing is armed; it preserves the process's exit code.
+# subject's one conversation. The subject still owes it, and no first reaction
+# takes it up while it is assigned to `human`. So file the one conversation
+# here with cmd_open, the same path the happy flow uses: it resolves the
+# subject's rig from its id, joins a conversation already in the queue, files
+# the conversation in the operator's queue, and hands the subject to it. Run
+# cmd_open in a subshell so its own exits cannot abort this trap, and disarm
+# first so it cannot re-enter. A no-op when nothing is armed; it preserves the
+# process's exit code.
 _ens_cleanup_bead=""
 engage_new_subject_cleanup() {
     _enc_rc=$?
@@ -4776,7 +4811,7 @@ engage_new_subject_cleanup() {
     if ( cmd_open "$@" >/dev/null 2>&1 ); then
         echo "$PROG: engage: the live engage aborted, but filed the one conversation new subject $_enc_bead owes — waiting in the operator's queue. Engage it when ready: $PROG engage $_enc_bead" >&2
     else
-        echo "$PROG: engage: new subject $_enc_bead was created but its conversation could NOT be filed (store error?), so a first reaction may take it up. File the conversation by hand: $PROG open $_enc_bead" >&2
+        echo "$PROG: engage: new subject $_enc_bead was created but its conversation could NOT be filed, or the subject not handed to it (store error?). It stays assigned to human, so no first reaction takes it up. File the conversation by hand, which hands the subject to it: $PROG open $_enc_bead" >&2
     fi
     return "$_enc_rc"
 }
@@ -4931,11 +4966,11 @@ cmd_engage() {
 
     # --new-subject: file a FRESH subject bead in a chosen rig, then engage it in
     # one gesture. The positional argument is the question the subject is about,
-    # not an id. engage_create_subject creates the marked bead in the --rig rig
-    # and leaves its id in $bead with the opener primed — after it the rest of
-    # this verb runs unchanged, deriving the rig from the new id's prefix and
-    # filing the ONE conversation the marker keeps the async worker from
-    # duplicating.
+    # not an id. engage_create_subject creates the bead in the --rig rig,
+    # assigned to `human` until its conversation owns it, and leaves its id in
+    # $bead with the opener primed. After it the rest of this verb runs
+    # unchanged, deriving the rig from the new id's prefix and filing the ONE
+    # conversation, whose open hands the subject to it.
     if [ "$engage_new_subject" = 1 ]; then
         new_subject_title="$bead"; bead=""
         engage_create_subject
