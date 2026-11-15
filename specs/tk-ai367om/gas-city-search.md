@@ -31,14 +31,19 @@ reaches it as a queued nudge, `Wait satisfied (<wait>): <note>`
 when its beads close (`depsWaitReadyDetailedFrom`), which on the old review path
 is the only way it turns ready. So the stay registers the wait, the landing order
 marks it ready while a reading is owed, and Gas City wakes the sitting with the
-note. The review-lanes design placed the wake here in its section 9.
+note. The order tells the stay's wait from one another session registered on the
+bead by its `session_id`: the session `gc session list --json` lists with the
+conversation's assignee as its `alias` (`sessionListJSONRow` in
+`cmd/gc/cmd_session.go`). The review-lanes design placed the wake here in its
+section 9.
 
 **What it does not cover, and what covers it.**
 
-- **The sleep and the record.** A wake cancels every wait of its session
-  (`Store.wakeSessionFromBead` in `internal/session/wait_store.go`), and `gc
-  session attach` asks the controller to start a stopped session as `gc session
-  wake` does (`cmd/gc/cmd_session.go`, the attach command's help). A wait
+- **The sleep and the record.** An explicit wake, `gc session wake` or the
+  API's, cancels every wait of its session (`Store.wakeSessionFromBead` in
+  `internal/session/wait_store.go`), and `gc session attach` asks the controller
+  to start a stopped session as `gc session wake` does (`cmd/gc/cmd_session.go`,
+  the attach command's help). A wait
   registered before a fresh restart is cancelled as stale
   (`WaitInfo.ContinuationStale` in `internal/session/waits.go`), a closed
   session's waits are cancelled (`prepareWaitWakeStateHooked` in
@@ -65,8 +70,9 @@ note. The review-lanes design placed the wake here in its section 9.
   own, standing in for the wait Gas City already ships.
 - **A nudge from the order.** `gc session nudge` sends text to a running session,
   and its `queue` delivery "never wakes the session" (`docs/reference/cli.md`,
-  `gc session nudge`). A sleeping sitting needs a wake, and the order would have
-  to resolve each conversation's session itself, where a wait names it.
+  `gc session nudge`). A sleeping sitting needs a wake, and `gc session wake`,
+  the explicit wake, cancels every wait of the session, the waits on its other
+  PRs among them (`Store.wakeSessionFromBead`).
 - **An order of its own.** Order triggers are cooldown, cron, condition, event,
   manual and webhook (`internal/orders/order.go`). The readiness is decided
   inside the landing order's pass, where the PR would be marked ready, so a
@@ -81,8 +87,10 @@ note. The review-lanes design placed the wake here in its section 9.
 **What it composes.** A stay already writes a `blocks` edge from its
 conversation onto its work, or onto an input convoy that tracks the work when the
 conversation tracks it. The order finds the stays on a PR's bead from that bead's
-dependents (`bd dep list <bead> --direction=up`) and the rows of those that read
-as conversations or input convoys. It adds no record.
+dependents (`bd dep list <bead> --direction=up`), the rows of those that read as
+conversations, and the dependents of each open convoy among them that tracks the
+bead alone and carries no `owned` label, which Gas City closes with the bead
+(`convoyStillAutocloses`). It adds no record.
 
 **The rework's wait.** The conversation tracks the PR's anchor, and bd keeps one
 edge from a bead onto another (`DependencyTypeConflictError`, beads
@@ -140,8 +148,12 @@ post (`assets/scripts/pr-post.sh`, `own-def`). The body opens with a marker that
 names the conversation and the head, the way the city already marks a purpose
 post, as the sitting reminder's `<!-- gc:sitting:<task> -->` does. The evaluator
 reads the PR's conversation comments on each pass (`GitHub.IssueComments` in
-`services/gctk/pr/pr.go`), so the markers cost no further read, and `pr-post.sh
-edit` rewrites a reading in place when a return restarts.
+`services/gctk/pr/pr.go`). The landing order consults `readyBar` before the
+evaluator runs (`decide` in `services/gctk/pr/landing.go`), so under call 1 (a)
+its draft arm reads the comments once more, only for a PR whose bead has a stay.
+Only a post of the city's own counts, by `pr-post.sh own-def`'s `gc_city_own`,
+so a marker anyone else writes releases nothing. `pr-post.sh edit` rewrites a
+reading in place when a return restarts.
 
 **What else was searched.**
 
@@ -186,10 +198,11 @@ mode writes what the stay now needs.
 
 ## What it leaves in place
 
-- **A sitting whose session closed** still stays, so its PR stays a draft until
-  the operator engages or dismisses the conversation. The condition names it.
-  Gas City closes a session only when a person or a prune asks, and the pack adds
-  no sweep for it.
+- **A sitting no wait can wake**, because its session closed, its return was cut
+  short before it registered its wait again, or its wait's note failed to reach
+  it, still stays, so its PR stays a draft until the operator engages or
+  dismisses the conversation. The condition names it. Gas City closes a session
+  only when a person or a prune asks, and the pack adds no sweep for it.
 - **A rework of a PR whose anchor has no open input convoy**, such as a change a
   sitting edited and handed over through `work-submit.sh`, waits on the ruling's
   ask and comes back at the review run's `record`, a step before the readiness.
