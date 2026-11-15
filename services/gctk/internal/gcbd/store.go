@@ -24,11 +24,11 @@ type Store interface {
 	// Update makes one `gc bd update` of id with args, returning its output.
 	// An error is a write that did not land.
 	Update(id string, args ...string) (string, error)
-	// Create files one bead with one `gc bd create` of args, returning the id
-	// the store gave it. An error is a create that may not have landed: bd
-	// answers a create whose commit it lost as it answers a refusal, so a caller
-	// that retries finds what an earlier attempt filed before it files again.
-	Create(args ...string) (string, error)
+	// Create makes one `gc bd create` titled title with args, and returns the
+	// new bead's id. An error may still have filed the bead: bd answers a
+	// create whose commit result it lost with the same reply and exit as a
+	// refusal, so the caller finds the bead before it files again.
+	Create(title string, args ...string) (string, error)
 }
 
 var _ Store = (*Client)(nil)

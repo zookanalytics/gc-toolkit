@@ -91,9 +91,9 @@ var (
 // branch carries, and the asks on its PR.
 func OnBranch(branch string) ledger.Selection { return ledger.Matching(branchKey, branch) }
 
-// NameBranch names, in w, the branch the bead's work is on, as an ask names
-// the branch of the PR it asks a change of.
-func NameBranch(w *ledger.Write, branch string) { branchKey.Set(w, branch) }
+// NameBranch names, in a, the branch the bead's work is on, as an ask's filing
+// names the branch of the PR it asks a change of.
+func NameBranch(a ledger.Act, branch string) { branchKey.Set(a, branch) }
 
 // OnTarget selects the beads whose merged_target is branch: the ones whose PR
 // is to merge into it, and the ones whose work landed on it.

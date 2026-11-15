@@ -182,8 +182,10 @@ func Retry(w *ledger.Write, state, reason, now string) {
 // Requeue sends a PR open at a head the refinery has not validated back to the
 // refinery: the bead open, merge_result head changed, the head found, and why,
 // keeping the validated head. The marker goes, because the refinery's next
-// publication arms it again.
-func Requeue(w *ledger.Write, prURL, observed, reason, now string) {
+// publication arms it again, unless held: a withdrawal still open on the bead
+// holds it from the refinery, so the marker stays for the landing order to
+// carry the withdrawal out.
+func Requeue(w *ledger.Write, prURL, observed, reason, now string, held bool) {
 	w.Status("open")
 	mergeResultKey.Set(w, HeadChanged)
 	existingPRKey.Set(w, prURL)
@@ -191,10 +193,18 @@ func Requeue(w *ledger.Write, prURL, observed, reason, now string) {
 	prStateKey.Set(w, "open")
 	checkedAtKey.Set(w, now)
 	rejectionReasonKey.Set(w, reason)
-	for _, k := range []ledger.Key[string]{blockedReasonKey, reconcileErrorKey, pendingKey} {
+	for _, k := range []ledger.Key[string]{blockedReasonKey, reconcileErrorKey} {
 		k.Clear(w)
 	}
+	if !held {
+		pendingKey.Clear(w)
+	}
 }
+
+// Mark sets the marker on a bead whose record has none, so the landing order
+// reads the record again: a withdrawal filed on a bead the order requeued
+// waits for the order to carry it out.
+func Mark(w *ledger.Write) { pendingKey.Set(w, "true") }
 
 // Settle clears the marker of an open bead whose changed head already waits on
 // the refinery's validation, as Gas Town's recovery of an interrupted requeue

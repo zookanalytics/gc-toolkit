@@ -451,6 +451,7 @@ func TestRecordClosesTheAsksTheRunAnswered(t *testing.T) {
 // bead by its own edge, naming the PR's branch and the checks it sends back.
 func TestAnAskIsFiledWithNoParent(t *testing.T) {
 	w := newWorld(t)
+	w.store.Put(bead{ID: "tk-ruling", Status: "closed", IssueType: "task"})
 	index := func(at string) (review.Index, error) {
 		if at != h1 {
 			t.Fatalf("the index was read at %s; want the validated head", at)
@@ -461,7 +462,7 @@ func TestAnAskIsFiledWithNoParent(t *testing.T) {
 	if err != nil || !filed {
 		t.Fatalf("FileAsk = %q, %t, %v", id, filed, err)
 	}
-	creates := w.store.Filed()
+	creates := w.store.Creates()
 	if len(creates) != 1 || slices.Contains(creates[0].Args, "--parent") {
 		t.Fatalf("the create carried %+v; want one create with no parent", creates)
 	}
@@ -470,7 +471,7 @@ func TestAnAskIsFiledWithNoParent(t *testing.T) {
 		!reflect.DeepEqual(row.Metadata, map[string]string{"branch": branch, "review_checks": "Arch"}) {
 		t.Fatalf("the ask reads %+v", row)
 	}
-	if !reflect.DeepEqual(row.Edges, []gcbd.Edge{{ID: "tk-ruling", Type: "discovered-from"}}) {
+	if !reflect.DeepEqual(row.Edges, []gcbd.Edge{{ID: "tk-ruling", Type: "discovered-from", Status: "closed"}}) {
 		t.Fatalf("the ask's own edges are %+v; want only its discovered-from source", row.Edges)
 	}
 	asks, err := review.AsksOn(w.ledger(), prBead)
@@ -489,6 +490,8 @@ func TestAnAskIsFiledWithNoParent(t *testing.T) {
 // open and after it closed, and another source files its own.
 func TestOneSourceAndReasonFiledTwice(t *testing.T) {
 	w := newWorld(t)
+	w.store.Put(bead{ID: "tk-ruling", Status: "closed", IssueType: "task"})
+	w.store.Put(bead{ID: "tk-other", Status: "closed", IssueType: "task"})
 	req := review.AskRequest{Bead: prBead, Reason: "Fix the cap.", Source: "tk-ruling"}
 	first, _, err := review.FileAsk(w.ledger(), req, nil)
 	if err != nil {
@@ -506,7 +509,7 @@ func TestOneSourceAndReasonFiledTwice(t *testing.T) {
 	if id, filed, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "Fix the cap.", Source: "tk-other"}, nil); err != nil || !filed || id == first {
 		t.Fatalf("another source's ask = %q, %t, %v; want one of its own", id, filed, err)
 	}
-	if n := len(w.store.Filed()); n != 2 {
+	if n := len(w.store.Creates()); n != 2 {
 		t.Fatalf("the store took %d creates; want 2", n)
 	}
 }
@@ -519,7 +522,7 @@ func TestAnAskOnABeadWithNoPRIsRefused(t *testing.T) {
 	w.store.Put(pr)
 	_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "x"}, nil)
 	var refused *review.Refusal
-	if !errors.As(err, &refused) || len(w.store.Filed()) != 0 {
+	if !errors.As(err, &refused) || len(w.store.Creates()) != 0 {
 		t.Fatalf("an ask on a bead with no PR on the record: %v; want it refused with nothing filed", err)
 	}
 }

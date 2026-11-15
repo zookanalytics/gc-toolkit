@@ -193,17 +193,17 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 			return a.ID, false, nil
 		}
 	}
-	w := l.File(askTitle(reason), "task")
-	w.Description(reason)
-	record.NameBranch(w, branch)
+	f := l.File(askTitle(reason), "task")
+	f.Description(reason)
+	record.NameBranch(f, branch)
 	if len(checks) > 0 {
-		checksKey.Set(w, strings.Join(checks, ","))
+		checksKey.Set(f, strings.Join(checks, ","))
 	}
-	w.Blocks(owner.ID)
+	f.Blocks(owner.ID)
 	if req.Source != "" {
-		w.From(req.Source)
+		f.From(req.Source)
 	}
-	id, err = l.Filed(w)
+	id, err = l.Create(f)
 	if err != nil {
 		return "", false, err
 	}

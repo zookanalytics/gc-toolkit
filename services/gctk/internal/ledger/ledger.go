@@ -14,8 +14,10 @@
 // update` carrying every key the act sets, and the title when the act gives
 // the bead one, so the act lands whole or not at all.
 // The update's exit decides whether the write landed: a write that exits
-// non-zero has failed, and nothing reads a write back to confirm it. A Snapshot
-// is one pass's read of the beads a question needs.
+// non-zero has failed, and nothing reads a write back to confirm it. A new
+// bead is one Filing, which Create makes as one `gc bd create` carrying its
+// keys and its edges. A Snapshot is one pass's read of the beads a question
+// needs.
 //
 // The ledger is the one package above the store adapter that reaches the
 // store, through gcbd.Store.
@@ -87,16 +89,7 @@ type Write struct {
 	status string
 	note   string
 	guard  *guard
-	file   *filing
 	err    error
-}
-
-// filing is what a write that files a new bead adds: its issue type, its
-// description, the beads it blocks and the bead it was found from.
-type filing struct {
-	issueType, description string
-	blocks                 []string
-	from                   string
 }
 
 // guard is the status and assignee a write lands under.
@@ -181,6 +174,93 @@ func (w *Write) args() []string {
 	return args
 }
 
+// Filing is the filing of one new bead: its title, its type, its description,
+// every key it carries, the beads it blocks and the bead it was found from,
+// made in one create, so the bead lands with its keys and its edges or not at
+// all.
+type Filing struct {
+	title, typ, description string
+	keys                    map[string]string
+	blocks                  []string
+	from                    string
+	err                     error
+}
+
+// File starts the filing of a bead titled title, of type issueType.
+func (l *Ledger) File(title, issueType string) *Filing {
+	return &Filing{title: title, typ: issueType, keys: map[string]string{}}
+}
+
+// Description gives the new bead its description.
+func (f *Filing) Description(text string) { f.description = text }
+
+// Blocks makes the new bead block each bead named, by a blocks edge from that
+// bead onto it, written in the create itself.
+func (f *Filing) Blocks(ids ...string) { f.blocks = append(f.blocks, ids...) }
+
+// From records the bead the new one was found from, by the new bead's own
+// discovered-from edge onto it, which is no wait and holds nothing.
+func (f *Filing) From(id string) { f.from = id }
+
+func (f *Filing) set(name, text string) { f.keys[name] = text }
+
+func (f *Filing) fail(err error) {
+	if f.err == nil {
+		f.err = err
+	}
+}
+
+// args is the create's arguments: the type, the description, the keys as one
+// JSON object, then the beads the new one blocks and the bead it was found
+// from, as one --deps list.
+func (f *Filing) args() ([]string, error) {
+	args := []string{"-t", f.typ}
+	if f.description != "" {
+		args = append(args, "--description", f.description)
+	}
+	if len(f.keys) > 0 {
+		raw, err := json.Marshal(f.keys)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "--metadata", string(raw))
+	}
+	deps := make([]string, 0, len(f.blocks)+1)
+	for _, id := range f.blocks {
+		deps = append(deps, "blocks:"+id)
+	}
+	if f.from != "" {
+		deps = append(deps, "discovered-from:"+f.from)
+	}
+	if len(deps) > 0 {
+		args = append(args, "--deps", strings.Join(deps, ","))
+	}
+	return args, nil
+}
+
+// Create files f as one create and returns the new bead's id. A filing a Set
+// refused, or one with no title or type, files nothing. A create the store
+// failed may still have filed the bead, as gcbd.Store.Create says, so its
+// error says that whether it did is unknown, and the caller finds the bead
+// before it files again.
+func (l *Ledger) Create(f *Filing) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	if strings.TrimSpace(f.title) == "" || f.typ == "" {
+		return "", errors.New("ledger: a filing names no title or no type")
+	}
+	args, err := f.args()
+	if err != nil {
+		return "", fmt.Errorf("ledger: the filing of %q did not encode: %w", f.title, err)
+	}
+	id, err := l.store.Create(f.title, args...)
+	if err != nil {
+		return "", fmt.Errorf("ledger: the filing of %q may not have landed: %w", f.title, err)
+	}
+	return id, nil
+}
+
 // Commit makes w as one update, whose exit decides whether it landed. A write a
 // Set refused, a write that changes nothing and an update that exits non-zero
 // all fail, and nothing reads the write back. A write its guard refused fails
@@ -188,9 +268,6 @@ func (w *Write) args() []string {
 func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
-	}
-	if w.file != nil {
-		return fmt.Errorf("ledger: a write that files a new bead lands through Filed")
 	}
 	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.title == "" && w.note == "" {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
@@ -202,107 +279,4 @@ func (l *Ledger) Commit(w *Write) error {
 		return fmt.Errorf("ledger: the write to %s did not land: %w", w.id, err)
 	}
 	return nil
-}
-
-// File starts an act that files a new bead titled title, of issue type typ.
-// Its keys, its description and its edges ride the one create Filed makes.
-func (l *Ledger) File(title, typ string) *Write {
-	return &Write{title: title, file: &filing{issueType: typ}}
-}
-
-// Description gives the bead a write files its description.
-func (w *Write) Description(text string) {
-	if w.file == nil {
-		w.fail(errors.New("ledger: a description rides only a write that files a new bead"))
-		return
-	}
-	w.file.description = text
-}
-
-// Blocks makes the bead a write files block id: id gains a blocks edge onto it,
-// a wait that holds id until the new bead closes.
-func (w *Write) Blocks(id string) {
-	if w.file == nil {
-		w.fail(errors.New("ledger: a blocks edge rides only a write that files a new bead"))
-		return
-	}
-	w.file.blocks = append(w.file.blocks, id)
-}
-
-// From records the bead a write files was found from, as its discovered-from
-// edge, which is no wait and holds nothing.
-func (w *Write) From(id string) {
-	if w.file == nil {
-		w.fail(errors.New("ledger: a discovered-from edge rides only a write that files a new bead"))
-		return
-	}
-	w.file.from = id
-}
-
-// Filed makes w, an act File started, as one create, and returns the id the
-// store gave the new bead. It gives the bead no parent, assignee or route.
-// Each bead the new one blocks is read first in the ledger's store, and a bead
-// the store does not hold refuses the create, because bd reports success for
-// an edge onto an id its store does not hold, and the edge holds nothing. A
-// create that fails may still have landed (gcbd.Store.Create), so a caller
-// that retries finds the bead an earlier attempt filed before it files again.
-func (l *Ledger) Filed(w *Write) (string, error) {
-	if w.err != nil {
-		return "", w.err
-	}
-	f := w.file
-	switch {
-	case f == nil:
-		return "", errors.New("ledger: a write to a bead that exists lands through Commit")
-	case w.title == "":
-		return "", errors.New("ledger: a new bead needs a title")
-	case len(w.unsets) > 0 || w.status != "" || w.note != "" || w.guard != nil:
-		return "", errors.New("ledger: a new bead's create carries its keys, description and edges alone")
-	}
-	if len(f.blocks) > 0 {
-		rows, err := l.store.Rows(f.blocks)
-		if err != nil {
-			return "", fmt.Errorf("ledger: the beads a new bead blocks did not read, so nothing was filed: %w", err)
-		}
-		held := map[string]bool{}
-		for _, r := range rows {
-			held[r.ID] = true
-		}
-		for _, id := range f.blocks {
-			if !held[id] {
-				return "", fmt.Errorf("ledger: the store holds no %s for a new bead to block, so nothing was filed", id)
-			}
-		}
-	}
-	args := []string{w.title, "-t", f.issueType}
-	if f.description != "" {
-		args = append(args, "--description", f.description)
-	}
-	if len(w.sets) > 0 {
-		meta := make(map[string]string, len(w.sets))
-		for _, kv := range w.sets {
-			k, v, _ := strings.Cut(kv, "=")
-			meta[k] = v
-		}
-		raw, err := json.Marshal(meta)
-		if err != nil {
-			return "", fmt.Errorf("ledger: a new bead's keys did not encode: %w", err)
-		}
-		args = append(args, "--metadata", string(raw))
-	}
-	var deps []string
-	for _, id := range f.blocks {
-		deps = append(deps, "blocks:"+id)
-	}
-	if f.from != "" {
-		deps = append(deps, "discovered-from:"+f.from)
-	}
-	if len(deps) > 0 {
-		args = append(args, "--deps", strings.Join(deps, ","))
-	}
-	id, err := l.store.Create(args...)
-	if err != nil {
-		return "", fmt.Errorf("ledger: the create may not have landed: %w", err)
-	}
-	return id, nil
 }

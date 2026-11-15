@@ -73,7 +73,9 @@ recently checked first, and reads each record under the store's record lock,
 from its read of the record to its last write of it, waiting while another
 writer of the record holds it. It reads each PR from GitHub by its number:
 
-  - open at the head the refinery validated: the evaluator decides whether it
+  - open at the head the refinery validated: a draft whose review result
+    passed at that head and target, with no review run attached, is marked
+    ready, without waiting for CI; otherwise the evaluator decides whether it
     is ready, and a ready one is merged with its head pinned, or added to its
     base's merge queue with it where the base requires one; the next run reads
     it again either way
@@ -85,6 +87,20 @@ writer of the record holds it. It reads each PR from GitHub by its number:
     names: an exception, kept blocked behind a human gate keyed by its value
   - a lookup or a fetch that failed, or a merge commit not yet on the target:
     recorded in pr_reconcile_error, and read again by the next run
+
+Before any of these, while the PR is open, it carries out each open
+withdrawal filed on the bead (gctk pr withdraw): it waits while an approval it
+would dismiss carries an inline comment the intake has not routed, dismisses
+each approval that stands on a commit that does not contain the withdrawal's
+head, which GitHub's compare of the two reads as neither identical nor ahead,
+or which GitHub refuses to compare, with the withdrawal's reason and the
+city's mark, reads the reviews again and closes the withdrawal once none
+stands. When GitHub refuses a dismissal, it
+files a human gate on the bead keyed approval-withdraw-refused. A compare or a
+dismissal GitHub does not answer leaves the withdrawal for the next run, and
+the record keeps its marker while a withdrawal is open, its changed head sent
+back to the refinery included, since the withdrawal holds the bead from the
+refinery until it is carried out.
 
 It acts only on a bead it reads under the lock as carrying the marker and,
 unless the bead is closed, still assigned to the refinery --refinery names,
@@ -212,7 +228,8 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 // at db, else the one gc routes the first of ids to, the record lock in that
 // store's .beads directory, GitHub through gh, the clone at $GC_RIG_ROOT else
 // the working directory, the pack's definition of feedback, loaded in that
-// clone, and the runtime adapter for human gates.
+// clone, and the runtime adapter for human gates and for the city's mark,
+// which `pr-post.sh mark` prints.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -229,6 +246,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if dir == "" {
 		dir = "."
 	}
+	rt := gascity.New()
 	return pr.Landing{
 		Ledger:   l,
 		Dir:      db,
@@ -241,10 +259,21 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 			}
 			return rule, nil
 		},
+		Mark:     func() (string, error) { return cityMark(rt) },
 		Checkout: checkout{dir: dir},
-		Gates:    gates{rt: gascity.New()},
+		Gates:    gates{rt: rt},
 		Wait:     recordLockWait,
 	}, nil
+}
+
+// cityMark reads the city's mark from the writer of the city's posts, which
+// owns it: `pr-post.sh mark`, from the scripts directory GCTK_SCRIPTS_DIR names.
+func cityMark(rt gascity.Runtime) (string, error) {
+	res := rt.Script("pr-post.sh", "mark")
+	if f := res.Failure(); f != "" {
+		return "", fmt.Errorf("pr-post.sh mark: %s", f)
+	}
+	return strings.TrimSpace(res.Output), nil
 }
 
 // checkout is the rig's clone through the git adapter.
