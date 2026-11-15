@@ -38,9 +38,13 @@ Approving this record decides five things:
    stays in shell is tested at its command line against one compiled fake gc,
    and no test code uses jq.
 2. **The budget, and how a slower change shows** (section 3). The macOS check's
-   suite sums at most about 530 test-seconds, with no run longer than about 178
-   seconds, so that a run as slow as the slowest measured still ends within five
-   minutes. Each PR's size comment shows what the PR does to the suite's time.
+   suite has a budget of about 530 test-seconds, with about 178 seconds for any
+   single run, so that a run as slow as the slowest measured still ends within
+   five minutes. Each PR's size comment shows what the PR does to the suite's
+   time, and how near each test job runs to its time limit. Every limit on time
+   is soft. The five minutes and the budget are targets that main is measured
+   against, and a job's time limit only ends a run that hangs. Nothing fails a
+   sound run or holds a merge because of its time.
 3. **The ask to the move into gctk** (section 4). This work does not wait for
    the move, and the move takes its domains in the order of what their suites
    cost wherever it has no stronger reason.
@@ -264,7 +268,9 @@ with a few looking at the bash CLI surface."
 
 The bar is the epic's closure condition: each required check finishes within
 five minutes over a week of runs on main, and none takes more than ten. Each
-number below is derived from that bar and from a measurement.
+number below is derived from that bar and from a measurement, and none of them
+is a limit that stops work ([No limit on time stops
+work](#no-limit-on-time-stops-work)).
 
 - **The spread between runs.** Two consecutive runs on main, whose suites cost
   the Linux check within 1% of each other, took the macOS check 26.8 and 36.2
@@ -276,10 +282,10 @@ number below is derived from that bar and from a measurement.
   five minutes, a typical run must end within 5 ÷ 1.35, which is about 3.7
   minutes. The job spends 44 seconds outside its suite, 37 of them before it
   starts, so the suite gets about 178 seconds.
-- **The macOS budget.** The suite sums at most about 530 test-seconds, which is
-  three cores times 178 seconds. No single run is longer than about 178
-  seconds, because no run starts before the suite does. `tools/run-tests.sh`
-  starts the files with the most source first, as its proxy for the slowest.
+- **The macOS budget.** The suite's budget is about 530 test-seconds, which is
+  three cores times 178 seconds. A single run's is about 178 seconds, because no
+  run starts before the suite does. `tools/run-tests.sh` starts the files with
+  the most source first, as its proxy for the slowest.
 - **The runner's cores.** The budget is set for three cores, which every main
   run from 2026-11-12 to a4ee5ae43 had. The next main run, at 45e9ddb41, got
   five on the same image and took 16.4 minutes for 4,705 test-seconds, while
@@ -315,12 +321,30 @@ The sitting proposed this part, not the operator.
   with their seconds, and the files whose time moved by more than the spread
   measured between runs. The Linux check is the reference for one file's change,
   because its runs hold within 10%.
-- **The hard limit is the closure's.** Once the suite meets the budget, each test
-  job's `timeout-minutes` becomes 10, the closure's "none takes more than ten".
-  Until then the macOS check keeps the limit it needs to pass (60, tk-d9u6tmm).
-- **No threshold below the hard limit stops a merge.** The macOS check's own time
-  moved by a third between two runs whose suites cost Linux the same, so a gate
-  on time would fail sound PRs.
+
+### No limit on time stops work
+
+The operator's words at review (PR #1505, comment 4577044998): "Hard limits can
+stop all sorts of other work. It has to be soft limits. Even the 5 minute
+target, as aspirational as it is realistic to be met, we'll see how close we
+get. But we can't stop other work, we just need to be smart and informed." The
+rules below are this design's reading of them.
+
+- **The five minutes and the budget are targets.** The PR comment shows each
+  change's effect on the suite's time, and the epic's first indicator reads how
+  close each week of runs on main comes to five minutes. Neither fails a check
+  or holds a merge.
+- **The closure's ten minutes grade the epic and limit no job.** No test job's
+  `timeout-minutes` is set from them, and this design lowers no job's limit.
+- **A job's `timeout-minutes` only ends a run that hangs.** It sits above the
+  job's slowest sound run, as the macOS check's 60 minutes sit above main's runs
+  of 26.8 to 44.0 (tk-d9u6tmm). The PR comment shows each test job's time beside
+  its `timeout-minutes`, so a check whose runs come near their limit shows on
+  every PR, and the limit can rise before a run meets it. The 45 minutes that
+  tk-d9u6tmm replaced had run out on eight PR runs in about fifteen hours.
+- **No threshold on time stops a merge.** The macOS check's own time moved by a
+  third between two runs whose suites cost Linux the same, so a gate on time
+  would fail sound PRs.
 
 ## 4. The move into gctk
 
@@ -407,7 +431,7 @@ Each unit is its own change, filed as a Story once this design is approved.
 
 | # | Unit | Effect | Waits on |
 |---|---|---|---|
-| 1 | **Each PR shows what it does to the suite's time.** The test jobs keep each run's seconds, in the job's summary and as a run artifact. The PR's size comment shows, for each check, the summed test-seconds beside main's latest completed run, and the files added, removed and moved beyond the measured spread. | No seconds of its own. It makes every later unit's effect, and every regression, visible in its own PR. | — |
+| 1 | **Each PR shows what it does to the suite's time.** The test jobs keep each run's seconds, in the job's summary and as a run artifact. The PR's size comment shows, for each check, the summed test-seconds beside main's latest completed run, the job's time beside its `timeout-minutes`, and the files added, removed and moved beyond the measured spread. | No seconds of its own. It makes every later unit's effect, and every regression, visible in its own PR, and a check nearing its time limit visible on every PR. | — |
 | 2 | **`step-number-citation.test.sh` costs Linux what it costs macOS.** Confirm the GNU-side cause and remove it. | About 250 Linux test-seconds, 6% of the Linux check, and about a minute of its wall time. | — |
 | 3 | **The compiled fake gc and its contract test.** A Go program in `services/gctk` answers the gc command line that the harness's bash stub answers, over the same store files and fault settings, and `test-harness.sh` installs it. Its contract test runs the same calls against a scratch store of the bd the city runs, as the store adapter's acceptance test does. `docs/testing.md` states the approach for whoever writes a test. | Each harness stub call goes from 12.7–19.1 ms to 3.2–4.7 ms. The kept harness suites spend few seconds in stubs: of those profiled, `pr-open.test.sh` spends about 10 and each of the others under 4, so the kept ground gains about 17 test-seconds here, and most of the fake's gain comes in units 4 and 5. While `pr-facts.test.sh` lives, its 35% stub share makes it about a quarter faster. | 1 |
 | 4 | **The engagement and conversation suites no Feature names move onto the fake:** stand-down, bead-rehome, converse-signoff, bead-context, conversation-merge-hold, first-reaction-dispose and converse-rework. | About 120 macOS test-seconds, projected from each suite's measured stub time and jq. | 3 |
@@ -470,9 +494,11 @@ test what stays, and a PR comment that keeps the time from growing back unseen.
 
 From 2026-10-12 to 2026-11-14 the macOS suite grew by 2,423 test-seconds, net
 of the fixes that landed in that time: about 73 a day, or 25 seconds of the
-macOS check a day. At that pace the check reaches its 60-minute limit in about
-eleven weeks, and every PR waits for it before it merges. The deletion plan's
-1,848 test-seconds, once they leave, buy about 25 days of that growth. Each
+macOS check a day. At that pace a typical run reaches the check's 60-minute
+limit in about eleven weeks, and a run 1.35 times as slow reaches it in about
+five and a half. The limit then has to rise again so that it stops no merge,
+and every PR waits for the check before it merges. The deletion plan's 1,848
+test-seconds, once they leave, buy about 25 days of that growth. Each
 suite written in the meantime gets a bash stub and jq of its own, and units 4
 and 5 then move it onto the fake.
 
