@@ -19,8 +19,8 @@
 #     out) and reads the result for the tells below. Evidence goes to stdout, one
 #     tab-separated line per finding:
 #       deleted-block   <path>  <size>  a conflict hunk: the branch changes a block
-#                                       the base side deleted, leaving no line in
-#                                       its place
+#                                       the base side deleted, leaving no
+#                                       non-blank line in its place
 #       deleted-file    <path>  <size>  a modify/delete conflict: the base side
 #                                       deleted a file the branch edits
 #       duplicate-definition <scope> <name>
@@ -33,9 +33,9 @@
 #     lines reappear among the base side's added lines was moved, not deleted,
 #     and is no tell; nor is one averaging more than MAX_WORDS_PER_LINE words a
 #     line, which is minified or bundled output. A block the base side rewrote,
-#     leaving any line in its place, is no tell either, because the code the
-#     branch changes still has a home there. Files the repository declares
-#     generated (linguist-generated) and test files are not read: their
+#     leaving any non-blank line in its place, is no tell either, because the
+#     code the branch changes still has a home there. Files the repository
+#     declares generated (linguist-generated) and test files are not read: their
 #     conflicts are regenerated, or follow the code under test. The thresholds
 #     and the history they were checked against are in
 #     specs/tk-b7c72m/supersession-tells.md.
@@ -83,8 +83,8 @@ MIN_BLOCK_WORDS=50
 # base side's added lines.
 MOVED_MAX=50
 # Hand-written code and wrapped prose average about a dozen words a line; a
-# minified bundle averages hundreds, and a rebuild of one on each side reads as a
-# rewrite of the whole file.
+# minified bundle averages hundreds, and one that one side emptied or deleted
+# would otherwise read as a large deleted block or file.
 MAX_WORDS_PER_LINE=40
 # Wide conflict markers, so a 7-character marker-like line inside a file is not
 # read as a hunk boundary.
@@ -155,7 +155,8 @@ hunk_tells() { # <path> <base-added-file>
     (st == 1 || st == 2) && $0 == MID { st = 3; next }
     st == 3 && opens($0, CLOSE) {
       st = 0
-      # Any line the base side left where the block was makes the hunk a rewrite.
+      # Any non-blank line the base side left where the block was makes the hunk
+      # a rewrite.
       if (olines > 0) next
       nb = 0
       for (w in bw) nb += bw[w]
