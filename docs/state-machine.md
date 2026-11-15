@@ -408,8 +408,9 @@ across pushes until triage rules a head material, by changing what the PR does,
 inferring one side's intent or choosing between two live designs. Triage then
 files a withdrawal (`gctk pr withdraw`), a task that blocks the bead and names
 the head in `withdraw_head`, before it writes its output, which
-`gctk review output` refuses until that withdrawal is filed. The landing order carries it out once the intake
-has routed the comments an approval it would dismiss carries. It dismisses each
+`gctk review output` refuses until that withdrawal is filed. The landing order
+carries it out once the intake has routed the comments an approval it would
+dismiss carries. It dismisses each
 approval given on a commit that does not contain the head, by GitHub's compare
 of the two, with the reason and the city's mark, reads the reviews again, and
 closes the withdrawal once none stands. A dismissal GitHub refuses files a human
@@ -538,8 +539,9 @@ run as an ask: each comment becomes a human finding whose `finding.fix_unit`
 names the ask, and no validation pass opens. The run's rule-and-repair rules
 each human finding by the bar its grade sets (`review-run.sh finding`), and the
 loop's check, once it records the run's result, closes each one whose ask has
-closed (`finding.sh close-answered`), which the write-back answers on the PR. On the old path, `pr-facts.sh` enters
-the batch into the finding/validation graph by opening a validation pass on it
+closed (`finding.sh close-answered`), which the write-back answers on the PR.
+On the old path, `pr-facts.sh` enters the batch into the finding/validation
+graph by opening a validation pass on it
 (see "Review cycle", `specs/tk-ztapg/review-cycle-architecture.md`):
 `gate-ensure.sh`'s quiescence holds a fresh whole-diff review off the anchor
 while the validator rules the batch. What makes an item feedback is its provenance, not its author: every
