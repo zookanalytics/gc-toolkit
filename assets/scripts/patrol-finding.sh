@@ -100,12 +100,13 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
               situations, re-run with that finding's --key and --about. A
               per-bead key, one finding per --about, passes it on every call
   --type      bead type (default: bug)
-  --priority  bead priority; the proactive scan spends its slots by board
-              weight, so a finding that matters should say so
+  --priority  bead priority; the proactive pool takes its reactions in
+              priority order, so a finding that matters should say so
   --rig       the rig whose store this lands in (default: $GC_RIG, else
               gc-toolkit). It also rig-qualifies the proactive pool
-  --no-react  file the bead and stop. It keeps gc.proactive=1, so the next
-              `gc-proactive.sh scan --sling` sweep reacts to it
+  --no-react  file the bead and stop. The next
+              `gc-proactive.sh scan --sling` sweep reacts to it, as it does to
+              every ready bead nobody has decided on
   --cleared   the situation has ended. Set situation=cleared, with --message
               as the reason, on the bead a recurrence would land on, or else
               on one held at blocked with nothing left to wait on, and file no
@@ -557,7 +558,7 @@ META=$(jq -nc \
   --arg t "$(now_utc)" --arg a "$ABOUT" --arg p "$PRIOR" \
   '{"finding.key": $k, "finding.scope": $s, "finding.digest": $d,
     "finding.first_seen": $t, "finding.last_seen": $t,
-    "finding.occurrences": "1", "gc.proactive": "1"}
+    "finding.occurrences": "1"}
    + (if $a == "" then {} else {"finding.about": $a} end)
    + (if $p == "" then {} else {"finding.recurrence_of": $p} end)' 2>/dev/null)
 [ -n "$META" ] || { warn "could not build the metadata payload (jq); nothing filed"; exit 1; }
@@ -595,19 +596,18 @@ fi
 # ── Hand it to the first reaction ────────────────────────────────────
 # The reaction is what disposes the finding: routed to a pool, held on an
 # edge, handed to a validating closer, or put to the operator as a human gate.
-# A reaction that cannot be filed is not a failure of the filing —
-# gc.proactive=1 is the standing opt-in the
-# next `gc-proactive.sh scan --sling` sweep reads, so the bead is reacted to
-# either way, just later.
+# A reaction that cannot be slung is not a failure of the filing: the finding
+# is a ready bead nobody has decided on, which the next
+# `gc-proactive.sh scan --sling` sweep reacts to, just later.
 [ -n "$NO_REACT" ] && exit 0
 if [ ! -x "$PROACTIVE" ]; then
-  warn "cannot find gc-proactive.sh (looked at $PROACTIVE); $BEAD carries gc.proactive=1 and waits for the next scan sweep"
+  warn "cannot find gc-proactive.sh (looked at $PROACTIVE); $BEAD waits for the next scan sweep"
   exit 0
 fi
 if ! "$PROACTIVE" deliverable >/dev/null 2>&1; then
-  warn "the proactive pool cannot pick a reaction up right now; $BEAD carries gc.proactive=1 and waits for the next scan sweep"
+  warn "the proactive pool cannot pick a reaction up right now; $BEAD waits for the next scan sweep"
   exit 0
 fi
 "$PROACTIVE" sling "$BEAD" \
-  || warn "the first-reaction sling on $BEAD failed; it carries gc.proactive=1 and waits for the next scan sweep"
+  || warn "the first-reaction sling on $BEAD did not start a reaction; it waits for the next scan sweep"
 exit 0

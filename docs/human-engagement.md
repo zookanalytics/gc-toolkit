@@ -607,9 +607,10 @@ target and files nothing. Registration is the bar, not liveness, and an
 unreadable roster refuses nothing, so a degraded data plane never blocks an
 intake.
 
-**Two paths, and the choice is not a preference.** The preferred path files a
-first reaction at the subject. The reaction triages it and takes one of its
-dispositions. On the two that put the subject to the operator, a ruling or
+**Two paths, and the choice is not a preference.** The preferred path slings a
+first reaction on the subject, a run of `mol-first-reaction` that
+`tools/gc-proactive.sh sling` starts. The reaction triages it and takes one of
+its dispositions. On the two that put the subject to the operator, a ruling or
 a recommend, it files a human gate on the subject under the key
 `first-reaction`, which reaches the operator on the board. A ruling is
 Discuss-only. A recommend also records the formula it recommends as
@@ -621,15 +622,18 @@ po's backlog refinement with the operator ([steering.md](steering.md)).
 
 The fallback path files a conversation in the operator's queue directly,
 through `gc-helm.sh open`, which is where filing a conversation lives. It runs
-on `--no-react`, when `tools/gc-proactive.sh deliverable` answers that the
-proactive pool is not registered, is suspended or is capped at zero slots, and
-when the reaction would file nothing: the subject already has an open first
-reaction or a live owner owns it, a live workflow already drives it, it is
-already routed or armed, a hold holds it, or an open human gate blocks it. A
-react path that could not deliver would leave a routed reaction bead nobody
-picks up and no conversation at all, the one outcome this channel exists to
-prevent. A roster the deliverable check cannot read answers yes, because
-absence of evidence is not evidence the pool is gone.
+on `--no-react`, and when `tools/gc-proactive.sh deliverable` answers that the
+proactive pool is not registered, is suspended or is capped at zero slots. It
+also runs when the sling slings nothing: it fails, or it refuses the subject
+because a first reaction already runs on it or an open conversation tracks it,
+a live workflow already drives it, it is already routed or armed, held,
+assigned or not open, an open human gate blocks it, Gas City left a pour of
+`mol-first-reaction` unfinished on it, or it is a standing record or a feedback
+pattern, whose kind takes no first reaction. A react path that could not
+deliver would leave a run waiting on a pool that cannot take it, and no
+conversation at all, the one outcome this channel exists to prevent. A roster
+the deliverable check cannot read answers yes, because absence of evidence is
+not evidence the pool is gone.
 
 **The intake stamps `gc.origin=operator` on the subject**, on both paths and
 never over an origin already recorded. It is a fact the reaction weighs, not a
@@ -664,15 +668,19 @@ one-line command prompt. `gc-helm open --new-subject --rig <rig>` files the
 subject and its conversation without starting a sitting, which is how the form
 saves a new topic before it starts one.
 
-The subject is created marked `gc.reaction_owned=1` in the same create, so
-the proactive scan never observes it unmarked. Three gates read the marker:
-the scan's precision filter drops a marked bead, the reaction-absent guard
-refuses to file one, and a reaction that reaches a marked subject anyway
-closes its own reaction bead without acting
-(`first-reaction-dispose.sh --stand-down`). The engage is the reaction, and
-the marker stays, so no later scan reacts. If a later step refuses the live
-spawn, a bad model or a suspended rig, the subject's one conversation still
-waits in the queue, so the topic is never lost.
+No first reaction takes the subject. It is filed assigned to `human`, the
+operator who asked, so in the moment before its conversation exists the scan,
+which reads only unassigned beads, passes it over, and
+`tools/gc-proactive.sh sling` refuses it, as a reaction's first act does. Once
+the conversation is filed, open hands the subject to it: one write, guarded on
+that assignee, clears it, and from then on the open conversation keeps a first
+reaction off the subject, because the sling refuses a bead an open
+conversation tracks. A write the store refuses leaves the subject assigned to
+`human`, and a re-run of `gc-helm open` on it hands it over. The engage is the
+reaction, and once the conversation's sitting signs off, the headline its
+sign-off writes keeps the scan off the subject. If a later step refuses the
+live spawn, a bad model or a suspended rig, the subject's one conversation
+still waits in the queue, so the topic is never lost.
 
 ### Returning to a conversation
 
@@ -1409,14 +1417,31 @@ clock.
 ### A sitting that stays for the return
 
 A sitting that sends work agrees with the operator whether it ends at its
-hand-off or stays until that work returns. The converse prompt has it recommend
-staying when the discussion will help judge the result, because what was
-agreed holds more than the work's brief carries, and ending when the brief and
-the work's ordinary checks suffice. It puts the choice to the operator with its
+hand-off or stays until that work returns, and tells them when a stay would
+come back. A return after the merge comes too late to change the work except
+through another PR, so the converse prompt has the sitting recommend ending at
+the hand-off when the stay would come back after the merge, with what was
+agreed written into the work's brief in full. Otherwise it recommends staying
+when the discussion will help judge the result, because what was agreed holds
+more than the work's brief carries, and ending when the brief and the work's
+ordinary checks suffice. It puts the choice to the operator with its
 recommendation, so they need not know to ask, and never stays without their
 agreement. The return compares what landed with what was agreed and tells the
 operator where it departs. It passes and fails nothing: the work's own checks
 give the verdicts, and the subject closes as it would after a hand-off.
+
+A stay comes back when the work it waits on closes, and when that is depends on
+what the ruling sends:
+
+- **A rework of the PR under discussion** closes once the refinery lands it on
+  the PR's branch. The stay comes back then, before the merge, which waits for
+  the return because the open conversation still holds it. The PR's checks
+  review the reworked branch again once the rework lands.
+- **New work that opens its own PR** closes only once the refinery has
+  verified that PR's merge, so the stay comes back after the merge.
+- **Work that opens no PR of its own** closes when it is done, as a report
+  does, or once it lands, as a part of an integration effort does on the
+  effort's branch. The stay comes back at that close.
 
 A sitting that stays carries out the ruling with `converse-signoff.sh --stay`.
 That first appends a `staying:` line to the conversation's notes, then writes

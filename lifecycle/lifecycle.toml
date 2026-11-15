@@ -393,9 +393,14 @@ since_format = "RFC 3339 UTC"
 # declares, grouped and defined. A key a gctk domain owns is declared in that
 # domain's package and listed in services/gctk/key-registry.json, which is
 # generated from the declarations (docs/gctk-architecture.md, "The ledger"). A
-# key absent from both is not pack state (docs/component-model.md §2-§3), and
-# doctor/check-state-space flags a bead carrying a key whose writer was retired
-# (its HEALER_RE and RETIRED_KEYS lists; retiring a key adds it there). Each
+# key absent from both is not pack state (docs/component-model.md §2-§3). A
+# retired key whose residue leaves nothing undone stays registered, with a
+# definition that opens RETIRED, so that residue on a pre-retirement bead reads
+# as known, not as a stray. doctor/check-state-space flags a live bead carrying
+# a retired key only where that key means something is wrong: its HEALER_RE
+# list holds the keys deleted with their healer writers, and its RETIRED_KEYS
+# list the retired keys whose carrier leaves work undone or shows a retired
+# writer still stamping, each with its remedy. Each
 # key's definition names five things a reader needs and only two of which the
 # value shows: what WRITES it, what READS it, what its ABSENCE means, how it is
 # CLEARED, and its value TYPE. Prose is spent where a reader cannot recover
@@ -438,11 +443,10 @@ since_format = "RFC 3339 UTC"
 # decomposition that cascades the parent's blocked state DOWN to its children,
 # so the pack attaches a conversation or a finding with `tracks` — which
 # carries the structure without making the child unclaimable — and reserves
-# parent-child for decomposition that should inherit the block. A `*_key` value
-# (finding.key, gc.blocker_key) is a dedup identity for
-# finding the one existing bead per cause, not a wait; any wait it carries is a
-# separate blocks edge. A human gate carries its situation key as its await id,
-# and that gate is itself the wait.
+# parent-child for decomposition that should inherit the block. A dedup key such
+# as finding.key is an identity for finding the one existing bead per cause, not
+# a wait; any wait it carries is a separate blocks edge. A human gate carries
+# its situation key as its await id, and that gate is itself the wait.
 
 [metadata.merge_identity]
 keys = [
@@ -1285,62 +1289,25 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # branch. Never cleared. Freeform.
 
 [metadata.proactive]
-# The proactive first-reaction surface. A first reaction is its own leased task
-# bead R that tracks the subject S; exactly-once is the substrate's, keyed on R's
-# identity, not a marker on S
-# (specs/tk-5n01ns/reaction-bead-first-reaction.md). The group also holds the
-# recommendation a recommend exit leaves for the operator's Accept, and the
-# marker that stands the scan down on a subject a live owner already reacts to.
+# The proactive first-reaction surface. A first reaction is a run of
+# formulas/mol-first-reaction.toml that tools/gc-proactive.sh slings on its
+# subject S. While it runs, the run is the record, and gc sling refuses a
+# second live run of the formula on S. Once it ends, the state its exit wrote,
+# and after that the gc.takeaway headline every exit writes, keep S out of the
+# scan (specs/tk-1tfzr71.105/design.md, section 2), so no key records that S
+# had one. The group holds the recommendation a recommend exit leaves for the
+# operator's Accept, and the retired keys of the reaction bead and of the
+# attempt record before it.
 keys = [
-  "gc.proactive",
-  "gc.reaction_kind", "gc.reaction_subject", "gc.reaction_subject_store",
-  "gc.reacted_by", "gc.proactive_reaction",
-  "gc.blocker_key",
   "gc.recommended_formula", "gc.recommended_formula_dispatched",
   "gc.acceptance",
-  "gc.reaction_owned",
+  "gc.proactive",
+  "gc.reaction_kind", "gc.reaction_subject", "gc.reaction_subject_store",
+  "gc.reacted_by", "gc.proactive_reaction", "gc.reaction_owned",
+  "gc.blocker_key",
   "gc.first_reaction", "gc.first_reaction_reason", "gc.first_reaction_target",
   "gc.first_reaction_at",
 ]
-# gc.proactive — `1`, the standing scan opt-in, written by patrol-finding.sh in
-#   the create payload of each finding it files. Read by tools/gc-proactive.sh,
-#   whose scan unions the opt-in query (`bd ready --metadata-field
-#   gc.proactive=1`) with a movable-forward query of every ready, unassigned,
-#   non-epic bead, and runs both through one precision filter. An absent key
-#   therefore excludes no bead. Never cleared.
-# gc.reaction_kind — the reaction sub-type on the reaction bead R, `first-reaction`.
-#   Written by tools/gc-proactive.sh in R's create call. Leaves room for other
-#   reaction kinds without a second dedup dimension. Never cleared.
-# gc.reaction_subject / _store — on the reaction bead R, the subject S it tracks
-#   and (only where the id prefix is ambiguous) that subject's store. Written by
-#   tools/gc-proactive.sh in R's create call, so R is born tracking S; read by the
-#   create-R-once dedup (with task_kind=reaction) and by the reaction worker to
-#   resolve S. A tracks edge R->S mirrors the subject. Never cleared. Bead id / store.
-# gc.reacted_by — on the SUBJECT S, the reaction bead R whose write-back landed.
-#   Written by first-reaction-dispose.sh LAST, after the disposition act and any
-#   edge, so its presence proves the whole write-back landed. Read by that
-#   script's re-offer recovery and by its --stand-down, which the reaction worker
-#   (agents/proactive/prompt.template.md) runs before it reacts, to close a
-#   re-claimed R without re-disposing S, and shown by bead-context.sh. It
-#   is not a guard progress is refused on — the write-backs are idempotent — and it
-#   is keyed to R's id, so a marker left by a closed R does not block a later
-#   re-reaction by a different R. Never cleared. A bead id.
-# gc.proactive_reaction — `1`, the legacy landed proof on the SUBJECT S for a
-#   frozen mol-first-reaction molecule, which has no reaction bead R to key on.
-#   Written by first-reaction-dispose.sh's no-`--reaction-bead` path after the
-#   disposition act, the close exit's included, in place of gc.reacted_by; a
-#   frozen molecule's advance-and-drain also writes it on a subject
-#   gc.reaction_owned marks, before it consumes that marker. Read by that
-#   molecule's frozen REACTED checks and by this script's re-offer guard, so a re-offered
-#   frozen step does not re-release a subject a worker already holds. gc.reacted_by
-#   is its replacement for the reaction-bead path; kept until pre-cutover molecules
-#   drain. Never cleared.
-# gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
-#   FILES, so one wait stands per recurring cause rather than one per instance
-#   (first-reaction-dispose.sh stamps it on the created blocker and looks an
-#   existing one up by it). It does not replace a blocks edge: the wait itself is
-#   already a blocks edge (--waiting-on), and this key only names the cause across
-#   instances. Never cleared. A caller-supplied string.
 # gc.recommended_formula — the execution mol a recommend exit names, which the
 #   operator can Accept from the subject's row on the board. first-reaction-dispose.sh sets
 #   it before the act of a recommend disposition and unsets a stale one on every
@@ -1367,25 +1334,50 @@ keys = [
 #   names, left by a run that stopped before its resolve or by an answer Accept
 #   reopened, binds nothing, and the next acceptance overwrites it. Never
 #   cleared.
-# gc.reaction_owned — `1`, the stand-down marker on a subject whose reaction a
-#   live owner already holds. gc-helm.sh `engage --new-subject` writes it in the
-#   create payload of the subject it files, beside gc.origin, so no scan sees
-#   that subject unmarked. tools/gc-proactive.sh drops a marked bead from its
-#   scan and refuses to file a reaction for one, and a reaction that reaches one
-#   anyway closes its reaction bead without acting and leaves the marker
-#   (first-reaction-dispose.sh --stand-down, which
-#   agents/proactive/prompt.template.md runs). A frozen mol-first-reaction
-#   molecule's advance-and-drain still consumes it: it writes
-#   gc.proactive_reaction=1, reads it back, and only then unsets this key.
-#   Absent means no live owner. Cleared only by that frozen consume.
+# gc.proactive — RETIRED. `1`, the scan opt-in patrol-finding.sh stamped on
+#   each finding it filed. Nothing writes or reads it: the scan reads every
+#   ready, unassigned bead in its rig that is not an epic, so a finding needs no
+#   opt-in to be read. Registered so that residue on a pre-retirement bead reads
+#   as known, not as a stray.
+# gc.reaction_kind — RETIRED. The sub-type a reaction bead carried,
+#   `first-reaction`. Nothing writes or reads it, because no pack code files a
+#   reaction bead. Registered so that residue on a pre-retirement bead reads as
+#   known, not as a stray.
+# gc.reaction_subject / _store — RETIRED. On a reaction bead, the subject it
+#   tracked and, where the id prefix was ambiguous, that subject's store.
+#   Nothing writes them. The proactive prompt's clause for a leftover reaction
+#   bead reads gc.reaction_subject to find the subject, which it slings a first
+#   reaction, and nothing reads _store. Registered so that residue on a
+#   pre-retirement bead reads as known, not as a stray. Bead id / store.
+# gc.reacted_by — RETIRED. On a subject, the reaction bead whose exit landed.
+#   Nothing writes it. The proactive prompt's clause for a leftover reaction
+#   bead reads it on that bead's subject, and slings the subject a reaction
+#   unless it names that bead. Registered so that residue on a pre-retirement
+#   bead reads as known, not as a stray. A bead id.
+# gc.proactive_reaction — RETIRED. `1`, on a subject, the proof an older first
+#   reaction stamped once its exit had landed. Nothing writes or reads it.
+#   Registered so that residue on a pre-retirement bead reads as known, not as
+#   a stray.
+# gc.reaction_owned — RETIRED. `1`, the marker that gc-helm.sh
+#   `engage --new-subject` wrote on the subject it filed, so that no scan
+#   reacted to a subject a sitting owned. Nothing writes or reads it: the
+#   subject's open conversation keeps a first reaction off it, because
+#   tools/gc-proactive.sh sling refuses a bead an open conversation tracks.
+#   Registered so that residue on a pre-retirement bead reads as known, not as
+#   a stray.
+# gc.blocker_key — RETIRED. The dedup handle a blocked first reaction stamped
+#   on the wait bead it filed. Nothing writes or reads it: the blocked exit's
+#   --blocker reuses a pending wait of the subject's under the same title, as
+#   gctk bead holds lists it, before it files one. Registered so that residue
+#   on a pre-retirement bead reads as known, not as a stray.
 # gc.first_reaction / _reason / _target / _at — RETIRED. The attempt record a
 #   reaction wrote on its subject before the act, with the reason, the target it
-#   named and the time. Nothing writes them now: a reaction bead's identity is
-#   its exactly-once key, and the card in the subject's notes is the record of
-#   what was chosen and why. Registered so that residue on a pre-retirement bead
-#   reads as known, not as a stray. bead-context.sh still shows them on such a
-#   bead, and a validating closer reads _reason as the close brief of a reaction
-#   that ran before reaction beads.
+#   named and the time. Nothing writes them: the card a first reaction writes in
+#   its subject's notes is the record of what it chose and why. Registered so
+#   that residue on a pre-retirement bead reads as known, not as a stray.
+#   bead-context.sh still shows them on such a bead, and a validating closer
+#   reads _reason as the close brief of an older reaction that left its brief
+#   there.
 
 [metadata.priority]
 # The priority flow (docs/steering.md): a bead's priority is the priority of the
@@ -1445,12 +1437,14 @@ keys = [
 # dated record docs/epics.md calls for. No key marks an epic as reviewed, and no
 # pack script writes the ruling's keys. finalize-gate.sh
 # (clause_epic_ruling_recorded) and doctor/check-epic-closed-implies-ruled read
-# epic_hypothesis, epic_ruling and epic_ruling_reason.
+# epic_hypothesis, epic_ruling and epic_ruling_reason, and `gctk epic
+# unweighed` reads the ruling's keys, epic_shifted_at and epic_weighed_at.
 keys = [
   "epic_handle", "epic_hypothesis", "epic_boundaries",
   "epic_closure_condition", "epic_indicators",
   "epic_ruling", "epic_ruling_reason",
   "epic_ruling_at", "epic_ruling_by", "epic_ruling_evidence",
+  "epic_shifted_at", "epic_weighed_at",
 ]
 # epic_handle / epic_hypothesis / epic_boundaries — the elaboration floor
 #   (docs/epics.md): a 3-5 word handle, a one-sentence hypothesis, and the
@@ -1475,6 +1469,14 @@ keys = [
 #   made the latest ruling, who recorded it, and the human gate whose resolve
 #   carried it. Bookkeeping beside epic_ruling; absent leaves the provenance
 #   unstated.
+# epic_shifted_at — when the operator last ruled shift, stamped with that
+#   ruling and left standing by a later continue or close, so the rig's po
+#   still weighs the shift at its next portfolio sync. Absent records no shift
+#   beyond the ruling's own keys.
+# epic_weighed_at — the time of the read the rig's po last weighed the epic
+#   from at a portfolio sync, which `gctk epic unweighed` prints first, stamped
+#   with the sync's note on the epic. A close or shift on or after its day
+#   lists at the next sync. Absent means no sync has weighed the epic.
 
 [metadata.human_surface]
 keys = [
@@ -1887,7 +1889,7 @@ keys = [
 #   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `shipped`
 #   from the lifecycle writer's transition into `merged` and from
 #   mol-refinery-patrol.toml's rework hand-back close, and `no-op` from
-#   first-reaction-dispose.sh on the reaction bead it closes,
+#   the proactive prompt's clause on a leftover reaction bead it closes,
 #   mol-validate-close, work-outcome.sh on every conversation close, the
 #   observation-filing recipes, and converse by hand. bead-rehome.sh reads it
 #   to confirm a no-op origin is disposable, `gctk pr compose` drops a no-op row

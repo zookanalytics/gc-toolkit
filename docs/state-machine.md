@@ -1134,8 +1134,8 @@ review's result set.
   current is routinely one horn of what a person is being asked, so a child
   filed under one answers the question by performing it. Clearing the gate is
   what releases the dispatch. A conflict that is not drift gets no child
-  either. When a change that landed first deleted or rewrote code the branch
-  edits, `branch-supersession.sh` files a human gate under
+  either. When a change that landed first deleted code the branch edits,
+  `branch-supersession.sh` files a human gate under
   `rework-base-supersession` on the anchor, because whether the branch still
   has work to do is the operator's call. That gate holds the dispatch while it
   is open. Clearing it `benign:` (the overlap was incidental) lets the next pass
