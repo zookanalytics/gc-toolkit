@@ -609,15 +609,19 @@ func (u *run) observeAlone(s state, host string, hub Hub, p *gh.PullRequest, ret
 // already in the queue has its merge requested, and is only observed. The
 // evaluator reads the PR as blocked read it a moment before, and the run's
 // login (readHub). Each write the check makes carries the GitHub read it made,
-// after the request where it makes one, and a read that does not answer leaves
-// the read the bead holds. Whatever GitHub answers, the next run reads the PR
-// again by its number.
+// after the request where it makes one. A read that does not answer leaves the
+// read the bead holds, and so does a check that made none, because the
+// evaluator's own pass of the store found the record lacking a part, which a
+// writer that takes no lock can leave after the run's read. Whatever GitHub
+// answers, the next run reads the PR again by its number.
 func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry func(string, string) RunOutcome) RunOutcome {
 	nodeID, inQueue, queue := p.ID, p.InMergeQueue, p.MergeQueueEnabled
 	checked := func(gr *GitHubRead, detail string) RunOutcome {
 		w := u.Ledger.Write(s.id)
 		record.Checked(w, "open", s.now)
-		githubReadKey.Set(w, gr)
+		if gr != nil {
+			githubReadKey.Set(w, gr)
+		}
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActChecked, Detail: detail})
 	}
 	if inQueue {

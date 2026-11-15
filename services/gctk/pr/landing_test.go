@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"slices"
@@ -991,6 +992,42 @@ func TestAReadThatFailsAfterThePRsReadKeepsTheLastWholeRead(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A writer that takes no lock can leave the record lacking a part between the
+// run's read of the bead and the evaluator's own, which then reads no GitHub.
+// The check is recorded, and the bead keeps the read its last whole check made.
+func TestACheckThatMadeNoReadKeepsTheLastWholeRead(t *testing.T) {
+	d := newLand(t)
+	d.pr.Reviews = nil
+	is(t, d.once(t), pr.ActChecked)
+	before := d.row(t).Metadata["pr_github_read"]
+	if before == "" {
+		t.Fatal("the first check saved no read")
+	}
+	moved := false
+	d.github.OnRead = func(method string, _ *ghfake.PR) {
+		if method != "PullRequest" || moved {
+			return
+		}
+		moved = true
+		b, _ := d.store.Row(bead)
+		b.Metadata = maps.Clone(b.Metadata)
+		delete(b.Metadata, "merged_target")
+		d.store.Put(b)
+	}
+	n := len(d.github.Reads())
+	out := d.once(t)
+	is(t, out, pr.ActChecked)
+	if out.Detail != "not ready: record" {
+		t.Fatalf("the check reads %q, want the record's gap alone", out.Detail)
+	}
+	if reads := d.github.Reads()[n:]; !slices.Equal(reads, []string{"PullRequest"}) {
+		t.Fatalf("the run read %v, want the PR's read alone", reads)
+	}
+	if got := d.row(t).Metadata["pr_github_read"]; got != before {
+		t.Fatalf("a check that made no read saved\n%s\nover the last whole read\n%s", got, before)
 	}
 }
 
