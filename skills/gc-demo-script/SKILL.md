@@ -70,13 +70,15 @@ small enough for direct reads, and ordering matters for cross-references).
 
 ### Step A1: Read the rig's demo guide
 
-Read `docs/review-demo.md` at the commit the demo shows. The pack reads a rig's
-review guidance at a commit through one script, run from inside a worktree or
-checkout of the rig, where `<binding>` is the name in front of this skill's
-own, `gc-toolkit` in `gc-toolkit.gc-demo-script`:
+Read `docs/review-demo.md` at the commit the demo shows. It is the rig's
+guidance for the demo check, which the pack reads at a commit with
+`gctk review guidance`, run from inside a worktree or checkout of the rig:
 
 ```bash
-( cd <a worktree or checkout of the rig> && "$(gc <binding> scripts-dir)/review-checks.sh" --extension demo --at "$(git rev-parse <commit>)" )
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+( cd <a worktree or checkout of the rig> && "$GCTK" review guidance demo --at "$(git rev-parse <commit>)" )
 ```
 
 It prints the guide that commit carries, and nothing when it carries none. In a

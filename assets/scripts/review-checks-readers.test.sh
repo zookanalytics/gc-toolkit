@@ -161,12 +161,12 @@ eq "$(lists "$TMP/not-lists.sh")" "" "a comment, skill names, file names and one
 # The rig's docs/review-demo.md is also its demo guide, plain text that the demo
 # paths read at the commit they show. The drafter's skill and mol-rig-demo's
 # prepare-script, which hands the drafter that commit, each ask the one reader.
-DEMO_READ='review-checks.sh" --extension demo --at'
+DEMO_READ='"$GCTK" review guidance demo --at'
 for f in skills/gc-demo-script/SKILL.md formulas/mol-rig-demo.toml; do
   if grep -qF -- "$DEMO_READ" "$ROOT/$f"; then
-    ok "$f reads the demo guide through review-checks.sh --extension demo, at a commit"
+    ok "$f reads the demo guide through gctk review guidance demo, at a commit"
   else
-    bad "$f reads the demo guide through review-checks.sh --extension demo, at a commit" "no '$DEMO_READ' in it"
+    bad "$f reads the demo guide through gctk review guidance demo, at a commit" "no '$DEMO_READ' in it"
   fi
 done
 
