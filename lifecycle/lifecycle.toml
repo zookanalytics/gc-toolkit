@@ -1880,10 +1880,10 @@ keys = [
 #   writes gc.work_commit (merged_sha) and gc.work_branch (merged_target) from
 #   the landing it records, when that landing names both.
 #   mol-refinery-patrol.toml's rework hand-back close writes them from the head
-#   it read back from origin and the branch that head is on. `gctk review
-#   record`'s close of an ask an earlier round of the run fixed writes them from
-#   the fix's commit and the PR's branch, which the repair pushed that commit
-#   onto from a worktree of the rig checkout. bead-rehome.sh
+#   it read back from origin and the branch that head is on. The close of an ask
+#   an earlier round of the run fixed, by `gctk review passed --record`, writes
+#   them from the fix's commit and the PR's branch, which the repair pushed that
+#   commit onto from a worktree of the rig checkout. bead-rehome.sh
 #   reads gc.work_dir and gc.work_commit — with the pack-written bare work_dir
 #   defined in merge_identity — as proof a run produced work before a duplicate
 #   or fixed-upstream close.
