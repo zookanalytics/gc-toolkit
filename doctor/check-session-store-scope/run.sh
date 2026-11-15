@@ -85,10 +85,13 @@ budget_init
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 gcmux() { run_bounded tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
-# env_val <key> <env-text> — the value of key, empty when absent or removed. A
-# value is any bytes, and BSD sed stops at one its locale cannot decode, which
-# would read every key after it as absent.
-env_val() { printf '%s\n' "$2" | LC_ALL=C sed -n "s/^$1=//p" | head -1; }
+# env_val <key> <env-text> — the value of key, empty when absent or removed: the
+# rest of the first line that starts with <key>=. A value is any bytes, so the
+# match runs under the C locale, in which every byte is one character.
+env_val() {
+    local LC_ALL=C t=$'\n'"$2" k=$'\n'"$1="
+    case "$t" in *"$k"*) t="${t#*"$k"}"; printf '%s\n' "${t%%$'\n'*}" ;; esac
+}
 # env_removed <key> <env-text> — true when tmux reports the key marked removed.
 env_removed() { printf '%s\n' "$2" | grep -qx -- "-$1"; }
 # rig_named_by <path> — the rig a path under <city>/rigs/ belongs to, else empty.
