@@ -627,12 +627,13 @@ proactive pool is not registered, is suspended or is capped at zero slots. It
 also runs when the sling slings nothing: it fails, or it refuses the subject
 because a first reaction already runs on it or an open conversation tracks it,
 a live workflow already drives it, it is already routed or armed, held,
-assigned or not open, an open human gate blocks it, or it is a standing record
-or a feedback pattern, whose kind takes no first reaction. A react path that
-could not deliver would leave a run waiting on a pool that cannot take it, and
-no conversation at all, the one outcome this channel exists to prevent. A
-roster the deliverable check cannot read answers yes, because absence of
-evidence is not evidence the pool is gone.
+assigned or not open, an open human gate blocks it, Gas City left a pour of
+`mol-first-reaction` unfinished on it, or it is a standing record or a feedback
+pattern, whose kind takes no first reaction. A react path that could not
+deliver would leave a run waiting on a pool that cannot take it, and no
+conversation at all, the one outcome this channel exists to prevent. A roster
+the deliverable check cannot read answers yes, because absence of evidence is
+not evidence the pool is gone.
 
 **The intake stamps `gc.origin=operator` on the subject**, on both paths and
 never over an origin already recorded. It is a fact the reaction weighs, not a
@@ -671,10 +672,10 @@ The subject's one conversation keeps a first reaction off it.
 `tools/gc-proactive.sh sling` refuses a bead an open conversation tracks, and a
 reaction's first act asks the same refusal, so a reaction slung in the moment
 before the conversation is filed stands down once it starts. The engage is the
-reaction, and once the conversation closes, the headline its sitting's sign-off
-writes keeps the scan off the subject. If a later step refuses the live spawn,
-a bad model or a suspended rig, the subject's one conversation still waits in
-the queue, so the topic is never lost.
+reaction, and once the conversation's sitting signs off, the headline its
+sign-off writes keeps the scan off the subject. If a later step refuses the
+live spawn, a bad model or a suspended rig, the subject's one conversation
+still waits in the queue, so the topic is never lost.
 
 ### Returning to a conversation
 
