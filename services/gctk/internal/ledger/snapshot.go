@@ -57,6 +57,10 @@ func (r *Record) Labels() []string { return r.row.LabelStrings() }
 // AwaitType is what a gate awaits, "" on a bead that is no gate.
 func (r *Record) AwaitType() string { return r.row.AwaitType }
 
+// AwaitID is the key a gate was filed under, such as a human gate's situation
+// key, "" on a bead that is no gate.
+func (r *Record) AwaitID() string { return r.row.AwaitID }
+
 // CreatedAt is when the bead was created, as the row writes the time.
 func (r *Record) CreatedAt() string { return r.row.CreatedAtString() }
 

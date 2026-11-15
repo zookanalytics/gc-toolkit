@@ -51,4 +51,10 @@ var (
 		"The formula a workflow root was poured from, which Gas City stamps at the pour (lifecycle/lifecycle.toml, "+
 			"[metadata.runtime_owned]). A live root of mol-pr-review that a blocks edge of a PR's bead names is a "+
 			"review run attached to the bead, and the landing order marks no PR ready while one is.")
+	runHeadVar = ledger.ReadOnly("gc.var.head", ledger.String,
+		"A review run's head var, which Gas City stamps on its root at the pour: the head the landing order "+
+			"poured it at. The order counts a closed run at the PR's validated head toward its re-offer.")
+	runTargetVar = ledger.ReadOnly("gc.var.target", ledger.String,
+		"A review run's target var, which Gas City stamps on its root at the pour: the target its result is "+
+			"for. The order counts a closed run for the record's target toward its re-offer.")
 )

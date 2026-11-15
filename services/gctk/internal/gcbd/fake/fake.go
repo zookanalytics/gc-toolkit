@@ -24,14 +24,15 @@ import (
 // into another store: Rows leaves it out, as a show does, and Find keeps it, as
 // a listing does. ClosedAt is when a closed bead closed. An edge carries the far
 // bead's fields as a show row reports them, so a closed row that names no close
-// time takes the one an edge onto it names. Assignee, AwaitType, Description,
-// Priority, Labels, CreatedAt and Notes are the row's own fields a listing
-// carries, and an update's --append-notes adds a line to Notes. Ephemeral and
-// Template put the row in the ephemeral plane or make it a template.
+// time takes the one an edge onto it names. Assignee, AwaitType, AwaitID,
+// Description, Priority, Labels, CreatedAt and Notes are the row's own fields a
+// listing carries, and an update's --append-notes adds a line to Notes.
+// Ephemeral and Template put the row in the ephemeral plane or make it a
+// template.
 type Bead struct {
 	ID, Title, Status, IssueType, ClosedAt string
 	Assignee, AwaitType, Description       string
-	CreatedAt, Notes                       string
+	AwaitID, CreatedAt, Notes              string
 	Priority                               int
 	Labels                                 []string
 	Ephemeral, Template                    bool
@@ -492,7 +493,7 @@ func bead(b Bead, deps []any) gcbd.Bead {
 		meta[k] = v
 	}
 	out := gcbd.Bead{ID: b.ID, Title: b.Title, Status: &status, Metadata: meta, Dependencies: deps,
-		AwaitType: b.AwaitType, Priority: float64(b.Priority)}
+		AwaitType: b.AwaitType, AwaitID: b.AwaitID, Priority: float64(b.Priority)}
 	if b.IssueType != "" {
 		out.IssueType = b.IssueType
 	}

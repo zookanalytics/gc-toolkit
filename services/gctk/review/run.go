@@ -142,13 +142,13 @@ func (r Ruling) Subject() string {
 }
 
 // Run is a review run as the store holds it: its root, the vars it was poured
-// with, the control bead of its loop, and the outputs its steps wrote, by
-// iteration. Broken names each output that names a step of the review and
-// does not read as one, which the pass rule reads as not written.
+// with, the control bead of its loop, its record step, and the outputs its
+// steps wrote, by iteration. Broken names each output that names a step of the
+// review and does not read as one, which the pass rule reads as not written.
 type Run struct {
 	Root, PRBead, Head, Target string
 	Shadow                     bool
-	Loop                       *ledger.Record
+	Loop, RecordStep           *ledger.Record
 	Iterations                 map[int]*Iteration
 	Broken                     []string
 }
@@ -197,6 +197,9 @@ func ReadRun(l *ledger.Ledger, id string) (*Run, error) {
 				return nil, &NotARun{ID: id, Why: fmt.Sprintf("its root %s has two loops, %s and %s", root.ID, run.Loop.ID, m.ID)}
 			}
 			run.Loop = m
+		}
+		if strings.HasSuffix(str(stepRefKey, m), "."+stepRecord) {
+			run.RecordStep = m
 		}
 		if raw := str(outputKey, m); raw != "" && worked(kind) {
 			if why := run.add(raw); why != "" {

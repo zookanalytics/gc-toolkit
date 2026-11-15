@@ -134,3 +134,66 @@ func TestRenderReasons(t *testing.T) {
 		}
 	})
 }
+
+// The review condition renders with the run's state (specs/tk-1tfzr71.108/
+// design.md, section 7): a run attached is the city's work in flight, and a
+// closed run with no result at the head, and the gates a run's failure files,
+// read needs-attention as the machine's fault, which holds no held: value, so
+// none reads as a person's hold or a ruling owed.
+func TestTheReviewConditionRendersWithTheRunsState(t *testing.T) {
+	const at = "1111111111111111111111111111111111111111"
+	review := pr.Answer{Head: at, Target: "main", Conditions: []pr.Condition{
+		{Kind: pr.KindReview}, {Kind: pr.KindWait, ID: "tk-run2"}}}
+	live := prstatus.Facts{Runs: []prstatus.Run{
+		{ID: "tk-run1", Status: "closed", Head: at, Target: "main", ClosedAt: "2026-11-12T09:10:00Z"},
+		{ID: "tk-run2", Status: "open", Head: at, Target: "main"}}}
+	if got := prstatus.Render(review, live); got != prstatus.Merging {
+		t.Fatalf("a run attached rendered %s, want the city's work in flight on an approved PR, merging", got)
+	}
+	if got := prstatus.RenderReasons(review, live); len(got) != 0 {
+		t.Fatalf("a run attached gave reasons %+v, want none", got)
+	}
+
+	ended := pr.Answer{Head: at, Target: "main", Conditions: []pr.Condition{{Kind: pr.KindReview}}}
+	closed := prstatus.Facts{Runs: []prstatus.Run{
+		{ID: "tk-run1", Status: "closed", Head: at, Target: "main", ClosedAt: "2026-11-12T09:10:00Z"},
+		{ID: "tk-run2", Status: "closed", Head: at, Target: "main", ClosedAt: "2026-11-12T09:20:00Z"},
+		{ID: "tk-run0", Status: "closed", Head: "2222222222222222222222222222222222222222", Target: "main",
+			ClosedAt: "2026-11-12T09:30:00Z"}}}
+	if got := prstatus.Render(ended, closed); got != prstatus.NeedsAttention {
+		t.Fatalf("a closed run with no result at the head rendered %s, want needs-attention", got)
+	}
+	reasons := prstatus.RenderReasons(ended, closed)
+	if len(reasons) != 1 || reasons[0].Held != "" || reasons[0].ID != "tk-run2" {
+		t.Fatalf("a closed run with no result gave %+v, want the last run at the head, with no held value", reasons)
+	}
+	if held := prstatus.RenderHeld(ended, closed); len(held) != 0 {
+		t.Fatalf("the machine's fault named held values %v, want none", held)
+	}
+	withResult := closed
+	withResult.ReviewResults = `[{"head":"` + at + `","target":"main","passed":false}]`
+	if got := prstatus.RenderReasons(ended, withResult); len(got) != 0 {
+		t.Fatalf("a run that recorded a result that did not pass gave %+v, want none", got)
+	}
+
+	for _, key := range []string{"review-run-failed", "review-loop-exhausted"} {
+		f := prstatus.Facts{Gates: []prstatus.Blocker{{ID: "tk-g", Title: "look at the runs", IssueType: "gate",
+			AwaitType: "human", AwaitID: key}}}
+		gate := pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindReview}, {Kind: pr.KindWait, ID: "tk-g"}}}
+		if got := prstatus.Render(gate, f); got != prstatus.NeedsAttention {
+			t.Fatalf("a %s gate rendered %s, want needs-attention", key, got)
+		}
+		want := []prstatus.Reason{{ID: "tk-g", Title: "look at the runs"}}
+		if got := prstatus.RenderReasons(gate, f); !reflect.DeepEqual(got, want) {
+			t.Fatalf("a %s gate gave %+v, want %+v, the machine's fault", key, got, want)
+		}
+		if got := prstatus.Derive(f); got != prstatus.NeedsAttention || len(prstatus.Held(f)) != 0 {
+			t.Fatalf("on the old record a %s gate derived %s with held %v, want needs-attention and none", key, got, prstatus.Held(f))
+		}
+	}
+	question := prstatus.Facts{Gates: []prstatus.Blocker{{ID: "tk-q", Title: "which scope?", IssueType: "gate",
+		AwaitType: "human", AwaitID: "review-question-scope"}}}
+	if got := prstatus.RenderHeld(pr.Answer{}, question); !reflect.DeepEqual(got, []prstatus.Hold{prstatus.HeldGate}) {
+		t.Fatalf("a run's question to a person held %v, want a person's hold, gate", got)
+	}
+}

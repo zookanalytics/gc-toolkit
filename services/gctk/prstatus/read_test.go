@@ -303,3 +303,33 @@ func TestReasons(t *testing.T) {
 		})
 	}
 }
+
+// Read gathers the review runs an anchor's own blocks edges name, open and
+// closed, with the head and the target each was poured at, and the anchor's
+// stored review results, which Render reads the run's state from. A blocker
+// that is no review run's root is no run.
+func TestReadGathersTheReviewRunsAttachedToTheAnchor(t *testing.T) {
+	root := func(id, status, head string) Blocker {
+		return Blocker{ID: id, Status: status, ClosedAt: map[string]string{"closed": "2026-11-12T09:10:00Z"}[status],
+			Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-pr-review",
+				"gc.var.head": head, "gc.var.target": "main"}}
+	}
+	other := Blocker{ID: "w", Status: "open", Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-polecat-work"}}
+	s := &store{
+		rows:  map[string]Row{"a": row("a", map[string]string{"review_results": `[{"head":"h1","target":"main","passed":true}]`})},
+		edges: map[string][]Blocker{"a": {root("r1", "closed", "h1"), root("r2", "open", "h2"), other}},
+	}
+	facts, err := Read([]string{"a"}, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := facts["a"]
+	want := []Run{{ID: "r1", Status: "closed", Head: "h1", Target: "main", ClosedAt: "2026-11-12T09:10:00Z"},
+		{ID: "r2", Status: "open", Head: "h2", Target: "main"}}
+	if !slices.Equal(f.Runs, want) {
+		t.Fatalf("Runs = %+v, want %+v", f.Runs, want)
+	}
+	if f.ReviewResults != `[{"head":"h1","target":"main","passed":true}]` {
+		t.Fatalf("ReviewResults = %q", f.ReviewResults)
+	}
+}

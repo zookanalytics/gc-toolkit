@@ -104,9 +104,11 @@ func undraftable(p *gh.PullRequest, branch string) string {
 // readyBar says why the run does not mark a draft ready, and is empty when it
 // marks it: the PR is a draft open at the head the refinery validated, the
 // record is pending there, a passed result of the review loop names that head
-// and the PR's target, and no review run is attached to the bead, so the order
-// has no run to pour for it. It does not wait for CI.
-func readyBar(s state, p *gh.PullRequest, results []review.Result) string {
+// and the PR's target, no review run is attached to the bead and no ask a run
+// can take is open on it, so the order has no run to pour for it. An ask that
+// something holds starts no round until a run can take it, so it keeps no PR a
+// draft. It does not wait for CI.
+func readyBar(s state, p *gh.PullRequest, results []review.Result, asks []review.Ask) string {
 	switch {
 	case !p.IsDraft:
 		return "the PR is ready already"
@@ -116,6 +118,11 @@ func readyBar(s state, p *gh.PullRequest, results []review.Result) string {
 		return fmt.Sprintf("no review result passed at head %s into %s", p.HeadRefOid, p.BaseRefName)
 	case len(s.runs) > 0:
 		return "the review run " + strings.Join(s.runs, ", ") + " is attached to the bead"
+	}
+	for _, a := range asks {
+		if a.Takeable() {
+			return "ask " + a.ID + " is open and nothing holds it, so a review run takes it before the PR is ready"
+		}
 	}
 	return ""
 }

@@ -233,7 +233,9 @@ func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
 			Status:    b.StatusLowerOr("open"),
 			IssueType: b.IssueTypeString(),
 			AwaitType: b.AwaitType,
+			AwaitID:   b.AwaitID,
 			Assignee:  b.AssigneeString(),
+			ClosedAt:  b.ClosedAtString(),
 			Metadata:  metadataOf(b),
 		})
 	}

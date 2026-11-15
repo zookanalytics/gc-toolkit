@@ -77,10 +77,10 @@ type Gates interface {
 // directory, where the record lock lives, and Refinery the assignee of a bead
 // the refinery holds. Feedback loads the definition of feedback, once a run
 // first needs it. Mark reads the city's mark, which a dismissal's message
-// carries, from the writer that owns it. Audit is the rig's seed audit, nil for
-// a rig whose repository carries none. Wait bounds how long a writer waits for
-// the lock, and Yield is how long a run lets the lock stand free between two
-// records, so a writer waiting for it takes it.
+// carries, from the writer that owns it. Runs pours a PR's review run. Audit is
+// the rig's seed audit, nil for a rig whose repository carries none. Wait
+// bounds how long a writer waits for the lock, and Yield is how long a run lets
+// the lock stand free between two records, so a writer waiting for it takes it.
 type Landing struct {
 	Ledger   *ledger.Ledger
 	Dir      string
@@ -90,6 +90,7 @@ type Landing struct {
 	Mark     func() (string, error)
 	Checkout Checkout
 	Gates    Gates
+	Runs     Runs
 	Audit    Audit
 	Now      func() time.Time
 	Wait     time.Duration
@@ -191,8 +192,14 @@ const (
 	ActRequested = "requested"
 	// ActReadied: the PR was a draft whose record is pending at its head, a
 	// passed review result names that head and its target, and no review run is
-	// attached, so the run marked it ready for review.
+	// attached and no ask a run can take is open, so the run marked it ready for
+	// review.
 	ActReadied = "readied"
+	// ActPoured: the PR is open at the head the refinery validated with no
+	// passed review result there, or an ask a run can take is open, and nothing
+	// else writes the branch, so the run poured a review run attached to the
+	// bead.
+	ActPoured = "poured"
 	// ActLanded: the merge commit is on the target, and the bead closed.
 	ActLanded = "landed"
 	// ActRequeued: the PR is open at another head, and the bead went back to the
@@ -413,11 +420,13 @@ func (h readHub) PullRequest(repo string, number int) (*gh.PullRequest, error) {
 func (h readHub) Login() (string, error) { return h.login() }
 
 // state is one record as a run read it under the lock: the bead's row and its
-// record, the open withdrawals filed on it and the review runs attached to it.
+// record, the beads its blocks edges name, open and closed, the withdrawals
+// filed on it and the review runs attached to it, live.
 type state struct {
 	id, status, assignee, branch string
 	row                          *ledger.Record
 	rec                          record.Record
+	blockers                     []*ledger.Record
 	withdrawals                  []withdrawal
 	runs                         []string
 	now                          string
@@ -458,8 +467,9 @@ func (u *run) one(id string) (RunOutcome, error) {
 	case s.status != "open" && s.status != "blocked":
 		return RunOutcome{Bead: id, Action: ActSkipped, Detail: "the bead's status " + s.status + " is none the record knows"}, nil
 	}
-	rows, err := u.blockers(r, false)
+	rows, err := u.blockers(r, true)
 	if err == nil {
+		s.blockers = rows
 		s.withdrawals, err = withdrawalsIn(rows)
 	}
 	if err == nil {
@@ -692,11 +702,14 @@ func (u *run) blocked(s state) RunOutcome {
 // and asks GitHub to merge one that is, pinned to the head the answer judged,
 // or to add it to its base's merge queue where the base requires one. A PR
 // already in the queue has its merge requested. A draft the review loop has
-// passed at its head, with no review run attached, is marked ready first, and
-// the next run reads it again (readyBar). The evaluator reads the PR as blocked
-// read it a moment before, and the run's login (readHub). Whatever GitHub
-// answers, the next run reads the PR again by its number. note is what the run
-// did with the record's withdrawals, which each outcome carries.
+// passed at its head, with no review run attached and no ask a run can take,
+// is marked ready first, and the next run reads it again (readyBar). A PR the
+// evaluator finds not ready is owed a review run when it has no passed result
+// at the head or an ask a run can take is open, which the run pours (admit).
+// The evaluator reads the PR as blocked read it a moment before, and the run's
+// login (readHub). Whatever GitHub answers, the next run reads the PR again by
+// its number. note is what the run did with the record's withdrawals, which
+// each outcome carries.
 func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry func(string, string) RunOutcome, note string) RunOutcome {
 	nodeID, inQueue, queue := p.ID, p.InMergeQueue, p.MergeQueueEnabled
 	retried := func(state, why string) RunOutcome {
@@ -712,12 +725,16 @@ func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry fun
 	if inQueue {
 		return checked("the PR is in its base's merge queue, which holds its merge request")
 	}
+	asks, err := review.AsksIn(u.Ledger, s.row, s.blockers)
+	if err != nil {
+		return retried("lookup_failed", "the asks on the bead did not read; will retry: "+err.Error())
+	}
 	if p.IsDraft {
 		results, _, err := review.Results.Get(s.row)
 		if err != nil {
 			return retried("lookup_failed", "the review results did not read; will retry: "+err.Error())
 		}
-		if readyBar(s, p, results) == "" {
+		if readyBar(s, p, results, asks) == "" {
 			if err := hub.MarkReady(nodeID); err != nil {
 				why := fmt.Sprintf("the ready transition at %s was refused or not answered; the next run reads the draft flag again: %v", p.HeadRefOid, err)
 				return retried("open", why)
@@ -725,8 +742,8 @@ func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry fun
 			w := u.Ledger.Write(s.id)
 			record.Checked(w, "open", s.now)
 			return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActReadied, Detail: withNote(fmt.Sprintf(
-				"marked ready at %s, without waiting for CI: a passed result names the head and no review run is attached; "+
-					"the next run reads the PR again", p.HeadRefOid), note)})
+				"marked ready at %s, without waiting for CI: a passed result names the head, and no review run is attached "+
+					"and no ask a run can take is open; the next run reads the PR again", p.HeadRefOid), note)})
 		}
 	}
 	if _, err := u.rule(); err != nil {
@@ -743,6 +760,9 @@ func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry fun
 		return retried("lookup_failed", "the evaluator's read did not answer; will retry: "+err.Error())
 	}
 	if !ans.Ready {
+		if out, owed := u.admit(s, p, ans, asks, note); owed {
+			return out
+		}
 		var not []string
 		for _, c := range ans.Conditions {
 			not = append(not, string(c.Kind))

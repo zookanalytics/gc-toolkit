@@ -1,0 +1,402 @@
+package pr_test
+
+import (
+	"errors"
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
+	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
+)
+
+// The landing order admits the review run (specs/tk-1tfzr71.108/design.md,
+// sections 1 and 7), each case one of section 12's for unit 4, on the landing
+// order's world with no passed result at the validated head.
+
+// boundRefinery is a refinery whose address names its rig and the binding the
+// pack is imported under, which the review run's pools carry.
+const boundRefinery = "rig/gc-toolkit.refinery"
+
+// pours is the pour of a review run as gc formula cook --attach makes it: the
+// root, which carries its formula and vars, and the bead's blocks edge onto it,
+// which the store's blocked listing holds the bead on. err fails the pour, and
+// a run already attached when it pours fails the test, since cook would attach
+// a second.
+type pours struct {
+	mu    sync.Mutex
+	store *fake.Store
+	t     *testing.T
+	vars  []map[string]string
+	err   error
+}
+
+func (p *pours) Pour(formula, b string, vars map[string]string) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.err != nil {
+		return "", p.err
+	}
+	p.vars = append(p.vars, maps.Clone(vars))
+	root := fmt.Sprintf("tk-run%d", len(p.vars))
+	md := map[string]string{"gc.kind": "workflow", "gc.formula_name": formula}
+	for k, v := range vars {
+		md["gc.var."+k] = v
+	}
+	p.store.Put(fake.Bead{ID: root, Title: formula, Status: "open", Metadata: md})
+	row, _ := p.store.Row(b)
+	row.Edges = append(row.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: root, Title: formula, Status: "open"})
+	p.store.Put(row)
+	p.store.List(b, root)
+	return root, nil
+}
+
+func (p *pours) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.vars)
+}
+
+// admitting is the landing order's world with no review result at the
+// validated head, a refinery whose address names its binding, and the pour.
+type admitting struct {
+	*land
+	runs *pours
+}
+
+func newAdmit(t *testing.T) *admitting {
+	t.Helper()
+	d := newCycle(t)
+	d.l.Refinery = boundRefinery
+	d.edit(t, func(b *fake.Bead) {
+		b.Assignee = boundRefinery
+		delete(b.Metadata, "review_results")
+	})
+	p := &pours{store: d.store, t: t}
+	d.l.Runs = p
+	return &admitting{land: d, runs: p}
+}
+
+// end closes the run, as a run's end closes its root, with the outcome given,
+// and stops the blocked listing holding the bead on it.
+func (d *admitting) end(t *testing.T, root, outcome, at string) {
+	t.Helper()
+	r, ok := d.store.Row(root)
+	if !ok {
+		t.Fatalf("no run %s", root)
+	}
+	r.Status, r.ClosedAt = "closed", at
+	r.Metadata["gc.outcome"] = outcome
+	d.store.Put(r)
+	d.edit(t, func(b *fake.Bead) {
+		for i := range b.Edges {
+			if b.Edges[i].ID == root {
+				b.Edges[i].Status, b.Edges[i].ClosedAt = "closed", at
+			}
+		}
+	})
+	d.store.Unlist(bead)
+}
+
+// gate files an open human gate on the bead under key, which the blocked
+// listing holds the bead on.
+func (d *admitting) gate(t *testing.T, id, key string) {
+	t.Helper()
+	d.store.Put(fake.Bead{ID: id, Title: "a gate keyed " + key, Status: "open", IssueType: "gate", AwaitType: "human", AwaitID: key})
+	d.edit(t, func(b *fake.Bead) {
+		b.Edges = append(b.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: id, Title: "a gate keyed " + key, Status: "open", IssueType: "gate", AwaitType: "human"})
+	})
+	d.store.List(bead, id)
+}
+
+// clear closes the gate at at.
+func (d *admitting) clear(t *testing.T, id, at string) {
+	t.Helper()
+	g, _ := d.store.Row(id)
+	g.Status, g.ClosedAt = "closed", at
+	d.store.Put(g)
+	d.edit(t, func(b *fake.Bead) {
+		for i := range b.Edges {
+			if b.Edges[i].ID == id {
+				b.Edges[i].Status, b.Edges[i].ClosedAt = "closed", at
+			}
+		}
+	})
+	d.store.Unlist(bead)
+}
+
+// ask files an ask on the bead, as gctk review ask does, which the blocked
+// listing holds the bead on.
+func (d *admitting) ask(t *testing.T, reason string) string {
+	t.Helper()
+	id, filed, err := review.FileAsk(ledger.New(d.store), review.AskRequest{Bead: bead, Reason: reason}, nil)
+	if err != nil || !filed {
+		t.Fatalf("the ask did not file: %v (filed %v)", err, filed)
+	}
+	d.store.List(bead, id)
+	return id
+}
+
+func gated(d *admitting, key string) bool {
+	return slices.Contains(d.gates.list(), bead+" "+key)
+}
+
+// A head the refinery validated with no review result gets one run, poured
+// with the record's vars and the pools and binding the refinery's address
+// names, and two runs of the order that overlap pour one between them.
+func TestAHeadValidatedWithNoResultGetsOneRunUnderOverlappingPasses(t *testing.T) {
+	d := newAdmit(t)
+	o := d.once(t)
+	is(t, o, pr.ActPoured)
+	want := map[string]string{"pr_bead": bead, "head": head, "target": "main", "branch": branch,
+		"review_target": "rig/gc-toolkit.polecat-codex", "repair_target": "rig/gc-toolkit.polecat", "binding_prefix": "gc-toolkit."}
+	if got := d.runs.vars[0]; !maps.Equal(got, want) {
+		t.Fatalf("the run was poured with %v, want %v", got, want)
+	}
+	is(t, d.once(t), pr.ActChecked)
+	if n := d.runs.count(); n != 1 {
+		t.Fatalf("the attached run did not keep the next run from pouring: %d runs", n)
+	}
+
+	e := newAdmit(t)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := e.l.Reconcile(pr.Options{Count: 10}, func(pr.RunOutcome) {}); err != nil {
+				t.Errorf("Reconcile: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if n := e.runs.count(); n != 1 {
+		t.Fatalf("four overlapping runs of the order poured %d review runs, want one", n)
+	}
+}
+
+// A run that ended without a result is poured again, and when the second at
+// the same head ends without one too, the order asks a person through a
+// review-run-failed gate naming both runs and how each ended, and pours none.
+func TestARunThatEndedWithoutAResultIsPouredAgainAndTheSecondFailureGetsTheGate(t *testing.T) {
+	d := newAdmit(t)
+	is(t, d.once(t), pr.ActPoured)
+	d.end(t, "tk-run1", "canceled", "2026-11-12T09:10:00Z")
+	is(t, d.once(t), pr.ActPoured)
+	if gated(d, "review-run-failed") {
+		t.Fatal("the first failure asked a person")
+	}
+	d.end(t, "tk-run2", "canceled", "2026-11-12T09:20:00Z")
+	o := d.once(t)
+	is(t, o, pr.ActExcepted)
+	if !gated(d, "review-run-failed") || d.runs.count() != 2 {
+		t.Fatalf("the second failure filed %v and poured %d runs, want the gate and two runs", d.gates.list(), d.runs.count())
+	}
+	msg := d.gates.messages[len(d.gates.messages)-1]
+	for _, want := range []string{"tk-run1", "tk-run2", "cancelled", head} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the gate's message lacks %q: %s", want, msg)
+		}
+	}
+	// The gate holds the bead, so the next run pours nothing.
+	d.gate(t, "tk-g1", "review-run-failed")
+	is(t, d.once(t), pr.ActChecked)
+	if d.runs.count() != 2 {
+		t.Fatal("the order poured a run while the review-run-failed gate held the bead")
+	}
+}
+
+// A run whose loop exhausted recorded a result, so it counts as no failure:
+// the run after it, at the same head, ending without a result is poured again.
+func TestARunThatRecordedItsResultIsNoFailureOfTheReOffer(t *testing.T) {
+	d := newAdmit(t)
+	is(t, d.once(t), pr.ActPoured)
+	recorded(t, d, "tk-run1")
+	d.end(t, "tk-run1", "fail", "2026-11-12T09:10:00Z")
+	is(t, d.once(t), pr.ActPoured)
+	d.end(t, "tk-run2", "canceled", "2026-11-12T09:20:00Z")
+	is(t, d.once(t), pr.ActPoured)
+	if gated(d, "review-run-failed") {
+		t.Fatal("a run that recorded its result was counted as one that ended without one")
+	}
+}
+
+// recorded writes the steps of a run that judged the head, exhausted its loop
+// and closed its record step, as a run that recorded its result leaves them.
+func recorded(t *testing.T, d *admitting, root string) {
+	t.Helper()
+	member := func(id, kind, ref, outcome, output string) {
+		md := map[string]string{"gc.root_bead_id": root, "gc.step_ref": ref, "gc.outcome": outcome}
+		if kind != "" {
+			md["gc.kind"] = kind
+		}
+		if output != "" {
+			md["gc.output_json"] = output
+		}
+		d.store.Put(fake.Bead{ID: id, Title: ref, Status: "closed", Metadata: md})
+	}
+	member(root+"-loop", "ralph", "mol-pr-review.review-loop", "fail", "")
+	member(root+"-triage", "", "review-loop.iteration.1.triage", "pass",
+		`{"review":"triage","iteration":1,"head":"`+head+`","checks":[],"material":false}`)
+	member(root+"-record", "", "mol-pr-review.record", "pass", "")
+}
+
+// A cleared review-run-failed or review-loop-exhausted gate gets one more run:
+// the runs that ended before the review-run-failed gate closed are not counted
+// again, and a run that fails after it is poured again once.
+func TestAClearedRunFailedOrLoopExhaustedGateGetsOneMoreRun(t *testing.T) {
+	d := newAdmit(t)
+	is(t, d.once(t), pr.ActPoured)
+	d.end(t, "tk-run1", "canceled", "2026-11-12T09:10:00Z")
+	is(t, d.once(t), pr.ActPoured)
+	d.end(t, "tk-run2", "canceled", "2026-11-12T09:20:00Z")
+	is(t, d.once(t), pr.ActExcepted)
+	d.gate(t, "tk-g1", "review-run-failed")
+	d.clear(t, "tk-g1", "2026-11-12T09:30:00Z")
+	is(t, d.once(t), pr.ActPoured)
+	d.end(t, "tk-run3", "canceled", "2026-11-12T09:40:00Z")
+	is(t, d.once(t), pr.ActPoured)
+	if n := len(d.gates.list()); n != 1 {
+		t.Fatalf("one failure after the gate cleared asked a person again: %v", d.gates.list())
+	}
+
+	e := newAdmit(t)
+	is(t, e.once(t), pr.ActPoured)
+	recorded(t, e, "tk-run1")
+	e.end(t, "tk-run1", "fail", "2026-11-12T09:10:00Z")
+	e.gate(t, "tk-g2", "review-loop-exhausted")
+	is(t, e.once(t), pr.ActChecked)
+	e.clear(t, "tk-g2", "2026-11-12T09:30:00Z")
+	is(t, e.once(t), pr.ActPoured)
+}
+
+// An open human gate on the bead keeps the order from pouring until it
+// closes, and so does a sitting's open conversation, whose sitting may be
+// editing the branch, and an open rework child on the branch.
+func TestAGateASittingOrAnotherWriterKeepsTheRunOffTheBranch(t *testing.T) {
+	d := newAdmit(t)
+	d.gate(t, "tk-q1", "review-question-scope")
+	o := d.once(t)
+	is(t, o, pr.ActChecked)
+	if d.runs.count() != 0 || !strings.Contains(o.Detail, "tk-q1") {
+		t.Fatalf("an open human gate let the order pour: %d runs (%s)", d.runs.count(), o.Detail)
+	}
+	d.clear(t, "tk-q1", "2026-11-12T09:30:00Z")
+	is(t, d.once(t), pr.ActPoured)
+
+	e := newAdmit(t)
+	e.store.Put(fake.Bead{ID: "tk-conv", Title: "Converse about the PR", Status: "in_progress", IssueType: "task",
+		Assignee: "rig/gc-toolkit.tk-conv"})
+	e.edit(t, func(b *fake.Bead) {
+		b.Edges = append(b.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: "tk-conv", Status: "in_progress"})
+	})
+	e.store.List(bead, "tk-conv")
+	o = e.once(t)
+	is(t, o, pr.ActChecked)
+	if e.runs.count() != 0 || !strings.Contains(o.Detail, "conversation tk-conv") {
+		t.Fatalf("a sitting's open conversation let the order pour: %d runs (%s)", e.runs.count(), o.Detail)
+	}
+
+	f := newAdmit(t)
+	f.store.Put(fake.Bead{ID: "tk-kid", Title: "Rework the branch", Status: "in_progress", IssueType: "task",
+		Assignee: "rig/gc-toolkit.polecat-1", Metadata: map[string]string{"branch": branch, "task_kind": "rework"}})
+	o = f.once(t)
+	is(t, o, pr.ActChecked)
+	if f.runs.count() != 0 || !strings.Contains(o.Detail, "tk-kid") {
+		t.Fatalf("a rework child on the branch let the order pour: %d runs (%s)", f.runs.count(), o.Detail)
+	}
+}
+
+// An ask on a head that already passed starts a round: the order pours a run
+// for it, and marks no draft ready while it is open.
+func TestAnAskOnAPassedHeadStartsARound(t *testing.T) {
+	d := newAdmit(t)
+	d.edit(t, func(b *fake.Bead) {
+		b.Metadata["review_results"] = `[{"head":"` + head + `","target":"main","passed":true}]`
+	})
+	d.pr.Facts.IsDraft = true
+	a := d.ask(t, "Rename the flag, as the operator ruled.")
+	o := d.once(t)
+	is(t, o, pr.ActPoured)
+	if !strings.Contains(o.Detail, a) {
+		t.Fatalf("the pour does not name the ask it is for: %s", o.Detail)
+	}
+	if slices.ContainsFunc(d.github.Asks(), func(x ghfake.Ask) bool { return x.Method == "MarkReady" }) {
+		t.Fatalf("a draft with an open ask was marked ready: %v", asks(d.github))
+	}
+}
+
+// A draft with an open ask that nothing holds is not marked ready, even while
+// a run is attached; once the ask closes and the run has ended, it is.
+func TestADraftWithAnOpenAskThatNothingHoldsIsNotMarkedReady(t *testing.T) {
+	d := newAdmit(t)
+	d.edit(t, func(b *fake.Bead) {
+		b.Metadata["review_results"] = `[{"head":"` + head + `","target":"main","passed":true}]`
+	})
+	d.pr.Facts.IsDraft = true
+	a := d.ask(t, "Answer the reviewer's comment on the flag.")
+	d.runs.err = errors.New("gc formula cook: exit 1: the store did not answer")
+	is(t, d.once(t), pr.ActRetry)
+	if slices.ContainsFunc(d.github.Asks(), func(x ghfake.Ask) bool { return x.Method == "MarkReady" }) {
+		t.Fatalf("a draft with an open ask that nothing holds was marked ready: %v", asks(d.github))
+	}
+	r, _ := d.store.Row(a)
+	r.Status, r.ClosedAt = "closed", "2026-11-12T09:30:00Z"
+	d.store.Put(r)
+	d.store.Unlist(bead)
+	is(t, d.once(t), pr.ActReadied)
+}
+
+// An ask an open bead holds, on a head that passed, pours no run, files no gate
+// and leaves the head's passed result, and the run after the bead that holds it
+// closes pours one run, which can take it.
+func TestAnAskAnOpenBeadHoldsWaitsAndThePassAfterItsHolderClosesPoursOne(t *testing.T) {
+	d := newAdmit(t)
+	passed := `[{"head":"` + head + `","target":"main","passed":true}]`
+	d.edit(t, func(b *fake.Bead) { b.Metadata["review_results"] = passed })
+	a := d.ask(t, "Apply the ruling once the other PR lands.")
+	d.store.Put(fake.Bead{ID: "tk-other", Title: "the other PR's work", Status: "open"})
+	r, _ := d.store.Row(a)
+	r.Edges = append(r.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: "tk-other", Status: "open"})
+	d.store.Put(r)
+	d.store.List(a, "tk-other")
+	o := d.once(t)
+	is(t, o, pr.ActChecked)
+	if d.runs.count() != 0 || len(d.gates.list()) != 0 || d.row(t).Metadata["review_results"] != passed {
+		t.Fatalf("a held ask poured %d runs, filed %v, or moved the result to %q (%s)",
+			d.runs.count(), d.gates.list(), d.row(t).Metadata["review_results"], o.Detail)
+	}
+	other, _ := d.store.Row("tk-other")
+	other.Status, other.ClosedAt = "closed", "2026-11-12T09:30:00Z"
+	d.store.Put(other)
+	d.store.Unlist(a)
+	o = d.once(t)
+	is(t, o, pr.ActPoured)
+	if !strings.Contains(o.Detail, a) || d.runs.count() != 1 {
+		t.Fatalf("the pass after the holder closed poured %d runs (%s)", d.runs.count(), o.Detail)
+	}
+	got, err := review.AsksOn(ledger.New(d.store), bead)
+	if err != nil || len(got) != 1 || !got[0].Takeable() {
+		t.Fatalf("the ask does not read as one the run can take: %+v, %v", got, err)
+	}
+}
+
+// A refinery whose address names no binding pours nothing, since the run's
+// steps name the pack's scripts by it.
+func TestARefineryAddressWithNoBindingPoursNothing(t *testing.T) {
+	d := newAdmit(t)
+	d.l.Refinery = refinery
+	d.edit(t, func(b *fake.Bead) { b.Assignee = refinery })
+	o := d.once(t)
+	is(t, o, pr.ActChecked)
+	if d.runs.count() != 0 || !strings.Contains(o.Detail, "rig/refinery") {
+		t.Fatalf("a refinery with no binding poured %d runs (%s)", d.runs.count(), o.Detail)
+	}
+}

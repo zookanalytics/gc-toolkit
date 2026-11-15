@@ -259,9 +259,10 @@
     "name": "gc.var.head",
     "type": "string",
     "readers": [
+      "pr",
       "review"
     ],
-    "doc": "A review run's head var: the head the refinery validated, the run's first head."
+    "doc": "A review run's head var: the head the refinery validated, the run's first head. A review run's head var, which Gas City stamps on its root at the pour: the head the landing order poured it at. The order counts a closed run at the PR's validated head toward its re-offer."
   },
   {
     "name": "gc.var.issue",
@@ -291,9 +292,10 @@
     "name": "gc.var.target",
     "type": "string",
     "readers": [
+      "pr",
       "review"
     ],
-    "doc": "A review run's target var: the branch the PR merges into, the target its result is for."
+    "doc": "A review run's target var: the branch the PR merges into, the target its result is for. A review run's target var, which Gas City stamps on its root at the pour: the target its result is for. The order counts a closed run for the record's target toward its re-offer."
   },
   {
     "name": "gc.work_outcome",

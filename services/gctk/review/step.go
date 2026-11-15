@@ -29,6 +29,7 @@ const (
 	stepTriage = "triage"
 	stepRepair = "rule-and-repair"
 	stepLane   = "lane"
+	stepRecord = "record"
 )
 
 // Step is one step of a review run: its bead, its gc.step_ref, the output it

@@ -50,8 +50,7 @@ func AsksOn(l *ledger.Ledger, bead string) ([]Ask, error) {
 }
 
 func asksOf(l *ledger.Ledger, owner *ledger.Record) ([]Ask, error) {
-	branch := view(record.Branch, owner)
-	if branch == "" {
+	if view(record.Branch, owner) == "" {
 		return nil, nil
 	}
 	edges, err := owner.Edges()
@@ -64,9 +63,24 @@ func asksOf(l *ledger.Ledger, owner *ledger.Record) ([]Ask, error) {
 			ids = append(ids, e.ID)
 		}
 	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
 	rows, err := l.Find(ledger.ByID(ids...).WithClosed())
 	if err != nil {
 		return nil, err
+	}
+	return AsksIn(l, owner, rows)
+}
+
+// AsksIn is every ask among rows, the beads the bead that owns a PR waits on
+// through its blocks edges, open or closed, as a caller that already read them
+// holds them, in id order, with what holds each open one. A read that fails
+// returns its error.
+func AsksIn(l *ledger.Ledger, owner *ledger.Record, rows []*ledger.Record) ([]Ask, error) {
+	branch := view(record.Branch, owner)
+	if branch == "" {
+		return nil, nil
 	}
 	var asks []Ask
 	var open []string
@@ -109,6 +123,11 @@ func asksOf(l *ledger.Ledger, owner *ledger.Record) ([]Ask, error) {
 	slices.SortFunc(asks, func(a, b Ask) int { return strings.Compare(a.ID, b.ID) })
 	return asks, nil
 }
+
+// IsAsk reports whether r, a bead that names a PR's branch, is an ask on that
+// PR: a task that names the branch, with no route and no assignee. A bead of
+// another shape that names the branch is work of its own on it.
+func IsAsk(r *ledger.Record, branch string) bool { return isAsk(r, branch) }
 
 // isAsk reports whether r, a bead the PR's bead waits on, is an ask on the PR
 // whose branch is branch: a task that names that branch, with no route and no
