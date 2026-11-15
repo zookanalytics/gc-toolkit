@@ -274,8 +274,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    adopt an existing PR for the branch or
    `gh pr create` — as a draft when `check_set` names an `open-as-draft` check,
    so a preview can deploy before the change is surfaced, else ready — re-read
-   the created PR by number, refuse a moved head, replay the verdict as a comment
-   (never an approval), then one `lifecycle.sh` transition carrying
+   the created PR by number, refuse a moved head, replay each `pre-open` check's
+   verdict as a comment of its own (never an approval), then one `lifecycle.sh`
+   transition carrying
    `pr_url`/`pr_number`/`merged_target`. A later pass flips a draft to ready once
    its `open-as-draft` checks are green. That draft-to-ready walk runs after the
    pre-open walk, under the same deadline, and rotates on `pr-open.cursor.ready`
