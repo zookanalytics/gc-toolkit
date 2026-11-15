@@ -241,11 +241,13 @@ HUMAN_GATE="$SCRIPTS_DIR/human-gate.sh"
 # write-back reports a review thread it cannot resolve through it
 # (wb_unresolvable).
 PATROL_FINDING="$SCRIPTS_DIR/patrol-finding.sh"
-# The one resolver of the check index: the two merge-readiness all-green reads
+# The check index, `gctk review checks`: the two merge-readiness all-green reads
 # below ask it for every declared lane (`--through merge` spans all phases),
 # which drops the non-lanes none/off and the approval merge rule in one place.
-REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
-[ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot reconcile" >&2; exit 1; }
+# With no binary the read fails, and the reads hold.
+# shellcheck source=gctk-resolve.sh
+. "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+review_checks() { local g; g=$(gctk_path) || return 1; GCTK_SCRIPTS_DIR="$SCRIPTS_DIR" "$g" review checks "$@"; }
 # Each lane those reads name derives its green through lane-state.sh, the one
 # derivation merge.sh holds on (lanes_green).
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
@@ -673,7 +675,7 @@ review_threads_load() { # <pr-number>
 # A check_set that declares no lane passes.
 lanes_green() { # <anchor-id> <check_set> <head-oid>
   local gates g
-  gates=$("$REVIEW_CHECKS" --resolve --check-set "$2" --through merge --at "${3:-}" 2>/dev/null) || return 1
+  gates=$(review_checks --resolve "$2" --through merge --at "${3:-}" 2>/dev/null) || return 1
   while IFS= read -r g; do
     [ -n "$g" ] || continue
     "$LANE_STATE" green --anchor "$1" --lane "$g" >/dev/null 2>&1 </dev/null || return 1

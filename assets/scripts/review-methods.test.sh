@@ -140,9 +140,14 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1${2:+ ($2)}"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi; }
 
-CHECKS="$ROOT/assets/scripts/review-checks.sh"
+# The check index and a rig's guidance, read through gctk built from this
+# checkout, with this checkout's index as the pack's.
+( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
+checks() { GCTK_SCRIPTS_DIR="$ROOT/assets/scripts" "$TMP/gctk" review checks "$@"; }
+guidance() { "$TMP/gctk" review guidance "$@"; }
 INDEX="$ROOT/review-checks.toml"
-NAMES=$("$CHECKS" --file "$INDEX" 2>/dev/null | cut -f1)
+NAMES=$(checks --file "$INDEX" 2>/dev/null | cut -f1)
 [ -n "$NAMES" ] && ok "the pack's index declares checks ($(printf '%s' "$NAMES" | paste -sd' ' -))" \
   || bad "the pack's index declares checks" "none read"
 
@@ -224,14 +229,14 @@ printf '[checks.ux]\npurpose = "Does the change keep the flows a person uses int
 git -C "$RIG" add review-checks.toml; git -C "$RIG" commit -q -m "a check of the rig's own"
 AT=$(git -C "$RIG" rev-parse HEAD)
 [ -d "$ROOT/skills/review-ux" ] && bad "the fixture's check has no pack skill" || ok "the fixture's check has no pack skill"
-ROW=$(cd "$RIG" && "$CHECKS" --check ux --at "$AT" 2>/dev/null); rc=$?
+ROW=$(cd "$RIG" && checks --check ux --at "$AT" 2>/dev/null); rc=$?
 eq "$rc" "0" "--check of the rig's own check succeeds at its commit"
 eq "$(printf '%s' "$ROW" | cut -f2)" "Does the change keep the flows a person uses intact?" "…and prints the purpose the reviewer judges against"
-ERR=$(cd "$RIG" && "$CHECKS" --check nonesuch --at "$AT" 2>&1 >/dev/null); rc=$?
+ERR=$(cd "$RIG" && checks --check nonesuch --at "$AT" 2>&1 >/dev/null); rc=$?
 eq "$rc" "1" "--check of a token no index declares exits 1"
 case "$ERR" in *"does not declare check 'nonesuch'"*) ok "…saying no index declares it, the case the formula approves with --needs-you" ;;
   *) bad "…saying no index declares it" "got '$ERR'" ;; esac
-ERR=$(cd "$RIG" && "$CHECKS" --check ux --at 0000000000000000000000000000000000000000 2>&1 >/dev/null); rc=$?
+ERR=$(cd "$RIG" && checks --check ux --at 0000000000000000000000000000000000000000 2>&1 >/dev/null); rc=$?
 eq "$rc" "1" "--check at a commit nothing can read exits 1 too"
 case "$ERR" in *"does not declare"*) bad "…but never as a check declared nowhere" "got '$ERR'" ;;
   *) ok "…but never as a check declared nowhere, which nothing approves on" ;; esac
@@ -276,13 +281,13 @@ hasF "$ARCH_SKILL" 'When one of them is the pattern this change adds to, use the
 notF "$ARCH_SKILL" 'bd create' "…and files every follow-up through mol-review's probe, never a create of its own"
 notF "$ARCH_SKILL" 'divergence lens' "the pack's arch skill, which every rig's arch review loads, carries none of gc-toolkit's lens"
 # This checkout's guidance, committed in a scratch repository and read back
-# through --extension at that commit, the read load-dispatch makes for a review.
+# through gctk review guidance at that commit, the read load-dispatch makes for a review.
 OWN="$TMP/own"; git init -q "$OWN"; mkdir -p "$OWN/docs"
 cp "$ROOT/docs/review-arch.md" "$ROOT/docs/review-triage.md" "$OWN/docs/"
 git -C "$OWN" add docs; git -C "$OWN" commit -q -m "this repo's arch and triage guidance"
 OWN_AT=$(git -C "$OWN" rev-parse HEAD)
 for c in arch triage; do
-  (cd "$OWN" && "$CHECKS" --extension "$c" --at "$OWN_AT" 2>/dev/null) > "$TMP/own.$c"
+  (cd "$OWN" && guidance "$c" --at "$OWN_AT" 2>/dev/null) > "$TMP/own.$c"
 done
 hasF "$TMP/own.arch" "The lens holds new surface to Gas City's own documentation instead." "this repo's arch guidance holds new surface to Gas City's own docs, not the pack's account of Gas City"
 hasF "$TMP/own.arch" 'A converter is a finding on sight.' "…makes a converter between a pack noun and a Gas City noun a finding"

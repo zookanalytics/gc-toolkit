@@ -294,7 +294,7 @@ note.
 check names. `none` and `off` are sentinels that declare no check at all (`none`
 is the spelling the rest of this pack uses). `approval` is a third name a
 check_set may carry, but it is a universal merge rule, not a check (below). The
-one resolver, `review-checks.sh --resolve --check-set <cs> --through <phase> --at <oid>`,
+one resolver, `gctk review checks --resolve <cs> --through <phase> --at <oid>`,
 reads the check index at the commit the reader judges, drops all three and
 returns the checks whose phase gates `<phase>`, so no reader of a stage
 transition re-derives that drop: `gate-ensure.sh`, `pr-open.sh`, `merge.sh`

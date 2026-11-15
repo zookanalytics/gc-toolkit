@@ -23,7 +23,9 @@
 #     store's wait edges are lines of $STUB_HOLDS, "<bead> <what it waits on>":
 #     a blocks edge a create or `gc bd dep` writes is added there, `gc bd dep
 #     list` reads them, and `gctk bead holds` answers from the ones whose far
-#     bead the store does not hold closed.
+#     bead the store does not hold closed. `gctk review` is the real one's,
+#     the binary $RT_GCTK_REAL names, which a suite that reads the check index
+#     builds.
 # No live city, store, GitHub or network.
 
 PASS=0; FAIL=0
@@ -339,6 +341,8 @@ cat > "$BIN/gctk" <<'GCTK'
 #!/usr/bin/env bash
 echo "$*" >> "$LOGS/gctk.log"
 case "$1 $2" in
+  "review checks"|"review guidance")
+    exec "${RT_GCTK_REAL:?the suite builds no gctk to read the check index with}" "$@" ;;
   "bead arm")
     [ "${STUB_ARM_RC:-0}" = 0 ] || exit "$STUB_ARM_RC"
     id="$3"; target=""; shift 3

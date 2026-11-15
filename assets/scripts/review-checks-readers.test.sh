@@ -2,14 +2,15 @@
 # review-checks-readers.test.sh — one reader of the review guidance, and one
 # list of the checks. A rig's
 # review-checks.toml and docs/review-<check>.md are read at the commit being
-# judged, laid over the pack's index, and only assets/scripts/review-checks.sh
-# reads them. Every other script, formula, skill, doctor check and order asks it
-# (--resolve, --show, --check, --extension), so no reader can fall back to a
-# working tree or a pack copy on its own.
+# judged, laid over the pack's index, and only gctk's review domain
+# (services/gctk/review/index.go) reads them. Every script, formula, skill,
+# doctor check and order asks it (`gctk review checks` and `gctk review
+# guidance`), so no reader can fall back to a working tree or a pack copy on its
+# own.
 #
 # The test looks for reads, not names: a git object read (show <oid>:<path>), a
 # file read (cat, head, tail, source, a < redirect, a -r or -f test) and an
-# index handed to the resolver as --file. signoff.sh names both files in what it
+# index handed to `gctk review checks` as --file. signoff.sh names both files in what it
 # tells a reviewer and reads neither, and prose names them freely.
 # A fixture of each read shape proves the scan finds it, and a fixture of
 # names proves it reads past them.
@@ -66,12 +67,11 @@ SCOPE=$(cd "$ROOT" && {
 FOUND=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  [ "$f" = "assets/scripts/review-checks.sh" ] && continue
   hits=$(reads "$ROOT/$f")
   [ -z "$hits" ] || FOUND="$FOUND$(printf '%s\n' "$hits" | sed "s|^|$f:|")
 "
 done <<< "$SCOPE"
-eq "$FOUND" "" "no script, formula, skill, doctor check or order outside review-checks.sh reads the review guidance"
+eq "$FOUND" "" "no script, formula, skill, doctor check or order reads the review guidance"
 
 # Each read shape is found.
 cat > "$TMP/reads.sh" <<'FIXTURE'
@@ -81,7 +81,7 @@ IDX=$(cat "$root/review-checks.toml")
 PURPOSE=$(head -5 "$GC_RIG_ROOT/docs/review-pm.md")
 while read -r l; do :; done < "$root/review-checks.toml"
 [ -r "$root/review-checks.toml" ] && echo readable
-"$S/review-checks.sh" --resolve --check-set c --through merge --file "$HERE/../../review-checks.toml"
+"$GCTK" review checks --resolve c --through merge --file "$HERE/../../review-checks.toml"
 FIXTURE
 eq "$(reads "$TMP/reads.sh" | wc -l | tr -d ' ')" "7" "every read shape in the fixture is found"
 
@@ -91,7 +91,7 @@ cat > "$TMP/names.sh" <<'FIXTURE'
 warn "this change edits its own review guidance (review-checks.toml, docs/review-*.md)"
 GUIDANCE_EDITS=$(printf '%s\n' "$paths" | awk '/^review-checks\.toml$/ || /^docs\/review-[^\/]*\.md$/')
 The reviewed repo's `review-checks.toml` declares the check, and `docs/review-<check>.md` adds to it.
-"$(gc kit scripts-dir)/review-checks.sh" --show --at "$REVIEWED_OID"
+GCTK_SCRIPTS_DIR="$(gc kit scripts-dir)" "$GCTK" review checks --show --at "$REVIEWED_OID"
 FIXTURE
 eq "$(reads "$TMP/names.sh")" "" "a name, a message, a path pattern and a resolver call are not reads"
 
@@ -102,8 +102,8 @@ eq "$(reads "$TMP/names.sh")" "" "a name, a message, a path pattern and a resolv
 # configuration: gate-ensure.sh's --default, refinery-reconcile.sh's
 # REFINERY_RECONCILE_CHECK_SET and mol-refinery-patrol's check_set var, with
 # lifecycle/lifecycle.toml's check_set_default, which no scan here reads. The
-# names come from the pack's index.
-NAMES=$("$ROOT/assets/scripts/review-checks.sh" --file "$ROOT/review-checks.toml" 2>/dev/null | cut -f1 | paste -sd'|' -)
+# names are the pack's index's [checks.<name>] tables.
+NAMES=$(sed -n 's/^\[checks\.\([A-Za-z0-9_-]*\)\][[:space:]]*$/\1/p' "$ROOT/review-checks.toml" | paste -sd'|' -)
 case "$NAMES" in
   *'|'*) ok "the pack's index names its checks ($NAMES)" ;;
   *) bad "the pack's index names its checks" "got '$NAMES'" ;;

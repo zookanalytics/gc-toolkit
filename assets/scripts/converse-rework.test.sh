@@ -27,6 +27,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/converse-rework.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-rework-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# gctk, built from this checkout, reads the check index for the scripts under
+# test.
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
+export GCTK_BIN="$TMP/gctk"
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -245,7 +250,7 @@ printf '#!/usr/bin/env bash\nexec %q "$@" --db %q\n' "$HERE/queue-priority.sh" "
 chmod +x "$BIN/queue-priority"
 export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
 
-# No check index: review-checks.sh then resolves every check_set token as a
+# No check index: gctk review checks then resolves every check_set token as a
 # lane gating every transition, so the lanes do not depend on the checkout.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 export STUB_STORE="$TMP/store.json"

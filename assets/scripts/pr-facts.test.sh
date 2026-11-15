@@ -117,8 +117,8 @@ trap 'rm -rf "$TMP"' EXIT
 harness_build_gctk
 harness_init
 # No check index and no repository: the script under test runs from a private
-# directory, so the suite names a missing index outright, and review-checks.sh
-# then resolves every check_set token as a lane gating every transition. The
+# directory, so the suite names a missing index outright, and gctk review
+# checks then resolves every check_set token as a lane gating every transition. The
 # lanes do not depend on the checkout, and a case that needs a real index names
 # one itself.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
@@ -135,9 +135,7 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-# A case that wraps review-checks.sh runs the real one from $TMP, beside this.
-mkdir -p "$TMP"; cp "$HERE/bd-lib.sh" "$TMP/bd-lib.sh"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/finalize-gate.sh" "$HERE/scaffolding-sweep.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/scaffolding-sweep.sh"
 # lane-state.sh's contract, answered from the environment: every lane derives
 # green unless STUB_LANE_UNGREEN names "<anchor>:<lane>" (or the bare anchor,
 # for each of its lanes), and STUB_LANE_UNREADABLE does the same for exit 2, a
@@ -1803,12 +1801,10 @@ store "[$(anchor D1 20)]"
 printf '%s' "$(prview 20 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_20.json"
 printf '[{"id":901,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","commit_id":"sha-OLD","submitted_at":"2026-08-19T00:00:00Z"}]' > "$GH_DIR/reviews_20.json"
 : > "$STUB_GH_LOG"
-# The resolver logs the arguments it is asked with, then runs as itself.
-cp "$SD/review-checks.sh" "$TMP/review-checks.real"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$TMP/resolver.log" "$TMP/review-checks.real" > "$SD/review-checks.sh"
-chmod +x "$SD/review-checks.sh"; : > "$TMP/resolver.log"
-out=$(run)
-cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+# gctk logs each check index call it is asked, then runs as itself.
+printf '#!/usr/bin/env bash\ncase "$1 ${2:-}" in "review checks") printf "%%s\\n" "$*" >> "%s" ;; esac\nexec "%s" "$@"\n' "$TMP/resolver.log" "$GCTK_BIN" > "$TMP/gctk-logged"
+chmod +x "$TMP/gctk-logged"; : > "$TMP/resolver.log"
+out=$(GCTK_BIN="$TMP/gctk-logged" run)
 has "$out" "dismissed our own superseded CHANGES_REQUESTED (review 901)" "the stale own block is dismissed"
 eq "$(meta D1 signoff_dismissed)" "901@sha-20" "signoff_dismissed recorded (and read back) first"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/20/reviews/901/dismissals" "the dismissal hit the pinned endpoint"

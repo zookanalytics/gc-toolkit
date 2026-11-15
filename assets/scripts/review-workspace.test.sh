@@ -200,7 +200,11 @@ for v in GATHER REMOVE QREMOVE; do
 done
 # The pack gc names holds the scripts the gather calls and the libs they source.
 PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
-cp "$SUT" "$HERE/review-checks.sh" "$HERE/review-evidence.sh" "$HERE/bd-lib.sh" "$HERE/rig-check-lib.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
+cp "$SUT" "$HERE/review-evidence.sh" "$HERE/bd-lib.sh" "$HERE/rig-check-lib.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
+# The gather reads the rig's guidance through gctk, built from this checkout.
+harness_build_gctk
+[ -n "$GCTK_BUILT" ] || { echo "gctk did not build: $GCTK_BUILD_ERR" >&2; exit 1; }
+export GCTK_BIN="$GCTK_BUILT"
 # The gather fetches the base and the branch from origin before it makes the
 # worktree, and reads the anchor.
 ORIGIN="$TMP/origin.git"; git init -q --bare "$ORIGIN"

@@ -31,13 +31,13 @@ Three inputs, in this order.
 
 ### The index
 
-Read the index through the pack's resolver rather than eyeballing a file. It
+Read the index through `gctk review checks` rather than eyeballing a file. It
 has two layers. The pack's own index declares every check the pack ships a
 skill for, so every rig has them. The reviewed repo's `review-checks.toml` at
 the commit under review, when it keeps one, adds checks of the rig's own and
-can change a pack check's purpose or phase for that rig. The resolver is the
-pack's own copy, which `gc <binding> scripts-dir` finds from any rig: it prints
-the directory holding the pack's scripts. `<binding>` is the name the city
+can change a pack check's purpose or phase for that rig. The pack's index sits
+beside the pack's scripts, which `gc <binding> scripts-dir` finds from any rig:
+it prints the directory holding them. `<binding>` is the name the city
 imports the pack under, which gc puts in front of this skill's name:
 `gc-toolkit` in `gc-toolkit.review-triage`. `gc skill list` prints it in this
 skill's FROM column. The rig's rows come out of `<reviewed_oid>`, not off disk —
@@ -46,7 +46,10 @@ and a branch may change the index it is judged against:
 
 ```bash
 # >>> triage-index-read
-"$(gc <binding> scripts-dir)/review-checks.sh" --show --at "<reviewed_oid>"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" review checks --show --at "<reviewed_oid>"
 # <<< triage-index-read
 ```
 
