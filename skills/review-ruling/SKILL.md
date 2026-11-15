@@ -64,6 +64,21 @@ fix is low-risk and net-positive and declined when it is risky or marginal;
 and a nit, a preference that no grade covers, is answered and not fixed. The
 reason names the grade.
 
+A batch of a person's comments reaches the run as one ask, and each comment in
+it is a human finding naming that ask as its fix unit, which the round's read
+lists under the ask. Rule each comment by its grade, as above, and record that
+ruling on its finding as well as in the round's output, so the comment is
+answered on the PR once the ask closes:
+
+```bash
+"$(gc <binding> scripts-dir)/review-run.sh" finding --finding <finding> --ruling <must-fix|declined|deferred|answered|question> --reason "<the answer, naming the grade>"
+```
+
+A question also names its gate, `--gate <gate>`. A deferred comment's follow-up
+bead is filed by this call, waiting on the PR's bead and taking the PR's target,
+so file no second one with `review-run.sh defer`. The call prints the follow-up,
+which the ruling's reason names.
+
 An ask that carries a ruling the operator made, as a sitting's send-back does,
 is applied as ruled and not graded again.
 

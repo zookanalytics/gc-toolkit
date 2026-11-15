@@ -15,8 +15,11 @@
 # post of the head's comment, or the edit of the one its mark finds, nothing
 # when there is nothing to answer, and nothing in a shadow run; a deferred fix
 # filed waiting on the PR's bead and armed, found rather than filed again; a
-# question put to a gate; the record asking a person when the loop exhausted
-# its attempts, and removing the workspace, which a shadow run keeps; and the
+# question put to a gate; a person's batch, whose human findings the round's
+# read lists and the finding verb rules through finding.sh, a deferral's
+# follow-up taking the PR's target; the record asking a person when the loop
+# exhausted its attempts, closing the human findings whose asks closed, and
+# removing the workspace, which a shadow run keeps; and the
 # reads making each step's worktree in its own part of the workspace, and
 # stopping when it does not land.
 set -uo pipefail
@@ -36,12 +39,13 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 SD="$TMP/scripts"; mkdir -p "$SD"
 cp "$HERE/review-run.sh" "$HERE/review-workspace.sh" "$HERE/gctk-resolve.sh" "$SD/"
 LOG="$TMP/calls.log"; export LOG
-for s in decline.sh human-gate.sh pr-post.sh demo-deliver.sh review-evidence.sh; do
+for s in decline.sh human-gate.sh pr-post.sh demo-deliver.sh review-evidence.sh finding.sh; do
     { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$SD/$s" <<'STUB'
 printf '%s %s\n' "${0##*/}" "$*" >> "$LOG"
 case "${0##*/}" in
     human-gate.sh) echo "tk-gate1" ;;
     pr-post.sh) [ "$1" = comment ] && echo "https://github.com/o/r/pull/7#issuecomment-9" ;;
+    finding.sh) exit "${STUB_RC_FINDING:-0}" ;;
 esac
 exit "${STUB_RC_SIBLING:-0}"
 STUB
@@ -68,7 +72,7 @@ printf 'gc %s\n' "$*" >> "$LOG"
 case "$1 $2" in
     "hook current") echo "${STUB_HELD:-tk-step}" ;;
     "bd update") exit "${STUB_RC_BD_UPDATE:-0}" ;;
-    "bd show") printf '[{"id":"%s","metadata":{"gc.var.repair_target":"rig/gc-toolkit.polecat"}}]\n' "$3" ;;
+    "bd show") printf '[{"id":"%s","metadata":{"gc.var.repair_target":"rig/gc-toolkit.polecat","finding.follow_up":"tk-fu"}}]\n' "$3" ;;
     "bd list") printf '%s\n' "${STUB_LIST:-[]}" ;;
     "bd create") echo '{"id":"tk-new"}' ;;
     "bd dep") ;;
@@ -234,6 +238,33 @@ has "$OUT" "tk-gate1" "and prints the gate"
 run question --key "Bad Key" --message m
 eq "$RC" 64 "a key that is no slug is a usage error"
 
+# --- a person's batch: each comment a human finding, ruled by its grade ----------
+facts review-loop.iteration.1.rule-and-repair repair 1
+STUB_LIST='[{"id":"tk-f1","title":"rename the flag","status":"open","metadata":{"task_kind":"finding","finding.lane":"human","finding.fix_unit":"tk-ask"}},{"id":"tk-f9","title":"a lane finding","status":"open","metadata":{"task_kind":"finding","finding.lane":"correctness"}}]' \
+    run repair
+has "$OUT" "tk-f1 (ask tk-ask, unvalidated): rename the flag" "the round's read lists each human finding the batch's ask carries"
+hasnt "$OUT" "tk-f9" "and no other finding"
+run finding --finding tk-f1 --ruling declined --reason "A nit, P2 at most: the name reads as well as the one suggested, so it is answered and not fixed."
+eq "$RC" 0 "a nit is ruled"
+has "$(cat "$LOG")" "finding.sh set-disposition --finding tk-f1 --anchor tk-pr --disposition declined --reason A nit" "as declined on the finding, answered and not fixed"
+has "$(cat "$LOG")" "--reply A nit, P2 at most" "with its answer as the reply the comment is owed"
+run finding --finding tk-f1 --ruling deferred --reason "The fix reaches the parser, outside this PR's diff."
+eq "$RC/$OUT" "0/tk-fu" "a fix outside the diff is deferred, printing its follow-up"
+has "$(cat "$LOG")" "--disposition deferred --reason The fix reaches the parser" "through finding.sh"
+has "$(cat "$LOG")" "--fix-pool rig/gc-toolkit.polecat" "on the run's repair pool"
+has "$(cat "$LOG")" "gc bd update tk-fu --set-metadata target=main" "and its follow-up takes the PR's target"
+run finding --finding tk-f1 --ruling must-fix --reason "P1: the flag is read before it is set."
+has "$(cat "$LOG")" "--disposition must-fix" "a P1 is must-fix"
+run finding --finding tk-f1 --ruling question --reason "Which name?"
+eq "$RC" 64 "a question names its gate"
+run finding --finding tk-f1 --ruling question --reason "Which name?" --gate tk-gate1
+has "$(cat "$LOG")" "--disposition needs-you --reason Which name? --answer Which name? --visit tk-gate1" "a question rides its gate"
+STUB_RC_FINDING=2 run finding --finding tk-f1 --ruling declined --reason r
+eq "$RC" 2 "a ruling that does not land is run again"
+facts review-loop.iteration.1.rule-and-repair repair 1 true
+run finding --finding tk-f1 --ruling declined --reason r
+eq "$(called finding.sh)" 0 "a shadow run rules nothing on the finding"
+
 # --- deliver ---------------------------------------------------------------------
 facts mol-pr-review-lane.review-loop.iteration.1.triage.item.1.lane lane 1
 echo mp4 > "$TMP/cap.mp4"
@@ -249,11 +280,13 @@ STUB_RECORD="tk-pr: review did not pass at $FIX into main"$'\n'"tk-pr: the loop 
 eq "$RC" 0 "record records the result"
 has "$(cat "$LOG")" "human-gate.sh --subject tk-pr --key review-loop-exhausted --message Review run tk-run exhausted its attempts at $FIX" \
     "and asks a person when the loop exhausted, at the last head it judged"
+has "$(cat "$LOG")" "finding.sh close-answered --anchor tk-pr" "and closes each human finding whose ask it closed"
 if [ -e "$WS" ]; then bad "record removes the run's workspace"; else ok "record removes the run's workspace"; fi
 mkdir -p "$WS"
 facts mol-pr-review.record "" 0 true
 STUB_RECORD="tk-pr: the loop exhausted its attempts at $FIX" run record
 eq "$(called human-gate.sh)" 0 "a shadow run's record files no gate"
+eq "$(called finding.sh)" 0 "and closes no finding"
 if [ -d "$WS" ]; then ok "and keeps its workspace for the comparison"; else bad "and keeps its workspace for the comparison"; fi
 
 # --- the reads make each step's worktree in its part ----------------------------
