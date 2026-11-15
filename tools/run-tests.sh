@@ -74,10 +74,11 @@
 # one tally summed over the parts (harness_run_parts in the same harness).
 #
 # Each file runs in its own process group with its output captured to a file,
-# never a pipe. A file that leaves a background child behind (pr-facts.test.sh
-# does) therefore cannot wedge the runner on a pipe that never reaches EOF, and
-# the group is killed once the file's own process exits so the child cannot
-# outlive the file that spawned it.
+# never a pipe. A file that leaves a background child behind therefore cannot
+# wedge the runner on a pipe that never reaches EOF. Once the file's own
+# process exits, the runner sends the group TERM, which ends a child that
+# leaves TERM to its default action. A child that handles TERM runs its handler
+# instead, and may outlive the file.
 #
 # The suite yields to whatever else the host runs, such as a city's agents and
 # their bead calls. A file forks a stub for every gc and bd call it makes, so at
@@ -115,10 +116,14 @@
 # /var, a symlink to /private/var, so there a path built from it and the same
 # path resolved compare unequal. What the run puts under TMPDIR, such as the
 # suite's own temp and the work tree of any Go build it starts, so lands in a
-# directory that names its owner. The runner removes it once the run ends. A
-# run still going when the runner itself ends keeps it while its process lives,
-# and build-scratch-reap.sh removes it once that process is gone. A file run
-# directly, outside the runner, gets the caller's TMPDIR as it is.
+# directory that names its owner. The runner removes it once the run ends and
+# no process is left in the run's group. A process the file left running that
+# the group's TERM has not ended yet, such as one still in its TERM handler,
+# may still use the directory, so the runner keeps the directory and looks at
+# it again just before exiting. A directory still kept then, and the directory
+# of a run still going when the runner itself ends, stays while any process of
+# the run's group lives, and build-scratch-reap.sh removes it once none does. A
+# file run directly, outside the runner, gets the caller's TMPDIR as it is.
 #
 # Every file runs with the test floor, tools/test-floor, at the front of PATH.
 # A file that stubs gc, bd or gh puts its stub directory in front of that, so
@@ -489,7 +494,15 @@ fi
 unset "${!GC_@}" "${!BEADS_@}"
 
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")" || { echo "run-tests: mktemp failed" >&2; exit 2; }
-trap 'rm -rf "$LOGDIR"' EXIT
+# On exit the logs go, and so does each run directory kept for a process of
+# its group (drop_run_tmp, below) whose group has emptied since.
+declare -a KEPT_TMP=()
+on_exit() {
+  local p
+  for p in "${KEPT_TMP[@]}"; do drop_run_tmp "$p"; done
+  rm -rf "$LOGDIR"
+}
+trap on_exit EXIT
 
 total="${#RUN_FILE[@]}"
 [ "$JOBS" -gt "$total" ] && JOBS="$total"
@@ -503,8 +516,8 @@ if [ "$QUIET" -eq 0 ]; then
 fi
 
 # Monitor mode places each background job in its own process group, so
-# `kill -- -<leader-pid>` reaps a job's whole tree — including any child it
-# leaked — without touching the runner's own group.
+# `kill -- -<leader-pid>` signals a job's whole tree, a child it leaked
+# included, without touching the runner's own group.
 set -m
 
 declare -A PID_IDX=() PID_START=()
@@ -521,11 +534,28 @@ if ionice -c 2 -n 7 true >/dev/null 2>&1; then
 fi
 
 # The temp directory of the run whose process is <pid> (see the header), and its
-# removal once the run has ended and its group is reaped. Go writes some of its
-# files read-only, so write permission goes back first.
+# removal once the run has ended. That process leads the run's process group,
+# so the directory goes only once the group has no process left. A run whose
+# group still has one, such as a process the group's TERM has not ended yet,
+# keeps its directory, and its pid goes into KEPT_TMP for the look on exit. Go
+# writes some of its files read-only, so write permission goes back first.
 run_tmp() { printf '%s/run.%s' "$tmp_real" "$1"; }
+
+# group_lives <pgid> — whether any process is left in the group. kill -0
+# reaches a live member of this uid. It is refused for a member this uid cannot
+# signal, and on macOS for one that has ended and is not yet reaped, and ps,
+# which lists every process, answers for those.
+group_lives() {
+  local ids
+  kill -0 -- "-$1" 2>/dev/null && return 0
+  ids="$(ps -A -o pgid= 2>/dev/null)"
+  case $'\n'"${ids// /}"$'\n' in *$'\n'"$1"$'\n'*) return 0 ;; esac
+  return 1
+}
+
 drop_run_tmp() { # <pid>
   local d
+  if group_lives "$1"; then KEPT_TMP+=("$1"); return 0; fi
   d="$(run_tmp "$1")"
   chmod -R u+w "$d" 2>/dev/null
   rm -rf -- "$d" 2>/dev/null
@@ -538,6 +568,8 @@ drop_run_tmp() { # <pid>
 # the index are a command the run starts through, such as LOW_PRIORITY. The
 # subshell's pid is the run's own: each command after it replaces it in place
 # (exec, nice, ionice) until timeout, which lives as long as the file it runs.
+# Monitor mode makes the subshell the leader of the run's process group, so
+# the group's id is that pid too.
 spawn() { # <run-index> [<command>...]
   local t="${RUN_FILE[$1]}" part="${RUN_PART[$1]}" log="$LOGDIR/$1.log"
   shift
@@ -570,7 +602,7 @@ launch() {
 finish() {
   local pid="$1" rc="$2" idx dur rel status
   idx="${PID_IDX[$pid]}"
-  kill -- -"$pid" 2>/dev/null   # reap anything the file left running in its group
+  kill -- -"$pid" 2>/dev/null   # TERM whatever the file left running in its group
   drop_run_tmp "$pid"
   dur=$(( SECONDS - PID_START[$pid] ))
   rel="$(label "$idx")"
@@ -586,15 +618,16 @@ finish() {
   unset 'PID_IDX[$pid]' 'PID_START[$pid]'
 }
 
-# Re-run one run serially (no sibling jobs) at the caller's priority, reusing
-# the same timeout and process-group reap as the parallel path. Used after the
-# parallel wave to tell a parallel-contention false failure from a real one.
+# Re-run one run serially (no sibling jobs) at the caller's priority, with the
+# same timeout, TERM to its group and removal of its temp as the parallel path.
+# Used after the parallel wave to tell a parallel-contention false failure from
+# a real one.
 rerun_serial() {
   local idx="$1" pid rc
   spawn "$idx"
   pid=$!
   wait "$pid"; rc=$?
-  kill -- -"$pid" 2>/dev/null   # reap anything the file left in its group
+  kill -- -"$pid" 2>/dev/null   # TERM whatever the file left in its group
   drop_run_tmp "$pid"
   return "$rc"
 }

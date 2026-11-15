@@ -35,6 +35,12 @@
 #     removes it once the run ends, a run its timeout ended included; the same
 #     file run directly gets the TMPDIR as given; a TMPDIR that names no
 #     directory is a usage error;
+#   - a process the file leaves in the run's group that is still in its TERM
+#     handler when the run ends still finds the run's directory, after the
+#     parallel wave and after a serial re-run alike, and when kill -0 cannot
+#     reach it and only ps shows it; the runner removes the directory on exit
+#     once that process has ended, and leaves it in place while one is still
+#     running then;
 #   - every file runs with the test floor at the front of PATH: gc, bd and gh
 #     resolve to it and git does not, and a call made after a file's stub
 #     directory is removed is refused there rather than reaching the binary
@@ -411,11 +417,12 @@ eq "$RC" 0 "a file runs with TMPDIR unset"
 got="$(cat "$STATE/tmpdir")"
 eq "${got%/run.*}" "$(cd /tmp && pwd -P)" "and its TMPDIR sits in the physical path of /tmp"
 # Two runs at once have two directories, and a run its timeout ends loses its
-# own as well.
+# own as well. The file execs its sleep, so the timeout's TERM leaves no
+# process in the run's group, and the directory goes when the run ends.
 cat > "$FIX/tmpdirslow.test.sh" <<'F'
 #!/usr/bin/env bash
 printf '%s\n' "$TMPDIR" > "$RUNTESTS_FIXTURE_STATE/tmpdirslow"
-sleep 20
+exec sleep 20
 F
 reset_state
 OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" TMPDIR="$TMP/tmp-link/" "$RUNNER_COPY" -j 2 -t 2 --no-retry "$FIX/tmpdir.test.sh" "$FIX/tmpdirslow.test.sh" 2>&1)"; RC=$?
@@ -430,6 +437,81 @@ TMPDIR="$TMP/no-such-dir" run "$FIX/tmpdir.test.sh"
 eq "$RC" 2 "a TMPDIR that names no directory is a usage error"
 has "$OUT" "cannot resolve the temp directory '$TMP/no-such-dir'" "…and named"
 if [ -e "$STATE/tmpdir" ]; then bad "and no file runs" "the fixture ran"; else ok "and no file runs"; fi
+
+echo "── tmpdir: a process the file leaves in its group keeps the run's directory while it lives ──"
+# The fixture writes a token under its TMPDIR and leaves a child in the run's
+# group that handles TERM. The runner sends the group TERM once the file's own
+# process exits, and the child's handler then waits LEAK_GRACE seconds, looks
+# for the token, and reports what it found in the state directory, outside
+# TMPDIR. Run n of the file fails while n is below LEAK_PASS_FROM. A child no
+# TERM reaches ends by itself within 30 seconds. These runs keep their temp
+# under the suite's own.
+cat > "$FIX/leak.test.sh" <<'F'
+#!/usr/bin/env bash
+s="$RUNTESTS_FIXTURE_STATE"
+c="$s/leak.count"
+n=$(( $(cat "$c" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$c"
+echo token > "$TMPDIR/token"
+printf '%s\n' "$TMPDIR" > "$s/leak.$n.tmpdir"
+(
+  trap 'sleep "$LEAK_GRACE"; if [ -e "$TMPDIR/token" ]; then echo present; else echo missing; fi > "$s/leak.$n.read"; exit 0' TERM
+  : > "$s/leak.$n.ready"
+  i=0; while [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+) </dev/null >/dev/null 2>&1 &
+i=0; while [ ! -e "$s/leak.$n.ready" ] && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i + 1)); done
+[ "$n" -ge "${LEAK_PASS_FROM:-1}" ]
+F
+cat > "$FIX/leakslow.test.sh" <<'F'
+#!/usr/bin/env bash
+exec sleep 3
+F
+# await_reports <file>... — wait up to 20 seconds for each child's report.
+await_reports() {
+  local f i
+  for f in "$@"; do
+    i=0; while [ ! -s "$f" ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
+  done
+}
+mkdir -p "$TMP/leak-tmp"
+reset_state
+# The wave's run fails and its serial re-run passes, so each completion path
+# meets a child still in its handler.
+TMPDIR="$TMP/leak-tmp" LEAK_GRACE=3 LEAK_PASS_FROM=2 run "$FIX/leak.test.sh"
+eq "$RC" 0 "a file that leaves a child in its group recovers on its serial re-run"
+await_reports "$STATE/leak.1.read" "$STATE/leak.2.read"
+eq "$(cat "$STATE/leak.1.read" 2>/dev/null)" present \
+  "a child still in its TERM handler after the parallel wave finds the run's temp"
+eq "$(cat "$STATE/leak.2.read" 2>/dev/null)" present "…and after the serial re-run"
+d1="$(cat "$STATE/leak.1.tmpdir" 2>/dev/null)"; d2="$(cat "$STATE/leak.2.tmpdir" 2>/dev/null)"
+if [ -n "$d1" ] && [ -d "$d1" ] && [ -n "$d2" ] && [ -d "$d2" ]; then
+  ok "a directory whose group still has a process when the runner exits is left in place"
+else
+  bad "a directory whose group still has a process when the runner exits is left in place" "got '$d1' and '$d2'"
+fi
+reset_state
+# The child's handler ends well before the slower sibling, and so before the
+# runner exits.
+TMPDIR="$TMP/leak-tmp" LEAK_GRACE=0.3 run "$FIX/leak.test.sh" "$FIX/leakslow.test.sh"
+eq "$RC" 0 "a file that leaves a child in its group passes beside a slower one"
+await_reports "$STATE/leak.1.read"
+eq "$(cat "$STATE/leak.1.read" 2>/dev/null)" present "a child whose TERM handler ends before the runner finds the run's temp"
+d1="$(cat "$STATE/leak.1.tmpdir" 2>/dev/null)"
+if [ -n "$d1" ] && [ ! -e "$d1" ]; then ok "the runner removes that directory on exit, once its group is empty"
+else bad "the runner removes that directory on exit, once its group is empty" "got '$d1'"; fi
+# kill -0 is refused for a member this uid cannot signal, and on macOS for one
+# that has ended and is not yet reaped. A stand-in for the kill builtin, which
+# the runner imports from its environment, refuses every probe of a group, so
+# only ps can show the child.
+REFUSE_GROUP_PROBE='() { [ "${1-}" = -0 ] && [ "${2-}" = -- ] && return 1; builtin kill "$@"; }'
+reset_state
+OUT="$(env "BASH_FUNC_kill%%=$REFUSE_GROUP_PROBE" RUNTESTS_FIXTURE_STATE="$STATE" TMPDIR="$TMP/leak-tmp" LEAK_GRACE=2 \
+  "$RUNNER_COPY" -j 2 -t 30 "$FIX/leak.test.sh" "$FIX/tmpdir.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "both files pass while kill -0 cannot reach a group"
+await_reports "$STATE/leak.1.read"
+eq "$(cat "$STATE/leak.1.read" 2>/dev/null)" present "a child kill -0 cannot reach is found through ps, and finds the run's temp"
+d1="$(cat "$STATE/tmpdir" 2>/dev/null)"
+if [ -n "$d1" ] && [ ! -e "$d1" ]; then ok "and a run that leaves no process still loses its directory"
+else bad "and a run that leaves no process still loses its directory" "got '$d1'"; fi
 
 echo "── floor: every file runs above the test floor ──"
 # CANARY stands in for the directory holding the real gc, bd and gh: each one

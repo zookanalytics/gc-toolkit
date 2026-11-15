@@ -69,26 +69,43 @@ for longer than any wait.
 
 The reaper removes an entry only when its name records its owner's pid, that
 pid is gone, and no process holds the tree, all re-read just before the
-remove. It never removes a templated name. Such temp belongs to the run that
-made it, which removes it when it ends.
+remove. A `run.<pid>` also waits until the process group whose id is that pid
+has no process left. It never removes a templated name. Such temp belongs to
+the run that made it, which removes it when it ends.
 
 `tools/run-tests.sh` gives every run a temp directory of its own and runs it
 with TMPDIR set to it: `run.<pid>` in the physical path of the caller's temp
 directory. The pid is the run's own process. The runner's subshell `exec`s
 through `nice` and `ionice` into `timeout`, which lives as long as the file it
 runs. A suite's `gctk-*` temp and any Go build it starts land inside. The
-runner removes the directory once the run ends and its process group is
-reaped, a run its timeout ended included. A run still going when the runner
-itself is ended keeps its directory while its process lives, and the reaper's
-dead-pid rule removes it after that. The form is the one the build scripts
-already use for their Go scratch (`run.$$` under `/var/tmp/gotmp`), so the
-reaper gains no new name.
+pid also leads the run's process group, and a process the file leaves running
+stays in that group.
+
+Once the run's process exits, the runner sends the group TERM and removes the
+directory when the group has no process left, a run its timeout ended
+included. A process that has not ended by then, such as one still in its TERM
+handler, may still read or write the directory. So the runner keeps the
+directory, looks again just before it exits, and removes it then if the group
+has emptied. A directory still kept at that point, and the directory of a run
+still going when the runner itself is ended, waits for the reaper, which
+removes a `run.<pid>` once its pid and its group are both gone. The form is
+the one the build scripts already use for their Go scratch (`run.$$` under
+`/var/tmp/gotmp`), so the reaper gains no new name. A build script's pid
+leads no group of its own unless something started it as a job, so for that
+tree the group check adds nothing.
+
+The runner tells an empty group from a live one with `kill -0` to the group,
+and with ps where that is refused. `kill -0` is refused for a member this uid
+cannot signal, and on macOS for a member that has ended and is not yet
+reaped, which this host's kill returned EPERM for (probed 2026-11-15). ps
+lists both, so they count as members, and the directory waits a moment longer
+for a process that has ended than it has to.
 
 What each producer gets:
 
 - A suite run through the runner, which is every pre-flight, self-review and
   refinery gate: its temp sits in the run's directory, removed when the run
-  ends, or by the reaper once the run's process is gone.
+  ends and nothing is left in its group, or by the reaper once nothing is.
 - A suite run directly, a pack script's `gctk-*` temp, and a formula's
   hand-off file: no pass removes them while they live. What a run ended first
   leaves waits for the host's own temp cleanup.
@@ -150,6 +167,14 @@ does not touch it.
 - A descriptor that `test-harness.sh` or the runner holds on a suite's dir.
   That still guesses from holders, and it leaves a suite run directly, a Go
   build and a hand-off between shell blocks exposed.
+- Removing a run's directory as soon as the runner has sent its group TERM,
+  the second version of this change. A signal does not end a process at once.
+  At signoff a child whose TERM handler read a file under its TMPDIR found it
+  gone, while the runner reported the file passed (finding `tk-hlvhiww`).
+- Waiting for the group to empty after the TERM, and sending KILL past a
+  grace, as `timeout -k 5` does. That puts a fixed wait into every completion
+  that leaves a process behind. A member in uninterruptible sleep can outlast
+  the grace, so the directory would still need the group check before it goes.
 
 The workarounds that kept temp out of the reaper's reach go, since nothing
 removes a `gctk-*` entry now: the `exec 9>` hold in `doctor/check-cadence-live`
@@ -179,20 +204,43 @@ host temp once its owner ends, or that names a session's temp:
 
 None removes build or test temp, and none can give a session a TMPDIR of its
 own, so the pack's reaper stays and the owner is named where the pack sets
-TMPDIR, in `tools/run-tests.sh`. The change adds no flag, environment key or
-output field. The reaper's `--verbose` reasons gain `skip (records no owner)`.
+TMPDIR, in `tools/run-tests.sh`.
+
+For whether a process group still has a member, searched `gastownhall/gascity`
+main at `d2254b579`. `alive` in `internal/processgroup/processgroup_unix.go`
+counts a group as alive when `kill(-pgid, 0)` succeeds or fails with EPERM,
+and `Terminate` in the same file sends the group TERM, waits, and sends KILL.
+The package is Go that Gas City's own commands call, such as order dispatch and
+the supervisor, and no `gc` command exposes it. So the runner and the reaper
+compose the same rule from `kill -0` to the group and `ps -A`, and wait for no
+group, as the weighed option above explains.
+
+The change adds no flag, environment key or output field. The reaper's
+`--verbose` reasons gain `skip (records no owner)`,
+`keep (group <pid> has a process left)` and
+`keep (group <pid> not shown empty)`.
 
 ## Verified
 
-- `build-scratch-reap.test.sh`: 42 passed, 0 failed. A month-old unheld
+- `build-scratch-reap.test.sh`: 50 passed, 0 failed. A month-old unheld
   `go-build*`, `go-link*` and `gctk-*` entry is kept, while every dead pid's
-  tree goes. Main's holder rule for templated names fails 7 cases, and dropping
-  the pid gate fails 1.
-- `tools/run-tests.test.sh`: 150 passed, 0 failed. A run's TMPDIR is
+  tree goes. A `run.<pid>` whose pid is gone is kept while a process lives on
+  in its group, and goes once that process has ended. A `ps -A` listing that
+  does not show the reaper itself keeps it too. Main's script fails 11 cases,
+  and dropping the pid gate fails 1. The script before the group check fails
+  4, dropping the check that the listing shows the reaper fails 2, and reading
+  "cannot tell" as empty fails 1.
+- `tools/run-tests.test.sh`: 160 passed, 0 failed. A run's TMPDIR is
   `run.<pid>` in the caller's physical temp path, it exists while the file runs
   and its pid is live then, two runs at once have two, and the runner removes
-  it after a pass and after a timeout. Skipping the removal fails 2 cases, and
-  reading `$BASHPID` inside the command substitution fails 3.
+  it after a pass and after a timeout. A child still in its TERM handler when
+  its run ends finds the run's temp, after the parallel wave, after a serial
+  re-run, and when only ps can see it. The runner removes that directory on
+  exit once the child has ended, and leaves it while one still runs. Skipping
+  the removal fails 4 cases, and reading `$BASHPID` inside the command
+  substitution fails 5. The runner that removed the directory right after the
+  TERM fails 5. Dropping the group check from the serial re-run fails 2, from
+  the parallel wave 4, the look on exit 1, and the ps fallback 1.
 - A dry run of main's script on the live roots on 2026-11-15, during the first
   version of this change, listed two `go-build*` trees modified two minutes
   earlier as "would reap".

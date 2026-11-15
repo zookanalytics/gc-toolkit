@@ -50,7 +50,18 @@ hold_open() { ( exec 9>"$1"; exec sleep 300 ) </dev/null >/dev/null 2>&1 & HOLDE
 DEAD1="$(dead_pid)"; DEAD2="$(dead_pid)"; DEAD3="$(dead_pid)"; DEADH="$(dead_pid)"
 DEADN1="$(dead_pid)"; DEADN2="$(dead_pid)"; DEADN3="$(dead_pid)"; DEADN4="$(dead_pid)"
 DEADP="$(dead_pid)"; DEADS="$(dead_pid)"; DEADL1="$(dead_pid)"; DEADL2="$(dead_pid)"
+DEADG="$(dead_pid)"
 LIVE1="$(live_pid)"; LIVERUN="$(live_pid)"; HOLDERS+=("$LIVE1" "$LIVERUN")
+# A process group whose leader has ended while a process it started lives on
+# in it, as a run's group does when its file leaves a child running. Job
+# control makes the outer subshell a group leader, and its own background child
+# stays in that group, since a subshell runs without job control.
+set -m
+( ( exec sleep 300 ) </dev/null >/dev/null 2>&1 & echo "$!" >"$TMP/orphan.member" ) </dev/null >/dev/null 2>&1 &
+ORPHAN=$!
+set +m
+wait "$ORPHAN" 2>/dev/null || true
+ORPHAN_MEMBER="$(cat "$TMP/orphan.member")"; HOLDERS+=("$ORPHAN_MEMBER")
 
 # --- dead scratch: must be reaped. The pid names the owner, so a tree goes on
 #     its dead pid however recently it was written. ---
@@ -62,6 +73,7 @@ mkdir -p "$ROOT/run.${DEADS}"; head -c 65536 /dev/zero >"$ROOT/run.${DEADS}/obj"
 # --- live or held: must be kept ---
 mkdir -p "$ROOT/gct${LIVE1}-333"            # pid alive
 mkdir -p "$ROOT/run.${LIVERUN}"             # pid alive
+mkdir -p "$ROOT/run.${ORPHAN}";             : >"$ROOT/run.${ORPHAN}/f"   # pid gone, its group not empty
 mkdir -p "$ROOT/gct1-555"                   # pid 1: alive, and another uid's, so kill -0 is refused
 mkdir -p "$ROOT/gct${DEADH}-444"            # dead pid BUT an open holder inside
 hold_open "$ROOT/gct${DEADH}-444/.lock"
@@ -122,6 +134,9 @@ has "$OUT" "skip (records no owner): $RROOT/go-build99887766" "…and says it re
 
 kept "$ROOT/gct${LIVE1}-333"      "keeps gct<pid> whose pid is alive"
 kept "$ROOT/run.${LIVERUN}"       "keeps run.<pid> whose pid is alive"
+eq "$(ps -o pgid= -p "$ORPHAN_MEMBER" 2>/dev/null | tr -d ' ')" "$ORPHAN" "the fixture's child lives on in the group of a leader that has ended"
+kept "$ROOT/run.${ORPHAN}"        "keeps run.<pid> whose pid is gone while its process group still has a process"
+has "$OUT" "keep (group ${ORPHAN} has a process left): $RROOT/run.${ORPHAN}" "…and says the group has a process left"
 kept "$ROOT/gct1-555"             "keeps gct<pid> whose live pid another uid owns"
 kept "$ROOT/gct${DEADH}-444"      "keeps a dead-pid tree that still has an open holder"
 kept "$ROOT/gct12x-777"           "keeps a gct name whose pid is non-numeric (unparseable)"
@@ -133,6 +148,16 @@ kept "$ROOT/gct${DEADN1}"         "keeps gct<pid> with no -<n> suffix (not an ow
 kept "$ROOT/gct-${DEADN2}"        "keeps gct-<pid> with no -<n> suffix (not an owned form)"
 kept "$ROOT/gct${DEADN3}-7x"      "keeps gct<pid>-<n> whose run-counter is non-numeric"
 kept "$ROOT/run.${DEADN4}-9"      "keeps run.<pid>-<n> (run owns no -<n> suffix)"
+
+# --- once the group's last process has ended, its run.<pid> goes ---
+# Its parent has ended, so the system reaps it once it ends, and kill -0
+# answers for its pid until then. It leaves HOLDERS, so the cleanup never
+# signals a pid the system may have handed on.
+kill "$ORPHAN_MEMBER" 2>/dev/null || true
+i=0; while kill -0 "$ORPHAN_MEMBER" 2>/dev/null && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i + 1)); done
+rest=(); for p in "${HOLDERS[@]}"; do [ "$p" = "$ORPHAN_MEMBER" ] || rest+=("$p"); done; HOLDERS=("${rest[@]}")
+bash "$SUT" --root "$ROOT" --no-lock >/dev/null 2>&1
+gone "$ROOT/run.${ORPHAN}"        "reaps that run.<pid> once its group has no process left"
 
 # --- refuses to reap when lsof cannot be trusted ---
 FAKEBIN="$TMP/fakebin"; mkdir -p "$FAKEBIN"
@@ -156,6 +181,22 @@ kept "$ROOT/gct${DEADP}-888"  "a ps that cannot list this process keeps a dead p
 has "$OUT" "keep (pid '${DEADP}' not shown gone)" "and says the pid was not shown gone"
 bash "$SUT" --root "$ROOT" --no-lock >/dev/null 2>&1
 gone "$ROOT/gct${DEADP}-888"  "with ps answering, the same dead pid's tree is reaped"
+
+# --- a ps listing that does not show this process shows no group empty ---
+# kill -0 finds no member in a group that has none, so the listing decides. A
+# stand-in answers `ps -A` with an empty listing and passes the pid gate's own
+# calls to the real ps. The run.<pid> is kept, and with the listing answering,
+# the same tree goes.
+NOLIST="$TMP/nolist"; mkdir -p "$NOLIST"
+printf '#!/bin/sh\ncase " $* " in *" -A "*) exit 0 ;; esac\nexec %s "$@"\n' "$(command -v ps)" >"$NOLIST/ps"; chmod +x "$NOLIST/ps"
+mkdir -p "$ROOT/run.${DEADG}";             : >"$ROOT/run.${DEADG}/f"
+RC=0
+OUT="$(PATH="$NOLIST:$PATH" bash "$SUT" --root "$ROOT" --no-lock --verbose 2>&1)" || RC=$?
+eq "$RC" "0" "a pass whose ps lists no process still exits 0"
+kept "$ROOT/run.${DEADG}"     "a listing that does not show this process keeps a dead pid's run.<pid>"
+has "$OUT" "keep (group ${DEADG} not shown empty)" "and says the group was not shown empty"
+bash "$SUT" --root "$ROOT" --no-lock >/dev/null 2>&1
+gone "$ROOT/run.${DEADG}"     "with the listing answering, the same run.<pid> is reaped"
 
 # --- the single-flight lock ---
 # A lock another pass holds skips this one. A holder past the stall bound, and a
