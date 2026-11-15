@@ -1423,9 +1423,10 @@ func TestARecordThatNamesNoPROfTheRigsGetsNoLabel(t *testing.T) {
 }
 
 // For an exception on an open PR whose gate files, a call that fails, and one
-// the run's deadline skips, each keep the marker with why. The next run finds
-// the gate open, reads the PR, writes its labels and then clears the marker
-// and the error.
+// the run's deadline skips, each clear the marker and owe the call, with why.
+// A later run makes the owed call alone: it asks for no gate and reads the PR
+// once, makes the call under the lock, and then clears the key and the error.
+// A call that fails again keeps the key for the run after.
 func TestAnExceptionsLabelsThatDidNotLandAreWrittenByTheNextRun(t *testing.T) {
 	for _, how := range []string{"the call failed", "the deadline passed"} {
 		t.Run(how, func(t *testing.T) {
@@ -1454,36 +1455,137 @@ func TestAnExceptionsLabelsThatDidNotLandAreWrittenByTheNextRun(t *testing.T) {
 				wants(t, d)
 			}
 			is(t, o, pr.ActExcepted)
-			says(t, o, "and the marker stays for the next run")
+			says(t, o, "and the call is owed to a later run, which reads nothing else of the record")
 			b := d.row(t)
-			meta(t, b, map[string]string{"merge_result": record.Invalid, "pr_reconcile_pending": "true"})
+			meta(t, b, map[string]string{"merge_result": record.Invalid, "pr_reconcile_pending": "<absent>",
+				"pr_status_label_owed": "true"})
 			if !strings.Contains(b.Metadata["pr_reconcile_error"], record.Invalid+": the human gate is filed, but") {
 				t.Fatalf("the exception recorded the error %q", b.Metadata["pr_reconcile_error"])
 			}
 			made := len(d.labels.made())
 			n := len(d.github.Reads())
+			d.labels.fail = 1
 			o = d.once(t)
-			is(t, o, pr.ActExcepted)
-			says(t, o, "the exception an earlier run recorded stands behind its gate")
-			if g := d.gates.list(); !slices.Equal(g, []string{bead + " " + record.Invalid, bead + " " + record.Invalid}) {
-				t.Fatalf("gates asked for %v, want the one key twice: filed, then found open", g)
+			is(t, o, pr.ActRetry)
+			says(t, o, "the PR's labels did not land", "and the call stays owed to the next run")
+			meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>", "pr_status_label_owed": "true"})
+			is(t, d.once(t), pr.ActSettled)
+			if g := d.gates.list(); !slices.Equal(g, []string{bead + " " + record.Invalid}) {
+				t.Fatalf("gates asked for %v, want the first run's filing alone", g)
 			}
-			if reads := d.github.Reads()[n:]; !slices.Equal(reads, []string{"PullRequest"}) {
-				t.Fatalf("the next run read %v, want the PR's read alone", reads)
+			if reads := d.github.Reads()[n:]; !slices.Equal(reads, []string{"PullRequest", "PullRequest"}) {
+				t.Fatalf("the later runs read %v, want the PR's read alone in each", reads)
 			}
-			if got := d.labels.made()[made:]; !slices.Equal(got, []string{"reconcile " + bead + " [status: working,bug]"}) {
-				t.Fatalf("the next run called the label's writer %v", got)
+			call := "reconcile " + bead + " [status: working,bug]"
+			if got := d.labels.made()[made:]; !slices.Equal(got, []string{call, call}) {
+				t.Fatalf("the later runs called the label's writer %v", got)
 			}
-			if call := d.labels.last(t); !call.locked || call.gates != 2 || call.row.Metadata["pr_reconcile_pending"] != "true" {
-				t.Fatalf("the next run's call ran under the lock %v with %d gates asked and the marker %q, want it "+
-					"under the lock once the gate is found, before the marker clears", call.locked, call.gates,
-					call.row.Metadata["pr_reconcile_pending"])
+			if c := d.labels.last(t); !c.locked || c.row.Metadata["pr_status_label_owed"] != "true" {
+				t.Fatalf("the owed call ran under the lock %v with the key %q, want it under the lock before the key "+
+					"clears", c.locked, c.row.Metadata["pr_status_label_owed"])
 			}
-			meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>", "pr_reconcile_error": "<absent>"})
+			b = d.row(t)
+			if b.Status != "blocked" {
+				t.Fatalf("the owed call left the bead %s", b.Status)
+			}
+			meta(t, b, map[string]string{"merge_result": record.Invalid, "pr_status_label_owed": "<absent>",
+				"pr_reconcile_error": "<absent>"})
 			if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 {
 				t.Fatalf("a run after the labels landed read %+v", out)
 			}
 		})
+	}
+}
+
+// A person decides an exception's record once its gate files, so a call of
+// the label's writer still owed then judges nothing of it. A merge of a head
+// the refinery did not validate files its gate, and its clear fails. The person
+// checks the merge, clears the gate and closes the bead as landed, as the
+// gate's message says. The next run leaves the bead closed and asks for no
+// gate: it reads the PR, takes its labels off and clears what it owed.
+func TestABeadAPersonClosedAsLandedAfterItsGateFiledStaysClosed(t *testing.T) {
+	d := labeled(t)
+	mergedOnGitHub(d, other)
+	d.labels.fail = 1
+	o := d.once(t)
+	is(t, o, pr.ActExcepted)
+	says(t, o, "the PR's labels did not land")
+	if g := d.gates.list(); !slices.Equal(g, []string{bead + " " + record.MergedUnvalidatedHead}) {
+		t.Fatalf("gates filed %v", g)
+	}
+	b := d.row(t)
+	b.Status = "closed"
+	d.store.Put(b)
+	n := len(d.github.Reads())
+	is(t, d.once(t), pr.ActSettled)
+	b = d.row(t)
+	if b.Status != "closed" {
+		t.Fatalf("the next run left the person's close %s", b.Status)
+	}
+	if g := d.gates.list(); len(g) != 1 {
+		t.Fatalf("gates asked for %v, want the first run's filing alone", g)
+	}
+	if reads := d.github.Reads()[n:]; !slices.Equal(reads, []string{"PullRequest"}) {
+		t.Fatalf("the next run read %v, want the PR's read alone", reads)
+	}
+	wants(t, d, "clear [status: working,bug]", "clear [status: working,bug]")
+	meta(t, b, map[string]string{"merge_result": record.MergedUnvalidatedHead, "pr_reconcile_pending": "<absent>",
+		"pr_status_label_owed": "<absent>", "pr_reconcile_error": "<absent>"})
+	if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 {
+		t.Fatalf("a run after the clear read %+v", out)
+	}
+}
+
+// An exception on an open PR files its gate, and its call fails. The person
+// clears the gate, and the bead stays blocked while they decide what becomes of
+// the work. Any gate asked for under the key now would be filed anew, so the
+// next run asks for none: it reads the PR, writes its labels and clears what it
+// owed, leaving the bead as the person has it.
+func TestAGateAPersonClearedIsNotFiledAgain(t *testing.T) {
+	d := labeled(t)
+	d.pr.Facts.HeadRefName = "polecat/other"
+	d.labels.fail = 1
+	is(t, d.once(t), pr.ActExcepted)
+	if g := d.gates.list(); !slices.Equal(g, []string{bead + " " + record.Invalid}) {
+		t.Fatalf("gates filed %v", g)
+	}
+	n := len(d.github.Reads())
+	is(t, d.once(t), pr.ActSettled)
+	if g := d.gates.list(); len(g) != 1 {
+		t.Fatalf("gates asked for %v, want the first run's filing alone", g)
+	}
+	if reads := d.github.Reads()[n:]; !slices.Equal(reads, []string{"PullRequest"}) {
+		t.Fatalf("the next run read %v, want the PR's read alone", reads)
+	}
+	wants(t, d, "reconcile "+bead+" [status: working,bug]", "reconcile "+bead+" [status: working,bug]")
+	b := d.row(t)
+	if b.Status != "blocked" || b.Assignee != refinery {
+		t.Fatalf("the next run left the bead %s and assigned to %q", b.Status, b.Assignee)
+	}
+	meta(t, b, map[string]string{"merge_result": record.Invalid, "pr_reconcile_pending": "<absent>",
+		"pr_status_label_owed": "<absent>", "pr_reconcile_error": "<absent>"})
+}
+
+// A closed bead whose exception's gate never filed still carries the marker,
+// so a run reads it as any close that took no lock: with no verified merge on
+// its record, it is reopened as blocked behind a gate.
+func TestAClosedBeadWhoseExceptionsGateNeverFiledIsReopened(t *testing.T) {
+	d := labeled(t)
+	mergedOnGitHub(d, other)
+	d.gates.err = errors.New("human-gate: could not read the bead's gates")
+	is(t, d.once(t), pr.ActRetry)
+	b := d.row(t)
+	b.Status = "closed"
+	d.store.Put(b)
+	d.gates.err = nil
+	is(t, d.once(t), pr.ActExcepted)
+	b = d.row(t)
+	if b.Status != "blocked" {
+		t.Fatalf("a closed bead whose gate never filed was left %s", b.Status)
+	}
+	meta(t, b, map[string]string{"merge_result": record.LegacyClosed, "pr_reconcile_pending": "<absent>"})
+	if g := d.gates.list(); !slices.Equal(g, []string{bead + " " + record.LegacyClosed}) {
+		t.Fatalf("gates filed %v", g)
 	}
 }
 

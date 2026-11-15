@@ -892,10 +892,14 @@ in a note, and nothing else written.
 ([state-machine.md](state-machine.md#the-status-label-github-projection)). It
 passes the labels the read found on the PR, so the script reads none itself. A
 check's call runs once its write has landed, with the lock free. A merge's
-clear runs before the write that closes the bead, and an exception's call once
-its gate files, and each keeps the marker until it lands, so a later run reads
-the PR again and makes the call. An exception whose check read no PR reads it
-for its labels, and a record whose URL names no PR in the rig's repository gets
+clear runs before the write that closes the bead, which keeps the marker until
+the clear lands, so a later run reads the PR again and makes the call. An
+exception's call runs once its gate files, and the marker clears then whether or
+not the call lands, because a person decides the record from then on. A call
+that did not land is owed through `pr_status_label_owed`: a later run reads the
+PR, makes the call and clears the key, and it asks for no gate and judges
+nothing else of the record. An exception whose check read no PR reads it for
+its labels, and a record whose URL names no PR in the rig's repository gets
 none. No call starts past the run's deadline.
 
 **The seed audit after a landing.** In a rig whose clone carries

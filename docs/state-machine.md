@@ -284,12 +284,19 @@ the `blocked` status in one write, so a refinery that dies between them leaves
 an open bead that names its PR, never a blocked bead with half a record. The
 landing order reads a record whose marker is `true` while its bead is open,
 blocked or closed, and clears the marker once the record owes no further run:
-the bead closed on a verified merge, or met an exception whose human gate is
-filed, each once its PR's labels are written, or it went back to the refinery
-or was released from it. A call of the label's writer that a merge or an
-exception did not land keeps the marker, with why in `pr_reconcile_error`, so
-a later run reads the PR again and makes the call. A bead at any other
-status, such as one claimed or deferred, keeps its marker, and no run reads it.
+the bead closed on a verified merge once its PR's labels are written, met an
+exception whose human gate is filed, or went back to the refinery or was
+released from it. A clear of the PR's labels that a merge did not land keeps
+the marker, with why in `pr_reconcile_error`, so a later run reads the PR again
+and makes the call. An exception's record is a person's to decide once its gate
+files, so its marker clears then even when its call of the label's writer did
+not land, and the call is owed instead: `pr_status_label_owed` is `true`, with
+why in `pr_reconcile_error`. A later run reads such a bead for that call alone.
+It reads the PR the record names, makes the call by the state it finds and
+clears the key once the call lands, and it asks for no gate and neither judges
+nor writes the bead's status, so a gate the person cleared is not filed again
+and a bead the person closed stays closed. A bead at any other status, such as
+one claimed or deferred, keeps its marker or its owed call, and no run reads it.
 The marker is never a review or approval fact. On an open or blocked bead whose
 marker is `true`, the record's `blocked_reason` waits on the order's next run,
 and I1 reads that reason as answered (`settled_keys` in
@@ -825,10 +832,13 @@ against origin.
 On Gas Town's pending record, the landing order takes the labels off a PR its
 check finds merged or closed: before the write that records the merge and
 closes the bead, once the gate files at an exception, and once the write lands
-at a retry. When the clear at a merge or an exception does not land, the bead
-keeps the record's marker, `pr_reconcile_pending`, with why in
-`pr_reconcile_error`, and a later run reads the PR again, takes the labels off,
-and then clears the marker.
+at a retry. When the clear at a merge does not land, the bead keeps the
+record's marker, `pr_reconcile_pending`, with why in `pr_reconcile_error`, and
+a later run reads the PR again, takes the labels off, and then clears the
+marker. When the call at an exception does not land, the marker clears all the
+same, because a person decides the record once its gate files, and the bead
+owes the call through `pr_status_label_owed`. A later run reads the PR again,
+makes the call and clears the key, reading nothing else of the record.
 
 An open human gate holds the anchor through its `blocks` edge onto it, read by
 `bd_human_gates` in `assets/scripts/bd-lib.sh`: the bead's `blocks` edges, kept

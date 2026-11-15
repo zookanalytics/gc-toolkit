@@ -77,7 +77,9 @@ func Exception(v string) bool {
 
 // Record is the record a bead carries, each value as it is stored, "" where the
 // bead carries none. Marked is whether it carries pr_reconcile_pending=true,
-// the marker that a reconciliation is still owed.
+// the marker that a reconciliation is still owed, and LabelOwed whether it
+// carries pr_status_label_owed=true, the call of the label's writer an
+// exception still owes once its gate is filed.
 type Record struct {
 	Result                   string
 	URL, Number, Repo        string
@@ -88,7 +90,7 @@ type Record struct {
 	ExistingPR               string
 	BlockedReason, Rejection string
 	Error                    string
-	Marked                   bool
+	Marked, LabelOwed        bool
 }
 
 // Read reads the record r carries. A value that does not decode is an error.
@@ -106,7 +108,7 @@ func Read(r *ledger.Record) (Record, error) {
 		Head: get(prHeadKey), Observed: get(observedHeadKey), State: get(prStateKey), CheckedAt: get(checkedAtKey),
 		Target: get(mergedTargetKey), MergedSHA: get(mergedSHAKey), MergedAt: get(mergedAtKey),
 		ExistingPR: get(existingPRKey), BlockedReason: get(blockedReasonKey), Rejection: get(rejectionReasonKey),
-		Error: get(reconcileErrorKey), Marked: get(pendingKey) == "true",
+		Error: get(reconcileErrorKey), Marked: get(pendingKey) == "true", LabelOwed: get(labelOwedKey) == "true",
 	}
 	return rec, err
 }
@@ -114,6 +116,11 @@ func Read(r *ledger.Record) (Record, error) {
 // Marked selects the beads that carry the marker, closed ones among them,
 // whatever value it holds: a reader keeps the ones whose record reads Marked.
 func Marked() ledger.Selection { return ledger.Carrying(pendingKey).WithClosed() }
+
+// Owing selects the beads that carry pr_status_label_owed, closed ones among
+// them, whatever value it holds: a reader keeps the ones whose record reads
+// LabelOwed.
+func Owing() ledger.Selection { return ledger.Carrying(labelOwedKey).WithClosed() }
 
 // The writes. Each sets what one act of the record sets, and the verb that
 // makes it adds the guard on what it read.
@@ -223,9 +230,9 @@ func Revalidate(w *ledger.Write, reason, now string) {
 
 // Except records one of the exceptions: the bead blocked, merge_result the
 // exception, the PR's state and why. The marker stays until the verb has filed
-// the human gate keyed by the exception and written the PR's labels, and then
-// cleared it (Finish), so a run that stops between them leaves what it did not
-// make for the next run.
+// the human gate keyed by the exception, which then clears it (Finish, or Owe
+// while the PR's labels are owed), so a run that stops before the gate files
+// leaves the gate for the next run.
 func Except(w *ledger.Write, result, state, reason, now string) {
 	w.Status("blocked")
 	mergeResultKey.Set(w, result)
@@ -251,11 +258,12 @@ type Landing struct {
 }
 
 // Land records the verified merge and closes the bead in one write, the marker
-// cleared as the close lands, since the pack runs no artifact cleanup after the
-// close. owed, when given, is why a call the landing owes did not land, such as
-// the clear of the PR's labels: the marker then stays, with owed as the record's
-// error, so a later run reads the closed bead and makes the call. note rides the
-// close as its reason, which bd's update does not set.
+// and any owed call of the label's writer cleared as the close lands, since the
+// pack runs no artifact cleanup after the close. owed, when given, is why a call
+// the landing owes did not land, such as the clear of the PR's labels: the
+// marker then stays, with owed as the record's error, so a later run reads the
+// closed bead and makes the call. note rides the close as its reason, which
+// bd's update does not set.
 func Land(w *ledger.Write, l Landing, now, note, owed string) {
 	w.Status("closed")
 	mergeResultKey.Set(w, Merged)
@@ -270,8 +278,9 @@ func Land(w *ledger.Write, l Landing, now, note, owed string) {
 	if owed != "" {
 		reconcileErrorKey.Set(w, owed)
 	} else {
-		reconcileErrorKey.Clear(w)
-		pendingKey.Clear(w)
+		for _, k := range []ledger.Key[string]{reconcileErrorKey, pendingKey, labelOwedKey} {
+			k.Clear(w)
+		}
 	}
 	w.Note(note)
 }
@@ -285,12 +294,25 @@ func Unmark(w *ledger.Write, note string) {
 	}
 }
 
-// Finish clears the marker and the error an earlier run left, on a bead whose
-// record needs no further run once the last call it owed has landed: one closed
-// on a verified merge, and an exception behind its human gate.
+// Finish clears the marker, the owed call of the label's writer and the error
+// an earlier run left, on a bead whose record needs no further run once the
+// last call it owed has landed: one closed on a verified merge, and an
+// exception behind its human gate.
 func Finish(w *ledger.Write) {
+	for _, k := range []ledger.Key[string]{pendingKey, labelOwedKey, reconcileErrorKey} {
+		k.Clear(w)
+	}
+}
+
+// Owe records an exception whose human gate is filed and whose PR's call of the
+// label's writer did not land: the marker clears, because a person decides the
+// record from then on, and pr_status_label_owed is set, with why and when, so a
+// later run makes the call and reads nothing else of the record.
+func Owe(w *ledger.Write, why, now string) {
 	pendingKey.Clear(w)
-	reconcileErrorKey.Clear(w)
+	labelOwedKey.Set(w, "true")
+	checkedAtKey.Set(w, now)
+	reconcileErrorKey.Set(w, why)
 }
 
 // Valid reports whether p names a PR the record can hold: a URL on a host,

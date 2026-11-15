@@ -440,6 +440,44 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City ships a retry that a pack can hand a failed write
   to an outside service, such as an outbox that a later pass drains.
 
+## Owed status label
+
+- **Covers.** The `pr_status_label_owed` key, declared as `labelOwedKey` in
+  `services/gctk/pr/record/keys.go`. Its writer is `Owe` in
+  `services/gctk/pr/record/record.go`, which `gate` in
+  `services/gctk/pr/landing.go` writes once an exception's human gate is filed
+  and its call of the label's writer did not land, and `Finish` and `Land` in
+  `services/gctk/pr/record/record.go` clear it. Its readers are `due`, which
+  lists the beads that carry it through `Owing`, and `owing`, which makes the
+  owed call, both in `services/gctk/pr/landing.go`.
+- **Stands in for.** A retry of a failed write to an outside service, kept
+  until a later pass lands it, on a record that no later pass may judge,
+  because a person decides it.
+- **Evidence.**
+  - In `gastownhall/gascity`, a failed order is not retried ("No retry on
+    dispatch failure" in `engdocs/architecture/orders.md`), and
+    `[steps.retry]` retries a formula step's attempt within its run (section
+    3.2 of `docs/reference/specs/formula-spec-v2.md`). Its persisted queues
+    carry their own deliveries alone: nudges for sessions
+    (`internal/nudgequeue`), and where a conversation's messages go
+    (`internal/extmsg`). Its usage facts retry a write that failed with a
+    marker of their own on the session bead (`usage_compute_emitted_at`,
+    `emitComputeFactForBead` in `cmd/gc/usage_compute.go`).
+  - In `gastownhall/gascity-packs`, Gas Town's record retries through its own
+    marker, `pr_reconcile_pending`, and clears it at every exception
+    (`quarantine_terminal_pr` in `gastown/commands/pr-merge-reconcile/run.sh`
+    390-403), so that marker owes nothing once a person decides the record.
+  - In `gastownhall/beads`, no Go source keeps an outbox or a retry queue, and
+    the GitHub client retries a request inside one call
+    (`internal/github/client.go`).
+  - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main e9a628c50030,
+  `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
+  8cdfa796a8f5.
+- **Retires when.** Gas City ships a retry that a pack can hand a failed write
+  to an outside service, such as an outbox that a later pass drains. The owed
+  call then moves onto it.
+
 ## Saved GitHub read
 
 - **Covers.** The `pr_github_read` key, declared as `githubReadKey` in

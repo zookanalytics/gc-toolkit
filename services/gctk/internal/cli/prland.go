@@ -103,11 +103,15 @@ through pr-status-label.sh, by the state its read found, given the labels that
 read found: reconcile for a PR open, which derives them as gctk pr status
 answers over the store, and clear for a PR merged or closed. A check's call
 runs once its write has landed, with the lock free. A merge's clear runs before
-the write that closes the bead, and an exception's call once its gate files,
-and each keeps the marker until it lands, with why in pr_reconcile_error, so a
-later run reads the PR again and makes the call. An exception whose check read
-no PR reads it for its labels, and a record whose URL names no PR in the rig's
-own repository gets none.
+the write that closes the bead, which keeps the marker until the clear lands,
+with why in pr_reconcile_error, so a later run reads the PR again and makes the
+call. An exception's call runs once its gate files, and the marker clears then
+whether or not the call lands, because a person decides the record from then
+on. A call that did not land is owed through pr_status_label_owed, with why in
+pr_reconcile_error: a later run reads the PR, makes the call and clears the
+key, and it asks for no gate and judges nothing else of the record. An
+exception whose check read no PR reads it for its labels, and a record whose
+URL names no PR in the rig's own repository gets none.
 
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the run fetched it, once the lock is free, in a clone

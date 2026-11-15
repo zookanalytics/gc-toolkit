@@ -59,16 +59,23 @@ var (
 			"written. A publication clears it.")
 	reconcileErrorKey = ledger.Declare("pr_reconcile_error", ledger.String,
 		"Why the landing order's last read could not decide, such as a lookup that failed or a merge commit "+
-			"not yet on the fetched target, or why the PR's labels, which a merge or an exception writes before "+
-			"the marker clears, did not land. The next run reads the record again, and a read that decides "+
-			"clears it.")
+			"not yet on the fetched target, or why a call of the PR's labels did not land: the clear a merge "+
+			"makes before the marker clears, or the call an exception makes once its gate is filed. The next run "+
+			"reads the record again, or makes the call, and clears it once its read decides or the call lands.")
 	pendingKey = ledger.Declare("pr_reconcile_pending", ledger.String,
 		"true while a reconciliation of the record is still owed, the marker the landing order selects the "+
 			"records it reads by. The record's first write sets it, and the order clears it when the bead "+
-			"closes on a verified merge or meets an exception, each once the PR's labels are written, goes "+
-			"back to the refinery or has been released from the refinery. A disposition's close clears it in "+
-			"the same write, through bead-rehome.sh, the one shell writer that spells it, because only that "+
-			"write closes the bead under the record lock.")
+			"closes on a verified merge once the PR's labels are written, meets an exception whose human gate "+
+			"is filed, goes back to the refinery or has been released from the refinery. A disposition's close "+
+			"clears it in the same write, through bead-rehome.sh, the one shell writer that spells it, because "+
+			"only that write closes the bead under the record lock.")
+	labelOwedKey = ledger.Declare("pr_status_label_owed", ledger.String,
+		"true while the call of the label's writer that an exception owes its PR has not landed. The landing "+
+			"order sets it in the write that clears the marker once the exception's human gate is filed, since a "+
+			"person decides the record from then on. A run that finds it on a bead without the marker reads the "+
+			"PR the record names, makes the call by the state it finds and clears the key once the call lands, "+
+			"and reads nothing else of the record.",
+		ledger.Warrant("owed-status-label"))
 )
 
 // The reading faces of the record's keys whose value is another domain's whole

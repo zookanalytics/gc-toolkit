@@ -17,8 +17,8 @@
 # city's answer, draft stage and live work. The landing order (gctk pr
 # reconcile) recomputes both at each check of a PR on Gas Town's pending record,
 # passing the labels its read of the PR found, and takes them off one it finds
-# merged or closed, keeping the record's marker until the clear lands. On the
-# old path both come off once the PR merges or closes, where
+# merged or closed. A call it makes that does not land is made again by a later
+# run. On the old path both come off once the PR merges or closes, where
 # GitHub's own Merged or Closed state takes over: pr-facts.sh clears them when it
 # records a merge or a close, and gctk merge when it merges, each before its
 # record. A clear that does not land is recorded on the anchor as

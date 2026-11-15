@@ -24,14 +24,17 @@ import (
 // reads that saved read back. Each check that reads a PR also writes the PR's
 // status: and held: labels through the pack's one writer of them, by the state
 // its read found (that design, section 5): once its write has landed and the
-// lock is free, or under the lock where the write that clears the marker waits
-// on the call, at a merge and at an exception. Both take the store's record
-// lock, Record across both of its writes and a run for one record at a time,
-// and every write they make carries bd's guards on the status and the assignee
-// read under the lock, so neither writes over a bead that a close or a release
-// reached first. A run that lands a PR on the rig's default branch then checks
-// that branch's seed audit with the lock free, and asks for the branch's
-// re-render when the audit is stale, holding no PR for it (the design's call 1).
+// lock is free, or under the lock where the write after the call records
+// whether it landed, at a merge and at an exception. An exception's call that
+// does not land is owed to a later run, which makes it and reads nothing else
+// of the record, because a person decides it once its gate is filed. Both take
+// the store's record lock, Record across both of its writes and a run for one
+// record at a time, and every write they make carries bd's guards on the status
+// and the assignee read under the lock, so neither writes over a bead that a
+// close or a release reached first. A run that lands a PR on the rig's default
+// branch then checks that branch's seed audit with the lock free, and asks for
+// the branch's re-render when the audit is stale, holding no PR for it (the
+// design's call 1).
 
 // Hub is GitHub as the landing order reaches it: the evaluator's reads, and a
 // merge request or an enqueue pinned to the head it judged.
@@ -209,7 +212,8 @@ const (
 	// ActReleased: a release took the bead from the refinery, and the run cleared
 	// the marker and named the PR in a note.
 	ActReleased = "released"
-	// ActSettled: no further run is owed, and the run cleared the marker.
+	// ActSettled: no further run is owed, and the run cleared the marker, or the
+	// key that owed the call of the label's writer once that call landed.
 	ActSettled = "settled"
 	// ActBlocked: the publication's second write had landed on a bead still
 	// open, and the run moved it to blocked.
@@ -233,14 +237,15 @@ type Options struct {
 }
 
 // Reconcile is one run of the landing order. It lists the beads that carry the
-// marker, takes up to o.Count of them, the least recently checked first, and
-// reads each under the record lock, from its read of the record to its last
-// write of it, waiting while another writer holds the lock. A check whose write
-// landed makes the call its PR's labels owe once the lock is released, and a
-// record that lands on the rig's default branch has the branch's seed audit
-// checked then, and its outcome says what the check found. It reports each
-// record's outcome to report as it goes, and returns an error when the listing
-// or a lock did not answer, or when a record's outcome failed.
+// marker or owe the call of the label's writer, takes up to o.Count of them, the
+// least recently checked first, and reads each under the record lock, from its
+// read of the record to its last write of it, waiting while another writer
+// holds the lock. A check whose write landed makes the call its PR's labels owe
+// once the lock is released, and a record that lands on the rig's default
+// branch has the branch's seed audit checked then, and its outcome says what
+// the check found. It reports each record's outcome to report as it goes, and
+// returns an error when the listing or a lock did not answer, or when a
+// record's outcome failed.
 func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	ids, err := l.due(o.Count)
 	if err != nil {
@@ -280,22 +285,27 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 }
 
 // due lists the records a run reads: the beads carrying the marker set true,
-// open, blocked or closed, the least recently checked first, up to count.
+// or the call of the label's writer owed, open, blocked or closed, the least
+// recently checked first, up to count.
 func (l Landing) due(count int) ([]string, error) {
-	rows, err := l.Ledger.Find(record.Marked())
-	if err != nil {
-		return nil, err
-	}
 	type due struct{ id, checked string }
 	var all []due
-	for _, r := range rows {
-		rec, err := record.Read(r)
-		if err != nil || !rec.Marked {
-			continue
+	listed := map[string]bool{}
+	for _, sel := range []ledger.Selection{record.Marked(), record.Owing()} {
+		rows, err := l.Ledger.Find(sel)
+		if err != nil {
+			return nil, err
 		}
-		switch r.Status() {
-		case "open", "blocked", "closed":
-			all = append(all, due{r.ID, rec.CheckedAt})
+		for _, r := range rows {
+			rec, err := record.Read(r)
+			if err != nil || !(rec.Marked || rec.LabelOwed) || listed[r.ID] {
+				continue
+			}
+			switch r.Status() {
+			case "open", "blocked", "closed":
+				listed[r.ID] = true
+				all = append(all, due{r.ID, rec.CheckedAt})
+			}
 		}
 	}
 	slices.SortStableFunc(all, func(a, b due) int {
@@ -349,8 +359,8 @@ type run struct {
 // for a PR open, and a clear for one merged or closed, on the PR the record's
 // URL names, given the labels the read found on it. A check makes the call once
 // its write has landed and the lock is free. A merge's clear and an exception's
-// call are made under the lock instead, because the write that clears the
-// marker waits on them: under says one of those paths took the call, and made
+// call are made under the lock instead, because the write after them records
+// whether they landed: under says one of those paths took the call, and made
 // that it landed.
 type labelCall struct {
 	url   string
@@ -440,8 +450,9 @@ func (u *run) one(id string) (RunOutcome, error) {
 	if err != nil {
 		return RunOutcome{Bead: id, Action: ActFailed, Detail: "the record did not read: " + err.Error()}, nil
 	}
-	if !rec.Marked {
-		return RunOutcome{Bead: id, Action: ActSkipped, Detail: "the bead no longer carries the marker"}, nil
+	if !rec.Marked && !rec.LabelOwed {
+		return RunOutcome{Bead: id, Action: ActSkipped,
+			Detail: "the bead no longer carries the marker or owes the call of the label's writer"}, nil
 	}
 	branch, _, err := branchKey.Get(r)
 	if err != nil {
@@ -454,6 +465,8 @@ func (u *run) one(id string) (RunOutcome, error) {
 	s := state{id: id, status: r.Status(), assignee: r.Assignee(), branch: strings.TrimSpace(branch),
 		since: strings.TrimSpace(since), rec: rec, now: u.stamp()}
 	switch {
+	case !rec.Marked:
+		return u.owing(s), nil
 	case s.status == "closed":
 		return u.closed(s), nil
 	case s.assignee != u.Refinery:
@@ -492,6 +505,26 @@ func (u *run) released(s state) RunOutcome {
 	record.Unmark(w, note)
 	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActReleased,
 		Detail: fmt.Sprintf("assigned to %s, not to the refinery: the marker is cleared and %s is named in a note", nobody(s.assignee), pr)})
+}
+
+// owing makes the call of the label's writer that a bead without the marker
+// still owes, the one an exception's gate path did not land. A person decides
+// the record from the moment its gate is filed, so the run reads nothing else
+// of it: neither its status nor its result is judged, and no gate is asked for.
+// It reads the PR the record names, makes the call by the state it finds, and
+// clears the key once the call lands. A call that does not land keeps the key
+// for the next run.
+func (u *run) owing(s state) RunOutcome {
+	if why := u.owed(s); why != "" {
+		w := u.Ledger.Write(s.id)
+		record.Retry(w, "", why, s.now)
+		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry,
+			Detail: why + ", and the call stays owed to the next run"})
+	}
+	w := u.Ledger.Write(s.id)
+	record.Finish(w)
+	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActSettled,
+		Detail: "the call of the label's writer owed since the gate filed has landed, and the key that owed it is cleared"})
 }
 
 // closed handles a closed bead that still carries the marker. One closed on a
@@ -555,15 +588,14 @@ func (u *run) open(s state) RunOutcome {
 func (u *run) blocked(s state) RunOutcome {
 	r := s.rec
 	if record.Exception(r.Result) {
-		// A run recorded the exception and stopped before its gate filed, or
-		// before the PR's labels landed once it had.
+		// A run recorded the exception and stopped before its gate filed.
 		message := fmt.Sprintf("%s %s stays blocked, and what waits on it stays held, until a person "+
 			"decides what becomes of the work.", firstOf(r.BlockedReason, "The pending record met "+r.Result+"."), s.id)
 		if r.Result == record.CloseRefused {
 			message = refusedMessage(s.id, firstOf(r.BlockedReason, "A verified merge's close was refused"))
 		}
-		return u.gate(s, r.Result, message, RunOutcome{Bead: s.id, Action: ActExcepted,
-			Detail: r.Result + ": the exception an earlier run recorded stands behind its gate"})
+		return u.gate(s, r.Result, message,
+			RunOutcome{Bead: s.id, Action: ActExcepted, Detail: r.Result + ": the gate an earlier run did not file is filed"})
 	}
 	switch r.Result {
 	case record.Pending:
@@ -909,8 +941,9 @@ func (u *run) contradiction(s state, why string) RunOutcome {
 
 // except records the exception with the bead blocked, guarded on what the run
 // read, then files the human gate keyed by it, writes the PR's labels and
-// clears the marker. A bead that moved since the read gets neither the record
-// nor the gate.
+// clears the marker, which owes the labels to a later run when their call did
+// not land. A bead that moved since the read gets neither the record nor the
+// gate.
 func (u *run) except(s state, result, prState, reason, message string) RunOutcome {
 	w := u.Ledger.Write(s.id)
 	record.Except(w, result, prState, reason, s.now)
@@ -924,10 +957,12 @@ func (u *run) except(s state, result, prState, reason, message string) RunOutcom
 
 // gate files the exception's human gate on a bead the record already holds
 // blocked, then makes the call of the label's writer the exception owes, so the
-// label of its PR, while open, names the gate the bead waits behind, and clears
-// the marker once both have landed. A gate that does not file leaves the
-// marker, so the next run files it, and a call that does not land leaves it
-// too, with why, so the next run finds the gate open and makes the call.
+// label of its PR, while open, names the gate the bead waits behind. A gate that
+// does not file leaves the marker, so the next run files it. Once the gate
+// files, a person decides the record, so the marker clears whether or not the
+// call lands, and no later run judges the record or asks for its gate again. A
+// call that does not land is owed instead (record.Owe), with why, and a later
+// run makes that call alone (owing).
 func (u *run) gate(s state, result, message string, done RunOutcome) RunOutcome {
 	if u.call != nil {
 		u.call.under = true
@@ -939,10 +974,9 @@ func (u *run) gate(s state, result, message string, done RunOutcome) RunOutcome 
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: why})
 	}
 	if why := u.owed(s); why != "" {
-		why += ", and the marker stays for the next run"
 		w := u.Ledger.Write(s.id)
-		record.Retry(w, "", result+": the human gate is filed, but "+why, s.now)
-		done.Detail += "; " + why
+		record.Owe(w, result+": the human gate is filed, but "+why, s.now)
+		done.Detail += "; " + why + ", and the call is owed to a later run, which reads nothing else of the record"
 		return u.commit(s, w, done)
 	}
 	w := u.Ledger.Write(s.id)
@@ -980,7 +1014,7 @@ func (u *run) owed(s state) string {
 // own repository. A record whose URL names no PR, or names one outside the
 // rig's repository, gets no label, and callOf returns no call and no why. A
 // read that does not answer, or one past the run's deadline, which it does not
-// start, returns why, which keeps the marker for the next run.
+// start, returns why, which keeps the call owed to a later run.
 func (u *run) callOf(s state) (*labelCall, string) {
 	host, repo, number, ok := record.ParseURL(s.rec.URL)
 	if !ok {
