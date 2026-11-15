@@ -500,10 +500,9 @@ wording moved, the reason follows.
 This change states the target in two living pages, and the units bring the rest
 current as they build:
 
-- **docs/architecture.md:** a decision that the landing order reads GitHub once a
-  pass for every PR the city owns and acts only where GitHub differs from the
-  store, and a Debt entry for the landing order as built. Unit 1 narrows that
-  entry and unit 2 drops it.
+- **docs/architecture.md:** a decision that the landing order observes every PR
+  the city owns and maintains each one's labels, and a Debt entry for the
+  landing order as built. Unit 1 narrows that entry and unit 2 drops it.
 - **docs/built-once-target.md:** a difference from Gas Town under Merge, one read
   a pass for every PR, with its reason.
 
