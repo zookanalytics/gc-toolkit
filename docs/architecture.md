@@ -74,8 +74,8 @@ flowchart LR
   DISP -->|successor edge, then checked close| LEDGER
   SIGN -->|verdicts on review beads| LEDGER
   ORD -->|every 60s| CAD
-  ORD -->|landing order: merge request| PR
-  ORD -->|landing order: record, then close| LEDGER
+  ORD -->|landing order: merge request, labels| PR
+  ORD -->|landing order: record, GitHub read, then close| LEDGER
   CAD -->|reads + writes| LEDGER
   CAD -->|labels| PR
   BR --> PR
@@ -87,7 +87,8 @@ flowchart LR
 
 **Legend.** Solid = writes state. Dashed = reads without writing. Each write
 path that matters has one writer. The refinery writes landings, and the landing
-order writes merges. `bead-rehome.sh` writes dispositions, the closes that name
+order writes merges and the GitHub read each PR's status is derived from.
+`bead-rehome.sh` writes dispositions, the closes that name
 a successor. `signoff.sh` writes check verdicts. Everything else reads.
 
 **The PRs the city lands.** A PR another account opened, such as a person's,
@@ -449,8 +450,13 @@ first. Either way the change is a decision on the record, not a drift.
   opens.**
 - **The pack keeps no landing state of its own beside Gas Town's pending
   record.**
-- **The board and the merge both read the evaluator's answer,** which is
-  computed at each read and stored nowhere.
+- **No display reads GitHub.** The board, a PR's status label and
+  `gctk pr status` derive a PR's status by the evaluator's one rule from the
+  GitHub read the landing order saved at its last check of the PR and the store
+  as it is at the read. Every reader of GitHub draws on one API allowance.
+- **Only the merge acts on a fresh read of GitHub,** and the saved GitHub read
+  grants nothing. The evaluator's answer is computed at each read and stored
+  nowhere.
 - **A review, a hold or a change of base that arrives after the landing
   order's read is not part of its decision to merge,** even when GitHub carries
   out the merge request after it.
@@ -477,10 +483,14 @@ why a reader must know it, and the work that retires it.
   record of an open PR, and checks each landing write against its transition
   machine, so steps 6 to 8 are not what runs there today. Each rig's cutover
   bead moves the rig onto the pending record once the review loop
-  (tk-1tfzr71.22) lands, along with the board's phase of a pending PR by the
-  evaluator's answer (tk-1tfzr71.88) and a sitting's retirement of one
+  (tk-1tfzr71.22) lands, along with a sitting's retirement of one
   (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which waits on
   every cutover, deletes the old path once no open bead is on it.
+- **The agents' board derives a pending PR's status by another rule.**
+  `helm-svc board` phases a PR on the pending record with the old path's rule
+  over the keys its beads source reads, so its phase can differ from the PR's
+  status label. The board member (tk-1tfzr71.24) replaces that source with a
+  reader of the evaluator's rule over the saved GitHub read.
 - **The merge cadence still admits work on a pending record.** It files work
   for a PR on the pending record beside the landing order
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
