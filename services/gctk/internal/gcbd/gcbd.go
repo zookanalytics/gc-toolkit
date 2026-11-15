@@ -284,30 +284,46 @@ func (c *Client) Where() (path, prefix string, err error) {
 	return where.Path, where.Prefix, nil
 }
 
+// listedRig is one rig `gc rig list --json` names, the city among them: its
+// name, its bead prefix, and the path its .beads directory sits under.
+type listedRig struct {
+	Name   string `json:"name"`
+	Prefix string `json:"prefix"`
+	Path   string `json:"path"`
+}
+
+// rigs is each rig `gc rig list --json` names, the city among them. A listing
+// that fails or does not decode returns a *ReadError, which names id when the
+// listing was read to route one.
+func (c *Client) rigs(id string) ([]listedRig, error) {
+	var stderr bytes.Buffer
+	cmd := c.command("rig", "list", "--json")
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, &ReadError{ID: id, Reason: "gc rig list did not name the stores: " + failure(out, stderr.String())}
+	}
+	var list struct {
+		Rigs []listedRig `json:"rigs"`
+	}
+	if err := json.Unmarshal(Scrub(out), &list); err != nil {
+		return nil, &ReadError{ID: id, Reason: "gc rig list did not decode: " + err.Error()}
+	}
+	return list.Rigs, nil
+}
+
 // StoreOf names the store whose bead prefix begins id, the longest such prefix
 // when several do, from the stores `gc rig list --json` names, the city's
 // among them: the store gc routes a read of id to when the read names no
 // store. ok is false when no store's prefix begins id. A listing that fails
 // or does not decode returns a *ReadError.
 func (c *Client) StoreOf(id string) (path string, ok bool, err error) {
-	var stderr bytes.Buffer
-	cmd := c.command("rig", "list", "--json")
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	rigs, err := c.rigs(id)
 	if err != nil {
-		return "", false, &ReadError{ID: id, Reason: "gc rig list did not name the stores: " + failure(out, stderr.String())}
-	}
-	var list struct {
-		Rigs []struct {
-			Prefix string `json:"prefix"`
-			Path   string `json:"path"`
-		} `json:"rigs"`
-	}
-	if err := json.Unmarshal(Scrub(out), &list); err != nil {
-		return "", false, &ReadError{ID: id, Reason: "gc rig list did not decode: " + err.Error()}
+		return "", false, err
 	}
 	best := ""
-	for _, r := range list.Rigs {
+	for _, r := range rigs {
 		if r.Prefix == "" || r.Path == "" || !strings.HasPrefix(id, r.Prefix+"-") {
 			continue
 		}
@@ -323,23 +339,11 @@ func (c *Client) StoreOf(id string) (path string, ok bool, err error) {
 // pinned there names with bd's --db. ok is false when no rig has that name. A
 // listing that fails or does not decode returns a *ReadError.
 func (c *Client) RigStore(name string) (path string, ok bool, err error) {
-	var stderr bytes.Buffer
-	cmd := c.command("rig", "list", "--json")
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	rigs, err := c.rigs("")
 	if err != nil {
-		return "", false, &ReadError{Reason: "gc rig list did not name the stores: " + failure(out, stderr.String())}
+		return "", false, err
 	}
-	var list struct {
-		Rigs []struct {
-			Name string `json:"name"`
-			Path string `json:"path"`
-		} `json:"rigs"`
-	}
-	if err := json.Unmarshal(Scrub(out), &list); err != nil {
-		return "", false, &ReadError{Reason: "gc rig list did not decode: " + err.Error()}
-	}
-	for _, r := range list.Rigs {
+	for _, r := range rigs {
 		if r.Name == name && r.Path != "" {
 			return filepath.Join(r.Path, ".beads"), true, nil
 		}
