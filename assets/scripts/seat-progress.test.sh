@@ -83,9 +83,9 @@ H=3600
 # session bead a pool seat that woke five hours ago, its newest write four
 # hours old in the rig store and none in the city's.
 reset() {
-  STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"lx-wisp-seat1","metadata":{"gc.session_id":"lx-wisp-seat1"}}]'
-  STUB_SESSIONS="{\"sessions\":[{\"id\":\"lx-wisp-seat1\",\"agent_name\":\"gc-toolkit/gc-toolkit.polecat-1\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
-  STUB_SESSION_BEAD="[{\"id\":\"lx-wisp-seat1\",\"metadata\":{\"pool_managed\":\"true\",\"last_woke_at\":\"$(ago $((5 * H)))\"}}]"
+  STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"hq-wisp-seat1","metadata":{"gc.session_id":"hq-wisp-seat1"}}]'
+  STUB_SESSIONS="{\"sessions\":[{\"id\":\"hq-wisp-seat1\",\"agent_name\":\"gc-toolkit/gc-toolkit.polecat-1\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
+  STUB_SESSION_BEAD="[{\"id\":\"hq-wisp-seat1\",\"metadata\":{\"pool_managed\":\"true\",\"last_woke_at\":\"$(ago $((5 * H)))\"}}]"
   STUB_RIG_NEWEST="[{\"newest\":\"$(ago $((4 * H)))\"}]"
   STUB_CITY_NEWEST='[{"newest":null}]'
   unset STUB_SESSIONS_FAIL STUB_CLAIM_FAIL STUB_SESSION_BEAD_FAIL STUB_RIG_SQL_FAIL STUB_CITY_SQL_FAIL STUB_FINDING_RC
@@ -102,19 +102,19 @@ echo "# a printing pool seat with no write for four hours is reported"
 reset
 run --bead tk-claim
 eq "$RC" 0 "the judgment exits 0"
-eq "$(arg --key)" "no-progress.lx-wisp-seat1" "keyed on the session"
+eq "$(arg --key)" "no-progress.hq-wisp-seat1" "keyed on the session"
 eq "$(arg --about)" "tk-claim" "about the claim the seat holds"
 eq "$(arg --scope)" "witness-findings" "in the witness's findings"
 has "$FILED" "--distinct" "a per-session key passes --distinct, so another finding about the claim cannot refuse it"
 has "$(arg --title)" "gc-toolkit/gc-toolkit.polecat-1" "the title names the seat"
 has "$(arg --title)" "4 hours" "and how long it has written nothing"
 MSG=$(printf '%s\n' "$FILED" | awk 'p { print } $0 == "--message" { p = 1 }')
-has "$MSG" "lx-wisp-seat1" "the message names the session"
-has "$MSG" "as lx-wisp-seat1 to this rig's store or the city's was at $(ago $((4 * H)))" "and its newest write, by the identity its writes carry"
-has "$MSG" "gc session kill lx-wisp-seat1" "and the restart a person can choose"
-has "$OUT" "reported lx-wisp-seat1" "the line says it reported the seat"
-has "$LOG" "FROM events WHERE actor = 'lx-wisp-seat1'" "the query reads the events table by the claim's assignee"
-has "$LOG" "FROM wisp_events WHERE actor = 'lx-wisp-seat1'" "and the wisp_events table"
+has "$MSG" "hq-wisp-seat1" "the message names the session"
+has "$MSG" "as hq-wisp-seat1 to this rig's store or the city's was at $(ago $((4 * H)))" "and its newest write, by the identity its writes carry"
+has "$MSG" "gc session kill hq-wisp-seat1" "and the restart a person can choose"
+has "$OUT" "reported hq-wisp-seat1" "the line says it reported the seat"
+has "$LOG" "FROM events WHERE actor = 'hq-wisp-seat1'" "the query reads the events table by the claim's assignee"
+has "$LOG" "FROM wisp_events WHERE actor = 'hq-wisp-seat1'" "and the wisp_events table"
 has "$LOG" "bd --db $CITY_DB sql" "and the city store as well as the rig's"
 hasnt "$LOG" "updated_at" "no record's updated_at is read"
 hasnt "$LOG" "session kill" "it kills nothing"
@@ -127,7 +127,7 @@ reset
 STUB_CITY_NEWEST="[{\"newest\":\"$(ago 600)\"}]"
 run --bead tk-claim
 eq "$FILED" "" "a write ten minutes ago in the city store spares it"
-has "$OUT" "spared lx-wisp-seat1" "and the line says so"
+has "$OUT" "spared hq-wisp-seat1" "and the line says so"
 eq "$RC" 0 "with exit 0"
 reset
 STUB_RIG_NEWEST="[{\"newest\":\"$(ago $((2 * H)))\"}]"
@@ -141,59 +141,59 @@ eq "$RC" 0 "and is no unreadable time"
 
 echo "# a quiet pane is the controller's, so the seat is spared"
 reset
-STUB_SESSIONS="{\"sessions\":[{\"id\":\"lx-wisp-seat1\",\"state\":\"active\",\"last_active\":\"$(ago 300)\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
+STUB_SESSIONS="{\"sessions\":[{\"id\":\"hq-wisp-seat1\",\"state\":\"active\",\"last_active\":\"$(ago 300)\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
 run --bead tk-claim
 eq "$FILED" "" "a pane quiet for five minutes is not filed"
 has "$OUT" "the controller paces a quiet pool seat" "the line names who has it"
 hasnt "$LOG" "sql" "and no store is queried for its writes"
 reset
-STUB_SESSIONS="{\"sessions\":[{\"id\":\"lx-wisp-seat1\",\"state\":\"asleep\",\"last_active\":\"\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
+STUB_SESSIONS="{\"sessions\":[{\"id\":\"hq-wisp-seat1\",\"state\":\"asleep\",\"last_active\":\"\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
 run --bead tk-claim
 eq "$FILED" "" "a session with no activity time is not filed"
 
 echo "# only a pool seat is judged"
 reset
-STUB_SESSION_BEAD="[{\"id\":\"lx-wisp-seat1\",\"metadata\":{\"configured_named_session\":\"true\",\"last_woke_at\":\"$(ago $((5 * H)))\"}}]"
+STUB_SESSION_BEAD="[{\"id\":\"hq-wisp-seat1\",\"metadata\":{\"configured_named_session\":\"true\",\"last_woke_at\":\"$(ago $((5 * H)))\"}}]"
 run --bead tk-claim
 eq "$FILED" "" "a named session is not judged"
 has "$OUT" "is not a pool seat" "and the line says why"
 hasnt "$LOG" "sql" "and its writes are not read"
 reset
-STUB_SESSION_BEAD="[{\"id\":\"lx-wisp-seat1\",\"metadata\":{\"session_origin\":\"manual\",\"last_woke_at\":\"$(ago $((5 * H)))\"}}]"
+STUB_SESSION_BEAD="[{\"id\":\"hq-wisp-seat1\",\"metadata\":{\"session_origin\":\"manual\",\"last_woke_at\":\"$(ago $((5 * H)))\"}}]"
 run --bead tk-claim
 eq "$FILED" "" "a manual session, such as a converse sitting, is not judged"
 
 echo "# only a claim a session holds now is judged"
 reset
-STUB_CLAIM='[{"id":"tk-claim","status":"open","assignee":"lx-wisp-seat1","metadata":{"gc.session_id":"lx-wisp-seat1"}}]'
+STUB_CLAIM='[{"id":"tk-claim","status":"open","assignee":"hq-wisp-seat1","metadata":{"gc.session_id":"hq-wisp-seat1"}}]'
 run --bead tk-claim
 eq "$FILED" "" "an open bead is no claim"
 hasnt "$LOG" "session list" "and the seat is not even read"
 eq "$RC" 0 "with exit 0"
 reset
-STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"lx-wisp-seat1","metadata":{}}]'
+STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"hq-wisp-seat1","metadata":{}}]'
 run --bead tk-claim
 eq "$FILED" "" "a bead naming no session is no claim"
 has "$OUT" "is no claim a session holds" "and the line says so"
 reset
-STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.polecat-1","metadata":{"gc.session_id":"lx-wisp-seat1"}}]'
+STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.polecat-1","metadata":{"gc.session_id":"hq-wisp-seat1"}}]'
 run --bead tk-claim
 eq "$FILED" "" "a claim assigned to a name the seat's writes do not carry is not judged"
 hasnt "$LOG" "sql" "so no other identity's writes are read for it"
 reset
-STUB_SESSIONS='{"sessions":[{"id":"lx-wisp-other","state":"active"}]}'
+STUB_SESSIONS='{"sessions":[{"id":"hq-wisp-other","state":"active"}]}'
 run --bead tk-claim
 eq "$FILED" "" "a session that is no longer open is not judged"
 eq "$RC" 0 "with exit 0"
 
 echo "# an aliased pool seat is judged on its alias, the identity its writes carry"
-ALIASED="{\"sessions\":[{\"id\":\"lx-wisp-seat1\",\"alias\":\"gc-toolkit/gc-toolkit.hicks\",\"agent_name\":\"gc-toolkit/gc-toolkit.hicks\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
+ALIASED="{\"sessions\":[{\"id\":\"hq-wisp-seat1\",\"alias\":\"gc-toolkit/gc-toolkit.hicks\",\"agent_name\":\"gc-toolkit/gc-toolkit.hicks\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
 reset
-STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.hicks","metadata":{"gc.session_id":"lx-wisp-seat1"}}]'
+STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.hicks","metadata":{"gc.session_id":"hq-wisp-seat1"}}]'
 STUB_SESSIONS="$ALIASED"
 run --bead tk-claim
 has "$LOG" "actor = 'gc-toolkit/gc-toolkit.hicks'" "the query reads the alias's writes"
-eq "$(arg --key)" "no-progress.lx-wisp-seat1" "and the finding is keyed on the session, not the alias"
+eq "$(arg --key)" "no-progress.hq-wisp-seat1" "and the finding is keyed on the session, not the alias"
 reset
 STUB_SESSIONS="$ALIASED"
 run --bead tk-claim
@@ -204,24 +204,24 @@ eq "$RC" 0 "with exit 0"
 echo "# the clock starts no earlier than the seat last woke"
 reset
 STUB_RIG_NEWEST='[{"newest":null}]'
-STUB_SESSION_BEAD="[{\"id\":\"lx-wisp-seat1\",\"metadata\":{\"pool_managed\":\"true\",\"last_woke_at\":\"$(ago $H)\"}}]"
+STUB_SESSION_BEAD="[{\"id\":\"hq-wisp-seat1\",\"metadata\":{\"pool_managed\":\"true\",\"last_woke_at\":\"$(ago $H)\"}}]"
 run --bead tk-claim
 eq "$FILED" "" "a seat that woke an hour ago and has written nothing is spared"
 has "$OUT" "since it woke at" "and the line counts from its wake"
 reset
 STUB_RIG_NEWEST="[{\"newest\":\"$(ago $((6 * H)))\"}]"
-STUB_SESSION_BEAD="[{\"id\":\"lx-wisp-seat1\",\"metadata\":{\"pool_managed\":\"true\",\"last_woke_at\":\"$(ago $H)\"}}]"
+STUB_SESSION_BEAD="[{\"id\":\"hq-wisp-seat1\",\"metadata\":{\"pool_managed\":\"true\",\"last_woke_at\":\"$(ago $H)\"}}]"
 run --bead tk-claim
 eq "$FILED" "" "an older write, such as one a predecessor made under a shared alias, never makes a seat restarted an hour ago look stuck"
 reset
 STUB_RIG_NEWEST='[{"newest":null}]'
 run --bead tk-claim
-eq "$(arg --key)" "no-progress.lx-wisp-seat1" "a seat that has written nothing since it woke five hours ago is reported"
-has "$(printf '%s\n' "$FILED" | awk 'p { print } $0 == "--message" { p = 1 }')" "has written nothing as lx-wisp-seat1 to this rig's store or the city's since it woke at $(ago $((5 * H)))" "and the message says it has written nothing since its wake"
+eq "$(arg --key)" "no-progress.hq-wisp-seat1" "a seat that has written nothing since it woke five hours ago is reported"
+has "$(printf '%s\n' "$FILED" | awk 'p { print } $0 == "--message" { p = 1 }')" "has written nothing as hq-wisp-seat1 to this rig's store or the city's since it woke at $(ago $((5 * H)))" "and the message says it has written nothing since its wake"
 reset
 STUB_RIG_NEWEST='[{"newest":null}]'
-STUB_SESSION_BEAD='[{"id":"lx-wisp-seat1","metadata":{"pool_managed":"true"}}]'
-STUB_SESSIONS="{\"sessions\":[{\"id\":\"lx-wisp-seat1\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago $H)\"}]}"
+STUB_SESSION_BEAD='[{"id":"hq-wisp-seat1","metadata":{"pool_managed":"true"}}]'
+STUB_SESSIONS="{\"sessions\":[{\"id\":\"hq-wisp-seat1\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago $H)\"}]}"
 run --bead tk-claim
 eq "$FILED" "" "with no wake time on the session bead, the session's start is the floor"
 
@@ -269,8 +269,8 @@ reset
 
 echo "# an identity the query cannot hold is never put into it"
 reset
-STUB_CLAIM="[{\"id\":\"tk-claim\",\"status\":\"in_progress\",\"assignee\":\"gc-toolkit/x'y\",\"metadata\":{\"gc.session_id\":\"lx-wisp-seat1\"}}]"
-STUB_SESSIONS="{\"sessions\":[{\"id\":\"lx-wisp-seat1\",\"alias\":\"gc-toolkit/x'y\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
+STUB_CLAIM="[{\"id\":\"tk-claim\",\"status\":\"in_progress\",\"assignee\":\"gc-toolkit/x'y\",\"metadata\":{\"gc.session_id\":\"hq-wisp-seat1\"}}]"
+STUB_SESSIONS="{\"sessions\":[{\"id\":\"hq-wisp-seat1\",\"alias\":\"gc-toolkit/x'y\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
 run --bead tk-claim
 eq "$RC" 1 "an assignee carrying a quote exits 1"
 hasnt "$LOG" "sql" "and reaches no query"
@@ -281,7 +281,7 @@ reset
 export STUB_FINDING_RC=1
 run --bead tk-claim
 eq "$RC" 1 "a failed filing exits 1"
-has "$OUT" "patrol-finding.sh filed nothing for lx-wisp-seat1" "and the line says so"
+has "$OUT" "patrol-finding.sh filed nothing for hq-wisp-seat1" "and the line says so"
 
 echo "# usage"
 reset

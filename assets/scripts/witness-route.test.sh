@@ -120,9 +120,9 @@ NOW=$(date +%s)
 # The fixture's values are exported once, so each case assigns them plainly.
 export STUB_CLAIM STUB_SESSIONS STUB_SESSION_BEAD STUB_RIG_NEWEST
 ago() { jq -rn --argjson s "$(( NOW - $1 ))" '$s | todate'; }
-STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"lx-wisp-seat1","metadata":{"gc.session_id":"lx-wisp-seat1"}}]'
-STUB_SESSIONS="{\"sessions\":[{\"id\":\"lx-wisp-seat1\",\"agent_name\":\"gc-toolkit/gc-toolkit.polecat-1\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago 21600)\"}]}"
-STUB_SESSION_BEAD="[{\"id\":\"lx-wisp-seat1\",\"metadata\":{\"pool_managed\":\"true\",\"last_woke_at\":\"$(ago 18000)\"}}]"
+STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"hq-wisp-seat1","metadata":{"gc.session_id":"hq-wisp-seat1"}}]'
+STUB_SESSIONS="{\"sessions\":[{\"id\":\"hq-wisp-seat1\",\"agent_name\":\"gc-toolkit/gc-toolkit.polecat-1\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago 21600)\"}]}"
+STUB_SESSION_BEAD="[{\"id\":\"hq-wisp-seat1\",\"metadata\":{\"pool_managed\":\"true\",\"last_woke_at\":\"$(ago 18000)\"}}]"
 STUB_RIG_NEWEST="[{\"newest\":\"$(ago 14400)\"}]"
 
 # run <rendered-block-file> <prelude> -> transcript in OUT, gc calls in LOG,
@@ -142,20 +142,20 @@ echo "# no-progress-finding: a printing pool seat with no write for four hours"
 run "$TMP/progress.sh" ""
 eq "$RC" 0 "the block exits 0"
 has "$LOG" 'gc-toolkit scripts-dir' "it finds seat-progress.sh through the pack lookup"
-eq "$(arg --key)" "no-progress.lx-wisp-seat1" "the finding is keyed on the seat's session"
+eq "$(arg --key)" "no-progress.hq-wisp-seat1" "the finding is keyed on the seat's session"
 eq "$(arg --about)" "tk-claim" "and is about the bead the row named"
 eq "$(arg --scope)" "witness-findings" "among the witness's findings"
 hasnt "$FILED" 'routed_to' "the finding carries no route"
 hasnt "$FILED" 'dog' "and addresses no dog"
 hasnt "$LOG" 'agent list' "so no roster is read for an address"
 hasnt "$LOG" 'session kill' "and the seat is not killed"
-has "$OUT" "reported lx-wisp-seat1" "and the step's line says what it judged"
+has "$OUT" "reported hq-wisp-seat1" "and the step's line says what it judged"
 
 echo "# no-progress-finding: the same seat with a write ten minutes ago"
 STUB_RIG_NEWEST="[{\"newest\":\"$(ago 600)\"}]"
 run "$TMP/progress.sh" ""
 eq "$FILED" "" "a seat that wrote recently gets no finding"
-has "$OUT" "spared lx-wisp-seat1" "and the line says it was spared"
+has "$OUT" "spared hq-wisp-seat1" "and the line says it was spared"
 eq "$RC" 0 "and the step keeps running"
 
 BUG_PRELUDE='TITLE="submit-and-exit strands pushed work"; BODY="the branch-shape gate re-runs against a detached HEAD"'
