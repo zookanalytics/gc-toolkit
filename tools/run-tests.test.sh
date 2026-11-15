@@ -74,20 +74,8 @@
 #     run prints one line saying so and exits 0, and --list prints nothing;
 #   - a BASE git cannot read, a missing BASE, an option or a range where BASE
 #     belongs, and a PATH beside --affected are usage errors;
-#   - under a bash older than 5.1 the runner runs no suite, whatever it was
-#     asked, and exits 2 with one line naming that bash. Under a newer bash it
-#     starts no suite either when the older bash comes first on PATH, and says
-#     so in one line. The same calls under the bash on PATH select and run. The
-#     case's older bash is /bin/bash, so a host whose /bin/bash is 5.1 or later
-#     skips it;
-#   - a file starts with the bash the runner held to its floor, the first bash
-#     on PATH as seen from the repository root, by its full path, with the
-#     timeout and without it. Called from a directory whose bin holds another
-#     bash, with bin first on PATH, the runner judges and starts the bash in
-#     the root's bin. A bash older than 5.1 there, a bash that reports no
-#     version, and a PATH with no bash from the root each stop the run with one
-#     line before any suite starts. Stand-in scripts play the older bash and
-#     the one that reports no version, so the case runs on every host.
+#   - the runner runs no suite, and exits 2, unless its own bash and the first
+#     bash on PATH from the repository root are both 5.1 or later.
 #
 # Hermetic: runs a copy of the runner over throwaway fixture *.test.sh files
 # whose pass/fail is driven by a per-file invocation counter, so "fails the
@@ -952,14 +940,8 @@ case "$old" in
 esac
 
 echo "── 19. a file starts with the bash the runner held to its floor ──"
-# Each file starts from the runner's repository root, so a relative directory on
-# PATH names a directory under the root, and the caller's directory of the same
-# name can hold another bash. from_caller puts one bash in bin under the
-# caller's directory and another in bin under the root, then calls the runner
-# from the caller's directory with bin first on PATH. The stand-in for an older
-# bash reports 3.2 and exits 0 without running the file it is given, as a suite
-# whose opening lines need bash 4 can under bash 3.2. The fixture records the
-# bash that ran it.
+# Each file starts from the repository root, so with bin first on PATH the
+# runner must judge and start the root's bin/bash, not the caller's.
 BREPO="$TMP/bash-repo"
 CALLER="$TMP/caller"
 mkdir -p "$BREPO/tools" "$BREPO/bin" "$CALLER/bin"

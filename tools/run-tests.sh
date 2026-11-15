@@ -134,27 +134,12 @@
 # under either prefix that is meant for one file, such as
 # GC_TMUX_TEST_WAIT_SECS, reaches it only then.
 #
-# The runner needs bash 5.1 or later. It selects the runs with associative
-# arrays, which bash 4.0 added, and reaps each with `wait -n -p`, whose -p
-# option bash 5.1 added. An older bash, such as the /bin/bash 3.2 that macOS
-# ships, reports each of those lines as an error and carries on, and it can
-# reach an exit 0 having run nothing. So under an older bash the runner stops
-# before it reads its arguments, and exits 2 with a line naming that bash.
-#
-# Every file starts with the first bash on PATH, and a file can fail the same
-# way. Under bash 3.2 a suite whose opening lines need bash 4 can exit 0 having
-# run none of its assertions. So before it starts a file, the runner holds that
-# bash to the same floor. It looks the bash up from the repository root, where
-# each file starts, so a relative directory on PATH, such as bin, is read under
-# the root. It reads the version of the file it found there, and it starts every
-# file with that file by its full path. When that bash is older than 5.1,
-# reports no version, or is not on PATH at all, the runner exits 2 with a line
-# saying so.
+# The runner needs bash 5.1 or later, both its own and the first on PATH, which
+# starts each file.
 #
 # Exit: 0 every file passed, or passed on a serial re-run, or the subset was
 # empty; 1 one or more failed serially too; 2 a usage or enumeration error,
-# such as a BASE git cannot read, or no bash of 5.1 or later to run the runner
-# or to start its files.
+# such as a BASE git cannot read, or no bash of 5.1 or later.
 
 set -uo pipefail
 
