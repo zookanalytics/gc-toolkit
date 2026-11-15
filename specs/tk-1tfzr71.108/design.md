@@ -338,7 +338,10 @@ a lift today, now applied at any head: the change made a call that is yours to
 make, by changing what the PR does, inferring one side's intent, or choosing
 between two live designs. A change that only alters how the approved behavior is
 achieved is not material. When triage rules a head material, it files the
-withdrawal before the run can record a result there:
+withdrawal before it writes its output, and `gctk review output` refuses a
+triage output that rules its head material until a withdrawal for that head is
+filed on the bead, so no round passes on the approvals given before it. A
+shadow run files none, so its ruling stands alone:
 
 ```bash
 gctk pr withdraw <bead> --head <head> --reason "<the call, what it means for the PR, and where to look>"

@@ -12,6 +12,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
@@ -160,21 +161,24 @@ review field says.
 It fills in the iteration the step runs in and an empty list of picks,
 findings or rulings, and refuses an output the run would read as not written
 or as a slip: another step's shape, another iteration, another head, a pick or
-a finding twice, a lane triage did not pick, a finding that breaks the finding
-contract (a grade of P0, P1 or P2, which every correctness finding carries,
-with a category and a failure_scenario; on a P0 or P1 a verification opening
-CONFIRMED or PLAUSIBLE; never a REFUTED candidate), an approve that carries a
-blocking finding (a P0, a P1 or an ungraded one) and a request-changes that
-carries none, a demo verdict with no visual decision or one its rules refuse
-(none only with an approve; a fallback, screenshot or video, costlier than the
-modality delivered), a visual on another check's verdict, a ruling of a finding
-no lane raised or of an ask the round cannot take, a finding or an ask left
-unruled, a must-fix with no fixing commit, a commit on a ruling that changes no
-code, a question with no gate, and a fix for an ask an earlier round of the run
-declined. A correctness lane's approve on a change that edits its own review
-guidance (review-checks.toml, docs/review-*.md) is refused until needs_you
-names the edit for the person who approves the merge, and when the paths
-cannot be listed, needs_you says the edit is unchecked.
+a finding twice, a triage that rules its head material while no withdrawal for
+that head is filed on the bead that owns the PR (a shadow run files none, so
+its ruling stands alone), a lane triage did not pick, a finding that breaks
+the finding contract (a grade of P0, P1 or P2, which every correctness finding
+carries, with a category and a failure_scenario; on a P0 or P1 a verification
+opening CONFIRMED or PLAUSIBLE; never a REFUTED candidate), an approve that
+carries a blocking finding (a P0, a P1 or an ungraded one) and a
+request-changes that carries none, a demo verdict with no visual decision or
+one its rules refuse (none only with an approve; a fallback, screenshot or
+video, costlier than the modality delivered), a visual on another check's
+verdict, a ruling of a finding no lane raised or of an ask the round cannot
+take, a finding or an ask left unruled, a must-fix with no fixing commit, a
+commit on a ruling that changes no code, a question with no gate, and a fix
+for an ask an earlier round of the run declined. A correctness lane's approve
+on a change that edits its own review guidance (review-checks.toml,
+docs/review-*.md) is refused until needs_you names the edit for the person who
+approves the merge, and when the paths cannot be listed, needs_you says the
+edit is unchecked.
 
 A shadow run's round fixes, pushes and files nothing, and its output carries
 the comment it would have posted, which this renders, and each write it made
@@ -236,7 +240,10 @@ func reviewOutput(bead, db, file, writes string, stdout, stderr io.Writer) int {
 		Writes: lines}, stdout, stderr)
 }
 
+// reviewOutputIn checks the output over l. The withdrawal a material head
+// needs is the pr domain's to answer, read through the same store.
 func reviewOutputIn(l *ledger.Ledger, req review.OutputRequest, stdout, stderr io.Writer) int {
+	req.Withdrawal = func(bead, head string) (string, error) { return pr.WithdrawalFor(l, bead, head) }
 	out, err := review.Output(l, req)
 	var refused *review.Refused
 	var notRun *review.NotARun

@@ -106,6 +106,20 @@ func TestReviewOutputExits(t *testing.T) {
 	if code := reviewOutputIn(ledger.New(s), bad, &out, &errb); code != 3 {
 		t.Errorf("an output at another head = exit %d; want 3", code)
 	}
+	// A head ruled material stands once its withdrawal is filed on the PR's
+	// bead, which the command reads through the pr domain.
+	material := review.OutputRequest{Step: "tk-tri", Raw: []byte(`{"review":"triage","head":"` + runHead + `","material":true}`)}
+	errb.Reset()
+	if code := reviewOutputIn(ledger.New(s), material, &out, &errb); code != 3 || !strings.Contains(errb.String(), "no withdrawal for it is filed") {
+		t.Errorf("a material head with no withdrawal = exit %d: %s; want 3", code, errb.String())
+	}
+	s.Put(fake.Bead{ID: "tk-wd", Status: "open", IssueType: "task", Metadata: map[string]string{"withdraw_head": runHead}})
+	pr, _ := s.Row("tk-pr")
+	pr.Edges = append(pr.Edges, gcbd.Edge{ID: "tk-wd", Type: gcbd.EdgeBlocks})
+	s.Put(pr)
+	if code := reviewOutputIn(ledger.New(s), material, &out, &errb); code != 0 {
+		t.Errorf("a material head with its withdrawal filed = exit %d: %s", code, errb.String())
+	}
 }
 
 // comment refuses an iteration whose round has written no rulings.

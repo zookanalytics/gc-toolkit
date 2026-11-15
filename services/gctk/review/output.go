@@ -3,6 +3,7 @@ package review
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
@@ -40,13 +41,16 @@ type Shadow struct {
 }
 
 // OutputRequest is one step's output to check: the step's bead, the text the
-// step wrote, the checkouts that can read the reviewed commit, and, for a
-// shadow run's round, each write it made none of.
+// step wrote, the checkouts that can read the reviewed commit, for a shadow
+// run's round each write it made none of, and the reader of the withdrawal
+// filed on a bead for a head, open or closed, "" when none is, which the pr
+// domain answers (pr.WithdrawalFor).
 type OutputRequest struct {
-	Step   string
-	Raw    []byte
-	Repos  []string
-	Writes []string
+	Step       string
+	Raw        []byte
+	Repos      []string
+	Writes     []string
+	Withdrawal func(bead, head string) (string, error)
 }
 
 // Refused is the error of an output the step must write again: why.
@@ -88,7 +92,7 @@ func Output(l *ledger.Ledger, req OutputRequest) ([]byte, error) {
 	var v any
 	switch st.Output {
 	case OutputTriage:
-		v, err = triageOutput(run, n, req.Raw)
+		v, err = triageOutput(run, n, req)
 	case OutputLane:
 		v, err = laneOutput(run, n, req)
 	case OutputRepair:
@@ -115,9 +119,14 @@ func decode(raw []byte, v any, what string) error {
 	return nil
 }
 
-func triageOutput(run *Run, n int, raw []byte) (*Triage, error) {
+// triageOutput checks triage's output. A head ruled material keeps the
+// approvals given before it only until the landing order carries out the
+// withdrawal triage files for it, so the output stands only once that
+// withdrawal is on the bead that owns the PR, open or closed. A shadow run
+// files none, so its ruling stands alone.
+func triageOutput(run *Run, n int, req OutputRequest) (*Triage, error) {
 	var t Triage
-	if err := decode(raw, &t, OutputTriage); err != nil {
+	if err := decode(req.Raw, &t, OutputTriage); err != nil {
 		return nil, err
 	}
 	t.Iteration = n
@@ -138,6 +147,19 @@ func triageOutput(run *Run, n int, raw []byte) (*Triage, error) {
 	}
 	if t.Checks == nil {
 		t.Checks = []Pick{}
+	}
+	if t.Material && !run.Shadow {
+		if req.Withdrawal == nil {
+			return nil, errors.New("no reader of withdrawals was given, so a material ruling cannot be checked")
+		}
+		id, err := req.Withdrawal(run.PRBead, t.Head)
+		if err != nil {
+			return nil, err
+		}
+		if id == "" {
+			return nil, refuse("triage rules %s material, and no withdrawal for it is filed on %s: withdraw the approvals "+
+				"given before it (review-run.sh withdraw), then write the output", t.Head, run.PRBead)
+		}
 	}
 	return &t, nil
 }

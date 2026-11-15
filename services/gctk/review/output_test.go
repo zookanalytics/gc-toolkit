@@ -3,10 +3,12 @@ package review_test
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
@@ -17,7 +19,9 @@ func (w *world) check(step string, wrote any, v any, repos ...string) error {
 	if !ok {
 		raw = jsonOf(w.t, wrote)
 	}
-	out, err := review.Output(w.ledger(), review.OutputRequest{Step: step, Raw: raw, Repos: repos})
+	l := w.ledger()
+	out, err := review.Output(l, review.OutputRequest{Step: step, Raw: raw, Repos: repos,
+		Withdrawal: func(bead, head string) (string, error) { return pr.WithdrawalFor(l, bead, head) }})
 	if err != nil {
 		return err
 	}
@@ -63,6 +67,64 @@ func TestATriageOutput(t *testing.T) {
 	mustRefuse(t, w.check(st, map[string]any{"review": "triage", "head": h1, "picks": []any{}}, nil), "does not read in its shape")
 	mustRefuse(t, w.check(st, triage(1, h1, "correctness", "Correctness"), nil), "picked twice")
 	mustRefuse(t, w.check(st, []byte("not json"), nil), "not one JSON object")
+}
+
+// A triage that rules its head material stands only once the withdrawal for
+// that head is filed on the bead that owns the PR, open or carried out, and
+// one for another head does not count. A shadow run files no withdrawal, so
+// its ruling stands alone, and a read of the withdrawals that fails is no
+// refusal: the step writes nothing until the store answers.
+func TestATriageThatRulesItsHeadMaterialNeedsItsWithdrawal(t *testing.T) {
+	w := newWorld(t)
+	st := w.step(1, "triage")
+	material := map[string]any{"review": "triage", "head": h1, "material": true}
+	mustRefuse(t, w.check(st, material, nil), "no withdrawal for it is filed on "+prBead)
+
+	w.withdrawal("tk-wd2", h2, "open")
+	mustRefuse(t, w.check(st, material, nil), "no withdrawal for it is filed on "+prBead)
+
+	w.withdrawal("tk-wd1", h1, "open")
+	if err := w.check(st, material, nil); err != nil {
+		t.Fatalf("a material head with its withdrawal filed is refused: %v", err)
+	}
+	w.withdrawal("tk-wd1", h1, "closed")
+	if err := w.check(st, material, nil); err != nil {
+		t.Fatalf("a material head whose withdrawal was carried out is refused: %v", err)
+	}
+
+	shadow := newWorld(t)
+	shadow.shadowRun()
+	if err := shadow.check(shadow.step(1, "triage"), material, nil); err != nil {
+		t.Fatalf("a shadow run's material ruling is refused for its missing withdrawal: %v", err)
+	}
+
+	broken := newWorld(t)
+	_, err := review.Output(broken.ledger(), review.OutputRequest{Step: broken.step(1, "triage"), Raw: jsonOf(t, material),
+		Withdrawal: func(string, string) (string, error) { return "", errors.New("the store did not answer") }})
+	var refused *review.Refused
+	if err == nil || errors.As(err, &refused) {
+		t.Fatalf("a withdrawal read that failed returns %v; want the read's error, not a refusal", err)
+	}
+}
+
+// shadowRun makes the world's run a shadow run.
+func (w *world) shadowRun() {
+	r, _ := w.store.Row(root)
+	r.Metadata["gc.var.shadow"] = "true"
+	w.store.Put(r)
+}
+
+// withdrawal files a withdrawal for head on the PR's bead, as gctk pr withdraw
+// does: a bead naming the head that the PR's bead waits on.
+func (w *world) withdrawal(id, head, status string) {
+	w.store.Put(bead{ID: id, Status: status, IssueType: "task", Description: "the call", Metadata: map[string]string{
+		"withdraw_head": head,
+	}})
+	pr, _ := w.store.Row(prBead)
+	if !slices.ContainsFunc(pr.Edges, func(e gcbd.Edge) bool { return e.ID == id }) {
+		pr.Edges = append(pr.Edges, gcbd.Edge{ID: id, Type: gcbd.EdgeBlocks})
+		w.store.Put(pr)
+	}
 }
 
 // A lane writes for a check triage picked, at the head triage judged, with a

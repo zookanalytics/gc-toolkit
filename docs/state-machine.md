@@ -400,7 +400,8 @@ the city's own counts against an approval GitHub still shows. An approval stands
 across pushes until triage rules a head material, by changing what the PR does,
 inferring one side's intent or choosing between two live designs. Triage then
 files a withdrawal (`gctk pr withdraw`), a task that blocks the bead and names
-the head in `withdraw_head`. The landing order carries it out once the intake
+the head in `withdraw_head`, before it writes its output, which
+`gctk review output` refuses until that withdrawal is filed. The landing order carries it out once the intake
 has routed the comments an approval it would dismiss carries. It dismisses each
 approval given on a commit that does not contain the head, by GitHub's compare
 of the two, with the reason and the city's mark, reads the reviews again, and

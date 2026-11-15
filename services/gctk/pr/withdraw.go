@@ -131,6 +131,36 @@ func (l Landing) Withdraw(bead, head, reason string) (Withdrawn, error) {
 	return Withdrawn{ID: id, Filed: true}, nil
 }
 
+// WithdrawalFor is the withdrawal for head filed on the bead, open or closed,
+// "" when none is: the one Withdraw files, and finds again on a retry. A
+// review run's triage output that rules its head material stands only once it
+// is filed. A read that fails, and a bead the store does not hold, return an
+// error.
+func WithdrawalFor(l *ledger.Ledger, bead, head string) (string, error) {
+	land := Landing{Ledger: l}
+	r, err := land.read(bead)
+	if err != nil {
+		return "", err
+	}
+	if r == nil {
+		return "", &ledger.ReadError{ID: bead, Reason: "the store holds no such bead"}
+	}
+	rows, err := land.blockers(r, true)
+	if err != nil {
+		return "", err
+	}
+	filed, err := withdrawalsIn(rows)
+	if err != nil {
+		return "", err
+	}
+	for _, w := range filed {
+		if w.head == head {
+			return w.id, nil
+		}
+	}
+	return "", nil
+}
+
 // withdrawTitle is a withdrawal's title: what it withdraws, of which PR.
 func withdrawTitle(number, head string) string {
 	pr := "the PR"

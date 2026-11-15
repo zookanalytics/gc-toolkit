@@ -151,8 +151,9 @@ does, by inferring one side's intent or by choosing between two live designs.
 A change that only alters how the approved behavior is achieved is not
 material. A review run asks this at every head, and at a material one the
 formula's withdrawal call withdraws the approvals given before that head,
-naming the call, what it means for the PR, and where to look, before the run
-records a result there. A review bead asks it of a conflicted round, below.
+naming the call, what it means for the PR, and where to look, before you write
+the output, which the output check refuses until that withdrawal is filed. A
+review bead asks it of a conflicted round, below.
 
 A round that conflicted is also yours to rule on. Each entry says what collided
 (the two intents), what the worker decided and why, what a reviewer should
