@@ -249,8 +249,10 @@ case "$1 ${2:-}" in
     # when they recorded nothing. Each other bead is a wait the caller names,
     # clear when the store holds it. The store holds a tk- bead unless
     # FAKE_HOLDS_MISSING names it, and no bead of another prefix, so such a bead
-    # prints its error line and the command exits 1. FAKE_HOLDS_FAILS is a store
-    # that did not answer, which prints every bead's error line and exits 1.
+    # prints its error line and the command exits 1. FAKE_HOLDS_UNREAD names a
+    # bead the store holds whose holds the read could not answer, which prints
+    # an error line of another reason. FAKE_HOLDS_FAILS is a store that did not
+    # answer, which prints every bead's error line and exits 1.
     shift 2; _ids=""
     while [ $# -gt 0 ]; do case "$1" in --db) shift 2 ;; --db=*) shift ;; *) _ids="$_ids $1"; shift ;; esac; done
     _rc=0; _subject=1
@@ -259,6 +261,8 @@ case "$1 ${2:-}" in
       elif [ -n "$_subject" ] && [ -n "${FAKE_HOLDS_JSON:-}" ]; then printf '%s\n' "$FAKE_HOLDS_JSON"
       elif [ -n "$_subject" ] && [ -s "$FAKE_STATE.pending" ]; then
         jq -sc --arg id "$_id" '{id: $id, status: "blocked", waits: ., pending: ., last_landed: "", in_flight: "", arm: null, foreign: []}' "$FAKE_STATE.pending"
+      elif [ -z "$_subject" ] && case " ${FAKE_HOLDS_UNREAD:-} " in *" $_id "*) true ;; *) false ;; esac; then
+        printf '{"id":"%s","error":"the store'"'"'s read could not answer %s: the store marks it blocked, and its blocked listing leaves it out"}\n' "$_id" "$_id"; _rc=1
       elif [ -z "$_subject" ] && case "$_id" in tk-*) case " ${FAKE_HOLDS_MISSING:-} " in *" $_id "*) true ;; *) false ;; esac ;; *) true ;; esac; then
         printf '{"id":"%s","error":"the store'"'"'s read could not answer %s: the store holds no such bead"}\n' "$_id" "$_id"; _rc=1
       else printf '{"id":"%s","status":"clear","waits":[],"pending":[],"last_landed":"","in_flight":"","arm":null,"foreign":[]}\n' "$_id"; fi
@@ -801,7 +805,8 @@ eq "$LOG" "" "(UNNAMED) …before anything is read or written"
 # ── blocked: the wait is an edge, in one store ───────────────────────────────
 #   (BLK)        the release carries the wait as --waiting-on
 #   (BLKHOLDS)   what holds the subject is read before the first write, in the
-#                subject's store, and a read that does not answer writes nothing
+#                subject's store, and a read that does not answer, for the
+#                subject or for a bead it would wait on, writes nothing
 #   (BLKFOREIGN) a subject with a wait edge into another store takes no write,
 #                and the refusal names the edge and its removal
 #   (BLKCROSS)   a --waiting-on the subject's store does not hold, such as one
@@ -837,6 +842,16 @@ FAKE_HOLDS_FAILS=1 run tk-sub --disposition blocked --reason "r" --takeaway "t" 
     --then-route gc-toolkit/gc-toolkit.polecat --run "$ROOT"
 eq "$RC" "4" "(BLKHOLDS) a holds read that does not answer stops the exit"
 has "could not read what holds tk-sub" "$ERR" "(BLKHOLDS) …saying so"
+eq "$(writes)" "" "(BLKHOLDS) …and nothing is written"
+
+# An error line for a reason other than the store holding no such bead is a
+# read that did not answer for a bead the store may hold, so it says nothing
+# about whether an edge onto that bead would hold the subject.
+FAKE_HOLDS_UNREAD=tk-blk1 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --run "$ROOT"
+eq "$RC" "4" "(BLKHOLDS) a wait the read could not answer for stops the exit"
+has "could not read whether tk-sub's store holds tk-blk1" "$ERR" "(BLKHOLDS) …saying so"
+has "its blocked listing leaves it out" "$ERR" "(BLKHOLDS) …with the read's reason"
+hasnt "is not a bead tk-sub's store holds" "$ERR" "(BLKHOLDS) …and not that the store does not hold it"
 eq "$(writes)" "" "(BLKHOLDS) …and nothing is written"
 
 export FAKE_HOLDS_JSON='{"id":"tk-sub","status":"clear","waits":[],"pending":[],"foreign":[{"id":"ra-elsewhere","type":"blocks"}]}'
@@ -1539,7 +1554,8 @@ unset FAKE_SHOW_JSON FAKE_DEPS_JSON
 #   (CLOSEWAIT)    a close that waits holds the subject on each bead and arms
 #                  the closer for when they close. A wait the subject's store
 #                  does not hold, or a subject with a wait edge into another
-#                  store, is refused before anything is written
+#                  store, is refused before anything is written, and a read
+#                  that does not answer for a wait writes nothing
 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "already fixed, nothing to merge" --takeaway "close: fixed in #123" --run "$ROOT"
 eq "$RC" "0" "(CLOSE) the close exit succeeds"
 has "SLING sling --rig gc-toolkit gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close" "$LOG" \
@@ -1645,6 +1661,11 @@ eq "$RC" "2" "(CLOSEWAIT) a wait in another store named after one in this store 
 eq "$(writes)" "" "(CLOSEWAIT) …holding the subject on neither"
 FAKE_HOLDS_MISSING=tk-gone GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-gone --run "$ROOT"
 eq "$RC" "2" "(CLOSEWAIT) a wait on a bead this store does not hold is refused the same way"
+eq "$(writes)" "" "(CLOSEWAIT) …writing nothing"
+FAKE_HOLDS_UNREAD=tk-retire GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --run "$ROOT"
+eq "$RC" "4" "(CLOSEWAIT) a wait the read could not answer for stops the close"
+has "could not read whether tk-sub's store holds tk-retire" "$ERR" "(CLOSEWAIT) …saying so"
+hasnt "is not a bead tk-sub's store holds" "$ERR" "(CLOSEWAIT) …and not that the store does not hold it"
 eq "$(writes)" "" "(CLOSEWAIT) …writing nothing"
 
 # A subject that already carries a wait edge into another store holds nothing

@@ -737,9 +737,12 @@ fi
 # nothing, since bd keeps an edge onto a bead its store does not hold and the
 # edge holds nothing. The blocked exit and a close that waits each write wait
 # edges, so each reads it before its first write. The read names each
-# --waiting-on beside the subject and answers a bead the subject's store does
-# not hold, such as one in another store, with an error line. An edge onto that
-# bead would hold nothing, so the call is refused as malformed. A subject that
+# --waiting-on beside the subject. gctk answers a bead the subject's store does
+# not hold, such as one in another store, with the error line of a read that
+# could not answer that bead because the store holds no such bead. An edge onto
+# that bead would hold nothing, so the call is refused as malformed. An error
+# line for any other reason is about what holds that bead, and says nothing
+# about whether the store holds it, so nothing is written. A subject that
 # carries a foreign edge would read as waiting while nothing holds it, and
 # gctk bead arm refuses it, so the exit refuses it and names the edge. A read
 # that does not answer for the subject leaves all of this unknown, so nothing
@@ -759,6 +762,8 @@ if [ "$DISPOSITION" = "blocked" ] || { [ "$DISPOSITION" = "close" ] && [ -n "$WA
             || die "could not read whether $BEAD's store holds $w (gctk bead holds gave no line for it), so nothing was written. Re-run this command once the store answers."
         _werr=$(printf '%s' "$_wline" | jq -r '.error // ""' 2>/dev/null)
         [ -n "$_werr" ] || continue
+        [ "$_werr" = "the store's read could not answer $w: the store holds no such bead" ] \
+            || die "could not read whether $BEAD's store holds $w (gctk bead holds: $_werr), so nothing was written. Re-run this command once the store answers for $w."
         [ "$DISPOSITION" != "close" ] \
             || usage_die "--waiting-on $w is not a bead $BEAD's store holds ($_werr), so an edge onto it would hold nothing and could not hold $BEAD until $w lands. Nothing was written. When $w is a bead in another store, a person closes $BEAD once it lands instead: put that to the operator with --disposition ruling."
         usage_die "--waiting-on $w is not a bead $BEAD's store holds ($_werr), so an edge onto it would hold nothing. Nothing was written. When $w is a bead in another store, wait on a bead in ${BEAD%%-*}'s store that names it instead, which --blocker \"<title>\" files."
