@@ -504,10 +504,14 @@ conditions not met. It reads:
   with nothing left to route. tk-1tfzr71.21 adds an approving review's message
   to the intake's count (section 3, case 1).
 
-The label and the board render the evaluator's answer through `prstatus`, and
-the merge acts only on an answer it read in the same run. `prstatus`'s `merging`
-is what the board shows, and it authorizes nothing. Readiness is computed per PR
-at each read and stored nowhere, so it never stands as a permission on a commit
+The merge acts only on an answer it read in the same run. The landing order
+saves the GitHub read each of its checks makes on the PR's bead, and the label
+and the board run the evaluator's rule over that read and the store as it is at
+their read, through `prstatus`
+([tk-1tfzr71.134's design](../tk-1tfzr71.134/design.md)). `prstatus`'s
+`merging` is what the board shows, and it authorizes nothing. Readiness is
+computed per PR at each read and stored nowhere. What is saved is GitHub's
+facts, which grant nothing, so no answer stands as a permission on a commit
 that another PR shares.
 
 **The merge request.** The landing order asks GitHub to merge a PR only on an
@@ -815,8 +819,8 @@ registry, and the doctor checks the beads after the write.
 
 | Reader | Target | Built by |
 |---|---|---|
-| The board and the status label | Both read the evaluator's answer through `prstatus`, and the record's values. The board's clauses for retired values match nothing once no bead carries them. | unit 2 for the answer, unit 5 for the values; the board member (tk-1tfzr71.24) drops the dead clauses |
-| The PR-finishing rank (`prio_pr_approved` in `priority-lib.sh`) | Carried, not dropped. It reads the approval from the posture at `pr_head_oid`, which stay until tk-1tfzr71.21. When the posture goes, the rank reads the approval from the evaluator's answer through `prstatus`. Whichever change removes the machine's exit sets keeps clearing `pr_finishing_settled` and `pr_head_oid` when a bead leaves the values of an open PR, until tk-1tfzr71.21 removes the keys. | tk-1tfzr71.21, and the retirement bead |
+| The board and the status label | Both run the evaluator's rule through `prstatus` over the GitHub read the landing order saves at each check and the store, and read the record's values. The board's clauses for retired values match nothing once no bead carries them. | unit 2 for the rule, tk-1tfzr71.132 for the saved read, unit 5 for the values; the board member (tk-1tfzr71.24) drops the dead clauses |
+| The PR-finishing rank (`prio_pr_approved` in `priority-lib.sh`) | Carried, not dropped. It reads the approval from the posture at `pr_head_oid`, which stay until tk-1tfzr71.21. When the posture goes, the rank reads the approval from the GitHub read the landing order saves, through the evaluator's rule. Whichever change removes the machine's exit sets keeps clearing `pr_finishing_settled` and `pr_head_oid` when a bead leaves the values of an open PR, until tk-1tfzr71.21 removes the keys. | tk-1tfzr71.21, and the retirement bead |
 | The sign-off's headline (`converse-signoff.sh`) | It reads `prstatus` instead of sourcing `review-verdict.sh`. `needs-review` means the PR still needs your Approve. | unit 5 |
 | A rework child parked for a person | It still owns the anchor's branch. The refinery's conflict path, and later the intake's conflict repair, add the conflict to that child's notes, running or parked, and file and sling nothing else. | unit 4; tk-1tfzr71.21 for the intake |
 | The doctor | I5 reads every closed bead with a PR, and reads `mr_merged` and `merged` as landed. I2 reads the kept values. `check-one-anchor-per-pr` counts the values of an open PR. `check-refinery-patrol-live` retires with the old patrol. | units 4 and 5, and the retirement bead |
