@@ -157,9 +157,10 @@ not land is made again by a later pass, with nothing recording that it was owed.
   writes a GitHub label. A search for `addLabels`, `removeLabels`,
   `labels(first`, `LabelsOnLabelable` and `--add-label` finds only bead labels.
 - **Gas Town.** No label code.
-- **bd.** `AddLabels` adds labels to an issue number over REST, with no removal
-  and no rule that derives them. Not covered: the families, the derivation and
-  the clear are the pack's own.
+- **bd.** `AddLabels` and `RemoveLabel` in `internal/github/client.go` add
+  labels to an issue number and take one off over REST, in a package internal to
+  bd that gctk cannot import, with no rule that derives them. Not covered: the
+  families, the derivation and the clear are the pack's own.
 - **Retrying a failed write.** No queue exists (above). The comparison is the
   retry: a later pass reads the labels again and writes what still differs.
 

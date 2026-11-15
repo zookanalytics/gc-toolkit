@@ -89,9 +89,9 @@ which). Each field reads:
 - **Its required checks at the head:** the latest run of each check in each
   suite, through `isRequired(pullRequestNumber: N)` at the field's own number,
   the shape of gctk's checks query today.
-- **What tells that its feedback moved:** the newest review's id, the newest
-  conversation comment's id, which review threads are unresolved, and the review
-  decision.
+- **What tells that its feedback moved:** the newest review's id and the number
+  of reviews, the newest conversation comment's id, which review threads are
+  unresolved, and the review decision.
 - **Its labels.**
 
 A PR is changed when the pass's read differs from the read saved on its bead in
@@ -105,10 +105,14 @@ feedback in each id space, or the review threads waiting on the city's answer,
 because the definition of feedback and the approval rule read the text and the
 author of every post. For those it returns what tells that they moved:
 
-- **A review or an inline comment.** The newest review's id moves for every
-  review and every inline comment. Every inline comment on the 9 open PRs here
+- **A review or an inline comment.** Every inline comment on the 9 open PRs here
   belongs to a review the PR's reviews list holds, the newest one to the newest
   review, and on merged #1488 each reply in a thread carries a review of its own.
+  So a review or an inline comment moves the newest review's id, or the number of
+  reviews when its review was started before another and submitted after it.
+  Such a review can sit behind the other in the list: a person's review here
+  stays unsubmitted for up to 15 minutes, and the list's order for one was not
+  observed.
 - **A conversation comment.** The newest conversation comment's id moves.
 - **A thread a person resolves or reopens.** The set of unresolved threads moves.
 - **An approval dismissed.** The review decision moves.
@@ -125,7 +129,7 @@ counts as changed, and its whole read pages them.
 One order runs it: the landing order (`orders/pr-reconcile.toml`, `gctk pr
 reconcile`). Each run reads, compares, then acts within a budget:
 
-1. **Read the store once,** one listing of every live bead
+1. **Read the store in one listing** of every live bead
    (services/gctk/listing). It gives the PRs the city owns, the pending records,
    each record's store side and each owner's saved read. This rig's 877 live
    beads list in 0.45 s.
@@ -138,9 +142,11 @@ reconcile`). Each run reads, compares, then acts within a budget:
 4. **Act, one record at a time under the record lock,** each act guarded on the
    status and assignee read under it, as today. The order is store-only acts,
    then lands, requeues and exceptions, then the saved read's state where it
-   differs, then whole reads and merge requests, then labels. Within each kind
-   the record least recently checked goes first. No act starts after 90 seconds.
-   An act not reached stays a difference, and the next pass finds it.
+   differs, then whole reads and merge requests, then labels, over a second
+   listing that sees those writes ([section 4](#4-the-label-comparisons-reach)).
+   Within each kind the record least recently checked goes first. No act starts
+   after 90 seconds. An act not reached stays a difference, and the next pass
+   finds it.
 
 Measured costs:
 
@@ -148,7 +154,7 @@ Measured costs:
 |---|---|---|---|
 | Nothing changed | 1 request per repository, about 4 points here | none | about 4 s |
 | A base move changes N PRs' merge state | the same request | N saved reads, and a label write for each PR whose derived label changed | 4 s plus the writes |
-| M PRs' feedback moved | the request, plus M whole reads of six calls and about 5 points each | M | about 4 s plus 4.4 s each |
+| M PRs' feedback moved | the request, plus M whole reads of six calls and about 5 points each | M | about 4 s plus 4.4 s and a write each |
 | Today, per run | up to 20 whole reads | up to 20 | up to about 140 s |
 
 The other two candidates fail on facts of Gas City as shipped (gas-city-search.md,
@@ -193,9 +199,9 @@ recently checked first.
 ## 3. The saved read
 
 A changed PR's saved read is refreshed from the pass's read wherever that read
-holds the field. Only a PR whose feedback moved takes the whole read it takes
-today (`observe`: the PR, its check suites, reviews, login, review threads and
-conversation comments).
+holds the field. Only a PR whose feedback moved, or that reads ready to merge,
+takes the whole read it takes today (`observe`: the PR, its check suites,
+reviews, login, review threads and conversation comments).
 
 - **Every field the pass's read holds** is written from it when it differs: the
   identity, head, state, draft flag, merge state and required checks. A base move
@@ -236,8 +242,8 @@ never from a saved read alone.
 Batching the whole read was measured too: one aliased request read 9 PRs whole,
 reviews, threads and comments included, in 3.93 seconds for 18 points, against
 4.36 seconds and about 5 points for one PR today. This design does not build it.
-The whole read runs only on a change of feedback, which people make, and at
-today's counts a pass's whole reads fit its budget.
+The whole read runs only on a change of feedback, which people make, or for a PR
+that reads ready. At today's counts a pass's whole reads fit its budget.
 
 ## 4. The label comparison's reach
 
@@ -264,10 +270,10 @@ What the store derives for each:
 | owned, merged or closed | none: GitHub's own state takes over |
 | owned by no live bead, open or closed | none: the city works no such PR |
 
-The derivation is `prstatus` over the pass's one listing, the one `gctk pr status`
-runs for a single bead and the rig board runs for all of them. It runs after the
-acts, from a second listing, so it sees what the pass wrote. The labels compared
-are those the pass's read returned, which no write in the pass has changed.
+The derivation is `prstatus`, the one `gctk pr status` runs for a single bead and
+the rig board runs for all of them. It runs after the acts, over a second listing
+of the store, so it sees what the pass wrote. The labels compared are those the
+pass's read returned, which no write in the pass has changed.
 
 Each difference is written through the label's one writer,
 `assets/scripts/pr-status-label.sh`, with the verbs it has:
@@ -283,11 +289,13 @@ compares again, and no key or marker records it.
 
 The first pass over the closed PRs runs at a pace. A pass clears at most 10 PRs
 the store does not own, so the 527 here clear in about 53 passes, an hour and
-three quarters at 2 minutes. That keeps the clears to about a fifth of the hour's
-GitHub allowance if one write of `gh pr edit` costs about four GraphQL requests.
-That cost is gh's and is not measured here, so the unit measures it on its first
-clear and sets the per-pass count to hold that share. PRs the city owns have no
-cap: they are few, and their labels are what the operator reads.
+three quarters at 2 minutes. Each clear reads the PR's labels and then edits
+them. If one `gh pr edit` makes about four GraphQL requests at a point each, the
+300 clears an hour cost about 1,500 of the hour's 5,000 points, under a third of
+the allowance. The edit's cost is gh's and is not measured here, so the unit
+measures it on its first clear and sets the per-pass count to hold that share.
+PRs the city owns have no cap: they are few, and their labels are what the
+operator reads.
 
 An open PR that no live bead owns loses the city's labels. One open between
 `pr-open.sh`'s create and its record of `pr_url` can lose its first label for one
@@ -304,7 +312,7 @@ scheduled bead retires, so none changes here (AGENTS.md, rule 1):
 |---|---|---|
 | `pr-facts.sh` | its full pass's `reconcile`, and its clear at a merge or a close with `status_label_clear_owed` | retires with tk-1tfzr71.21 (tools/deletion-plan.tsv) |
 | `gctk merge` | its clear at a merge, with `status_label_clear_owed` | retires with tk-1tfzr71.70 (docs/built-once-target.md, lane A) |
-| `pr-open.sh` | `reconcile` at its create, its adoption and its draft-to-ready arm | its create retires with tk-1tfzr71.70, and its arm with the merge cadence (tk-1tfzr71.21) |
+| `pr-open.sh` | `reconcile` at its create, its adoption and its draft-to-ready arm | its create and its adoption, which each move an anchor from `pre_open_gate` to `pull_request` on the old path, retire with tk-1tfzr71.70 and that path's transition machine, and its arm with the merge cadence (tk-1tfzr71.21) |
 | `signoff.sh` | `reconcile` after a verdict | retires with tk-1tfzr71.122 by the deletion plan on `integration/tk-1tfzr71.22` |
 
 `status_label_clear_owed` retires with its two writers, and the comparison clears
@@ -510,6 +518,12 @@ texts are in the commands below.
   state, required checks by `isRequired(pullRequestNumber: N)`, labels, newest
   review and conversation comment, unresolved threads and review decision, and
   the merged PRs' merge commits. Cost 3. Time 3.24, 2.91 and 2.71 seconds.
+- **The number of reviews.** The same request with `totalCount` on each PR's
+  reviews and `pageInfo` on its threads cost 3, with no errors, in 2.95, 2.72
+  and 2.82 seconds. Over 552 reviews on 60 merged PRs here, a person's review
+  was submitted up to 15 minutes after it was started, and no review sat out of
+  the order of its id, its creation or its submission. So where the list puts a
+  review started before another and submitted after it was not seen.
 - **The open list.** `repository.pullRequests(states: OPEN, first: 100)` with
   labels, newest review and comment, threads and check contexts read 9 PRs in
   2.16 s for 6 points. Run against each of the city's six repositories it found
@@ -549,8 +563,9 @@ Gas City's facts are in [gas-city-search.md](gas-city-search.md).
 #   p<N>: pullRequest(number:<N>){ number url state isDraft headRefName headRefOid
 #     baseRefName mergeStateStatus isInMergeQueue isMergeQueueEnabled mergedAt
 #     mergeCommit{oid} reviewDecision labels(first:20){nodes{name}}
-#     reviews(last:1){nodes{fullDatabaseId}} comments(last:1){nodes{fullDatabaseId}}
-#     reviewThreads(first:100){nodes{isResolved}}
+#     reviews(last:1){totalCount nodes{fullDatabaseId}}
+#     comments(last:1){nodes{fullDatabaseId}}
+#     reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved}}
 #     commits(last:1){nodes{commit{oid checkSuites(first:20){pageInfo{hasNextPage}
 #       nodes{checkRuns(first:50,filterBy:{checkType:LATEST}){pageInfo{hasNextPage}
 #       nodes{name status conclusion isRequired(pullRequestNumber:<N>)}}}}}}} }
