@@ -73,7 +73,11 @@
 #   - a change that names no file runs no suite, not even a tree-wide one: the
 #     run prints one line saying so and exits 0, and --list prints nothing;
 #   - a BASE git cannot read, a missing BASE, an option or a range where BASE
-#     belongs, and a PATH beside --affected are usage errors.
+#     belongs, and a PATH beside --affected are usage errors;
+#   - under a bash older than 5.1 the runner runs no suite, whatever it was
+#     asked, and exits 2 with one line naming that bash, while the same calls
+#     under the bash on PATH select and run. A host whose /bin/bash is 5.1 or
+#     later has no older bash to run it under, and skips the case.
 #
 # Hermetic: runs a copy of the runner over throwaway fixture *.test.sh files
 # whose pass/fail is driven by a per-file invocation counter, so "fails the
@@ -894,6 +898,39 @@ has "$OUT" "not the range 'base...HEAD'" "…that names the range"
 alist --affected base lib/tool.sh
 eq "$RC" 2 "a PATH beside --affected is a usage error"
 has "$OUT" "takes no PATH" "…that says why"
+
+echo "── 18. a bash older than 5.1 runs nothing ──"
+# macOS's /bin/bash is 3.2. The fixture marks the state directory when it runs.
+cat > "$FIX/ran.test.sh" <<'F'
+#!/usr/bin/env bash
+touch "$RUNTESTS_FIXTURE_STATE/ran"
+F
+OLD_BASH=/bin/bash
+old="$("$OLD_BASH" -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"' 2>/dev/null)"
+case "$old" in
+  [0-4].*|5.0)
+    refused="run-tests: needs bash 5.1 or later, and $OLD_BASH is bash $("$OLD_BASH" -c 'echo "$BASH_VERSION"'), so nothing ran"
+    reset_state
+    OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$OLD_BASH" "$RUNNER_COPY" -j 2 -t 30 "$FIX/ran.test.sh" 2>&1)"; RC=$?
+    eq "$RC" 2 "a run under bash $old is refused"
+    eq "$OUT" "$refused" "…with one line naming the bash"
+    eq "$(ls "$STATE")" "" "…and runs no suite"
+    gitc checkout -q tool
+    OUT="$("$OLD_BASH" "$AREPO/tools/run-tests.sh" --affected base 2>&1)"; RC=$?
+    eq "$RC" 2 "--affected over a branch's change under bash $old is refused, not passed"
+    eq "$OUT" "$refused" "…with the same one line"
+    OUT="$("$OLD_BASH" "$AREPO/tools/run-tests.sh" --list --affected base 2>&1)"; RC=$?
+    eq "$RC" 2 "--list under bash $old is refused too"
+    eq "$OUT" "$refused" "…listing nothing"
+    reset_state
+    run "$FIX/ran.test.sh"
+    eq "$RC" 0 "the same run under the bash on PATH passes"
+    if [ -e "$STATE/ran" ]; then ok "…having run the suite"; else bad "…having run the suite" "no mark in $STATE"; fi
+    alist --affected base
+    eq "$LIST" "$WANT" "the same --affected under the bash on PATH lists the change's subset"
+    ;;
+  *) printf '  SKIP  bash older than 5.1: %s is bash %s\n' "$OLD_BASH" "${old:-unknown}" ;;
+esac
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
