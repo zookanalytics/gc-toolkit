@@ -242,7 +242,7 @@ starts, and nothing moves it afterwards.
 | The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the binding the rig runs the pack under, which the landing order passes when it starts the review and the review passes on to each check it starts. | The installed pack when the reviewer loads it |
 | The specialist stance, the skill `gc-toolkit.specialist-stance`, held by arch, demo, pm and a check of the rig's own | The reviewer's skill catalog | The installed pack when the reviewer loads it |
 | The architecture-document standard, the skill `gc-toolkit.architecture-document`, which the arch method holds the rig's architecture document to | The reviewer's skill catalog | The installed pack when the reviewer loads it |
-| The pack's scripts, and the pack's check index | The installed pack's script directory, which every caller reaches through `gc <binding> scripts-dir`: a formula step with the `binding_prefix` it is poured with, and a skill with the binding its catalog shows. `gctk review checks` reads the `review-checks.toml` at the root of the pack, two directories above that script directory. | The installed pack when the script runs |
+| The pack's scripts, and the pack's check index | The installed pack's script directory, which every caller reaches through `gc <binding> scripts-dir`: a formula step with the `binding_prefix` it is poured with, and a skill with the binding its catalog shows. `gctk review checks` reads the `review-checks.toml` at the installed pack's root. | The installed pack when the script runs |
 | The rig's check index rows | The rig's `review-checks.toml`, laid over the pack's rows | The reviewed commit |
 | The rig's guidance for the check | The rig's `docs/review-<check>.md`, which the formula prints | The reviewed commit |
 | The diff, and the docs a check stewards, such as `docs/architecture.md` for arch and `docs/product-goals.md` for pm | The review's worktree ([review-workspace.md](review-workspace.md)) | The reviewed commit |
@@ -267,8 +267,7 @@ none.
   guidance fix merged on the default branch reaches an open PR when that PR
   next merges its base. So a correctness approve of a branch that edits its own
   guidance, `review-checks.toml` or a `docs/review-*.md`, names the edit to the
-  person who approves the merge, and the verdict's write refuses one that does
-  not.
+  person who approves the merge.
 - **When gc-toolkit reviews itself, the pack and the rig are the same files at
   two commits.** A branch that edits a check's method, the specialist stance, a
   review formula or a script the review calls is reviewed under the installed
