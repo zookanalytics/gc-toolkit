@@ -46,19 +46,21 @@ func TestPullRequest(t *testing.T) {
 		"id":"PR_kw1","number":7,"url":"https://github.com/acme/widgets/pull/7","state":"OPEN","isDraft":false,
 		"headRefName":"polecat/tk-1","headRefOid":"abc","baseRefName":"main","mergeStateStatus":"CLEAN",
 		"repository":{"nameWithOwner":"acme/widgets"},"mergedAt":null,"mergeCommit":null,
-		"isInMergeQueue":true,"isMergeQueueEnabled":true}}}}`})
+		"isInMergeQueue":true,"isMergeQueueEnabled":true,
+		"labels":{"nodes":[{"name":"status: merging"},{"name":"bug"}]}}}}}`})
 	p, err := c.PullRequest("acme/widgets", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := gh.PullRequest{ID: "PR_kw1", Number: 7, URL: "https://github.com/acme/widgets/pull/7", State: "OPEN",
 		HeadRefName: "polecat/tk-1", HeadRefOid: "abc", BaseRefName: "main", MergeStateStatus: "CLEAN",
-		Repository: "acme/widgets", InMergeQueue: true, MergeQueueEnabled: true}
-	if *p != want {
+		Repository: "acme/widgets", InMergeQueue: true, MergeQueueEnabled: true, Labels: []string{"status: merging", "bug"}}
+	if !reflect.DeepEqual(*p, want) {
 		t.Fatalf("got %+v, want %+v", *p, want)
 	}
 	args := strings.Join(r.calls[0].args, " ")
-	for _, want := range []string{"api --hostname github.com graphql", "-f owner=acme", "-f name=widgets", "-F number=7"} {
+	for _, want := range []string{"api --hostname github.com graphql", "-f owner=acme", "-f name=widgets", "-F number=7",
+		"labels(first:100){nodes{name}}"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("the read asks %q without %q", args, want)
 		}
@@ -73,13 +75,26 @@ func TestAMergedPullRequestNamesItsMergeCommit(t *testing.T) {
 		"id":"PR_kw1","number":7,"url":"https://github.com/acme/widgets/pull/7","state":"MERGED","isDraft":false,
 		"headRefName":"polecat/tk-1","headRefOid":"abc","baseRefName":"main","mergeStateStatus":"UNKNOWN",
 		"repository":{"nameWithOwner":"acme/widgets"},"mergedAt":"2026-11-12T08:00:00Z","mergeCommit":{"oid":"def"},
-		"isInMergeQueue":false,"isMergeQueueEnabled":false}}}}`})
+		"isInMergeQueue":false,"isMergeQueueEnabled":false,"labels":{"nodes":[]}}}}}`})
 	p, err := c.PullRequest("acme/widgets", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.State != "MERGED" || p.MergeCommit != "def" || p.MergedAt != "2026-11-12T08:00:00Z" {
+	if p.State != "MERGED" || p.MergeCommit != "def" || p.MergedAt != "2026-11-12T08:00:00Z" || len(p.Labels) != 0 {
 		t.Fatalf("a merged PR read as %+v", *p)
+	}
+}
+
+// A read whose answer holds no labels is not whole: the labels a check passes
+// on would name none, and the PR may carry some.
+func TestAPullRequestReadThatHoldsNoLabelsIsAnError(t *testing.T) {
+	c, _ := client([2]string{"pullRequest(number:$number)", `{"data":{"repository":{"pullRequest":{
+		"id":"PR_kw1","number":7,"url":"https://github.com/acme/widgets/pull/7","state":"OPEN","isDraft":false,
+		"headRefName":"polecat/tk-1","headRefOid":"abc","baseRefName":"main","mergeStateStatus":"CLEAN",
+		"repository":{"nameWithOwner":"acme/widgets"},"mergedAt":null,"mergeCommit":null,
+		"isInMergeQueue":false,"isMergeQueueEnabled":false}}}}`})
+	if _, err := c.PullRequest("acme/widgets", 7); err == nil || !strings.Contains(err.Error(), "holds no labels") {
+		t.Fatalf("a read with no labels read as %v", err)
 	}
 }
 
