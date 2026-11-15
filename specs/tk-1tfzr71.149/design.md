@@ -414,9 +414,12 @@ need not wait, since it is armed on mol-design-convoy.
 
 The two efforts build one read of GitHub. This effort owns it: the pass's read of
 every PR the city owns, and the saved read on each PR's bead. tk-1tfzr71.21's
-intake reads from it. When the saved read's newest feedback passes the bead's
-receipts, intake routes the posts behind it, the act the merge design moves into
-the landing order's run. Its own read of a post's text is then that act's read.
+intake reads from it. When the saved read shows feedback past what the bead's
+receipts hold, intake routes the posts behind it, the act the merge design moves
+into the landing order's run. Its own read of a post's text is then that act's
+read. A review started before another and submitted after it can sit below the
+newest id ([section 1](#1-what-makes-a-pr-changed)), so neither that test nor
+the receipts can rest on the newest id alone.
 
 This effort leaves to intake:
 
