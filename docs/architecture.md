@@ -193,9 +193,7 @@ session dying, a provider quota park, a `gc` build that moves the text the seed
 audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
 the cadence), or the landing order for a PR on the pending record, records PR
 events and files a human gate, the witness patrol
-recovers work orphaned by dead sessions, the `dog` pool is warrant executor for
-due-process recovery of wedged sessions (demand-scaled 0-2),
-`quota-park-nudge.sh` nudges a session parked behind a provider limit,
+recovers work orphaned by dead sessions,
 `witness-nudge.sh` gives a witness whose patrol pass stopped its next turn,
 `boot-health.sh` detects a wedged deacon (report-only by design),
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
@@ -204,6 +202,11 @@ branch calls, slings the one re-render of the default branch's
 `generated/seed-audit`. See [authority-map.md](authority-map.md). There is no
 healer category: writers complete their own transitions, so nothing
 reconstructs pack-written state after the fact.
+
+Gas City's controller recovers a pool seat that holds work and either goes
+quiet or is refused by its provider for a rate limit. It does not act on a pool
+seat that keeps printing while its work stands still, and the witness patrol
+files a finding on that seat. No part of the pack kills a stuck session.
 
 ## What the pack supplies and what a rig supplies
 
@@ -490,6 +493,13 @@ why a reader must know it, and the work that retires it.
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
   the memory intake.
+- **The pack still recovers stuck sessions itself.** The witness and the deacon
+  still file warrants on sessions they judge stuck, the `dog` pool still kills
+  one its probes find silent, and `quota-park-nudge.sh` still nudges a session
+  parked behind a provider limit. So a warrant can still end a session, and the
+  witness's finding on a seat that prints while its work stands still is not
+  built yet. The session-liveness implementation (tk-1tfzr71.138) files the
+  units that retire each of these.
 - **A sitting does not edit an open PR's branch.** A ruling on an open PR still
   files a rework a polecat runs. A unit that waits on the review-lanes member
   (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it
