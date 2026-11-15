@@ -17,8 +17,6 @@
 # question put to a gate; the record asking a person when the loop exhausted
 # its attempts, and removing the workspace, which a shadow run keeps; and the
 # reads making each step's worktree in its own part of the workspace.
-#
-# run-tests-scope: file
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
