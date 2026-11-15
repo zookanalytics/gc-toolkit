@@ -104,14 +104,23 @@ continuation group, so a session may take `implement` fresh.
 
 ### Review
 
-The declared checks run as lanes of a formula check loop, each check's method
-is its skill, and triage widens the check set. Review owns the check index
-(`review-checks.toml`) and the methods, which are prose, and the demo
-modalities. The shape of the loop is what tk-1tfzr71.22's design settles.
+The declared checks run as lanes of one review run per PR head,
+`mol-pr-review`, which composes Gas City's multi-lane review loop: a formula
+check loop whose triage picks the checks the head needs, a lane of
+`mol-pr-review-lane` for each, and one step that rules every finding by its own
+lane's rule and makes the round's fixes. Each check's method is its skill.
+Review owns the check index (`review-checks.toml`), the methods, which are
+prose, the demo modalities, the run's formulas and gctk's review domain, whose
+verbs read the index, hold the loop's pass rule and record the result the merge
+reads. A lane's verdict lives in the run. Every lane runs once the PR is open as
+a draft, and the operator reads each lane's verdict at a head in the run's one
+comment for that head on the PR, beside how each finding was ruled.
 
 The trade: review beads, lane derivation, validation passes, machine finding
-beads and the sweeps that close their leftovers go, and a lane's verdict lives
-in the loop. A person's finding on a PR stays a record the operator rules on.
+beads and the sweeps that close their leftovers go. A rig runs them until its
+cutover, and the old path's retirement (tk-1tfzr71.122) deletes them once every
+rig has cut over and the GitHub intake (tk-1tfzr71.21) has landed. A person's
+finding on a PR stays a record the operator rules on.
 
 ### Merge
 
@@ -160,12 +169,13 @@ yet. Each remaining difference names its reason and what ends it:
   human gate on the bead, keyed by the case. Gas Town routes the bead to
   `human` and mails the mayor. The po owns only what a ruling gives it. This
   ends when an operator ruling gives the po escalation handling.
-- **The PR opens as a draft.** The review loop (tk-1tfzr71.22) returns it to
-  draft for each later round of the city's work and marks it ready once the
-  lanes before the ready-for-review phase pass. Gas Town opens it ready and
+- **The PR opens as a draft.** Each city writer returns the PR to draft before
+  it pushes onto the PR's branch (`gctk pr draft`), and the landing order marks
+  it ready once a review run has passed at the head the refinery validated, with
+  no run attached and no ask a run can take open. Gas Town opens it ready and
   never returns it to draft. The city's checks run on the PR before it asks the
   operator, and a repository whose workflows skip drafts runs its CI on the
-  head the loop marks ready. No end is planned.
+  head the order marks ready. No end is planned.
 - **The city merges.** The landing order asks GitHub to merge the head the
   refinery validated once the evaluator finds the PR ready, where Gas Town
   leaves the merge to a person. The operator approves and the city lands the
@@ -215,9 +225,15 @@ yet. Each remaining difference names its reason and what ends it:
   effort's branch current with its target (`effort-bring-current.sh`). Gas Town
   has no integration efforts. This ends when the convoys member (tk-1tfzr71.23)
   moves efforts onto `gc convoy land`.
-- **One worker per branch.** A conflict on a branch whose rework child is open
-  goes to that child's notes. Gas Town has no rework children. This ends when
-  the review loop (tk-1tfzr71.22) takes review feedback off rework children.
+- **One worker per branch.** While a review run is attached to the bead that
+  owns a PR, the run is the one writer of the PR's branch, and the refinery's
+  find-work skips the bead the run holds. Work that needs the branch changed,
+  such as a conflict with the target, a person's comment or a sitting's ruling,
+  is filed as an ask, which the run takes. A conflict on a branch whose rework
+  child is still open goes to that child's notes, on a rig not yet cut over and
+  for a child a cutover left to finish, until the old path's retirement
+  (tk-1tfzr71.122). Gas Town has no review run and no asks. Two writers on one
+  branch would overwrite each other's work. No end is planned.
 
 ### Human engagement
 
@@ -304,8 +320,8 @@ reason and what ends it:
   not apply to an always-on session, so there its passes run back to back. This
   ends when Gas City gives an always-on patrol an idle interval.
 - **Reading our anchors, PR states and conversations.** Our pipeline writes them.
-  This ends as the old merge path's retirement (tk-1tfzr71.70) and tk-1tfzr71.22
-  land.
+  This ends as the retirements of the old merge path (tk-1tfzr71.70) and the
+  old review path (tk-1tfzr71.122) land.
 - **Findings and human gates in place of mayor mail.** Gas Town's witness mails
   the mayor about emergencies, failures, recovered and handed-off orphans and
   queue health. This one files findings and human gates instead, because the po
@@ -401,7 +417,7 @@ home.
   binding. Carried by tk-rzic0sg. All other pack text asks gc, in one line per
   shell block that runs a pack script, since each block is its own shell.
 - The decline sequence (file the human gate, cancel the run, drain): two copies
-  in the step text of `mol-validate.toml`, which tk-1tfzr71.22 retires. Outside
+  in the step text of `mol-validate.toml`, which tk-1tfzr71.122 retires. Outside
   that file a decline calls `decline.sh`. `mol-review`'s failed gather cancels
   its own run, because it returns the review to its pool through `gc sling` once
   the cancel has landed.
@@ -453,24 +469,25 @@ more than its size. A branch already in flight shows its measured net instead.
 ### 3. The lanes
 
 Each member is armed behind the one before it, and at most two migrations are
-in flight at once, on disjoint subsystems. The old merge path's retirement
-(tk-1tfzr71.70), last in lane A, is the exception: it is armed behind every
-rig's cutover, and each cutover waits on tk-1tfzr71.22. A member whose method
-is a design convoy lands only after the operator approves its design.
+in flight at once, on disjoint subsystems. The two retirements last in lane A
+are the exceptions. The old merge path's (tk-1tfzr71.70) is armed behind every
+rig's cutover, and the old review path's (tk-1tfzr71.122) behind every cutover
+and tk-1tfzr71.21. A member whose method is a design convoy lands only after
+the operator approves its design.
 
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
-| A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings, the bring-current guard and audit | 13,615 |
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring, the merge cadence's driver and its pacing, the failure cap and the supersession check | 18,145 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
 | A | tk-1tfzr71.70 | the old merge path, once every rig's cutover has moved its PRs onto the pending record: `gctk merge` and the transition machine, `pr-open.sh`'s create, `pre-open-rebase.sh`, `merge-tail-report.sh` | 1,288, and the rows it adds |
+| A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record and the GitHub intake has landed: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, and the cutover script | 18,326, and the cutover script |
 | B | tk-1tfzr71.17 | the reaction bead and the intake converters | 189, plus partial files |
 | B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,838 |
 | B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps, the salvage's branch context | 8,317 |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,490 |
 
-The whole files that the migration members name come to 49k of
+The whole files that the migration members name come to 54k of
 the 220k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas and the sign-off. The page's own items below carry
