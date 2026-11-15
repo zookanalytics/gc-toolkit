@@ -81,6 +81,9 @@
 #                 to human
 #   (NEWSUBJ-RERUN) a re-run onto that subject files its conversation and hands
 #                 the subject to it
+#   (NEWSUBJ-CHECK) the real check a reaction runs first refuses the subject at
+#                 both moments: on its assignee before its conversation exists,
+#                 and on its open conversation once it is handed over
 #   (NEWSUBJ-HANDOFF-FAIL) a hand-off the store refuses exits 4 after the
 #                 conversation is filed, the subject staying assigned to human,
 #                 and a re-run joins that conversation and hands the subject over
@@ -496,10 +499,24 @@ eq "$(printf '%s\n' "$OUT" | tail -n 1)" '{"subject":"tk-newsubj","conversation"
 has "$ERR" "subject tk-newsubj was filed, but its conversation was not" "(NEWSUBJ-PART) …and so does stderr"
 has "$ERR" "gc-helm open tk-newsubj --reason" "(NEWSUBJ-PART) …with the re-run onto it"
 eq "$(subj_assignee)" "human" "(NEWSUBJ-PART) …and the subject stays assigned to human, so no first reaction takes it up while it owes its conversation"
+# A reaction's own first act, the real check, run on the subject as the store
+# holds it: once with no conversation yet, and once open has handed it over.
+reaction_check() {
+  mkdir -p "$TMP/fx"; jq 'map({(.id): del(.id)}) | add' "$STATE/tk.json" > "$TMP/fx/beads.json"
+  set +e
+  CHECK_OUT="$(GC_PROACTIVE_FIXTURE="$TMP/fx" GC_RIG=gc-toolkit bash "$HERE/../../tools/gc-proactive.sh" sling tk-newsubj --check --run tk-root 2>&1)"; CHECK_RC=$?
+  set -e
+}
+reaction_check
+eq "$CHECK_RC" 5 "(NEWSUBJ-CHECK) a reaction's check on the subject before its conversation exists refuses it, exit 5"
+has "$CHECK_OUT" "it is assigned to human" "(NEWSUBJ-CHECK) …on its assignee, so no reaction gets past its check in that moment"
 run open tk-newsubj --reason "a question" --json
 eq "$RC" 0 "(NEWSUBJ-RERUN) the re-run onto the subject files its conversation, exit 0"
 eq "$(printf '%s\n' "$OUT" | tail -n 1)" '{"subject":"tk-newsubj","conversation":"tk-newconv","filed":true}' "(NEWSUBJ-RERUN) …and names it"
 eq "$(subj_assignee)" "" "(NEWSUBJ-RERUN) …and hands the subject to it"
+reaction_check
+eq "$CHECK_RC" 3 "(NEWSUBJ-CHECK) once the subject is handed over, a reaction's check refuses it on its open conversation, exit 3"
+has "$CHECK_OUT" "an open conversation tracks it (tk-newconv)" "(NEWSUBJ-CHECK) …naming the conversation"
 
 echo "# a hand-off the store refuses stops open, and a re-run onto the subject completes it"
 seed; UPDATE_FAIL=1 run open --new-subject --rig gc-toolkit --reason "a question" --json
