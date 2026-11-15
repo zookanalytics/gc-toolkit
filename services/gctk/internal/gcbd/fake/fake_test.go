@@ -63,8 +63,8 @@ func TestFakeUpdateAppliesAndRecordsTheWrite(t *testing.T) {
 
 // A show row leaves out an edge whose far bead the store does not hold, and a
 // listing row keeps it, as bd's two reads do. Find selects by id, by a key's
-// presence or by its value, by a parent or every bead, and reads closed beads
-// only when asked.
+// presence or by its value, by a parent, by an issue type or every bead, and
+// reads closed beads only when asked.
 func TestFakeFindAnswersAsTheListingDoes(t *testing.T) {
 	s := New()
 	s.Put(Bead{ID: "b-1", Status: "open", IssueType: "task", Metadata: map[string]string{"k": "v"},
@@ -98,6 +98,7 @@ func TestFakeFindAnswersAsTheListingDoes(t *testing.T) {
 		{"a key's value", gcbd.Query{Key: "k", Value: "w", Closed: true}, []string{"b-2"}},
 		{"every live bead", gcbd.Query{Every: true}, []string{"b-1"}},
 		{"the beads under a parent, closed ones included", gcbd.Query{Parent: "b-1", Closed: true}, []string{"b-2"}},
+		{"the beads of one type", gcbd.Query{Type: "task", Closed: true}, []string{"b-1"}},
 	} {
 		rows, err := s.Find(tc.q)
 		var got []string
@@ -108,8 +109,8 @@ func TestFakeFindAnswersAsTheListingDoes(t *testing.T) {
 			t.Errorf("%s = %v, %v; want %v", tc.name, got, err, tc.want)
 		}
 	}
-	if len(s.Finds()) != 6 {
-		t.Errorf("Finds = %+v; want the six queries", s.Finds())
+	if len(s.Finds()) != 7 {
+		t.Errorf("Finds = %+v; want the seven queries", s.Finds())
 	}
 	s.Lose("b-2")
 	var re *gcbd.ReadError

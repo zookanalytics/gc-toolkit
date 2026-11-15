@@ -67,6 +67,8 @@ the hypothesis, the ruling, and its reason.
 | `epic_ruling` | the latest ruling: `continue`, `shift`, or `close` |
 | `epic_ruling_reason` | why the latest ruling was made; on `close`, the outcome |
 | `epic_ruling_at` / `epic_ruling_by` / `epic_ruling_evidence` | when the operator ruled, who recorded it, and the human gate whose resolve carried the ruling |
+| `epic_shifted_at` | when the operator last ruled shift, which a later ruling leaves standing, so the po's next portfolio sync still weighs the shift |
+| `epic_weighed_at` | the time of the read the rig's po last weighed the epic from at a portfolio sync, stamped with the sync's note on it |
 
 ## Closing an epic: the before-close enforcement
 
@@ -138,8 +140,10 @@ Until it lands, nothing files the checkpoint sitting. A landed Delivery's row on
 the helm board asks for the checkpoint, among the rows the operator owes, and the
 operator calls the sitting from there. An epic with no Deliveries whose work has
 landed is reviewed only when a review is called
-([epics.md](epics.md#reviewing-an-epic)), so an answered or stalled epic stays
-open until someone looks. A Delivery that stalls before it lands is
+([epics.md](epics.md#reviewing-an-epic)). The rig's po proposes one at its
+portfolio sync for an epic with no open work or one that has stalled, so an
+answered or stalled epic waits until a sync proposes its review or someone else
+calls one. A Delivery that stalls before it lands is
 inspected only by such a sitting, and the machinery may add a nudge on a
 Delivery's age.
 
