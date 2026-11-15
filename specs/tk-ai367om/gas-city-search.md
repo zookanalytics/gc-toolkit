@@ -55,10 +55,12 @@ section 9.
 - **`--sleep`.** Its wait hold suppresses the session's demand-driven wake
   (`cmd/gc/compute_awake_set.go`, "wait_hold suppresses normal demand-driven
   wake"), which would keep a sitting asleep past a wait in the store that closes
-  early. The design needs no such override: every PR stay's wait in the store
-  stays open until the PR's bead closes, because the rework stay waits on the
-  anchor's input convoy rather than the ask. The stay registers its session wait
-  with no `--sleep`, so the bd edge alone decides the sleep, as it does today.
+  early. The design needs no such override. Every PR stay's wait in the store
+  stays open until the PR's bead closes, except the ask a rework stay waits on
+  before its PR's first review run pours, and the stay moves off that ask onto
+  the run's convoy when the ask closes (The move, below). The stay registers its
+  session wait with no `--sleep`, so the bd edge alone decides the sleep, as it
+  does today.
 
 **What else was searched.**
 
@@ -87,11 +89,15 @@ section 9.
 
 **What it composes.** A stay already writes a `blocks` edge from its
 conversation onto its work, or onto an input convoy that tracks the work when the
-conversation tracks it. The order finds the stays on a PR's bead from that bead's
-dependents (`bd dep list <bead> --direction=up`), the rows of those that read as
-conversations, and the dependents of each open convoy among them that tracks the
-bead alone and carries no `owned` label, which Gas City closes with the bead
-(`convoyStillAutocloses`). It adds no record.
+conversation tracks it, or onto the ruling's ask on the PR before the PR's first
+review run. The order finds the stays on a PR's bead from that bead's dependents
+(`bd dep list <bead> --direction=up`), the rows of those that read as
+conversations, the dependents of each open convoy among them that tracks the bead
+alone and carries no `owned` label, which Gas City closes with the bead
+(`convoyStillAutocloses`), and each conversation among the dependents of an ask
+on the bead, open or closed, which `review.AsksOn` reads, whose newest
+`staying:` line names that ask, since a conversation keeps its edges onto the
+work of a stay that returned. It adds no record.
 
 **The rework's wait.** The conversation tracks the PR's anchor, and bd keeps one
 edge from a bead onto another (`DependencyTypeConflictError`, beads
@@ -103,9 +109,15 @@ closes it when the bead closes (`doConvoyAutocloseWith` and
 beside the anchor's `blocks` edge onto the conversation without a cycle, because
 bd's cycle check walks only `blocks`, `conditional-blocks` and `parent-child`
 edges (`types.IsSchedulingEdge` in beads `internal/types/types.go`, which
-`WouldCreateSchedulingCycleInTx` applies). The ask a ruling files is not the
-wait, because the review run's `record` step closes it before the refinery
-validates the round's head (the review-lanes design, sections 1, 5 and 8).
+`WouldCreateSchedulingCycleInTx` applies). The ask a ruling files is the wait
+only until the PR's first review run has poured, because the run's `record` step
+closes it before the refinery validates the round's head (the review-lanes
+design, sections 1, 5 and 8). Every run is a graph.v2 cook attached to the PR's
+bead (`gc formula cook --attach`, with `mol-pr-review` declaring
+`formula_compiler = ">=2.0.0"`), which Gas City pours over a one-item input
+convoy that tracks the bead (`PrepareInvocation`, then `NormalizeInputConvoy`
+and `CreateSingleItemInputConvoy` in `internal/graphv2/invocation.go`), so a PR
+has an open input convoy from its first run's pour until its bead closes.
 
 **What else was searched.**
 
@@ -264,9 +276,43 @@ lines, its edge and its guarded status write. It gains the session wait, through
 `gc session wait "$GC_SESSION_ID"`, which needs no session argument in a sitting's
 own shell. It reaches the subject through the dispatch's input convoy, PR #1515's
 composition, and the anchor of the PR under discussion through the anchor's
-input convoy. A sign-off that ends a stay cancels its waits with `gc wait
+input convoy, or through the ruling's ask while the anchor has none. A sign-off
+that ends a stay cancels its waits with `gc wait
 cancel`. It adds no flag: `--stay` and `--waiting-on` keep their meaning, and the
 mode writes what the stay now needs.
+
+## The move: a rework stay onto the first run's convoy
+
+**What it composes.** A rework stay on a PR whose first review run has not poured
+waits on the ruling's ask, the one bead it can wait on then. Waiting on the open
+ask keeps the conversation staying, which lets the landing order pour the first
+run (`heldBy` in `services/gctk/pr/admit.go`), and that pour mints the input
+convoy that tracks the PR's bead (`CreateSingleItemInputConvoy`). When the run's
+`record` closes the ask, that close brings the sitting back, as the close of any
+stay's work does, and the sitting moves the stay's `blocks` edge onto that
+convoy. The entry reads the move from what it already reads: the stay's
+`staying:` line, its edges, the ask's status and the PR's bead's open input
+convoys. It adds the `MOVE` value to the entry's output and no record.
+
+**What else was searched.**
+
+- **`gc session wait --sleep`.** Its wait hold suppresses the session's
+  demand-driven wake (`cmd/gc/compute_awake_set.go`), so the sitting would sleep
+  through the ask's close with no move. The stay's wait in the store would then
+  be a closed ask, so the conversation would read as ready work to every reader
+  of bd's ready work for the rest of the round, and the stay's sleep would rest
+  on a session wait that an attach, a restart or a close cancels (The wake at
+  readiness, above). The edge onto the convoy keeps the store's wait the sleep
+  and the record, as for every other stay.
+- **A wait on the anchor itself.** The conversation tracks the anchor, and bd
+  keeps one edge from a bead onto another (`DependencyTypeConflictError`, beads
+  `issueops/errors.go`), so the stay cannot wait on it directly (The stays on a
+  bead, above).
+- **A convoy of the stay's own**, made at the sign-off with
+  `gc convoy create <name> <anchor>`, would give the stay a convoy to wait on
+  from the start. The first run's pour mints one in any case, so it would stand
+  in for that convoy only until the first run, and it would put a second open
+  convoy on the anchor.
 
 ## What it leaves in place
 
@@ -279,9 +325,6 @@ mode writes what the stay now needs.
 - **An operator who has opened a stay's conversation and not yet spoken in it.**
   Between engage's attach and the operator's first turn nothing holds the merge
   for the exchange to come (the design, section 2).
-- **A rework of a PR whose anchor has no open input convoy**, such as a change a
-  sitting edited and handed over through `work-submit.sh`, waits on the ruling's
-  ask and comes back at the review run's `record`, a step before the readiness.
 - **A person's own toggle** of the draft flag passes the draft, as it passes the
   draft cycle, and the evaluator's condition still holds the merge until the
   reading is on the PR.
