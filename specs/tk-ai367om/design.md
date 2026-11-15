@@ -1,6 +1,6 @@
 ---
 name: Design — a stay comes back when its work is ready for the operator's approval
-description: The design for tk-ai367om, the design child of initiative tk-vrg93t0, read at main 5d4c3b4cf and integration/tk-1tfzr71.22 at 04d8dad0d against Gas City upstream main 8e7d91b583 and beads v1.3.4. It settles what each stay waits on, how the landing order keeps a PR a draft until a staying sitting's reading is on it and wakes the sitting through a Gas City session wait, the entry's ready answer and the return it starts, every later round, the stay on the conversation's own subject, what a stay does on a rig still on the old review path, the pages, the surface it adds and the units. Read it to approve the design at its gate, or to build one of its units.
+description: The design for tk-ai367om, the design child of initiative tk-vrg93t0, read at main 5d4c3b4cf and integration/tk-1tfzr71.22 at 04d8dad0d against Gas City upstream main 8e7d91b583 and beads v1.3.4. It settles what each stay waits on, how the city holds a PR, as a draft or by its merge, until a staying sitting's reading of its latest ruling is on it and wakes the sitting through a Gas City session wait, the entry's ready answer and the return it starts, every later round and a sitting the operator talks with again, the stay on the conversation's own subject, what a stay does on a rig still on the old review path, the pages, the surface it adds and the units. Read it to approve the design at its gate, or to build one of its units.
 ---
 
 # Design: a stay comes back when its work is ready for your approval
@@ -40,7 +40,13 @@ run:
 - **Every round.** When you send the result back through the sitting, or the city
   repairs it after a failing check or merges the target in, the sitting reads
   again at the next readiness. It reads only what changed since the head it last
-  read, and posts one reading per head.
+  read, and posts one reading per ruling and head. A send-back owes its reading
+  even when the review run answers it without changing the PR. On a PR that is
+  ready already, the city then holds its merge until the reading is on it, so an
+  approval you gave earlier cannot merge it first.
+- **Talking with the sitting again.** Once you speak to a sitting that stays for
+  a PR, it holds the conversation, and the PR does not merge until you rule.
+  Staying again starts the next round, and ending the stay lets the PR go on.
 - **Work that opens no PR** comes back when it closes, as today.
 - **The stay ends** when the PR merges, when the work closes without one, or when
   you end it.
@@ -54,17 +60,23 @@ These calls carry a cost either way:
    - (a) It stays a draft until the reading is on it. GitHub requests no review
      and CI starts only then, so you are asked later by the time the sitting
      takes to read, rounded up to the landing order's next five-minute pass.
+     The merge also waits for the reading, through a condition of the city's
+     that the label and both boards render, because a round can end on a PR
+     that is ready already, which has no draft to keep.
    - (b) It is marked ready at once, and the merge and the needs-review label
-     wait for the reading. CI runs while the sitting reads, but GitHub shows the
-     PR ready for review before the reading is on it, and the merge rule gains a
-     condition that the label and both boards must render.
+     wait for the reading through that condition alone. CI runs while the
+     sitting reads, but GitHub shows the PR ready for review before the reading
+     is on it.
 2. **When the reading finds that the work departs from what you agreed.**
-   - (a) The sitting asks you, and the PR stays a draft until you answer. No
-     approval you gave in an earlier round can merge the PR past the departure,
-     but you answer the sitting before the PR can be approved and merged.
-   - (b) The PR leaves draft with the reading on it, and your approval decides.
-     You can approve without answering the sitting, but an approval you gave in
-     an earlier round can merge the PR before you have read the departure.
+   - (a) The sitting asks you, and the PR does not merge until you answer: a
+     draft stays a draft, and a PR that is ready already waits on the city's
+     condition. No approval you gave in an earlier round can merge the PR past
+     the departure, but you answer the sitting before the PR can be approved
+     and merged.
+   - (b) The PR leaves draft, or its merge goes on, with the reading on it, and
+     your approval decides. You can approve without answering the sitting, but
+     an approval you gave in an earlier round can merge the PR before you have
+     read the departure.
 
 Approving as it stands ships the first option of each.
 
@@ -143,8 +155,10 @@ GitHub's draft flag is what its review requests and this repository's CI follow
 (`KindDraft` in `services/gctk/pr/pr.go`), and the status label reads
 `needs-review` only once an approval is all that is left (`Render` in
 `services/gctk/prstatus/render.go`), which a draft never is. So under call 1 (a)
-the landing order keeps the PR a draft while a stay on its bead owes its reading,
-and a draft cannot merge.
+the landing order keeps the PR a draft while a stay on its bead owes its reading.
+The draft is not the whole hold, because a round can end on a PR that is ready
+already, which no draft keeps from merging (section 4). The evaluator holds the
+merge for the reading as well (The hold, below).
 
 **The stays on a bead.** A stay on a bead B is a conversation, open or in
 progress and assigned to its sitting's alias rather than to `human`, whose own
@@ -161,11 +175,23 @@ work reaches B through no edge of its own, so it owes B nothing.
 
 **A reading.** A reading is a comment on the PR, posted through
 `pr-post.sh comment` like every post of the city, whose body opens with a marker
-naming the conversation and the head it read:
+naming the conversation, the round of its stay and the head it read:
 
 ```
-<!-- gc:reading <conversation> <head> -->
+<!-- gc:reading <conversation> <round> <head> -->
 ```
+
+**The stay's round.** Each `--stay` sign-off records a ruling, what the operator
+agreed and the work it waits on, which is what the reading compares the PR with.
+So each one starts a round of the stay, and a reading answers one round at one
+head: a new ruling makes an earlier reading stop counting, even at the same head.
+The round is the count of the conversation's `staying:` lines that name work, the
+line a stay appends once everything but its wait has landed
+(`converse-signoff.sh --stay`), so it is read from the notes the entry already
+reads the stay from, and needs no record of its own. A stay that stopped short
+and is run again appends that line again and counts one round more, but no
+reading names the round it stopped in, because a stay that stopped short never
+left the conversation to wait, and a reading comes only at a `ready` entry.
 
 The comment is the rule's own condition, that the reading is on the PR, so
 nothing else records it. The city's mark that `pr-post.sh` appends makes it the
@@ -179,46 +205,83 @@ evaluator runs (`decide` in `services/gctk/pr/landing.go`), so under call 1 (a)
 its draft arm reads the comments itself, and only for a PR whose bead has a
 stay.
 
-**The hold.** `readyBar` gains one clause after the ones it has: the PR stays a
-draft while a stay on its bead is open with no reading of its own at the PR's
-head on the PR, or is in progress. A stay is in progress when its sitting holds
-the conversation, which during a stay it does only to ask the operator something
-(section 3, step 3, and the stopped-short recovery of `converse-stay`). The
-order's outcome names the conversation and the head. Once every stay on the bead
-is open with its reading at the head on the PR, the order marks the PR ready on
-its next pass (`orders/pr-reconcile.toml`, every five minutes).
+**The hold.** A stay owes its reading at the PR's head while it is open and no
+reading of its current round at that head is on the PR. It holds the PR while it
+owes its reading or is in progress. A stay is in progress when its sitting holds
+the conversation, which during a stay it does only to ask or talk with the
+operator (section 3, step 3; section 4, Talking with the sitting again; and the
+stopped-short recovery of `converse-stay`). The rule has two readers:
 
-**What the operator sees while the sitting reads.** On GitHub, the PR is a draft.
-Its `status:` label reads `working`, or `merging` when an approval from an
-earlier round still stands on it and no conversation that stays holds its merge
-(`Render`). `gctk pr status` names the sitting's reading at the head among the
-conditions not met. The rig board renders the PR
-from the same facts, with the reading as the city's work in flight, and the
-conversation's own row as its stay. Once the reading is posted, the PR shows it,
-the order marks the PR ready, CI runs, and the label turns to `needs-review`, or
+- **The evaluator** gains a condition of the city's that holds the merge while a
+  stay on the bead owes its reading at the head or is in progress, whether the
+  PR is a draft or ready. A PR that is ready already when its stay comes to owe
+  a reading, as when a round ends at a head the PR was ready at (section 4), has
+  no draft to keep, so this condition is what holds it.
+- **`readyBar`** gains the same clause after the ones it has, under call 1 (a),
+  so the order keeps the PR a draft for as long, and GitHub asks for no review
+  before the reading.
+
+The order's outcome names the conversation and the head. Once every stay on the
+bead is open with its reading of its current round at the head on the PR, the
+evaluator's condition is met, and the order marks a draft ready on its next pass
+(`orders/pr-reconcile.toml`, every five minutes).
+
+This departs from the review-lanes design's section 5 in where a round begins.
+There a round begins at the city's first push after the PR was last marked
+ready, so a review run that answers an ask with no push makes no round, and the
+PR stays ready. A stay's round begins at its sign-off instead (A reading, above),
+so its hold must reach a PR that is ready. A condition of the evaluator's reaches
+it with no new writer of the draft flag, which the order sets only from draft to
+ready and which only a writer that pushes returns to draft. The return to draft
+that was weighed instead is in [gas-city-search.md](gas-city-search.md). The
+condition holds the merge as an open ask or `merge_hold` does, which section 5
+keeps holding after the PR is marked ready.
+
+**What the operator sees while the sitting reads.** On GitHub, the PR is a draft,
+or ready when its round ended on a PR that was ready already. Its `status:` label
+reads `working`, or `merging` when an approval from an earlier round still stands
+on it and no conversation that stays holds its merge (`Render`). `gctk pr status`
+names the sitting's reading at the head among the conditions not met. The rig
+board renders the PR from the same facts, with the reading as the city's work in
+flight, and the conversation's own row as its stay. Once the reading is posted, the PR shows it,
+the order marks a draft ready, CI runs, and the label turns to `needs-review`, or
 to `merging` on a PR that an approval still stands on. A stay that holds for the
 operator's answer reads as a person's move: the PR's label reads
 `needs-attention`, held by that conversation.
 
 **What the hold does not cover.**
 
-- A person who marks the PR ready on GitHub themselves passes the hold, because
+- A person who marks the PR ready on GitHub themselves passes the draft, because
   the order changes the draft flag only from draft to ready, and a person's
   toggle is left for the cycle to finish (the review-lanes design, section 5).
-- A stay whose sitting no wait can wake still stays, so it keeps the PR a draft,
-  and the condition names it. That is a stay whose session has closed, whose
-  return was cut short before it registered its wait again (section 3), or whose
-  wait's note failed to reach it. The operator brings a sitting back by engaging
-  the conversation, which runs the entry and the reading, or ends the stay by
-  dismissing it. Gas City closes a session only when a person or a prune asks,
-  and a hold that wedged silently would break the rule's other half, so the hold
-  stands and names what clears it.
+  GitHub then asks for review before the reading is on the PR, and the
+  evaluator's condition still holds the merge until it is.
+- An operator who has opened a stay's conversation and not yet spoken in it.
+  Engaging a live sitting attaches the operator to it and adds no hold, so the
+  hold for the exchange begins at the sitting's claim on the operator's first
+  turn (section 4). engage does not take the hold itself. A hold on the PR's
+  merge that it wrote would stand under a stay nobody talks to: the PR would
+  read as the city's work (`Render` reads a stay that holds a PR as `working`),
+  and no wake would come to clear it. A claim that it wrote would read to the
+  entry as a stay that stopped short, whose recovery stays again and lets the
+  hold go. The window is the time the operator takes to write that turn, and a
+  merge in it still waits for green checks and the landing order's next
+  five-minute pass.
+- A stay whose sitting no wait can wake still stays, so it keeps the PR from
+  merging, and a draft a draft, and the condition names it. That is a stay whose
+  session has closed, whose return was cut short before it registered its wait
+  again (section 3), or whose wait's note failed to reach it. The operator
+  brings a sitting back by engaging the conversation, which runs the entry and
+  the reading, or ends the stay by dismissing it. Gas City closes a session only
+  when a person or a prune asks, and a hold that wedged silently would break the
+  rule's other half, so the hold stands and names what clears it.
 
-**Call 1 (b), if chosen.** The order marks the PR ready at once, and the
-evaluator gains the same clause as a condition of the city's, which holds the
-merge and keeps the label at `working` while CI runs. The stays, the reading and
-the wake are the same, and the order then marks the waits ready as it marks the
-PR ready, which is the review-lanes design's section 9 sentence as written.
+**Call 1 (b), if chosen.** `readyBar` gains no clause, so the order marks the PR
+ready at once, and the evaluator's condition alone holds the merge and keeps the
+label at `working` while CI runs. The stays, the reading and the wake are the
+same, and the order marks the waits ready at the round's end, which on a draft is
+as it marks the PR ready, the review-lanes design's section 9 sentence as
+written.
 
 ## 3. The wake and the return
 
@@ -232,9 +295,15 @@ gc session wait "$GC_SESSION_ID" --on-beads <the PR's bead> \
 ```
 
 The landing order marks such a wait ready (`gc wait ready <wait>`) on every pass
-on which the PR would leave draft but for a stay's reading. It marks the waits of
-each stay that owes its reading and waits open: those in state `pending` whose
-`dep_ids` name the PR's bead and whose `session_id` is the stay's sitting
+that finds the round ended at the PR's head while a stay owes its reading there.
+The round has ended when `readyBar`'s conditions other than the draft flag hold:
+the record is pending at the PR's head, a passed result names that head and the
+target, no review run is attached to the bead and no ask a run can take is open
+on it. On a draft, that is the pass on which the PR would leave draft but for the
+reading. On a PR that is ready already, which `decide` takes to the evaluator
+without consulting `readyBar`, it is the pass that finds the round over at a head
+the PR was ready at. It marks the waits of each stay that owes its reading and
+waits open: those in state `pending` whose `dep_ids` name the PR's bead and whose `session_id` is the stay's sitting
 (`gc wait list --json`), the session `gc session list --json` lists with the
 conversation's assignee as its `alias`. A wait another session registered on the
 bead is left to turn ready when the bead closes. Gas City wakes the session for
@@ -245,10 +314,12 @@ the entry on that notice, as it does on the notice that a blocker closed. A wait
 whose bead closes first is marked ready by Gas City itself, at the same moment
 the conversation's wait in the store brings the sitting back.
 
-This is the review-lanes design's section 9 wake, with one change of timing:
-under call 1 (a) the order marks the waits ready while the reading is owed, and
-the PR ready only after it. Marking them as it marks the PR ready, as section 9
-words it, would ask the operator before the reading, which the rule rules out.
+This is the review-lanes design's section 9 wake, with two changes. Under call 1
+(a) the order marks the waits ready while the reading is owed, and the PR ready
+only after it. Marking them as it marks the PR ready, as section 9 words it,
+would ask the operator before the reading, which the rule rules out. And a round
+that ends on a PR that is ready already comes to no ready transition, so the
+order marks the waits ready at the round's end, which section 9 does not reach.
 
 **Why the session wait is the wake and not the sleep.** An explicit wake,
 `gc session wake` or the API's, cancels every wait of the session
@@ -275,17 +346,20 @@ and `returned`:
 | `ready` | A PR this sitting stays for waits at its head for this sitting's reading. | `converse-stay` |
 
 Beside the values a stay prints (`CONV`, `CONVERSATION`, `SUBJECT`, `GATES`,
-`WORK`, `AGREED`), a `ready` entry prints `READING=<the PR's bead> <the head> <the
-PR's URL>` and `READ=<the head this conversation last read on that PR>`, or
-`READ=none`. A `waiting` or `ready` entry also prints `WAIT=` with the open
-session wait on each PR's bead the stay watches, or `missing`.
+`WORK`, `AGREED`), a `ready` entry prints `READING=<the PR's bead> <the round>
+<the head> <the PR's URL>` and `READ=<the head this conversation last read on
+that PR, in any round>`, or `READ=none`. A `waiting` or `ready` entry also prints
+`WAIT=` with the open session wait on each PR's bead the stay watches, or
+`missing`.
 
 The entry asks gctk, which holds the hold's rule, rather than deciding the rule
 itself: `gctk pr status <bead> --json` gains a `reading` key, `{"head": <oid>,
-"owed": [<conversation>...], "held": [<conversation>...]}`, present while the PR
-waits at its head for a stay. The entry reads `ready` when `owed` names its
-conversation. It checks for `ready` after a stay that stopped short
-(`interrupted`) and before `returned` and `waiting`.
+"owed": [{"conversation": <id>, "round": <n>}...], "held": [<conversation>...]}`,
+present while the round has ended at the PR's head and a stay owes its reading
+there or is in progress, on a draft or on a PR that is ready already. The entry
+reads `ready` when `owed` names its conversation, and takes the round it prints
+from there, so the round is counted once, in gctk. It checks for `ready` after a
+stay that stopped short (`interrupted`) and before `returned` and `waiting`.
 
 **The return at `ready`.** `converse-stay`'s return gains a reading, in this
 order:
@@ -296,16 +370,22 @@ order:
    names as `missing`, and a return cut short while the conversation waits open
    is woken again by the order's next pass. When `READ` names an earlier head of
    the same PR, read the change since that head (`git diff <READ>..<head>`), with
-   the review run's account of each head between them.
+   the review run's account of each head between them. When `READ` names this
+   head, as after a round that ended with no push, the PR has not changed since
+   the last reading: read how the round's review run ruled each ask the new
+   ruling filed, declined, deferred or answered, from the rulings the run
+   records.
 2. **Compare it with what was agreed**, `AGREED` and the thread, as the return
    compares today.
 3. **Decide whether the comparison leaves the operator anything to answer before
    they approve.** When it does, claim the conversation back first, with the
-   guarded write the hold's claim-back uses, so the PR stays a draft from before
-   the reading lands until the operator answers (call 2, option a).
+   guarded write the hold's claim-back uses, so from before the reading lands
+   until the operator answers the PR does not merge, and a draft stays a draft
+   (call 2, option a).
 4. **Post the reading** through `pr-post.sh comment`, its body opening with the
-   marker. When a comment with this conversation's marker at this head is on the
-   PR already, as after a restart, edit it in place with `pr-post.sh edit`.
+   marker. When a comment with this conversation's marker for this round and
+   head is on the PR already, as after a restart, edit it in place with
+   `pr-post.sh edit`.
 5. **Hold, or stay on.** Hold (`converse-hold`) when step 3 claimed the
    conversation. Otherwise record and post the hand-back, which says what the
    reading found and that the sitting comes back at the next readiness or when
@@ -331,28 +411,69 @@ conversation.
 ## 4. Every round
 
 **When the sitting reads again.** Every readiness of the PR owes a reading from
-each stay on its bead, whatever started the round: a send-back the operator ruled
-through the sitting, an ask someone put on the PR, a repair after a failing
-check, or a merge of the target. The rule puts the reading on the PR before the
+each stay on its bead that has no reading of its current round at that head on
+the PR. A new head owes one, whatever started the round: a send-back the
+operator ruled through the sitting, an ask someone put on the PR, a repair after
+a failing check, or a merge of the target. A new ruling of the stay owes one
+too, even when its round ends at the head the last reading read (A send-back
+through the sitting, below). The rule puts the reading on the PR before the
 operator is asked to approve, and they are asked about the head the round ends
 at. A round's reading reads only the change since the head the conversation last
 read, so a merge of the target that git made without help, or a one-line repair,
 costs a short reading.
 
-**No reading twice.** A reading is one comment per conversation and head, which
-its marker names. `reading.owed` names a conversation only while no post of the
-city's own with its marker at the head is on the PR, so a wake at a head the
-sitting has already read reads `waiting`, and a return that restarts finds its
-own comment and edits it.
+**No reading twice.** A reading is one comment per conversation, round and head,
+which its marker names. `reading.owed` names a conversation only while no post of
+the city's own with its marker for the stay's current round at the head is on the
+PR, so a wake at a head the sitting has read in this round reads `waiting`, and a
+return that restarts finds its own comment and edits it. An ask someone else put
+on the PR, which the review run answers with no push, leaves the head and the
+stay's round as they were, so the reading stands.
 
 **A send-back through the sitting.** On the review path, a ruling that sends the
 PR back files an ask on the PR's bead with the checks it names, through
 `converse-rework.sh` for the PR the conversation is about and through the `prs`
 skill's `gctk review ask` for another PR, such as new work's. The sitting stays
-again on the same work, with the same wait in the store. The ask holds the PR's
-bead by its own edge, the next round's readiness owes the sitting its next
-reading, and the operator's approval of an earlier round carries across it unless
-triage rules the round material (the review-lanes design, section 4).
+again on the same work, with the same wait in the store, and that sign-off starts
+the stay's next round. The ask holds the PR's bead by its own edge while it is
+open. The round ends in one of two ways:
+
+- **The review run pushes a fix.** Its push returns the PR to draft, and the
+  round ends at the new head, as any round does.
+- **The run declines, defers or answers the ask.** Its pass rule counts such an
+  ask as ruled (`judge` in `services/gctk/review/passed.go`), its `record` closes
+  the ask as a no-op (`answeredAsks` in `services/gctk/review/result.go`), and
+  its push step, with nothing to push, returns before it would return the PR to
+  draft (`cmd_push` in `assets/scripts/review-run.sh`). The round ends at the
+  head the PR was ready at, with the PR still ready. The new round's reading is
+  owed all the same, so the evaluator's condition holds the merge, and the order
+  wakes the sitting at the round's end (sections 2 and 3). The return reads how
+  the run ruled the ask, and when that departs from what the operator agreed,
+  it asks them before the PR can merge (call 2).
+
+The operator's approval of an earlier round carries across the round unless
+triage rules it material (the review-lanes design, section 4). With no new head,
+the change triage reads since the last passed head is empty (the review-lanes
+design, section 2), so the evaluator's condition is what keeps that approval from
+merging the PR before the reading.
+
+**Talking with the sitting again.** When the operator takes up a stay's
+conversation again and speaks, the sitting holds before it answers their first
+turn: it claims the conversation back with the guarded write the hold's
+claim-back uses, and records the hold (`converse-hold`). The stay is then in
+progress, so no PR it watches merges, and a draft stays a draft (section 2). The
+exchange ends in a sign-off:
+
+- **Staying again** starts the stay's next round, whose reading the merge then
+  waits for. When the operator rules that nothing changes, the sitting stays
+  again with the same agreement, and its reading of that round says so in a line.
+- **Ending the stay** closes the conversation, which no longer holds the PR.
+
+The sitting of a stay on work that opens no PR holds nothing for the exchange,
+because there is no merge to hold, and answers the operator through the
+sign-off's `--answer`, as `converse-stay` has it. Before the operator's first
+turn nothing holds the merge for the exchange (section 2, What the hold does not
+cover).
 
 **What ends the stay.**
 
@@ -438,21 +559,24 @@ comes back, by section 1's table, with the old path's rows until a rig cuts over
 
 - **`docs/human-engagement.md`**, its section "A sitting that stays for the
   return": the rule, the table, the hold and what the operator sees (section 2),
-  the wake and the reading (section 3), every round (section 4), the old path
-  (section 6).
+  the wake and the reading (section 3), every round and talking with the sitting
+  again (section 4), the old path (section 6).
 - **The converse prompt's "End or stay?"** (its decision 4): the sitting says when
   the stay would come back, by the table. It recommends staying when its reading
   will help the operator judge the result before they approve, and ending at the
   hand-off where the rig's path brings the stay back after the merge. Its table of
   entries gains `ready`, and it runs the entry on a `Wait satisfied` notice.
 - **`converse-stay`**: the stay's session wait, `ready`, the return's reading,
-  staying on, every round, and what ends the stay.
+  staying on, every round, the hold while the operator talks with the sitting
+  again in place of today's "Do not hold" for a stay on a PR, and what ends the
+  stay.
 - **`converse-settle`**: the order of a sitting that sends its subject and stays
-  (section 5), and that a stay on a PR's work keeps the PR a draft until its
-  reading is on it.
-- **`converse-hold`**: a hold after a reading keeps the PR a draft until the
-  operator answers, and staying on after a reading lifts the conversation's hold
-  on the PR's merge.
+  (section 5), and that a stay on a PR's work keeps the PR from merging, and a
+  draft a draft, until its reading is on it.
+- **`converse-hold`**: a hold during a stay, after a reading or while the
+  operator talks with the sitting again, keeps the PR from merging, and a draft
+  a draft, until the operator rules, and staying on after a reading lifts the
+  conversation's hold on the PR's merge.
 - **`docs/product-goals.md`** gains one sentence in its "Human gates and
   conversations" surface: a conversation the operator asks to stay with its work
   comes back before their next decision about that work, never after it, and for
@@ -467,10 +591,12 @@ unit rewrites them once, on the effort's branch brought current with main
 
 This design's own change states the rule in `docs/architecture.md`, at the
 document's altitude, because a design that moves the architecture changes that
-document. Its "How humans engage" says when a stay comes back and what the
-landing order holds for the reading, step 9 of its "How work moves" names the
-wake beside the close, and its Debt names the gap until the build lands, with
-tk-vrg93t0 as the work that retires it. The words unit narrows that Debt entry
+document. Its "How humans engage" says when a stay comes back, what the city
+holds for the reading, as a draft or by the merge of a PR that is ready already,
+and that a sitting the operator talks with again holds the PR until they rule.
+Step 9 of its "How work moves" names the wake beside the close, and its Debt
+names the gap until the build lands, with tk-vrg93t0 as the work that retires
+it. The words unit narrows that Debt entry
 to the rigs still on the old review path. It also gives
 `docs/lifecycle-composition.md`, which calls `closed` the one signal the waiting
 side keys on, the exception step 9 names.
@@ -484,19 +610,24 @@ Each item's search is in [gas-city-search.md](gas-city-search.md).
   subject dispatch's input convoy; the rework stay's wait on the review path,
   through the anchor's input convoy; and, in a sign-off that ends a stay, the
   cancel of the stay's waits.
-- **`converse-entry.sh`** gains the `ready` entry with its `READING` and `READ`
-  values, and `WAIT` on a `waiting` entry.
+- **`converse-entry.sh`** gains the `ready` entry with its `READING`, which names
+  the round, and `READ` values, and `WAIT` on a `waiting` entry.
+- **The evaluator** (`pr.Ready`) gains a condition of the city's: a stay on the
+  bead that owes its reading at the head, or is in progress, holds the merge.
+  `gctk pr status` and both boards name it among the conditions not met.
 - **The landing order** (`gctk pr reconcile`) gains one clause in its ready
-  transition and the wake, through its Gas City adapter
-  (`services/gctk/internal/gascity`): `gc session list --json`,
-  `gc wait list --json` and `gc wait ready`.
+  transition, and the wake at a round's end, on a draft or on a PR that is ready
+  already, through its Gas City adapter (`services/gctk/internal/gascity`):
+  `gc session list --json`, `gc wait list --json` and `gc wait ready`.
 - **`gctk pr status --json`** gains the `reading` key, and `prstatus` gains the
   stays on a bead and their readings among the facts it renders.
-- **A reading's marker** in the body of a PR comment.
+- **A reading's marker** in the body of a PR comment, naming the conversation,
+  the stay's round and the head.
 
 None of it is a store, a lifecycle state, a bead kind or a metadata key. The
-stays are read off the edges a stay already writes, the reading off the comment
-the rule asks for, and the wake is Gas City's.
+stays are read off the edges a stay already writes, a stay's round off the
+`staying:` lines it already writes, the reading off the comment the rule asks
+for, and the wake is Gas City's.
 
 ## 9. The units
 
@@ -506,9 +637,9 @@ waits a stay registers, which nothing there marks ready.
 
 | Unit | What it does | Waits on | Releases |
 |---|---|---|---|
-| 1. The reading rule, the hold and the wake | First, a probe in a scratch city: a session wait with no `--sleep` on a sleeping session, marked ready with `gc wait ready`, wakes the session and delivers its note, and an attach to the sleeping session cancels it. Then, in the pr domain: the stays on a bead, read from the store (section 2); each stay's reading at a head, read from the PR's comments by the marker; `readyBar`'s clause; in the landing order's pass, the wake through the Gas City adapter's `gc session list --json`, `gc wait list --json` and `gc wait ready`, which marks only the waits of the stays that owe their reading; `gctk pr status --json`'s `reading` key; `prstatus` renders a stay that owes its reading as the city's work and a stay in progress as a person's move. Tests, one per row of section 1's table: the hold and the wake for new work through a `blocks` edge, for a rework and for the subject through an open input convoy, nothing for a closed convoy or for a conversation that tracks the bead and stays for other work, and nothing for work with no PR; a stay in progress holds the draft and is not woken; every stay's reading at the head lets the PR leave draft; a reading at an earlier head does not; a person's toggle to ready is left alone; a wait already ready is not marked again; a wait another session registered on the bead is left alone; a store or GitHub read that fails leaves the draft and is retried. | tk-1tfzr71.22 | unit 2 |
-| 2. The stay and the entry | `converse-signoff.sh --stay`: the session wait on each PR's bead; the subject's convoy wait and its refusals, from PR #1515's head with its open-convoy fix; the rework stay's convoy wait on a PR on the record, and the ask when the anchor has no open convoy; on the old path, the waits as they are; a sign-off that ends a stay cancels its waits. `converse-entry.sh`: `ready` with `READING` and `READ`, read from `gctk pr status --json`; `WAIT` on `waiting`; the restarts of section 3's return. Tests, one per row: what the sign-off writes for each, the entry's answer before, during and after a reading, a second wake at a head already read, a missing wait after an attach and at a `ready` wake, a return cut short after it registered its wait again, and a restart between each two steps of the return. | unit 1 | unit 3 |
-| 3. The words | The converse prompt's "End or stay?" and its entry table, and its seven renders; `converse-stay`, `converse-settle` and `converse-hold` (section 7); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; `docs/lifecycle-composition.md`'s close signal; the skill-needs pins of the table and of each example's call through the real parsers; the stay's Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path (section 7). | unit 2 | the landing |
+| 1. The reading rule, the hold and the wake | First, a probe in a scratch city: a session wait with no `--sleep` on a sleeping session, marked ready with `gc wait ready`, wakes the session and delivers its note, and an attach to the sleeping session cancels it. Then, in the pr domain: the stays on a bead, read from the store, and each stay's round, read from its conversation's `staying:` lines (section 2); each stay's reading of its round at a head, read from the PR's comments by the marker; the evaluator's condition and `readyBar`'s clause; in the landing order's pass, the wake at a round's end, on a draft or on a PR that is ready already, through the Gas City adapter's `gc session list --json`, `gc wait list --json` and `gc wait ready`, which marks only the waits of the stays that owe their reading; `gctk pr status --json`'s `reading` key; `prstatus` renders a stay that owes its reading as the city's work and a stay in progress as a person's move. Tests, one per row of section 1's table: the hold and the wake for new work through a `blocks` edge, for a rework and for the subject through an open input convoy, nothing for a closed convoy or for a conversation that tracks the bead and stays for other work, and nothing for work with no PR; a stay in progress holds the draft and the merge of a ready PR, and is not woken; every stay's reading of its current round at the head lets the PR leave draft and meets the condition; a reading at an earlier head, or of an earlier round at the same head, does not; a send-back whose ask the run declines, defers or answers with no push owes the new round's reading, so on a ready PR an approval of an earlier round does not merge it until that reading is on it, and the order marks the stay's wait ready at the round's end; an ask someone else put on the PR that ends with no push owes no new reading; a person's toggle to ready is left alone and the merge still waits; a wait already ready is not marked again; a wait another session registered on the bead is left alone; a store or GitHub read that fails leaves the draft and is retried. | tk-1tfzr71.22 | unit 2 |
+| 2. The stay and the entry | `converse-signoff.sh --stay`: the session wait on each PR's bead; the subject's convoy wait and its refusals, from PR #1515's head with its open-convoy fix; the rework stay's convoy wait on a PR on the record, and the ask when the anchor has no open convoy; on the old path, the waits as they are; a sign-off that ends a stay cancels its waits. `converse-entry.sh`: `ready` with `READING`, its round included, and `READ`, read from `gctk pr status --json`; `WAIT` on `waiting`; the restarts of section 3's return. Tests, one per row: what the sign-off writes for each, the entry's answer before, during and after a reading, a second wake at a head already read in the round, `ready` for a new round at the head the last reading read, a stopped stay run again, which counts one round more before any reading, a missing wait after an attach and at a `ready` wake, a return cut short after it registered its wait again, and a restart between each two steps of the return. | unit 1 | unit 3 |
+| 3. The words | The converse prompt's "End or stay?" and its entry table, and its seven renders; `converse-stay`, its hold while the operator talks with the sitting again included, `converse-settle` and `converse-hold` (section 7); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; `docs/lifecycle-composition.md`'s close signal; the skill-needs pins of the table and of each example's call through the real parsers; the stay's Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path (section 7). | unit 2 | the landing |
 
 The initiative's "Done when" asks for a test of each row of the table. Units 1
 and 2 hold the rows in their suites, and unit 3 pins them in the words.
@@ -574,13 +705,29 @@ The pack, at main 5d4c3b4cf and `integration/tk-1tfzr71.22` 04d8dad0d:
 - The landing order marks a draft ready when `readyBar` finds nothing that keeps
   it a draft, without waiting for CI (`services/gctk/pr/draft.go`,
   `services/gctk/pr/landing.go`), on a five-minute cooldown
-  (`orders/pr-reconcile.toml`).
+  (`orders/pr-reconcile.toml`). It consults `readyBar` only for a draft, and asks
+  the evaluator directly about a PR that is ready (`decide`).
+- A review run can pass with no push. Its pass rule counts an ask ruled
+  declined, deferred or answered as ruled (`judge` in
+  `services/gctk/review/passed.go`), its `record` closes such an ask as a no-op
+  (`answeredAsks` in `services/gctk/review/result.go`), and its push step returns
+  before `gctk pr draft` when the worktree is at the head the round judged
+  (`cmd_push` in `assets/scripts/review-run.sh`). Only a writer that pushes
+  returns a PR to draft (`Draft` in `services/gctk/pr/draft.go`).
 - A conversation its sitting stays in keeps no review run off the branch
   (`heldBy` in `services/gctk/pr/admit.go`), and `prstatus` reads a stay that
   holds a PR as `working` (`Render`).
 - A conversation on an open PR holds the PR's merge through the anchor's
   `blocks` edge onto it (`conversation_hold_merge` in `assets/scripts/gc-helm.sh`),
   and `converse-hold` lifts that edge for a sitting that is helping the PR land.
+  The lift lasts for the sitting: engage adds the edge only for a conversation
+  no live sitting holds, and attaches the operator to a live one without adding
+  it (`gc-helm.sh`, engage).
+- While its work is out, a staying sitting answers the operator through the
+  sign-off's `--answer` and does not hold (`skills/converse-stay`, "While the
+  work is out"), and the entry reads a claimed stay whose newest record is its
+  `staying:` line as one that stopped short, and a claimed one whose newest is a
+  `holding:` line as a hold that stands (`converse-entry.sh`).
 - `converse-entry.sh` prints `fresh`, `interrupted`, `waiting`, `returned`, `none`,
   `stop` or `unreadable`, and reads a stay off its `staying:` lines and its own
   `blocks` edges. A stay writes those, then the edge, then a guarded write that

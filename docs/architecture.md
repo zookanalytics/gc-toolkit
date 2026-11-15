@@ -356,12 +356,18 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   sitting compares the work with what was agreed and tells the operator where
   it departs. Work that opens no PR brings the sitting back when it closes.
   For work that opens a PR, that decision is the approval, in every round.
-  When the PR would be ready for approval, the landing order keeps it a draft
-  and has the sitting woken. The order marks the PR ready only once the
-  sitting has posted that comparison on the PR as its reading, and the
-  operator has answered anything the reading leaves them to answer. A sitting
+  A reading answers one ruling of the stay at one head, so a ruling the
+  operator sends back through the sitting is owed a reading even when its
+  round ends with no new head. When the PR would be ready for approval, the
+  landing order keeps it a draft and has the sitting woken. The order marks
+  the PR ready only once the sitting has posted that comparison on the PR as
+  its reading, and the operator has answered anything the reading leaves them
+  to answer. A PR that is ready already, as after a round with no new head,
+  has no draft to keep, so its merge waits for the reading instead. A sitting
   that stays on after a reading lifts its conversation's hold on the PR's
-  merge, so the operator's approval decides. The board shows a conversation
+  merge, so the operator's approval decides. A sitting the operator speaks to
+  again holds its conversation, and the PR does not merge until the operator
+  rules. The board shows a conversation
   its sitting stays in, and the pull request whose merge it holds, as waiting
   on that work, not as asks of the operator. The sitting passes and fails
   nothing: the work's own checks give the verdicts, and the subject closes as
