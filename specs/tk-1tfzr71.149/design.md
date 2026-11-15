@@ -150,11 +150,14 @@ within a budget:
 3. **Compare in memory and write nothing.** For each record it computes the act
    the store and GitHub's side imply, the same decision a check makes today, with
    GitHub's side taken from the pass's read and the saved read.
-4. **Save the state of each changed PR,** one record at a time under the record
-   lock: a read of the bead, then one write of its saved read with the state part
-   refreshed, guarded on the status and assignee that read shows. No budget stops
-   these writes, so every changed PR's state is saved in the pass that read it,
-   at up to about 0.8 seconds a PR, and only a run's timeout could cut them short
+4. **Save the state part of each PR where it changed,** one record at a time
+   under the record lock: a read of the bead, then one write of its saved read
+   with the state part refreshed, guarded on the status and assignee that read
+   shows. A PR whose only change is in the signs of moved feedback takes no such
+   write, since a whole read saves those signs
+   ([section 3](#3-the-saved-read)). No budget stops these writes, so every
+   changed state is saved in the pass that read it, at up to about 0.8 seconds a
+   PR, and only a run's timeout could cut them short
    ([section 7](#7-the-interval-and-the-bound)).
 5. **Act, one record at a time under the record lock,** each act guarded on the
    status and assignee read under it, as today. The order is store-only acts,
@@ -517,12 +520,14 @@ wording moved, the reason follows.
    draft flag, merge state or required checks reaches the saved read within one
    pass, for as many changed PRs as a run's timeout lets it write, about 360
    ([section 7](#7-the-interval-and-the-bound)). A change to its feedback, a
-   review, a comment, a dismissed review or a thread's resolution, reaches it
-   within one pass for as many PRs as one pass's budget reads, and the rest in
-   the passes after. A dismissed review is a change to its feedback even when the
-   review decision stays as it was. *(The feedback read is per PR, so its count,
-   not the open count, can span passes. The state writes come before the budget,
-   so only a run's timeout bounds them.)*
+   review, a comment, a dismissed review or a thread's resolution, or to its
+   review decision, reaches it within one pass for as many PRs as one pass's
+   budget reads, and the rest in the passes after. A dismissed review is a change
+   to its feedback even when the review decision stays as it was. *(The feedback
+   read is per PR, so its count, not the open count, can span passes. The review
+   decision is saved with the signs of moved feedback, which only a whole read
+   writes ([section 3](#3-the-saved-read)). The state writes come before the
+   budget, so only a run's timeout bounds them.)*
 2. A pass in which nothing changed makes one GitHub request per repository and
    writes no PR's bead. Gas City still writes its tracking bead for the run.
 3. A PR's labels on GitHub are the ones the store derives, and a label that
