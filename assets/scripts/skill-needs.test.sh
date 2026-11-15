@@ -57,9 +57,16 @@
 # re-check's moot or benign close under stubs, and fails unless the close
 # settles a headline that still waits on a subject nothing holds any more,
 # leaves one that an open blocker holds, and closes the conversation only once
-# every read and write before it has answered. It pins that every skill and
-# formula names a pack skill to load by its catalog name, never by its path, so
-# an agent in any tree loads the installed pack's copy.
+# every read and write before it has answered. It runs the edit skill's copy of a
+# UI under a stub gc, and fails unless the copy runs the command the rig declares
+# as its ui_serve_command, as written, from the tree, with the city's publisher,
+# and starts no copy for a rig that declares none. It pins that the demo:capture
+# skill and the demo check read that command for a capture of the rig's app, and
+# that they start a drafted terminal script's shell at the worktree's root, as
+# the drafter's script expects. It pins that every skill and formula names a
+# pack skill to load by its catalog
+# name, never by its path, so an agent in any tree loads the installed pack's
+# copy.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc. The one case
@@ -1154,6 +1161,70 @@ have "…and reads the polecat class's standards before the first edit" 'templat
 have "…shows the operator a copy of a UI change at an address of its own" 'GCTK_SCRIPTS_DIR="$CONV" "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --command "$SERVE"' "$EDIT"
 have "…with the city's publisher" '--publish-command "$(var ui_publish_command)" --address-pattern "$(var ui_address_pattern)"' "$EDIT"
 have "…and stops the copy" '( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )' "$EDIT"
+echo "── a sitting's copy of a UI runs the command the rig declares ──"
+# The copy's block runs as written. gc answers the formula's vars for the rig,
+# whose ui_serve_command is LC_SERVE, unset when that is empty, and gctk records
+# where it runs and what it is given. A stale SERVE in the environment names
+# nothing.
+LC="$TMP/live-copy"
+mkdir -p "$LC/bin" "$LC/city/.gc/services/gctk/bin" "$LC/tree"
+cat >"$LC/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+[ "$*" = "formula show mol-rig-demo --rig rig-x --json" ] || { echo "gc: unexpected call: $*" >&2; exit 1; }
+jq -n --arg c "$LC_SERVE" '{ok: true, vars: [{name: "ui_serve_command", default: "", rig_default: (if $c == "" then null else $c end)}, {name: "ui_publish_command", default: "", rig_default: "publish $PORT"}, {name: "ui_address_pattern", default: "", rig_default: "https://host:$PORT/"}]}'
+STUB
+cat >"$LC/city/.gc/services/gctk/bin/gctk" <<'STUB'
+#!/usr/bin/env bash
+{ printf 'in %s\n' "$(pwd -P)"; printf 'scripts %s\n' "$GCTK_SCRIPTS_DIR"; printf '%s\n' "$@"; } >"$LC_LOG"
+printf '%s\n' '{"state":"running","address":"https://host:1/","port":1}'
+STUB
+chmod +x "$LC/bin/gc" "$LC/city/.gc/services/gctk/bin/gctk"
+LC_TREE=$(cd "$LC/tree" && pwd -P)
+# lc_run <shell> <ui_serve_command> — one run of the block from no log; prints
+# its stdout and stderr.
+lc_run() {
+    rm -f "$LC/log"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV CONV="$REPO/assets/scripts" TREE="$LC/tree" GC_RIG=rig-x \
+        GC_CITY_PATH="$LC/city" LC_LOG="$LC/log" LC_SERVE="$2" SERVE=stale PATH="$LC/bin:$PATH" $1 "$LC/block" </dev/null 2>&1)
+}
+fenced_block "$EDIT" 'rig serve --command "$SERVE"' >"$LC/block"
+LC_CMD='cd app && exec ./serve --port $PORT'
+LC_WANT=$(printf 'in %s\nscripts %s\nrig\nserve\n--command\n%s\n--publish-command\n%s\n--address-pattern\n%s' \
+    "$LC_TREE" "$REPO/assets/scripts" "$LC_CMD" 'publish $PORT' 'https://host:$PORT/')
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    out=$(lc_run "$run" "$LC_CMD")
+    if [ "$(cat "$LC/log" 2>/dev/null)" = "$LC_WANT" ]; then
+        ok "($sh_) converse-edit: the copy runs the rig's ui_serve_command as written, from the tree, with the city's publisher"
+    else
+        bad "($sh_) converse-edit: the copy runs the rig's ui_serve_command as written, from the tree, with the city's publisher" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
+    fi
+    out=$(lc_run "$run" "")
+    if [ ! -e "$LC/log" ] && printf '%s\n' "$out" | grep -qF 'declares no ui_serve_command, so it offers no copy'; then
+        ok "($sh_) converse-edit: a rig that declares no ui_serve_command gets no copy, and the block says so"
+    else
+        bad "($sh_) converse-edit: a rig that declares no ui_serve_command gets no copy, and the block says so" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
+    fi
+done
+# A capture of a rig's own app takes the same command the copy runs: the
+# demo:capture skill reads it for a rig, and its Demo a PR and the demo check
+# pass it to the capture as --serve.
+DEMO_SKILL="$REPO/skills/demo-capture/SKILL.md"
+DEMO_CHECK="$REPO/skills/review-demo/SKILL.md"
+START_READ='SERVE=$(gc formula show mol-rig-demo --rig <rig> --json | jq -r '"'"'[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty'"'"')'
+have "the demo:capture skill reads a rig's start command, its ui_serve_command" "$START_READ" "$DEMO_SKILL"
+have "…and its Demo a PR captures a page script with it" 'rig-demo-capture.sh" --script <script.md> --output <clip.mp4> --serve "$SERVE" --cwd .' "$DEMO_SKILL"
+have "the demo check's capture reads the same command, for the review's rig" 'SERVE=$(gc formula show mol-rig-demo --rig "${GC_RIG:-}" --json | jq -r '"'"'[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty'"'"')' "$DEMO_CHECK"
+have "…and serves it from the reviewed worktree" 'Give it as `--serve "$SERVE" --cwd <worktree>`.' "$DEMO_CHECK"
+# A terminal script the drafter writes runs on three paths, mol-rig-demo, the
+# demo check and Demo a PR. Each starts its shell at the worktree's root, which
+# mol-rig-demo-capture-arm.test.sh runs for mol-rig-demo, so the draft changes
+# into the directory its guide names in its first step.
+have "the drafter's terminal script changes into the directory its guide names, in its first step" \
+    'changes into it before its other actions, as `run cd <dir>`,' "$REPO/skills/gc-demo-script/SKILL.md"
+have "…which Demo a PR captures from the worktree's root" 'A terminal script takes `--cwd .` alone,' "$DEMO_SKILL"
+have "…and so does the demo check" '`--cwd <worktree>`, the root its shell starts in on every demo path.' "$DEMO_CHECK"
 echo "── a moot or benign close settles a headline that waits on nothing ──"
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The

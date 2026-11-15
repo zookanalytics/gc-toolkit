@@ -208,18 +208,37 @@ approval_rule = "universal-nonself-standing"
 [holds]
 # Present with a non-empty value, and the bead is held, whatever it says.
 marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
-# A marker its own writer can answer, as `<marker>=<settled-key>`: <marker>
-# holds only while <settled-key> is absent or empty on the same bead.
+# A marker its own writer can answer, as
+# `<marker>=[<status>,...:]<settled-key>[=<value>]`: <marker> holds while
+# <settled-key> is absent or empty on the same bead. Where the pair names a
+# value, it also holds while <settled-key> reads anything else, and where the
+# pair names statuses, it also holds on a bead at any other status. Nothing here
+# clears a marker: the sentence stands, and the second key records beside it
+# what answers it. A pair that does not parse is dropped, so its marker holds.
+#
 # gc.takeaway is stamped by every sign-off, the one that settled its subject as
 # much as the one that parked it for a person, and only the writer knows which
 # it was — `gc-helm.sh takeaway --no-wait` says so by stamping
 # gc.takeaway_settled beside the headline, and a takeaway without it is a hold.
-# Nothing here clears a marker: the sentence stands and the second key records
-# the disposition beside it. Every writer of a marker in this list writes its
-# settled-key in the same statement, empty unless it means settled, so a stamp
-# cannot inherit the disposition of the sitting before it
-# (assets/scripts/takeaway-settled-pairing.test.sh).
-settled_keys = ["gc.takeaway=gc.takeaway_settled"]
+# Every writer of gc.takeaway writes gc.takeaway_settled in the same statement,
+# empty unless it means settled, so a stamp cannot inherit the disposition of
+# the sitting before it (assets/scripts/takeaway-settled-pairing.test.sh).
+#
+# blocked_reason is also the pending record's reason: the merge a bead awaits,
+# or the exception that holds it. The record writes it only on a bead whose
+# marker, pr_reconcile_pending, is true. A run of the landing order reads a
+# record whose marker is true while its bead is open, blocked or closed (due()
+# in services/gctk/pr/landing.go, with record.Read), and the check that reads
+# this declaration reads no closed bead. So the pair answers the reason on an
+# open or blocked bead whose marker is true, where the reason waits on the
+# order's next run and not on a bead. On any other status, such as after a
+# claim or a deferral, or at any other value, no run reads the record, so the
+# reason holds and the bead owes its edge, as it does once the order clears the
+# marker. The order clears an exception's marker only after it files the
+# exception's human gate, and the edge an exception or a refinery park owes is
+# the human gate filed with it. doctor/check-wait-is-an-edge/run.test.sh holds
+# the pair's statuses and value to that code.
+settled_keys = ["gc.takeaway=gc.takeaway_settled", "blocked_reason=open,blocked:pr_reconcile_pending=true"]
 # merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a
 # hold that must show as an edge asserts it through blocked_reason or
 # gc.takeaway beside it, both declared above, which carry the wait's sentence.
@@ -543,7 +562,9 @@ keys = [
 #   holds it. Written by pr-facts.sh, the refinery's parks (refinery-prep.sh,
 #   refinery-land.sh, refinery-publish.sh) and the pending record's writers
 #   (gctk pr record, gctk pr reconcile); it is also a [holds] marker, so a live
-#   bead carrying it owes a blocks edge. Freeform.
+#   bead carrying it owes a blocks edge, save on an open or blocked bead whose
+#   pr_reconcile_pending is true, a record the landing order's next run reads
+#   ([holds] settled_keys). Freeform.
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
 #   workspace-setup so a restart or witness recovery can find the work in flight.
 #   Absent means no worktree is recorded yet. Never cleared. Absolute path.
