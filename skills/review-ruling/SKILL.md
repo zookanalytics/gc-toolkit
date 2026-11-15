@@ -47,6 +47,14 @@ For each must-fix point, find the other sites in the change that share its
 cause, and fix them in the same round. Name them in the ruling's reason, so the
 next lane need not raise each one in turn.
 
+An ask to bring the branch current, such as a conflict with the target, is
+answered by merging the PR's target into the run's worktree. When git needs your
+help with that merge, its message carries the account the next round's triage
+reads beside `git show --remerge-diff`: commit it with `git commit -F <file>`,
+the file holding git's first line, then one paragraph for each file you resolved
+by hand, naming what collided, what you kept or wrote and why, and what a
+reviewer should check.
+
 ## A fix outside the reviewed diff
 
 A fix that reaches outside the diff the operator reviews, such as code the PR
