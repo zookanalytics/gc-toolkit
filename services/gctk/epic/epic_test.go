@@ -258,3 +258,15 @@ func TestUnweighedLeavesOutWhatTheStoresListingOfEpicsHides(t *testing.T) {
 		"2026-11-15T00:00:00Z | k1 | closed | kept |  |  | ",
 	})
 }
+
+// A time written with an offset reads by its UTC day, the mark's and the
+// change's alike.
+func TestUnweighedReadsATimeByItsUTCDay(t *testing.T) {
+	mark := keys(hyp, "epic_weighed_at", "2026-11-14T23:30:00-05:00")
+	s := fake.New()
+	s.Put(closed(epicBead("b1", "open", mark), "2026-11-14T20:00:00Z", "the UTC day before"))
+	s.Put(closed(epicBead("s1", "open", mark), "2026-11-15T01:00:00Z", "the mark's UTC day"))
+	sameLines(t, "around a mark written with an offset", unweighedOn(t, s), []string{
+		"2026-11-15T01:00:00Z | s1 | closed | the mark's UTC day |  |  | 2026-11-15",
+	})
+}
