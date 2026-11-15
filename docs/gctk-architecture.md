@@ -114,8 +114,10 @@ bead.
 | `gctk rig test`, `lint`, `typecheck`, `setup`, `build` | agent, hook | run a rig's check and record its result at the commit, or read that record | One consistent surface that simplifies an agent's logic, caches each result at its commit, and processes every check the same way. |
 | `gctk rig serve` | agent, hook | run a copy of the rig's UI from a checkout, with no address for a demo capture or at an address of its own for a person, report its state, or stop it | Gas City supervises a declared service under the supervisor's origin, one process per name, and runs no app instance from a worktree on a port of its own ([the search](../specs/tk-rymdhac/gas-city-search.md#a-copy-of-a-rigs-ui)). The verb serves both consumers on one path, inside the sandbox the pack's demo capture defines, and ends the copy's whole process group with the copy, at the caller's stop, or through Gas City's orphan sweep once the caller's session has ended. |
 | `gctk review checks` | hook, order | which checks gate a change at a commit, with the rig's index laid over the pack's | Gas City's formula check loop runs a check script and iterates, and holds no review checks. The check index and its rig overlay are the feature. The review formula's steps read it at the reviewed commit, a lane for its own row and triage for the whole index, and the merge cadence reads it for the lanes a change needs before it dispatches them or lands the change. The loop's shape is the review-lane member's design. |
-| `gctk review guidance <check>` | hook | the rig's guidance for a check at the reviewed commit | Part of the check index: a rig's guidance, read at the commit under review rather than the one checked out. |
-| `gctk review passed <bead>` | hook | whether every lane has passed at the head: the loop's pass-or-iterate check | The check script that a review formula's check loop runs after each round. It holds the pass rule over the lanes, which the loop itself cannot. |
+| `gctk review guidance <check>` | hook | the rig's guidance for a check at the reviewed commit, or the guidance a change edits | Part of the check index: a rig's guidance, read at the commit under review rather than the one checked out. |
+| `gctk review passed <run>` | hook | whether an iteration of a review run passed: the loop's pass-or-iterate check | The check script that a review formula's check loop runs after each round. It holds the pass rule over the lanes, their findings and rulings and the asks open on the bead, which the loop itself cannot, and reads only the store, since a check runs with no `gh`. |
+| `gctk review record <run>` | hook | record the run's result for the head and target it judged, and close the asks it answered | Gas City's PR review and its PR monitor keep their reports per head SHA and record no pass on the bead that owns a PR ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#the-check-script-and-the-result-unit-1)). The result is the one the pr domain's evaluator counts, written under the store's record lock, and each ask closes with the work record Gas City's close reads. |
+| `gctk review ask <bead> --reason <text>` | agent, hook | ask for a change on a PR's branch, or for a check at its next head | Gas City's PR monitor files a repair bead that is routed and poured as it is filed, a writer of its own ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#asks-unit-1-unit-4)). An ask is a task bd files with its `blocks` edge onto the PR's bead in one create and no route, so the review run is the branch's one writer. The verb refuses a bead that owns no PR on the record and a check the index does not declare, and finds an ask of the same source and reason, open or closed, before it files. |
 | `gctk session title` | agent | give a session a title its record and its terminal show | `gc session rename` writes only the title on Gas City's record. An agent's terminal shows the name the agent's own `/rename` sets, typed into its input box, so the verb renames the session and has Gas City type `/rename <title>` into it through `gc session submit`, for Claude Code and Codex alike. |
 | `gctk quota-park nudge` | order | nudge each live session parked at a provider's limit banner, backing off per session and telling a person once an episode | Nothing in Gas City wakes a live session idle under a limit banner ([warrants.md](warrants.md#quota-park-nudging)). A nudge costs a busy or still-blocked agent nothing, and the pass polls rather than trusting the banner's reset time, because quota returns by routes no banner predicts. The standing revisit of its cadence, backoff and scope is tk-vtnyw8d. |
 | `gctk quota-park status <session>` | hook | whether this session is parked on a provider limit | The patrols read it, rather than the session's pane, before they warrant a session. |
@@ -136,7 +138,8 @@ What each noun owns:
   ([warrants.md](warrants.md#priority-following)).
 - **`pr`:** a bead's PR summary, the title and managed summary region of its
   PR, and Gas Town's pending-through-merge record on the bead that owns the PR,
-  with the store's record lock that each writer of the record takes. It starts
+  with the branch the bead's work is on and the store's record lock that each
+  writer of the record takes. It starts
   from Gas City's own PR concept. Gas Town's refinery opens a PR
   with a title and a body taken from its bead, Gas City's PR monitor and
   `gc github pr backfill` read a PR's readiness when something runs them, and
@@ -151,9 +154,13 @@ What each noun owns:
 - **`quota-park`:** the nudge episode of each parked session, under the city's
   runtime directory.
 - **`seed`:** the rendered audit under `generated/seed-audit/`.
-- **`review`, `dolt` and `session`:** nothing. The check index is config in the
-  pack and the rig, and a session's title is Gas City's record and the agent's
-  own terminal.
+- **`review`:** a review run's result on the bead that owns a PR, in
+  `review_results`, which the pr domain's evaluator reads through its reading
+  face, and the checks an ask sends back, in `review_checks`. The check index is
+  config in the pack and the rig, and what a run judged is in its steps' outputs,
+  which Gas City keeps on the run's beads.
+- **`dolt` and `session`:** nothing. A session's title is Gas City's record and
+  the agent's own terminal.
 
 What gets a verb:
 
@@ -369,7 +376,9 @@ Nothing outside it parses a metadata value or spells a key's name.
 - **One act is one write.** A verb's change of state is one `bd update`,
   create or close, carrying every key the act sets, so the act lands whole or
   not at all. A write that exits non-zero has failed, and no caller discards
-  that status.
+  that status. A close carries the runtime's work record, `gc.work_outcome` and
+  `gc.work_commit`, which Gas City's close reads and no domain owns, so the
+  ledger sets them as part of the act that closes the bead.
 - **A write's exit decides whether it landed.** Nothing reads a write back to
   confirm it, before an act that cannot be undone or anywhere else, so a close,
   a push, a dismissal or a sling that rests on a write goes ahead once the write

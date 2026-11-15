@@ -669,6 +669,9 @@ keys = [
 #   oid.
 
 [metadata.gates]
+# A review run's result on the bead that owns a PR, review_results, and the
+# checks an ask sends back, review_checks, are the review domain's keys,
+# declared in services/gctk/review and listed in services/gctk/key-registry.json.
 keys = [
   "check_set", "signoff_dismissed", "approval_dismissed",
   "signoff_verdict", "visual", "visual_fallback_from",
