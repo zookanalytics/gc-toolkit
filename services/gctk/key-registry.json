@@ -155,6 +155,14 @@
     "doc": "The formula contract a root was poured under. A root reading graph.v2 is a run's root."
   },
   {
+    "name": "gc.formula_name",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The formula a workflow root was poured from, which Gas City stamps at the pour (lifecycle/lifecycle.toml, [metadata.runtime_owned]). A live root of mol-pr-review that a blocks edge of a PR's bead names is a review run attached to the bead, and the landing order marks no PR ready while one is."
+  },
+  {
     "name": "gc.input_convoy_id",
     "type": "string",
     "readers": [
@@ -174,6 +182,7 @@
     "name": "gc.kind",
     "type": "string",
     "readers": [
+      "pr",
       "waits"
     ],
     "doc": "The runtime's kind of a bead. A root reading workflow is a run's root."
@@ -412,5 +421,11 @@
     "type": "json",
     "owner": "internal/rig",
     "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
+  },
+  {
+    "name": "withdraw_head",
+    "type": "string",
+    "owner": "pr",
+    "doc": "The head a withdrawal of a PR's approvals names, on the bead `gctk pr withdraw` files, which blocks the bead that owns the PR. The landing order dismisses each approval that stands on a commit that does not contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is filed, and never cleared."
   }
 ]

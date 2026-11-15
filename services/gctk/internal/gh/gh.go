@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -80,7 +82,8 @@ type PullRequest struct {
 
 // Review is one review of a PR. State is APPROVED, CHANGES_REQUESTED,
 // COMMENTED, DISMISSED or PENDING. AuthorCanPush is whether its author can push
-// to the repository (authorCanPushToRepository).
+// to the repository (authorCanPushToRepository). Commit is the commit the
+// review was given on, its commit_id, empty when GitHub names none.
 type Review struct {
 	ID            int64
 	State         string
@@ -88,6 +91,7 @@ type Review struct {
 	SubmittedAt   string
 	Author        string
 	AuthorCanPush bool
+	Commit        string
 }
 
 // CheckSuite is one check suite at a commit, with the latest result of each of
@@ -161,10 +165,18 @@ const (
 	enqueueMutation = `mutation($id:ID!,$head:GitObjectID!){
   enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{id}}}`
 
+	// The PR's stage, the two mutations gh pr ready and gh pr ready --undo
+	// make, each naming the PR by its node id.
+	readyMutation = `mutation($id:ID!){
+  markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}`
+
+	draftMutation = `mutation($id:ID!){
+  convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{isDraft}}}`
+
 	reviewsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
     reviews(first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
-      nodes{fullDatabaseId state body submittedAt authorCanPushToRepository author{login}}}}}}`
+      nodes{fullDatabaseId state body submittedAt authorCanPushToRepository author{login} commit{oid}}}}}}`
 
 	// The check runs are read with GitHub's LATEST filter, so a re-run's
 	// result stands in place of the attempt it re-ran, in the suite of both.
@@ -275,6 +287,100 @@ func (c *Client) mutate(query, id, head string) error {
 		func(json.RawMessage) error { return nil })
 }
 
+// MarkReady marks the PR whose node id is id ready for review. An error is a
+// request GitHub refused or one whose answer did not arrive, which may still
+// take effect: the caller reads the PR's draft flag again to learn which.
+func (c *Client) MarkReady(id string) error { return c.stage(readyMutation, id) }
+
+// ConvertToDraft returns the PR whose node id is id to draft. An error reads as
+// MarkReady's.
+func (c *Client) ConvertToDraft(id string) error { return c.stage(draftMutation, id) }
+
+// stage runs a request that moves the PR whose node id is id between draft and
+// ready.
+func (c *Client) stage(query, id string) error {
+	if id == "" {
+		return errors.New("github: a change of a PR's stage names no pull request")
+	}
+	return c.graphql(query, []string{"-f", "id=" + id}, false, func(json.RawMessage) error { return nil })
+}
+
+// The statuses of a compare, how its head stands against its base.
+var compareStatuses = []string{"identical", "ahead", "behind", "diverged"}
+
+// commitID is a full commit id, as GitHub names a commit.
+var commitID = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+
+// Compare reads how commit head stands against commit base in repo, by
+// GitHub's compare of the two (GET repos/<repo>/compare/<base>...<head>):
+// identical, ahead when head descends from base, behind when head is an
+// ancestor of base, or diverged. base and head are full commit ids. An answer
+// that names no status of those is an error, as is one GitHub did not give.
+func (c *Client) Compare(repo, base, head string) (string, error) {
+	if _, err := prVars(repo, 1); err != nil {
+		return "", err
+	}
+	if !commitID.MatchString(base) || !commitID.MatchString(head) {
+		return "", fmt.Errorf("github: a compare of %q with %q names no two full commit ids", head, base)
+	}
+	// One commit a page is enough: the status is the answer, and the commits
+	// between the two are not read.
+	raw, err := c.run("api", "--hostname", c.host, fmt.Sprintf("repos/%s/compare/%s...%s?per_page=1", repo, base, head))
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", fmt.Errorf("github: the compare of %s with %s did not decode: %w", head, base, err)
+	}
+	if !slices.Contains(compareStatuses, out.Status) {
+		return "", fmt.Errorf("github: the compare of %s with %s named the status %q", head, base, out.Status)
+	}
+	return out.Status, nil
+}
+
+// DismissReview dismisses review id of PR number in repo with message, through
+// GitHub's review dismissal (PUT repos/<repo>/pulls/<n>/reviews/<id>/dismissals).
+// An error is a dismissal GitHub refused, or one whose answer did not arrive,
+// which may still take effect; Refused tells the two apart.
+func (c *Client) DismissReview(repo string, number int, id int64, message string) error {
+	if _, err := prVars(repo, number); err != nil {
+		return err
+	}
+	if id < 1 {
+		return fmt.Errorf("github: %d is no review id", id)
+	}
+	if strings.TrimSpace(message) == "" {
+		return errors.New("github: a dismissal needs a message")
+	}
+	_, err := c.run("api", "--hostname", c.host, "-X", "PUT",
+		fmt.Sprintf("repos/%s/pulls/%d/reviews/%d/dismissals", repo, number, id), "-f", "message="+message)
+	return err
+}
+
+// httpStatus is the HTTP status gh reports for an API request GitHub answered
+// with an error, as gh writes it at the end of its message: "(HTTP 422)".
+var httpStatus = regexp.MustCompile(`\(HTTP ([0-9]{3})\)`)
+
+// Refused reports whether err is GitHub's refusal of a request it answered: an
+// HTTP status from 400 to 499, other than a rate limit. Any other error, such
+// as a connection that failed, a server error or a rate limit, is a request
+// whose answer did not arrive, which a later try may still see taken.
+func Refused(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	m := httpStatus.FindAllStringSubmatch(msg, -1)
+	if len(m) == 0 {
+		return false
+	}
+	code, _ := strconv.Atoi(m[len(m)-1][1])
+	return code >= 400 && code < 500 && code != 429 && !strings.Contains(strings.ToLower(msg), "rate limit")
+}
+
 // Reviews reads every review of PR number in repo, oldest first.
 func (c *Client) Reviews(repo string, number int) ([]Review, error) {
 	vars, err := prVars(repo, number)
@@ -293,6 +399,9 @@ func (c *Client) Reviews(repo string, number int) ([]Review, error) {
 						SubmittedAt   string `json:"submittedAt"`
 						AuthorCanPush bool   `json:"authorCanPushToRepository"`
 						Author        *actor `json:"author"`
+						Commit        *struct {
+							Oid string `json:"oid"`
+						} `json:"commit"`
 					}] `json:"reviews"`
 				} `json:"pullRequest"`
 			} `json:"repository"`
@@ -308,8 +417,12 @@ func (c *Client) Reviews(repo string, number int) ([]Review, error) {
 			if err != nil {
 				return err
 			}
-			out = append(out, Review{ID: id, State: n.State, Body: n.Body, SubmittedAt: n.SubmittedAt,
-				Author: n.Author.name(), AuthorCanPush: n.AuthorCanPush})
+			v := Review{ID: id, State: n.State, Body: n.Body, SubmittedAt: n.SubmittedAt,
+				Author: n.Author.name(), AuthorCanPush: n.AuthorCanPush}
+			if n.Commit != nil {
+				v.Commit = n.Commit.Oid
+			}
+			out = append(out, v)
 		}
 		return nil
 	})

@@ -17,7 +17,8 @@
 #     non-zero exit, which it exits. The fake
 #     `gctk pr record` keeps the real one's guard: it writes nothing on a bead
 #     that is closed or assigned to anyone but the refinery, and exits 3. The
-#     fake `gctk pr compose` names, as riding the owner's PR, each bead whose
+#     fake `gctk pr draft` logs its call and exits $STUB_DRAFT_RC, 0 when unset.
+#     The fake `gctk pr compose` names, as riding the owner's PR, each bead whose
 #     landing onto the owner's branch the lifecycle stub logged, and the fake
 #     `gh pr edit` keeps the body it gives PR #<n> as $GH_DIR/edit_<n>.md. The
 #     store's wait edges are lines of $STUB_HOLDS, "<bead> <what it waits on>":
@@ -377,6 +378,8 @@ riding: $riders}"
     [ -n "$bodyf" ] && grep -qF "at $head" "$bodyf" && outcome=current
     jq -n --arg t "feat: $owner (${owner})" --arg b "$body" --arg o "$outcome" \
       '{title: $t, body: $b, summary: $o, branch_beads: "single", branch_bead_count: 1}' ;;
+  "pr draft")
+    exit "${STUB_DRAFT_RC:-0}" ;;
   "pr record")
     bead="$3"; shift 3; url=""; head=""; target=""; refinery=""
     while [ $# -gt 0 ]; do

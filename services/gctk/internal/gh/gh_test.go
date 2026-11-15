@@ -161,6 +161,142 @@ func TestReviewsArePagedToTheirEnd(t *testing.T) {
 	}
 }
 
+// Each review names the commit it was given on, which GitHub leaves null for a
+// review it can name no commit of.
+func TestAReviewNamesTheCommitItWasGivenOn(t *testing.T) {
+	c, r := client([2]string{"reviews(first:100", `{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasNextPage":false,"endCursor":"c"},
+		"nodes":[{"fullDatabaseId":"5","state":"APPROVED","body":"","submittedAt":"2026-11-12T01:00:00Z","authorCanPushToRepository":true,
+		"author":{"login":"operator"},"commit":{"oid":"1111111111111111111111111111111111111111"}},
+		{"fullDatabaseId":"6","state":"APPROVED","body":"","submittedAt":"2026-11-12T02:00:00Z","authorCanPushToRepository":true,
+		"author":{"login":"operator"},"commit":null}]}}}}}`})
+	got, err := c.Reviews("acme/widgets", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Commit != "1111111111111111111111111111111111111111" || got[1].Commit != "" {
+		t.Fatalf("the reviews read their commits as %+v", got)
+	}
+	if args := strings.Join(r.calls[0].args, " "); !strings.Contains(args, "commit{oid}") {
+		t.Fatalf("the read %q does not ask each review's commit", args)
+	}
+}
+
+// A compare asks GitHub how one commit stands against another, one commit a
+// page, and answers with GitHub's status, which names whether the head
+// descends from the base.
+func TestACompareAnswersHowAHeadStandsAgainstItsBase(t *testing.T) {
+	const base, headID = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
+	for _, status := range []string{"identical", "ahead", "behind", "diverged"} {
+		c, r := client([2]string{"compare/" + base + "..." + headID, `{"status":"` + status + `","ahead_by":1,"files":[]}`})
+		got, err := c.Compare("acme/widgets", base, headID)
+		if err != nil || got != status {
+			t.Fatalf("a compare answered %q read as %q, %v", status, got, err)
+		}
+		args := strings.Join(r.calls[0].args, " ")
+		if want := "api --hostname github.com repos/acme/widgets/compare/" + base + "..." + headID + "?per_page=1"; args != want {
+			t.Fatalf("the compare asked %q, want %q", args, want)
+		}
+	}
+	c, _ := client([2]string{"compare/", `{"status":"unknown"}`})
+	if _, err := c.Compare("acme/widgets", base, headID); err == nil {
+		t.Fatal("a compare that named no status GitHub gives read as an answer")
+	}
+	c, _ = client([2]string{"compare/", "ERR:gh: gh: Not Found (HTTP 404)"})
+	if _, err := c.Compare("acme/widgets", base, headID); err == nil {
+		t.Fatal("a compare GitHub did not answer read as an answer")
+	}
+	c, r := client()
+	for _, pair := range [][2]string{{"", headID}, {base, "abc"}, {base, base + "/../x"}} {
+		if _, err := c.Compare("acme/widgets", pair[0], pair[1]); err == nil {
+			t.Fatalf("a compare of %q with %q ran", pair[1], pair[0])
+		}
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("a compare of no two commit ids asked GitHub: %+v", r.calls)
+	}
+}
+
+// A dismissal names the review on its PR and carries its message, as GitHub's
+// review dismissal takes it.
+func TestADismissalNamesTheReviewAndCarriesItsMessage(t *testing.T) {
+	c, r := client([2]string{"/dismissals", `{"id":100,"state":"DISMISSED"}`})
+	if err := c.DismissReview("acme/widgets", 7, 100, "The change needs another look.\n\n<!-- gc:city -->"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"api", "--hostname", "github.com", "-X", "PUT", "repos/acme/widgets/pulls/7/reviews/100/dismissals",
+		"-f", "message=The change needs another look.\n\n<!-- gc:city -->"}
+	if !reflect.DeepEqual(r.calls[0].args, want) {
+		t.Fatalf("the dismissal asked %q, want %q", r.calls[0].args, want)
+	}
+	c, r = client()
+	for _, err := range []error{
+		c.DismissReview("acme/widgets", 7, 0, "m"),
+		c.DismissReview("acme/widgets", 7, 100, " "),
+		c.DismissReview("widgets", 7, 100, "m"),
+	} {
+		if err == nil {
+			t.Fatal("a dismissal that names no review, message or repository ran")
+		}
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("a dismissal refused before GitHub asked it: %+v", r.calls)
+	}
+}
+
+// The PR's stage moves by the mutations gh pr ready makes, each naming the PR
+// by its node id.
+func TestTheStageOfAPRMovesByItsNodeID(t *testing.T) {
+	for _, tc := range []struct {
+		name, mutation string
+		do             func(*gh.Client) error
+	}{
+		{"ready", "markPullRequestReadyForReview(input:{pullRequestId:$id})", func(c *gh.Client) error { return c.MarkReady("PR_kw1") }},
+		{"draft", "convertPullRequestToDraft(input:{pullRequestId:$id})", func(c *gh.Client) error { return c.ConvertToDraft("PR_kw1") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, r := client([2]string{tc.mutation, `{"data":{"x":{"pullRequest":{"isDraft":false}}}}`})
+			if err := tc.do(c); err != nil {
+				t.Fatal(err)
+			}
+			if args := strings.Join(r.calls[0].args, " "); !strings.Contains(args, "-f id=PR_kw1") {
+				t.Fatalf("the request %q does not name the PR", args)
+			}
+		})
+	}
+	c, _ := client([2]string{"convertPullRequestToDraft", `{"data":null,"errors":[{"message":"Pull request is closed"}]}`})
+	if err := c.ConvertToDraft("PR_kw1"); err == nil {
+		t.Fatal("a refused conversion read as taken")
+	}
+	c, r := client()
+	if err := c.MarkReady(""); err == nil || len(r.calls) != 0 {
+		t.Fatalf("a request that names no PR ran: %v, %+v", err, r.calls)
+	}
+}
+
+// GitHub refused a request when it answered it with a client error, other than
+// a rate limit. A request whose answer did not arrive, or that GitHub could not
+// serve, is not refused.
+func TestRefusedTellsARefusalFromNoAnswer(t *testing.T) {
+	for msg, want := range map[string]bool{
+		"gh: gh: Validation Failed (HTTP 422)":                               true,
+		"gh: gh: Resource not accessible by integration (HTTP 403)":          true,
+		"gh: gh: Not Found (HTTP 404)":                                       true,
+		"gh: gh: API rate limit exceeded for user ID 1. (HTTP 403)":          false,
+		"gh: gh: You have exceeded a secondary rate limit (HTTP 403)":        false,
+		"gh: gh: Too Many Requests (HTTP 429)":                               false,
+		"gh: gh: Bad Gateway (HTTP 502)":                                     false,
+		"gh: error connecting to api.github.com":                             false,
+		"github: the query failed: {\"message\":\"Pull request is closed\"}": false,
+	} {
+		if got := gh.Refused(errors.New(msg)); got != want {
+			t.Errorf("Refused(%q) = %v, want %v", msg, got, want)
+		}
+	}
+	if gh.Refused(nil) {
+		t.Error("no error read as a refusal")
+	}
+}
+
 func TestCheckSuitesReadTheLatestResultOfEachRequiredRun(t *testing.T) {
 	c, r := client([2]string{"checkSuites(first:100", `{"data":{"repository":{"object":{"checkSuites":{
 		"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[{"databaseId":116886735833,"checkRuns":{

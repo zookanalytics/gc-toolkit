@@ -631,6 +631,63 @@ func (c *Client) Update(id string, args ...string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), err
 }
 
+// Create makes one `gc bd create --title <title> --json` with args, and
+// returns the id its reply names. A create that exits non-zero, or exits 0
+// with a reply that names no bead, returns an error that says why, and may
+// still have filed the bead: bd answers a create whose commit result it lost
+// (ErrCommitIndeterminate) with the same reply and exit 1 as a refusal, and gc
+// bd exits 4, with bd's reply passed through, when bd fell back to a store
+// whose writes do not persist (cmd/bd/create.go; cmd/gc/cmd_bd.go).
+func (c *Client) Create(title string, args ...string) (string, error) {
+	full := append([]string{"bd", "create", "--title", title, "--json"}, args...)
+	cmd := c.command(full...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	id, said := createReply(out)
+	if said == "" {
+		said = strings.TrimSpace(stderr.String())
+	}
+	switch {
+	case err != nil && said != "":
+		return "", fmt.Errorf("bd's create exited %d, so whether it filed the bead is unknown: %s", ExitCode(err), said)
+	case err != nil:
+		return "", fmt.Errorf("bd's create exited %d, so whether it filed the bead is unknown: %w", ExitCode(err), err)
+	case id == "" && said != "":
+		return "", fmt.Errorf("bd's create exited 0 and its reply named no bead, so whether it filed one is unknown: %s", said)
+	case id == "":
+		return "", errors.New("bd's create exited 0 and its reply named no bead, so whether it filed one is unknown")
+	}
+	return id, nil
+}
+
+// createReply reads a `bd create --json` reply: the id of the bead it names, as
+// an object or an array holding one, or the message of bd's error object,
+// which says why the create failed and not whether it wrote.
+func createReply(out []byte) (id, said string) {
+	var v any
+	if json.NewDecoder(bytes.NewReader(Scrub(out))).Decode(&v) != nil {
+		return "", ""
+	}
+	if arr, ok := v.([]any); ok {
+		if len(arr) == 0 {
+			return "", ""
+		}
+		v = arr[0]
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	if s, ok := obj["id"].(string); ok && s != "" {
+		return s, ""
+	}
+	if s, ok := obj["error"].(string); ok {
+		return "", strings.TrimSpace(s)
+	}
+	return "", ""
+}
+
 // ExitCode reports the exit status behind an Update error. A command that could
 // not be run at all reports 127, which is the status a shell caller would have
 // seen for the same failure.

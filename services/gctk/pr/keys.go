@@ -32,3 +32,23 @@ var (
 			"reading no-op put no work on its branch.",
 		ledger.Alias("work_outcome"))
 )
+
+// The withdrawal of a PR's approvals, which this domain owns: gctk pr withdraw
+// files it, and the landing order carries it out.
+var withdrawHeadKey = ledger.Declare("withdraw_head", ledger.String,
+	"The head a withdrawal of a PR's approvals names, on the bead `gctk pr withdraw` files, which blocks the bead "+
+		"that owns the PR. The landing order dismisses each approval that stands on a commit that does not "+
+		"contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is "+
+		"filed, and never cleared.")
+
+// The runtime's stamps on a workflow root, which tell the landing order that a
+// review run is attached to the bead that owns a PR: a live root of the review
+// formula that a blocks edge of the bead names.
+var (
+	kindKey = ledger.ReadOnly("gc.kind", ledger.String,
+		"The runtime's kind of a bead. A root reading workflow is a run's root.")
+	formulaNameKey = ledger.ReadOnly("gc.formula_name", ledger.String,
+		"The formula a workflow root was poured from, which Gas City stamps at the pour (lifecycle/lifecycle.toml, "+
+			"[metadata.runtime_owned]). A live root of mol-pr-review that a blocks edge of a PR's bead names is a "+
+			"review run attached to the bead, and the landing order marks no PR ready while one is.")
+)

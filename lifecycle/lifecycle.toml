@@ -696,6 +696,10 @@ keys = [
 #   those reviews, so it never dismisses an approval given after them. Absent
 #   means the pass dismissed nothing: it converged, or no approval stood. Never
 #   cleared.
+# withdraw_head — the head a withdrawal of a PR's approvals names, on a PR the
+#   pending record holds, is the pr domain's key, declared in services/gctk/pr
+#   and listed in services/gctk/key-registry.json: gctk pr withdraw writes it on
+#   the withdrawal it files, and the landing order reads it.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
 #   in the same write that closes the review bead (signoff.sh's closing update;
 #   review-outcome.sh writes `approve` in the create that files a back-lane
@@ -1804,7 +1808,7 @@ keys = [
   "gc.routed_to", "gc.execution_routed_to", "gc.run_target", "gc.outcome",
   "assignee", "gc.session_id", "gc.session_name", "gc.session_affinity",
   "gc.claimed_at", "gc.kind", "gc.synthetic", "gc.step_id", "gc.step_ref",
-  "gc.root_bead_id", "gc.root_store_ref", "gc.input_convoy_id", "gc.formula_source",
+  "gc.root_bead_id", "gc.root_store_ref", "gc.input_convoy_id", "gc.formula_source", "gc.formula_name",
   "gc.native_step_dependencies.v1", "gc.graphv2_*", "gc.var.*",
   "pin_awake", "configured_named_session",
   "gc.formula_contract", "gc.work_dir", "gc.work_commit", "gc.work_branch",
@@ -1832,6 +1836,9 @@ keys = [
 #   it in its step metadata: gascity's sling routes a poured step by its
 #   assignee, else by this key, which is how mol-review-quorum-signoff sends
 #   each lane to its provider's pool ([metadata.review_quorum]).
+# gc.formula_name — the formula a workflow root was poured from, stamped by the
+#   pour beside gc.kind=workflow. The landing order reads it to tell a review
+#   run, a live root of mol-pr-review, attached to a PR's bead by a blocks edge.
 # gc.formula_contract — `graph.v2` on a workflow root, stamped by the formula
 #   pour beside gc.kind=workflow. orphan-dispose.sh, run-cancel.sh and
 #   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a

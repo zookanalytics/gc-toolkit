@@ -9,6 +9,7 @@
 package fake
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -44,20 +45,28 @@ type Write struct {
 	Args []string
 }
 
+// Create is one create the store took: the bead it filed, its title and the
+// create's arguments.
+type Create struct {
+	ID, Title string
+	Args      []string
+}
+
 // Store is an in-memory gcbd.Store, safe for concurrent use as the city's
 // store is.
 type Store struct {
-	mu     sync.Mutex
-	rows   map[string]Bead
-	lost   map[string]bool
-	listed map[string][]string
-	marked []string
-	ready  map[string]bool
-	writes []Write
+	mu      sync.Mutex
+	rows    map[string]Bead
+	lost    map[string]bool
+	listed  map[string][]string
+	marked  []string
+	ready   map[string]bool
+	writes  []Write
+	creates []Create
 
 	// RowsErr, BlockedErr, FindErr and ReadyErr fail the matching read when
-	// set, and UpdateErr fails every write.
-	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr error
+	// set, UpdateErr fails every write and CreateErr every create.
+	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr, CreateErr error
 
 	// OnFind, when set, runs before each find the store takes, outside the
 	// store's lock, and fails nothing. A test lands another actor's write in it.
@@ -67,6 +76,11 @@ type Store struct {
 	// lock, so a test can land another writer's change between a read and a
 	// write, or refuse the write with the error it returns.
 	BeforeUpdate func(id string, args []string) error
+
+	// CloseTime, when set, is the close time an update that closes a bead
+	// stamps on a row that names none, as bd stamps a close. With none set, an
+	// update stamps nothing, and a test names a close time itself.
+	CloseTime string
 
 	finds []gcbd.Query
 }
@@ -140,6 +154,16 @@ func (s *Store) List(id string, by ...string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.listed[id] = slices.Clone(by)
+}
+
+// Unlist leaves each bead named out of the store's blocked listing, as the store
+// leaves a bead once nothing holds it.
+func (s *Store) Unlist(ids ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range ids {
+		delete(s.listed, id)
+	}
 }
 
 // Mark makes the store mark ids blocked.
@@ -304,6 +328,9 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 			delete(b.Metadata, value)
 		case "--status":
 			b.Status = value
+			if strings.EqualFold(value, "closed") && b.ClosedAt == "" {
+				b.ClosedAt = s.CloseTime
+			}
 		case "--assignee":
 			b.Assignee = value
 		case "--append-notes":
@@ -328,6 +355,77 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 	s.rows[id] = b
 	s.writes = append(s.writes, Write{ID: id, Args: slices.Clone(args)})
 	return "", nil
+}
+
+// Creates returns every create the store took, in order.
+func (s *Store) Creates() []Create {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.creates)
+}
+
+// Create files a bead titled title, open, as fk-<n> for the nth create, with
+// the create's -t, -d, --metadata, a JSON object of strings, and --deps: an
+// entry blocks:<id> gives bead id a blocks edge onto the new bead, as bd's
+// --deps does, and any other names a bead the new one waits on by a blocks
+// edge. A bead --deps names that the store does not hold refuses the create.
+func (s *Store) Create(title string, args ...string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.CreateErr != nil {
+		return "", s.CreateErr
+	}
+	id := fmt.Sprintf("fk-%d", len(s.creates)+1)
+	b := Bead{ID: id, Title: title, Status: "open", IssueType: "task", Metadata: map[string]string{}}
+	var blocks []string
+	for i := 0; i < len(args); i++ {
+		name := args[i]
+		if name == "--json" {
+			continue
+		}
+		if i+1 >= len(args) {
+			return "", fmt.Errorf("fake store: %s needs a value", name)
+		}
+		i++
+		value := args[i]
+		switch name {
+		case "-t", "--type":
+			b.IssueType = value
+		case "-d", "--description":
+			b.Description = value
+		case "--metadata":
+			var m map[string]string
+			if err := json.Unmarshal([]byte(value), &m); err != nil {
+				return "", fmt.Errorf("fake store: --metadata %q is not a JSON object of strings: %w", value, err)
+			}
+			maps.Copy(b.Metadata, m)
+		case "--deps":
+			for _, d := range strings.Split(value, ",") {
+				typ, far, ok := strings.Cut(d, ":")
+				if !ok {
+					typ, far = "blocked-by", d
+				}
+				if _, held := s.rows[far]; !held {
+					return "", fmt.Errorf("fake store: --deps names %s, which the store does not hold", far)
+				}
+				if typ == "blocks" {
+					blocks = append(blocks, far)
+				} else {
+					b.Edges = append(b.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: far, Status: s.rows[far].Status})
+				}
+			}
+		default:
+			return "", fmt.Errorf("fake store: create takes no %s", name)
+		}
+	}
+	for _, far := range blocks {
+		r := s.rows[far]
+		r.Edges = append(slices.Clone(r.Edges), gcbd.Edge{Type: gcbd.EdgeBlocks, ID: id, Title: title, Status: "open"})
+		s.rows[far] = r
+	}
+	s.rows[id] = b
+	s.creates = append(s.creates, Create{ID: id, Title: title, Args: slices.Clone(args)})
+	return id, nil
 }
 
 // row renders b as gcbd decodes a `gc bd show --json` row, whose edges carry
