@@ -30,18 +30,20 @@ line each:
 
 <time> is taken before the store answers, so each change the list does not
 show was written after it. A sync weighs an epic when its note on the epic
-marks it with that time (the portfolio-sync skill), which leaves each such
-change on the next sync's list. <weighed> is "last weighed <day>", the UTC day
-of the read a sync last weighed the epic from, or "never weighed". Each epic
-answers by its own mark, so a sitting that ends before it marks every epic
-leaves the rest on the list. A change made on or after the day of its epic's
-mark lists, so one made on that day before the read lists again. That keeps a
-change the read did not show though its time comes before the read, since a
-change's writer stamps its time before the write lands. An epic's latest shift
-is the one its epic review stamped last, so a shift that a later review
-continued or closed still lists, with the ruling that followed it. A Delivery,
-an epic under one of the rig's epics with no hypothesis of its own, is left
-out, since its close is one of the writes of its epic's ruling.
+marks it with that time (the portfolio-sync skill), which leaves each change
+made after the read on the next sync's list. <weighed> is
+"last weighed <day>", the UTC day of the read a sync last weighed the epic
+from, or "never weighed". Each epic answers by its own mark, so a sitting that
+ends before it marks every epic leaves the rest on the list. A change made on
+or after the day of its epic's mark lists, so one made on that day before the
+read lists again. That keeps a change the read did not show though its time
+comes before the read, since a change's writer stamps its time before the
+write lands. One made on the day before the read and written after it does not
+list, which takes a single write that spans both the read and midnight UTC. An
+epic's latest shift is the one its epic review stamped last, so a shift that a
+later review continued or closed still lists, with the ruling that followed
+it. A Delivery, an epic under one of the rig's epics with no hypothesis of its
+own, is left out, since its close is one of the writes of its epic's ruling.
 
 With nothing to list it prints the time and one line that says so. When the
 store does not answer it prints nothing on stdout and says so on stderr, since
@@ -115,7 +117,7 @@ func epicUnweighedOpen(rig string, stderr io.Writer) (*ledger.Ledger, int) {
 // epicUnweighed prints the time it read the epics l reads, then the changes no
 // sync has weighed of them, one line each, or the line that says there are
 // none. It takes the time before the store answers, so a sync that marks each
-// epic with it leaves every change the read did not show to the next sync.
+// epic with it leaves each change made after the read to the next sync.
 func epicUnweighed(l *ledger.Ledger, stdout, stderr io.Writer) int {
 	readAt := now().Format(time.RFC3339)
 	changes, err := epic.Unweighed(l)

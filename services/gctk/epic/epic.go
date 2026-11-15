@@ -83,7 +83,9 @@ type Change struct {
 // mark carries the time of the read the sync weighed the epic from, so a change
 // after that read lists. One made earlier on the mark's day lists again. That
 // keeps a change the read did not show though its time comes before the read,
-// since a change's writer stamps its time before the write lands.
+// since a change's writer stamps its time before the write lands. One made on
+// the day before the read and written after it does not list, which takes a
+// single write that spans both the read and midnight UTC.
 //
 // An epic's latest shift is its latest ruling when that is a shift, and the
 // shift's own time once a later ruling followed it, so a shift a later review
