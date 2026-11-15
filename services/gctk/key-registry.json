@@ -107,6 +107,14 @@
     "doc": "The branch a bead's work was folded onto by a polecat (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it has its work on that branch."
   },
   {
+    "name": "gc.attempt",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "The iteration a review run's step runs in, from 1, which Gas City writes on every step of a check loop's iteration, a lane bonded there included. A step's output names the same iteration."
+  },
+  {
     "name": "gc.dispatch_when_ready",
     "type": "string",
     "owner": "arm/record",
@@ -234,9 +242,18 @@
     "name": "gc.step_ref",
     "type": "string",
     "readers": [
+      "review",
       "waits"
     ],
-    "doc": "The formula step a step bead carries out, as \u003cformula\u003e.\u003cstep\u003e. A live run with an open step whose ref ends in .load-context has not passed load-context."
+    "doc": "The formula step a step bead carries out, as \u003cformula\u003e.\u003cstep\u003e. A live run with an open step whose ref ends in .load-context has not passed load-context. A review run's step's place in its formula. Its last part names the step, triage, rule-and-repair or lane, which says the output the step writes."
+  },
+  {
+    "name": "gc.var.branch",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A review run's branch var: the PR's branch, read when the bead that owns the PR names none."
   },
   {
     "name": "gc.var.head",

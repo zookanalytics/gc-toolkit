@@ -26,9 +26,11 @@ func newReviewCmd(stdout, stderr io.Writer) *cobra.Command {
 	return group("review", "a PR's review: the check index, a review run's pass rule, its result and its asks",
 		"The review of a PR: which checks gate a change at a commit, with the rig's index laid over the pack's, "+
 			"and the rig's guidance for each; whether an iteration of a review run passed; the result a run records "+
-			"for the head and the target it judged; and the asks a run works on the PR's branch.",
+			"for the head and the target it judged; the asks a run works on the PR's branch; and, for a run's "+
+			"steps, what a step judges, the check of the output it writes and the head's comment its round posts.",
 		newReviewChecksCmd(stdout, stderr), newReviewGuidanceCmd(stdout, stderr),
-		newReviewPassedCmd(stdout, stderr), newReviewRecordCmd(stdout, stderr), newReviewAskCmd(stdout, stderr))
+		newReviewPassedCmd(stdout, stderr), newReviewRecordCmd(stdout, stderr), newReviewAskCmd(stdout, stderr),
+		newReviewStepCmd(stdout, stderr), newReviewOutputCmd(stdout, stderr), newReviewCommentCmd(stdout, stderr))
 }
 
 const reviewChecksLong = `Prints the check index: every check a commit's review can run, with the rig's

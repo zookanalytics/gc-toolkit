@@ -1,16 +1,19 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 // The reads of a commit a caller names, which the review domain's check index
-// makes: whether a clone holds the commit, the commit fetched by its id when it
-// does not, a file's text at the commit, and the paths a change touches.
+// and its review run make: whether a clone holds the commit, the commit fetched
+// by its id when it does not, a file's text at the commit, whether one commit
+// is behind another, and the paths a change touches.
 
 // Toplevel is the top-level directory of the worktree dir sits in, and false
 // when dir sits in none.
@@ -82,6 +85,32 @@ func FileAt(dir, rev, path string) (text string, held bool, err error) {
 		return "", true, err
 	}
 	return text, true, nil
+}
+
+// IsAncestor reports whether commit a is b or an ancestor of b in the clone
+// dir sits in, reading the history git stores, with replace refs and the
+// grafts file ignored, since either rewrites what merge-base sees. An error is
+// a read that did not answer, a commit the clone does not hold among them.
+func IsAncestor(dir, a, b string) (bool, error) {
+	if !IsObjectID(a) || !IsObjectID(b) {
+		return false, fmt.Errorf("git merge-base: %q and %q must be full object names", a, b)
+	}
+	cmd := exec.Command("git", "--no-replace-objects", "-C", dir, "merge-base", "--is-ancestor", a, b)
+	cmd.Env = append(os.Environ(), "GIT_GRAFT_FILE="+os.DevNull)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &ee) && ee.ExitCode() == 1:
+		return false, nil
+	}
+	if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		return false, fmt.Errorf("git merge-base: %s", msg)
+	}
+	return false, fmt.Errorf("git merge-base: %w", err)
 }
 
 // MergeBase is a best common ancestor of a and b.

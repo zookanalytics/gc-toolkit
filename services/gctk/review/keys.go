@@ -49,3 +49,17 @@ var (
 		"A review run's shadow var. Reading true, the run writes nothing outside itself, so gctk review record "+
 			"writes no result and closes no ask.")
 )
+
+// The keys a review run's step carries that say which step it is: the
+// iteration it runs in and its place in the formula, and the branch var a run
+// is poured with, all written by the runtime.
+var (
+	attemptKey = ledger.ReadOnly("gc.attempt", ledger.String,
+		"The iteration a review run's step runs in, from 1, which Gas City writes on every step of a check loop's "+
+			"iteration, a lane bonded there included. A step's output names the same iteration.")
+	stepRefKey = ledger.ReadOnly("gc.step_ref", ledger.String,
+		"A review run's step's place in its formula. Its last part names the step, triage, rule-and-repair or lane, "+
+			"which says the output the step writes.")
+	branchVar = ledger.ReadOnly("gc.var.branch", ledger.String,
+		"A review run's branch var: the PR's branch, read when the bead that owns the PR names none.")
+)

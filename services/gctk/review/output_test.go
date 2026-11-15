@@ -1,0 +1,239 @@
+package review_test
+
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
+)
+
+// output checks what a step wrote and decodes what it printed into v.
+func (w *world) check(step string, wrote any, v any, repos ...string) error {
+	w.t.Helper()
+	raw, ok := wrote.([]byte)
+	if !ok {
+		raw = jsonOf(w.t, wrote)
+	}
+	out, err := review.Output(w.ledger(), review.OutputRequest{Step: step, Raw: raw, Repos: repos})
+	if err != nil {
+		return err
+	}
+	if v != nil {
+		if err := json.Unmarshal(out, v); err != nil {
+			w.t.Fatalf("the printed output does not decode: %v: %s", err, out)
+		}
+	}
+	return nil
+}
+
+func mustRefuse(t *testing.T, err error, why string) {
+	t.Helper()
+	var r *review.Refused
+	if !errors.As(err, &r) {
+		t.Fatalf("the output stood or failed otherwise (%v); want it refused for %q", err, why)
+	}
+	if !strings.Contains(r.Why, why) {
+		t.Fatalf("refused for %q; want %q", r.Why, why)
+	}
+}
+
+// A triage output gets its step's iteration and an empty list of picks, which
+// its fan-out reads as an array. One naming another iteration, another head,
+// another step's shape, a field the shape does not name, or a check twice is
+// refused.
+func TestATriageOutput(t *testing.T) {
+	w := newWorld(t)
+	st := w.step(1, "triage")
+	var got map[string]any
+	if err := w.check(st, map[string]any{"review": "triage", "head": h1, "material": false}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["iteration"] != float64(1) {
+		t.Errorf("the iteration printed reads %v; want 1", got["iteration"])
+	}
+	if picks, ok := got["checks"].([]any); !ok || len(picks) != 0 {
+		t.Errorf("an output with no picks prints checks %v; want an empty array", got["checks"])
+	}
+	mustRefuse(t, w.check(st, map[string]any{"review": "triage", "iteration": 2, "head": h1}, nil), "names iteration 2")
+	mustRefuse(t, w.check(st, map[string]any{"review": "triage", "head": h2}, nil), "iteration 1 judges "+h1)
+	mustRefuse(t, w.check(st, map[string]any{"review": "lane", "head": h1}, nil), `review field reads "triage"`)
+	mustRefuse(t, w.check(st, map[string]any{"review": "triage", "head": h1, "picks": []any{}}, nil), "does not read in its shape")
+	mustRefuse(t, w.check(st, triage(1, h1, "correctness", "Correctness"), nil), "picked twice")
+	mustRefuse(t, w.check(st, []byte("not json"), nil), "not one JSON object")
+}
+
+// A lane writes for a check triage picked, at the head triage judged, with a
+// verdict and findings that each name an id, a locus and a message.
+func TestALaneOutput(t *testing.T) {
+	w := newWorld(t)
+	w.output(triage(1, h1, "arch"))
+	st := w.step(1, "lane")
+	if err := w.check(st, lane(1, "arch", h1, review.VerdictRequestChanges, "A1"), nil); err != nil {
+		t.Fatal(err)
+	}
+	mustRefuse(t, w.check(st, lane(1, "pm", h1, review.VerdictApprove), nil), `did not pick "pm"`)
+	mustRefuse(t, w.check(st, lane(1, "arch", h2, review.VerdictApprove), nil), "reviews "+h1)
+	mustRefuse(t, w.check(st, lane(1, "arch", h1, "comment"), nil), `verdict reads "comment"`)
+	mustRefuse(t, w.check(st, lane(1, "arch", h1, review.VerdictRequestChanges, "A1", "A1"), nil), "used twice")
+	ln := lane(1, "arch", h1, review.VerdictRequestChanges, "A1")
+	ln.Findings[0].Locus = ""
+	mustRefuse(t, w.check(st, ln, nil), "needs its locus and its message")
+}
+
+// A correctness approve on a change that edits its own review guidance is
+// refused until needs_you names the edit. Paths that cannot be listed leave
+// the edit unchecked, and needs_you says so. Another check's approve, and a
+// change that edits no guidance, need nothing.
+func TestTheGuidanceEditGuard(t *testing.T) {
+	r := newHeadRepo(t)
+	setup := func(head string, check string) (*world, string) {
+		w := newWorld(t)
+		root2, _ := w.store.Row(root)
+		root2.Metadata["gc.var.head"] = head
+		w.store.Put(root2)
+		w.output(triage(1, head, check))
+		return w, w.step(1, "lane")
+	}
+	w, st := setup(r.h2, "correctness")
+	mustRefuse(t, w.check(st, lane(1, "correctness", r.h2, review.VerdictApprove), nil, r.dir), "docs/review-arch.md")
+	named := lane(1, "correctness", r.h2, review.VerdictApprove)
+	named.NeedsYou = "This change edits the arch guidance, which its own arch review read."
+	var got review.Lane
+	if err := w.check(st, named, &got, r.dir); err != nil || got.NeedsYou != named.NeedsYou {
+		t.Errorf("an approve that names the edit = %v, needs_you %q", err, got.NeedsYou)
+	}
+	if err := w.check(st, lane(1, "correctness", r.h2, review.VerdictRequestChanges, "C1"), nil, r.dir); err != nil {
+		t.Errorf("a request-changes on the same change is refused: %v", err)
+	}
+	w, st = setup(r.h1, "correctness")
+	got = review.Lane{}
+	if err := w.check(st, lane(1, "correctness", r.h1, review.VerdictApprove), &got, r.dir); err != nil || got.NeedsYou != "" {
+		t.Errorf("an approve of a change that edits no guidance = %v, needs_you %q", err, got.NeedsYou)
+	}
+	got = review.Lane{}
+	if err := w.check(st, lane(1, "correctness", r.h1, review.VerdictApprove), &got); err != nil ||
+		!strings.Contains(got.NeedsYou, "unchecked") {
+		t.Errorf("with no repository to list the paths in, the approve = %v, needs_you %q; want it to say the edit is unchecked", err, got.NeedsYou)
+	}
+	w, st = setup(r.h2, "arch")
+	if err := w.check(st, lane(1, "arch", r.h2, review.VerdictApprove), nil, r.dir); err != nil {
+		t.Errorf("an arch approve of a change that edits guidance is refused: %v", err)
+	}
+}
+
+// A round rules each finding its iteration's lanes raised and each ask it can
+// take, once each, by a ruling in the set and with a reason. A must-fix names
+// the commit that fixes it, and a ruling that changes no code names none; a
+// question names its gate. An ask an earlier round of the run declined takes
+// no fix.
+func TestARepairOutput(t *testing.T) {
+	setup := func() (*world, string) {
+		w := newWorld(t)
+		w.output(triage(1, h1, "correctness"))
+		w.output(lane(1, "correctness", h1, review.VerdictRequestChanges, "F1"))
+		return w, w.step(1, "rule-and-repair")
+	}
+	must := review.Ruling{Check: "correctness", Finding: "F1", Ruling: review.RulingMustFix, Reason: "it holds", Commit: fix}
+	w, st := setup()
+	if err := w.check(st, repair(1, h1, fix, must), nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		rp   review.Repair
+		why  string
+	}{
+		{"an unruled finding", repair(1, h1, ""), "finding F1 is not ruled"},
+		{"a finding no lane raised", repair(1, h1, "", finding("correctness", "F1", review.RulingDeclined),
+			finding("correctness", "F9", review.RulingDeclined)), "no lane of this iteration raised correctness finding F9"},
+		{"a finding ruled twice", repair(1, h1, "", finding("correctness", "F1", review.RulingDeclined),
+			finding("correctness", "F1", review.RulingAnswered)), "ruled twice"},
+		{"a ruling outside the set", repair(1, h1, "", finding("correctness", "F1", "fixed")), "not a ruling"},
+		{"a must-fix with no commit", repair(1, h1, "", review.Ruling{Check: "correctness", Finding: "F1",
+			Ruling: review.RulingMustFix, Reason: "r"}), "names no commit"},
+		{"a decline with a commit", repair(1, h1, "", review.Ruling{Check: "correctness", Finding: "F1",
+			Ruling: review.RulingDeclined, Reason: "r", Commit: fix}), "changes no code"},
+		{"a question with no gate", repair(1, h1, "", review.Ruling{Check: "correctness", Finding: "F1",
+			Ruling: review.RulingQuestion, Reason: "r"}), "names no gate"},
+		{"a ruling with no reason", repair(1, h1, "", review.Ruling{Check: "correctness", Finding: "F1",
+			Ruling: review.RulingDeclined}), "with no reason"},
+		{"another head", repair(1, h2, "", finding("correctness", "F1", review.RulingDeclined)), "judged " + h1},
+		{"a push that is no commit", repair(1, h1, "abc", must), "not a full object name"},
+	} {
+		w, st := setup()
+		mustRefuse(t, w.check(st, c.rp, nil), c.why)
+	}
+
+	w, st = setup()
+	w.ask("tk-ask", "")
+	mustRefuse(t, w.check(st, repair(1, h1, fix, must), nil), "ask tk-ask is open and nothing holds it")
+	if err := w.check(st, repair(1, h1, fix, must, review.Ruling{Ask: "tk-ask", Ruling: review.RulingDeclined,
+		Reason: "a nit, answered and not fixed"}), nil); err != nil {
+		t.Errorf("a round that rules the ask: %v", err)
+	}
+	w.store.Put(bead{ID: "tk-other", Status: "open", IssueType: "task"})
+	w.ask("tk-held", "", gcbd.Edge{ID: "tk-other", Type: gcbd.EdgeBlocks})
+	w.store.List("tk-held", "tk-other")
+	w.store.Mark("tk-held")
+	mustRefuse(t, w.check(st, repair(1, h1, fix, must, review.Ruling{Ask: "tk-ask", Ruling: review.RulingDeclined, Reason: "r"},
+		review.Ruling{Ask: "tk-held", Ruling: review.RulingAnswered, Reason: "r"}), nil), "not an ask the round can take")
+
+	// The ask declined at iteration 1 takes no fix at iteration 2.
+	w = newWorld(t)
+	w.ask("tk-ask", "")
+	w.output(triage(1, h1))
+	w.output(repair(1, h1, "", review.Ruling{Ask: "tk-ask", Ruling: review.RulingDeclined, Reason: "a nit"}))
+	w.output(triage(2, h1))
+	st = w.step(2, "rule-and-repair")
+	mustRefuse(t, w.check(st, repair(2, h1, fix, review.Ruling{Ask: "tk-ask", Ruling: review.RulingMustFix, Reason: "r",
+		Commit: fix}), nil), "an earlier round of this run ruled ask tk-ask declined")
+}
+
+// A shadow run's round fixes, pushes and files nothing. Its output carries the
+// comment it would have posted, and each write it made none of.
+func TestAShadowRound(t *testing.T) {
+	w := newWorld(t)
+	r, _ := w.store.Row(root)
+	r.Metadata["gc.var.shadow"] = "true"
+	w.store.Put(r)
+	w.output(triage(1, h1, "correctness"))
+	w.output(lane(1, "correctness", h1, review.VerdictRequestChanges, "F1"))
+	st := w.step(1, "rule-and-repair")
+	shadowMust := review.Ruling{Check: "correctness", Finding: "F1", Ruling: review.RulingMustFix, Reason: "it holds"}
+	raw := jsonOf(t, repair(1, h1, "", shadowMust))
+	out, err := review.Output(w.ledger(), review.OutputRequest{Step: st, Raw: raw, Writes: []string{"push: would push 1 commit"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got review.Repair
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Shadow == nil || !strings.Contains(got.Shadow.Comment, "a shadow run fixes nothing") ||
+		len(got.Shadow.Writes) != 1 {
+		t.Errorf("the shadow round's output carries %+v; want the comment and the one write", got.Shadow)
+	}
+	mustRefuse(t, w.check(st, repair(1, h1, fix, shadowMust), nil), "a shadow run pushes nothing")
+	withCommit := shadowMust
+	withCommit.Commit = fix
+	mustRefuse(t, w.check(st, repair(1, h1, "", withCommit), nil), "a shadow run fixes nothing")
+
+	w = newWorld(t)
+	w.output(triage(1, h1))
+	st = w.step(1, "rule-and-repair")
+	own := repair(1, h1, "")
+	own.Shadow = &review.Shadow{Comment: "x"}
+	mustRefuse(t, w.check(st, own, nil), "only a shadow run's round")
+}
+
+// A step that writes no output, such as prepare, is refused.
+func TestAStepThatWritesNoOutput(t *testing.T) {
+	w := newWorld(t)
+	w.store.Put(bead{ID: "tk-prep", Status: "in_progress", IssueType: "task", Metadata: map[string]string{
+		"gc.root_bead_id": root, "gc.step_ref": "mol-pr-review.prepare",
+	}})
+	mustRefuse(t, w.check("tk-prep", triage(1, h1), nil), "not a step that writes an output")
+}
