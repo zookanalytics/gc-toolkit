@@ -49,12 +49,13 @@ give one answer.
 - The merge still reads GitHub fresh in its own run, and never acts on what was
   saved.
 
-**What it leaves open.** Between a new head, such as a rework landing, and the
-landing order's next check, the PR reads `working`, with GitHub's side named as
-not yet read. The agents' board (`helm-svc board`) keeps its own rule until the
-board member replaces its reader. A PR still on the old path shows what the old
-path records, as today. Every rig's move onto the pending record waits on this
-work, so the first PRs it shows are the ones those moves bring.
+**What it leaves open.** A PR the refinery publishes at a head the landing order
+has not read, such as a new PR, reads `working`, with GitHub's side named as not
+yet read, until the landing order's next check. The agents' board
+(`helm-svc board`) keeps its own rule until the board member replaces its
+reader. A PR still on the old path shows what the old path records, as today.
+Every rig's move onto the pending record waits on this work, so the first PRs it
+shows are the ones those moves bring.
 
 **The one call.** The label when a PR merges or closes (tk-1tfzr71.91):
 
@@ -109,7 +110,8 @@ Two functions compose them, and every caller asks one of the two:
   decides, and returns the answer with the GitHub read it made. It is the
   merge's question, and only the landing order asks it: at a check of a PR open
   at its validated head, it saves the read and acts on the answer (section 6).
-  At a requeue, where it decides nothing, it observes alone.
+  At a check of a PR already in its base's merge queue, and at a requeue, where
+  it decides nothing, it observes alone.
 - **`pr.FromStore(l, bead)`** reads the bead's side and the GitHub read the
   landing order saved, and decides. It is every display's question. It reads no
   GitHub and loads no definition of feedback.
@@ -142,8 +144,9 @@ takes the read's form of its input:
   name, so a list of the required runs at the head gives the same conditions.
 
 The test that holds the rule to one is the evaluator's own suite run twice.
-Every case of `ready_test.go` asks `Ready` over the fake GitHub, saves the read
-`Ready` returns on the bead, asks `FromStore`, and requires the same answer.
+Every case of `ready_test.go` that answers asks `Ready` over the fake GitHub,
+saves the read `Ready` returns on the bead, asks `FromStore`, and requires the
+same answer.
 
 ## 2. The GitHub read, saved on the PR's bead
 
@@ -180,11 +183,12 @@ The second test is where a reader learns the PR's own head without reading
 GitHub. Both keys are Gas Town's record. The refinery's publication writes
 `pr_head_sha`, the head it validated and pushed, and clears
 `observed_pr_head_sha`. The landing order's requeue writes
-`observed_pr_head_sha`, the head it found. So a rework the refinery publishes
-makes the saved read older than the PR's head until the next check, and a head
-the landing order found open stays the PR's head until the refinery publishes
-again. The third test covers the instant `pr-facts.sh` stamps once, the first
-time it reads a PR, which a read made before the stamp did not apply.
+`observed_pr_head_sha`, the head it found. So a head the refinery publishes
+makes the saved read older than the PR's head until the next check, unless the
+landing order's requeue read the PR at that head. A head the landing order found
+open stays the PR's head until the refinery publishes again. The third test
+covers the instant `pr-facts.sh` stamps once, the first time it reads a PR,
+which a read made before the stamp did not apply.
 
 **A read that is not current, or none.** `decide` then names one condition,
 `github-unread`, saying that the landing order has not read the PR on GitHub at
@@ -196,14 +200,15 @@ of GitHub's. Section 4 says what each display shows for it.
 ## 3. The writer: the landing order's check
 
 At each check that finds the PR open, the landing order reads GitHub's side
-whole, through `Ready` at the validated head and through `observe` alone at a
-requeue, and saves the read in the same guarded write that records the check,
-so one act stays one write:
+whole, through `Ready` at the validated head, and through `observe` alone for a
+PR in its base's merge queue and at a requeue. It saves the read in the same
+guarded write that records the check, so one act stays one write:
 
 | The check finds | It writes |
 |---|---|
 | the PR open at the validated head, not ready | `record.Checked` and the read |
 | the PR ready | the merge or enqueue request on the answer `Ready` gave over the read it just made (section 6), then `record.Checked` and the read |
+| the PR ready, and GitHub refuses the request or does not answer it | `record.Retry` with why, and the read |
 | the PR in its base's merge queue | `record.Checked` and the read, and no request |
 | the PR open at another head | the requeue and the read made at the head it found |
 
@@ -211,9 +216,10 @@ The order of the reads is today's. The run's read of the PR comes first, then
 the check suites at the PR's head, the reviews, the city's login (once for each
 host in a run), the review threads and the conversation comments, with the
 definition of feedback loaded once in a run. A check of a PR open at its
-validated head makes the reads it makes today. A requeue also reads the rest of
-GitHub's side, where today it reads only the PR, so the board shows the rule at
-the head the refinery has yet to validate.
+validated head and outside the merge queue makes the reads it makes today. A
+check of a PR in the queue and a requeue also read the rest of GitHub's side,
+where today each reads only the PR, so the board shows the rule over a queued
+PR's facts and at the head the refinery has yet to validate.
 
 **A read that fails partway.** The read is saved whole or not at all, so
 `decide` never runs on part of the facts, and no reader finds a read with a
@@ -384,7 +390,8 @@ Other work carries the rest:
   so whichever of the two lands second edits the rows (section 8).
 - **`docs/gctk-architecture.md`'s rows** for `gctk pr status` and
   `gctk pr reconcile`, and `services/gctk/README.md`, state each verb as built,
-  so the unit that changes the verb restates its row (section 11).
+  so the unit that changes the verb restates its row (section 11). The page's
+  paragraph on what the pr noun owns gains the saved read, in unit 1.
 
 ## 8. The overlap with the review-lanes effort
 
@@ -392,6 +399,8 @@ Other work carries the rest:
 
 - `pr.go` reads the review results through `review.Results` and the branch
   through `record.Branch`, and `ready_keys.go` gives up both declarations.
+- `feedback.go` gains `unrouted`, the withdrawal's reading of the inline
+  comments that the reviews it dismisses carry.
 - `landing.go`'s `state` gains the bead's row, its open withdrawals and the
   review runs attached to it. `open` and `blocked` carry a withdrawal out before
   they requeue or decide, and `decide` marks a draft ready when a passed result
@@ -401,6 +410,10 @@ Other work carries the rest:
 - `gh.go` gains the draft transitions, the compare and the review dismissal.
 - The cli's `prland.go` and `prstatus.go`, and `docs/architecture.md`'s
   boundary, flow step 7 and review table.
+- The `gctk pr reconcile` rows of `docs/gctk-architecture.md` and
+  `services/gctk/README.md`, and that page's paragraph on what the pr noun
+  owns, which gains the branch and the withdrawal. `key-registry.json`, which
+  is generated from the declarations, gains that effort's keys.
 
 Its unit 4 (tk-1tfzr71.128, in flight at this reading, with its branch not yet
 on origin) has the landing order pour the review run, and has `prstatus` render
@@ -416,17 +429,28 @@ them, and whichever lands second composes the two as follows:
   is read after it and the read keeps only the approvals that still stand; then
   the pour of a review run. The read of GitHub's side comes before the draft's
   ready transition, and every write those paths make (checked, readied,
-  requested, requeued) carries the read. A draft the landing order marks ready
-  is saved as a draft until its next check.
+  requested, a refused request's retry, requeued) carries the read. A draft the
+  landing order marks ready is saved as a draft until its next check.
 - **The bead's side** reads the results and the branch through
   `review.Results` and `record.Branch` once that effort is in.
+- **`feedback.go`.** That effort's `unrouted` reads the live threads in the
+  withdrawal's carry and stays as it is, beside this work's split of
+  `unhandled`.
 - **`gh.go`.** Both add to the queries and the mutations beside `pullQuery`, and
   each keeps the other's.
 - **`prstatus/render.go`.** That effort's unit 4 adds the run's state to the
   `review` condition, and this work adds the `github-unread` case. Both stand,
   since an unread side names no `review` condition.
-- **`docs/architecture.md`.** The diagram's edge from the landing order to the
-  PR carries both acts, "ready, merge request, labels".
+- **`docs/architecture.md`.** The diagram keeps that effort's edge from the
+  landing order to the review run. Its edge to the PR carries both acts, "ready,
+  merge request, labels", and its edge to the ledger reads "record, GitHub read,
+  then close". The legend keeps both additions: the saved read beside the
+  landing order's merges, and a PR's review run as the writer of the PR's review
+  result.
+- **`docs/gctk-architecture.md`, `services/gctk/README.md` and
+  `key-registry.json`.** The `gctk pr reconcile` rows name both efforts' acts,
+  the pr noun's paragraph names the branch, the withdrawal and the saved read,
+  and the registry is generated again from both efforts' declarations.
 - **`specs/tk-1tfzr71.108/design.md`.** Its section 9 rows take section 7's
   text, in whichever effort lands second.
 
@@ -463,8 +487,8 @@ leaves the city working.
 
 | Unit | What it does | Files | Tests | Waits on |
 |---|---|---|---|---|
-| 1. The rule split from its reads, and the read saved | `GitHubRead` and its key; `observe`, `decide` and `FromStore`; `Ready` composed of the bead's side, `observe` and `decide`, returning the read it made; `github-unread` and section 2's test of a current read; the landing order reads GitHub's side once per check, saves it in each check's write, a requeue's included, and leaves the last read on a read that fails partway. | `services/gctk/pr/pr.go`, `rules.go`, `feedback.go`, a new `read.go`, `landing.go`, `key-registry.json` | every `ready_test.go` case gives one answer live and over the read it saves; section 2's test for another head, another PR, another provenance instant, no read saved, and a changed head's observed head; the landing order saves the read on a check, a request, the queue and a requeue, and keeps the last read on a failure after the PR's read; the merge path's two cases of section 6 | nothing |
-| 2. Every display over the saved read | `gctk pr status` over `FromStore`, with no gh and no definition of feedback; `prstatus.Render`'s `github-unread` case and the package's header; `Listing.PRAnswers`; the rig board's `prFacts` and row 5, carried from #1509; `gctk pr status`'s row in `docs/gctk-architecture.md` and the README | `services/gctk/internal/cli/prstatus.go`, `services/gctk/prstatus/render.go`, `prstatus.go`, `services/gctk/listing`, `services/helm/internal/rigboard` (`gather.go`, `build.go`, `table.go`, `document.go`), `docs/gctk-architecture.md`, `services/gctk/README.md`, `services/helm/README.md` | `gctk pr status` gives each status over a saved read with a gh stub that fails the test when it is called; `github-unread` reads `working`, and `needs-attention` beside a gate; `PRAnswers` over a pass; #1509's `pending_test.go`, read from the saved read in place of a live one, so four of its six cases fail if the board falls back to the posture; row 5 for a bead the record holds blocked | unit 1 |
+| 1. The rule split from its reads, and the read saved | `GitHubRead` and its key; `observe`, `decide` and `FromStore`; `Ready` composed of the bead's side, `observe` and `decide`, returning the read it made; `github-unread` and section 2's test of a current read; the landing order reads GitHub's side once per check, saves it in each check's write, a queued PR's, a refused request's and a requeue's included, and leaves the last read on a read that fails partway; the pr noun's paragraph in `docs/gctk-architecture.md` | `services/gctk/pr/pr.go`, `rules.go`, `feedback.go`, a new `read.go`, `landing.go`, `services/gctk/key-registry.json`, `docs/gctk-architecture.md` | every `ready_test.go` case that answers gives one answer live and over the read it saves; section 2's test for another head, another PR, another provenance instant, no read saved, and a changed head's observed head; the landing order saves the read on a check, a request, a refused request, the queue and a requeue, and keeps the last read on a failure after the PR's read; the merge path's two cases of section 6 | nothing |
+| 2. Every display over the saved read | `gctk pr status` over `FromStore`, with no gh and no definition of feedback; `prstatus.Render`'s `github-unread` case and the package's header; `Listing.PRAnswers`; the rig board's `prFacts` and row 5, carried from #1509; `gctk pr status`'s row in `docs/gctk-architecture.md` and the README | `services/gctk/internal/cli/prstatus.go`, `services/gctk/prstatus/render.go`, `prstatus.go`, `services/gctk/listing`, `services/helm/internal/rigboard` (`gather.go`, `build.go`, `table.go`, `document.go`), `services/helm/web/src/rigboard/document.gen.ts`, generated from `document.go`, `docs/gctk-architecture.md`, `services/gctk/README.md`, `services/helm/README.md` | `gctk pr status` gives each status over a saved read with a gh stub that fails the test when it is called; `github-unread` reads `working`, and `needs-attention` beside a gate; `PRAnswers` over a pass; #1509's `pending_test.go`, read from the saved read in place of a live one, so four of its six cases fail if the board falls back to the posture; row 5 for a bead the record holds blocked | unit 1 |
 | 3. The landing order writes the label | the `Labels` port and its runtime adapter over `pr-status-label.sh`; a reconcile after each check that read the PR open; the clear before a merged or closed record, with the marker kept until it lands and the next run's retry; the PR read's labels; `gctk pr reconcile`'s row in `docs/gctk-architecture.md`, the README and the order's header | `services/gctk/pr/landing.go`, `services/gctk/pr/record/record.go`, `services/gctk/internal/gh/gh.go`, `services/gctk/internal/cli/prland.go`, `orders/pr-reconcile.toml`, `docs/gctk-architecture.md`, `services/gctk/README.md` | a reconcile after a check, a request, a readied draft, a requeue and an exception on an open PR, each with the labels its read found; none past the run's deadline; a clear before each merged or closed record; a clear that fails keeps the marker, and the next run clears the labels, then the marker; the cli's call names the script, its verb, the PR and the repository | unit 2 |
 
 Unit 3 waits on unit 2, because until `gctk pr status` reads the saved read, the
@@ -492,9 +516,11 @@ landing order's label call would read GitHub a second time at every check.
   `specs/tk-1tfzr71.108/design.md`, so whichever effort lands second carries
   them.
 - Before filing, the child surveys the open branches against each unit's files
-  again, since they move. At this reading only `integration/tk-1tfzr71.22`
-  touches them, with `integration/tk-1tfzr71.17` touching
-  `docs/built-once-target.md` outside its merge section.
+  again, since they move. At this reading `integration/tk-1tfzr71.22` touches
+  them. PR #1514 touches the epic noun's lines of `docs/gctk-architecture.md`
+  and `services/gctk/README.md`, and the generated `key-registry.json`.
+  `integration/tk-1tfzr71.17` touches `docs/built-once-target.md` outside its
+  merge section.
 
 ## 13. Facts this design rests on
 
