@@ -339,28 +339,50 @@ cmd_post() {
     fi
 }
 
+# A deferred fix is a task that waits on the PR's bead. bd keeps one edge
+# between two beads, so that wait is the task's only edge onto the PR's bead,
+# and the create writes it with the task. The task an earlier call filed is
+# found by its title and that wait. A found task that is open and carries no
+# arm and no route gets the arm that call did not make, and any other found
+# task is left as it stands.
 cmd_defer() {
     [ -n "$TITLE" ] && [ -n "$FILE" ] || usage
     load; owns rule-and-repair
     [ -s "$FILE" ] || die 64 "--file $FILE holds no description"
     if [ "$SHADOW" = true ]; then would "bead: $TITLE, waiting on $PR_BEAD and armed to start once it lands"; return 0; fi
-    local found new pool
-    found=$(gc bd list --all --title-contains "$TITLE" --json --limit 0 2>/dev/null \
-        | jq -r --arg t "$TITLE" --arg pr "$PR_BEAD" '.[]? | select(.title == $t)
-            | select([.dependencies[]? | select((.depends_on_id // .id) == $pr and (.dependency_type // .type) == "discovered-from")] | length > 0)
-            | .id' | head -1)
-    if [ -n "$found" ]; then echo "$found"; echo "$PROG: $found already carries this fix" >&2; return 0; fi
-    new=$(gc bd create "$TITLE" -t task -d "$(cat "$FILE")" --deps "discovered-from:$PR_BEAD" \
-        --metadata "$(jq -cn --arg t "$TARGET" '{target: $t}')" --json \
-        | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-    [ -n "$new" ] || die 1 "the create returned no bead; a retry finds one that landed"
-    gc bd dep add "$new" "$PR_BEAD" --type=blocks >/dev/null || die 1 "$new is filed and its wait on $PR_BEAD did not land"
+    local pool rows found id status routed arm
     pool=$(gc bd show "$RUN" --json 2>/dev/null | jq -r '.[0].metadata["gc.var.repair_target"] // empty')
-    [ -n "$pool" ] || die 1 "$new waits on $PR_BEAD and is not armed: the run names no repair pool"
-    "$gctk" bead arm "$new" --target "$pool" --on mol-polecat-work \
+    [ -n "$pool" ] || die 1 "the run names no repair pool to arm a deferred fix for, so nothing is filed"
+    rows=$(gc bd list --all --title-contains "$TITLE" --json --limit 0 2>/dev/null) \
+        || die 2 "the beads titled '$TITLE' did not read, so whether this fix is filed is unknown"
+    found=$(printf '%s' "$rows" | jq -r --arg t "$TITLE" --arg pr "$PR_BEAD" '[.[]? | select(.title == $t)
+        | select(any(.dependencies[]?; (.depends_on_id // .id) == $pr and (.dependency_type // .type) == "blocks"))][0]
+        // empty | [.id, (.status // ""), (.metadata["gc.routed_to"] // "")] | join("\u001f")') \
+        || die 2 "the beads titled '$TITLE' did not decode, so whether this fix is filed is unknown"
+    if [ -z "$found" ]; then
+        id=$(gc bd create "$TITLE" -t task -d "$(cat "$FILE")" --deps "blocked-by:$PR_BEAD" \
+            --metadata "$(jq -cn --arg t "$TARGET" '{target: $t}')" --json \
+            | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+        [ -n "$id" ] || die 1 "the create returned no bead; a retry finds one that landed"
+    else
+        IFS=$'\x1f' read -r id status routed <<< "$found"
+        if [ "$status" != open ] || [ -n "$routed" ]; then
+            echo "$id"
+            echo "$PROG: $id already carries this fix, ${routed:+routed to $routed and }at status $status, so it is not armed" >&2
+            return 0
+        fi
+        arm=$("$gctk" bead holds "$id" 2>/dev/null \
+            | jq -r --arg id "$id" 'select(.id == $id) | if .error then "unread" elif .arm then "armed" else "none" end')
+        case "$arm" in
+            armed) echo "$id"; echo "$PROG: $id already carries this fix, armed" >&2; return 0 ;;
+            none) ;;
+            *) die 2 "whether $id carries its arm did not read" ;;
+        esac
+    fi
+    "$gctk" bead arm "$id" --target "$pool" --on mol-polecat-work \
         --reason "deferred by review run $RUN: a fix outside the diff of $PR, started once $PR_BEAD lands" >/dev/null \
-        || die 1 "$new waits on $PR_BEAD and its arm did not land"
-    echo "$new"
+        || die 1 "$id waits on $PR_BEAD and its arm did not land; run this again"
+    echo "$id"
 }
 
 cmd_question() {

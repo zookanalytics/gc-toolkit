@@ -14,7 +14,9 @@
 # draft does not answer or the branch moved, and nothing in a shadow run; the
 # post of the head's comment, or the edit of the one its mark finds, nothing
 # when there is nothing to answer, and nothing in a shadow run; a deferred fix
-# filed waiting on the PR's bead and armed, found rather than filed again; a
+# filed with its wait on the PR's bead in its create, and armed, found rather
+# than filed again, armed then when the call that filed it did not arm it, and
+# left as it stands when it is armed, closed or routed; a
 # question put to a gate; a person's batch, whose human findings the round's
 # read lists and the finding verb rules through finding.sh, a deferral's
 # follow-up taking the PR's target; the record asking a person when the loop
@@ -72,8 +74,10 @@ printf 'gc %s\n' "$*" >> "$LOG"
 case "$1 $2" in
     "hook current") echo "${STUB_HELD:-tk-step}" ;;
     "bd update") exit "${STUB_RC_BD_UPDATE:-0}" ;;
-    "bd show") printf '[{"id":"%s","metadata":{"gc.var.repair_target":"rig/gc-toolkit.polecat","finding.follow_up":"tk-fu"}}]\n' "$3" ;;
-    "bd list") printf '%s\n' "${STUB_LIST:-[]}" ;;
+    "bd show") if [ -n "${STUB_NO_POOL:-}" ]; then printf '[{"id":"%s","metadata":{}}]\n' "$3"
+               else printf '[{"id":"%s","metadata":{"gc.var.repair_target":"rig/gc-toolkit.polecat","finding.follow_up":"tk-fu"}}]\n' "$3"; fi ;;
+    "bd list") [ -z "${STUB_RC_BD_LIST:-}" ] || exit "$STUB_RC_BD_LIST"
+               printf '%s\n' "${STUB_LIST:-[]}" ;;
     "bd create") echo '{"id":"tk-new"}' ;;
     "bd dep") ;;
 esac
@@ -93,6 +97,9 @@ case "$1 $2" in
     "review record") printf '%s\n' "${STUB_RECORD:-tk-pr: review passed at x into main}" ;;
     "pr draft") [ -z "${STUB_ORIGIN:-}" ] || git -C "$STUB_ORIGIN" rev-parse polecat/tk-pr > "$STUB_ORIGIN.at-draft"
         exit "${STUB_RC_DRAFT:-0}" ;;
+    "bead holds") if [ -n "${STUB_HOLDS:-}" ]; then printf '%s\n' "$STUB_HOLDS"
+                  else printf '{"id":"%s","status":"blocked","arm":null}\n' "$3"; fi ;;
+    "bead arm") exit "${STUB_RC_ARM:-0}" ;;
 esac
 exit 0
 STUB
@@ -222,14 +229,42 @@ has "$OUT" "**Review**" "and prints the comment its output carries"
 facts review-loop.iteration.1.rule-and-repair repair 1
 echo "Move the parser into its own package." > "$TMP/defer.md"
 run defer --title "Move the parser" --file "$TMP/defer.md"
-eq "$RC" 0 "a fix outside the diff is deferred"
+eq "$RC/$OUT" "0/tk-new" "a fix outside the diff is deferred, printing its bead"
 has "$(cat "$LOG")" "gc bd create Move the parser -t task" "to a bead of its own"
-has "$(cat "$LOG")" "--deps discovered-from:tk-pr --metadata {\"target\":\"main\"}" "from the PR's bead, with the PR's target"
-has "$(cat "$LOG")" "gc bd dep add tk-new tk-pr --type=blocks" "waiting on the PR's bead"
+has "$(cat "$LOG")" "--deps blocked-by:tk-pr --metadata {\"target\":\"main\"}" "whose create carries its wait on the PR's bead, with the PR's target"
+eq "$(called 'bd dep')" 0 "and adds no edge of its own onto the PR's bead, the one edge bd keeps between the two"
 has "$(cat "$LOG")" "gctk bead arm tk-new --target rig/gc-toolkit.polecat --on mol-polecat-work" "and armed on the run's repair pool"
-STUB_LIST='[{"id":"tk-old","title":"Move the parser","dependencies":[{"depends_on_id":"tk-pr","dependency_type":"discovered-from"}]}]' \
+STUB_NO_POOL=1 run defer --title "Move the parser" --file "$TMP/defer.md"
+eq "$RC/$(called 'bd create')" "1/0" "a run that names no repair pool files nothing"
+STUB_RC_ARM=1 run defer --title "Move the parser" --file "$TMP/defer.md"
+eq "$RC" 1 "an arm that does not land is run again"
+has "$OUT" "tk-new waits on tk-pr and its arm did not land" "saying the fix is filed and waits"
+# The bead an earlier call filed: its title, and its wait on the PR's bead.
+filed() { # <status> [route]
+    printf '[{"id":"tk-old","title":"Move the parser","status":"%s","metadata":{"gc.routed_to":"%s"},"dependencies":[{"issue_id":"tk-old","depends_on_id":"tk-pr","type":"blocks"}]}]' "$1" "${2:-}"
+}
+STUB_LIST=$(filed open) run defer --title "Move the parser" --file "$TMP/defer.md"
+eq "$RC/$OUT" "0/tk-old" "a retry after a create whose arm did not land finds the fix filed"
+eq "$(called 'bd create')/$(called 'bd dep')" "0/0" "and files nothing again"
+has "$(cat "$LOG")" "gctk bead holds tk-old" "and reads whether it is armed"
+has "$(cat "$LOG")" "gctk bead arm tk-old --target rig/gc-toolkit.polecat --on mol-polecat-work" "and makes the arm the earlier call did not"
+STUB_LIST=$(filed open) STUB_HOLDS='{"id":"tk-old","status":"blocked","arm":{"target":"rig/gc-toolkit.polecat","args":"[\"--on\",\"mol-polecat-work\"]"}}' \
     run defer --title "Move the parser" --file "$TMP/defer.md"
-eq "$(called 'bd create')/$OUT" "0/tk-old"$'\n'"review-run: tk-old already carries this fix" "a fix already filed is found, not filed again"
+eq "$RC/$OUT" "0/tk-old"$'\n'"review-run: tk-old already carries this fix, armed" "a clean re-run finds the fix filed and armed"
+eq "$(called 'bd create')/$(called 'bd dep')/$(called 'bead arm')" "0/0/0" "and writes nothing"
+STUB_LIST=$(filed closed) run defer --title "Move the parser" --file "$TMP/defer.md"
+eq "$RC/$(called 'bd create')/$(called 'bead arm')" "0/0/0" "a fix filed and closed since is found, and nothing is written"
+has "$OUT" "tk-old already carries this fix, at status closed, so it is not armed" "saying why it is left as it stands"
+STUB_LIST=$(filed open rig/gc-toolkit.polecat) run defer --title "Move the parser" --file "$TMP/defer.md"
+eq "$RC/$(called 'bd create')/$(called 'bead arm')" "0/0/0" "a fix filed and routed since is found, and nothing is written"
+STUB_LIST=$(filed open) STUB_HOLDS='{"id":"tk-old","error":"the store did not answer"}' \
+    run defer --title "Move the parser" --file "$TMP/defer.md"
+eq "$RC/$(called 'bead arm')" "2/0" "a found fix whose arm does not read is not armed blind"
+STUB_LIST='[{"id":"tk-other","title":"Move the parser","status":"open","dependencies":[{"issue_id":"tk-other","depends_on_id":"tk-pr","type":"discovered-from"}]}]' \
+    run defer --title "Move the parser" --file "$TMP/defer.md"
+eq "$RC/$OUT" "0/tk-new" "a bead of the same title that does not wait on the PR's bead is not taken for the fix"
+STUB_RC_BD_LIST=1 run defer --title "Move the parser" --file "$TMP/defer.md"
+eq "$RC/$(called 'bd create')" "2/0" "a lookup that does not answer files nothing"
 
 # --- question --------------------------------------------------------------------
 run question --key c1-scope --message "Is the cap the operator's to set?"
