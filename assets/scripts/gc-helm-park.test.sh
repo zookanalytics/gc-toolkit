@@ -413,12 +413,12 @@ grep -q '^bd update' <<< "$CALLS" && bad "(AGAIN) an update was sent for the bod
 # await type and no metadata, is the park. For each other kind the park files a
 # gate of its own:
 #   tk-hg   a human gate: await_type=human
-#   tk-mg   a gate another writer stamped: gc.blocker_key, no await type
+#   tk-mg   a gate another writer stamped with a key of its own, no await type
 KT="$(jq -r '.title' <<< "$(row tk-dg)")"
 for k in tk-hg tk-mg; do
   reset_store
   add_gate tk-hg "$KT" human '{}'
-  add_gate tk-mg "$KT" "" '{"gc.blocker_key":"loose-task-scope"}'
+  add_gate tk-mg "$KT" "" '{"writer.key":"loose-task-scope"}'
   add_edge tk-solo "$k"
   run_park tk-solo "$KT"
   eq "$RC" "0" "(KIND) $k: parking under its title exits 0"

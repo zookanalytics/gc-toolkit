@@ -268,7 +268,7 @@ eq "$(beads)" "1" "(first) exactly one bead filed"
 eq "$(meta fnd-1 'finding.key')" "doctor-sweep-failed" "(first) finding.key rode the create"
 eq "$(meta fnd-1 'finding.scope')" "deacon-findings" "(first) finding.scope recorded"
 eq "$(meta fnd-1 'finding.occurrences')" "1" "(first) occurrences starts at 1"
-eq "$(meta fnd-1 'gc.proactive')" "1" "(first) gc.proactive=1 is the standing scan opt-in"
+eq "$(meta fnd-1 'gc.proactive')" "<absent>" "(first) no scan opt-in is stamped: the scan reads every ready bead"
 eq "$(btype fnd-1)" "bug" "(first) default type is bug"
 has "$(body fnd-1)" "state=failed elapsed=612" "(first) the finding text is the bead body, verbatim"
 has "$OUT" "filed fnd-1" "(first) reports the bead it filed"
@@ -355,7 +355,7 @@ export STUB_DELIVERABLE_RC=1
 OUT=$("$SUT" --key doctor-x --title "x" --message "x fired" 2>&1); RC=$?
 eq "$RC" "0" "(pool down) the filing still succeeds"
 eq "$(beads)" "1" "(pool down) the bead is filed"
-eq "$(meta fnd-1 'gc.proactive')" "1" "(pool down) the scan opt-in is what picks it up later"
+eq "$(meta fnd-1 'gc.proactive')" "<absent>" "(pool down) no scan opt-in is stamped: the next sweep reads it as a ready bead"
 hasnt "$(cat "$STUB_PROACTIVE_LOG")" "sling" "(pool down) no sling into a pool that cannot claim it"
 has "$OUT" "waits for the next scan sweep" "(pool down) says how the reaction still happens"
 
@@ -364,7 +364,7 @@ export STUB_SLING_RC=1
 OUT=$("$SUT" --key doctor-y --title "y" --message "y fired" 2>&1); RC=$?
 eq "$RC" "0" "(sling fails) a failed reaction does not lose the finding"
 eq "$(beads)" "1" "(sling fails) the bead stands"
-has "$OUT" "sling on fnd-1 failed" "(sling fails) reported"
+has "$OUT" "sling on fnd-1 did not start a reaction" "(sling fails) reported"
 
 # ── 8. --no-react ────────────────────────────────────────────────────
 reset

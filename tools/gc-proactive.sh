@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 # gc-proactive.sh — the proactive first-reaction engine (Bead-Universe Phase 4;
-# v1 design specs/bead-universe/design-doc.md; reaction-bead model
-# specs/tk-5n01ns/reaction-bead-first-reaction.md). A first reaction is inbox
-# triage: read a freshly-filed bead once and dispose it (route it to a pool,
-# hold it on an edge, hand a confident no-op to a validating closer, or put it
-# to the operator as a human gate). A reaction is its OWN leased bead: `sling`
-# FILES a reaction bead R that tracks the subject and routes R to the proactive
-# pool, where a worker claims it, reads the subject, and disposes it. Exactly-once
-# is the substrate's, keyed on R's identity — not a marker on the subject. This
-# tool is the trigger layer:
-#   demand [<pool>]      pool work_query — routed reaction beads, board-ranked
-#   scan [--json|--sling] find movable-forward / opt-in subjects; --sling files
-#                        a reaction bead at each, bounded by GC_PROACTIVE_SLING_CAP
-#   sling <bead> [--nudge] [-n]  file a first reaction bead R tracking <bead>
+# design specs/tk-1tfzr71.105/design.md). A first reaction is inbox triage: read
+# a freshly-filed bead once and dispose it (route it to a pool, hold it on an
+# edge, hand a confident no-op to a validating closer, or put it to the
+# operator as a human gate). A reaction is a run of
+# formulas/mol-first-reaction.toml slung on its subject S. The `sling` verb
+# applies the refusals below, then runs
+#   gc sling <rig>/gc-toolkit.proactive S --on mol-first-reaction
+# whose pour routes the run's one step, react, to the proactive pool. Gas City's
+# default work query offers that step to a worker, which reads S and disposes
+# it. Gas City refuses a second live run of the formula on S, so a reaction
+# happens once at a time. This tool is the trigger layer:
+#   scan [--json|--sling] find the ready beads a first reaction may take;
+#                        --sling slings a reaction at each until the sweep's
+#                        deadline (GC_PROACTIVE_SWEEP_TIMEOUT)
+#   sling <bead> [--nudge] [-n]  sling a first reaction on <bead> unless a
+#                        refusal holds
+#   sling <bead> --check --run <root>  the reaction's own first act: the same
+#                        refusals, writing nothing, its own run passed over
 #   deliverable [bead]   "would a routed bead be picked up?" — no when the
 #                        city's agent roster says this pool cannot claim it
 #                        (absent, suspended, or capped at zero), or when the
@@ -22,48 +27,47 @@
 #                        question for a named agent addressed by assignee,
 #                        exit 0/1
 # The pool's only throttle is its max_active_sessions
-# (agents/proactive/agent.toml); routed reaction beads queue until a slot frees.
-# GC_PROACTIVE_SLING_CAP is a different bound: how many one `scan --sling` sweep
-# may file. Code a reaction routes reaches main only through a PR, and not by
-# anything this router does. The routed subject lands by its own target: the
-# refinery sends a bead aimed at main through a PR, and a bead aimed at an
-# integration branch reaches main in that branch's PR.
-# Tunables: GC_PROACTIVE_POOL / _SCAN_LIMIT / _SLING_CAP / _FIXTURE
-# (test hook: canned ready/scan/agents/beads/runs/rigs .json instead of gc
-# calls).
+# (agents/proactive/agent.toml): a slung run waits for a slot at no cost. Code a
+# reaction routes reaches main only through a PR, and not by anything this
+# router does. The routed subject lands by its own target: the refinery sends a
+# bead aimed at main through a PR, and a bead aimed at an integration branch
+# reaches main in that branch's PR.
+# Tunables: GC_PROACTIVE_POOL / _TYPES / _SWEEP_TIMEOUT / _FIXTURE (test hook:
+# canned scan/beads/holds/agents/config/rigs/runs .json instead of gc calls).
 set -euo pipefail
 
 PROG="${0##*/}"
 
 POOL_BASE="${GC_PROACTIVE_POOL:-gc-toolkit.proactive}"
-SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
-# What ONE --sling sweep may file. A first reaction can end in a route to the
-# polecat pool, so an uncapped sweep is a queue of implementation sessions filed
-# by one command. 5 is that pool's own max_active_sessions: a sweep never files
-# more than the city can start working in one cycle.
-SLING_CAP="${GC_PROACTIVE_SLING_CAP:-5}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
-# The reaction sub-type stamped on R. One kind today; the key leaves room for
-# others (a scheduled re-reaction) without a second dedup dimension.
-REACTION_KIND="first-reaction"
-# Set by cmd_sling when it skips a bead as a no-op, else empty: "reacted" when
-# a reaction is already open for the subject or a live owner owns its reaction,
-# "dispatch-path" when the subject already has a route or an arm, a dispatch
-# hold holds it, or an open human gate blocks it, "live-workflow" when a live
-# workflow already drives it.
-# cmd_scan's --sling loop reads it in-process to keep a skip from spending the
-# cap; the `sling` CLI verb in main() translates it to RC_ALREADY_REACTED,
-# RC_DISPATCH_PATH or RC_LIVE_WORKFLOW so a cross-process caller (gc-helm
-# react, operator-intake) can tell the no-op from a dispatch, name its cause,
-# and file its own conversation rather than wait for a reaction that is
-# already in flight or never ran.
-SLING_SKIPPED=""
-# Exit codes the `sling` CLI verb uses for those skips — distinct from a
-# dispatch (0) and an error (1), so a caller that needs a NEW reaction can
-# branch on them.
+# The formula a first reaction is a run of.
+REACTION_FORMULA="mol-first-reaction"
+# The situation key the reaction's own recommend and ruling exits file their
+# human gate under (first-reaction-dispose.sh). A gate under it whose message
+# names the asking run is that run's own, which --check passes over.
+REACTION_GATE_KEY="first-reaction"
+# The situation key of the gate sling files on a subject where Gas City left a
+# pour of the formula unfinished.
+UNFINISHED_GATE_KEY="first-reaction-unfinished-pour"
+# How long one --sling sweep may take, from its start. Gas City ends an exec
+# order at its timeout by signalling the order's whole process group, which
+# would cut a pour short, so the scan order sets this in its [order.env] beside
+# its own timeout. Seconds, or a number with an s, m or h suffix.
+SWEEP_TIMEOUT="${GC_PROACTIVE_SWEEP_TIMEOUT:-300s}"
+# Exit codes of the `sling` verb for a refusal, distinct from a sling (0), an
+# error (1) and a usage error (2), so a caller can branch on the cause:
+#   3 a first reaction already runs on the subject, or an open conversation
+#     tracks it
+#   4 a live run of another formula already works it
+#   5 its next move is decided already: a route or an arm, a dispatch hold, an
+#     assignee, a status other than open, an open human gate, or an unfinished
+#     pour of the formula that a gate now asks a person to close
+#   6 its kind takes no first reaction: a standing record, or a feedback
+#     pattern, which the feedback distiller dispatches
 RC_ALREADY_REACTED=3
 RC_LIVE_WORKFLOW=4
 RC_DISPATCH_PATH=5
+RC_KIND=6
 # The issue types a first reaction may target — an ALLOWLIST (fail-safe): a
 # new bead type earns reactions only when added here deliberately. Tunable per
 # rig via GC_PROACTIVE_TYPES without a code change. The default excludes the
@@ -74,42 +78,53 @@ RC_DISPATCH_PATH=5
 # scan_precision_filter drops them by gc.kind and by the step keys gc.step_ref,
 # gc.step_id and gc.root_bead_id.
 PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The one definition of the standing kinds, shared with the liveness sweep and
-# the doctor checks. Exposes $STANDING_KINDS_JQ, which scan_precision_filter
-# applies.
+# the doctor checks. Exposes $STANDING_KINDS_JQ, which scan_precision_filter and
+# the sling's refusals apply.
 # shellcheck source=../assets/scripts/standing-kinds.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/standing-kinds.sh" \
+. "$HERE/../assets/scripts/standing-kinds.sh" \
     || { printf '%s: cannot source assets/scripts/standing-kinds.sh from the pack\n' "$PROG" >&2; exit 1; }
 # The one definition of a dispatch path and of a dispatch hold, shared with the
 # doctor checks, gc-helm.sh and the liveness classifier. Exposes
-# $DISPATCH_PATH_JQ, which scan_precision_filter and sling_dispatch_path_guard
-# apply.
+# $DISPATCH_PATH_JQ, which scan_precision_filter and the sling's refusals apply.
 # shellcheck source=../assets/scripts/dispatch-path.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/dispatch-path.sh" \
+. "$HERE/../assets/scripts/dispatch-path.sh" \
     || { printf '%s: cannot source assets/scripts/dispatch-path.sh from the pack\n' "$PROG" >&2; exit 1; }
 # The one rule of which human gates still hold the bead they block, shared with
-# every reader of a gate. Exposes $HUMAN_GATE_JQ, which sling_dispatch_path_guard
-# applies. This script's own die and scrub, defined below, replace the library's.
+# every reader of a gate. Exposes $HUMAN_GATE_JQ, whose open_human_gate the
+# sling applies to the waits `gctk bead holds` lists. This script's own die and
+# scrub, defined below, replace the library's.
 # shellcheck source=../assets/scripts/bd-lib.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/bd-lib.sh" \
+. "$HERE/../assets/scripts/bd-lib.sh" \
     || { printf '%s: cannot source assets/scripts/bd-lib.sh from the pack\n' "$PROG" >&2; exit 1; }
-# The one resolver of a bead id to the store that owns it, and of whether that
-# store holds the bead (docs/bead-store-resolution.md). subject_present_guard
-# asks it.
-BEAD_STORE="${GC_BEAD_STORE_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/bead-store.sh}"
-# The one reader of a run's link to the bead it works, which
-# sling_live_workflow_guard and scan_drop_inflight ask. Under the fixture seam
-# no store is read: its verbs answer from the fixture's runs.json, a JSON array
-# of runs in run-lib.sh's shape, through the stub its readers' suites use, and
-# a fixture with no runs.json holds no runs.
+# The one definition of a conversation's shape, shared with gc-helm.sh and the
+# board. Exposes $CONVERSATION_JQ, by which the sling tells an open
+# conversation about the subject from any other task that tracks it.
+# shellcheck source=../assets/scripts/conversation.sh
+. "$HERE/../assets/scripts/conversation.sh" \
+    || { printf '%s: cannot source assets/scripts/conversation.sh from the pack\n' "$PROG" >&2; exit 1; }
+# The one reader of a run's link to the bead it works, which the sling's
+# live-run refusal and scan_drop_inflight ask. Under the fixture seam no store
+# is read: its verbs answer from the fixture's runs.json, a JSON array of runs
+# in run-lib.sh's shape, through the stub its readers' suites use, and a
+# fixture with no runs.json holds no runs.
 if [ -n "$FIXTURE" ]; then
-    : "${GC_RUN_LIB:=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/run-lib.stub.sh}"
+    : "${GC_RUN_LIB:=$HERE/../assets/scripts/run-lib.stub.sh}"
     : "${RUN_LIB_STUB_RUNS:=$FIXTURE/runs.json}"
     export RUN_LIB_STUB_RUNS
 fi
 # shellcheck source=../assets/scripts/run-lib.sh
-. "${GC_RUN_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/run-lib.sh}" \
+. "${GC_RUN_LIB:-$HERE/../assets/scripts/run-lib.sh}" \
     || { printf '%s: cannot source assets/scripts/run-lib.sh from the pack\n' "$PROG" >&2; exit 1; }
+# The gate sling files on an unfinished pour goes through the pack's one filer
+# of a human gate.
+HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$HERE/../assets/scripts/human-gate.sh}"
+# `gctk bead holds` answers what holds the subject, from the binary the city
+# builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
@@ -123,9 +138,9 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 # resolve_pool_target [override] -> the RIG-QUALIFIED pool target. The pool
-# is rig-scoped and gc.routed_to is matched as an exact string, so a bare base
-# is qualified from GC_RIG — failing CLOSED when GC_RIG is unset rather than
-# emitting an unroutable name.
+# is rig-scoped and a step's route is matched as an exact string, so a bare
+# base is qualified from GC_RIG — failing CLOSED when GC_RIG is unset rather
+# than emitting an unroutable name.
 resolve_pool_target() {
     local base="${1:-}"
     [ -n "$base" ] || base="$POOL_BASE"
@@ -135,7 +150,7 @@ resolve_pool_target() {
             if [ -n "${GC_RIG:-}" ]; then
                 printf '%s/%s' "$GC_RIG" "$base"
             else
-                die "cannot rig-qualify proactive target '$base': set GC_RIG or pass a <rig>/<base> target (the pool is rig-scoped — agents/proactive/agent.toml watches {{.Rig}}/gc-toolkit.proactive, and a bare gc.routed_to matches nobody)"
+                die "cannot rig-qualify proactive target '$base': set GC_RIG or pass a <rig>/<base> target (the pool is rig-scoped — agents/proactive/agent.toml serves {{.Rig}}/gc-toolkit.proactive, and a bare route matches nobody)"
             fi
             ;;
     esac
@@ -143,12 +158,11 @@ resolve_pool_target() {
 
 # The pack's one read of the rig map, which rig_beads_db, deliverable and
 # assignable ask.
-RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/rig-map.sh"
+RIG_MAP="$HERE/../assets/scripts/rig-map.sh"
 
-# rig_beads_db -> this rig's .beads dir, to pin gc bd --db: an unpinned
+# rig_beads_db -> this rig's .beads dir, to pin every store read: an unpinned
 # up-walk from a worktree (where .beads is gitignored) overshoots to the HQ
-# ledger and demand comes back empty. Empty when unresolvable; callers fall
-# back to a bare gc bd ready.
+# ledger. Empty when unresolvable; the reads then go unpinned.
 rig_beads_db() {
     [ -n "${GC_RIG:-}" ] || return 0
     local path
@@ -159,308 +173,79 @@ rig_beads_db() {
     return 0
 }
 
-# rig_store_ref -> this rig's store ref (rig:<name>), stamped on a reaction bead
-# so a worker and the dedup can name the subject's store. Empty when GC_RIG is
-# unset; the subject and its reaction are same-store, so absence is not fatal.
-rig_store_ref() {
-    [ -n "${GC_RIG:-}" ] && printf 'rig:%s' "$GC_RIG"
-    return 0
+# The store every read of this tool goes to: STORE_DB, which pin_store sets
+# once from rig_beads_db, or the one the cwd resolves when that names none.
+# run-lib.sh reads through it too.
+STORE_DB=""
+STORE_PINNED=""
+pin_store() {
+    [ -z "$STORE_PINNED" ] || return 0
+    STORE_PINNED=1
+    [ -n "$FIXTURE" ] || STORE_DB="$(rig_beads_db)"
 }
-
-# subject_present_guard — a reaction bead names its subject, and its worker's
-# first act is to read that subject and write the disposition back to it. A
-# reaction filed for a bead that does not exist is routed work nobody can
-# dispose, so nothing is filed until the subject is proven present.
-# bead-store.sh --present is the proof: it asks the store the id's prefix names,
-# and only that store's hit on the exact id counts. Returns 0 when the subject
-# is proven present and 1 when it is not, whether its store proved it absent or
-# gave no verdict (a prefix no rig carries, an unreadable store, a partial or
-# ambiguous id). The two refuse alike, because a worker cannot read an unproven
-# subject either. bead-store.sh states its reasoning on stderr. A refusal relays
-# it and adds what it means for the sling; a pass stays quiet.
-#
-# Under the fixture, beads.json is the store: a bead it does not list is
-# absent. A fixture with no beads.json models no store reads, so the subject
-# passes, as it passes reaction_absent_guard.
-subject_present_guard() {
-    local bead="$1" rc=0 why=""
-    if [ -n "$FIXTURE" ]; then
-        [ -f "$FIXTURE/beads.json" ] || return 0
-        jq -e --arg id "$bead" 'has($id)' "$FIXTURE/beads.json" >/dev/null 2>&1 || rc=1
-    else
-        why="$("$BEAD_STORE" --present "$bead" 2>&1 >/dev/null)" || rc=$?
-    fi
-    [ "$rc" -ne 0 ] || return 0
-    [ -z "$why" ] || log "$why"
-    case "$rc" in
-        1) log "$PROG: sling: $bead is absent from the store its prefix names — not filing a first reaction. Its worker would read the subject and write the disposition back to it, so a reaction to a bead that does not exist is routed work nobody can dispose." ;;
-        *) log "$PROG: sling: cannot prove $bead exists (its store gave no verdict) — not filing a first reaction. A subject the store cannot show is as unreadable to the worker as an absent one. Retry once the store answers, or name the bead by its full id." ;;
-    esac
-    return 1
-}
-
-# reaction_absent_guard — a first reaction happens once AT A TIME, and never
-# where a live owner already owns it. Returns 0 when the caller may file, 1 when
-# it should skip filing a reaction for this subject, and 2 when the dedup could
-# not be read. It skips on two findings:
-#
-#   - A live operator intake (gc-helm engage --new-subject) marks the subject
-#     gc.reaction_owned=1 and handles it end-to-end — it has already filed the
-#     one conversation and spawned the sitting. A reaction would only ask the
-#     operator a SECOND time about a conversation already under way.
-#   - A reaction is already open for this subject. The dedup key is (subject +
-#     kind): an open/in-progress task_kind=reaction bead that names this subject
-#     either by its gc.reaction_subject stamp OR by a tracks edge R --tracks-->
-#     subject. R normally carries both — the stamp rides its create call, the
-#     edge is wired right after — but the two writes are not atomic, so the stamp
-#     can land empty or unreadable while the edge stands; the dedup reads EITHER
-#     signal (specs/tk-5n01ns/reaction-bead-first-reaction.md). A COMPLETED
-#     reaction has closed its bead, so a later re-reaction (the subject became
-#     eligible again) is not blocked — the dedup keys on OPEN reactions, not on
-#     history.
-#
-# The subject is read from the fixture under test, live otherwise. An unreadable
-# subject is not proof of a live owner, so the marker check proceeds on it; an
-# unreadable store is not proof of absence, so the dedup proceeds only when it
-# can positively read that no reaction is open, and returns 2 when the edge
-# lookup errors, which the caller fails CLOSED on: nothing is filed, and the
-# refusal is an error rather than a skip, because no reaction is in flight.
-reaction_absent_guard() {
-    local bead="$1" meta ro existing
-    if [ -n "$FIXTURE" ]; then
-        [ -f "$FIXTURE/beads.json" ] || return 0
-        meta="$(jq -c --arg id "$bead" '.[$id].metadata // {}' "$FIXTURE/beads.json" 2>/dev/null || printf '{}')"
-    else
-        local db; db="$(rig_beads_db)"
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        meta="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null \
-            | jq -c 'if type=="array" then (.[0].metadata // {}) else {} end' 2>/dev/null || printf '{}')"
-    fi
-    ro="$(printf '%s' "$meta" | jq -r '."gc.reaction_owned" // ""' 2>/dev/null || printf '')"
-    if [ "$ro" = "1" ]; then
-        log "$PROG: sling: $bead carries gc.reaction_owned=1 — a live operator intake is handling it end-to-end and has filed its one conversation. Not filing a first reaction, which would ask the operator a second time."
-        return 1
-    fi
-
-    if [ -n "$FIXTURE" ]; then
-        # Match on the gc.reaction_subject stamp OR a tracks edge to the subject
-        # (fixture edge shape: dependency_type + depends_on_id, as the scan.json
-        # fixtures carry them).
-        existing="$(jq -r --arg s "$bead" '
-            [ to_entries[] | (.value + {id: .key})
-              | select(((.metadata["task_kind"] // "") == "reaction")
-                       and (((.status // "open")) as $st | ($st == "open" or $st == "in_progress"))
-                       and (((.metadata["gc.reaction_subject"] // "") == $s)
-                            or ([ (.dependencies // [])[]
-                                  | select(((.dependency_type // .type) // "") == "tracks")
-                                  | .depends_on_id ] | index($s) != null)))
-              | .id ] | .[0] // ""' "$FIXTURE/beads.json" 2>/dev/null || printf '')"
-    else
-        local db; db="$(rig_beads_db)"
-        # (a) the primary link: the gc.reaction_subject stamp.
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        existing="$(gc bd list ${db:+--db "$db"} --status open,in_progress \
-                        --metadata-field "gc.reaction_subject=$bead" --limit 0 --json 2>/dev/null \
-            | jq -r 'if type=="array" then [ .[]? | select((.metadata["task_kind"] // "") == "reaction") | .id ] | .[0] // "" else "" end' 2>/dev/null || printf '')"
-        # (b) the fallback link: a tracks edge R --tracks--> subject, for a
-        # reaction whose stamp landed empty or unreadable. `gc bd dep list
-        # --direction up -t tracks` names the beads that track this subject;
-        # keep the open/in-progress reactions. Only a JSON array (the
-        # dependents, possibly none) answers it. Anything else is not proof of
-        # absence, so fail CLOSED rather than risk a duplicate. bd's not-found
-        # error is no exception: subject_present_guard has proven the subject
-        # present, so a not-found here is a subject deleted since, and nothing
-        # may be filed for it.
-        if [ -z "$existing" ]; then
-            local up
-            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-            up="$(gc bd dep list "$bead" ${db:+--db "$db"} --direction up -t tracks --json 2>/dev/null || true)"
-            if printf '%s' "$up" | jq -e 'type=="array"' >/dev/null 2>&1; then
-                existing="$(printf '%s' "$up" | jq -r '[ .[]? | select(((.metadata["task_kind"] // "") == "reaction") and ((.status // "") as $st | ($st == "open" or $st == "in_progress"))) | .id ] | .[0] // ""' 2>/dev/null || printf '')"
-            else
-                log "$PROG: sling: could not read the tracks-edge dedup for $bead (gc bd dep list --direction up returned no usable answer) — refusing to file a possible duplicate. Retry when the store is readable."
-                return 2
-            fi
-        fi
-    fi
-    [ -z "$existing" ] && return 0
-    log "$PROG: sling: $bead already has an open first reaction ($existing) — not filing another. A first reaction happens once at a time; it reacts when the pool claims $existing."
-    return 1
-}
-
-# sling_dispatch_path_guard — a first reaction never second-guesses a dispatch
-# someone already decided, so refuse to file a reaction for a bead that has a
-# dispatch path (has_dispatch_path, assets/scripts/dispatch-path.sh): a route a
-# pool queue serves, or a deferred-dispatch arm. scan_precision_filter keeps
-# such a bead out of every sweep, and this guard holds the same line for a bead
-# named to the sling directly, the way gc-helm react and operator-intake name one.
-# A held bead (has_dispatch_hold) is refused the same way: hold:mayor keeps it
-# for the operator's placement sitting and hold:external for an actor outside
-# this store, so its next move is not a reaction's. The scan drops it too, and
-# this guard's own read refuses one held since the scan's read and one named to
-# the sling directly. A reaction would only triage it again, and its close exit
-# could hand it to a validating closer before the sitting reads it.
-# A bead an open human gate blocks is refused the same way: the person's answer
-# decides what happens to it, as a converse sitting's ruling does to the bead
-# it holds, and `bd ready` keeps every such bead out of the sweeps.
-# Filing a reaction leaves the subject's route in place, so a routed subject
-# stays claimable for the whole reaction. The pool its route names can hand it
-# to a worker mid-reaction, and the disposition then acts on a bead that worker
-# holds: the release most exits end in (gc-helm.sh takeaway --release) keeps
-# that claim and fails, and the close exit slings a validating closer at it.
-# An arm is no safer: the deferred-dispatch reconcile pass slings the bead once
-# nothing holds it and reads no reaction, so the bead can be dispatched twice.
-#
-# Returns 0 when the bead has no dispatch path or hold and no open human gate
-# blocks it, 1 when it has one or a gate blocks it, and 2 when its row cannot be
-# read. A failed read is not proof that it has none, so the caller fails closed
-# on 2.
-# The live read takes only one JSON array holding one row as an answer, so an
-# empty answer fails it even when gc exits 0, and two answers fail it too.
-# bd's not-found error is no exception: subject_present_guard has proven the
-# bead present, so a not-found here is a bead deleted since, and nothing may be
-# filed for it. The read comes from the fixture under test (beads.json), live
-# otherwise.
-sling_dispatch_path_guard() {
-    local bead="$1" row paths holds gates
-    local unreadable="$PROG: sling: cannot tell whether $bead already has a dispatch path (its row could not be read) — not filing a first reaction. A reaction to a routed or armed bead races the dispatch already decided for it; retry once the store answers."
-    if [ -n "$FIXTURE" ]; then
-        [ -f "$FIXTURE/beads.json" ] || return 0
-        row="$(jq -c --arg id "$bead" '.[$id] // {}' "$FIXTURE/beads.json" 2>/dev/null)" \
-            || { log "$unreadable"; return 2; }
-    else
-        local db; db="$(rig_beads_db)"
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        row="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
-            | jq -cs 'if length == 1 and (.[0] | type) == "array" and (.[0] | length) == 1
-                      then .[0][0] else error("unreadable") end' 2>/dev/null)" \
-            || { log "$unreadable"; return 2; }
-    fi
-    # Each key is asked on its own through the shared predicate, so the log can
-    # name the path it found without a second definition of one.
-    paths="$(printf '%s' "$row" | jq -r "$DISPATCH_PATH_JQ"'
-        (.metadata // {}) as $m | [ dispatch_path_keys[] as $k
-                    | select({metadata: {($k): $m[$k]}} | has_dispatch_path)
-                    | "\($k)=\($m[$k])" ] | join(", ")' 2>/dev/null)" \
-        || { log "$unreadable"; return 2; }
-    if [ -n "$paths" ]; then
-        log "$PROG: sling: $bead already has a dispatch path ($paths) — not filing a first reaction. Whoever routed or armed it already decided its dispatch, and a reaction would race the pool or the arm that serves it. File a conversation directly (gc-helm open), or react once that route or arm is cleared."
-        return 1
-    fi
-    # The labels named are the bead's own spellings of each hold.
-    holds="$(printf '%s' "$row" | jq -r "$DISPATCH_PATH_JQ"'
-        if has_dispatch_hold then [ dispatch_hold_labels[] as $h | dispatch_hold_spellings($h)[] ] | join(", ")
-        else "" end' 2>/dev/null)" \
-        || { log "$unreadable"; return 2; }
-    if [ -n "$holds" ]; then
-        log "$PROG: sling: $bead is held ($holds) — not filing a first reaction. A hold says no worker is its next move: hold:mayor keeps it for the operator's placement sitting, and hold:external for an actor outside this store, and a reaction would race that decision. File a conversation directly (gc-helm open), or react once the hold is lifted."
-        return 1
-    fi
-    # `bd show` gives each blocker's own row beside the edge, so the shared rule
-    # (open_human_gate) judges each blocker as it stands.
-    gates="$(printf '%s' "$row" | jq -r "$HUMAN_GATE_JQ"'[ (.dependencies // [])[]
-        | select(((.dependency_type // .type // "") | tostring) == "blocks")
-        | select(open_human_gate(""))
-        | ((.id // .depends_on_id // "") | tostring) ] | join(", ")' 2>/dev/null)" \
-        || { log "$unreadable"; return 2; }
-    [ -n "$gates" ] || return 0
-    log "$PROG: sling: $bead waits on a person's answer (open human gate $gates) — not filing a first reaction. That answer decides what happens to it, and a reaction would race the ruling. File a conversation directly (gc-helm open), or react once the gate is answered."
-    return 1
-}
-
-# The reader run-lib.sh reads this rig's store through: the store RUNS_DB names,
-# which each caller pins from rig_beads_db, or the one the cwd resolves.
 proactive_bd() {
-    # shellcheck disable=SC2086  # ${RUNS_DB:+--db "$RUNS_DB"} expands to 0 or 2 space-free fields
-    gc bd "$@" ${RUNS_DB:+--db "$RUNS_DB"}
-}
-RUNS_DB=""
-
-# sling_live_workflow_guard — a first reaction never races a live workflow, so
-# refuse to file a reaction for a bead a live run already works (run-lib.sh). A
-# reaction bead is no workflow on its subject, so nothing in the filing itself
-# notices a queued mol-polecat-work on the subject. The scan's work-in-flight
-# markers (branch, work_dir) land only at that polecat's workspace-setup, so
-# until then nothing else stops the reaction, and its disposition can route,
-# hold or hand to a closer the bead the polecat is building. A run is live
-# until its root closes. Liveness decides, never gc.execution_routed_to: the
-# pour stamps that key on the bead and it outlives the workflow, so keying on it
-# would keep holding a bead whose workflow is gone.
-#
-# The guard takes its read for each bead it is about to react to, never from the
-# scan's read at the start of the sweep, because a pour can land while the
-# sweep runs: the deferred-dispatch order slings an armed bead once its
-# blockers close, and anyone can run gc sling.
-#
-# Returns 0 when no live run works the bead, 1 when one does, and 2 when the
-# runs cannot be read. A failed read is not proof that none does, so the caller
-# fails closed on 2.
-sling_live_workflow_guard() {
-    local bead="$1" runs live
-    local unreadable="$PROG: sling: cannot tell whether a live workflow already drives $bead (the runs that work it could not be read) — not filing a reaction. A reaction that raced one could dispose of work in flight; retry once the store answers."
-    # A failed read leaves the question open, bd's not-found error included:
-    # subject_present_guard has proven the bead present, so a not-found here is
-    # a bead deleted since, and nothing may be filed for it.
-    [ -n "$FIXTURE" ] || RUNS_DB="$(rig_beads_db)"
-    runs="$(run_lib runs proactive_bd "$bead")" || { log "$unreadable"; return 2; }
-    live="$(printf '%s' "$runs" | jq -r '[ .[] | select(.live)
-        | "\(.root) (\(if .formula == "" then "unknown formula" else .formula end))" ] | unique | join(", ")' 2>/dev/null)" \
-        || { log "$unreadable"; return 2; }
-    [ -n "$live" ] || return 0
-    log "$PROG: sling: $bead is already driven by live workflow(s) $live — not filing a first reaction. A reaction would race work in flight: its disposition can route, hold or hand to a closer the bead that workflow is driving. React once the workflow's root closes."
-    return 1
+    # shellcheck disable=SC2086  # ${STORE_DB:+--db "$STORE_DB"} expands to 0 or 2 space-free fields
+    gc bd "$@" ${STORE_DB:+--db "$STORE_DB"}
 }
 
-# board_rank — re-rank (stdin JSON array) by the board's priority weight
-# (prio_w = max(0, 4-p), null->1), oldest-first within a band. Mirrored
-# inline in agents/proactive/agent.toml's work_query; keep the two in sync.
-board_rank() {
-    jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end);
-        sort_by(-(prio_w(.priority)), (.created_at // ""))'
+# store_rows <bd args...> — one read of the store, printed only when it is one
+# JSON array, so a read that fails or answers anything else returns 1 and is
+# never taken for an empty answer. The `gc bd:` notice a store can print on
+# stdout is dropped before the scrub, while its newline still stands.
+store_rows() {
+    local raw
+    raw="$(proactive_bd "$@" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub)" || return 1
+    printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+    printf '%s' "$raw"
 }
 
-# exclude_graph_structural — drop graph.v2 STRUCTURAL beads from a demand array
-# on stdin: topology ROOTS (gc.kind in workflow/scope/spec) AND formula STEP
-# beads (gc.step_ref / gc.step_id / gc.root_bead_id). Neither is a reaction for
-# this pool to take. gc hook --claim refuses some topology roots, so a query
-# that counts one spawns a worker that claims nothing. It offers a routed step,
-# and a root it does not refuse, like any other work, so a worker would react
-# to one as if it were an input. The roots clause matches gc.kind alone, like
-# topology_kind in assets/scripts/liveness-classify.sh, whose comment names Gas
-# City's own check and where the two differ. agents/proactive/agent.toml's
-# work_query and scale_check inline the same predicate; keep all three in sync.
-exclude_graph_structural() {
-    jq 'map(select((
-            ((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec"))
-            or ((.metadata["gc.step_ref"] // "") != "")
-            or ((.metadata["gc.step_id"] // "") != "")
-            or ((.metadata["gc.root_bead_id"] // "") != "")
-          ) | not))'
+# fixture_rows — the fixture store, beads.json, as an array of rows each
+# carrying its id. A fixture with no beads.json holds no beads.
+fixture_rows() {
+    if [ -f "$FIXTURE/beads.json" ]; then
+        jq -c '[ to_entries[] | (.value + {id: .key}) ]' "$FIXTURE/beads.json"
+    else
+        printf '[]'
+    fi
 }
 
 usage() {
     cat <<EOF
-Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
-                                      proactive reaction beads, board-ranked.
-                                      Read-only.
-       $PROG scan [--json] [--sling]  Find movable-forward / opt-in subjects;
-                                      with --sling, file a reaction bead at each,
-                                      at most $SLING_CAP per sweep
-                                      (GC_PROACTIVE_SLING_CAP). Read-only
-                                      without --sling. Exit 1, nothing
-                                      slung, when a ready read or the
-                                      filter fails.
+Usage: $PROG scan [--json] [--sling]  Find the ready beads a first reaction may
+                                      take. With --sling, sling a first
+                                      reaction at each, until the sweep's
+                                      deadline (GC_PROACTIVE_SWEEP_TIMEOUT,
+                                      default 300s) leaves less time than the
+                                      slowest sling so far took; the rest wait
+                                      for the next sweep. A rig whose pool
+                                      cannot take a reaction (deliverable) is
+                                      skipped with exit 0. Read-only without
+                                      --sling. Exit 1, nothing slung, when the
+                                      ready read or the filter fails.
        $PROG sling <bead> [--nudge] [-n|--dry-run]
-                                      File a first-reaction bead R that tracks
-                                      <bead> and route it to the proactive pool.
-                                      Exit 0 filed, $RC_ALREADY_REACTED a reaction
-                                      is already open or a live owner owns it,
-                                      $RC_LIVE_WORKFLOW already driven by a live
-                                      workflow, $RC_DISPATCH_PATH already routed
-                                      or armed, held, or waiting on a person's
-                                      answer (each a no-op, nothing filed), 1
-                                      error, including a <bead> its own store
-                                      does not prove present.
+                                      Sling a first reaction on <bead>: gc
+                                      sling <rig>/$POOL_BASE <bead>
+                                      --on $REACTION_FORMULA, unless a refusal
+                                      holds. Exit 0 slung,
+                                      $RC_ALREADY_REACTED a first reaction already
+                                      runs or an open conversation tracks it,
+                                      $RC_LIVE_WORKFLOW a live run of another formula
+                                      works it, $RC_DISPATCH_PATH routed or armed,
+                                      held, assigned, not open, waiting on a
+                                      person's answer, or left with an
+                                      unfinished pour (a gate now asks a
+                                      person), $RC_KIND a standing record or a
+                                      feedback pattern (each a refusal,
+                                      nothing slung), 1 error, including a
+                                      <bead> its store does not hold and a
+                                      sling gc sling refuses.
+       $PROG sling <bead> --check --run <root>
+                                      The same refusals, as the first act of
+                                      the reaction whose run is <root>: that
+                                      run, and a first-reaction gate whose
+                                      message names it, are passed over.
+                                      Writes nothing. Exit 0 when <bead> takes
+                                      the reaction, else the refusal's code.
        $PROG deliverable [<pool-target>] [<bead>]
                                       Would work routed at that pool actually
                                       be PICKED UP? No when this city's agent
@@ -482,8 +267,7 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       hook does not read. Exit 0 yes, 1 no.
 
 Budget: the pool cap (agents/proactive/agent.toml max_active_sessions) throttles
-how many run at once; routed reaction beads queue until a slot frees. One
---sling sweep files at most $SLING_CAP reactions.
+how many reactions run at once; a slung run waits for a slot at no cost.
 EOF
 }
 
@@ -491,7 +275,7 @@ EOF
 # deliverable [<pool-target>] [<bead>] — "if I route work there right now, will
 # anything ever pick it up?" The default target is the proactive pool; the first
 # reaction's actionable exit asks the same question about the pool it is about
-# to hand a bead to."
+# to hand a bead to, and a --sling sweep asks it before it reads the store.
 # The queue is not the question: a routed bead waits at zero cost until a slot
 # frees. Two things make a route vanish. A pool that cannot claim it at all,
 # which the city's own agent roster shows: the pool is not registered in this
@@ -700,58 +484,434 @@ cmd_assignable() {
 }
 
 # ---------------------------------------------------------------------------
-# demand — the proactive pool's work_query: the standard pool demand (ready,
-# unassigned, routed-to-us beads), board-ranked. The reconciler runs this to
-# decide whether to spawn a proactive worker. The routed beads are reaction
-# beads, not subjects.
+# The refusals. A first reaction triages a bead nobody has decided on, so the
+# sling refuses a subject whose next move is already someone's. Each read below
+# answers one row of the design's refusal table, and the sling and the
+# reaction's own first act (--check) apply the same ones, so one definition
+# answers both ends. A read that fails is not proof that nothing holds the
+# subject, so it fails the verb closed: nothing is slung.
 # ---------------------------------------------------------------------------
 
-cmd_demand() {
-    local r='[]'
+# subject_row <bead> — the subject's one row, as `gc bd show --json` gives it.
+# Only one JSON array holding one row whose id is <bead> exactly is an answer:
+# bd answers an id as an exact-or-prefix match, and a read that fails, a bead
+# the store does not hold and an empty answer all return 1.
+subject_row() {
+    local bead="$1"
     if [ -n "$FIXTURE" ]; then
-        if [ -f "$FIXTURE/ready.json" ]; then r="$(cat "$FIXTURE/ready.json")"; fi
-    else
-        # Standard pool demand: ready (deps closed), unassigned, not an epic,
-        # routed to this proactive pool. The route is rig-qualified (see
-        # resolve_pool_target) so it matches the gc.routed_to the pool's
-        # agent.toml work_query writes. Mirrors the polecat probe, pinned to
-        # the proactive target.
-        local target db
-        # resolve_pool_target dies (with the "set GC_RIG or pass <rig>/<base>"
-        # guidance) on an unset GC_RIG; fail the demand query closed rather than
-        # query with an empty route that matches nothing.
-        target="$(resolve_pool_target "${1:-}")" || return 1
-        db="$(rig_beads_db)"
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-        r="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.routed_to=$target" --unassigned \
-                --exclude-type=epic --json --limit 0 2>/dev/null || true)"
-        [ -n "$r" ] || r='[]'
+        fixture_rows | jq -ce --arg id "$bead" '[ .[] | select(.id == $id) ] | if length == 1 then .[0] else error("absent") end' 2>/dev/null
+        return
     fi
-    # Drop graph-structural beads (see exclude_graph_structural), then rank by
-    # board weight and slice to the worker page. The full routed set is read
-    # (--limit 0) and structural beads dropped BEFORE the slice, so — like the
-    # agent.toml work_query this mirrors — a page filled by structural beads
-    # cannot bury a claimable reaction behind them and understate demand to zero.
-    # The scarce proactive slots then spend on the highest-priority work first
-    # (oldest within a band), not whatever bd-ready returned oldest across all
-    # bands.
-    printf '%s' "$r" | exclude_graph_structural | board_rank | jq --argjson n "$SCAN_LIMIT" '.[0:$n]'
+    proactive_bd show "$bead" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub \
+        | jq -cs --arg id "$bead" 'if length == 1 and (.[0] | type) == "array" and (.[0] | length) == 1
+                  and ((.[0][0].id // "") | tostring) == $id
+                then .[0][0] else error("unreadable") end' 2>/dev/null
+}
+
+# row_refusal <row> — the refusal the subject's own row carries, as its exit
+# code, a tab and its reason, or nothing. Its kind first, since a standing
+# record and a feedback pattern take no first reaction in any state; then its
+# status, its assignee, its dispatch path and its dispatch hold. A dispatch
+# path is a route a pool queue serves or a deferred-dispatch arm
+# (has_dispatch_path), and each key is named on its own, so the reason can say
+# which. A hold names the labels as the bead spells them.
+row_refusal() {
+    printf '%s' "$1" | jq -r "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
+        (.metadata // {}) as $m
+        | ((.status // "open") | tostring | ascii_downcase) as $st
+        | ((.assignee // "") | tostring) as $as
+        | if is_standing_kind then
+            "6\tit is a standing record (task_kind=\($m.task_kind)), open by design, so a first reaction has no disposition to make on it"
+          elif (($m.task_kind // "") | tostring) == "feedback-pattern" then
+            "6\tit is a feedback pattern, which the feedback distiller dispatches"
+          elif $st != "open" then
+            "5\tits status is \($st), and a first reaction takes only an open bead"
+          elif ($as | test("[^[:space:]]")) then
+            "5\tit is assigned to \($as), whose next move it is"
+          elif has_dispatch_path then
+            "5\tit already has a dispatch path (\([ dispatch_path_keys[] as $k
+                | select({metadata: {($k): $m[$k]}} | has_dispatch_path)
+                | "\($k)=\($m[$k])" ] | join(", "))), so whoever routed or armed it already decided its dispatch"
+          elif has_dispatch_hold then
+            "5\tit is held (\([ dispatch_hold_labels[] as $h | dispatch_hold_spellings($h)[] ] | join(", "))): hold:mayor keeps it for the operator'"'"'s placement sitting, and hold:external for an actor outside this store"
+          else empty end' 2>/dev/null
+}
+
+# subject_conversations <bead> — the open conversations about the bead, by
+# conversation.sh's shape, as their ids on one line. An open conversation marks
+# a live owner of the bead's first reaction: it puts the bead to the operator
+# already, as gc-helm.sh engage --new-subject does for the subject it creates.
+# The inverse tracks listing names the candidates, the open tasks that track the
+# bead assigned to `human` or to the alias that names their own id. It proves
+# only that each one tracks the bead, not that the bead is all it tracks, so the
+# candidates' own rows are read with their edges, in one listing, and the
+# shared rule decides, as gc-helm.sh's bead_conversations reads them. Returns 1
+# when either read does not answer, or answers without a candidate's row.
+subject_conversations() {
+    local bead="$1" up ids own
+    if [ -n "$FIXTURE" ]; then
+        fixture_rows | jq -r --arg b "$bead" "$CONVERSATION_JQ"'
+            [ .[] | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+              | select(conversation and conversation_subjects == [$b]) | .id ] | join(" ")'
+        return
+    fi
+    up="$(store_rows dep list "$bead" --direction=up --type tracks)" || return 1
+    ids="$(printf '%s' "$up" | jq -r "$CONVERSATION_JQ"'
+        [ .[] | objects
+          | select((.issue_type // "task") == "task")
+          | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+          | select((((.assignee // "") | tostring) == "human") or conversation_alias)
+          | (.id // "") | tostring | select(. != "") ] | unique | join(",")' 2>/dev/null)" || return 1
+    [ -n "$ids" ] || return 0
+    own="$(store_rows list --id "$ids" --all --limit 0)" || return 1
+    printf '%s' "$own" | jq -r --arg b "$bead" --arg ids "$ids" "$CONVERSATION_JQ"'
+        ($ids | split(",")) as $want
+        | [ .[] | objects | select(((.id // "") | tostring) as $i | any($want[]; . == $i)) ] as $own
+        | if ([ $own[] | .id ] | unique) != $want then error("a candidate row did not read")
+          else [ $own[]
+                 | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+                 | select(conversation and conversation_subjects == [$b]) | .id ] | join(" ")
+          end' 2>/dev/null
+}
+
+# unfinished_pours <root>... — of the roots named, the ones whose pour Gas City
+# left unfinished, as a JSON object of root to why. A root is an unfinished
+# pour when it carries molecule_failed=true, or when it or a bead poured under it
+# still carries the fence gc.instantiating, whatever their status: the rule
+# gctk's deferred-dispatch start applies to its own pours (pours,
+# services/gctk/arm/start.go). Such a root never finishes. The fence holds a
+# bead's route back, marking the pour failed does not restore it, and Gas City
+# counts the root as live until it closes, so gc sling refuses every later pour
+# of the formula on the bead while it stands. A fenced bead is gate-typed, and
+# a pour marked failed keeps that type, so both reads include gates. Two reads
+# answer any number of roots: the open beads marked failed, and every bead
+# still fenced. Returns 1 when either read fails.
+unfinished_pours() {
+    [ $# -gt 0 ] || { printf '{}'; return 0; }
+    local failed fenced
+    if [ -n "$FIXTURE" ]; then
+        failed="$(fixture_rows | jq -c '[ .[] | select(((.metadata // {}).molecule_failed // "" | tostring) == "true")
+                                             | select(((.status // "open") | tostring) != "closed") ]')" || return 1
+        fenced="$(fixture_rows | jq -c '[ .[] | select(((.metadata // {})["gc.instantiating"] // "" | tostring) | test("[^[:space:]]")) ]')" || return 1
+    else
+        failed="$(store_rows list --metadata-field molecule_failed=true --include-gates --include-ephemeral --limit 0)" || return 1
+        fenced="$(store_rows list --has-metadata-key gc.instantiating --all --include-gates --include-ephemeral --limit 0)" || return 1
+    fi
+    jq -cn --argjson failed "$failed" --argjson fenced "$fenced" --args '
+        def key($k): ((.metadata // {})[$k] // "") | tostring;
+        $ARGS.positional as $roots
+        | [ $failed[] | select(key("molecule_failed") == "true") | (.id // "") | tostring ] as $f
+        | [ $fenced[] | select(key("gc.instantiating") | test("[^[:space:]]")) ] as $fr
+        | reduce $roots[] as $r ({};
+            ([ (if ($f | index($r)) != null then "it carries molecule_failed=true" else empty end),
+               (if any($fr[]; (.id // "") == $r) then "it is still fenced by gc.instantiating" else empty end),
+               ([ $fr[] | select(key("gc.root_bead_id") == $r) | .id ] | unique
+                | if length > 0 then "gc.instantiating still fences \(join(", ")) under it" else empty end) ]) as $why
+            | if ($why | length) > 0 then . + {($r): ($why | join(", and "))} else . end)' "$@"
+}
+
+# subject_runs <bead> — the live runs that work the bead (run-lib.sh), each as
+# {root, formula}, with a run of the formula whose pour Gas City left unfinished
+# read as no run: it never finishes, and gc sling's own refusal names it when a
+# sling meets it. Returns 1 when a read fails.
+subject_runs() {
+    local bead="$1" runs reaction_roots unfinished
+    runs="$(run_lib runs proactive_bd "$bead")" || return 1
+    reaction_roots="$(printf '%s' "$runs" | jq -r --arg f "$REACTION_FORMULA" '[ .[] | select(.live and .formula == $f) | .root ] | unique | .[]' 2>/dev/null)" || return 1
+    # shellcheck disable=SC2086  # one root id per word
+    unfinished="$(unfinished_pours $reaction_roots)" || return 1
+    printf '%s' "$runs" | jq -c --argjson u "$unfinished" '[ .[] | select(.live) | select(($u[.root] // null) == null) | {root, formula} ] | unique_by(.root)' 2>/dev/null
+}
+
+# subject_holds <bead> — what holds the bead, as `gctk bead holds` prints its
+# one line. A line that carries an error, or none, returns 1. Under the fixture
+# the line is holds.json's entry for the bead, and a bead it does not list is
+# clear.
+subject_holds() {
+    local bead="$1" line
+    if [ -n "$FIXTURE" ]; then
+        if [ -f "$FIXTURE/holds.json" ]; then
+            jq -ce --arg id "$bead" '.[$id] // {id: $id, status: "clear", waits: []}' "$FIXTURE/holds.json" 2>/dev/null
+        else
+            jq -nc --arg id "$bead" '{id: $id, status: "clear", waits: []}'
+        fi
+        return
+    fi
+    [ -x "$GCTK" ] || return 1
+    # shellcheck disable=SC2086  # ${STORE_DB:+--db "$STORE_DB"} expands to 0 or 2 space-free fields
+    line="$("$GCTK" bead holds ${STORE_DB:+--db "$STORE_DB"} "$bead" </dev/null 2>/dev/null)" || return 1
+    printf '%s' "$line" | jq -ce --arg id "$bead" 'select(type == "object" and .id == $id and (has("error") | not)) | select((.waits | type) == "array")' 2>/dev/null
+}
+
+# gate_rows <gate>... — the gates' own rows, as `gc bd show` gives them, which
+# carry the key a gate was filed under (await_id) and its message
+# (description). `show` reads a gate that `list` hides without
+# --include-gates. Returns 1 unless every gate named reads back.
+gate_rows() {
+    local rows
+    if [ -n "$FIXTURE" ]; then
+        rows="$(fixture_rows)"
+    else
+        rows="$(proactive_bd show "$@" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub)" || return 1
+    fi
+    printf '%s' "$rows" | jq -ce --args '
+        $ARGS.positional as $want
+        | if type != "array" then error("no answer") else
+          [ .[] | objects | select(((.id // "") | tostring) as $i | any($want[]; . == $i)) ] as $got
+          | if ([ $got[] | .id ] | unique) != ($want | unique) then error("a gate did not read") else $got end end' "$@" 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
-# scan — the PROCESS-SCAN trigger. Find raw INPUT beads "able to be updated":
-# open, ready, unassigned, an allowlisted issue_type (GC_PROACTIVE_TYPES),
+# sling <bead> [--nudge] [-n|--dry-run]
+# sling <bead> --check --run <root>
+#
+# Each refusal, the read it comes from, and its code:
+#   - a standing record (standing-kinds.sh) or a feedback pattern
+#     (task_kind=feedback-pattern), from the row: 6
+#   - a status other than open, an assignee, a route or an arm, hold:mayor or
+#     hold:external (dispatch-path.sh), from the row: 5
+#   - an open conversation that tracks the bead (conversation.sh's shape),
+#     from its tracks dependents: 3
+#   - a live run of mol-first-reaction (run-lib.sh), or gc sling's own refusal
+#     when two slings meet: 3
+#   - a live run of another formula (run-lib.sh): 4
+#   - an open human gate, from `gctk bead holds`: 5
+#   - an unfinished pour of mol-first-reaction that gc sling's refusal names,
+#     read from the root's marks after the sling: 5, once the gate that asks a
+#     person to close it is filed
+# Gas City's sling itself refuses a bead no store holds, a pool that does not
+# read the bead's store and a target the city does not configure, each an
+# error here.
+#
+# --check is the reaction's first act, as `sling <S> --check --run <root>`: it
+# writes nothing, and passes over its own run and a first-reaction gate whose
+# message names that run, so a reaction re-offered after it filed its gate
+# resumes rather than stands down.
+#
+# The verb sets SLING_RC to 0 when it slung (or would, under --dry-run or
+# --check) and to a refusal's code or 1 otherwise, and returns 0 either way:
+# the --sling sweep reads SLING_RC in-process, and main exits with it. A return
+# that carried the code would disable set -e inside a loop's condition, or
+# read as the generic error.
+# ---------------------------------------------------------------------------
+SLING_RC=0
+# The asking reaction's run under --check, empty for a sling.
+CHECK_RUN=""
+
+cmd_sling() {
+    local bead="" nudge="" dry="" check="" run=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --nudge)      nudge=1; shift ;;
+            -n|--dry-run) dry=1; shift ;;
+            --check)      check=1; shift ;;
+            --run)        shift; [ $# -gt 0 ] || { log "$PROG: sling: --run needs the root of the asking reaction's run"; exit 2; }; run="$1"; shift ;;
+            --run=*)      run="${1#--run=}"; shift ;;
+            -h|--help)    usage; exit 0 ;;
+            -*) log "$PROG: sling: unknown flag '$1'"; exit 2 ;;
+            *) [ -z "$bead" ] || { log "$PROG: sling takes one bead-id"; exit 2; }; bead="$1"; shift ;;
+        esac
+    done
+    [ -n "$bead" ] || { log "$PROG: sling needs <bead-id>"; usage >&2; exit 2; }
+    if [ -n "$check" ] && [ -z "$run" ]; then
+        log "$PROG: sling: --check needs --run <root>, the run of the reaction that asks, so its own run is not taken for a second reaction"; exit 2
+    fi
+    if [ -n "$run" ] && [ -z "$check" ]; then
+        log "$PROG: sling: --run names the asking reaction's run, which only --check reads"; exit 2
+    fi
+    if [ -n "$check" ] && [ -n "$nudge$dry" ]; then
+        log "$PROG: sling: --check writes nothing, so it takes neither --nudge nor --dry-run"; exit 2
+    fi
+    sling_one "$bead" "$nudge" "$dry" "$run"
+}
+
+# refuse <code> <bead> <reason> — record a refusal and say why. A --check
+# names the refusal alone, which the reaction that asked declines with.
+refuse() {
+    SLING_RC="$1"
+    if [ -n "$CHECK_RUN" ]; then
+        log "$PROG: sling: $2: $3."
+    else
+        log "$PROG: sling: $2: $3. No first reaction is slung."
+    fi
+}
+
+# unanswered <text> — a read the verb could not take, which decides nothing:
+# no sling, and under --check no refusal either, so the reaction asks again
+# rather than declines.
+unanswered() {
+    SLING_RC=1
+    if [ -n "$CHECK_RUN" ]; then
+        log "$PROG: sling: $1 The check decides nothing; ask again once the store answers."
+    else
+        log "$PROG: sling: $1 No first reaction is slung."
+    fi
+}
+
+# sling_one <bead> <nudge> <dry> <run> — the refusals, then the sling. <run>
+# is non-empty for --check.
+sling_one() {
+    local bead="$1" nudge="$2" dry="$3" run="$4"
+    local target="" row why convs runs live other holds gates own_gates
+    SLING_RC=1
+    CHECK_RUN="$run"
+    if [ -z "$run" ]; then
+        # resolve_pool_target dies on an unset GC_RIG with the "set GC_RIG or
+        # pass <rig>/<base>" guidance; the subshell keeps that exit local, so a
+        # sweep's loop goes on to its own summary.
+        target="$(resolve_pool_target)" || return 0
+    fi
+    pin_store
+
+    row="$(subject_row "$bead")" || {
+        unanswered "cannot read $bead's own row: the store does not hold it, matches it only as a prefix of another id, or did not answer."
+        return 0
+    }
+    why="$(row_refusal "$row")" || { unanswered "cannot judge $bead's row."; return 0; }
+    if [ -n "$why" ]; then
+        local tab=$'\t'
+        refuse "${why%%"$tab"*}" "$bead" "${why#*"$tab"}"
+        return 0
+    fi
+
+    convs="$(subject_conversations "$bead")" || {
+        unanswered "cannot read whether an open conversation tracks $bead: its tracks dependents did not read."
+        return 0
+    }
+    if [ -n "$convs" ]; then
+        refuse "$RC_ALREADY_REACTED" "$bead" "an open conversation tracks it ($convs), which puts it to the operator already"
+        return 0
+    fi
+
+    runs="$(subject_runs "$bead")" || {
+        unanswered "cannot read the runs that work $bead, and a reaction that raced one could dispose of work in flight."
+        return 0
+    }
+    live="$(printf '%s' "$runs" | jq -r --arg f "$REACTION_FORMULA" --arg own "$run" '[ .[] | select(.formula == $f and .root != $own) | .root ] | join(", ")')"
+    if [ -n "$live" ]; then
+        refuse "$RC_ALREADY_REACTED" "$bead" "a first reaction already runs on it ($live)"
+        return 0
+    fi
+    other="$(printf '%s' "$runs" | jq -r --arg f "$REACTION_FORMULA" '[ .[] | select(.formula != $f) | "\(.root) (\(if .formula == "" then "unknown formula" else .formula end))" ] | join(", ")')"
+    if [ -n "$other" ]; then
+        refuse "$RC_LIVE_WORKFLOW" "$bead" "a live workflow already works it ($other), and a reaction would race work in flight"
+        return 0
+    fi
+
+    holds="$(subject_holds "$bead")" || {
+        unanswered "cannot read what holds $bead: gctk bead holds did not answer, and a person's answer may decide it."
+        return 0
+    }
+    gates="$(printf '%s' "$holds" | jq -c "$HUMAN_GATE_JQ"'[ .waits[]? | objects | select(open_human_gate("")) ]')"
+    if [ -n "$run" ] && [ "$gates" != "[]" ]; then
+        # The asking reaction's own gate is one filed under the reaction's key
+        # whose message names its run, as the recommend and ruling exits file it.
+        local gate_ids
+        gate_ids="$(printf '%s' "$gates" | jq -r '[ .[].id ] | unique | .[]')"
+        # shellcheck disable=SC2086  # one gate id per word
+        own_gates="$(gate_rows $gate_ids | jq -c --arg k "$REACTION_GATE_KEY" --arg run "$run" "$HUMAN_GATE_JQ"'
+            [ .[] | select(open_human_gate($k))
+              | select([ ((.description // "") | tostring) | scan("[A-Za-z0-9._-]+") | sub("[.]+$"; "") ] | index($run) != null)
+              | .id ]')" || {
+            unanswered "cannot read the human gates that hold $bead, to pass over its own run's."
+            return 0
+        }
+        gates="$(printf '%s' "$gates" | jq -c --argjson own "$own_gates" '[ .[] | select(.id as $i | ($own | index($i)) == null) ]')"
+    fi
+    if [ "$gates" != "[]" ]; then
+        refuse "$RC_DISPATCH_PATH" "$bead" "it waits on a person's answer ($(printf '%s' "$gates" | jq -r '[ .[] | "open human gate \(.id)\(if (.ancestor // "") != "" then " on \(.ancestor)" else "" end)" ] | join(", ")')), which decides what happens to it"
+        return 0
+    fi
+
+    if [ -n "$run" ]; then
+        log "$PROG: sling: $bead takes this first reaction (run $run): no refusal holds."
+        SLING_RC=0
+        return 0
+    fi
+
+    local -a cmd=(gc sling --rig "${target%%/*}" "$target" "$bead" --on "$REACTION_FORMULA")
+    [ -z "$nudge" ] || cmd+=(--nudge)
+    if [ -n "$dry" ]; then
+        printf '%s\n' "${cmd[*]}"
+        SLING_RC=0
+        return 0
+    fi
+    if [ -n "$FIXTURE" ]; then
+        # The fixture stands in for every gc call in this tool: a --sling sweep
+        # under test exercises its loop without slinging into a live city.
+        log "$PROG: (fixture) would sling a first reaction on $bead -> $target"
+        printf '%s\n' "${cmd[*]}"
+        SLING_RC=0
+        return 0
+    fi
+
+    local out rc=0
+    out="$("${cmd[@]}" </dev/null 2>&1)" || rc=$?
+    [ -z "$out" ] || log "$out"
+    case "$rc" in
+        0)
+            log "$PROG: slung a first reaction on $bead ($REACTION_FORMULA -> $target)"
+            SLING_RC=0 ;;
+        3) sling_conflict "$bead" "$out" ;;
+        *) unanswered "gc sling refused or failed on $bead (exit $rc)." ;;
+    esac
+    return 0
+}
+
+# sling_conflict <bead> <output> — gc sling exited 3: a live workflow of the
+# formula works the bead already, and its output names each root
+# (printSourceWorkflowConflictLines in cmd/gc/cmd_sling.go). A root whose pour
+# finished is a reaction that runs, the refusal passed through. When every
+# root it names is an unfinished pour, nothing will finish them and every later
+# sling meets them, so a human gate on the bead names each root and the command
+# that closes it with its steps, the remedy gctk's deferred-dispatch start names
+# for its own (askUnfinished, services/gctk/arm/start.go). Clearing the gate
+# returns the bead to the scan.
+sling_conflict() {
+    local bead="$1" out="$2" roots unfinished msg gate
+    roots="$(printf '%s\n' "$out" | awk -v pre="gc sling: source bead $bead already has live workflow(s): " '
+        { sub(/^[ \t]+/, ""); if (index($0, pre) == 1) print substr($0, length(pre) + 1) }' \
+        | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d' | sort -u | tr '\n' ' ')"
+    roots="${roots% }"
+    if [ -z "$roots" ]; then
+        refuse "$RC_ALREADY_REACTED" "$bead" "gc sling refused a second live $REACTION_FORMULA run on it"
+        return 0
+    fi
+    # shellcheck disable=SC2086  # one root id per word
+    unfinished="$(unfinished_pours $roots)" || {
+        unanswered "gc sling named live run(s) $roots on $bead, and whether their pours finished could not be read."
+        return 0
+    }
+    # shellcheck disable=SC2086  # one root id per word
+    if ! printf '%s' "$unfinished" | jq -e --args '. as $u | all($ARGS.positional[]; $u[.] != null)' $roots >/dev/null 2>&1; then
+        refuse "$RC_ALREADY_REACTED" "$bead" "gc sling found a first reaction already running on it ($roots)"
+        return 0
+    fi
+    msg="$(printf '%s' "$unfinished" | jq -r --arg b "$bead" --arg f "$REACTION_FORMULA" '
+        [ to_entries[] | "\(.key) (\(.value))" ] as $parts
+        | [ keys[] | "gc convoy delete \(.) --force" ] as $closes
+        | "A first reaction cannot start on \($b): Gas City left a pour of \($f) unfinished.\n\n"
+          + "Gas City left its pour of \($f) unfinished at \($parts | join("; ")). gc sling refuses another pour of \($f) on \($b) while such a root is open, and nothing finishes it. "
+          + "Close each root and its steps (\($closes | join("; "))), then clear this gate, and the next sweep reacts to \($b)."')"
+    gate="$("$HUMAN_GATE" --subject "$bead" --key "$UNFINISHED_GATE_KEY" --message "$msg")" || {
+        unanswered "Gas City left an unfinished $REACTION_FORMULA pour on $bead ($roots), and the gate that asks a person to close it could not be filed."
+        return 0
+    }
+    refuse "$RC_DISPATCH_PATH" "$bead" "Gas City left a pour of $REACTION_FORMULA unfinished on it ($roots), so gc sling refuses another; human gate ${gate:-?} asks a person to close it"
+}
+
+# ---------------------------------------------------------------------------
+# scan — the PROCESS-SCAN trigger. Find raw INPUT beads a first reaction may
+# take: open, ready, unassigned, an allowlisted issue_type (GC_PROACTIVE_TYPES),
 # top-level, and not already routed, armed or held / machinery (so we never
-# react to work-in-flight or to a reaction bead). Unions the explicit per-bead
-# opt-in (gc.proactive=1) with the broader movable-forward scan, deduped and
-# precision-filtered (see scan_candidates). Read-only unless --sling. The
-# per-subject "a reaction is already open" dedup is at sling time, not here (see
-# reaction_absent_guard).
+# react to work-in-flight or to a reaction's own run). Read-only unless
+# --sling. The refusals are read again at sling time for each bead, since its
+# state can change while the sweep runs.
 # ---------------------------------------------------------------------------
 
 # scan_precision_filter — from a candidate array on stdin, keep only raw
-# top-level INPUT beads a fresh first reaction may target. Each clause drops a
-# distinct non-input population:
+# top-level INPUT beads a fresh first reaction may target, in the order read.
+# Each clause drops a distinct non-input population:
 #   - ALLOWLIST issue_type ($types, GC_PROACTIVE_TYPES) — drops the convoy/
 #     epic/step/molecule/spec/decision types by omission.
 #   - graph-structural beads (topology roots gc.kind in workflow/scope/spec,
@@ -763,60 +923,44 @@ cmd_demand() {
 #     gc.step_ref, control steps such as workflow-finalize included. A step
 #     advances only through its own molecule, so a first reaction has no
 #     disposition to make on it, and reacting to a root or a step writes over a
-#     live molecule.
-#   - task_kind=reaction — a reaction bead is this tool's own output, not an
-#     input; it is also routed, so the dispatch-path clause drops it too, but
-#     naming it keeps a reaction from ever being a subject.
+#     live molecule. A first reaction's own root and step are among them.
 #   - a standing kind (is_standing_kind, assets/scripts/standing-kinds.sh) — a
 #     standing record is open and unrouted by design and never closes, so a
 #     reaction has no disposition to make on it.
+#   - task_kind=feedback-pattern — the feedback distiller decides every
+#     pattern bd ready lists.
 #   - task_kind=review — a dispatched signoff lane, work-in-flight.
 #   - durable work/lifecycle markers ($markers) — a review lane carries
 #     check_name/anchor_bead; an implementation anchor carries branch/
 #     merge_result/work_dir/pr_url/pr_number. An anchor is an issue_type
 #     task/bug bead with no task_kind, so the allowlist and the task_kind
 #     clauses both miss it, and its markers are the only signal that the work
-#     is already in motion. Filing a reaction at either reacts to work-in-flight,
+#     is already in motion. Reacting to either reacts to work-in-flight,
 #     which the proactive scope forbids.
-#   - gc.takeaway / gc.takeaway_by — a sitting has already RULED this bead.
+#   - gc.takeaway / gc.takeaway_by — the headline every exit of a first
+#     reaction writes, and a sitting's ruling: the bead has been triaged. A
+#     request can still ask for another reaction on it.
 #   - top-level only — a parent-child CHILD carries the edge in its own
-#     .dependencies; a convoy's tracks edge lives on the convoy, so this
-#     catches parented beads, not every convoy member.
-# Plus a state predicate: no dispatch path, has a description; deduped by id.
-# A subject that already has an open reaction is NOT dropped here — that dedup
-# needs a per-bead query (reaction_absent_guard at sling time), and a completed
-# reaction stamps its takeaway on the subject on every exit, so the takeaway
-# clause drops it then.
-#   - gc.reaction_owned — a live owner already owns reacting to this bead, so an
-#     autonomous first reaction would duplicate it. An operator engage (gc-helm
-#     engage --new-subject) is the setter today: it creates the subject marked,
-#     files the ONE conversation, and spawns the sitting itself. The marker is
-#     set in the create write, so the scan never sees the subject unmarked;
-#     dropping it here keeps a sweep from asking the operator a SECOND time
-#     about a subject whose conversation is under way. reaction_absent_guard
-#     refuses it too, and a reaction that reaches one anyway stands down
-#     (agents/proactive/prompt.template.md).
+#     .dependencies, so no member of an epic is scanned. A convoy's tracks edge
+#     lives on the convoy, so this catches parented beads, not every convoy
+#     member.
 #   - a dispatch path (has_dispatch_path, assets/scripts/dispatch-path.sh) — a
 #     gc.routed_to a pool queue serves, or a gc.dispatch_when_ready arm the
 #     deferred-dispatch order slings once the bead's own blockers close.
-#     Whoever routed or armed the bead already decided its dispatch. The
-#     reconcile pass reads no reaction and no route before it slings, so a
-#     reaction to an armed bead only second-guesses the arm and can leave the
-#     bead dispatched twice. An arm reconcile has stopped retrying at its
-#     failure cap is dropped too: that bead waits on the human gate the cap
-#     filed, not on a first reaction. sling_dispatch_path_guard refuses
-#     the same beads, so a bead routed or armed after this read still gets no
-#     reaction.
+#     Whoever routed or armed the bead already decided its dispatch. An arm
+#     the start stopped retrying at its failure cap is dropped too: that bead
+#     waits on the human gate the cap filed, not on a first reaction. The
+#     sling refuses the same beads, so a bead routed or armed after this read
+#     still gets no reaction.
 #   - a dispatch hold (has_dispatch_hold, assets/scripts/dispatch-path.sh) —
 #     intake held it as new work for the operator's placement sitting
 #     (docs/steering.md) with hold:mayor, so its next move is the sitting's, or
 #     hold:external names an actor outside this store. The witness and the
 #     feedback distiller file their beads held and unrouted, with no takeaway,
-#     so no other clause drops them. A reaction would only triage the bead again,
-#     and its close exit could close a proposal before the operator reads it.
-#     sling_dispatch_path_guard refuses a held bead too, so a bead held after
-#     this read still gets no reaction. Once a write lifts the hold, the other
-#     clauses judge the bead.
+#     so no other clause drops them. The sling refuses a held bead too, so a
+#     bead held after this read still gets no reaction. Once a write lifts the
+#     hold, the other clauses judge the bead.
+# Plus a state predicate: has a description.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -826,8 +970,7 @@ scan_precision_filter() {
     markers_json='["branch","merge_result","work_dir","pr_url","pr_number","check_name","anchor_bead"]'
     jq --argjson types "$types_json" --argjson markers "$markers_json" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
         map(select(
-            ((.metadata["gc.reaction_owned"] // "") == "")
-            and (has_dispatch_path | not)
+            (has_dispatch_path | not)
             and (has_dispatch_hold | not)
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
@@ -835,120 +978,115 @@ scan_precision_filter() {
             and ((.metadata["gc.step_ref"] // "") == "")
             and ((.metadata["gc.step_id"] // "") == "")
             and ((.metadata["gc.root_bead_id"] // "") == "")
-            and ((.metadata["task_kind"] // "") != "reaction")
             and (is_standing_kind | not)
+            and ((.metadata["task_kind"] // "") != "feedback-pattern")
             and ((.metadata["task_kind"] // "") != "review")
             and ((.metadata["gc.takeaway"] // "") == "")
             and ((.metadata["gc.takeaway_by"] // "") == "")
             and (.metadata as $m | ($markers | any(.[]; ($m[.] // "") != "")) | not)
             and (([ .dependencies[]? | select((.dependency_type // .type) == "parent-child") ] | length) == 0)
           ))
-        | unique_by(.id)
     '
 }
 
 # scan_drop_inflight — from a candidate array on stdin, drop each bead a live
 # run already works (run-lib.sh's map). A pour moves the bead's route to
 # gc.execution_routed_to, which is not a dispatch path, so the dispatch-path
-# clause above cannot see one.
-# sling_live_workflow_guard refuses to file a reaction for such a bead, and a
-# refusal spends none of SLING_CAP, so a page that offers these beads holds fewer
-# beads a sweep can react to, and the sweep spends its time on the guard's reads
-# before it reaches the beads below them.
+# clause above cannot see one. The sling refuses such a bead, so a page that
+# offers it spends the sweep's time on the refusal's reads. A run of
+# mol-first-reaction whose pour Gas City left unfinished is no run here, as in
+# the sling's own read, so the sweep reaches its bead and the sling asks a
+# person about it.
 #
-# The map is read once per sweep, and the guard reads the runs of each bead it
-# is about to react to, so on one store state the two agree. A read that fails
-# or does not parse drops nothing and logs that the sweep went unfiltered. The
-# sling guard still refuses those beads.
+# The map is read once per sweep, and the sling reads the runs of each bead it
+# is about to react to, so on one store state the two agree. A map that fails
+# or does not parse drops nothing and logs that the sweep went unfiltered; the
+# sling still refuses those beads. Unfinished pours that cannot be read leave
+# every live reaction's bead out of the sweep, and the sweep says so.
 scan_drop_inflight() {
-    local cands runs inflight kept dropped
+    local cands runs roots unfinished inflight kept dropped
     cands="$(cat)"
     # The candidates come from the precision filter, which prints nothing when
     # it fails. Nothing is not an empty page, so refuse it rather than count it;
     # scan_candidates reports the failure.
     printf '%s' "$cands" | jq -se 'length == 1 and (.[0] | type) == "array"' >/dev/null 2>&1 || return 1
-    [ -n "$FIXTURE" ] || RUNS_DB="$(rig_beads_db)"
     if ! runs="$(run_lib map proactive_bd)" \
-        || ! inflight="$(printf '%s' "$runs" | jq -c '[ .[] | .bead | select(. != "") ] | unique' 2>/dev/null)"; then
-        log "$PROG: scan: could not read the live runs, so beads a live workflow drives are not filtered out of this sweep (the sling guard still refuses them)"
+        || ! roots="$(printf '%s' "$runs" | jq -r --arg f "$REACTION_FORMULA" '[ .[] | select(.formula == $f) | .root ] | unique | .[]' 2>/dev/null)"; then
+        log "$PROG: scan: could not read the live runs, so beads a live workflow drives are not filtered out of this sweep (the sling still refuses them)"
         printf '%s' "$cands"
         return 0
     fi
+    # shellcheck disable=SC2086  # one root id per word
+    if ! unfinished="$(unfinished_pours $roots)"; then
+        log "$PROG: scan: could not read whether the live first reactions' pours finished, so their beads stay out of this sweep"
+        unfinished='{}'
+    fi
+    inflight="$(printf '%s' "$runs" | jq -c --argjson u "$unfinished" '[ .[] | select(($u[.root] // null) == null) | .bead | select(. != "") ] | unique')"
     kept="$(printf '%s' "$cands" | jq -c --argjson skip "$inflight" \
         'map(select(.id as $i | ($skip | index($i)) == null))')"
     dropped=$(( $(printf '%s' "$cands" | jq 'length') - $(printf '%s' "$kept" | jq 'length') ))
     if [ "$dropped" -gt 0 ]; then
-        log "$PROG: scan: $dropped candidate(s) already have a live workflow; not offered (the sling guard would refuse them)"
+        log "$PROG: scan: $dropped candidate(s) already have a live workflow; not offered (the sling would refuse them)"
     fi
     printf '%s' "$kept"
 }
 
-# ready_read_failed <read> <rc> <output> — log a gc bd ready read that exited
+# ready_read_failed <rc> <output> — log a gc bd ready read that exited
 # non-zero, with the error text from the {"error": ...} object gc bd leaves on
 # stdout when there is one. A failed read is not an empty ready set. Taken as
-# one, it drops its beads from the sweep unseen, and with both reads failing a
-# --sling sweep exits 0 with nothing slung, the result a sweep with no work gives.
+# one, it drops its beads from the sweep unseen, and a --sling sweep exits 0
+# with nothing slung, the result a sweep with no work gives.
 ready_read_failed() {
     local err
-    err="$(printf '%s' "$3" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)"
-    log "$PROG: scan: the $1 read failed (gc bd ready exit $2${err:+: $err}). A failed read is not an empty ready set, so the scan fails rather than report no candidates; retry once the store answers."
+    err="$(printf '%s' "$2" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)"
+    log "$PROG: scan: the ready read failed (gc bd ready exit $1${err:+: $err}). A failed read is not an empty ready set, so the scan fails rather than report no candidates; retry once the store answers."
 }
 
-# scan_candidates — the scan's candidate page, one JSON array. cmd_scan runs it
-# in a command substitution, where set -e does not apply, so a step that fails
-# returns non-zero here explicitly. A step that failed quietly would leave an
-# empty page, which reads as nothing to react to.
+# scan_candidates — the scan's candidates, one JSON array, highest priority
+# first. cmd_scan runs it in a command substitution, where set -e does not
+# apply, so a step that fails returns non-zero here explicitly. A step that
+# failed quietly would leave an empty array, which reads as nothing to react
+# to. The whole ready set is read (--limit 0) and filtered with no page, so no
+# bead the filter drops can bury one it keeps.
 scan_candidates() {
-    local ranked rank_rc=0
+    local ready rc=0 cands
     if [ -n "$FIXTURE" ]; then
-        local raw='[]'
-        if [ -f "$FIXTURE/scan.json" ]; then raw="$(cat "$FIXTURE/scan.json")"; fi
-        ranked="$(printf '%s' "$raw" | scan_precision_filter | scan_drop_inflight | board_rank)" || rank_rc=$?
+        ready='[]'
+        if [ -f "$FIXTURE/scan.json" ]; then ready="$(cat "$FIXTURE/scan.json")"; fi
     else
-        # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
-        # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
-        local optin movable db optin_rc=0 movable_rc=0
-        db="$(rig_beads_db)"
-        # Read the FULL opt-in and movable sets (--limit 0), not a page.
-        # scan_precision_filter drops work-in-flight beads (review lanes,
-        # branch/PR anchors, topology roots), so bounding a query to the worker
-        # page BEFORE the filter lets a page of now-dropped rows bury a raw input
-        # past the bound — the union filters to empty while a real candidate sits
-        # at row N+1. Read all, filter, rank, then slice (below), the same
-        # filter-before-bound the demand mirror uses.
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-        optin="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.proactive=1" --unassigned \
-                    --exclude-type=epic --json --sort oldest --limit 0 2>/dev/null)" || optin_rc=$?
-        [ "$optin_rc" -eq 0 ] || { ready_read_failed opt-in "$optin_rc" "$optin"; return 1; }
-
-        # (B) movable-forward: any ready, unassigned, non-epic bead. The precision
-        # filter below drops the ones a fresh first reaction must not touch.
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-        movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
-                    --sort oldest --limit 0 2>/dev/null)" || movable_rc=$?
-        [ "$movable_rc" -eq 0 ] || { ready_read_failed movable-forward "$movable_rc" "$movable"; return 1; }
-
-        # Union the two sources, apply the shared precision filter, drop the
-        # beads a workflow is already driving, then rank by board weight. A read
-        # that exited 0 must still be one JSON array, [] when nothing is ready.
-        # Anything else, an empty read included, stops the union with an error
-        # that names the read. The check rides the union's own parse because
-        # each read can run to tens of megabytes.
-        ranked="$(jq -n --slurpfile optin <(printf '%s' "$optin") --slurpfile movable <(printf '%s' "$movable") '
-                def answered($read): if length == 1 and (.[0] | type) == "array" then .[0]
-                    else error("the \($read) read failed: gc bd ready printed something other than one JSON array") end;
-                ($optin | answered("opt-in")) + ($movable | answered("movable-forward"))' \
-            | scan_precision_filter | scan_drop_inflight | board_rank)" || rank_rc=$?
+        # shellcheck disable=SC2086  # ${STORE_DB:+--db "$STORE_DB"} expands to 0 or 2 fields
+        ready="$(gc bd ready ${STORE_DB:+--db "$STORE_DB"} --unassigned --exclude-type=epic --json \
+                    --sort priority --limit 0 2>/dev/null)" || rc=$?
+        [ "$rc" -eq 0 ] || { ready_read_failed "$rc" "$ready"; return 1; }
+        # A read that exited 0 must still be one JSON array, [] when nothing is
+        # ready; anything else, an empty read included, fails the scan.
+        printf '%s' "$ready" | jq -e 'type == "array"' >/dev/null 2>&1 || {
+            log "$PROG: scan: the ready read failed: gc bd ready printed something other than one JSON array"
+            return 1
+        }
     fi
-    if [ "$rank_rc" -ne 0 ]; then
-        log "$PROG: scan: the candidates could not be filtered and ranked, so the scan fails rather than report none"
+    cands="$(printf '%s' "$ready" | scan_precision_filter | scan_drop_inflight)" || {
+        log "$PROG: scan: the candidates could not be filtered, so the scan fails rather than report none"
         return 1
-    fi
+    }
+    printf '%s' "$cands"
+}
 
-    # Slice to the worker page (SCAN_LIMIT, 0 = unbounded) AFTER the filter and
-    # rank, so the bound falls on real candidates and a --sling sweep spends its
-    # limited headroom on the highest-priority ones first.
-    printf '%s' "$ranked" | jq --argjson n "$SCAN_LIMIT" 'if $n == 0 then . else .[0:$n] end'
+# sweep_seconds <duration> — a duration as whole seconds: a number, alone or
+# with an s, m or h suffix, as an order's timeout is written. Returns 1 for
+# anything else.
+sweep_seconds() {
+    local d="$1" n
+    case "$d" in
+        ''|*[!0-9smh]*) return 1 ;;
+    esac
+    n="${d%[smh]}"
+    case "$n" in ''|*[!0-9]*) return 1 ;; esac
+    case "$d" in
+        *h) printf '%s' "$(( n * 3600 ))" ;;
+        *m) printf '%s' "$(( n * 60 ))" ;;
+        *)  printf '%s' "$(( n ))" ;;
+    esac
 }
 
 cmd_scan() {
@@ -962,22 +1100,23 @@ cmd_scan() {
         esac
     done
 
-    case "$SLING_CAP" in
-        ''|*[!0-9]*) die "GC_PROACTIVE_SLING_CAP must be a non-negative integer (got '$SLING_CAP')" ;;
-    esac
-
-    # A --sling sweep routes to the proactive pool, so resolve that target ONCE
-    # up front and fail the whole sweep closed when it cannot. resolve_pool_target
-    # dies on an unset GC_RIG; the per-bead cmd_sling re-resolves inside the loop's
-    # condition below, where set -e is disabled and that die cannot abort — so
-    # without this gate an unset GC_RIG surfaces the guidance once per candidate
-    # and then attempts a reaction routed to an empty target each time. The
-    # subshell keeps die's exit local, so the guidance shows a single time;
-    # `|| return 1` stops the sweep.
+    local deadline=0 verdict
     if [ -n "$do_sling" ]; then
+        deadline="$(sweep_seconds "$SWEEP_TIMEOUT")" \
+            || die "GC_PROACTIVE_SWEEP_TIMEOUT must be a duration in seconds, minutes or hours, such as 300s or 5m (got '$SWEEP_TIMEOUT')"
+        # A sweep slings into this rig's proactive pool, so resolve that target
+        # once and fail the whole sweep closed when it cannot. The subshell
+        # keeps die's exit local, so the guidance shows a single time.
         ( resolve_pool_target >/dev/null ) || return 1
+        # A rig whose pool cannot take a reaction (absent, suspended or capped
+        # at zero) skips cleanly: the order ran and had nothing to do here.
+        if ! verdict="$(cmd_deliverable)"; then
+            log "scan --sling: no sweep this rig — $verdict"
+            return 0
+        fi
     fi
 
+    pin_store
     local cands
     cands="$(scan_candidates)" || return 1
 
@@ -992,182 +1131,47 @@ cmd_scan() {
         return 0
     fi
 
-    # --sling: file a reaction at each candidate, highest board weight first, and
-    # stop at SLING_CAP. The cap is the throttle that matters now that a reaction
-    # can end in a route to an implementation pool: without it one sweep files as
-    # many downstream sessions as the scan found candidates. What it skips is
-    # named, not silently dropped — the next sweep sees the same subjects, since
-    # a subject only leaves the scan once a reaction has advanced it.
-    local slung=0 skipped=0 reacted=0 routed=0 driven=0
-    local ids
+    # --sling: sling a reaction at each candidate in the order read, highest
+    # priority first. The sweep has no cap: a slung run waits for a pool slot
+    # at no cost. It has a deadline, since the order's timeout kills a pour in
+    # progress, so it starts no sling once less time is left than the slowest
+    # sling so far took, and the next sweep reads the rest. Time is read in
+    # whole seconds from the script's start ($SECONDS), so each figure is taken
+    # as its upper bound: a sling that read d seconds counts as d+1, and the
+    # time used as the reading plus one. Only a sling counts as a dispatch; each
+    # refusal is counted under its cause.
+    local slung=0 reacting=0 driven=0 decided=0 kinded=0 failed=0 left=0 slowest=0
+    local ids id t0 took
     ids="$(printf '%s' "$cands" | jq -r '.[].id')"
-    local id
     for id in $ids; do
-        if [ "$slung" -ge "$SLING_CAP" ]; then
-            skipped=$(( skipped + 1 ))
+        if [ $(( deadline - SECONDS - 1 )) -lt "$slowest" ]; then
+            left=$(( left + 1 ))
             continue
         fi
-        # Only a genuine dispatch spends the cap. cmd_sling skips a subject that
-        # already has an open reaction as a no-op and flags it in SLING_SKIPPED —
-        # a reaction filed after the scan selected it, or one still running. It
-        # skips a bead routed, armed or held since the scan's read, and a bead a
-        # live workflow drives, the same way. Counting any of these skips is the
-        # cap-starvation bug: subjects that need no new reaction would spend the
-        # whole cap every sweep while no reaction is filed.
-        if cmd_sling "$id"; then
-            case "$SLING_SKIPPED" in
-                reacted)       reacted=$(( reacted + 1 )) ;;
-                dispatch-path) routed=$(( routed + 1 )) ;;
-                live-workflow) driven=$(( driven + 1 )) ;;
-                *)             slung=$(( slung + 1 )) ;;
-            esac
-        fi
-    done
-    local note="" uncounted=""
-    if [ "$reacted" -gt 0 ]; then uncounted="$reacted already reacting"; fi
-    if [ "$routed" -gt 0 ]; then uncounted="${uncounted:+$uncounted, }$routed already routed or armed, held, or waiting on a person"; fi
-    if [ "$driven" -gt 0 ]; then uncounted="${uncounted:+$uncounted, }$driven driven by a live workflow"; fi
-    if [ -n "$uncounted" ]; then note=" ($uncounted, not counted)"; fi
-    if [ "$skipped" -gt 0 ]; then
-        log "scan --sling: filed $slung first reaction(s)$note; $skipped candidate(s) left for the next sweep (cap $SLING_CAP, GC_PROACTIVE_SLING_CAP)"
-    else
-        log "scan --sling: filed $slung first reaction(s)$note"
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# sling — file a first-reaction bead R that tracks <bead> and route it to the
-# proactive pool. R is a plain task; no formula is poured on it and the subject
-# is not routed — the subject stays clean until R disposes it. R carries its own
-# route, so the un-clearable-execution-route pain of pouring a workflow onto a
-# bead that is not that workflow's work never arises.
-# ---------------------------------------------------------------------------
-
-cmd_sling() {
-    local bead="" nudge="" dry=""
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --nudge)    nudge=1; shift ;;
-            -n|--dry-run) dry=1; shift ;;
-            -h|--help)  usage; exit 0 ;;
-            -*) die "sling: unknown flag '$1'" ;;
-            *) [ -z "$bead" ] || die "sling: takes one bead-id"; bead="$1"; shift ;;
+        t0=$SECONDS
+        sling_one "$id" "" "" ""
+        took=$(( SECONDS - t0 + 1 ))
+        [ "$took" -le "$slowest" ] || slowest=$took
+        case "$SLING_RC" in
+            0)                     slung=$(( slung + 1 )) ;;
+            "$RC_ALREADY_REACTED") reacting=$(( reacting + 1 )) ;;
+            "$RC_LIVE_WORKFLOW")   driven=$(( driven + 1 )) ;;
+            "$RC_DISPATCH_PATH")   decided=$(( decided + 1 )) ;;
+            "$RC_KIND")            kinded=$(( kinded + 1 )) ;;
+            *)                     failed=$(( failed + 1 )) ;;
         esac
     done
-    [ -n "$bead" ] || { log "$PROG: sling needs <bead-id>"; usage; exit 2; }
-
-    # A reaction is filed only for a subject proven present (see
-    # subject_present_guard), and every read below keys on that subject. A
-    # subject absent from its store, or one its store gives no verdict on, is an
-    # error rather than a skip: it returns 1 and nothing is filed.
-    #
-    # A first reaction happens once at a time, and never where a live owner owns
-    # it (see reaction_absent_guard), so skip such a subject as an idempotent
-    # no-op rather than file a duplicate. A reaction never second-guesses a
-    # dispatch already decided (see sling_dispatch_path_guard) and never races a
-    # live workflow (see sling_live_workflow_guard), so skip those beads the same
-    # way. cmd_sling returns 0 for each skip and flags it out-of-band in
-    # SLING_SKIPPED: the in-process cmd_scan --sling loop reads that flag to tell
-    # a skip from a dispatch and not spend a cap slot on it, and the `sling` CLI
-    # verb in main() reads it to exit with the skip's own code, the signal a
-    # cross-process caller needs. The return stays 0 because a non-zero one
-    # cannot carry the distinction here: caught in the loop's condition it would
-    # disable set -e for this function, and returned to main it would read as
-    # the generic fail-closed error, not the specific no-op. A guard read that
-    # fails is that error: it returns 1 and nothing is filed.
-    SLING_SKIPPED=""
-    subject_present_guard "$bead" || return 1
-    local absent=0
-    reaction_absent_guard "$bead" || absent=$?
-    case "$absent" in
-        0) ;;
-        1) SLING_SKIPPED="reacted"; return 0 ;;
-        *) return 1 ;;
-    esac
-    local pathed=0
-    sling_dispatch_path_guard "$bead" || pathed=$?
-    case "$pathed" in
-        0) ;;
-        1) SLING_SKIPPED="dispatch-path"; return 0 ;;
-        *) return 1 ;;
-    esac
-    local live=0
-    sling_live_workflow_guard "$bead" || live=$?
-    case "$live" in
-        0) ;;
-        1) SLING_SKIPPED="live-workflow"; return 0 ;;
-        *) return 1 ;;
-    esac
-
-    local target
-    # resolve_pool_target emits the "set GC_RIG or pass <rig>/<base>" guidance and
-    # dies on an unset GC_RIG. Fail closed rather than file a reaction routed to an
-    # empty target that matches nobody — this guards both a direct `sling` (where
-    # set -e would abort) and the cmd_scan loop's condition (where set -e is
-    # disabled, so the guard, not set -e, is what refuses the empty target).
-    target="$(resolve_pool_target)" || return 1
-
-    local store_ref subject_title
-    store_ref="$(rig_store_ref)"
-    # A short title for the reaction bead; the subject's own title, when
-    # readable, orients a reader of the board and the reaction's own row.
-    if [ -n "$FIXTURE" ]; then
-        subject_title="$(jq -r --arg id "$bead" '.[$id].title // ""' "$FIXTURE/beads.json" 2>/dev/null || printf '')"
+    local note=""
+    [ "$reacting" -eq 0 ] || note="${note:+$note, }$reacting already reacting or in a conversation"
+    [ "$driven" -eq 0 ] || note="${note:+$note, }$driven driven by a live workflow"
+    [ "$decided" -eq 0 ] || note="${note:+$note, }$decided already routed, armed, held, assigned or waiting on a person"
+    [ "$kinded" -eq 0 ] || note="${note:+$note, }$kinded a standing record or a feedback pattern"
+    [ "$failed" -eq 0 ] || note="${note:+$note, }$failed not slung for an error"
+    [ -z "$note" ] || note=" ($note)"
+    if [ "$left" -gt 0 ]; then
+        log "scan --sling: slung $slung first reaction(s)$note; $left candidate(s) left for the next sweep, since less of the sweep's ${deadline}s (GC_PROACTIVE_SWEEP_TIMEOUT) was left than its slowest sling took"
     else
-        local db; db="$(rig_beads_db)"
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-        subject_title="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null \
-            | jq -r 'if type=="array" then (.[0].title // "") else "" end' 2>/dev/null || printf '')"
-    fi
-    local title="react: $bead${subject_title:+ — $subject_title}"
-    # bd caps a title at 500 bytes; keep the reaction title well under it.
-    title="$(printf '%s' "$title" | cut -c1-200)"
-
-    # R's markers ride the CREATE call, so R is born routed and tracking its
-    # subject in one atomic write — no window where a half-made reaction sits
-    # unrouted (orphaned) or unlinked. task_kind=reaction is the dedup and
-    # pool-query key; gc.reaction_subject is the subject; gc.routed_to routes R
-    # to the proactive pool.
-    local meta
-    meta="$(jq -nc --arg t "$target" --arg s "$bead" --arg ss "$store_ref" --arg k "$REACTION_KIND" '
-        {"task_kind":"reaction","gc.reaction_kind":$k,"gc.reaction_subject":$s,"gc.routed_to":$t}
-        + (if $ss != "" then {"gc.reaction_subject_store":$ss} else {} end)')"
-
-    if [ -n "$dry" ]; then
-        printf 'gc bd create -t task --title %q --metadata %q  # then: gc bd dep add <R> %s --type=tracks\n' "$title" "$meta" "$bead"
-        return 0
-    fi
-
-    if [ -n "$FIXTURE" ]; then
-        # The fixture hook stands in for every gc call in this tool: a --sling
-        # sweep under test must exercise the loop and its cap without filing
-        # anything into a live city.
-        log "$PROG: (fixture) would file a reaction bead tracking $bead -> $target"
-        printf 'gc bd create -t task --title %q --metadata %q\n' "$title" "$meta"
-        printf 'gc bd dep add <R> %s --type=tracks\n' "$bead"
-        return 0
-    fi
-
-    local db reaction
-    db="$(rig_beads_db)"
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-    reaction="$(gc bd create ${db:+--db "$db"} -t task --title "$title" --metadata "$meta" \
-        -d "First reaction to $bead: read it, write a first-reaction card, and dispose it (route / hold / hand to a closer / put to the operator) per agents/proactive/prompt.template.md. This bead is the reaction's own work unit; closing it records the reaction done." \
-        --json 2>/dev/null | jq -r 'if type=="array" then (.[0].id // "") else (.id // "") end' 2>/dev/null || printf '')"
-    [ -n "$reaction" ] && [ "$reaction" != "null" ] \
-        || die "sling: could not file the reaction bead for $bead — nothing was routed"
-
-    # The tracks edge records lineage; gc.reaction_subject is the primary link a
-    # worker resolves, so a failed edge is not fatal (the stamp still names S).
-    # tracks, NOT parent-child: a parent-child edge transmits the subject's
-    # blocked state to R, making it unclaimable exactly where a reaction is owed.
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-    gc bd dep add "$reaction" "$bead" ${db:+--db "$db"} --type=tracks >/dev/null 2>&1 \
-        || log "$PROG: sling: filed reaction $reaction but could not add the tracks edge to $bead; gc.reaction_subject still names it. Wire it by hand: gc bd dep add $reaction $bead --type=tracks"
-
-    log "$PROG: filed first reaction $reaction tracking $bead -> $target"
-    if [ -n "$nudge" ]; then
-        gc session nudge "$target" "A first reaction ($reaction) is routed to you; claim it with gc hook --claim." >/dev/null 2>&1 || true
+        log "scan --sling: slung $slung first reaction(s)$note"
     fi
 }
 
@@ -1180,23 +1184,14 @@ main() {
     local verb="$1"; shift || true
     case "$verb" in
         -h|--help|help) usage; exit 0 ;;
-        demand) cmd_demand "$@" ;;
         scan)   cmd_scan "$@" ;;
         sling)
             cmd_sling "$@"
-            # A skipped bead is a no-op, not a dispatch: surface it to a
-            # cross-process caller under the exit code of its cause, so it files
-            # its own conversation instead of waiting for a reaction that is
-            # already in flight or never ran.
-            case "$SLING_SKIPPED" in
-                reacted)       exit "$RC_ALREADY_REACTED" ;;
-                dispatch-path) exit "$RC_DISPATCH_PATH" ;;
-                live-workflow) exit "$RC_LIVE_WORKFLOW" ;;
-            esac
+            exit "$SLING_RC"
             ;;
         deliverable) cmd_deliverable "$@" ;;
         assignable)  cmd_assignable "$@" ;;
-        *) die "unknown verb '$verb' (demand|scan|sling|deliverable|assignable; --help)" ;;
+        *) die "unknown verb '$verb' (scan|sling|deliverable|assignable; --help)" ;;
     esac
 }
 

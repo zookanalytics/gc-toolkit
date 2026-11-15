@@ -74,6 +74,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` |
+| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` |

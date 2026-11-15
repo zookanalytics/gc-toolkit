@@ -25,14 +25,14 @@ import (
 // a listing does. ClosedAt is when a closed bead closed. An edge carries the far
 // bead's fields as a show row reports them, so a closed row that names no close
 // time takes the one an edge onto it names. Assignee, AwaitType, AwaitID,
-// Description, Priority, Labels, CreatedAt and Notes are the row's own fields a
-// listing carries, and an update's --append-notes adds a line to Notes.
-// Ephemeral and Template put the row in the ephemeral plane or make it a
+// Description, Priority, Labels, CreatedAt, CloseReason and Notes are the row's
+// own fields a listing carries, and an update's --append-notes adds a line to
+// Notes. Ephemeral and Template put the row in the ephemeral plane or make it a
 // template.
 type Bead struct {
 	ID, Title, Status, IssueType, ClosedAt string
 	Assignee, AwaitType, Description       string
-	AwaitID, CreatedAt, Notes              string
+	AwaitID, CreatedAt, CloseReason, Notes string
 	Priority                               int
 	Labels                                 []string
 	Ephemeral, Template                    bool
@@ -225,7 +225,8 @@ func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
 // Find returns, in id order, the row of each bead q selects, in a listing's
 // shape: every edge, with the far bead's id and the edge's type alone. A bead q
 // names that the store does not hold is left out, as a listing leaves it out.
-// A parent selects the beads whose own parent-child edge names it.
+// A parent selects the beads whose own parent-child edge names it, and a type
+// the beads whose issue type is that one exactly.
 func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 	if s.OnFind != nil {
 		s.OnFind(q)
@@ -236,7 +237,7 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 	if s.FindErr != nil {
 		return nil, s.FindErr
 	}
-	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && !q.Every {
+	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && q.Type == "" && !q.Every {
 		return nil, &gcbd.ReadError{Reason: "the fake store takes no find that selects no beads"}
 	}
 	ids := slices.Sorted(maps.Keys(s.rows))
@@ -261,6 +262,9 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 			continue
 		}
 		if q.TitleContains != "" && !strings.Contains(b.Title, q.TitleContains) {
+			continue
+		}
+		if q.Type != "" && b.IssueType != q.Type {
 			continue
 		}
 		out = append(out, s.listing(b))
@@ -508,6 +512,9 @@ func bead(b Bead, deps []any) gcbd.Bead {
 	}
 	if b.CreatedAt != "" {
 		out.CreatedAt = b.CreatedAt
+	}
+	if b.CloseReason != "" {
+		out.CloseReason = b.CloseReason
 	}
 	if b.Notes != "" {
 		out.Notes = b.Notes

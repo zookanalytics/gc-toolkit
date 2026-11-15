@@ -1,0 +1,94 @@
+---
+name: portfolio-sync
+description: Use when you are the po in a portfolio sync, working your rig's epics with the operator, such as which epics the rig works on now and which are parked, the order within each, what an epic closed or shifted since the last sync changes, and which epics are due a review. For the queue of held new work, use backlog-refinement.
+compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
+---
+
+# Portfolio sync
+
+A portfolio sync works your rig's epics with the operator: which the rig works
+on now, which wait, and in what order. You bring a recommendation for each epic,
+with your reasons, and the operator rules. You apply each ruling through your
+prompt's levers once they agree, and each write's exit says whether it landed.
+
+## What a park says
+
+A park separates whether the rig works on an epic from where the epic ranks. An
+epic nothing parks is one the rig works on now. Every other epic is parked, and
+its park says what releases it. Priority ranks the epics within each group, so
+bd's five levels are enough. How many epics the rig works on is the operator's
+choice as they prioritize, never a count, since one rig has room for five and
+another for one. Propose no limit, and hold the portfolio to none.
+
+## 1. Read the epics against the rig's goals
+
+Open from your rig's goals, as your prompt's "The rig's goals" reads them. Then
+read each open epic, its Deliveries among them, by the epic read in your
+prompt's "Reads". An epic's frontier names the park that holds it, when one
+does. Its horizon counts the work directly under it, open, closed, advancing
+and stuck, and counts an open Delivery as stuck, because no pool takes an epic.
+
+## 2. Weigh each epic closed or shifted since a sync last weighed it
+
+A review of an epic rules continue, shift or close on the epic's own evidence.
+That ruling is the operator's, made in the review and never in this sitting,
+but a close or a shift can change what the rig works on and in what order, so
+weigh each one. This lists, oldest first, each close and each latest shift of
+the rig's epics that no sync has weighed, with the day a sync last weighed each
+epic, after a first line that names the time it read them, which section 4
+marks each epic with. A read that exits non-zero has listed nothing, so run it
+again before you weigh any change:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" epic unweighed --rig <rig>
+```
+
+For each epic listed, read each `## Epic review` block in its notes dated on or
+after the day its line says a sync last weighed it, or every one when none has,
+for what the rulings moved. A change made on the day its epic was last weighed
+lists again, so read the last sync's note on the epic for what that sync made
+of it. A later review can continue an epic on the course a shift set, so weigh
+the shift even when its line names the continue that followed it. A close can
+send the epic's work to another epic, and a shift changes an epic's course and
+can change its hypothesis. Say what each changes in the portfolio, such as a
+parked epic to bring forward now that a worked one has closed, or a priority
+that no longer fits a shifted epic, and propose the move.
+
+## 3. Name the epics due a review
+
+A review is the operator's judgment of an epic, in a sitting of its own. From
+what the epic read showed, name each epic whose state calls for one, such as
+these, and say why:
+
+- one whose Delivery has landed: an open Delivery under it whose horizon counts
+  work, none of it open;
+- one with no open work: its own horizon counts none open;
+- one that has stalled: nothing parks it, yet no open work under it advances.
+  Read the work outside its Deliveries from its own horizon, and the rest from
+  each open Delivery's.
+
+Propose each review, and give the operator the command that calls it:
+`gc-helm engage <epic> --reason "Review this epic: <why it is due>"`.
+
+## 4. Bring the portfolio, and note each ruling
+
+Bring which epics the rig works on now, which wait and the order within each,
+by your prompt's "Sequencing: WSJF", with what sections 2 and 3 found. Each
+piece fits one screen and carries a recommendation for each epic.
+
+Note each ruling on its bead under the sync's date, with the operator's reason
+in their words, and on an epic mark it weighed in the same write. Mark it with
+the time on the first line of section 2's read, the earliest such time when you
+ran the read more than once. A change made after the read is one this sync has
+not seen, and a mark at any later time, such as the note's own, can take it off
+the next sync's list. On each epic that section 2 listed, note too what the
+sync made of its close or shift, even when nothing moved, because its mark is
+what takes that change off the next sync's list:
+
+```bash
+gc bd --rig <rig> update <epic> --append-notes "Portfolio sync, po sitting $(date -u +%Y-%m-%d): <ruling: reason>" \
+  --set-metadata epic_weighed_at="<the read's time>"
+```

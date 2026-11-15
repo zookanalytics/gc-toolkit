@@ -63,9 +63,6 @@ doctor/check-feedback-routing-owed/doctor.toml	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/run.sh	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/run.test.sh	tk-1tfzr71.21
 orders/refinery-reconcile.toml	tk-1tfzr71.21
-assets/scripts/proactive-scan-sling.sh	tk-1tfzr71.17
-assets/scripts/proactive-scan-sling.test.sh	tk-1tfzr71.17
-orders/proactive-scan-sling.toml	tk-1tfzr71.17
 agents/dog/agent.toml	tk-1tfzr71.18
 agents/dog/prompt.template.md	tk-1tfzr71.18
 assets/scripts/boot-health.sh	tk-1tfzr71.18

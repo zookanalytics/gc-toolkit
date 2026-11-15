@@ -37,7 +37,10 @@
 #     lift, or a sling made while the bead was held, and `gc-helm.sh place`
 #     finishes either. An arm for the validating closer (mol-validate-close) is
 #     neither: the bead waits on another bead to land and is checked then, so
-#     its hold is lifted, not placed (skills/waits/SKILL.md).
+#     its hold is lifted, not placed (skills/waits/SKILL.md). A run of
+#     mol-first-reaction sends nothing either: a first reaction triages the
+#     bead and works none of it, and its held exit writes hold:mayor seconds
+#     before its run ends.
 #
 # The po's addresses are every identity Gas City serves its work under, which
 # its session.AssigneeIdentities names: the session bead's id, its runtime
@@ -409,6 +412,7 @@ scan_store() {
     done <<< "$(printf '%s' "$runs" | jq -r --arg q " $queued " '.[] | objects
         | ((.bead // "") | tostring) as $id
         | select(.live == true and $id != "" and ($q | contains(" " + $id + " ")))
+        | select(((.formula // "") | tostring) != "mol-first-reaction")
         | "queued bead \($id) is worked by live run \((.root // "?") | tostring)\(((.formula // "") | tostring) as $f | if $f == "" then "" else " (" + $f + ")" end): it was slung while held. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without a second run"
         | gsub("[[:cntrl:]]"; " ")' 2>/dev/null)"
 }

@@ -13,9 +13,13 @@
 #     answer of `gctk bead holds`, the pack's one rule.
 #   - One writer per branch. A bead is left while another open bead works on
 #     its branch: any open bead on the branch but the one it names as its
-#     anchor, unless that bead is waiting here too. Among the beads that wait
-#     here, a rework child handed back is taken before its anchor, then the
-#     highest priority, then the oldest.
+#     anchor, unless that bead is waiting here too, or it waits on the bead and
+#     nobody writes it now. Such a bead cannot start before the bead closes.
+#     Whether someone writes it is the build pool's own test, the one
+#     work-setup.sh waits behind a sibling by (work_writing in work-lib.sh): a
+#     live run works it, or a listed session holds its in_progress claim.
+#     Among the beads that wait here, a rework child handed back is taken
+#     before its anchor, then the highest priority, then the oldest.
 #   - A rework child the requeue filed and never sent on (refinery-lib.sh)
 #     works nothing. Once nothing holds it, it is neither a wait on its bead
 #     nor a writer of the bead's branch, so the bead is taken as if the child
@@ -42,6 +46,10 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$HERE/refinery-lib.sh" || { echo "$PROG: cannot source refinery-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=gctk-resolve.sh
 . "$HERE/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+# shellcheck source=work-lib.sh
+. "$HERE/work-lib.sh" || { echo "$PROG: cannot source work-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$HERE/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 1; }
 
 LIVE="open,in_progress,blocked,deferred,hooked,pinned"
 case "${1:-}" in
@@ -115,19 +123,60 @@ HELD=$(printf '%s' "$JUDGED" | jq -r '[ .[] | select(.held) | .id + " waits on "
 CLEAR=$(printf '%s' "$JUDGED" | jq -c '[ .[] | select(.held | not) ]')
 
 WAITING=$(printf '%s' "$JUDGED" | jq -c '[ .[].id ]')
-# A writer of a bead's branch is any open bead on it but the bead itself, the
-# one it names as its anchor, its unsent rework children and its asks, unless
-# the bead waits here too.
-RANKED=$(printf '%s\n%s\n%s' "$CLEAR" "$BUSY" "$WAITING" | jq -sc '
+# The other open beads on each bead's branch, as .others: all but the bead
+# itself, the one it names as its anchor, its unsent rework children, its asks
+# and the beads that wait here too. Each is a writer of the branch unless it
+# waits on the bead and nobody writes it now.
+OTHERS=$(printf '%s\n%s\n%s' "$CLEAR" "$BUSY" "$WAITING" | jq -sc '
   .[0] as $clear | .[1] as $busy | .[2] as $waiting
   | [ $clear[] | . as $b
       | ((.metadata.anchor_bead // "") | tostring) as $anchor
-      | ([ $busy[] | select(((.metadata.branch // "") | tostring) == (($b.metadata.branch // "") | tostring))
+      | . + {others: ([ $busy[] | select(((.metadata.branch // "") | tostring) == (($b.metadata.branch // "") | tostring))
            | select(.id != $b.id and .id != $anchor)
            | select(.id as $i | (($b.unsent + $b.asks) | index($i)) == null)
-           | select(.id as $i | ($waiting | index($i)) == null) | .id ] | unique) as $writers
-      | . + {writers: $writers,
-             rank: (if ((.metadata.task_kind // "") | tostring) == "rework" and $anchor != "" then 0 else 1 end)} ]' 2>/dev/null)
+           | select(.id as $i | ($waiting | index($i)) == null) | .id ] | unique)} ]' 2>/dev/null)
+printf '%s' "$OTHERS" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "the beads on each branch could not be weighed"
+
+# What each of those beads waits on, by `gctk bead holds`, as SIB_WAITS: each
+# one's id to the ids of what holds it. Each that waits on a bead whose branch
+# it is on is asked whether someone writes it now (work_writing), and the ones
+# nobody writes are IDLE.
+SIB_WAITS='{}'; IDLE='[]'
+SIBS=$(printf '%s' "$OTHERS" | jq -r '[ .[].others[] ] | unique | .[]')
+if [ -n "$SIBS" ]; then
+  SROWS=$(printf '%s' "$BUSY" | jq -c --arg ids "$SIBS" '($ids | split("\n")) as $want | [ .[] | select(.id as $i | $want | index($i)) ] | unique_by(.id)' 2>/dev/null)
+  printf '%s' "$SROWS" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "the other beads on the branches could not be weighed"
+  # shellcheck disable=SC2086  # one argument per bead id
+  SHOLDS=$("$gctk" bead holds $SIBS </dev/null 2>/dev/null) \
+    || unread "gctk bead holds did not answer for every other bead on the branches"
+  SIB_WAITS=$(judge "$SROWS" "$SHOLDS" | jq -c 'map({key: .id, value: [ (.holds.waits // [])[] | ((.id // "") | tostring) ]}) | from_entries' 2>/dev/null)
+  printf '%s' "$SIB_WAITS" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || unread "gctk bead holds did not answer for every other bead on the branches"
+  WAITERS=$(printf '%s\n%s\n%s' "$OTHERS" "$SROWS" "$SIB_WAITS" | jq -sr '.[2] as $w
+    | ([ .[0][] | .id as $b | .others[] | select((($w[.] // []) | index($b)) != null) ] | unique) as $ids
+    | .[1][] | select(.id as $i | $ids | index($i)) | [.id, ((.status // "open") | tostring), ((.assignee // "") | tostring)] | @tsv' 2>/dev/null) \
+    || unread "the beads that wait on another could not be weighed"
+  QUIET=""
+  while IFS="$(printf '\t')" read -r id status assignee; do
+    [ -n "$id" ] || continue
+    work_writing "$id" "$status" "$assignee"
+    case $? in
+      0) ;;
+      1) QUIET="$QUIET $id" ;;
+      *) unread "the runs that work $id did not read" ;;
+    esac
+  done <<ROWS
+$WAITERS
+ROWS
+  IDLE=$(printf '%s\n' "$QUIET" | jq -Rc 'split(" ") | map(select(. != ""))')
+fi
+# A bead's writers are its others, but one that waits on it and is IDLE.
+RANKED=$(printf '%s\n%s\n%s' "$OTHERS" "$SIB_WAITS" "$IDLE" | jq -sc '
+  .[0] as $others | .[1] as $waits | .[2] as $idle
+  | [ $others[] | .id as $b
+      | . + {writers: [ .others[] | select(. as $o
+                          | ((($waits[$o] // []) | index($b)) != null and ($idle | index($o)) != null) | not) ],
+             rank: (if ((.metadata.task_kind // "") | tostring) == "rework" and ((.metadata.anchor_bead // "") | tostring) != "" then 0 else 1 end)} ]' 2>/dev/null)
 printf '%s' "$RANKED" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "the beads on each branch could not be weighed"
 BUSY_NOTE=$(printf '%s' "$RANKED" | jq -r '[ .[] | select(.writers | length > 0) | .id + " (" + (.writers | join(", ")) + " works its branch)" ] | join("; ")')
 [ -z "$BUSY_NOTE" ] || echo "$PROG: leaving bead(s) whose branch another open bead works on: $BUSY_NOTE" >&2

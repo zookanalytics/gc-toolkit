@@ -10,6 +10,11 @@
 #   - a bead something holds is left, and named;
 #   - a bead whose branch another open bead works on is left until that bead
 #     is gone, while the anchor a bead names is no writer of its branch;
+#   - a bead on the branch that waits on the bead, armed, with no live run and
+#     no claim a listed session holds, is no writer of it, so the bead is
+#     taken; one a live run works, or whose claim a listed session holds or no
+#     session list can be read for, still writes, and so does one that waits on
+#     other work; what holds it, or its runs, not reading exits 1;
 #   - a rework child handed back is taken before its anchor, then the highest
 #     priority, then the oldest;
 #   - a rework child the requeue filed and never sent on, which nothing holds,
@@ -33,6 +38,9 @@ trap 'rm -rf "$TMP"' EXIT
 fresh() {
   rm -rf "${TMP:?}"/*
   rt_init refinery-find-work.sh
+  # The runs the store holds, which run-lib.stub.sh answers from.
+  export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json"
+  echo '[]' > "$RUN_LIB_STUB_RUNS"
 }
 run() { OUT=$("$SUT/refinery-find-work.sh" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 
@@ -71,6 +79,58 @@ has "$ERR" "an (writer works its branch)" "it names the bead and the writer of i
 jq 'map(if .id == "writer" then .status = "closed" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
 run
 eq "$OUT" "an" "once the writer is gone, the bead is taken"
+
+echo "# a rework that waits on the bead, with no run or claim, writes nothing on its branch"
+# Two reworks on one PR's branch: the second yielded behind the first at its
+# checkout (work-setup.sh), which made it wait on the first and armed it, and the
+# first then handed back to the refinery. The anchor holds the PR's pending
+# record and waits on both.
+# two_reworks <what sib waits on> [<sib status>] [<sib assignee>]
+two_reworks() {
+  fresh
+  work an polecat/an '{"merge_result":"pull_request_pending","pr_reconcile_pending":"true"}' blocked
+  work rw polecat/an '{"task_kind":"rework","anchor_bead":"an"}'
+  put "$(jq -nc --arg s "${2:-open}" --arg a "${3:-}" '{id: "sib", title: "Rework", status: $s, assignee: $a, issue_type: "task", notes: "",
+    metadata: {task_kind: "rework", anchor_bead: "an", branch: "polecat/an", "gc.dispatch_when_ready": "rig-a/gc-toolkit.polecat"}}')"
+  printf 'an rw\nan sib\nsib %s\n' "$1" > "$STUB_HOLDS"
+}
+two_reworks rw
+echo '[{"root":"r-sib","convoy":"c-sib","bead":"sib","formula":"mol-polecat-work","live":false}]' > "$RUN_LIB_STUB_RUNS"
+run
+eq "$RC $OUT" "0 rw" "the rework handed back is taken while its sibling waits on it, armed, and its run has ended"
+hasnt "$ERR" "works its branch" "…since the sibling is no writer of the branch"
+echo '[{"root":"r-sib","convoy":"c-sib","bead":"sib","formula":"mol-polecat-work","live":true}]' > "$RUN_LIB_STUB_RUNS"
+run
+eq "$RC" 3 "a sibling that waits on it while a live run works it still writes the branch (exit 3)"
+has "$ERR" "rw (sib works its branch)" "…and is named as its writer"
+two_reworks rw in_progress rig-a/gc-toolkit.polecat-2
+STUB_SESSIONS_JSON='{"sessions":[{"alias":"rig-a/gc-toolkit.polecat-2"}]}' run
+eq "$RC" 3 "a sibling that waits on it under a claim a listed session holds still writes the branch (exit 3)"
+has "$ERR" "rw (sib works its branch)" "…and is named as its writer"
+run
+eq "$RC" 3 "…and so does one whose claim no session list can be read for, which proves nobody gone"
+STUB_SESSIONS_JSON='{"sessions":[]}' run
+eq "$RC $OUT" "0 rw" "a claim no listed session holds writes nothing, so the rework is taken"
+two_reworks gate-1
+export RUN_LIB_STUB_LOG="$TMP/runs.log"
+run
+eq "$RC" 3 "a sibling that waits on other work, not on the bead, still goes first (exit 3)"
+has "$ERR" "rw (sib works its branch)" "…and is named as its writer"
+eq "$(cat "$RUN_LIB_STUB_LOG" 2>/dev/null)" "" "…with no runs read, since only a bead that waits on the one it holds back is asked whether it is written"
+unset RUN_LIB_STUB_LOG
+two_reworks rw
+work rw2 polecat/an '{"task_kind":"rework","anchor_bead":"an"}'
+jq 'map(if .id == "rw2" then .priority = 1 else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+run
+eq "$RC $OUT" "0 rw" "a sibling that waits on one rework handed back is no writer of that one alone"
+has "$ERR" "rw2 (sib works its branch)" "…so another handed back on the branch still waits for it, even at a higher priority"
+two_reworks rw
+STUB_HOLDS_FAIL=sib run
+eq "$RC" 1 "what holds the other bead on the branch not answering exits 1"
+eq "$OUT" "" "…and names no bead"
+RUN_LIB_STUB_FAIL=all run
+eq "$RC" 1 "the runs of a sibling that waits on it not reading exits 1"
+eq "$OUT" "" "…and names no bead"
 
 echo "# a rework child handed back is taken before its anchor"
 fresh

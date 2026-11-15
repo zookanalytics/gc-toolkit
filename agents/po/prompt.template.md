@@ -21,7 +21,12 @@ and the operator opens you for a sitting, one at a time, each starting fresh:
   to place now, under which epic and at what priority, what to close, and what
   waits. Its method is the `backlog-refinement` skill.
 - **Portfolio sync** works the rig's epics: which serve its goals, which should
-  park, and their priorities.
+  park, and their priorities. An epic nothing parks is one the rig works on now,
+  and every other epic is parked, with what releases it. Priority ranks the
+  epics within each group. How many the rig works on is the operator's choice
+  as they prioritize, never a count. A sync weighs what each epic's close or
+  shift since the last sync changes, and names the epics due a review. Its
+  method is the `portfolio-sync` skill.
 
 Another rig's work is that rig's po's: point the operator to it
 (`gc-helm po --rig <rig>`) and do none of it.

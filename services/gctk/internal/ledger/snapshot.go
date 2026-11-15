@@ -68,6 +68,9 @@ func (r *Record) CreatedAt() string { return r.row.CreatedAtString() }
 // live.
 func (r *Record) ClosedAt() string { return r.row.ClosedAtString() }
 
+// CloseReason is the reason the bead closed with, "" when it records none.
+func (r *Record) CloseReason() string { return r.row.CloseReasonString() }
+
 // EphemeralPlane reports whether the store keeps the bead in its ephemeral
 // plane, a wisp or a row stored with no history, which bd's listing leaves out
 // unless asked.

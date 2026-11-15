@@ -7,16 +7,18 @@
 # bead that owns the work.
 # Owns everything upstream of the conversation (rig, subject bead, path
 # choice); filing the conversation lives ONCE in gc-helm.sh open, which this
-# calls. Two paths: PREFERRED files a first reaction (a framing card; a reaction
-# that puts the topic to the operator files a human gate, which reaches the
-# operator on the board); FALLBACK files a conversation in the operator's queue
-# directly — taken on --no-react, whenever `gc-proactive.sh deliverable`
+# calls. Two paths: PREFERRED slings a first reaction (a framing card; a
+# reaction that puts the topic to the operator files a human gate, which reaches
+# the operator on the board); FALLBACK files a conversation in the operator's
+# queue directly — taken on --no-react, whenever `gc-proactive.sh deliverable`
 # answers no (divert-on-no is the contract — a reaction routed into a downed
-# pool waits invisibly; today's tool always says yes), and when the subject
-# already has an open first reaction or a live owner owns it (gc-helm react
-# exit 5), a live workflow already drives it (exit 6), or it is already routed
-# or armed, held, or waits on a person's answer (exit 7), so react is a no-op
-# that files nothing: nothing would put the topic to the operator, so this does.
+# pool waits invisibly; today's tool always says yes), and when a first
+# reaction already runs on the subject or an open conversation tracks it
+# (gc-helm react exit 5), a live workflow already drives it (exit 6), it is
+# already routed or armed, held, assigned, not open, or waits on a person's
+# answer (exit 7), or it is a standing record or a feedback pattern, whose kind
+# takes no first reaction (exit 8), so react is a no-op that slings nothing:
+# nothing would put the topic to the operator, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (the rig map did not
 # read, with rig-map.sh's reason, or the city has no rigs) · 4 runtime failure.
 set -u
@@ -374,7 +376,7 @@ if [ -z "$ORIGIN_NOW" ]; then
         || note "$PROG: could not stamp gc.origin=operator on $SUBJECT — the conversation is unaffected; stamp it by hand"
 fi
 
-# ── Path selection: can a filed first reaction actually be picked up? ─
+# ── Path selection: can a slung first reaction actually be picked up? ─
 # Delegated to gc-proactive.sh deliverable so this caller cannot drift from
 # the clamps (the tool + agents/proactive/agent.toml).
 REACT=""; REACT_WHY=""
@@ -395,7 +397,7 @@ if [ -n "$REACT" ]; then
     # The reaction owns putting the topic to the operator from here; a
     # conversation filed now would put it twice.
     if "$HELM" react "$SUBJECT" --reason "operator-origin intake: $ARG"; then
-        printf '%s: subject %s — first reaction filed (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
+        printf '%s: subject %s — first reaction slung (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
         printf '       The reaction writes a framing card, and when it puts the topic to you it files a human gate for you; nothing waits on you yet.\n'
         printf '       Want the conversation now instead? Re-run with --no-react.\n'
         exit 0
@@ -405,26 +407,29 @@ if [ -n "$REACT" ]; then
     # No reaction was dispatched, so nothing downstream will put the topic to
     # the operator — fall through and file the conversation directly; a
     # conversation beats a bead nobody is coming to. gc-helm react exit 5 is
-    # the already-reacting no-op (the guard
-    # filed nothing because a first reaction happens once at a time, or a live
-    # owner owns it), exit 6 the live-workflow no-op (the guard filed nothing
-    # because a reaction never races work in flight), and exit 7 the
-    # dispatch-path no-op (the guard filed nothing because the subject is already
-    # routed or armed, held, or waits on a person's answer), each distinct from a
-    # real failure to file: name the actual cause so the ask the converse
-    # session reads is accurate.
+    # the already-reacting no-op (a first reaction happens once at a time, and
+    # an open conversation already puts the subject to the operator), exit 6
+    # the live-workflow no-op (a reaction never races work in flight), exit 7
+    # the decided no-op (the subject is already routed or armed, held,
+    # assigned, not open, or waits on a person's answer), and exit 8 the kind
+    # no-op (a standing record or a feedback pattern takes no first reaction),
+    # each distinct from a real failure to sling: name the actual cause so the
+    # ask the converse session reads is accurate.
     if [ "$REACT_RC" -eq 5 ]; then
-        note "$PROG: subject $SUBJECT already has an open first reaction, or a live owner owns its reaction — no new reaction was filed; filing the conversation directly"
-        REACT_WHY="no: subject already has an open first reaction or a live owner (a first reaction happens once at a time)"
+        note "$PROG: a first reaction already runs on subject $SUBJECT, or an open conversation tracks it — no new reaction was slung; filing the conversation directly"
+        REACT_WHY="no: a first reaction already runs on the subject or a conversation tracks it (a first reaction happens once at a time)"
     elif [ "$REACT_RC" -eq 6 ]; then
-        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the conversation directly"
+        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was slung; filing the conversation directly"
         REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     elif [ "$REACT_RC" -eq 7 ]; then
-        note "$PROG: subject $SUBJECT is already routed or armed, held, or waits on a person's answer — no reaction was filed; filing the conversation directly"
-        REACT_WHY="no: the subject is already routed or armed, held, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
+        note "$PROG: subject $SUBJECT is already routed or armed, held, assigned, not open, or waits on a person's answer — no reaction was slung; filing the conversation directly"
+        REACT_WHY="no: the subject is already routed or armed, held, assigned, not open, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
+    elif [ "$REACT_RC" -eq 8 ]; then
+        note "$PROG: subject $SUBJECT is a standing record or a feedback pattern, whose kind takes no first reaction — filing the conversation directly"
+        REACT_WHY="no: the subject is a standing record or a feedback pattern, whose kind takes no first reaction"
     else
-        note "$PROG: filing the first reaction FAILED — falling back to filing the conversation directly"
-        REACT_WHY="no: filing the first reaction failed"
+        note "$PROG: slinging the first reaction FAILED — falling back to filing the conversation directly"
+        REACT_WHY="no: slinging the first reaction failed"
     fi
 fi
 

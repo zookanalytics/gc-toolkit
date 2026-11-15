@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/branch-supersession.sh — tells a conflicting
 # branch a landed change made moot from one that only drifted. Covers classify
-# over real git fixtures: the base side deleting or rewriting a block the branch
-# edits (or rewrote itself), deleting a file it edits, and both sides newly
-# defining one name, each naming the commit that did it rather than a later one
-# on the same file; and what is not a tell: same-line drift, small edits
-# interleaved across a large block the base side mostly kept, a block too small
-# to count, a block the base side moved elsewhere, a renamed file, minified
-# output, a generated file, a test file, identical additions that merge into one
-# copy, Go `init`, and a definition only test files share. An unresolvable ref
+# over real git fixtures: the base side deleting a block the branch edits (or
+# rewrote itself), deleting a file it edits, and both sides newly defining one
+# name, each naming the commit that did it rather than a later one on the same
+# file; and what is not a tell: a block the base side rewrote, same-line drift,
+# small edits interleaved across a large block the base side mostly kept, a
+# deleted block too small to count, a block the base side moved elsewhere, a
+# renamed file, minified output, a deletion in a generated file or a test file,
+# identical additions that merge into one copy, Go `init`, and a definition
+# only test files share. An unresolvable ref
 # and unrelated histories are "could not tell". Covers hold over a stubbed store: a
 # supersession files one rework-base-supersession human gate on the anchor and
 # holds; an open gate holds without classifying, whoever it is assigned to; drift
@@ -187,9 +188,9 @@ m_mov() { drop_pin_block lib/gate.sh; printf '%s\n' "$PIN_BLOCK" > lib/pins.sh; 
 b_mov() { edit_pin_line lib/gate.sh; }
 scenario mov "move check_pin into its own file"
 
-m_small() { printf 'greet() {\n  printf "hi %%s\\n" "$1"\n}\n' > lib/small.sh; }
+m_small() { : > lib/small.sh; }
 b_small() { printf 'greet() {\n  echo "hello there $1"\n}\n' > lib/small.sh; }
-scenario small "greet with printf"
+scenario small "drop the greeting"
 
 m_gone() { git rm -q lib/gone.sh; }
 b_gone() { sedi 's/could not pour $lane/could not pour the $lane review/' lib/gone.sh; }
@@ -199,21 +200,21 @@ m_ren() { git mv lib/gone.sh lib/dispatch.sh; }
 b_ren() { sedi 's/could not pour $lane/could not pour the $lane review/' lib/gone.sh; }
 scenario ren "rename the dispatcher"
 
-m_gen() { rewrite_pin_body generated/out.sh; }
+m_gen() { drop_pin_block generated/out.sh; }
 b_gen() { edit_pin_line generated/out.sh; }
 scenario gen "regenerate the rendered copy"
 
-m_bundle() { bundle w > web/app.js; }
+m_bundle() { : > web/app.js; }
 b_bundle() { bundle x > web/app.js; }
-scenario bundle "rebuild the bundle"
+scenario bundle "empty the bundle"
 
 m_bundled() { git rm -q web/app.css; }
 b_bundled() { bundle d > web/app.css; }
 scenario bundled "drop the stylesheet bundle"
 
-m_tst() { rewrite_pin_body lib/gate.test.sh; }
+m_tst() { drop_pin_block lib/gate.test.sh; }
 b_tst() { edit_pin_line lib/gate.test.sh; }
-scenario tst "rewrite the pin test"
+scenario tst "drop the pin test"
 
 m_dup() { printf '\nfunc stallReason(b []string) string {\n\treturn "main"\n}\n' >> pkg/board/derive.go; }
 b_dup() { printf 'package board\n\nfunc stallReason(b []string) string {\n\treturn "branch"\n}\n' > pkg/board/stall.go; }
@@ -251,12 +252,6 @@ has "$OUT" "$(printf 'deleted-block\tlib/gate.sh\t')" "it is reported as a delet
 has "$OUT" "$(printf 'landed\t%s\tremove the commit pin' "$(git rev-parse --short m-del~1)")" "and the landed line names the commit that deleted it"
 hasnt "$OUT" "describe the gate helpers" "not a later commit that only touched the same file"
 
-echo "# the base side rewrote a block the branch edits"
-OUT=$(classify m-rew b-rew); rc=$?
-eq "$rc" "0" "a block the base side rewrote while the branch edits it in place is a supersession"
-has "$OUT" "$(printf 'rewritten-block\tlib/gate.sh\t')" "it is reported as a rewritten block"
-has "$OUT" "read the lane state, not a pinned commit" "and names the rewriting commit"
-
 OUT=$(classify m-both b-both); rc=$?
 eq "$rc" "0" "a block the base side deleted while the branch rewrote it is a supersession too"
 has "$OUT" "$(printf 'deleted-block\tlib/gate.sh\t')" "and is reported as the deleted block it is"
@@ -277,12 +272,17 @@ eq "$rc" "0" "two new definitions of one shell function in one script are a supe
 has "$OUT" "$(printf 'duplicate-definition\tlib/gate.sh\tusage')" "it names the script and the function"
 
 echo "# drift is not a supersession"
+git merge-tree --write-tree --quiet m-rew b-rew >/dev/null 2>&1; eq "$?" "1" "the rewrite really conflicts with the in-place edit (premise of the next check)"
+OUT=$(classify m-rew b-rew); rc=$?
+eq "$rc" "1" "a block the base side rewrote while the branch edits it in place is drift, since the edit still has a home"
+eq "$OUT" "" "and prints no evidence"
 git merge-tree --write-tree --quiet m-ord b-ord >/dev/null 2>&1; eq "$?" "1" "the same-line edit really conflicts (premise of the next check)"
 OUT=$(classify m-ord b-ord); rc=$?
 eq "$rc" "1" "both sides editing one line of a block is drift"
 eq "$OUT" "" "and prints no evidence"
+git merge-tree --write-tree --quiet m-small b-small >/dev/null 2>&1; eq "$?" "1" "the small deletion really conflicts with the edit"
 OUT=$(classify m-small b-small); rc=$?
-eq "$rc" "1" "a rewrite of a block too small to count is drift"
+eq "$rc" "1" "a deletion of a block too small to count is drift"
 REGION=$(git merge-file -p --diff3 --object-id "$(git rev-parse m-drift:lib/gate.sh)" "$(git rev-parse "$BASE":lib/gate.sh)" "$(git rev-parse b-drift:lib/gate.sh)" \
   | awk '/^\|\|\|\|\|\|\| /{f=1; next} /^=======$/{f=0} f' | wc -w)
 [ "$REGION" -ge 50 ] && ok "interleaved edits really form one conflict of ${REGION} base words (premise of the next check)" \
@@ -298,14 +298,15 @@ OUT=$(classify m-ren b-ren); rc=$?
 eq "$rc" "1" "a renamed file is followed by the merge, not read as deleted"
 
 echo "# what is not read"
-git merge-tree --write-tree --quiet m-gen b-gen >/dev/null 2>&1; eq "$?" "1" "the generated rewrite really conflicts"
+git merge-tree --write-tree --quiet m-gen b-gen >/dev/null 2>&1; eq "$?" "1" "the generated deletion really conflicts"
 OUT=$(classify m-gen b-gen); rc=$?
-eq "$rc" "1" "a rewrite in a file the repository declares generated is regenerated, not superseded"
+eq "$rc" "1" "a deletion in a file the repository declares generated is regenerated, not superseded"
+git merge-tree --write-tree --quiet m-tst b-tst >/dev/null 2>&1; eq "$?" "1" "the test-file deletion really conflicts"
 OUT=$(classify m-tst b-tst); rc=$?
-eq "$rc" "1" "a rewrite in a test file is not a tell"
-git merge-tree --write-tree --quiet m-bundle b-bundle >/dev/null 2>&1; eq "$?" "1" "a bundle rebuilt on both sides really conflicts"
+eq "$rc" "1" "a deletion in a test file is not a tell"
+git merge-tree --write-tree --quiet m-bundle b-bundle >/dev/null 2>&1; eq "$?" "1" "a bundle one side emptied and the other rebuilt really conflicts"
 OUT=$(classify m-bundle b-bundle); rc=$?
-eq "$rc" "1" "minified output rebuilt on both sides is not a rewrite of code, declared generated or not"
+eq "$rc" "1" "minified output one side emptied is not a deleted block of code, declared generated or not"
 OUT=$(classify m-bundled b-bundled); rc=$?
 eq "$rc" "1" "nor is a bundle one side deleted and the other rebuilt"
 OUT=$(classify m-same b-same); rc=$?
@@ -349,7 +350,7 @@ eq "$(gates A1)" "1" "exactly one open decision gate blocks the anchor behind th
 has "$OUT" "filed decision" "and the arm's log says the decision was filed"
 MSG=$(cat "$STUB_ESC_MSG")
 FIRST=$(printf '%s\n' "$MSG" | head -n 1)
-eq "$FIRST" "Branch polecat/tk-pin may be moot: a change already on main deleted or rewrote code it edits" "the headline states the stake in plain language"
+eq "$FIRST" "Branch polecat/tk-pin may be moot: a change already on main deleted code it edits or defined a name it also defines" "the headline states the stake in plain language"
 [ "${#FIRST}" -le 140 ] && ok "the headline fits a gate's 140-character title" || bad "headline is ${#FIRST} characters"
 has "$MSG" "(tighten the stale-pin check)" "the anchor's title says what the work is"
 has "$MSG" "remove the commit pin" "the brief names what landed"
