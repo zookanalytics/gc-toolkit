@@ -28,9 +28,9 @@ seat never starts, restarts the seat once when its started work goes unanswered,
 and restarts a seat its provider refuses for a rate limit. Approving this design
 retires the dog, its dance, the warrant bead, the quota-park nudge and the pin
 keepalive, and hands boot health to the patrol member (tk-1tfzr71.19).
-Afterwards nothing in the pack kills a session. The implementation child files
-the three units of section 8 on the integration branch. No cut-over bead is
-needed, because each retired order stops when its file leaves the pack.
+Afterwards nothing in the pack kills a stuck session. The implementation child
+files the three units of section 8 on the integration branch. No cut-over bead
+is needed, because each retired order stops when its file leaves the pack.
 
 These calls carry a cost either way:
 
