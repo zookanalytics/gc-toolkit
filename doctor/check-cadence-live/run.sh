@@ -117,8 +117,6 @@ probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-cadence-live.XXXXXX" 2>/dev/nu
     exit 1
 }
 trap 'rm -rf "$probe_dir"' EXIT
-# build-scratch-reap removes a gctk-* temp dir that no process holds open.
-exec 9>"$probe_dir/held"
 # Every retained run of every registration. The read carries no --since: gc
 # applies that bound only after fetching every retained run, so it would not
 # make the read cheaper, and without it the answer covers every order's window.
