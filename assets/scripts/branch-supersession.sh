@@ -5,21 +5,22 @@
 #
 # The conflict arms (pre-open-rebase.sh, and pr-facts.sh's CONFLICTING arm) see
 # only that a branch no longer merges into its target. Usually the target merely
-# moved and a merge-in child is the answer. Sometimes a change that already landed
-# deleted or rewrote the code the branch edits, or shipped the branch's purpose
-# under the same names. Then bringing the branch current is a decision about
-# whether it still has work to do. A polecat sent to merge it either keeps its side
-# of a conflict on code the target removed, which reverts the landed change, or
-# stops and asks the operator, after the session is spent.
+# moved, or rewrote code the branch also edits, and a merge-in child is the
+# answer: it resolves the conflict on the new code and asks a person only when a
+# resolution needs a decision. Sometimes a change that already landed deleted the
+# code the branch edits, or shipped the branch's purpose under the same names.
+# Then bringing the branch current is a decision about whether it still has work
+# to do. A polecat sent to merge it either keeps its side of a conflict on code
+# the target removed, which reverts the landed change, or stops and asks the
+# operator, after the session is spent.
 #
 #   branch-supersession.sh classify <base> <branch>
 #     Trial-merges <branch> into <base> with `git merge-tree` (nothing is checked
-#     out) and reads the result for three tells. Evidence goes to stdout, one
+#     out) and reads the result for the tells below. Evidence goes to stdout, one
 #     tab-separated line per finding:
 #       deleted-block   <path>  <size>  a conflict hunk: the branch changes a block
-#       rewritten-block <path>  <size>  the base side deleted (kept none of its
-#                                       words) or rewrote (kept at most
-#                                       MAIN_KEEP_MAX% of them)
+#                                       the base side deleted, leaving no line in
+#                                       its place
 #       deleted-file    <path>  <size>  a modify/delete conflict: the base side
 #                                       deleted a file the branch edits
 #       duplicate-definition <scope> <name>
@@ -31,7 +32,9 @@
 #     A block or file counts only at MIN_BLOCK_WORDS words or more. One whose
 #     lines reappear among the base side's added lines was moved, not deleted,
 #     and is no tell; nor is one averaging more than MAX_WORDS_PER_LINE words a
-#     line, which is minified or bundled output. Files the repository declares
+#     line, which is minified or bundled output. A block the base side rewrote,
+#     leaving any line in its place, is no tell either, because the code the
+#     branch changes still has a home there. Files the repository declares
 #     generated (linguist-generated) and test files are not read: their
 #     conflicts are regenerated, or follow the code under test. The thresholds
 #     and the history they were checked against are in
@@ -72,10 +75,9 @@ QUIET_WINDOW=86400
 # both routes land the same question on one key.
 KEY="rework-base-supersession"
 
-# A block counts from about six lines of code. A smaller rewrite is drift that a
-# merge-in child re-applies routinely.
+# A block counts from about six lines of code. A smaller deletion is drift that a
+# merge-in child resolves routinely.
 MIN_BLOCK_WORDS=50
-MAIN_KEEP_MAX=25
 # A block is moved, not deleted, when more than this share of its lines (of 8
 # characters or more, so braces and blank lines do not count) appears among the
 # base side's added lines.
@@ -138,7 +140,7 @@ skip_paths() { # <base-commit>
 # --diff3` output on stdin. The base side is "ours", the branch is "theirs".
 hunk_tells() { # <path> <base-added-file>
   awk -v path="$1" -v ADDED="$2" -v MS="$MARKER_SIZE" -v MINW="$MIN_BLOCK_WORDS" \
-      -v MAINMAX="$MAIN_KEEP_MAX" -v MOVMAX="$MOVED_MAX" -v WPL="$MAX_WORDS_PER_LINE" '
+      -v MOVMAX="$MOVED_MAX" -v WPL="$MAX_WORDS_PER_LINE" '
     function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     function marker(c,   s, i) { s = ""; for (i = 0; i < MS; i++) s = s c; return s }
     function opens(line, m) { return line == m || index(line, m " ") == 1 }
@@ -148,29 +150,30 @@ hunk_tells() { # <path> <base-added-file>
       OPEN = marker("<"); BASE = marker("|"); MID = marker("="); CLOSE = marker(">")
       st = 0
     }
-    st == 0 && opens($0, OPEN) { st = 1; olines = 0; blines = 0; bfull = 0; split("", bw); split("", ow); split("", olist); next }
+    st == 0 && opens($0, OPEN) { st = 1; olines = 0; blines = 0; bfull = 0; split("", bw); next }
     st == 1 && opens($0, BASE) { st = 2; next }
     (st == 1 || st == 2) && $0 == MID { st = 3; next }
     st == 3 && opens($0, CLOSE) {
       st = 0
-      nb = 0; okeep = 0
-      for (w in bw) { nb += bw[w]; okeep += (bw[w] < ow[w] + 0) ? bw[w] : ow[w] + 0 }
+      # Any line the base side left where the block was makes the hunk a rewrite.
+      if (olines > 0) next
+      nb = 0
+      for (w in bw) nb += bw[w]
       if (nb < MINW) next
       if (nb > WPL * bfull) next
-      if (okeep * 100 > MAINMAX * nb) next
       moved = 0; counted = 0; probe = ""
       for (i = 1; i <= blines; i++) {
         x = trim(B[i]); if (length(x) < 8) continue
         counted++; if (x in added) moved++
-        # The longest line the base side dropped names the commit that dropped
+        # The longest line of the deleted block names the commit that deleted
         # it (git log -S). A tab would not survive the evidence line.
-        if (!(x in olist) && index(x, "\t") == 0 && length(x) > length(probe)) probe = x
+        if (index(x, "\t") == 0 && length(x) > length(probe)) probe = x
       }
       if (counted > 0 && moved * 100 > MOVMAX * counted) next
-      printf "%s\t%s\t%d lines, %d%% kept by the base\t%s\n", (olines == 0 ? "deleted-block" : "rewritten-block"), path, blines, int(okeep * 100 / nb), probe
+      printf "deleted-block\t%s\t%d lines\t%s\n", path, blines, probe
       next
     }
-    st == 1 { x = trim($0); if (x != "") { olines++; olist[x] = 1 }; tally($0, ow); next }
+    st == 1 { if (trim($0) != "") olines++; next }
     st == 2 { blines++; B[blines] = $0; if (trim($0) != "") bfull++; tally($0, bw); next }
   '
 }
@@ -354,7 +357,6 @@ brief() { # <label> <branch> <target> <anchor> <anchor-title> <head> <base> <pr>
   local where landed more retire
   where=$(printf '%s\n' "$evidence" | awk -F'\t' -v t="$target" '
     $1 == "deleted-block"        { n++; split($3, s, " "); if (n <= 5) printf "- %s: %s deleted a %s-line block this branch edits\n", $2, t, s[1] }
-    $1 == "rewritten-block"      { n++; split($3, s, " "); if (n <= 5) printf "- %s: %s rewrote a %s-line block this branch edits\n", $2, t, s[1] }
     $1 == "deleted-file"         { n++; if (n <= 5) printf "- %s: %s deleted this file, which this branch edits\n", $2, t }
     $1 == "duplicate-definition" { n++; if (n <= 5) printf "- %s: both sides now define %s\n", $2, $3 }
     END { if (n > 5) printf "- and %d more\n", n - 5 }')
@@ -363,7 +365,7 @@ brief() { # <label> <branch> <target> <anchor> <anchor-title> <head> <base> <pr>
   more=""; [ -n "$title" ] && more=" ($title)"
   if [ -n "$pr" ]; then retire="pr-dispose.sh closes the PR and disposes of the anchor"; else retire="bead-rehome.sh disposes of the anchor"; fi
   cat <<BRIEF
-$label may be moot: a change already on $target deleted or rewrote code it edits
+$label may be moot: a change already on $target deleted code it edits or defined a name it also defines
 
 $label$more conflicts with $target, and the conflict is not drift. Bringing the branch current would mean either undoing what landed or rebuilding the branch on top of it. That is a decision about whether this work is still needed, so no merge-in rework was sent.
 
@@ -446,7 +448,7 @@ hold() {
     echo "$PROG: $anchor — $label looks superseded, but no supersession gate is open (a recent moot or benign ruling answers it); dispatching the ordinary merge-in child"
     return 1
   fi
-  echo "$PROG: $anchor — $label conflicts with '$target' because a landed change deleted or rewrote code it edits; filed decision $vid, no rework dispatched"
+  echo "$PROG: $anchor — $label conflicts with '$target' because a landed change deleted code it edits or defined a name it also defines; filed decision $vid, no rework dispatched"
   return 0
 }
 
