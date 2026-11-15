@@ -196,6 +196,15 @@ yet. Each remaining difference names its reason and what ends it:
   nothing escalated. What holds the close is no fact a run can change, so a
   retry alone leaves a landed merge holding its work with no one told. This
   ends when Gas Town's command escalates a close it cannot make.
+- **One read a pass watches every PR.** The landing order reads every PR the
+  city owns in a repository in one GitHub request a pass, and reads a PR in full
+  only when that request shows its feedback moved or the PR reads ready. Gas
+  Town's command reads each pending PR by its URL at each find-work and writes
+  the check on the record each time. The city's readers of GitHub share one
+  allowance, and a pass whose cost follows the number of PRs cannot watch them
+  all every few minutes. A pass that finds nothing changed leaves the record as
+  it is, so `pr_last_checked_at` moves only when the order writes the record. No
+  end is planned.
 - **find-work reads waits.** It skips a bead something holds or whose branch
   another open bead works on, and takes a rework child before its anchor. Gas
   Town takes any bead assigned to the refinery. Two writers on one branch would
