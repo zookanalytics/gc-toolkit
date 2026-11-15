@@ -140,7 +140,8 @@ What each noun owns:
   with the store's record lock that each writer of the record takes, and the
   GitHub read the landing order saves on that bead at each check. The read is
   GitHub's facts about the PR at one head, over which the evaluator's rule
-  decides without reading GitHub, and it holds no answer. It starts
+  decides without reading GitHub, and it holds no answer. The read stands on
+  its warrant ([warrants.md](warrants.md#saved-github-read)). The noun starts
   from Gas City's own PR concept. Gas Town's refinery opens a PR
   with a title and a body taken from its bead, Gas City's PR monitor and
   `gc github pr backfill` read a PR's readiness when something runs them, and

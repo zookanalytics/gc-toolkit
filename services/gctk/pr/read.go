@@ -76,7 +76,8 @@ var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*GitHubRead](),
 		"answer. The pr evaluator decides over it for a display, as current only while it names the record's "+
 		"repository and number, its head is the head the store holds (observed_pr_head_sha on a changed head, "+
 		"pr_head_sha otherwise) and its since is the bead's pr_provenance_since. Absent or not current, "+
-		"GitHub's side of the PR reads as unread.")
+		"GitHub's side of the PR reads as unread.",
+	ledger.Warrant("saved-github-read"))
 
 // FromStore answers what Ready answers for the bead's PR, over the GitHub read
 // the landing order saved on the bead in place of a live one: it reads the
