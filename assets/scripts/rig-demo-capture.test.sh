@@ -33,7 +33,7 @@ trap 'rm -rf "$TMPD" "$ETMP"' EXIT
 # which is why every happy case either sets $SPRINTSHOW_BIN or puts the
 # resolution stubs on PATH.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
-for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat env readlink; do
+for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat env readlink awk; do
   p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
   ln -s "$p" "$FARM/$c"
 done
@@ -264,6 +264,64 @@ ok "nothing is captured" "[ ! -e '$OUT' ]"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --port 4321 --cwd "$SITE")"; rc=$?
 ok "--port with --serve exits 2" "[ '$rc' = 2 ]"
 has "--port names the --serve-dir server's port" "$out" "it says --port is the --serve-dir server's"
+
+# A terminal script declares **Terminal:** among its head lines and drives a
+# shell in the engine's own terminal.
+TSCRIPT="$TMPD/terminal.md"
+printf '# Demo: a report\n\n**Terminal:** 100x30\n\n## Steps\n\n1. **The report prints**\n   `run true`\n' >"$TSCRIPT"
+echo "# a terminal script records with no app target, linted and captured in the sandbox, and its shell starts in --cwd"
+out="$(run -- --script "$TSCRIPT" --output "$OUT" --cwd "$SERVE_DIR")"; rc=$?
+ok "a terminal script with no app target exits 0" "[ '$rc' = 0 ]"
+ok "the clip exists and is non-empty" "[ -s '$OUT' ]"
+has "captured $OUT" "$out" "it reports the captured clip"
+RL="$(cat "$RUNLOG")"
+has "run $TSCRIPT" "$RL" "it records the terminal script"
+has "--cwd $SERVE_DIR" "$RL" "its shell starts in --cwd"
+for f in --serve-dir --serve --base-url --port; do hasnt "$f " "$RL" "the engine is given no $f"; done
+has "sandbox-exec $STUB lint $TSCRIPT" "$(cat "$SANDBOX_LOG")" "it lints the terminal script inside the sandbox"
+has "sandbox-exec $STUB run $TSCRIPT" "$(cat "$SANDBOX_LOG")" "and records it inside the sandbox"
+out="$(run -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+ok "a terminal script with no --cwd exits 0" "[ '$rc' = 0 ]"
+hasnt "--cwd" "$(cat "$RUNLOG")" "its shell starts where the capture runs"
+out="$(run LINT_RC=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+ok "a terminal script the linter rejects exits 1" "[ '$rc' = 1 ]"
+ok "and nothing is recorded" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+out="$(run RUN_NOFILE=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+ok "a terminal capture that leaves no clip exits 1" "[ '$rc' = 1 ]"
+has "does not exist" "$out" "it catches the silent non-delivery"
+out="$(run RUN_FAILED=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+ok "a terminal clip with a failed proof exits 3" "[ '$rc' = 3 ]"
+
+echo "# a terminal script takes no app target and no --port -> exit 2, before anything is linted"
+for args in "--serve-dir $SERVE_DIR" "--serve true" "--base-url https://preview.example.com" "--port 4321"; do
+  # shellcheck disable=SC2086 # each case is a flag and a value without blanks
+  out="$(run -- --script "$TSCRIPT" --output "$OUT" $args)"; rc=$?
+  ok "a terminal script with ${args%% *} exits 2" "[ '$rc' = 2 ]"
+  has "is a terminal script, which runs in the engine's own terminal" "$out" "it says a terminal script takes no ${args%% *}"
+  ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
+done
+
+echo "# the engine's rule for a terminal script: **Terminal:** in any case, among the lines above the first ## heading"
+LSCRIPT="$TMPD/lower.md"
+printf '# Demo: lower\n\n   **terminal:**\n\n## Steps\n\n1. **The report prints**\n   `run true`\n' >"$LSCRIPT"
+out="$(run -- --script "$LSCRIPT" --output "$OUT")"; rc=$?
+ok "an indented, lowercase **terminal:** declares a terminal script" "[ '$rc' = 0 ]"
+PSCRIPT="$TMPD/late.md"
+printf '# Demo: late\n\n**Start:** `/`\n\n## Notes\n\n**Terminal:** 80x24\n\n## Steps\n\n1. **It opens**\n' >"$PSCRIPT"
+out="$(run -- --script "$PSCRIPT" --output "$OUT")"; rc=$?
+ok "a **Terminal:** line below a ## heading leaves a page script, which needs its app (exit 2)" "[ '$rc' = 2 ]"
+has "exactly one of --serve-dir" "$out" "it asks for the page's app target"
+USCRIPT="$TMPD/unreadable.md"
+cp "$SCRIPT" "$USCRIPT" && chmod 000 "$USCRIPT"
+if [ -r "$USCRIPT" ]; then
+  ok "a script no read can be refused to here, where the user reads every file, so its case does not run"
+else
+  out="$(run -- --script "$USCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+  ok "a script whose head lines do not read exits 1" "[ '$rc' = 1 ]"
+  has "could not read the head lines of '$USCRIPT'" "$out" "it says the lines that name its surface did not read"
+  ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
+fi
+chmod 600 "$USCRIPT"
 
 echo "# fail closed: lint rejects the script -> exit 1, no capture"
 out="$(run LINT_RC=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
