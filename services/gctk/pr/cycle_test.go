@@ -169,10 +169,16 @@ func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) 
 	if got := asks(d.github); !slices.Equal(got, []string{"MarkReady PR_7 "}) || d.pr.Facts.IsDraft {
 		t.Fatalf("asked %v, the PR a draft %v", got, d.pr.Facts.IsDraft)
 	}
+	if !ofRead(t, d, head).Draft {
+		t.Fatal("the ready transition saved a read made after it, not the draft the run read")
+	}
 	o := d.once(t)
 	is(t, o, pr.ActChecked)
 	if !strings.Contains(o.Detail, "check-pending") {
 		t.Fatalf("the PR merged before its checks reported: %s", o.Detail)
+	}
+	if ofRead(t, d, head).Draft {
+		t.Fatal("the check after the ready transition saved the PR as a draft")
 	}
 	d.pr.Suites = map[string][]gh.CheckSuite{head: {{ID: 1, Runs: []gh.CheckRun{passed("test")}}}}
 	is(t, d.once(t), pr.ActRequested)
@@ -227,6 +233,7 @@ func TestAReadyTransitionStoppedBetweenItsStepsFinishesFromWhereThePRStands(t *t
 	d.pr.Facts.IsDraft = true
 	d.github.Fail["MarkReady"] = errors.New("gh: error connecting to api.github.com")
 	is(t, d.once(t), pr.ActRetry)
+	ofRead(t, d, head)
 	delete(d.github.Fail, "MarkReady")
 	is(t, d.once(t), pr.ActReadied)
 	e := newCycle(t)
@@ -510,7 +517,9 @@ func TestAWithdrawalOnAHeadSentBackToTheRefineryKeepsItsRecordMarked(t *testing.
 	id := d.withdraw(t, head)
 	is(t, d.once(t), pr.ActRequeued)
 	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
+	ofRead(t, d, later)
 	is(t, d.once(t), pr.ActChecked)
+	ofRead(t, d, later)
 	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
 	is(t, d.once(t), pr.ActSettled)
 	if status(t, d, id) != "closed" || d.row(t).Status != "open" {

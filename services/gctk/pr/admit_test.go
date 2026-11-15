@@ -160,7 +160,9 @@ func TestAHeadValidatedWithNoResultGetsOneRunUnderOverlappingPasses(t *testing.T
 	if got := d.runs.vars[0]; !maps.Equal(got, want) {
 		t.Fatalf("the run was poured with %v, want %v", got, want)
 	}
+	ofRead(t, d.land, head)
 	is(t, d.once(t), pr.ActChecked)
+	ofRead(t, d.land, head)
 	if n := d.runs.count(); n != 1 {
 		t.Fatalf("the attached run did not keep the next run from pouring: %d runs", n)
 	}
@@ -185,6 +187,8 @@ func TestAHeadValidatedWithNoResultGetsOneRunUnderOverlappingPasses(t *testing.T
 // A run that ended without a result is poured again, and when the second at
 // the same head ends without one too, the order asks a person through a
 // review-run-failed gate naming both runs and how each ended, and pours none.
+// A gate that does not file is filed by the next run, and each of these checks
+// saves the GitHub read it made.
 func TestARunThatEndedWithoutAResultIsPouredAgainAndTheSecondFailureGetsTheGate(t *testing.T) {
 	d := newAdmit(t)
 	is(t, d.once(t), pr.ActPoured)
@@ -194,8 +198,13 @@ func TestARunThatEndedWithoutAResultIsPouredAgainAndTheSecondFailureGetsTheGate(
 		t.Fatal("the first failure asked a person")
 	}
 	d.end(t, "tk-run2", "canceled", "2026-11-12T09:20:00Z")
+	d.gates.err = errors.New("human-gate: could not read the bead's gates")
+	is(t, d.once(t), pr.ActRetry)
+	ofRead(t, d.land, head)
+	d.gates.err = nil
 	o := d.once(t)
 	is(t, o, pr.ActExcepted)
+	ofRead(t, d.land, head)
 	if !gated(d, "review-run-failed") || d.runs.count() != 2 {
 		t.Fatalf("the second failure filed %v and poured %d runs, want the gate and two runs", d.gates.list(), d.runs.count())
 	}
@@ -390,6 +399,7 @@ func TestADraftWithAnOpenAskThatNothingHoldsIsNotMarkedReady(t *testing.T) {
 	a := d.ask(t, "Answer the reviewer's comment on the flag.")
 	d.runs.err = errors.New("gc formula cook: exit 1: the store did not answer")
 	is(t, d.once(t), pr.ActRetry)
+	ofRead(t, d.land, head)
 	if slices.ContainsFunc(d.github.Asks(), func(x ghfake.Ask) bool { return x.Method == "MarkReady" }) {
 		t.Fatalf("a draft with an open ask that nothing holds was marked ready: %v", asks(d.github))
 	}
