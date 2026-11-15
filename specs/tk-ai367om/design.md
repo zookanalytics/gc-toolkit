@@ -420,8 +420,8 @@ Until a rig cuts over:
 - **The sitting says when.** It tells the operator when its stay would come back,
   and recommends ending at the hand-off, with what was agreed written into the
   work's brief in full, when that is after the merge. That is tk-lv4r5mv's rule,
-  built on its branch and not yet landed, and it stands for those rows until the
-  rig's cutover.
+  which landed on main in #1523 after this design read main, and it stands for
+  those rows until the rig's cutover.
 - **How it tells the path.** A PR's bead whose merge result is on the record is on
   the new path (`pr.OnRecord`, which `gctk pr status` reads). For work that has
   no PR yet, the rig's switch tells it, read as `refinery-lib.sh` reads the
@@ -461,8 +461,9 @@ comes back, by section 1's table, with the old path's rows until a rig cuts over
   check judges a change to a stay against. Everything else stays in the pages
   above, because the file states goals and surfaces, not features.
 
-tk-lv4r5mv writes these passages for the old path. The words unit waits for it to
-land and rewrites them once (section 9).
+tk-lv4r5mv wrote these passages for the old path, and they are on main. The words
+unit rewrites them once, on the effort's branch brought current with main
+(sections 9 and 10).
 
 ## 8. The surface this adds
 
@@ -497,7 +498,7 @@ waits a stay registers, which nothing there marks ready.
 |---|---|---|---|
 | 1. The reading rule, the hold and the wake | First, a probe in a scratch city: a session wait with no `--sleep` on a sleeping session, marked ready with `gc wait ready`, wakes the session and delivers its note, and an attach to the sleeping session cancels it. Then, in the pr domain: the stays on a bead, read from the store (section 2); each stay's reading at a head, read from the PR's comments by the marker; `readyBar`'s clause; in the landing order's pass, the wake through the Gas City adapter's `gc session list --json`, `gc wait list --json` and `gc wait ready`, which marks only the waits of the stays that owe their reading; `gctk pr status --json`'s `reading` key; `prstatus` renders a stay that owes its reading as the city's work and a stay in progress as a person's move. Tests, one per row of section 1's table: the hold and the wake for new work through a `blocks` edge, for a rework and for the subject through an open input convoy, nothing for a closed convoy or for a conversation that tracks the bead and stays for other work, and nothing for work with no PR; a stay in progress holds the draft and is not woken; every stay's reading at the head lets the PR leave draft; a reading at an earlier head does not; a person's toggle to ready is left alone; a wait already ready is not marked again; a wait another session registered on the bead is left alone; a store or GitHub read that fails leaves the draft and is retried. | tk-1tfzr71.22 | unit 2 |
 | 2. The stay and the entry | `converse-signoff.sh --stay`: the session wait on each PR's bead; the subject's convoy wait and its refusals, from PR #1515's head with its open-convoy fix; the rework stay's convoy wait on a PR on the record, and the ask when the anchor has no open convoy; on the old path, the waits as they are; a sign-off that ends a stay cancels its waits. `converse-entry.sh`: `ready` with `READING` and `READ`, read from `gctk pr status --json`; `WAIT` on `waiting`; the restarts of section 3's return. Tests, one per row: what the sign-off writes for each, the entry's answer before, during and after a reading, a second wake at a head already read, a missing wait after an attach and at a `ready` wake, a return cut short after it registered its wait again, and a restart between each two steps of the return. | unit 1 | unit 3 |
-| 3. The words | The converse prompt's "End or stay?" and its entry table, and its seven renders; `converse-stay`, `converse-settle` and `converse-hold` (section 7); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; the skill-needs pins of the table and of each example's call through the real parsers; `docs/architecture.md` where it describes the stay. | unit 2; tk-lv4r5mv | the landing |
+| 3. The words | The converse prompt's "End or stay?" and its entry table, and its seven renders; `converse-stay`, `converse-settle` and `converse-hold` (section 7); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; the skill-needs pins of the table and of each example's call through the real parsers; `docs/architecture.md` where it describes the stay. | unit 2 | the landing |
 
 The initiative's "Done when" asks for a test of each row of the table. Units 1
 and 2 hold the rows in their suites, and unit 3 pins them in the words.
@@ -514,14 +515,14 @@ and 2 hold the rows in their suites, and unit 3 pins them in the words.
   the asks this builds on. Once tk-1tfzr71.22 has landed on main, the effort's
   branch is brought current with main before unit 1 builds
   (`skills/work/integration-effort.md`, "Bring the effort's branch current").
-- Unit 3 waits on tk-lv4r5mv, which rewrites the same passages for the old path.
+- Unit 3 needs no edge onto tk-lv4r5mv, which has closed. The passages it wrote
+  for the old path reach the effort's branch when that branch is brought current
+  with main before unit 1, and unit 3 rewrites them there.
 - A note on tk-1tfzr71.78, gc-toolkit's cutover: among the rig's first PRs on the
   new path, watch one stay through a round, from the hold and the wake to the
   reading and the PR leaving draft.
 - A note on tk-35ob5gq, the city board's reading of a stay: the city board reads a
   stay that owes its reading by the same facts, once unit 1 has added them.
-- A note on tk-lv4r5mv: unit 3 rewrites its passages once the review path brings
-  a PR stay back at readiness.
 
 ## 11. Facts this design rests on
 
