@@ -130,6 +130,9 @@ func TestTheChangeTriageReads(t *testing.T) {
 			review.Change{From: r.h1, Head: r.h2, Why: review.ChangeRepair}},
 		{"a passed head off the branch", []review.Result{{Head: r.side, Target: target, Passed: true}}, r.h1,
 			review.Change{Head: r.h1, Why: review.ChangeWhole}},
+		{"a passed head the clone does not hold, which no origin serves", []review.Result{
+			{Head: strings.Repeat("ab", 20), Target: target, Passed: true}}, r.h2,
+			review.Change{From: r.h1, Head: r.h2, Why: review.ChangeRepair}},
 	}
 	for _, c := range cases {
 		got, err := review.ChangeAt(run, c.results, repos, c.head)

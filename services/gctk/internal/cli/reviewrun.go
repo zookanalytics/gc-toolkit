@@ -193,10 +193,9 @@ blocking finding (a P0, a P1 or an ungraded one) and a request-changes that
 carries none, a demo verdict with no visual decision or one its rules refuse
 (none only with an approve; a fallback, screenshot or video, costlier than the
 modality delivered), a visual on another check's verdict, a ruling of a finding
-no lane
-raised or of an ask the round cannot take, a finding or an ask left unruled, a
-must-fix with no fixing commit, a commit on a ruling that changes no code, a
-question with no gate, and a fix for an ask an earlier round of the run
+no lane raised or of an ask the round cannot take, a finding or an ask left
+unruled, a must-fix with no fixing commit, a commit on a ruling that changes no
+code, a question with no gate, and a fix for an ask an earlier round of the run
 declined. A correctness lane's approve on a change that edits its own review
 guidance (review-checks.toml, docs/review-*.md) is refused until needs_you
 names the edit for the person who approves the merge, and when the paths

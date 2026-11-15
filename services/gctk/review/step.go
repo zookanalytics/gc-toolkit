@@ -184,8 +184,11 @@ func (c Change) String() string {
 // target, else the run's own repair since its first head when the head is not
 // the first, else the whole PR. Results are the entries on the bead that owns
 // the PR. repos are the checkouts that can answer which commit descends from
-// which; a commit none of them holds is fetched from origin by its id, and a
-// read that fails is an error, because a wrong change is a wrong triage.
+// which; the head is fetched from origin by its id when none of them holds it,
+// and a read that fails is an error, because a wrong change is a wrong triage.
+// A clone that holds the head holds every commit behind it, so a passed head
+// that clone does not hold is not behind the head, such as one a rewrite of
+// the branch left behind, which origin may no longer serve.
 func ChangeAt(run *Run, results []Result, repos []string, head string) (Change, error) {
 	if !git.IsObjectID(head) {
 		return Change{}, fmt.Errorf("the head %q is not a full object name", head)
@@ -204,7 +207,7 @@ func ChangeAt(run *Run, results []Result, repos []string, head string) (Change, 
 		var behind []string
 		for _, p := range passed {
 			if !git.HasCommit(repo, p) {
-				_ = git.FetchCommit(repo, p)
+				continue
 			}
 			ok, err := ancestor(repo, p, head)
 			if err != nil {
