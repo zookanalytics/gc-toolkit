@@ -165,42 +165,6 @@ func TestLandingFilesItsGatesThroughTheRuntime(t *testing.T) {
 	}
 }
 
-// The landing order writes a PR's status labels through the runtime adapter:
-// the pack's pr-status-label.sh, from GCTK_SCRIPTS_DIR, gets its verb, the
-// bead a reconcile derives for, the PR's number, its repository on its host,
-// and the labels the run's read found, a lone comma for a PR that carries
-// none. A call the script does not complete is an error carrying its words.
-func TestLandingWritesThePRsLabelsThroughThePacksWriter(t *testing.T) {
-	scripts := t.TempDir()
-	log := filepath.Join(scripts, "calls")
-	stub := "#!/bin/sh\n{ for a in \"$@\"; do printf '%s\\n' \"$a\"; done; echo; } >> '" + log + "'\n" +
-		"[ \"${STUB_EXIT:-0}\" = 0 ] || echo 'pr-status-label: could not write PR#7s labels' >&2\nexit \"${STUB_EXIT:-0}\"\n"
-	if err := os.WriteFile(filepath.Join(scripts, "pr-status-label.sh"), []byte(stub), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GCTK_SCRIPTS_DIR", scripts)
-	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/refinery")
-	if err != nil {
-		t.Fatal(err)
-	}
-	url := "https://github.com/acme/widgets/pull/7"
-	if err := l.Labels.Reconcile("tk-1", url, []string{"status: working", "bug"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := l.Labels.Clear(url, nil); err != nil {
-		t.Fatal(err)
-	}
-	want := "reconcile\n--anchor\ntk-1\n--pr\n7\n--repo\ngithub.com/acme/widgets\n--current-labels\nstatus: working,bug\n\n" +
-		"clear\n--pr\n7\n--repo\ngithub.com/acme/widgets\n--current-labels\n,\n\n"
-	if raw, _ := os.ReadFile(log); string(raw) != want {
-		t.Fatalf("pr-status-label.sh got\n%s\nwant\n%s", raw, want)
-	}
-	t.Setenv("STUB_EXIT", "2")
-	if err := l.Labels.Clear(url, nil); err == nil || !strings.Contains(err.Error(), "could not write PR#7s labels") {
-		t.Fatalf("a call the script did not complete read as %v", err)
-	}
-}
-
 // auditClone is a clone at $GC_RIG_ROOT that carries a rendered seed audit
 // beside its pack.toml, with stubs of the pack's render-seed-audit.sh and
 // seed-audit-reaudit.sh in GCTK_SCRIPTS_DIR that log their arguments to

@@ -232,13 +232,11 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 # this declaration reads no closed bead. So the pair answers the reason on an
 # open or blocked bead whose marker is true, where the reason waits on the
 # order's next run and not on a bead. On any other status, such as after a
-# claim or a deferral, or at any other value, no run judges the record, so the
+# claim or a deferral, or at any other value, no run reads the record, so the
 # reason holds and the bead owes its edge, as it does once the order clears the
 # marker. The order clears an exception's marker only after it files the
 # exception's human gate, and the edge an exception or a refinery park owes is
-# the human gate filed with it. A later run that makes the call of the label's
-# writer the exception still owes (pr_status_label_owed) writes neither the
-# bead's status nor its reason. doctor/check-wait-is-an-edge/run.test.sh holds
+# the human gate filed with it. doctor/check-wait-is-an-edge/run.test.sh holds
 # the pair's statuses and value to that code.
 settled_keys = ["gc.takeaway=gc.takeaway_settled", "blocked_reason=open,blocked:pr_reconcile_pending=true"]
 # merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a

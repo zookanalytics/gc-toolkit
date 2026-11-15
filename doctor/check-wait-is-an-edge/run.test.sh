@@ -712,12 +712,9 @@ PR_GO="$HERE/../../services/gctk/pr"
 due_body=$(awk '/^func \(l Landing\) due\(/ { f = 1 } f && /^}/ { exit } f' "$PR_GO/landing.go")
 due_statuses=$(printf '%s\n' "$due_body" | sed -n 's/^[[:space:]]*case \(".*"\):$/\1/p' \
   | grep -o '"[a-z_]*"' | tr -d '"' | grep -vx closed | sort | paste -sd, -)
-# due() keeps a record where record.Read reads it marked, which is what makes
-# record.Read's value the pair's. It also keeps a record that owes the call of
-# the label's writer, which is no part of the pair: the order sets that key
-# only once the exception's human gate is filed, and that gate is the edge the
-# bead's blocked_reason owes.
-{ grep -q 'record\.Read(r)' <<< "$due_body" && grep -q '!(rec\.Marked || rec\.LabelOwed)' <<< "$due_body"; } || due_statuses=""
+# due() keeps a record only where record.Read reads it marked, which is what
+# makes record.Read's value the pair's.
+{ grep -q 'record\.Read(r)' <<< "$due_body" && grep -q '!rec\.Marked' <<< "$due_body"; } || due_statuses=""
 marker_key=$(sed -n 's/^[[:space:]]*pendingKey *= *ledger\.Declare("\([^"]*\)".*/\1/p' "$PR_GO/record/keys.go")
 marked_value=$(sed -n 's/.*Marked: *get(pendingKey) *== *"\([^"]*\)".*/\1/p' "$PR_GO/record/record.go")
 record_pair() { # <entry> — blocked_reason's pair, its statuses sorted

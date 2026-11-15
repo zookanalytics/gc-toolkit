@@ -60,9 +60,7 @@ func gh(args ...string) ([]byte, error) {
 // GitHub's merge state, such as CLEAN, BLOCKED or DIRTY. Repository is the base
 // repository, owner/name. MergedAt and MergeCommit are set once it merged.
 // InMergeQueue is whether it is in a merge queue, and MergeQueueEnabled whether
-// its base requires one (isMergeQueueEnabled). Labels names the labels the PR
-// carries, the first hundred GitHub lists, which is every label of a PR that
-// carries no more.
+// its base requires one (isMergeQueueEnabled).
 type PullRequest struct {
 	ID                string
 	Number            int
@@ -78,7 +76,6 @@ type PullRequest struct {
 	MergeCommit       string
 	InMergeQueue      bool
 	MergeQueueEnabled bool
-	Labels            []string
 }
 
 // Review is one review of a PR. State is APPROVED, CHANGES_REQUESTED,
@@ -152,8 +149,7 @@ const (
 	pullQuery = `query($owner:String!,$name:String!,$number:Int!){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
     id number url state isDraft headRefName headRefOid baseRefName mergeStateStatus
-    repository{nameWithOwner} mergedAt mergeCommit{oid} isInMergeQueue isMergeQueueEnabled
-    labels(first:100){nodes{name}}}}}`
+    repository{nameWithOwner} mergedAt mergeCommit{oid} isInMergeQueue isMergeQueueEnabled}}}`
 
 	// A merge request pinned to the head the caller judged: GitHub merges, or
 	// adds the PR to its base's merge queue, only while the PR's head is that
@@ -222,11 +218,6 @@ func (c *Client) PullRequest(repo string, number int) (*PullRequest, error) {
 				} `json:"mergeCommit"`
 				IsInMergeQueue      bool `json:"isInMergeQueue"`
 				IsMergeQueueEnabled bool `json:"isMergeQueueEnabled"`
-				Labels              *struct {
-					Nodes []struct {
-						Name string `json:"name"`
-					} `json:"nodes"`
-				} `json:"labels"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
 	}
@@ -254,12 +245,6 @@ func (c *Client) PullRequest(repo string, number int) (*PullRequest, error) {
 	}
 	if p.MergeCommit != nil {
 		out.MergeCommit = p.MergeCommit.Oid
-	}
-	if p.Labels == nil {
-		return nil, fmt.Errorf("github: the read of %s#%d holds no labels", repo, number)
-	}
-	for _, l := range p.Labels.Nodes {
-		out.Labels = append(out.Labels, l.Name)
 	}
 	return out, nil
 }

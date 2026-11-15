@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the saved GitHub read and the label's writer
-description: The Gas City, Gas Town, bd and GitHub primitives searched for the surface tk-1tfzr71.134's design adds, namely the GitHub read the landing order saves on each PR's bead, the condition a display names when that read is not of the PR's head, the landing order's write of the PR's status label, and the key through which an exception owes a call of that label that did not land. It says what each search found at a named upstream commit and why none covers the need. Read it when building or reviewing one of the design's units, or when the arch check asks for the search.
+description: The Gas City, Gas Town, bd and GitHub primitives searched for the surface tk-1tfzr71.134's design adds, namely the GitHub read the landing order saves on each PR's bead, the condition a display names when that read is not of the PR's head, and the landing order's write of the PR's status label. It says what each search found at a named upstream commit and why none covers the need. Read it when building or reviewing one of the design's units, or when the arch check asks for the search.
 ---
 
 # Gas City search for the saved GitHub read and the label's writer
@@ -126,49 +126,7 @@ What unit 3 composes: the pack's one writer of those labels,
 and writes only a label that differs, called by the landing order through
 gctk's runtime adapter at each check, with the PR's labels from the check's own
 read of the PR. The read gains one field, the PR's labels, and no call of its
-own. The clear at a merge or a close is that script's `clear` verb. A clear
-that did not land at a merge is made again by a later run while the bead keeps
-the record's marker, which Gas Town's record already keeps while a
-reconciliation is owed (`pr_reconcile_pending`). A call that did not land at an
-exception is owed through a key of its own, for the reasons the next section
-gives.
-
-## A call of the label's writer an exception still owes (unit 3)
-
-Read on 2026-11-15 at `gastownhall/gascity` main e9a628c500, at
-`gastownhall/gascity-packs` main 0f07496d2f and at `gastownhall/beads` main
-8cdfa796a8f5.
-
-The need: when an exception's call of the label's writer does not land after
-its gate files, a later run makes that call, and that run reads nothing else of
-a record a person now decides. It asks for no gate, since a gate the person
-cleared would be filed again, and it does not judge the bead's status or
-result, since a close the person made as the gate told them would be reopened.
-
-- **Gas Town's record** clears `pr_reconcile_pending` at every exception, in the
-  write after the one that records it (`quarantine_terminal_pr` in
-  `gastown/commands/pr-merge-reconcile/run.sh`, 390-403), and keeps it past a
-  close only through a verified merge's cleanup (776-779). A call owed after an
-  exception's gate files cannot ride the marker without that marker meaning
-  something Gas Town's does not, and a marker kept there sends the call through
-  each path that judges the record.
-- **Gas City** retries no failed order ("No retry on dispatch failure" in
-  `engdocs/architecture/orders.md`), and `[steps.retry]` retries a formula
-  step's attempt within its run (section 3.2 of
-  `docs/reference/specs/formula-spec-v2.md`). Its persisted queues carry their
-  own deliveries alone: the deferred-nudge queue holds nudges for sessions
-  (`internal/nudgequeue`), and the external messaging fabric records where a
-  conversation's messages go (`internal/extmsg`). Its usage facts retry a write
-  that failed with a marker of their own on the session bead
-  (`usage_compute_emitted_at`, `emitComputeFactForBead` in
-  `cmd/gc/usage_compute.go`).
-- **bd** has no outbox or retry queue in its Go sources. Its GitHub client
-  retries a request inside one call (`internal/github/client.go`), and a list
-  selects beads by one metadata key (`--has-metadata-key` in
-  `cmd/bd/list.go`).
-
-What the change composes: a bd metadata key on the bead,
-`pr_status_label_owed`, which the landing order's existing run lists with
-`--has-metadata-key` as it lists the marker, and the label's one writer. It
-adds no order, script or state of the bead. The key carries the warrant *Owed
-status label* in [warrants.md](../../docs/warrants.md#owed-status-label).
+own. The clear at a merge or a close is that script's `clear` verb. A call that
+did not land at a merge or an exception is made again by a later run while the
+bead keeps the record's marker, which Gas Town's record already keeps while a
+reconciliation is owed (`pr_reconcile_pending`).

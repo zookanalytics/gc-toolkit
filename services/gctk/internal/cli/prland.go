@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -39,12 +38,10 @@ const runYield = 200 * time.Millisecond
 // The run's bounds: how many records a run reads, and how long it starts new
 // ones. A record whose PR is open at the validated head costs about seven
 // seconds, measured on 2026-11-12: five for the PR's read and the evaluator's
-// six GitHub reads, and two for the store's reads and the write. Its call of the
-// label's writer adds under a second where the labels already stand as
-// derived, 0.72 seconds measured on 2026-11-15 in the order's environment.
-// Twenty of them fit inside the order's 300-second time limit with room for
-// GitHub answering at half that speed, and the budget starts none in the last
-// minute. A cycle over 50 open records then takes three runs.
+// six GitHub reads, and two for the store's reads and the write. Twenty of them
+// fit inside the order's 300-second time limit with room for GitHub answering
+// at half that speed, and the budget starts none in the last minute. A cycle
+// over 50 open records then takes three runs.
 const (
 	defaultRunCount  = 20
 	defaultRunBudget = 4 * time.Minute
@@ -98,21 +95,6 @@ feedback in each comment space and the review threads waiting on the city. A
 read that fails partway saves nothing, so the bead keeps the last whole read.
 The merge acts on the run's own read, never on the saved one.
 
-Each check that reads a PR then writes the PR's status: and held: labels
-through pr-status-label.sh, by the state its read found, given the labels that
-read found: reconcile for a PR open, which derives them as gctk pr status
-answers over the store, and clear for a PR merged or closed. A check's call
-runs once its write has landed, with the lock free. A merge's clear runs before
-the write that closes the bead, which keeps the marker until the clear lands,
-with why in pr_reconcile_error, so a later run reads the PR again and makes the
-call. An exception's call runs once its gate files, and the marker clears then
-whether or not the call lands, because a person decides the record from then
-on. A call that did not land is owed through pr_status_label_owed, with why in
-pr_reconcile_error: a later run reads the PR, makes the call and clears the
-key, and it asks for no gate and judges nothing else of the record. An
-exception whose check read no PR reads it for its labels, and a record whose
-URL names no PR in the rig's own repository gets none.
-
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the run fetched it, once the lock is free, in a clone
 that carries one (render-seed-audit.sh). The pages that no longer render as
@@ -124,9 +106,8 @@ It acts only on a bead it reads under the lock as carrying the marker and,
 unless the bead is closed, still assigned to the refinery --refinery names,
 with each write guarded on the status and assignee it read. A bead a release
 took from the refinery has its marker cleared and its PR named in a note, and
-nothing else written. It starts no record, and no call of the label's writer,
-past --budget. Each record's outcome prints on a line of its own, as <bead>
-<action>: <detail>.
+nothing else written. It starts no record past --budget. Each record's outcome
+prints on a line of its own, as <bead> <action>: <detail>.
 
 exit: 0 every record read was handled
       1 usage
@@ -247,9 +228,8 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 // at db, else the one gc routes the first of ids to, the record lock in that
 // store's .beads directory, GitHub through gh, the clone at $GC_RIG_ROOT else
 // the working directory, the pack's definition of feedback, loaded in that
-// clone, and the runtime adapter for human gates, for the PRs' status labels
-// and, where the clone carries one, for the seed audit, whose scripts run in
-// the clone.
+// clone, and the runtime adapter for human gates and, where the clone carries
+// one, the seed audit, whose scripts run in the clone.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -285,7 +265,6 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		},
 		Checkout: checkout{dir: dir},
 		Gates:    gates{rt: rt},
-		Labels:   labels{rt: rt},
 		Audit:    audit,
 		Wait:     recordLockWait,
 	}, nil
@@ -367,39 +346,6 @@ func (a seedAudit) Reaudit(branch, seenBy string, pages []string) (string, error
 		return "", fmt.Errorf("seed-audit-reaudit.sh: %s", why)
 	}
 	return res.Tail(), nil
-}
-
-// labels writes a PR's status: and held: labels through the runtime adapter,
-// which runs the pack's pr-status-label.sh from the scripts directory
-// GCTK_SCRIPTS_DIR names, pinned to the repository the PR's URL names, on its
-// host. It passes the labels the run's read found as --current-labels, a lone
-// comma for a PR that carries none, which the script reads as no label, so the
-// script reads none itself. A call the script does not complete is an error
-// carrying why: its exit and its last line, or why it did not run.
-type labels struct{ rt gascity.Runtime }
-
-func (l labels) Reconcile(bead, url string, current []string) error {
-	return l.call("reconcile", url, current, "--anchor", bead)
-}
-
-func (l labels) Clear(url string, current []string) error { return l.call("clear", url, current) }
-
-func (l labels) call(verb, url string, current []string, args ...string) error {
-	host, repo, number, ok := record.ParseURL(url)
-	if !ok {
-		return fmt.Errorf("pr-status-label.sh %s: %q is not a pull request's URL", verb, url)
-	}
-	carried := strings.Join(current, ",")
-	if carried == "" {
-		carried = ","
-	}
-	args = append([]string{verb}, args...)
-	args = append(args, "--pr", strconv.Itoa(number), "--repo", host+"/"+repo, "--current-labels", carried)
-	res := l.rt.Script("pr-status-label.sh", args...)
-	if f := res.Failure(); f != "" {
-		return fmt.Errorf("pr-status-label.sh %s on %s: %s", verb, url, f)
-	}
-	return nil
 }
 
 // gates files human gates through the runtime adapter, which runs the pack's

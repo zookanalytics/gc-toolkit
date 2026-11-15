@@ -284,19 +284,9 @@ the `blocked` status in one write, so a refinery that dies between them leaves
 an open bead that names its PR, never a blocked bead with half a record. The
 landing order reads a record whose marker is `true` while its bead is open,
 blocked or closed, and clears the marker once the record owes no further run:
-the bead closed on a verified merge once its PR's labels are written, met an
-exception whose human gate is filed, or went back to the refinery or was
-released from it. A clear of the PR's labels that a merge did not land keeps
-the marker, with why in `pr_reconcile_error`, so a later run reads the PR again
-and makes the call. An exception's record is a person's to decide once its gate
-files, so its marker clears then even when its call of the label's writer did
-not land, and the call is owed instead: `pr_status_label_owed` is `true`, with
-why in `pr_reconcile_error`. A later run reads such a bead for that call alone.
-It reads the PR the record names, makes the call by the state it finds and
-clears the key once the call lands, and it asks for no gate and neither judges
-nor writes the bead's status, so a gate the person cleared is not filed again
-and a bead the person closed stays closed. A bead at any other status, such as
-one claimed or deferred, keeps its marker or its owed call, and no run reads it.
+the bead closed on a verified merge, went back to the refinery or was released
+from it, or met an exception whose human gate is filed. A bead at any other
+status, such as one claimed or deferred, keeps its marker, and no run reads it.
 The marker is never a review or approval fact. On an open or blocked bead whose
 marker is `true`, the record's `blocked_reason` waits on the order's next run,
 and I1 reads that reason as answered (`settled_keys` in
@@ -829,17 +819,6 @@ anchor's `pr_url` names, so a write that records the key on an anchor with no
 `pr_url` records the live PR's url beside it, the one its writer validated
 against origin.
 
-On Gas Town's pending record, the landing order takes the labels off a PR its
-check finds merged or closed: before the write that records the merge and
-closes the bead, once the gate files at an exception, and once the write lands
-at a retry. When the clear at a merge does not land, the bead keeps the
-record's marker, `pr_reconcile_pending`, with why in `pr_reconcile_error`, and
-a later run reads the PR again, takes the labels off, and then clears the
-marker. When the call at an exception does not land, the marker clears all the
-same, because a person decides the record once its gate files, and the bead
-owes the call through `pr_status_label_owed`. A later run reads the PR again,
-makes the call and clears the key, reading nothing else of the record.
-
 An open human gate holds the anchor through its `blocks` edge onto it, read by
 `bd_human_gates` in `assets/scripts/bd-lib.sh`: the bead's `blocks` edges, kept
 to the gates whose await type is human. The merge pass's finalize gate
@@ -878,10 +857,7 @@ readied it, reads like any other PR.
 every call that derives one writes the other. `pr-open.sh` sets the labels when
 it opens a PR and when it records a draft ready, whether it flipped the draft or
 found it already ready, and `signoff.sh` re-derives them on each of the city's
-own verdicts. The landing order re-derives them at each check that finds a PR
-on Gas Town's pending record open, given the labels its read of the PR found:
-once the check's write has landed, and at an exception once its gate files, so
-the labels name the gate. A human's review moves them in the merge cadence's posture and
+own verdicts. A human's review moves them in the merge cadence's posture and
 feedback arms, in the pass that records the review. The posture arm re-derives
 the labels for an anchor whose posture value it changes: an approval, a comment,
 a change request, or a dismissal. The feedback arm re-derives them for an anchor
@@ -897,11 +873,9 @@ since its last visit, then rotates through the rest until its deadline, and a
 PR it does not reach waits for a later pass.
 
 Nothing re-derives the labels when a human gate or a blocker is filed or cleared,
-other than the gate the landing order files at an exception, and such a change
-does not put its anchor first in that walk. The labels follow it on the
+and such a change does not put its anchor first in that walk. The labels follow it on the
 next full pass that reaches the anchor: within one reconcile pass while the walk
 reaches every open PR, and after more passes when the deadline stops it short.
-A PR on the pending record also follows it at the landing order's next check.
 The labels likewise read the machine verdict and the thread count the last merge
 pass recorded, so they follow a new verdict, or a thread answered or resolved, on
 the next pass that derives them after the merge pass's visit. Every write is
