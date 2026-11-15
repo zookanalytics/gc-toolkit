@@ -14,13 +14,15 @@
 #   • verb dispatch + validation — open/react/takeaway routing and the
 #     fail-closed arg checks that reject a call before it reaches Dolt;
 #   • react wiring — react <id> is a thin front door over
-#     tools/gc-proactive.sh `sling`, on the codex-gated mr path;
+#     tools/gc-proactive.sh `sling`, which slings a run of mol-first-reaction
+#     on the bead at the rig's proactive pool;
 #   • the operator-surface contract — the script prints its own usage, and no
 #     operator-facing surface file advertises a phantom `gc helm` CLI.
 #
 # HERMETIC BY DESIGN. The write verbs resolve a rig through the tool's
 # GC_HELM_FIXTURE hook (a canned rigs.json under a temp dir), and react runs on
-# gc-proactive.sh's --dry-run path, so these assertions write NOTHING to Dolt
+# gc-proactive.sh's --dry-run path, whose refusals read a canned store in the
+# same dir (GC_PROACTIVE_FIXTURE), so these assertions write NOTHING to Dolt
 # and need no live city. An OPT-IN takeaway round-trip (GC_HELM_SMOKE_BEAD=<id>)
 # exercises the live write path on a bead the operator chooses — the fixture
 # never invents or closes a bead of its own.
@@ -53,6 +55,12 @@ absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac
 cat > "$FXDIR/rigs.json" <<'JSON'
 [{"name":"gc-toolkit","path":"/tmp/fx-gc-toolkit","prefix":"tk"}]
 JSON
+# The sling reads the subject's own row from beads.json before it slings, and
+# finds no run (no runs.json) and nothing holding it (no holds.json): an open,
+# unassigned bead nobody has decided on, which takes a first reaction.
+cat > "$FXDIR/beads.json" <<'JSON'
+{"tk-subj": {"title":"a subject nobody has decided on","issue_type":"task","status":"open","metadata":{}}}
+JSON
 
 echo "── hermetic: verb dispatch + fail-closed validation ──"
 has  "help lists the open verb"  "open"  "$("$TOOL" help 2>&1 || true)"
@@ -77,24 +85,24 @@ has    "usage documents the takeaway --release flag"           "--release"      
 NOTE_OUT="$("$TOOL" takeaway tk-x sometext --note whatever 2>&1 || true)"
 has    "the retired takeaway --note flag is now rejected as unknown" "unknown flag" "$NOTE_OUT"
 
-echo "── hermetic: react is the front-door over gc-proactive.sh sling (mr path, codex-gated) ──"
+echo "── hermetic: react is the front-door over gc-proactive.sh sling ──"
 # react <id> is a THIN wrapper over tools/gc-proactive.sh `sling` — it owns no
-# sling logic. Driven through the REAL gc-proactive.sh on its --dry-run path
-# (GC_PROACTIVE_FIXTURE makes that path echo the resolved command instead of
-# calling gc), so this proves the WIRING end-to-end: react → sling → files a
-# reaction bead tracking the subject, routed to the proactive pool.
+# sling logic. Driven through the REAL gc-proactive.sh on its --dry-run path,
+# which prints the gc sling it would run instead of running it, with its
+# refusals' reads answered by the canned store above, so this proves the
+# WIRING end-to-end: react → sling → a run of mol-first-reaction slung on the
+# subject at the rig's proactive pool.
 PROACTIVE_TOOL_REAL="$HERE/gc-proactive.sh"
 if [ -x "$PROACTIVE_TOOL_REAL" ]; then
     RX="$(GC_RIG=gc-toolkit GC_PROACTIVE_TOOL="$PROACTIVE_TOOL_REAL" GC_PROACTIVE_FIXTURE="$FXDIR" \
-          GC_HELM_FIXTURE="$FXDIR" "$TOOL" react tk-epic --dry-run 2>&1 || true)"
-    has    "react files a reaction bead"              "gc bd create"                    "$RX"
-    has    "react stamps the reaction subject"        "gc.reaction_subject"             "$RX"
+          GC_HELM_FIXTURE="$FXDIR" "$TOOL" react tk-subj --dry-run 2>&1 || true)"
+    has    "react slings a run of mol-first-reaction" "--on mol-first-reaction"         "$RX"
     absent "react no longer pins a merge path"        "--merge"                         "$RX"
-    has    "react targets the rig-qualified pool"     "gc-toolkit/gc-toolkit.proactive" "$RX"
-    has    "react passes the bead through to sling"   "tk-epic"                         "$RX"
+    has    "react targets the rig-qualified pool"     "gc sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive" "$RX"
+    has    "react passes the bead through to sling"   "tk-subj"                         "$RX"
     # --reason is accepted as operator intent but NOT forwarded (sling has none).
     RXR="$(GC_RIG=gc-toolkit GC_PROACTIVE_TOOL="$PROACTIVE_TOOL_REAL" GC_PROACTIVE_FIXTURE="$FXDIR" \
-           GC_HELM_FIXTURE="$FXDIR" "$TOOL" react tk-epic --reason "pick a backend" --dry-run 2>&1 || true)"
+           GC_HELM_FIXTURE="$FXDIR" "$TOOL" react tk-subj --reason "pick a backend" --dry-run 2>&1 || true)"
     has    "react surfaces the operator --reason"     "pick a backend"                  "$RXR"
     absent "react does NOT forward --reason to sling" "--reason"                        "$RXR"
     # Regression: react must SELF-SUPPLY GC_RIG so the sling can
@@ -107,12 +115,11 @@ if [ -x "$PROACTIVE_TOOL_REAL" ]; then
     # data change is needed. "rig-qualify" is the fail-closed die() phrase —
     # asserting it absent proves the guard never fired.
     RXNR="$(env -u GC_RIG GC_PROACTIVE_TOOL="$PROACTIVE_TOOL_REAL" GC_PROACTIVE_FIXTURE="$FXDIR" \
-            GC_HELM_FIXTURE="$FXDIR" "$TOOL" react tk-epic --dry-run 2>&1 || true)"
+            GC_HELM_FIXTURE="$FXDIR" "$TOOL" react tk-subj --dry-run 2>&1 || true)"
     has    "react self-supplies the rig (no GC_RIG → still rig-qualified)" \
-           "gc-toolkit/gc-toolkit.proactive" "$RXNR"
-    has    "react (no GC_RIG) still files a reaction bead"     "gc bd create"            "$RXNR"
-    has    "react (no GC_RIG) still stamps the subject"        "gc.reaction_subject"     "$RXNR"
-    has    "react (no GC_RIG) passes the bead through"         "tk-epic"                 "$RXNR"
+           "gc sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive" "$RXNR"
+    has    "react (no GC_RIG) still slings a run of mol-first-reaction" "--on mol-first-reaction" "$RXNR"
+    has    "react (no GC_RIG) passes the bead through"         "tk-subj"                 "$RXNR"
     absent "react (no GC_RIG) never hits the fail-closed guard" "rig-qualify"            "$RXNR"
 else
     printf '  skip  react→sling wiring (gc-proactive.sh not found at %s)\n' "$PROACTIVE_TOOL_REAL"
@@ -165,7 +172,7 @@ absent "no operator surface file advertises a phantom 'gc helm' CLI" "gc helm" "
 # an operator-chosen bead. The fixture never invents or closes a bead — it writes
 # only to the bead the operator named, and every leg self-cleans (the unset
 # undoes takeaway; the --release leg captures and restores the
-# bead's prior lifecycle fields and unsets the marker it set).
+# bead's prior lifecycle fields and unsets the headline it wrote).
 if [ -n "${GC_HELM_SMOKE_BEAD:-}" ]; then
     echo "── live (opt-in): takeaway + takeaway --release round-trip on $GC_HELM_SMOKE_BEAD ──"
     bead="$GC_HELM_SMOKE_BEAD"
@@ -184,7 +191,7 @@ if [ -n "${GC_HELM_SMOKE_BEAD:-}" ]; then
     eq "bead no longer carries gc.takeaway" "" \
         "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.takeaway"] // ""')"
     # --release leg: ONE call stamps the takeaway AND releases the bead (reopen,
-    # unassign, clear route, mark reacted). Capture the prior lifecycle fields so
+    # unassign, clear route). Capture the prior lifecycle fields so
     # we can restore them — unlike the takeaway-only leg above, --release mutates
     # status/assignee/route.
     PRIOR_STATUS="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].status // "open"')"

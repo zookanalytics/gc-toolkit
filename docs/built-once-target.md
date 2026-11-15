@@ -265,9 +265,6 @@ but the last ends with an operator ruling that gives the seat the job:
   operator's next attach starts a new sitting. This ends if the po runs always
   on, as the mayor does.
 
-The trade: the first reaction stops being a bead kind of its own
-(tk-1tfzr71.17).
-
 ### Board
 
 The board renders platform objects (beads, human gates, conversations and the
@@ -387,7 +384,7 @@ bd 1.3.2.
 
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
-| the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.17 to .22 |
+| the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.18 to .22 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
 | `pr-facts.sh` polling and its mirrored keys | the PR monitor and webhook receiver | tk-1tfzr71.21 |
 
@@ -416,9 +413,9 @@ A compatibility piece carries a dated debt and the trigger that retires it,
 and the change that fires the trigger deletes it.
 
 - Readers of legacy shapes, which "legacy" names 23 times across 12 runtime
-  files: the `gc.proactive_reaction=1` proof and PR bodies older than the
-  managed region, among others. Trigger: no store or open PR holds the shape.
-  Each goes with the member that rewrites its reader.
+  files: PR bodies older than the managed region, among others. Trigger: no
+  store or open PR holds the shape. Each goes with the member that rewrites its
+  reader.
 
 ### Doctrine restated per call site
 
@@ -464,7 +461,6 @@ is a design convoy lands only after the operator approves its design.
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring, the merge cadence's driver and its pacing, the failure cap and the supersession check | 18,145 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
 | A | tk-1tfzr71.70 | the old merge path, once every rig's cutover has moved its PRs onto the pending record: `gctk merge` and the transition machine, `pr-open.sh`'s create, `pre-open-rebase.sh`, `merge-tail-report.sh` | 1,288, and the rows it adds |
-| B | tk-1tfzr71.17 | the reaction bead and the intake converters | 189, plus partial files |
 | B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,838 |
 | B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps, the salvage's branch context | 8,317 |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |

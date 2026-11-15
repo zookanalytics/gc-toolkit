@@ -153,10 +153,6 @@ reference to a dozen live beads.
   actually holds.
 - `mol-witness-patrol`'s cleanup step holds `git worktree remove` behind
   `--present`: a worktree whose owner cannot be placed is not an unowned one.
-- `gc-proactive.sh sling` files a reaction bead only for a subject `--present`
-  proves. The reaction's worker reads that subject and writes the disposition
-  back to it, so a reaction to an absent or unproven subject is routed work
-  nobody can dispose.
 
 A gate that concludes absence without going through it is reporting on
 whichever store it happened to be standing in.

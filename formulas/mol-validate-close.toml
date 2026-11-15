@@ -77,9 +77,9 @@ TOOLS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/../../tools"
 The close brief is the section that sent the bead here, the latest of them in
 its notes. A first reaction writes a card into the bead's notes and, after it,
 a `## Close brief (first reaction, <time>)` section naming why it saw no work
-and the counter-case for keeping the bead open. A reaction that ran before
-reaction beads left that brief in `gc.first_reaction_reason` instead. A
-store-only exit whose run's record finishes the bead writes a
+and the counter-case for keeping the bead open. An older reaction left that
+brief in `gc.first_reaction_reason` instead. A store-only exit whose run's
+record finishes the bead writes a
 `## Close brief (store-only exit, <time>)` section: the record, why it meets
 what the bead asks for, and anything that argues for keeping it open. A bead
 held on another bead's landing carries a brief that names it,

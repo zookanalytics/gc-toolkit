@@ -37,10 +37,10 @@
 #
 # Arm 1 judges steps alone. Core's orphan-sweep order resets a claim on any
 # bead whose holder no longer exists, every five minutes. The bare beads a pool
-# claims, which are rework children, first-reaction beads, warrants and reviews
-# returned to their pool, are each a piece the deletion schedule removes, and
-# its members replace them with poured runs where the work has a formula, so
-# every pool claim becomes a step. Judging the bare beads now would hold their
+# claims, which are rework children, warrants and reviews returned to their
+# pool, are each a piece the deletion schedule removes, and its members replace
+# them with poured runs where the work has a formula, so every pool claim
+# becomes a step. Judging the bare beads now would hold their
 # pools to a stall bound nobody has measured for them.
 #
 # Arm 2 — UNCLAIMED. A claim is not the first thing that can fail to happen. A

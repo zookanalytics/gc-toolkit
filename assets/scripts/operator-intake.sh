@@ -376,7 +376,7 @@ if [ -z "$ORIGIN_NOW" ]; then
         || note "$PROG: could not stamp gc.origin=operator on $SUBJECT — the conversation is unaffected; stamp it by hand"
 fi
 
-# ── Path selection: can a filed first reaction actually be picked up? ─
+# ── Path selection: can a slung first reaction actually be picked up? ─
 # Delegated to gc-proactive.sh deliverable so this caller cannot drift from
 # the clamps (the tool + agents/proactive/agent.toml).
 REACT=""; REACT_WHY=""
