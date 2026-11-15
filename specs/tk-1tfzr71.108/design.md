@@ -204,6 +204,10 @@ closes, however the run ended, after the run has ruled every finding, so a demo
 capture stays readable until its finding is ruled. Its script keys the reap on
 the run's root instead of a review bead: it removes the directory of a run whose
 root is closed, or which names no live bead and has been idle as long as today.
+Gas City keeps per-run working storage of its own,
+`<city>/.gc/molecules/<root>/`, and the run does not compose it: a pool step's
+shell is not given its path, and nothing removes a cancelled run's directory
+there ([the search](gas-city-search.md#the-runs-workspace-and-its-reap-unit-3)).
 
 ### What it records
 

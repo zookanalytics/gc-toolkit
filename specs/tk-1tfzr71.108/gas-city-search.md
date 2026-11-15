@@ -9,9 +9,10 @@ Read on 2026-11-14 at `gastownhall/gascity` main 13bb101b8f and
 `gastownhall/gascity-packs` main 0f07496d2f, from snapshots taken at those
 commits. GitHub's behavior is cited from gh's manual as installed (`gh pr ready`).
 Each section names the unit of [the design](design.md) that adds the surface.
-The section on the check's record was read again on 2026-11-15 at
-`gastownhall/gascity` main e9a628c500, from the city's gascity checkout's
-upstream remote, and each symbol cited there is unchanged at main 294079d53f.
+The sections on the check's record and on the run's workspace were read again
+on 2026-11-15 at `gastownhall/gascity` main e9a628c500, from the city's
+gascity checkout's upstream remote, and each symbol cited there is unchanged at
+main 294079d53f.
 
 ## The run's formulas (unit 3)
 
@@ -195,12 +196,41 @@ writer of its own.
 
 ## The run's workspace and its reap (unit 3)
 
-Gas City gives a session a work directory and reports worktree events
-(`bead.worktree.*` in `internal/events/events.go`), but a run's steps are claimed
-by different sessions, so no session's directory holds the run. **Not covered**:
-`review-workspace.sh` keys the directory by the run's root, and
-`orders/review-workspace-reap.toml`, keyed the same way, removes it once the
-run's root closes, however the run ended.
+The need: one directory for the run, outliving each step's session, that holds
+a detached git worktree of the rig's checkout for triage, each lane and the
+repair, and that goes once the run ends, however it ends.
+
+- **A session's work directory and worktree events.** Gas City gives a session a
+  work directory and reports worktree events (`bead.worktree.*` in
+  `internal/events/events.go`), but a run's steps are claimed by different
+  sessions, so no session's directory holds the run.
+- **Molecule-scoped working storage.** Gas City keeps
+  `<city>/.gc/molecules/<root>/`, with `artifacts/<bead>/` under it, as storage
+  that outlives any worker (`internal/molecule/artifact.go`, since 46a1425717).
+  Three things keep it from covering the need. A pool step's shell is not
+  given its path: `GC_ARTIFACT_DIR` reaches the route env of a bead `gc sling`
+  slings (`ResolveSlingEnvForBead` in `internal/sling/sling.go`) and a check's
+  script (`resolveRalphCheckMoleculePaths` in `internal/dispatch/ralph.go`),
+  and a run's steps are routed at the cook and claimed through `gc hook --claim`
+  by sessions already running, so a step would have to rebuild the path from
+  the package's layout, which no page documents beyond naming the directory
+  (`docs/reference/exec-session-provider.md`). Only the workflow's finalizer
+  removes it, with `os.RemoveAll` (`molecule.RemoveDir` in
+  `processWorkflowFinalize`, `internal/dispatch/runtime.go`), and a run cancel
+  closes the finalizer unrun, because it spares only teardown members and the
+  finalizer carries no teardown role (`cancelWorkflowRoot` in
+  `internal/api/huma_handlers_runs.go`; the `workflow-finalize` step in
+  `internal/formula/graph.go`), so a cancelled run's directory stays, and
+  nothing else sweeps `.gc/molecules`. A run that must stop ends by exactly that
+  cancel. And `os.RemoveAll` removes a git worktree's directory and leaves its
+  registration in the rig's checkout, which only `git worktree prune` clears,
+  repository-wide, the call `review-workspace.sh` refuses to make
+  (`docs/worktree-reclaim.md`). The probe above saw the directory of a run that
+  passed removed at its finalize.
+- **Not covered**: `review-workspace.sh` keys the directory by the run's root,
+  and `orders/review-workspace-reap.toml`, keyed the same way, removes it once
+  the root closes, however the run ended, each worktree first through
+  `git worktree remove`.
 
 ## The cutover script (unit 5)
 
