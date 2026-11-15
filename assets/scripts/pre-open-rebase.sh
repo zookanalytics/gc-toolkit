@@ -29,8 +29,8 @@
 # anchor, a rebase_hold on any bead naming the branch, and a live human gate on
 # the anchor (rebasing is one horn of what a person may be asked, so performing
 # it answers their question by fait accompli). And the same supersession guard: a
-# branch whose conflict is a landed change deleting or rewriting the code it
-# edits gets the operator's decision instead of a child (branch-supersession.sh).
+# branch whose conflict is a landed change deleting the code it edits gets the
+# operator's decision instead of a child (branch-supersession.sh).
 #
 # Dedup is shared with pr-facts.sh by construction rather than by bookkeeping:
 # both arms probe children on `metadata.branch`, and the `rejection_reason`
@@ -330,7 +330,7 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
   # A conflict is not always drift. When a change already on the target deleted
-  # or rewrote the code this branch edits, bringing it current decides whether
+  # the code this branch edits, bringing it current decides whether
   # the branch still has work to do, and a child sent to merge it would stop and
   # ask. branch-supersession.sh tells the two apart and puts that decision to the
   # operator; it holds only behind an open human gate that asks it, so anything it cannot

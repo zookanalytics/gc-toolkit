@@ -373,7 +373,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    whatever the gate asks, since bringing the branch current is one answer a
    person may still be weighing. So is the supersession guard. Past the vetoes and
    the dedup, both arms ask `branch-supersession.sh` whether the conflict is drift
-   or a change that landed first and deleted or rewrote code the branch edits.
+   or a change that landed first and deleted code the branch edits. A change
+   that rewrote that code is drift, and gets the merge-in child.
    Whether a superseded branch still has work to do is the operator's call, so
    the arm files a human gate under `rework-base-supersession` on the anchor
    instead of a child, and dispatches nothing while a gate under that key is open
@@ -451,7 +452,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    approval draws `bring_current_lifted_at`, before which no approval counts,
    and files no gate
    ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
-   conflict is a landed change deleting or rewriting code the branch edits,
+   conflict is a landed change deleting code the branch edits,
    the approved PR gets the operator's supersession decision instead of the
    child, as for arm 5), `BLOCKED` on an unresolved review thread or a
    missing required approving review (→ no gate. The write-back below resolves
