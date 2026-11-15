@@ -511,6 +511,14 @@ END { finish() }'
 # list_hash <file> — the hash the list holds for a whole note.
 list_hash() { LC_ALL=C awk -v W= -v RE="$USE_AWK_RE" "$LIST_AWK" "$1" | "${SHA[@]}" | cut -c1-64; }
 
+# list_dir <dir> <file> — the path of each .md file in <dir>, each ended by a
+# NUL and sorted, in <file>. 1 when <dir> cannot be listed. A listing that
+# fails part way holds only the files read before it failed, and a note it
+# leaves out would read as gone, so a caller acts on none of a failed listing.
+list_dir() {
+  find "$1" -maxdepth 1 -type f -name '*.md' -print0 > "$2.found" 2>/dev/null \
+    && LC_ALL=C sort -z "$2.found" > "$2"
+}
 # incomplete <dir> — says that a scan of <dir> could not read a file it listed.
 incomplete() { err "cannot read every note in $1; nothing there is removed, and its list stays as it is"; }
 # scan <dir> <work> — the directory as <work>/files.tsv (name, hash, mtime of
@@ -523,8 +531,7 @@ scan() {
   local -a all=() notes=() hubs=()
   rm -rf "$w"; mkdir -p "$w/e" "$w/s" || { err "cannot make $w, so $dir is not read"; return 1; }
   : > "$w/files.tsv"; : > "$w/units.tsv"
-  if ! find "$dir" -maxdepth 1 -type f -name '*.md' -print0 > "$w/found" 2>/dev/null \
-     || ! LC_ALL=C sort -z "$w/found" > "$w/listed"; then
+  if ! list_dir "$dir" "$w/listed"; then
     err "cannot list $dir; nothing there is removed, and its list stays as it is"
     return 1
   fi
@@ -617,8 +624,8 @@ due_rows() {
 # in this directory, and an item with lines under it is kept whole. A pointer
 # line can hold several, joined by " · ". Each pointer to a note no longer in
 # the directory is taken out with the text that follows it, and a line left
-# with none goes. A listing that does not name the file being edited was not
-# read, and nothing is taken out on it.
+# with none goes. Nothing is taken out on a listing that does not name the file
+# being edited.
 TARGET_AWK='
 function target(s,   t) {
   if (s ~ /^\[\[/) { t = substr(s, 3); t = substr(t, 1, index(t, "]]") - 1); sub(/\|.*/, "", t); sub(/#.*/, "", t); if (t !~ /\.md$/) t = t ".md"; return t }
@@ -691,14 +698,18 @@ add_to_entry() { LC_ALL=C awk -v ENTRY="$1" -v ADD="$2" "$ENTRY_EDIT_AWK"; }
 # tidy <dir> <state dir> — takes the pointers to notes no longer in the
 # directory out of the index and every collection note, and removes, with its
 # text kept, a collection note this leaves with no entries. LINKS counts the
-# files it edited. 1 when a collection note left with no entries stays because
+# files it edited. 1 when it cannot list the directory, and it then edits
+# nothing more, or when a collection note left with no entries stays because
 # its text was not kept.
 LINKS=0
 tidy() {
   local dir=$1 sd=$2 f name had gone_hub rc fail=0
   for _ in 1 2 3; do
     gone_hub=0
-    find "$dir" -maxdepth 1 -type f -name '*.md' -print 2>/dev/null | sed 's|.*/||' > "$WORK/present"
+    if ! list_dir "$dir" "$WORK/listed" || ! tr '\0' '\n' < "$WORK/listed" | sed 's|.*/||' > "$WORK/present"; then
+      err "cannot list $dir, so its links were not tidied; the next run tries again"
+      return 1
+    fi
     for f in "$dir/MEMORY.md" "$dir"/hub-*.md; do
       [ -f "$f" ] || continue
       name=${f##*/}

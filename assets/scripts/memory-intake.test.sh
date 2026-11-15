@@ -89,6 +89,21 @@ exit "$rc"
 STUB
 cp "$SB/edit-bin/cp" "$SB/edit-bin/mkdir"
 chmod +x "$SB/edit-bin/cp" "$SB/edit-bin/mkdir"
+mkdir -p "$SB/list-bin"
+cat > "$SB/list-bin/find" <<'STUB'
+#!/usr/bin/env bash
+# find, except that a listing of the directory STUB_LIST_FAIL names prints its
+# index and collection notes and then fails, as a listing that fails part way
+# does.
+if [ "$1" = "${STUB_LIST_FAIL:-}" ]; then
+  end='\n'; case " $* " in *" -print0 "*) end='\0' ;; esac
+  for f in "$1/MEMORY.md" "$1"/hub-*.md; do [ -f "$f" ] && printf "%s$end" "$f"; done
+  echo "find: $1: Input/output error" >&2
+  exit 1
+fi
+command -p find "$@"
+STUB
+chmod +x "$SB/list-bin/find"
 export PATH="$SB/bin:$ROOT/tools/test-floor:$PATH"
 export GC_PATROL_FINDING_TOOL="$SB/bin/pf"
 export MEMORY_INTAKE_MANAGED_SETTINGS="$SB/managed.json"
@@ -510,7 +525,7 @@ chmod 300 "$U"   # its files open by name, but the directory cannot be listed
 run read
 chmod 700 "$U"
 has "$(cat "$U/MEMORY.md")" "- [U](u.md) — u" "the index keeps its links"
-has "$ERR" "the links in $U/MEMORY.md were not tidied" "and says so"
+has "$ERR" "cannot list $U, so its links were not tidied" "and says so"
 eq "$RC" 1 "the read fails"
 has "$ERR" "cannot list $U; nothing there is removed, and its list stays as it is" "saying it cannot list the directory"
 has "$OUT" "u: not counted, since its notes could not all be read;" "and counting none of its notes"
@@ -522,6 +537,25 @@ chmod 644 "$U/w.md"
 has "$ERR" "cannot read every note in $U" "a note that cannot be read stops the read of its directory"
 eq "$(cmp -s "$LIST" "$B/list.before" && echo same || echo changed)" "same" "and its list stays as it was"
 eq "$(due_json --count)" 0 "with every judgment held"
+
+echo "── a listing that fails part way takes out no link ──"
+city partial
+rig p tk; rig r tk
+P=$(memdir "$B/rigs/p"); R=$(memdir "$B/rigs/r")
+printf 'p lesson.\n' > "$P/p.md"
+printf -- '- [P](p.md) — p\n' > "$P/hub-a.md"
+printf '# Memory Index\n\n- [P](p.md) — p\n- [A](hub-a.md) — a\n' > "$P/MEMORY.md"
+printf 'r lesson.\n' > "$R/r.md"
+STUB_LIST_FAIL=$P PATH="$SB/list-bin:$PATH" run read
+eq "$RC" 1 "the read fails"
+has "$ERR" "cannot list $P, so its links were not tidied" "saying the links of the directory it could not list were not tidied"
+has "$(cat "$P/MEMORY.md")" "- [P](p.md) — p" "the index keeps its pointer to a note the listing left out"
+has "$(cat "$P/MEMORY.md")" "- [A](hub-a.md) — a" "and its pointer to the collection note"
+eq "$(cat "$P/hub-a.md" 2>/dev/null)" "- [P](p.md) — p" "the collection note stays with its pointer"
+eq "$(find "$STATE" -path '*/removed/*' | grep -c .)" 0 "and no text is kept for a removal"
+run read
+eq "$RC" 0 "a read that lists every directory succeeds"
+eq "$(printf '%s\n' "$OUT" | tail -1)" "memory-intake: 2 due" "and counts the due notes of both"
 
 # ── waits that end ─────────────────────────────────────────────────────────
 echo "── a wait ends once its pattern's fix has landed ──"
