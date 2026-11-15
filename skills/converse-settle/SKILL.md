@@ -297,7 +297,9 @@ Take the case that fits the ruling:
 PR. A ruling reaches the subject's PR, the PR whose merge this conversation
 holds, and any PR that a gate the ruling answers releases. Pass one of these:
 
-- `--rework` when the PR's branch must change (the `prs` skill);
+- `--rework` when the PR's branch must change (the `prs` skill), with
+  `--check <check>` once for each check the ruling sends back when the PR is on
+  Gas Town's pending record, whose review run then takes the ruling as an ask;
 - `--no-rework` when the PR stands as it is;
 - `--retire <kind>` when the PR will not land: `not-needed`, with this
   conversation as the evidence, or `duplicate`, `folded`, `re-homed` or
