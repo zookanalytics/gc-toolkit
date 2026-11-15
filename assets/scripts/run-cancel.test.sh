@@ -370,16 +370,33 @@ has "$(cat "$CURL_LOG")" "/runs/tk-root/cancel" "…and the claimed step's run i
 hasnt "$OUT" "NOTE: --bead" "…and nothing is reported about it"
 
 # ── 3b. a check loop's step is named by the loop ─────────────────────────────
+# Gas City writes a run's first iteration under the loop's bare name and each
+# later one with the formula's name before it; a step bonded inside an
+# iteration carries its own formula's name before that.
+for ref in self-review.iteration.1 mol-polecat-work.self-review.iteration.2 \
+           mol-pr-review-lane.mol-pr-review.review-loop.iteration.2.triage.item.1.lane; do
+  case "$ref" in *self-review*) loop=self-review ;; *) loop=review-loop ;; esac
+  cat > "$FAKE_STORE" <<JSON
+[
+ {"id":"tk-rootL","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow"}},
+ {"id":"tk-iter","status":"in_progress","assignee":"$MINE","metadata":{"gc.step_ref":"$ref","gc.root_bead_id":"tk-rootL"}}
+]
+JSON
+  : > "$CURL_LOG"; : > "$GC_LOG"
+  OUT=$(FAKE_HOOK_CURRENT=tk-iter "$SCRIPT" --step "$loop" --reason r 2>&1); RC=$?
+  eq "$RC" 0 "loop: $ref answers to its loop's name, $loop"
+  has "$(cat "$CURL_LOG")" "/runs/tk-rootL/cancel" "loop: its root is cancelled"
+done
 cat > "$FAKE_STORE" <<JSON
 [
  {"id":"tk-rootL","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow"}},
- {"id":"tk-iter","status":"in_progress","assignee":"$MINE","metadata":{"gc.step_ref":"self-review.iteration.2","gc.root_bead_id":"tk-rootL"}}
+ {"id":"tk-iter","status":"in_progress","assignee":"$MINE","metadata":{"gc.step_ref":"mol-x.pre-review-loop.iteration.2.triage","gc.root_bead_id":"tk-rootL"}}
 ]
 JSON
 : > "$CURL_LOG"; : > "$GC_LOG"
-OUT=$(FAKE_HOOK_CURRENT=tk-iter "$SCRIPT" --step self-review --reason r 2>&1); RC=$?
-eq "$RC" 0 "loop: an iteration answers to its loop's name"
-has "$(cat "$CURL_LOG")" "/runs/tk-rootL/cancel" "loop: its root is cancelled"
+OUT=$(FAKE_HOOK_CURRENT=tk-iter "$SCRIPT" --step review-loop --reason r 2>&1); RC=$?
+[ "$RC" -ne 0 ] && ok "loop: a loop whose name only ends in the loop's name is another loop" || bad "loop: another loop's step was taken for review-loop's"
+hasnt "$(cat "$CURL_LOG")" "/runs/tk-rootL/cancel" "loop: …and nothing is cancelled"
 reset
 
 # ── 4. a claimed step this session already blocked ──────────────────────────
