@@ -3,6 +3,7 @@ package pr_test
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,7 +21,9 @@ import (
 // condition it is about. The store and GitHub are the adapters' fakes, and the
 // definition of feedback is a test double that reads every post as feedback
 // unless a test names it, since the definition itself is pr-post.sh's and the
-// feedback adapter's own tests run it.
+// feedback adapter's own tests run it. Every answer is asked twice, of Ready
+// over the fake GitHub and of FromStore over the GitHub read Ready made, saved
+// on the bead, and the two must be one answer.
 
 const (
 	bead   = "tk-1"
@@ -122,20 +125,69 @@ func ready() *world {
 	}
 }
 
-func (w *world) answer(t *testing.T) pr.Answer {
-	t.Helper()
+// put writes the world's bead with md as its metadata, and the other beads.
+func (w *world) put(md map[string]string) {
 	w.store.Put(fake.Bead{ID: bead, Title: "the work", Status: "blocked", Assignee: "rig/refinery",
-		Metadata: w.md, Edges: w.edges})
+		Metadata: md, Edges: w.edges})
 	for _, b := range w.others {
 		w.store.Put(b)
 	}
-	ans, err := pr.Ready(pr.Sources{
+}
+
+// live asks Ready over the world, and returns its answer and the GitHub read
+// it made.
+func (w *world) live(t *testing.T) (pr.Answer, *pr.GitHubRead) {
+	t.Helper()
+	w.put(w.md)
+	ans, read, err := pr.Ready(pr.Sources{
 		Ledger:   ledger.New(w.store),
 		GitHub:   func(string) pr.GitHub { return w.github },
 		Feedback: w.rule,
 	}, bead)
 	if err != nil {
 		t.Fatalf("Ready: %v", err)
+	}
+	return ans, read
+}
+
+// withRead is the world's metadata with read saved on it, as the landing order
+// saves it, through the key's JSON codec: none for no read.
+func (w *world) withRead(t *testing.T, read *pr.GitHubRead) map[string]string {
+	t.Helper()
+	md := maps.Clone(w.md)
+	if read != nil {
+		raw, err := json.Marshal(read)
+		if err != nil {
+			t.Fatal(err)
+		}
+		md["pr_github_read"] = string(raw)
+	}
+	return md
+}
+
+// fromStore asks FromStore over the world's bead carrying md, and fails if it
+// reads GitHub.
+func (w *world) fromStore(t *testing.T, md map[string]string) pr.Answer {
+	t.Helper()
+	w.put(md)
+	before := len(w.github.Reads())
+	ans, err := pr.FromStore(ledger.New(w.store), bead)
+	if err != nil {
+		t.Fatalf("FromStore: %v", err)
+	}
+	if reads := w.github.Reads()[before:]; len(reads) > 0 {
+		t.Fatalf("FromStore read GitHub: %v", reads)
+	}
+	return ans
+}
+
+// answer is Ready's answer over the world, which FromStore must give over the
+// GitHub read Ready made, saved on the bead.
+func (w *world) answer(t *testing.T) pr.Answer {
+	t.Helper()
+	ans, read := w.live(t)
+	if saved := w.fromStore(t, w.withRead(t, read)); !reflect.DeepEqual(saved, ans) {
+		t.Fatalf("over the read it saves the rule answers\n%+v\nand live\n%+v", saved, ans)
 	}
 	return ans
 }
@@ -254,15 +306,37 @@ func TestReviewResultCountsOnlyAtTheLiveHeadAndTarget(t *testing.T) {
 	})
 }
 
+// The head the store holds for a PR open at a head the refinery has not
+// validated is the one the landing order found there, so a read at that head
+// is GitHub's side of the PR, and holds it for its head.
 func TestHeadOtherThanTheValidatedOne(t *testing.T) {
 	w := ready()
 	w.pr.Facts.HeadRefOid = other
 	w.pr.Suites[other] = w.pr.Suites[head]
 	w.md["review_results"] = `[{"head":"` + other + `","target":"main","passed":true}]`
+	w.md["merge_result"] = "pull_request_head_changed"
+	w.md["observed_pr_head_sha"] = other
 	a := w.answer(t)
 	only(t, a, pr.KindHead)
 	if a.Head != other {
 		t.Fatalf("judged head %q, want the live head %q", a.Head, other)
+	}
+}
+
+// On a pending record the store holds the validated head, so GitHub's side of
+// a PR found at another head is not read at the store's head: the rule names
+// that alone, judges no head, and keeps the store's conditions.
+func TestAPendingRecordsPRFoundAtAnotherHeadReadsAsUnread(t *testing.T) {
+	w := ready()
+	w.pr.Facts.HeadRefOid = other
+	w.md["merge_hold"] = "true"
+	a := w.answer(t)
+	only(t, a, pr.KindGitHubUnread, pr.KindHold)
+	if a.Head != "" || a.Target != "" {
+		t.Fatalf("judged head %q into %q, want none for a side of GitHub's that is unread", a.Head, a.Target)
+	}
+	if d := a.Conditions[0].Detail; !strings.Contains(d, head) || !strings.Contains(d, other) {
+		t.Fatalf("the condition %q names neither the head the store holds nor the one read", d)
 	}
 }
 
@@ -561,10 +635,10 @@ func TestAReadThatFailsAnswersNothing(t *testing.T) {
 			w := ready()
 			w.github.Fail[read] = errors.New("github: unreachable")
 			w.store.Put(fake.Bead{ID: bead, Status: "blocked", Metadata: w.md})
-			_, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
+			_, gr, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
 				GitHub: func(string) pr.GitHub { return w.github }, Feedback: w.rule}, bead)
-			if err == nil {
-				t.Fatal("answered on a read that failed")
+			if err == nil || gr != nil {
+				t.Fatalf("answered on a read that failed, or returned the read %+v", gr)
 			}
 		})
 	}
@@ -572,25 +646,31 @@ func TestAReadThatFailsAnswersNothing(t *testing.T) {
 		w := ready()
 		w.rule.err = errors.New("jq: failed")
 		w.store.Put(fake.Bead{ID: bead, Status: "blocked", Metadata: w.md})
-		if _, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
-			GitHub: func(string) pr.GitHub { return w.github }, Feedback: w.rule}, bead); err == nil {
-			t.Fatal("answered on a definition that did not run")
+		if _, gr, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
+			GitHub: func(string) pr.GitHub { return w.github }, Feedback: w.rule}, bead); err == nil || gr != nil {
+			t.Fatalf("answered on a definition that did not run, or returned the read %+v", gr)
 		}
 	})
 	t.Run("review results that do not decode", func(t *testing.T) {
 		w := ready()
 		w.md["review_results"] = "{not json"
 		w.store.Put(fake.Bead{ID: bead, Status: "blocked", Metadata: w.md})
-		if _, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
+		if _, _, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
 			GitHub: func(string) pr.GitHub { return w.github }, Feedback: w.rule}, bead); err == nil {
 			t.Fatal("answered on review results that did not decode")
+		}
+		if _, err := pr.FromStore(ledger.New(w.store), bead); err == nil {
+			t.Fatal("answered over the store on review results that did not decode")
 		}
 	})
 	t.Run("a bead the store does not hold", func(t *testing.T) {
 		w := ready()
-		if _, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
+		if _, _, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
 			GitHub: func(string) pr.GitHub { return w.github }, Feedback: w.rule}, bead); err == nil {
 			t.Fatal("answered for a bead the store does not hold")
+		}
+		if _, err := pr.FromStore(ledger.New(w.store), bead); err == nil {
+			t.Fatal("answered over the store for a bead the store does not hold")
 		}
 	})
 }

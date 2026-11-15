@@ -440,6 +440,64 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City ships a retry that a pack can hand a failed write
   to an outside service, such as an outbox that a later pass drains.
 
+## Saved GitHub read
+
+- **Covers.** The `pr_github_read` key, declared as `githubReadKey` in
+  `services/gctk/pr/read.go`. Its writer is the landing order: `blocked` and
+  `decide` in `services/gctk/pr/landing.go` save the read that `observe` in
+  `services/gctk/pr/read.go` makes. Its reader is `FromStore` in
+  `services/gctk/pr/read.go`, which `answerFromStore` in
+  `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
+  `PRAnswers` in `services/gctk/listing/pr.go` calls for the rig board, from
+  `services/helm/internal/rigboard/gather.go`.
+- **Stands in for.** A record of GitHub's facts about a pull request, kept on
+  the bead that owns it, from which a display derives the PR's status in place
+  of reading GitHub. The facts are the PR's state, draft flag, head and merge
+  state, the required checks at that head, the standing approvals and requests
+  for changes, the newest feedback in each comment space, and the review
+  threads waiting on the city's answer, all read at one head.
+- **Evidence.**
+  - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor lists each
+    open PR's number, title, URL, author, draft flag, merge state, base and head
+    refs, head commit and the last commit's check rollup (`pullRequestsQuery`
+    in `internal/githubmonitor/client.go`). It reads no review, review thread
+    or comment, and no check's required flag. It writes what it finds as
+    `github.*` keys on a repair bead it files for a PR it finds actionable
+    (`ensureGitHubPRRepairBead` and `githubPRRepairVolatileMetadata` in
+    `cmd/gc/cmd_github.go`), never on the bead that owns the PR. Only
+    [gc github pr backfill](https://docs.gascity.com/reference/cli#gc-github-pr-backfill)
+    runs it, and a monitor's
+    [GitHubPRMonitor](https://docs.gascity.com/reference/config#githubprmonitor)
+    entry declares a poll interval and a webhook secret, which no code outside
+    the configuration package reads. No Go source there, tests aside, reads a
+    pull request's reviews or review threads.
+  - A webhook rule hands one verified provider event to an order or a
+    conversation and keeps no state of its own
+    ([WebhookRule](https://docs.gascity.com/reference/config#webhookrule) in
+    the configuration reference).
+  - In `gastownhall/gascity-packs`, Gas Town's `pr-merge-reconcile` reads a
+    PR's URL, number, state, head and base refs, head commit, merge time and
+    merge commit (`gh pr view` in `gastown/commands/pr-merge-reconcile/run.sh`
+    180-181), and writes only its record's own keys, such as `pr_state`,
+    `observed_pr_head_sha` and `pr_reconcile_error`. No pack keeps GitHub's
+    checks, reviews or merge state for a PR on a bead. The review keys packs
+    write are about the reviews their own runs make or ask for, such as the
+    `gascity` pack's `gc.github.review_outcome`.
+  - In `gastownhall/beads`, `bd github sync` reads and writes issues, their
+    sub-issues and blocking links, and their labels through bd's GitHub client
+    (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
+    and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
+  - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main e9a628c50030,
+  `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
+  8cdfa796a8f5.
+- **Retires when.** Gas City records the facts the rule reads, namely a pull
+  request's reviews, the required checks at its head and its review threads,
+  where a reader of the PR's own bead finds them, for example once its PR
+  monitor reads them and writes them on the bead that owns the PR, once Gas
+  Town's pending record carries them, or once a webhook receiver keeps them
+  from GitHub's events. The saved read then moves onto that record.
+
 ## Unanswered review threads
 
 - **Covers.** The `pr.unanswered_threads` key, in the

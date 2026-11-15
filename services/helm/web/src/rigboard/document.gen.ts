@@ -106,7 +106,8 @@ export interface Row {
   line3?: Ref[];
   /**
    * Reasons are what holds a pull request a person owes a move on, in the
-   * pack's words (prstatus.Reasons).
+   * pack's words (prstatus.Reasons, or prstatus.RenderReasons over the
+   * evaluator's answer for a pull request on Gas Town's pending record).
    */
   reasons?: Reason[];
   /**
