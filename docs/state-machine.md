@@ -232,13 +232,13 @@ pending-through-merge record, with Gas Town's values and their meanings
 (`gastown/commands/pr-merge-reconcile` in gascity-packs at 7f86098c04ea). The
 pack adds one value of its own, the exception `pull_request_merged_close_refused`,
 and keeps no other state beside the record. `services/gctk/pr/record`
-declares its keys and values. Two writers write it, and no machine checks
-them: the refinery publishes a PR's record through `gctk pr record`, in its
-`mr` step and when it sends a PR on the record back to the PR's review run
-(`refinery-requeue.sh`), and the landing order writes each later step through
-`gctk pr reconcile`
-([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
-The doctor checks the beads once they are written.
+declares its keys and values. No machine checks its writers: the refinery
+publishes a PR's record through `gctk pr record`, in its `mr` step and when it
+sends a PR on the record back to the PR's review run (`refinery-requeue.sh`),
+the landing order writes each later step through `gctk pr reconcile`
+([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)),
+and `gctk pr withdraw` sets the record's marker when it files a withdrawal on a
+record that carries none. The doctor checks the beads once they are written.
 
 ```mermaid
 stateDiagram-v2

@@ -178,11 +178,11 @@ The machine itself — states, transitions, writers, checks — is drawn once, i
   the edge and writes one `bd update` carrying every field of the transition,
   whose exit says whether the transition landed. A single `bd update` is atomic ([gascity/routing-model.md](gascity/routing-model.md)); the old
   healer passes existed because writers split transitions across calls. Gas
-  Town's pending record, which the machine does not declare, has two writers in
-  `gctk`'s pr domain: the refinery's publication (`gctk pr record`) and the
-  landing order (`gctk pr reconcile`). Both take the store's record lock and
-  guard each write on the status and assignee they read, and so does
-  `gctk pr withdraw` when it marks a requeued record for the order
+  Town's pending record, which the machine does not declare, is written in
+  `gctk`'s pr domain: by the refinery's publication (`gctk pr record`), by the
+  landing order (`gctk pr reconcile`), and by `gctk pr withdraw` when it marks a
+  requeued record for the order. Each takes the store's record lock and guards
+  each write on the status and assignee it read
   ([state-machine.md](state-machine.md#the-pending-record)).
 - **One review-result writer** — a review run's `record` step, through
   `gctk review record`, which writes the result for the last head the run
@@ -480,7 +480,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/effort-bring-current.sh` | merge | The refinery's hand-off that brings an integration effort's branch current with its target, by a fast-forward or a merge pushed under the lease. A merge that conflicts is a polecat's to resolve. The script pushes nothing, proves the polecat pool's route (`pool-route.sh`), and files the merge as a task that the hand-off and the landing bead wait on, with the effort's branch as its target. It settles the task and slings it with `--merge direct`, so the polecat's merge commit lands on the branch as a fast-forward. The polecat asks the operator, through a human gate on the task, only when a resolution needs a product decision. The hand-off stays assigned to the refinery, and once the task lands, the next call finds nothing left to merge and closes it. |
 | `orders/pr-reconcile.toml` | merge | The landing order: one run per rig every five minutes over the PRs on the pending record ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)). |
 | `assets/scripts/pr-reconcile.sh` | merge | The landing order's run: names the rig's refinery from the roster and execs `gctk pr reconcile`, the second writer of the pending record. |
-| `services/gctk` (`gctk pr`) | merge | The pr domain: a PR's title and managed summary (`compose`, `summary`), the one evaluator of its readiness, which the status label, the board and the landing order read (`status`), Gas Town's pending record with its lock and its two writers, `record` for the refinery's publication and `reconcile` for the landing order, which also pours each head's review run, carries out the withdrawals filed on a bead and marks a draft ready, and the draft cycle and the approval withdrawal (`draft`, `withdraw`) ([gctk-architecture.md](gctk-architecture.md)). |
+| `services/gctk` (`gctk pr`) | merge | The pr domain: a PR's title and managed summary (`compose`, `summary`), the one evaluator of its readiness, which the status label, the board and the landing order read (`status`), Gas Town's pending record with its lock and its writers, `record` for the refinery's publication, `reconcile` for the landing order, which also pours each head's review run, carries out the withdrawals filed on a bead and marks a draft ready, and `withdraw`, which files the approval withdrawal and marks a requeued record for the order, and the draft cycle (`draft`) ([gctk-architecture.md](gctk-architecture.md)). |
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
 | `assets/scripts/pace-lib.sh` | merge | The visit order and time budget of a cadence arm that walks the gating set: visit in id order after the anchor the last pass finished, wrapping, and start no new anchor past the arm's deadline. It also keeps each walk's seen marks, what it saw of each anchor at its last visit, so an arm can put first the anchors that changed since. The paced arms source it, and `gctk merge` carries the same rotation. |
 | `assets/scripts/merge.sh` | merge | Arm 2, on a rig still on the old path: the one writer of a PR's merge there. On the anchor of each open, non-draft PR it visits, it also records how many of the PR's review threads wait on the city's answer (`pr.unanswered_threads`), which the `held:` labels and the board read and the merge does not. |

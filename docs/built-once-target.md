@@ -186,10 +186,11 @@ yet. Each remaining difference names its reason and what ends it:
   never checks its author. The city merges every PR it takes, so its contract
   covers only the PRs it opens. No end is planned.
 - **The record's writers.** The pack writes Gas Town's pending-through-merge
-  record itself (`gctk pr record`, `gctk pr reconcile`), from a landing order
-  rather than from the refinery's find-work, and its reconcile also decides
-  readiness and requests the merge. Both writers take the store's record lock,
-  and each write is guarded on the bead's status and assignee, so a bead that a
+  record itself (`gctk pr record`, `gctk pr reconcile`, and `gctk pr withdraw`,
+  which marks a requeued record), from a landing order rather than from the
+  refinery's find-work, and its reconcile also decides readiness and requests
+  the merge. Each writer takes the store's record lock, and each write is
+  guarded on the bead's status and assignee, so a bead that a
   close or a release reached first gets no record, and a run leaves a bead a
   release took as the release left it. Gas Town's one refinery session
   reconciles once per find-work, writes the record unconditionally and assigns
