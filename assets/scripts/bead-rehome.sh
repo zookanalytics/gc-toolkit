@@ -137,7 +137,6 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
 # The composable "may this bead be finalized?" precondition set, asked before
 # anything is written. An open human gate that blocks the origin holds its
 # close, a pinned one included, which bd's own close does not count, the same
@@ -153,6 +152,11 @@ BRANCH_END="${GC_BRANCH_END_TOOL:-$HERE/branch-end.sh}"
 # none of the library's store reads.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "bead-rehome: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
+# The id-prefix derivation lives in bead-store.sh, so an edge's far end and the
+# destructive gates that read one place the same id in the same store. Sourced,
+# it places both ids and resolves both stores from one read of the rig map.
+# shellcheck source=bead-store.sh
+. "$HERE/bead-store.sh" || { echo "bead-rehome: cannot source bead-store.sh from $HERE" >&2; exit 1; }
 
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""
 ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""; CHECK=""; EXCEPT_KEY=""
@@ -266,13 +270,9 @@ esac
 [ "$ORIGIN" != "$SUCCESSOR" ] || die "--origin and --successor are the same bead ($ORIGIN)" 64
 
 # Store refs are `rig:<name>`; reads go through `gc bd --db <path>/.beads`
-# (the `--rig` form answers empty for the HQ store, `--db` does not).
-RIGS_JSON=""
-rigs_json() {
-    [ -n "$RIGS_JSON" ] && { printf '%s' "$RIGS_JSON"; return 0; }
-    RIGS_JSON=$("$HERE/rig-map.sh" || true)
-    printf '%s' "$RIGS_JSON"
-}
+# (the `--rig` form answers empty for the HQ store, `--db` does not). Both
+# resolvers run in this shell, so the rig map bead-store.sh reads once is the
+# map every lookup below reads.
 
 # Both resolvers end in `return 0`: under set -e a non-zero "no match" would
 # abort before the die below can name the unresolvable store.
@@ -282,26 +282,28 @@ store_path() { # rig:<name> -> repo path, empty when unresolvable
         rig:?*) name="${ref#rig:}" ;;
         *) return 0 ;;
     esac
-    rigs_json | jq -r --arg n "$name" '.rigs[]? | select(.name == $n) | .path // empty' 2>/dev/null || true
+    bead_store_map
+    printf '%s' "$BEAD_STORE_MAP" | jq -r --arg n "$name" '.rigs[]? | select(.name == $n) | .path // empty' 2>/dev/null || true
     return 0
 }
 
-# The id-prefix derivation lives in bead-store.sh, so an edge's far end and the
-# destructive gates that read one place the same id in the same store.
-store_for_bead() { # bead id -> rig:<name> via prefix; empty when unresolved
-    local name
-    name=$("$BEAD_STORE" "$1") || return 0
-    [ -n "$name" ] && printf 'rig:%s' "$name"
+# store_for_bead <bead-id> — rig:<name> of the store the id's prefix names, in
+# STORE_FOR_BEAD, which is empty when the id does not place.
+store_for_bead() {
+    STORE_FOR_BEAD=""
+    bead_store_rig "$1" || return 0
+    [ -z "$BEAD_STORE_RIG" ] || STORE_FOR_BEAD="rig:$BEAD_STORE_RIG"
     return 0
 }
 
-[ -n "$ORIGIN_STORE" ]    || ORIGIN_STORE=$(store_for_bead "$ORIGIN")
-[ -n "$SUCCESSOR_STORE" ] || SUCCESSOR_STORE=$(store_for_bead "$SUCCESSOR")
+if [ -z "$ORIGIN_STORE" ]; then store_for_bead "$ORIGIN"; ORIGIN_STORE="$STORE_FOR_BEAD"; fi
+if [ -z "$SUCCESSOR_STORE" ]; then store_for_bead "$SUCCESSOR"; SUCCESSOR_STORE="$STORE_FOR_BEAD"; fi
 [ -n "$ORIGIN_STORE" ] \
     || die "cannot derive the store for origin $ORIGIN from its id prefix; pass --origin-store rig:<name>" 2
 [ -n "$SUCCESSOR_STORE" ] \
     || die "cannot derive the store for successor $SUCCESSOR from its id prefix; pass --successor-store rig:<name>" 2
 
+bead_store_map
 ORIGIN_PATH=$(store_path "$ORIGIN_STORE")
 SUCCESSOR_PATH=$(store_path "$SUCCESSOR_STORE")
 [ -n "$ORIGIN_PATH" ]    || die "origin store '$ORIGIN_STORE' does not resolve to a rig (want rig:<name> from 'gc rig list')" 2
@@ -318,6 +320,21 @@ bd_at() {
     else
         gc bd --db "$db/.beads" "$@" 9>&-
     fi
+}
+
+# bd_at_json <repo-path> <bd args...> — bd_at's answer as
+# `| grep -a -vE '^gc bd:' | scrub` leaves it: the `gc bd:` notice a store can
+# print on stdout dropped, and the control bytes scrubbed. A read with no
+# control byte and no notice at its start is one line that the two leave as it
+# is, so only another read goes through them. It exits 0, since every caller
+# judges the answer rather than the read's status.
+bd_at_json() {
+    local raw
+    { raw=$(bd_at "$@" 2>/dev/null) || :; } 2>/dev/null
+    case "$raw" in
+        *[[:cntrl:]]*|'gc bd:'*) printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub || : ;;
+        *) printf '%s' "$raw" ;;
+    esac
 }
 
 # The store's record lock (the header's rule), taken on fd 9 before the origin
@@ -343,8 +360,7 @@ release_record_lock() { exec 9>&-; }
 # templates are listed too, so no bead reads as absent for its type. Empty when
 # the store does not hold the bead or does not answer.
 bead_row() {
-    bd_at "$1" list --id "$2" --all --include-gates --include-infra --include-templates --json --limit 0 2>/dev/null \
-        | grep -a -vE '^gc bd:' | scrub \
+    bd_at_json "$1" list --id "$2" --all --include-gates --include-infra --include-templates --json --limit 0 \
         | jq -c --arg id "$2" '[ .[]? | select(((.id // "") | tostring) == $id) ] | select(length == 1)' 2>/dev/null || true
 }
 
@@ -358,17 +374,53 @@ SUCC_JSON=$(bead_row "$SUCCESSOR_PATH" "$SUCCESSOR")
 ORIGIN_JSON=$(bead_row "$ORIGIN_PATH" "$ORIGIN")
 [ -n "$ORIGIN_JSON" ] \
     || die "origin $ORIGIN does not exist in $ORIGIN_STORE ($ORIGIN_PATH/.beads) — nothing written" 3
+# The fields of the two rows that this run judges, read in one jq rather than
+# one jq each. A field holds what a `jq -r` of its expression over its row
+# prints, less the newlines that end it and with an object or array in compact
+# form, and a field that does not read holds what its read gave on failure:
+# empty, or 1 for ORIGIN_WORKKEYS, which only 0 lets through. JUDGED_STATUS and
+# JUDGED_ASSIGNEE are the status and assignee the gates below judge, as the
+# store holds them, and the close is conditional on both. PAIR_TYPE is the edge
+# the origin already carries onto the successor, by type, or empty: bd keeps
+# one edge per pair, so its type decides what the disposition does. PRIOR_SUCC
+# is other_successor's answer for the origin.
+ORIGIN_MARKER=""; ORIGIN_STATUS=""; JUDGED_STATUS=""; JUDGED_ASSIGNEE=""
+PAIR_TYPE=""; PRIOR_SUCC=""; ORIGIN_ASSIGNEE=""; ORIGIN_TASK_KIND=""
+ORIGIN_STEP_REF=""; ORIGIN_KIND_META=""; ORIGIN_OUTCOME=""; ORIGIN_WORKKEYS=1
+ORIGIN_BRANCH=""; RULED_KIND=""; RULED_SUCC=""; RULED_SUCC_STORE=""
+SUCC_STATUS=""; SUCC_OUTCOME=""
+ROW_FIELDS=$(printf '%s\n%s\n' "$ORIGIN_JSON" "$SUCC_JSON" | jq -rs --arg s "$SUCCESSOR" "$DISPOSITION_JQ"'
+    def field($name; f; $unread):
+      "\($name)=\([try (f | if type == "string" then . else tojson end) catch $unread]
+        | join("\n") | sub("\n+\\z"; "") | @sh)";
+    def field($name; f): field($name; f; "");
+    .[0] as $o | .[1] as $n
+    | field("ORIGIN_MARKER"; $o | (.[0].metadata // {}) | has("pr_reconcile_pending")),
+      field("ORIGIN_STATUS"; $o | (.[0].status // "") | ascii_downcase),
+      field("JUDGED_STATUS"; $o | (.[0].status // "") | tostring),
+      field("JUDGED_ASSIGNEE"; $o | (.[0].assignee // "") | tostring),
+      field("PAIR_TYPE"; $o | [.[0].dependencies[]? | select(((.depends_on_id // "") | tostring) == $s) | ((.type // "") | tostring)] | .[0] // ""),
+      field("PRIOR_SUCC"; $o | [ .[0].dependencies[]? | select(disposition_edge) | edge_target | select(. != $s) ] | .[0] // ""),
+      field("ORIGIN_ASSIGNEE"; $o | .[0].assignee // ""),
+      field("ORIGIN_TASK_KIND"; $o | .[0].metadata["task_kind"] // ""),
+      field("ORIGIN_STEP_REF"; $o | .[0].metadata["gc.step_ref"] // .[0].metadata["gc.step_id"] // ""),
+      field("ORIGIN_KIND_META"; $o | .[0].metadata["gc.kind"] // ""),
+      field("ORIGIN_OUTCOME"; $o | .[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"] // ""),
+      field("ORIGIN_WORKKEYS"; $o | (.[0].metadata // {}) as $m
+          | ["branch","work_dir","gc.work_dir","pr_number","pr_url","merge_result","gc.work_commit"]
+          | map(select((($m[.]) // "") | tostring | . != "")) | length; "1"),
+      field("ORIGIN_BRANCH"; $o | (.[0].metadata.branch // "") | tostring),
+      field("RULED_KIND"; $o | .[0].metadata["gc.pr_close_disposition_kind"] // ""),
+      field("RULED_SUCC"; $o | .[0].metadata["gc.pr_close_disposition_successor"] // ""),
+      field("RULED_SUCC_STORE"; $o | .[0].metadata["gc.pr_close_disposition_successor_store"] // ""),
+      field("SUCC_STATUS"; $n | (.[0].status // "") | ascii_downcase),
+      field("SUCC_OUTCOME"; $n | .[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"] // "")' 2>/dev/null) || ROW_FIELDS=""
+eval "$ROW_FIELDS"
 # The landing order's marker, which the close clears in its own write.
 CLEAR_MARKER=()
-if printf '%s' "$ORIGIN_JSON" | jq -e '(.[0].metadata // {}) | has("pr_reconcile_pending")' >/dev/null 2>&1; then
+if [ "$ORIGIN_MARKER" = true ]; then
     CLEAR_MARKER=(--unset-metadata pr_reconcile_pending)
 fi
-
-ORIGIN_STATUS=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
-# The status and assignee the gates below judge, as the store holds them. The
-# close is conditional on both.
-JUDGED_STATUS=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].status // "") | tostring' 2>/dev/null || true)
-JUDGED_ASSIGNEE=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].assignee // "") | tostring' 2>/dev/null || true)
 
 # With no identity of its own, a caller's writes run as bd's default actor, which
 # only bd can name, since gc runs it in the store's directory and git's user.name
@@ -376,8 +428,7 @@ JUDGED_ASSIGNEE=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].assignee // "") | to
 # bd's preview of a create, which writes nothing. An answer that does not read
 # leaves it empty, and close_guard holds an assigned origin.
 if [ -z "$ACTOR" ] && [ -n "$JUDGED_ASSIGNEE" ]; then
-    ACTOR=$(bd_at "$ORIGIN_PATH" create "bead-rehome actor read" --dry-run --json 2>/dev/null \
-        | grep -a -vE '^gc bd:' | scrub \
+    ACTOR=$(bd_at_json "$ORIGIN_PATH" create "bead-rehome actor read" --dry-run --json \
         | jq -r 'if type == "array" then .[0] else . end | (.created_by // "") | tostring' 2>/dev/null || true)
 fi
 
@@ -386,11 +437,6 @@ case "$KIND" in
     *)         EDGE_TYPE=supersedes ;;
 esac
 
-# The edge the origin already carries onto the successor, by type, or empty.
-# bd keeps one edge per pair, so its type decides what the disposition does.
-PAIR_TYPE=$(printf '%s' "$ORIGIN_JSON" | jq -r --arg s "$SUCCESSOR" \
-    '[.[0].dependencies[]? | select(((.depends_on_id // "") | tostring) == $s) | ((.type // "") | tostring)] | .[0] // ""' \
-    2>/dev/null || true)
 # other_successor <origin-row> — a bead other than this successor that one of the
 # row's disposition edges names, or nothing. Every edge counts, not only the first
 # a reader takes.
@@ -400,7 +446,6 @@ other_successor() {
 }
 # A disposition the origin already records, onto another bead, is somebody
 # else's decision.
-PRIOR_SUCC=$(other_successor "$ORIGIN_JSON")
 if [ -n "$PRIOR_SUCC" ]; then
     die "origin $ORIGIN already names $PRIOR_SUCC as its successor (a duplicates or supersedes edge); refusing to record another disposition over it — reconcile the two by hand" 6
 fi
@@ -449,10 +494,7 @@ IDS
 # PR-close disposition (pr-dispose.sh) naming this kind and this successor, and
 # that successor's store when the record names one.
 ruled_disposition() {
-    local rk rs rss
-    rk=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.pr_close_disposition_kind"] // ""' 2>/dev/null || true)
-    rs=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.pr_close_disposition_successor"] // ""' 2>/dev/null || true)
-    rss=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.pr_close_disposition_successor_store"] // ""' 2>/dev/null || true)
+    local rk="$RULED_KIND" rs="$RULED_SUCC" rss="$RULED_SUCC_STORE"
     [ -n "$rk" ] && [ "$rk" = "$KIND" ] && [ "$rs" = "$SUCCESSOR" ] || return 1
     [ -z "$rss" ] || [ "$rss" = "$SUCCESSOR_STORE" ]
 }
@@ -460,11 +502,7 @@ ruled_disposition() {
 GATE_REASON=""
 gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
     GATE_REASON=""
-    local assignee task_kind step_ref kind_meta
-    assignee=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].assignee // ""' 2>/dev/null || true)
-    task_kind=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["task_kind"] // ""' 2>/dev/null || true)
-    step_ref=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.step_ref"] // .[0].metadata["gc.step_id"] // ""' 2>/dev/null || true)
-    kind_meta=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.kind"] // ""' 2>/dev/null || true)
+    local assignee="$ORIGIN_ASSIGNEE" task_kind="$ORIGIN_TASK_KIND" step_ref="$ORIGIN_STEP_REF" kind_meta="$ORIGIN_KIND_META"
 
     # (a) A review, step, or workflow bead is closed by its own machinery, never
     # here: signoff.sh/review-sweep close reviews, and a step or workflow root is
@@ -499,9 +537,7 @@ gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
             # A fix upstream has to have landed. A duplicate's canonical carries
             # the work whatever its state, so the duplicate closes at once.
             if [ "$KIND" = fixed-upstream ]; then
-                local sstatus soutcome
-                sstatus=$(printf '%s' "$SUCC_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
-                soutcome=$(printf '%s' "$SUCC_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"] // ""' 2>/dev/null || true)
+                local sstatus="$SUCC_STATUS" soutcome="$SUCC_OUTCOME"
                 if [ "$sstatus" != "closed" ] && [ "$soutcome" != "shipped" ]; then
                     GATE_REASON="a $KIND close needs the successor $SUCCESSOR closed or work_outcome=shipped; it is ${sstatus:-unreadable} and has not shipped"; return 1
                 fi
@@ -510,15 +546,10 @@ gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
             # explicit statement and is accepted even beside a work-product key,
             # because a rebase/rework twin's branch names the TWIN, not a push
             # this bead made. Absent an outcome, no work-product key may be set.
-            local ooutcome workkeys
-            ooutcome=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"] // ""' 2>/dev/null || true)
+            local ooutcome="$ORIGIN_OUTCOME" workkeys="$ORIGIN_WORKKEYS"
             if [ "$ooutcome" = "no-op" ]; then
                 :
             elif [ -z "$ooutcome" ]; then
-                workkeys=$(printf '%s' "$ORIGIN_JSON" | jq -r '
-                    (.[0].metadata // {}) as $m
-                    | ["branch","work_dir","gc.work_dir","pr_number","pr_url","merge_result","gc.work_commit"]
-                    | map(select((($m[.]) // "") | tostring | . != "")) | length' 2>/dev/null || printf '1')
                 case "$workkeys" in
                     0) : ;;
                     *) GATE_REASON="a $KIND close needs $ORIGIN to have done no work: it records no work_outcome but carries work-product metadata (branch/work_dir/pr/merge_result). Stamp gc.work_outcome=no-op if it truly pushed nothing"; return 1 ;;
@@ -547,7 +578,7 @@ except_key_holds() { # <origin-row>
     # live blocker and every open child holds the close, and with one standing
     # the gates stay open and nothing closes. Any other blocker that is closed or
     # pinned holds nothing, as in bd.
-    blk_json=$(bd_at "$ORIGIN_PATH" dep list "$ORIGIN" --type blocks --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
+    blk_json=$(bd_at_json "$ORIGIN_PATH" dep list "$ORIGIN" --type blocks --json)
     if ! printf '%s' "$blk_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
         HOLD_UNREAD="its blockers did not read, so whether anything${EXCEPT_KEY:+ besides its own [$EXCEPT_KEY] gates} holds the close is unknown"
         return 0
@@ -559,7 +590,7 @@ except_key_holds() { # <origin-row>
               | select(($k != "" and open_human_gate($k) and ((.assignee // "") | tostring) == "") | not)
               | select((.id // "") != $dropped)
               | .id ] | join(" ")' 2>/dev/null || true)
-    kids_json=$(bd_at "$ORIGIN_PATH" list --parent "$ORIGIN" --include-gates --include-infra --include-templates --json --limit 1 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
+    kids_json=$(bd_at_json "$ORIGIN_PATH" list --parent "$ORIGIN" --include-gates --include-infra --include-templates --json --limit 1)
     if ! printf '%s' "$kids_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
         HOLD_UNREAD="its children did not read, so whether an open child holds the close is unknown"
         return 0
@@ -600,8 +631,7 @@ close_guard() {
 # origin's store, whose edges carry `type` and `depends_on_id`, or nothing when
 # the store does not answer.
 list_rows() {
-    bd_at "$ORIGIN_PATH" list --id "$(printf '%s' "$1" | tr ' ' ',')" --all --include-gates --include-infra --include-templates --json --limit 0 2>/dev/null \
-        | grep -a -vE '^gc bd:' | scrub || true
+    bd_at_json "$ORIGIN_PATH" list --id "${1// /,}" --all --include-gates --include-infra --include-templates --json --limit 0
 }
 
 # carry_plan — the waits a duplicate's close would end before its canonical
@@ -615,13 +645,11 @@ carry_plan() {
     if [ "$KIND" != duplicate ]; then
         CARRY_NONE="a $KIND close moves no wait"; return 0
     fi
-    local sstatus soutcome up_json waiting rows_json w t conflicts=""
-    sstatus=$(printf '%s' "$SUCC_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
-    soutcome=$(printf '%s' "$SUCC_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"] // ""' 2>/dev/null || true)
+    local sstatus="$SUCC_STATUS" soutcome="$SUCC_OUTCOME" up_json waiting rows_json w t conflicts=""
     if [ "$sstatus" = closed ] || [ "$soutcome" = shipped ]; then
         CARRY_NONE="$SUCCESSOR has closed or shipped, so a wait on $ORIGIN may end with its close"; return 0
     fi
-    up_json=$(bd_at "$ORIGIN_PATH" dep list "$ORIGIN" --direction=up --type blocks --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
+    up_json=$(bd_at_json "$ORIGIN_PATH" dep list "$ORIGIN" --direction=up --type blocks --json)
     # The canonical's own wait on the duplicate ends with the close: the work it
     # waits for is its own.
     if ! waiting=$(printf '%s' "$up_json" | jq -er --arg s "$SUCCESSOR" '
@@ -734,12 +762,6 @@ if [ -n "$CHECK" ]; then
     exit 0
 fi
 
-# The branch a bead names in metadata.branch; empty when it names none or the
-# answer does not parse.
-origin_branch() {
-    printf '%s' "$1" | jq -r '(.[0].metadata.branch // "") | tostring' 2>/dev/null || true
-}
-
 if [ -n "$DRY_RUN" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
         CLOSE_PLAN="already closed — edge + note only, the close left as it is"
@@ -769,7 +791,7 @@ if [ -n "$DRY_RUN" ]; then
     else
         WAITERS_PLAN="none ($CARRY_NONE)"
     fi
-    PLAN_BRANCH=$(origin_branch "$ORIGIN_JSON")
+    PLAN_BRANCH="$ORIGIN_BRANCH"
     if [ -n "$PLAN_BRANCH" ]; then
         PLAN_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$PLAN_BRANCH" --bead "$ORIGIN" --dry-run)
         BRANCH_PLAN="end $PLAN_BRANCH on the git remote of $ORIGIN_STORE once the close lands, unless a live owner names it (${PLAN_CMD% } previews it)"
@@ -1078,7 +1100,7 @@ fi
 # complete before this runs, so a branch it cannot end costs a warning, never
 # the close.
 release_record_lock
-RETIRED_BRANCH=$(origin_branch "$ORIGIN_JSON")
+RETIRED_BRANCH="$ORIGIN_BRANCH"
 if [ -n "$RETIRED_BRANCH" ]; then
     # Quoted for a paste: a branch name may carry shell metacharacters.
     END_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN")
