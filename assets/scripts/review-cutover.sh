@@ -19,8 +19,8 @@
 #     pours no run while it works the branch;
 #   - a machine finding that an open rework child of the bead still blocks. bd
 #     refuses that close while the child is open, and finding.sh close-answered
-#     closes the finding once the child lands, in the record step of the run the
-#     landing order pours then;
+#     closes the finding once the child lands, in the loop's check of the run
+#     the landing order pours then, once it records the run's result;
 #   - any other bead whose anchor_bead names the bead, which is no review
 #     scaffolding.
 #

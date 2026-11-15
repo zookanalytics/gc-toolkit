@@ -40,9 +40,9 @@ pending-through-merge record:
   the head, and fixes what must be fixed. A fix is a new head, so the run
   triages its own fix before it can pass. The run ends with a result for the
   head and the target it judged, and the merge counts only that result. A head
-  that only merges the target in costs the run's prepare, triage,
-  rule-and-repair and record steps and no lane, because triage picks no check
-  when git merged it without help.
+  that only merges the target in costs the run's triage and rule-and-repair
+  steps and no lane, because triage picks no check when git merged it without
+  help, and the loop's check records the result with no agent.
 - **The draft.** The PR is a draft while the city works on it. A round of the
   city's work returns it to draft before its first push, and the landing order
   marks it ready once the run has passed at the head the refinery validated,
@@ -124,7 +124,7 @@ A city that serves the graph class from a storage binding of its own refuses a
 v2 attach in a rig's store (the same page). This city is single-store
 (`gc storage status`: every class served by the work store), and a city that
 binds the graph class later pours the run with `gc sling <pool> mol-pr-review
---formula` and writes the `blocks` edge itself, in the run's first step.
+--formula` and writes the `blocks` edge itself, in triage's first read.
 
 The order counts no run as live from a list of its own. The runs attached to a
 bead are its `blocks` edges onto roots of `mol-pr-review`, open or closed, and
@@ -144,12 +144,22 @@ subtree again as the next iteration. A step cannot combine `check` with `expand`
 
 | Step | Who | What it does |
 |---|---|---|
-| `prepare` | the review pool (`<rig>/<binding>polecat-codex`, where reviews run today) | Reads the record and the PR, and stops the run with no result when the PR's head is no longer the run's head. Makes the run's workspace (below). |
-| `review-loop` (template, checked) | the orchestrator | Holds one iteration per head the run judges. Its check is `gctk review passed <run>` (section 8). `max_attempts` is a formula var, 3 by default, the bound the pack's one check loop already uses (`mol-polecat-work`'s self-review). |
-| `triage` (child) | the review pool | Judges the iteration's head: nothing at a head that already passed, the change since the last head that passed, or since the run's first head when the run's own repair pushed this one, or else the whole PR (section 2). Its output names the checks the head needs and whether the change is material. |
+| `review-loop` (template, checked) | the orchestrator | Holds one iteration per head the run judges. Its check is `gctk review passed <run> --record` (section 8), which is also the run's final validate and record: at the iteration that ends the loop, a pass or the last attempt, it writes the result for the head and the target, closes the asks the run answered, files `review-loop-exhausted` when the loop spent its attempts, and closes each person's finding whose ask closed. `max_attempts` is a formula var, 3 by default, the bound the pack's one check loop already uses (`mol-polecat-work`'s self-review). |
+| `triage` (child) | the review pool (`<rig>/<binding>polecat-codex`, where reviews run today) | Its read first checks that the run stands: the run's vars name the bead's record, and the PR is open from its branch into the run's target at the head the iteration judges. When either fails it stops the run with no result. The read makes the run's workspace (below). Triage then judges the iteration's head: nothing at a head that already passed, the change since the last head that passed, or since the run's first head when the run's own repair pushed this one, or else the whole PR (section 2). Its output names the checks the head needs and whether the change is material. |
 | one lane per picked check | the review pool, or the check's own target | Bonded at runtime from triage's output, one `mol-pr-review-lane` per check. Each runs its check's method at the head in its own worktree and writes its verdict and findings as its output. |
 | `rule-and-repair` (child) | the fix pool (`<rig>/<binding>polecat`, where fixes and validation passes run today) | Rules every finding and every ask the run can take, answers them in the head's comment, and makes the round's fixes as one push (section 6). |
-| `record` | the review pool | Writes the result for the head and the target, closes the asks the run answered, and removes the workspace. |
+
+The run has no step that only runs a script, because such a step still costs a
+session. Gas City's formulas have no script step: agents execute only plain
+work beads, the orchestrator executes only control beads, and the one
+author-supplied script the runtime runs is a step's check, which it runs again
+without spending an attempt on exit 75 (formula-spec-v2.md at
+`gastownhall/gascity` main e9a628c500, section 0.2, the step keys of section
+1.3, the `gc.kind` vocabulary and section 3.1). So the test that the run stands
+runs in triage's read at every head, and the record runs in the loop's check
+(ruled in conversation tk-9p5oh6j). A step that only ran one script cost a
+session of the review pool, about 0.26M tokens processed and a wait for one of
+its slots.
 
 The two pools are formula vars, `review_target` and `repair_target`, which the
 landing order fills from the rig as `refinery-reconcile.sh` fills them today.
@@ -169,10 +179,13 @@ the fallback is one static lane child per pack check, each closing at once with
 the verdict "not picked" when triage did not pick it, at the cost of a session
 per check left out. Rig checks then run in one generic lane.
 
-An exhausted check closes the template step with `gc.outcome=fail`, and the step
-after it still runs, because "a `needs` edge is ordering-only"
-(`internal/dispatch/drain.go`). `record` reads the loop's outcome itself, so an
-exhausted loop never reads as a pass (section 7).
+An exhausted check closes the template step with `gc.outcome=fail`. The check
+knows its last attempt from the run's `max_attempts` var, the value Gas City
+compiles the loop's bound from, because the runtime hands the script no bound of
+its own (`runRalphCheck` in `internal/dispatch/ralph.go` sets no
+`MaxIterations` in the script's `ConditionEnv`). At that attempt it records a
+result that does not pass before it exits 1, so an exhausted loop never reads
+as a pass (section 7).
 
 ### Where it runs
 
@@ -181,14 +194,14 @@ the review workspace root `review-workspace.sh` keeps today
 (`<dir>/gc-review-<root>`, with `<dir>` the `REVIEW_WORKSPACE_DIR`, else
 `$TMPDIR`). Each lane takes a detached worktree at its head inside it, so lanes
 that build, test or capture never share a tree, and the repair takes the run's
-one worktree on the PR's branch. `record` removes the directory once the run has
-ruled every finding, so a demo capture stays readable until its finding is
-ruled. The work's own worktree is not a candidate: it belongs to the pool slot
+one worktree on the PR's branch. Triage's read makes the directory, private to
+its user, at the run's first head. The work's own worktree is not a candidate: it belongs to the pool slot
 that built the work, whose reaper removes it once that slot moves on, and a run's
 steps are claimed by other slots.
 
-`orders/review-workspace-reap.toml` stays, as the backstop for a run that ends
-without its `record` step, such as a cancelled run. Its script keys the reap on
+`orders/review-workspace-reap.toml` removes the directory once the run's root
+closes, however the run ended, after the run has ruled every finding, so a demo
+capture stays readable until its finding is ruled. Its script keys the reap on
 the run's root instead of a review bead: it removes the directory of a run whose
 root is closed, or which names no live bead and has been idle as long as today.
 
@@ -196,12 +209,15 @@ root is closed, or which names no live bead and has been idle as long as today.
 
 The run's one write on the bead that owns the PR is its result, in
 `review_results`, the JSON array of `{head, target, passed}` the evaluator reads
-(`services/gctk/pr/ready_keys.go`). `record` writes it through
-`gctk review record <run>`, which replaces the entry for the run's last judged
-head and target, or adds one, under the store's record lock. `passed` is true
-when the loop's check passed at that head and no gate the run filed is open. It
-is false when the loop exhausted, or when the loop stopped on a question the run
-put to a person (section 6).
+(`services/gctk/pr/ready_keys.go`). The loop's check writes it through
+`gctk review passed <run> --record` at the iteration that ends the loop, before
+the loop closes. It replaces the entry for the run's last judged head and
+target, or adds one, under the store's record lock. `passed` is true when the
+iteration passed at that head and no gate the run filed is open. It is false
+when the loop exhausted, or when the loop stopped on a question the run put to
+a person (section 6). A record that does not land exits 75, so Gas City runs
+the check again without spending an attempt, and the retry replaces the same
+entry.
 The review domain owns the key from then on. `ready_keys.go` reads it through
 the face the review domain exports, as it reads the record through the record
 package.
@@ -441,7 +457,8 @@ rule its source carries, which `review-ruling` states:
 
 - **A lane's finding** is ruled by that lane's own rule for what blocks, the
   What blocks section of its skill, with that lane's evidence in its worktree,
-  which stays on disk until `record` removes the run's workspace. A blocking
+  which stays on disk until the reap removes the run's workspace once its root
+  closes. A blocking
   finding is fixed, unless the lane's own rule shows it does not hold, and then it
   is declined with that reason. A finding the lane raised and the run does not act
   on is answered where the PR shows that lane's verdict (tk-n4uafu5).
@@ -485,8 +502,9 @@ which the landing order gives a run of its own (tk-2w1w33v, PRs #1305 and #1481)
 a human finding, the record tk-1tfzr71.21 decides the form of, and the batch's
 fix unit is filed as an ask instead of a rework child, through `gctk review ask`.
 It opens no validation pass. The run rules each human finding of the batch with
-`finding.sh set-disposition`, unchanged, and its `record` step runs
-`finding.sh close-answered`, unchanged, so each finding closes once its ask has
+`finding.sh set-disposition`, unchanged, and the loop's check runs
+`finding.sh close-answered`, unchanged, once it records the run's result, so
+each finding closes once its ask has
 closed and `pr-facts.sh`'s write-back answers the comment as it does today. The
 failing-check and conflict arms file their rework child as an ask the same way.
 `finding.sh` is not changed, and its row moves to the bead that retires the old
@@ -514,31 +532,38 @@ re-offered it.
   without spending an attempt, up to 20 times (`maxCheckInfraRetries` in
   `internal/dispatch/ralph.go`).
 - **A loop that exhausts its attempts** has failed to converge round after round,
-  so `record` writes `passed: false` for the run's last judged head and files a
-  human gate on the bead, keyed `review-loop-exhausted`, naming the head, the
-  findings still open and the run. That is the one gate a run files about its
+  so the loop's check, at its last attempt, writes `passed: false` for the
+  run's last judged head and files a human gate on the bead, keyed
+  `review-loop-exhausted`, naming the head, the findings still open and the
+  run, before the loop closes. That is the one gate a run files about its
   own failure, and once a person clears it, the next pass pours a fresh run. A
   loop that a step's hard failure closed did not exhaust: Gas City ends it without
   running the check and records `gc.final_disposition = hard_fail`
-  (formula-spec-v2.md, section 3.1, "A hard failure ends the loop"), and `record`
-  writes no result and files no gate for it.
+  (formula-spec-v2.md, section 3.1, "A hard failure ends the loop"), so no
+  result is written and no gate filed for it.
 - **A run that ends without a result,** through a cancel, a hard failure or a
   decline, closes its root, and the `blocks` edge stops holding. The landing
   order's next pass finds no result at the head and no run attached, and pours
   another. When the last two runs attached to the bead at the live head both
   closed without a result, it files a human gate keyed `review-run-failed`
-  instead, naming both runs and how each ended. It counts only runs that ended
+  instead, naming both runs and how each ended. It reads how a run ended from
+  its loop: a loop that closed passed, or exhausted at a judged head, recorded
+  its result, because its check exits 0, and at the last attempt 1, only once
+  its record landed. It counts only runs that ended
   after the bead's last such gate closed, so a person who clears the gate gets one
   more run rather than the same gate again. The first failure is often
   transient, as when a gather's failure path cancelled a review's run together
   with its own session (tk-6qbps3w), and a second at the same head is a defect a
   person should see.
-- **A run never ends as pass.** The result is written only by `record`, and
-  `passed` is true only when the check passed at that head and no gate the run
-  filed is open. A run's record is its own vars, which the order fills from the
-  record it read under the lock. `prepare` refuses vars that do not name the bead's record, and stops the run
-  with no result, so nothing pours a run with an empty record, the shape that
-  wedged the arch reviews of PRs #1317 and #1319 (tk-11jxw8s).
+- **A run never ends as pass.** The result is written only by the loop's
+  check, and `passed` is true only when the check passed at that head and no
+  gate the run filed is open. A run's record is its own vars, which the order
+  fills from the record it read under the lock. Triage's read refuses vars that
+  do not name the bead's record, at every head the run judges, and stops the
+  run with no result, so nothing pours a run with an empty record, the shape
+  that wedged the arch reviews of PRs #1317 and #1319 (tk-11jxw8s). In a later
+  round the head it compares with GitHub's is the head that round judges, the
+  repair's push, while the bead's record keeps the head the refinery validated.
 - **An approval never stands in for a check.** The evaluator reads the review
   result and the approval as two conditions, and nothing reads an approval as a
   lane's green, so lane-state's GitHub-approval fallback has no successor. A
@@ -562,8 +587,7 @@ member the review domain. Its verbs:
 |---|---|---|
 | `gctk review checks [--at <oid>] [--resolve <set> \| --show \| --check <name>]` | The check index at a commit, with the rig's overlay laid over the pack's: the port of `review-checks.sh`'s verbs. Every caller moves in the same change and the shell goes, by the domain move's rule. | triage, the lanes, the old path's readers until it retires |
 | `gctk review guidance <check> --at <oid>` | The rig's guidance for a check at the reviewed commit (`review-checks.sh --extension`). | each lane |
-| `gctk review passed <run> [--explain]` | The loop's check script (below). `--explain` prints the iteration's lanes, verdicts, findings and rulings, which `rule-and-repair` reads before it rules, and which triage reads at a head the repair pushed. | the formula's check; triage; `rule-and-repair` |
-| `gctk review record <run>` | Writes the result for the run's last judged head and target into `review_results` under the record lock, and closes the asks the run answered with `gc.work_outcome` and the commit. | `record` |
+| `gctk review passed <run> [--explain] [--record]` | The pass rule (below). With `--record`, the loop's check and the run's final validate and record: at the iteration that ends the loop it writes the result for the run's last judged head and target into `review_results` under the record lock, closes the asks the run answered with `gc.work_outcome` and the commit, files `review-loop-exhausted` when the loop spent its attempts, and closes each person's finding whose ask closed. `--explain` prints the iteration's lanes, verdicts, findings and rulings, which `rule-and-repair` reads before it rules, and which triage reads at a head the repair pushed. | the formula's check (`--record`); triage; `rule-and-repair` |
 | `gctk review ask <bead> --reason <text> [--check <name>]...` | Files an ask (section 1). It refuses a bead that owns no PR on the record, and it finds an ask of the same source and reason, open or closed, before it files, so a re-run after the ask closed files nothing (the window PR #1480 left in `rework-child.sh`). | the refinery, `pr-facts.sh`, `converse-rework.sh`, the `prs` skill |
 | `gctk pr draft <bead>` | Reads the PR's draft flag and converts it to draft only when it is ready (section 5). | the repair, the refinery's `mr` step |
 | `gctk pr withdraw <bead> --head <oid> --reason <text>` | Files the withdrawal (section 4). The landing order carries it out. | triage |
@@ -578,8 +602,8 @@ nothing holds the ask and a later run takes it (section 1). Each finding the run
 ruled must-fix at an earlier head must also name the commit that fixes it. A
 finding declined by its lane's own rule counts as ruled, and so does a question
 put to a person, so the loop stops there rather than spend its attempts on a
-question only a person can settle, and `record` then writes no passed result
-while that gate is open (section 1). It exits 1 otherwise, so the next
+question only a person can settle, and the result the check records then does
+not pass while that gate is open (section 1). It exits 1 otherwise, so the next
 iteration triages the head the repair pushed. It exits 75 when the store does
 not answer. It reads only the store, because a check runs inside the control
 dispatcher with a `PATH` of the directories of bd, gc, dolt and jq plus the
@@ -587,7 +611,7 @@ system's (`conditionPATH` in `internal/convergence/condition.go`), which has no
 `gh`. The steps' outputs carry the heads, so the check needs no GitHub read.
 
 **What is left of signoff.sh.** Its verdict record becomes each lane's output
-and the result `gctk review record` writes. Its post becomes the one comment per
+and the result the loop's check writes. Its post becomes the one comment per
 head that `rule-and-repair` posts. Its widening of `check_set` becomes triage's
 picks at each head. Its findings, its rework child and its validation pass have
 no successor, because findings live in the run, the run repairs and the run rules.
@@ -643,9 +667,9 @@ in under rule 1:
 
 | Problem | The new path | Because |
 |---|---|---|
-| tk-11jxw8s: a review poured with an empty record | removes it | The order is the one pourer, from the record it read; `prepare` refuses vars that do not name the record; a run with no result never passes (section 7). |
+| tk-11jxw8s: a review poured with an empty record | removes it | The order is the one pourer, from the record it read; triage's read refuses vars that do not name the record, at every head; a run with no result never passes (section 7). |
 | tk-2w1w33v, and PRs #1305 and #1481: a fix merged with no triage | removes it | No convergence is ruled. Every head the run pushes is triaged in the next iteration, and a push after a pass is a head with no result. |
-| tk-a43j1j1: demo, pm and arch findings ruled without that lane's evidence | removes it | `rule-and-repair` rules each finding by its lane's What blocks, with the lane's worktree on disk until `record`. |
+| tk-a43j1j1: demo, pm and arch findings ruled without that lane's evidence | removes it | `rule-and-repair` rules each finding by its lane's What blocks, with the lane's worktree on disk until the run's root closes. |
 | tk-n4uafu5: a declined finding never answered | removes it | Each finding is answered in the head's comment beside its lane's verdict. |
 | tk-8tht7qk, tk-95xeo8v, and the arch and pm cases on tk-ltcv43q and on another rig: a finding closed by another lane's fix | removes it | No fix unit exists to share; each must-fix finding records the commit that fixed it. |
 | tk-v7qqux, tk-rmkr6l1, and the seat taken from another rig's validation pass: a fix before its ruling, a slot held while it waits | removes it | The step that rules is the step that fixes, and it closes after its push, so no repair waits on a check and none is ready beside the check that rules it. |
@@ -663,7 +687,7 @@ in under rule 1:
 | tk-z1wjjcn, tk-0dpxsl6, tk-qf1l1i2, tk-9qa0dae, tk-3p9bvai, tk-nvlo9e5 | removes each | No rework child, finding bead, validation pass or sweep exists on the new path; an ask is filed whole by one verb, and the run names no commit in an ask, since it judges its own heads. |
 | The approval-withdraw login read (tk-a8nb8wo) | removes it | The withdrawal reads the login through `pr-post.sh acting-login`. |
 | `gate-ensure.sh` swallowing unknown flags, `finding.sh` and `lane-state.sh` refusing `--help`, and `mol-validate`'s steps over the hook's cap | removes each | The verbs are gctk's, which refuse an unknown flag, and every step the run's formulas deliver is held to `formula-step-size.test.sh`'s bound. |
-| A validation pass closed with no work outcome | removes it | `gctk review record` closes each ask with `gc.work_outcome`, and the run's root is Gas City's to close. |
+| A validation pass closed with no work outcome | removes it | The loop's check closes each ask with `gc.work_outcome` as it records the result, and the run's root is Gas City's to close. |
 | tk-e70808f: a sitting edits an open PR's branch | answers it | A sitting holds the bead through its conversation's gate while it edits, the order pours no run while a conversation's gate holds the bead, and the sitting's push runs `gctk pr draft` first and goes under the lease. When the sitting lets go, the head it left is validated and triaged like any other, so a small edit costs one triage. |
 | tk-vrg93t0: wake a conversation when its PR is ready for approval | answers it | Section 9. |
 | tk-1tfzr71.50: `bd-lib.sh`'s checked create | moves its edge | Its last callers (`gate-ensure.sh`, `finding.sh`, the validation-pass filing in `signoff.sh`) retire with the old path. |
@@ -686,8 +710,8 @@ A shadow run is attached to nothing, so it holds nothing, and with `shadow=true`
 no step writes outside the run. Triage files no withdrawal, and a demo lane keeps
 its capture in the run's workspace rather than delivering it. `rule-and-repair`
 rules, and writes into its own output the comment it would post and the gates and
-beads it would file, but it fixes, pushes, posts and files nothing. `record`
-writes no result, closes no ask and files no gate. So it adds no writer, no post
+beads it would file, but it fixes, pushes, posts and files nothing. The loop's
+check writes no result, closes no ask and files no gate. So it adds no writer, no post
 and no hold on the PR. The mechanik compares, at the same head, each lane's verdict and each
 finding's ruling with the old path's review beads and validation rulings, and
 records the comparison on gc-toolkit's cutover bead. It stops once every check
@@ -729,10 +753,10 @@ the city working. Until a rig cuts over, nothing on the new path runs there.
 
 | Unit | What it does | Waits on | Releases |
 |---|---|---|---|
-| 1. The review domain | `gctk review checks` and `gctk review guidance`, the port of `review-checks.sh`, with every caller moved and the shell deleted; `gctk review passed` with its pass rule and `--explain`; `gctk review record`, which takes `review_results`'s declaration from `ready_keys.go`; `gctk review ask`, with the key `review_checks` registered. Tests for each case of the pass rule: a lane's finding ruled must-fix and one declined by its lane's rule, a question put to a person, a repair that pushed, a must-fix finding of an earlier head with no commit that fixes it, an untaken ask that nothing holds, which fails the check, and an ask an open bead holds, which neither fails it nor is taken, an ask's check not run at the head, a store that does not answer; for `record`, a result replaced at the same head and target, `passed: false` for an exhausted loop and while a gate the run filed is open, and no result for a loop a hard failure closed; an ask filed twice by one source and reason, open and closed, and an ask filed with no parent. | nothing | the formula (unit 3) |
+| 1. The review domain | `gctk review checks` and `gctk review guidance`, the port of `review-checks.sh`, with every caller moved and the shell deleted; `gctk review passed` with its pass rule, `--explain`, and `--record`, the loop's check that writes the run's result, which takes `review_results`'s declaration from `ready_keys.go`; `gctk review ask`, with the key `review_checks` registered. Tests for each case of the pass rule: a lane's finding ruled must-fix and one declined by its lane's rule, a question put to a person, a repair that pushed, a must-fix finding of an earlier head with no commit that fixes it, an untaken ask that nothing holds, which fails the check, and an ask an open bead holds, which neither fails it nor is taken, an ask's check not run at the head, a store that does not answer; for the record, a result replaced at the same head and target, a passing round recorded once and only once, a record that fails spending no attempt, `passed: false` and a `review-loop-exhausted` gate for an exhausted loop, `passed: false` while a gate the run filed is open, and no result for a run that judged no head; an ask filed twice by one source and reason, open and closed, and an ask filed with no parent. | nothing | the formula (unit 3) |
 | 2. The draft cycle and the withdrawal | `gctk pr draft`; `gctk pr withdraw` with `withdraw_head` registered; in the landing order's pass, the withdrawal carried out (waiting for routing, dismissing with the mark each approval on a commit that does not contain the withdrawal's head, reading back, a gate on refusal) and the ready transition; the refinery's `mr` push runs `gctk pr draft` first. Tests show section 10's draft-cycle items of the merge design: a round's first push returns a ready PR to draft and later pushes change nothing; the order readies a draft whose passed result names its validated head with no run attached, whoever drafted it, and not one whose record is not pending at that head; a cycle stopped between any two steps finishes from where the PR stands; a return to draft dismisses no approval, and a PR approved before a round merges on that approval after it unless triage ruled the round's head material; a gate or `merge_hold` still holds a PR the order readied; a withdrawal waits while an approval it would dismiss carries unrouted comments, holds the PR until no approval that stands was given on a commit without its head, and files its gate when GitHub refuses; a withdrawal for a head, carried out after a person approved a later head, keeps that approval, keeps an approval of the head itself, and still dismisses an approval of a commit that does not contain the head. | nothing | unit 4 |
-| 3. The formula | First, a probe in a scratch city: `gc formula cook --attach` of a v2 formula whose template child carries `on_complete`, inside a `[template.check]` loop, with steps routed by `gc.run_target`, run over three iterations; its result picks `on_complete` or the static fallback (section 1). Then `mol-pr-review` and `mol-pr-review-lane`, each step calling a tested script within the step-size bound, which `formula-step-size.test.sh` learns to read in expansion templates and bonds; `review-workspace.sh` keyed by the run's root and the reap order with it; the shadow var; the skills' verdict sentences, triage's per-head method and material ruling, and the `review-ruling` skill (section 3). | unit 1 | unit 4 |
-| 4. Admission and asks | The landing order's pass pours a run (no passed result at the validated head, or an open ask that nothing holds; none attached; no other writer, rework child or conversation's gate, on the branch; no human gate on the bead), re-offers a run that ended without a result, and files `review-run-failed` at the second failure at one head since that gate last closed. Its ready transition waits while an ask that nothing holds is open. The asks: the refinery's conflict path, `pr-facts.sh`'s three arms on a PR on the record, `converse-rework.sh` on such a PR, and the `prs` skill's command. `prstatus` renders the run's state; `refinery-lib.sh` leaves an ask alone. Tests: a head validated with no result gets one run and only one under overlapping passes; a run that ended without a result is poured again, and the second failure gets the gate; a cleared `review-run-failed` or `review-loop-exhausted` gate gets one more run; an open human gate on the bead keeps the order from pouring until it closes; an ask on a passed head starts a round; an ask an open bead holds, on a passed head, pours no run, files no gate and leaves the head's passed result, and the pass after that bead closes pours one run, which takes it; a draft with an open ask that nothing holds is not marked ready; a sitting's open gate keeps the run off the branch; a person's batch is ruled by grade, a nit answered and not fixed, a fix outside the diff deferred to a bead with the PR's target. | units 2 and 3 | unit 5 |
+| 3. The formula | First, a probe in a scratch city: `gc formula cook --attach` of a v2 formula whose template child carries `on_complete`, inside a `[template.check]` loop, with steps routed by `gc.run_target`, run over three iterations; its result picks `on_complete` or the static fallback (section 1). Then `mol-pr-review` and `mol-pr-review-lane`, each step calling a tested script within the step-size bound and none that only runs one (section 1), which `formula-step-size.test.sh` learns to read in expansion templates and bonds; `review-workspace.sh` keyed by the run's root and the reap order with it; the shadow var; the skills' verdict sentences, triage's per-head method and material ruling, and the `review-ruling` skill (section 3). | unit 1 | unit 4 |
+| 4. Admission and asks | The landing order's pass pours a run (no passed result at the validated head, or an open ask that nothing holds; none attached; no other writer, rework child or conversation's gate, on the branch; no human gate on the bead), re-offers a run that ended without a result, and files `review-run-failed` at the second failure at one head since that gate last closed. Its ready transition waits while an ask that nothing holds is open. The asks: the refinery's conflict path, `pr-facts.sh`'s three arms on a PR on the record, `converse-rework.sh` on such a PR, and the `prs` skill's command. `prstatus` renders the run's state; `refinery-lib.sh` leaves an ask alone. Tests: a head validated with no result gets one run and only one under overlapping passes; a run that ended without a result is poured again, and the second failure gets the gate; a cleared `review-run-failed` or `review-loop-exhausted` gate gets one more run, and while the exhausted loop's gate is open no second run pours; a run cancelled at triage's read leaves no result and is poured again; an open human gate on the bead keeps the order from pouring until it closes; an ask on a passed head starts a round; an ask an open bead holds, on a passed head, pours no run, files no gate and leaves the head's passed result, and the pass after that bead closes pours one run, which takes it; a draft with an open ask that nothing holds is not marked ready; a sitting's open gate keeps the run off the branch; a person's batch is ruled by grade, a nit answered and not fixed, a fix outside the diff deferred to a bead with the PR's target. | units 2 and 3 | unit 5 |
 | 5. Docs, warrants, the plan and the cutover script | The pages in section 9's last row, and what its `architecture.md` row leaves; the account of a hand-resolved merge in the merge commit's message, in `mol-polecat-work`'s workspace-setup; the warrants' Covers lines; `review-cutover.sh` for the cutover beads; the deletion plan's rows moved to the retirement bead, with a note on it saying why; `built-once-target.md`'s Review section and the lane table. | units 1 to 4 | the landing |
 
 **Rule 2.** Every step of the two formulas calls tested scripts or gctk verbs and
@@ -774,9 +798,20 @@ Gas City, at 13bb101b8f:
 - `[steps.check]`: exit 0 passes, exit 75 or a timeout re-runs the check without
   spending an attempt, any other exit spends one, and exhaustion closes the step
   failed (formula-spec-v2.md, the check exit-code table; `internal/dispatch/control.go`).
-  A `needs` edge is ordering-only, so the step after an exhausted loop still runs
-  (`internal/dispatch/drain.go`). `check` combines with neither `expand` nor
-  `on_complete` (formula-spec-v2.md; `internal/formula/types.go`).
+  `check` combines with neither `expand` nor `on_complete` (formula-spec-v2.md;
+  `internal/formula/types.go`).
+- A formula has no script step. Agents execute only plain work beads and the
+  orchestrator only control beads, and a step's check is the one author script
+  the runtime runs (formula-spec-v2.md at e9a628c500, sections 0.2, 1.3 and 3.1).
+  The check's script gets the store's connection env (`BEADS_DIR`, the Dolt and
+  credentials env: `ConditionEnv.Environ` in `internal/convergence/condition.go`)
+  and no bound on the loop's attempts (`runRalphCheck` in
+  `internal/dispatch/ralph.go`, at e9a628c500). On the city's gc 1.4.3, a probe
+  in a scratch city on 2026-11-15 had a check script take the record lock in the
+  store's `.beads` directory, write `review_results` and close a bead with its
+  work record, at a pass and at the last attempt of an exhausting loop, and read
+  the loop's bound from the root's `gc.var.max_attempts`, which matched the loop's
+  `gc.max_attempts` ([the search](gas-city-search.md#the-check-script-and-the-result-unit-1)).
 - The multi-lane loop on a template's check: understanding-formulas.md, "Multi-Lane
   Review Loops", and `gascity/formulas/build-basic-review.formula.toml` in
   gascity-packs at 0f07496d2f.

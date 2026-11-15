@@ -15,12 +15,15 @@
 # repair's are kept in <workspace>/repair/shadow-writes.txt, which its output
 # carries. A demo lane's capture stays in the run's workspace.
 #
+# The run's result belongs to no step: the loop's check records it as it ends
+# the loop (review-passed-check.sh), and the review-workspace-reap order
+# removes the workspace once the run's root closes.
+#
 # Usage (each verb's step in brackets):
-#   review-run.sh prepare                         [prepare]
-#       stop a run that must stop, by cancelling it with no result (exit 3),
-#       else make its workspace and print the run
 #   review-run.sh triage                          [triage]
-#       make triage's worktree at the head and print what it reads: the change,
+#       stop a run that must stop, by cancelling it with no result (exit 3),
+#       else make the run's workspace and triage's worktree at the head and
+#       print what it reads: the change, none at a head that already passed,
 #       the merges in it, the check index there, the asks and, at a head the
 #       repair pushed, the rulings that push answers
 #   review-run.sh lane --check <check>            [a lane]
@@ -52,10 +55,6 @@
 #       needs-you on the gate --gate names
 #   review-run.sh deliver --file <capture>        [a lane]
 #       deliver a demo capture to the PR (demo-deliver.sh)
-#   review-run.sh record                          [record]
-#       record the run's result (gctk review record), ask a person through a
-#       gate when the loop exhausted its attempts, close each human finding
-#       whose ask closed (finding.sh close-answered), and remove the workspace
 #
 # Prints what each verb did or read on stdout, and why it stopped on stderr.
 # Exit: 0 done, or nothing to do · 1 a write did not land, and running it again
@@ -122,8 +121,7 @@ load() {
     RUN=$(fact .run); PR_BEAD=$(fact .pr_bead); PR=$(fact .pr); BRANCH=$(fact .branch)
     TARGET=$(fact .target); HEAD=$(fact .head); N=$(fact .iteration); SHADOW=$(fact .shadow)
     case "$(fact .output)" in
-        triage) STEP=triage ;; lane) STEP=lane ;; repair) STEP=rule-and-repair ;;
-        *) case "$(fact .ref)" in *.prepare) STEP=prepare ;; *.record) STEP=record ;; *) STEP=other ;; esac ;;
+        triage) STEP=triage ;; lane) STEP=lane ;; repair) STEP=rule-and-repair ;; *) STEP=other ;;
     esac
     WS=$("$HERE/review-workspace.sh" path --root "$RUN") || die 1 "no workspace path for $RUN"
     SHADOW_WRITES="$WS/repair/shadow-writes.txt"
@@ -186,30 +184,31 @@ print_change() { # <worktree>
 
 # A run that must stop ends with no result: the cancel closes its root, the
 # root's edge stops holding the PR's bead, and the landing order pours a fresh
-# run once the refinery validates the PR's live head.
-cmd_prepare() {
-    local out rc ref
-    out=$("$gctk" review step "$ID" --json --prepare 2>&1); rc=$?
+# run once the refinery validates the PR's live head. Triage's read asks it at
+# every head before triage judges, the run's first head and each push of its
+# repair. A step whose run does not read as one, such as a run poured with an
+# empty record, stops the same way when the step is triage's.
+stands() {
+    local out rc row ref
+    out=$("$gctk" review step "$ID" --json --stands 2>&1); rc=$?
     case "$rc" in
-        0) ;;
+        0) return 0 ;;
         3)
-            ref=$("$gctk" review step "$ID" --json 2>/dev/null | jq -r '.ref // empty')
-            [ "$ref" = mol-pr-review.prepare ] || die 3 "${out#gctk review step: }"
+            row=$(gc bd show "$ID" --json 2>/dev/null) \
+                || die 2 "${out#gctk review step: }; whether $ID is triage's step did not read, so nothing is cancelled"
+            ref=$(printf '%s' "$row" | jq -r '.[0].metadata["gc.step_ref"] // empty' 2>/dev/null)
+            case "$ref" in *.triage) ;; *) die 3 "${out#gctk review step: }" ;; esac
             echo "$PROG: ${out#gctk review step: }" >&2
-            "$HERE/decline.sh" --step mol-pr-review.prepare --reason "${out#gctk review step: }" \
+            "$HERE/decline.sh" --step review-loop --reason "${out#gctk review step: }" \
                 || die 1 "the run must stop, and its cancel did not land: run this again"
             exit 3 ;;
         # The run's check did not answer, so whether it stands is unknown.
         *) die 2 "${out#gctk review step: }" ;;
     esac
-    load
-    owns prepare
-    { mkdir -p "$WS" && chmod 700 "$WS"; } || die 1 "cannot make the run's workspace $WS"
-    print_run
-    printf '%s\n' "== The run's workspace: $WS"
 }
 
 cmd_triage() {
+    stands
     load; owns triage; repo
     local wt
     worktree --triage; wt=$WT
@@ -223,7 +222,7 @@ cmd_triage() {
         printf '%s\n' "== The round before, whose push this head may be"
         "$gctk" review passed "$ID" --iteration "$((N - 1))" --explain || true
     fi
-    printf '%s\n' "== Triage's worktree: $wt" "== Write the output to: ${wt%/wt}/output.json"
+    printf '%s\n' "== The run's workspace: $WS" "== Triage's worktree: $wt" "== Write the output to: ${wt%/wt}/output.json"
 }
 
 cmd_lane() {
@@ -445,39 +444,7 @@ cmd_deliver() {
     "$HERE/demo-deliver.sh" --file "$FILE" --pr "$PR"
 }
 
-cmd_record() {
-    load; owns record
-    local out rc
-    out=$("$gctk" review record "$RUN" 2>&1); rc=$?
-    printf '%s\n' "$out"
-    case "$rc" in
-        0) ;;
-        3) exit 3 ;;
-        *) exit 2 ;;
-    esac
-    local last
-    last=$(printf '%s\n' "$out" | sed -n 's/.*: the loop exhausted its attempts at \([0-9a-f]*\)$/\1/p' | head -1)
-    if [ -n "$last" ]; then
-        local explain
-        explain=$("$gctk" review passed "$RUN" --explain 2>&1)
-        if [ "$SHADOW" = true ]; then
-            echo "shadow run: wrote nothing: gate review-loop-exhausted on $PR_BEAD, at $last"
-        else
-            "$HERE/human-gate.sh" --subject "$PR_BEAD" --key review-loop-exhausted --message "$(printf '%s\n\n%s' \
-                "Review run $RUN exhausted its attempts at $last without a passed head, so $PR waits for you. Clearing this gate has the landing order pour a fresh run." \
-                "$explain")" || die 1 "the result is recorded and the review-loop-exhausted gate did not land"
-        fi
-    fi
-    if [ "$SHADOW" = true ]; then
-        echo "shadow run: its workspace stays for the comparison until the reap order takes it: $WS"
-        return 0
-    fi
-    "$HERE/finding.sh" close-answered --anchor "$PR_BEAD" \
-        || die 2 "the result is recorded, and the human findings whose asks it closed did not close; run it again"
-    "$HERE/review-workspace.sh" remove --root "$RUN" || die 1 "the run's workspace was not removed; the reap order takes it"
-}
-
 case "$VERB" in
-    prepare|triage|lane|repair|output|withdraw|push|post|defer|question|finding|deliver|record) "cmd_$VERB" ;;
+    triage|lane|repair|output|withdraw|push|post|defer|question|finding|deliver) "cmd_$VERB" ;;
     *) usage ;;
 esac

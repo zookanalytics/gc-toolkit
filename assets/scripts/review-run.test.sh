@@ -4,9 +4,11 @@
 # stub answers `review step` from a fixture each case sets, and every stub logs
 # the calls it gets.
 #
-# Covers prepare making the workspace, cancelling a run that must stop with no
-# result, and stopping with nothing made when its check of the run does not
-# answer; a verb the held step does not own refused; output writing what
+# Covers triage's read cancelling a run that must stop with no result, a run
+# that does not read as one included, cancelling nothing for a step that is not
+# triage's or whose ref does not read, stopping with nothing made when its check
+# of the run does not answer, and making the run's workspace private to its
+# user; a verb the held step does not own refused; output writing what
 # gctk printed as the step's gc.output_json, from the step's own file, and
 # writing nothing for an output gctk refuses, a shadow round handing gctk its
 # writes; triage's withdrawal; the push returning the PR to draft before it
@@ -19,11 +21,9 @@
 # left as it stands when it is armed, closed or routed; a
 # question put to a gate; a person's batch, whose human findings the round's
 # read lists and the finding verb rules through finding.sh, a deferral's
-# follow-up taking the PR's target; the record asking a person when the loop
-# exhausted its attempts, closing the human findings whose asks closed, and
-# removing the workspace, which a shadow run keeps; and the
-# reads making each step's worktree in its own part of the workspace, and
-# stopping when it does not land.
+# follow-up taking the PR's target; triage's read at a head that already
+# passed; and the reads making each step's worktree in its own part of the
+# workspace, and stopping when it does not land.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -74,8 +74,9 @@ printf 'gc %s\n' "$*" >> "$LOG"
 case "$1 $2" in
     "hook current") echo "${STUB_HELD:-tk-step}" ;;
     "bd update") exit "${STUB_RC_BD_UPDATE:-0}" ;;
-    "bd show") if [ -n "${STUB_NO_POOL:-}" ]; then printf '[{"id":"%s","metadata":{}}]\n' "$3"
-               else printf '[{"id":"%s","metadata":{"gc.var.repair_target":"rig/gc-toolkit.polecat","finding.follow_up":"tk-fu"}}]\n' "$3"; fi ;;
+    "bd show") [ -z "${STUB_RC_BD_SHOW:-}" ] || exit "$STUB_RC_BD_SHOW"
+               if [ -n "${STUB_NO_POOL:-}" ]; then printf '[{"id":"%s","metadata":{}}]\n' "$3"
+               else printf '[{"id":"%s","metadata":{"gc.var.repair_target":"rig/gc-toolkit.polecat","finding.follow_up":"tk-fu","gc.step_ref":"%s"}}]\n' "$3" "${STUB_STEP_REF:-}"; fi ;;
     "bd list") [ -z "${STUB_RC_BD_LIST:-}" ] || exit "$STUB_RC_BD_LIST"
                printf '%s\n' "${STUB_LIST:-[]}" ;;
     "bd create") echo '{"id":"tk-new"}' ;;
@@ -86,15 +87,14 @@ STUB
 printf 'gctk %s\n' "$*" >> "$LOG"
 case "$1 $2" in
     "review step")
-        case " $* " in *" --prepare "*)
-            [ -z "${STUB_PREPARE_WHY:-}" ] || { echo "gctk review step: run tk-run must stop with no result: $STUB_PREPARE_WHY" >&2; exit 3; }
-            [ -z "${STUB_PREPARE_RC:-}" ] || { echo "gctk review step: GitHub did not answer for https://github.com/o/r/pull/7" >&2; exit "$STUB_PREPARE_RC"; } ;;
+        case " $* " in *" --stands "*)
+            [ -z "${STUB_STANDS_OUT:-}" ] || { echo "gctk review step: $STUB_STANDS_OUT" >&2; exit 3; }
+            [ -z "${STUB_STANDS_RC:-}" ] || { echo "gctk review step: GitHub did not answer for https://github.com/o/r/pull/7" >&2; exit "$STUB_STANDS_RC"; } ;;
         esac
         cat "$STUB_FACTS" ;;
     "review output") [ -z "${STUB_REFUSE:-}" ] || { echo "gctk review output: $STUB_REFUSE; write it again" >&2; exit 3; }
         echo '{"review":"x","iteration":1}' ;;
     "review comment") [ -f "$STUB_GCTK_OUT" ] && cat "$STUB_GCTK_OUT" ;;
-    "review record") printf '%s\n' "${STUB_RECORD:-tk-pr: review passed at x into main}" ;;
     "pr draft") [ -z "${STUB_ORIGIN:-}" ] || git -C "$STUB_ORIGIN" rev-parse polecat/tk-pr > "$STUB_ORIGIN.at-draft"
         exit "${STUB_RC_DRAFT:-0}" ;;
     "bead holds") if [ -n "${STUB_HOLDS:-}" ]; then printf '%s\n' "$STUB_HOLDS"
@@ -126,21 +126,32 @@ facts() {
 run() { : > "$LOG"; OUT=$(bash "$SD/review-run.sh" "$@" 2>&1); RC=$?; }
 called() { grep -c -- "$1" "$LOG"; }
 
-# --- prepare ---------------------------------------------------------------------
-facts mol-pr-review.prepare "" 0
-run prepare
-eq "$RC" 0 "prepare goes on for a run that stands"
-has "$OUT" "The run's workspace: $WS" "and prints the run's workspace"
-eq "$(ls -ld "$WS" | cut -c1-10)" "drwx------" "which it makes, private to its user"
-STUB_PREPARE_WHY="the PR's head is abc, no longer the run's head" run prepare
-eq "$RC" 3 "prepare refuses a run that must stop"
-has "$(cat "$LOG")" "decline.sh --step mol-pr-review.prepare --reason run tk-run must stop with no result: the PR's head is abc" \
+# --- triage's read: whether the run stands ------------------------------------
+facts review-loop.iteration.1.triage triage 1
+export STUB_STEP_REF=review-loop.iteration.1.triage
+STUB_STANDS_OUT="run tk-run must stop with no result: the PR's head is abc, no longer the run's head" run triage
+eq "$RC" 3 "triage's read refuses a run that must stop"
+has "$(cat "$LOG")" "decline.sh --step review-loop --reason run tk-run must stop with no result: the PR's head is abc" \
     "and cancels it with no result, saying why"
-STUB_PREPARE_RC=2 run prepare
-eq "$RC" 2 "prepare stops, exit 2, when its check of the run does not answer"
+if [ -e "$WS" ]; then bad "and makes no workspace"; else ok "and makes no workspace"; fi
+STUB_STANDS_OUT="tk-step is not a review run: its root tk-run names no pr_bead var" run triage
+eq "$RC" 3 "triage's read refuses a run poured with no record to name"
+has "$(cat "$LOG")" "decline.sh --step review-loop --reason tk-step is not a review run: its root tk-run names no pr_bead var" \
+    "and cancels it the same way"
+STUB_STANDS_RC=2 run triage
+eq "$RC" 2 "triage's read stops, exit 2, when its check of the run does not answer"
 has "$OUT" "GitHub did not answer" "and says which read did not answer"
 eq "$(called decline.sh)" 0 "and cancels nothing, since a retry may find the run stands"
 hasnt "$OUT" "The run's workspace" "and does not go on as if the run stood"
+STUB_STEP_REF=mol-pr-review-lane.review-loop.iteration.1.triage.item.1.lane STUB_STANDS_OUT="x" run triage
+eq "$RC/$(called decline.sh)" "3/0" "a step that is not triage's cancels nothing"
+STUB_RC_BD_SHOW=1 STUB_STANDS_OUT="x" run triage
+eq "$RC/$(called decline.sh)" "2/0" "a step whose ref does not read cancels nothing"
+run triage
+eq "$RC" 0 "triage's read goes on for a run that stands"
+has "$OUT" "The run's workspace: $WS" "and prints the run's workspace"
+eq "$(ls -ld "$WS" | cut -c1-10)" "drwx------" "which it makes, private to its user"
+unset STUB_STEP_REF
 
 # --- a verb the step does not own -----------------------------------------------
 facts review-loop.iteration.1.triage triage 1
@@ -311,21 +322,6 @@ has "$(cat "$LOG")" "demo-deliver.sh --file $TMP/cap.mp4 --pr https://github.com
 facts mol-pr-review-lane.review-loop.iteration.1.triage.item.1.lane lane 1 true
 run deliver --file "$TMP/cap.mp4"
 eq "$(called demo-deliver.sh)" 0 "a shadow run keeps it in the workspace"
-
-# --- record ----------------------------------------------------------------------
-facts mol-pr-review.record "" 0
-STUB_RECORD="tk-pr: review did not pass at $FIX into main"$'\n'"tk-pr: the loop exhausted its attempts at $FIX" run record
-eq "$RC" 0 "record records the result"
-has "$(cat "$LOG")" "human-gate.sh --subject tk-pr --key review-loop-exhausted --message Review run tk-run exhausted its attempts at $FIX" \
-    "and asks a person when the loop exhausted, at the last head it judged"
-has "$(cat "$LOG")" "finding.sh close-answered --anchor tk-pr" "and closes each human finding whose ask it closed"
-if [ -e "$WS" ]; then bad "record removes the run's workspace"; else ok "record removes the run's workspace"; fi
-mkdir -p "$WS"
-facts mol-pr-review.record "" 0 true
-STUB_RECORD="tk-pr: the loop exhausted its attempts at $FIX" run record
-eq "$(called human-gate.sh)" 0 "a shadow run's record files no gate"
-eq "$(called finding.sh)" 0 "and closes no finding"
-if [ -d "$WS" ]; then ok "and keeps its workspace for the comparison"; else bad "and keeps its workspace for the comparison"; fi
 
 # --- the reads make each step's worktree in its part ----------------------------
 facts review-loop.iteration.1.triage triage 1

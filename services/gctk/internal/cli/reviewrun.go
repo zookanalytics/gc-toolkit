@@ -26,23 +26,25 @@ reads at that head (services/gctk/review/step.go): since the nearest earlier
 head of the branch a run passed at for the target, else the run's own repair
 since its first head, else the whole PR.
 
-With --prepare it also refuses a run that must stop with no result: its vars do
-not name the record the bead that owns the PR carries (its validated head, its
-target and its branch), or GitHub's PR is not open from that branch into that
-target at the run's head. A shadow run needs only the PR, its branch and its
-head, since its bead may be on no record. --json prints one object.
+With --stands it also refuses a run that must stop with no result, which
+triage's read asks before it judges a head: the run's vars do not name the
+record the bead that owns the PR carries (its validated head, its target and
+its branch), or GitHub's PR is not open from that branch into that target at
+the head the step's iteration judges. A shadow run needs only the PR, its
+branch and its head, since its bead may be on no record. --json prints one
+object.
 
 exit: 0 printed
       1 usage
       2 a read did not answer: the store, git or GitHub
-      3 refused: the bead is not a review run's step, or with --prepare the run
+      3 refused: the bead is not a review run's step, or with --stands the run
         must stop, and the command says why`
 
 func newReviewStepCmd(stdout, stderr io.Writer) *cobra.Command {
 	var db string
-	var prepare, asJSON bool
+	var stands, asJSON bool
 	cmd := &cobra.Command{
-		Use:         "step <bead> [--prepare] [--json]",
+		Use:         "step <bead> [--stands] [--json]",
 		Short:       "what a review run's step judges: its iteration, its head and the change triage reads",
 		Long:        reviewStepLong,
 		Args:        cobra.ExactArgs(1),
@@ -52,17 +54,17 @@ func newReviewStepCmd(stdout, stderr io.Writer) *cobra.Command {
 			if bead == "" {
 				return errors.New("name the step's bead")
 			}
-			return exit(reviewStep(bead, db, prepare, asJSON, stdout, stderr))
+			return exit(reviewStep(bead, db, stands, asJSON, stdout, stderr))
 		},
 	}
 	cmd.Flags().StringVar(&db, "db", "", "the store's .beads directory, else the store gc routes the bead to")
-	cmd.Flags().BoolVar(&prepare, "prepare", false, "refuse a run whose vars do not name the record or whose PR moved")
+	cmd.Flags().BoolVar(&stands, "stands", false, "refuse a run whose vars do not name the record or whose PR moved")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print one JSON object")
 	return cmd
 }
 
-// reviewGitHubFor is GitHub on host as a run's prepare reads it, gh's by
-// default.
+// reviewGitHubFor is GitHub on host as triage's read asks it whether the run
+// stands, gh's by default.
 var reviewGitHubFor = func(host string) review.GitHub { return gh.New(host) }
 
 // stepFacts is what the step verb prints.
@@ -86,16 +88,16 @@ type stepFacts struct {
 	} `json:"change,omitempty"`
 }
 
-func reviewStep(bead, db string, prepare, asJSON bool, stdout, stderr io.Writer) int {
+func reviewStep(bead, db string, stands, asJSON bool, stdout, stderr io.Writer) int {
 	_, l, err := storeOf(db, bead)
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk review step: the store did not answer: %v\n", err)
 		return 2
 	}
-	return reviewStepIn(l, bead, prepare, asJSON, review.Repos(".", os.Getenv("GC_RIG_ROOT")), stdout, stderr)
+	return reviewStepIn(l, bead, stands, asJSON, review.Repos(".", os.Getenv("GC_RIG_ROOT")), stdout, stderr)
 }
 
-func reviewStepIn(l *ledger.Ledger, bead string, prepare, asJSON bool, repos []string, stdout, stderr io.Writer) int {
+func reviewStepIn(l *ledger.Ledger, bead string, stands, asJSON bool, repos []string, stdout, stderr io.Writer) int {
 	st, err := review.ReadStep(l, bead)
 	var notRun *review.NotARun
 	switch {
@@ -110,7 +112,7 @@ func reviewStepIn(l *ledger.Ledger, bead string, prepare, asJSON bool, repos []s
 	f := stepFacts{Step: st.ID, Ref: st.Ref, Output: st.Output, Iteration: st.Iteration, Run: run.Root,
 		PRBead: run.PRBead, PR: st.PR(), Branch: st.Branch, Target: run.Target, FirstHead: run.Head,
 		Head: run.Head, Shadow: run.Shadow}
-	if prepare {
+	if stands {
 		why, err := st.MustStop(reviewGitHubFor)
 		if err != nil {
 			fmt.Fprintf(stderr, "gctk review step: %v\n", err)

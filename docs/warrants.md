@@ -500,7 +500,10 @@ shares only the word ([authority-map.md](authority-map.md)).
   `services/gctk/internal/cli/prcycle.go` runs. Its carrier is the landing
   order: `withdrawalsIn`, `carry` and `carryOne` in the same file, which the
   order's run in `services/gctk/pr/landing.go` calls on each pass that reads
-  the record.
+  the record. Its reader for the review run: `WithdrawalFor` in the same file,
+  which the `output` verb of `services/gctk/internal/cli/reviewrun.go` reads
+  to refuse a triage output that rules its head material before the
+  withdrawal for that head is filed.
 - **Stands in for.** A withdrawal of a pull request's approvals once a head
   changes what the PR does: an operation that dismisses each approval given on
   a commit without that head, and holds the PR's bead from merging until GitHub
@@ -532,7 +535,7 @@ shares only the word ([authority-map.md](authority-map.md)).
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main e9a628c50030, with
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main 294079d53f57, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 0f07496d2fa4.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
@@ -548,7 +551,8 @@ shares only the word ([authority-map.md](authority-map.md)).
   by its shape: `isAsk`, `IsAsk`, `AsksOn` and `AsksIn` in the same file, and
   `writers` in `services/gctk/pr/admit.go`, which leaves an ask out of a
   branch's other writers. Its close: `Record` in
-  `services/gctk/review/result.go`.
+  `services/gctk/review/result.go`, which the loop's check runs through the
+  `passed` verb's `--record`.
 - **Stands in for.** A request held on a pull request's bead for the review run
   that works it: a change on the PR's branch, or a check at its next head, that
   no pool claims, so the run stays the branch's one writer, with the checks a
@@ -573,7 +577,7 @@ shares only the word ([authority-map.md](authority-map.md)).
     discovered-from edge to the bead it came from, and no route or assignee.
     The search is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main e9a628c50030, with
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main 294079d53f57, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 0f07496d2fa4.
 - **Retires when.** Gas City files a request for a pull request's branch that

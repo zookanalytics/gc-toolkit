@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -25,11 +27,12 @@ import (
 func newReviewCmd(stdout, stderr io.Writer) *cobra.Command {
 	return group("review", "a PR's review: the check index, a review run's pass rule, its result and its asks",
 		"The review of a PR: which checks gate a change at a commit, with the rig's index laid over the pack's, "+
-			"and the rig's guidance for each; whether an iteration of a review run passed; the result a run records "+
-			"for the head and the target it judged; the asks a run works on the PR's branch; and, for a run's "+
-			"steps, what a step judges, the check of the output it writes and the head's comment its round posts.",
+			"and the rig's guidance for each; whether an iteration of a review run passed, which as the loop's "+
+			"check records the result of a run for the head and the target it judged; the asks a run works on the "+
+			"PR's branch; and, for a run's steps, what a step judges, the check of the output it writes and the "+
+			"head's comment its round posts.",
 		newReviewChecksCmd(stdout, stderr), newReviewGuidanceCmd(stdout, stderr),
-		newReviewPassedCmd(stdout, stderr), newReviewRecordCmd(stdout, stderr), newReviewAskCmd(stdout, stderr),
+		newReviewPassedCmd(stdout, stderr), newReviewAskCmd(stdout, stderr),
 		newReviewStepCmd(stdout, stderr), newReviewOutputCmd(stdout, stderr), newReviewCommentCmd(stdout, stderr))
 }
 
@@ -267,11 +270,11 @@ func reviewGuidanceEdits(src review.IndexSources, base, at string, stdout, stder
 	return 0
 }
 
-const reviewPassedLong = `The pass rule of a review run's loop, run as the loop's check after each
-iteration. <run> is the run's root, or any bead poured under it, such as the
-iteration the check runs for. It judges --iteration, else the latest iteration
-any step wrote for, from what the run's steps wrote as their outputs
-(services/gctk/review/run.go) and the asks open on the bead that owns the PR.
+const reviewPassedLong = `The pass rule of a review run's loop. <run> is the run's root, or any bead
+poured under it, such as the iteration the loop's check runs for. It judges
+--iteration, else the latest iteration any step wrote for, from what the run's
+steps wrote as their outputs (services/gctk/review/run.go) and the asks open on
+the bead that owns the PR.
 
 The iteration passes when triage wrote the head it judged, every lane triage
 bonded wrote its verdict at that head, rule-and-repair ruled every finding and
@@ -282,21 +285,42 @@ for nothing. Each finding or ask an earlier iteration ruled must-fix must name
 the commit that fixes it. A finding declined by its lane's rule counts as
 ruled, and so does a question put to a person through a gate.
 
-It reads only the store. It prints the verdict and each reason the iteration
-did not pass, and with --explain the iteration's lanes, verdicts, findings and
-rulings and the asks on the bead.
+With --record it is the loop's check, run after each iteration, which records
+the run's result when the iteration ends the loop: when it passes, or when it
+is the loop's last attempt by the run's max_attempts var and does not pass,
+which Gas City then closes as exhausted. The result is {head, target, passed}
+for the last head the run judged and the run's target, in review_results on the
+bead that owns the PR, under the store's record lock, replacing the entry for
+the same head and target. It passes only when the iteration passed and no gate
+the run put a question to is open. Each ask the round at that head answered,
+ruled declined, deferred or answered, closes with its work record: shipped with
+the commit of the run's must-fix ruling of it, else no-op. At an exhausted loop
+it asks a person through a review-loop-exhausted gate on the bead
+(human-gate.sh), and it closes each person's finding whose ask closed
+(finding.sh close-answered), both from the scripts directory GCTK_SCRIPTS_DIR
+names. A shadow run (its shadow var reads true) writes and files nothing, and
+the command prints what it would have written. A record that does not land
+exits 75, so Gas City runs the check again without spending an attempt, and the
+retry replaces the same entry.
 
-exit: 0 passed
-      1 not yet: the next iteration runs
-      75 the store did not answer, so there is no verdict`
+It reads only the store, which is all a check's PATH reaches. It prints the
+verdict and each reason the iteration did not pass, with --explain the
+iteration's lanes, verdicts, findings and rulings and the asks on the bead, and
+with --record what it recorded.
+
+exit: 0 passed, and with --record its result recorded
+      1 not yet: the next iteration runs, or with --record at the loop's last
+        attempt the loop ends exhausted, its result recorded
+      75 the store did not answer, or with --record a write did not land, so
+        there is no verdict yet`
 
 func newReviewPassedCmd(stdout, stderr io.Writer) *cobra.Command {
 	var db string
 	var iteration int
-	var explain bool
+	var explain, record bool
 	cmd := &cobra.Command{
-		Use:   "passed <run> [--iteration <n>] [--explain]",
-		Short: "whether an iteration of a review run passed: its loop's check",
+		Use:   "passed <run> [--iteration <n>] [--explain] [--record]",
+		Short: "whether an iteration of a review run passed, and as the loop's check the run's result",
 		Long:  reviewPassedLong,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -307,30 +331,53 @@ func newReviewPassedCmd(stdout, stderr io.Writer) *cobra.Command {
 			if iteration < 0 {
 				return fmt.Errorf("--iteration %d names no iteration", iteration)
 			}
-			return exit(reviewPassed(run, db, iteration, explain, stdout, stderr))
+			return exit(reviewPassed(run, db, iteration, explain, record, stdout, stderr))
 		},
 	}
 	cmd.Flags().StringVar(&db, "db", "", "the store's .beads directory, else the store gc routes the run to")
 	cmd.Flags().IntVar(&iteration, "iteration", 0, "the iteration to judge, from 1, else the latest")
 	cmd.Flags().BoolVar(&explain, "explain", false, "print the iteration's lanes, verdicts, findings and rulings")
+	cmd.Flags().BoolVar(&record, "record", false, "as the loop's check: record the run's result when the iteration ends the loop")
 	return cmd
 }
 
-// passedNoVerdict is the check's exit when the store did not answer, which
-// re-runs it without spending an attempt.
+// passedNoVerdict is the check's exit when the store did not answer, or a
+// record did not land, which re-runs it without spending an attempt.
 const passedNoVerdict = 75
 
-func reviewPassed(run, db string, n int, explain bool, stdout, stderr io.Writer) int {
-	l, err := ledger.Open(db, run)
+// checkLockWait is how long the loop's check waits for the store's record lock
+// before it exits for a re-run, well inside the check's timeout in the formula.
+const checkLockWait = time.Minute
+
+func reviewPassed(run, db string, n int, explain, record bool, stdout, stderr io.Writer) int {
+	dir, l, err := storeOf(db, run)
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk review passed: the store did not answer: %v\n", err)
 		return passedNoVerdict
 	}
-	return passedIn(l, run, n, explain, stdout, stderr)
+	var rec *recorder
+	if record {
+		rt := gascity.New()
+		rec = &recorder{dir: dir, wait: checkLockWait, gates: gates{rt}, scripts: rt}
+	}
+	return passedIn(l, run, n, explain, rec, stdout, stderr)
 }
 
-// passedIn is the check's exit for the run over l.
-func passedIn(l *ledger.Ledger, run string, n int, explain bool, stdout, stderr io.Writer) int {
+// recorder is what the loop's check records the run's result through: the
+// store's .beads directory, where the record lock lives, how long it waits for
+// the lock, the filer of the review-loop-exhausted gate and the pack's scripts.
+type recorder struct {
+	dir     string
+	wait    time.Duration
+	gates   review.Gates
+	scripts interface {
+		Script(name string, args ...string) gascity.Result
+	}
+}
+
+// passedIn is the check's exit for the run over l, with rec recording the
+// run's result when the iteration ends the loop, and nil for the rule alone.
+func passedIn(l *ledger.Ledger, run string, n int, explain bool, rec *recorder, stdout, stderr io.Writer) int {
 	v, err := review.Passed(l, run, n)
 	var notRun *review.NotARun
 	switch {
@@ -351,84 +398,34 @@ func passedIn(l *ledger.Ledger, run string, n int, explain bool, stdout, stderr 
 			fmt.Fprintf(stdout, "  - %s\n", r)
 		}
 	}
+	if rec != nil && v.Ends() {
+		if code := rec.record(l, v, stdout, stderr); code != 0 {
+			return code
+		}
+	}
 	if v.Passed {
 		return 0
 	}
 	return 1
 }
 
-const reviewRecordLong = `Records a review run's result: for the last head the run judged and the run's
-target, {head, target, passed} in review_results on the bead that owns the PR,
-replacing the entry for the same head and target, under the store's record
-lock. <run> is the run's root, or any bead poured under it.
-
-The result passes only when the run's loop passed its check at that head and no
-gate the run put a question to is open. A loop that exhausted its attempts gets
-a result that does not pass, and the command says so. A loop that a step's hard
-failure ended (gc.final_disposition=hard_fail), one that ended any other way,
-and a run that judged no head get no result.
-
-It then closes each ask the round at that head answered, ruled declined,
-deferred or answered, with its work record: shipped with the commit of the
-run's must-fix ruling of it, else no-op. A shadow run (its shadow var reads
-true) writes nothing, and the command prints what it would have written.
-
-exit: 0 recorded, or the run has no result to record
-      1 usage
-      2 a read, the lock or a write did not answer; the command says which
-        landed, and a retry replaces the same entry
-      3 refused: the bead is not a review run, or its loop has not closed`
-
-func newReviewRecordCmd(stdout, stderr io.Writer) *cobra.Command {
-	var db string
-	cmd := &cobra.Command{
-		Use:         "record <run>",
-		Short:       "record a review run's result for the head and target it judged",
-		Long:        reviewRecordLong,
-		Args:        cobra.ExactArgs(1),
-		Annotations: map[string]string{usageExitKey: "1"},
-		RunE: func(_ *cobra.Command, args []string) error {
-			run := strings.TrimSpace(args[0])
-			if run == "" {
-				return errors.New("name the review run")
-			}
-			return exit(reviewRecord(run, db, stdout, stderr))
-		},
-	}
-	cmd.Flags().StringVar(&db, "db", "", "the store's .beads directory, else the store gc routes the run to")
-	return cmd
-}
-
-func reviewRecord(run, db string, stdout, stderr io.Writer) int {
-	db, l, err := storeOf(db, run)
+// record writes the result of the run the verdict ends, then closes each
+// person's finding whose ask closed, and says what it did. It returns 0 once
+// every part landed, and passedNoVerdict when one did not, so the check runs
+// again.
+func (r *recorder) record(l *ledger.Ledger, v *review.Verdict, stdout, stderr io.Writer) int {
+	got, err := review.Record(l, r.dir, r.wait, v, r.gates)
 	if err != nil {
-		fmt.Fprintf(stderr, "gctk review record: %v\n", err)
-		return 2
-	}
-	got, err := review.Record(l, db, recordLockWait, run)
-	var notRun *review.NotARun
-	switch {
-	case errors.As(err, &notRun), review.IsUnfinished(err):
-		fmt.Fprintf(stderr, "gctk review record: %v; nothing written\n", err)
-		return 3
-	case err != nil && (got == nil || got.Result == nil):
-		fmt.Fprintf(stderr, "gctk review record: %v; nothing written\n", err)
-		return 2
-	case err != nil:
-		fmt.Fprintf(stderr, "gctk review record: %s: the result landed (%s): %v\n", got.Bead, got.Result, err)
-		return 2
+		fmt.Fprintf(stderr, "gctk review passed: the run's result did not land in full, so the check runs again: %v\n", err)
+		return passedNoVerdict
 	}
 	switch {
 	case got.Result == nil:
 		fmt.Fprintf(stdout, "%s: no result: %s\n", got.Bead, got.NoResult)
-		return 0
 	case got.Shadow:
 		fmt.Fprintf(stdout, "%s: shadow run, nothing written: the result would read %s\n", got.Bead, got.Result)
 	default:
 		fmt.Fprintf(stdout, "%s: review %s\n", got.Bead, got.Result)
-	}
-	if got.Exhausted {
-		fmt.Fprintf(stdout, "%s: the loop exhausted its attempts at %s\n", got.Bead, got.Result.Head)
 	}
 	for _, g := range got.Open {
 		fmt.Fprintf(stdout, "%s: gate %s is open\n", got.Bead, g)
@@ -439,6 +436,25 @@ func reviewRecord(run, db string, stdout, stderr io.Writer) int {
 			verb = "would close"
 		}
 		fmt.Fprintf(stdout, "%s: %s ask %s, %s (%s%s)\n", got.Bead, verb, a.ID, a.Ruling, a.Outcome, commitSuffix(a.Commit))
+	}
+	switch {
+	case got.Result == nil || !got.Exhausted:
+	case got.Shadow:
+		fmt.Fprintf(stdout, "%s: shadow run, nothing filed: the loop exhausted its attempts at %s, which asks a person through a %s gate\n",
+			got.Bead, got.Result.Head, review.LoopExhaustedKey)
+	default:
+		fmt.Fprintf(stdout, "%s: the loop exhausted its attempts at %s, so a person is asked through a %s gate\n",
+			got.Bead, got.Result.Head, review.LoopExhaustedKey)
+	}
+	if got.Shadow {
+		return 0
+	}
+	// A person's comment is a human finding until tk-1tfzr71.21 gives it its
+	// new form, and its ask closing above is what lets it close.
+	if f := r.scripts.Script("finding.sh", "close-answered", "--anchor", got.Bead).Failure(); f != "" {
+		fmt.Fprintf(stderr, "gctk review passed: the result is recorded, and the findings whose asks closed did not close, "+
+			"so the check runs again: %s\n", f)
+		return passedNoVerdict
 	}
 	return 0
 }

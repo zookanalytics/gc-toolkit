@@ -320,9 +320,12 @@ work it sent, or while a human gate holds it
 The run is a checked loop, and each iteration judges one head: the run's first
 head, the one the refinery validated, then each head its own repair pushes.
 
-- **Triage** reads the change at the head: since the last head a run passed at
-  for the target, else the run's own repair since its first head, else the
-  whole PR, with each merge in it read from its commit
+- **Triage** first checks that the run still stands, and cancels a run whose
+  vars no longer name the bead's record, or whose PR is no longer open at the
+  head the iteration judges, with no result. It then reads the change at the
+  head: none at a head a run already passed at for the target, else since the
+  last head a run passed at for the target, else the run's own repair since its
+  first head, else the whole PR, with each merge in it read from its commit
   ([Bringing a branch current](#bringing-a-branch-current)). It picks the
   checks the head needs, `correctness` at the PR's first judged head whatever
   the diff and the checks an ask the run takes sends back, and rules whether the
@@ -336,21 +339,25 @@ head, the one the refinery validated, then each head its own repair pushes.
   It answers them on the PR in one comment for the head, which carries every
   lane's verdict at that head, and pushes the round's fixes as one new head.
 
-The loop's check, `gctk review passed`, passes an iteration when triage wrote
-the head it judged, every lane it picked wrote its verdict there, every finding
-and every ask the round could take was ruled, nothing was ruled must-fix and
-nothing was pushed. A finding its lane's rule declines, and a question put to a
-person, count as ruled, and a finding ruled must-fix at an earlier head names
-the commit that fixes it. The check reads only the store, and it exits 75 when
-the store does not answer, which runs it again without spending an attempt.
+The loop's check, `gctk review passed --record`, passes an iteration when
+triage wrote the head it judged, every lane it picked wrote its verdict there,
+every finding and every ask the round could take was ruled, nothing was ruled
+must-fix and nothing was pushed. A finding its lane's rule declines, and a
+question put to a person, count as ruled, and a finding ruled must-fix at an
+earlier head names the commit that fixes it. The check reads only the store,
+and it exits 75 when the store does not answer, which runs it again without
+spending an attempt.
 
-When the loop ends, `record` writes the run's result for the last head it judged
-and the target, a `{head, target, passed}` entry in the bead's `review_results`,
-through `gctk review record` under the store's record lock. `passed` is true
-only when the loop passed at that head and no gate the run filed is open. A loop
-that spent its attempts records `passed: false` and files a human gate keyed
-`review-loop-exhausted`, and a loop that a step's hard failure closed records
-nothing. The evaluator counts a result only for the PR's live head and target.
+The check is also the run's final validate and record, so no step records the
+result. At the iteration that ends the loop, a pass or the loop's last attempt,
+it writes the run's result for the last head it judged and the target, a
+`{head, target, passed}` entry in the bead's `review_results`, under the
+store's record lock, before the loop closes. `passed` is true only when the
+iteration passed and no gate the run filed is open. A loop that spent its
+attempts records `passed: false` and files a human gate keyed
+`review-loop-exhausted`, and a loop that a step's hard failure closed runs no
+check and records nothing. A record that does not land exits 75 as well. The
+evaluator counts a result only for the PR's live head and target.
 A run that ends without a result is poured again, and a second such run at the
 same head files a human gate keyed `review-run-failed`
 ([The machine axis](#the-machine-axis)).
@@ -364,8 +371,8 @@ closed, so a re-run files nothing. The refinery's requeue of a PR on the record,
 and a must-fix point a sitting or the mechanik puts on another open PR each file
 one. A run takes an ask only while `gctk bead holds` reads it clear, so an ask
 that waits on other work starts no round and spends no attempt, and holds the PR
-by its own edge until a run takes it. `record` closes each ask the run answered,
-with the runtime's work record.
+by its own edge until a run takes it. The loop's check closes each ask the run
+answered as it records the result, with the runtime's work record.
 
 **What the run reads of the check index and of `check_set`.** The index is the
 pack's `review-checks.toml` with the rows of the rig's own laid over it, which
@@ -529,9 +536,9 @@ Feedback from a person is review the branch has never been answered against.
 On a PR on the pending record, `pr-facts.sh` routes a batch to the PR's review
 run as an ask: each comment becomes a human finding whose `finding.fix_unit`
 names the ask, and no validation pass opens. The run's rule-and-repair rules
-each human finding by the bar its grade sets (`review-run.sh finding`), and its
-record step closes each one whose ask has closed (`finding.sh close-answered`),
-which the write-back answers on the PR. On the old path, `pr-facts.sh` enters
+each human finding by the bar its grade sets (`review-run.sh finding`), and the
+loop's check, once it records the run's result, closes each one whose ask has
+closed (`finding.sh close-answered`), which the write-back answers on the PR. On the old path, `pr-facts.sh` enters
 the batch into the finding/validation graph by opening a validation pass on it
 (see "Review cycle", `specs/tk-ztapg/review-cycle-architecture.md`):
 `gate-ensure.sh`'s quiescence holds a fresh whole-diff review off the anchor

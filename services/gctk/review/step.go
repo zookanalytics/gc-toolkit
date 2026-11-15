@@ -15,10 +15,12 @@ import (
 // to, the PR the run judges, the iteration it runs in, the head that iteration
 // judges and the change triage reads there.
 //
-// Before a run judges anything, its prepare asks whether the run must stop
-// with no result: when its vars do not name the record the bead that owns the
-// PR carries, or when GitHub's PR is not open from the bead's branch into the
-// run's target at the run's head.
+// Before triage judges a head, its read asks whether the run must stop with no
+// result: when the run's vars do not name the record the bead that owns the PR
+// carries, or when GitHub's PR is not open from the bead's branch into the
+// run's target at the head that iteration judges. The record keeps the head
+// the refinery validated while the run holds the bead, a repair's push
+// included, so a later iteration's vars still name it.
 //
 // The head of iteration 1 is the run's first head, the head the refinery
 // validated. Each later iteration judges the head the round before it pushed,
@@ -37,7 +39,6 @@ const (
 	stepTriage = "triage"
 	stepRepair = "rule-and-repair"
 	stepLane   = "lane"
-	stepRecord = "record"
 )
 
 // Step is one step of a review run: its bead, its gc.step_ref, the output it
@@ -117,8 +118,8 @@ func (st *Step) PR() string {
 	return st.Record.ExistingPR
 }
 
-// GitHub is the one read a run's prepare makes of GitHub, the PR the run
-// judges, which the gh adapter's Client carries out and its fake answers.
+// GitHub is the one read triage's read makes of GitHub, the PR the run judges,
+// which the gh adapter's Client carries out and its fake answers.
 type GitHub interface {
 	PullRequest(repo string, number int) (*gh.PullRequest, error)
 }
@@ -126,10 +127,11 @@ type GitHub interface {
 // MustStop is why the run must stop with no result, "" when it may go on: its
 // vars do not name the record the bead that owns the PR carries, the PR the
 // bead names is not a PR's URL, or GitHub's PR is not open, its head is not
-// the run's head, it is from another branch or it merges into another target.
-// It reads the PR once the vars name the record, through the GitHub that
-// github returns for the host the URL names. A read of the PR that fails is
-// an error, since whether the run stands is then unknown.
+// the head the step's iteration judges (the run's first head outside the
+// loop), it is from another branch or it merges into another target. It reads
+// the PR once the vars name the record, through the GitHub that github returns
+// for the host the URL names. A read of the PR that fails is an error, since
+// whether the run stands is then unknown.
 func (st *Step) MustStop(github func(host string) GitHub) (string, error) {
 	if why := st.mismatch(); why != "" {
 		return why, nil
@@ -143,12 +145,17 @@ func (st *Step) MustStop(github func(host string) GitHub) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("GitHub did not answer for %s: %w", url, err)
 	}
-	run := st.Run
+	run, head := st.Run, st.Run.Head
+	if st.Iteration > 0 {
+		head = run.HeadOf(st.Iteration)
+	}
 	switch {
 	case pr.State != "OPEN":
 		return fmt.Sprintf("the PR is %s", strings.ToLower(pr.State)), nil
-	case pr.HeadRefOid != run.Head:
-		return fmt.Sprintf("the PR's head is %s, no longer the run's head %s", pr.HeadRefOid, run.Head), nil
+	case pr.HeadRefOid != head && st.Iteration > 1:
+		return fmt.Sprintf("the PR's head is %s, no longer the head iteration %d judges, %s", pr.HeadRefOid, st.Iteration, head), nil
+	case pr.HeadRefOid != head:
+		return fmt.Sprintf("the PR's head is %s, no longer the run's head %s", pr.HeadRefOid, head), nil
 	case pr.HeadRefName != st.Branch:
 		return fmt.Sprintf("the PR is from %s, not the branch %s", pr.HeadRefName, st.Branch), nil
 	case pr.BaseRefName != run.Target:

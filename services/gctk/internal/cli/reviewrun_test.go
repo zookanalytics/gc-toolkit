@@ -20,7 +20,7 @@ const (
 )
 
 // runStore is a store holding a PR's bead on the pending record, a run poured
-// from that record, and the run's prepare and first triage steps.
+// from that record, and the run's first triage step.
 func runStore() *fake.Store {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "tk-pr", Status: "blocked", IssueType: "task", Metadata: map[string]string{
@@ -31,16 +31,13 @@ func runStore() *fake.Store {
 		"gc.kind": "workflow", "gc.var.pr_bead": "tk-pr", "gc.var.head": runHead, "gc.var.target": "main",
 		"gc.var.branch": "polecat/tk-pr",
 	}})
-	s.Put(fake.Bead{ID: "tk-prep", Status: "in_progress", IssueType: "task", Metadata: map[string]string{
-		"gc.root_bead_id": "tk-run", "gc.step_ref": "mol-pr-review.prepare",
-	}})
 	s.Put(fake.Bead{ID: "tk-tri", Status: "in_progress", IssueType: "task", Metadata: map[string]string{
 		"gc.root_bead_id": "tk-run", "gc.step_ref": "review-loop.iteration.1.triage", "gc.attempt": "1",
 	}})
 	return s
 }
 
-// withGitHub has a run's prepare read GitHub from g, on every host.
+// withGitHub has triage's read ask GitHub from g, on every host.
 func withGitHub(t *testing.T, g *ghfake.GitHub) {
 	t.Helper()
 	was := reviewGitHubFor
@@ -48,11 +45,11 @@ func withGitHub(t *testing.T, g *ghfake.GitHub) {
 	t.Cleanup(func() { reviewGitHubFor = was })
 }
 
-// prepare exits 0 while the run may go on, 3 with the reason when it must stop
-// with no result, and 2 when GitHub does not answer, in the lines
-// review-run.sh's prepare reads. The domain's tests hold each reason a run
+// --stands exits 0 while the run may go on, 3 with the reason when it must
+// stop with no result, and 2 when GitHub does not answer, in the lines
+// review-run.sh's triage read reads. The domain's tests hold each reason a run
 // stops for.
-func TestReviewStepPrepare(t *testing.T) {
+func TestReviewStepStands(t *testing.T) {
 	g := ghfake.New("")
 	p := &ghfake.PR{Facts: gh.PullRequest{Repository: "o/r", Number: 7, State: "OPEN", HeadRefOid: runHead,
 		HeadRefName: "polecat/tk-pr", BaseRefName: "main"}}
@@ -60,7 +57,7 @@ func TestReviewStepPrepare(t *testing.T) {
 	withGitHub(t, g)
 	run := func() (int, string, string) {
 		var out, errb bytes.Buffer
-		code := reviewStepIn(ledger.New(runStore()), "tk-prep", true, false, nil, &out, &errb)
+		code := reviewStepIn(ledger.New(runStore()), "tk-tri", true, false, nil, &out, &errb)
 		return code, out.String(), errb.String()
 	}
 	if code, out, errs := run(); code != 0 || !strings.Contains(out, "first head "+runHead) || errs != "" {

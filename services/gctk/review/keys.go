@@ -7,9 +7,9 @@ import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 var (
 	resultsKey = ledger.Declare("review_results", ledger.JSON[[]Result](),
 		"The review loop's results on the bead that owns a PR, a JSON array of {head, target, passed}, one for "+
-			"each head and target a run judged, which gctk review record writes under the store's record lock, "+
-			"replacing the entry for the same head and target. The pr evaluator counts only a result for the PR's "+
-			"live head and target, and reads none while the key is absent.")
+			"each head and target a run judged, which the loop's check writes through gctk review passed --record "+
+			"under the store's record lock, replacing the entry for the same head and target. The pr evaluator "+
+			"counts only a result for the PR's live head and target, and reads none while the key is absent.")
 	checksKey = ledger.Declare("review_checks", ledger.String,
 		"On an ask, the checks it sends back, a comma list of names from the check index at the PR's validated "+
 			"head, which gctk review ask writes as it files the ask. A review run picks each at the first head it "+
@@ -46,8 +46,11 @@ var (
 	targetVar = ledger.ReadOnly("gc.var.target", ledger.String,
 		"A review run's target var: the branch the PR merges into, the target its result is for.")
 	shadowVar = ledger.ReadOnly("gc.var.shadow", ledger.String,
-		"A review run's shadow var. Reading true, the run writes nothing outside itself, so gctk review record "+
-			"writes no result and closes no ask.")
+		"A review run's shadow var. Reading true, the run writes nothing outside itself, so the loop's check "+
+			"records no result, closes no ask and files no gate.")
+	maxAttemptsVar = ledger.ReadOnly("gc.var.max_attempts", ledger.String,
+		"A review run's max_attempts var: the loop's bound, which Gas City compiles the loop's check from, so the "+
+			"iteration that reaches it is the loop's last and its check records the run's result when it does not pass.")
 )
 
 // The keys a review run's step carries that say which step it is: the

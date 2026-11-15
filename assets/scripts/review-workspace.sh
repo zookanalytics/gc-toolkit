@@ -21,8 +21,8 @@
 # triage, each lane takes lane-<check>, and rule-and-repair takes repair, the
 # run's one worktree from which its fixes are pushed onto the PR's branch. A
 # lane at a later iteration takes its part at the new head, so lanes that build,
-# test or capture never share a tree, and the run's record step removes the
-# whole workspace once the run has ruled every finding.
+# test or capture never share a tree, and the reap removes the whole workspace
+# once the run's root closes, after the run has ruled every finding.
 #
 # Usage:
 #   review-workspace.sh path   (--review-bead <id> | --root <id>)
@@ -64,8 +64,8 @@
 #       2 usage.
 # Callers: formulas/mol-review.toml and mol-review-quorum-signoff.toml (add,
 # path, remove); formulas/mol-rig-demo.toml (add); review-run.sh, for the
-# steps of formulas/mol-pr-review.toml and mol-pr-review-lane.toml (path, add
-# and remove with --root); orders/review-workspace-reap.toml (reap). See
+# steps of formulas/mol-pr-review.toml and mol-pr-review-lane.toml (path and
+# add with --root); orders/review-workspace-reap.toml (reap). See
 # docs/review-workspace.md.
 set -uo pipefail
 

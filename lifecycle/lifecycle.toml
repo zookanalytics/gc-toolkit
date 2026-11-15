@@ -1901,11 +1901,12 @@ keys = [
 #   bead closes, and warns on a missing or unknown value unless
 #   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `shipped`
 #   from the lifecycle writer's transition into `merged`, from
-#   mol-refinery-patrol.toml's rework hand-back close and from `gctk review
-#   record`'s close of an ask an earlier round fixed, and `no-op` from
+#   mol-refinery-patrol.toml's rework hand-back close and from the review
+#   loop's check (`gctk review passed --record`) closing an ask an earlier
+#   round fixed, and `no-op` from
 #   the proactive prompt's clause on a leftover reaction bead it closes,
 #   mol-validate-close, work-outcome.sh on every conversation close, the
-#   observation-filing recipes, `gctk review record`'s close of any other ask
+#   observation-filing recipes, the review loop's check closing any other ask
 #   the run answered, the landing order's close of a withdrawal it carried out,
 #   and converse by hand. bead-rehome.sh reads it
 #   to confirm a no-op origin is disposable, `gctk pr compose` drops a no-op row

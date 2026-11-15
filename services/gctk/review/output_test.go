@@ -380,11 +380,12 @@ func TestAShadowRound(t *testing.T) {
 	mustRefuse(t, w.check(st, own, nil), "only a shadow run's round")
 }
 
-// A step that writes no output, such as prepare, is refused.
+// A bead of the run that writes no output, such as the loop's spec, is
+// refused.
 func TestAStepThatWritesNoOutput(t *testing.T) {
 	w := newWorld(t)
-	w.store.Put(bead{ID: "tk-prep", Status: "in_progress", IssueType: "task", Metadata: map[string]string{
-		"gc.root_bead_id": root, "gc.step_ref": "mol-pr-review.prepare",
+	w.store.Put(bead{ID: "tk-spec", Status: "in_progress", IssueType: "task", Metadata: map[string]string{
+		"gc.root_bead_id": root, "gc.step_ref": "mol-pr-review.review-loop.spec",
 	}})
-	mustRefuse(t, w.check("tk-prep", triage(1, h1), nil), "not a step that writes an output")
+	mustRefuse(t, w.check("tk-spec", triage(1, h1), nil), "not a step that writes an output")
 }

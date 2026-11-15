@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -142,13 +143,15 @@ func (r Ruling) Subject() string {
 }
 
 // Run is a review run as the store holds it: its root, the vars it was poured
-// with, the control bead of its loop, its record step, and the outputs its
-// steps wrote, by iteration. Broken names each output that names a step of the
-// review and does not read as one, which the pass rule reads as not written.
+// with, the loop's bound among them (0 when the var does not read as a count),
+// the control bead of its loop, and the outputs its steps wrote, by iteration.
+// Broken names each output that names a step of the review and does not read
+// as one, which the pass rule reads as not written.
 type Run struct {
 	Root, PRBead, Head, Target string
 	Shadow                     bool
-	Loop, RecordStep           *ledger.Record
+	MaxAttempts                int
+	Loop                       *ledger.Record
 	Iterations                 map[int]*Iteration
 	Broken                     []string
 }
@@ -182,6 +185,9 @@ func ReadRun(l *ledger.Ledger, id string) (*Run, error) {
 	}
 	run := &Run{Root: root.ID, PRBead: str(prBeadVar, root), Head: str(headVar, root),
 		Target: str(targetVar, root), Shadow: str(shadowVar, root) == "true", Iterations: map[int]*Iteration{}}
+	if n, err := strconv.Atoi(str(maxAttemptsVar, root)); err == nil && n > 0 {
+		run.MaxAttempts = n
+	}
 	if run.PRBead == "" {
 		return nil, &NotARun{ID: id, Why: fmt.Sprintf("its root %s names no pr_bead var", root.ID)}
 	}
@@ -197,9 +203,6 @@ func ReadRun(l *ledger.Ledger, id string) (*Run, error) {
 				return nil, &NotARun{ID: id, Why: fmt.Sprintf("its root %s has two loops, %s and %s", root.ID, run.Loop.ID, m.ID)}
 			}
 			run.Loop = m
-		}
-		if strings.HasSuffix(str(stepRefKey, m), "."+stepRecord) {
-			run.RecordStep = m
 		}
 		if raw := str(outputKey, m); raw != "" && worked(kind) {
 			if why := run.add(raw); why != "" {

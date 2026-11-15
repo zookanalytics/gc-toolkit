@@ -228,10 +228,17 @@ func TestARunThatRecordedItsResultIsNoFailureOfTheReOffer(t *testing.T) {
 	}
 }
 
-// recorded writes the steps of a run that judged the head, exhausted its loop
-// and closed its record step, as a run that recorded its result leaves them.
+// recorded writes the steps of a run that judged the head and exhausted its
+// loop, whose bound the root carries as Gas City's cook stamps every var, as a
+// run whose loop's check recorded its result leaves them.
 func recorded(t *testing.T, d *admitting, root string) {
 	t.Helper()
+	r, ok := d.store.Row(root)
+	if !ok {
+		t.Fatalf("no run %s", root)
+	}
+	r.Metadata["gc.var.max_attempts"] = "1"
+	d.store.Put(r)
 	member := func(id, kind, ref, outcome, output string) {
 		md := map[string]string{"gc.root_bead_id": root, "gc.step_ref": ref, "gc.outcome": outcome}
 		if kind != "" {
@@ -245,7 +252,6 @@ func recorded(t *testing.T, d *admitting, root string) {
 	member(root+"-loop", "ralph", "mol-pr-review.review-loop", "fail", "")
 	member(root+"-triage", "", "review-loop.iteration.1.triage", "pass",
 		`{"review":"triage","iteration":1,"head":"`+head+`","checks":[],"material":false}`)
-	member(root+"-record", "", "mol-pr-review.record", "pass", "")
 }
 
 // A cleared review-run-failed or review-loop-exhausted gate gets one more run:

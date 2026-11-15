@@ -9,6 +9,9 @@ Read on 2026-11-14 at `gastownhall/gascity` main 13bb101b8f and
 `gastownhall/gascity-packs` main 0f07496d2f, from snapshots taken at those
 commits. GitHub's behavior is cited from gh's manual as installed (`gh pr ready`).
 Each section names the unit of [the design](design.md) that adds the surface.
+The section on the check's record was read again on 2026-11-15 at
+`gastownhall/gascity` main e9a628c500, from the city's gascity checkout's
+upstream remote, and each symbol cited there is unchanged at main 294079d53f.
 
 ## The run's formulas (unit 3)
 
@@ -96,8 +99,55 @@ and record the result for the head and the target the evaluator reads.
   carries no `gh` (`internal/convergence/condition.go`).
 - **A result per head on a bead.** `github-pr-review` keeps a report directory per
   head SHA, and the PR monitor dedupes repair beads by head SHA. Neither records a
-  pass on the bead that owns a PR. **Not covered**: `gctk review record` writes
+  pass on the bead that owns a PR. **Not covered**: the loop's check writes
   `review_results`, the key the merge design's evaluator already reads.
+- **Where the record runs.** A formula has no script step: agents execute only
+  plain work beads, the orchestrator executes only control beads (`retry`,
+  `ralph`, `check`, `retry-eval`, `fanout`, `drain`, `scope-check`,
+  `workflow-finalize`), and the one author-supplied script the runtime runs is a
+  step's check, run again without spending an attempt on exit 75
+  (formula-spec-v2.md at e9a628c500, section 0.2, the step keys of section 1.3
+  and section 3.1). A step that only records is still an agent's session, and a
+  teardown step (`gc.scope_role = teardown`, which a run cancel spares through
+  `TeardownTailExclusionFromMembers` in `internal/molecule/cleanup.go`) is a
+  plain work bead too. **Composed**: the record runs in the loop's check, the
+  one script the runtime runs at the loop's end, through `gctk review passed
+  --record`. The check's script gets the store's connection env, `BEADS_DIR`
+  with the Dolt and credentials env (`ConditionEnv.Environ` in
+  `internal/convergence/condition.go`), and `gc` and `bd` on its `PATH`, so it
+  can write the store as well as read it. It gets no bound on the loop's
+  attempts: `runRalphCheck` in `internal/dispatch/ralph.go` sets no
+  `MaxIterations` in the script's `ConditionEnv`, and the bound lives on the
+  check's control bead (`gc.max_attempts`, which `processRalphCheck` reads),
+  which the script is not named. So the check reads the run's `max_attempts`
+  var on the root, the value the compiler substitutes into the loop's
+  `[steps.check] max_attempts` (formula-spec-v2.md, section 3.1), and knows the
+  iteration at that bound is the last, which the runtime closes as exhausted
+  when it does not pass (`attempt >= maxAttempts` in `processRalphCheck`).
+- **The probe of the record.** On 2026-11-15, a scratch city on the city's gc
+  1.4.3 cooked a formula whose checked loop ran a check script that took an
+  exclusive lock on `pr-record.lock` in `$BEADS_DIR`, wrote a `review_results`
+  value on one bead through `gc bd update` and closed another with
+  `gc.work_outcome=no-op` and a note, all from the control dispatcher
+  (`gc convoy control`). At a pass the script exited 0 and the loop and the
+  workflow closed passed. In a loop of two attempts the script exited 1 at the
+  first, and at the second wrote the same way and exited 1, and the loop closed
+  `gc.outcome = fail` with `gc.failed_attempt = 2` and no
+  `gc.final_disposition`, its writes standing. The root carried
+  `gc.var.max_attempts` equal to the loop's `gc.max_attempts`, the script read
+  `GC_MAX_ITERATIONS=0`, and `GC_BEAD_ID` named the iteration's scope bead. The
+  same city then cooked the pack's own `mol-pr-review`, with its check script
+  and gctk built from the change, and the steps played: a passing round
+  recorded `passed: true` and closed the ask it declined with
+  `gc.work_outcome=no-op`, and a loop of two attempts that never passed
+  recorded `passed: false` at its last judged head and filed the
+  `review-loop-exhausted` gate on the PR's bead before the loop closed failed.
+- **The landing order's pass**, which the sitting proposed for an exhausted
+  loop, already reads how each run ended. It would record an exhausted run only
+  after the run closed, and would have to keep which exhausted runs it had
+  recorded and gated, so that a cleared gate is not filed again. **Not used**:
+  the check knows its last attempt and records then, in the same act as its
+  verdict.
 
 ## The check index (unit 1)
 
@@ -149,7 +199,8 @@ Gas City gives a session a work directory and reports worktree events
 (`bead.worktree.*` in `internal/events/events.go`), but a run's steps are claimed
 by different sessions, so no session's directory holds the run. **Not covered**:
 `review-workspace.sh` keys the directory by the run's root, and
-`orders/review-workspace-reap.toml` stays as the backstop, keyed the same way.
+`orders/review-workspace-reap.toml`, keyed the same way, removes it once the
+run's root closes, however the run ended.
 
 ## The cutover script (unit 5)
 

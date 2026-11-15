@@ -9,11 +9,20 @@ import (
 
 // A run that ends without a result is poured again by the landing order, and
 // the second at one head asks a person (specs/tk-1tfzr71.108/design.md,
-// section 7). Ended says which a closed run was, from the store alone: a run
-// recorded its result when its loop closed passed or exhausted at a head it
-// judged and its record step closed passed. A cancel, a loop a step's hard
-// failure ended, a run that judged no head and a record step that did not
-// finish each leave the run with no result.
+// section 7). Ended says which a closed run was, from the store alone. The
+// loop's check records the run's result before it closes the loop: it exits 0
+// only once a passed iteration's result landed, and at the loop's last attempt
+// it exits 1 only once the result of an iteration that did not pass landed, a
+// write that does not land re-running it without spending an attempt. So a run
+// recorded its result when its loop closed passed, or exhausted at a head it
+// judged while its bound reads. A cancel, a loop a step's hard failure ended,
+// which runs no check, and a run that judged no head each leave the run with
+// no result. Gas City bounds the attempt-free re-runs (maxCheckInfraRetries in
+// internal/dispatch/ralph.go) and grades the next one a failure, so a record
+// that fails that often at the last attempt leaves an exhausted loop with no
+// result written, which reads here as recorded: the landing order then finds no
+// result at the head and pours a fresh run, though without counting this one
+// as a failure.
 
 // Ending is how a closed review run ended: its root, whether it recorded its
 // result, and how it ended, in one clause.
@@ -66,11 +75,12 @@ func Ended(l *ledger.Ledger, root string) (Ending, error) {
 		return out, nil
 	}
 	head := run.Iterations[last].Triage.Head
-	if st := run.RecordStep; st == nil || st.Status() != "closed" || str(outcomeKey, st) != "pass" {
-		out.How = fmt.Sprintf("its record step did not finish, so no result was written at %s (%s)", head, closed)
+	if loopOutcome != "pass" && run.MaxAttempts == 0 {
+		out.How = fmt.Sprintf("its loop exhausted at %s while its max_attempts var named no bound, so its check "+
+			"could not know its last attempt and recorded nothing (%s)", head, closed)
 		return out, nil
 	}
 	out.Result = true
-	out.How = fmt.Sprintf("it recorded its result at %s (%s)", head, closed)
+	out.How = fmt.Sprintf("its loop's check recorded its result at %s (%s)", head, closed)
 	return out, nil
 }

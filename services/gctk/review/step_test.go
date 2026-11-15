@@ -283,6 +283,39 @@ func TestARunsVarsNameTheRecord(t *testing.T) {
 	}
 }
 
+// In a later round the run stands at the head that round judges, the
+// repair's push, and stops once the PR moved past it. The bead's record keeps
+// the head the refinery validated while the run holds the bead, and reads
+// head-changed once the landing order saw the push, so the run's vars still
+// name it.
+func TestALaterRoundStandsAtTheHeadItJudges(t *testing.T) {
+	w := newWorld(t)
+	setPR := func(k, v string) {
+		pr, _ := w.store.Row(prBead)
+		pr.Metadata[k] = v
+		w.store.Put(pr)
+	}
+	setPR("pr_url", "https://github.com/o/r/pull/7")
+	setPR("merge_result", "pull_request_head_changed")
+	w.output(triage(1, h1, "correctness"))
+	w.output(lane(1, "correctness", h1, review.VerdictRequestChanges, "F1"))
+	w.output(repair(1, h1, h2, review.Ruling{Check: "correctness", Finding: "F1", Ruling: review.RulingMustFix, Commit: fix}))
+	st, err := review.ReadStep(w.ledger(), w.step(2, "triage"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, p := openPR()
+	p.Facts.HeadRefOid = h2
+	if why, err := st.MustStop(on(g)); why != "" || err != nil {
+		t.Errorf("iteration 2 at the repair's push stops for %q, %v", why, err)
+	}
+	p.Facts.HeadRefOid = h1
+	want := "the PR's head is " + h1 + ", no longer the head iteration 2 judges, " + h2
+	if why, err := st.MustStop(on(g)); why != want || err != nil {
+		t.Errorf("iteration 2 with the PR back at the first head stops for %q, %v; want %q", why, err, want)
+	}
+}
+
 // A run whose vars name the record goes on while GitHub's PR, read on the host
 // its URL names, is open from the bead's branch into the run's target at the
 // run's head. It stops with no result when the PR is closed or merged, its head

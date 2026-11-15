@@ -15,7 +15,8 @@ the PR's branch under a lease on the head it judged. A lane writes its output
 and its evidence beside its worktree, a capture among them, where the round
 reads them before it rules, so lanes that build, test or capture never share a
 tree. `review-workspace.sh add --root <root>` with `--triage`, `--lane <check>`
-or `--repair` makes a part, and the run's `record` step removes the directory.
+or `--repair` makes a part, triage's first, and the hourly reap removes the
+directory once the run's root closes.
 
 On a rig not yet cut over, a review bead reads its pinned commit in a detached
 worktree and runs there any suite its check calls for. It writes its verdict
@@ -72,9 +73,6 @@ reap removes it once the mol closes that bead.
 
 ## When it is removed
 
-- **At a run's record step.** A review run's `record` runs
-  `review-workspace.sh remove --root <root>` once the run has ruled every
-  finding, so a lane's evidence stays readable until its finding is ruled.
 - **At the verdict step.** mol-review's `verdict-and-drain` and the quorum's
   `synthesize-and-signoff` run `review-workspace.sh remove` once the step chain
   is closed, just before they drain. A verdict that fails and returns the bead
@@ -82,8 +80,9 @@ reap removes it once the mol closes that bead.
   next gets the same worktree back.
 - **By the hourly reap.** `orders/review-workspace-reap.toml` runs
   `review-workspace.sh reap`, city scope, no LLM and no agent. It takes the
-  directory of a run whose root closed without its `record` step, such as a
-  cancelled run, and those of reviews that closed without reaching the verdict
+  directory of a review run once its root closes, however the run ended, so a
+  lane's evidence stays readable until every finding is ruled, and those of
+  reviews that closed without reaching the verdict
   step, after a crash, a drain, or a close by another writer such as
   review-sweep.
 

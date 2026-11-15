@@ -1,12 +1,13 @@
 # review-workspace-reap — remove the on-disk workspaces of reviews that have
 # ended. A review keeps its worktree and scratch in a directory named for its
 # review bead, and a review run keeps its steps' worktrees in one named for the
-# run's root. The terminal step removes that directory when the review or the
-# run ends there. This pass takes the ones that ended some other way, after a
-# crash, a drain, a cancelled run, or a close by another writer such as
-# review-sweep: a workspace whose bead is closed, or which names no bead the
-# ledger has and has been idle past the horizon. Each checkout left behind
-# counts against the per-uid tmpfs quota.
+# run's root. A review's terminal step removes its directory when the review
+# ends there. This pass takes a review run's once the run's root closes,
+# however the run ended, and a review's that ended some other way, after a
+# crash, a drain, or a close by another writer such as review-sweep: a
+# workspace whose bead is closed, or which names no bead the ledger has and has
+# been idle past the horizon. Each checkout left behind counts against the
+# per-uid tmpfs quota.
 #
 # City scope: every rig's reviews share one temp directory, and the bead each
 # workspace is named for lives in its own rig's store. A pass removes only what

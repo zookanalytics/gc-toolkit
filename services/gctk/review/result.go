@@ -21,16 +21,30 @@ type Result struct {
 }
 
 // The run's one write on the bead that owns the PR is its result for the last
-// head it judged and its target. The result passes only when the loop's check
-// passed at that head and no gate the run filed is open. A loop that exhausted
-// its attempts gets a result that does not pass, and so does a loop that
-// stopped on a question while the question's gate stays open. A loop a step's
-// hard failure ended did not exhaust, and gets no result, as does a loop that
-// ended any other way, such as a cancel, and a run that judged no head.
+// head it judged and its target, which the loop's check writes as it closes the
+// loop, so no step of the run records it. The check records at the iteration
+// that ends the loop: one that passed, or the loop's last attempt, which Gas
+// City closes as exhausted when it does not pass. The result passes only when
+// the iteration passed and no gate the run filed is open, so a loop that
+// stopped on a question gets a result that does not pass while the question's
+// gate stays open, and an exhausted loop gets one that does not pass and asks
+// a person. A loop a step's hard failure ended runs no check and gets no
+// result, as does a run cancelled before its loop ended and a run that judged
+// no head.
+
+// LoopExhaustedKey keys the human gate the loop's check files on the bead that
+// owns the PR when the loop exhausts its attempts with no passed head.
+const LoopExhaustedKey = "review-loop-exhausted"
+
+// Gates files a human gate on a bead under a key, or finds the one open there.
+type Gates interface {
+	File(subject, key, message string) error
+}
 
 // Recorded is what Record did: the result it wrote on the bead, nil with
-// NoResult saying why when the run has none, whether the loop exhausted, and
-// each ask it closed. Shadow says it wrote nothing, because the run is a
+// NoResult saying why when the run has none, whether the loop exhausted, each
+// gate of a question still open, each ask it closed, and the gate it filed
+// when the loop exhausted. Shadow says it wrote nothing, because the run is a
 // shadow, and what it would have written.
 type Recorded struct {
 	Bead      string
@@ -39,6 +53,7 @@ type Recorded struct {
 	Exhausted bool
 	Open      []string
 	Closed    []ClosedAsk
+	Gated     bool
 	Shadow    bool
 }
 
@@ -48,57 +63,38 @@ type ClosedAsk struct {
 	ID, Ruling, Outcome, Commit string
 }
 
-// Unfinished is the error of a run whose loop has not closed, which has no
-// result yet.
-type Unfinished struct{ Run, Loop string }
-
-func (e *Unfinished) Error() string {
-	if e.Loop == "" {
-		return e.Run + " has no loop, so it has no result to record"
-	}
-	return fmt.Sprintf("%s's loop %s has not closed, so it has no result yet", e.Run, e.Loop)
+// Ends reports whether the iteration the verdict judged ends the run's loop:
+// it passed, or it is the loop's last attempt by the run's bound. With no bound
+// to read, only a pass ends it.
+func (v *Verdict) Ends() bool {
+	return v.Passed || (v.Run.MaxAttempts > 0 && v.Iteration >= v.Run.MaxAttempts)
 }
 
-// Record writes the result of the run id names, its root or any bead poured
-// under it, into review_results on the bead that owns the PR, replacing the
-// entry for the same head and target, and closes the asks the run answered at
-// that head. It holds the store's record lock, in the .beads directory dir,
-// from its read of the bead to its last write, waiting up to wait for it. A
-// read, the lock or a write that fails returns its error, and a retry
-// replaces the same entry and closes what is still open.
-func Record(l *ledger.Ledger, dir string, wait time.Duration, id string) (*Recorded, error) {
-	run, err := ReadRun(l, id)
-	if err != nil {
-		return nil, err
+// Record writes the result of the run the verdict judged, once its iteration
+// ends the loop, into review_results on the bead that owns the PR, replacing
+// the entry for the same head and target, and closes the asks the run answered
+// at that head. When the loop exhausted it then files the review-loop-exhausted
+// gate on the bead through filer, naming the head and the round's account. It
+// holds the store's record lock, in the .beads directory dir, from its read of
+// the bead to its last write on the bead, waiting up to wait for it, and files
+// the gate once the lock is released. A verdict whose iteration does not end
+// the loop is refused, and a read, the lock, a write or the gate that fails
+// returns its error: a retry replaces the same entry, closes what is still
+// open and finds the gate filed.
+func Record(l *ledger.Ledger, dir string, wait time.Duration, v *Verdict, filer Gates) (*Recorded, error) {
+	run := v.Run
+	if !v.Ends() {
+		return nil, fmt.Errorf("iteration %d of %s neither passed nor is its loop's last attempt, so the run has no result yet",
+			v.Iteration, run.Root)
 	}
-	out := &Recorded{Bead: run.PRBead, Shadow: run.Shadow}
-	loop := run.Loop
-	if loop == nil || loop.Status() != "closed" {
-		u := &Unfinished{Run: run.Root}
-		if loop != nil {
-			u.Loop = loop.ID
-		}
-		return nil, u
-	}
-	outcome, disposition := str(outcomeKey, loop), str(dispositionKey, loop)
-	switch {
-	case disposition == "hard_fail":
-		out.NoResult = "a step's hard failure ended the loop"
-		return out, nil
-	case outcome == "pass":
-	case outcome == "fail" && disposition == "":
-		out.Exhausted = true
-	default:
-		out.NoResult = fmt.Sprintf("the loop ended with outcome %q and disposition %q", outcome, disposition)
-		return out, nil
-	}
+	out := &Recorded{Bead: run.PRBead, Shadow: run.Shadow, Exhausted: !v.Passed}
 	last := run.Last()
 	if last == 0 {
 		out.NoResult = "the run judged no head"
 		return out, nil
 	}
 	head := run.Iterations[last].Triage.Head
-	passed := !out.Exhausted
+	passed := v.Passed
 	for _, gate := range gates(run) {
 		g, err := one(l, gate)
 		if err != nil {
@@ -115,30 +111,59 @@ func Record(l *ledger.Ledger, dir string, wait time.Duration, id string) (*Recor
 		out.Closed = answered
 		return out, nil
 	}
+	url, err := out.write(l, dir, wait, run, head, answered)
+	if err != nil {
+		return out, err
+	}
+	if !out.Exhausted {
+		return out, nil
+	}
+	if filer == nil {
+		return out, errors.New("the loop exhausted and no gate filer was given, so no person is asked")
+	}
+	pr := run.PRBead + "'s PR"
+	if url != "" {
+		pr = url
+	}
+	message := fmt.Sprintf("Review run %s exhausted its attempts at %s without a passed head, so %s waits for you. "+
+		"Clearing this gate has the landing order pour a fresh run.\n\n%s", run.Root, head, pr, v.Explain())
+	if err := filer.File(run.PRBead, LoopExhaustedKey, message); err != nil {
+		return out, fmt.Errorf("the result landed and the %s gate did not: %w", LoopExhaustedKey, err)
+	}
+	out.Gated = true
+	return out, nil
+}
 
+// write lands the result and closes the answered asks under the record lock,
+// and returns the PR's URL the bead's record names.
+func (out *Recorded) write(l *ledger.Ledger, dir string, wait time.Duration, run *Run, head string, answered []ClosedAsk) (string, error) {
 	release, err := record.Lock(dir, wait)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer release()
 	owner, err := one(l, run.PRBead)
 	if err != nil {
-		return nil, err
+		return "", err
+	}
+	rec, err := record.Read(owner)
+	if err != nil {
+		return "", err
 	}
 	results, _, err := resultsKey.Get(owner)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	results = slices.DeleteFunc(results, func(r Result) bool { return r.Head == head && r.Target == run.Target })
 	w := l.Write(owner.ID)
 	resultsKey.Set(w, append(results, *out.Result))
 	if err := l.Commit(w); err != nil {
-		return nil, err
+		return "", err
 	}
 
 	asks, err := asksOf(l, owner)
 	if err != nil {
-		return out, err
+		return "", err
 	}
 	// A fixed ask's commit is on the PR's branch, which the repair pushed it
 	// onto from a worktree of the rig's checkout, so the checkout's origin ref
@@ -154,11 +179,14 @@ func Record(l *ledger.Ledger, dir string, wait time.Duration, id string) (*Recor
 		w.WorkRecord(a.Outcome, a.Commit, branch)
 		w.Note(fmt.Sprintf("Answered by review run %s at %s into %s: %s.", run.Root, head, run.Target, a.Ruling))
 		if err := l.Commit(w); err != nil {
-			return out, fmt.Errorf("the result landed and ask %s did not close: %w", a.ID, err)
+			return "", fmt.Errorf("the result landed and ask %s did not close: %w", a.ID, err)
 		}
 		out.Closed = append(out.Closed, a)
 	}
-	return out, nil
+	if rec.URL != "" {
+		return rec.URL, nil
+	}
+	return rec.ExistingPR, nil
 }
 
 // gates is every human gate the run's rulings put a question to, each once.
@@ -213,12 +241,6 @@ func answeredAsks(run *Run, last int) []ClosedAsk {
 		out = append(out, c)
 	}
 	return out
-}
-
-// IsUnfinished reports whether err is a run with no result yet.
-func IsUnfinished(err error) bool {
-	var u *Unfinished
-	return errors.As(err, &u)
 }
 
 // String is the result as one line.
