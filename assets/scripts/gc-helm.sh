@@ -1737,10 +1737,10 @@ EOF
         fi
     fi
     # What follows a zero exit cannot be taken back: the run's end below, and
-    # the close a caller makes on it, as when first-reaction-dispose.sh closes
-    # its reaction or converse-signoff.sh resolves gates and closes the
-    # conversation. So a refused update ends the verb here, with no wait edge
-    # and no run's end, and a re-run writes the whole update again.
+    # what a caller writes next, as when first-reaction-dispose.sh arms, hands
+    # over or holds the bead, or converse-signoff.sh resolves gates and closes
+    # the conversation. So a refused update ends the verb here, with no wait
+    # edge and no run's end, and a re-run writes the whole update again.
     _tk_rc=0; _tk_err=""
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     _tk_err=$(gc bd update "$bead" ${db:+--db "$db"} "$@" 2>&1 >/dev/null) || _tk_rc=$?

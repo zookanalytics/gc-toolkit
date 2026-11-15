@@ -366,8 +366,7 @@ for exit_args in "actionable --route gc-toolkit/gc-toolkit.polecat" "actionable 
                  "blocked --waiting-on tk-blk1 --then-route gc-toolkit/gc-toolkit.polecat" \
                  "close --route gc-toolkit/gc-toolkit.polecat" "ruling" "recommend --recommended-formula mol-x"; do
   for st in closed in_progress; do
-    FAKE_SHOW_JSON='[{"id":"tk-sub","status":"'"$st"'",'"$MEMBER"',"metadata":{}}]'
-    export FAKE_SHOW_JSON
+    export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"'"$st"'",'"$MEMBER"',"metadata":{}}]'
     # shellcheck disable=SC2086  # one flag per word
     run tk-sub --run "$ROOT" --reason "r" --takeaway "t" --disposition $exit_args
     eq "$RC" "3" "(STATUS) --disposition ${exit_args%% *} on a $st subject exits 3"
