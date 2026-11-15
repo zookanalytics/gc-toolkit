@@ -135,8 +135,9 @@ bead_store_rig() {
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-# The command. A sourced load skips it.
-if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+# The command. A sourced load skips it, in zsh as well, where BASH_SOURCE is
+# unset and a caller's nounset would refuse it bare.
+if [ "${BASH_SOURCE[0]:-}" = "$0" ]; then
   set -uo pipefail
 
   PROG="bead-store"
