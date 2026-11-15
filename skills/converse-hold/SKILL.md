@@ -127,7 +127,15 @@ and record it on the conversation first (the prompt's hand-back). When the
 recommendation sends work, the decision names the formula the work goes on,
 chosen as the `work` skill says. The decision also says whether you recommend
 that the sitting end at its hand-off or stay for the work's return, and why
-(the prompt's End or stay).
+(the prompt's End or stay). It says when a stay would come back, in the
+operator's terms, and recommends ending at the hand-off when that is after the
+merge:
+
+| The ruling sends | A stay comes back | You recommend |
+|---|---|---|
+| A rework of the PR under discussion | When the rework reaches the PR's branch, before the merge, which waits for the return | Staying when the discussion will help judge the result, and ending otherwise. Say that the PR's checks review the reworked branch again. |
+| New work that opens its own PR | Only after that PR has merged | Ending at the hand-off, with what was agreed written into the work's brief in full. Say that a stay would report only after the merge. |
+| Work that opens no PR of its own | When the work closes | Staying when the discussion will help judge the result, and ending otherwise. |
 
 Then offer the close-out as the last line, the only thing below the hand-back.
 The close-out is the switch that ends the sitting, put where the operator

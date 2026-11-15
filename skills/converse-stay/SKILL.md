@@ -10,11 +10,21 @@ literally, from the entry's output, at the top of every call below.
 
 ## Stay
 
-Stay only once the operator has agreed to it. First run the end up to its
-sign-off (`converse-settle`): record the outcome, send the work, reply to the
-gates the ruling settles and name what each answer releases, and settle the
-subject's dispatch path. Then run the sign-off with `--stay`, giving in one
-line what the operator agreed. The return compares the work with that line.
+Stay only once the operator has agreed to it, after you have told them when the
+stay would come back, in their terms (the prompt's End or stay). Recommend
+ending at the hand-off when that is after the merge:
+
+| The ruling sends | A stay comes back | You recommend |
+|---|---|---|
+| A rework of the PR under discussion | When the rework reaches the PR's branch, before the merge, which waits for the return | Staying when the discussion will help judge the result, and ending otherwise. Say that the PR's checks review the reworked branch again. |
+| New work that opens its own PR | Only after that PR has merged | Ending at the hand-off, with what was agreed written into the work's brief in full. Say that a stay would report only after the merge. |
+| Work that opens no PR of its own | When the work closes | Staying when the discussion will help judge the result, and ending otherwise. |
+
+First run the end up to its sign-off (`converse-settle`): record the outcome,
+send the work, reply to the gates the ruling settles and name what each answer
+releases, and settle the subject's dispatch path. Then run the sign-off with
+`--stay`, giving in one line what the operator agreed. The return compares the
+work with that line.
 
 The sign-off with `--stay` writes in this order:
 
@@ -78,8 +88,8 @@ to bring the sitting back. Act on what the entry prints:
 
 - **`returned`**: carry out the return (below) in place of a hand-back.
 - **`waiting`**: record and post the hand-back. It opens with where the subject
-  stands, and says that the sitting stays until the work lands and then comes
-  back to compare it with what was agreed. Below the hand-back, offer the
+  stands, and says when the sitting comes back, in the table's terms, to
+  compare the work with what was agreed. Below the hand-back, offer the
   close-out line a framing offers (`converse-hold`), because a sitting that
   stays ends the same way.
 
@@ -107,9 +117,12 @@ fits:
 - **Nobody speaks.** End the turn with nothing said and nothing recorded. A
   hand-back nobody asked for would replace the stay's hand-back, which the tab
   prints.
-- **The operator rules that more work is needed.** Stay again, with a
-  `--waiting-on` for every bead the conversation now waits on, the earlier work
-  and the new, so the return waits for the last of them.
+- **The operator rules that more work is needed.** Put the choice to them
+  again, as Stay (above) says, because the return waits for the last of the
+  work, and new work that opens its own PR brings it back only after that PR
+  has merged. To stay, stay again, with a `--waiting-on` for every bead the
+  conversation now waits on, the earlier work and the new. To end, sign off as
+  the next case says.
 - **The operator ends the stay.** Sign off without `--stay`
   (`converse-settle`), which closes the conversation over its wait.
 

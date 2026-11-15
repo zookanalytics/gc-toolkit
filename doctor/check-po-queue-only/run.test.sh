@@ -286,6 +286,21 @@ has "$OUT" "queued bead al-q6 is worked by live run al-run1 (mol-polecat-work)" 
 has "$OUT" "gc-helm.sh place al-q6 --under <parent> or --standalone" "…with the placement that finishes it"
 hasnt "$OUT" "al-q7" "a run that has ended is not a live run"
 
+# A first reaction's run sends nothing: it triages the bead and works none of
+# it, and its held exit writes hold:mayor seconds before its run ends. So a
+# queued bead whose only live run is a first reaction reaches no finding, while
+# a run of any other formula beside it still does.
+reset
+queue '{"id":"al-q12","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{}}' \
+      '{"id":"al-q13","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{}}'
+runs '{"root":"al-run3","convoy":"al-cv3","bead":"al-q12","formula":"mol-first-reaction","live":true}' \
+     '{"root":"al-run4","convoy":"al-cv4","bead":"al-q13","formula":"mol-first-reaction","live":true}' \
+     '{"root":"al-run5","convoy":"al-cv5","bead":"al-q13","formula":"mol-polecat-work","live":true}'
+OUT=$(run_check); RC=$?
+hasnt "$OUT" "al-q12" "a live first reaction on a queued bead is not a send"
+has "$OUT" "queued bead al-q13 is worked by live run al-run5 (mol-polecat-work)" "…while another formula's run beside one still is"
+hasnt "$OUT" "al-run4" "…and the reaction's run is not named"
+
 # An arm for the validating closer is a wait whose hold was not lifted, so its
 # remedy is the lift, never the disarm or a placement that would replace it.
 reset

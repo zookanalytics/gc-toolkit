@@ -12,7 +12,7 @@
 #               subject to the operator files a human gate, which reaches the
 #               operator on the board, and a conversation beside it would put
 #               the topic to them twice.
-#   (SHED)      the whole reason the fallback exists. Filing a reaction bead
+#   (SHED)      the whole reason the fallback exists. Slinging a reaction
 #               is fire-and-forget and returns 0 whether or not anything will
 #               ever claim it, so an unguarded react path leaves the
 #               topic routed, unclaimed, and WITHOUT a conversation — filed-looking
@@ -293,9 +293,9 @@ eq "$RC" "4" "(RECOVER) a direct path that also fails exits 4"
 unset FAKE_HELM_RC
 
 # --- (REACTED) an already-reacting subject files the conversation directly ----
-# react returns its no-op code (5) when the subject already has an open first
-# reaction or a live owner owns it: the guard filed nothing, so no new reaction
-# will put the topic to the operator. operator-intake must NOT trust the skip as
+# react returns its no-op code (5) when a first reaction already runs on the
+# subject or an open conversation tracks it: the sling slung nothing, so no new
+# reaction will put the topic to the operator. operator-intake must NOT trust the skip as
 # a dispatch — it falls through and files the conversation itself, naming the
 # real cause so its ask is accurate rather than reporting a failure to file
 # that did not happen.
@@ -304,7 +304,7 @@ eq "$RC" "0" "(REACTED) exits 0 — the conversation is filed"
 has "$CALLS" "helm react tk-newsub" "(REACTED) react was attempted"
 has "$CALLS" "helm open tk-newsub" "(REACTED) an already-reacted subject falls through to filing the conversation"
 has "$OUT" "conversation filed" "(REACTED) the summary reports a filed conversation"
-has "$ERR" "already has an open first reaction" "(REACTED) the reason names the no-op skip"
+has "$ERR" "a first reaction already runs on subject tk-newsub, or an open conversation tracks it" "(REACTED) the reason names the no-op skip"
 hasnt "$ERR" "FAILED" "(REACTED) it is NOT reported as a failure to file"
 unset FAKE_HELM_REACT_RC
 
@@ -320,7 +320,7 @@ has "$CALLS" "helm react tk-newsub" "(DRIVEN) react was attempted"
 has "$CALLS" "helm open tk-newsub" "(DRIVEN) a driven subject falls through to filing the conversation"
 has "$CALLS" "a live workflow already drives the subject" "(DRIVEN) the conversation's ask names the live workflow"
 has "$ERR" "a live workflow already drives subject tk-newsub" "(DRIVEN) the reason names the no-op skip"
-hasnt "$ERR" "already has an open first reaction" "(DRIVEN) it is NOT reported as an already-reacting subject"
+hasnt "$ERR" "a first reaction already runs" "(DRIVEN) it is NOT reported as an already-reacting subject"
 hasnt "$ERR" "FAILED" "(DRIVEN) it is NOT reported as a failure to file"
 unset FAKE_HELM_REACT_RC
 
@@ -336,9 +336,26 @@ has "$CALLS" "helm react tk-newsub" "(ROUTED) react was attempted"
 has "$CALLS" "helm open tk-newsub" "(ROUTED) a routed subject falls through to filing the conversation"
 has "$CALLS" "the subject is already routed or armed" "(ROUTED) the conversation's ask names the route or arm"
 has "$ERR" "subject tk-newsub is already routed or armed" "(ROUTED) the reason names the no-op skip"
-hasnt "$ERR" "already has an open first reaction" "(ROUTED) it is NOT reported as an already-reacting subject"
+hasnt "$ERR" "a first reaction already runs" "(ROUTED) it is NOT reported as an already-reacting subject"
 hasnt "$ERR" "a live workflow already drives" "(ROUTED) it is NOT reported as a driven subject"
 hasnt "$ERR" "FAILED" "(ROUTED) it is NOT reported as a failure to file"
+unset FAKE_HELM_REACT_RC
+
+# --- (KIND) a standing record or a feedback pattern files the conversation directly
+# react returns its fourth no-op code (8) when the subject's kind takes no first
+# reaction: a standing record is open by design, and the feedback distiller
+# dispatches a pattern. No reaction will put the topic to the operator, so the
+# conversation is filed directly, its ask naming that cause, not another skip
+# and not a failure to sling.
+FAKE_HELM_REACT_RC=8 run yes "a topic on a standing record"
+eq "$RC" "0" "(KIND) exits 0 — the conversation is filed"
+has "$CALLS" "helm react tk-newsub" "(KIND) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(KIND) a standing record or pattern falls through to filing the conversation"
+has "$CALLS" "the subject is a standing record or a feedback pattern" "(KIND) the conversation's ask names the kind"
+has "$ERR" "subject tk-newsub is a standing record or a feedback pattern" "(KIND) the reason names the no-op skip"
+hasnt "$ERR" "a first reaction already runs" "(KIND) it is NOT reported as an already-reacting subject"
+hasnt "$ERR" "already routed or armed" "(KIND) it is NOT reported as a routed subject"
+hasnt "$ERR" "FAILED" "(KIND) it is NOT reported as a failure to sling"
 unset FAKE_HELM_REACT_RC
 
 # --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing
