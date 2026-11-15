@@ -154,5 +154,14 @@ by different sessions, so no session's directory holds the run. **Not covered**:
 ## The cutover script (unit 5)
 
 `review-cutover.sh` closes a moved bead's old review scaffolding at a rig's
-cutover. bd closes beads, and the script composes `gc bd close` over the beads it
-finds. It exists only for the cutover and goes with the old path's retirement.
+cutover. bd closes beads, and the script composes bd's checked close over the
+beads it finds. It closes through `gc bd update --status=closed`, the form that
+carries `gc.outcome=superseded`, the note and the runtime's work record in the
+same write, since `gc bd close` sets no metadata. Gas City's work-record gate
+checks that form beside `gc bd close`, and it wants `gc.work_outcome` on a plain
+task bead's close (the package comment and `Gated` in
+`internal/workrecord/gate.go`), so each close records `no-op`. bd refuses the
+close of a bead an open blocker holds, so a must-fix machine finding whose fix
+unit is still open stays open, and `finding.sh close-answered` closes it once
+that unit lands. The script exists only for the cutover and goes with the old
+path's retirement.
