@@ -112,12 +112,14 @@ as its vars, and the pools and binding the refinery's address names
 (<rig>/<binding>refinery): review_target <rig>/<binding>polecat-codex,
 repair_target <rig>/<binding>polecat and binding_prefix <binding>. No run is
 poured while one is attached to the bead, while another open bead names the
-PR's branch, such as a rework child, or while a conversation or a human gate
-holds the bead. A run that ended without a result is poured again. When the
-last two runs at the validated head both ended without one, counting only runs
-that ended after the bead's last review-run-failed gate closed, it files a
-human gate on the bead keyed review-run-failed instead, naming both runs and
-how each ended.
+PR's branch, such as a rework child, or while a human gate holds the bead. A
+conversation that holds the bead keeps the run off the branch too, since its
+sitting may be editing it, unless the sitting stays for the work its ruling
+sent, because it edits nothing until that work lands. A run that ended without
+a result is poured again. When the last two runs at the validated head both
+ended without one, counting only runs that ended after the bead's last
+review-run-failed gate closed, it files a human gate on the bead keyed
+review-run-failed instead, naming both runs and how each ended.
 
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the run fetched it, once the lock is free, in a clone

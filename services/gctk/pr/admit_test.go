@@ -314,6 +314,46 @@ func TestAGateASittingOrAnotherWriterKeepsTheRunOffTheBranch(t *testing.T) {
 	}
 }
 
+// A sitting that stays edits nothing while the work its ruling sent is out,
+// and that work can be the ask its ruling filed, which only a run takes, so
+// its conversation keeps no run off the branch. Once nothing it waits on is
+// open, the sitting comes back and may edit, so its conversation holds the
+// branch again.
+func TestAStayingSittingKeepsNoRunOffTheBranch(t *testing.T) {
+	d := newAdmit(t)
+	d.edit(t, func(b *fake.Bead) {
+		b.Metadata["review_results"] = `[{"head":"` + head + `","target":"main","passed":true}]`
+	})
+	a := d.ask(t, "operator ruling (conversation tk-conv): rename the flag")
+	d.store.Put(fake.Bead{ID: "tk-conv", Title: "Converse about the PR", Status: "open", IssueType: "task",
+		Assignee: "rig/gc-toolkit.tk-conv", Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: a, Status: "open"}}})
+	d.store.List("tk-conv", a)
+	d.edit(t, func(b *fake.Bead) {
+		b.Edges = append(b.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: "tk-conv", Status: "open"})
+	})
+	d.store.List(bead, a, "tk-conv")
+	o := d.once(t)
+	is(t, o, pr.ActPoured)
+	if d.runs.count() != 1 || !strings.Contains(o.Detail, a) {
+		t.Fatalf("a staying sitting kept the run that takes its ask off the branch: %d runs (%s)", d.runs.count(), o.Detail)
+	}
+
+	e := newAdmit(t)
+	e.store.Put(fake.Bead{ID: "tk-work", Title: "The work the ruling sent", Status: "closed", IssueType: "task",
+		ClosedAt: "2026-11-12T09:30:00Z"})
+	e.store.Put(fake.Bead{ID: "tk-conv", Title: "Converse about the PR", Status: "open", IssueType: "task",
+		Assignee: "rig/gc-toolkit.tk-conv", Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "tk-work", Status: "closed"}}})
+	e.edit(t, func(b *fake.Bead) {
+		b.Edges = append(b.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: "tk-conv", Status: "open"})
+	})
+	e.store.List(bead, "tk-conv")
+	o = e.once(t)
+	is(t, o, pr.ActChecked)
+	if e.runs.count() != 0 || !strings.Contains(o.Detail, "conversation tk-conv") {
+		t.Fatalf("a sitting back from its stay let the order pour: %d runs (%s)", e.runs.count(), o.Detail)
+	}
+}
+
 // An ask on a head that already passed starts a round: the order pours a run
 // for it, and marks no draft ready while it is open.
 func TestAnAskOnAPassedHeadStartsARound(t *testing.T) {
