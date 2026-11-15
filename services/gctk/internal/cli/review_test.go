@@ -20,14 +20,23 @@ func runGctk(t *testing.T, args ...string) (code int, stdout, stderr string) {
 }
 
 // The check index's calls: a call that names no commit, two forms in one call
-// and a flag only another form takes are usage errors, and an index named
-// outright answers each form with no commit.
+// and a flag only another form takes are usage errors even where the pack's
+// index cannot be found, and an index named outright answers each form with no
+// commit.
 func TestReviewChecksCalls(t *testing.T) {
 	idx := filepath.Join(t.TempDir(), "review-checks.toml")
 	if err := os.WriteFile(idx, []byte("[checks.correctness]\npurpose = \"p\"\nphase = \"pre-open\"\n[checks.demo]\npurpose = \"d\"\nphase = \"open-as-draft\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GC_REVIEW_CHECKS_INDEX", "")
+	// No GCTK_SCRIPTS_DIR, and a gc that names no scripts directory ahead of
+	// any other, so the pack's index cannot be found.
+	trap := t.TempDir()
+	if err := os.WriteFile(filepath.Join(trap, "gc"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", trap+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GCTK_SCRIPTS_DIR", "")
 	for _, tc := range []struct {
 		args []string
 		code int

@@ -81,13 +81,13 @@ func newReviewChecksCmd(stdout, stderr io.Writer) *cobra.Command {
 			case resolve && review.PhaseRank(through) == 0:
 				return fmt.Errorf("--resolve needs --through <phase>, one of %s (got %q)", review.Phases(), through)
 			}
+			if namedIndex(file) == "" && at == "" {
+				return errors.New("no commit named (--at is missing or empty) and no index named (--file, GC_REVIEW_CHECKS_INDEX); a rig's rows are read only at the commit being judged")
+			}
 			src, err := indexSources(file)
 			if err != nil {
 				fmt.Fprintf(stderr, "gctk review checks: %v\n", err)
 				return exit(1)
-			}
-			if src.Named == "" && at == "" {
-				return errors.New("no commit named (--at is missing or empty) and no index named (--file, GC_REVIEW_CHECKS_INDEX); a rig's rows are read only at the commit being judged")
 			}
 			return exit(reviewChecks(src, at, check, set, through, resolve, withPhase, stdout, stderr))
 		},
@@ -166,15 +166,20 @@ func reviewChecks(src review.IndexSources, at, check, set, through string, resol
 	return 0
 }
 
-// indexSources is where the index is read: the index --file names, else the
-// one GC_REVIEW_CHECKS_INDEX names, else the pack's beside the scripts
-// directory, with the checkout the command runs in and GC_RIG_ROOT's as the
-// repositories a commit is read in.
-func indexSources(file string) (review.IndexSources, error) {
-	src := review.IndexSources{Named: file, Repos: review.Repos(".", os.Getenv("GC_RIG_ROOT"))}
-	if src.Named == "" {
-		src.Named = os.Getenv("GC_REVIEW_CHECKS_INDEX")
+// namedIndex is the index named outright: the one --file names, else the one
+// GC_REVIEW_CHECKS_INDEX names, "" when neither names one.
+func namedIndex(file string) string {
+	if file != "" {
+		return file
 	}
+	return os.Getenv("GC_REVIEW_CHECKS_INDEX")
+}
+
+// indexSources is where the index is read: the index named outright, else the
+// pack's beside the scripts directory, with the checkout the command runs in
+// and GC_RIG_ROOT's as the repositories a commit is read in.
+func indexSources(file string) (review.IndexSources, error) {
+	src := review.IndexSources{Named: namedIndex(file), Repos: review.Repos(".", os.Getenv("GC_RIG_ROOT"))}
 	if src.Named != "" {
 		return src, nil
 	}
