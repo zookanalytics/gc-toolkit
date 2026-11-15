@@ -136,8 +136,12 @@ repo() {
     fi
 }
 
-worktree() { # <part flag...> — the step's worktree at the head
-    "$HERE/review-workspace.sh" add --root "$RUN" "$@" --oid "$HEAD" --repo "$REPO" || die 1 "the worktree did not land"
+# worktree <part flag...> — the step's worktree at the head, in WT. It sets WT
+# rather than printing the path, so a worktree that did not land stops the
+# verb here and not only a subshell.
+worktree() {
+    WT=$("$HERE/review-workspace.sh" add --root "$RUN" "$@" --oid "$HEAD" --repo "$REPO") && [ -n "$WT" ] \
+        || die 1 "the worktree did not land"
 }
 
 print_run() {
@@ -172,14 +176,18 @@ print_change() { # <worktree>
 cmd_prepare() {
     local out rc ref
     out=$("$gctk" review step "$ID" --json --prepare 2>&1); rc=$?
-    if [ "$rc" = 3 ]; then
-        ref=$("$gctk" review step "$ID" --json 2>/dev/null | jq -r '.ref // empty')
-        [ "$ref" = mol-pr-review.prepare ] || die 3 "${out#gctk review step: }"
-        echo "$PROG: ${out#gctk review step: }" >&2
-        "$HERE/decline.sh" --step mol-pr-review.prepare --reason "${out#gctk review step: }" \
-            || die 1 "the run must stop, and its cancel did not land: run this again"
-        exit 3
-    fi
+    case "$rc" in
+        0) ;;
+        3)
+            ref=$("$gctk" review step "$ID" --json 2>/dev/null | jq -r '.ref // empty')
+            [ "$ref" = mol-pr-review.prepare ] || die 3 "${out#gctk review step: }"
+            echo "$PROG: ${out#gctk review step: }" >&2
+            "$HERE/decline.sh" --step mol-pr-review.prepare --reason "${out#gctk review step: }" \
+                || die 1 "the run must stop, and its cancel did not land: run this again"
+            exit 3 ;;
+        # The run's check did not answer, so whether it stands is unknown.
+        *) die 2 "${out#gctk review step: }" ;;
+    esac
     load
     owns prepare
     { mkdir -p "$WS" && chmod 700 "$WS"; } || die 1 "cannot make the run's workspace $WS"
@@ -190,7 +198,7 @@ cmd_prepare() {
 cmd_triage() {
     load; owns triage; repo
     local wt
-    wt=$(worktree --triage)
+    worktree --triage; wt=$WT
     print_run
     print_change "$wt"
     printf '%s\n' "== The check index at $HEAD"
@@ -208,7 +216,7 @@ cmd_lane() {
     [ -n "$CHECK" ] || usage
     load; owns lane; repo
     local wt
-    wt=$(worktree --lane "$CHECK")
+    worktree --lane "$CHECK"; wt=$WT
     print_run
     printf '%s\n' "== The PR as published: $PR"
     gh pr view "$PR" --json title,body --jq '.title, "", .body' || die 2 "gh pr view $PR did not answer"
@@ -225,7 +233,7 @@ cmd_lane() {
 cmd_repair() {
     load; owns rule-and-repair; repo
     local wt
-    wt=$(worktree --repair)
+    worktree --repair; wt=$WT
     print_run
     printf '%s\n' "== The round to rule"
     "$gctk" review passed "$ID" --explain || true

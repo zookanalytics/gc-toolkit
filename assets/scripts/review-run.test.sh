@@ -4,8 +4,9 @@
 # stub answers `review step` from a fixture each case sets, and every stub logs
 # the calls it gets.
 #
-# Covers prepare making the workspace, and cancelling a run that must stop with
-# no result; a verb the held step does not own refused; output writing what
+# Covers prepare making the workspace, cancelling a run that must stop with no
+# result, and stopping with nothing made when its check of the run does not
+# answer; a verb the held step does not own refused; output writing what
 # gctk printed as the step's gc.output_json, from the step's own file, and
 # writing nothing for an output gctk refuses, a shadow round handing gctk its
 # writes; triage's withdrawal; the push returning the PR to draft before it
@@ -16,7 +17,8 @@
 # filed waiting on the PR's bead and armed, found rather than filed again; a
 # question put to a gate; the record asking a person when the loop exhausted
 # its attempts, and removing the workspace, which a shadow run keeps; and the
-# reads making each step's worktree in its own part of the workspace.
+# reads making each step's worktree in its own part of the workspace, and
+# stopping when it does not land.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,7 +78,10 @@ STUB
 printf 'gctk %s\n' "$*" >> "$LOG"
 case "$1 $2" in
     "review step")
-        case " $* " in *" --prepare "*) [ -z "${STUB_PREPARE_WHY:-}" ] || { echo "gctk review step: run tk-run must stop with no result: $STUB_PREPARE_WHY" >&2; exit 3; } ;; esac
+        case " $* " in *" --prepare "*)
+            [ -z "${STUB_PREPARE_WHY:-}" ] || { echo "gctk review step: run tk-run must stop with no result: $STUB_PREPARE_WHY" >&2; exit 3; }
+            [ -z "${STUB_PREPARE_RC:-}" ] || { echo "gctk review step: GitHub did not answer for https://github.com/o/r/pull/7" >&2; exit "$STUB_PREPARE_RC"; } ;;
+        esac
         cat "$STUB_FACTS" ;;
     "review output") [ -z "${STUB_REFUSE:-}" ] || { echo "gctk review output: $STUB_REFUSE; write it again" >&2; exit 3; }
         echo '{"review":"x","iteration":1}' ;;
@@ -117,6 +122,11 @@ STUB_PREPARE_WHY="the PR's head is abc, no longer the run's head" run prepare
 eq "$RC" 3 "prepare refuses a run that must stop"
 has "$(cat "$LOG")" "decline.sh --step mol-pr-review.prepare --reason run tk-run must stop with no result: the PR's head is abc" \
     "and cancels it with no result, saying why"
+STUB_PREPARE_RC=2 run prepare
+eq "$RC" 2 "prepare stops, exit 2, when its check of the run does not answer"
+has "$OUT" "GitHub did not answer" "and says which read did not answer"
+eq "$(called decline.sh)" 0 "and cancels nothing, since a retry may find the run stands"
+hasnt "$OUT" "The run's workspace" "and does not go on as if the run stood"
 
 # --- a verb the step does not own -----------------------------------------------
 facts review-loop.iteration.1.triage triage 1
@@ -257,6 +267,18 @@ run lane --check arch
 eq "$RC" 0 "a lane reads"
 eq "$(git -C "$WS/lane-arch/wt" rev-parse HEAD 2>/dev/null)" "$HEAD1" "in its own worktree at the head"
 has "$(cat "$LOG")" "review-evidence.sh --anchor tk-pr --commit $HEAD1 --worktree $WS/lane-arch/wt" "with what gctk rig recorded there"
+# A part the workspace cannot take, here a file where the step's directory goes.
+: > "$WS/lane-pm"
+run lane --check pm
+eq "$RC" 1 "a lane's read whose worktree does not land stops there"
+eq "$(called review-evidence.sh)" 0 "and reads nothing in its place"
+rm -f "$WS/lane-pm"
+facts review-loop.iteration.1.rule-and-repair repair 1
+rm -rf "$WS/repair"; : > "$WS/repair"
+run repair
+eq "$RC" 1 "the repair's read whose worktree does not land stops there"
+hasnt "$OUT" "Write the output to" "and names no worktree to work in"
+rm -f "$WS/repair"
 
 echo
 echo "review-run.test.sh: $PASS passed, $FAIL failed"
