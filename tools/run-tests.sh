@@ -144,11 +144,17 @@
 # Every file starts with the first bash on PATH, and a file can fail the same
 # way. Under bash 3.2 a suite whose opening lines need bash 4 can exit 0 having
 # run none of its assertions. So before it starts a file, the runner holds that
-# bash to the same floor, and exits 2 with a line naming it.
+# bash to the same floor. It looks the bash up from the repository root, where
+# each file starts, so a relative directory on PATH, such as bin, is read under
+# the root. It reads the version of the file it found there, and it starts every
+# file with that file by its full path. When that bash is older than 5.1,
+# reports no version, or is not on PATH at all, the runner exits 2 with a line
+# saying so.
 #
 # Exit: 0 every file passed, or passed on a serial re-run, or the subset was
 # empty; 1 one or more failed serially too; 2 a usage or enumeration error,
-# such as a BASE git cannot read, or a bash older than 5.1.
+# such as a BASE git cannot read, or no bash of 5.1 or later to run the runner
+# or to start its files.
 
 set -uo pipefail
 
@@ -493,12 +499,22 @@ export TMPDIR="$tmp_real"
 export PATH="$ROOT/tools/test-floor:$PATH"
 
 # The bash every file starts with, held to the runner's own floor (see the
-# header). It is the first bash on PATH, the one spawn's `bash` finds.
-file_bash="$(command -v bash)"
-file_bash_v="$(bash -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]} $BASH_VERSION"' 2>/dev/null)"
+# header). spawn starts each file from ROOT, so the first bash on PATH is looked
+# up from ROOT, and spawn starts each file with the full path found here, the
+# file whose version this reads. type -P answers from the locations the shell
+# remembers before it searches PATH, so the lookup forgets them first.
+FILE_BASH="$(cd "$ROOT" && hash -r && type -P bash)" || {
+  echo "run-tests: each file starts with the first bash on PATH, and PATH has no bash, so nothing ran" >&2
+  exit 2; }
+case "$FILE_BASH" in /*) ;; *) FILE_BASH="$ROOT/$FILE_BASH" ;; esac
+file_bash_v="$("$FILE_BASH" -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]} $BASH_VERSION"' 2>/dev/null)"
 case "$file_bash_v" in
   [0-4].*|5.0\ *)
-    echo "run-tests: each file starts with the first bash on PATH, and $file_bash is bash ${file_bash_v#* }, older than 5.1, so nothing ran" >&2
+    echo "run-tests: each file starts with the first bash on PATH, and $FILE_BASH is bash ${file_bash_v#* }, older than 5.1, so nothing ran" >&2
+    exit 2 ;;
+  [0-9]*.[0-9]*\ *) ;;
+  *)
+    echo "run-tests: each file starts with the first bash on PATH, and $FILE_BASH reports no bash version, so nothing ran" >&2
     exit 2 ;;
 esac
 
@@ -544,10 +560,11 @@ if ionice -c 2 -n 7 true >/dev/null 2>&1; then
   LOW_PRIORITY+=(ionice -c 2 -n 7)
 fi
 
-# Start one run in the background, under the timeout, its output to its log. A
-# part's run is told which part it is and which parts its file declares; a run
-# of a whole file gets neither, whatever the caller exported. Any words after
-# the index are a command the run starts through, such as LOW_PRIORITY.
+# Start one run in the background with FILE_BASH, under the timeout, its output
+# to its log. A part's run is told which part it is and which parts its file
+# declares; a run of a whole file gets neither, whatever the caller exported.
+# Any words after the index are a command the run starts through, such as
+# LOW_PRIORITY.
 spawn() { # <run-index> [<command>...]
   local t="${RUN_FILE[$1]}" part="${RUN_PART[$1]}" log="$LOGDIR/$1.log"
   shift
@@ -559,9 +576,9 @@ spawn() { # <run-index> [<command>...]
       unset RUN_TESTS_PART RUN_TESTS_PARTS
     fi
     if [ "$TIMEOUT" -gt 0 ]; then
-      exec "$@" timeout -k 5 -s TERM "$TIMEOUT" bash "$t"
+      exec "$@" timeout -k 5 -s TERM "$TIMEOUT" "$FILE_BASH" "$t"
     else
-      exec "$@" bash "$t"
+      exec "$@" "$FILE_BASH" "$t"
     fi
   ) >"$log" 2>&1 &
 }

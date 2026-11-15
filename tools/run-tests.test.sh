@@ -79,7 +79,15 @@
 #     starts no suite either when the older bash comes first on PATH, and says
 #     so in one line. The same calls under the bash on PATH select and run. The
 #     case's older bash is /bin/bash, so a host whose /bin/bash is 5.1 or later
-#     skips it.
+#     skips it;
+#   - a file starts with the bash the runner held to its floor, the first bash
+#     on PATH as seen from the repository root, by its full path, with the
+#     timeout and without it. Called from a directory whose bin holds another
+#     bash, with bin first on PATH, the runner judges and starts the bash in
+#     the root's bin. A bash older than 5.1 there, a bash that reports no
+#     version, and a PATH with no bash from the root each stop the run with one
+#     line before any suite starts. Stand-in scripts play the older bash and
+#     the one that reports no version, so the case runs on every host.
 #
 # Hermetic: runs a copy of the runner over throwaway fixture *.test.sh files
 # whose pass/fail is driven by a per-file invocation counter, so "fails the
@@ -942,6 +950,70 @@ case "$old" in
     ;;
   *) printf '  SKIP  %s is bash %s, so the runner was not run under a bash older than 5.1\n' "$OLD_BASH" "${old:-unknown}" ;;
 esac
+
+echo "── 19. a file starts with the bash the runner held to its floor ──"
+# Each file starts from the runner's repository root, so a relative directory on
+# PATH names a directory under the root, and the caller's directory of the same
+# name can hold another bash. from_caller puts one bash in bin under the
+# caller's directory and another in bin under the root, then calls the runner
+# from the caller's directory with bin first on PATH. The stand-in for an older
+# bash reports 3.2 and exits 0 without running the file it is given, as a suite
+# whose opening lines need bash 4 can under bash 3.2. The fixture records the
+# bash that ran it.
+BREPO="$TMP/bash-repo"
+CALLER="$TMP/caller"
+mkdir -p "$BREPO/tools" "$BREPO/bin" "$CALLER/bin"
+cp "$RUNNER" "$BREPO/tools/run-tests.sh"
+cp -R "$HERE/test-floor" "$BREPO/tools/"
+git -C "$BREPO" init -q
+cat > "$TMP/bash-3.2" <<'F'
+#!/bin/sh
+[ "$1" = -c ] && echo "3.2 3.2.57(1)-release"
+exit 0
+F
+cat > "$TMP/no-version" <<'F'
+#!/bin/sh
+exit 0
+F
+chmod +x "$TMP/bash-3.2" "$TMP/no-version"
+cat > "$FIX/which.test.sh" <<'F'
+#!/usr/bin/env bash
+printf '%s\n' "$BASH" > "$RUNTESTS_FIXTURE_STATE/ran"
+F
+# from_caller <caller's bin/bash> <root's bin/bash> [runner-args...] -> RC and OUT
+from_caller() {
+  ln -sf "$1" "$CALLER/bin/bash"; ln -sf "$2" "$BREPO/bin/bash"; shift 2
+  reset_state
+  OUT="$(cd "$CALLER" && PATH="bin:$PATH" RUNTESTS_FIXTURE_STATE="$STATE" "$BASH" "$BREPO/tools/run-tests.sh" "$@" 2>&1)"; RC=$?
+}
+from_caller "$BASH" "$TMP/bash-3.2" -j 2 -t 30 "$FIX/which.test.sh"
+eq "$RC" 2 "an older bash in bin under the root is refused, though the caller's bin holds a newer one"
+eq "$OUT" "run-tests: each file starts with the first bash on PATH, and $BREPO/bin/bash is bash 3.2.57(1)-release, older than 5.1, so nothing ran" \
+  "…with one line naming the root's bash by its full path"
+eq "$(ls "$STATE")" "" "…and starts no suite"
+for t in 30 0; do
+  from_caller "$TMP/bash-3.2" "$BASH" -j 2 -t "$t" "$FIX/which.test.sh"
+  eq "$RC" 0 "a newer bash in bin under the root runs the file, though the caller's bin holds an older one (-t $t)"
+  eq "$(cat "$STATE/ran" 2>/dev/null)" "$BREPO/bin/bash" "…which starts under the root's bash, by its full path (-t $t)"
+done
+from_caller "$BASH" "$TMP/no-version" -j 2 -t 30 "$FIX/which.test.sh"
+eq "$RC" 2 "a bash that reports no version is refused"
+eq "$OUT" "run-tests: each file starts with the first bash on PATH, and $BREPO/bin/bash reports no bash version, so nothing ran" \
+  "…with one line naming it"
+eq "$(ls "$STATE")" "" "…and starts no suite"
+# Only the caller's directory reaches a bash, so from the root PATH has none.
+# The rest of PATH holds only the tools the runner calls for one file before it
+# looks bash up.
+NOBASH="$TMP/no-bash-path"
+mkdir -p "$NOBASH" "$CALLER/only"
+for t in dirname git awk sed paste sort grep cut; do ln -s "$(type -P "$t")" "$NOBASH/$t"; done
+ln -s "$BASH" "$CALLER/only/bash"
+reset_state
+OUT="$(cd "$CALLER" && PATH="only:$NOBASH" RUNTESTS_FIXTURE_STATE="$STATE" "$BASH" "$BREPO/tools/run-tests.sh" -j 2 -t 30 "$FIX/which.test.sh" 2>&1)"; RC=$?
+eq "$RC" 2 "a bash only the caller's directory reaches is refused, since from the root PATH has none"
+eq "$OUT" "run-tests: each file starts with the first bash on PATH, and PATH has no bash, so nothing ran" \
+  "…with one line saying so"
+eq "$(ls "$STATE")" "" "…and starts no suite"
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
