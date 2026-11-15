@@ -14,17 +14,30 @@
 # $TMPDIR, else /tmp. The worktree is <workspace>/wt, and whatever else the
 # review writes to disk goes beside it.
 #
+# A review run (formulas/mol-pr-review.toml) is the same, named for the run's
+# root: <dir>/gc-review-<root>. Its steps are claimed by different sessions, so
+# each takes a part of the workspace of its own, a directory holding a detached
+# worktree in wt and whatever else the step writes beside it: triage takes
+# triage, each lane takes lane-<check>, and rule-and-repair takes repair, the
+# run's one worktree from which its fixes are pushed onto the PR's branch. A
+# lane at a later iteration takes its part at the new head, so lanes that build,
+# test or capture never share a tree, and the run's record step removes the
+# whole workspace once the run has ruled every finding.
+#
 # Usage:
-#   review-workspace.sh path   --review-bead <id>
+#   review-workspace.sh path   (--review-bead <id> | --root <id>)
 #       print the workspace path
 #   review-workspace.sh add    --review-bead <id> --oid <commit> [--repo <dir>]
 #       print the path of <workspace>/wt, a worktree of <dir>'s repository
 #       (default: the current directory) detached at <commit>. A worktree
 #       already there at that commit is reused as it stands.
-#   review-workspace.sh remove --review-bead <id>
+#   review-workspace.sh add    --root <id> (--triage | --lane <check> | --repair)
+#                              --oid <commit> [--repo <dir>]
+#       the same for the run's part: print <workspace>/<part>/wt
+#   review-workspace.sh remove (--review-bead <id> | --root <id>)
 #       remove the workspace now
 #   review-workspace.sh reap [--dry-run]
-#       remove every review workspace whose review has ended
+#       remove every review workspace whose review or run has ended
 #
 # Removal takes each git worktree inside a workspace with `git worktree
 # remove`, deepest first, so its registration goes with its directory. Nothing
@@ -34,8 +47,9 @@
 #
 # reap reads every gc-review-* entry this user owns directly under the
 # directory, and under /tmp as well unless REVIEW_WORKSPACE_DIR names the one
-# to read. It takes an entry only when no process has its cwd or an open file
-# inside it, and either
+# to read. The bead an entry is named for is a review bead or a run's root,
+# and either closes when its review ends. It takes an entry only when no
+# process has its cwd or an open file inside it, and either
 #   - the entry is named gc-review-<id> for a bead whose prefix is one of the
 #     city's, and that bead is closed; or
 #   - the entry names no such bead, or a bead the ledger no longer has, and
@@ -49,30 +63,48 @@
 #       left the workspace behind, or reap could not read the city's rigs ·
 #       2 usage.
 # Callers: formulas/mol-review.toml and mol-review-quorum-signoff.toml (add,
-# path, remove); formulas/mol-rig-demo.toml (add);
-# orders/review-workspace-reap.toml (reap). See docs/review-workspace.md.
+# path, remove); formulas/mol-rig-demo.toml (add); review-run.sh, for the
+# steps of formulas/mol-pr-review.toml and mol-pr-review-lane.toml (path, add
+# and remove with --root); orders/review-workspace-reap.toml (reap). See
+# docs/review-workspace.md.
 set -uo pipefail
 
 PROG="${0##*/}"
 usage() {
-    echo "usage: $PROG path|remove --review-bead <id>" >&2
+    echo "usage: $PROG path|remove (--review-bead <id> | --root <id>)" >&2
     echo "       $PROG add --review-bead <id> --oid <commit> [--repo <dir>]" >&2
+    echo "       $PROG add --root <id> (--triage | --lane <check> | --repair) --oid <commit> [--repo <dir>]" >&2
     echo "       $PROG reap [--dry-run]" >&2
     exit 2
 }
 
 [ "$#" -ge 1 ] || usage
 CMD="$1"; shift
-BEAD=""; OID=""; REPO="."; DRY_RUN=0
+BEAD=""; ROOT=""; PART=""; OID=""; REPO="."; DRY_RUN=0
+part() { [ -z "$PART" ] || usage; PART="$1"; }
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --review-bead) [ "$#" -ge 2 ] || usage; BEAD="$2"; shift 2 ;;
+        --root)        [ "$#" -ge 2 ] || usage; ROOT="$2"; shift 2 ;;
+        --triage)      part triage; shift ;;
+        --repair)      part repair; shift ;;
+        --lane)        [ "$#" -ge 2 ] || usage
+                       case "$2" in '' | *[!A-Za-z0-9_-]*) echo "$PROG: --lane takes a check's name, got '$2'" >&2; exit 2 ;; esac
+                       part "lane-$2"; shift 2 ;;
         --oid)         [ "$#" -ge 2 ] || usage; OID="$2"; shift 2 ;;
         --repo)        [ "$#" -ge 2 ] || usage; REPO="$2"; shift 2 ;;
         --dry-run)     DRY_RUN=1; shift ;;
         *) echo "$PROG: unknown argument: $1" >&2; usage ;;
     esac
 done
+# A review bead and a run's root name a workspace the same way; a part belongs
+# to a run's workspace alone.
+if [ -n "$ROOT" ]; then
+    [ -z "$BEAD" ] || usage
+    BEAD="$ROOT"
+elif [ -n "$PART" ]; then
+    usage
+fi
 
 UID_NUM="$(id -u)"
 IDLE_AFTER="${REVIEW_WORKSPACE_IDLE_AFTER:-86400}"
@@ -118,14 +150,16 @@ teardown() { # <absolute path>
 }
 
 cmd_path() {
-    valid_bead "$BEAD" || usage
+    valid_bead "$BEAD" && [ -z "$PART" ] || usage
     workspace "$BEAD"
 }
 
 cmd_add() {
     valid_bead "$BEAD" && [ -n "$OID" ] || usage
+    [ -z "$ROOT" ] || [ -n "$PART" ] || usage
     local ws wt commit
     ws="$(workspace "$BEAD")"; wt="$ws/wt"
+    [ -z "$PART" ] || wt="$ws/$PART/wt"
     commit="$(git -C "$REPO" rev-parse --verify -q "$OID^{commit}")" \
         || { echo "$PROG: $OID is not a commit in $REPO" >&2; exit 1; }
     mkdir -m 700 "$ws" 2>/dev/null
@@ -133,6 +167,13 @@ cmd_add() {
     if [ -L "$ws" ] || [ ! -d "$ws" ] || [ ! -O "$ws" ]; then
         echo "$PROG: cannot use $ws: it must be a directory this user owns" >&2
         exit 1
+    fi
+    if [ -n "$PART" ]; then
+        mkdir -m 700 "$ws/$PART" 2>/dev/null
+        if [ -L "$ws/$PART" ] || [ ! -d "$ws/$PART" ]; then
+            echo "$PROG: cannot use $ws/$PART: it must be a directory" >&2
+            exit 1
+        fi
     fi
     # Parallel shells of one review can run add at once. The lock makes the
     # later one wait and then find the worktree, rather than race the first
@@ -154,7 +195,7 @@ cmd_add() {
 }
 
 cmd_remove() {
-    valid_bead "$BEAD" || usage
+    valid_bead "$BEAD" && [ -z "$PART" ] || usage
     local ws
     ws="$(workspace "$BEAD")"
     gone "$ws" && { echo "$PROG: no workspace at $ws"; return 0; }

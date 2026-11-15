@@ -181,6 +181,40 @@ OUT="$(run remove --review-bead tk-rm)"
 eq "$?" "0" "remove of an absent workspace exits 0"
 has "$OUT" "no workspace" "and says there was none"
 
+# --- a review run's workspace --------------------------------------------------
+# A run's workspace is named for its root, and each step takes a part of it: a
+# directory per lane, one for triage and one for the repair, each holding a
+# detached worktree.
+eq "$(bash "$SUT" path --root tk-run)" "$WS/gc-review-tk-run" "path names a run's workspace for its root"
+LANE_A="$(bash "$SUT" add --root tk-run --lane correctness --oid "$C1" --repo "$REPO" 2>/dev/null)"
+eq "$LANE_A" "$WS/gc-review-tk-run/lane-correctness/wt" "a lane's worktree is in its own part"
+LANE_B="$(bash "$SUT" add --root tk-run --lane arch --oid "$C1" --repo "$REPO" 2>/dev/null)"
+REPAIR="$(bash "$SUT" add --root tk-run --repair --oid "$C1" --repo "$REPO" 2>/dev/null)"
+TRIAGE="$(bash "$SUT" add --root tk-run --triage --oid "$C1" --repo "$REPO" 2>/dev/null)"
+eq "$REPAIR|$TRIAGE" "$WS/gc-review-tk-run/repair/wt|$WS/gc-review-tk-run/triage/wt" "the repair and triage take parts of their own"
+for p in "$LANE_A" "$LANE_B" "$REPAIR" "$TRIAGE"; do
+    eq "$(git -C "$p" rev-parse HEAD 2>/dev/null)/$(git -C "$p" symbolic-ref -q HEAD || echo detached)" "$C1/detached" \
+        "${p#"$WS"/} is detached at the head"
+done
+touch "$WS/gc-review-tk-run/lane-correctness/capture.mp4"
+eq "$(bash "$SUT" add --root tk-run --lane correctness --oid "$C2" --repo "$REPO" 2>/dev/null)" "$LANE_A" "a lane at a later head keeps its part's path"
+eq "$(git -C "$LANE_A" rev-parse HEAD)" "$C2" "and its worktree moves to the new head"
+eq "$(git -C "$LANE_B" rev-parse HEAD)" "$C1" "while another lane's worktree stays where it was"
+if exists "$WS/gc-review-tk-run/lane-correctness/capture.mp4"; then ok "a file beside the worktree stays"; else bad "a file beside the worktree stays"; fi
+for args in "add --root tk-run --oid $C1" "add --lane arch --oid $C1" "add --root tk-run --lane arch --repair --oid $C1" \
+            "add --root tk-run --review-bead tk-abc --lane arch --oid $C1" "path --root tk-run --lane arch" \
+            "remove --root tk-run --repair" "add --root tk-run --lane ../x --oid $C1"; do
+    # shellcheck disable=SC2086
+    bash "$SUT" $args --repo "$REPO" >/dev/null 2>&1
+    eq "$?" "2" "'$args' is a usage error"
+done
+OUT="$(run remove --root tk-run)"
+eq "$?" "0" "remove takes a run's workspace by its root"
+if exists "$WS/gc-review-tk-run"; then bad "with every part"; else ok "with every part"; fi
+for p in "$LANE_A" "$LANE_B" "$REPAIR" "$TRIAGE"; do
+    if is_registered "$p"; then bad "remove deregisters ${p#"$WS"/}"; else ok "remove deregisters ${p#"$WS"/}"; fi
+done
+
 # --- the formulas' own lines ---------------------------------------------------
 extract() { # <toml> <marker>
     awk -v m="$2" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$1"

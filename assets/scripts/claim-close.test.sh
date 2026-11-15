@@ -214,7 +214,10 @@ if grep -q 'bd update' "$GC_LOG"; then bad "a usage error writes nothing"; else 
 
 # --- each formula's close names the step it sits in -----------------------------
 # A close that names another step refuses at run time, and the step stays open. A
-# check loop's iterations carry the loop's bare name.
+# check loop's iterations carry the loop's bare name, and so do its children's
+# closes, the loop step itself holding no close of its own. An expansion's
+# template step bonded inside a loop closes by that loop's name, the loop of the
+# formula whose on_complete bonds it.
 ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"   # tomllib_python only; the assertions above are this suite's own
@@ -222,27 +225,52 @@ if TOML_PY="$(tomllib_python)"; then
   CHECKED=0
   for f in "$ROOT"/formulas/*.toml; do
     grep -q 'claim-close\.sh' "$f" || continue
-    out=$("$TOML_PY" - "$f" <<'CHECK'
-import re, sys, tomllib
+    out=$("$TOML_PY" - "$f" "$ROOT/formulas" <<'CHECK'
+import glob, re, sys, tomllib
 d = tomllib.load(open(sys.argv[1], "rb"))
 formula = d.get("formula", "")
+# The loops that bond each expansion: a check step whose child's on_complete
+# names it, in any formula beside this one.
+bonded = {}
+for other in glob.glob(sys.argv[2] + "/*.toml"):
+    o = tomllib.load(open(other, "rb"))
+    for st in o.get("steps", []):
+        for child in st.get("children", []) if "check" in st else []:
+            bond = (child.get("on_complete") or {}).get("bond")
+            if bond:
+                bonded.setdefault(bond, set()).add(st["id"])
+CLOSE = r'(?:claim-close\.sh|\$SC|\$\{SC:\?[^}]*\})"? --step ([A-Za-z0-9._<>-]+)'
+NAMES = r'claim-close\.sh"? --step|\$SC"? --step|\$\{SC:\?[^}]*\}"? --step'
 bad = []
 calls = 0
-for st in d.get("steps", []):
-    for m in re.finditer(r'(?:claim-close\.sh|\$SC|\$\{SC:\?[^}]*\})"? --step ([A-Za-z0-9._<>-]+)', st.get("description", "")):
+def judge(st, allowed, label):
+    global calls
+    text = st.get("description", "")
+    for m in re.finditer(CLOSE, text):
         ref = m.group(1)
         if "<" in ref:
             continue
         calls += 1
-        if ref not in (formula + "." + st["id"], st["id"]):
-            bad.append("%s names %s" % (st["id"], ref))
+        if ref not in allowed:
+            bad.append("%s names %s" % (label, ref))
     # A step that names no close of its own leaves its successors blocked, and a
     # later step's close refuses while the claim is still on it. work-submit.sh
     # closes submit-and-exit, and a plain warrant has no steps for the dance to close.
-    text = st.get("description", "")
     if (formula, st["id"]) != ("mol-polecat-work", "submit-and-exit") and formula != "mol-dog-shutdown-dance" \
-            and not re.search(r'claim-close\.sh"? --step|\$SC"? --step|\$\{SC:\?[^}]*\}"? --step', text):
-        bad.append("%s names no close" % st["id"])
+            and not re.search(NAMES, text):
+        bad.append("%s names no close" % label)
+if d.get("type") == "expansion":
+    loops = bonded.get(formula, set())
+    if not loops:
+        bad.append("no formula's loop bonds %s, so nothing says what its steps close by" % formula)
+    for st in d.get("template", []):
+        judge(st, loops, st["id"])
+for st in d.get("steps", []):
+    if "check" in st and st.get("children"):
+        for child in st["children"]:
+            judge(child, (st["id"],), "%s.%s" % (st["id"], child["id"]))
+        continue
+    judge(st, (formula + "." + st["id"], st["id"]), st["id"])
 print("%d|%s" % (calls, "; ".join(bad)))
 CHECK
 )

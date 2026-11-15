@@ -34,9 +34,17 @@
 # (applyVarDefaults and substituteStepDescription in gascity's
 # internal/molecule/molecule.go). Both are trimmed and lose any
 # <system-reminder> tag, as promptsafe's SanitizeForSystemReminder strips them.
-# The bead id is a stand-in a little longer than a step bead's id. The render
-# reads a step's own title and description, so a step that keeps text anywhere
-# else, in a description_file, children or a loop body, fails the run until the
+# The bead id is a stand-in a little longer than a step bead's id.
+#
+# A step's children are steps of their own, each a bead a hook delivers, such
+# as a check loop's members, which every iteration pours again. An expansion
+# formula (type = "expansion") delivers its template steps, each a bead once a
+# formula bonds it, as an on_complete fan-out does, and names its vars as
+# {var}, which take the expansion's defaults the same way; {target} and an
+# item's placeholder stand in for what the bond passes. A bond names its
+# formula as a pour does, so an expansion bonded anywhere is measured. The
+# render reads a step's own title and description, so a step that keeps text
+# anywhere else, in a description_file or a loop body, fails the run until the
 # render reads it too.
 #
 # Hermetic: reads the tracked files of the pack and of the fixture trees it
@@ -82,8 +90,10 @@ import sys
 import tomllib
 
 BEAD_ID = "tk-xxxxxxxxx"
-UNREAD = ("description_file", "children", "loop")
+UNREAD = ("description_file", "loop")
 VAR = re.compile(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}")
+EXPANSION_VAR = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+BOND = re.compile(r"\bbond\s*=\s*\"(mol-[A-Za-z0-9_-]+)\"")
 FORMULA_FILE = re.compile(r"^(?:packs/[^/]+/)?formulas/[^/]+\.toml$")
 POUR = re.compile(r"(\bmol (?:wisp|pour) |--on[= ]|--formula[= ]|--sling-arg )[\"']?(mol-[A-Za-z0-9_-]+)")
 FORMULA_KEY = re.compile(r"^\s*formula\s*=\s*\"(mol-[A-Za-z0-9_-]+)\"")
@@ -122,7 +132,15 @@ def root_only(root, files):
             m = FORMULA_KEY.match(line)
             if m and config:
                 pours.setdefault(m.group(1), []).append(False)
+            for m in BOND.finditer(line):
+                pours.setdefault(m.group(1), []).append(False)
     return {name for name, rooted in pours.items() if all(rooted)}
+
+
+def walk(steps):
+    for step in steps or []:
+        yield step
+        yield from walk(step.get("children"))
 
 
 def steps(root, files):
@@ -137,8 +155,10 @@ def steps(root, files):
             continue
         defaults = {var: str(spec["default"]) for var, spec in (formula.get("vars") or {}).items()
                     if isinstance(spec, dict) and spec.get("default") not in (None, "")}
-        render = lambda text: VAR.sub(lambda m: defaults.get(m.group(1), m.group(0)), text)
-        for step in formula.get("steps") or []:
+        expansion = formula.get("type") == "expansion"
+        pattern = EXPANSION_VAR if expansion else VAR
+        render = lambda text: pattern.sub(lambda m: defaults.get(m.group(1), m.group(0)), text)
+        for step in walk(formula.get("template") if expansion else formula.get("steps")):
             unread = [key for key in UNREAD if key in step]
             if unread:
                 sys.exit(f"{name}.{step.get('id', '?')} sets {', '.join(unread)}, which this render does not read")
@@ -231,8 +251,7 @@ eq "$(steps "$TMP/vars" | cut -f1)" "$want" \
   "a default fills its var in the title and the description, an empty or undeclared var keeps its placeholder, and every reminder tag is stripped"
 
 # ── A step with text the render does not read fails the run ─────────────────
-for unread in 'description_file = "step.md"' 'children = [{ id = "c", title = "C" }]' \
-              'loop = { body = [{ id = "b", title = "B" }] }'; do
+for unread in 'description_file = "step.md"' 'loop = { body = [{ id = "b", title = "B" }] }'; do
   key="${unread%% =*}"
   rm -rf "$TMP/unread" && mkdir -p "$TMP/unread/formulas"
   printf 'formula = "mol-unread"\n\n[[steps]]\nid = "u"\ntitle = "U"\n%s\n' "$unread" \
@@ -245,6 +264,37 @@ for unread in 'description_file = "step.md"' 'children = [{ id = "c", title = "C
       "a step that sets $key fails the run"
   fi
 done
+
+# ── A step's children and an expansion's template steps are measured ────────
+# A check loop's members are steps of their own, and an expansion's template
+# steps are beads once a formula bonds them, with their vars written {var}.
+mkdir -p "$TMP/nested/formulas"
+sized "$TMP/nested/formulas/mol-big.toml" mol-big "$((BOUND + 1))"
+"$PY" - "$TMP/nested/formulas" <<'PY2'
+import sys, tomllib
+d = sys.argv[1]
+big = tomllib.load(open(d + "/mol-big.toml", "rb"))["steps"][0]["description"]
+with open(d + "/mol-loop.toml", "w", encoding="utf-8") as f:
+    f.write('formula = "mol-loop"\n\n[vars.who]\ndefault = "0123456789"\n\n')
+    f.write('[[steps]]\nid = "loop"\ntitle = "Loop"\n\n')
+    f.write('[[steps.children]]\nid = "small"\ntitle = "Small {{who}}"\ndescription = "x"\n\n')
+    f.write("[[steps.children]]\nid = \"big\"\ntitle = \"Sized\"\ndescription = '''\n" + big + "'''\n")
+with open(d + "/mol-lanes.toml", "w") as f:
+    f.write('formula = "mol-lanes"\ntype = "expansion"\n\n[vars.who]\ndefault = "0123456789"\n\n')
+    f.write('[[template]]\nid = "{target}.lane"\ntitle = "Lane {who} {{who}} {target}"\ndescription = "y"\n')
+PY2
+rm -f "$TMP/nested/formulas/mol-big.toml"
+track "$TMP/nested"
+steps "$TMP/nested" > "$TMP/nested.tsv"
+eq "$(cut -f2 "$TMP/nested.tsv" | sort | tr '\n' ' ')" "mol-lanes.{target}.lane mol-loop.big mol-loop.loop mol-loop.small " \
+  "each of a loop's children and each of an expansion's template steps is measured"
+eq "$(over "$TMP/nested.tsv" | awk '{ print $1 }')" "mol-loop.big" "a child over the bound fails as a step does"
+want="$("$PY" -c '
+r = ("<system-reminder>\nYour current active work assignment:\n\n## Lane 0123456789 {0123456789} {target} (tk-xxxxxxxxx)\n\n"
+     "y\n</system-reminder>\n")
+print(len(r.encode()))')"
+eq "$(awk -F'\t' '$2 == "mol-lanes.{target}.lane" { print $1 }' "$TMP/nested.tsv")" "$want" \
+  "an expansion's {var} takes its default, inside a {{var}} too as Gas City fills it, and {target} keeps its placeholder"
 
 # ── A formula the pack pours only as a root-only wisp is left out ────────────
 mkdir -p "$TMP/patrol/formulas" "$TMP/patrol/agents/fx" "$TMP/patrol/docs"
@@ -274,6 +324,8 @@ check_pour "a sling's --on measures the formula's steps" \
   skills/fx/SKILL.md 'gc sling <pool> <bead> --on mol-fx-patrol'
 check_pour "an order's formula key measures the formula's steps" \
   orders/fx.toml 'formula = "mol-fx-patrol"'
+check_pour "a bond measures the formula's steps" \
+  formulas/mol-fx-work.toml 'bond = "mol-fx-patrol"'
 
 # ── Every step the pack's hooks deliver fits ────────────────────────────────
 if steps "$ROOT" > "$TMP/sizes.tsv"; then
