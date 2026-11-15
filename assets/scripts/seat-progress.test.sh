@@ -187,12 +187,19 @@ eq "$FILED" "" "a session that is no longer open is not judged"
 eq "$RC" 0 "with exit 0"
 
 echo "# an aliased pool seat is judged on its alias, the identity its writes carry"
+ALIASED="{\"sessions\":[{\"id\":\"lx-wisp-seat1\",\"alias\":\"gc-toolkit/gc-toolkit.hicks\",\"agent_name\":\"gc-toolkit/gc-toolkit.hicks\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
 reset
 STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.hicks","metadata":{"gc.session_id":"lx-wisp-seat1"}}]'
-STUB_SESSIONS="{\"sessions\":[{\"id\":\"lx-wisp-seat1\",\"alias\":\"gc-toolkit/gc-toolkit.hicks\",\"agent_name\":\"gc-toolkit/gc-toolkit.hicks\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago $((6 * H)))\"}]}"
+STUB_SESSIONS="$ALIASED"
 run --bead tk-claim
 has "$LOG" "actor = 'gc-toolkit/gc-toolkit.hicks'" "the query reads the alias's writes"
 eq "$(arg --key)" "no-progress.lx-wisp-seat1" "and the finding is keyed on the session, not the alias"
+reset
+STUB_SESSIONS="$ALIASED"
+run --bead tk-claim
+eq "$FILED" "" "an aliased seat's claim assigned to its session id is not judged, since the seat writes as its alias"
+hasnt "$LOG" "sql" "so no writes under the session id are read as the seat's"
+eq "$RC" 0 "with exit 0"
 
 echo "# the clock starts no earlier than the seat last woke"
 reset

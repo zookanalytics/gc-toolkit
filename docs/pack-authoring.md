@@ -559,8 +559,8 @@ unreadable roster is the absence of proof rather than proof of an empty city,
 so there the name comes back unchanged on exit 3 and the caller files
 unverified rather than not at all.
 
-The witness resolves the rig-scoped refinery's identity before it reads that
-queue. Its recipe is the `refinery-stuck-handoff` block in
+The witness resolves the identity of the rig-scoped refinery before it reads
+the refinery's queue. Its recipe is the `refinery-stuck-handoff` block in
 `formulas/mol-witness-patrol.toml`, which
 `assets/scripts/refinery-stuck-handoff.test.sh` executes as extracted from the
 formula, and `assets/scripts/witness-route.test.sh` holds every step of that

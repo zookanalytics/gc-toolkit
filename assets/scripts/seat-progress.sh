@@ -4,8 +4,9 @@
 #
 # Usage: seat-progress.sh --bead <bead-id>
 #   <bead> is judged only when it is the claim a live pool seat holds now: in
-#   progress, its gc.session_id the seat's session, and assigned to the seat's
-#   own identity. The seat's writes are the rows whose actor is that identity in
+#   progress, its gc.session_id the seat's session, and assigned to the identity
+#   the seat writes as, which is its alias when it has one and otherwise its
+#   session id. The seat's writes are the rows whose actor is that identity in
 #   the events and wisp_events tables of the rig's store, the one a plain
 #   `gc bd` reads, and the city's, $GC_CITY_PATH/.beads, counted from no earlier
 #   than the seat's last wake. The finding is keyed no-progress.<session> and is
@@ -82,10 +83,14 @@ if [ -z "$SEAT" ]; then
 fi
 ALIAS=$(printf '%s' "$SEAT" | jq -r '.alias // ""')
 AGENT=$(printf '%s' "$SEAT" | jq -r '.agent_name // ""')
-# The seat's own identity is the one its writes carry, so a claim assigned to
-# any other name would be judged on someone else's writes.
-if [ -z "$ACTOR" ] || { [ "$ACTOR" != "$SESSION" ] && [ "$ACTOR" != "$ALIAS" ]; }; then
-  say "$BEAD is assigned to ${ACTOR:-nobody}, not to the identity of its session $SESSION; nothing judged"
+# Gas City runs a seat with its alias, when it has one, as the actor of its
+# writes, and an unaliased pool seat with its session id (AssigneeIdentifier in
+# internal/session/assignee_identities.go). A claim assigned to any other name,
+# the session id of an aliased seat included, would be judged on writes the seat
+# does not make.
+IDENTITY="${ALIAS:-$SESSION}"
+if [ "$ACTOR" != "$IDENTITY" ]; then
+  say "$BEAD is assigned to ${ACTOR:-nobody}, not to $IDENTITY, the identity its session $SESSION writes as; nothing judged"
   exit 0
 fi
 
