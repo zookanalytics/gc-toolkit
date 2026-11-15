@@ -143,9 +143,10 @@ Usage:
   person closes the subject once that bead lands instead (--disposition ruling
   asks them).
   --waiting-on (blocked) names a bead the subject waits on. --blocker files
-  the bead the subject is waiting on, when the wait is not a bead yet. A
-  pending wait of the subject's with that title, as gctk bead holds lists it,
-  is reused instead, so a re-run waits on the bead the first run filed.
+  the bead the subject is waiting on, when the wait is not a bead yet, and the
+  same create writes the subject's wait on it. A pending wait of the subject's
+  with that title, as gctk bead holds lists it, is reused instead, so a re-run
+  waits on the bead an earlier run filed, wherever that run stopped.
   Before its first write the blocked exit reads what holds the subject
   (gctk bead holds), and a subject with a wait edge into another store, which
   holds nothing, takes no write. The release refuses a --waiting-on in another
@@ -750,9 +751,16 @@ if [ "$DISPOSITION" = "blocked" ]; then
 fi
 
 # ── The blocked exit's missing bead: reuse it, or file it once ────────
-# A pending wait of the subject's whose title is the blocker's is the bead an
-# earlier run of this exit filed, so the exit waits on it again rather than
-# filing a second.
+# The blocker is filed with the subject's wait on it in the same create
+# (--deps blocks:<subject>, which bd writes with the bead in one transaction),
+# so a blocker this exit filed is always one of the subject's pending waits,
+# however the exit stops after it. A pending wait of the subject's whose title
+# is the blocker's is therefore the bead an earlier run of this exit filed, and
+# the exit waits on it again rather than filing a second. A create whose reply
+# was lost is found the same way, because the create lands whole or not at all.
+# The check a re-offered reaction runs first refuses a human gate, not a wait
+# on a bead like this one, so a reaction cut off after the create still passes
+# it and finishes the exit.
 if [ "$DISPOSITION" = "blocked" ] && [ -n "$BLOCKER_TITLE" ]; then
     EXISTING=$(printf '%s' "$HOLDS_LINE" | jq -r --arg t "$BLOCKER_TITLE" \
         '[ .pending[]? | select(((.type // "") == "blocks") and ((.title // "") == $t)) | .id ] | .[0] // ""' 2>/dev/null || printf '')
@@ -760,12 +768,12 @@ if [ "$DISPOSITION" = "blocked" ] && [ -n "$BLOCKER_TITLE" ]; then
         note "the wait '$BLOCKER_TITLE' is already $BEAD's pending wait $EXISTING; waiting on that one"
         WAITING="$WAITING $EXISTING"
     else
-        NEW=$(gc_bd create -t task --title "$BLOCKER_TITLE" \
+        NEW=$(gc_bd create -t task --title "$BLOCKER_TITLE" --deps "blocks:$BEAD" \
             -d "Filed by a first reaction on $BEAD, which is waiting on it.
 
 $REASON" --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id // "") else (.id // "") end' 2>/dev/null || printf '')
         [ -n "$NEW" ] && [ "$NEW" != "null" ] \
-            || die "could not file the blocker bead for '$BLOCKER_TITLE' — nothing was written to $BEAD; re-run this command"
+            || die "bd named no blocker bead for '$BLOCKER_TITLE'. It files the bead and $BEAD's wait on it in one write, so either both landed or neither did, and nothing else was written to $BEAD. Re-run this command: it waits on a blocker that landed, as one of $BEAD's pending waits, and files one that did not."
         note "filed the wait as $NEW"
         WAITING="$WAITING $NEW"
     fi
@@ -1012,7 +1020,9 @@ fi
 # queue, which its hold:mayor label puts it in and
 # `gc beads list --label hold:mayor` lists. Either way --no-wait says so. A
 # blocked one names its wait as an edge, and a --then-assign hands the bead over
-# in the same form, so the agent reads it once the edge clears. A recommend
+# in the same form, so the agent reads it once the edge clears. A blocker this
+# exit filed carries that edge from its create, and adding it again leaves it
+# single. A recommend
 # or a ruling names its human gate as its wait: the subject is waiting on a
 # person, and the gate carries the wait, so --waiting-on records the blocks edge
 # onto it. That edge is the one the gate's create already wrote, and adding it

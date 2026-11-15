@@ -92,7 +92,24 @@ case "$1 ${2:-}" in
   "bd create")
     printf 'CREATE %s\n' "$*" >> "$FAKE_LOG"
     [ -n "${FAKE_CREATE_FAILS:-}" ] && { printf '{"error":"nope"}\n'; exit 0; }
-    printf '[{"id":"%s"}]\n' "${FAKE_NEW_ID:-tk-newblk}" ;;
+    # A create that carries --deps blocks:<bead> writes <bead>'s wait on the new
+    # bead with it, as bd does in one transaction, so a later `gctk bead holds`
+    # lists that wait as pending. FAKE_CREATE_LOST is a create that lands whole
+    # and loses its reply.
+    _prev=""; _blocks=""; _title=""
+    for _a in "$@"; do
+      case "$_prev" in
+        --deps)  case "$_a" in blocks:*) _blocks="${_a#blocks:}" ;; esac ;;
+        --title) _title="$_a" ;;
+      esac
+      _prev="$_a"
+    done
+    _new="${FAKE_NEW_ID:-tk-newblk}"
+    if [ -n "$_blocks" ]; then
+      jq -nc --arg id "$_new" --arg t "$_title" '{id: $id, type: "blocks", title: $t, status: "open", issue_type: "task"}' >> "$FAKE_STATE.pending"
+    fi
+    [ -n "${FAKE_CREATE_LOST:-}" ] && { echo "Error: the store did not answer" >&2; exit 1; }
+    printf '[{"id":"%s"}]\n' "$_new" ;;
   "rig list")
     # A rig whose path has no .beads dir leaves the pin unresolved, which is
     # what every assertion below the PIN block expects.
@@ -227,12 +244,15 @@ printf 'GCTK %s\n' "$*" >> "$FAKE_LOG"
 case "$1 ${2:-}" in
   "bead holds")
     # What holds the bead, one line, as gctk bead holds prints it. FAKE_HOLDS_JSON
-    # is the line; unset, the bead is clear. FAKE_HOLDS_FAILS is a store that did
+    # is the line; unset, the bead waits on what the creates above recorded, and
+    # is clear when they recorded nothing. FAKE_HOLDS_FAILS is a store that did
     # not answer, which prints the bead's error line and exits 1.
     shift 2; _id=""
     while [ $# -gt 0 ]; do case "$1" in --db) shift 2 ;; --db=*) shift ;; *) _id="$1"; shift ;; esac; done
     if [ -n "${FAKE_HOLDS_FAILS:-}" ]; then printf '{"id":"%s","error":"the store did not answer"}\n' "$_id"; exit 1; fi
     if [ -n "${FAKE_HOLDS_JSON:-}" ]; then printf '%s\n' "$FAKE_HOLDS_JSON"
+    elif [ -s "$FAKE_STATE.pending" ]; then
+      jq -sc --arg id "$_id" '{id: $id, status: "blocked", waits: ., pending: ., last_landed: "", in_flight: "", arm: null, foreign: []}' "$FAKE_STATE.pending"
     else printf '{"id":"%s","status":"clear","waits":[],"pending":[],"last_landed":"","in_flight":"","arm":null,"foreign":[]}\n' "$_id"; fi ;;
   "bead arm")
     # FAKE_ARM_FAILS models an arm gctk bead arm refuses: it names why on
@@ -313,7 +333,7 @@ run_now() {
   RC=0; OUT="$("$SCRIPT" "$@" 2>"$TMP/err")" || RC=$?; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")"
 }
 run() {
-  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.hold" "$FAKE_STATE.priority" "$FAKE_STATE.status"
+  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.hold" "$FAKE_STATE.priority" "$FAKE_STATE.status" "$FAKE_STATE.pending"
   printf '%s' "${FAKE_SHOW_JSON:-$DEFAULT_SHOW}" \
     | jq -r '(.[0].metadata // {})["gc.recommended_formula"] // ""' > "$FAKE_STATE" 2>/dev/null || : > "$FAKE_STATE"
   run_now "$@"
@@ -418,7 +438,7 @@ eq "$RC" "3" "(CLOSEDCHECK) an exit run on that subject anyway is refused as wel
 eq "$(writes)" "" "(CLOSEDCHECK) …with nothing written"
 unset FAKE_SHOW_JSON
 
-: > "$FAKE_LOG"; rm -f "$FAKE_STATE.status" "$FAKE_STATE.hold" "$FAKE_STATE.priority"; : > "$FAKE_STATE"
+: > "$FAKE_LOG"; rm -f "$FAKE_STATE.status" "$FAKE_STATE.hold" "$FAKE_STATE.priority" "$FAKE_STATE.pending"; : > "$FAKE_STATE"
 CARD="# First reaction · run $ROOT · a subject that closes while it is read
 ## Disposition
 ruling — r"
@@ -776,7 +796,12 @@ eq "$LOG" "" "(UNNAMED) …before anything is read or written"
 #   (BLKCROSS)   a --waiting-on in another store is refused by the release
 #                itself, which writes nothing
 #   (BLKSELF)    a bead never waits on itself
-#   (BLKNEW)     --blocker files the missing bead and waits on it
+#   (BLKNEW)     --blocker files the missing bead and waits on it, the wait
+#                riding the bead's create
+#   (BLKRETRY)   an exit that stops after it filed the blocker, at a release
+#                the store refuses, waits on that blocker when it is run again
+#   (BLKLOST)    a create that landed and lost its reply stops the exit, and a
+#                re-run waits on the blocker that landed
 #   (BLKREUSE)   a pending wait of the subject's with the blocker's title is
 #                reused, so a re-run files no second bead
 #   (BLKEDGE)    an edge takeaway could not write fails the exit before any arm
@@ -830,6 +855,7 @@ run tk-sub --disposition blocked --reason "nothing tracks the migration yet" \
     --takeaway "held: the migration is now filed" --blocker "Migrate the seed schema" --run "$ROOT"
 eq "$RC" "0" "(BLKNEW) a wait that is not a bead yet is filed"
 has "CREATE bd create -t task --title Migrate the seed schema" "$LOG" "(BLKNEW) …as a bead"
+has "--deps blocks:tk-sub" "$(grep '^CREATE' "$FAKE_LOG")" "(BLKNEW) …whose create writes the subject's wait on it"
 eq "$(grep -c '^CREATE' "$FAKE_LOG")" "1" "(BLKNEW) …once"
 has "--waiting-on tk-filed" "$LOG" "(BLKNEW) …and the subject waits on it"
 before '^CREATE' '^HELM takeaway' "(BLKNEW) …filed before the release writes the wait"
@@ -837,6 +863,32 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" \
     --blocker "$(printf 'x%.0s' $(seq 1 501))" --run "$ROOT"
 eq "$RC" "2" "(BLKNEW) a blocker title past bd's 500-byte cap is refused here"
 has "cap is 500" "$ERR" "(BLKNEW) …by its actual cause, not 'no id returned'"
+
+# The release the store refuses stops the exit after the blocker is filed. The
+# re-run keeps the log and the state the first run left, as a re-offered
+# reaction meets them.
+export FAKE_NEW_ID=tk-blocker-first FAKE_HELM_FAILS=1
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --blocker "Migrate the seed schema" --run "$ROOT"
+eq "$RC" "4" "(BLKRETRY) an exit whose release fails after the blocker is filed stops"
+unset FAKE_HELM_FAILS; export FAKE_NEW_ID=tk-blocker-second
+run_now tk-sub --disposition blocked --reason "r" --takeaway "t" --blocker "Migrate the seed schema" --run "$ROOT"
+eq "$RC" "0" "(BLKRETRY) …and the same exit run again succeeds"
+eq "$(grep -c '^CREATE' "$FAKE_LOG")" "1" "(BLKRETRY) …filing the blocker once across both runs"
+has "--waiting-on tk-blocker-first" "$(grep '^HELM takeaway' "$FAKE_LOG" | tail -n 1)" "(BLKRETRY) …the re-run waiting on the blocker the first run filed"
+has "already tk-sub's pending wait tk-blocker-first" "$ERR" "(BLKRETRY) …and saying so"
+hasnt "tk-blocker-second" "$LOG" "(BLKRETRY) …with no second blocker anywhere"
+
+export FAKE_NEW_ID=tk-blocker-lost FAKE_CREATE_LOST=1
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --blocker "Migrate the seed schema" --run "$ROOT"
+eq "$RC" "4" "(BLKLOST) a create that named no bead stops the exit"
+has "either both landed or neither did" "$ERR" "(BLKLOST) …saying the bead and the wait land together"
+hasnt "HELM takeaway" "$LOG" "(BLKLOST) …before the release"
+unset FAKE_CREATE_LOST
+run_now tk-sub --disposition blocked --reason "r" --takeaway "t" --blocker "Migrate the seed schema" --run "$ROOT"
+eq "$RC" "0" "(BLKLOST) …and the same exit run again succeeds"
+eq "$(grep -c '^CREATE' "$FAKE_LOG")" "1" "(BLKLOST) …waiting on the blocker that landed rather than filing another"
+has "--waiting-on tk-blocker-lost" "$(grep '^HELM takeaway' "$FAKE_LOG" | tail -n 1)" "(BLKLOST) …which the release names"
+unset FAKE_NEW_ID
 
 export FAKE_HOLDS_JSON='{"id":"tk-sub","status":"blocked","waits":[{"id":"tk-already","type":"blocks","title":"Migrate the seed schema","status":"open","issue_type":"task"}],"pending":[{"id":"tk-already","type":"blocks","title":"Migrate the seed schema","status":"open","issue_type":"task"}],"foreign":[]}'
 export FAKE_DEPS_JSON='[{"id":"tk-already"}]'
