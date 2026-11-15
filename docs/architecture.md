@@ -239,7 +239,7 @@ starts, and nothing moves it afterwards.
 |---|---|---|
 | The review's steps | The pack's formulas. Each rig's `.beads/formulas` entry for one is a link Gas City makes into the installed pack. | The installed pack when each formula is poured. A poured formula keeps its step text. |
 | The review's values: the bead that owns the PR, its branch and target, and each check with the head it judges | The landing order, which starts the review, and the review itself, which starts each check | Fixed when the review starts, and for each check when that check starts |
-| The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the var `gc sling` adds to every pour. | The installed pack when the reviewer loads it |
+| The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the binding the rig runs the pack under, which the landing order passes when it starts the review and the review passes on to each check it starts. | The installed pack when the reviewer loads it |
 | The specialist stance, the skill `gc-toolkit.specialist-stance`, held by arch, demo, pm and a check of the rig's own | The reviewer's skill catalog | The installed pack when the reviewer loads it |
 | The architecture-document standard, the skill `gc-toolkit.architecture-document`, which the arch method holds the rig's architecture document to | The reviewer's skill catalog | The installed pack when the reviewer loads it |
 | The pack's scripts, and the pack's check index | The installed pack's script directory, which every caller reaches through `gc <binding> scripts-dir`: a formula step with the `binding_prefix` it is poured with, and a skill with the binding its catalog shows. `gctk review checks` reads the `review-checks.toml` at the root of the pack, two directories above that script directory. | The installed pack when the script runs |
@@ -483,11 +483,10 @@ why a reader must know it, and the work that retires it.
   takes a PR open on a work bead's branch whoever opened it, keeps its own
   record of an open PR, and checks each landing write against its transition
   machine, so steps 6 to 8 are not what runs there today. Each rig's cutover
-  bead moves the rig onto the pending record once the review loop
-  (tk-1tfzr71.22) lands, along with the board's phase of a pending PR by the
-  evaluator's answer (tk-1tfzr71.88) and a sitting's retirement of one
-  (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which waits on
-  every cutover, deletes the old path once no open bead is on it.
+  bead moves the rig onto the pending record, along with the board's phase of a
+  pending PR by the evaluator's answer (tk-1tfzr71.88) and a sitting's
+  retirement of one (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which
+  waits on every cutover, deletes the old path once no open bead is on it.
 - **The merge cadence still admits work on a pending record.** It files work
   for a PR on the pending record beside the landing order
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
@@ -498,17 +497,15 @@ why a reader must know it, and the work that retires it.
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
   the memory intake.
 - **A sitting does not edit an open PR's branch.** A ruling on an open PR still
-  files a rework a polecat runs. A unit that waits on the review-lanes member
-  (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it
-  (tk-e70808f).
+  sends its change to a polecat: on the pending record as an ask the PR's review
+  run takes, and on the old path as a rework child. The sitting's live edit
+  (tk-e70808f) retires it.
 - **A PR's checks still run as review beads.** Until a rig's cutover, the merge
   cadence sends each check on a PR there out as a review bead, `signoff.sh`
   records its verdict and files its findings, and a validation pass rules them
   for a rework child to fix, so step 7 is not what runs there. On that path a
   check no index declares is approved with `--needs-you`, so the operator
-  decides whether it stays in the anchor's `check_set`. The review run is not
-  built yet. The review-lanes member (tk-1tfzr71.22) builds
-  it in the units its implementation child (tk-1tfzr71.109) files. Each rig's
-  cutover bead then moves the rig onto it, and a retirement bead that child
-  files deletes the old path once every rig has moved and the GitHub intake
+  decides whether it stays in the anchor's `check_set`. Each rig's cutover bead
+  moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)
+  deletes the old path once every rig has moved and the GitHub intake
   (tk-1tfzr71.21) has landed.
