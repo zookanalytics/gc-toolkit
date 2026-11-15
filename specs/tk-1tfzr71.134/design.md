@@ -1,6 +1,6 @@
 ---
 name: Design — a PR's status derived by one rule from the GitHub read the landing order saves
-description: The design for tk-1tfzr71.134, the design child of initiative tk-1tfzr71.132, read at 7559e1bbd and against Gas City upstream main a1eb65702f, gascity-packs main 0f07496d2f and bd v1.3.4. It splits the pr evaluator's rule from its reads, has the landing order save its GitHub read of each PR on the PR's bead at every check and write the PR's status label after it, has the rig board, the label and gctk pr status run the one rule over that read and the store, keeps the merge on a fresh read, plans the merge with the review-lanes effort, and defines the units the implementation child files. Read it to approve the design at its gate, or to build one of its units.
+description: The design for tk-1tfzr71.134, the design child of initiative tk-1tfzr71.132, read at 7559e1bbd and against Gas City upstream main a1eb65702f, gascity-packs main 0f07496d2f and bd v1.3.4. It splits the pr evaluator's rule from its reads, has the landing order save its GitHub read of each PR on the PR's bead at every check, has the rig board, the label and gctk pr status run the one rule over that read and the store, keeps the merge on a fresh read, leaves the label's writer on the pending record to tk-1tfzr71.149, plans the merge with the review-lanes effort, and defines the units the implementation child files. Read it to approve the design at its gate, or to build one of its units.
 ---
 
 # Design: a PR's status derived by one rule from the GitHub read the landing order saves
@@ -41,11 +41,12 @@ give one answer.
 - A change on GitHub, such as your approval, shows at the PR's next check, which
   comes within the landing order's cycle, the pace you accepted.
 - A change in the city, such as a gate you answer or a hold you set, shows at
-  once on the board and in `gctk pr status`. The label shows it at the PR's next
-  check, or at once where the writer that made the change sets the label, as a
-  review verdict does today.
-- The landing order writes the label after each check, so the label keeps a
-  writer once the old GitHub intake retires.
+  once on the board and in `gctk pr status`.
+- The label takes the same answer when one of its writers sets it: at once
+  where the writer that made a change sets the label, as a review verdict does
+  today, and otherwise when the old GitHub intake's full pass next reaches the
+  PR (`pr-facts.sh`), which keeps reconciling an open PR's label until
+  tk-1tfzr71.21 retires it.
 - The merge still reads GitHub fresh in its own run, and never acts on what was
   saved.
 
@@ -57,18 +58,17 @@ reader. A PR still on the old path shows what the old path records, as today.
 Every rig's move onto the pending record waits on this work, so the first PRs it
 shows are the ones those moves bring.
 
-**The one call.** The label when a PR merges or closes (tk-1tfzr71.91):
-
-- **(a) This work carries it.** The landing order takes the `status:` and
-  `held:` labels off a PR it finds merged or closed, and keeps the record's
-  marker until that lands, so a clear that fails is tried again on the next run.
-  The label's unit grows by that path and its tests, and tk-1tfzr71.91 closes
-  once its validating closer checks the landing.
-- **(b) It stays its own bead.** A merged PR on the new path keeps its last
-  label, such as `status: merging`, in GitHub's PR list until that bead is
-  built, and the work edits the lines this work adds.
-
-Approving the design as it stands takes (a).
+**The label's writer on the pending record is tk-1tfzr71.149's.** This work
+changes no writer of the label (section 5). When a PR on the pending record
+merges or closes, or its bead meets an exception and waits on a person, nothing
+writes the PR's labels, so it keeps the ones it had, such as
+`status: merging`, until tk-1tfzr71.149's label step lands. Its target corrects
+a PR's labels by comparing what GitHub shows with what the store derives, so
+the landing order makes no label call and nothing records one that failed. You
+chose that approach in conversation tk-y9h5lbd. As it was put to you: "Until
+its label step lands, a PR on the new path that merges, closes or goes to a
+person keeps its last label, and that step then corrects it." (the ruling's
+note on tk-1tfzr71.132)
 
 ## 1. The rule and its reads
 
@@ -291,83 +291,25 @@ store as it is then, so a gate the operator answers, a hold set or lifted, a
 review result recorded, feedback the intake routes, and a rework's new head all
 show at the next render of the board and the next call of `gctk pr status`.
 
-## 5. The label's writer
+## 5. The label's writers
 
-At each check that reads the PR, the landing order writes the PR's `status:`
-and `held:` labels through `pr-status-label.sh`, by the state its read found. A
-PR open takes `reconcile` for the bead and its PR, whatever the check recorded:
-a check, a request, a retry, a requeue or an exception. The script derives
-through `gctk pr status`, so the label is what that gives over the store as it
-then is: the rule over the read the check just saved, or for an exception the
-gate the check filed, which the label names as `held: gate`. A PR merged or
-closed takes `clear`, which takes every label of both families off, since
-GitHub's own state then shows (call (a)). Each call passes the labels the same
-read found (`--current-labels`), so the script reads no PR's labels itself, and
-a steady state reads and writes nothing on GitHub. A call runs once its check's
-write has landed, with the record lock free, as the seed audit's check does.
-Two calls run under the lock instead, because a write that clears the marker
-waits on them: a merge's `clear`, before that write, and an exception's call,
-once the gate files.
+This work changes no writer of the `status:` and `held:` labels, and the
+landing order writes none. `pr-open.sh` and `signoff.sh` keep setting the
+labels when they change one of their inputs. `pr-facts.sh`'s full pass keeps
+reconciling each open PR's labels, a PR on the pending record among them, until
+tk-1tfzr71.21 retires the script, and `gctk merge` keeps clearing them on the
+old path until tk-1tfzr71.70 retires it. Each derives through
+`gctk pr status`, so for a PR on the pending record each writes what the rule
+gives over the saved read and the store (section 4).
 
-- **The port.** `pr.Landing` gains a `Labels` port, as it has `Gates` and
-  `Audit`, with a fake for the domain's tests. The cli builds it over the runtime
-  adapter, which runs the pack's scripts for the landing order already
-  ([gctk-architecture.md](../../docs/gctk-architecture.md#the-adapters)).
-- **The PR's read** gains the PR's labels (`labels(first:100){nodes{name}}` in
-  `pullQuery`, and `Labels` on `gh.PullRequest`). A read that finds none passes
-  a lone comma. The script's parse drops empty names, so it reads a list that
-  names no label as a PR that carries none, and it reads a PR's labels itself
-  only for an empty value. `pr-facts.sh` passes an empty value for a list it
-  dropped after an earlier call on the same anchor, so that value keeps its
-  meaning, and the script needs no change.
-- **The budget.** The run starts no label call past its deadline, as it starts
-  no seed audit check past it. A call that adds a label also lists the
-  repository's labels first, so that it can create one the repository lacks
-  (`ensure_labels`). On 2026-11-15, `gctk pr status --json` took 0.83 to 0.88
-  seconds over the store at a one-minute load average of 34, beside the about
-  seven seconds a check of an open PR took when the run's bounds were measured
-  (`services/gctk/internal/cli/prland.go`).
-
-**A label that did not land.** The marker `pr_reconcile_pending` is what brings
-a bead back to a run, so a later run makes a call that the deadline skipped, or
-one that failed, for as long as the bead keeps the marker. That is the marker's
-meaning in Gas Town's record, a reconciliation still owed, which can outlive the
-close while the close's cleanup runs
-([the merge design](../tk-1tfzr71.66/design.md), section 6). Every check's write
-keeps the marker except at a merge, an exception or a requeue, so for any other
-check the next check makes the call.
-
-- **At a merge.** The `clear` runs before the write that records the merge and
-  closes the bead, and that write keeps the marker when the clear did not land.
-- **At an exception.** The bead waits on a person behind its gate, and nothing
-  marks it again while it waits. So the gate path, which today clears the
-  marker as soon as the gate files, makes the call the check still owes once
-  the gate files, and clears the marker only once that call lands. A call it
-  skips at the deadline, or one that fails, leaves the marker, with why in
-  `pr_reconcile_error` (`record.Retry`).
-- **At a requeue.** Its write clears the marker, and the refinery's publication
-  of the new head sets it again. So a requeue's call that did not land is made
-  at the first check after that publication, and until then the label keeps the
-  status the PR had before its head changed.
-
-The next run reads a bead whose call is owed through the branch that already
-finishes it: the read of a closed bead on a verified merge, or the exception's
-gate path, which files the gate or finds it open. The bead keeps no labels, so
-the branch reads the PR as a check reads it, makes the call by the state it
-finds, and then clears the marker and the error the earlier run left. A read
-that fails keeps the marker for the run after. An exception the check recorded
-without reading the PR, such as a record that lacks a part or a closed bead the
-run reopens, has its gate path read the PR in the same way, so the label of
-every exception's open PR names the gate while the bead waits on a person. A
-record that names no PR gets no label. The old path's `status_label_clear_owed`
-key stays `pr-facts.sh`'s and `gctk merge`'s.
-
-**The label's other writers.** `pr-open.sh` and `signoff.sh` keep setting the
-label when they change one of its inputs. `pr-facts.sh`'s full pass keeps
-reconciling it until tk-1tfzr71.21 retires the script, and `gctk merge` keeps
-clearing it on the old path until tk-1tfzr71.70 retires it. Each derives through
-`gctk pr status`, so all of them write the same values, and this work changes
-none of them.
+Nothing writes the labels of a PR on the pending record when it merges or
+closes, or when its bead meets an exception. `pr-facts.sh` leaves a merged or
+closed PR on the record to the landing order, and its walk reaches no bead an
+exception holds, since on the record it lists only `pull_request_pending` and
+`pull_request_head_changed`. Such a PR keeps the labels it had until
+tk-1tfzr71.149's label step lands. The bead for the labels a merged or closed
+PR keeps (tk-1tfzr71.91) and the one for the PR of work a person stands down at
+an exception (tk-1tfzr71.140) wait on tk-1tfzr71.149.
 
 ## 6. The merge acts only on a fresh read
 
@@ -395,8 +337,8 @@ This change restates the text in the files at its base:
   evaluator's answer, computed at each read and stored nowhere, becomes two:
   no display reads GitHub, and only the merge acts on a fresh read, with the
   saved read granting nothing. The boundary's diagram shows the landing order
-  writing the saved read and the labels, and its legend names the order as the
-  saved read's one writer. Debt drops the cutover's wait on the board's phase by
+  writing the saved read, and its legend names the order as the saved read's
+  one writer. Debt drops the cutover's wait on the board's phase by
   the evaluator's answer (tk-1tfzr71.88, retired), and names the agents' board,
   which keeps its own rule until tk-1tfzr71.24.
 - **`docs/built-once-target.md`.** The merge section's sentence on the one
@@ -475,11 +417,10 @@ them, and whichever lands second composes the two as follows:
   `review` condition, and this work adds the `github-unread` case. Both stand,
   since an unread side names no `review` condition.
 - **`docs/architecture.md`.** The diagram keeps that effort's edge from the
-  landing order to the review run. Its edge to the PR carries both acts, "ready,
-  merge request, labels", and its edge to the ledger reads "record, GitHub read,
-  then close". The legend keeps both additions: the saved read beside the
-  landing order's merges, and a PR's review run as the writer of the PR's review
-  result.
+  landing order to the review run, and its edge to the PR, "ready, merge
+  request". Its edge to the ledger reads "record, GitHub read, then close".
+  The legend keeps both additions: the saved read beside the landing order's
+  merges, and a PR's review run as the writer of the PR's review result.
 - **`docs/gctk-architecture.md`, `services/gctk/README.md` and
   `key-registry.json`.** The `gctk pr reconcile` rows name both efforts' acts,
   the pr noun's paragraph names the branch, the withdrawal and the saved read,
@@ -503,15 +444,13 @@ rule runs only for a value `pr.OnRecord` names.
 
 ## 10. The Gas City search
 
-The surface this work adds is the key `pr_github_read`, the condition kind
-`github-unread` in `gctk pr status`'s output, and the landing order's label
-write with the labels field of its read of the PR.
+The surface this work adds is the key `pr_github_read` and the condition kind
+`github-unread` in `gctk pr status`'s output.
 [gas-city-search.md](gas-city-search.md) records the search at a1eb65702f.
 Gas City's PR monitor saves GitHub facts only on the repair beads it files for
 a PR it reads as broken, and reads no review, thread or required check. Gas
 Town's record holds no review or check state. bd's GitHub sync writes issues.
-Upstream's own dashboard reads no GitHub, and nothing upstream writes a PR's
-labels.
+Upstream's own dashboard reads no GitHub.
 
 ## 11. The units
 
@@ -522,22 +461,17 @@ leaves the city working.
 |---|---|---|---|---|
 | 1. The rule split from its reads, and the read saved | `GitHubRead` and its key; `observe`, `decide` and `FromStore`; `Ready` composed of the bead's side, `observe` and `decide`, returning the read it made; `github-unread` and section 2's test of a current read; the landing order reads GitHub's side once per check, saves it in each check's write, a queued PR's, a refused request's and a requeue's included, and leaves the last read on a read that fails partway; the pr noun's paragraph in `docs/gctk-architecture.md` | `services/gctk/pr/pr.go`, `rules.go`, `feedback.go`, a new `read.go`, `landing.go`, `services/gctk/key-registry.json`, `docs/gctk-architecture.md` | every `ready_test.go` case that answers gives one answer live and over the read it saves; section 2's test for another head, another PR, another provenance instant, no read saved, and a changed head's observed head; the landing order saves the read on a check, a request, a refused request, the queue and a requeue, and keeps the last read on a failure after the PR's read; the merge path's two cases of section 6 | nothing |
 | 2. Every display over the saved read | `gctk pr status` over `FromStore`, with no gh and no definition of feedback; `prstatus.Render`'s `github-unread` case and the package's header; `Listing.PRAnswers`; the rig board's `prFacts` and row 5, carried from #1509; `gctk pr status`'s row in `docs/gctk-architecture.md` and the README | `services/gctk/internal/cli/prstatus.go`, `services/gctk/prstatus/render.go`, `prstatus.go`, `services/gctk/listing`, `services/helm/internal/rigboard` (`gather.go`, `build.go`, `table.go`, `document.go`), `services/helm/web/src/rigboard/document.gen.ts`, generated from `document.go`, `docs/gctk-architecture.md`, `services/gctk/README.md`, `services/helm/README.md` | `gctk pr status` gives each status over a saved read with a gh stub that fails the test when it is called; `github-unread` reads `working`, and `needs-attention` beside a gate; `PRAnswers` over a pass; #1509's `pending_test.go`, read from the saved read in place of a live one, so four of its six cases fail if the board falls back to the posture; row 5 for a bead the record holds blocked | unit 1 |
-| 3. The landing order writes the label | the `Labels` port and its runtime adapter over `pr-status-label.sh`; each check's call by the state its read found, a `reconcile` for a PR open and a `clear` for one merged or closed, passed the labels that read found, or a lone comma for none; the marker kept at a merge and at an exception until the call lands, and the next run's call, which reads the PR first; the read of the PR for an exception whose check read none; the PR read's labels; `gctk pr reconcile`'s row in `docs/gctk-architecture.md`, the README and the order's header | `services/gctk/pr/landing.go`, `services/gctk/pr/record/record.go`, `services/gctk/internal/gh/gh.go`, `services/gctk/internal/cli/prland.go`, `assets/scripts/pr-status-label.test.sh`, `orders/pr-reconcile.toml`, `docs/gctk-architecture.md`, `services/gctk/README.md` | a reconcile after a check, a request, a readied draft, a retry, a requeue and an exception on an open PR, and a clear at a merge, a retry and an exception on a merged or closed PR, each passed the labels its read found; a lone comma for a PR with no labels, and in `pr-status-label.test.sh` a `reconcile` and a `clear` given one, which run no `gh pr view`; none past the run's deadline; for an exception on an open PR whose gate files, a call that fails and one the deadline skips each keep the marker, and the next run finds the gate, reads the PR, writes the label and then clears the marker; an exception recorded without a read of the PR reads it for its label; a clear that fails before a merge keeps the marker, and the next run reads the PR, clears its labels, then the marker; the cli's call names the script, its verb, the PR and the repository | unit 2 |
 
-Unit 3 waits on unit 2, because until `gctk pr status` reads the saved read, the
-landing order's label call would read GitHub a second time at every check.
+No unit writes the label. Its writer on the pending record is tk-1tfzr71.149's
+(section 5).
 
 ## 12. Edges and notes the implementation child adds
 
 - The units are filed under the epic (tk-1tfzr71), with
   `target=integration/tk-1tfzr71.132` in each create. tk-1tfzr71.132 and the
   summary task tk-1tfzr71.136 each wait on every unit through a `blocks` edge.
-  Unit 2 waits on unit 1 and unit 3 on unit 2, each armed to dispatch on
-  `mol-polecat-work` when its wait closes. The child builds no unit.
-- Under call (a), tk-1tfzr71.91 gets a close brief that names unit 3's clear and
-  its retry, keeps its `blocks` edge onto tk-1tfzr71.132, gets the validating
-  closer's arm, and loses `hold:mayor`, as the `gc-toolkit.waits` skill says.
-  Under (b) it keeps its hold.
+  Unit 2 waits on unit 1, armed to dispatch on `mol-polecat-work` when its wait
+  closes. The child builds no unit.
 - tk-1tfzr71.21's description takes the Done of section 7 in place of its Done
   paragraph, in one write that keeps every other line. A note there says that a
   PR still on the old path shows by `pr-facts.sh`'s keys, so the script's
@@ -565,12 +499,7 @@ landing order's label call would read GitHub a second time at every check.
   `decide`, `merged`, `except`, `gate`, `closed`, `audit`), and the record's
   writes in `services/gctk/pr/record/record.go`: `Checked` writes `pr_state` and
   `pr_last_checked_at` and clears `pr_reconcile_error`, `Retry` writes the
-  three, `Requeue` writes `observed_pr_head_sha`, and `Publish` clears it. `due`
-  lists only the beads that carry the marker. `gate` clears the marker with
-  `Unmark` once the gate files, `Unmark` leaves `pr_reconcile_error` as it
-  stands, and `Requeue` and `Land` clear the marker in their own write. The run
-  prints each outcome and stores none of its reasons
-  (`services/gctk/internal/cli/prland.go`, `newPRReconcileCmd`).
+  three, `Requeue` writes `observed_pr_head_sha`, and `Publish` clears it.
 - `gctk pr status` evaluates `pr.Ready` for a bead on the record and
   `prstatus.Derive` otherwise (`services/gctk/internal/cli/prstatus.go`). The
   rig board on main derives every PR with `prstatus.Derive` (`table.go`'s row
@@ -578,14 +507,13 @@ landing order's label call would read GitHub a second time at every check.
   record the board reads `needs-review` from the posture while the label reads
   `working`, which is how `Render` reads the review condition while nothing on
   main writes `review_results`.
-- `pr-status-label.sh` derives through `gctk pr status --json`, writes only a
-  label that differs, and takes `--current-labels` to skip its read of the PR's
-  labels. `sync_labels` reads them itself for an empty value, which
-  `pr-facts.sh`'s `reconcile_status_label` passes once it has dropped its list
-  after a call, and it drops empty names from a value it is given, so a lone
-  comma names no label. A call that adds a label lists the repository's labels
-  first (`ensure_labels`). `prstatus` names `held: gate` for an open human gate
-  on any bead, on the record or not.
+- `pr-status-label.sh` derives through `gctk pr status --json` and writes only a
+  label that differs. At main 65a86b0e7, `pr-facts.sh`'s full pass calls its
+  `reconcile` for each anchor its walk reaches (`reconcile_status_label`), and
+  the walk lists `pull_request` on an open bead, `pull_request_pending` on a
+  blocked one and `pull_request_head_changed` on an open one
+  (`OPEN_PR_ANCHORS_JQ`). It records no merge or close of a PR on the record and
+  clears none of its labels, leaving the record to the landing order.
 - No bead in gc-toolkit's store carried `pull_request_pending` or
   `pull_request_head_changed` on 2026-11-15, read with
   `gc bd list --metadata-field merge_result=<value>`.

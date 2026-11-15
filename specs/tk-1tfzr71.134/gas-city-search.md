@@ -1,9 +1,9 @@
 ---
-name: Gas City search for the saved GitHub read and the label's writer
-description: The Gas City, Gas Town, bd and GitHub primitives searched for the surface tk-1tfzr71.134's design adds, namely the GitHub read the landing order saves on each PR's bead, the condition a display names when that read is not of the PR's head, and the landing order's write of the PR's status label. It says what each search found at a named upstream commit and why none covers the need. Read it when building or reviewing one of the design's units, or when the arch check asks for the search.
+name: Gas City search for the saved GitHub read
+description: The Gas City, Gas Town and bd primitives searched for the surface tk-1tfzr71.134's design adds, namely the GitHub read the landing order saves on each PR's bead and the condition a display names when that read is not of the PR's head. It says what each search found at a named upstream commit and why none covers the need. Read it when building or reviewing one of the design's units, or when the arch check asks for the search.
 ---
 
-# Gas City search for the saved GitHub read and the label's writer
+# Gas City search for the saved GitHub read
 
 Read on 2026-11-15 at `gastownhall/gascity` main a1eb65702f, at
 `gastownhall/gascity-packs` main 0f07496d2f, and at `gastownhall/beads`
@@ -100,33 +100,3 @@ store's conditions stand as at any read.
 What unit 1 adds: one value, `github-unread`, in the evaluator's condition
 kinds, which `gctk pr status` prints among the conditions not met, as it prints
 every other kind.
-
-## The landing order's write of the status label (unit 3)
-
-The need: the PR's `status:` and `held:` labels keep a writer once
-`pr-facts.sh` retires, from the same rule every display runs, and come off once
-the landing order finds the PR merged or closed.
-
-- **Gas City** writes no label on a PR. Its Go's label writes are bead labels
-  through bd (`--add-label` in `cmd/gc/cmd_bd_by_id.go` and
-  `internal/bdflags`), and no core order or script edits a PR's labels.
-- **Gas Town's github pack** ships `comment-issue`, `create-pr`, `import-app`,
-  `map-repo`, `push-branch`, `release-workflow`, `status` and `sync-app`
-  (`github/commands/` at 0f07496d2f), and `create-pr.sh`, `status.sh` and
-  `comment-issue.sh` never mention a label.
-- **bd** writes a bead's labels to the GitHub issue it is synced with, along
-  with its title, body and state (`CreateIssue` and `UpdateIssue` in
-  `internal/github/tracker.go`). Syncing the bead that owns a PR would write the
-  bead's title and body over the PR's, and the sync carries no status of its
-  own.
-- **GitHub** keeps labels on an issue or a PR and runs no rule that sets one.
-
-What unit 3 composes: the pack's one writer of those labels,
-`assets/scripts/pr-status-label.sh`, which derives through `gctk pr status`
-and writes only a label that differs, called by the landing order through
-gctk's runtime adapter at each check, with the PR's labels from the check's own
-read of the PR. The read gains one field, the PR's labels, and no call of its
-own. The clear at a merge or a close is that script's `clear` verb. A call that
-did not land at a merge or an exception is made again by a later run while the
-bead keeps the record's marker, which Gas Town's record already keeps while a
-reconciliation is owed (`pr_reconcile_pending`).

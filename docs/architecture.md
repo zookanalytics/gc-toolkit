@@ -74,7 +74,7 @@ flowchart LR
   DISP -->|successor edge, then checked close| LEDGER
   SIGN -->|verdicts on review beads| LEDGER
   ORD -->|every 60s| CAD
-  ORD -->|landing order: merge request, labels| PR
+  ORD -->|landing order: merge request| PR
   ORD -->|landing order: record, GitHub read, then close| LEDGER
   CAD -->|reads + writes| LEDGER
   CAD -->|labels| PR
