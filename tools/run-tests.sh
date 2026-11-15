@@ -105,14 +105,20 @@
 # commit each of those commits needs a reachable signing agent. No test may
 # depend on one.
 #
-# Every file runs with TMPDIR set to the physical path of the caller's temp
-# directory (/tmp when TMPDIR is unset), with no symlink in it and no trailing
-# slash. A test builds the paths it expects from TMPDIR, while the scripts it
-# tests print paths they resolve: `pwd` drops a doubled slash, `pwd -P` and git,
-# which records a worktree by its physical path, resolve a symlink too. On macOS
-# TMPDIR ends in a slash and sits under /var, a symlink to /private/var, so
-# there a path built from it and the same path resolved compare unequal. A file
-# run directly, outside the runner, gets the caller's TMPDIR as it is.
+# Every run has a temp directory of its own and runs with TMPDIR set to it:
+# run.<pid> in the physical path of the caller's temp directory (/tmp when
+# TMPDIR is unset), named for the process that lives as long as the run, with no
+# symlink in it and no trailing slash. A test builds the paths it expects from
+# TMPDIR, while the scripts it tests print paths they resolve: `pwd` drops a
+# doubled slash, `pwd -P` and git, which records a worktree by its physical
+# path, resolve a symlink too. On macOS TMPDIR ends in a slash and sits under
+# /var, a symlink to /private/var, so there a path built from it and the same
+# path resolved compare unequal. What the run puts under TMPDIR, such as the
+# suite's own temp and the work tree of any Go build it starts, so lands in a
+# directory that names its owner. The runner removes it once the run ends. A
+# run still going when the runner itself ends keeps it while its process lives,
+# and build-scratch-reap.sh removes it once that process is gone. A file run
+# directly, outside the runner, gets the caller's TMPDIR as it is.
 #
 # Every file runs with the test floor, tools/test-floor, at the front of PATH.
 # A file that stubs gc, bd or gh puts its stub directory in front of that, so
@@ -514,15 +520,33 @@ if ionice -c 2 -n 7 true >/dev/null 2>&1; then
   LOW_PRIORITY+=(ionice -c 2 -n 7)
 fi
 
+# The temp directory of the run whose process is <pid> (see the header), and its
+# removal once the run has ended and its group is reaped. Go writes some of its
+# files read-only, so write permission goes back first.
+run_tmp() { printf '%s/run.%s' "$tmp_real" "$1"; }
+drop_run_tmp() { # <pid>
+  local d
+  d="$(run_tmp "$1")"
+  chmod -R u+w "$d" 2>/dev/null
+  rm -rf -- "$d" 2>/dev/null
+  return 0
+}
+
 # Start one run in the background, under the timeout, its output to its log. A
 # part's run is told which part it is and which parts its file declares; a run
 # of a whole file gets neither, whatever the caller exported. Any words after
-# the index are a command the run starts through, such as LOW_PRIORITY.
+# the index are a command the run starts through, such as LOW_PRIORITY. The
+# subshell's pid is the run's own: each command after it replaces it in place
+# (exec, nice, ionice) until timeout, which lives as long as the file it runs.
 spawn() { # <run-index> [<command>...]
   local t="${RUN_FILE[$1]}" part="${RUN_PART[$1]}" log="$LOGDIR/$1.log"
   shift
   (
     cd "$ROOT" || exit 2
+    run_pid=$BASHPID   # read here: inside $( ) it names the substitution's subshell
+    TMPDIR="$(run_tmp "$run_pid")"
+    mkdir -p -- "$TMPDIR" || { echo "run-tests: cannot make the run's temp directory $TMPDIR" >&2; exit 2; }
+    export TMPDIR
     if [ -n "$part" ]; then
       export RUN_TESTS_PART="$part" RUN_TESTS_PARTS="${DECLARED[$t]}"
     else
@@ -547,6 +571,7 @@ finish() {
   local pid="$1" rc="$2" idx dur rel status
   idx="${PID_IDX[$pid]}"
   kill -- -"$pid" 2>/dev/null   # reap anything the file left running in its group
+  drop_run_tmp "$pid"
   dur=$(( SECONDS - PID_START[$pid] ))
   rel="$(label "$idx")"
   if [ "$rc" -eq 0 ]; then
@@ -570,6 +595,7 @@ rerun_serial() {
   pid=$!
   wait "$pid"; rc=$?
   kill -- -"$pid" 2>/dev/null   # reap anything the file left in its group
+  drop_run_tmp "$pid"
   return "$rc"
 }
 

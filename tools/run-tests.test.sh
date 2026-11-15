@@ -28,9 +28,12 @@
 #   - every file commits and tags with signing off, under a git config that
 #     signs both with a signer that always fails, and a git config entry the
 #     caller exported still reaches it;
-#   - every file runs under the physical path of the caller's TMPDIR, or of
-#     /tmp when it is unset, with no symlink and no trailing slash, while the
-#     same file run directly gets the TMPDIR as given; a TMPDIR that names no
+#   - every run has a directory of its own as its TMPDIR, run.<pid> in the
+#     physical path of the caller's TMPDIR, or of /tmp when it is unset, with
+#     no symlink and no trailing slash; it exists while the file runs, the pid
+#     in its name is live then, two runs at once have two, and the runner
+#     removes it once the run ends, a run its timeout ended included; the same
+#     file run directly gets the TMPDIR as given; a TMPDIR that names no
 #     directory is a usage error;
 #   - every file runs with the test floor at the front of PATH: gc, bd and gh
 #     resolve to it and git does not, and a call made after a file's stub
@@ -369,7 +372,7 @@ OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" signing_env bash "$FIX/signing.test.sh" 2
 if [ "$RC" -ne 0 ]; then ok "the file run directly fails"; else bad "the file run directly fails" "it exited 0"; fi
 has "$OUT" "failed to write commit object" "because the commit could not be signed"
 
-echo "── tmpdir: every file runs under the physical path of the caller's TMPDIR ──"
+echo "── tmpdir: every run has its own directory in the physical path of the caller's TMPDIR ──"
 # A temp directory named through a symlink, with a trailing slash, stands in for
 # macOS's TMPDIR, which ends in a slash and sits under /var, a symlink to
 # /private/var.
@@ -378,21 +381,50 @@ ln -s "$TMP/tmp-real" "$TMP/tmp-link"
 TMP_REAL="$(cd "$TMP/tmp-real" && pwd -P)"
 cat > "$FIX/tmpdir.test.sh" <<'F'
 #!/usr/bin/env bash
-printf '%s\n' "${TMPDIR-unset}" > "$RUNTESTS_FIXTURE_STATE/tmpdir"
+s="$RUNTESTS_FIXTURE_STATE"
+printf '%s\n' "${TMPDIR-unset}" > "$s/tmpdir"
+[ -d "${TMPDIR-}" ] && echo dir > "$s/tmpdir.dir"
+p="${TMPDIR##*/run.}"
+case "$p" in ''|*[!0-9]*) ;; *) kill -0 "$p" 2>/dev/null && echo live > "$s/tmpdir.live" ;; esac
+: > "${TMPDIR-}/written" 2>/dev/null || true
 F
 reset_state
 TMPDIR="$TMP/tmp-link/" run "$FIX/tmpdir.test.sh"
 eq "$RC" 0 "a file runs under a TMPDIR named through a symlink"
-eq "$(cat "$STATE/tmpdir")" "$TMP_REAL" "it gets the directory's physical path, with no trailing slash"
-# The same file run directly gets the TMPDIR it was given: the physical path
-# above is the runner's doing.
+got="$(cat "$STATE/tmpdir")"
+eq "${got%/run.*}" "$TMP_REAL" "its TMPDIR sits in the directory's physical path, with no trailing slash"
+case "${got##*/}" in
+  run.[0-9]*) ok "and is a directory of its own, run.<pid>" ;;
+  *)          bad "and is a directory of its own, run.<pid>" "got '$got'" ;;
+esac
+eq "$(cat "$STATE/tmpdir.dir" 2>/dev/null)" dir "the directory exists while the file runs"
+eq "$(cat "$STATE/tmpdir.live" 2>/dev/null)" live "and the pid in its name is a live process then"
+if [ -e "$got" ]; then bad "the runner removes it once the run ends" "still there: $got"; else ok "the runner removes it once the run ends"; fi
+# The same file run directly gets the TMPDIR it was given: the directory above
+# is the runner's doing.
 reset_state
 RUNTESTS_FIXTURE_STATE="$STATE" TMPDIR="$TMP/tmp-link/" bash "$FIX/tmpdir.test.sh"
 eq "$(cat "$STATE/tmpdir")" "$TMP/tmp-link/" "the file run directly gets the TMPDIR as given"
 reset_state
 OUT="$(unset TMPDIR; RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 30 "$FIX/tmpdir.test.sh" 2>&1)"; RC=$?
 eq "$RC" 0 "a file runs with TMPDIR unset"
-eq "$(cat "$STATE/tmpdir")" "$(cd /tmp && pwd -P)" "and gets the physical path of /tmp"
+got="$(cat "$STATE/tmpdir")"
+eq "${got%/run.*}" "$(cd /tmp && pwd -P)" "and its TMPDIR sits in the physical path of /tmp"
+# Two runs at once have two directories, and a run its timeout ends loses its
+# own as well.
+cat > "$FIX/tmpdirslow.test.sh" <<'F'
+#!/usr/bin/env bash
+printf '%s\n' "$TMPDIR" > "$RUNTESTS_FIXTURE_STATE/tmpdirslow"
+sleep 20
+F
+reset_state
+OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" TMPDIR="$TMP/tmp-link/" "$RUNNER_COPY" -j 2 -t 2 --no-retry "$FIX/tmpdir.test.sh" "$FIX/tmpdirslow.test.sh" 2>&1)"; RC=$?
+eq "$RC" 1 "the run that outlasts its timeout fails"
+a="$(cat "$STATE/tmpdir" 2>/dev/null)"; b="$(cat "$STATE/tmpdirslow" 2>/dev/null)"
+if [ -n "$a" ] && [ -n "$b" ] && [ "$a" != "$b" ]; then ok "two runs at once have two directories"
+else bad "two runs at once have two directories" "got '$a' and '$b'"; fi
+if [ -n "$b" ] && [ ! -e "$b" ]; then ok "the runner removes the directory of a run its timeout ended"
+else bad "the runner removes the directory of a run its timeout ended" "got '$b'"; fi
 reset_state
 TMPDIR="$TMP/no-such-dir" run "$FIX/tmpdir.test.sh"
 eq "$RC" 2 "a TMPDIR that names no directory is a usage error"

@@ -2,39 +2,36 @@
 # build-scratch-reap.sh — reclaim build and test scratch left behind by killed
 # or crashed runs.
 #
-# A run that exits normally removes its own temp on an EXIT trap. A run that is
-# killed or crashes skips that trap, and its scratch is left on the host's
-# shared tmpfs: Go toolchain trees (go-build*, go-link*), the gascity gc.test
-# binary's per-run trees (gct<pid>-<n>, gct-<pid>-<n>), the build scripts' Go
-# scratch (run.<pid> under /var/tmp/gotmp), and templated tool temp (gctk-*).
-# Nothing reclaims these, so they accumulate against the per-uid tmpfs quota
-# until it is exhausted, at which point every agent's shell output capture fails
-# silently and the host loses its shells. This is the backstop that reclaims
-# them.
+# A run that exits normally removes its own temp: a script on its EXIT trap, the
+# go command when it exits. A run ended first, by a signal it does not handle or
+# by a crash, leaves its scratch in the host's shared temp. The scratch
+# this script reclaims is named for the process that owns it: the gascity
+# gc.test binary's per-run trees (gct<pid>-<n>, gct-<pid>-<n>), and run.<pid>,
+# which is the build scripts' Go scratch under /var/tmp/gotmp and the temp dir
+# tools/run-tests.sh gives each run, holding the suite's temp and any Go build
+# it starts. On a host whose temp is a per-uid tmpfs, these accumulate against
+# its quota until it is exhausted, at which point every agent's shell output
+# capture fails silently and the host loses its shells. This is the backstop
+# that reclaims them.
 #
-# Safety model: an entry goes only once nothing shows its owner still running,
-# and never on age or size alone. It must have NO live holder: lsof reports no
-# process with a file inside it open and no process whose cwd is inside it.
-# What else must be shown depends on the name. A pid-encoded name
-# (gct<pid>-<n>, gct-<pid>-<n>, run.<pid>) names its owner, so the process with
-# that pid must be gone. A templated name (go-build*, go-link*, gctk-*) names
-# no owner, and a live run that owns one holds nothing for long stretches: a Go
-# compile holds nothing open in its $WORK while it compiles, a suite's temp dir
-# is held only while a stub or jq has a file in it open, and a formula hands a
-# gctk-* file from one shell block to a later one with no process in between.
-# So a templated entry must also have gone unmodified, anywhere inside it and
-# directories included, for longer than a live owner goes without writing
-# there: an hour for a Go toolchain tree, which every action of its build
-# writes in, and a day for gctk-* temp, which a formula can hand across a run
-# that lasts hours. The wait bounds that inference, so an owner that holds
-# nothing and writes nothing for longer than its wait still loses the entry.
-# Every gate is re-checked immediately before the remove, because the
-# scan-to-delete gap is a TOCTOU window. A recent write only ever keeps an
-# entry, and size never counts: a 6G gc.test tree nine minutes into a live run
-# holds a lock file and is kept; a 1K tree whose owner died is reaped. A name
-# that looks pid-encoded but whose pid is empty or non-numeric is unparseable
-# and is left alone. So is an entry whose pid cannot be shown gone, and a
-# templated tree that cannot be read in full.
+# Safety model: an entry goes only once the owner its name records has ended,
+# and never on age or size. The process with the pid in its name must be gone,
+# and the tree must have NO live holder: lsof reports no process with a file
+# inside it open and no process whose cwd is inside it, so a tree that a child
+# of the owner still uses is kept. Both gates are re-checked immediately before
+# the remove, because the scan-to-delete gap is a TOCTOU window. Size never
+# counts: a 6G gc.test tree nine minutes into a live run holds a lock file and
+# is kept; a 1K tree whose owner died is reaped. A name that looks pid-encoded
+# but whose pid is empty or non-numeric is unparseable and is left alone, and
+# so is a pid whose process cannot be shown gone.
+#
+# A templated name (go-build*, go-link*, gctk-*) records no owner, and nothing
+# outside its run can show that run has ended: a live run holds nothing open in
+# it for long stretches. So this script never removes one. The run that made it
+# removes it when it ends, and what a killed run leaves under such a name waits
+# for the host's own temp cleanup. A run that must not leave such scratch puts
+# its temp under a run.<pid> dir, as the build scripts and tools/run-tests.sh
+# do.
 #
 # Scope: the host's shared build/test scratch, under every root this host's
 # runs point their temp at (tmpfs today, /var/tmp if a run redirects there).
@@ -57,8 +54,8 @@
 #      scripts use), TMPDIR.
 # Exit: 0 reaped or nothing to do · 1 cannot verify holders (refused) · 2 usage.
 # Caller: the build-scratch-reap cooldown order (orders/build-scratch-reap.toml).
-# See specs/tk-jp1fg5/build-scratch-reap.md, and for the wait on templated
-# names specs/tk-0ajlj81/templated-temp-liveness.md.
+# See specs/tk-jp1fg5/build-scratch-reap.md, and for why a templated name is
+# never removed specs/tk-0ajlj81/temp-ownership.md.
 set -euo pipefail
 
 PROG="${0##*/}"
@@ -101,13 +98,6 @@ UID_NUM="$(id -u 2>/dev/null || echo 0)"
 # GNU stat takes its format after -c and BSD stat after -f; both read %u as the
 # owner's uid, of a symlink itself rather than what it names.
 if stat -c %u -- / >/dev/null 2>&1; then STAT=(stat -c); else STAT=(stat -f); fi
-# How long a templated entry must go unmodified before it can be judged dead,
-# in minutes as find's -mmin reads them. A Go toolchain tree's longest quiet
-# stretch while its build runs is one compile or link, minutes long, and its
-# trees run to gigabytes, so it waits an hour. gctk-* temp is small, and a
-# formula's handoff file can sit unwritten for most of a run, so it waits a day.
-GO_IDLE_MIN=60
-GCTK_IDLE_MIN=1440
 
 # Single-flight across the host. The lock lives at a per-uid path every session
 # shares and that matches none of the reaped patterns, so a pass never reaps its
@@ -212,34 +202,18 @@ pid_is_dead() {
     return 0
 }
 
-# Has nothing in the entry been modified for <minutes>? The entry itself and
-# everything below it count, directories included, so one write anywhere in a
-# running build or suite keeps the whole tree. find stops at the first recent
-# path, so a live tree is cheap to read. Returns 0 unmodified, 1 modified, and
-# 2 when the tree cannot be read in full (an unreadable directory, a path gone
-# mid-walk), because what it could not read may be what was written.
-unmodified_for() {   # unmodified_for <path> <minutes>
-    local hit rc=0
-    hit="$(find "$1" -mmin "-$2" -print -quit 2>/dev/null)" || rc=$?
-    [ -n "$hit" ] && return 1
-    [ "$rc" -eq 0 ] || return 2
-    return 0
-}
-
-# Phase 1 — the gates that need no holder scan: the name must be a known scratch
-# form, the entry must be ours, a pid-encoded name whose pid is still alive (or
-# not shown gone) is kept untouched, and so is a templated entry modified within
-# its wait. What survives is dead scratch unless a holder says otherwise, which
-# phase 2 decides.
-CAND=()        # candidate paths, dead by name/pid/wait, pending the holder gate
-CAND_PID=()    # parallel: the pid for a pid-encoded name, "" otherwise
-CAND_IDLE=()   # parallel: the wait in minutes for a templated name, "" otherwise
+# Phase 1 — the gates that need no holder scan: the name must be a pid-encoded
+# scratch form, the entry must be ours, and an entry whose pid is still alive
+# (or not shown gone) is kept untouched. What survives is dead scratch unless a
+# holder says otherwise, which phase 2 decides.
+CAND=()        # candidate paths, dead by name and pid, pending the holder gate
+CAND_PID=()    # parallel: the pid each name encodes
 KEPT_N=0
 for root in "${SCAN_ROOTS[@]}"; do
     while IFS= read -r -d '' entry; do
         [ -e "$entry" ] || continue
         base="${entry##*/}"
-        pid=""; suf=""; form=""; idle=""
+        pid=""; suf=""
         case "$base" in
             .pnpm-store|node-compile-cache) log "keep (rebuild-cost cache): $entry"; KEPT_N=$((KEPT_N + 1)); continue ;;
             # gc.test per-run trees. The owned shapes are gct<pid>-<n> and
@@ -248,12 +222,14 @@ for root in "${SCAN_ROOTS[@]}"; do
             # so a name that is merely gct plus a pid, with no -<n>, is some other
             # user's path and reaping it on a dead pid would delete an unrelated
             # directory. Parse the whole name here; the shape is validated below.
-            gct-[0-9]*-[0-9]*) rest="${base#gct-}"; pid="${rest%%-*}"; suf="${rest#*-}"; form=pid ;;
-            gct[0-9]*-[0-9]*)  rest="${base#gct}";  pid="${rest%%-*}"; suf="${rest#*-}"; form=pid ;;
-            # Go scratch: run.<pid>, the raw numeric pid with no suffix (GOTMP/run.$$).
-            run.[0-9]*) pid="${base#run.}"; form=pid ;;
-            go-build*|go-link*) form=holder; idle="$GO_IDLE_MIN" ;;
-            gctk-*) form=holder; idle="$GCTK_IDLE_MIN" ;;
+            gct-[0-9]*-[0-9]*) rest="${base#gct-}"; pid="${rest%%-*}"; suf="${rest#*-}" ;;
+            gct[0-9]*-[0-9]*)  rest="${base#gct}";  pid="${rest%%-*}"; suf="${rest#*-}" ;;
+            # A run's own scratch: run.<pid>, the raw numeric pid with no suffix
+            # (the build scripts' GOTMP/run.$$, tools/run-tests.sh's per-run temp).
+            run.[0-9]*) pid="${base#run.}" ;;
+            # Templated temp records no owner, so it is never this pass's to remove
+            # (see the header).
+            go-build*|go-link*|gctk-*) log "skip (records no owner): $entry"; continue ;;
             *) log "skip (unrecognized): $entry"; continue ;;   # e.g. gctfoo-1, gct<pid> with no -<n>, run.bogus
         esac
         # The gct run-counter <n> must be numeric; a non-numeric or multi-dash
@@ -268,17 +244,10 @@ for root in "${SCAN_ROOTS[@]}"; do
         if [ "$("${STAT[@]}" %u -- "$entry" 2>/dev/null || echo -1)" != "$UID_NUM" ]; then
             log "keep (not owned by uid $UID_NUM): $entry"; KEPT_N=$((KEPT_N + 1)); continue
         fi
-        if [ "$form" = pid ]; then
-            d=0; pid_is_dead "$pid" || d=$?
-            if [ "$d" -eq 2 ]; then log "keep (pid '$pid' not shown gone): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
-            if [ "$d" -eq 1 ]; then log "keep (pid $pid alive): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
-        fi
-        if [ -n "$idle" ]; then
-            u=0; unmodified_for "$entry" "$idle" || u=$?
-            if [ "$u" -eq 1 ]; then log "keep (modified in the last ${idle}m): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
-            if [ "$u" -eq 2 ]; then log "keep (cannot be read in full): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
-        fi
-        CAND+=("$entry"); CAND_PID+=("$pid"); CAND_IDLE+=("$idle")
+        d=0; pid_is_dead "$pid" || d=$?
+        if [ "$d" -eq 2 ]; then log "keep (pid '$pid' not shown gone): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
+        if [ "$d" -eq 1 ]; then log "keep (pid $pid alive): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
+        CAND+=("$entry"); CAND_PID+=("$pid")
     done < <(find "$root" -maxdepth 1 -mindepth 1 \
                 \( -name 'go-build*' -o -name 'go-link*' -o -name 'gct*' -o -name 'run.*' \) \
                 -print0 2>/dev/null)
@@ -303,10 +272,10 @@ reap() {
 }
 
 # Phase 2 — the holder gate and its TOCTOU recheck. SNAP1 drops anything held at
-# scan time; SNAP2 is a fresh snapshot taken immediately before removal, and the
-# pid and the wait are re-read per entry, closing the window between proving an
-# entry dead and removing it. An lsof that yields nothing is a broken probe, not
-# an idle host: refuse rather than reap blind.
+# scan time; SNAP2 is a fresh snapshot taken immediately before removal and the
+# pid is re-read per entry, closing the window between proving an entry dead and
+# removing it. An lsof that yields nothing is a broken probe, not an idle host:
+# refuse rather than reap blind.
 if [ "${#CAND[@]}" -gt 0 ]; then
     rc1=0; SNAP1="$(snapshot)" || rc1=$?
     if [ "$rc1" -ne 0 ] || [ -z "$SNAP1" ]; then
@@ -315,13 +284,13 @@ if [ "${#CAND[@]}" -gt 0 ]; then
     fi
     declare -A HELD1=()
     while IFS= read -r h; do [ -n "$h" ] && HELD1["$h"]=1; done < <(compute_held "$SNAP1")
-    REAP=(); REAP_PID=(); REAP_IDLE=()
+    REAP=(); REAP_PID=()
     for i in "${!CAND[@]}"; do
         c="${CAND[$i]}"
         if [ -n "${HELD1[$c]:-}" ]; then
             log "keep (open holder): $c"; KEPT_N=$((KEPT_N + 1))
         else
-            REAP+=("$c"); REAP_PID+=("${CAND_PID[$i]}"); REAP_IDLE+=("${CAND_IDLE[$i]}")
+            REAP+=("$c"); REAP_PID+=("${CAND_PID[$i]}")
         fi
     done
     if [ "${#REAP[@]}" -gt 0 ]; then
@@ -332,18 +301,13 @@ if [ "${#CAND[@]}" -gt 0 ]; then
             declare -A HELD2=()
             while IFS= read -r h; do [ -n "$h" ] && HELD2["$h"]=1; done < <(compute_held "$SNAP2")
             for i in "${!REAP[@]}"; do
-                p="${REAP[$i]}"; pid="${REAP_PID[$i]}"; idle="${REAP_IDLE[$i]}"
+                p="${REAP[$i]}"; pid="${REAP_PID[$i]}"
                 [ -e "$p" ] || continue   # a peer may have removed it since the scan
                 if [ -n "$pid" ]; then
                     pid_is_dead "$pid" || { log "keep (pid $pid returned): $p"; KEPT_N=$((KEPT_N + 1)); continue; }
                 fi
                 if [ -n "${HELD2[$p]:-}" ]; then
                     log "keep (holder appeared): $p"; KEPT_N=$((KEPT_N + 1)); continue
-                fi
-                if [ -n "$idle" ]; then
-                    u=0; unmodified_for "$p" "$idle" || u=$?
-                    if [ "$u" -eq 1 ]; then log "keep (modified since the scan): $p"; KEPT_N=$((KEPT_N + 1)); continue; fi
-                    if [ "$u" -eq 2 ]; then log "keep (cannot be read in full): $p"; KEPT_N=$((KEPT_N + 1)); continue; fi
                 fi
                 reap "$p"
             done

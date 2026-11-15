@@ -167,8 +167,9 @@ in the total.
 ## What it does not touch
 
 Scope is the harness scratch root. Other `/tmp` tenants are reclaimed
-elsewhere: build and test scratch left by killed or crashed runs is
-`build-scratch-reap.sh`'s, the workspaces of ended reviews are
-`review-workspace.sh`'s, and a horizon on `/tmp` as a whole is the host's
-policy, not the pack's. Bead worktrees live under `.gc/worktrees/`, not under
-`/tmp`, and [worktree-reclaim.md](worktree-reclaim.md) says what removes them.
+elsewhere: build and test scratch that killed or crashed runs left under a
+name recording their pid is `build-scratch-reap.sh`'s, the workspaces of ended
+reviews are `review-workspace.sh`'s, and a horizon on `/tmp` as a whole is the
+host's policy, not the pack's. Bead worktrees live under `.gc/worktrees/`, not
+under `/tmp`, and [worktree-reclaim.md](worktree-reclaim.md) says what removes
+them.

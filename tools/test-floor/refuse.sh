@@ -8,10 +8,11 @@
 # the real binary. It lives in the test's temp dir, so it can go while a script
 # the test started is still running. A test killed by a signal its children do
 # not get removes its temp dir from its EXIT trap, and the scratch reaper
-# removes a temp dir no process holds open. A PATH search that misses the stub
-# finds the next directory instead. The real gc found there reaches the live
-# city from the working directory, the real gh reaches GitHub, and the real git
-# acts on the checkout.
+# removes a run's temp dir once the process it is named for has ended, though a
+# child of the run that holds nothing open there may still be running. A PATH
+# search that misses the stub finds the next directory instead. The real gc
+# found there reaches the live city from the working directory, the real gh
+# reaches GitHub, and the real git acts on the checkout.
 #
 # This directory is that next directory. tools/run-tests.sh puts it at the
 # front of PATH for every file it runs, so a file's own stubs land ahead of it.
