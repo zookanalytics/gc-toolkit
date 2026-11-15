@@ -537,6 +537,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pin-keepalive-precheck.sh` | patrol | The pin-keepalive order's condition check: runs `pin-keepalive.sh --check`, read-only. |
 | `assets/scripts/pin-keepalive.sh` | patrol | The pass, and (in `--check` mode) its own condition gate on one predicate: pins every standing conversational named session (`configured_named_session`, provider `claude`) that is not already pinned. |
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
+| `assets/scripts/seat-progress.sh` | patrol | The witness's judgment of a live pool seat that holds a claim: it reads the seat's own writes to the rig's store and the city's, and files `no-progress.<session>` through `patrol-finding.sh` when the seat's pane still prints but it has written nothing for three hours. It kills nothing. |
 | `assets/scripts/witness-nudge.sh` | patrol | Gives a witness whose patrol pass stopped, with its wisp still in progress, its next turn. |
 | `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions that have ended, and of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/build-scratch-reap.sh` | patrol | Removes build and test scratch (Go toolchain trees, gc.test per-run trees, templated tool temp) that a killed or crashed run left behind, gated on no live holder and — for pid-named trees — a dead pid, so the per-uid tmpfs quota has a floor the pack controls. |

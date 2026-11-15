@@ -22,7 +22,8 @@
 #   patrol-finding.sh --key <situation-key> --cleared --message <text>
 #                     [--about <bead-id>] [--scope <slug>] [--rig <rig>]
 #                     [--dry-run]
-# Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml,
+# Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml
+# and its assets/scripts/seat-progress.sh,
 # formulas/mol-refinery-patrol.toml, formulas/mol-dog-shutdown-dance.toml,
 # mol-polecat-work's refusals of a work bead it cannot read, the refinery
 # reconcile's assets/scripts/merge-tail-report.sh and

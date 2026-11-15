@@ -493,13 +493,12 @@ why a reader must know it, and the work that retires it.
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
   the memory intake.
-- **The pack still recovers stuck sessions itself.** The witness and the deacon
-  still file warrants on sessions they judge stuck, the `dog` pool still kills
-  one its probes find silent, and `quota-park-nudge.sh` still nudges a session
-  parked behind a provider limit. So a warrant can still end a session, and the
-  witness's finding on a seat that prints while its work stands still is not
-  built yet. The session-liveness implementation (tk-1tfzr71.138) files the
-  units that retire each of these.
+- **The pack still recovers stuck sessions itself.** No patrol files a warrant,
+  but the `dog` pool still kills a session its probes find silent when a
+  warrant names one, and `quota-park-nudge.sh` still nudges a session parked
+  behind a provider limit. So a warrant filed by hand can still end a session.
+  The session-liveness units retire both: the dog, its dance and the warrant
+  bead (tk-1tfzr71.155), then quota-park nudging (tk-1tfzr71.157).
 - **A sitting does not edit an open PR's branch.** A ruling on an open PR still
   files a rework a polecat runs. A unit that waits on the review-lanes member
   (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it

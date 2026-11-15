@@ -1,17 +1,9 @@
 #!/usr/bin/env bash
-# Hermetic test for the two witness-patrol blocks that file work: warrant-file,
-# which stamps the dog pool's address, and bug-file, which stamps none, because
-# a pack defect is new work and waits, held, for the operator's placement. It also
-# holds every step of the formula to the rule that no address is built without
-# the resolver; refinery-stuck-handoff.test.sh runs the queue read that
-# resolves.
-#
-# The witness addresses agents at two different scopes, and the qualifier one
-# needs is exactly the qualifier the other must not carry. The warrant block is
-# run here against the real resolve-route.sh over a roster where the rendered
-# `{{binding_prefix}}<role>` form is WRONG, so a block that stamped what the
-# template rendered would file an address nothing claims and still exit clean.
-# Stubbed gc and git; no live city, Dolt or network.
+# Hermetic test for the two witness-patrol blocks that file work, neither of
+# which stamps an address: no-progress-finding, one call to seat-progress.sh,
+# and bug-file, which holds a pack defect for placement. It also holds every
+# step of the formula to resolving each address it builds. Stubbed gc and
+# patrol-finding.sh; no live city, Dolt or network.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,15 +26,16 @@ extract() { awk -v n="$1" '
   $0 ~ "^[[:space:]]*# <<< " n "[[:space:]]*$" {inb=0}
   inb' "$TOML"; }
 
-# {{binding_prefix}} is substituted exactly as the materializer does it.
-render() { printf '%s\n' "$1" | sed 's|{{binding_prefix}}|gc-toolkit.|g'; }
+# {{binding_prefix}} is substituted exactly as the materializer does it, and
+# <bead> as the witness fills it from the row it is judging.
+render() { printf '%s\n' "$1" | sed -e 's|{{binding_prefix}}|gc-toolkit.|g' -e 's|<bead>|tk-claim|g'; }
 
-WARRANT="$(extract warrant-file)"
+PROGRESS="$(extract no-progress-finding)"
 BUG="$(extract bug-file)"
-[ -n "$WARRANT" ] && ok "warrant-file block extracted" || bad "warrant-file block EMPTY — markers missing from $TOML"
+[ -n "$PROGRESS" ] && ok "no-progress-finding block extracted" || bad "no-progress-finding block EMPTY — markers missing from $TOML"
 [ -n "$BUG" ] && ok "bug-file block extracted" || bad "bug-file block EMPTY — markers missing from $TOML"
 
-echo "# the warrant writes no address of its own, and the bug writes none at all"
+echo "# neither block writes an address of its own"
 # Inside a block, {{binding_prefix}} belongs in exactly three places: the
 # binding a block asks gc for the pack's scripts under, an argument to the
 # resolver, and a diagnostic naming what failed to resolve. Anywhere else it is
@@ -51,8 +44,10 @@ PACK_CALL="\$(b='{{binding_prefix}}'; gc \"\${b%.}\" scripts-dir)"
 unpack() { awk -v c="$PACK_CALL" '{ while ((i = index($0, c)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(c)); print }'; }
 stray() { printf '%s\n' "$1" | unpack | grep -n '{{binding_prefix}}' \
   | grep -v 'resolve-route.sh' | grep -vE '^[0-9]+: *echo ' || true; }
-has "$WARRANT" 'resolve-route.sh' "warrant-file resolves its address"
-eq "$(stray "$WARRANT")" "" "warrant-file renders no address it does not resolve"
+has "$PROGRESS" "$PACK_CALL/seat-progress.sh\" --bead <bead>" "no-progress-finding is one call to seat-progress.sh on the row's bead"
+eq "$(stray "$PROGRESS")" "" "no-progress-finding renders no address"
+hasnt "$PROGRESS" 'resolve-route.sh' "no-progress-finding asks the resolver for no agent"
+hasnt "$PROGRESS" 'gc.routed_to' "no-progress-finding stamps no route"
 # A pack defect is held for placement, so the bug block names no pool at all:
 # routing it is the placement sitting's move.
 hasnt "$BUG" '{{binding_prefix}}' "bug-file renders no address"
@@ -69,27 +64,39 @@ FORMULA_STRAY=$(unpack < "$TOML" | grep -n '{{binding_prefix}}' \
   | grep '{{binding_prefix}}' | grep -v 'resolve-route.sh' | grep -vE '^[0-9]+: *echo ' || true)
 eq "$FORMULA_STRAY" "" "every {{binding_prefix}} in the formula is resolved, a diagnostic, or forwarded to the next pour"
 
-# The pack gc names for `gc gc-toolkit scripts-dir`, holding a copy of the real
-# resolver so $SCRIPTS resolution is exercised without reaching the live tree.
+# The pack gc names for `gc gc-toolkit scripts-dir`: the real seat-progress.sh
+# and the library it sources, beside a patrol-finding.sh that records the
+# filing one argument per line.
 RIGROOT="$TMP/rig"; mkdir -p "$RIGROOT/assets/scripts"
-cp "$ROOT/assets/scripts/resolve-route.sh" "$ROOT/assets/scripts/file-warrant.sh" "$RIGROOT/assets/scripts/"
-chmod +x "$RIGROOT/assets/scripts/resolve-route.sh" "$RIGROOT/assets/scripts/file-warrant.sh"
+cp "$ROOT/assets/scripts/seat-progress.sh" "$ROOT/assets/scripts/bd-lib.sh" "$RIGROOT/assets/scripts/"
+chmod +x "$RIGROOT/assets/scripts/seat-progress.sh"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$RIGROOT/assets/scripts/patrol-finding.sh" <<'STUB'
+for a in "$@"; do printf '%s\n' "$a"; done >> "${STUB_FINDING_LOG:?}"
+echo "patrol-finding: filed tk-find for the stub"
+STUB
+chmod +x "$RIGROOT/assets/scripts/patrol-finding.sh"
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
+if [ "${1:-} ${2:-}" = "bd --db" ]; then
+  [ "${3:-}" = "${STUB_CITY_DB:?}" ] || { echo "unexpected store: ${3:-}" >&2; exit 99; }
+  case "${4:-}" in
+    show) printf '%s\n' "${STUB_SESSION_BEAD:?}" ;;
+    sql)  printf '%s\n' '[{"newest":null}]' ;;
+    *) echo "unexpected gc invocation: $*" >&2; exit 99 ;;
+  esac
+  exit 0
+fi
 case "${1:-} ${2:-}" in
   "gc-toolkit scripts-dir")
     [ -n "${STUB_PACK:-}" ] || exit 1
     printf '%s/assets/scripts\n' "$STUB_PACK" ;;
-  "agent list")
-    [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }
-    printf '%s\n' "${STUB_AGENTS:-}" ;;
-  "session list")
-    [ -n "${STUB_SESSIONS_FAIL:-}" ] && { echo "gc: session list unavailable" >&2; exit 1; }
-    printf '%s\n' "${STUB_SESSIONS:-{\"sessions\":[]}}" ;;
-  "bd list")   printf '%s\n' "${STUB_OPEN:-[]}" ;;
+  "agent list") printf '%s\n' "${STUB_AGENTS:-}" ;;
+  "session list") printf '%s\n' "${STUB_SESSIONS:?}" ;;
+  "bd show") printf '%s\n' "${STUB_CLAIM:?}" ;;
+  "bd sql") printf '%s\n' "${STUB_RIG_NEWEST:?}" ;;
   "bd create")
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: bd create failed" >&2; exit 1; }
     printf '%s\n' "${STUB_CREATE:-{\"id\":\"tk-new\"}}" ;;
@@ -102,72 +109,59 @@ exit 1
 STUB
 chmod +x "$BIN/gc" "$BIN/git"
 export PATH="$BIN:$PATH"
+unset GC_PATROL_FINDING_TOOL GC_BD_LIB BEADS_DIR
 export STUB_PACK="$RIGROOT" GC_RIG_ROOT="" GC_RIG=gc-toolkit
-export STUB_GC_LOG="$TMP/gc.log"
-# The roster file-warrant.sh resolves the wedged OWNER against. The witness owner
-# is a /-bearing agent address (an assignee); its session id is what the warrant
-# must carry, since dance-probe.sh refuses the slash form.
-export STUB_SESSIONS='{"sessions":[
-  {"id":"hq-wisp-conv2","alias":"gc-toolkit/gc-toolkit.converse-2","session_name":"gc-toolkit--gc-toolkit__converse-2-pool","state":"active"},
-  {"id":"sess-1","alias":"gc-toolkit/gc-toolkit.thing","session_name":"s-sess-1","state":"active"}]}'
+export GC_CITY_PATH="$TMP/city" STUB_CITY_DB="$TMP/city/.beads"
+export STUB_GC_LOG="$TMP/gc.log" STUB_FINDING_LOG="$TMP/finding.log"
 
-# run <rendered-block-file> <prelude> -> transcript in OUT, gc calls in LOG
+# A polecat's claim, its pane printing now, its session a pool seat that woke
+# five hours ago, and its newest write four hours old.
+NOW=$(date +%s)
+# The fixture's values are exported once, so each case assigns them plainly.
+export STUB_CLAIM STUB_SESSIONS STUB_SESSION_BEAD STUB_RIG_NEWEST
+ago() { jq -rn --argjson s "$(( NOW - $1 ))" '$s | todate'; }
+STUB_CLAIM='[{"id":"tk-claim","status":"in_progress","assignee":"lx-wisp-seat1","metadata":{"gc.session_id":"lx-wisp-seat1"}}]'
+STUB_SESSIONS="{\"sessions\":[{\"id\":\"lx-wisp-seat1\",\"agent_name\":\"gc-toolkit/gc-toolkit.polecat-1\",\"state\":\"active\",\"last_active\":\"$(ago 5)\",\"created_at\":\"$(ago 21600)\"}]}"
+STUB_SESSION_BEAD="[{\"id\":\"lx-wisp-seat1\",\"metadata\":{\"pool_managed\":\"true\",\"last_woke_at\":\"$(ago 18000)\"}}]"
+STUB_RIG_NEWEST="[{\"newest\":\"$(ago 14400)\"}]"
+
+# run <rendered-block-file> <prelude> -> transcript in OUT, gc calls in LOG,
+# the finding's arguments in FILED
 run() {
-  : > "$STUB_GC_LOG"
+  : > "$STUB_GC_LOG"; : > "$STUB_FINDING_LOG"
   OUT=$( { printf '%s\n' "$2"; cat "$1"; } | bash 2>&1 ); RC=$?
-  LOG=$(cat "$STUB_GC_LOG")
+  LOG=$(cat "$STUB_GC_LOG"); FILED=$(cat "$STUB_FINDING_LOG")
 }
-render "$WARRANT" > "$TMP/warrant.sh"
+arg() { printf '%s\n' "$FILED" | awk -v f="$1" 'p { print; exit } $0 == f { p = 1 }'; }
+render "$PROGRESS" > "$TMP/progress.sh"
 render "$BUG" > "$TMP/bug.sh"
-bash -n "$TMP/warrant.sh" && ok "rendered warrant-file is valid bash" || bad "warrant-file failed bash -n"
+bash -n "$TMP/progress.sh" && ok "rendered no-progress-finding is valid bash" || bad "no-progress-finding failed bash -n"
 bash -n "$TMP/bug.sh" && ok "rendered bug-file is valid bash" || bad "bug-file failed bash -n"
 
-WARRANT_PRELUDE='OWNER=gc-toolkit/gc-toolkit.converse-2; REASON="No progress on tk-a for 6h"'
+echo "# no-progress-finding: a printing pool seat with no write for four hours"
+run "$TMP/progress.sh" ""
+eq "$RC" 0 "the block exits 0"
+has "$LOG" 'gc-toolkit scripts-dir' "it finds seat-progress.sh through the pack lookup"
+eq "$(arg --key)" "no-progress.lx-wisp-seat1" "the finding is keyed on the seat's session"
+eq "$(arg --about)" "tk-claim" "and is about the bead the row named"
+eq "$(arg --scope)" "witness-findings" "among the witness's findings"
+hasnt "$FILED" 'routed_to' "the finding carries no route"
+hasnt "$FILED" 'dog' "and addresses no dog"
+hasnt "$LOG" 'agent list' "so no roster is read for an address"
+hasnt "$LOG" 'session kill' "and the seat is not killed"
+has "$OUT" "reported lx-wisp-seat1" "and the step's line says what it judged"
+
+echo "# no-progress-finding: the same seat with a write ten minutes ago"
+STUB_RIG_NEWEST="[{\"newest\":\"$(ago 600)\"}]"
+run "$TMP/progress.sh" ""
+eq "$FILED" "" "a seat that wrote recently gets no finding"
+has "$OUT" "spared lx-wisp-seat1" "and the line says it was spared"
+eq "$RC" 0 "and the step keeps running"
+
 BUG_PRELUDE='TITLE="submit-and-exit strands pushed work"; BODY="the branch-shape gate re-runs against a detached HEAD"'
 
-echo "# the dog is city-scoped here (the bare rendered identity is live), and the"
-echo "# owner is a /-bearing agent address that must resolve to a session id"
-export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"},
-  {"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}'
-export STUB_OPEN='[]'
-run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
-has "$LOG" 'bd create' "a wedged session with no open warrant files one"
-has "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "routed at the city-scoped dog, unqualified"
-has "$LOG" '"warrant.target":"hq-wisp-conv2"' "the /-bearing owner is resolved to its session id"
-hasnt "$LOG" '"warrant.target":"gc-toolkit/gc-toolkit.converse-2"' "the agent address never lands as a target dance-probe.sh would refuse"
-has "$LOG" '"warrant.reason":"No progress on tk-a for 6h"' "and the reason as given"
-
-echo "# the same block, a city whose dog is rig-scoped: the rendered form is now wrong"
-export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.dog"}]}'
-run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
-has "$LOG" '"gc.routed_to":"gc-toolkit/gc-toolkit.dog"' "the warrant is routed at the identity that is live"
-hasnt "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "not at the one the template rendered"
-
-echo "# a reason carrying a double quote cannot break the metadata payload"
-run "$TMP/warrant.sh" 'OWNER=sess-1; REASON="bead \"tk-a\" stale 6h"'
-has "$LOG" 'bd create' "the warrant is still filed"
-printf '%s\n' "$LOG" | grep -F 'bd create' | sed 's/^.*--metadata //' | jq -e . >/dev/null 2>&1 \
-  && ok "and its metadata is still parseable JSON" || bad "the metadata payload did not survive the quote"
-
-echo "# no live dog: refuse rather than file an address nothing claims"
-export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}'
-run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
-hasnt "$LOG" 'bd create' "nothing is filed"
-hasnt "$LOG" 'bd list' "and the dedup query is not even reached"
-has "$OUT" "file a human gate on the bead instead of the warrant" "the step is told what to do instead"
-eq "$RC" 0 "and the patrol step survives the refusal rather than aborting mid-sweep"
-
-echo "# an open warrant for the same target still suppresses a second one"
-export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"}]}'
-export STUB_OPEN='[{"id":"tk-old"}]'
-run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
-hasnt "$LOG" 'bd create' "the dedup survives the resolver"
-has "$OUT" "tk-old" "and names the warrant already open"
-export STUB_OPEN='[]'
-
 echo "# bug-file: a reported pack defect waits for the operator's placement"
-export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"},
-  {"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}'
+export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}'
 run "$TMP/bug.sh" "$BUG_PRELUDE"
 has "$LOG" 'bd create' "a reported pack defect is filed as a bug"
 has "$LOG" '-t bug' "typed as one"
@@ -184,7 +178,7 @@ hasnt "$LOG" 'bd update' "the hold is not a second write that can fail behind a 
 hasnt "$LOG" 'set-state' "…nor a set-state after the create"
 
 echo "# a city with no live polecat pool still files the bug"
-export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"}]}'
+export STUB_AGENTS='{"agents":[]}'
 run "$TMP/bug.sh" "$BUG_PRELUDE"
 has "$LOG" '--labels hold:mayor' "holding for placement needs no pool to exist"
 eq "$RC" 0 "and the step keeps running"
@@ -203,15 +197,6 @@ run "$TMP/bug.sh" "$BUG_PRELUDE"
 has "$OUT" "reported no id" "the failure is reported"
 eq "$RC" 0 "and the step keeps running"
 unset STUB_CREATE_FAIL
-
-echo "# an unreadable roster files the work rather than muting the witness"
-export STUB_AGENTS_FAIL=1
-run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
-has "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "the warrant goes out on the rendered address"
-has "$OUT" "UNVERIFIED" "marked unproven"
-run "$TMP/bug.sh" "$BUG_PRELUDE"
-has "$LOG" '--labels hold:mayor' "and the bug is held for placement, which reads no roster"
-unset STUB_AGENTS_FAIL
 
 echo
 echo "passed: $PASS   failed: $FAIL"

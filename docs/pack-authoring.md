@@ -559,12 +559,12 @@ unreadable roster is the absence of proof rather than proof of an empty city,
 so there the name comes back unchanged on exit 3 and the caller files
 unverified rather than not at all.
 
-The witness addresses both scopes and resolves at both sites: it files a
-warrant to the city-scoped dog and reads the rig-scoped refinery's queue. Its
-recipes are the `warrant-file` and `refinery-stuck-handoff` blocks in
-`formulas/mol-witness-patrol.toml`, which `assets/scripts/witness-route.test.sh`
-and `assets/scripts/refinery-stuck-handoff.test.sh` execute as extracted from
-the formula.
+The witness resolves the rig-scoped refinery's identity before it reads that
+queue. Its recipe is the `refinery-stuck-handoff` block in
+`formulas/mol-witness-patrol.toml`, which
+`assets/scripts/refinery-stuck-handoff.test.sh` executes as extracted from the
+formula, and `assets/scripts/witness-route.test.sh` holds every step of that
+formula to resolving each address it builds.
 
 ## Refresh procedure
 
