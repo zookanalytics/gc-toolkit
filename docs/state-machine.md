@@ -646,9 +646,10 @@ review bead carrying it. A store that will not take the record costs a
 re-run: signoff exits 2 with nothing posted and the review left open.
 
 Pre-open, the verdict body is read back off the same bead on the same terms.
-Its notes are the only copy: `pr-open.sh` replays them as the PR's first
-comment when it opens one, and a request-changes child names the bead it came
-from in `source_review_bead` and has nowhere else to read its findings. So an
+Its notes are the only copy: when `pr-open.sh` opens the PR, it replays every
+pre-open check's verdict, each as a comment of its own read from that check's
+latest review bead, and a request-changes child names the bead it came from in
+`source_review_bead` and has nowhere else to read its findings. So an
 append that did not land also costs a re-run, rather than a backing or a
 rework child standing on findings nobody can read.
 

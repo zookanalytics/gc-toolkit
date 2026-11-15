@@ -14,8 +14,9 @@
 # PR + supersede note; same-head close is a human decision left alone); holds
 # gating the create path; the all-lanes-green gate over every check the anchor
 # declares, which no head move disturbs; the moved-head refusal on the created
-# PR; the comment-not-approval verdict replay, which starts at the last line in
-# the shape a verdict opens with and replays notes with no such line whole; and
+# PR; the comment-not-approval verdict replay, which gives each pre-open check
+# that signed a comment of its own, starts at the last line in the shape a
+# verdict opens with and replays notes with no such line whole; and
 # the de-duplicated ## Summary
 # heading. The phase model: a draft create when an open-as-draft check gates the
 # PR, the draft-to-ready arm (its prefilter, holds, must-fix, loud enumeration
@@ -470,6 +471,34 @@ printf '%s' "$(prrow 79 OPEN polecat/c3 sha-c3 main)" > "$GH_DIR/pr_view_79.json
 ghlog=$(cat "$STUB_GH_LOG")
 has "$ghlog" "--body PM: approve. Needs you: decide whether the board shows parked work." "the replay opens with the later verdict's first line"
 hasnt "$ghlog" "Nothing needs you" "…and carries nothing of the earlier one"
+
+echo "# every pre-open check that signed replays its own verdict, each as a comment of its own"
+# Before the PR exists each check's verdict lives only in its own review bead's
+# notes, so a replay that read one bead would leave every other check's verdict,
+# and the decision it asks, off the PR.
+lane_rev() { # anchor lane updated_at notes
+  jq -nc --arg a "$1" --arg l "$2" --arg u "$3" --arg n "$4" '{id: ("rev-" + $a + "-" + $l), status: "closed", assignee: "",
+    notes: $n, updated_at: $u, metadata: {task_kind: "review", anchor_bead: $a, check_name: $l,
+    reviewed_oid: ("sha-" + ($a | ascii_downcase)), signoff_verdict: "approve"}}'
+}
+store "[$(pre C4 polecat/c4 '' 'correctness,pm'),
+        $(lane_rev C4 correctness 2026-11-01T08:00:00Z "Correctness: approve. Needs you: decide whether preview access needs a passkey.
+
+Anchor: C4 — check.correctness @ sha-c4"),
+        $(lane_rev C4 pm 2026-11-01T09:00:00Z "PM: approve. Nothing needs you.
+
+Anchor: C4 — check.pm @ sha-c4")]"
+echo "sha-c4" > "$GH_DIR/head_polecat_c4"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/80"
+printf '%s' "$(prrow 80 OPEN polecat/c4 sha-c4 main)" > "$GH_DIR/pr_view_80.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#80" "the PR was opened"
+ghlog=$(cat "$STUB_GH_LOG")
+eq "$(grep -c '^PRCOMMENT 80$' "$STUB_GH_LOG")" "2" "each check that signed is replayed as a comment of its own"
+has "$ghlog" "--body Correctness: approve. Needs you: decide whether preview access needs a passkey." \
+  "the check that signed first reaches the PR, opening with its own first line and its ask"
+has "$ghlog" "--body PM: approve. Nothing needs you." "…and so does the check that signed last"
 
 echo "# the body summarizes the diff, and demotes the dispatch text"
 # A reviewer who was not in the originating conversation opens this body. The

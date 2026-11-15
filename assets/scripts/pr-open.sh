@@ -14,8 +14,8 @@
 # (finding.sh); `gh pr create` pinned to origin — a draft when the check_set
 # names an open-as-draft check, ready otherwise — body summarizing the polecat's
 # PR summary with the dispatch text demoted (the description only when no
-# summary was carried), read back BY NUMBER, refuse a moved head, replay the
-# recorded verdict as a COMMENT (never an approval);
+# summary was carried), read back BY NUMBER, refuse a moved head, replay each
+# pre-open check's recorded verdict as a COMMENT of its own (never an approval);
 # then ONE lifecycle.sh transition to pull_request carrying
 # pr_url/pr_number/merged_target. Every failure leaves pre_open_gate.
 # A second arm flips a draft the refinery opened to ready once its pre-open and
@@ -690,22 +690,33 @@ GATES
     skipped=$((skipped + 1)); continue
   fi
 
-  # Replay the recorded verdict as a COMMENT — the city never approves (#185).
-  # It opens with the verdict's own first line, as every review comment does,
-  # and the comment-only note closes it.
-  REVIEW_ID=$(bd_anchor_children "$id" closed,open,in_progress \
-    | jq -r '[ .[] | select(((.metadata.task_kind // "") | tostring) == "review") ]
-             | sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
-  VERDICT=""
-  [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \
-    | jq -r '.[0].notes // ""' 2>/dev/null | verdict_body)
-  if [ -n "$VERDICT" ]; then
+  # Replay every pre-open check's recorded verdict as a COMMENT of its own, since
+  # the city never approves. Before the PR exists, signoff.sh records each
+  # check's verdict only in the notes of that check's review bead, so a verdict
+  # not replayed here never reaches the PR. A check's verdict is the one its
+  # latest review bead carries, matched by check_name as lane-state.sh matches
+  # it. Each comment opens with its verdict's own first line, as every review
+  # comment does, and the comment-only note closes it.
+  REVIEWS=$(bd_anchor_children "$id" closed,open,in_progress)
+  REPLAYED=""
+  while IFS= read -r g; do
+    [ -n "${g:-}" ] || continue
+    REVIEW_ID=$(printf '%s' "$REVIEWS" | jq -r --arg lane "$g" '[ .[]
+        | select(((.metadata.task_kind // "") | tostring) == "review")
+        | select((((.metadata.check_name // "") | tostring) | if . == "" then "correctness" else . end) == $lane) ]
+      | sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
+    VERDICT=""
+    [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \
+      | jq -r '.[0].notes // ""' 2>/dev/null | verdict_body)
+    [ -n "$VERDICT" ] || continue
     "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
       --body "$(printf '%s\n\nPre-open signoff (comment-only — not an approval).' "$VERDICT")" >/dev/null 2>&1 || true
-  else
-    "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
-      --body "Pre-open checks signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
-  fi
+    REPLAYED=1
+  done <<GATES
+$PREOPEN_GATES
+GATES
+  [ -n "$REPLAYED" ] || "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
+    --body "Pre-open checks signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
   [ -n "$SUP_NUM" ] && "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$SUP_NUM" \
     --body "Superseded by #$PR_NUMBER: branch \`$branch\` was re-implemented and re-gated at \`${head_oid:0:8}\`." >/dev/null 2>&1 || true
 
