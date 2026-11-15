@@ -405,9 +405,10 @@ of three states. The distiller formula gives the command for each.
   would change the call. When the window ends with no new evidence, dismiss
   it, but only when no observation or memory note is left unjudged, because
   any of them may be its recurrence. A run that leaves some unjudged, a gated
-  run with observations pending or a run whose due notes outnumber what it
-  judged, defers the hold to the next run instead, with a reason that says it
-  waits for them to be judged. A survivor the per-run cap dropped is deferred
+  run with observations pending, a run whose due notes outnumber what it
+  judged, or a run whose memory intake could not read a memory directory,
+  defers the hold to the next run instead, with a reason that says it waits
+  for them to be judged. A survivor the per-run cap dropped is deferred
   to the next run as well, and the next run judges each again.
 
 A pattern this run did not judge is decided from its record: its edges

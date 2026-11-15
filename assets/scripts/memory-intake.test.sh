@@ -538,7 +538,7 @@ has "$ERR" "cannot read every note in $U" "a note that cannot be read stops the 
 eq "$(cmp -s "$LIST" "$B/list.before" && echo same || echo changed)" "same" "and its list stays as it was"
 eq "$(due_json --count)" 0 "with every judgment held"
 
-echo "── a listing that fails part way takes out no link ──"
+echo "── a listing that fails part way takes out no link, and due leaves its directory out ──"
 city partial
 rig p tk; rig r tk
 P=$(memdir "$B/rigs/p"); R=$(memdir "$B/rigs/r")
@@ -553,6 +553,13 @@ has "$(cat "$P/MEMORY.md")" "- [P](p.md) — p" "the index keeps its pointer to 
 has "$(cat "$P/MEMORY.md")" "- [A](hub-a.md) — a" "and its pointer to the collection note"
 eq "$(cat "$P/hub-a.md" 2>/dev/null)" "- [P](p.md) — p" "the collection note stays with its pointer"
 eq "$(find "$STATE" -path '*/removed/*' | grep -c .)" 0 "and no text is kept for a removal"
+has "$OUT" "1 due in the directories it could read" "the count says a directory is left out"
+STUB_LIST_FAIL=$P PATH="$SB/list-bin:$PATH" run due
+eq "$RC" 1 "due fails while a directory cannot be listed"
+eq "$(printf '%s' "$OUT" | jq -r '[.[].memory_file | sub(".*/"; "")] | join(",")')" "r.md" "and prints the due notes of the directory it read"
+has "$ERR" "cannot list $P;" "naming the directory it left out"
+STUB_LIST_FAIL=$P PATH="$SB/list-bin:$PATH" run due --count
+eq "$RC $OUT" "1 1" "--count counts the directory it read, and fails"
 run read
 eq "$RC" 0 "a read that lists every directory succeeds"
 eq "$(printf '%s\n' "$OUT" | tail -1)" "memory-intake: 2 due" "and counts the due notes of both"

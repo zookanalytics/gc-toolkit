@@ -215,7 +215,8 @@ if [ ! -s "$RIGSET" ]; then
 fi
 
 # memory-intake.sh sits beside the claim-close.sh that $SC names. It prints
-# the due notes, or [] when it cannot read them.
+# the due notes of each memory directory it can read, or [] when it can read
+# none, and says which it cannot read.
 PENDING=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX"); "${SC%/*}/memory-intake.sh" due --limit {{memory_notes_per_run}} > "$PENDING"
 # `while read < file`, never `for R in $RIGS` (zsh does not word-split).
 # Open a store by PATH when known (`gc bd -C <path>` — also reaches HQ),
@@ -474,9 +475,10 @@ gc bd update "$PATTERN" --set-metadata "promotion_hold=<the block, such as gate1
 gc bd defer "$PATTERN" --until "+{{pattern_defer_days}}d" --reason "<the recurrence that would change the call>"
 ```
 A hold back in `bd ready` with no new evidence has had its window: dismiss it.
-If this run leaves observations or due memory notes unjudged, one may be its
-recurrence, so defer it `--until +12h` with a reason that says so, as the
-rubric defers a survivor §6 dropped at the cap.
+If this run leaves observations or due memory notes unjudged, or the memory
+intake said it could not read a memory directory, one may be its recurrence,
+so defer it `--until +12h` with a reason that says so, as the rubric defers a
+survivor §6 dropped at the cap.
 
 Then close this step (non-terminal; the session carries the survivors and
 the consumed-observation map forward):

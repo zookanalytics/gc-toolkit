@@ -17,7 +17,8 @@
 # due    The due notes, oldest first, as a JSON array for the pending set
 #        (memory_ref, memory_kind, memory_dir, memory_file, memory_due,
 #        memory_prior, created_at, and memory_text for a collection entry).
-#        --limit N prints the N oldest, and --count how many are due.
+#        --limit N prints the N oldest, and --count how many are due. A
+#        directory it cannot read is left out, as it says, and it exits 1.
 # apply  One decision a line, by the ref `due` gave: `<ref> waits <bead-id>`,
 #        `<ref> next <YYYY-MM-DD> [ask-use]` or `<ref> drop`. ask-use adds to
 #        a note the line that asks its users to record the days they use it,
@@ -1117,13 +1118,15 @@ home_rig() {
   [ -f "$repo/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$repo/pack.toml"
 }
 
-due_all() {  # prints the due rows of every directory
-  local dir i=0
+# due_all — the due rows of each directory it can read. 1 when it cannot read
+# one, as scan says, since that directory's due notes are then not among them.
+due_all() {
+  local dir i=0 rc=0
   for dir in "${DIRS[@]}"; do
     i=$((i + 1))
-    scan "$dir" "$WORK/due.$i" || continue
-    due_rows "$dir" "$WORK/due.$i"
+    if scan "$dir" "$WORK/due.$i"; then due_rows "$dir" "$WORK/due.$i" || rc=1; else rc=1; fi
   done
+  return "$rc"
 }
 
 cmd_read() {
@@ -1162,12 +1165,16 @@ cmd_read() {
   settle || rc=1
   say "waits ended: $SETTLED_LEFT unit(s) removed with a fix landed, their text kept; $SETTLED_DUE due again with no fix landed"
   [ "$SETTLED_VETOED" = 0 ] || say "vetoed: $SETTLED_VETOED of those due again marked, so agents stop following the rule the operator vetoed"
-  say "$(due_all | grep -c .) due"
+  if due_all > "$WORK/read.due"; then
+    say "$(grep -c . "$WORK/read.due") due"
+  else
+    rc=1; say "$(grep -c . "$WORK/read.due") due in the directories it could read"
+  fi
   return "$rc"
 }
 
 cmd_due() {
-  local limit="" count=0 i ef rows
+  local limit="" count=0 i ef rows rc=0
   local -a args=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1182,8 +1189,10 @@ cmd_due() {
     return 1
   fi
   place_all
-  due_all > "$WORK/due.tsv"
-  if [ "$count" = 1 ]; then grep -c . "$WORK/due.tsv"; return 0; fi
+  # A directory it cannot read leaves its due notes out, so the notes of the
+  # others are printed and the exit is 1.
+  due_all > "$WORK/due.tsv" || rc=1
+  if [ "$count" = 1 ]; then grep -c . "$WORK/due.tsv"; return "$rc"; fi
   # The fields are joined unescaped: none holds a tab or a newline, and the
   # reads below take each backslash as written.
   jq -Rnr --argjson lim "${limit:-null}" '[inputs | split("\t")
@@ -1198,6 +1207,7 @@ cmd_due() {
          memory_file: (.[1] + "/" + .[4]), memory_due: .[6], memory_prior: .[7], created_at: .[0]}
         + (if .[8] != "" then {memory_text: $ARGS.named["t\($i)"]} else {} end))' < "$WORK/due.sel") || { echo '[]'; return 1; }
   printf '%s\n' "$rows"
+  return "$rc"
 }
 
 # The line that asks for a note's uses is a line that begins with the use mark,
