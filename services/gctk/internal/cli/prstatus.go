@@ -5,14 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
@@ -26,8 +24,12 @@ import (
 //
 // prstatus.Read gathers the facts through gcbdStore and decides nothing here
 // either: the helm board asks the same package through its own store, so the
-// labels, engage and the board read one definition. The cli tests pin GC_NO_API,
-// so every read answers from the same `gc bd` stub the shell acceptance drives.
+// labels, engage and the board read one definition. For a PR on Gas Town's
+// pending record it asks the pr domain's evaluator over the store, the GitHub
+// read the landing order saved on the bead among it (pr.FromStore), as the rig
+// board asks it through its listing, so they give one answer and none of them
+// reads GitHub. The cli tests pin GC_NO_API, so every read answers from the
+// same `gc bd` stub the shell acceptance drives.
 
 // prStatusProg is the name warnings carry: the script whose derivation this is,
 // because its callers grep those lines and the language behind the command is
@@ -44,15 +46,19 @@ the PR's own review threads or blocked verdict hold it. Both lists are empty
 arrays when nothing holds the PR.
 
 For a bead whose PR is on Gas Town's pending record, the status renders the pr
-domain's evaluator, which reads the PR on GitHub, and each condition not met
-follows the status on a line of its own, as <kind>: <detail>. For such a bead,
-held and reasons name the gates and the beads a person owes that hold it, and
-the review threads the evaluator finds waiting on the city's answer while no
+domain's evaluator over the store as it stands, the GitHub read the landing
+order saved on the bead among it, so the command reads no GitHub, and each
+condition not met follows the status on a line of its own, as <kind>:
+<detail>. A saved read that is absent, or is not of the PR at the head the
+store holds, names one condition, github-unread, in place of GitHub's, and the
+PR reads working until the landing order's next check, or needs-attention
+while something only a person clears holds it. For such a bead, held and
+reasons name the gates and the beads a person owes that hold it, and the
+review threads the saved read finds waiting on the city's answer while no
 work of the city's acts on them. Its --json object also carries "ready", the
-"head" and "target" the evaluator judged, and "conditions": [{"kind",
-"detail", "id", "value"}], an empty array when the PR is ready. The evaluator
-applies the pack's definition of feedback from the scripts directory
-GCTK_SCRIPTS_DIR names, or else the one gc names.
+"head" and "target" the evaluator judged, the saved read's while it is
+current, and "conditions": [{"kind", "detail", "id", "value"}], an empty
+array when the PR is ready.
 
 exit: 0 printed
       1 usage
@@ -86,9 +92,9 @@ func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 // prStatus prints the state prstatus.Derive returns for the facts prstatus.Read
 // gathers about the anchor, and with asJSON the values prstatus.Held and
 // prstatus.Reasons return beside it. For an anchor on Gas Town's pending record
-// it prints the state prstatus.Render gives the evaluator's answer instead, with
-// the conditions not met, and with asJSON the values prstatus.RenderHeld and
-// prstatus.RenderReasons return.
+// it prints the state prstatus.Render gives the evaluator's answer over the
+// store instead (answerFromStore), with the conditions not met, and with asJSON
+// the values prstatus.RenderHeld and prstatus.RenderReasons return.
 func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 	facts, err := prstatus.Read([]string{anchor}, gcbdStore{gcbd.New()})
 	f, answered := facts[anchor]
@@ -103,9 +109,9 @@ func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 	state := prstatus.Derive(f)
 	var ans *pr.Answer
 	if pr.OnRecord(f.MergeResult) {
-		a, err := evaluateReady(anchor)
+		a, err := answerFromStore(anchor)
 		if err != nil {
-			fmt.Fprintf(stderr, "%s: could not decide whether the PR %s owns is ready: %v; cannot derive a status\n", prStatusProg, anchor, err)
+			fmt.Fprintf(stderr, "%s: could not read what the store holds about the PR %s owns: %v; cannot derive a status\n", prStatusProg, anchor, err)
 			return 2
 		}
 		ans, state = &a, prstatus.Render(a, f)
@@ -238,51 +244,23 @@ func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
 	return out
 }
 
-// evaluateReady is the evaluation pr status prints, evaluate, which its tests
-// replace with an answer of their own.
-var evaluateReady = evaluate
-
-// evaluate asks the pr domain's evaluator whether the PR anchor owns is ready,
-// over readySources, and leaves the GitHub read it made unsaved.
-func evaluate(anchor string) (pr.Answer, error) {
-	src, err := readySources(anchor)
+// answerFromStore is the pr domain's evaluator's answer for the PR anchor owns,
+// over the store gc routes the anchor to, read through the ledger, and the
+// GitHub read the landing order saved on the bead (pr.FromStore). It reads no
+// GitHub and loads no definition of feedback. A read of the store that fails
+// returns its error and no answer.
+func answerFromStore(anchor string) (pr.Answer, error) {
+	l, err := ledger.Open("", anchor)
 	if err != nil {
 		return pr.Answer{}, err
 	}
-	ans, _, err := pr.Ready(src, anchor)
-	return ans, err
-}
-
-// readySources are what the evaluator reads for the PR anchor owns: the store
-// gc routes the anchor to, through the ledger, GitHub through gh on the host
-// the PR's URL names, and the pack's definition of feedback. The definition is
-// loaded in the checkout of the rig whose store holds the anchor, the
-// directory that holds the store's .beads, because pr-post.sh reads the
-// declaration of the posts that are not for review from the default branch of
-// the checkout it runs in. The directory gctk runs in can be another rig's.
-func readySources(anchor string) (pr.Sources, error) {
-	db, err := gcbd.New().Route(anchor)
-	if err != nil {
-		return pr.Sources{}, err
-	}
-	l, err := ledger.Open(db)
-	if err != nil {
-		return pr.Sources{}, err
-	}
-	rule, err := feedbackIn(filepath.Dir(db))
-	if err != nil {
-		return pr.Sources{}, err
-	}
-	return pr.Sources{
-		Ledger:   l,
-		GitHub:   func(host string) pr.GitHub { return gh.New(host) },
-		Feedback: rule,
-	}, nil
+	return pr.FromStore(l, anchor)
 }
 
 // feedbackIn loads the pack's definition of feedback in checkout, a rig's
 // clone, so the definition holds the posts that rig's default branch declares
-// not for review.
+// not for review. The landing order loads it in the clone it runs in
+// (landing).
 func feedbackIn(checkout string) (*feedback.Rule, error) {
 	scripts, err := feedback.ScriptsDir()
 	if err != nil {
