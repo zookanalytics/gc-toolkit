@@ -141,19 +141,28 @@ supersede) is `bead-rehome.sh`'s and the operator's — put it to the operator.
 marker and a note recording what you checked, freshness-stamped.
 `gc.work_outcome=no-op` is the work record of a close that ships no commit. The
 note and the reason say what the close records: `done` for a store-only exit's
-brief, whose record finished the work, and `no work` for a first reaction's:
+brief, whose record finished the work, and `no work` for a first reaction's.
+Write your text on the lines between each quoted here-document's delimiters,
+where every character stays as you wrote it:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 [ -n "$WORK_BEAD_ID" ] || { echo "mol-validate-close needs an input convoy with exactly one tracked member" >&2; exit 1; }
 gc bd update "$WORK_BEAD_ID" --set-metadata gc.work_outcome=no-op \
-  --append-notes "$(printf 'Validated <done, or no work> and closed (%s): <what you checked>.' "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
-gc bd close "$WORK_BEAD_ID" --reason "validated <done, or no work>: <one line>"
+  --append-notes "$(printf 'Validated <done, or no work> and closed (%s): %s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(cat <<'CHECKED'
+<what you checked>
+CHECKED
+)")"
+gc bd close "$WORK_BEAD_ID" --reason "$(cat <<'REASON'
+validated <done, or no work>: <one line>
+REASON
+)"
 ```
 
 **2b. ASK THE OPERATOR — any doubt.** The premise does not hold, there is real
 work, or the call is the operator's. Leave the bead OPEN and ask; do not close
-it. Record why on the bead's notes so the operator lands on the disagreement.
+it. Record why on the bead's notes so the operator lands on the disagreement,
+on the lines between the quoted here-document's delimiters as in 2a.
 The ask is a human gate on the bead under the key `validate-close`, which holds
 the bead until the operator answers. On a bead with an open child the ask is a
 conversation on the bead instead, because a gate on the parent would pause the
@@ -162,7 +171,10 @@ child's work:
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 [ -n "$WORK_BEAD_ID" ] || { echo "mol-validate-close needs an input convoy with exactly one tracked member" >&2; exit 1; }
-gc bd update "$WORK_BEAD_ID" --append-notes "$(printf 'Did not close (%s): <why the no-work conclusion did not hold, or why this is the operator/refinery to close>.' "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+gc bd update "$WORK_BEAD_ID" --append-notes "$(printf 'Did not close (%s): %s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(cat <<'WHY'
+<why the no-work conclusion did not hold, or why this is the operator/refinery to close>
+WHY
+)")"
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/gc-helm.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?human-gate.sh and gc-helm.sh not found in the pack}"
 # >>> validate-close-ask
