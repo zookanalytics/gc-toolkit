@@ -442,20 +442,26 @@ no warrant.
 ## Saved GitHub read
 
 - **Covers.** The `pr_github_read` key, declared as `githubReadKey` in
-  `services/gctk/pr/read.go`. Its writer is the landing order: `blocked`,
-  `requeued` and `decide` in `services/gctk/pr/landing.go`, and `admit` and
-  `runFailed` in `services/gctk/pr/admit.go`, save the read that `observe` in
-  `services/gctk/pr/read.go` makes. Its reader is `FromStore` in
+  `services/gctk/pr/read.go`, in the four parts `SavedRead` declares in
+  `services/gctk/pr/saved.go`. Its one writer is the one-PR update, `update`
+  and `save` in `services/gctk/pr/refresh.go`, which `Poll` there runs for each
+  PR whose cheap signs moved (`gctk pr poll`, from `orders/pr-poll.toml`) and
+  `Refresh` runs for one PR (`gctk pr refresh`). Its readers are `FromStore` in
   `services/gctk/pr/read.go`, which `answerFromStore` in
   `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
   `PRAnswers` in `services/gctk/listing/pr.go` calls for the rig board, from
-  `services/helm/internal/rigboard/gather.go`.
+  `services/helm/internal/rigboard/gather.go`, and the update itself, which
+  compares a PR's signs with the ones each part keeps (`moved` in
+  `services/gctk/pr/saved.go`).
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
-  of reading GitHub. The facts are the PR's state, draft flag, head and merge
-  state, the required checks at that head, the standing approvals and requests
-  for changes, the newest feedback in each comment space, and the review
-  threads waiting on the city's answer, all read at one head.
+  of reading GitHub, and against which a pass of the PR watch tells whether the
+  PR moved. The facts are the PR's state, draft flag, head and merge state, the
+  required checks at that head, the standing approvals and requests for
+  changes, the newest feedback in each comment space, the review threads
+  waiting on the city's answer and those unresolved, and the PR's labels, in
+  four parts that each keep the instant their read was sent and the cheap signs
+  read with it.
 - **Evidence.**
   - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor lists each
     open PR's number, title, URL, author, draft flag, merge state, base and head
@@ -487,8 +493,11 @@ no warrant.
     sub-issues and blocking links, and their labels through bd's GitHub client
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
-  - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
-- **Verified.** 2026-11-16, at `gastownhall/gascity` main c7eb6d2f43ca,
+  - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md),
+    and the search for the parts, their signs and their one writer is
+    [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
+    read at `gastownhall/gascity` main 9a4b1e718.
+- **Verified.** 2026-11-16, at `gastownhall/gascity` main 192fa2d39407,
   `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
   8cdfa796a8f5.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull

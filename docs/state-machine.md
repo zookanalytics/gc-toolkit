@@ -238,7 +238,12 @@ sends a PR on the record back to the PR's review run (`refinery-requeue.sh`),
 the landing order writes each later step through `gctk pr reconcile`
 ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)),
 and `gctk pr withdraw` sets the record's marker when it files a withdrawal on a
-record that carries none. The doctor checks the beads once they are written.
+record that carries none. The record's `pr_state` and `pr_last_checked_at` are
+the PR watch's, which writes them with GitHub's side of the PR
+([refinery-merge-cadence.md](refinery-merge-cadence.md#the-pr-watch)), so they
+say what GitHub showed when the watch last read the PR, where Gas Town's also
+record a read that could not decide. The doctor checks the beads once they are
+written.
 
 ```mermaid
 stateDiagram-v2
@@ -258,9 +263,9 @@ stateDiagram-v2
 | Value | Status, assignee | Meaning |
 |---|---|---|
 | no record | — | The bead has not landed and owns no PR on the record. A bead the landing order sends back to the refinery keeps its record, and one the refinery sends back to the pool keeps the PR it may reuse as `existing_pr`, so absence never means "rejected": `rejection_reason` says that. |
-| `pull_request_pending` | `blocked`, the refinery | The PR is open at the head the refinery validated, and the bead waits on its merge. The record names the PR (`pr_url`, `pr_number`, `pr_repo`), the validated head (`pr_head_sha`), `pr_state=open`, the intended target (`merged_target`), `blocked_reason` and when the landing order last read it (`pr_last_checked_at`). |
+| `pull_request_pending` | `blocked`, the refinery | The PR is open at the head the refinery validated, and the bead waits on its merge. The record names the PR (`pr_url`, `pr_number`, `pr_repo`), the validated head (`pr_head_sha`), the intended target (`merged_target`) and `blocked_reason`. The PR watch's one-PR update adds the PR's state as it last read it (`pr_state`) and when (`pr_last_checked_at`), with each write it makes on a bead on the record. |
 | `pull_request_head_changed` | open, the refinery | The PR is open at a head the refinery has not validated, such as after a person's push. The bead keeps `pr_head_sha` and records `existing_pr`, the head found (`observed_pr_head_sha`) and why (`rejection_reason`), and the refinery validates the new head and records it pending again, on the same PR. |
-| `mr_merged` | closed | The PR merged the validated head, and the merge commit is on the freshly fetched target. The record names `merged_sha`, `merged_target`, `pr_state=merged` and `pr_merged_at`. |
+| `mr_merged` | closed | The PR merged the validated head, and the merge commit is on the freshly fetched target. The record names `merged_sha`, `merged_target` and `pr_merged_at`, the merge's evidence. |
 | `pull_request_record_incomplete` | open, the refinery | A writer that died between the publication's two writes left the record half written, so the bead goes back to the refinery to be validated again, keeping the PR it may reuse. |
 | `pull_request_closed_unmerged` | `blocked` | The PR closed without merging. |
 | `pull_request_merged_unvalidated_head` | `blocked` | The PR merged a head the refinery did not validate. |
@@ -844,11 +849,11 @@ it leads to, and the verdict is what remains when neither stands. A hold that on
 For a PR on the pending record, the status renders the evaluator's answer for
 its anchor, with the same precedence (`prstatus.Render`, which `gctk pr status`
 prints). The evaluator decides over the store as it stands and the GitHub read
-the landing order saved on the bead, and reads nothing on GitHub, so the label
-and the rig board give one answer. It reads `merging` once the evaluator finds
-the PR ready, or approved with only the city's work left; `working` while it
-waits on the city's work and on an approval, or while the landing order has yet
-to read the PR on GitHub at the head the store holds; `needs-review` when only
+the PR watch's one-PR update saved on the bead, and reads nothing on GitHub, so
+the label and the rig board give one answer. It reads `merging` once the
+evaluator finds the PR ready, or approved with only the city's work left;
+`working` while it waits on the city's work and on an approval, or while the
+PR watch has yet to read the PR at the head the store holds; `needs-review` when only
 an approval, or the lift of a request for changes, is left; and
 `needs-attention` when something only a person clears holds it. The `held:`
 reasons are the gates and the beads a person owes that the walk below names,

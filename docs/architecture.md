@@ -77,7 +77,9 @@ flowchart LR
   ORD -->|every 60s| CAD
   ORD -->|landing order: one run per head| RUN
   ORD -->|landing order: ready, merge request| PR
-  ORD -->|landing order: record, GitHub read, then close| LEDGER
+  ORD -->|landing order: record, then close| LEDGER
+  ORD -.->|PR watch: asks what moved| PR
+  ORD -->|PR watch: GitHub read of a PR that moved| LEDGER
   CAD -->|reads + writes| LEDGER
   CAD -->|labels| PR
   BR --> PR
@@ -88,8 +90,9 @@ flowchart LR
 ```
 
 **Legend.** Solid = writes state. Dashed = reads without writing. Each write
-path that matters has one writer. The refinery writes landings, and the landing
-order writes merges and the GitHub read each PR's status is derived from.
+path that matters has one writer. The refinery writes landings, the landing
+order writes merges, and the PR watch's one-PR update writes the GitHub read
+each PR's status is derived from.
 `bead-rehome.sh` writes dispositions, the closes that name a successor. A PR's
 review run writes the PR's review result, for the last head the run judged.
 Everything else reads.
@@ -461,8 +464,8 @@ first. Either way the change is a decision on the record, not a drift.
   record.**
 - **No display reads GitHub.** The board, a PR's status label and
   `gctk pr status` derive a PR's status by the evaluator's one rule from the
-  GitHub read the landing order saved at its last check of the PR and the store
-  as it is at the read. Every reader of GitHub draws on one API allowance.
+  GitHub read the one-PR update saved on the PR's bead and the store as it is
+  at the read. Every reader of GitHub draws on one API allowance.
 - **Only the merge acts on a fresh read of GitHub,** and the saved GitHub read
   grants nothing. The evaluator's answer is computed at each read and stored
   nowhere.
@@ -508,11 +511,10 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
-- **The landing order still reads GitHub to decide, and watches only the
-  pending record.** It reads each pending record's PR itself rather than acting
-  from the bead, and it watches no PR off the pending record. It writes no
-  label, so a PR on the pending record keeps its last label once it merges,
-  closes or meets an exception. The units of tk-1tfzr71.149 retire it.
+- **The landing order still reads GitHub to decide.** It reads each pending
+  record's PR itself rather than acting from the bead. It writes no label, so
+  a PR on the pending record keeps its last label once it merges, closes or
+  meets an exception. The units of tk-1tfzr71.149 retire it.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds

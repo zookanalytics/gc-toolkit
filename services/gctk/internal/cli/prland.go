@@ -40,8 +40,9 @@ const runYield = 200 * time.Millisecond
 // seconds, measured on 2026-11-12: five for the PR's read and the evaluator's
 // six GitHub reads, and two for the store's reads and the write. Twenty of them
 // fit inside the order's 300-second time limit with room for GitHub answering
-// at half that speed, and the budget starts none in the last minute. A cycle
-// over 50 open records then takes three runs.
+// at half that speed, and the budget starts none in the last minute. A run
+// takes its records in a shuffled order, so over 50 open records a record waits
+// about two and a half runs on average.
 const (
 	defaultRunCount  = 20
 	defaultRunBudget = 4 * time.Minute
@@ -69,8 +70,8 @@ exit: 0 recorded
         written, or it moved between the two writes, so only the marker landed`
 
 const prReconcileLong = `One run of the landing order over the store's pending records. It takes up to
---count of the beads that carry the marker pr_reconcile_pending, the least
-recently checked first, and reads each record under the store's record lock,
+--count of the beads that carry the marker pr_reconcile_pending, in a shuffled
+order, and reads each record under the store's record lock,
 from its read of the record to its last write of it, waiting while another
 writer of the record holds it. It reads each PR from GitHub by its number:
 
@@ -120,13 +121,11 @@ ended without one, counting only runs that ended after the bead's last
 review-run-failed gate closed, it files a human gate on the bead keyed
 review-run-failed instead, naming both runs and how each ended.
 
-Each check of an open PR, at the validated head or at another, reads GitHub's
-side of it whole and saves that read on the bead as pr_github_read, in the
-write that records the check: the PR's state, draft flag, head and merge state,
-the required checks at that head, who approved or asked for changes, the newest
-feedback in each comment space and the review threads waiting on the city. A
-read that fails partway saves nothing, so the bead keeps the last whole read.
-The merge acts on the run's own read, never on the saved one.
+The run saves none of what it reads of GitHub: the one-PR update (gctk pr
+refresh) is the one writer of pr_github_read, pr_state and
+pr_last_checked_at. A check that leaves the record standing writes nothing
+but the removal of an error an earlier run recorded. The merge acts on the
+run's own read, never on the saved one.
 
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the run fetched it, once the lock is free, in a clone

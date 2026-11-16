@@ -30,6 +30,11 @@ func (r *recorded) run(args ...string) ([]byte, error) {
 			if strings.HasPrefix(a[1], "ERR:") {
 				return nil, errors.New(strings.TrimPrefix(a[1], "ERR:"))
 			}
+			// A GraphQL answer that carries errors: gh writes it to stdout and
+			// exits non-zero.
+			if body, ok := strings.CutPrefix(a[1], "PARTIAL:"); ok {
+				return []byte(body), errors.New("gh: exit status 1")
+			}
 			return []byte(a[1]), nil
 		}
 	}

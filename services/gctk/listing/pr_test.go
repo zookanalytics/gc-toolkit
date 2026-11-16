@@ -16,8 +16,8 @@ const validatedHead = "1111111111111111111111111111111111111111"
 
 // onRecord is the metadata of a bead whose PR, number n in acme/widgets, is on
 // Gas Town's pending record, validated at validatedHead into main with a review
-// result passed there, and with read saved on it as the landing order saves it,
-// none when read is nil.
+// result passed there, and with read saved on it in the parts the one-PR update
+// saves, none when read is nil.
 func onRecord(t *testing.T, n string, read *pr.GitHubRead) map[string]string {
 	t.Helper()
 	md := map[string]string{
@@ -26,13 +26,26 @@ func onRecord(t *testing.T, n string, read *pr.GitHubRead) map[string]string {
 		"review_results": `[{"head":"` + validatedHead + `","target":"main","passed":true}]`,
 	}
 	if read != nil {
-		raw, err := json.Marshal(read)
+		raw, err := json.Marshal(inParts(read))
 		if err != nil {
 			t.Fatal(err)
 		}
 		md["pr_github_read"] = string(raw)
 	}
 	return md
+}
+
+// inParts is r, GitHub's side of a PR at one head, in the four parts the one-PR
+// update saves it in, each read at r's instant.
+func inParts(r *pr.GitHubRead) *pr.SavedRead {
+	return &pr.SavedRead{
+		PR: &pr.SavedPR{ReadAt: r.ReadAt, URL: r.URL, Number: r.Number, Repository: r.Repository,
+			HeadBranch: r.HeadBranch, Base: r.Base, Head: r.Head, State: r.State, Draft: r.Draft, MergeState: r.MergeState},
+		Checks: &pr.SavedChecks{ReadAt: r.ReadAt, Head: r.Head, Runs: r.Checks},
+		Conversation: &pr.SavedConversation{ReadAt: r.ReadAt, Since: r.Since, Approvers: r.Approvers,
+			Requesters: r.Requesters, Feedback: r.Feedback, Awaiting: r.Awaiting, Unresolved: []string{}},
+		Labels: &pr.SavedLabels{ReadAt: r.ReadAt, Names: []string{}},
+	}
 }
 
 // readyRead is the read of PR 7 at validatedHead that leaves nothing to do:

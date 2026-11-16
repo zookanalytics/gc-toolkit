@@ -13,9 +13,9 @@ import (
 // pendingHead is the head the refinery validated for tk-a's PR.
 const pendingHead = "1111111111111111111111111111111111111111"
 
-// savedRead is the GitHub read the landing order saves of tk-a's PR at
-// pendingHead that leaves nothing to do, open, approved, CLEAN and its required
-// check passed, after edit changes it.
+// savedRead is the read the one-PR update saves of tk-a's PR at pendingHead
+// that leaves nothing to do, open, approved, CLEAN and its required check
+// passed, after edit changes it, in the parts the update saves it in.
 func savedRead(t *testing.T, edit func(*pr.GitHubRead)) string {
 	t.Helper()
 	r := &pr.GitHubRead{ReadAt: "2026-11-15T09:00:00Z", URL: "https://github.com/acme/widgets/pull/7", Number: 7,
@@ -25,7 +25,14 @@ func savedRead(t *testing.T, edit func(*pr.GitHubRead)) string {
 	if edit != nil {
 		edit(r)
 	}
-	raw, err := json.Marshal(r)
+	raw, err := json.Marshal(&pr.SavedRead{
+		PR: &pr.SavedPR{ReadAt: r.ReadAt, URL: r.URL, Number: r.Number, Repository: r.Repository,
+			HeadBranch: r.HeadBranch, Base: r.Base, Head: r.Head, State: r.State, Draft: r.Draft, MergeState: r.MergeState},
+		Checks: &pr.SavedChecks{ReadAt: r.ReadAt, Head: r.Head, Runs: r.Checks},
+		Conversation: &pr.SavedConversation{ReadAt: r.ReadAt, Since: r.Since, Approvers: r.Approvers,
+			Requesters: r.Requesters, Feedback: r.Feedback, Awaiting: r.Awaiting, Unresolved: []string{}},
+		Labels: &pr.SavedLabels{ReadAt: r.ReadAt, Names: []string{}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,8 +41,8 @@ func savedRead(t *testing.T, edit func(*pr.GitHubRead)) string {
 
 // pendingRows is a rig whose tk-a owns PR 7 on Gas Town's pending record, at
 // the blocked status the record writes, validated at pendingHead into main
-// with a review result passed there, and carrying read as the GitHub read the
-// landing order saved, none when read is empty. The old record's posture is
+// with a review result passed there, and carrying read as the read the one-PR
+// update saved, none when read is empty. The old record's posture is
 // left on it, approved, which prstatus.Derive reads as merging. With gated,
 // tk-a waits on tk-q, an open human gate. tk-o owns PR 8 on the old record,
 // approved.

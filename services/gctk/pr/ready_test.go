@@ -151,19 +151,34 @@ func (w *world) live(t *testing.T) (pr.Answer, *pr.GitHubRead) {
 	return ans, read
 }
 
-// withRead is the world's metadata with read saved on it, as the landing order
-// saves it, through the key's JSON codec: none for no read.
+// withRead is the world's metadata with read saved on it in the parts the
+// one-PR update saves (saveRead), through the key's JSON codec: none for no
+// read.
 func (w *world) withRead(t *testing.T, read *pr.GitHubRead) map[string]string {
 	t.Helper()
 	md := maps.Clone(w.md)
 	if read != nil {
-		raw, err := json.Marshal(read)
+		raw, err := json.Marshal(saveRead(read))
 		if err != nil {
 			t.Fatal(err)
 		}
 		md["pr_github_read"] = string(raw)
 	}
 	return md
+}
+
+// saveRead is read, GitHub's side of a PR at one head, in the four parts of the
+// saved read, each read at the read's instant with no signs.
+func saveRead(read *pr.GitHubRead) *pr.SavedRead {
+	return &pr.SavedRead{
+		PR: &pr.SavedPR{ReadAt: read.ReadAt, URL: read.URL, Number: read.Number, Repository: read.Repository,
+			HeadBranch: read.HeadBranch, Base: read.Base, Head: read.Head, State: read.State, Draft: read.Draft,
+			MergeState: read.MergeState},
+		Checks: &pr.SavedChecks{ReadAt: read.ReadAt, Head: read.Head, Runs: read.Checks},
+		Conversation: &pr.SavedConversation{ReadAt: read.ReadAt, Since: read.Since, Approvers: read.Approvers,
+			Requesters: read.Requesters, Feedback: read.Feedback, Awaiting: read.Awaiting, Unresolved: []string{}},
+		Labels: &pr.SavedLabels{ReadAt: read.ReadAt, Names: []string{}},
+	}
 }
 
 // fromStore asks FromStore over the world's bead carrying md, and fails if it

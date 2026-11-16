@@ -8,8 +8,8 @@
 // prstatus's Store and queue's, so a pull request's facts, what a person owes
 // and the order work lands in come from the same rows the reader lays out. It
 // asks the pr domain's evaluator about a PR on Gas Town's pending record over
-// those rows too, with the GitHub read the landing order saved on the PR's
-// bead ([Listing.PRAnswers]).
+// those rows too, with the read the one-PR update saved on the PR's bead
+// ([Listing.PRAnswers]).
 //
 // The package sits outside internal/ so the helm board, a separate module, can
 // import it, while the ledger stays internal.

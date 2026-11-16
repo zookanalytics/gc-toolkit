@@ -49,10 +49,9 @@ const runFailedKey = "review-run-failed"
 // that asks a person once two runs at its head ended without a result, and
 // says what it did. It returns false when the bead is owed no run, so the
 // caller reports the evaluator's answer. ans is the evaluator's answer at the
-// validated head and gr the GitHub read it made, which each write carries when
-// it made one, asks the asks on the bead, and note what the run did with the
-// record's withdrawals.
-func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks []review.Ask, note string) (RunOutcome, bool) {
+// validated head, asks the asks on the bead, and note what the run did with
+// the record's withdrawals.
+func (u *run) admit(s state, p *gh.PullRequest, ans Answer, asks []review.Ask, note string) (RunOutcome, bool) {
 	var takeable []string
 	for _, a := range asks {
 		if a.Takeable() {
@@ -68,12 +67,7 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 		why = "ask " + strings.Join(takeable, ", ") + " is open, and nothing holds it"
 	}
 	checked := func(detail string) (RunOutcome, bool) {
-		w := u.Ledger.Write(s.id)
-		record.Checked(w, "open", s.now)
-		if gr != nil {
-			githubReadKey.Set(w, gr)
-		}
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActChecked, Detail: withNote(detail, note)}), true
+		return u.stands(s, RunOutcome{Bead: s.id, Action: ActChecked, Detail: withNote(detail, note)}), true
 	}
 	if len(s.runs) > 0 {
 		return checked("review run " + strings.Join(s.runs, ", ") + " is attached, and the bead waits on it: " + why)
@@ -93,7 +87,7 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 		return checked("no review run is poured, because how its earlier runs ended did not read; the next run reads it: " + err.Error())
 	}
 	if len(failed) == 2 {
-		return u.runFailed(s, p, failed, gr, note), true
+		return u.runFailed(s, p, failed, note), true
 	}
 	vars, err := reviewVars(u.Refinery)
 	if err != nil {
@@ -107,18 +101,10 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 	if err != nil {
 		w := u.Ledger.Write(s.id)
 		detail := fmt.Sprintf("the review run at %s did not pour, and the next run pours it: %v", s.rec.Head, err)
-		record.Retry(w, "open", detail, s.now)
-		if gr != nil {
-			githubReadKey.Set(w, gr)
-		}
+		record.Retry(w, detail)
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(detail, note)}), true
 	}
-	w := u.Ledger.Write(s.id)
-	record.Checked(w, "open", s.now)
-	if gr != nil {
-		githubReadKey.Set(w, gr)
-	}
-	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActPoured, Detail: withNote(fmt.Sprintf(
+	return u.stands(s, RunOutcome{Bead: s.id, Action: ActPoured, Detail: withNote(fmt.Sprintf(
 		"review run %s poured at %s into %s, attached to the bead: %s", root, s.rec.Head, s.rec.Target, why), note)}), true
 }
 
@@ -242,9 +228,8 @@ func closedTime(b *ledger.Record) (time.Time, error) {
 // runFailed files the gate that asks a person to look at the two runs at the
 // validated head that ended without a result. The gate holds the bead, so no
 // run is poured until a person clears it, and then the next run of the order
-// pours one more. Each write carries gr, the GitHub read the check made, when
-// it made one.
-func (u *run) runFailed(s state, p *gh.PullRequest, failed []review.Ending, gr *GitHubRead, note string) RunOutcome {
+// pours one more.
+func (u *run) runFailed(s state, p *gh.PullRequest, failed []review.Ending, note string) RunOutcome {
 	var parts []string
 	for _, e := range failed {
 		parts = append(parts, fmt.Sprintf("%s, where %s", e.Root, e.How))
@@ -256,18 +241,10 @@ func (u *run) runFailed(s state, p *gh.PullRequest, failed []review.Ending, gr *
 	if err := u.Gates.File(s.id, runFailedKey, message); err != nil {
 		w := u.Ledger.Write(s.id)
 		why := fmt.Sprintf("%s: the human gate did not file; the next run files it: %v", runFailedKey, err)
-		record.Retry(w, "open", why, s.now)
-		if gr != nil {
-			githubReadKey.Set(w, gr)
-		}
+		record.Retry(w, why)
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(why, note)})
 	}
-	w := u.Ledger.Write(s.id)
-	record.Checked(w, "open", s.now)
-	if gr != nil {
-		githubReadKey.Set(w, gr)
-	}
-	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: withNote(fmt.Sprintf(
+	return u.stands(s, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: withNote(fmt.Sprintf(
 		"%s: review runs %s and %s ended without a result at %s, so a person is asked before another run", runFailedKey,
 		failed[0].Root, failed[1].Root, s.rec.Head), note)})
 }

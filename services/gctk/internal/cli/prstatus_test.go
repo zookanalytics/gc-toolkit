@@ -543,9 +543,9 @@ func TestPRStatusUsageErrors(t *testing.T) {
 // stPR is the PR st-1 owns on Gas Town's pending record.
 const stPR = "https://github.com/acme/widgets/pull/7"
 
-// savedRead is the GitHub read the landing order saves of st-1's PR at the head
-// the refinery validated: open, approved, CLEAN, its required check passed and
-// nothing waiting on the city. edit changes it before it is saved.
+// savedRead is the read the one-PR update saves of st-1's PR at the head the
+// refinery validated: open, approved, CLEAN, its required check passed and
+// nothing waiting on the city. edit changes it before it is saved in parts.
 func savedRead(t *testing.T, edit func(*pr.GitHubRead)) string {
 	t.Helper()
 	r := &pr.GitHubRead{ReadAt: "2026-11-15T09:00:00Z", URL: stPR, Number: 7, Repository: "acme/widgets",
@@ -555,11 +555,24 @@ func savedRead(t *testing.T, edit func(*pr.GitHubRead)) string {
 	if edit != nil {
 		edit(r)
 	}
-	raw, err := json.Marshal(r)
+	raw, err := json.Marshal(inParts(r))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+// inParts is r, GitHub's side of a PR at one head, in the four parts the one-PR
+// update saves it in, each read at r's instant.
+func inParts(r *pr.GitHubRead) *pr.SavedRead {
+	return &pr.SavedRead{
+		PR: &pr.SavedPR{ReadAt: r.ReadAt, URL: r.URL, Number: r.Number, Repository: r.Repository,
+			HeadBranch: r.HeadBranch, Base: r.Base, Head: r.Head, State: r.State, Draft: r.Draft, MergeState: r.MergeState},
+		Checks: &pr.SavedChecks{ReadAt: r.ReadAt, Head: r.Head, Runs: r.Checks},
+		Conversation: &pr.SavedConversation{ReadAt: r.ReadAt, Since: r.Since, Approvers: r.Approvers,
+			Requesters: r.Requesters, Feedback: r.Feedback, Awaiting: r.Awaiting, Unresolved: []string{}},
+		Labels: &pr.SavedLabels{ReadAt: r.ReadAt, Names: []string{}},
+	}
 }
 
 // pendingStore is a store whose st-1 owns PR 7 on Gas Town's pending record, at
@@ -626,7 +639,7 @@ func pendingDerive(t *testing.T, store string, extra ...string) (string, int) {
 }
 
 // An anchor on Gas Town's pending record reads the evaluator's answer over the
-// GitHub read the landing order saved on it, which prstatus renders, and the
+// read the one-PR update saved on it, which prstatus renders, and the
 // command prints each condition not met, once for each status. It reads
 // neither GitHub nor the definition of feedback.
 func TestPRStatusOnThePendingRecord(t *testing.T) {

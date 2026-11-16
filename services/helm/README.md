@@ -1492,7 +1492,7 @@ asked of the listing's rows, so one document never mixes two reads of a bead:
 | `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
 | `services/gctk/prstatus` (`Holding` over `Listing.Blockers`) | what a person owes on a bead through its `blocks` edges |
 | `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | each open pull request's facts, and where one on the old record stands and what holds it |
-| `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it: the evaluator's answer over the listing's rows and the GitHub read the landing order saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
+| `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it: the evaluator's answer over the listing's rows and the read the one-PR update saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to |
 | `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows and waits' answers, and whether the city takes each piece as things stand |
 

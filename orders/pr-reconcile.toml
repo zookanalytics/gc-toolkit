@@ -31,16 +31,18 @@
 # webhook fires skips Gas City's gates and each event would start a run of its
 # own.
 #
-# A run reads at most 20 records, the least recently checked first, and starts
-# none after four minutes (gctk pr reconcile's --count and --budget). One record
-# whose PR is open costs about seven seconds, measured on 2026-11-12. A landing
-# on the default branch adds the seed audit's check, one render of the branch's
-# tip, which took about three seconds on 2026-11-14 and starts only inside the
-# four minutes. So a run ends inside the 300-second timeout, and the kernel
-# frees the lock of a run the timeout stops. Every 5 minutes, a cycle over 50
-# open records takes three runs, so a PR lands within about fifteen minutes of
-# the last thing it waits for, the design's landing-time check being nine in
-# ten within 3 hours. Tune from city.toml [[orders.overrides]].
+# A run reads at most 20 records, in a shuffled order, and starts none after
+# four minutes (gctk pr reconcile's --count and --budget). One record whose PR
+# is open costs about seven seconds, measured on 2026-11-12. A landing on the
+# default branch adds the seed audit's check, one render of the branch's tip,
+# which took about three seconds on 2026-11-14 and starts only inside the four
+# minutes. So a run ends inside the 300-second timeout, and the kernel frees the
+# lock of a run the timeout stops. A run saves none of what it reads of
+# GitHub: orders/pr-poll.toml's one-PR update writes GitHub's side on the bead.
+# Every 5 minutes, over 50 open records, a record waits about two and a half
+# runs on average, so a PR lands within about fifteen minutes of the last thing
+# it waits for, the design's landing-time check being nine in ten within 3
+# hours. Tune from city.toml [[orders.overrides]].
 [order]
 description = "Landing order: read each PR the refinery recorded as pending, merge a ready one with its head pinned, and close its bead once the merge commit is on the target"
 trigger = "cooldown"

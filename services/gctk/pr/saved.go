@@ -1,0 +1,303 @@
+package pr
+
+import (
+	"fmt"
+	"maps"
+	"reflect"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+)
+
+// The saved read (specs/tk-1tfzr71.149/design.md, section 3) is GitHub's side
+// of a PR on the bead that owns it, in four parts: the PR, its checks, its
+// conversation and its labels. Each part keeps the instant its read was sent
+// and the signs read with it, never later than its facts, so the one-PR update
+// can tell which part a moved sign makes stale, and an older read of a part
+// never replaces a newer one.
+
+// SavedRead is GitHub's side of a PR as the one-PR update saved it. A part is
+// nil until the update has read it.
+type SavedRead struct {
+	PR           *SavedPR           `json:"pr,omitempty"`
+	Checks       *SavedChecks       `json:"checks,omitempty"`
+	Conversation *SavedConversation `json:"conversation,omitempty"`
+	Labels       *SavedLabels       `json:"labels,omitempty"`
+}
+
+// SavedPR is the PR's own facts: its identity, head branch and base, its head,
+// state, draft flag and merge state, and whether it is in a merge queue and
+// whether its base requires one.
+type SavedPR struct {
+	ReadAt            string  `json:"read_at"`
+	URL               string  `json:"url"`
+	Number            int     `json:"number"`
+	Repository        string  `json:"repository"`
+	HeadBranch        string  `json:"head_branch"`
+	Base              string  `json:"base"`
+	Head              string  `json:"head"`
+	State             string  `json:"state"`
+	Draft             bool    `json:"draft"`
+	MergeState        string  `json:"merge_state"`
+	InMergeQueue      bool    `json:"in_merge_queue"`
+	MergeQueueEnabled bool    `json:"merge_queue_enabled"`
+	Signs             PRSigns `json:"signs"`
+}
+
+// PRSigns are the signs kept with the PR's own facts.
+type PRSigns struct {
+	State     string `json:"state"`
+	Draft     bool   `json:"draft"`
+	Head      string `json:"head"`
+	Base      string `json:"base"`
+	BaseTip   string `json:"base_tip"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// SavedChecks is the required check runs at Head, each result its check suite
+// holds as the run's latest.
+type SavedChecks struct {
+	ReadAt string        `json:"read_at"`
+	Head   string        `json:"head"`
+	Runs   []RequiredRun `json:"runs"`
+	Signs  CheckSigns    `json:"signs"`
+}
+
+// CheckSigns are the signs kept with the checks: the head, the rollup's state,
+// the contexts' total and the check runs and commit statuses counted by state.
+type CheckSigns struct {
+	Head      string         `json:"head"`
+	Rollup    string         `json:"rollup"`
+	Contexts  int            `json:"contexts"`
+	CheckRuns map[string]int `json:"check_runs"`
+	Statuses  map[string]int `json:"statuses"`
+}
+
+// SavedConversation is what the rule reads of the PR's conversation, with the
+// definition of feedback applied from Since: the accounts whose approval or
+// request for changes stands, the newest feedback in each id space, the review
+// threads waiting on the city's answer, the unresolved threads and GitHub's
+// review decision.
+type SavedConversation struct {
+	ReadAt         string            `json:"read_at"`
+	Since          string            `json:"since"`
+	Approvers      []string          `json:"approvers"`
+	Requesters     []string          `json:"requesters"`
+	Feedback       NewestFeedback    `json:"feedback"`
+	Awaiting       []string          `json:"awaiting"`
+	Unresolved     []string          `json:"unresolved"`
+	ReviewDecision string            `json:"review_decision"`
+	Signs          ConversationSigns `json:"signs"`
+}
+
+// ConversationSigns are the signs kept with the conversation: the comment, review
+// and dismissed counts, when GitHub last changed the PR, and the newest post
+// time, the latest time any conversation comment, review or inline comment
+// changed, which the update reads with the posts.
+type ConversationSigns struct {
+	Comments   int    `json:"comments"`
+	Reviews    int    `json:"reviews"`
+	Dismissed  int    `json:"dismissed"`
+	UpdatedAt  string `json:"updated_at"`
+	NewestPost string `json:"newest_post"`
+}
+
+// SavedLabels is the PR's labels, every one, sorted. They are their own signs.
+type SavedLabels struct {
+	ReadAt string   `json:"read_at"`
+	Names  []string `json:"names"`
+}
+
+// view is the saved read as the rule reads it, GitHub's side of the PR at one
+// head, and why it is no such read when it is not: no read is saved, a part the
+// rule reads is missing, or the checks were read at another head than the PR.
+func (s *SavedRead) view() (*GitHubRead, string) {
+	switch {
+	case s == nil || (s.PR == nil && s.Checks == nil && s.Conversation == nil):
+		return nil, "no read of GitHub is saved on the bead"
+	case s.PR == nil:
+		return nil, "the saved read holds no read of the PR itself"
+	case s.Checks == nil:
+		return nil, "the saved read holds no read of the PR's checks"
+	case s.Conversation == nil:
+		return nil, "the saved read holds no read of the PR's conversation"
+	case s.Checks.Head != s.PR.Head:
+		return nil, fmt.Sprintf("the checks are read at head %s and the PR at %s", s.Checks.Head, s.PR.Head)
+	}
+	p, c := s.PR, s.Conversation
+	return &GitHubRead{ReadAt: p.ReadAt, Since: c.Since, URL: p.URL, Number: p.Number, Repository: p.Repository,
+		HeadBranch: p.HeadBranch, Base: p.Base, Head: p.Head, State: p.State, Draft: p.Draft, MergeState: p.MergeState,
+		Checks: s.Checks.Runs, Approvers: c.Approvers, Requesters: c.Requesters, Feedback: c.Feedback,
+		Awaiting: c.Awaiting}, ""
+}
+
+// parts names the parts of a saved read a read covers.
+type parts struct{ pr, checks, conversation, labels bool }
+
+func (p parts) any() bool { return p.pr || p.checks || p.conversation || p.labels }
+
+// every is each part.
+var every = parts{true, true, true, true}
+
+func (p parts) String() string {
+	var names []string
+	for _, n := range []struct {
+		on   bool
+		name string
+	}{{p.pr, "pr"}, {p.checks, "checks"}, {p.conversation, "conversation"}, {p.labels, "labels"}} {
+		if n.on {
+			names = append(names, n.name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+// prSigns, checkSigns and labels are the cheap signs as each part keeps them.
+func prSigns(s gh.Signs) PRSigns {
+	return PRSigns{State: s.State, Draft: s.IsDraft, Head: s.HeadRefOid, Base: s.BaseRefName, BaseTip: s.BaseTip,
+		UpdatedAt: s.UpdatedAt}
+}
+
+func checkSigns(s gh.Signs) CheckSigns {
+	return CheckSigns{Head: s.HeadRefOid, Rollup: s.Rollup, Contexts: s.Contexts, CheckRuns: counted(s.CheckRuns),
+		Statuses: counted(s.Statuses)}
+}
+
+func (a CheckSigns) equal(b CheckSigns) bool {
+	return a.Head == b.Head && a.Rollup == b.Rollup && a.Contexts == b.Contexts &&
+		maps.Equal(counted(a.CheckRuns), counted(b.CheckRuns)) && maps.Equal(counted(a.Statuses), counted(b.Statuses))
+}
+
+// counted is the states of m that count one or more, never nil.
+func counted(m map[string]int) map[string]int {
+	out := map[string]int{}
+	for k, v := range m {
+		if v > 0 {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func labels(s gh.Signs) []string { return listed(slices.Sorted(slices.Values(s.Labels))) }
+
+// moved is the parts of saved that the signs s, read just now, say are stale,
+// by the one-PR update's table (specs/tk-1tfzr71.149/design.md, section 4). A
+// part whose own signs differ is stale. A move of the comment, review or
+// dismissed count makes the PR part stale too, since reviews move its merge
+// state, and so does a move of the checks, which are read with it. Every part
+// is stale when the saved read lacks a part or stale says it is not current for
+// the bead.
+func moved(saved *SavedRead, s gh.Signs, stale string) parts {
+	if stale != "" || saved == nil || saved.PR == nil || saved.Checks == nil || saved.Conversation == nil ||
+		saved.Labels == nil {
+		return every
+	}
+	var p parts
+	p.labels = !slices.Equal(saved.Labels.Names, labels(s))
+	p.checks = !saved.Checks.Signs.equal(checkSigns(s))
+	c := saved.Conversation.Signs
+	counts := c.Comments != s.Comments || c.Reviews != s.Reviews || c.Dismissed != s.Dismissed
+	p.conversation = counts || c.UpdatedAt != s.UpdatedAt
+	p.pr = saved.PR.Signs != prSigns(s) || p.checks || counts
+	return p
+}
+
+// owned is a live bead that owns a PR, as the PR watch reads it: the bead, its
+// status and assignee, the PR's URL, host, repository and number, its pending
+// record, branch and provenance instant, and the read saved on it, nil when it
+// holds none or one that does not decode.
+type owned struct {
+	id, status, assignee string
+	url, host, repo      string
+	number               int
+	rec                  record.Record
+	branch, since        string
+	saved                *SavedRead
+}
+
+// stale says why the saved read is not current for the bead, and is empty when
+// it is: the read the rule takes from it (view) names another PR than the bead
+// owns, it applied the definition of feedback from another instant than the
+// bead's, or, on a whole pending record, its head is not the head the store
+// holds, as the evaluator's currency test (unread) reads each.
+func (o owned) stale() string {
+	read, why := o.saved.view()
+	switch {
+	case why != "":
+		return why
+	case !strings.EqualFold(read.Repository, o.repo) || read.Number != o.number:
+		return fmt.Sprintf("the read is of %s#%d", read.Repository, read.Number)
+	case read.Since != o.since:
+		return fmt.Sprintf("the read applied the definition of feedback from %q, not from the bead's provenance instant %q",
+			read.Since, o.since)
+	case record.OnRecord(o.rec.Result) && len(recordGaps(o.rec, o.branch)) == 0 && read.Head != storeHead(o.rec):
+		return "the read is at head " + read.Head
+	}
+	return ""
+}
+
+// instant is the time a read is sent, RFC 3339 UTC to the millisecond, so two
+// reads of one part are ordered by when each was sent.
+func instant(now func() time.Time) string {
+	if now == nil {
+		now = time.Now
+	}
+	return now().UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+// after reports whether a, an instant a read was sent, is later than b. An
+// instant that does not read as one is earlier than any that does.
+func after(a, b string) bool {
+	ta, errA := time.Parse(time.RFC3339Nano, a)
+	tb, errB := time.Parse(time.RFC3339Nano, b)
+	switch {
+	case errA != nil:
+		return false
+	case errB != nil:
+		return true
+	}
+	return ta.After(tb)
+}
+
+// sameButInstant reports whether a and b, two reads of one part, hold the same
+// facts and signs, whatever instant each was read at.
+func sameButInstant[T any](a, b *T, instant func(*T) *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	x, y := *a, *b
+	*instant(&x), *instant(&y) = "", ""
+	return reflect.DeepEqual(x, y)
+}
+
+// merge is saved with each part of fresh that was read after the saved part's
+// instant and whose facts or signs differ from it, and which parts it took. It
+// changes neither argument.
+func merge(saved, fresh *SavedRead) (*SavedRead, parts) {
+	out := &SavedRead{}
+	if saved != nil {
+		*out = *saved
+	}
+	var took parts
+	if f := fresh.PR; f != nil && (out.PR == nil || after(f.ReadAt, out.PR.ReadAt)) &&
+		!sameButInstant(f, out.PR, func(p *SavedPR) *string { return &p.ReadAt }) {
+		out.PR, took.pr = f, true
+	}
+	if f := fresh.Checks; f != nil && (out.Checks == nil || after(f.ReadAt, out.Checks.ReadAt)) &&
+		!sameButInstant(f, out.Checks, func(p *SavedChecks) *string { return &p.ReadAt }) {
+		out.Checks, took.checks = f, true
+	}
+	if f := fresh.Conversation; f != nil && (out.Conversation == nil || after(f.ReadAt, out.Conversation.ReadAt)) &&
+		!sameButInstant(f, out.Conversation, func(p *SavedConversation) *string { return &p.ReadAt }) {
+		out.Conversation, took.conversation = f, true
+	}
+	if f := fresh.Labels; f != nil && (out.Labels == nil || after(f.ReadAt, out.Labels.ReadAt)) &&
+		!sameButInstant(f, out.Labels, func(p *SavedLabels) *string { return &p.ReadAt }) {
+		out.Labels, took.labels = f, true
+	}
+	return out, took
+}

@@ -1,0 +1,30 @@
+# pr-poll — ask GitHub cheaply whether each PR the rig's beads own moved, and
+# read and save each one that did (specs/tk-1tfzr71.149/design.md, sections 1,
+# 4 and 6). A pass lists the PRs the store's live beads own, an anchor's by
+# pr_url beside a merge_result and a bead the refinery sent back by
+# existing_pr, asks GitHub for each one's signs in one request for each 50 PRs
+# in a repository, and runs the one-PR update, `gctk pr refresh`, for each PR
+# whose signs moved. The update reads only the parts that moved and saves them
+# on the bead as pr_github_read, the one writer of that read, with pr_state and
+# pr_last_checked_at on a bead on the pending record. A pass in which nothing
+# moved writes no bead, and costs one GitHub point for each 50 owned PRs.
+# Exec, not a formula: reads and guarded writes need no LLM. Rig-scoped: one
+# pass per importing rig against its own store, named by --db, loading the
+# pack's definition of feedback in the rig's checkout. GCTK_SCRIPTS_DIR names
+# the pack's scripts, where that definition lives.
+# Gas City starts no run while the last one is open, but its watchdog closes a
+# run's record two minutes after it was made, so a long pass can overlap the
+# next. Each update writes under the store's record lock and keeps each part's
+# read instant, so an older read never replaces a newer one.
+# `timeout` holds the pass's 90 seconds of starting updates, the last update's
+# 30-second wait for the record lock and its reads; gctk's cli test asserts the
+# window and the lock wait sit below it. A pass that fails to read a PR exits 2,
+# so Gas City records the run failed, and the next pass asks again. Tune from
+# city.toml [[orders.overrides]].
+[order]
+description = "PR watch: ask GitHub whether each PR the rig's beads own moved, and read and save on its bead each one that did"
+trigger = "cooldown"
+interval = "2m"
+timeout = "180s"
+exec = "GCTK_SCRIPTS_DIR=\"$PACK_DIR/assets/scripts\" \"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" pr poll --db \"$GC_RIG_ROOT/.beads\""
+scope = "rig"

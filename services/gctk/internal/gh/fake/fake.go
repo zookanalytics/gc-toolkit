@@ -16,18 +16,28 @@ import (
 )
 
 // PR is one pull request's state on GitHub. Suites holds the check suites at
-// each commit, by its oid.
+// each commit, by its oid. The rest is what the cheap question reads beside
+// what it counts from the rest: its labels, when GitHub last changed it, its
+// base's tip, its review decision, and its head's check rollup state and the
+// commit statuses there, counted by state.
 type PR struct {
-	Facts    gh.PullRequest
-	Reviews  []gh.Review
-	Suites   map[string][]gh.CheckSuite
-	Threads  []gh.Thread
-	Comments []gh.IssueComment
+	Facts          gh.PullRequest
+	Reviews        []gh.Review
+	Suites         map[string][]gh.CheckSuite
+	Threads        []gh.Thread
+	Comments       []gh.IssueComment
+	Labels         []string
+	UpdatedAt      string
+	BaseTip        string
+	ReviewDecision string
+	Rollup         string
+	Statuses       map[string]int
 }
 
 // GitHub is an in-memory GitHub. Self is the login the reads run as. Fail
 // fails a read or a request by its method's name, such as "Reviews", with its
-// error. OnRead, when set, runs as a read of a PR starts, so a test can change
+// error. SignsFail fails the cheap question for the PRs it numbers, each with
+// its error. OnRead, when set, runs as a read of a PR starts, so a test can change
 // GitHub or another writer's state while a read is in flight. OnMerge, when
 // set, answers a merge request or an enqueue in place of the default, which
 // refuses a request whose head is not the PR's and otherwise merges the PR, or
@@ -42,10 +52,19 @@ type GitHub struct {
 	OnMerge   func(method string, p *PR, head string) error
 	OnDismiss func(p *PR, review int64) error
 	Descends  map[string][]string
+	SignsFail map[int]error
 
 	mu    sync.Mutex
 	reads []string
 	asks  []Ask
+	signs [][]int
+}
+
+// SignsAsked returns the PRs each cheap question asked about, in order.
+func (g *GitHub) SignsAsked() [][]int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.signs)
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
@@ -65,7 +84,8 @@ func (g *GitHub) Asks() []Ask {
 
 // New returns a GitHub that reads as self and holds no PR.
 func New(self string) *GitHub {
-	return &GitHub{Self: self, PRs: map[string]*PR{}, Fail: map[string]error{}, Descends: map[string][]string{}}
+	return &GitHub{Self: self, PRs: map[string]*PR{}, Fail: map[string]error{}, Descends: map[string][]string{},
+		SignsFail: map[int]error{}}
 }
 
 // Put adds p under its repository and number.
@@ -286,4 +306,107 @@ func (g *GitHub) Login() (string, error) {
 		return "", fmt.Errorf("github: gh named no account it acts as")
 	}
 	return g.Self, nil
+}
+
+// Signs answers the cheap question for each PR numbered in repo from the PR's
+// state: its facts, the comments and the inline comments counted together, the
+// reviews and the dismissed among them, its labels sorted, and the check runs
+// at its head counted by their conclusion, or by their status while one runs.
+// It records one read, "Signs", for the whole question, and a PR it holds no
+// such PR for, or one SignsFail numbers, fails alone.
+func (g *GitHub) Signs(repo string, numbers []int) (map[int]gh.Signs, map[int]error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reads = append(g.reads, "Signs")
+	g.signs = append(g.signs, slices.Sorted(slices.Values(numbers)))
+	read, failed := map[int]gh.Signs{}, map[int]error{}
+	for _, n := range numbers {
+		if err := g.Fail["Signs"]; err != nil {
+			failed[n] = err
+			continue
+		}
+		if err := g.SignsFail[n]; err != nil {
+			failed[n] = err
+			continue
+		}
+		p, ok := g.PRs[key(repo, n)]
+		if !ok {
+			failed[n] = fmt.Errorf("github: %s holds no pull request %d", repo, n)
+			continue
+		}
+		read[n] = p.signs()
+	}
+	return read, failed
+}
+
+func (p *PR) signs() gh.Signs {
+	s := gh.Signs{Number: p.Facts.Number, State: p.Facts.State, IsDraft: p.Facts.IsDraft,
+		HeadRefOid: p.Facts.HeadRefOid, BaseRefName: p.Facts.BaseRefName, BaseTip: p.BaseTip,
+		UpdatedAt: p.UpdatedAt, Comments: len(p.Comments), Reviews: len(p.Reviews), Rollup: p.Rollup,
+		CheckRuns: map[string]int{}, Statuses: map[string]int{}}
+	for _, t := range p.Threads {
+		s.Comments += len(t.Comments)
+	}
+	for _, v := range p.Reviews {
+		if v.State == "DISMISSED" {
+			s.Dismissed++
+		}
+	}
+	if len(p.Labels) > 0 {
+		s.Labels = slices.Sorted(slices.Values(p.Labels))
+	}
+	for _, suite := range p.Suites[p.Facts.HeadRefOid] {
+		for _, r := range suite.Runs {
+			state := r.Status
+			if r.Status == "COMPLETED" {
+				state = r.Conclusion
+			}
+			s.CheckRuns[state]++
+			s.Contexts++
+		}
+	}
+	for state, n := range p.Statuses {
+		if n > 0 {
+			s.Statuses[state] = n
+			s.Contexts += n
+		}
+	}
+	return s
+}
+
+// PullRequestPart returns the PR's facts and, with checks, the check suites at
+// its head. It records "PullRequestPart", or "PullRequestPart+checks".
+func (g *GitHub) PullRequestPart(repo string, number int, checks bool) (*gh.PRPart, error) {
+	read := "PullRequestPart"
+	if checks {
+		read += "+checks"
+	}
+	p, err := g.pr(read, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := &gh.PRPart{PullRequest: p.Facts}
+	if checks {
+		out.ChecksAt = p.Facts.HeadRefOid
+		out.Suites = slices.Clone(p.Suites[p.Facts.HeadRefOid])
+		if out.Suites == nil {
+			out.Suites = []gh.CheckSuite{}
+		}
+	}
+	return out, nil
+}
+
+// Conversation returns the PR's reviews, threads, conversation comments and
+// review decision.
+func (g *GitHub) Conversation(repo string, number int) (*gh.Conversation, error) {
+	p, err := g.pr("Conversation", repo, number)
+	if err != nil {
+		return nil, err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return &gh.Conversation{Reviews: slices.Clone(p.Reviews), Threads: slices.Clone(p.Threads),
+		Comments: slices.Clone(p.Comments), ReviewDecision: p.ReviewDecision}, nil
 }

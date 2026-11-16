@@ -8,8 +8,9 @@ import (
 )
 
 // The record's keys, with the meanings Gas Town's pr-merge-reconcile gives
-// them. `gctk pr record` and `gctk pr reconcile` write them through the writes
-// in record.go. The keys the old path also writes (merge_result, pr_url,
+// them, but for pr_state and pr_last_checked_at, which say what the one-PR
+// update read. `gctk pr record`, `gctk pr reconcile` and `gctk pr refresh`
+// write them through the writes in record.go. The keys the old path also writes (merge_result, pr_url,
 // pr_number, merged_target, merged_sha, existing_pr, blocked_reason and
 // rejection_reason) keep those shell writers, whose definitions stay in
 // lifecycle/lifecycle.toml's [metadata.merge_identity], until the merge
@@ -45,11 +46,14 @@ var (
 		"The head the landing order found on a PR open at a head the refinery has not validated. The next "+
 			"publication clears it.")
 	prStateKey = ledger.Declare("pr_state", ledger.String,
-		"The PR's state as the landing order last read it: open, merged, or the state a read that could not "+
-			"decide or an exception left, such as lookup_failed, merge_unreachable or closed_unmerged.")
+		"The PR's state as the one-PR update (gctk pr refresh) last read and saved it, lower-cased: open, "+
+			"closed or merged. The update writes it, with pr_last_checked_at, in each write it makes to a bead "+
+			"on the record, and nothing else writes it.")
 	checkedAtKey = ledger.Declare("pr_last_checked_at", ledger.String,
-		"When the record was last written or read, RFC 3339 UTC to the second. The landing order reads the "+
-			"records it checked least recently first.")
+		"When the one-PR update last read GitHub's side of the PR and saved it on a bead on the record, RFC "+
+			"3339 UTC to the second. A pass of the PR watch that finds the PR unmoved writes nothing, so it "+
+			"says when the PR was last read and saved, not when GitHub was last asked about it. The landing "+
+			"order reads the records read least recently first.")
 	mergedTargetKey = ledger.Declare("merged_target", ledger.String,
 		"The branch the bead's PR is to merge into, the base its PR must name, and once it lands the branch "+
 			"it landed on. A PR's composition reads it to find the beads that landed on the PR's branch.")
