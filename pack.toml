@@ -1,7 +1,7 @@
 # gc-toolkit — primary pack for a Gas City city. Native roster, no pack imports.
 #
 # Every agent this pack runs ships under agents/<name>/ (polecat, refinery,
-# witness, deacon, mechanik, po, polecat-codex, proactive, dog, demo, the
+# witness, deacon, mechanik, po, polecat-codex, proactive, demo, the
 # converse-claude-opus, converse-claude-fable, converse-codex-sol and
 # converse-codex-astra sittings, and the converse-opus, converse-fable and
 # converse-codex templates kept for the sittings already open on them). There is
@@ -28,8 +28,8 @@
 # hook and the shared gh guard gets the guard registered inside its own
 # overlay's settings.json rather than a second stanza. Every agent must end up
 # with the guard: assets/scripts/gh-origin-guard-wiring.test.sh enumerates
-# agents/ and fails when one is left uncovered. The codex agents (dog,
-# polecat-codex, converse-codex-sol, converse-codex-astra, converse-codex) read
+# agents/ and fails when one is left uncovered. The codex agents
+# (polecat-codex, converse-codex-sol, converse-codex-astra, converse-codex) read
 # no .claude/settings.json and take no overlay; each registers the guard in the
 # Codex home through its pre_start (docs/gh-origin-guard.md, "Codex").
 #

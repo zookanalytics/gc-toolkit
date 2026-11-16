@@ -14,12 +14,13 @@ which defers the next wisp an hour and ends the turn, and the controller's
 reassignment restart runs the next pass in a fresh session once the hour has
 passed.
 
-Scope: the witness recovers work whose owner died, files ONE warrant bead
-for the dog pool when an owner is alive but wedged, files a bug bead that
-waits for the operator's placement when mail reports a defect in the pack, and
-watches the refinery queue. It does NOT manage processes (controller), write
-code (polecats), merge (refinery/cadence), kill sessions directly (the dog pool
-executes warrants), or run the batch unnamed-wait triage (the
+Scope: the witness recovers work whose owner died, files a finding when a live
+pool seat keeps printing but has written nothing for three hours, files a bug
+bead that waits for the operator's placement when mail reports a defect in the
+pack, and watches the refinery queue. It does NOT manage processes
+(controller), write code (polecats), merge (refinery/cadence), kill or restart
+a session (the controller recovers a pool seat that goes quiet, and a person
+decides on a seat a finding names), or run the batch unnamed-wait triage (the
 liveness-sweep exec order owns that surface). A finding becomes one deduped
 BEAD through assets/scripts/patrol-finding.sh, and a proactive first reaction
 disposes it: routed to a pool, held for the operator's placement sitting, held
@@ -28,18 +29,15 @@ assets/scripts/human-gate.sh files a human gate on a bead directly, for an
 emergency about that bead that needs a human now.
 
 Every address this formula stamps or queries comes from
-assets/scripts/resolve-route.sh. The agents it addresses do not share a scope:
-the dog it files warrants to is city-scoped and its identity carries no rig
-segment, while the refinery whose queue it reads is rig-scoped and carries
-`<rig>/`. The qualifier that reaches one is invisible to the other, and a stamp
-reads back clean either way, so a hand-written address is right only by luck. A
-query by a hand-written address fails just as quietly: listing beads by an
+assets/scripts/resolve-route.sh. The refinery whose queue it reads is
+rig-scoped, so its identity carries `<rig>/`, and the bare rendered form names
+no agent. A query by a hand-written address fails quietly: listing beads by an
 address no agent holds returns a valid empty array, which reads as an empty
 queue.
 
 Marked blocks (bug-file, notice-finding, candidate-pipeline,
 host-bead-skip, downstream-court-skip, topology-root-skip,
-liveness-map-guard, liveness-lookup, warrant-file, husk-guard,
+liveness-map-guard, liveness-lookup, no-progress-finding, husk-guard,
 owning-store-guard, recovery-stamp-gate, crash-loop-window,
 patrol-wisp-pour, refinery-stuck-handoff) are extracted and executed by
 their tests; keep markers, keep them backslash-free."""
@@ -47,7 +45,7 @@ formula = "mol-witness-patrol"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol builds its refinery and dog addresses from it, and an empty prefix renders bare roles like <rig>/refinery that no agent holds."
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol builds its refinery address from it, and an empty prefix renders bare roles like <rig>/refinery that no agent holds."
 default = "gc-toolkit."
 
 [[steps]]
@@ -66,9 +64,6 @@ polecats two findings, and `--distinct` files the second while the first is
 still live. Emergencies (crash, data loss, corruption, security) go straight to
 a human gate on the bead they are about, through human-gate.sh — they need a
 human now, not a disposition.
-A `DOG_DONE:` notice is a completed shutdown dance on a warrant this rig
-filed — note the outcome (the closed warrant carries the evidence) and
-archive.
 
 Mail reporting a defect in the pack itself, a formula or script fault the
 sender hit and worked around, is none of those: it is work for a polecat, not
@@ -259,8 +254,7 @@ jq -c '[ .[]
 # control-dispatcher's workflow-finalize, and orphan-dispose.sh refuses it as
 # root_not_schedulable. Left in, it misleads the loop. A root names a session
 # only in gc.session_name, a stamp the controller copies from its worked steps,
-# so that session's liveness says nothing about the run. Resolved live, the root
-# can draw a warrant against a session doing other work, and resolved dead, it
+# so that session's liveness says nothing about the run. Resolved dead, the root
 # churns a witness-salvage-refused notice on a bead with no worktree. The kind
 # set is beadmeta.WorkflowTopologyKinds (workflow, scope, spec), matched on
 # gc.kind alone, the same match topology_kind in liveness-classify.sh makes. The
@@ -477,8 +471,8 @@ assigned to it, so its owner then reads `absent`. A row whose close did not
 land stays open in `failed-create`. Both are dead states, so the work
 assigned to either is recovered here, whatever becomes of the row.
 Every other state is owned, and its bead is not orphaned. `active` and
-`awake` are live, and a live owner whose
-bead shows no progress is the warrant path below, not a punt. The rest,
+`awake` are live, and branch 2b below judges the seat behind a live owner.
+The rest,
 among them `start-pending`, `creating`, `asleep`, `suspended`, `draining`,
 and `quarantined`, mean the controller or the operator still owns the
 session. A state not named here is owned too, the direction the retry and
@@ -486,37 +480,23 @@ the map both resolve toward. The `dead` definition in both jq programs
 above names the same states except `absent`, which the lookup returns when
 no session carries the owner.
 
-**2b. Live but wedged -> ONE warrant.** An `active`/`awake` owner whose
-work bead is stale (no `updated_at` movement and no wisp progress for
-longer than the work plausibly needs — judgment over the same signals as
-always, no new thresholds) is wedged, not orphaned. First ask the recovery
-order, never the pane (pane text is agent-controlled output):
-`quota-park-nudge.sh --status <session>` — `quota_park=yes` is a healthy
-park: defer, file nothing this cycle. Otherwise file ONE warrant for the
-dog pool, dedup'd on the target like a human gate's situation key — never kill
-directly. The dog is city-scoped, so its identity carries no rig segment and
-the rig-qualified form the refinery queue-nudge uses matches nothing here.
-Set REASON to what is stale and for how long. `file-warrant.sh` resolves the
-loop's OWNER to a live session id — the target dance-probe.sh and `gc session
-kill` require — and refuses to file a warrant no dog can execute:
+**2b. A live owner: judge its seat, never its bead.** A bead whose owner resolved
+`active` or `awake` is not orphaned, so parts 3 to 5 do not apply to it, and
+nothing here kills or restarts its owner. Run `seat-progress.sh` on it. The
+script judges the bead only when it is the claim a live pool seat holds now,
+and judges that seat by its own writes, never by the bead's `updated_at`. It
+files one finding, keyed `no-progress.<session>` and about the claim, when the
+seat's pane still prints but it has written nothing for three hours, the one
+shape Gas City's controller takes no step on:
 ```bash
-# >>> warrant-file
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/file-warrant.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] || SCRIPTS=""
-DOG=$("$SCRIPTS/resolve-route.sh" "{{binding_prefix}}dog") || true
-if [ -z "$DOG" ]; then
-  echo "no live dog identity resolves from '{{binding_prefix}}dog'; a warrant nothing claims leaves the session wedged and still reports success, so file a human gate on the bead instead of the warrant." >&2
-else
-  "$SCRIPTS/file-warrant.sh" --owner "$OWNER" --reason "$REASON" --requester witness --dog "$DOG"
-  case $? in
-    0|3) : ;;  # a warrant was filed, or one was already open for this session
-    *) echo "file-warrant.sh refused to file for owner '$OWNER' (it resolved to no live session id); file a human gate on the bead for this wedged session instead of leaving it silently un-warranted." >&2 ;;
-  esac
-fi
-# <<< warrant-file
+# >>> no-progress-finding
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/seat-progress.sh" --bead <bead>
+# <<< no-progress-finding
 ```
-The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
-pardon-or-execute, DOG_DONE notice back); if it executes, the dead
-session's beads return through THIS step next cycle.
+Its line says what it judged. It files nothing for a named session, a sitting,
+a seat whose pane is quiet or a seat that wrote within three hours. Exit 1 is a
+read that failed, which judges nothing: go on to the next bead, and the next
+cycle judges the seat again.
 
 **3. Salvage.** Read the bead's recovery pointers and resolve the repo that
 OWNS the branch. The witness runs from its agent home, whose git toplevel is

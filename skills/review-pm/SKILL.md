@@ -161,7 +161,8 @@ change does instead or fails to show, and what would close the gap.
 
 ## The verdict
 
-Two verdicts, and the check passes no `signoff.sh` flag of its own.
+Two verdicts, which go where the formula you run under says, and the check adds
+nothing of its own to the verdict.
 
 - **Approve.** The change is the right thing for the people it serves and presents
   it so the operator can judge. If it changes what the product is for or what it

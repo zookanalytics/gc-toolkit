@@ -32,7 +32,7 @@ const (
 	phaseOpenAsDraft = "open-as-draft"
 )
 
-// ParseGates reads the gates `review-checks.sh --resolve --with-phase` prints:
+// ParseGates reads the gates `gctk review checks --resolve --with-phase` prints:
 // one `<check>\t<phase>` per line. A blank line names no gate.
 func ParseGates(s string) []Gate {
 	var out []Gate

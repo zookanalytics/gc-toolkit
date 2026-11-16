@@ -117,7 +117,6 @@ has "$NUDGES" "quiet for 15 minutes" "the nudge says how long the pane has been 
 has "$NUDGES" "patrol wisp still in progress, so your pass stopped" "the nudge says the pass stopped with its wisp in progress"
 has "$NUDGES" "startup wisp reconcile" "the nudge asks for the startup reconcile"
 has "$NUDGES" "mol-witness-patrol from check-inbox" "the nudge names the patrol and where to start it"
-hasnt "$NUDGES" "limit" "the nudge reads as no provider banner to the quota-park order"
 has "$OUT" "1 checked, 1 nudged" "the summary counts it"
 has "$(cat "$LIST_LOG")" "GC_NO_API=1 " "the list reads the local path"
 has "$(cat "$LIST_LOG")" "session list --json" "the list asks for JSON"

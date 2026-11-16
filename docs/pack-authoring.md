@@ -303,7 +303,7 @@ closed bead of the rig's in a home's directory name
 `work_dir` and `pre_start` accept are upstream's
 ([config reference](https://docs.gascity.com/reference/config), `Agent`).
 
-A **city-scoped** agent (mechanik, deacon, dog) spans rigs and has no single
+A **city-scoped** agent (mechanik, deacon) spans rigs and has no single
 `{{.Rig}}`, so it stays under `.gc/agents/` and passes the repo explicitly on
 each call (`gh --repo <owner>/<rig>`, `git -C <rig-root>`). A rig-scoped agent
 that legitimately targets a fixed repo the same way (the gascity-keeper
@@ -538,7 +538,7 @@ and both scopes ship in one pack:
 
 | Agents | `scope` | Identity to stamp |
 | --- | --- | --- |
-| dog, deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
+| deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
 | converse-claude-opus, converse-claude-fable, converse-codex-sol, converse-codex-astra, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
 
 Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the
@@ -559,12 +559,12 @@ unreadable roster is the absence of proof rather than proof of an empty city,
 so there the name comes back unchanged on exit 3 and the caller files
 unverified rather than not at all.
 
-The witness addresses both scopes and resolves at both sites: it files a
-warrant to the city-scoped dog and reads the rig-scoped refinery's queue. Its
-recipes are the `warrant-file` and `refinery-stuck-handoff` blocks in
-`formulas/mol-witness-patrol.toml`, which `assets/scripts/witness-route.test.sh`
-and `assets/scripts/refinery-stuck-handoff.test.sh` execute as extracted from
-the formula.
+The witness resolves the identity of the rig-scoped refinery before it reads
+the refinery's queue. Its recipe is the `refinery-stuck-handoff` block in
+`formulas/mol-witness-patrol.toml`, which
+`assets/scripts/refinery-stuck-handoff.test.sh` executes as extracted from the
+formula, and `assets/scripts/witness-route.test.sh` holds every step of that
+formula to resolving each address it builds.
 
 ## Refresh procedure
 

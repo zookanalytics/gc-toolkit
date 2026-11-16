@@ -694,6 +694,9 @@ keys = [
 #   oid.
 
 [metadata.gates]
+# A review run's result on the bead that owns a PR, review_results, and the
+# checks an ask sends back, review_checks, are the review domain's keys,
+# declared in services/gctk/review and listed in services/gctk/key-registry.json.
 keys = [
   "check_set", "signoff_dismissed", "approval_dismissed",
   "signoff_verdict", "visual", "visual_fallback_from",
@@ -721,6 +724,10 @@ keys = [
 #   those reviews, so it never dismisses an approval given after them. Absent
 #   means the pass dismissed nothing: it converged, or no approval stood. Never
 #   cleared.
+# withdraw_head — the head a withdrawal of a PR's approvals names, on a PR the
+#   pending record holds, is the pr domain's key, declared in services/gctk/pr
+#   and listed in services/gctk/key-registry.json: gctk pr withdraw writes it on
+#   the withdrawal it files, and the landing order reads it.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
 #   in the same write that closes the review bead (signoff.sh's closing update;
 #   review-outcome.sh writes `approve` in the create that files a back-lane
@@ -1670,13 +1677,15 @@ keys = ["seed_audit_reaudit"]
 #   statuses, so a branch owns at most one live re-audit. Never cleared. A branch
 #   name.
 
-# Warrant beads (label=warrant, routed to the dog pool): the due-process kill
-# request a patrol detector files against a live-but-wedged session
-# (docs/authority-map.md; formulas/mol-dog-shutdown-dance.toml). Renamed from
-# the pre-rewrite bare target/reason/requester — bare `target` collides with
-# the merge_identity key above.
+# Warrant beads (label=warrant): the kill request a patrol filed against a live
+# session, for the dog pool's shutdown dance. The pack has neither now, since
+# Gas City's work ladder recovers a stuck pool seat.
 [metadata.warrant]
 keys = ["warrant.target", "warrant.reason", "warrant.requester"]
+# warrant.target / warrant.reason / warrant.requester — RETIRED. The session a
+#   warrant named, why the patrol filed it, and the patrol the dance answered
+#   when it finished. Nothing writes or reads them now. Registered so that
+#   residue on a pre-retirement bead reads as known, not as a stray.
 
 [metadata.deferred_dispatch]
 # The arm itself, gc.dispatch_when_ready and its _args, _armed_by, _armed_at,
@@ -1828,9 +1837,9 @@ keys = [
   "gc.routed_to", "gc.execution_routed_to", "gc.run_target", "gc.outcome",
   "assignee", "gc.session_id", "gc.session_name", "gc.session_affinity",
   "gc.claimed_at", "gc.kind", "gc.synthetic", "gc.step_id", "gc.step_ref",
-  "gc.root_bead_id", "gc.root_store_ref", "gc.input_convoy_id", "gc.formula_source",
+  "gc.root_bead_id", "gc.root_store_ref", "gc.input_convoy_id", "gc.formula_source", "gc.formula_name",
   "gc.native_step_dependencies.v1", "gc.graphv2_*", "gc.var.*",
-  "pin_awake", "configured_named_session",
+  "pin_awake",
   "gc.formula_contract", "gc.work_dir", "gc.work_commit", "gc.work_branch",
   "gc.work_outcome", "work_outcome",
 ]
@@ -1856,6 +1865,9 @@ keys = [
 #   it in its step metadata: gascity's sling routes a poured step by its
 #   assignee, else by this key, which is how mol-review-quorum-signoff sends
 #   each lane to its provider's pool ([metadata.review_quorum]).
+# gc.formula_name — the formula a workflow root was poured from, stamped by the
+#   pour beside gc.kind=workflow. The landing order reads it to tell a review
+#   run, a live root of mol-pr-review, attached to a PR's bead by a blocks edge.
 # gc.formula_contract — `graph.v2` on a workflow root, stamped by the formula
 #   pour beside gc.kind=workflow. orphan-dispose.sh, run-cancel.sh and
 #   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a
@@ -1870,7 +1882,10 @@ keys = [
 #   writes gc.work_commit (merged_sha) and gc.work_branch (merged_target) from
 #   the landing it records, when that landing names both.
 #   mol-refinery-patrol.toml's rework hand-back close writes them from the head
-#   it read back from origin and the branch that head is on. bead-rehome.sh
+#   it read back from origin and the branch that head is on. The close of an ask
+#   an earlier round of the run fixed, by `gctk review passed --record`, writes
+#   them from the fix's commit and the PR's branch, which the repair pushed that
+#   commit onto from a worktree of the rig checkout. bead-rehome.sh
 #   reads gc.work_dir and gc.work_commit — with the pack-written bare work_dir
 #   defined in merge_identity — as proof a run produced work before a duplicate
 #   or fixed-upstream close.
@@ -1887,21 +1902,19 @@ keys = [
 #   like gc.outcome: the runtime's work-record gate checks it when a plain task
 #   bead closes, and warns on a missing or unknown value unless
 #   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `shipped`
-#   from the lifecycle writer's transition into `merged` and from
-#   mol-refinery-patrol.toml's rework hand-back close, and `no-op` from
+#   from the lifecycle writer's transition into `merged`, from
+#   mol-refinery-patrol.toml's rework hand-back close and from the review
+#   loop's check (`gctk review passed --record`) closing an ask an earlier
+#   round fixed, and `no-op` from
 #   the proactive prompt's clause on a leftover reaction bead it closes,
 #   mol-validate-close, work-outcome.sh on every conversation close, the
-#   observation-filing recipes, and converse by hand. bead-rehome.sh reads it
+#   observation-filing recipes, the review loop's check closing any other ask
+#   the run answered, the landing order's close of a withdrawal it carried out,
+#   and converse by hand. bead-rehome.sh reads it
 #   to confirm a no-op origin is disposable, `gctk pr compose` drops a no-op row
 #   from a branch's ledger, and each falls back to the legacy bare `work_outcome`
 #   alias. Absent leaves the
 #   disposition unstated. Never cleared.
-# configured_named_session — on a session bead, the authoritative "standing
-#   named" gate: "true" marks a session the pack's [[named_session]] config
-#   declares standing, applied by the runtime. pin-keepalive.sh reads it beside
-#   pin_awake to decide which conversational sessions to keep pinned; the pack
-#   does not write it. Absent or any value but "true" means the session is not a
-#   standing named one. A boolean-valued string.
 # gc.synthetic — "true" on a machine-minted convoy, written by the runtime that
 #   mints it. liveness-sweep.sh's machine_convoy test reads it, with the sling-
 #   and input-convoy title prefixes, as a signal that a convoy is machine-owned

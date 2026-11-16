@@ -31,14 +31,17 @@ type Runtime struct {
 	Root    string
 	RootErr error
 	// OnSling answers a sling, and nil answers exit 0. OnScript answers a script
-	// call, and nil answers exit 0.
+	// call, and nil answers exit 0. OnCook answers a cook, and nil answers exit 0
+	// with a root of its own.
 	OnSling  func(gascity.Sling) gascity.SlingResult
 	OnScript func(Call) gascity.Result
+	OnCook   func(gascity.Cook) gascity.CookResult
 
 	mu      sync.Mutex
 	slings  []gascity.Sling
 	asks    []gascity.Sling
 	scripts []Call
+	cooks   []gascity.Cook
 }
 
 var _ gascity.Runtime = (*Runtime)(nil)
@@ -53,6 +56,26 @@ func (r *Runtime) Sling(s gascity.Sling) gascity.SlingResult {
 		return on(s)
 	}
 	return gascity.SlingResult{}
+}
+
+// Cook records c and answers it.
+func (r *Runtime) Cook(c gascity.Cook) gascity.CookResult {
+	r.mu.Lock()
+	r.cooks = append(r.cooks, c)
+	n := len(r.cooks)
+	on := r.OnCook
+	r.mu.Unlock()
+	if on != nil {
+		return on(c)
+	}
+	return gascity.CookResult{Root: fmt.Sprintf("cooked-%d", n)}
+}
+
+// Cooks returns each cook taken, in order.
+func (r *Runtime) Cooks() []gascity.Cook {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.cooks)
 }
 
 // DefaultFormula records s and answers from Formulas, else from PackFormulas

@@ -8,6 +8,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
 // The evaluator's two reads and its one rule (specs/tk-1tfzr71.134/design.md,
@@ -107,7 +108,7 @@ type side struct {
 	holds   []string
 	rc      receipts
 	since   string
-	results []ReviewResult
+	results []review.Result
 	missing []string
 	waits   []Condition
 	host    string
@@ -126,7 +127,7 @@ func readSide(l *ledger.Ledger, bead string) (side, *ledger.Record, error) {
 		return side{}, nil, &ledger.ReadError{ID: bead, Reason: "the store holds no such bead"}
 	}
 	r := rows[0]
-	read := func(k ledger.Key[string]) string {
+	read := func(k reading) string {
 		v, _, e := k.Get(r)
 		if e != nil && err == nil {
 			err = e
@@ -137,7 +138,7 @@ func readSide(l *ledger.Ledger, bead string) (side, *ledger.Record, error) {
 	if err == nil {
 		err = serr
 	}
-	b := side{bead: bead, rec: rec, branch: read(branchKey),
+	b := side{bead: bead, rec: rec, branch: read(record.Branch),
 		holds: []string{read(mergeHoldKey), read(rebaseHoldKey)},
 		rc: receipts{
 			review: mark(read(reviewWatermarkKey)), comment: mark(read(commentWatermarkKey)),
@@ -146,7 +147,7 @@ func readSide(l *ledger.Ledger, bead string) (side, *ledger.Record, error) {
 		},
 		since: read(provenanceKey),
 	}
-	results, _, rerr := reviewResultsKey.Get(r)
+	results, _, rerr := review.Results.Get(r)
 	if err == nil {
 		err = rerr
 	}
@@ -290,7 +291,8 @@ func listed(l []string) []string {
 // conditions come first: the PR's identity, state, draft flag, head and merge
 // state, its required checks, its approval and the review loop's result, then
 // the store's, then the feedback the receipts do not cover and the review
-// threads waiting on the city's answer.
+// threads waiting on the city's answer. An answer that judged a head carries
+// the review loop's result there, passed or not, when one stands.
 func decide(b side, read *GitHubRead) Answer {
 	ans := Answer{Bead: b.bead, Conditions: []Condition{}}
 	var store []Condition
@@ -317,6 +319,7 @@ func decide(b side, read *GitHubRead) Answer {
 	}
 
 	ans.Head, ans.Target = read.Head, read.Base
+	ans.ReviewResult = resultAt(b.results, read.Head, read.Base)
 	// Empty rather than nil, so a ready answer's conditions encode as [].
 	front := []Condition{}
 	named := &gh.PullRequest{URL: read.URL, Number: read.Number, Repository: read.Repository,
@@ -351,7 +354,7 @@ func decide(b side, read *GitHubRead) Answer {
 		front = append(front, Condition{Kind: KindChangesRequested, Value: login,
 			Detail: login + " requests changes, and the request stands"})
 	}
-	if !passedAt(b.results, read.Head, read.Base) {
+	if r := ans.ReviewResult; r == nil || !r.Passed {
 		front = append(front, Condition{Kind: KindReview,
 			Detail: fmt.Sprintf("no review result passed at head %s into %s", read.Head, read.Base)})
 	}

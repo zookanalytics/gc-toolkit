@@ -12,11 +12,9 @@
 #
 #   (1) the fragment defines where-to-search;
 #   (2) every agent under agents/, and under a sub-pack's agents/ in packs/,
-#       renders the rule's heading exactly once, except two: the mechanik,
-#       whose prime has no room for it under the session-start cap
-#       mechanik-prime-cap.test.sh holds it to, and the dog, whose prompt the
-#       deletion plan retires (tools/deletion-plan.tsv), so it takes no new
-#       text;
+#       renders the rule's heading exactly once, except the mechanik, whose
+#       prime has no room for it under the session-start cap
+#       mechanik-prime-cap.test.sh holds it to;
 #   (3) no prompt or fragment cites a formula by its file path, which reads as
 #       a file to go and find, where `gc formula show <name>` reads it.
 #
@@ -28,7 +26,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 FRAG="$ROOT/template-fragments/where-to-search.template.md"
 RENDERS="$ROOT/generated/seed-audit/agents"
 HEADING='## Where to search'
-EXEMPT=" agents/mechanik agents/dog "
+EXEMPT=" agents/mechanik "
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }

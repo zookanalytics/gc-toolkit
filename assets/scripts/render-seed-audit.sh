@@ -41,7 +41,7 @@
 # WHOSE TEXT IT IS. Rendering every agent the synthetic city configures means
 # the tree also holds prompts this pack does not author. claude.md, codex.md
 # and gemini.md come from the `builtin:` providers, and their startup protocol
-# is the core pack's shared claim-protocol fragment; bd.dog.md comes from the bd
+# is the core pack's shared claim-protocol fragment; dog.md comes from the bd
 # example pack. In the gascity repo those two sources are
 # internal/bootstrap/packs/core/template-fragments/claim-protocol.template.md
 # and examples/bd/dolt/agents/dog/prompt.template.md. A render is a mirror of
@@ -618,11 +618,10 @@ while IFS= read -r atoml; do
     PACK_AGENTS="${PACK_AGENTS} $(basename "$(dirname "$atoml")")"
 done < <(find "$ROOT/agents" "$ROOT/packs" -mindepth 2 -maxdepth 4 -name agent.toml -print 2>/dev/null | LC_ALL=C sort)
 
-# A bare name does not say whose agent it is: the bd pack's dolt maintenance
-# dog and this pack's warrant executor are both `dog`. gc qualifies an agent as
-# <binding>.<name>, where the binding is the import that brought its pack in, so
-# the imports whose source is this pack or one of its sub-packs are what mark a
-# copy as this pack's own.
+# A bare name does not say whose agent it is, since two packs can each ship an
+# agent of that name. gc qualifies an agent as <binding>.<name>, where the
+# binding is the import that brought its pack in, so the imports whose source is
+# this pack or one of its sub-packs are what mark a copy as this pack's own.
 PACK_BINDINGS="$(ROOT="$ROOT" awk '
     /^\[/ {
         binding = ""
@@ -659,9 +658,9 @@ mapfile -t RIGS < <(awk '
 # gc that refuses it fails the render under --strict, and a gc that does not
 # renders whichever agent comes first in config order. So each of those agents
 # is primed by its qualified name and filed under its binding-qualified name
-# (gc-toolkit.dog.md beside bd.dog.md). A city-scoped agent's qualified name is
-# that identity; a rig-scoped one is primed through its copy in the first rig
-# declared, the copy an unshared name would render.
+# (gc-toolkit.<name>.md beside bd.<name>.md). A city-scoped agent's qualified
+# name is that identity; a rig-scoped one is primed through its copy in the
+# first rig declared, the copy an unshared name would render.
 #
 # Each entry is <file stem> <name to prime> <bare name> <binding>, tab-separated.
 mapfile -t AGENT_ENTRIES < <(gcq agent list --json 2>/dev/null | jq -r --args '

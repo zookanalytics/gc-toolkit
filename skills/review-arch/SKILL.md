@@ -135,7 +135,8 @@ stance names:
 
 ## What blocks
 
-`signoff.sh` writes one of two verdicts, `approve` or `request-changes`. There is
+The verdict is one of two, `approve` or `request-changes`, and it goes where
+the formula you run under says. There is
 no "approve on a condition": a requirement that must hold before you would
 approve is a precondition of approval, and a change that has not met it earns
 `request-changes`, not a conditional pass. These shapes recur:
@@ -169,4 +170,4 @@ the review.
   test within the change's reach.
 - **Request changes** in every other case, each of the shapes above a finding.
 
-The check passes no `signoff.sh` flag of its own.
+The check adds nothing of its own to the verdict the formula records.

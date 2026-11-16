@@ -79,6 +79,79 @@ func TestAnActThatTitlesTheBeadTitlesItInTheSameWrite(t *testing.T) {
 	}
 }
 
+// A new bead is one create, which carries its type, its description, its keys
+// and the edge from each bead it blocks, so it lands whole or not at all.
+func TestAFilingIsOneCreateCarryingItsKeysAndEdges(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	l := New(s)
+	f := l.File("withdraw the approvals", "task")
+	f.Description("why")
+	testText.Set(f, "now")
+	f.Blocks("b-1")
+	id, err := l.Create(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creates := s.Creates()
+	want := []string{"-t", "task", "--description", "why", "--metadata", `{"test.ledger.text":"now"}`, "--deps", "blocks:b-1"}
+	if len(creates) != 1 || creates[0].ID != id || creates[0].Title != "withdraw the approvals" || !slices.Equal(creates[0].Args, want) {
+		t.Fatalf("creates = %+v, want one create %q", creates, want)
+	}
+	owner, _ := s.Row("b-1")
+	if !slices.ContainsFunc(owner.Edges, func(e gcbd.Edge) bool { return e.Type == gcbd.EdgeBlocks && e.ID == id }) {
+		t.Fatalf("the bead the filing blocks has edges %+v, without one onto %s", owner.Edges, id)
+	}
+	if len(s.Writes()) != 0 {
+		t.Fatalf("a filing wrote an update: %+v", s.Writes())
+	}
+}
+
+// The bead a filing was found from is the new bead's own discovered-from edge,
+// in the create's one --deps list after the beads it blocks, and no wait.
+func TestAFilingFoundFromABeadCarriesItsDiscoveredFromEdge(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "src", Status: "closed"})
+	l := New(s)
+	f := l.File("ask", "task")
+	f.Blocks("b-1")
+	f.From("src")
+	id, err := l.Create(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"-t", "task", "--deps", "blocks:b-1,discovered-from:src"}; !slices.Equal(s.Creates()[0].Args, want) {
+		t.Fatalf("the create carried %q, want %q", s.Creates()[0].Args, want)
+	}
+	row, _ := s.Row(id)
+	if len(row.Edges) != 1 || row.Edges[0].Type != "discovered-from" || row.Edges[0].ID != "src" {
+		t.Fatalf("the new bead's edges are %+v, want only its discovered-from edge onto src", row.Edges)
+	}
+}
+
+// A filing a Set refused, or one that names no title, files nothing, and a
+// create the store failed says the bead may have been filed.
+func TestAFilingThatCannotLandFilesNothing(t *testing.T) {
+	s := fake.New()
+	l := New(s)
+	f := l.File("t", "task")
+	testShell.Set(f, "x")
+	if _, err := l.Create(f); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("a filing of a read-only key read as %v", err)
+	}
+	if _, err := l.Create(l.File(" ", "task")); err == nil {
+		t.Fatal("a filing with no title filed")
+	}
+	if len(s.Creates()) != 0 {
+		t.Fatalf("a refused filing reached the store: %+v", s.Creates())
+	}
+	s.CreateErr = errors.New("bd's create exited 1, so whether it filed the bead is unknown")
+	if _, err := l.Create(l.File("t", "task")); err == nil || !strings.Contains(err.Error(), "may not have landed") {
+		t.Fatalf("a failed create read as %v", err)
+	}
+}
+
 func TestAKeyReadsItsAliasAndClearsBoth(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "b-1", Status: "open", Metadata: map[string]string{"test.ledger.old_text": "older", "test.ledger.record": "{not json"}})

@@ -47,8 +47,8 @@ since a bead with no target opens into the rig's default branch and a
 retargeted bead's merged_target names its earlier base.
 
 --gates is the gate set the bead's check set resolves to at --head, as
-review-checks.sh --resolve --through open-as-draft --with-phase prints it,
-empty for none. A region that must be written without it is left as it
+gctk review checks --resolve <set> --through open-as-draft --with-phase prints
+it, empty for none. A region that must be written without it is left as it
 stands, and its outcome says needs-gates.
 
 It prints one JSON object: {"title", "body", "summary", "branch_beads",

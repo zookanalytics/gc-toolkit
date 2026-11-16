@@ -4,11 +4,11 @@
 # legitimate HQ resident is exempt (infra type, a bead an open human gate
 # blocks, which another gate does not exempt, a conversation,
 # deacon-ledger label, debt label, gc-doctor title, an assigned bead, a bead
-# routed to a city-scoped agent, a warrant label, a standing subject); the
+# routed to a city-scoped agent, a standing subject); the
 # machinery types bd's ready-work query excludes (step, convoy,
 # startup-health-episode) are exempt while a marooned spec is still flagged; the
-# city-route exemption keys off the agent's scope not its name; a warrant is
-# still exempt when the agent list is down; a mix names only the marooned beads;
+# city-route exemption keys off the agent's scope not its name; a label still
+# exempts when the agent list is down; a mix names only the marooned beads;
 # an empty store passes; the probes' scratch tree is removed on exit; and the
 # fail-closed arms — no locatable city, an unreadable gate listing, an
 # unreadable store (its warning ends
@@ -105,10 +105,8 @@ B_LEDGER='{"id":"ok-ledger","status":"open","issue_type":"task","title":"deacon 
 B_DEBT='{"id":"ok-debt","status":"open","issue_type":"task","title":"gc doctor: 2 new findings (dolt-drift)","labels":["debt"]}'
 B_DOCTOR='{"id":"ok-doctor","status":"open","issue_type":"task","title":"gc doctor: agent-token-telemetry"}'
 B_ASSIGNED='{"id":"ok-assigned","status":"open","issue_type":"bug","title":"already being worked","assignee":"gc-toolkit/gc-toolkit.polecat"}'
-B_WARRANT='{"id":"ok-warrant","status":"open","issue_type":"task","title":"warrant: shut down hq-x","labels":["warrant"],"metadata":{"gc.routed_to":"gc-toolkit.dog"}}'
 B_DOGROUTE='{"id":"ok-dogroute","status":"open","issue_type":"task","title":"city task the dog claims","metadata":{"gc.routed_to":"gc-toolkit.dog"}}'
 B_DOGQUAL='{"id":"ok-dogqual","status":"open","issue_type":"task","title":"city task routed at the qualified form","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.dog"}}'
-B_WARRANT_UNROUTED='{"id":"ok-warrant-unrouted","status":"open","issue_type":"task","title":"warrant with its route cleared","labels":["warrant"]}'
 B_TRIAGE='{"id":"ok-triage","status":"open","issue_type":"task","title":"triage: escalations raised from an ephemeral subject (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"ephemeral-subject-findings"}}'
 B_STARTUP='{"id":"ok-startup","status":"open","issue_type":"startup-health-episode","title":"Startup health: gc-toolkit__ripley-pool"}'
 B_STEP='{"id":"ok-step","status":"open","issue_type":"step","title":"mol-polecat-work.implement"}'
@@ -246,15 +244,13 @@ has "$OUT" "NOT checked" "the silent listing's warning says the store was skippe
 
 # --- 9. city machinery and standing subjects are exempt; a real marooned bead
 #        among them is still caught -----------------------------------------
-store "$B_WARRANT" "$B_DOGROUTE" "$B_DOGQUAL" "$B_WARRANT_UNROUTED" "$B_TRIAGE" "$B_BUG"
+store "$B_DOGROUTE" "$B_DOGQUAL" "$B_TRIAGE" "$B_BUG"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a real marooned bug among city machinery is still an ERROR"
 has "$OUT" "1 finding" "only the marooned bug is a finding"
 has "$OUT" "m-bug" "the marooned bug is named"
-hasnt "$OUT" "ok-warrant" "a warrant routed to the city dog is not flagged"
 hasnt "$OUT" "ok-dogroute" "a task routed to the city dog (bare identity) is not flagged"
 hasnt "$OUT" "ok-dogqual" "a task routed to the dog at the qualified form is not flagged"
-hasnt "$OUT" "ok-warrant-unrouted" "a warrant with no route is exempt by its label"
 hasnt "$OUT" "ok-triage" "a standing triage-subject is not flagged"
 
 # --- 10. the city-route exemption keys off scope, not the name 'dog' ---------
@@ -268,13 +264,13 @@ OUT=$(AGENTS_JSON="$TMP/agents-dogrig.json" run_check); RC=$?
 eq "$RC" "2" "a task routed to a NON-city-scoped dog is still marooned"
 has "$OUT" "ok-dogroute" "the exemption is scope-driven, not a hardcoded 'dog' name"
 
-# --- 11. with the agent list down, the warrant label still exempts -----------
-# CITY_ROUTES cannot resolve without the roster, but a warrant is city machinery
-# a rig never works regardless of route resolution.
-store "$B_WARRANT_UNROUTED"
+# --- 11. with the agent list down, a label still exempts ---------------------
+# CITY_ROUTES cannot resolve without the roster, and a label exemption reads no
+# route.
+store "$B_LEDGER"
 OUT=$(AGENTS_RC=1 WANT_CITY_PATH="$CITY" run_check); RC=$?
-eq "$RC" "0" "a warrant is exempt by label even when the agent list is unreadable"
-has "$OUT" "OK:" "the roster-down warrant store reports the OK line"
+eq "$RC" "0" "a deacon-ledger digest is exempt by label even when the agent list is unreadable"
+has "$OUT" "OK:" "the roster-down ledger store reports the OK line"
 
 # --- 12. machinery types mirrored from bd's ready-work exclusions are exempt,
 #         but spec (real rig work) is still caught --------------------------

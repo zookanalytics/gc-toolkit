@@ -74,11 +74,10 @@
 # one tally summed over the parts (harness_run_parts in the same harness).
 #
 # Each file runs in its own process group with its output captured to a file,
-# never a pipe. A file that leaves a background child behind therefore cannot
-# wedge the runner on a pipe that never reaches EOF. Once the file's own
-# process exits, the runner sends the group TERM, which ends a child that
-# leaves TERM to its default action. A child that handles TERM runs its handler
-# instead, and may outlive the file.
+# never a pipe. A file that leaves a background child behind (pr-facts.test.sh
+# does) therefore cannot wedge the runner on a pipe that never reaches EOF, and
+# the group is killed once the file's own process exits so the child cannot
+# outlive the file that spawned it.
 #
 # The suite yields to whatever else the host runs, such as a city's agents and
 # their bead calls. A file forks a stub for every gc and bd call it makes, so at
@@ -106,24 +105,14 @@
 # commit each of those commits needs a reachable signing agent. No test may
 # depend on one.
 #
-# Every run has a temp directory of its own and runs with TMPDIR set to it:
-# run.<pid> in the physical path of the caller's temp directory (/tmp when
-# TMPDIR is unset), named for the process that lives as long as the run, with no
-# symlink in it and no trailing slash. A test builds the paths it expects from
-# TMPDIR, while the scripts it tests print paths they resolve: `pwd` drops a
-# doubled slash, `pwd -P` and git, which records a worktree by its physical
-# path, resolve a symlink too. On macOS TMPDIR ends in a slash and sits under
-# /var, a symlink to /private/var, so there a path built from it and the same
-# path resolved compare unequal. What the run puts under TMPDIR, such as the
-# suite's own temp and the work tree of any Go build it starts, so lands in a
-# directory that names its owner. The runner removes it once the run ends and
-# no process is left in the run's group. A process the file left running that
-# the group's TERM has not ended yet, such as one still in its TERM handler,
-# may still use the directory, so the runner keeps the directory and looks at
-# it again just before exiting. A directory still kept then, and the directory
-# of a run still going when the runner itself ends, stays while any process of
-# the run's group lives, and build-scratch-reap.sh removes it once none does. A
-# file run directly, outside the runner, gets the caller's TMPDIR as it is.
+# Every file runs with TMPDIR set to the physical path of the caller's temp
+# directory (/tmp when TMPDIR is unset), with no symlink in it and no trailing
+# slash. A test builds the paths it expects from TMPDIR, while the scripts it
+# tests print paths they resolve: `pwd` drops a doubled slash, `pwd -P` and git,
+# which records a worktree by its physical path, resolve a symlink too. On macOS
+# TMPDIR ends in a slash and sits under /var, a symlink to /private/var, so
+# there a path built from it and the same path resolved compare unequal. A file
+# run directly, outside the runner, gets the caller's TMPDIR as it is.
 #
 # Every file runs with the test floor, tools/test-floor, at the front of PATH.
 # A file that stubs gc, bd or gh puts its stub directory in front of that, so
@@ -145,11 +134,22 @@
 # under either prefix that is meant for one file, such as
 # GC_TMUX_TEST_WAIT_SECS, reaches it only then.
 #
+# The runner needs bash 5.1 or later, both its own and the first on PATH, which
+# starts each file.
+#
 # Exit: 0 every file passed, or passed on a serial re-run, or the subset was
 # empty; 1 one or more failed serially too; 2 a usage or enumeration error,
-# such as a BASE git cannot read.
+# such as a BASE git cannot read, or no bash of 5.1 or later.
 
 set -uo pipefail
+
+# The oldest bash the runner runs under (see the header). bash sets
+# BASH_VERSINFO itself and never takes it from the environment.
+case "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" in
+  [0-4].*|5.0)
+    echo "run-tests: needs bash 5.1 or later, and $BASH is bash $BASH_VERSION, so nothing ran" >&2
+    exit 2 ;;
+esac
 
 usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
@@ -483,6 +483,26 @@ export TMPDIR="$tmp_real"
   echo "run-tests: no test floor at $ROOT/tools/test-floor; not running" >&2; exit 2; }
 export PATH="$ROOT/tools/test-floor:$PATH"
 
+# The bash every file starts with, held to the runner's own floor (see the
+# header). spawn starts each file from ROOT, so the first bash on PATH is looked
+# up from ROOT, and spawn starts each file with the full path found here, the
+# file whose version this reads. type -P answers from the locations the shell
+# remembers before it searches PATH, so the lookup forgets them first.
+FILE_BASH="$(cd "$ROOT" && hash -r && type -P bash)" || {
+  echo "run-tests: each file starts with the first bash on PATH, and PATH has no bash, so nothing ran" >&2
+  exit 2; }
+case "$FILE_BASH" in /*) ;; *) FILE_BASH="$ROOT/$FILE_BASH" ;; esac
+file_bash_v="$("$FILE_BASH" -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]} $BASH_VERSION"' 2>/dev/null)"
+case "$file_bash_v" in
+  [0-4].*|5.0\ *)
+    echo "run-tests: each file starts with the first bash on PATH, and $FILE_BASH is bash ${file_bash_v#* }, older than 5.1, so nothing ran" >&2
+    exit 2 ;;
+  [0-9]*.[0-9]*\ *) ;;
+  *)
+    echo "run-tests: each file starts with the first bash on PATH, and $FILE_BASH reports no bash version, so nothing ran" >&2
+    exit 2 ;;
+esac
+
 # The caller's variables every file runs without, and the one value handed on
 # (see the header). The runner is the only source of RUN_TESTS_GC_BIN, so one
 # the caller exported is replaced.
@@ -494,15 +514,7 @@ fi
 unset "${!GC_@}" "${!BEADS_@}"
 
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")" || { echo "run-tests: mktemp failed" >&2; exit 2; }
-# On exit the logs go, and so does each run directory kept for a process of
-# its group (drop_run_tmp, below) whose group has emptied since.
-declare -a KEPT_TMP=()
-on_exit() {
-  local p
-  for p in "${KEPT_TMP[@]}"; do drop_run_tmp "$p"; done
-  rm -rf "$LOGDIR"
-}
-trap on_exit EXIT
+trap 'rm -rf "$LOGDIR"' EXIT
 
 total="${#RUN_FILE[@]}"
 [ "$JOBS" -gt "$total" ] && JOBS="$total"
@@ -516,8 +528,8 @@ if [ "$QUIET" -eq 0 ]; then
 fi
 
 # Monitor mode places each background job in its own process group, so
-# `kill -- -<leader-pid>` signals a job's whole tree, a child it leaked
-# included, without touching the runner's own group.
+# `kill -- -<leader-pid>` reaps a job's whole tree — including any child it
+# leaked — without touching the runner's own group.
 set -m
 
 declare -A PID_IDX=() PID_START=()
@@ -533,61 +545,25 @@ if ionice -c 2 -n 7 true >/dev/null 2>&1; then
   LOW_PRIORITY+=(ionice -c 2 -n 7)
 fi
 
-# The temp directory of the run whose process is <pid> (see the header), and its
-# removal once the run has ended. That process leads the run's process group,
-# so the directory goes only once the group has no process left. A run whose
-# group still has one, such as a process the group's TERM has not ended yet,
-# keeps its directory, and its pid goes into KEPT_TMP for the look on exit. Go
-# writes some of its files read-only, so write permission goes back first.
-run_tmp() { printf '%s/run.%s' "$tmp_real" "$1"; }
-
-# group_lives <pgid> — whether any process is left in the group. kill -0
-# reaches a live member of this uid. It is refused for a member this uid cannot
-# signal, and on macOS for one that has ended and is not yet reaped, and ps,
-# which lists every process, answers for those.
-group_lives() {
-  local ids
-  kill -0 -- "-$1" 2>/dev/null && return 0
-  ids="$(ps -A -o pgid= 2>/dev/null)"
-  case $'\n'"${ids// /}"$'\n' in *$'\n'"$1"$'\n'*) return 0 ;; esac
-  return 1
-}
-
-drop_run_tmp() { # <pid>
-  local d
-  if group_lives "$1"; then KEPT_TMP+=("$1"); return 0; fi
-  d="$(run_tmp "$1")"
-  chmod -R u+w "$d" 2>/dev/null
-  rm -rf -- "$d" 2>/dev/null
-  return 0
-}
-
-# Start one run in the background, under the timeout, its output to its log. A
-# part's run is told which part it is and which parts its file declares; a run
-# of a whole file gets neither, whatever the caller exported. Any words after
-# the index are a command the run starts through, such as LOW_PRIORITY. The
-# subshell's pid is the run's own: each command after it replaces it in place
-# (exec, nice, ionice) until timeout, which lives as long as the file it runs.
-# Monitor mode makes the subshell the leader of the run's process group, so
-# the group's id is that pid too.
+# Start one run in the background with FILE_BASH, under the timeout, its output
+# to its log. A part's run is told which part it is and which parts its file
+# declares; a run of a whole file gets neither, whatever the caller exported.
+# Any words after the index are a command the run starts through, such as
+# LOW_PRIORITY.
 spawn() { # <run-index> [<command>...]
   local t="${RUN_FILE[$1]}" part="${RUN_PART[$1]}" log="$LOGDIR/$1.log"
   shift
   (
     cd "$ROOT" || exit 2
-    run_pid=$BASHPID   # read here: inside $( ) it names the substitution's subshell
-    TMPDIR="$(run_tmp "$run_pid")"
-    mkdir -p -- "$TMPDIR" || { echo "run-tests: cannot make the run's temp directory $TMPDIR" >&2; exit 2; }
-    export TMPDIR
     if [ -n "$part" ]; then
       export RUN_TESTS_PART="$part" RUN_TESTS_PARTS="${DECLARED[$t]}"
     else
       unset RUN_TESTS_PART RUN_TESTS_PARTS
     fi
     if [ "$TIMEOUT" -gt 0 ]; then
-      exec "$@" timeout -k 5 -s TERM "$TIMEOUT" bash "$t"
+      exec "$@" timeout -k 5 -s TERM "$TIMEOUT" "$FILE_BASH" "$t"
     else
-      exec "$@" bash "$t"
+      exec "$@" "$FILE_BASH" "$t"
     fi
   ) >"$log" 2>&1 &
 }
@@ -602,8 +578,7 @@ launch() {
 finish() {
   local pid="$1" rc="$2" idx dur rel status
   idx="${PID_IDX[$pid]}"
-  kill -- -"$pid" 2>/dev/null   # TERM whatever the file left running in its group
-  drop_run_tmp "$pid"
+  kill -- -"$pid" 2>/dev/null   # reap anything the file left running in its group
   dur=$(( SECONDS - PID_START[$pid] ))
   rel="$(label "$idx")"
   if [ "$rc" -eq 0 ]; then
@@ -618,17 +593,15 @@ finish() {
   unset 'PID_IDX[$pid]' 'PID_START[$pid]'
 }
 
-# Re-run one run serially (no sibling jobs) at the caller's priority, with the
-# same timeout, TERM to its group and removal of its temp as the parallel path.
-# Used after the parallel wave to tell a parallel-contention false failure from
-# a real one.
+# Re-run one run serially (no sibling jobs) at the caller's priority, reusing
+# the same timeout and process-group reap as the parallel path. Used after the
+# parallel wave to tell a parallel-contention false failure from a real one.
 rerun_serial() {
   local idx="$1" pid rc
   spawn "$idx"
   pid=$!
   wait "$pid"; rc=$?
-  kill -- -"$pid" 2>/dev/null   # TERM whatever the file left in its group
-  drop_run_tmp "$pid"
+  kill -- -"$pid" 2>/dev/null   # reap anything the file left in its group
   return "$rc"
 }
 

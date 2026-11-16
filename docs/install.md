@@ -120,8 +120,8 @@ that does not import the pack itself.
   execs the same binary.
 - **Orders** — the merge cadence (`refinery-reconcile`, 60s, rig-scoped),
   `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
-  `boot-health`, `quota-park-nudge`, `witness-nudge`, `gctk-build`, `helm-build`,
-  and the feedback miner/distiller.
+  `boot-health`, `witness-nudge`, `gctk-build`, `helm-build`, and the feedback
+  miner/distiller.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
   `gc-toolkit.session-title`, …).
 - **Doctor checks** — the structural checks verified below.
@@ -267,7 +267,7 @@ gc config show | grep -E '^\[\[agent\]\]|^name ='
 ```
 
 Confirm the native roster is present — `polecat`, `polecat-codex`,
-`refinery`, `witness`, `deacon`, `dog`, `converse-claude-opus`,
+`refinery`, `witness`, `deacon`, `converse-claude-opus`,
 `converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra`,
 `mechanik` — with no gastown entries.
 

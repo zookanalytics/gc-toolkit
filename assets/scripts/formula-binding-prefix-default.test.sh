@@ -3,14 +3,13 @@
 # [vars.binding_prefix] must give it a non-empty default.
 #
 # binding_prefix is the agent-identity prefix (with trailing dot) that formulas
-# splice into routing addresses: the refinery, the polecat pool, the dog. A pour
-# that supplies the var renders the bound prefix. The default is reached
-# whenever the var is not supplied, by a pour that omits it or by an agent that
-# reconstructs a command from the .toml source. An empty default then renders a
-# bare role (<rig>/refinery, <rig>/polecat, a bare dog), an address no agent
-# holds. Each consumer matches its address exactly, the refinery on assignee and
-# a pool on route, so a bead sent to a bare role is read by no one and nothing
-# reports the strand.
+# splice into routing addresses: the refinery and the polecat pool. A pour that
+# supplies the var renders the bound prefix. The default is reached whenever the
+# var is not supplied, by a pour that omits it or by an agent that reconstructs
+# a command from the .toml source. An empty default then renders a bare role
+# (<rig>/refinery, <rig>/polecat), an address no agent holds. Each consumer
+# matches its address exactly, the refinery on assignee and a pool on route, so
+# a bead sent to a bare role is read by no one and nothing reports the strand.
 #
 # Several formulas build routing addresses from the same var, so the invariant
 # is a class, not one file: this scans every formula under formulas/, and every
@@ -68,7 +67,7 @@ for f in "$FORMULAS"/*.toml; do
   if [ -n "$val" ]; then
     ok "$name: binding_prefix default is non-empty ($val)"
   else
-    bad "$name: binding_prefix default is EMPTY or absent — wherever the var is not supplied it renders a bare role (<rig>/refinery, <rig>/polecat, bare dog) that names no agent and strands silently"
+    bad "$name: binding_prefix default is EMPTY or absent — wherever the var is not supplied it renders a bare role (<rig>/refinery, <rig>/polecat) that names no agent and strands silently"
   fi
 done
 
