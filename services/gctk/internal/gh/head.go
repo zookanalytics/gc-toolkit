@@ -45,8 +45,8 @@ func ghWithin(limit time.Duration, args ...string) ([]byte, error) {
 }
 
 // HeadChecks is every check at one ref of a repository, as GitHub reports it:
-// the commit they are at, its check runs and its commit statuses, each read
-// across all its pages.
+// the commit its combined status names, its check runs and its commit
+// statuses, each read across all its pages.
 type HeadChecks struct {
 	SHA      string
 	Runs     []RefCheckRun
@@ -147,9 +147,6 @@ func (c *Client) HeadChecks(repo, ref string) (*HeadChecks, error) {
 	})
 	if err != nil {
 		return nil, err
-	}
-	if out.SHA == "" && len(out.Runs) > 0 {
-		out.SHA = out.Runs[0].HeadSHA
 	}
 	return out, nil
 }

@@ -197,6 +197,7 @@ func waitingWorld(t *testing.T) *world {
 	store.Put(s)
 	w.store = store
 	w.r.Ledger = ledger.New(store)
+	w.sync()
 	return w
 }
 

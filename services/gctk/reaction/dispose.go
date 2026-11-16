@@ -81,7 +81,21 @@ func Validate(rt gascity.Runtime, rig string, d *Dispose) error {
 			if len(flags) > 0 {
 				takes = "--" + strings.Join(flags, ", --")
 			}
-			return usage("--%s does not belong to the %s exit, which takes %s", name, d.Disposition, takes)
+			var owners []string
+			for _, e := range Exits {
+				if slices.Contains(ExitFlags[e], name) {
+					owners = append(owners, e)
+				}
+			}
+			belongs := ""
+			switch len(owners) {
+			case 0:
+			case 1:
+				belongs = "; it belongs to the " + owners[0] + " exit"
+			default:
+				belongs = "; it belongs to the " + strings.Join(owners[:len(owners)-1], ", ") + " and " + owners[len(owners)-1] + " exits"
+			}
+			return usage("--%s does not belong to the %s exit, which takes %s%s", name, d.Disposition, takes, belongs)
 		}
 	}
 	if d.Reason == "" {

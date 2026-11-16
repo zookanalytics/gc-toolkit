@@ -52,7 +52,11 @@ func (r *Reactions) checkMain(bead, check string) (outcome int, why string) {
 		return mainUnknown, fmt.Sprintf("GitHub did not answer for the checks on %s of %s (%v)", branch, slug, err)
 	}
 	head := branch + " of " + slug
-	if sha := checks.SHA; sha != "" {
+	sha := checks.SHA
+	if sha == "" && len(checks.Runs) > 0 {
+		sha = checks.Runs[0].HeadSHA
+	}
+	if sha != "" {
 		head += " at " + sha[:min(len(sha), 12)]
 	}
 	type entry struct {

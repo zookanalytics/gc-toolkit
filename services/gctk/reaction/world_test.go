@@ -62,6 +62,7 @@ func newWorld(t *testing.T) *world {
 	w.store.MakeReady("tk-sub")
 	w.store.OnWrite = func(kind, id string, args []string) {
 		w.add(strings.ToUpper(kind) + " " + id + " " + strings.Join(args, " "))
+		w.sync()
 	}
 	w.store.OnFind = func(q gcbd.Query) { w.add("FIND " + strings.Join(q.IDs, " ")) }
 	two := 2
@@ -135,6 +136,28 @@ func newWorld(t *testing.T) *world {
 	return w
 }
 
+// sync makes the store's blocked answers for the subject what its edges say,
+// as bd's blocked rule reads them: blocked by each bead a blocks edge of its
+// names that is not closed.
+func (w *world) sync() {
+	s, ok := w.store.Row("tk-sub")
+	if !ok {
+		return
+	}
+	var by []string
+	for _, e := range s.Edges {
+		if far, held := w.store.Row(e.ID); held && e.Type == gcbd.EdgeBlocks && !strings.EqualFold(far.Status, "closed") {
+			by = append(by, e.ID)
+		}
+	}
+	if len(by) == 0 {
+		w.store.Unlist("tk-sub")
+		return
+	}
+	w.store.List("tk-sub", by...)
+	w.store.Mark("tk-sub")
+}
+
 func (w *world) add(line string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -176,6 +199,7 @@ func (w *world) script(c rtfake.Call) gascity.Result {
 			s, _ := w.store.Row(subject)
 			s.Edges = append(slices.Clone(s.Edges), gcbd.Edge{Type: gcbd.EdgeBlocks, ID: open, Title: title, Status: "open"})
 			w.store.Put(s)
+			w.sync()
 		}
 		return gascity.Result{Output: open + "\n", Stdout: open + "\n"}
 	}
@@ -353,6 +377,7 @@ func (w *world) subject(f func(*fake.Bead)) {
 	s, _ := w.store.Row("tk-sub")
 	f(&s)
 	w.store.Put(s)
+	w.sync()
 }
 
 // red puts the repository zook/repo, whose main's head has a failing
