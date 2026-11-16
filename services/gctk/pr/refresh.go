@@ -281,7 +281,7 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 		if err != nil {
 			return nil, err
 		}
-		conv, err := conversation(rule, self, o.since, c)
+		conv, err := savedConversation(rule, self, o.since, c)
 		if err != nil {
 			return nil, err
 		}
@@ -296,10 +296,10 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 	return fresh, nil
 }
 
-// conversation is what the rule reads of a PR's conversation c, by the
+// savedConversation is what the rule reads of a PR's conversation c, by the
 // definition of feedback applied from since as the account self acts as, with
 // the newest time any post changed as its post time.
-func conversation(rule Feedback, self, since string, c *gh.Conversation) (*SavedConversation, error) {
+func savedConversation(rule Feedback, self, since string, c *gh.Conversation) (*SavedConversation, error) {
 	fresh, err := newestFeedback(rule, self, since, c.Reviews, c.Threads, c.Comments)
 	if err != nil {
 		return nil, err

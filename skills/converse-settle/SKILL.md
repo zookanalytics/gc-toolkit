@@ -311,10 +311,12 @@ Take the case that fits the ruling:
 PR. A ruling reaches the subject's PR, the PR whose merge this conversation
 holds, and any PR that a gate the ruling answers releases. Pass one of these:
 
-- `--rework` when the PR's branch must change (the `prs` skill), with
-  `--check <check>` once for each check the ruling sends back when the PR is on
-  Gas Town's pending record, whose review run then takes the ruling as an ask;
-- `--no-rework` when the PR stands as it is;
+- `--rework` when the PR's branch must change and you do not make the change
+  yourself (the `prs` skill), with `--check <check>` once for each check the
+  ruling sends back when the PR is on Gas Town's pending record, whose review
+  run then takes the ruling as an ask;
+- `--no-rework` when the PR stands as it is, as it does once you have pushed
+  the change the ruling asked for onto its branch yourself (`converse-edit`);
 - `--retire <kind>` when the PR will not land: `not-needed`, with this
   conversation as the evidence, or `duplicate`, `folded`, `re-homed` or
   `fixed-upstream`, with `--successor <bead>`.
