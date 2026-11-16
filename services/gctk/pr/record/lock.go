@@ -14,10 +14,12 @@ import (
 // (specs/tk-1tfzr71.66/design.md, section 4). `gctk pr record` holds it across
 // both of a publication's writes, `gctk pr reconcile` holds it for one record
 // at a time, from its read of the record to its last write of it,
-// bead-rehome.sh holds it from its read of a bead to its close, and
-// `gctk pr push` holds it from its proof's first read to the end of its push.
-// Nothing that holds it takes another lock, so no two writers wait on each
-// other in a cycle.
+// `gctk pr withdraw` holds it from its read of a bead to its filing of the
+// withdrawal, `gctk review passed --record` holds it from its read of the PR's
+// bead to its close of the asks the run answered, bead-rehome.sh holds it from
+// its read of a bead to its close, and `gctk pr push` holds it from its
+// proof's first read to the end of its push. Nothing that holds it takes
+// another lock, so no two writers wait on each other in a cycle.
 const LockFile = "pr-record.lock"
 
 // lockPoll is how often a writer waiting for the lock asks for it again.

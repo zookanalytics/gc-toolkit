@@ -15,9 +15,9 @@ The surface the change adds is one verb of gctk's pr noun,
 sitting's conversation holds the branch of the PR the bead owns and that
 nothing else writes it, checks that the checkout's origin is the PR's
 repository, returns the PR to draft, and pushes the checkout's HEAD onto the
-branch under git's lease. `--check` proves the holding and changes nothing. The change adds no metadata key, bead kind, lifecycle state,
-order or formula step. The `converse-edit` skill's text, which calls the verb,
-is not surface.
+branch under git's lease. `--check` proves the holding and changes nothing.
+The change adds no metadata key, bead kind, lifecycle state, order or formula
+step. The `converse-edit` skill's text, which calls the verb, is not surface.
 
 ## A session's push onto an open PR's branch
 
