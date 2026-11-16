@@ -1,22 +1,24 @@
 ---
-name: Gas City search for the GitHub intake on the landing order's read
-description: The Gas City, Gas Town, gascity-packs and GitHub primitives searched for the surface tk-1tfzr71.21's design adds, namely the city's taken mark in the definition of feedback, the landing order's act that takes each person's post as an ask, the saved read's list of untaken posts, the review run's answers on GitHub, the run poured behind its own question gates, and the red-check and conflict acts with their gates. It says what each search found at a named upstream commit and why none covers the need. Read it when building or reviewing one of the design's units, or when the arch check asks for the search.
+name: Gas City search for the GitHub intake on the one-PR update's read
+description: The Gas City, Gas Town, gascity-packs and GitHub primitives searched for the surface tk-1tfzr71.21's design adds, namely the city's taken mark in the definition of feedback, the landing order's act that takes each person's post as an ask from the PR's saved read, the saved read's list of untaken posts, the review run's answers on GitHub with the dismissal of a request for changes, triage's answer, the run poured behind its own question gates, and the red-check and conflict acts with their gates. It says what each search found at a named upstream commit and why none covers the need. Read it when building or reviewing one of the design's units, or when the arch check asks for the search.
 ---
 
-# Gas City search for the GitHub intake on the landing order's read
+# Gas City search for the GitHub intake on the one-PR update's read
 
-Read on 2026-11-16 in a checkout of `gastownhall/gascity` at main 76a06b2327
-(2026-11-16T03:05:19Z), of `gastownhall/gascity-packs` at main 0f07496d2f
+Read on 2026-11-16 in a checkout of `gastownhall/gascity` at main 994008c628
+(2026-11-16T20:35:45Z), of `gastownhall/gascity-packs` at main 0f07496d2f
 (2026-11-13T23:13:29Z), and of `gastownhall/beads` at tag v1.3.4 (7ef2fd05eb),
-the bd the city runs beside gc 1.4.3 (`gc bd version`). The initiative's leads were read at Gas City main
-e9a628c500 and 294079d53f, and none of the files cited below changed between
-294079d53f and 76a06b2327 (`git diff --stat` over `internal/githubmonitor`,
-`internal/webhooksink`, `internal/api/handler_webhook.go`, `cmd/gc/cmd_github.go`
-and `internal/config`). Each section names the unit of [the design](design.md)
-that adds the surface. The landing order's one read per pass, which every unit
-here builds on, has its own search in
-[tk-1tfzr71.149's record](../tk-1tfzr71.149/gas-city-search.md), at the head of
-PR #1533.
+the bd the city runs (`gc bd version`). The initiative's leads were read at Gas
+City main e9a628c500 and 294079d53f, and none of the files cited below changed
+between 294079d53f and 994008c628 (`git diff --stat` over
+`internal/githubmonitor`, `internal/webhooksink`,
+`internal/api/handler_webhook.go`, `cmd/gc/cmd_github.go`, `internal/config`
+and `internal/convergence/condition.go`). Each section names the unit of
+[the design](design.md) that adds the surface. The landing-order design these
+units build on, the cheap question, the one-PR update that alone writes a PR's
+saved read and the landing order that acts from the beads, has its own search
+in [tk-1tfzr71.149's record](../tk-1tfzr71.149/gas-city-search.md), as PR #1533
+merged it at bc181140b.
 
 ## Which posts the city has taken (units 1 and 2)
 
@@ -64,11 +66,11 @@ until tk-ssm8qns.8 moves the city's PR posts into gctk whole
 
 ## The act that takes each post (unit 2)
 
-The need: on each pass, for each PR the city owns, take every post a person
-made that the city has not taken, as one piece of work on the PR's branch that
-blocks the bead owning the PR and that the PR's review run works, in the run
-that reads the post, under the record lock, and retried by the next pass when a
-write does not land.
+The need: for each PR the city owns, take every post a person made that the
+city has not taken, as one piece of work on the PR's branch that blocks the
+bead owning the PR and that the PR's review run works, decided from the PR's
+saved read, under the record lock, and retried by the next run when a write
+does not land.
 
 - **Gas City's PR monitor with repair beads** files one repair bead per PR head
   for a PR it reads as needing action (`ensureGitHubPRRepairBead` in
@@ -90,76 +92,109 @@ write does not land.
   conversation comment and wakes a handling session for it. Not covered, for
   the reasons in the section above.
 
-So the act is the landing order's, in gctk's pr domain, and the work is an ask
-(`gctk review ask`), the form the review-lanes effort settled for work on a PR's
-branch, whose own search is in
-[tk-1tfzr71.108's record](../tk-1tfzr71.108/gas-city-search.md). No bead kind,
-key or order is added.
+So the take is an act of the landing order, in gctk's pr domain, decided from
+the saved read the one-PR update writes, as the landing-order design puts the
+routing of a person's posts
+([its section 12](../tk-1tfzr71.149/design.md#12-the-github-intakes-finish-line)).
+The work is an ask (`gctk review ask`), the form the review-lanes effort settled
+for work on a PR's branch, whose own search is in
+[tk-1tfzr71.108's record](../tk-1tfzr71.108/gas-city-search.md). Once its marks
+land, the take runs the one-PR update for the PR, the call a webhook rule makes
+in that design. No bead kind, key or order is added.
 
 ## The saved read's untaken posts (unit 2)
 
 The need: a display, which reads no GitHub, tells from the PR's bead alone
-whether a post waits for the city to take it, and the next pass gives that PR a
-whole read.
+whether a post waits for the city to take it, and the landing order decides the
+take from the bead.
 
 `pr_github_read`'s warrant ("Saved GitHub read" in `docs/warrants.md`) records
 that Gas City saves no PR read on a bead. Unit 2 changes what the key's
-feedback part holds, the ids of the posts the act left untaken in place of the
-newest feedback id in each id space, and re-verifies that warrant against the
-same upstream sources when it touches the key.
+conversation part holds, the posts the update read with neither of the city's
+marks, each with what its ask's reason names, in place of the newest feedback
+id in each id space, and re-verifies that warrant against the same upstream
+sources when it touches the key.
 
 ## The answers on GitHub (unit 4)
 
 The need: once the review run rules a post's ask, a reply in an inline
-comment's thread with the ruling's answer and the thread resolved, a 👍 on a
-post owed nothing more, a reply naming the gate for a question, and a request
-for the person's review once every ask from the reviews of a person whose
-request for changes stands is answered, each found again so a retry posts
-nothing twice.
+comment's thread with the ruling's answer and the thread resolved, a reply
+comment that links a post with no thread where words are owed, a 👍 on a post
+owed nothing more, a reply naming the gate for a question, and the dismissal of
+a person's request for changes once every point it raised is answered, with a
+request for that person's review, each found again so a retry posts nothing
+twice.
 
 - **Gas City** has no command, order or doc that resolves a review thread,
   reacts to a post, requests a review or dismisses one:
   `git grep -l -i -F` for `resolveReviewThread`, `addReaction`,
   `requestReviews` and `dismissPullRequestReview` over `cmd`, `internal`, `docs`
-  and `engdocs` at 76a06b2327 finds no file.
+  and `engdocs` at 994008c628 finds no file.
 - **gascity-packs.** The github pack's commands are `comment-issue`, `create-pr`,
   `import-app`, `map-repo`, `push-branch`, `release-workflow`, `status` and
   `sync-app`, none of which answers in a review thread. `mol-pr-iterate`'s step
   text has an agent reply to the one comment it was slung for, with `gh api`
   and `in_reply_to` (lines 554 and 563), and resolves nothing. No pack resolves
-  a thread, reacts on GitHub or requests a review: the same greps over the
-  repository find `addReaction` only in the Slack adapter.
+  a thread, reacts on GitHub, requests a review or dismisses one: the same
+  greps over the repository find `addReaction` only in the Slack adapter.
 
-So the review run's rule-and-repair step makes them, in `review-run.sh post`,
-the verb that already answers the round's rulings in the head's comment. It
-composes `pr-post.sh reply`, the pack's one writer of the city's posts, and adds
+So the post that answers a round makes them, in `review-run.sh post`, the verb
+that already answers the round's rulings in the head's comment. It composes
+`pr-post.sh reply`, the pack's one writer of the city's posts, and adds
 GitHub's `resolveReviewThread`, `addReaction` and `requestReviews` mutations to
 gctk's GitHub adapter beside the mutations it holds
 (`markPullRequestReadyForReview`, `convertPullRequestToDraft`, the review
 dismissal). The review loop's check cannot hold them. Gas City runs a check
 with HOME set to the city's directory and only a whitelist of variables, none
 of them a GitHub token (`ConditionEnv.Environ` in
-`internal/convergence/condition.go` at 76a06b2327), so gh has no login there.
+`internal/convergence/condition.go`), so gh has no login there.
+
+## Triage's answer (unit 6)
+
+The need: a round in which triage answers a post that needs only an answer, or
+nothing, and closes its ask, with no ruling session working it.
+
+- **Gas City's formulas.** A step bonds one formula from its output: a step
+  carries one `OnCompleteSpec`, with one `for_each` and one `bond`
+  (`internal/formula` at 994008c628), and the review run's triage bonds its
+  lanes with it. A round's steps are made when the round is made, and no step
+  is skipped at run time. So the ruling step cannot be bonded from triage's
+  output beside the lanes, and it stays in the round, closing at once when
+  triage leaves it nothing. Not covered.
+- **The pr-review pack** (`gascity-packs/pr-review/formulas`): `mol-adopt-pr`,
+  `mol-pr-ci-diagnose`, `mol-pr-iterate`, `mol-pr-merge-only` and
+  `mol-pr-revert`. None triages a comment or answers one without working it:
+  `mol-pr-iterate` addresses the one comment it is slung for, and
+  `mol-pr-ci-diagnose` writes a verdict on CI to its root bead. Not covered.
+
+So triage's output carries a ruling for each ask it answers, read by the pass
+rule, the result writer and the head's comment beside the ruling step's, and
+triage posts those answers through `review-run.sh post`. No step, formula, bead
+kind or key is added: the output gains rulings, the shape the ruling step's
+output already has.
 
 ## A run behind its own question gates (unit 4)
 
-The need: a person's comment that answers a question a review run put to a
-person reaches a run while that question's gate is open.
+The need: a person's comment made while a question a review run put to a
+person is open reaches a run, which rules it and, when it settles the question,
+resolves the gate with the comment as its answer.
 
-A human gate holds the bead it is filed on until a person clears it, and Gas
-City reads no PR comment as a gate's answer: no source under `cmd` or
-`internal` at 76a06b2327 reads a GitHub comment except the webhook receiver,
-which hands an order only the rule's arguments. So the landing order, which
-already decides when a run pours, pours one behind gates of the run's own
-question key (`review-question-<slug>`, filed by `review-run.sh question`) when
-a post was taken after them. No gate kind or key is added.
+A human gate holds the bead it is filed on until it is resolved, and Gas City
+reads no PR comment as a gate's answer: no source under `cmd` or `internal` at
+76a06b2327 reads a GitHub comment except the webhook receiver, which hands an
+order only the rule's arguments. So the landing order, which already decides
+when a run pours, pours one behind gates of the run's own question key
+(`review-question-<slug>`, filed by `review-run.sh question`) when an ask for a
+person's post was filed after them, and the run resolves a gate that post
+settles. The person answers a question on the board, as at any other gate. No
+gate kind or key is added.
 
 ## Red checks (unit 5)
 
-The need: from the landing order's read, an ask for a required check that
-failed for a code cause, one re-run of the failed jobs of a check that failed
-for another cause, a gate where the city cannot go on, the gate withdrawn once
-the checks pass, and a restart of a required check that never reported.
+The need: from the saved read, an ask for a required check that failed for a
+code cause, one re-run of the failed jobs of a check that failed for another
+cause, a gate where the city cannot go on, the gate withdrawn once the checks
+pass, and a restart of a required check that never reported.
 
 - **Gas City's PR monitor** cannot tell a required check from the rest, since
   its query reads no `isRequired` (`pullRequestsQuery`). It counts a cancelled
@@ -168,12 +203,16 @@ the checks pass, and a restart of a required check that never reported.
   `checkPending` returns true for any other conclusion that is not a success,
   neutral or skip. It marks every PR that GitHub reads BLOCKED actionable with
   the failure kind `blocked` (`classifyPullRequest`), which includes every PR
-  waiting on a review. Its repair bead is a writer of its own (above). Its
+  waiting on a review. Its repair bead is a writer of its own (above), and it
+  copies GitHub's facts onto that bead in `github.*` keys
+  (`githubPRRepairVolatileMetadata` in `cmd/gc/cmd_github.go`). Its
   `poll_interval`, `webhook_secret_env`, `webhook_secret_key` and `merge_queue`
   are read only by validation and patches: the readers of each field at
   76a06b2327 are `ValidateGitHubPRMonitors`, `validate_durations.go` and
-  `patch.go`, and `WebhookSecretKeyOrDefault` has no caller. Not covered.
-- **A re-run of a workflow's failed jobs.** No source or doc at 76a06b2327
+  `patch.go`, and `WebhookSecretKeyOrDefault` has no caller. Not covered. The
+  design's section 4 names each of the three differences, its reason and what
+  would end it.
+- **A re-run of a workflow's failed jobs.** No source or doc at 994008c628
   re-runs a GitHub Actions run (`rerun-failed-jobs`, `actions/runs/.../rerun`
   and `gh run rerun` find no file). Not covered.
 - **bd's GitHub gates,** which core's `gate-sweep` order checks every thirty
@@ -183,15 +222,15 @@ the checks pass, and a restart of a required check that never reported.
   completes failed or cancelled, and a `gh:pr` gate waits for a PR to merge
   (`bd gate check`'s help in `cmd/bd/gate.go`). The acts here decide over every
   required check at the PR's head, re-run a non-code failure once, and ask a
-  person only for an approved PR, and the pass reads those checks at every
-  interval already. A `gh:run` gate would hold the PR's bead on one run and
-  escalate a failure on any PR, approved or not, so it covers none of the three
-  rules, and a `gh:pr` gate waits for what the landing order itself does. Not
+  person only for an approved PR, and the saved read holds those checks after
+  every move. A `gh:run` gate would hold the PR's bead on one run and escalate
+  a failure on any PR, approved or not, so it covers none of the three rules,
+  and a `gh:pr` gate waits for what the landing order itself does. Not
   covered.
 - **The pr-review pack's `mol-pr-ci-diagnose`** reads a PR's check runs and
   writes a verdict to its root bead's notes, slung by hand for one PR, with no
   re-run and no work filed. Not covered.
-- **Moving a PR between draft and ready.** Nothing at 76a06b2327 converts a PR
+- **Moving a PR between draft and ready.** Nothing at 994008c628 converts a PR
   to draft or marks it ready (`convertPullRequestToDraft`,
   `markPullRequestReadyForReview` and `gh pr ready` find no file), as the
   review-lanes search found at 13bb101b8f
@@ -201,13 +240,14 @@ the checks pass, and a restart of a required check that never reported.
 The gates are Gas City's human gates, filed and withdrawn under a situation key
 as the landing order's exceptions are, with the keys today's red-check gates
 carry and one more for a check that never reports (`pr-check-unreported.<n>`).
-The pass's read gains each check suite's status and creation time, two fields
-on nodes tk-1tfzr71.149's request already reads, so no request is added.
+The one-PR update's checks read gains each check suite's status, its creation
+time and its Actions run's attempt, fields on nodes that read already returns,
+so no request is added.
 
 ## Conflicts (unit 5)
 
 The need: an ask to merge the target into an approved PR that GitHub reads
-conflicting, filed only while nothing holds the bead.
+conflicting, filed only while no hold set by hand or human gate holds the bead.
 
 - **Gas City's PR monitor** files a repair bead of the failure kind
   `merge_conflict` for a PR GitHub reads DIRTY, routed and poured as above, for
@@ -215,7 +255,7 @@ conflicting, filed only while nothing holds the bead.
   covered.
 - **Gas Town's refinery** brings a branch current in its own prep, for a work
   bead it holds (`gastown/formulas/mol-refinery-patrol.toml`), and the merge
-  design kept that flow. A PR on the pending record at its validated head is
+  design kept that flow. A PR on the new merge path at its validated head is
   the landing order's, and the review run is its branch's one writer
   ([the review-lanes design, section 1](../tk-1tfzr71.108/design.md#what-pours-it)).
   Not covered.
@@ -225,19 +265,26 @@ open PR is since the review-lanes effort.
 
 ## The webhook (not built)
 
-GitHub delivers only to a public hook, since a private or tenant hook answers
-404 to a request that comes from neither loopback nor an internal proxy
-(`webhookRequestAllowed` in `internal/api/handler_webhook.go`). A public hook
-may fire only a formula order, never an exec order (`routeOrder` in
-`internal/webhooksink/sink.go`), so each delivery would pour work an agent runs,
-and the order gets the rule's arguments, never the payload. The design builds
-none, and gives a public route to the operator as an option
+Nothing is built for it. The route a webhook would take is the github pack's
+webhook service (`github/scripts/github_intake_service.py`), whose rule for an
+event that names a PR runs `gctk pr refresh` for that PR and then the landing
+order, as [tk-1tfzr71.149's search](../tk-1tfzr71.149/gas-city-search.md#the-webhook-a-later-effort-adopts-no-unit)
+records. The one-PR update saves a PR's untaken posts with the rest of its
+read, so a delivery reaches the take with no change to the intake. Gas City's
+own receiver does not fit: a public hook may fire only a formula order, never
+an exec order (`routeOrder` in `internal/webhooksink/sink.go`), so each
+delivery would wake an agent, and a private or tenant hook answers only a
+request from the loopback or one carrying `X-GC-Request`
+(`webhookRequestAllowed` in `internal/api/handler_webhook.go`), which GitHub's
+delivery does not carry. The design gives a webhook to the operator as an
+optimization to take when they decide to
 ([design, section 5](design.md#5-the-webhook)).
 
 ## The owner hop (dropped)
 
 `docs/gctk-architecture.md` lists `gctk pr owner <pr>` for "a GitHub event on an
-open PR" taken to the bead that owns it. With no webhook and no monitor, no
-event arrives, and the landing order reads each PR from the bead that owns it
-through its listing (`Listing.PRAnswers` in `services/gctk/listing/pr.go`). The
-verb would have no caller, so unit 6 removes its row.
+open PR" taken to the bead that owns it. `gctk pr refresh` finds the bead that
+owns the PR it reads
+([the landing-order design's section 4](../tk-1tfzr71.149/design.md#4-the-one-pr-updates-read)),
+and a webhook's rule calls it, so the verb would have no caller, and the
+retirement unit removes its row.
