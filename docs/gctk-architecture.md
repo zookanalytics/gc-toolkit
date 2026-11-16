@@ -123,6 +123,11 @@ bead.
 | `gctk review step <bead>` | hook | what a review run's step judges: the iteration it runs in, the head that iteration judges and the change triage reads there, and for triage's read whether the run must stop | Gas City records a step's iteration (`gc.attempt`) and the vars a run was poured with, and says neither which head a later iteration of a check loop judges nor what changed since the last head that passed. The verb derives both from the steps' outputs and the results on the bead, and its `--stands` form stops a run whose vars do not name the bead's record, or whose PR is no longer at the head the iteration judges, with no result. |
 | `gctk review output <bead> --file <path>` | hook | check the output a run's step wrote, before the step writes it | Gas City keeps a step's `gc.output_json` as written, and reads it only for a fan-out's items, so a slip shows only once the pass rule reads the output as not written, which spends an attempt, or a fan-out cannot read a triage output's checks, which stops the run. The verb checks the output in the run's shape and against the run's facts, and carries the guidance-edit guard on a correctness approve. The write stays native. |
 | `gctk review comment <run>` | hook | the head's one comment: every lane's verdict there, its findings and how the round ruled each | Gas City's PR review posts one lane's report per head SHA and runs no loop ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#the-runs-formulas-unit-3)), and nothing renders a loop's lanes and rulings. The comment carries every lane's verdict at the head, approvals included, and each point's answer as what the head carries for it. The post goes through `pr-post.sh`, the city's one writer of posts. |
+| `gctk reaction check <bead> --run <root>` | hook | whether this run may still react to its subject | A subject's state can change between its reaction's sling and the claim of its step. Gas City retires a run whose subject closed or took an assignee before the claim and checks nothing else then, so the check, the reaction's first act, applies the sling's refusals again. |
+| `gctk reaction sling <bead>` | agent, hook | sling a first reaction on a bead nobody has decided on, through the rig's proactive pool | `gc sling` pours on a bead whatever already speaks for it, such as a hold label, a human gate, an assignee or a live run of another formula. The verb refuses a bead whose next move is someone's, and leaves a second live reaction to `gc sling`'s own refusal. |
+| `gctk reaction sweep [--dry-run]` | order, agent | sling a first reaction at each ready bead in the rig that nobody has decided on | Nothing in Gas City starts work on a bead nobody slung, and its work query offers only routed work, so the sweep runs on its order's cadence. Its dry run shows an agent what a sweep would take. |
+| `gctk reaction deliverable` | hook | whether this rig's proactive pool can take a reaction now | A slung reaction waits for a slot at no cost, but one routed to a pool the city's roster shows absent, suspended or capped at zero waits for nobody. A finding's filing and the operator's intake ask before they sling. |
+| `gctk reaction dispose <bead> --disposition <exit>` | agent | take one of a first reaction's exits on its subject: route it, recommend an action, hold it on its wait, hand it to a validating closer, or put it to the operator | One intent over the native writes each exit makes. It applies intake's rule ([steering.md](steering.md)). |
 | `gctk session title` | agent | give a session a title its record and its terminal show | `gc session rename` writes only the title on Gas City's record. An agent's terminal shows the name the agent's own `/rename` sets, typed into its input box, so the verb renames the session and has Gas City type `/rename <title>` into it through `gc session submit`, for Claude Code and Codex alike. |
 | `gctk seed render` | hook, order | render every agent's prompt and every formula's recipe into the audit under `generated/seed-audit/` | Gas City renders one prompt or recipe on demand and keeps no copy. The audit keeps them all in the tree, so a PR's diff shows what each agent will receive. It writes only the output it owns, which is what lets an order run it. |
 | `gctk seed check` | hook | whether the render is current | The pre-commit hook and a doctor check read it, so a stale audit is caught before it lands. |
@@ -168,6 +173,11 @@ What each noun owns:
   config in the pack and the rig, and what a run judged is in its steps' outputs,
   which Gas City keeps on the run's beads, in the shape the review domain
   declares and checks.
+- **`reaction`:** the recommendation a first reaction's `recommend` exit leaves
+  for the operator's Accept, in `gc.recommended_formula`. A reaction itself is a
+  Gas City run of `mol-first-reaction`, and each record its exits leave has
+  another owner: the human gate and the hold label are Gas City's, the headline
+  is the takeaway's, and the arm is `bead`'s.
 - **`dolt` and `session`:** nothing. A session's title is Gas City's record and
   the agent's own terminal.
 
@@ -684,3 +694,9 @@ why a reader must know it, and the work that retires it.
   scripts themselves.** They retire whole with the old merge path
   (tk-1tfzr71.70, [the register](#the-re-implementation-register)), so they get
   no layering work.
+- **The first reaction still runs from shell.** Until the port lands
+  (tk-ssm8qns.19), `tools/gc-proactive.sh` and
+  `assets/scripts/first-reaction-dispose.sh` hold the `reaction` verbs, and
+  every caller names the scripts. They decode bead rows and GitHub's answers in
+  jq, outside the adapters, and the emergency check passes the checks at the
+  default branch's head to jq as arguments.
