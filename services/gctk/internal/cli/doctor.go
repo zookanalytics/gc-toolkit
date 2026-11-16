@@ -69,8 +69,9 @@ long since first_failed, and from then on it is failing.
 
 The monitors are ` + strings.Join(doctor.Monitors, ", ") + `. Their runs are
 read from the order.completed events recorded since the previous run began, or
-in the last 24 hours when there is none, and a monitor with none in that
-window keeps the last good run the previous event gave it.
+in the last 24 hours when there is no previous run or its read of them failed,
+and a monitor with none in that window keeps the last good run the previous
+event gave it.
 
 When the previous run's event does not read, no doctor runs and nothing is
 recorded, so the newest event stands. The record goes to standard output as

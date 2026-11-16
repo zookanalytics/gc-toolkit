@@ -342,11 +342,13 @@ func TestAnUnreadPreviousEventRecordsNothing(t *testing.T) {
 }
 
 // A run whose read of the monitors' runs fails records the previous run's,
-// says why, and fails.
+// says why, and fails. The run after it reads the whole window, so a monitor
+// that ran between the two runs before it is not missed.
 func TestAnUnreadMonitorsReadKeepsThePreviousRuns(t *testing.T) {
 	c := newCity()
 	c.Add(gascity.Event{Type: "order.completed", Subject: "reaper", Ts: t0.Add(-time.Hour)})
 	c.runAt(t, t0, nil)
+	c.Add(gascity.Event{Type: "order.completed", Subject: "mol-dog-backup", Ts: t0.Add(20 * time.Minute)})
 	c.ReadErr = map[string]error{"order.completed": errors.New("walk budget spent")}
 	out := c.runAt(t, t0.Add(time.Hour), nil, warn("a"))
 	rec := out.Record
@@ -355,6 +357,14 @@ func TestAnUnreadMonitorsReadKeepsThePreviousRuns(t *testing.T) {
 	}
 	if m := rec.Monitors[3]; m.Order != "reaper" || m.LastGood == nil || !m.LastGood.Equal(t0.Add(-time.Hour)) {
 		t.Fatalf("monitors = %+v", rec.Monitors)
+	}
+	c.ReadErr = nil
+	out = c.runAt(t, t0.Add(2*time.Hour), nil)
+	if r := c.Reads(); r[len(r)-1] != (fake.Read{Type: "order.completed", Since: window}) {
+		t.Errorf("the run after the unread one read the monitors' runs as %+v", r[len(r)-1])
+	}
+	if m := out.Record.Monitors[5]; m.Order != "mol-dog-backup" || m.LastGood == nil || !m.LastGood.Equal(t0.Add(20*time.Minute)) {
+		t.Fatalf("the run after the unread one has monitors %+v", out.Record.Monitors)
 	}
 }
 

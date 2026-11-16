@@ -334,11 +334,13 @@ func carry(rec, prev *Record) {
 }
 
 // monitors reads the monitors' runs since the previous run began, less the
-// overlap, or over the whole window when there is no previous run, and keeps
-// the previous run's last good run for each monitor that has none since.
+// overlap, and keeps the previous run's last good run for each monitor that
+// has none since. It reads the whole window when there is no previous run, or
+// when the previous run's own read of them failed, because the runs that run
+// recorded were read before it began.
 func (r *Runner) monitors(prev *Record) ([]Monitor, error) {
 	since := window
-	if prev != nil {
+	if prev != nil && prev.MonitorsUnread == "" {
 		if d := r.now().Sub(prev.Started) + overlap; d > 0 && d < window {
 			since = d
 		}
