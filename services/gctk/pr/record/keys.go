@@ -52,8 +52,7 @@ var (
 	checkedAtKey = ledger.Declare("pr_last_checked_at", ledger.String,
 		"When the one-PR update last read GitHub's side of the PR and saved it on a bead on the record, RFC "+
 			"3339 UTC to the second. A pass of the PR watch that finds the PR unmoved writes nothing, so it "+
-			"says when the PR was last read and saved, not when GitHub was last asked about it. The landing "+
-			"order reads the records read least recently first.")
+			"says when the PR was last read and saved, not when GitHub was last asked about it.")
 	mergedTargetKey = ledger.Declare("merged_target", ledger.String,
 		"The branch the bead's PR is to merge into, the base its PR must name, and once it lands the branch "+
 			"it landed on. A PR's composition reads it to find the beads that landed on the PR's branch.")

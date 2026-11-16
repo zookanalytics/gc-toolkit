@@ -148,6 +148,22 @@ func TestAPassInWhichNothingMovedWritesNoBead(t *testing.T) {
 	}
 }
 
+// A saved read that does not decode as the four parts, such as one whose
+// checks are a list, is read as none: the pass reads every part and saves the
+// four over it.
+func TestASavedReadThatDoesNotDecodeIsReadWholeAndReplaced(t *testing.T) {
+	d := newWatched(t)
+	b, _ := d.store.Row(bead)
+	b.Metadata = maps.Clone(b.Metadata)
+	b.Metadata["pr_github_read"] = `{"read_at":"2026-11-16T09:00:00Z","head":"` + head +
+		`","checks":[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]}`
+	d.store.Put(b)
+	updated(t, d.poll(t), "pr, checks, conversation, labels")
+	if s := d.saved(t, bead); s.PR == nil || s.Checks == nil || s.Conversation == nil || s.Labels == nil {
+		t.Fatalf("the pass saved %+v over a read that does not decode, want every part", s)
+	}
+}
+
 // Each sign that moved reads its row of the update's table, and the update
 // saves the parts whose facts or signs differ (section 4).
 func TestEachSignsMoveReadsItsRowOfTheTable(t *testing.T) {
@@ -435,7 +451,7 @@ func TestARefreshOfAPRNoLiveBeadOwnsSavesNothing(t *testing.T) {
 	}
 }
 
-// Called alone, as a webhook's rule calls it, the update reads the PR's signs
+// Called alone, as a webhook's rule can call it, the update reads the PR's signs
 // itself, and then what they say moved.
 func TestARefreshAloneReadsThePRsSignsItself(t *testing.T) {
 	d := newWatched(t)

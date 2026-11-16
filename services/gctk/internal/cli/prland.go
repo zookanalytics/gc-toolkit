@@ -41,8 +41,9 @@ const runYield = 200 * time.Millisecond
 // six GitHub reads, and two for the store's reads and the write. Twenty of them
 // fit inside the order's 300-second time limit with room for GitHub answering
 // at half that speed, and the budget starts none in the last minute. A run
-// takes its records in a shuffled order, so over 50 open records a record waits
-// about two and a half runs on average.
+// takes its records in a shuffled order, so over 50 open records each run reads
+// a given record with a chance of two in five, once in two and a half runs on
+// average.
 const (
 	defaultRunCount  = 20
 	defaultRunBudget = 4 * time.Minute

@@ -39,9 +39,10 @@
 # minutes. So a run ends inside the 300-second timeout, and the kernel frees the
 # lock of a run the timeout stops. A run saves none of what it reads of
 # GitHub: orders/pr-poll.toml's one-PR update writes GitHub's side on the bead.
-# Every 5 minutes, over 50 open records, a record waits about two and a half
-# runs on average, so a PR lands within about fifteen minutes of the last thing
-# it waits for, the design's landing-time check being nine in ten within 3
+# Every 5 minutes, over 50 open records, a run reads a given record with a
+# chance of two in five, so the merge of a ready PR is requested about ten
+# minutes after the last thing it waits for on average, and nine in ten within
+# about 25 minutes, the design's landing-time check being nine in ten within 3
 # hours. Tune from city.toml [[orders.overrides]].
 [order]
 description = "Landing order: read each PR the refinery recorded as pending, merge a ready one with its head pinned, and close its bead once the merge commit is on the target"

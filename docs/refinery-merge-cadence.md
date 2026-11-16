@@ -893,8 +893,8 @@ part's earlier signs, so the next pass reads the part again. A read that fails
 saves nothing. The update is the one writer of these three keys.
 
 `gctk pr refresh --pr <url>` is the same update run alone for one PR, which
-reads the PR's signs itself first: the call a webhook's rule makes for the PR an
-event names. A PR no live bead owns has nothing to save, and it exits 0.
+reads the PR's signs itself first: the call a webhook's rule can make for the PR
+an event names. A PR no live bead owns has nothing to save, and it exits 0.
 
 **Reading what a pass did.** A pass in which nothing moved writes no bead and
 costs 1 point for each 50 owned PRs, and Gas City still writes its run record.

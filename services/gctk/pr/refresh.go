@@ -183,7 +183,7 @@ func one(owners []owned, url string) (owned, error) {
 		url, strings.Join(ids, ", "))
 }
 
-// Refresh is the one-PR update called alone, as a webhook's rule calls it: it
+// Refresh is the one-PR update called alone, as a webhook's rule can call it: it
 // finds the live bead that owns the PR at url, reads the PR's signs itself, and
 // reads and saves what they say moved. A PR no live bead owns has nothing to
 // save, which it reports with no error.

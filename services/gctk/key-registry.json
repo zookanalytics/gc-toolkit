@@ -426,7 +426,7 @@
     "name": "pr_last_checked_at",
     "type": "string",
     "owner": "pr/record",
-    "doc": "When the one-PR update last read GitHub's side of the PR and saved it on a bead on the record, RFC 3339 UTC to the second. A pass of the PR watch that finds the PR unmoved writes nothing, so it says when the PR was last read and saved, not when GitHub was last asked about it. The landing order reads the records read least recently first."
+    "doc": "When the one-PR update last read GitHub's side of the PR and saved it on a bead on the record, RFC 3339 UTC to the second. A pass of the PR watch that finds the PR unmoved writes nothing, so it says when the PR was last read and saved, not when GitHub was last asked about it."
   },
   {
     "name": "pr_merged_at",
