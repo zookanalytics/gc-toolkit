@@ -26,18 +26,19 @@ import (
 // in that time the order pours no run, and its ready transition, which reads no
 // conversation's hold, does not mark the PR ready between its return to draft
 // and the push. Every other writer of the record waits for that lock, so the
-// push holds it for at most half the time a writer waits for it (Wait). A call
-// to GitHub, origin or the store still running then is stopped with every
-// process it started, and the lock goes free only once they have ended, since a
-// push that landed after that could land on a PR the order had marked ready in
-// the meantime. The checkout's own reads, its origin's URLs and its status, read
-// files and reach no remote, so nothing bounds them. The push goes only to the
-// PR's repository: every URL the checkout's origin fetches from or pushes to
-// must name it. It returns the PR to draft first, as every writer of the city
-// does, and goes under git's lease on the tip it reads on the branch, so a push
-// another writer made is never overwritten. Once the conversation closes, the
-// refinery validates the head the sitting left and the landing order pours one
-// review run there, as for any other head.
+// push holds it for at most half of Wait, the time this landing's own writers
+// wait for it. A call to GitHub, origin or the store still running then is
+// stopped with every process it started, and the lock goes free only once
+// they have ended, since a push that landed after that could land on a PR the
+// order had marked ready in the meantime. The checkout's own reads, its
+// origin's URLs and its status, read files and reach no remote, so nothing
+// bounds them. The push goes only to the PR's repository: every URL the
+// checkout's origin fetches from or pushes to must name it. It returns the PR
+// to draft first, as every writer of the city does, and goes under git's lease
+// on the tip it reads on the branch, so a push another writer made is never
+// overwritten. Once the conversation closes, the refinery validates the head
+// the sitting left and the landing order pours one review run there, as for
+// any other head.
 
 // Tree is the sitting's checkout of the PR's branch.
 type Tree interface {

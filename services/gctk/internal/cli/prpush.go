@@ -39,15 +39,15 @@ reads under the store's record lock, which the landing order holds from its
 read of a record to its pour of a review run, and the push holds that lock to
 its end, so between the proof and the push the order neither pours a run nor
 marks the PR ready. The push holds the lock for at most two and a half
-minutes, half the five a writer waits for it: a call to GitHub, origin or the
-store still running then is stopped with every process it started, and the
-lock goes free once they have ended. A SIGTERM or SIGINT stops it the same
-way, and it then exits as that signal would. Every URL the checkout's origin
-fetches from or pushes to must name the PR's repository, and the checkout must
-hold no work its HEAD's commit does not. Then the PR returns to draft, and the
-checkout's HEAD goes onto the branch under git's lease on the tip read there,
-never forced, so a push another writer made is never overwritten. --check
-proves the holding and changes nothing.
+minutes, half the five the other gctk pr verbs wait for it: a call to GitHub,
+origin or the store still running then is stopped with every process it
+started, and the lock goes free once they have ended. A SIGTERM or SIGINT
+stops it the same way, and it then exits as that signal would. Every URL the
+checkout's origin fetches from or pushes to must name the PR's repository, and
+the checkout must hold no work its HEAD's commit does not. Then the PR returns
+to draft, and the checkout's HEAD goes onto the branch under git's lease on the
+tip read there, never forced, so a push another writer made is never
+overwritten. --check proves the holding and changes nothing.
 
 Once the conversation closes, the refinery validates the head the sitting left
 and the landing order pours one review run there.

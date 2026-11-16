@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,11 +15,13 @@ import (
 
 // stalledSSH is an ssh that never answers: it handles SIGTERM as git does,
 // leaving a mark, and starts a child that ignores SIGTERM and writes its pid,
-// so only a SIGKILL to the group ends that child.
+// so only a SIGKILL to the group ends that child. It marks $SSH_READY once its
+// trap is set and it forks nothing more.
 const stalledSSH = `#!/bin/sh
 sh -c 'trap "" TERM; echo $$ > "$1"; exec sleep 30 >/dev/null 2>&1' _ "$CHILD_PID" &
-trap 'touch "$SSH_TERM"; exit 143' TERM
+trap ': > "$SSH_TERM"; exit 143' TERM
 sleep 30 &
+: > "$SSH_READY"
 wait $!
 `
 
@@ -34,6 +37,17 @@ func pidOf(t *testing.T, path string) int {
 	}
 	t.Fatalf("no pid appeared in %s", path)
 	return 0
+}
+
+// waitFor waits for a process to make the file at path.
+func waitFor(t *testing.T, path string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+	}
+	t.Fatalf("nothing made %s", path)
 }
 
 // goneWithin reports whether kill(2) finds no process with pid within d.
@@ -58,31 +72,85 @@ func TestAFetchItsContextStoppedEndsWithEveryProcessInItsGroup(t *testing.T) {
 	t.Cleanup(func() { StopGrace = g })
 	dir := repo(t)
 	marks := t.TempDir()
-	ssh, term, child := filepath.Join(marks, "ssh"), filepath.Join(marks, "ssh.term"), filepath.Join(marks, "child.pid")
+	ssh := filepath.Join(marks, "ssh")
+	term, ready, child := filepath.Join(marks, "ssh.term"), filepath.Join(marks, "ssh.ready"), filepath.Join(marks, "child.pid")
 	if err := os.WriteFile(ssh, []byte(stalledSSH), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// GIT_SSH_COMMAND outranks GIT_SSH and core.sshCommand.
 	t.Setenv("GIT_SSH_COMMAND", ssh)
 	t.Setenv("SSH_TERM", term)
+	t.Setenv("SSH_READY", ready)
 	t.Setenv("CHILD_PID", child)
 	gitIn(t, dir, "remote", "add", "origin", "ssh://git.invalid/acme/widgets.git")
 
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err := FetchTipContext(ctx, dir, "main")
-	took := time.Since(start)
-	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "stopped, with every process it started") {
+	done := make(chan error, 1)
+	go func() { done <- FetchTipContext(ctx, dir, "main") }()
+	pid := pidOf(t, child)
+	waitFor(t, ready)
+	cancel()
+	stop := time.Now()
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the fetch did not return once its context ended")
+	}
+	took := time.Since(stop)
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "stopped, with every process it started") {
 		t.Fatalf("a fetch its context stopped read %v", err)
 	}
 	if took < StopGrace || took > 10*time.Second {
-		t.Errorf("the fetch returned %s after it started, want once the %s grace of the child that ignores SIGTERM was spent", took, StopGrace)
+		t.Errorf("the fetch returned %s after its context ended, want once the %s grace of the child that ignores SIGTERM was spent", took, StopGrace)
 	}
 	if _, err := os.Stat(term); err != nil {
 		t.Error("the ssh carrying the fetch got no SIGTERM it could handle")
 	}
-	if !goneWithin(pidOf(t, child), 5*time.Second) {
+	if !goneWithin(pid, 5*time.Second) {
 		t.Error("the child that ignores SIGTERM outlived the fetch")
+	}
+}
+
+// darwin's kill(2) to a group does not reach a child whose fork is under way
+// as it runs, so one SIGKILL can leave a process of the group running. A stop
+// sends SIGKILL again until the group is empty, so a process the first one
+// missed is gone once the stop returns.
+func TestAStopKillsAgainAProcessTheFirstSIGKILLMissed(t *testing.T) {
+	g := StopGrace
+	StopGrace = 100 * time.Millisecond
+	t.Cleanup(func() { StopGrace = g })
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pgid := cmd.Process.Pid
+	go func() { _ = cmd.Wait() }()
+	t.Cleanup(func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
+	send := signalGroup
+	t.Cleanup(func() { signalGroup = send })
+	missed := false
+	signalGroup = func(pgid int, sig syscall.Signal) error {
+		switch {
+		case sig == syscall.SIGTERM:
+			// A process that ignores SIGTERM.
+			return nil
+		case sig == syscall.SIGKILL && !missed:
+			// The process this SIGKILL missed.
+			missed = true
+			return nil
+		}
+		return send(pgid, sig)
+	}
+	if err := stopGroup(pgid); err != nil {
+		t.Fatalf("the stop read %v", err)
+	}
+	if !missed {
+		t.Fatal("the stop sent no SIGKILL")
+	}
+	if err := syscall.Kill(-pgid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("a process the first SIGKILL missed outlived the stop: kill(-%d, 0) read %v", pgid, err)
 	}
 }

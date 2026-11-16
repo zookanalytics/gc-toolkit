@@ -306,21 +306,28 @@ func goneWithin(target int, d time.Duration) bool {
 }
 
 // stalledGH is a gh that writes its pid to $GH_PID and never answers, with a
-// child that ignores SIGTERM, so only the stop's SIGKILL to its group ends it.
-// The child holds none of gh's output, so the wait for gh ends once gh itself
-// has exited, and only the stop keeps the child from outliving the call.
-const stalledGH = "#!/bin/sh\necho $$ > \"$GH_PID\"\n(trap '' TERM; exec sleep 30 >/dev/null 2>&1) &\nsleep 30\n"
+// child that ignores SIGTERM and writes its pid to $GH_CHILD, so only the
+// stop's SIGKILL to its group ends it. gh forks nothing once the child has
+// written its pid. The child holds none of gh's output, so the wait for gh
+// ends once gh itself has exited, and only the stop keeps the child from
+// outliving the call.
+const stalledGH = `#!/bin/sh
+echo $$ > "$GH_PID"
+sh -c 'trap "" TERM; echo $$ > "$1"; exec sleep 30 >/dev/null 2>&1' _ "$GH_CHILD" &
+exec sleep 30
+`
 
 // stalledPush readies a push whose read of the PR GitHub does not answer: the
 // store stub holds pushStore, the rig's clone and the checkout both name the
 // PR's repository, and the gh on PATH is stalledGH. It returns the verb's
-// arguments, the store's .beads directory and the file gh writes its pid to.
-func stalledPush(t *testing.T) (args []string, db, ghPid string) {
+// arguments, the store's .beads directory, and the files gh and its child
+// write their pids to.
+func stalledPush(t *testing.T) (args []string, db, ghPid, ghChild string) {
 	t.Helper()
 	hermeticGit(t)
 	asSession(t, "rig/gc-toolkit.st-conv")
-	bin := t.TempDir()
-	ghPid = filepath.Join(t.TempDir(), "gh.pid")
+	bin, marks := t.TempDir(), t.TempDir()
+	ghPid, ghChild = filepath.Join(marks, "gh.pid"), filepath.Join(marks, "child.pid")
 	for name, text := range map[string]string{"gc": storeStub, "gh": stalledGH} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(text), 0o755); err != nil {
 			t.Fatal(err)
@@ -329,6 +336,7 @@ func stalledPush(t *testing.T) (args []string, db, ghPid string) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("STUB_STORE", pushStore)
 	t.Setenv("GH_PID", ghPid)
+	t.Setenv("GH_CHILD", ghChild)
 	root := t.TempDir()
 	for _, dir := range []string{"rig", "tree"} {
 		treeGit(t, root, "init", "-q", dir)
@@ -338,26 +346,31 @@ func stalledPush(t *testing.T) (args []string, db, ghPid string) {
 	t.Setenv("GC_RIG_ROOT", filepath.Join(root, "rig"))
 	t.Chdir(filepath.Join(root, "tree"))
 	db = t.TempDir()
-	return []string{"pr", "push", "st-1", "--held-by", "st-conv", "--db", db}, db, ghPid
+	return []string{"pr", "push", "st-1", "--held-by", "st-conv", "--db", db}, db, ghPid, ghChild
 }
 
 // A push whose call does not answer is stopped once the push has held the
 // record lock for half the time a writer waits for it: the call's whole
 // process group ends, the lock is free, and the verb exits 2 saying why.
 func TestPRPushStopsACallThatDoesNotAnswerAndLetsTheLockGo(t *testing.T) {
-	args, db, ghPid := stalledPush(t)
-	shortLockWait(t, 2*time.Second, 500*time.Millisecond)
+	args, db, ghPid, ghChild := stalledPush(t)
+	// Three seconds under the lock, so gh has started its child long before
+	// they are spent, on a slow host too.
+	shortLockWait(t, 6*time.Second, 500*time.Millisecond)
 	var errs bytes.Buffer
 	start := time.Now()
 	code := Run(args, "", io.Discard, &errs)
-	if took := time.Since(start); took > 15*time.Second {
-		t.Errorf("the push returned after %s, past its 1s under the lock and its grace", took)
+	if took := time.Since(start); took > 20*time.Second {
+		t.Errorf("the push returned after %s, past its 3s under the lock and its grace", took)
 	}
-	if code != 2 || !strings.Contains(errs.String(), "the push held the store's record lock for 1s, the most it may") {
+	if code != 2 || !strings.Contains(errs.String(), "the push held the store's record lock for 3s, the most it may") {
 		t.Fatalf("exit %d, stderr %q, want exit 2 naming the push's time under the lock", code, errs.String())
 	}
 	if !lockFreeIn(db) {
 		t.Error("the record lock was still held after the push returned")
+	}
+	if readPid(ghChild) == 0 {
+		t.Fatal("gh had started no child when the push's time under the lock was spent")
 	}
 	if !goneWithin(-readPid(ghPid), 5*time.Second) {
 		t.Error("a process of gh's group outlived the push")
@@ -368,7 +381,7 @@ func TestPRPushStopsACallThatDoesNotAnswerAndLetsTheLockGo(t *testing.T) {
 // process it started, and the push exits as a SIGTERM would, once the lock is
 // free.
 func TestPRPushPassesASIGTERMOnToTheCallStillRunning(t *testing.T) {
-	args, db, ghPid := stalledPush(t)
+	args, db, ghPid, ghChild := stalledPush(t)
 	shortLockWait(t, time.Minute, 500*time.Millisecond)
 	// The test's own relay, so a push that does not take the signal fails this
 	// test rather than ending the test binary.
@@ -377,7 +390,7 @@ func TestPRPushPassesASIGTERMOnToTheCallStillRunning(t *testing.T) {
 	t.Cleanup(func() { signal.Stop(held) })
 	exited := make(chan int, 1)
 	go func() { exited <- Run(args, "", io.Discard, io.Discard) }()
-	if !appears(ghPid, 10*time.Second) {
+	if !appears(ghChild, 10*time.Second) {
 		t.Fatal("the push never reached GitHub")
 	}
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
@@ -406,12 +419,22 @@ func TestTheSittingsCheckoutStopsAFetchOrAPushThatDoesNotAnswer(t *testing.T) {
 	hermeticGit(t)
 	shortLockWait(t, time.Minute, 500*time.Millisecond)
 	const b = "polecat/st-1"
-	stall := "#!/bin/sh\necho $$ > \"$STALL_PID\"\n(trap '' TERM; exec sleep 30 >/dev/null 2>&1) &\nsleep 30\n"
+	// The pusher writes its pid to $STALL_PID and starts a child that ignores
+	// SIGTERM, which writes its pid to $STALL_CHILD once its trap is set. The
+	// pusher forks nothing after it.
+	stall := `#!/bin/sh
+echo $$ > "$STALL_PID"
+sh -c 'trap "" TERM; echo $$ > "$1"; exec sleep 30 >/dev/null 2>&1' _ "$STALL_CHILD" &
+exec sleep 30
+`
 	for name, c := range map[string]struct {
 		setup func(t *testing.T, tree string)
-		// gone is what must be gone once the push returns, from the pid the
-		// stalled process wrote: the ssh itself, or the pusher's group.
-		gone func(pid int) int
+		// stalled is the file the stalled process has written once it stalls,
+		// $STALL_PID or $STALL_CHILD, and gone is what must be gone once the
+		// push returns, from the pid in $STALL_PID: the ssh itself, or the
+		// pusher's group.
+		stalled string
+		gone    func(pid int) int
 	}{
 		"a fetch whose ssh does not answer": {
 			setup: func(t *testing.T, tree string) {
@@ -423,7 +446,8 @@ func TestTheSittingsCheckoutStopsAFetchOrAPushThatDoesNotAnswer(t *testing.T) {
 				t.Setenv("GIT_SSH_COMMAND", ssh)
 				treeGit(t, tree, "remote", "add", "origin", "ssh://git.invalid/acme/widgets.git")
 			},
-			gone: func(pid int) int { return pid },
+			stalled: "STALL_PID",
+			gone:    func(pid int) int { return pid },
 		},
 		"a pusher that does not return": {
 			setup: func(t *testing.T, tree string) {
@@ -437,28 +461,41 @@ func TestTheSittingsCheckoutStopsAFetchOrAPushThatDoesNotAnswer(t *testing.T) {
 				}
 				t.Setenv("GCTK_SCRIPTS_DIR", scripts)
 			},
-			gone: func(pid int) int { return -pid },
+			stalled: "STALL_CHILD",
+			gone:    func(pid int) int { return -pid },
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tree := t.TempDir()
 			treeGit(t, tree, "init", "-q")
 			treeCommit(t, tree, "a.txt", "one\n")
-			pid := filepath.Join(t.TempDir(), "pid")
+			marks := t.TempDir()
+			pid := filepath.Join(marks, "pid")
 			t.Setenv("STALL_PID", pid)
+			t.Setenv("STALL_CHILD", filepath.Join(marks, "child"))
 			c.setup(t, tree)
 			s, err := newSittingTree(tree)
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			start := time.Now()
-			err = s.Push(ctx, b)
-			if took := time.Since(start); took > 10*time.Second {
-				t.Errorf("the push returned after %s, long past its context's end", took)
+			done := make(chan error, 1)
+			go func() { done <- s.Push(ctx, b) }()
+			if !appears(os.Getenv(c.stalled), 10*time.Second) {
+				t.Fatal("the push never reached the process that stalls it")
 			}
-			if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "stopped, with every process it started") {
+			cancel()
+			stop := time.Now()
+			select {
+			case err = <-done:
+			case <-time.After(20 * time.Second):
+				t.Fatal("the push did not return once its context ended")
+			}
+			if took := time.Since(stop); took > 10*time.Second {
+				t.Errorf("the push returned %s after its context ended", took)
+			}
+			if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "stopped, with every process it started") {
 				t.Fatalf("a push that did not answer read %v", err)
 			}
 			if !goneWithin(c.gone(readPid(pid)), 5*time.Second) {

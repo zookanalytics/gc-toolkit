@@ -455,24 +455,33 @@ func command(ctx context.Context, bin string, args ...string) *exec.Cmd {
 }
 
 // stopGroup sends SIGTERM to the process group pgid leads, and SIGKILL to
-// whatever is left of it after StopGrace, and returns once the group is empty
-// or has been sent SIGKILL. A child that ignores SIGTERM runs on after the
-// command has exited, so the command's exit does not end the stop. darwin
-// answers EPERM, not ESRCH, for a group whose only members have exited and wait
-// to be reaped, so only ESRCH reads as empty. A group already gone is
-// os.ErrProcessDone.
+// whatever is left of it after StopGrace, and returns once the group is empty.
+// A child that ignores SIGTERM runs on after the command has exited, so the
+// command's exit does not end the stop. darwin's kill(2) to a group does not
+// reach a child whose fork is under way as it runs, so SIGKILL goes again
+// until no process is left, for at most StopGrace more. darwin answers EPERM,
+// not ESRCH, for a group whose only members have exited and wait to be reaped,
+// so only ESRCH reads as empty. A group already gone is os.ErrProcessDone.
 func stopGroup(pgid int) error {
-	if errors.Is(syscall.Kill(-pgid, syscall.SIGTERM), syscall.ESRCH) {
+	if errors.Is(signalGroup(pgid, syscall.SIGTERM), syscall.ESRCH) {
 		return os.ErrProcessDone
 	}
 	for deadline := time.Now().Add(StopGrace); time.Now().Before(deadline); time.Sleep(groupPoll) {
-		if errors.Is(syscall.Kill(-pgid, 0), syscall.ESRCH) {
+		if errors.Is(signalGroup(pgid, 0), syscall.ESRCH) {
 			return nil
 		}
 	}
-	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	for deadline := time.Now().Add(StopGrace); time.Now().Before(deadline); time.Sleep(groupPoll) {
+		if errors.Is(signalGroup(pgid, syscall.SIGKILL), syscall.ESRCH) {
+			return nil
+		}
+	}
 	return nil
 }
+
+// signalGroup sends sig to the process group pgid leads. A variable so a test
+// can stand in for a kill(2) that misses a process.
+var signalGroup = func(pgid int, sig syscall.Signal) error { return syscall.Kill(-pgid, sig) }
 
 // why is a result's failure in one line: why it did not run, or its exit and
 // its output's last line.

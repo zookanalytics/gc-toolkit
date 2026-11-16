@@ -227,11 +227,37 @@ type Client struct {
 	ctx     context.Context
 }
 
-// stopGrace is how long a call stopped by its context may hold its output open
-// before the wait for it gives up. The stop kills every process the call
+// stopGrace is how long the stop of a call its context ended goes on killing
+// the call's process group, and then how long the call may hold its output
+// open before the wait for it gives up. The stop kills every process the call
 // started, so only one that left the call's process group can hold it that
 // long.
 const stopGrace = 2 * time.Second
+
+// groupPoll is how often a stop kills again a group that is not yet empty.
+const groupPoll = 25 * time.Millisecond
+
+// killGroup sends SIGKILL to the process group pgid leads until no process is
+// left in it, for at most stopGrace, since darwin's kill(2) to a group does not
+// reach a child whose fork is under way as it runs, as gc's fork of bd can be.
+// darwin answers EPERM, not ESRCH, for a group whose only members have exited
+// and wait to be reaped, so only ESRCH reads as empty. A group already gone is
+// os.ErrProcessDone.
+func killGroup(pgid int) error {
+	if errors.Is(signalGroup(pgid, syscall.SIGKILL), syscall.ESRCH) {
+		return os.ErrProcessDone
+	}
+	for deadline := time.Now().Add(stopGrace); time.Now().Before(deadline); time.Sleep(groupPoll) {
+		if errors.Is(signalGroup(pgid, syscall.SIGKILL), syscall.ESRCH) {
+			return nil
+		}
+	}
+	return nil
+}
+
+// signalGroup sends sig to the process group pgid leads. A variable so a test
+// can stand in for a kill(2) that misses a process.
+var signalGroup = func(pgid int, sig syscall.Signal) error { return syscall.Kill(-pgid, sig) }
 
 // WithContext returns a client whose every forked `gc` call ends when ctx
 // does. Each call runs in a process group of its own, and once ctx is done the
@@ -378,7 +404,7 @@ func (c *Client) Route(ids ...string) (string, error) {
 // store named ahead of the verb, where bd reads its global flags. A call that
 // names its own store keeps it. A client with a context runs the call in its
 // own process group and kills the group once the context is done
-// ([Client.WithContext]).
+// ([Client.WithContext], [killGroup]).
 func (c *Client) command(args ...string) *exec.Cmd {
 	if c.db != "" && len(args) > 0 && args[0] == "bd" && !slices.Contains(args, "--db") {
 		args = append([]string{"bd", "--db", c.db}, args[1:]...)
@@ -388,7 +414,7 @@ func (c *Client) command(args ...string) *exec.Cmd {
 	}
 	cmd := exec.CommandContext(c.ctx, c.bin, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
 	cmd.WaitDelay = stopGrace
 	return cmd
 }
