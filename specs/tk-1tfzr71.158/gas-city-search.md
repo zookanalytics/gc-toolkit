@@ -99,9 +99,11 @@ here reached 9.2 GB on 2026-11-16. The check reads the backup's working set,
 with the time Dolt stamps on it, from the backup's own files through Dolt's
 storage packages (`nbs.NewLocalStore`, `go/store/nbs/store.go`). It compares
 that working set's hash with the store's `dolt_hashof_db()`, and dates what the
-backup lacks by the write times the store's rows carry after that time. It is a
-pack doctor check, so `gc doctor` runs it and the doctor order records it, and
-its `run.sh` only calls gctk.
+backup lacks by the write times the store's rows carry more than a second after
+that time, since a row the backup holds can carry the second after it. A missed
+write whose rows carry no later time reads current until the next sync carries
+it, as a removal does. It is a pack doctor check, so `gc doctor` runs it and
+the doctor order records it, and its `run.sh` only calls gctk.
 
 ## `gctk patrol cold` and `doctor/check-patrol-advancing`
 

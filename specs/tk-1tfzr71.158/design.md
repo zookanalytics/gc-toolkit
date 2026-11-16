@@ -482,25 +482,48 @@ The check reads the rest from the store's server:
 - The store's working set hashes as the backup's does (`dolt_hashof_db()`):
   the backup holds every write, whatever either file's age.
 - They differ: the age counts from the oldest write time the store's rows carry
-  that is later than the backup's working-set time (a bead's `updated_at`, a
-  dependency's, a comment's or an event's `created_at`), and the store is
-  flagged once that time is older than one backup cadence plus its grace. A
-  write that lands while a sync runs, after it, or after an idle stretch counts
-  from its own time, however fresh `last_sync` is. A row's own time needs no
-  shared history, so a history the dolt pack's compactor flattened
+  that is more than a second later than the backup's working-set time (a
+  bead's `updated_at`, a dependency's, a comment's or an event's
+  `created_at`), and the store is flagged once that time is older than one
+  backup cadence plus its grace. Such a write counts from its own time, however
+  fresh `last_sync` is. A row's own time needs no shared history, so a history
+  the dolt pack's compactor flattened
   (`examples/bd/dolt/commands/compact/help.md`) changes nothing here.
 - A file in the backup newer than its manifest past the grace is a torn sync,
   flagged as today.
 - A backup or a working set it cannot read flags the store as unreadable, never
   healthy.
 
+The check dates only rows timed past the second after the working-set time,
+because a row timed in that second or before it can be a write the backup holds
+or one it lacks. Dolt stamps the working set as a transaction commits and cuts
+the time to its whole second (`time.Now().Unix()` in
+`DoltTransaction.WorkingSetMeta`). bd stamps a row when its statement runs,
+which is before its transaction commits. An event's `created_at` is the
+statement's whole second (`NowAuxTime`,
+`internal/storage/issueops/derivedid.go`). A time bd binds to a bead, such as
+its `updated_at`, is rounded to the nearest second when Dolt's SQL engine
+stores it in a `DATETIME` column (`ConvertToTime`, go-mysql-server
+`sql/types/datetime.go`, at the version Gas City's `go.mod` requires at
+918f45f71). So the last write a backup holds can read one second past its
+working-set time. A write the sync missed can read any of those seconds too. A
+label bd adds in the working-set time's own second, after the sync took the
+root, reads that second. A write whose statement ran before the working-set
+time, in a transaction that committed after the sync took the root, reads an
+earlier one. Counting the rows of those seconds would date the gap from a write
+the backup holds, such as an idle store's last write, and flag an idle store at
+its first write after a backup.
+
 bd writes an event row, with its own `created_at`, for each label it adds or
 removes (`AddLabelInTx` and `RemoveLabelInTx`,
 `internal/storage/issueops/labels.go`), so a label is dated by its event. A
-change that leaves no time at all, such as a bead's removal, which takes the
-bead's events with it, adds no age. A store whose only missing writes are such
-changes reads current until the next sync carries them, and a store whose syncs
-stop is what `bd-backup-freshness` reports, at 24 hours.
+missing write adds no age when it leaves no time at all, such as a bead's
+removal, which takes the bead's events with it, or when no row it wrote is
+timed past the second after the working-set time. A store whose only missing
+writes are such writes reads current until the next sync carries them. When a
+later write is missing beside them, the age counts from that write, which can
+be younger than they are. A store whose syncs stop is what
+`bd-backup-freshness` reports, at 24 hours.
 
 The suspended-store backup and Dolt reclaim keep their warrants and their
 orders.
@@ -729,7 +752,7 @@ whole files this design retires beyond the twenty already listed.
 | Unit | What it does | Waits on | Releases |
 |---|---|---|---|
 | 1. The doctor order | `gctk doctor record`, `orders/doctor-record.toml` and the doctor result of section 4; the keyed-problem-record warrant; the pack checks that report per rig name each rig as `rig <name>`; the deacon's system-health step, `doctor-sweep.sh` and its test, and the doctor parts of `deacon-human-gate-wiring.test.sh` go, and so do `patrol-finding.sh`'s `--check`, its reserved `doctor-*` keys and their drift guard, whose one caller was that step. Its PR shows a dry run against the live city beside the deacon's open doctor findings. | nothing | the doctor's results through one pass with no session |
-| 2. The backup check | `gctk dolt unbacked` and `doctor/check-backup-current`; the backup-currency warrant; gctk's build gains Dolt's Go module, which Gas City's own build carries; the deacon's dolt-health step and `dolt-backup-manifest-check.test.sh` go. Its PR shows the check's dry run beside the deacon's backup findings of the week, and the working-set hash and time it reads from the smallest backup's files beside `dolt_hashof_db()` and the newest row times in that backup restored into a scratch directory (`dolt backup restore`). | unit 1 | the closers of the five backup beads, once the landing closes |
+| 2. The backup check | `gctk dolt unbacked` and `doctor/check-backup-current`; the backup-currency warrant; gctk's build gains Dolt's Go module, which Gas City's own build carries; the deacon's dolt-health step and `dolt-backup-manifest-check.test.sh` go. Its PR shows the check's dry run beside the deacon's backup findings of the week, and the working-set hash and time it reads from the smallest backup's files beside `dolt_hashof_db()`, with that backup restored into a scratch directory (`dolt backup restore`) to show that no row it holds is timed more than a second past that working-set time. | unit 1 | the closers of the five backup beads, once the landing closes |
 | 3. The cold-patrol check | `gctk patrol cold` and `doctor/check-patrol-advancing`; the patrol-liveness warrant. | unit 2 | a report of a cold witness |
 | 4. The deacon retires | `agents/deacon/`, its named session and the pack's patch for it, `formulas/mol-deacon-patrol.toml`, boot health's three files, `gc-deacon-ledger.sh` and its test, the continue hook with its test and settings entry, `human-gate.sh`'s ledger append, `check-hq-marooned-work`'s ledger exemption, the deacon and boot health in `patrol-finding.sh`'s caller list, the deacon's tests and the pages that name them, among them `docs/pack-authoring.md`'s patrol startup section (tk-a89659h). | unit 3 | the deacon's session, and tk-hpy4lgk's closer |
 | 5. The witness's recovery | recover-orphaned-beads calls `gctk worktree salvage`, which acts on section 2's fresh read, check-polecat-health calls `gctk session progress`, and `orphan-dispose.sh`, `branch-context.sh`, `seat-progress.sh` with their tests and the step's extraction tests go. | unit 4 | the closers of tk-wcdwhxm and tk-8a6akou |
