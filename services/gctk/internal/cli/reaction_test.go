@@ -58,11 +58,11 @@ func TestReactionDisposeFindsTheSubjectsStoreByItsPrefix(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(rig, ".beads"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rt := &fake.Runtime{RigList: []gascity.Rig{{Name: "town", Path: t.TempDir(), Prefix: "lx", HQ: true}, {Name: "gc-toolkit", Path: rig, Prefix: "tk"}}}
+	rt := &fake.Runtime{RigList: []gascity.Rig{{Name: "town", Path: t.TempDir(), Prefix: "hq", HQ: true}, {Name: "gc-toolkit", Path: rig, Prefix: "tk"}}}
 	if got := subjectStore(rt, "tk-sub"); got != filepath.Join(rig, ".beads") {
 		t.Errorf("tk-sub's store is %q", got)
 	}
-	if got := subjectStore(rt, "lx-sub"); got != "" {
+	if got := subjectStore(rt, "hq-sub"); got != "" {
 		t.Errorf("a rig with no .beads named the store %q", got)
 	}
 	if got := subjectStore(rt, "zz-sub"); got != "" {

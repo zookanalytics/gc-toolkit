@@ -87,7 +87,7 @@ func TestABoundedReadEndsAtItsLimit(t *testing.T) {
 func TestTheNamedSessionsAndTheRigsAreReadOnce(t *testing.T) {
 	c, log := rosterCity(t, map[string]string{
 		"config-show": `{"config":{"NamedSessions":[{"Name":"","Template":"mechanik","Scope":"city","Dir":""},{"Template":"refinery","Dir":"rig"}]}}`,
-		"rig-list":    `{"rigs":[{"name":"town","path":"/town","prefix":"lx","hq":true},{"name":"rig","path":"/town/rigs/rig","prefix":"tk"}]}`,
+		"rig-list":    `{"rigs":[{"name":"town","path":"/town","prefix":"hq","hq":true},{"name":"rig","path":"/town/rigs/rig","prefix":"tk"}]}`,
 	})
 	for range 3 {
 		named, err := c.NamedSessions()

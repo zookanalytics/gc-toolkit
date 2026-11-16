@@ -77,7 +77,7 @@ func newWorld(t *testing.T) *world {
 		},
 		Named: []gascity.NamedSession{{Template: "mechanik"}, {Template: "refinery", Dir: "gc-toolkit"}},
 		RigList: []gascity.Rig{
-			{Name: "town", Path: "/town", Prefix: "lx", HQ: true},
+			{Name: "town", Path: "/town", Prefix: "hq", HQ: true},
 			{Name: "gc-toolkit", Path: "/town/rigs/gc-toolkit", Prefix: "tk"},
 		},
 	}

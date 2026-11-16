@@ -22,7 +22,7 @@ func TestThePoolAnswersNoOnlyOnAFinding(t *testing.T) {
 		why          string
 	}{
 		"a registered pool":        {"gc-toolkit/gc-toolkit.polecat", "tk-sub", nil, true, "is registered and not suspended"},
-		"a pool in another store":  {"gc-toolkit/gc-toolkit.polecat", "lx-sub", nil, false, "reads the gc-toolkit store (prefix tk-) but lx-sub lives in the store of town (prefix lx-)"},
+		"a pool in another store":  {"gc-toolkit/gc-toolkit.polecat", "hq-sub", nil, false, "reads the gc-toolkit store (prefix tk-) but hq-sub lives in the store of town (prefix hq-)"},
 		"a store no rig owns":      {"gc-toolkit/gc-toolkit.polecat", "zz-sub", nil, false, "since none owns prefix zz-"},
 		"no bead to ask the store": {"gc-toolkit/gc-toolkit.polecat", "", func(w *world) { w.rt.RigsErr = errors.New("unasked") }, true, ""},
 		"an absent pool":           {"gc-toolkit/gc-toolkit.nosuch", "tk-sub", nil, false, "no agent is registered at gc-toolkit/gc-toolkit.nosuch"},
@@ -32,7 +32,7 @@ func TestThePoolAnswersNoOnlyOnAFinding(t *testing.T) {
 			"runs no sessions"},
 		"an unreadable roster": {"gc-toolkit/gc-toolkit.nosuch", "tk-sub", func(w *world) { w.rt.RosterErr = errors.New("gc agent list did not answer within 15s") }, true,
 			"an unreadable roster is no evidence that it is gone"},
-		"an unreadable rig list": {"gc-toolkit/gc-toolkit.polecat", "lx-sub", func(w *world) { w.rt.RigsErr = errors.New("no rigs") }, true, ""},
+		"an unreadable rig list": {"gc-toolkit/gc-toolkit.polecat", "hq-sub", func(w *world) { w.rt.RigsErr = errors.New("no rigs") }, true, ""},
 	} {
 		w := newWorld(t)
 		if c.edit != nil {
@@ -60,7 +60,7 @@ func TestANamedAgentIsAssignableOnlyWhereItsHookReads(t *testing.T) {
 		"the mechanik":                  {"gc-toolkit.mechanik", "tk-sub", nil, true, "a registered named session"},
 		"the mechanik on any store":     {"gc-toolkit.mechanik", "zz-sub", nil, true, ""},
 		"the rig's refinery":            {"gc-toolkit/gc-toolkit.refinery", "tk-sub", nil, true, "whose hook reads the store tk-sub lives in"},
-		"the refinery on the city's":    {"gc-toolkit/gc-toolkit.refinery", "lx-sub", nil, true, ""},
+		"the refinery on the city's":    {"gc-toolkit/gc-toolkit.refinery", "hq-sub", nil, true, ""},
 		"the refinery on another store": {"gc-toolkit/gc-toolkit.refinery", "zz-sub", func(w *world) { w.rt.RigList = append(w.rt.RigList, gascity.Rig{Name: "other", Prefix: "zz"}) }, false, "is scoped to the rig gc-toolkit, so its hook reads the tk- store and the city's"},
 		"a bare name":                   {"mechanik", "tk-sub", nil, false, "no agent is registered as mechanik"},
 		"a suspended agent":             {"gc-toolkit.mechanik", "tk-sub", func(w *world) { w.rt.Roster[1].Suspended = true }, false, "is suspended"},
