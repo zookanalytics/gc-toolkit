@@ -108,8 +108,8 @@ jobs:
           cache: false
 
       # The image's only bash is /bin/bash 3.2. run-tests.sh needs bash 5, and
-      # it runs each suite with the first bash on PATH. run-tests.sh bounds
-      # each run with timeout(1), and refinery-reconcile.sh and gc-helm.sh's
+      # it runs each suite with the first bash on PATH. Scripts under test
+      # bound calls with timeout(1), and refinery-reconcile.sh and gc-helm.sh's
       # accept take their locks with flock(1); macOS ships neither.
       # tmux-intake-prompt.test.sh runs tmux-bindings.sh under /bin/sh against
       # a real tmux server, and skips that case without tmux. The host installs all four from Homebrew.
