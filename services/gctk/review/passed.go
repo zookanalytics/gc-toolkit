@@ -109,7 +109,7 @@ func judge(run *Run, n int, asks []Ask) []string {
 				why = append(why, fmt.Sprintf("a %s finding names no id, so no ruling can answer it", ln.Check))
 				continue
 			}
-			if _, ok := rulingOf(rp, func(r Ruling) bool { return strings.EqualFold(r.Check, ln.Check) && r.Finding == f.ID }); !ok {
+			if _, ok := rulingOf(rp, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) }); !ok {
 				why = append(why, fmt.Sprintf("%s finding %s is not ruled", ln.Check, f.ID))
 			}
 		}

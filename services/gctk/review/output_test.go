@@ -343,6 +343,35 @@ func TestARepairOutput(t *testing.T) {
 		Commit: fix}), nil), "an earlier round of this run ruled ask tk-ask declined")
 }
 
+// A finding is its lane's check, compared without case, and its id as the
+// lane wrote it, in the round's output as in the pass rule: two findings whose
+// ids differ only in case are two, each ruled once, and the round that rules
+// both passes.
+func TestAFindingsIDKeepsItsCase(t *testing.T) {
+	lanes := func(w *world) {
+		w.output(triage(1, h1, "correctness"))
+		w.output(lane(1, "correctness", h1, review.VerdictRequestChanges, "F1", "f1"))
+	}
+	one := repair(1, h1, "", finding("correctness", "F1", review.RulingDeclined))
+	both := repair(1, h1, "", finding("Correctness", "F1", review.RulingDeclined),
+		finding("correctness", "f1", review.RulingDeclined))
+	w := newWorld(t)
+	lanes(w)
+	st := w.step(1, "rule-and-repair")
+	mustRefuse(t, w.check(st, one, nil), "correctness finding f1 is not ruled")
+	if err := w.check(st, both, nil); err != nil {
+		t.Fatalf("a round that rules F1 and f1 once each: %v", err)
+	}
+	w = newWorld(t)
+	lanes(w)
+	w.output(one)
+	mustFail(t, w.passed(1), "correctness finding f1 is not ruled")
+	w = newWorld(t)
+	lanes(w)
+	w.output(both)
+	mustPass(t, w.passed(1))
+}
+
 // A shadow run's round fixes, pushes and files nothing. Its output carries the
 // comment it would have posted, and each write it made none of.
 func TestAShadowRound(t *testing.T) {

@@ -142,6 +142,25 @@ func (r Ruling) Subject() string {
 	return r.Check + " finding " + r.Finding
 }
 
+// subject is what a ruling rules, as the round's output, the pass rule and the
+// head's comment match a ruling to it: an ask by its bead's id, or a lane's
+// finding by the lane's check, whose name compares without case as a lane's
+// check matches triage's pick, and by the finding's id exactly as the lane
+// wrote it.
+type subject struct{ ask, check, finding string }
+
+func (r Ruling) subject() subject {
+	if r.Ask != "" {
+		return subject{ask: r.Ask}
+	}
+	return subject{check: strings.ToLower(r.Check), finding: r.Finding}
+}
+
+// rulesFinding reports whether the ruling rules the finding id of check's lane.
+func (r Ruling) rulesFinding(check, id string) bool {
+	return r.subject() == Ruling{Check: check, Finding: id}.subject()
+}
+
 // Run is a review run as the store holds it: its root, the vars it was poured
 // with, the loop's bound among them (0 when the var does not read as a count),
 // the control bead of its loop, and the outputs its steps wrote, by iteration.

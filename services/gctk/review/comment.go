@@ -76,7 +76,7 @@ func Comment(run *Run, n int, asks []Ask) string {
 				grade = "ungraded"
 			}
 			fmt.Fprintf(&b, "- **%s** (%s, `%s`): %s\n", f.ID, grade, f.Locus, oneLine(f.Message))
-			r, ok := rulingOf(rp, func(r Ruling) bool { return strings.EqualFold(r.Check, ln.Check) && r.Finding == f.ID })
+			r, ok := rulingOf(rp, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
 			fmt.Fprintf(&b, "  - %s\n", answer(r, ok, rp, run.Shadow))
 		}
 		fmt.Fprintln(&b, "\n</details>")
@@ -184,7 +184,7 @@ func tally(ln Lane, rp *Repair) string {
 	}
 	count := map[string]int{}
 	for _, f := range ln.Findings {
-		r, ok := rulingOf(rp, func(r Ruling) bool { return strings.EqualFold(r.Check, ln.Check) && r.Finding == f.ID })
+		r, ok := rulingOf(rp, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
 		if !ok {
 			count["unruled"]++
 			continue

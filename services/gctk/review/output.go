@@ -248,25 +248,25 @@ func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair
 		return nil, err
 	}
 	declined := earlierDeclines(run, n)
-	subjects := map[string]bool{}
+	subjects := map[subject]bool{}
 	for _, r := range rp.Rulings {
 		if err := checkRuling(r, it, asks, declined, run.Shadow); err != nil {
 			return nil, err
 		}
-		if subjects[strings.ToLower(r.Subject())] {
+		if subjects[r.subject()] {
 			return nil, refuse("%s is ruled twice", r.Subject())
 		}
-		subjects[strings.ToLower(r.Subject())] = true
+		subjects[r.subject()] = true
 	}
 	for _, ln := range it.Lanes {
 		for _, f := range ln.Findings {
-			if !subjects[strings.ToLower(Ruling{Check: ln.Check, Finding: f.ID}.Subject())] {
+			if !subjects[Ruling{Check: ln.Check, Finding: f.ID}.subject()] {
 				return nil, refuse("%s finding %s is not ruled", ln.Check, f.ID)
 			}
 		}
 	}
 	for _, a := range asks {
-		if a.Takeable() && !subjects[strings.ToLower(Ruling{Ask: a.ID}.Subject())] {
+		if a.Takeable() && !subjects[Ruling{Ask: a.ID}.subject()] {
 			return nil, refuse("ask %s is open and nothing holds it, so the round rules it", a.ID)
 		}
 	}
@@ -378,7 +378,7 @@ func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string
 		return refuse("a ruling names neither an ask nor a lane's check and finding")
 	default:
 		ln, ok := lane(it, r.Check)
-		if !ok || !slices.ContainsFunc(ln.Findings, func(f Finding) bool { return f.ID == r.Finding }) {
+		if !ok || !slices.ContainsFunc(ln.Findings, func(f Finding) bool { return r.rulesFinding(ln.Check, f.ID) }) {
 			return refuse("no lane of this iteration raised %s", r.Subject())
 		}
 	}
