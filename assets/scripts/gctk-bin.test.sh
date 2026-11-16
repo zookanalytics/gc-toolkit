@@ -2,11 +2,10 @@
 # Hermetic test for the gctk-bin block: the one line by which a formula step,
 # a skill's step, an agent's prompt, a prompt fragment's step or example,
 # AGENTS.md's hold rule, a doctor check, and a script such as await-ruling.sh
-# or review-evidence.sh find
-# the gctk binary they call directly, as $GCTK. Formula, skill and prompt text
-# have no include mechanism, so each caller carries the line in a
-# `# >>> gctk-bin` block, and this holds every copy to the one definition and
-# runs it.
+# or review-evidence.sh find the gctk binary they call directly, as $GCTK.
+# Formula, skill and prompt text have no include mechanism, so each caller
+# carries the line in a `# >>> gctk-bin` block, and this holds every copy to the
+# one definition and runs it.
 #
 # run-tests-scope: tree
 #

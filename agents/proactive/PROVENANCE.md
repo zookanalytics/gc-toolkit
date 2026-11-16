@@ -77,9 +77,10 @@ The first reaction NEVER closes its subject — every disposition advances it
 and leaves it open, the `close` disposition included: it routes the subject to a
 validating closer (mol-validate-close), which re-checks the no-work call and
 closes the subject on its own confident check or escalates.
-`gctk reaction dispose` performs each of them through native writes. No key on the subject records that a reaction landed: the run is the
-record while it runs, `gc sling` refuses a second, and the state the exit wrote
-and its headline keep the subject out of the scan afterwards. A worker that dies
+`gctk reaction dispose` performs each of them through native writes. No key on
+the subject records that a reaction landed: the run is the record while it
+runs, `gc sling` refuses a second, and the state the exit wrote and its
+headline keep the subject out of the scan afterwards. A worker that dies
 before it closes its step leaves the step to the next, whose check passes only
 while the exit has not dispatched the subject; that worker finds the card its run
 wrote and re-runs the same exit. The card in the subject's notes records which
@@ -94,8 +95,9 @@ routes or holds, a determinable action that warrants the operator's trigger is a
 recommend, and only a genuine fork, an irreversible or destructive action, or a
 policy call with no action to offer is a ruling. The guardrail lives in the
 reacting agent's rubric (`agents/proactive/prompt.template.md`), not in an
-origin gate on the script.
+origin gate on `gctk reaction dispose`.
 
 Gate: `tools/gc-proactive.test.sh` covers the sling, its refusals, the check and
-the scan; the Go tests of `services/gctk/reaction` cover the exits themselves. Design refs: specs/tk-1tfzr71.105/design.md; design-doc.md Key
-Components 5-6, Phase 4.
+the scan; the Go tests of `services/gctk/reaction` cover the exits themselves.
+Design refs: specs/tk-1tfzr71.105/design.md; design-doc.md Key Components 5-6,
+Phase 4.
