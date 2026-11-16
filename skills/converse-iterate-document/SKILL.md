@@ -9,11 +9,11 @@ A worker sent on a short ruling makes every call the ruling left open, the
 operator redlines those calls at the next gate, and each round costs a whole
 re-review. So settle the calls here with the operator, item by item. The
 document then changes in one of two ways. The operator can rule that you edit
-it with them, and `converse-edit` carries that change. Otherwise you send one
-rework that carries the decisions, for a worker to write the text from, which
-is also the way to change a document on an open PR, because a sitting edits no
-open PR's branch. The block of notes that carries the decisions for a worker is
-the scaffold.
+it with them, and `converse-edit` carries that change, on an open PR's branch
+too when the PR is on the pending record. Otherwise you send one rework that
+carries the decisions, for a worker to write the text from, which is also the
+way to change a document on an open PR the old path reviews. The block of notes
+that carries the decisions for a worker is the scaffold.
 
 This applies when the operator wants a document's content changed and more than
 one call stands between its text and what they want. The document can be a
@@ -72,8 +72,9 @@ the repo.
 When the operator rules that you make the change with them, load
 `converse-edit` and make it in this sitting: the items you settled are its
 steps, each committed once they agree to it. No scaffold is written, because
-the change carries the decisions and its summary quotes the rulings. A
-document on an open PR takes the scaffold and one rework below instead.
+the change carries the decisions and its summary quotes the rulings. A document
+on an open PR the old path reviews, whose `merge_result` is `pull_request`,
+takes the scaffold and one rework below instead.
 
 ## Write the scaffold
 

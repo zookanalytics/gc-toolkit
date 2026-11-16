@@ -1197,11 +1197,11 @@ apart. A review bead carries `task_kind=review`. An anchor carries
 also narrows by `task_kind=review` or by title, so a marked child joins no
 review's result set.
 
-On the pending record a PR's review run is its branch's one writer, so work a
-loop below would send onto the branch of a PR on the record is an ask the run
-takes ([Checks](#checks)), as the Rejection, Ruling and External rework bullets
-say. The rework children, the verdict's rework, quiescence, the disposal sweep
-and the dispatch on a lane are the old path's ([Debt](#debt)).
+On the pending record a PR's review run is the one worker on its branch, so
+work a loop below would send onto the branch of a PR on the record is an ask
+the run takes ([Checks](#checks)), as the Rejection, Ruling and External rework
+bullets say. The rework children, the verdict's rework, quiescence, the
+disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
 
 - **Rejection** (refinery judgment): the branch conflicts with its target, or
   the gate failed for a reason the branch caused. The refinery sends the work
@@ -1289,8 +1289,13 @@ and the dispatch on a lane are the old path's ([Debt](#debt)).
   back a lane through the ruling: a review already in flight when the ruling is
   filed, whose verdict is on the head it read, and an operator's GitHub
   approval, which until it is dismissed backs every lane but one a later
-  bring-current round reopened. A sitting does not edit an open PR's branch,
-  so a ruling on an open PR files this ask or this rework, which a polecat runs.
+  bring-current round reopened. A sitting the operator rules make the change
+  with them edits the branch of an open PR on the pending record itself, beside
+  any review run that works it, pushes through `gctk pr push` under the lease
+  and answers the PR with `--no-rework`, and the head it leaves is triaged as
+  any head is. Otherwise a ruling that changes an open PR's branch files this
+  ask, which the PR's review run takes, or on the old path this rework, which a
+  polecat runs.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
   acting on the anchor — a fix unit in flight (including the one answering an
   open `must-fix` finding on any lane), a validation pass in flight, or a full
