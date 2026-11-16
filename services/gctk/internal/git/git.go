@@ -153,6 +153,36 @@ func OriginURL(dir string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// OriginURLs lists the URLs of the remote named origin in the clone dir sits
+// in as git resolves them, with every insteadOf and pushInsteadOf rewrite
+// applied: fetch, the ones it fetches from, and push, the ones a push to
+// origin goes to (`git remote get-url --all`, without and with --push).
+func OriginURLs(dir string) (fetch, push []string, err error) {
+	if fetch, err = remoteURLs(dir); err != nil {
+		return nil, nil, err
+	}
+	if push, err = remoteURLs(dir, "--push"); err != nil {
+		return nil, nil, err
+	}
+	return fetch, push, nil
+}
+
+// remoteURLs lists every URL `git remote get-url --all` prints for origin with
+// flags, one a line.
+func remoteURLs(dir string, flags ...string) ([]string, error) {
+	out, err := Output(dir, append(append([]string{"remote", "get-url", "--all"}, flags...), "origin")...)
+	if err != nil {
+		return nil, err
+	}
+	var urls []string
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			urls = append(urls, l)
+		}
+	}
+	return urls, nil
+}
+
 // ValidBranch reports whether name is a branch name git accepts.
 func ValidBranch(name string) bool {
 	if name == "" {

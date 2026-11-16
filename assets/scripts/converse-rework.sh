@@ -9,12 +9,14 @@
 # What is the ruling's own to decide is decided here: the anchor must be an open
 # PR, the child resumes the anchor's own branch and lands where the anchor lands,
 # and its rejection_reason carries the ruling. Resuming the branch keeps the PR
-# and its history, which closing the PR and re-pouring would discard. A sitting
-# does not edit an open PR's branch, so this rework, which a polecat runs, is
-# how a ruling changes an open PR (docs/authority-map.md).
+# and its history, which closing the PR and re-pouring would discard. A ruling
+# whose change the sitting does not make itself, on the branch of a PR on the
+# pending record with the operator (`gctk pr push`), changes an open PR through
+# this rework, which a polecat runs, or through the ask below
+# (docs/authority-map.md).
 #
 # On Gas Town's pending record (merge_result pull_request_pending or
-# pull_request_head_changed) the PR's branch has one writer, its review run
+# pull_request_head_changed) the PR's branch has one worker, its review run
 # (specs/tk-1tfzr71.108/design.md, section 1), so the ruling goes to the run as
 # an ask (`gctk review ask`) instead: the ruling as its reason, the conversation
 # as its source, and the checks the ruling names (--check), which the run picks

@@ -23,7 +23,7 @@ Hard rules, in force for every step:
 - Each step is claimed by its own session, so no shell variable or file outside
   the run's workspace survives from one step to the next. Each step's read,
   `review-run.sh`, prints what the step uses.
-- The run is the one writer of the PR's branch while it holds the bead, and
+- The run is the one worker on the PR's branch while it holds the bead, and
   only rule-and-repair pushes, through `review-run.sh push`.
 - A step writes its output once, through `review-run.sh output`, before it
   closes. A step that cannot go on cancels the run rather than closing.

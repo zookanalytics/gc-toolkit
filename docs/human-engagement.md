@@ -1026,9 +1026,10 @@ the ruling left open. So when more than one call stands between a document's
 text and what the operator wants, the sitting settles them with the operator
 item by item, reading the operator's guidance for its intent and pushing back
 where it disagrees. The document then changes in one of two ways. The operator
-can rule that the sitting edit it with them (*A sitting's change*, below), or
-the sitting sends one rework that carries the decisions, which is also how a
-document on an open PR changes, because a sitting edits no open PR's branch.
+can rule that the sitting edit it with them (*A sitting's change*, below), on
+an open PR's branch too when the PR is on the pending record, or the sitting
+sends one rework that carries the decisions, which is also how a document on an
+open PR the old path reviews changes.
 The big picture between sittings is the subject's notes: the dated rulings and
 the newest `## Current state` block. That block with no open question left is
 the scaffold.
@@ -1054,10 +1055,10 @@ no reaction would spend their attention for nothing, and a pool does it as well
 without them. Whatever the ruling, a sitting holds one change in flight per
 conversation and changes only its own rig's repository, the rig its
 conversation is filed in, because the hold below is a `blocks` edge, which holds
-only within one store. It never edits in its home, edits an open PR's branch,
-cuts an integration effort's branch, pushes to a target branch, merges, or
-forces a push. The `gc-toolkit.converse-edit` skill carries a change from the
-ruling to the refinery.
+only within one store. It never edits in its home, edits the branch of an
+open PR the old path reviews, cuts an integration effort's branch, pushes to a
+target branch, merges, or forces a push. The `gc-toolkit.converse-edit` skill
+carries a change from the ruling to the refinery.
 
 **The change is a bead the sitting files**, in its own rig's store, with its
 target in the create: the rig's default branch, or the integration branch of an
@@ -1157,10 +1158,30 @@ conversation as the evidence, removes the tree and its local branch, and carries
 out what the ruling says of the subject. A tree whose sitting ended first stays
 on its branch, and Gas City's reaper removes it once the change closes.
 
-**An open PR's branch** takes one writer at a time, the PR's rework child, which
-a polecat runs and on which the review machinery keys. So a sitting does not
-edit it, and a ruling that changes an open PR's branch files a rework through the
-sign-off.
+**An open PR's branch** on the pending record is one the sitting can edit
+itself, on the operator's ruling, while its conversation holds the PR's merge,
+and the PR's bead carries the change, so the sitting files no bead. The sitting
+proves that it holds the PR (`gctk pr push --check`): the bead owns a PR on the
+pending record and waits on the conversation through the `blocks` edge every
+conversation on an open PR carries, and the conversation is in progress under
+the sitting. It edits a checkout of the branch's tip in a tree under its home
+that has no local branch, and pushes through `gctk pr push`, which proves the
+holding again, refuses a checkout whose origin reaches any repository but the
+PR's, returns the PR to draft and pushes under the lease. A review run or
+another writer can work the branch at the same time, and the lease keeps
+either push from overwriting the other: when the branch holds a commit the tree
+does not, the push sends nothing, and the sitting merges that commit in and
+pushes again. The push takes no lock. A review run's pass on a head the edit
+replaces counts for nothing, since the evaluator counts only a passed result
+that names the PR's head. The landing order's ready switch reads no
+conversation, so it can mark the PR ready between the push's return to draft
+and its push, which starts the PR's CI before the edit's review. The sitting
+rewrites the PR's summary to cover the edit and answers the PR with
+`--no-rework` at the sign-off. The refinery validates the head the sitting
+left, and the landing order pours a review run there, which repairs what it
+rules must-fix with no send-back to the sitting. On the old path the branch's
+writer is the PR's rework child, on which the review machinery keys, so a
+ruling that changes the branch files a rework through the sign-off.
 
 ## Accept
 
