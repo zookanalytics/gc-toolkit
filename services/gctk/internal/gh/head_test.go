@@ -2,8 +2,11 @@ package gh
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // answers serves a recorded answer for each call by the path it names, and
@@ -80,5 +83,23 @@ func TestTheChecksAtARefAreEveryPage(t *testing.T) {
 		if h, err := c.HeadChecks("o/r", "main"); err == nil {
 			t.Errorf("%s read as %+v", name, h)
 		}
+	}
+}
+
+// A bounded client ends a gh that stalls at its limit, with gh's whole process
+// group, as a read that did not answer.
+func TestABoundedReadEndsAtItsLimit(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nsleep 30 &\nwait\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	start := time.Now()
+	_, err := NewBounded("github.com", 200*time.Millisecond).DefaultBranch("o/r")
+	if err == nil || !strings.Contains(err.Error(), "did not answer within 200ms") {
+		t.Fatalf("a stalled read answered %v", err)
+	}
+	if took := time.Since(start); took > 10*time.Second {
+		t.Fatalf("the read ended %s after it started", took)
 	}
 }
