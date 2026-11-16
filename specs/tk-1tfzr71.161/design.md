@@ -179,10 +179,10 @@ What reads the receipts:
   through `services/gctk/pr/withdraw.go`) becomes the untaken feedback posts of
   the approvals the withdrawal would dismiss: each approval's own message and
   its inline comments, read with their marks in the withdrawal's own read. A
-  dismissal retires both: the definition counts no dismissed review's message,
-  and it leaves out a dismissed review's inline comments (`live_comments`). So
-  a withdrawal still waits until the intake has taken every post a dismissal
-  would retire. The message is in that set because a withdrawal can act before
+  dismissal retires both: the intake counts no dismissed review's message,
+  since `countedReviewStates` holds no `DISMISSED`, and the definition leaves
+  out a dismissed review's inline comments (`live_comments`). So a withdrawal
+  still waits until the intake has taken every post a dismissal would retire. The message is in that set because a withdrawal can act before
   the intake reads the approval. Today the landing order's run carries a
   withdrawal ahead of its whole read (`carry` before every `observeAlone` in
   `services/gctk/pr/landing.go`), and tk-1tfzr71.149's pass acts on a
