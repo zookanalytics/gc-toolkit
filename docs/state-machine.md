@@ -384,7 +384,8 @@ pack's `review-checks.toml` with the rows of the rig's own laid over it, which
 `gctk review` reads at the commit the reader judges:
 
 - triage's read prints the whole index at its head (`gctk review checks --at
-  <head>`), and its picks are closed over it;
+  <head>`), over which its picks are closed, and the rig's guidance for triage
+  there (`gctk review guidance triage --at <head>`);
 - each lane's read prints the rig's guidance for its check at its head (`gctk
   review guidance <check> --at <head>`);
 - a lane whose check has no method in the reviewer's skill catalog reads the

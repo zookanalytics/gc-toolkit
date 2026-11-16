@@ -25,10 +25,11 @@
 # read lists and the finding verb rules through finding.sh, a deferral's
 # follow-up taking the PR's target; triage's read at a head that already
 # passed, its read of the check index naming the scripts directory beside it
-# for any binding; the repair's read again keeping the round's commit and uncommitted
-# edit and showing them, and stopping the run on a worktree that is not at the
-# head or past it; and the reads making each step's worktree in its own part of
-# the workspace, and stopping when it does not land.
+# for any binding, its read of the rig's guidance for triage at the head, and
+# stopping when that does not read; the repair's read again keeping the round's
+# commit and uncommitted edit and showing them, and stopping the run on a
+# worktree that is not at the head or past it; and the reads making each step's
+# worktree in its own part of the workspace, and stopping when it does not land.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -101,6 +102,8 @@ case "$1 $2" in
     "review output") [ -z "${STUB_REFUSE:-}" ] || { echo "gctk review output: $STUB_REFUSE; write it again" >&2; exit 3; }
         echo '{"review":"x","iteration":1}' ;;
     "review comment") [ -f "$STUB_GCTK_OUT" ] && cat "$STUB_GCTK_OUT" ;;
+    "review guidance") [ -z "${STUB_RC_GUIDANCE:-}" ] || { echo "gctk review guidance: docs/review-$3.md would not read" >&2; exit "$STUB_RC_GUIDANCE"; }
+        printf 'the rig guidance for %s, read in %s\n' "$3" "$PWD" ;;
     "pr draft") [ -z "${STUB_ORIGIN:-}" ] || git -C "$STUB_ORIGIN" rev-parse polecat/tk-pr > "$STUB_ORIGIN.at-draft"
         exit "${STUB_RC_DRAFT:-0}" ;;
     "bead holds") if [ -n "${STUB_HOLDS:-}" ]; then printf '%s\n' "$STUB_HOLDS"
@@ -399,6 +402,12 @@ eq "$(git -C "$WS/triage/wt" rev-parse HEAD 2>/dev/null)" "$HEAD1" "in its own w
 has "$(cat "$LOG")" "gctk-scripts-dir $SD" \
     "its read of the check index names the pack's scripts beside review-run.sh, with none in the caller's environment and no binding gc knows"
 has "$OUT" "The change to judge: git diff origin/main...$HEAD1 (the whole PR)" "and prints the change and the rule that chose it"
+has "$OUT" "== The rig's guidance for triage at $HEAD1, empty when it keeps none
+the rig guidance for triage, read in $WS/triage/wt" "and the rig's guidance for triage, read in its worktree"
+has "$(cat "$LOG")" "gctk review guidance triage --at $HEAD1" "…at the head it judges"
+STUB_RC_GUIDANCE=1 run triage
+eq "$RC" 2 "triage's read stops, exit 2, when the rig's guidance does not read"
+hasnt "$OUT" "Write the output to" "and names no output to write"
 facts review-loop.iteration.1.triage triage 1 false "$HEAD1" "the head already passed into its target"
 run triage
 eq "$RC" 0 "triage reads at a head that already passed"

@@ -24,8 +24,9 @@
 #       stop a run that must stop, by cancelling it with no result (exit 3),
 #       else make the run's workspace and triage's worktree at the head and
 #       print what it reads: the change, none at a head that already passed,
-#       the merges in it, the check index there, the asks and, at a head the
-#       repair pushed, the rulings that push answers
+#       the merges in it, the check index and the rig's guidance for triage
+#       there, the asks and, at a head the repair pushed, the rulings that push
+#       answers
 #   review-run.sh lane --check <check>            [a lane]
 #       make the lane's worktree at the head and print what the lane reads
 #   review-run.sh repair                          [rule-and-repair]
@@ -230,6 +231,8 @@ cmd_triage() {
     print_change "$wt"
     printf '%s\n' "== The check index at $HEAD"
     (cd "$wt" && "$gctk" review checks --at "$HEAD") || die 2 "the check index at $HEAD did not read"
+    printf '%s\n' "== The rig's guidance for triage at $HEAD, empty when it keeps none"
+    (cd "$wt" && "$gctk" review guidance triage --at "$HEAD") || die 2 "the rig's guidance for triage at $HEAD did not read"
     printf '%s\n' "== The run so far, and the asks open on $PR_BEAD"
     "$gctk" review passed "$ID" --explain || true
     if [ "$N" -gt 1 ]; then
