@@ -20,13 +20,21 @@
 # Over two stores, one per rig, a run with GC_RIG naming the anchor's rig, as
 # converse-signoff.sh runs it, files, edges and dispatches the child there, and
 # a run from the conversation's rig cannot prove the edge and dispatches
-# nothing.
+# nothing. An anchor on the pending record takes the ruling as an ask to its
+# review run instead, with the checks the ruling names, read from the check
+# index beside this checkout's scripts whatever the binding, and nothing
+# superseded.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/converse-rework.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-rework-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# gctk, built from this checkout, reads the check index for the scripts under
+# test.
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
+export GCTK_BIN="$TMP/gctk"
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -245,7 +253,7 @@ printf '#!/usr/bin/env bash\nexec %q "$@" --db %q\n' "$HERE/queue-priority.sh" "
 chmod +x "$BIN/queue-priority"
 export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
 
-# No check index: review-checks.sh then resolves every check_set token as a
+# No check index: gctk review checks then resolves every check_set token as a
 # lane gating every transition, so the lanes do not depend on the checkout.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 export STUB_STORE="$TMP/store.json"
@@ -363,16 +371,39 @@ eq "$RC" "0" "once the first rework has landed and closed, the later ruling is f
 eq "$(created)" "2" "…as a child of its own"
 has "$(meta fix-2 rejection_reason)" "also rename the section" "…carrying the later ruling"
 
-echo "# --- an open PR on the pending record takes a ruling's rework the same way ---"
+echo "# --- an open PR on the pending record takes the ruling as an ask to its review run ---"
+# The ask's writer is gctk review ask, whose rules its own suite proves, so a
+# stub stands in for it here: it logs its call and answers as the real one does.
+cat > "$TMP/gctk-ask" <<'ASK'
+#!/usr/bin/env bash
+echo "$*" >> "$TMP_ASK_LOG"
+echo "${GCTK_SCRIPTS_DIR:-unset}" >> "$TMP_ASK_LOG.env"
+[ "${STUB_ASK_RC:-0}" = 0 ] || { echo "gctk review ask: anc-1: the check index at the head declares no check \"nope\"" >&2; exit 3; }
+echo "ask-1 ${STUB_ASK_HOW:-filed}"
+ASK
+chmod +x "$TMP/gctk-ask"
+export TMP_ASK_LOG="$TMP/ask.log"
 for rec in "pull_request_pending blocked" "pull_request_head_changed open"; do
   set -- $rec
   reset "$(printf '%s' "$ANCHOR_PR" | jq -c --arg mr "$1" --arg st "$2" 'map(.metadata.merge_result = $mr | .status = $st)')"
-  OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment directly to docs/material-layers.md" 2>&1); RC=$?
-  eq "$RC" "0" "$1: exit 0 on a clean mint+dispatch"
-  eq "$(created)" "1" "$1: exactly one rework child created"
-  eq "$(meta fix-1 anchor_bead)" "anc-1" "$1: the child names the anchor"
-  eq "$(meta fix-1 branch)" "polecat/anc-1" "$1: the child resumes the anchor's branch"
+  : > "$TMP_ASK_LOG"; : > "$TMP_ASK_LOG.env"
+  OUT=$(env -u GCTK_SCRIPTS_DIR GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment directly to docs/material-layers.md" --check arch 2>&1); RC=$?
+  eq "$RC" "0" "$1: exit 0 once the ask stands"
+  eq "$(cat "$TMP_ASK_LOG.env")" "$HERE" "$1: the checked ask names the pack's scripts beside converse-rework.sh, with none in the caller's environment"
+  eq "$(created)" "0" "$1: no rework child is filed"
+  eq "$(cat "$TMP_ASK_LOG")" "review ask anc-1 --reason operator ruling (conversation vis-1): apply the amendment directly to docs/material-layers.md --source vis-1 --check arch" "$1: the ask carries the ruling, the conversation as its source, and the checks it names"
+  eq "$(printf '%s\n' "$OUT" | tail -n 1)" "ask-1 ask filed" "$1: the last line names the ask, as a child's line names the child"
+  hasnt "$(cat "$STUB_GC_LOG")" "sling" "$1: nothing is slung"
+  hasnt "$OUT" "returned anc-1's lanes to unreviewed" "$1: nothing is superseded"
 done
+OUT=$(STUB_ASK_HOW=found GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment directly to docs/material-layers.md" 2>&1); RC=$?
+eq "$RC $(printf '%s\n' "$OUT" | tail -n 1)" "0 ask-1 ask found" "a re-run names the ask the first filed"
+OUT=$(STUB_ASK_RC=3 GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" --check nope 2>&1); RC=$?
+eq "$RC" "2" "an ask the writer refuses exits 2"
+has "$OUT" "declares no check" "…naming why"
+reset "$ANCHOR_PR"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" --check arch 2>&1); RC=$?
+eq "$RC $(created)" "2 0" "--check on the old path is refused, with nothing filed"
 
 echo "# --- guard: a non-PR anchor is refused, nothing filed ---"
 reset '[{"id":"anc-1","status":"open","metadata":{"merge_result":"","branch":"polecat/anc-1","target":"main"}}]'

@@ -285,7 +285,7 @@ fi
 # The pre_open_gate anchors whose lanes are all green, as an {anchor-id: true}
 # map the classifier's pre_open_all_green reads: such an anchor waits only on
 # pr-open.sh, so it is gated, not an unnamed wait. The gates come from the ONE
-# resolver, the review-checks.sh --resolve pr-open.sh and merge.sh ask, so an
+# resolver, the `gctk review checks --resolve` pr-open.sh and merge.sh ask, so an
 # undeclared or legacy token (codex) gates pre-open here exactly as it does
 # there, and an open-as-draft check (demo), which runs against the open PR,
 # never holds a pre_open_gate anchor as not yet gated. Each gate derives through
@@ -309,6 +309,8 @@ _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # on the unit separator, since tab is whitespace to read and an empty check_set
 # would shift the branch into its place.
 LANE_STATE="${GC_LANE_STATE_TOOL:-$_LS_DIR/lane-state.sh}"
+# shellcheck source=gctk-resolve.sh
+. "$_LS_DIR/gctk-resolve.sh" || { echo "liveness-sweep: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
 _LS_PREOPEN=$(jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
          | [(.id // ""), (.metadata.check_set // ""), (.metadata.branch // "")]
          | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' "$READY" 2>/dev/null)
@@ -338,7 +340,8 @@ PREOPEN_GREEN_MAP=$(
       fi
       _head=$(printf '%s\n' "$_LS_HEADS" | awk -F'\t' -v b="$_abr" '$2 == b { print $1; exit }')
       [ -n "$_head" ] || continue
-      _g=$(bounded "$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
+      _ls_gctk=$(gctk_path) || continue
+      _g=$(bounded env GCTK_SCRIPTS_DIR="$_LS_DIR" "$_ls_gctk" review checks --resolve "$_acs" --through pre-open \
            --at "$_head" 2>/dev/null </dev/null) || continue
       [ -n "$(printf '%s' "$_g" | tr -d '[:space:]')" ] || continue
       _green=1

@@ -49,6 +49,10 @@ done
 # only thing steering it.
 unset GC_RIG_ROOT GC_RIG GC_CITY GC_CITY_PATH GC_PACK_DIR REVIEW_WORKSPACE_DIR 2>/dev/null || true
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2>/dev/null || true
+# The gather reads the rig's guidance through gctk, built from this checkout.
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMP/gctk-real" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
+export GCTK_REAL="$TMP/gctk-real"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
@@ -87,9 +91,11 @@ echo "$*" >> "$FAKE_LC_LOG"
 echo "${GC_RIG_ROOT:-<unset>}" >> "$FAKE_LC_LOG.root"
 LC
 # gctk answers the gather's record reads: a fail of the tests, a pass of lint
-# and nothing for typecheck, logging each call and the directory it ran in.
+# and nothing for typecheck, logging each call and the directory it ran in. The
+# rig's guidance is the real one's.
 cat > "$TMP/gctk" <<'GCTK'
 #!/usr/bin/env bash
+[ "$1" != review ] || exec "$GCTK_REAL" "$@"
 printf '%s|%s\n' "$*" "$(pwd -P)" >> "$GCTK_LOG"
 case "$2" in
   test) echo '{"check":"test","result":"fail","scope":"affected","exit_code":1,"command":"t"}'; exit 1 ;;
@@ -243,8 +249,8 @@ git -C "$PROBE_RIG" worktree list --porcelain | sed -n "s/^worktree //p" > "$PRO
 git -C "$PROBE_CWD" worktree list --porcelain | sed -n "s/^worktree //p" > "$PROBE/cwd"'
 printf '[{"id":"tk-anc","title":"the change under review"}]\n' > "$TMP/anchor.json"
 
-# gc names this checkout as the pack, so the block runs the review-workspace.sh and
-# review-checks.sh under test. The rig's origin carries the reviewed commit as
+# gc names this checkout as the pack, so the block runs the review-workspace.sh
+# under test, and gctk built from it. The rig's origin carries the reviewed commit as
 # both main and polecat/x, which the block fetches before it makes the worktree.
 # REVIEW_SKIP_CD=1 runs the block without its cd into the worktree.
 review_case() { # <mode> [check] [guidance file]; sets RC, OID, D

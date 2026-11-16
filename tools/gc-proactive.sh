@@ -195,7 +195,7 @@ proactive_bd() {
 store_rows() {
     local raw
     raw="$(proactive_bd "$@" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub)" || return 1
-    printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+    printf '%s' "$raw" | jq -se 'length == 1 and (.[0] | type) == "array"' >/dev/null 2>&1 || return 1
     printf '%s' "$raw"
 }
 
@@ -584,22 +584,32 @@ subject_conversations() {
 # counts the root as live until it closes, so gc sling refuses every later pour
 # of the formula on the bead while it stands. A fenced bead is gate-typed, and
 # a pour marked failed keeps that type, so both reads include gates. Two reads
-# answer any number of roots: the open beads marked failed, and every bead
-# still fenced. Returns 1 when either read fails.
+# answer any number of roots: the open beads marked failed, and every bead that
+# carries the key gc.instantiating. Gas City sets a fence to true and lifts it
+# by setting it empty (fenceGraphWorkflowBead and
+# deferredRoutingActivationUpdate, internal/molecule/molecule.go), and bd list
+# selects on a key only by its presence or by one exact value, so the second
+# read also answers every bead whose fence was lifted, and the filter keeps
+# each fence that is not blank. Gas City's own readers count any value that is
+# not blank as a fence (carriedPoolRoute, cmd/gc/route_recovery.go), so the
+# read asks for the key rather than for the value true. Both reads reach jq on
+# its input, because the second grows with the store and a command's arguments
+# are capped (getconf ARG_MAX). Returns 1 when either read fails.
 unfinished_pours() {
     [ $# -gt 0 ] || { printf '{}'; return 0; }
     local failed fenced
     if [ -n "$FIXTURE" ]; then
         failed="$(fixture_rows | jq -c '[ .[] | select(((.metadata // {}).molecule_failed // "" | tostring) == "true")
                                              | select(((.status // "open") | tostring) != "closed") ]')" || return 1
-        fenced="$(fixture_rows | jq -c '[ .[] | select(((.metadata // {})["gc.instantiating"] // "" | tostring) | test("[^[:space:]]")) ]')" || return 1
+        fenced="$(fixture_rows | jq -c '[ .[] | select((.metadata // {}) | has("gc.instantiating")) ]')" || return 1
     else
         failed="$(store_rows list --metadata-field molecule_failed=true --include-gates --include-ephemeral --limit 0)" || return 1
         fenced="$(store_rows list --has-metadata-key gc.instantiating --all --include-gates --include-ephemeral --limit 0)" || return 1
     fi
-    jq -cn --argjson failed "$failed" --argjson fenced "$fenced" --args '
+    printf '%s\n%s\n' "$failed" "$fenced" | jq -cn --args '
         def key($k): ((.metadata // {})[$k] // "") | tostring;
-        $ARGS.positional as $roots
+        input as $failed | input as $fenced
+        | $ARGS.positional as $roots
         | [ $failed[] | select(key("molecule_failed") == "true") | (.id // "") | tostring ] as $f
         | [ $fenced[] | select(key("gc.instantiating") | test("[^[:space:]]")) ] as $fr
         | reduce $roots[] as $r ({};

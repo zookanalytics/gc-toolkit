@@ -245,8 +245,8 @@ reports whether the `gh` it needs is present.
 
 When the modality that fits cannot be produced here, a cheaper one that still
 shows the change is the fallback where it can be produced. Otherwise the note
-stands. The verdict records a delivered fallback as one: `--visual` names the
-modality delivered, and `--visual-fallback-from` names the one that fits.
+stands. The verdict records a delivered fallback as one: its visual names the
+modality delivered, and its visual fallback names the one that fits.
 
 ### Show each message
 
@@ -386,23 +386,24 @@ and it never blocks.
 
 ## The verdict
 
-The formula's one `signoff.sh` call records the verdict and the decision, with
-the check's two flags. `--visual` carries the decision: `none` when no visual is
-needed, otherwise the modality you picked. A verdict that delivers more than one
-modality, such as a clip of the screens beside a screenshot of each message,
-names the costliest. A fallback adds
-`--visual-fallback-from <the modality that fits>`.
+The verdict carries its visual on either path, where the formula you run under
+says: the check's two flags, `--visual` and `--visual-fallback-from`, or the
+output's `visual` and `visual_fallback_from`, which the flags below stand for.
+`--visual` carries the decision: `none` when no visual is needed, otherwise the
+modality you picked. A verdict that delivers more than one modality, such as a
+clip of the screens beside a screenshot of each message, names the costliest. A
+fallback adds `--visual-fallback-from <the modality that fits>`.
 
-`signoff.sh` refuses a demo verdict without `--visual`, and refuses `none` with
-`request-changes`, because a check that found no visual needed has nothing to
-block on. It stamps the decision on the review bead as `visual` and names it on
+The verdict's write refuses a demo verdict without `--visual`, and refuses
+`none` with `request-changes`, because a check that found no visual needed has
+nothing to block on. It records the decision with the verdict and names it on
 the posted comment's `Visual:` line. That line says what kind of visual the
 verdict rests on. A `repo-artifact` reads `author-committed` there, because a
 committed visual is what an author recorded, not a capture of the reviewed
 commit. A fallback is stamped as `visual_fallback_from`, and the line then
 reads, for example, `Visual: repo-artifact (author-committed; fallback from
-video)`. `signoff.sh` refuses a fallback that is not cheaper than the modality
-it stands in for.
+video)`. The verdict's write refuses a fallback that is not cheaper than the
+modality it stands in for.
 
 The verdict body states the reasons, one sentence each: the need decision; when
 a visual helps, the modality and why it is the cheapest that conveys the change;

@@ -544,6 +544,14 @@ printf 'converse-rework ran in GC_RIG=%s GC_RIG_ROOT=%s PWD=%s\n' "${GC_RIG:-}" 
 [ -n "${REWORK_FAIL:-}" ] && { echo "rework refused: anchor has no branch"; exit 2; }
 _child="${REWORK_CHILD:-tk-child}"
 _a=""; _r=""; _p=""; for x in "$@"; do [ "$_p" = "--anchor" ] && _a="$x"; [ "$_p" = "--ruling-bead" ] && _r="$x"; _p="$x"; done
+if [ -n "${REWORK_ASK:-}" ]; then
+  # On the pending record the writer files an ask instead: a task naming the
+  # conversation as its source through a discovered-from edge.
+  [ -f "$STORE/b/$_child.json" ] || jq -n --arg id "$_child" --arg a "$_a" --arg r "$_r" '{id:$id, title:"Review ask: the ruling", issue_type:"task",
+      status:"open", assignee:"", metadata:{branch:"polecat/anc"}, deps:[{type:"discovered-from", on:$r}]}' > "$STORE/b/$_child.json"
+  echo "$_child ask filed"
+  exit 0
+fi
 if [ -z "${REWORK_NO_CHILD:-}" ] && [ ! -f "$STORE/b/$_child.json" ]; then
   jq -n --arg id "$_child" --arg a "$_a" --arg r "$_r" '{id:$id, title:("Rework " + $a), issue_type:"task", status:"open", assignee:"",
       metadata:{task_kind:"rework", anchor_bead:$a, source_ruling_bead:$r}, deps:[]}' > "$STORE/b/$_child.json"
@@ -2160,7 +2168,18 @@ run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ru
 eq "$RC" 0 "(STAY-REWORK-RETURN) the return of a rework stay, its call less --stay with --no-rework in place of its --rework, exits 0"
 has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(STAY-REWORK-RETURN) …leaving the reworked branch as it stands"
 eq "$(grep -c '^converse-rework ' "$CALLS" || true)" "$REWORKS" "(STAY-REWORK-RETURN) …filing no second rework"
+
 eq "$(field tk-conv status)" "closed" "(STAY-REWORK-RETURN) …and closing the conversation"
+
+# On Gas Town's pending record the rework is an ask the PR's review run takes,
+# which carries the checks --check names, and a stay waits on that ask.
+open_pr; setm tk-anc merge_result pull_request_pending
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --check arch --no-wait --stay "the retry backs off"
+eq "$RC" 0 "(STAY-REWORK-ASK) a stay on a ruling that sends a PR on the record back exits 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry --check arch" "(STAY-REWORK-ASK) …passing the checks the ruling names"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-ask --type blocks" "(STAY-REWORK-ASK) …and waiting on the ask, read as this conversation's rework by its discovered-from edge"
+run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "fix the retry" --no-rework --check arch --no-wait
+eq "$RC" 2 "(CHECK-NEEDS-REWORK) --check without --rework is refused"
 # A ruling that reaches two open PRs reworks the one its --pr-anchor names. The
 # return leaves that --pr-anchor out with the --rework, since --no-rework takes
 # none and leaves both PRs standing.

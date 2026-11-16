@@ -165,11 +165,13 @@ if [ -n "{{review_pr_url}}" ]; then
   gh pr view "{{review_pr_url}}" --json title,body --jq '.title, "", .body' || exit 1
 fi
 echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
-"$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" review guidance "{{check}}" --at "{{reviewed_oid}}" || exit 1
 echo "== What gctk rig recorded at {{reviewed_oid}}"
 "$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" --worktree "$WT" || exit 1
-echo "== The pack's scripts: $SCRIPTS"
-printf '%s\n' "== The review's workspace: ${WT%/wt}" "== The review's worktree: $WT"
+printf '%s\n' "== The pack's scripts: $SCRIPTS" "== The review's workspace: ${WT%/wt}" "== The review's worktree: $WT"
 # <<< review-gather
 ```
 A block that exits non-zero here, other than the refusal in part 1, ends the
@@ -212,7 +214,7 @@ skill in the review's worktree is the change under review, not your method.
 When your catalog has no such skill:
 
 - If the rig's check index declares `{{check}}`
-  (`review-checks.sh --check {{check}} --at {{reviewed_oid}}` prints its row),
+  (`gctk review checks --check {{check}} --at {{reviewed_oid}}` prints its row),
   judge the diff against the purpose the row states. Load
   `{{binding_prefix}}specialist-stance` and hold it. Say in your coverage line
   that the pack ships no method for this check.

@@ -31,23 +31,29 @@ type PR struct {
 // GitHub or another writer's state while a read is in flight. OnMerge, when
 // set, answers a merge request or an enqueue in place of the default, which
 // refuses a request whose head is not the PR's and otherwise merges the PR, or
-// adds it to the queue.
+// adds it to the queue. OnDismiss, when set, answers a dismissal in place of
+// the default, which dismisses the review. Descends names, for each commit,
+// the commits it descends from, which a compare reads.
 type GitHub struct {
-	Self    string
-	PRs     map[string]*PR
-	Fail    map[string]error
-	OnRead  func(method string, p *PR)
-	OnMerge func(method string, p *PR, head string) error
+	Self      string
+	PRs       map[string]*PR
+	Fail      map[string]error
+	OnRead    func(method string, p *PR)
+	OnMerge   func(method string, p *PR, head string) error
+	OnDismiss func(p *PR, review int64) error
+	Descends  map[string][]string
 
 	mu    sync.Mutex
 	reads []string
 	asks  []Ask
 }
 
-// Ask is one merge request a test's code made: "MergePullRequest" or
-// "EnqueuePullRequest", the PR's node id and the head it was pinned to.
+// Ask is one request a test's code made of GitHub: "MergePullRequest" or
+// "EnqueuePullRequest" with the PR's node id and the head it was pinned to,
+// "MarkReady" or "ConvertToDraft" with the PR's node id, or "DismissReview"
+// with the review's id and the dismissal's message.
 type Ask struct {
-	Method, ID, Head string
+	Method, ID, Head, Message string
 }
 
 // Asks returns the merge requests made, in order.
@@ -59,7 +65,7 @@ func (g *GitHub) Asks() []Ask {
 
 // New returns a GitHub that reads as self and holds no PR.
 func New(self string) *GitHub {
-	return &GitHub{Self: self, PRs: map[string]*PR{}, Fail: map[string]error{}}
+	return &GitHub{Self: self, PRs: map[string]*PR{}, Fail: map[string]error{}, Descends: map[string][]string{}}
 }
 
 // Put adds p under its repository and number.
@@ -186,6 +192,85 @@ func (g *GitHub) IssueComments(repo string, number int) ([]gh.IssueComment, erro
 		return nil, err
 	}
 	return slices.Clone(p.Comments), nil
+}
+
+// MarkReady records the request and marks the PR ready.
+func (g *GitHub) MarkReady(id string) error {
+	return g.stage("MarkReady", id, false)
+}
+
+// ConvertToDraft records the request and returns the PR to draft.
+func (g *GitHub) ConvertToDraft(id string) error {
+	return g.stage("ConvertToDraft", id, true)
+}
+
+func (g *GitHub) stage(method, id string, draft bool) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.asks = append(g.asks, Ask{Method: method, ID: id})
+	if err := g.Fail[method]; err != nil {
+		return err
+	}
+	p := g.byID(id)
+	if p == nil {
+		return fmt.Errorf("github: no pull request has the node id %s", id)
+	}
+	p.Facts.IsDraft = draft
+	return nil
+}
+
+// Compare answers how head stands against base by Descends: identical, ahead
+// when head descends from base, behind when base descends from head, and
+// diverged otherwise.
+func (g *GitHub) Compare(repo, base, head string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reads = append(g.reads, "Compare")
+	if err := g.Fail["Compare"]; err != nil {
+		return "", err
+	}
+	switch {
+	case base == head:
+		return "identical", nil
+	case slices.Contains(g.Descends[head], base):
+		return "ahead", nil
+	case slices.Contains(g.Descends[base], head):
+		return "behind", nil
+	}
+	return "diverged", nil
+}
+
+// DismissReview records the dismissal and answers it: by OnDismiss when set,
+// else by dismissing the review, which GitHub refuses for a review the PR does
+// not hold and for one that neither approves nor requests changes.
+func (g *GitHub) DismissReview(repo string, number int, id int64, message string) error {
+	g.mu.Lock()
+	g.asks = append(g.asks, Ask{Method: "DismissReview", ID: fmt.Sprint(id), Message: message})
+	err := g.Fail["DismissReview"]
+	p, ok := g.PRs[key(repo, number)]
+	g.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("gh: gh: Not Found (HTTP 404)")
+	}
+	if g.OnDismiss != nil {
+		return g.OnDismiss(p, id)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for i, v := range p.Reviews {
+		if v.ID != id {
+			continue
+		}
+		if v.State != "APPROVED" && v.State != "CHANGES_REQUESTED" {
+			return fmt.Errorf("gh: gh: Can not dismiss a %s pull request review (HTTP 422)", strings.ToLower(v.State))
+		}
+		p.Reviews[i].State = "DISMISSED"
+		return nil
+	}
+	return fmt.Errorf("gh: gh: Not Found (HTTP 404)")
 }
 
 // Login returns Self.

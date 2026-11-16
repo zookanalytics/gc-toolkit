@@ -17,7 +17,11 @@
 #     non-zero exit, which it exits. The fake
 #     `gctk pr record` keeps the real one's guard: it writes nothing on a bead
 #     that is closed or assigned to anyone but the refinery, and exits 3. The
-#     fake `gctk pr compose` names, as riding the owner's PR, each bead whose
+#     fake `gctk pr draft` logs its call and exits $STUB_DRAFT_RC, 0 when unset.
+#     The fake `gctk review ask` files an ask on the bead's branch, with the
+#     bead's blocks edge onto it, or finds one of the same reason, and exits
+#     $STUB_ASK_RC with nothing filed when that is set.
+#     The fake `gctk pr compose` names, as riding the owner's PR, each bead whose
 #     landing onto the owner's branch the lifecycle stub logged, and the fake
 #     `gh pr edit` keeps the body it gives PR #<n> as $GH_DIR/edit_<n>.md. The
 #     store's wait edges are lines of $STUB_HOLDS, "<bead> <what it waits on>":
@@ -26,7 +30,8 @@
 #     bead the store does not hold closed. `gctk bead holds` asked about the
 #     bead $STUB_HOLDS_FAIL names exits 1 with no answer. `gc session list`
 #     prints $STUB_SESSIONS_JSON, and nothing when it is unset, which is a list
-#     that cannot be read.
+#     that cannot be read. `gctk review` is the real one's, the binary
+#     $RT_GCTK_REAL names, which a suite that reads the check index builds.
 # No live city, store, GitHub or network.
 
 PASS=0; FAIL=0
@@ -46,7 +51,7 @@ rt_init() {
   here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   SUT="$TMP/sut"; BIN="$TMP/bin"; GH_DIR="$TMP/gh"; LOGS="$TMP/logs"
   mkdir -p "$SUT" "$BIN" "$GH_DIR" "$LOGS"
-  for f in bd-lib.sh refinery-lib.sh dispatch-path.sh gctk-resolve.sh branch-push.sh pr-post.sh work-lib.sh run-lib.sh "$@"; do
+  for f in bd-lib.sh refinery-lib.sh dispatch-path.sh gctk-resolve.sh branch-push.sh pr-post.sh work-lib.sh run-lib.sh conversation.sh "$@"; do
     cp "$here/$f" "$SUT/"; chmod +x "$SUT/$f"
   done
   for f in human-gate patrol-finding lifecycle preexisting-failure rig-check-pre-existing stand-down pool-route queue-priority; do
@@ -343,6 +348,8 @@ cat > "$BIN/gctk" <<'GCTK'
 #!/usr/bin/env bash
 echo "$*" >> "$LOGS/gctk.log"
 case "$1 $2" in
+  "review checks"|"review guidance")
+    exec "${RT_GCTK_REAL:?the suite builds no gctk to read the check index with}" "$@" ;;
   "bead arm")
     [ "${STUB_ARM_RC:-0}" = 0 ] || exit "$STUB_ARM_RC"
     id="$3"; target=""; shift 3
@@ -382,6 +389,21 @@ riding: $riders}"
     [ -n "$bodyf" ] && grep -qF "at $head" "$bodyf" && outcome=current
     jq -n --arg t "feat: $owner (${owner})" --arg b "$body" --arg o "$outcome" \
       '{title: $t, body: $b, summary: $o, branch_beads: "single", branch_bead_count: 1}' ;;
+  "pr draft")
+    exit "${STUB_DRAFT_RC:-0}" ;;
+  "review ask")
+    rc="${STUB_ASK_RC:-0}"
+    [ "$rc" = 0 ] || { echo "gctk review ask: $3: the store did not answer" >&2; exit "$rc"; }
+    bead="$3"; shift 3; reason=""
+    while [ $# -gt 0 ]; do case "$1" in --reason) reason="$2"; shift ;; esac; shift; done
+    branch=$(jq -r --arg id "$bead" '[ .[] | select(.id == $id) ][0].metadata.branch // ""' "$STORE")
+    found=$(jq -r --arg b "$branch" --arg r "$reason" '[ .[] | select(.metadata.branch == $b and (.description // "") == $r and (.assignee // "") == "") ][0].id // ""' "$STORE")
+    [ -z "$found" ] || { echo "$found found"; exit 0; }
+    id="$bead-ask-$(jq 'length' "$STORE")"
+    jq --arg id "$id" --arg b "$branch" --arg r "$reason" '. + [{id: $id, title: ("Review ask: " + $r), status: "open", assignee: "",
+      issue_type: "task", notes: "", description: $r, metadata: {branch: $b}}]' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+    echo "$bead $id" >> "$STUB_HOLDS"
+    echo "$id filed" ;;
   "pr record")
     bead="$3"; shift 3; url=""; head=""; target=""; refinery=""
     while [ $# -gt 0 ]; do

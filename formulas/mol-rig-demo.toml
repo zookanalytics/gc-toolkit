@@ -126,6 +126,9 @@ CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REQUEST_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/decline.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?decline.sh not found in the pack}"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 if [ -z "$REQUEST_BEAD" ]; then
   "$SCRIPTS/decline.sh" --step mol-rig-demo.prepare-script --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone" --subject "{{convoy_id}}" --key rig-demo-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-rig-demo cannot derive its demo-request bead; the pour is malformed and must be redone. Its run is cancelled; nothing was captured."
   exit 1
@@ -140,8 +143,7 @@ path is stamped on the request bead so the capture step reads it back.
 If `demo_script` is set, it must exist:
 ```bash
 SCRIPT_PATH="{{demo_script}}"
-SOURCE_BEAD="{{source_bead}}"
-if [ -n "$SCRIPT_PATH" ] && [ -n "$SOURCE_BEAD" ]; then
+if [ -n "$SCRIPT_PATH" ] && [ -n "{{source_bead}}" ]; then
   echo "give exactly one of demo_script / source_bead, not both" >&2
   "$SCRIPTS/decline.sh" --step mol-rig-demo.prepare-script --reason "both demo_script and source_bead set; scenario ambiguous" --subject "$REQUEST_BEAD" --key rig-demo-ambiguous-scenario --message "mol-rig-demo on $REQUEST_BEAD got both demo_script and source_bead; the scenario is ambiguous. Its run is cancelled; re-pour it with one of them."
   exit 1
@@ -152,7 +154,7 @@ If `source_bead` is set instead, load the skill `gc-toolkit.gc-demo-script`
 from your skill catalog and follow it against that bead. The commit the capture
 shows is the HEAD of the `{{rig_name}}` checkout that `gc rig list` names, so the
 skill reads the rig's demo guide at that commit, from inside the checkout:
-`"$SCRIPTS/review-checks.sh" --extension demo --at "$(git rev-parse HEAD)"`. The
+`"$GCTK" review guidance demo --at "$(git rev-parse HEAD)"`. The
 skill reads the bead tree, categorizes the diff, and writes a validated
 demo:capture script to
 `.captures/demo-scripts/<bead>-<slug>.md` (gitignored); use the path it reports

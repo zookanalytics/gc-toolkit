@@ -4,8 +4,8 @@
 # doctor-budget.test.sh).
 #
 # A check that reads its stores at once runs each read as a background job. The
-# read lands in a file under a scratch tree the check holds open, its stderr
-# lands beside it so the warning for a failed read can say why, and the
+# read lands in a file under the check's scratch tree, its stderr lands beside
+# it so the warning for a failed read can say why, and the
 # per-store jobs start through a cap, so the load a check adds does not grow
 # with the rig count. Pack scripts have no include mechanism, so the block
 # lives as marker-fenced copies (# >>> doctor-parallel-reads / # <<<). Hand
@@ -13,7 +13,7 @@
 # rc and no reason. This suite extracts every copy and asserts:
 #   - one block, asserted by EXECUTING it rather than by matching its text;
 #   - a read keeps its stdout scrubbed, its stderr beside it, and its own rc;
-#   - the scratch tree is made under TMPDIR, held open, and removed on exit;
+#   - the scratch tree is made under TMPDIR and removed on exit;
 #   - the cap holds however many jobs start, waits only for its own jobs,
 #     returns each job's status, and frees a slot even when `wait -n` reports
 #     no job;
@@ -136,9 +136,8 @@ else ok "a refused read does not run its probe"; fi
 echo "── 4. the scratch tree ──"
 OUT="$(TMPDIR="$TMP/rt" blk 'reads_init t-tree || exit 9
     case "$WORK" in "$1"/gctk-t-tree.*) printf "named " ;; esac
-    [ -d "$WORK" ] && printf "dir "
-    printf held >&9 && [ "$(cat "$WORK/.hold")" = held ] && printf "held"' "$TMP/rt")"
-eq "$OUT" "named dir held" "reads_init makes gctk-<check>.* under TMPDIR and holds a file in it open on fd 9"
+    [ -d "$WORK" ] && printf "dir"' "$TMP/rt")"
+eq "$OUT" "named dir" "reads_init makes gctk-<check>.* under TMPDIR"
 eq "$(ls -A "$TMP/rt")" "" "the tree is removed when the check exits"
 OUT="$(TMPDIR="$TMP/no-such-dir" blk 'if reads_init t-none; then printf made; else printf refused; fi')"
 eq "$OUT" "refused" "with no usable TMPDIR, reads_init fails rather than handing out a tree it does not have"

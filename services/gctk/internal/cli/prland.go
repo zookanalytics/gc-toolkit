@@ -74,10 +74,15 @@ recently checked first, and reads each record under the store's record lock,
 from its read of the record to its last write of it, waiting while another
 writer of the record holds it. It reads each PR from GitHub by its number:
 
-  - open at the head the refinery validated: the evaluator decides whether it
-    is ready, and a ready one is merged with its head pinned, or added to its
-    base's merge queue with it where the base requires one; the next run reads
-    it again either way
+  - open at the head the refinery validated: a draft whose review result
+    passed at that head and target, with no review run attached and no ask a
+    run can take open, is marked ready, without waiting for CI; otherwise the
+    evaluator decides whether it is ready, and a ready one is merged with its
+    head pinned, or added to its base's merge queue with it where the base
+    requires one; one that is not ready is owed a review run when no review
+    result passed at that head and target, or an ask that nothing holds is open
+    on the bead (gctk review ask), and the run pours it below; the next run
+    reads it again either way
   - open at another head: back to the refinery, open, as
     pull_request_head_changed
   - merged at the validated head, with the merge commit on the freshly fetched
@@ -86,6 +91,34 @@ writer of the record holds it. It reads each PR from GitHub by its number:
     names: an exception, kept blocked behind a human gate keyed by its value
   - a lookup or a fetch that failed, or a merge commit not yet on the target:
     recorded in pr_reconcile_error, and read again by the next run
+
+Before any of these, while the PR is open, it carries out each open
+withdrawal filed on the bead (gctk pr withdraw): it waits while an approval it
+would dismiss carries an inline comment the intake has not routed, dismisses
+each approval that stands on a commit that does not contain the withdrawal's
+head, which GitHub's compare of the two reads as neither identical nor ahead,
+or which GitHub refuses to compare, with the withdrawal's reason and the
+city's mark, reads the reviews again and closes the withdrawal once none
+stands. When GitHub refuses a dismissal, it
+files a human gate on the bead keyed approval-withdraw-refused. A compare or a
+dismissal GitHub does not answer leaves the withdrawal for the next run, and
+the record keeps its marker while a withdrawal is open, its changed head sent
+back to the refinery included, since the withdrawal holds the bead from the
+refinery until it is carried out.
+
+The review run is mol-pr-review, poured with gc formula cook --attach onto the
+bead under the record lock, with the record's PR bead, head, target and branch
+as its vars, and the pools and binding the refinery's address names
+(<rig>/<binding>refinery): review_target <rig>/<binding>polecat-codex,
+repair_target <rig>/<binding>polecat and binding_prefix <binding>. No run is
+poured while one is attached to the bead, while another open bead names the
+PR's branch, such as a rework child, or while a human gate holds the bead. A
+conversation on the PR holds only its merge, so runs are poured while it is
+open, and the merge waits until it closes. A run that ended without a result
+is poured again. When the last two runs at the validated head both
+ended without one, counting only runs that ended after the bead's last
+review-run-failed gate closed, it files a human gate on the bead keyed
+review-run-failed instead, naming both runs and how each ended.
 
 Each check of an open PR, at the validated head or at another, reads GitHub's
 side of it whole and saves that read on the bead as pr_github_read, in the
@@ -228,8 +261,10 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 // at db, else the one gc routes the first of ids to, the record lock in that
 // store's .beads directory, GitHub through gh, the clone at $GC_RIG_ROOT else
 // the working directory, the pack's definition of feedback, loaded in that
-// clone, and the runtime adapter for human gates and, where the clone carries
-// one, the seed audit, whose scripts run in the clone.
+// clone, and the runtime adapter for human gates, for the city's mark, which
+// `pr-post.sh mark` prints, for a review run's pour, which runs in the clone,
+// so gc resolves the rig's store there, and, where the clone carries one, for
+// the seed audit, whose scripts run in the clone.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -263,11 +298,23 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 			}
 			return rule, nil
 		},
+		Mark:     func() (string, error) { return cityMark(rt) },
 		Checkout: checkout{dir: dir},
 		Gates:    gates{rt: rt},
+		Runs:     runs{rt: rt.In(dir)},
 		Audit:    audit,
 		Wait:     recordLockWait,
 	}, nil
+}
+
+// cityMark reads the city's mark from the writer of the city's posts, which
+// owns it: `pr-post.sh mark`, from the scripts directory GCTK_SCRIPTS_DIR names.
+func cityMark(rt gascity.Runtime) (string, error) {
+	res := rt.Script("pr-post.sh", "mark")
+	if f := res.Failure(); f != "" {
+		return "", fmt.Errorf("pr-post.sh mark: %s", f)
+	}
+	return strings.TrimSpace(res.Output), nil
 }
 
 // checkout is the rig's clone through the git adapter.
@@ -346,6 +393,21 @@ func (a seedAudit) Reaudit(branch, seenBy string, pages []string) (string, error
 		return "", fmt.Errorf("seed-audit-reaudit.sh: %s", why)
 	}
 	return res.Tail(), nil
+}
+
+// runs pours a review run through the runtime adapter's cook. A cook that did
+// not exit 0, or that named no root, is an error carrying why.
+type runs struct{ rt gascity.Runtime }
+
+func (r runs) Pour(formula, bead string, vars map[string]string) (string, error) {
+	res := r.rt.Cook(gascity.Cook{Formula: formula, Bead: bead, Vars: vars})
+	if f := res.Failure(); f != "" {
+		return "", fmt.Errorf("gc formula cook %s --attach %s: %s", formula, bead, f)
+	}
+	if res.Root == "" {
+		return "", fmt.Errorf("gc formula cook %s --attach %s named no root: %s", formula, bead, res.Tail())
+	}
+	return res.Root, nil
 }
 
 // gates files human gates through the runtime adapter, which runs the pack's
