@@ -24,7 +24,7 @@ AI changed the cost of work. Agent iteration, parallel exploration, and self-cri
 
 **The pack borrows before it invents.** Most coordination problems aren't new, and many AI-era patterns are already published. gc-toolkit aggregates and cites; reinvention is the fallback when nothing fits.
 
-**Deterministic code does deterministic work.** Running an LLM on work that is completely scriptable wastes tokens. Decisions still go to LLMs.
+**Code does what needs no judgment.** Agent work is cheap, not free. Save it for judgment.
 
 ## Boundaries
 
