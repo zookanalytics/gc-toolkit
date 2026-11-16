@@ -54,6 +54,18 @@ segment, files `--no-react` with no hold, and ends nothing, so the record would
 grow the script past a fix, which AGENTS.md sends into gctk. The record is
 gctk's, beside the patrol finding, and one warrant covers both.
 
+**What closes a record.** Doctor's report marks two results it did not
+measure: a check it abandoned carries `timed_out` (`doctorJSONResult`,
+`cmd/gc/cmd_doctor.go`), and a check the store gate skipped is a stand-in whose
+message starts `not checked:` (`internal/doctor/store_liveness.go`). It marks
+nothing for a check it left out, because it registers checks conditionally, run
+by run (`CheckNames`, `internal/doctor/select.go`), and `gc doctor --check
+<name>` answers `unknown_check` with that run's registered names
+(`doctorUnknownCheckFailure`). So no Gas City surface tells a check that
+retired from one a run left out. The verb closes a record as retired only when
+`gc rig list --json` no longer lists its rig, and leaves every other retirement
+to the change or the person that knows it.
+
 ## `gctk dolt unbacked` and `doctor/check-backup-current`
 
 **Searched.** A judge of whether a store's backup holds its writes:
@@ -68,12 +80,25 @@ gctk's, beside the patrol finding, and one warrant covers both.
 - `mol-dog-backup` escalates a failed sync under the incident key
   `dolt-backup:required-sync` (`examples/bd/dolt/assets/scripts/mol-dog-backup.sh`).
 - bd's backup state file holds only `last_sync` and `duration`
-  (`.beads/dolt-backup-state.json` in each store, read on 2026-11-16).
+  (`.beads/dolt-backup-state.json` in each store, read on 2026-11-16), and bd
+  stamps `last_sync` when a sync returns (`updateDoltBackupState`, beads v1.3.4
+  `cmd/bd/backup_dolt.go`). `bd backup status` reports the destination,
+  `last_sync` and the sync's duration (`showDoltBackupStatusJSON`).
+- `dolt backup` adds, removes, restores and syncs a backup (`add`, `remove`,
+  `restore`, `sync`, `sync-url`, dolt 2.7.3), and no dolt pack command reads one
+  (`examples/bd/dolt/commands/`).
 
-**Gap.** None compares the root a backup holds with the root its store last
-wrote, so an idle store reads stale and a sync that returns without carrying a
-write reads fresh. The check is a pack doctor check, so `gc doctor` runs it and
-the doctor order records it, and its `run.sh` only calls gctk.
+**Gap.** None reports the newest commit a backup holds, and commits are what a
+backup carries, since `DOLT_BACKUP` "syncs COMMITTED history"
+(`commitWorkingSetBeforeBackup`, beads v1.3.4 `cmd/bd/backup_proxied_server.go`).
+So an idle store reads stale, and a sync that returns without carrying a write
+reads fresh. A restore copies the whole store to read it, and the backups here
+reached 9.2 GB on 2026-11-16. The check reads that commit from the backup's own
+files through Dolt's storage packages (`nbs.NewLocalStore`,
+`go/store/nbs/store.go` in `github.com/dolthub/dolt/go`), and it dates what the
+store holds beyond that commit from the store's own commits and from the write
+times its rows carry (`dolt_diff`). It is a pack doctor check, so `gc doctor`
+runs it and the doctor order records it, and its `run.sh` only calls gctk.
 
 ## `gctk patrol cold` and `doctor/check-patrol-advancing`
 
