@@ -512,6 +512,9 @@ why a reader must know it, and the work that retires it.
   session's work to the pool beside Gas City's release, and the deacon runs
   `gc doctor` and files each failure as a patrol finding for a first reaction.
   The second landing of tk-1tfzr71.19 retires both.
+- **The board lists no mailbox yet.** It neither reads Gas City's `human`
+  mailbox nor archives a message in it, so no message there reaches the
+  operator on the board. The inbox bead that tk-1tfzr71.159 files retires it.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
