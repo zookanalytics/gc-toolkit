@@ -35,12 +35,13 @@ beads. Approving this design splits its work into reading GitHub and acting:
   from what the store derives. Nothing records an act that failed: the
   difference stays, and the next run acts on it.
 - **A full comparison every 10 minutes is the net** for the changes no cheap
-  sign catches, such as a review thread a person resolves.
+  sign catches, such as a review thread a person resolves, or an edit to a
+  comment or a review that left the PR's change time as it was.
 - **The board shows when GitHub was last asked,** for each rig.
 
 A pass in which nothing moved costs 1 GitHub point per repository and about a
 second and a half. At today's 28 open PRs in five repositories, the city's
-reading costs about 220 of the hour's 5,000 points, and 1 or 2 more for each PR
+reading costs about 260 of the hour's 5,000 points, and 1 or 2 more for each PR
 that moved.
 
 **Where this departs from the operator's words:**
@@ -48,9 +49,11 @@ that moved.
 1. "The whole polling ever PR for lots of details, to see things like a
    resolved comment or re-checking a check over and over again, feels well
    overkill." The cheap question reads no thread and no check's details. But a
-   thread resolved or reopened moved no cheap sign when tested on this PR, so
-   the net reads every owned PR's threads and required checks every 10 minutes,
-   at 1 point for each 10 PRs ([section 2](#2-the-net)).
+   thread resolved or reopened moved no cheap sign when tested on this PR, and
+   an edit to a comment or a review does not always move one, so the net reads
+   every owned PR's threads, its required checks and the time each comment and
+   review last changed every 10 minutes, at 2 points for each 10 PRs. It reads
+   no comment's text ([section 2](#2-the-net)).
 2. "I thought we talked about one order reads, while another acts." The net, a
    reading order, also takes the city's labels off a PR no bead owns, because
    no bead holds that work for the landing order to find
@@ -102,12 +105,20 @@ Each field reads these signs and no detail:
 | When GitHub last changed the PR | `updatedAt` |
 | Its comments, conversation and inline together | `totalCommentsCount` |
 | Its reviews, and the dismissed among them | `reviews { totalCount }`, `reviews(states: [DISMISSED]) { totalCount }` |
-| Its labels | `labels(first: 20) { nodes { name } }` |
+| Its labels, every one | `labels(first: 100) { nodes { name } pageInfo { hasNextPage endCursor } }`, paged |
 | Its checks at the head, counted by state | the head commit's `statusCheckRollup { state contexts { totalCount checkRunCountsByState { state count } statusContextCountsByState { state count } } }` |
 
 `baseRefOid` is not the base's tip. On #1539 it read 6dd9d13ee, the base it was
 opened on, while main's tip was 8b9c4caf3. So the request reads the base ref's
 target.
+
+The labels are read whole. A PR with more than 100 is read on from where its
+first page ended until its labels end, and a page that fails is a failed read
+for that PR. The labels' writer takes off only a label the saved labels hold,
+and adds one they lack ([section 9](#9-labels)). So a stale label past an
+unread page would never come off, and a derived label there would be added
+again at every run. Reading 100 labels costs a request no more than reading 20:
+1 point at 50 PRs either way.
 
 What each kind of change moves, and how it was shown:
 
@@ -123,13 +134,20 @@ What each kind of change moves, and how it was shown:
 | A commit status | the count of statuses by state and the contexts' total | tested on #1533: a pending status and then a successful one moved them both times, and `updatedAt` neither time |
 | A base branch that moved | the base's tip | the field is the tip; the watch: `updatedAt` moved at 1 of 45 |
 | A merge or a close | the state | the field is the state; the watch: `updatedAt` moved at 2 of 2 changes of state or draft flag |
+| An edit to a post's text: a conversation comment, a review or an inline comment | `updatedAt`, mostly | an edit moves the post's own `updatedAt`; the PR's moved to a conversation comment's edit on #1497 and #1524, each made after the PR's last other change, and to a review's edit within a second on a public PR; on another, a review edited 3 seconds after the PR's last change left `updatedAt` unmoved 8 minutes later, so the net reads each post's time ([section 2](#2-the-net)) |
 | A thread resolved or reopened | none | tested on #1533: a thread reopened and then resolved moved no sign, no `updatedAt` and no ETag; the net reads it ([section 2](#2-the-net)) |
 
+Whether a post is feedback is read from its text (`gc_not_for_review` and
+`gc_feedback` in assets/scripts/pr-post.sh). So an edit that takes out the mark
+or the prefix saying a post is not for review turns it into feedback, and moves
+no count.
+
 Every kind no cheap sign is shown to catch goes to the net: a thread resolved
-or reopened, a change of the repository's rules that moves the review decision,
-a check's required flag or the merge state while no review or check moves, and
-two checks that trade states between passes so every count stays the same,
-which no change the watch saw did.
+or reopened, an edit to a post that left `updatedAt` as it was, a change of the
+repository's rules that moves the review decision, a check's required flag or
+the merge state while no review or check moves, and two checks that trade
+states between passes so every count stays the same, which no change the watch
+saw did.
 
 A PR counts as moved when any sign differs from the signs saved on its bead,
 when its bead holds no saved read, or when the saved read is not current for
@@ -156,21 +174,30 @@ in one request.
 
 The net is its own order, `pr-compare`, every 10 minutes. It reads each owned
 PR's state, draft flag, head, base and the base's tip, merge state, review
-decision, merge-queue flags, labels, dismissed count, every review thread's
-resolution, and the required checks at the head through the rollup's contexts,
-each with `isRequired(pullRequestNumber: N)` at the PR's own number. A request
-reads at most 10 PRs. On the 15 open PRs of the city's busiest repository the
-read took 1.8 to 2.2 seconds at 5 PRs, 2.4 to 2.7 at 10 and 2.8 to 5.1 at 15,
-for 1 point each, with no errors. A PR whose threads or checks pass the first
-100 is paged until its connection ends, and a response that carries errors is a
-failed read for the PRs it names.
+decision, merge-queue flags, every label, dismissed count, every review
+thread's resolution, the time each post last changed, and the required checks
+at the head through the rollup's contexts, each with
+`isRequired(pullRequestNumber: N)` at the PR's own number. A post's time is its
+`updatedAt`, read on each conversation comment, each review and each inline
+comment, the inline ones through the review threads, 10 threads a page. The net
+reads no post's text. GitHub counts a list nested in another once for each item
+that could hold it, so the inline comments of 100 threads a PR would cost a
+request of 10 PRs 10 points, where 10 threads a PR cost it 2. A request reads
+at most 10 PRs. On the 15 open PRs of the city's busiest repository the read
+took 2.0 to 3.0 seconds at 5 PRs for 1 point, and 2.8 to 3.5 at 10 and 3.5 to
+5.0 at 15 for 2 points, with no errors. A PR whose labels, comments, reviews,
+threads, a thread's comments or checks pass the first page is paged until that
+connection ends, and a response that carries errors is a failed read for the
+PRs it names.
 
 The net compares what it read with each PR's saved read, and runs the one-PR
 update over every part of each PR that differs. The saved read holds what the
-net compares, the unresolved threads among it
-([section 3](#3-where-the-signs-are-kept)). A change no cheap sign shows goes
-unseen for at most the net's 10 minutes, plus up to 30 seconds before Gas City's
-next lane pass starts the run, plus the run itself.
+net compares, the unresolved threads and the newest post time among it
+([section 3](#3-where-the-signs-are-kept)). When a PR's newest post time
+differs from the one saved, the update reads its conversation again, so an edit
+no cheap sign showed is saved within one pass of the net. A change no cheap
+sign shows goes unseen for at most the net's 10 minutes, plus up to 30 seconds
+before Gas City's next lane pass starts the run, plus the run itself.
 
 The net also runs the search for labels on PRs no bead owns
 ([section 9](#9-labels)).
@@ -186,8 +213,13 @@ read with it, never later than its facts:
 |---|---|---|
 | The PR | URL, number, repository, head branch, base, head, state, draft flag, merge state and merge-queue flags | state, draft flag, head, base, the base's tip, `updatedAt` |
 | The checks | the required check runs and commit statuses at the head, with their results | head, the rollup's state, the contexts' total, the counts by state |
-| The conversation | the approvers and requesters, the newest feedback in each id space, the threads waiting on the city's answer, the unresolved threads, the review decision, and the provenance instant the definition of feedback was applied from | comment count, review count, dismissed count |
+| The conversation | the approvers and requesters, the newest feedback in each id space, the threads waiting on the city's answer, the unresolved threads, the review decision, and the provenance instant the definition of feedback was applied from | comment count, review count, dismissed count, `updatedAt`, the newest post time |
 | The labels | the label names | the names themselves |
+
+The newest post time is the latest `updatedAt` among the PR's conversation
+comments, reviews and inline comments. The update's read of the conversation
+takes it with their text, and the net reads it to compare. The PR part and the
+conversation part each keep `updatedAt`, so a move of it reads both.
 
 The one-PR update is the only writer of the saved read and its signs. It also
 writes Gas Town's `pr_state` and `pr_last_checked_at` on a record on the pending
@@ -205,14 +237,17 @@ and "update" would read as a write to the PR on GitHub.
 2. **Take the signs.** The cheap question and the net hand it the signs they
    read. Called alone, as by a webhook rule, it reads the one PR's signs itself,
    for 1 point in about a second.
-3. **Read only what moved:**
+3. **Read only what moved.** Each sign that moved adds its row's reads, so a
+   push and an edit in one pass read both the checks and the conversation:
 
    | What moved | What it reads |
    |---|---|
-   | only the labels | nothing more, since the signs are the labels |
-   | the base's tip, or `updatedAt` alone | the PR part, whose merge state the base moves |
+   | the labels | nothing more, since the signs are the labels |
+   | the base's tip | the PR part, whose merge state the base moves |
+   | `updatedAt` | the PR part, and the conversation part, since an edit to a post can move `updatedAt` and moves no count |
    | the head, or the checks' state, total or counts | the PR part and the required checks at the head, in one request |
    | the comment, review or dismissed count | the conversation part, in one request, and the PR part, whose merge state reviews move |
+   | the newest post time, which only the net reads | the conversation part |
    | no saved read, or one not current for the bead | every part |
 
    The PR part with the required checks took 0.9 to 1.8 seconds for 1 point, and
@@ -220,7 +255,8 @@ and "update" would read as a write to the PR on GitHub.
    most discussed open PR of the city's busiest repository (16 comments, 14
    reviews, 4 threads). The conversation read applies the definition of
    feedback from the bead's provenance instant, with the login the city's
-   account acts as, which a caller reads once a run.
+   account acts as, which a caller reads once a run. It reads each post's
+   `updatedAt` with its text and keeps the newest as the post time.
 4. **A merge state read as unknown.** GitHub computes a merge state lazily after
    a push or a base move. The update saves the PR part with its merge state
    unknown and keeps that part's earlier signs, so the next pass finds the PR
@@ -270,17 +306,24 @@ withdrawn approval and a label write. The landing fetches the target to find the
 merge commit, as today. An act made from a saved read that a later refresh
 shows to be stale is decided again from the newer read at the next run.
 
-No act starts more than 45 seconds into a run. Records are taken in the order
-of their saved reads' age, the oldest first, and an act not reached is still a
-difference at the next run. The landing order reads no record's PR to decide,
-so it needs no bound on records per run (`--count`).
+No act starts more than 45 seconds into a run, and each act stops at 30
+seconds, with whatever GitHub call or fetch it is making. So a run whose first
+act is slow still starts the next one. Neither has a limit of its own today:
+gctk's GitHub adapter (services/gctk/internal/gh/gh.go) and the landing's fetch
+(`FetchBranch` in services/gctk/internal/git/git.go) wait for the call to end. A
+run takes the records that have an act in an order it shuffles. So a record
+whose act is slow or keeps failing comes first in about one run in n, where n
+records have an act, and its act holds no other record back. A stopped or
+failed act leaves its difference, which a later run acts on, and nothing
+records it. The landing order reads no record's PR to decide, so it needs no
+bound on records per run (`--count`).
 
 ## 6. The orders and their cadence
 
 | Order | Trigger | What a run does | GitHub points a pass |
 |---|---|---|---|
 | `pr-poll`, the cheap question | every 2 minutes | lists the owned PRs, asks GitHub about them, and runs the one-PR update for each that moved, starting none more than 90 seconds in | 1 per 50 owned PRs in the rig's repository, none when it owns none |
-| `pr-compare`, the net | every 10 minutes | reads every owned PR's comparable facts, runs the one-PR update for each that differs, and searches for labels on PRs no bead owns | 1 per 10 owned PRs, and 1 for the search |
+| `pr-compare`, the net | every 10 minutes | reads every owned PR's comparable facts, runs the one-PR update for each that differs, and searches for labels on PRs no bead owns | 2 per 10 owned PRs, and 1 for each page of the search, which is 1 here |
 | `pr-reconcile`, the landing order | every minute | acts from the beads | none to decide; the merge's own read when it merges |
 
 Each order is rig-scoped, as the landing order is, and reads its rig's
@@ -294,9 +337,9 @@ repository. At today's 28 open PRs in five of the six rigs' repositories:
 
 | Cadence of the net | Points an hour for the city | Run records an hour per rig |
 |---|---|---|
-| 5 minutes | about 144 | 12 |
-| 10 minutes | about 72 | 6 |
-| 30 minutes | about 24 | 2 |
+| 5 minutes | about 216 | 12 |
+| 10 minutes | about 108 | 6 |
+| 30 minutes | about 36 | 2 |
 
 The landing order every minute adds 60 run records an hour per rig, and every
 2 minutes 30. The one-PR updates add 1 or 2 points for each PR that moved. Gas
@@ -384,10 +427,11 @@ bead and the rig board runs for all of them. It writes a label only where the
 saved labels differ, through the labels' one writer,
 `assets/scripts/pr-status-label.sh`, with the verbs it has: `reconcile` for an
 owned open PR and `clear` for an owned PR that merged or closed. It passes the
-saved labels as the labels GitHub shows (`--current-labels`), so the writer
-edits only what differs from them. It reads the PR's labels itself only when
-the saved labels are empty, and a write that adds a label first lists the
-repository's labels to create any it lacks (`ensure_labels`). A write repeated
+saved labels, which are the whole set ([section 1](#1-the-cheap-signs)), as the
+labels GitHub shows (`--current-labels`), so the writer edits only what differs
+from them. It reads the PR's labels itself only when the saved labels are
+empty, and a write that adds a label first lists the repository's labels to
+create any it lacks (`ensure_labels`). A write repeated
 before the next refresh saves the labels it made asks GitHub to add a label
 already there or take off one already gone, which changes nothing. A write that
 does not land leaves the difference on the bead, and the next run writes it
@@ -403,11 +447,16 @@ again. No key records it.
 The PRs no bead owns are found by a search the net runs once a pass in each
 repository, `search(type: ISSUE, query: "repo:<repository> is:pr
 label:\"status: working\",...")` over every `status:` and `held:` value the
-labels' writer names, reading one page of 100 a pass for 1 point. A PR on that
-page that no live bead owns gets `clear`, at most 20 a pass in each repository.
-On 2026-11-16 the search found 527 closed PRs here that still carry a label, all
-closed before 2026-10-30, which clear in 27 passes, about four and a half
-hours. A clear that does not land is found by the next pass's search.
+labels' writer names, 100 PRs a page for 1 point. The net reads on, a page at a
+time, until it has found 20 PRs that no live bead owns or the results end, and
+gives each of them `clear`, so at most 20 a pass in each repository. A page
+that holds only owned PRs, whose labels are right, never hides the PRs behind
+it. On 2026-11-16 the search found 533 PRs here, newest first: the 6 open ones,
+which beads own, and 527 closed ones that still carry a label, all closed before
+2026-10-30. Its first page held the 6 and 94 to clear, so a pass reads one page
+for 1 point, and the 527 clear in 27 passes, about four and a half hours. A pass
+reads a second page only where more than 80 owned PRs come before the twentieth
+PR to clear. A clear that does not land is found by the next pass's search.
 
 Every other caller of the labels' writer is code a scheduled bead retires, so
 none changes here (AGENTS.md, the rule that retiring code gets no new work):
@@ -482,9 +531,9 @@ changed, so the effort's branch is first brought current with main at or past
 | # | Unit | What it builds | Waits on |
 |---|---|---|---|
 | 1 | feat(gctk): read a PR only when GitHub shows it moved | The cheap question in gctk's GitHub adapter. `gctk pr refresh`, the one-PR update, with the saved read in four parts, each with its read instant and signs, and Gas Town's `pr_state` and `pr_last_checked_at` moved to it. `gctk pr poll` and its order, `orders/pr-poll.toml`, every 2 minutes. The landing order stops writing the saved read and those two keys, and keeps its own read until unit 2. | the branch brought current with main |
-| 2 | feat(gctk): have the landing order act from the beads | The landing order decides every record from the saved read and the store, reads GitHub only for the merge's own read, runs every minute with no `--count` and no act started past 45 seconds, and writes no `pr_reconcile_error` | unit 1 |
-| 3 | feat(gctk): compare every owned PR in full every 10 minutes | `gctk pr compare` and its order, `orders/pr-compare.toml`: the full read in requests of at most 10 PRs, paged, and the one-PR update for each PR that differs | unit 1 |
-| 4 | feat(gctk): keep each PR's status labels equal to what the store derives | The landing order's label writes by comparison, the net's search and clears for PRs no bead owns, at most 20 a pass, and the labels' writer's header naming its callers | units 2 and 3 |
+| 2 | feat(gctk): have the landing order act from the beads | The landing order decides every record from the saved read and the store, reads GitHub only for the merge's own read, runs every minute with no `--count`, takes its acts in a shuffled order, starts none past 45 seconds and stops each at 30, and writes no `pr_reconcile_error` | unit 1 |
+| 3 | feat(gctk): compare every owned PR in full every 10 minutes | `gctk pr compare` and its order, `orders/pr-compare.toml`: the full read in requests of at most 10 PRs, with each post's time, paged, and the one-PR update for each PR that differs | unit 1 |
+| 4 | feat(gctk): keep each PR's status labels equal to what the store derives | The landing order's label writes by comparison, the net's search, paged until it has found 20 PRs no bead owns, and its clears of them, and the labels' writer's header naming its callers | units 2 and 3 |
 | 5 | feat(board): show when GitHub was last asked | The age line on the board, from `pr-poll`'s run history | unit 1 |
 
 Each unit's change carries the docs its behavior changes:
@@ -527,13 +576,14 @@ wording moved, the reason follows in italics.
    pass's 90 seconds refresh, about 60, and the rest in the passes after. Any
    other change reaches it within one pass of the net. *(The initiative said
    "within one pass, however many PRs are open". A thread resolved or reopened
-   moves no cheap sign, so only the net's read sees it, and the refreshes a
-   pass starts are bounded so that the next pass starts on time.)*
-2. A pass of the cheap question in which nothing moved makes one GitHub request
-   for each 50 owned PRs in a repository, and writes no bead. Gas City still
-   writes its run record. *(The initiative said "one GitHub call per
-   repository". GitHub ends a request at 10 seconds, and the light read took
-   about 5 seconds at 100 PRs.)*
+   moves no cheap sign, and an edit to a post does not always move one, so only
+   the net's read sees them, and the refreshes a pass starts are bounded so
+   that the next pass starts on time.)*
+2. A pass of the cheap question in which nothing moved writes no bead, and
+   makes one GitHub request for each 50 owned PRs in a repository, plus one for
+   each PR with more than 100 labels. Gas City still writes its run record.
+   *(The initiative said "one GitHub call per repository". GitHub ends a request
+   at 10 seconds, and the light read took about 5 seconds at 100 PRs.)*
 3. The one-PR update is the only writer of GitHub's side on a bead, and it
    writes only what differs, never an older read over a newer one.
 4. A PR's labels on GitHub are the ones the store derives, and a label that
@@ -574,7 +624,9 @@ except the tests on this PR. Gas City's facts are in
   seconds at 100 for 2 points, with no errors. Without the dismissed count and
   the base's tip, 100 PRs took 3.35 to 4.27 seconds. Over each rig repository's
   open PRs, one request each: 6 PRs here, 15, 1, 1 and 5 in four others, 0.62 to
-  1.70 seconds and 1 point each. The sixth rig's repository had none.
+  1.70 seconds and 1 point each. The sixth rig's repository had none. In a dry
+  run at 50 PRs, reading `labels(first: 100)` in place of `labels(first: 20)`
+  left the request at 1 point.
 - **The base's tip.** On this repository's six open PRs, `baseRefOid` equalled
   `baseRef.target.oid` on the five whose base had not moved, and on #1539 read
   6dd9d13ee while main's tip was 8b9c4caf3.
@@ -601,16 +653,41 @@ except the tests on this PR. Gas City's facts are in
     merge state from clean to unstable and back. `updatedAt` did not move, the
     check runs' ETag answered 304, and the PR's and the combined status's ETags
     moved. The thread ends resolved, as it was, and the status successful.
+- **Edits,** read from the times GitHub keeps, 17:00Z to 17:30Z. A post's
+  `updatedAt` moved with each edit read: to the edit's second on conversation
+  comments, reviews and inline comments, and 5 seconds later on one review. On
+  #1497 and #1524, a conversation comment edited after the PR's last other
+  change (04:40:17Z after 04:38:43Z, and 23:14:18Z after 22:49:45Z) set the
+  PR's `updatedAt` to the edit's second. Of 529 edited posts on the last 40 PRs
+  here and the last 30 or 40 of seven public repositories, 4 were later than
+  their PR's `updatedAt` when read, all in one public repository. A review
+  edited at 17:08:20Z, 3 seconds after its PR's last change, left `updatedAt` at
+  17:08:17Z, read again at 17:16:38Z. A conversation comment edited 1 second
+  after its PR's last change had not moved it a minute later, when a review's
+  edit at 17:10:02Z moved it to 17:10:03Z. The fourth was read seconds after its
+  edit and edited again before a second read.
 - **The net's read.** On the busiest repository's open PRs, three runs at each
-  size: 1.75 to 2.18 seconds at 5, 2.41 to 2.70 at 10 and 2.82 to 5.08 at 15,
-  1 point each, no errors, no page overflow.
+  size, with each post's time and the threads 10 a page: 1.97 to 3.00 seconds at
+  5 for 1 point, and 2.81 to 3.48 at 10 and 3.53 to 5.00 at 15 for 2 points, no
+  errors. One PR of the 15 has 13 threads, so its threads take a second page.
+  Without the post times, the read took 1.75 to 2.18 seconds at 5, 2.41 to 2.70
+  at 10 and 2.82 to 5.08 at 15, 1 point each. In dry runs at 10 PRs here, the
+  conversation comments' and reviews' times left the request at 1 point, and
+  the inline comments made it 10 under `reviewThreads(first: 100)` and 2 under
+  `reviewThreads(first: 10)`.
 - **The one-PR update's reads.** The PR part with the required checks: 0.90 to
   1.01 seconds on #1533 and 0.95 to 1.81 on the busiest repository's most
   discussed open PR, 1 point each. The conversation part: 0.76 to 0.89 and 0.98
   to 1.05 seconds, 1 point each.
 - **The search.** 527 closed and 6 open PRs here carry a `status:` or `held:`
-  label. None closed since 2026-10-30 carries one. 1 point and about 0.6
-  seconds.
+  label. None closed since 2026-10-30 carries one. The search lists them newest
+  first, and its first page held the 6 open ones and 94 closed. 1 point and 0.98
+  to 1.09 seconds a page.
+- **The landing order's calls.** At main 8b9c4caf3, gctk's GitHub adapter runs
+  `gh` with no time limit (`exec.Command` in services/gctk/internal/gh/gh.go),
+  and so does the landing's fetch (`FetchBranch` and `Output` in
+  services/gctk/internal/git/git.go). A fetch of this repository's main into its
+  checkout took 2.0 and 2.2 seconds.
 - **The store.** `gc bd list --json --limit 0` listed this rig's 857 live beads
   in 0.43 to 0.45 seconds. A read of one bead by its id took 0.15 to 0.19
   seconds and a metadata write guarded on its status 0.32 to 0.34, at a load
@@ -622,19 +699,29 @@ except the tests on this PR. Gas City's facts are in
 # The cheap question: one aliased field per owned PR.
 #   p<N>: pullRequest(number:<N>){ number state isDraft headRefOid baseRefName
 #     baseRef{target{oid}} updatedAt totalCommentsCount reviews{totalCount}
-#     dismissed: reviews(states:[DISMISSED]){totalCount} labels(first:20){nodes{name}}
+#     dismissed: reviews(states:[DISMISSED]){totalCount}
+#     labels(first:100){pageInfo{hasNextPage endCursor} nodes{name}}
 #     commits(last:1){nodes{commit{statusCheckRollup{state contexts{totalCount
 #       checkRunCountsByState{state count} statusContextCountsByState{state count}}}}}} }
 # The net: the same less updatedAt and the comment, review and check counts, plus
 #     mergeStateStatus reviewDecision isInMergeQueue
-#     reviewThreads(first:100){totalCount pageInfo{hasNextPage} nodes{isResolved}}
+#     comments(first:100){pageInfo{hasNextPage endCursor} nodes{updatedAt}}
+#     reviews(first:100){pageInfo{hasNextPage endCursor} nodes{updatedAt}}
+#     reviewThreads(first:10){totalCount pageInfo{hasNextPage endCursor} nodes{isResolved
+#       comments(first:100){pageInfo{hasNextPage endCursor} nodes{updatedAt}}}}
 #     commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){
 #       pageInfo{hasNextPage} nodes{... on CheckRun{name status conclusion
 #       isRequired(pullRequestNumber:<N>)} ... on StatusContext{context state
 #       isRequired(pullRequestNumber:<N>)}}}}}}}
-# The one-PR update's conversation part:
+# A later page of one PR's list, such as its labels:
+#   pullRequest(number:<N>){ labels(first:100, after:"<endCursor>"){
+#     pageInfo{hasNextPage endCursor} nodes{name}} }
+# The one-PR update's conversation part, each post with its updatedAt:
 #     reviews(first:100){...} reviewThreads(first:100){... comments(first:100){...}}
 #     comments(first:100){...}
+# The search for labels on PRs no bead owns, a page of 100, then on from endCursor:
+#   search(type:ISSUE, first:100, query:"repo:<owner>/<name> is:pr label:\"status: working\",...")
+#     { issueCount pageInfo{hasNextPage endCursor} nodes{... on PullRequest{number state}} }
 gh api graphql -f query=@read.graphql
 # The cost of a query before running it.
 #   query{ rateLimit(dryRun:true){cost} ... }

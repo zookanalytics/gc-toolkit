@@ -46,10 +46,13 @@ a bead still owns them.
   PRs as well as open ones, and each field can pass its own number to
   `isRequired(pullRequestNumber:)` for the net, which a list of PRs cannot. A
   rollup's `checkRunCountsByState` and `statusContextCountsByState` count a
-  head's checks without reading them. The REST API answers a conditional request
-  that finds nothing changed with a 304, free of the allowance, but a PR's ETag
-  moves at any push to its repository and the check runs' ETag misses a commit
-  status (design, section 1).
+  head's checks without reading them. Each conversation comment, review and
+  inline comment carries its own `updatedAt`, which an edit moves, so the net
+  reads those times and no text, since a PR's `updatedAt` misses some edits
+  (design, sections 1 and 2). The REST API answers a conditional request that
+  finds nothing changed with a 304, free of the allowance, but a PR's ETag moves
+  at any push to its repository and the check runs' ETag misses a commit status
+  (design, section 1).
 
 Conclusion: none covers it. Both reads are queries in gctk's GitHub adapter
 (services/gctk/internal/gh), beside the reads that adapter makes today.
