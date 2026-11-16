@@ -1,649 +1,639 @@
 ---
-name: Design — the landing order reads every PR it owns in one GitHub request and acts only on what differs
-description: The design for tk-1tfzr71.150, the design child of initiative tk-1tfzr71.149, read at main 65a86b0e7, at integration/tk-1tfzr71.132 as its label-writer rework leaves it, at integration/tk-1tfzr71.22 0ccee97bf, and against Gas City upstream main 294079d53f. Each pass of the landing order reads every PR the city owns in one GitHub request per repository, compares it with the store, and acts only where the two differ, its labels included, with nothing recording an act that failed. It settles what makes a PR changed, what runs the targeted work, the saved read, the label comparison's reach and the label's other callers, the order's interval and bound, the composition with the review-lanes effort, what tk-1tfzr71.21 waits on, and the units the implementation child files. Read it to approve the design at its gate, or to build one of its units.
+name: Design — ask GitHub cheaply whether each PR moved, read only a PR that did, and act from the beads
+description: The design for tk-1tfzr71.150, the design child of initiative tk-1tfzr71.149, read at main 8b9c4caf3 and against Gas City upstream main 9a4b1e718. A cheap question asks GitHub every 2 minutes whether each PR the city owns moved, a one-PR update reads and saves only a PR that did, the landing order acts from the beads every minute, and a full comparison every 10 minutes is the net for what no cheap sign catches. Read it to approve the design at its gate, or to build or review one of its units.
 ---
 
-# Design: the landing order reads every PR it owns in one GitHub request and acts only on what differs
+# Design: ask GitHub cheaply whether each PR moved, read only a PR that did, and act from the beads
 
 This is the design record for tk-1tfzr71.150, the design child of the
-initiative tk-1tfzr71.149. The pack was read at main 65a86b0e7, the commit
-`integration/tk-1tfzr71.149` was cut from. The PR-status effort was read at
-`integration/tk-1tfzr71.132` 348540443 with the warrant of 1db69633c, which is
-that branch as its rework (tk-52ow8z9) leaves it: the rework takes out unit 3
-(tk-1tfzr71.146) and its fix (tk-vnqn510), the commits after 348540443 other
-than the warrant. The review-lanes effort was read at `integration/tk-1tfzr71.22`
-0ccee97bf, with its rework (tk-n5ye5vf) in flight. Gas City is cited by symbol
-at `gastownhall/gascity` main 294079d53f, Gas Town by path at
-`gastownhall/gascity-packs` main 0f07496d2f, and bd at `gastownhall/beads`
-v1.3.4. GitHub was measured in this repository and, in aggregate, in the city's
-other repositories on 2026-11-15 ([section 14](#14-facts-this-design-rests-on)).
-The search behind the surface the units add is
-[gas-city-search.md](gas-city-search.md).
+initiative tk-1tfzr71.149, under the brief of conversation tk-trcyz2l. The pack
+was read at main 8b9c4caf3, which carries the review-lanes effort
+(tk-1tfzr71.22, #1531) and the PR-status effort (tk-1tfzr71.132, #1532).
+`integration/tk-1tfzr71.149` was cut from main at 65a86b0e7 and carries
+neither. Gas City is cited by symbol at `gastownhall/gascity` main 9a4b1e718,
+Gas Town and the github pack by path at `gastownhall/gascity-packs` main
+0f07496d2f, and bd at `gastownhall/beads` v1.3.4. GitHub was measured from the
+city's account on 2026-11-16 ([section 16](#16-facts-this-design-rests-on)).
+Repositories other than this one are lettered. The search behind the surface
+the units add is [gas-city-search.md](gas-city-search.md).
 
 ## What the operator approves
 
-Today the landing order reads up to 20 pending PRs a run, one at a time, in at
-least five GitHub queries and about seven seconds each, and rewrites each PR's
-bead whether or not anything changed. So its cost follows the number of PRs, and
-a busy rig waits several runs for a change to show. A PR's labels are written by
-calls each path has to remember, and keys remember a call that failed.
+The landing order is the order that merges the city's PRs and closes their
+beads. Approving this design splits its work into reading GitHub and acting:
 
-Approving this design gives the landing order one pass every 2 minutes that
-reads every PR the city owns in one GitHub request per repository, compares what
-it finds with the store, and acts only where the two differ:
+- **A cheap question every 2 minutes.** One light GitHub request per repository
+  asks, for every PR the city owns, whether anything moved. It reads signs, such
+  as a PR's head, its comment and review counts, its labels and its checks
+  counted by state, and no details. A pass in which nothing moved writes no bead.
+- **A one-PR update.** A PR whose sign moved is read alone, only on the side
+  that moved, and saved on its bead. It is the only way GitHub's side reaches a
+  bead, and it is the call a webhook makes later for the PR an event names.
+- **The landing order acts from the beads every minute.** It merges after its
+  own fresh read of the one PR, lands a merged PR, sends back one at a new head,
+  gates the exceptions, and writes a label where the labels GitHub shows differ
+  from what the store derives. Nothing records an act that failed: the
+  difference stays, and the next run acts on it.
+- **A full comparison every 10 minutes is the net** for the changes no cheap
+  sign catches, such as a review thread a person resolves.
+- **The board shows when GitHub was last asked,** for each rig.
 
-- It saves a PR's state, head, merge state and required checks on its bead when
-  they change, before any other act, so every display shows them within one pass
-  for up to hundreds of PRs at once. A base branch that moves and changes every
-  PR's merge state costs no extra request.
-- It reads a PR in full only when its feedback moved or it reads ready to merge,
-  and that read is the merge's own fresh read.
-- It lands a PR that merged, sends back one at a new head, and gates the
-  exceptions, as today.
-- It corrects every label that differs from the one the store derives, on every
-  PR the city owns and on the closed PRs that still carry one. Nothing records a
-  write that failed: the next pass finds the difference and makes it again.
+A pass in which nothing moved costs 1 GitHub point per repository and about a
+second and a half. At today's 28 open PRs in five repositories, the city's
+reading costs about 220 of the hour's 5,000 points, and 1 or 2 more for each PR
+that moved.
 
-A pass in which nothing changed makes one request per repository, about 4 of
-the hour's 5,000 GitHub points and 4 seconds, and writes no PR's bead.
+**Where this departs from the operator's words:**
 
-Decisions to check, each settled here unless you say otherwise:
+1. "The whole polling ever PR for lots of details, to see things like a
+   resolved comment or re-checking a check over and over again, feels well
+   overkill." The cheap question reads no thread and no check's details. But a
+   thread resolved or reopened moved no cheap sign when tested on this PR, so
+   the net reads every owned PR's threads and required checks every 10 minutes,
+   at 1 point for each 10 PRs ([section 2](#2-the-net)).
+2. "I thought we talked about one order reads, while another acts." The net, a
+   reading order, also takes the city's labels off a PR no bead owns, because
+   no bead holds that work for the landing order to find
+   ([section 9](#9-labels)). The landing order reads GitHub only for the
+   merge's own fresh read, as the spine has it.
+3. "The not writing beads all the time is great, I'm a huge fan of that." No
+   PR's bead is written unless GitHub moved. Gas City still writes a run record
+   for each run of each order, about 96 an hour for each rig, which this city
+   deletes 30 minutes after each one closes.
 
-1. **One order.** The acts run in the same pass, after the compare. The saved
-   state of every changed PR is written first, and every other act starts no
-   later than 90 seconds into a run. A second order would have to read GitHub
-   again, since Gas City passes nothing from one order to another, and a
-   condition order's check would run every 30-second lane pass with nothing
-   passed to its run ([section 2](#2-what-runs-the-targeted-work)).
-2. **Every 2 minutes,** about 480 of the hour's 5,000 points for the city at
-   today's 33 open PRs. Every minute doubles that
-   ([section 7](#7-the-interval-and-the-bound)).
-3. **Labels on both paths.** The comparison corrects the labels of every PR the
-   city owns, so on a rig still on the old path it works beside `pr-facts.sh`
-   until tk-1tfzr71.21 retires that ([section 4](#4-the-label-comparisons-reach)).
-4. **No age on the displays.** A landing order that stops still leaves every
-   display on its last facts with nothing marking them old. This effort does not
-   add that display ([section 6](#6-the-age-of-a-displays-facts)).
-5. **Where this departs from the sitting's wording:** the one request reads the
-   PRs the city owns, open or not, rather than every open PR, and a search finds
-   the rest that carry a label. "The landing order makes no label call" becomes
-   "its merge path makes none". `pr_last_checked_at` moves only when the order
-   writes the record. The living doc that says so is
-   `docs/refinery-merge-cadence.md`, not the merge design's spec
-   ([section 12](#12-what-the-gate-holds)).
+**Decisions to check,** each settled here unless the operator says otherwise:
 
-## 1. What makes a PR changed
+1. **The cadence.** The cheap question runs every 2 minutes, the landing order
+   every minute and the net every 10 minutes. A change a cheap sign shows
+   reaches its act within about 4 minutes, and one only the net sees within
+   about 12 ([section 6](#6-the-orders-and-their-cadence)).
+2. **The landing order runs on its own clock,** not on an event the update
+   emits, so a change on the store's side that no writer announces, such as a
+   gate a person clears, reaches it within a minute. A webhook rule starts it at
+   once after its update ([section 5](#5-how-the-landing-order-starts)).
+3. **The intake's finish line, read for this shape.** It says "One writer, the
+   landing order, saves one GitHub read per PR". Here that writer is the one-PR
+   update, which the cheap question, the net and a later webhook call. The
+   landing order reads that read and saves none of it
+   ([section 12](#12-the-github-intakes-finish-line)).
+4. **`pr_last_checked_at`** says when the one-PR update last read the PR and
+   saved what it read. When GitHub was last asked about every PR is the board's
+   age line ([section 11](#11-what-pr_last_checked_at-means)).
+5. **Labels on PRs no bead owns** are cleared by the net, at most 20 a pass in
+   each repository, so the 527 closed PRs here that still carry a city label
+   clear in about four and a half hours ([section 9](#9-labels)).
 
-The comparison reads GitHub's side through one request per repository, the
-pass's read, and never through a PR's `updatedAt`. Measured on 2026-11-15, a
-check that finishes does not move `updatedAt`: on 5 of the 9 open PRs here the
-last check finished 31 to 37 minutes after it. On #1529 it stopped six seconds
-short of the last review in a burst. It also moves on every label write the city
-makes, so it would mark the city's own writes as changes.
+## 1. The cheap signs
 
-The pass's read has one aliased `pullRequest(number: N)` field for each PR the
-city owns in the repository ([section 4](#4-the-label-comparisons-reach) says
-which). Each field reads:
+The cheap question is one GraphQL request per repository, with one aliased
+`pullRequest(number: N)` field for each PR the city owns there. A PR is owned
+when a live bead names it as its own and is no other bead's child: its anchor,
+which names it in `pr_url` with a `merge_result`, or a bead the refinery sent
+back to the pool, which names it in `existing_pr`. Every owned PR is asked
+about, on the pending record or not.
 
-- **The PR's state:** its URL, number, repository, head branch, base, head,
-  state, draft flag and merge state, its merge-queue flags, and for a merged PR
-  its merge commit and time.
-- **Its required checks at the head:** the latest run of each check in each
-  suite, through `isRequired(pullRequestNumber: N)` at the field's own number,
-  the shape of gctk's checks query today.
-- **What tells that its feedback moved:** the newest review's id, the number of
-  reviews and the number of dismissed reviews, the newest conversation comment's
-  id, which review threads are unresolved, and the review decision.
-- **Its labels.**
+Each field reads these signs and no detail:
 
-A PR is changed when the pass's read differs from the read saved on its bead in
-any of the first three. Labels are compared apart, against what the store
-derives, so a label write is not a change.
-
-Of the saved read's fields (`pr_github_read`, services/gctk/pr/read.go), the
-pass's read returns the identity, head, state, draft flag, merge state and
-required checks itself. It cannot return the approvers and requesters, the newest
-feedback in each id space, or the review threads waiting on the city's answer,
-because the definition of feedback and the approval rule read the text and the
-author of every post. For those it returns what tells that they moved:
-
-- **A review or an inline comment.** Every inline comment on the 9 open PRs here
-  belongs to a review the PR's reviews list holds, the newest one to the newest
-  review, and on merged #1488 each reply in a thread carries a review of its own.
-  So a review or an inline comment moves the newest review's id, or the number of
-  reviews when its review was started before another and submitted after it.
-  Such a review can sit behind the other in the list: a person's review here
-  stays unsubmitted for up to 15 minutes, and the list's order for one was not
-  observed.
-- **A conversation comment.** The newest conversation comment's id moves.
-- **A thread a person resolves or reopens.** The set of unresolved threads moves.
-- **A review dismissed.** The number of dismissed reviews grows. GitHub dismisses
-  only an approval or a change request, and the dismissal changes that review's
-  state in place, so its id stays and the number of reviews still counts it.
-
-An edit of a post's text moves none of them, as no receipt today keys on edits.
-When any of them moved, or the review decision did, the comparison takes the
-PR's whole read ([section 3](#3-the-saved-read)).
-
-The review decision is a sign only of GitHub's own verdict on a PR's reviews,
-which also follows the repository's review rules, so it can move with no review
-moving. It cannot stand for a dismissal, because it weighs every account's
-reviews: it stays approved while another account's approval stands, and asks for
-changes while any change request stands.
-
-A PR whose checks or threads overflow the read's page, shown by `hasNextPage`,
-counts as changed, and its whole read pages them.
-
-## 2. What runs the targeted work
-
-One order runs it: the landing order (`orders/pr-reconcile.toml`, `gctk pr
-reconcile`). Each run reads, compares, saves each changed PR's state, then acts
-within a budget:
-
-1. **Read the store in one listing** of every live bead
-   (services/gctk/listing). It gives the PRs the city owns, the pending records,
-   each record's store side and each owner's saved read. This rig's 877 live
-   beads list in 0.45 s.
-2. **Read GitHub once per repository,** the pass's read, with the label search
-   as a second root field of the same request
-   ([section 4](#4-the-label-comparisons-reach)).
-3. **Compare in memory and write nothing.** For each record it computes the act
-   the store and GitHub's side imply, the same decision a check makes today, with
-   GitHub's side taken from the pass's read and the saved read.
-4. **Save the state part of each PR where it changed,** one record at a time
-   under the record lock: a read of the bead, then one write of its saved read
-   with the state part refreshed, guarded on the status and assignee that read
-   shows. A PR whose only change is in the signs of moved feedback takes no such
-   write, since a whole read saves those signs
-   ([section 3](#3-the-saved-read)). No budget stops these writes, so every
-   changed state is saved in the pass that read it, at up to about 0.8 seconds a
-   PR, and only a run's timeout could cut them short
-   ([section 7](#7-the-interval-and-the-bound)).
-5. **Act, one record at a time under the record lock,** each act guarded on the
-   status and assignee read under it, as today. The order is store-only acts,
-   then lands, requeues and exceptions, then whole reads and merge requests, then
-   labels, over a second listing that sees those writes
-   ([section 4](#4-the-label-comparisons-reach)). Within each kind the record
-   least recently checked goes first. No act starts more than 90 seconds after
-   the run did, and the state writes' time counts in those 90 seconds. An act not
-   reached stays a difference, and the next pass finds it.
-
-Measured costs:
-
-| Pass | GitHub | Writes to PRs' beads | Time |
-|---|---|---|---|
-| Nothing changed | 1 request per repository, about 4 points here | none | about 4 s |
-| A base move changes N PRs' merge state | the same request | N saved reads, and a label write for each PR whose derived label changed | 4 s, plus up to 0.8 s a saved read and the label writes |
-| M PRs' feedback moved | the request, plus M whole reads of six calls and about 5 points each | M | about 4 s plus 4.4 s and a write each |
-| Today, per run | up to 20 whole reads | up to 20 | up to about 140 s |
-
-The other two candidates fail on facts of Gas City as shipped (gas-city-search.md,
-"What runs the pass"):
-
-- **A condition order whose check is the comparison.** Its check runs on every
-  lane pass, about every 30 seconds, and `interval` is ignored, since the
-  condition case calls `checkCondition` with no cooldown. The check's output goes
-  to `io.Discard`, so the run would read GitHub again. The check is skipped while
-  a run is open. Its timeout defaults to 10 seconds, and a slow check delays
-  every order in the pass.
-- **A second order.** Gas City has no queue a pack can hand mechanical work to,
-  and no order starts another. A second order would read GitHub again to find
-  its work, or read a second copy of GitHub's state stored for it, which
-  tk-1tfzr71.21's done criteria rule out.
-
-So the operator's asynchrony comes from the shape of one pass. The pass reads
-before it acts and acts only on differences. Its acts are bounded, so the next
-read is never more than one interval and one budget away, unless so many PRs
-change at once that their state writes alone outlast the budget
-([section 7](#7-the-interval-and-the-bound)). Work it leaves is a difference,
-never a queue entry.
-
-Gas City closes a run's tracking bead two minutes after it is made, whether or
-not the run still works (`runOrderTrackingSweepWatchdog`, stale after
-`orderTrackingSweepWatchdogStaleAfter`). A run past two minutes can therefore
-overlap the next. That stays safe: each act is taken under the record lock and
-decided again from the bead as the lock reads it, and an act that is already done
-is no difference.
-
-Gas Town's marker keeps its meaning. A record carrying `pr_reconcile_pending`
-gets the merge's acts: the merge request, the landing, the requeue and the
-exceptions. The order clears the marker when the record owes no further run, as
-today. A PR whose record has lost the marker, such as one behind an exception's
-gate or back with the refinery, still has its saved read refreshed and its labels
-corrected, and gets none of the merge's acts.
-
-`pr_last_checked_at` is written by each write the order makes to a record, and a
-pass that changes nothing writes it nowhere. Gas Town's command writes it at
-every check (`gastown/commands/pr-merge-reconcile/run.sh`), so here it says when
-the order last wrote the record. It still orders the acts a pass owes, least
-recently checked first.
-
-## 3. The saved read
-
-A changed PR's saved read is refreshed from the pass's read wherever that read
-holds the field. Only a PR whose feedback moved, or that reads ready to merge,
-takes the whole read it takes today (`observe`: the PR, its check suites,
-reviews, login, review threads and conversation comments).
-
-- **Every field the pass's read holds** is written from it when it differs,
-  before any budgeted act: the identity, head, state, draft flag, merge state and
-  required checks. A base move or a check that finishes is saved within the pass
-  that sees it, at no extra request, for as many changed PRs as a run's timeout
-  lets it write, about 360 ([section 7](#7-the-interval-and-the-bound)).
-- **The feedback part,** the approvers, requesters, newest feedback, threads
-  waiting on the city and the provenance instant it applied, is written only by a
-  whole read, an act the budget bounds. The saved read keeps beside it the signs
-  of moved feedback that the pass's read showed when that whole read was made:
-  the newest review's id, the number of reviews and of dismissed reviews, the
-  newest conversation comment's id, the unresolved threads and the review
-  decision. So the next pass can tell whether the feedback moved since, and signs
-  that moved in a pass whose budget reached no whole read of the PR still differ
-  at the next.
-- **`read_at` is the time of the read that last changed it.** A pass that finds
-  nothing changed leaves the saved read as it is, so `read_at` no longer tells
-  when GitHub was last looked at ([section 6](#6-the-age-of-a-displays-facts)).
-
-The two parts stay one key with one writer, the landing order, in the write that
-records each act. The state part is current as of the last pass, which read it
-and saved it before any budgeted act. The feedback part is current as of the
-last pass whose comparison found its signs unmoved. When they moved, a whole read
-refreshes it, in that pass if its budget reaches the PR and otherwise in a later
-one.
-
-A required check is told from the others by aliasing one `pullRequest` field per
-PR, each passing its own number to `isRequired`. Measured: one request read
-11 PRs, 9 open and 2 merged, with each one's required checks, its labels and the
-signs of moved feedback. It cost 3 points and took 2.7 to 3.2 seconds over three
-runs. The repository's open-PR list cannot do this, because `isRequired` takes
-the PR's number and a list passes no argument per node. The same request returns
-a merged PR's merge commit and time. So a PR that left the open list needs no
-read of its own to tell a merge from a close. That is the reason the landing
-order reads each PR by its number today
-([refinery-merge-cadence.md](../../docs/refinery-merge-cadence.md#the-landing-order)).
-
-The merge still acts only on a fresh read made in its own run. A record whose
-decision over the refreshed saved read reads ready, or whose feedback moved, gets
-the whole read under the record lock (`Ready`, as `decide` makes it today). The
-evaluator decides over that read, and the merge request is pinned to the head it
-judged. A merge, a landing and a requeue decide from reads made in the same run,
-never from a saved read alone.
-
-Batching the whole read was measured too: one aliased request read 9 PRs whole,
-reviews, threads and comments included, in 3.93 seconds for 18 points, against
-4.36 seconds and about 5 points for one PR today. This design does not build it.
-The whole read runs only on a change of feedback, which people make, or for a PR
-that reads ready. At today's counts a pass's whole reads fit its budget.
-
-## 4. The label comparison's reach
-
-The comparison reaches every PR whose label can be wrong through the same
-request:
-
-- **The PRs the city owns,** through the pass's read. A PR is owned when a live
-  bead names it as its own and is no other bead's child: its anchor, which names
-  it in `pr_url` with a `merge_result`, or a bead the refinery sent back to the
-  pool, which names it in `existing_pr`. This rig's 11 live beads that name a PR
-  are its 9 anchors and 2 rework children. Each open PR has one anchor.
-- **Every other PR that carries a `status:` or `held:` label,** through a search
-  of the repository for either family in either state
-  (`is:pr label:"status: working",...`). On 2026-11-15 it found 527 closed PRs
-  here, all closed before 2026-10-30, and none closed since. It costs 1 point for
-  a page of 100.
-
-What the store derives for each:
-
-| The PR | The labels |
+| Sign | Field |
 |---|---|
-| owned, open, its bead on the pending record | the status and `held:` values `gctk pr status` gives the bead, rendered over the evaluator's answer from the saved read and the store |
-| owned, open, its bead on the old path | the values `gctk pr status` gives the bead from the facts its keys hold |
-| owned, merged or closed | none: GitHub's own state takes over |
-| owned by no live bead, open or closed | none: the city works no such PR |
+| The PR's state and draft flag | `state`, `isDraft` |
+| Its head | `headRefOid` |
+| Its base and the base's tip | `baseRefName`, `baseRef { target { oid } }` |
+| When GitHub last changed the PR | `updatedAt` |
+| Its comments, conversation and inline together | `totalCommentsCount` |
+| Its reviews, and the dismissed among them | `reviews { totalCount }`, `reviews(states: [DISMISSED]) { totalCount }` |
+| Its labels | `labels(first: 20) { nodes { name } }` |
+| Its checks at the head, counted by state | the head commit's `statusCheckRollup { state contexts { totalCount checkRunCountsByState { state count } statusContextCountsByState { state count } } }` |
 
-The derivation is `prstatus`, the one `gctk pr status` runs for a single bead and
-the rig board runs for all of them. It runs after the acts, over a second listing
-of the store, so it sees what the pass wrote. The labels compared are those the
-pass's read returned, which no write in the pass has changed.
+`baseRefOid` is not the base's tip. On #1539 it read 6dd9d13ee, the base it was
+opened on, while main's tip was 8b9c4caf3. So the request reads the base ref's
+target.
 
-Each difference is written through the label's one writer,
-`assets/scripts/pr-status-label.sh`, with the verbs it has:
+What each kind of change moves, and how it was shown:
 
-- `reconcile` for an owned open PR, passing the labels the pass read as
-  `--current-labels`.
-- `clear` for any other PR.
-
-A PR found by the search is cleared without `--current-labels`, so the writer
-reads its labels itself and a stale search index costs a read, never a wrong
-write. A write that does not land is left as it is. The next pass derives and
-compares again, and no key or marker records it.
-
-The first pass over the closed PRs runs at a pace. A pass clears at most 10 PRs
-the store does not own, so the 527 here clear in about 53 passes, an hour and
-three quarters at 2 minutes. Each clear reads the PR's labels and then edits
-them. If one `gh pr edit` makes about four GraphQL requests at a point each, the
-300 clears an hour cost about 1,500 of the hour's 5,000 points, under a third of
-the allowance. The edit's cost is gh's and is not measured here, so the unit
-measures it on its first clear and sets the per-pass count to hold that share.
-PRs the city owns have no cap: they are few, and their labels are what the
-operator reads.
-
-An open PR that no live bead owns loses the city's labels. One open between
-`pr-open.sh`'s create and its record of `pr_url` can lose its first label for one
-pass, and a later pass writes it back.
-
-## 5. The label's other callers
-
-Once the comparison corrects every label, each other call is a write the next
-pass would make anyway. While it stands it shows a change at once, and the
-comparison corrects what it misses or fails. Every one of them is in code a
-scheduled bead retires, so none changes here (AGENTS.md, rule 1):
-
-| Caller | Its calls | What becomes of it |
+| Change | The sign that moves | Shown by |
 |---|---|---|
-| `pr-facts.sh` | its full pass's `reconcile`, and its clear at a merge or a close with `status_label_clear_owed` | retires with tk-1tfzr71.21 (tools/deletion-plan.tsv) |
-| `gctk merge` | its clear at a merge, with `status_label_clear_owed` | retires with tk-1tfzr71.70 (docs/built-once-target.md, lane A) |
-| `pr-open.sh` | `reconcile` at its create, its adoption and its draft-to-ready arm | its create and its adoption, which each move an anchor from `pre_open_gate` to `pull_request` on the old path, retire with tk-1tfzr71.70 and that path's transition machine, and its arm with the merge cadence (tk-1tfzr71.21) |
-| `signoff.sh` | `reconcile` after a verdict | retires with tk-1tfzr71.122 by the deletion plan on `integration/tk-1tfzr71.22` |
+| A pushed commit | the head | the field is the head; `updatedAt` also moved at every push the sitting's watch saw, 4 of 4 |
+| A conversation comment | the comment count | the watch: `updatedAt` and the count moved at 8 of 8 |
+| An inline comment | the comment count and the review count | the watch: the count less the conversation comments moved at 3 of 3; on #1533 the count is 10, its 6 conversation comments and 4 inline ones; each inline comment rides on a review |
+| A review | the review count | the watch: `updatedAt` and the count moved at 6 of 6 |
+| A dismissed review | the dismissed count | a dismissal sets that review's state to dismissed, which the count counts; the watch saw the count move at the one dismissal it caught, with label changes at the same moment |
+| A label | the labels | the field is the labels; the watch: `updatedAt` moved at 9 of 9 |
+| A finished check | the count of check runs by state | the watch's reads, compared again here: the counts moved at 32 of 32 check changes at one head, where the rollup's state moved at 5; GitHub's counts equal the counts of the check nodes on 15 of 15 open PRs; the sitting read `updatedAt` as moving for no check alone |
+| A commit status | the count of statuses by state and the contexts' total | tested on #1533: a pending status and then a successful one moved them both times, and `updatedAt` neither time |
+| A base branch that moved | the base's tip | the field is the tip; the watch: `updatedAt` moved at 1 of 45 |
+| A merge or a close | the state | the field is the state; the watch: `updatedAt` moved at 2 of 2 changes of state or draft flag |
+| A thread resolved or reopened | none | tested on #1533: a thread reopened and then resolved moved no sign, no `updatedAt` and no ETag; the net reads it ([section 2](#2-the-net)) |
 
-`status_label_clear_owed` retires with its two writers, and the comparison clears
-what it would have retried. The landing order's merge path makes no label call.
-The pass's comparison is the label's one caller once those retirements land.
-`pr-status-label.sh` stays the labels' one writer, with their families, values,
-colours and descriptions, and unit 2 rewrites its header's account of who calls
-it.
+Every kind no cheap sign is shown to catch goes to the net: a thread resolved
+or reopened, a change of the repository's rules that moves the review decision,
+a check's required flag or the merge state while no review or check moves, and
+two checks that trade states between passes so every count stays the same,
+which no change the watch saw did.
 
-## 6. The age of a display's facts
+A PR counts as moved when any sign differs from the signs saved on its bead,
+when its bead holds no saved read, or when the saved read is not current for
+the bead: another head than the store holds, or another provenance instant, as
+the evaluator's currency test (`unread` in services/gctk/pr/read.go) defines
+it. So a new publication at a new head is read at the next pass.
 
-This effort does not carry it, for three reasons:
+A request reads at most 50 PRs, and a repository with more takes more requests.
+In this repository the light read took 1.1 to 1.4 seconds at 10 PRs, 1.7 to 2.0
+at 25 and 2.4 to 4.2 at 50, for 1 point each, and 5.1 to 5.6 seconds at 100 for
+2 points. GitHub ends a request at 10 seconds. A response that carries errors is
+a failed read for the PRs its errors name. Those PRs keep their saved signs and
+are asked about again at the next pass, and the run exits non-zero, so Gas City
+records it as failed.
 
-- No display or doctor check reads a saved read's age today. At
-  `integration/tk-1tfzr71.132` 348540443 the only reader of a check's time is
-  `due`'s ordering, and the rig board's `read_at` is the board's own read of the
-  store. So `read_at` turning into the time of the last change, rather than of
-  the last look, removes nothing a reader uses.
-- The age a display needs is the landing order's last pass that read GitHub, and
-  Gas City records every run already: a tracking bead per run with its outcome
-  label, and `order.failed` with the tail of a failed run's output
-  (gas-city-search.md, "What runs the pass"). Showing it is a board's change over
-  those records, for every order the displays depend on, not this order's change.
-- The operator gave no ruling on the work the sitting offered, and none of this
-  design's acts needs it.
+Two cheaper-looking signs fail. A PR's REST ETag moves at any push anywhere in
+its repository, because the body embeds the repository, and the watch saw 8 of
+its 20 moves in the city come from that alone. The ETag of the check runs at a
+PR's head missed the commit status tested on #1533. Each also takes one REST
+request for each PR at every pass, where the cheap question asks about 50 PRs
+in one request.
 
-Until a display shows it, a landing order that stops, or whose read of GitHub
-fails, leaves every PR display on its last saved read, as today. A failed read
-exits non-zero, which Gas City records as `order.failed`. Funding the display is
-the operator's call at this gate. It would be one board unit over Gas City's run
-records, which the implementation child files only if the operator asks.
+## 2. The net
 
-## 7. The interval and the bound
+The net is its own order, `pr-compare`, every 10 minutes. It reads each owned
+PR's state, draft flag, head, base and the base's tip, merge state, review
+decision, merge-queue flags, labels, dismissed count, every review thread's
+resolution, and the required checks at the head through the rollup's contexts,
+each with `isRequired(pullRequestNumber: N)` at the PR's own number. A request
+reads at most 10 PRs. On the 15 open PRs of the city's busiest repository the
+read took 1.8 to 2.2 seconds at 5 PRs, 2.4 to 2.7 at 10 and 2.8 to 5.1 at 15,
+for 1 point each, with no errors. A PR whose threads or checks pass the first
+100 is paged until its connection ends, and a response that carries errors is a
+failed read for the PRs it names.
 
-The order runs every 2 minutes (`interval = "2m"`), with its 300-second timeout.
-Its state writes come first, and no other act starts more than 90 seconds after
-the run did (`--budget 90s`), so a run normally ends before Gas City's watchdog
-would let the next one start beside it.
+The net compares what it read with each PR's saved read, and runs the one-PR
+update over every part of each PR that differs. The saved read holds what the
+net compares, the unresolved threads among it
+([section 3](#3-where-the-signs-are-kept)). A change no cheap sign shows goes
+unseen for at most the net's 10 minutes, plus up to 30 seconds before Gas City's
+next lane pass starts the run, plus the run itself.
 
-The state writes are not under the budget, but their time counts in its 90
-seconds. Each is a read of the bead and a guarded write under the record lock,
-measured at 0.49 to 0.81 seconds as the host's load rose
-([section 14](#14-facts-this-design-rests-on)). The 15 open PRs one repository
-has today take at most about 12 seconds when all change at once, as a base move
-can make them, after the listing and the read's 3 to 7 seconds. That time comes
-out of the budgeted acts, so the run ends when it would have. At the slowest
-state write measured, the writes alone would outlast two minutes only past about
-140 changed PRs, and the run's timeout only past about 360, which leaves the rest
-to the next pass. A run that outlasts two minutes stays safe
-([section 2](#2-what-runs-the-targeted-work)).
+The net also runs the search for labels on PRs no bead owns
+([section 9](#9-labels)).
 
-The bound on records per run goes (`--count`). A run decides every record from
-one listing and reads every owned PR in one request, so no record waits for a
-later run to be looked at. The one count left is the 10 clears a pass of PRs the
-store does not own ([section 4](#4-the-label-comparisons-reach)).
+## 3. Where the signs are kept
 
-What the interval costs, at the city's six repositories and 33 open PRs measured
-on 2026-11-15:
+The signs last seen are kept in the saved read, `pr_github_read`, on the bead
+that owns the PR, beside the facts they describe. The saved read holds GitHub's
+side in four parts. Each part keeps the instant its read was sent and the signs
+read with it, never later than its facts:
 
-| Interval | Points an hour for the passes' reads | Tracking beads a day per rig |
+| Part | Its facts | The signs kept with it |
 |---|---|---|
-| 1 minute | about 960 | 1,440 |
-| 2 minutes | about 480 | 720 |
-| 5 minutes, today's interval | about 190 | 288 |
+| The PR | URL, number, repository, head branch, base, head, state, draft flag, merge state and merge-queue flags | state, draft flag, head, base, the base's tip, `updatedAt` |
+| The checks | the required check runs and commit statuses at the head, with their results | head, the rollup's state, the contexts' total, the counts by state |
+| The conversation | the approvers and requesters, the newest feedback in each id space, the threads waiting on the city's answer, the unresolved threads, the review decision, and the provenance instant the definition of feedback was applied from | comment count, review count, dismissed count |
+| The labels | the label names | the names themselves |
 
-The read costs about a quarter point per owned PR (3 points for 11). The search's
-page adds about 1 point per repository, and a repository with no owned PR pays the
-search alone. Gas City keeps a closed tracking bead 7 days by default
-(`[beads.policies.order_tracking]`). Its cooldown index reads the newest 256 runs
-per store, and an order whose last run falls outside that window pays one more
-read, which the index then remembers (`orderTrackingHistoryIndexLimit`). So a
-2-minute order costs the store rows, not other orders' timing. The interval is
-tuned from city.toml (`[[orders.overrides]]`).
+The one-PR update is the only writer of the saved read and its signs. It also
+writes Gas Town's `pr_state` and `pr_last_checked_at` on a record on the pending
+record. The cheap question and the net write nothing to a bead, and the landing
+order reads the saved read and writes none of it.
 
-## 8. The review-lanes effort
+## 4. The one-PR update's read
 
-tk-1tfzr71.22 (PR #1531, `integration/tk-1tfzr71.22`) rewrites the landing order's
-check. At 0ccee97bf it reads the bead's blockers, withdrawals and review runs in
-`one`, carries a withdrawal across a requeue, and pours a review run for a head
-with no passed result. It marks a draft ready once a run has passed, and
-dismisses an approval a material change withdraws. That touches
-services/gctk/pr/landing.go, pr/record/record.go, pr/record/keys.go and
-services/gctk/prstatus, and its rework (tk-n5ye5vf) is in flight under the brief
-of conversation tk-9p5oh6j. That brief keeps the run's structure and features,
-takes the prepare and record steps out of the review formula, and leaves the
-record's final shape for the rework to name in its PR summary.
+The one-PR update is `gctk pr refresh --pr <url>`. The verb is `refresh`
+because `gctk pr` names a verb by what it does to the city's record of the PR,
+and "update" would read as a write to the PR on GitHub.
 
-Each of those acts becomes one more case of the record's decision in
-[section 2](#2-what-runs-the-targeted-work). The decision reads the store side
-the effort adds (results, asks, runs and withdrawals) and GitHub's side from the
-pass's read and the saved read. A record whose decision names one of the acts
-gets it under the lock. Each act keeps its own GitHub write pinned to the head it
-names, as that branch builds it: the ready mark, a dismissal, the compare a
-withdrawal makes. So a review run's result, a filed ask or a withdrawal reaches
-its act in the first pass whose budget reaches the record, with no change on
-GitHub needed to start it.
+1. **Find the bead that owns the PR** in the store. A PR no live bead owns has
+   nothing to save, and the update says so and exits 0.
+2. **Take the signs.** The cheap question and the net hand it the signs they
+   read. Called alone, as by a webhook rule, it reads the one PR's signs itself,
+   for 1 point in about a second.
+3. **Read only what moved:**
 
-| Unit | Composes with tk-1tfzr71.22 | Waits on |
+   | What moved | What it reads |
+   |---|---|
+   | only the labels | nothing more, since the signs are the labels |
+   | the base's tip, or `updatedAt` alone | the PR part, whose merge state the base moves |
+   | the head, or the checks' state, total or counts | the PR part and the required checks at the head, in one request |
+   | the comment, review or dismissed count | the conversation part, in one request, and the PR part, whose merge state reviews move |
+   | no saved read, or one not current for the bead | every part |
+
+   The PR part with the required checks took 0.9 to 1.8 seconds for 1 point, and
+   the conversation part 0.8 to 1.1 seconds for 1 point, on #1533 and on the
+   most discussed open PR of the city's busiest repository (16 comments, 14
+   reviews, 4 threads). The conversation read applies the definition of
+   feedback from the bead's provenance instant, with the login the city's
+   account acts as, which a caller reads once a run.
+4. **A merge state read as unknown.** GitHub computes a merge state lazily after
+   a push or a base move. The update saves the PR part with its merge state
+   unknown and keeps that part's earlier signs, so the next pass finds the PR
+   moved and reads it again. Nothing else records it.
+5. **Write only what differs.** Under the record lock, the update reads the
+   bead and writes the saved read once, guarded on the status and assignee that
+   read shows, with each part whose read is newer than the saved one
+   ([section 7](#7-an-older-read-never-replaces-a-newer-one)) and whose facts or
+   signs differ. The read of the bead and the guarded write took about half a
+   second together.
+
+## 5. How the landing order starts
+
+Gas City offers three ways to start an order that matter here, all in
+`gastownhall/gascity` 9a4b1e718:
+
+- **A cooldown.** `checkCooldown` (internal/orders/triggers.go) makes an order
+  due once the time since its last run's start reaches `interval`.
+- **An event the pack emits.** `gc event emit <type>` records an event of any
+  type, best-effort (cmd/gc/cmd_event_emit.go). `checkEvent` makes an event
+  order due when an event of its `on` type follows its cursor, and
+  `dispatchExec` (cmd/gc/order_dispatch.go) sets the cursor to the event log's
+  head before the command runs, so an event recorded during a run starts the
+  next run.
+- **A run on demand.** `gc order run <name>` (`cmdOrderRun` and
+  `doOrderRunExecTracked` in cmd/gc/cmd_order.go) runs an exec order's command
+  in the caller and writes a run record, from which the cooldown then counts. It
+  does not wait for a run that is open.
+
+The landing order runs on a cooldown of 1 minute, and a webhook rule starts it
+on demand after its update ([section 8](#8-the-webhook)). An event would start
+it about 30 seconds after an update, but every writer of a store change it acts
+on would have to emit one: a review run's result, an ask, a withdrawal, a person
+clearing a gate. A change no writer announced would wait for whatever runs it
+next. A condition order (`checkCondition`) would run its check at every lane
+pass, about every 30 seconds, with the lane waiting on it, and an act that keeps
+failing would run again at each pass.
+
+A run of the landing order reads the store in one listing and decides every
+record from its saved read and the store, by the evaluator's rule as
+`FromStore` composes it today. It acts under the record lock, each act guarded
+on the status and assignee read under it. Only the merge reads GitHub: it takes
+the whole read in its own run and pins its request to the head it judged, as
+today. Every other act decides from the saved read and the store, such as a
+landing, a send-back, an exception's gate, marking a draft ready, dismissing a
+withdrawn approval and a label write. The landing fetches the target to find the
+merge commit, as today. An act made from a saved read that a later refresh
+shows to be stale is decided again from the newer read at the next run.
+
+No act starts more than 45 seconds into a run. Records are taken in the order
+of their saved reads' age, the oldest first, and an act not reached is still a
+difference at the next run. The landing order reads no record's PR to decide,
+so it needs no bound on records per run (`--count`).
+
+## 6. The orders and their cadence
+
+| Order | Trigger | What a run does | GitHub points a pass |
+|---|---|---|---|
+| `pr-poll`, the cheap question | every 2 minutes | lists the owned PRs, asks GitHub about them, and runs the one-PR update for each that moved, starting none more than 90 seconds in | 1 per 50 owned PRs in the rig's repository, none when it owns none |
+| `pr-compare`, the net | every 10 minutes | reads every owned PR's comparable facts, runs the one-PR update for each that differs, and searches for labels on PRs no bead owns | 1 per 10 owned PRs, and 1 for the search |
+| `pr-reconcile`, the landing order | every minute | acts from the beads | none to decide; the merge's own read when it merges |
+
+Each order is rig-scoped, as the landing order is, and reads its rig's
+repository. At today's 28 open PRs in five of the six rigs' repositories:
+
+| Cadence of the cheap question | Points an hour for the city | Run records an hour per rig |
 |---|---|---|
-| 1, the pass | rewrites the functions that branch rewrites, so it is built on that branch as it lands on main, and its acts join the decision as above | tk-1tfzr71.22 and tk-1tfzr71.132 landing on main |
-| 2, the labels | derives labels through `prstatus` as that branch leaves it, with the review run's state in the `review` condition and the failed machinery's `needs-attention` | unit 1, and tk-1tfzr71.132 while it is open |
+| 1 minute | about 300 | 60 |
+| 2 minutes | about 150 | 30 |
+| 5 minutes | about 60 | 12 |
 
-Building unit 1 after both efforts land composes their code once, on main, rather
-than in a merge of three branches that each rewrite `blocked` and `decide`.
+| Cadence of the net | Points an hour for the city | Run records an hour per rig |
+|---|---|---|
+| 5 minutes | about 144 | 12 |
+| 10 minutes | about 72 | 6 |
+| 30 minutes | about 24 | 2 |
 
-## 9. What tk-1tfzr71.21 needs
+The landing order every minute adds 60 run records an hour per rig, and every
+2 minutes 30. The one-PR updates add 1 or 2 points for each PR that moved. Gas
+City deletes a closed run record after `[beads.policies.order_tracking]
+delete_after_close`, which this city sets to 30 minutes. Every interval is tuned
+from city.toml with `[[orders.overrides]]`.
 
-tk-1tfzr71.21 waits on the whole effort, tk-1tfzr71.149, and not on one unit of
-it. Its retirement of `pr-facts.sh` lands on main, and the label comparison
-(unit 2) reaches main only with this effort's landing PR. An edge onto unit 2
-would release the retirement while main still lacks the comparison. Its design
-need not wait, since it is armed on mol-design-convoy.
+A change a cheap sign shows reaches its act within the cheap question's 2
+minutes, its update's few seconds and the landing order's minute, each run
+starting up to 30 seconds late at the next lane pass: about 4 minutes at the
+most, and about 2 on average. A change only the net sees reaches its act within
+about 12 minutes.
 
-The two efforts build one read of GitHub. This effort owns it: the pass's read of
-every PR the city owns, and the saved read on each PR's bead. tk-1tfzr71.21's
-intake reads from it. When the saved read shows feedback past what the bead's
-receipts hold, intake routes the posts behind it, the act the merge design moves
-into the landing order's run. Its own read of a post's text is then that act's
-read. A review started before another and submitted after it can sit below the
-newest id ([section 1](#1-what-makes-a-pr-changed)), so neither that test nor
-the receipts can rest on the newest id alone.
+## 7. An older read never replaces a newer one
 
-This effort leaves to intake:
+Two updates of one PR can cross: a webhook's and the cheap question's, the
+net's and the cheap question's, or two runs that overlap, since Gas City closes
+a run record two minutes after it is made whether or not the run still works
+(`runOrderTrackingSweepWatchdog`).
 
-- routing feedback into work, with its receipts and watermarks;
-- the red-check and conflict routing, which tk-1tfzr71.21's description gives to
-  Gas City's PR monitor and its repair beads;
-- the webhook.
+Each part of the saved read keeps the instant its read was sent. Under the
+record lock, the update writes a part only when its own read of that part was
+sent after the saved part's instant. A part and its signs are written together,
+and the signs were read no later than the facts beside them. So an older read
+never replaces a newer part, and saved signs never claim a state newer than the
+saved facts. When the signs a caller hands the update were read some seconds
+before the update read the facts, the worst that follows is one more read of
+the PR at the next pass, and no change is hidden.
 
-Gas City's monitor lists open PRs with no labels, review decision or
-`isRequired`, so it cannot stand for this read (gas-city-search.md, "The read of
-GitHub").
+## 8. The webhook
 
-## 10. The units
+None of it is built here. The upstream route that fits is the webhook service of
+the github pack, `github/scripts/github_intake_service.py` in
+`gastownhall/gascity-packs` 0f07496d2f. It accepts a delivery and runs the rules
+that match on a thread of its own (`enqueue_event_rules`), so GitHub's 10
+seconds for an answer are never spent on them. It runs each rule's actions in
+order and stops at the first that fails (`process_event_rules`). An `order`
+action runs `gc order run <name> --rig <rig>`, and a `command` action runs its
+argument list with `{{payload.path}}` filled from the delivery and the PR's
+number in `GC_GITHUB_PR_NUMBER` (`execute_rule_action`, `github_event_env`). The
+rules live in the city's `config/github-intake/rules.toml`. The call a rule
+makes for one PR, a review here:
 
-Each unit leaves the city working, and each waits on tk-1tfzr71.132 while that
-bead is open.
+```toml
+version = 1
 
-| # | Unit | What it builds | Settles | Waits on |
-|---|---|---|---|---|
-| 1 | feat(gctk): have the landing order read every PR it owns in one request and act only on what differs | The pass's read in gctk's GitHub adapter (one aliased request per repository, with `isRequired` per PR and the label search as a second field). The saved read's state part written from it for every changed PR before any budgeted act, and what tells that feedback moved, the number of dismissed reviews among it, kept beside the feedback part. The run reads the store once and GitHub once per repository, decides each record in memory, and acts under the lock only where the decision names an act, with the whole read only for moved feedback or a PR that reads ready. Every owned PR on the record is observed, marker or not. The order runs every 2 minutes, with `--budget 90s` over every act but the state writes, and no `--count`. `pr_last_checked_at` is written only by a write the order makes. The docs the behavior changes: refinery-merge-cadence.md's landing order, state-machine.md's pending record, gctk-architecture.md, services/gctk/README.md, the order's header, the saved read's warrant and key registry entry, and docs/architecture.md's Debt entry, narrowed to saying that the order writes no label. | questions 1, 2, 3 and 7 | tk-1tfzr71.132 and tk-1tfzr71.22 |
-| 2 | feat(gctk): keep each PR's status labels equal to what the store derives | The comparison over every PR the city owns and every PR the search finds, written through `pr-status-label.sh`'s `reconcile` and `clear`, at most 10 clears a pass of PRs the store does not own, with nothing recording a write that failed. The landing order's merge path makes no label call. `pr-status-label.sh`'s header names the comparison as its caller. docs/architecture.md drops the Debt entry this design adds. | questions 4 and 5, tk-1tfzr71.91, and the label half of tk-1tfzr71.140 | unit 1, and tk-1tfzr71.132 while it is open |
+[[rule]]
+id = "pr-review-refresh"
+event = "pull_request_review"
+match = { "repository.full_name" = "zookanalytics/gc-toolkit" }
 
-Unit 1 changes no label, so between the two units the labels stand as they do on
-main after tk-1tfzr71.132: the old path's writers keep theirs, and a PR on the
-pending record keeps its last label at a merge, a close or an exception, as the
-operator accepted for that effort.
+[[rule.action]]
+type = "command"
+command = [".gc/services/gctk/bin/gctk", "pr", "refresh", "--pr", "{{pull_request.html_url}}"]
 
-## 11. Edges and notes the implementation child adds
+[[rule.action]]
+type = "order"
+name = "pr-reconcile"
+rig = "gc-toolkit"
+```
 
-- **Unit 1:** `blocks` edges onto tk-1tfzr71.132 and tk-1tfzr71.22.
-- **Unit 2:** `blocks` edges onto unit 1 and onto tk-1tfzr71.132.
+A rule like it serves each event that names its PR in the payload: a PR's own
+change, a review, an inline comment, a thread resolved or reopened, and a
+conversation comment on a PR. An event that names no PR on such a path, such as
+a check run, whose PRs come in a list, a commit status or a push to a base,
+leaves its change to the next pass.
+
+Gas City's own receiver does not fit. A public hook may fire only a formula
+order, never an exec order (`routeOrder` in internal/webhooksink/sink.go). A
+tenant or private hook answers only a request from the loopback or one carrying
+`X-GC-Request` (`webhookRequestAllowed` in internal/api/handler_webhook.go),
+which GitHub's delivery does not.
+
+A delivery is a hint to read, never the facts. GitHub does not redeliver a
+delivery that failed, so the one-PR update reads GitHub itself, and the cheap
+question's next pass covers any delivery that never arrived.
+
+## 9. Labels
+
+The labels GitHub shows on a PR are among its saved facts, saved by the one-PR
+update whenever they move. The landing order derives what the store says the
+labels should be, by `prstatus`, the derivation `gctk pr status` runs for one
+bead and the rig board runs for all of them. It writes a label only where the
+saved labels differ, through the labels' one writer,
+`assets/scripts/pr-status-label.sh`, with the verbs it has: `reconcile` for an
+owned open PR and `clear` for an owned PR that merged or closed. It passes the
+saved labels as the labels GitHub shows (`--current-labels`), so the writer
+edits only what differs from them and reads nothing. A write repeated before
+the next refresh saves the labels it made asks GitHub to add a label already
+there or take off one already gone, which changes nothing. A write that does not
+land leaves the difference on the bead, and the next run writes it again. No key
+records it.
+
+| The PR | The labels the store derives |
+|---|---|
+| owned and open, on the pending record | the `status:` and `held:` values `gctk pr status` gives the bead |
+| owned and open, on the old path | the values `gctk pr status` gives the bead from the facts its keys hold |
+| owned, merged or closed | none, since GitHub's own state takes over |
+| owned by no live bead | none, since the city works no such PR |
+
+The PRs no bead owns are found by a search the net runs once a pass in each
+repository, `search(type: ISSUE, query: "repo:<repository> is:pr
+label:\"status: working\",...")` over the four `status:` values and the four
+`held:` values, reading one page of 100 a pass for 1 point. A PR on that page
+that no live bead owns gets `clear`, at most 20 a pass in each repository. On
+2026-11-16 the search found 527 closed PRs here that still carry a label, all
+closed before 2026-10-30, which clear in 27 passes, about four and a half
+hours. A clear that does not land is found by the next pass's search.
+
+Every other caller of the labels' writer is code a scheduled bead retires, so
+none changes here (AGENTS.md, the rule that retiring code gets no new work):
+
+| Caller | Its calls | It retires with |
+|---|---|---|
+| `pr-facts.sh` | its full pass's `reconcile`, and its clear at a merge or a close with `status_label_clear_owed` | tk-1tfzr71.21 (tools/deletion-plan.tsv) |
+| `gctk merge` | its clear at a merge, with `status_label_clear_owed` | tk-1tfzr71.70 (docs/built-once-target.md, lane A) |
+| `pr-open.sh` | `reconcile` at its create, its adoption and its draft-to-ready arm | its create and adoption with tk-1tfzr71.70, and its arm with the merge cadence (tk-1tfzr71.21) |
+| `signoff.sh` | `reconcile` after a verdict | tk-1tfzr71.122 (tools/deletion-plan.tsv) |
+
+Once they retire, the landing order and the net are the only callers.
+`status_label_clear_owed` retires with its two writers, and the comparison
+makes the writes it would have retried.
+
+## 10. The age line
+
+The board shows, for each rig, when GitHub was last asked: the start of the
+newest run of that rig's `pr-poll` that exited 0. It reads them from Gas City's
+run history, `GET /v0/city/{city}/orders/history?scoped_name=pr-poll:rig:<rig>`
+(`humaHandleOrderHistory` in internal/api/huma_handlers_orders.go), whose
+entries carry each run's `created_at` and `exit_code`. A run that could not read
+a repository exits non-zero, so a failing question leaves the line at the last
+pass that read every owned PR. The line reads stale once that pass is older than
+three intervals, 6 minutes. This city deletes a run record 30 minutes after it
+closes, so with no successful run in the history the line reads "not asked in
+the last 30 minutes". It is a unit of its own.
+
+## 11. What `pr_last_checked_at` means
+
+Gas Town's command stamps `pr_last_checked_at` on a record at every check, and
+its `reconcile_one` takes the least recently checked record first
+(`gastown/commands/pr-merge-reconcile/run.sh`), so there the stamp rotates the
+queue and says when the command last looked at the PR.
+
+Here the cheap question asks about every owned PR at every pass and writes
+nothing, so nothing rotates. The one-PR update stamps `pr_last_checked_at` with
+each write it makes to a record on the pending record, so the key says when
+GitHub's side of that PR was last read and saved. When GitHub was last asked
+about it is the board's age line. Gas Town's command also records a check that
+could not decide in `pr_reconcile_error`. Here nothing records a read or an act
+that failed: a read that fails leaves the PR's signs as they were, an act that
+fails leaves its difference on the bead, and Gas City's run record holds the
+failure. docs/built-once-target.md names both as one difference.
+
+## 12. The GitHub intake's finish line
+
+The intake effort's done (tk-1tfzr71.21) reads: "One writer, the landing order,
+saves one GitHub read per PR, and nothing else mirrors GitHub state into bead
+metadata." Under this shape the one writer is the one-PR update, which the
+cheap question, the net and a later webhook call. It saves one GitHub read per
+PR, the saved read with Gas Town's `pr_state` and `pr_last_checked_at`, and
+nothing else mirrors GitHub state into bead metadata. The landing order reads
+that read and saves none of it. The reading this design puts to the operator at
+the PR: the line holds with "the one-PR update" in the place of "the landing
+order".
+
+The intake reads its feedback from that saved read. When the conversation part
+shows feedback past what the bead's receipts hold, routing the posts behind it
+is an act of the landing order, taken from the bead like every other act. Its
+own read of a post's text is that act's read. The intake's design
+(tk-1tfzr71.161, #1536) names the read the landing order saves, so under this
+shape it reads the one the one-PR update saves.
+
+## 13. The units and their waits
+
+The review-lanes effort and the PR-status effort have landed on main, so no
+unit waits on either bead. The first four units rewrite code those efforts
+changed, so the effort's branch is first brought current with main at or past
+8b9c4caf3, and unit 1 is built on it.
+
+| # | Unit | What it builds | Waits on |
+|---|---|---|---|
+| 1 | feat(gctk): read a PR only when GitHub shows it moved | The cheap question in gctk's GitHub adapter. `gctk pr refresh`, the one-PR update, with the saved read in four parts, each with its read instant and signs, and Gas Town's `pr_state` and `pr_last_checked_at` moved to it. `gctk pr poll` and its order, `orders/pr-poll.toml`, every 2 minutes. The landing order stops writing the saved read and those two keys, and keeps its own read until unit 2. | the branch brought current with main |
+| 2 | feat(gctk): have the landing order act from the beads | The landing order decides every record from the saved read and the store, reads GitHub only for the merge's own read, runs every minute with no `--count` and no act started past 45 seconds, and writes no `pr_reconcile_error` | unit 1 |
+| 3 | feat(gctk): compare every owned PR in full every 10 minutes | `gctk pr compare` and its order, `orders/pr-compare.toml`: the full read in requests of at most 10 PRs, paged, and the one-PR update for each PR that differs | unit 1 |
+| 4 | feat(gctk): keep each PR's status labels equal to what the store derives | The landing order's label writes by comparison, the net's search and clears for PRs no bead owns, at most 20 a pass, and the labels' writer's header naming its callers | units 2 and 3 |
+| 5 | feat(board): show when GitHub was last asked | The age line on the board, from `pr-poll`'s run history | unit 1 |
+
+Each unit's change carries the docs its behavior changes:
+refinery-merge-cadence.md's landing order, state-machine.md's pending record,
+gctk-architecture.md, services/gctk/README.md, the orders' headers, the saved
+read's warrant and key registry entries, and docs/architecture.md. That page's
+decision that no display reads GitHub names the read the landing order saved,
+and unit 1 names the one the one-PR update saves instead.
+
+Code a scheduled bead retires gets no change from any unit: `pr-facts.sh`, the
+merge cadence's arms and `refinery-reconcile.sh` (tk-1tfzr71.21), `gctk merge`
+and `pr-open.sh`'s create and adoption (tk-1tfzr71.70), and `signoff.sh` and the
+review path (tk-1tfzr71.122). The units add no verb to `pr-status-label.sh`.
+
+Edges and notes the implementation child adds:
+
+- **Units:** `blocks` edges as the table gives them.
 - **tk-1tfzr71.91** (a merged or closed PR keeps its label): move its `blocks`
-  edge and its arm on mol-validate-close from tk-1tfzr71.149 onto unit 2. Append
-  a close brief: once unit 2 lands, check that a PR the landing order records
-  merged or closed ends with no `status:` or `held:` label, that the landing
-  order's merge path makes no label call, and that a clear that failed is made by
-  a later pass.
+  edge and its arm on mol-validate-close from tk-1tfzr71.149 onto unit 4, and
+  append a close brief: once unit 4 lands, check that a PR the landing order
+  records merged or closed ends with no `status:` or `held:` label, and that a
+  clear that failed is made by a later run.
 - **tk-1tfzr71.140** (a stood-down exception's PR stays open and labeled): move
-  its `blocks` edge and its arm on mol-polecat-work from tk-1tfzr71.149 onto
-  unit 2. Append a note: unit 2 takes the city's labels off an open PR whose bead
-  has closed, since no live bead owns it, so the label half of its Done is
-  settled there, and it builds only the other half: standing work down leaves no
-  PR open behind the closed bead.
-- **tk-1tfzr71.21:** no edge, so its design can start. Append a note: the unit
-  that retires `pr-facts.sh` waits on tk-1tfzr71.149, the landing bead, by a
-  `blocks` edge its implementation child adds. Its intake reads the pass's read
-  and the saved read this effort lands ([section 9](#9-what-tk-1tfzr7121-needs)).
+  its `blocks` edge and its arm on mol-polecat-work onto unit 4, and append a
+  note: unit 4 takes the city's labels off an open PR whose bead has closed, so
+  the label half of its done is settled there, and it builds only the other
+  half, that standing work down leaves no PR open behind the closed bead.
+- **tk-1tfzr71.21 and its design, tk-1tfzr71.161:** append a note that the
+  saved read is the one-PR update's ([section 12](#12-the-github-intakes-finish-line)).
+  The unit that retires `pr-facts.sh` waits on tk-1tfzr71.149, the landing
+  bead, by a `blocks` edge its implementation child adds.
 
-## 12. What the gate holds
+## 14. What the gate holds
 
 The initiative's proposed done criteria, as this design holds them. Where the
-wording moved, the reason follows.
+wording moved, the reason follows in italics.
 
-1. For every PR the city owns, a change on GitHub to its identity, head, state,
-   draft flag, merge state or required checks reaches the saved read within one
-   pass, for as many changed PRs as a run's timeout lets it write, about 360
-   ([section 7](#7-the-interval-and-the-bound)). A change to its feedback, a
-   review, a comment, a dismissed review or a thread's resolution, or to its
-   review decision, reaches it within one pass for as many PRs as one pass's
-   budget reads, and the rest in the passes after. A dismissed review is a change
-   to its feedback even when the review decision stays as it was. *(The feedback
-   read is per PR, so its count, not the open count, can span passes. The review
-   decision is saved with the signs of moved feedback, which only a whole read
-   writes ([section 3](#3-the-saved-read)). The state writes come before the
-   budget, so only a run's timeout bounds them.)*
-2. A pass in which nothing changed makes one GitHub request per repository and
-   writes no PR's bead. Gas City still writes its tracking bead for the run.
-3. A PR's labels on GitHub are the ones the store derives, and a label that
-   differs for any cause is corrected by a later pass, with nothing recording
+1. For every PR the city owns, a change a cheap sign shows reaches the saved
+   read within one pass of the cheap question, for as many moved PRs as the
+   pass's 90 seconds refresh, about 60, and the rest in the passes after. Any
+   other change reaches it within one pass of the net. *(The initiative said
+   "within one pass, however many PRs are open". A thread resolved or reopened
+   moves no cheap sign, so only the net's read sees it, and the refreshes a
+   pass starts are bounded so that the next pass starts on time.)*
+2. A pass of the cheap question in which nothing moved makes one GitHub request
+   for each 50 owned PRs in a repository, and writes no bead. Gas City still
+   writes its run record. *(The initiative said "one GitHub call per
+   repository". GitHub ends a request at 10 seconds, and the light read took
+   about 5 seconds at 100 PRs.)*
+3. The one-PR update is the only writer of GitHub's side on a bead, and it
+   writes only what differs, never an older read over a newer one.
+4. A PR's labels on GitHub are the ones the store derives, and a label that
+   differs for any cause is corrected by a later run, with nothing recording
    that it was owed.
-4. The landing order's merge path makes no label call, and the pass writes a
-   label only where it differs. *(The sitting's "the landing order makes no label
-   call": the comparison is a step of the landing order's pass, which is the one
-   read of GitHub it compares against.)*
-5. The merge acts only on a fresh read made in its own run.
-6. docs/architecture.md, docs/built-once-target.md and
-   docs/refinery-merge-cadence.md say so. *(The sitting's "the merge design": a
-   spec records one moment, so the living doc that owns the landing order's
-   runtime says it. docs/architecture.md states only the responsibility the
-   landing order takes on, that it observes every PR the city owns and
-   maintains each one's labels. How the order carries it out belongs in the
-   runtime doc.)*
+5. The landing order acts from the beads and writes a label only where the
+   saved labels differ from what the store derives. *(The initiative said "The
+   landing order makes no label call". The spine the operator accepted gives
+   the label writes to the work order, which is the landing order.)*
+6. The merge acts only on a fresh read made in its own run.
+7. The board shows, for each rig, when GitHub was last asked.
+8. docs/architecture.md, docs/built-once-target.md and
+   docs/refinery-merge-cadence.md say so. *(The initiative said "the merge
+   design". A spec records one moment, so the living doc that owns the landing
+   order's runtime says it.)*
 
-## 13. Pages this design changes
+## 15. Pages this design changes
 
-This change states the target in two living pages, and the units bring the rest
-current as they build:
+This change states the target in two living pages, and the units bring the
+rest current as they build:
 
-- **docs/architecture.md:** a decision that the landing order observes every PR
-  the city owns and maintains each one's labels, and a Debt entry for the
-  landing order as built. Unit 1 narrows that entry and unit 2 drops it.
-- **docs/built-once-target.md:** a difference from Gas Town under Merge, one read
-  a pass for every PR, with its reason.
+- **docs/architecture.md:** a decision that the one-PR update is the only way
+  GitHub's side of a PR reaches its bead and that the landing order acts from
+  the beads, and a Debt entry for what is built today, which the units retire.
+- **docs/built-once-target.md:** a difference from Gas Town under Merge: a cheap
+  question watches every PR and an update reads one, so `pr_last_checked_at`
+  says when the PR was last read and nothing records a read that failed.
 
-Both edits sit outside the hunks `integration/tk-1tfzr71.132` and
-`integration/tk-1tfzr71.22` change in those pages, so either effort's landing
-merges them without a conflict.
+## 16. Facts this design rests on
 
-## 14. Facts this design rests on
+Measured on 2026-11-16 with `gh api graphql` from the city's account, read-only
+except the tests on this PR. Gas City's facts are in
+[gas-city-search.md](gas-city-search.md).
 
-Measured on 2026-11-15 with `gh api graphql` from the city's account. The query
-texts are in the commands below.
-
-- **The pass's read.** One request with one aliased `pullRequest(number: N)` per
-  PR read 11 PRs, #1521 to #1532 less #1522 (9 open, 2 merged), with each one's
-  state, required checks by `isRequired(pullRequestNumber: N)`, labels, newest
-  review and conversation comment, unresolved threads and review decision, and
-  the merged PRs' merge commits. Cost 3. Time 3.24, 2.91 and 2.71 seconds.
-- **The number of reviews.** The same request with `totalCount` on each PR's
-  reviews and `pageInfo` on its threads cost 3, with no errors, in 2.95, 2.72
-  and 2.82 seconds. Over 552 reviews on 60 merged PRs here, a person's review
-  was submitted up to 15 minutes after it was started, and no review sat out of
-  the order of its id, its creation or its submission. So where the list puts a
-  review started before another and submitted after it was not seen.
-- **The number of dismissed reviews.** The same request with
-  `reviews(states: [DISMISSED]){totalCount}` on each PR read 12 PRs, #1505 and
-  #1521 to #1532 less #1522 (5 open, 7 merged), for 3 points with no errors, in
-  2.70, 3.52 and 6.53 seconds. It counted one dismissed review on open #1525 and
-  #1527 and on merged #1505, and none on the rest. On those three, the reviews
-  counted state by state (approved, changes requested, commented, dismissed and
-  pending) sum to the number of reviews, so that number counts a dismissed review
-  and a dismissal leaves it as it was. GitHub's schema says
-  `dismissPullRequestReview` "Dismisses an approved or rejected pull request
-  review", and gives `reviewDecision` as "The current status of this pull request
-  with respect to code review", whose `REVIEW_REQUIRED` reads "A review is
-  required before the pull request can be merged".
-- **The open list.** `repository.pullRequests(states: OPEN, first: 100)` with
-  labels, newest review and comment, threads and check contexts read 9 PRs in
-  2.16 s for 6 points. Run against each of the city's six repositories it found
-  33 open PRs, 0 to 15 each, in 0.6 to 4.3 s, at 6 points each.
-- **The whole read, batched.** 9 PRs with reviews, threads and their comments,
-  conversation comments and check suites with `isRequired`, in one aliased
-  request: 3.93 s, 18 points, no errors.
-- **The whole read today.** gctk's five queries (services/gctk/internal/gh/gh.go)
-  and the REST login for #1531: 4.36 s.
-- **`updatedAt`.** On #1524, #1525, #1527, #1528 and #1530 the last check
-  finished 31 to 37 minutes after it. On #1529 it read 11:52:00Z, and the newest
-  review was submitted at 11:52:06Z.
-- **Inline comments.** On the 9 open PRs, every inline comment's review is in the
-  PR's reviews list, and the newest inline comment's review is the newest review.
-  On merged #1488, each reply in a thread carries a review of its own.
-- **The search.** `search(type: ISSUE, query: "repo:<this repo> is:pr is:closed
-  label:\"status: working\",...")` over the four `status:` and four `held:`
-  values: 527, newest closed 2026-10-29T23:13:50Z. With `closed:>=2026-10-30`: 0.
-  Cost 1, about 1 s.
-- **The store.** `gc bd list --json --limit 0` listed this rig's 877 live beads
-  in 0.45 s. Of them, 11 name a PR: 9 anchors with `merge_result=pull_request`
-  and 2 rework children with `anchor_bead`. None is on the pending record, and
-  none carries a saved read.
-- **A state write.** A read of one bead by its id (`gc bd list --id <id> --all
-  --json`, run bare and with the flags gctk's ledger adds to include every kind
-  of bead) and a metadata write guarded on its status and assignee
-  (`gc bd update <id> --if-status=<s> --if-assignee=<a> --set-metadata
-  <key>=<value>`), the two store calls an act makes under the record lock, took
-  0.49 to 0.81 seconds together over ten runs, as the city host's load average
-  went from 10 to 18. The write alone took 0.32 to 0.56 seconds over fifteen
-  runs.
-- **The allowance.** At 21:24:44Z the account had used 282 GraphQL points in an
-  hour that resets at 22:16:27Z, and 826 REST calls in one that resets at
-  22:13:02Z, of 5,000 each.
-
-The read of the order, at `integration/tk-1tfzr71.132` 348540443:
-`orders/pr-reconcile.toml` (5-minute cooldown, 300-second timeout), `Reconcile`,
-`due`, `one`, `blocked`, `decide` and `observeAlone` in
-services/gctk/pr/landing.go, `observe`, `decide` and `FromStore` in
-services/gctk/pr/read.go, and `Listing.PRAnswers` in services/gctk/listing/pr.go.
-Gas City's facts are in [gas-city-search.md](gas-city-search.md).
+- **The cheap question.** In this repository, one aliased field per PR over
+  #1437 to #1536, three runs at each size: 1.06 to 1.35 seconds at 10 PRs, 1.68
+  to 1.99 at 25 and 2.35 to 4.21 at 50, for 1 point each, and 5.09 to 5.55
+  seconds at 100 for 2 points, with no errors. Without the dismissed count and
+  the base's tip, 100 PRs took 3.35 to 4.27 seconds. Over each rig repository's
+  open PRs, one request each: 6 PRs here, 15, 1, 1 and 5 in four others, 0.62 to
+  1.70 seconds and 1 point each. Two rig repositories had none.
+- **The base's tip.** On this repository's six open PRs, `baseRefOid` equalled
+  `baseRef.target.oid` on the five whose base had not moved, and on #1539 read
+  6dd9d13ee while main's tip was 8b9c4caf3.
+- **Counts by state.** On the busiest repository's 15 open PRs, GitHub's
+  `checkRunCountsByState` and `statusContextCountsByState` equalled the counts
+  of the check nodes on every PR.
+- **The sitting's watch,** 40 minutes on the city's 25 open PRs and 12 minutes
+  on 60 PRs of three public repositories (conversation tk-trcyz2l's notes,
+  2026-11-16T07:13:22Z): which changes moved `updatedAt` and the REST ETags.
+  Its reads of every PR at every tick were compared again here: the counts of
+  check nodes by state moved at 32 of the 32 changes of a PR's checks at one
+  head, 1 in the city and 31 in public repositories, where the rollup's state
+  moved at 5.
+- **Tests on this PR,** 15:48:48Z to 15:51:06Z, each read 8 seconds and about
+  30 seconds after the act:
+  - A thread reopened (`unresolveReviewThread` on PRRT_kwDOR_nG-c63vJ31): only
+    the set of unresolved threads moved. `updatedAt` stayed 15:37:59Z, every
+    sign stayed, and the PR's, the check runs' and the combined status's ETags
+    answered 304.
+  - The same thread resolved with no reply: the same.
+  - A commit status, pending and then successful, on the head 4d796d181: the
+    statuses' counts by state moved (pending 0 to 1, then to successful 1), the
+    contexts' total 1 to 2, the rollup's state to pending and back, and the
+    merge state from clean to unstable and back. `updatedAt` did not move, the
+    check runs' ETag answered 304, and the PR's and the combined status's ETags
+    moved. The thread ends resolved, as it was, and the status successful.
+- **The net's read.** On the busiest repository's open PRs, three runs at each
+  size: 1.75 to 2.18 seconds at 5, 2.41 to 2.70 at 10 and 2.82 to 5.08 at 15,
+  1 point each, no errors, no page overflow.
+- **The one-PR update's reads.** The PR part with the required checks: 0.90 to
+  1.01 seconds on #1533 and 0.95 to 1.81 on the busiest repository's most
+  discussed open PR, 1 point each. The conversation part: 0.76 to 0.89 and 0.98
+  to 1.05 seconds, 1 point each.
+- **The search.** 527 closed and 6 open PRs here carry a `status:` or `held:`
+  label. None closed since 2026-10-30 carries one. 1 point and about 0.6
+  seconds.
+- **The store.** `gc bd list --json --limit 0` listed this rig's 857 live beads
+  in 0.43 to 0.45 seconds. A read of one bead by its id took 0.15 to 0.19
+  seconds and a metadata write guarded on its status 0.32 to 0.34, at a load
+  average of 4.5.
+- **The allowance.** At 15:47Z the account had used 551 GraphQL points in an
+  hour that reset at 16:17:35Z, and 2,537 REST requests, of 5,000 each.
 
 ```bash
-# The pass's read: one aliased field per PR the city owns.
-#   p<N>: pullRequest(number:<N>){ number url state isDraft headRefName headRefOid
-#     baseRefName mergeStateStatus isInMergeQueue isMergeQueueEnabled mergedAt
-#     mergeCommit{oid} reviewDecision labels(first:20){nodes{name}}
-#     reviews(last:1){totalCount nodes{fullDatabaseId}}
-#     dismissed: reviews(states:[DISMISSED]){totalCount}
-#     comments(last:1){nodes{fullDatabaseId}}
-#     reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved}}
-#     commits(last:1){nodes{commit{oid checkSuites(first:20){pageInfo{hasNextPage}
-#       nodes{checkRuns(first:50,filterBy:{checkType:LATEST}){pageInfo{hasNextPage}
-#       nodes{name status conclusion isRequired(pullRequestNumber:<N>)}}}}}}} }
-gh api graphql -F query=@state.graphql
-# The allowance, at no cost.
+# The cheap question: one aliased field per owned PR.
+#   p<N>: pullRequest(number:<N>){ number state isDraft headRefOid baseRefName
+#     baseRef{target{oid}} updatedAt totalCommentsCount reviews{totalCount}
+#     dismissed: reviews(states:[DISMISSED]){totalCount} labels(first:20){nodes{name}}
+#     commits(last:1){nodes{commit{statusCheckRollup{state contexts{totalCount
+#       checkRunCountsByState{state count} statusContextCountsByState{state count}}}}}} }
+# The net: the same, less the counts, plus
+#     mergeStateStatus reviewDecision isInMergeQueue
+#     reviewThreads(first:100){totalCount pageInfo{hasNextPage} nodes{isResolved}}
+#     commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){
+#       pageInfo{hasNextPage} nodes{... on CheckRun{name status conclusion
+#       isRequired(pullRequestNumber:<N>)} ... on StatusContext{context state
+#       isRequired(pullRequestNumber:<N>)}}}}}}}
+# The one-PR update's conversation part:
+#     reviews(first:100){...} reviewThreads(first:100){... comments(first:100){...}}
+#     comments(first:100){...}
+gh api graphql -f query=@read.graphql
+# The cost of a query before running it.
+#   query{ rateLimit(dryRun:true){cost} ... }
 gh api rate_limit --jq '.resources | {graphql, core}'
 ```
