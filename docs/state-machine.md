@@ -367,8 +367,10 @@ failure, which closes the loop as a recorded `passed: false` does
 ([The machine axis](#the-machine-axis)).
 
 **Asks.** Work the PR's branch needs, or a check owed at its next head, is an
-ask: an open task with no route and no assignee that blocks the bead by its own
-edge, names the branch, and may name checks in `review_checks`. `gctk review
+ask: an open task with no assignee, neither of Gas City's routes
+(`gc.routed_to`, `gc.execution_routed_to`) and no `task_kind`, that blocks the
+bead by its own edge, names the branch, and may name checks in
+`review_checks`. `gctk review
 ask` files one, and finds an ask of the same source and reason first, open or
 closed, so a re-run files nothing. The refinery's requeue of a PR on the record,
 `pr-facts.sh`'s conflict, red-check and feedback arms, a sitting's send-back,

@@ -326,7 +326,9 @@ func TestAClearedRunFailedOrLoopExhaustedGateGetsOneMoreRun(t *testing.T) {
 
 // An open human gate on the bead keeps the order from pouring until it
 // closes, and so does a sitting's open conversation, whose sitting may be
-// editing the branch, and an open rework child on the branch.
+// editing the branch, and an open rework child on the branch, assigned or, as
+// a fix unit whose workflow Gas City's sling started, unassigned with its
+// execution route while its steps are claimed.
 func TestAGateASittingOrAnotherWriterKeepsTheRunOffTheBranch(t *testing.T) {
 	d := newAdmit(t)
 	d.gate(t, "tk-q1", "review-question-scope")
@@ -358,6 +360,20 @@ func TestAGateASittingOrAnotherWriterKeepsTheRunOffTheBranch(t *testing.T) {
 	is(t, o, pr.ActChecked)
 	if f.runs.count() != 0 || !strings.Contains(o.Detail, "tk-kid") {
 		t.Fatalf("a rework child on the branch let the order pour: %d runs (%s)", f.runs.count(), o.Detail)
+	}
+
+	g := newAdmit(t)
+	g.store.Put(fake.Bead{ID: "tk-fix", Title: "Rework PR#1: address signoff findings", Status: "open", IssueType: "task",
+		Metadata: map[string]string{"branch": branch, "task_kind": "rework", "anchor_bead": bead,
+			"gc.routed_to": "", "gc.execution_routed_to": "rig/gc-toolkit.polecat"}})
+	g.edit(t, func(b *fake.Bead) {
+		b.Edges = append(b.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: "tk-fix", Status: "open"})
+	})
+	g.store.List(bead, "tk-fix")
+	o = g.once(t)
+	is(t, o, pr.ActChecked)
+	if g.runs.count() != 0 || !strings.Contains(o.Detail, "tk-fix works") {
+		t.Fatalf("a fix unit whose workflow the sling started let the order pour: %d runs (%s)", g.runs.count(), o.Detail)
 	}
 }
 

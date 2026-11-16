@@ -607,9 +607,11 @@ shares only the word ([authority-map.md](authority-map.md)).
   `services/gctk/review/keys.go`, on the task an ask is. Its writer: `FileAsk`
   in `services/gctk/review/ask.go`, which the `ask` verb of
   `services/gctk/internal/cli/review.go` runs. Its readers, which know an ask
-  by its shape: `isAsk`, `IsAsk`, `AsksOn` and `AsksIn` in the same file, and
+  by its shape: `isAsk`, `IsAsk`, `AsksOn` and `AsksIn` in the same file,
   `writers` in `services/gctk/pr/admit.go`, which leaves an ask out of a
-  branch's other writers. Its close: `Record` in
+  branch's other writers, and `refinery_ask` in
+  `assets/scripts/refinery-lib.sh`, which applies the same rule to the beads
+  the refinery reads. Its close: `Record` in
   `services/gctk/review/result.go`, which the loop's check runs through the
   `passed` verb's `--record`.
 - **Stands in for.** A request held on a pull request's bead for the review run
@@ -634,7 +636,13 @@ shares only the word ([authority-map.md](authority-map.md)).
   - The rest of an ask is native: a task bead, a blocks edge onto the PR's
     bead filed in the same create, the `branch` key the record declares, a
     discovered-from edge to the bead it came from, and no route or assignee.
-    The search is asks in
+    Gas City's sling stamps `gc.execution_routed_to` on a work bead whose
+    workflow it started, clears its `gc.routed_to` and `gc.run_target`, and
+    leaves the bead unassigned while the workflow's steps are claimed
+    (`restampWorkBeadRouting` in `internal/sling/sling_core.go`, read at
+    `gastownhall/gascity` main d2254b579682), so an ask carries neither route,
+    and never the role key `task_kind` that a rework child carries. The search
+    is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
 - **Verified.** 2026-11-15, at `gastownhall/gascity` main 294079d53f57, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`

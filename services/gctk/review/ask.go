@@ -13,12 +13,18 @@ import (
 
 // An ask is a request for a change on a PR's branch, or for a check at its next
 // head: a task bead that blocks the bead that owns the PR by its own edge,
-// names the PR's branch in `branch`, and carries no route and no assignee, so
-// no pool claims it and the review run is the one that works it. Its
-// description is its reason, a discovered-from edge names the bead it came
-// from when it came from one, and review_checks names the checks it sends
-// back. It has no parent, because an ask filed under the bead it blocks would
-// read held through that bead for as long as it stays open.
+// names the PR's branch in `branch`, and carries no assignee, no route and no
+// role, so no pool claims it and the review run is the one that works it. The
+// route is either of Gas City's, gc.routed_to, which a pool claims by, and
+// gc.execution_routed_to, which its sling stamps on a work bead whose workflow
+// it started and which stays while that bead is unassigned and its steps are
+// claimed. The role is task_kind, which a rework child carries and an ask never
+// does. refinery-lib.sh's refinery_ask applies the same rule to the beads the
+// refinery reads, and a test runs that definition over the beads this one
+// classifies. An ask's description is its reason, a discovered-from edge names
+// the bead it came from when it came from one, and review_checks names the
+// checks it sends back. It has no parent, because an ask filed under the bead
+// it blocks would read held through that bead for as long as it stays open.
 //
 // A run can take an ask only when nothing holds it, which `gctk bead holds`
 // reads as clear. Every reader of an ask here applies that one test, so an ask
@@ -125,15 +131,16 @@ func AsksIn(l *ledger.Ledger, owner *ledger.Record, rows []*ledger.Record) ([]As
 }
 
 // IsAsk reports whether r, a bead that names a PR's branch, is an ask on that
-// PR: a task that names the branch, with no route and no assignee. A bead of
-// another shape that names the branch is work of its own on it.
+// PR: a task that names the branch, with no assignee, no route and no role. A
+// bead of another shape that names the branch is work of its own on it.
 func IsAsk(r *ledger.Record, branch string) bool { return isAsk(r, branch) }
 
 // isAsk reports whether r, a bead the PR's bead waits on, is an ask on the PR
-// whose branch is branch: a task that names that branch, with no route and no
-// assignee.
+// whose branch is branch: a task that names that branch, with no assignee, no
+// route of either kind and no role.
 func isAsk(r *ledger.Record, branch string) bool {
-	return r.IssueType() == "task" && view(record.Branch, r) == branch && r.Assignee() == "" && str(routedKey, r) == ""
+	return r.IssueType() == "task" && view(record.Branch, r) == branch && r.Assignee() == "" &&
+		str(routedKey, r) == "" && str(executionRoutedKey, r) == "" && str(roleKey, r) == ""
 }
 
 // splitChecks reads a comma list of check names, each once and in order.

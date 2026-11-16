@@ -56,12 +56,16 @@ REFINERY_UNSENT_JQ="$DISPATCH_PATH_JQ"'
 '
 
 # An ask on a bead's PR (`gctk review ask`): an open task that names the bead's
-# branch, with no assignee, no route and no task_kind. The review run works it,
-# and it holds the PR's merge through its own blocks edge onto the bead. The
-# refinery leaves it alone: it is neither a wait that keeps the refinery from
-# taking the bead nor a writer of the bead's branch, so a head the landing order
-# sent back with an ask open is still validated and published, and the order
-# pours the run that takes the ask once the record names that head.
+# branch, with no assignee, no route and no task_kind. The route is either of
+# Gas City's, gc.routed_to or gc.execution_routed_to, which its sling leaves on
+# a work bead whose workflow it started. services/gctk/review/ask.go's isAsk
+# applies the same rule, and its test runs this definition over the beads isAsk
+# classifies. The review run works it, and it holds the PR's merge through its
+# own blocks edge onto the bead. The refinery leaves it alone: it is neither a
+# wait that keeps the refinery from taking the bead nor a writer of the bead's
+# branch, so a head the landing order sent back with an ask open is still
+# validated and published, and the order pours the run that takes the ask once
+# the record names that head.
 #   jq "$REFINERY_ASK_JQ"' map(select(refinery_ask($branch))) '
 # shellcheck disable=SC2034  # read by the scripts that source this file
 REFINERY_ASK_JQ='
@@ -72,6 +76,7 @@ REFINERY_ASK_JQ='
       and (($m.branch // "") | tostring) == $branch
       and ((.assignee // "") | tostring) == ""
       and (($m["gc.routed_to"] // "") | tostring) == ""
+      and (($m["gc.execution_routed_to"] // "") | tostring) == ""
       and (($m.task_kind // "") | tostring) == "";
 '
 

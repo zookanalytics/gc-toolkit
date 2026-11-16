@@ -187,6 +187,15 @@ writer of its own.
   of its own. **Not covered** for an ask, which must stay unrouted so the run is
   the branch's one writer. tk-1tfzr71.21's join can file the monitor's repair work
   in the ask's shape.
+- **Telling an ask from a writer on the branch.** Read at `gastownhall/gascity`
+  main d2254b579682: `restampWorkBeadRouting` in `internal/sling/sling_core.go`
+  stamps `gc.execution_routed_to` on a work bead whose graph workflow the sling
+  started and clears its `gc.routed_to` and `gc.run_target`, and the work bead
+  stays unassigned while the workflow's steps are claimed, so a fix unit on the
+  branch carries no `gc.routed_to` and no assignee. **Composed**: an ask
+  carries neither route, no assignee and no `task_kind`, the role a rework child
+  carries, one rule `isAsk` in `services/gctk/review/ask.go` and `refinery_ask`
+  in `assets/scripts/refinery-lib.sh` both apply.
 - **`review_checks`**, the checks an ask sends back, is a new metadata key. Nothing
   upstream records on a bead which checks a later run must run.
 

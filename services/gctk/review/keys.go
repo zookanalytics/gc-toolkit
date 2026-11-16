@@ -41,6 +41,13 @@ var (
 			"triage, lanes and rule-and-repair each write theirs in the shape the review domain declares.")
 	routedKey = ledger.ReadOnly("gc.routed_to", ledger.String,
 		"An ask carries none, so no pool claims it and the review run is the one that works it.")
+	executionRoutedKey = ledger.ReadOnly("gc.execution_routed_to", ledger.String,
+		"The route Gas City's sling stamps on a work bead whose workflow it started, which stays while the bead "+
+			"is unassigned and its workflow's steps are claimed. An ask carries none, so a bead that names a PR's "+
+			"branch and carries one is work of its own on the branch.")
+	roleKey = ledger.ReadOnly("task_kind", ledger.String,
+		"A bead's role (lifecycle/lifecycle.toml). An ask carries none, so a bead that names a PR's branch and "+
+			"carries one, such as a rework child, is work of its own on the branch.")
 	prBeadVar = ledger.ReadOnly("gc.var.pr_bead", ledger.String,
 		"A review run's pr_bead var: the bead that owns the PR the run judges.")
 	headVar = ledger.ReadOnly("gc.var.head", ledger.String,

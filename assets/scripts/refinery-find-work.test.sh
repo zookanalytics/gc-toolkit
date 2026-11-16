@@ -214,6 +214,12 @@ ask k '{"gc.routed_to":"rig-a/gc-toolkit.polecat"}'
 echo "p k" > "$STUB_HOLDS"
 run
 eq "$RC" 3 "a routed bead on the branch is no ask, and still holds the bead"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+ask k '{"gc.execution_routed_to":"rig-a/gc-toolkit.polecat"}'
+echo "p k" > "$STUB_HOLDS"
+run
+eq "$RC" 3 "a bead on the branch whose workflow Gas City's sling started is no ask, and still holds the bead"
 
 echo "# a bead the old path's cadence drives is left and named"
 fresh
