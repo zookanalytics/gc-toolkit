@@ -174,13 +174,26 @@ What reads the receipts:
   read. The review threads waiting on the city's answer stay as they are
   (`awaiting`, through `gc_thread_awaits_answer`).
 - **The approval withdrawal.** `unrouted` (`services/gctk/pr/feedback.go`,
-  through `services/gctk/pr/withdraw.go`) becomes the inline comments carried
-  by the approvals the withdrawal would dismiss that are feedback and untaken,
-  read in the withdrawal's own read. So a withdrawal still waits until the
-  intake has taken every comment a dismissal would retire.
+  through `services/gctk/pr/withdraw.go`) becomes the untaken feedback posts of
+  the approvals the withdrawal would dismiss: each approval's own message and
+  its inline comments, read with their marks in the withdrawal's own read. A
+  dismissal retires both: the definition counts no dismissed review's message,
+  and it leaves out a dismissed review's inline comments (`live_comments`). So
+  a withdrawal still waits until the intake has taken every post a dismissal
+  would retire. The message is in that set because a withdrawal can act before
+  the intake reads the approval. Today the landing order's run carries a
+  withdrawal ahead of its whole read (`carry` before every `observeAlone` in
+  `services/gctk/pr/landing.go`), and tk-1tfzr71.149's pass acts on a
+  withdrawal in the first pass that reaches its record, whether or not that
+  pass reads the PR whole
+  ([its section 8](../tk-1tfzr71.149/design.md#8-the-review-lanes-effort)).
+  Without the message in the set, an approval that says "approved, but rename
+  X" and carries no inline comment would be dismissed for a material newer
+  head before the intake takes it, and its request would be lost.
 - **The approving review's message.** `countedReviewStates` gains `APPROVED`,
   so an approval that carries text is a post like any review's
-  ([the merge design's section 3, case 1](../tk-1tfzr71.66/design.md#3-how-an-approval-behaves-when-the-pr-changes)).
+  ([the merge design's section 3, case 1](../tk-1tfzr71.66/design.md#3-how-an-approval-behaves-when-the-pr-changes)),
+  and the withdrawal above waits on it while it is untaken.
 
 **Why marks on GitHub, not keys on the bead.** The mark is the city's own act
 on the post, read in the same read as the post, so the receipt and what it
@@ -658,7 +671,7 @@ wait on it. Each gets a row. "The retirement" is the bead section 12 files.
 | The arm's keys (11-13) | made moot: the intake reads no arm key |
 | The one-day quiet window (11-13) | made moot: on the record no gate is filed for feedback, since every post becomes an ask |
 | The review-lanes design's three things (11-14) | carried: the ask is the form, and units 2 and 4 move the run's ruling onto it |
-| The withdrawal reads the new marks (11-15) | carried, unit 2: `unrouted` |
+| The withdrawal reads the new marks (11-15) | carried, unit 2: `unrouted`, over each approval's own message as well as its inline comments |
 | tk-os61zl6 (11-15) | carried, unit 2, on the record |
 | The board's ruling (11-15) | carried: the saved read is the one copy |
 | The supersession check asked on a rewrite (11-15) | carried, unit 5: the skill's conflict rule |
@@ -736,7 +749,7 @@ effort, on the default branch.
 | # | Unit | What it builds | Waits on |
 |---|---|---|---|
 | 1 | feat(pr): define the city's taken mark beside its handled mark, and keep what a dismissal retires in the definition of feedback | `gc_city_taken` in `pr-post.sh`'s definition, and `live_comments` moved there from `review-dismissal.sh`, so `feedback-def` no longer sources that file; `review-dismissal.sh` keeps `pr_coords`, `approval_phrase` and `unrouted_comment_ids`; `review-dismissal.test.sh` and `pr-post.test.sh` follow; the "Unanswered review threads" warrant re-verified | nothing |
-| 2 | feat(gctk): take each person's post on a PR as its own ask, with the city's marks as receipts | in gctk's pr domain: the whole read reads the marks; the act files one ask per untaken post and marks it 👀; the saved read's `untaken`; the evaluator's condition per untaken post; `unrouted` over the marks; an approval's message counted; `pr_provenance_since` stamped by the landing order; `prstatus.Render` reads a PR with an untaken post or an open post ask as working; `prio_pr_approved` reads the saved read's approvers on the record; `pr-facts.sh` stops routing, posting, recording a posture and writing a conversation on the record. Tests: a late review below the newest id is taken; a post whose mark failed is taken again with no second ask; an edited post is not filed twice; an approval's message becomes an ask; a run merges over no untaken post; the withdrawal waits on an untaken comment; the rank on the record; working ahead of merging. The "Saved GitHub read" warrant re-verified | unit 1, and tk-1tfzr71.149 landing on main with the effort's branch brought current |
+| 2 | feat(gctk): take each person's post on a PR as its own ask, with the city's marks as receipts | in gctk's pr domain: the whole read reads the marks; the act files one ask per untaken post and marks it 👀; the saved read's `untaken`; the evaluator's condition per untaken post; `unrouted` over the marks, with each approval's own message among the posts it waits on; an approval's message counted; `pr_provenance_since` stamped by the landing order; `prstatus.Render` reads a PR with an untaken post or an open post ask as working; `prio_pr_approved` reads the saved read's approvers on the record; `pr-facts.sh` stops routing, posting, recording a posture and writing a conversation on the record. Tests: a late review below the newest id is taken; a post whose mark failed is taken again with no second ask; an edited post is not filed twice; an approval's message becomes an ask; a run merges over no untaken post; the withdrawal waits on an untaken inline comment; a withdrawal for a material newer head that acts before the intake has taken the message of an approval with no inline comment waits, and dismisses the approval in a later run once the intake has taken it; the rank on the record; working ahead of merging. The "Saved GitHub read" warrant re-verified | unit 1, and tk-1tfzr71.149 landing on main with the effort's branch brought current |
 | 3 | feat(gctk): convert the old path's receipts on a bead that moves onto the record | at a bead's first whole read on the record, while it carries `pr-facts.sh`'s watermarks, answered marks or batch ledgers: the city's 👀 on every feedback post at or below them, each unresolved thread that holds only the city's own posts resolved, each open human finding's post filed as its ask and the finding closed as superseded by it, and the old keys unset in the write that saves the read. Tests: each old key converted; a post at or below a watermark marked and filed nothing; a post above it taken; a human finding superseded by its post's ask; a thread of the city's own resolved and a person's left alone; a bead with no old keys untouched | unit 2 |
 | 4 | feat(review): answer each person's post where it was made, in the round that rules it | `review-run.sh post`, in rule-and-repair, replies in a thread and resolves it, puts 👍, leaves a question's thread open with its gate named, and asks again for the review of a person whose request for changes stands once the round has answered every ask from their reviews, each reply found again by a marker naming its ask; part 6 of the step's text in `mol-pr-review.toml` names the answers; the loop's check makes no GitHub call, and its call to `finding.sh close-answered` goes; `review-run.sh finding` and the prepare read's human findings go; the review-ruling skill's batch paragraph replaced, a post read at its URL, and a comment that answers a question closes its gate; the landing order pours a run for a post taken after the run's own question gates; `review-run.test.sh`'s defer case on a target other than `main`; `pr-post.test.sh` reads the reaction names from the Go writer. Tests: each ruling's answer by post kind; a post run again posts nothing twice; an answer that does not land exits 1 and leaves its ask open; a run poured behind a question gate for a newer post, and none behind any other gate | unit 2 |
 | 5 | feat(gctk): route a PR's red checks and conflicts from the landing order's read | the pass's read gains the suites' status and creation time; the acts of [section 4](#4-red-checks-and-conflicts) with their gates and their withdrawal; the skill's conflict rule; `pr-facts.sh` stops its conflict and red-check arms on the record. Tests: a code failure's ask and both bounds; a non-code failure re-run once, after its run finished, and a gate only when approved; a gate withdrawn when the checks pass; the stuck suite toggled once and then gated; a conflict ask only on an approved PR that nothing holds | unit 2, and tk-1tfzr71.149 landing on main |
@@ -825,6 +838,12 @@ builds its own unit 1 after the review-lanes effort.
 - **gctk's reads** (`services/gctk/internal/gh/gh.go`): inline comments carry
   `reactionGroups { content viewerHasReacted }`, and reviews and conversation
   comments do not.
+- **The withdrawal's place in a run** (`services/gctk/pr/landing.go`): an open
+  PR's run calls `carry`, which carries out each open withdrawal by dismissing
+  the approvals that stand on a commit without its head, before any
+  `observeAlone`, its whole read. `unrouted` reads only the inline comments
+  those approvals carry, and `countedReviewStates` holds `COMMENTED` and
+  `CHANGES_REQUESTED` (`services/gctk/pr/feedback.go`).
 - **The ask** (`services/gctk/review/ask.go`): a task that blocks the PR's bead,
   names its branch, has no route, assignee or role, and is found again by the
   same reason and source, open or closed. The head's comment shows an ask by
