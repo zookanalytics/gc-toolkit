@@ -658,14 +658,15 @@ except the tests on this PR. Gas City's facts are in
   comments, reviews and inline comments, and 5 seconds later on one review. On
   #1497 and #1524, a conversation comment edited after the PR's last other
   change (04:40:17Z after 04:38:43Z, and 23:14:18Z after 22:49:45Z) set the
-  PR's `updatedAt` to the edit's second. Of 529 edited posts on the last 40 PRs
-  here and the last 30 or 40 of seven public repositories, 4 were later than
-  their PR's `updatedAt` when read, all in one public repository. A review
-  edited at 17:08:20Z, 3 seconds after its PR's last change, left `updatedAt` at
-  17:08:17Z, read again at 17:16:38Z. A conversation comment edited 1 second
-  after its PR's last change had not moved it a minute later, when a review's
-  edit at 17:10:02Z moved it to 17:10:03Z. The fourth was read seconds after its
-  edit and edited again before a second read.
+  PR's `updatedAt` to the edit's second. Of 529 edited posts read on the 40
+  most recently updated PRs here and the 30 or 40 most recently updated in each
+  of seven public repositories, 4 were later than their PR's `updatedAt` when
+  read, all in one public repository. A review edited at 17:08:20Z, 3 seconds
+  after its PR's last change, left `updatedAt` at 17:08:17Z, read again at
+  17:16:38Z. A conversation comment edited 1 second after its PR's last change
+  had not moved it a minute later, when a review's edit at 17:10:02Z moved it to
+  17:10:03Z. The fourth was read seconds after its edit and edited again before
+  a second read.
 - **The net's read.** On the busiest repository's open PRs, three runs at each
   size, with each post's time and the threads 10 a page: 1.97 to 3.00 seconds at
   5 for 1 point, and 2.81 to 3.48 at 10 and 3.53 to 5.00 at 15 for 2 points, no
