@@ -855,9 +855,10 @@ nothing and exits 2 for the next tick, and a rig whose roster names no refinery
 has no record to read. The order acts only on pending records, so on a rig
 still on the old path it finds none.
 
-Each run takes up to 20 beads that carry the marker `pr_reconcile_pending`,
-the least recently checked first (`pr_last_checked_at`), and starts none after
-four minutes (its `--count` and `--budget`). It reads each PR from GitHub by its
+Each run takes up to 20 beads that carry the marker `pr_reconcile_pending`, or
+that the refinery holds on the record with a ruling's disposition on them, the
+least recently checked first (`pr_last_checked_at`), and starts none after four
+minutes (its `--count` and `--budget`). It reads each PR from GitHub by its
 number, never from a list of open PRs, because a PR missing from that list can
 have closed without merging.
 
@@ -867,6 +868,7 @@ have closed without merging.
 | open at another head | sends the bead back to the refinery, open, as `pull_request_head_changed`. The refinery validates the new head and records it pending again. When it will not land the head as it stands, such as on a conflict with the target, it files the reason as an ask and then records the PR pending at the head its prep read (`refinery-requeue.sh`), so the ask holds the merge before the head is pending, a later run pours the review run that answers it, and its find-work leaves the ask alone |
 | merged at the validated head, with the merge commit on the freshly fetched target | records `mr_merged` and closes the bead; when bd refuses that close, for an open child or a live blocker, records the exception `pull_request_merged_close_refused` with the merge's evidence, and files its human gate |
 | closed unmerged, merged at another head, or no longer the PR the record names | records the exception, keeps the bead blocked and files a human gate keyed by its value |
+| retired by a ruling, whose bead carries the disposition `pr-dispose.sh` records before it closes the PR | requests no merge, pours no review run and marks nothing ready while the PR is open. Once the PR has closed and no review run is attached, it closes the asks and the withdrawals still open on the bead, then, with the record lock free, closes the bead onto the ruling's successor through `bead-rehome.sh`, run as the refinery ([state-machine.md](state-machine.md#disposition)). A close the script holds, such as one the ruling's open conversation holds, is tried again by the next run. A retired PR that merged all the same lands as any other |
 | a lookup or a fetch that failed, or a merge commit not yet on the target | records why in `pr_reconcile_error`, and the next run reads it again |
 
 **Withdrawals come first.** While the PR is open, a run first carries out each

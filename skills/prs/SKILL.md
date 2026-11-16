@@ -161,23 +161,30 @@ instead (the waits skill), and never file it under the anchor (the work skill).
 
 The message is that the PR will not land because its work moved, is not needed,
 or is wrong. The writer records the disposition on the anchor and closes the
-PR, and the reconcile closes the anchor on its next pass through the
-disposition writer, `bead-rehome.sh`.
+PR, and the PR's closer then closes the anchor through the disposition writer,
+`bead-rehome.sh`: the reconcile on its next pass for an anchor at
+`merge_result=pull_request`, and the landing order on its next run for one on
+Gas Town's pending record (`pull_request_pending` or
+`pull_request_head_changed`). On the pending record the landing order requests
+no merge of the PR once the disposition is recorded, and it closes the asks and
+the approval withdrawals still open on the anchor, which no review run takes
+once the PR is closed.
 
 Writer: `"$(gc <binding> scripts-dir)/pr-dispose.sh" --anchor <anchor> --successor <bead> --kind not-needed --note "<why, one sentence>"`.
-The anchor must be open at `merge_result=pull_request`. Under `not-needed` the
-successor is the evidence that ruled the work out, such as the conversation
-where it was decided. Under `duplicate`, `folded`, `re-homed` and
-`fixed-upstream` it is the bead that carries the work now. Never close the PR
-by hand first: a PR closed with no disposition recorded reads as abandoned, and
-the reconcile files a human gate on the anchor asking whether to rework it or
-close it.
+The anchor must own an open PR: open at `merge_result=pull_request`, or not
+closed on the pending record. Under `not-needed` the successor is the evidence
+that ruled the work out, such as the conversation where it was decided. Under
+`duplicate`, `folded`, `re-homed` and `fixed-upstream` it is the bead that
+carries the work now. Never close the PR by hand first: a PR closed with no
+disposition recorded reads as abandoned, and the reconcile or the landing order
+files a human gate on the anchor asking whether to rework it or close it.
 
 A supplement still open on the PR keeps its `blocks` edge on the anchor, so the
 anchor's close waits until the supplement closes. Stop and close the supplement
 too (the work skill). An open human gate on the anchor holds its close the same
-way (`docs/finalize-gate.md`), so the reconcile closes the anchor once each
-gate is cleared.
+way (`docs/finalize-gate.md`), and so do the sitting's own conversation and a
+review run attached to the anchor, so the closer closes the anchor once each
+of them has closed.
 
 In a sitting, retire a PR only on the operator's ruling, and only through the
 sign-off writer: `--retire <kind>` on its `--ruled yes` call (the

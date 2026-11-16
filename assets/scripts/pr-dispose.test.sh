@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/pr-dispose.sh — the sanctioned path that
 # records a deliberate PR-close disposition on the open anchor and closes the
-# PR, so pr-facts.sh consummates the terminal close through bead-rehome.sh.
-# Covers: the marker stamped on an OPEN pull_request anchor;
+# PR, so the PR's closer consummates the terminal close through bead-rehome.sh.
+# Covers: the marker stamped on an OPEN pull_request anchor; the marker stamped
+# and the PR closed on an anchor on the pending record, pending or at a changed
+# head, with the landing order named as its closer, and a closed anchor or an
+# exception of that record refused;
 # --no-close-pr stamping only; the PR closed through gh when the anchor is open,
 # after a closing comment posted through pr-post.sh with the city's mark, which
 # gates the close; gh view, comment and close pinned to the anchor's own pr_url
@@ -121,6 +124,38 @@ out=$("$SUT" --anchor A5 --successor S5 --kind not-needed 2>&1); rc=$?
 eq "$rc" 1 "exits 1"
 has "$out" "bead-rehome.sh --origin A5" "names the direct disposition verb for a non-pull_request anchor"
 eq "$(meta A5 'gc.pr_close_disposition_kind')" "<absent>" "no marker stamped on the refused anchor"
+
+echo "# an anchor on the pending record: the marker is stamped and the PR closed, for the landing order"
+store "[$(anchor A30 100 | jq -c '.status = "blocked" | .metadata.merge_result = "pull_request_pending"'), $(succ S30)]"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --anchor A30 --successor S30 --kind not-needed 2>&1); rc=$?
+eq "$rc" 0 "exits 0"
+eq "$(meta A30 'gc.pr_close_disposition_kind')" "not-needed" "kind stamped"
+eq "$(meta A30 'gc.pr_close_disposition_successor')" "S30" "successor stamped"
+eq "$(bstatus A30)" "blocked" "the anchor is left as it stands: its close is the landing order's"
+has "$(cat "$STUB_GH_LOG")" "pr close 100" "the PR is closed"
+has "$out" "the landing order disposes A30" "names the landing order as the closer"
+
+echo "# …and one at a head the refinery has not validated yet"
+store "[$(anchor A31 101 | jq -c '.metadata.merge_result = "pull_request_head_changed"'), $(succ S31)]"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --anchor A31 --successor S31 --kind re-homed 2>&1); rc=$?
+eq "$rc" 0 "exits 0"
+eq "$(meta A31 'gc.pr_close_disposition_kind')" "re-homed" "kind stamped"
+eq "$(bstatus A31)" "open" "the anchor is left open"
+has "$(cat "$STUB_GH_LOG")" "pr close 101" "the PR is closed"
+
+echo "# a closed anchor, or an exception of the pending record, is refused, naming bead-rehome"
+for c in "A32 closed pull_request_pending" "A33 blocked pull_request_closed_unmerged"; do
+  set -- $c
+  store "[$(anchor "$1" 102 | jq -c --arg s "$2" --arg m "$3" '.status = $s | .metadata.merge_result = $m'), $(succ S32)]"
+  : > "$STUB_GH_LOG"
+  out=$("$SUT" --anchor "$1" --successor S32 --kind not-needed 2>&1); rc=$?
+  eq "$rc" 1 "$2 at $3 exits 1"
+  has "$out" "bead-rehome.sh --origin $1" "…naming the direct disposition verb"
+  eq "$(meta "$1" 'gc.pr_close_disposition_kind')" "<absent>" "…with no marker stamped"
+  hasnt "$(cat "$STUB_GH_LOG")" "pr " "…and no gh call"
+done
 
 echo "# a pull_request anchor with no parseable pr_url is refused before stamping"
 store "[{\"id\":\"A6\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"pull_request\",\"pr_number\":\"80\"}}, $(succ S6)]"
