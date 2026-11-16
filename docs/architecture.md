@@ -198,13 +198,11 @@ A converse sitting can take steps 4 and 5 itself, on the operator's ruling in
 the sitting, for a change whose next step is the operator's reaction.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a provider quota park, a `gc` build that moves the text the seed
+session dying, a `gc` build that moves the text the seed
 audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
 the cadence), or the landing order for a PR on the pending record, records PR
 events and files a human gate, the witness patrol
-recovers work orphaned by dead sessions, the `dog` pool is warrant executor for
-due-process recovery of wedged sessions (demand-scaled 0-2),
-`quota-park-nudge.sh` nudges a session parked behind a provider limit,
+recovers work orphaned by dead sessions,
 `witness-nudge.sh` gives a witness whose patrol pass stopped its next turn,
 `boot-health.sh` detects a wedged deacon (report-only by design),
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
@@ -213,6 +211,11 @@ branch calls, slings the one re-render of the default branch's
 `generated/seed-audit`. See [authority-map.md](authority-map.md). There is no
 healer category: writers complete their own transitions, so nothing
 reconstructs pack-written state after the fact.
+
+Gas City's controller recovers a pool seat that holds work and either goes
+quiet or is refused by its provider for a rate limit. It does not act on a pool
+seat that keeps printing while its work stands still, and the witness patrol
+files a finding on that seat. No part of the pack kills a stuck session.
 
 ## What the pack supplies and what a rig supplies
 

@@ -300,15 +300,15 @@ equal all go. The web page is the board's one view for people, and
 Gas City's orders keep the fleet clean: core's orphan sweep, reaper, wisp
 compaction, spawn-storm detection, convoy backstop and branch pruning, the
 controller's closed-bead worktree reaper, and the dolt pack's orders. The
-pack's patrols carry only judgment: the witness's HELP-mail triage, salvage and
-watch on the refinery's queue, and the deacon running `gc doctor` from an
-order. Patrol owns the warranted Dolt reclaim and suspended-store backup, and the
-reapers no native one covers: scratch and the review workspaces outside
-`.gc/worktrees/`.
+controller's work ladder recovers a stuck pool seat. The pack's patrols carry
+only judgment: the witness's HELP-mail triage, salvage, watch on the refinery's
+queue and finding on a pool seat that keeps printing while its work stands
+still, and the deacon running `gc doctor` from an order. Patrol owns the
+warranted Dolt reclaim and suspended-store backup, and the reapers no native one
+covers: scratch and the review workspaces outside `.gc/worktrees/`.
 
-The trade: the liveness census stops filing human gates, the incident ledger
-moves onto events and bead notes, and the dog's due process moves to the
-controller's stall handling or to Gas Town's dance (tk-1tfzr71.18 and .19).
+The trade: the liveness census stops filing human gates, and the incident
+ledger moves onto events and bead notes (tk-1tfzr71.19).
 
 The witness's target is Gas Town's witness. Each remaining difference names its
 reason and what ends it:
@@ -402,7 +402,7 @@ bd 1.3.2.
 
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
-| the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.18 to .22 |
+| the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.19 to .22 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
 | `pr-facts.sh` polling and its mirrored keys | the PR monitor and webhook receiver | tk-1tfzr71.21 |
 
@@ -480,12 +480,11 @@ the operator approves its design.
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
 | A | tk-1tfzr71.70 | the old merge path, once every rig's cutover has moved its PRs onto the pending record: `gctk merge` and the transition machine, `pr-open.sh`'s create, `pre-open-rebase.sh`, `merge-tail-report.sh` | 1,288, and the rows it adds |
 | A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record and the GitHub intake has landed: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, and the cutover script | 18,326, and the cutover script |
-| B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,838 |
-| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps, the salvage's branch context | 8,317 |
+| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, boot health, the copied patrol steps, the salvage's branch context | 9,290 |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,490 |
 
-The whole files that the migration members name come to 54k of
+The whole files that the migration members name come to 49k of
 the 220k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas and the sign-off. The page's own items below carry

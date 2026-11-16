@@ -1,7 +1,7 @@
 {{ define "watch-dispatched-work" }}
 ## Addressing: pools versus named agents
 
-A **pool** (polecat, polecat-codex, dog, proactive) takes a sling, which pours a
+A **pool** (polecat, polecat-codex, proactive) takes a sling, which pours a
 workflow its members claim:
 
 ```

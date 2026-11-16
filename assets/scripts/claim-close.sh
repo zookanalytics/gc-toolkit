@@ -18,8 +18,8 @@
 # formula name before that.
 #
 # A bead already closed is reported and exits 0, so a close whose call was
-# interrupted can be run again. A plain routed bead with no steps, such as a
-# dog's warrant, is refused like any other bead that is not <ref>.
+# interrupted can be run again. A plain routed bead with no steps is refused like
+# any other bead that is not <ref>.
 #
 # Callers: the close block of each formula step that runs this script, and the
 # polecat doctrine for a step inherited from core, whose text names no close.
