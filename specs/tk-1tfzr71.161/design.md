@@ -104,9 +104,11 @@ only where an act is due.
   at the head, its labels, and the signs that its feedback moved: the newest
   review's id, the number of reviews and of dismissed reviews, the newest
   conversation comment's id, the unresolved threads and the review decision.
-  The intake adds each check suite's status and creation time at the head, two
-  fields on nodes the read already returns, for the check that never reports
-  ([section 4](#4-red-checks-and-conflicts)).
+  The intake adds, on each check suite at the head, its status, its creation
+  time and the GitHub Actions run behind it with that run's attempt number
+  (`workflowRun { databaseId runAttempt }`), fields on nodes the read already
+  returns, for the re-run of a non-code failure and the check that never
+  reports ([section 4](#4-red-checks-and-conflicts)).
 - **The whole read** (`observe` in `services/gctk/pr/read.go`) reads the PR,
   its check suites, its reviews, the city's login, its review threads and its
   conversation comments. The intake adds the city's reactions on each review
@@ -352,14 +354,22 @@ The withdrawal of a red-check gate is never skipped:
   a fourth, as `pr-facts.sh`'s cap of three does today. A deploy's failure
   files a gate.
 - **A non-code failure,** one that timed out, was cancelled, failed to start or
-  wants an action. The order re-runs the failed jobs of its GitHub Actions run
-  once per head, and only once that run has finished, which its check suite's
-  status in the pass's read shows, since GitHub re-runs a run's failed jobs
-  only once the whole run has finished. The run's attempt number
-  (`run_attempt`, which the act reads from the run before it re-runs) says
-  whether it was re-run already, so no key records it. A failure after the
-  re-run files a gate (`pr-fix-noncode.<n>`) only on an approved PR, and an
-  unapproved one waits for its review.
+  wants an action. The order re-runs the failed jobs of each GitHub Actions run
+  that holds such a failure, once per head, and only once those runs have
+  finished, which their check suites' status in the pass's read shows, since
+  GitHub re-runs a run's failed jobs only once the whole run has finished.
+  A re-run keeps the run and its check suite and raises the run's attempt
+  number, so GitHub itself records it. The head reads re-run once a run at the
+  head that holds a required check shows an attempt above 1 on the suites in
+  the pass's read, whoever re-ran it, and no key records it. One run's own
+  attempt cannot bound the head, because each new run at a head starts at
+  attempt 1, and a head carries several: one for each workflow, and one more
+  each time an event starts a workflow again, such as an edit of the PR's
+  body, which starts this repository's pr-size workflow. A failure at a head
+  that reads re-run, a re-run GitHub refuses, and a failure outside any Actions
+  run each file a gate (`pr-fix-noncode.<n>`) only on an approved PR. An
+  unapproved PR waits for its review, and a refused re-run is asked for again
+  at its next pass, since nothing records the refusal.
 - **The gates withdrawn.** Each red-check gate on the bead closes as moot once
   the read shows every required check passing at the PR's head. The gate is
   named under its key by the order `human-gate.sh`'s dedup uses (created, then
@@ -391,8 +401,9 @@ of that code is resolved with the account.
 The notes of 2026-11-06 hold three rules for the re-run, and each is kept: a
 non-code failure is re-run once per head before a person is asked, it goes to a
 person only on an approved PR, and its park lifts once the PR reads mergeable.
-On the record the park is only the gate, which is withdrawn once the checks
-pass.
+The first is kept by the attempt numbers of the head's runs, where
+`pr-facts.sh` records the head in `pr_check_rerun`. On the record the park is
+only the gate, which is withdrawn once the checks pass.
 
 ## 5. The webhook
 
@@ -597,7 +608,7 @@ and nothing else mirrors GitHub state into bead metadata." Each key
 | `pr_comment_answered`, `pr_review_answered` | go | the same |
 | `pr_comment_batch`, `pr_review_batch`, `pr_issue_comment_batch`, `pr_comment_disposition` | go | each post's ask names it, and its own ruling answers it |
 | `pr_unengaged_threads` | goes | the old path's gate for unmarked threads under the city's login; no open bead carries it (2026-11-16), and the conversion resolves such threads |
-| `pr_check_rerun` | goes | the Actions run's attempt number says whether it was re-run |
+| `pr_check_rerun` | goes | the attempt numbers of the head's Actions runs, on the suites in the pass's read, say whether the head was re-run |
 | `status_label_clear_owed` | goes | tk-1tfzr71.149's label comparison retries any clear |
 | `pr_url`, which it writes beside `status_label_clear_owed` on a bead that names none | the write goes | the PR's URL is the record's own key (`services/gctk/pr/record`) |
 | `signoff_dismissed` | goes | no city request for changes stands to dismiss |
@@ -650,7 +661,7 @@ wait on it. Each gets a row. "The retirement" is the bead section 12 files.
 | Test cost (11-05) | carried, the retirement deletes `pr-facts.test.sh` |
 | Approval comments (11-05) | carried, unit 2: an approval's message is a post |
 | A follow-up read as fixed (11-06) | carried, unit 4: the answer is the ruling's reason, and a scheduled point is resolved |
-| tk-tx227cp's re-run rules (11-06, two notes) | carried, unit 5; the monitor's `CANCELED` spelling is moot, since no monitor runs |
+| tk-tx227cp's re-run rules (11-06, two notes) | carried, unit 5, with the head's run attempts in place of `pr_check_rerun`; the monitor's `CANCELED` spelling is moot, since no monitor runs |
 | A parked rework child keeps the branch (11-06) | carried, unit 5: no conflict ask while another open bead names the branch |
 | The suite's per-run limit (11-06) | carried: new tests are Go tests, outside `tools/run-tests.sh`'s 900-second limit, and every shell suite a unit changes stays within it in a loaded `-j9` wave |
 | bead-rehome exit 5 (11-07) | made moot on the record: a PR closed unmerged is the landing order's exception, and a recorded disposition there is tk-1tfzr71.89's |
@@ -752,7 +763,7 @@ effort, on the default branch.
 | 2 | feat(gctk): take each person's post on a PR as its own ask, with the city's marks as receipts | in gctk's pr domain: the whole read reads the marks; the act files one ask per untaken post and marks it 👀; the saved read's `untaken`; the evaluator's condition per untaken post; `unrouted` over the marks, with each approval's own message among the posts it waits on; an approval's message counted; `pr_provenance_since` stamped by the landing order; `prstatus.Render` reads a PR with an untaken post or an open post ask as working; `prio_pr_approved` reads the saved read's approvers on the record; `pr-facts.sh` stops routing, posting, recording a posture and writing a conversation on the record. Tests: a late review below the newest id is taken; a post whose mark failed is taken again with no second ask; an edited post is not filed twice; an approval's message becomes an ask; a run merges over no untaken post; the withdrawal waits on an untaken inline comment; a withdrawal for a material newer head that acts before the intake has taken the message of an approval with no inline comment waits, and dismisses the approval in a later run once the intake has taken it; the rank on the record; working ahead of merging. The "Saved GitHub read" warrant re-verified | unit 1, and tk-1tfzr71.149 landing on main with the effort's branch brought current |
 | 3 | feat(gctk): convert the old path's receipts on a bead that moves onto the record | at a bead's first whole read on the record, while it carries `pr-facts.sh`'s watermarks, answered marks or batch ledgers: the city's 👀 on every feedback post at or below them, each unresolved thread that holds only the city's own posts resolved, each open human finding's post filed as its ask and the finding closed as superseded by it, and the old keys unset in the write that saves the read. Tests: each old key converted; a post at or below a watermark marked and filed nothing; a post above it taken; a human finding superseded by its post's ask; a thread of the city's own resolved and a person's left alone; a bead with no old keys untouched | unit 2 |
 | 4 | feat(review): answer each person's post where it was made, in the round that rules it | `review-run.sh post`, in rule-and-repair, replies in a thread and resolves it, puts 👍, leaves a question's thread open with its gate named, and asks again for the review of a person whose request for changes stands once the round has answered every ask from their reviews, each reply found again by a marker naming its ask; part 6 of the step's text in `mol-pr-review.toml` names the answers; the loop's check makes no GitHub call, and its call to `finding.sh close-answered` goes; `review-run.sh finding` and the prepare read's human findings go; the review-ruling skill's batch paragraph replaced, a post read at its URL, and a comment that answers a question closes its gate; the landing order pours a run for a post taken after the run's own question gates; `review-run.test.sh`'s defer case on a target other than `main`; `pr-post.test.sh` reads the reaction names from the Go writer. Tests: each ruling's answer by post kind; a post run again posts nothing twice; an answer that does not land exits 1 and leaves its ask open; a run poured behind a question gate for a newer post, and none behind any other gate | unit 2 |
-| 5 | feat(gctk): route a PR's red checks and conflicts from the landing order's read | the pass's read gains the suites' status and creation time; the acts of [section 4](#4-red-checks-and-conflicts) with their gates and their withdrawal; the skill's conflict rule; `pr-facts.sh` stops its conflict and red-check arms on the record. Tests: a code failure's ask and both bounds; a non-code failure re-run once, after its run finished, and a gate only when approved; a gate withdrawn when the checks pass; the stuck suite toggled once and then gated; a conflict ask only on an approved PR that nothing holds | unit 2, and tk-1tfzr71.149 landing on main |
+| 5 | feat(gctk): route a PR's red checks and conflicts from the landing order's read | the pass's read gains each suite's status, creation time, and Actions run with its attempt; the acts of [section 4](#4-red-checks-and-conflicts) with their gates and their withdrawal; the skill's conflict rule; `pr-facts.sh` stops its conflict and red-check arms on the record. Tests: a code failure's ask and both bounds; a non-code failure re-run once per head after its runs finished, and not re-run again when a second run at that head, at attempt 1, fails; a re-run GitHub refuses and a failure outside any Actions run each gated; each non-code gate only when approved; a gate withdrawn when the checks pass; the stuck suite toggled once and then gated; a conflict ask only on an approved PR that nothing holds | unit 2, and tk-1tfzr71.149 landing on main |
 | 6 | docs: state the GitHub intake on the record, and move the cadence's rows | `docs/architecture.md`, `docs/refinery-merge-cadence.md`, `docs/state-machine.md`, `docs/gctk-architecture.md` (the `gctk pr owner` row out, the debt entry), `docs/built-once-target.md` (the replacement named for `pr-facts.sh`, lane A's rows), `tools/deletion-plan.tsv` (the rows of section 8 moved to tk-1tfzr71.122), `lifecycle/lifecycle.toml` (the old receipts written only on the old path), `services/gctk/README.md`; and the comparison of [section 11](#11-the-comparison-before-pr-factssh-retires), with its test in the pr package and its report | units 3, 4 and 5 |
 | R | refactor: retire pr-facts.sh and the GitHub intake's old path (outside the effort, target `main`) | its drain check: no open bead on the old path in any store, and none carrying the old receipt keys or an open human finding. Then it deletes `pr-facts.sh`, `review-answer.sh`, `record-failure-cap.sh`, `branch-supersession.sh`, the doctor check and their tests (16,399 lines with their tests at 713e3a733), and `lifecycle.sh` once no caller is left; removes arms 1, 4 and 7; removes the conversion, the comparison's test and `prio_pr_approved`'s posture clause; registers [section 9](#9-one-writer)'s keys retired; moves `prstatus` under the pr domain onto the ledger; rewrites every live line that names `pr-facts.sh` ([section 14](#14-the-files-that-name-pr-factssh)) | tk-1tfzr71.21, tk-1tfzr71.149, tk-1tfzr71.70, and every rig's cutover bead (tk-1tfzr71.78, .80 to .84) |
 
@@ -844,6 +855,13 @@ builds its own unit 1 after the review-lanes effort.
   `observeAlone`, its whole read. `unrouted` reads only the inline comments
   those approvals carry, and `countedReviewStates` holds `COMMENTED` and
   `CHANGES_REQUESTED` (`services/gctk/pr/feedback.go`).
+- **The head's runs** (GitHub's GraphQL schema by introspection, and the city's
+  repository, read 2026-11-16): a check suite names the Actions run behind it
+  (`CheckSuite.workflowRun`), and the run its attempt (`WorkflowRun.runAttempt`).
+  A re-run of a run's failed jobs keeps the run and its suite and raises the
+  attempt: at PR #1391's head 6e9b24b49, one suite holds the tests run
+  42114792210 at attempt 2, beside four pr-size runs at attempt 1, each started
+  by its own event.
 - **The ask** (`services/gctk/review/ask.go`): a task that blocks the PR's bead,
   names its branch, has no route, assignee or role, and is found again by the
   same reason and source, open or closed. The head's comment shows an ask by
