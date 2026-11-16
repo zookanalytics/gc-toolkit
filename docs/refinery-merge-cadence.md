@@ -912,10 +912,13 @@ when only conversations and asks hold the bead, the run wakes the refinery and
 nudges it, with `gc session wake` and `gc session nudge` as a polecat's
 hand-off does, before the write that clears the marker. That is the run that
 requeues the head when no withdrawal or run holds it, and otherwise the first
-run after the review run or the withdrawal ends, within the order's five
-minutes. A wake that does not land keeps the marker and says why in
-`pr_reconcile_error`, and the next run wakes the refinery again. The search for
-a Gas City primitive that covers the wake is
+run that reads the record after the review run or the withdrawal ends. The
+order starts a run every five minutes, but each run reads a bounded number of
+records and starts none after its budget (above), so while more records carry
+the marker than one run reads, the wake can come several runs after the review
+run ends. A wake that does not land keeps the marker and says why in
+`pr_reconcile_error`, and the next run that reads the record wakes the
+refinery again. The search for a Gas City primitive that covers the wake is
 [specs/tk-1tfzr71.165/gas-city-search.md](../specs/tk-1tfzr71.165/gas-city-search.md).
 
 A merge request binds only the head the evaluator judged, so a push that lands
