@@ -85,7 +85,7 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 	if by != "" {
 		return checked("no review run is poured while " + by + ": " + why)
 	}
-	writers, err := u.writers(s)
+	writers, err := u.writers(s.id, s.branch)
 	if err != nil {
 		return checked("no review run is poured, because the beads on " + s.branch + " did not read; the next run reads them: " + err.Error())
 	}
@@ -178,17 +178,17 @@ func isHumanGate(b *ledger.Record) bool {
 	return strings.EqualFold(b.IssueType(), "gate") && b.AwaitType() == "human"
 }
 
-// writers names the open beads other than the bead s read and its asks that
-// name its branch, each of them work of its own on the branch, such as a
-// rework child.
-func (u *run) writers(s state) ([]string, error) {
-	rows, err := u.Ledger.Find(record.OnBranch(s.branch))
+// writers names the open beads other than the bead id and its asks that name
+// branch, the bead's branch, each of them work of its own on the branch, such
+// as a rework child.
+func (l Landing) writers(id, branch string) ([]string, error) {
+	rows, err := l.Ledger.Find(record.OnBranch(branch))
 	if err != nil {
 		return nil, err
 	}
 	var out []string
 	for _, r := range rows {
-		if r.ID == s.id || r.Status() == "closed" || review.IsAsk(r, s.branch) {
+		if r.ID == id || r.Status() == "closed" || review.IsAsk(r, branch) {
 			continue
 		}
 		out = append(out, r.ID)
