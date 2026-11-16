@@ -303,7 +303,7 @@ closed bead of the rig's in a home's directory name
 `work_dir` and `pre_start` accept are upstream's
 ([config reference](https://docs.gascity.com/reference/config), `Agent`).
 
-A **city-scoped** agent (mechanik, deacon, dog) spans rigs and has no single
+A **city-scoped** agent (mechanik, deacon) spans rigs and has no single
 `{{.Rig}}`, so it stays under `.gc/agents/` and passes the repo explicitly on
 each call (`gh --repo <owner>/<rig>`, `git -C <rig-root>`). A rig-scoped agent
 that legitimately targets a fixed repo the same way (the gascity-keeper
@@ -538,7 +538,7 @@ and both scopes ship in one pack:
 
 | Agents | `scope` | Identity to stamp |
 | --- | --- | --- |
-| dog, deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
+| deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
 | converse-claude-opus, converse-claude-fable, converse-codex-sol, converse-codex-astra, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
 
 Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the

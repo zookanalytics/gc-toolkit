@@ -107,7 +107,7 @@ has "$OUT" "gc hook --claim --json" "the refusal says how to take the step"
 
 # --- a bead with no steps is refused, not closed --------------------------------
 seed; export FAKE_HOOK_CURRENT=plain
-run --step mol-dog-shutdown-dance.close
+run --step mol-polecat-work.implement
 eq "$RC" 2 "a plain routed bead refuses"
 eq "$(status_of plain)" in_progress "the plain bead stays as it was"
 
@@ -224,9 +224,9 @@ for st in d.get("steps", []):
             bad.append("%s names %s" % (st["id"], ref))
     # A step that names no close of its own leaves its successors blocked, and a
     # later step's close refuses while the claim is still on it. work-submit.sh
-    # closes submit-and-exit, and a plain warrant has no steps for the dance to close.
+    # closes submit-and-exit.
     text = st.get("description", "")
-    if (formula, st["id"]) != ("mol-polecat-work", "submit-and-exit") and formula != "mol-dog-shutdown-dance" \
+    if (formula, st["id"]) != ("mol-polecat-work", "submit-and-exit") \
             and not re.search(r'claim-close\.sh"? --step|\$SC"? --step|\$\{SC:\?[^}]*\}"? --step', text):
         bad.append("%s names no close" % st["id"])
 print("%d|%s" % (calls, "; ".join(bad)))

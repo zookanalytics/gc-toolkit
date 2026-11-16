@@ -267,7 +267,7 @@ gc config show | grep -E '^\[\[agent\]\]|^name ='
 ```
 
 Confirm the native roster is present — `polecat`, `polecat-codex`,
-`refinery`, `witness`, `deacon`, `dog`, `converse-claude-opus`,
+`refinery`, `witness`, `deacon`, `converse-claude-opus`,
 `converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra`,
 `mechanik` — with no gastown entries.
 

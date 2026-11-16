@@ -21,8 +21,7 @@ it.
 **Boundaries.** The rule and the tests that decide what needs a warrant are
 [foundation.md](foundation.md#boundaries), and the arch check holds a change to
 them ([review-arch.md](review-arch.md)). A pack noun missing from this page has
-no warrant. The `warrant` bead the `dog` pool executes to stop a wedged session
-shares only the word ([authority-map.md](authority-map.md)).
+no warrant.
 
 ## An entry
 
@@ -263,8 +262,8 @@ shares only the word ([authority-map.md](authority-map.md)).
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-10, at `gastownhall/gascity` main f1f75f53c and
-  `gastownhall/gascity-packs` main c6f0a9aa6. The config reference's `[github]`
+- **Verified.** 2026-11-16, at `gastownhall/gascity` main 437715530 and
+  `gastownhall/gascity-packs` main 0f07496d2. The config reference's `[github]`
   table declares pull-request monitors, whose `authors` allow-list scopes the
   pull requests a monitor acts on, and scopes no agent's writes. GitHub's
   *Managing your personal access tokens* page was read on 2026-11-05.

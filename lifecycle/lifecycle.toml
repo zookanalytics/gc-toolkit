@@ -1670,13 +1670,15 @@ keys = ["seed_audit_reaudit"]
 #   statuses, so a branch owns at most one live re-audit. Never cleared. A branch
 #   name.
 
-# Warrant beads (label=warrant, routed to the dog pool): the due-process kill
-# request a patrol detector files against a live-but-wedged session
-# (docs/authority-map.md; formulas/mol-dog-shutdown-dance.toml). Renamed from
-# the pre-rewrite bare target/reason/requester — bare `target` collides with
-# the merge_identity key above.
+# Warrant beads (label=warrant): the kill request a patrol filed against a live
+# session, for the dog pool's shutdown dance. The pack has neither now, since
+# Gas City's work ladder recovers a stuck pool seat.
 [metadata.warrant]
 keys = ["warrant.target", "warrant.reason", "warrant.requester"]
+# warrant.target / warrant.reason / warrant.requester — RETIRED. The session a
+#   warrant named, why the patrol filed it, and the patrol the dance answered
+#   when it finished. Nothing writes or reads them now. Registered so that
+#   residue on a pre-retirement bead reads as known, not as a stray.
 
 [metadata.deferred_dispatch]
 # The arm itself, gc.dispatch_when_ready and its _args, _armed_by, _armed_at,

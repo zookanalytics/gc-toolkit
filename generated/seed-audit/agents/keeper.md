@@ -306,7 +306,7 @@ commit is the operator running `git rebase --skip` in the worktree first.
 
 ## Addressing: pools versus named agents
 
-A **pool** (polecat, polecat-codex, dog, proactive) takes a sling, which pours a
+A **pool** (polecat, polecat-codex, proactive) takes a sling, which pours a
 workflow its members claim:
 
 ```
