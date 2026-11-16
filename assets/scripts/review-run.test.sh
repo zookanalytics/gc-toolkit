@@ -13,7 +13,9 @@
 # writing nothing for an output gctk refuses, a shadow round handing gctk its
 # writes; triage's withdrawal; the push returning the PR to draft before it
 # pushes, with a lease on the head the round judged, pushing nothing when the
-# draft does not answer or the branch moved, and nothing in a shadow run; the
+# draft does not answer or the branch moved, weighing a failed push by the
+# branch on origin (landed, unmoved and to run again, moved, or not read), and
+# nothing in a shadow run; the
 # post of the head's comment, or the edit of the one its mark finds, nothing
 # when there is nothing to answer, and nothing in a shadow run; a deferred fix
 # filed with its wait on the PR's bead in its create, and armed, found rather
@@ -221,6 +223,42 @@ gw reset -q --hard "$HEAD1"; echo other > "$WT/f"; gw commit -q -am other
 run push
 eq "$RC" 1 "a push onto a branch that moved from the judged head does not land"
 eq "$(git -C "$TMP/origin.git" rev-parse polecat/tk-pr)" "$FIX" "and the branch keeps what is there"
+has "$OUT" "moved from $HEAD1, the head the round judged, to $FIX" "and it names where the branch moved"
+# A push that fails is weighed by the branch on origin: commits an earlier call
+# landed read as pushed, a refusal that left the branch at the judged head runs
+# again, and so does an origin that does not answer.
+facts review-loop.iteration.1.rule-and-repair repair 1
+gw reset -q --hard "$FIX"
+run push
+eq "$RC" 0 "a push whose commits an earlier call landed reads as pushed"
+eq "$(printf '%s\n' "$OUT" | tail -n 1)" "$FIX" "and prints the head on origin"
+# Origin takes the commits and still answers with a failure, as a push whose
+# connection drops after the update does: the hook moves the branch itself,
+# outside the push's quarantine, then refuses.
+git -C "$TMP/origin.git" update-ref refs/heads/polecat/tk-pr "$HEAD1"
+printf '%s\n' '#!/bin/sh' 'unset GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES' \
+    'while read -r old new ref; do git update-ref "$ref" "$new"; done' 'exit 1' > "$TMP/origin.git/hooks/pre-receive"
+chmod +x "$TMP/origin.git/hooks/pre-receive"
+run push
+eq "$RC" 0 "a push that failed after its commits landed reads as pushed"
+eq "$(git -C "$TMP/origin.git" rev-parse polecat/tk-pr)/$(printf '%s\n' "$OUT" | tail -n 1)" "$FIX/$FIX" "and prints the head origin holds"
+has "$OUT" "so the repair's commits are there" "and says why it reads the failure as a push"
+git -C "$TMP/origin.git" update-ref refs/heads/polecat/tk-pr "$HEAD1"
+printf '#!/bin/sh\nexit 1\n' > "$TMP/origin.git/hooks/pre-receive"; chmod +x "$TMP/origin.git/hooks/pre-receive"
+run push
+eq "$RC" 2 "a push origin refused while the branch stayed at the judged head exits 2, to run again"
+eq "$(git -C "$TMP/origin.git" rev-parse polecat/tk-pr)" "$HEAD1" "and the branch stays at the head"
+has "$OUT" "still at $HEAD1" "and it says the branch did not move"
+rm -f "$TMP/origin.git/hooks/pre-receive"
+run push
+eq "$RC" 0 "run again, the push lands"
+eq "$(git -C "$TMP/origin.git" rev-parse polecat/tk-pr)" "$FIX" "onto the PR's branch"
+git -C "$TMP/origin.git" update-ref refs/heads/polecat/tk-pr "$HEAD1"
+git -C "$TMP/rig" remote set-url origin "$TMP/nowhere.git"
+run push
+eq "$RC" 2 "a push to an origin that does not answer exits 2, to run again"
+git -C "$TMP/rig" remote set-url origin "$TMP/origin.git"
+git -C "$TMP/origin.git" update-ref refs/heads/polecat/tk-pr "$FIX"
 facts review-loop.iteration.1.rule-and-repair repair 1 true
 : > "$WS/repair/shadow-writes.txt"
 run push

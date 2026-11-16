@@ -38,7 +38,10 @@
 #       withdraw the approvals a material head leaves behind (gctk pr withdraw)
 #   review-run.sh push                            [rule-and-repair]
 #       return the PR to draft (gctk pr draft), then push the repair's commits
-#       onto the PR's branch with a lease on the head the round judged
+#       onto the PR's branch with a lease on the head the round judged. A push
+#       that fails is weighed by the branch on origin: at the repair's head it
+#       landed, at the judged head nothing moved (exit 2, run it again), and at
+#       any other commit the branch moved (exit 1)
 #   review-run.sh post                            [rule-and-repair]
 #       post the head's comment (gctk review comment), or edit the one its mark
 #       finds, through pr-post.sh
@@ -328,8 +331,20 @@ cmd_push() {
         3) die 3 "gctk pr draft refused, so nothing is pushed" ;;
         *) die 2 "the PR may still be ready, so nothing is pushed" ;;
     esac
-    git -C "$wt" push --quiet --force-with-lease="refs/heads/$BRANCH:$HEAD" origin "HEAD:refs/heads/$BRANCH" \
-        || die 1 "the push onto $BRANCH did not land: the branch may have moved from $HEAD"
+    if ! git -C "$wt" push --quiet --force-with-lease="refs/heads/$BRANCH:$HEAD" origin "HEAD:refs/heads/$BRANCH"; then
+        # git exits non-zero both for a lease the branch no longer matches and
+        # for a push that never reached origin, so the branch on origin says
+        # which: only a branch at another commit means the run's head is gone.
+        local at
+        at=$(git -C "$wt" ls-remote origin "refs/heads/$BRANCH") \
+            || die 2 "the push onto $BRANCH did not land, and the branch on origin did not read, so nothing says it moved from $HEAD: run it again"
+        at=$(printf '%s' "$at" | cut -f1)
+        case "$at" in
+            "$new") echo "$PROG: the push reported a failure, and $BRANCH is at $new on origin, so the repair's commits are there" >&2 ;;
+            "$HEAD") die 2 "the push onto $BRANCH did not land, and the branch is still at $HEAD, the head the round judged: run it again" ;;
+            *) die 1 "the push onto $BRANCH did not land: the branch moved from $HEAD, the head the round judged, to ${at:-no commit, deleted}" ;;
+        esac
+    fi
     echo "$new"
 }
 

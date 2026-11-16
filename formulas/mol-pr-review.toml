@@ -184,11 +184,14 @@ call prints for the ruling:
 **4. Push the round's fixes.** The call returns the PR to draft first, and
 pushes onto the branch only while it is at the head the round judged:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" push`
-It prints the head it pushed. Exit 1: the branch moved from the head the round
-judged, so the run's head is gone. Cancel the run, and the landing order pours
-one at the new head:
+It prints the head it pushed, and prints it too when an earlier push of these
+commits already landed. Exit 1: the branch on origin moved from the head the
+round judged to another commit, so the run's head is gone. Cancel the run, and
+the landing order pours one at the new head:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the PR's branch moved past the head the round judged"`
-Exit 2: the PR may still be ready and nothing was pushed: run it again.
+Exit 2: nothing was pushed, because the PR may still be ready, or the push did
+not reach origin, whose branch is still at the head the round judged or did
+not read: run it again.
 
 **5. Write the output** to `output.json` in the repair's part of the workspace:
 `review` reading `repair`, the `head` the round judged, `rulings` with one
