@@ -353,12 +353,11 @@ result. At the iteration that ends the loop, a pass or the loop's last attempt,
 it writes the run's result for the last head it judged and the target, a
 `{head, target, passed, run}` entry in the bead's `review_results`, `run`
 naming the run's root, under the store's record lock, before the loop closes.
-`passed` is true only when the
-iteration passed and no gate the run filed is open. A loop that spent its
-attempts records `passed: false` and files a human gate keyed
-`review-loop-exhausted`, and a loop that a step's hard failure closed runs no
-check and records nothing. A record that does not land exits 75 as well. The
-evaluator counts a result only for the PR's live head and target.
+`passed` is true only when the iteration passed and no gate the run filed is
+open. A loop that spent its attempts records `passed: false` and files a human
+gate keyed `review-loop-exhausted`, and a loop that a step's hard failure
+closed runs no check and records nothing. A record that does not land exits 75
+as well. The evaluator counts a result only for the PR's live head and target.
 A run that ends without a result is poured again, and a second such run at the
 same head files a human gate keyed `review-run-failed`. A closed run counts as
 one that recorded its result only while the entry for its last head and target
@@ -370,15 +369,15 @@ failure, which closes the loop as a recorded `passed: false` does
 ask: an open task with no assignee, neither of Gas City's routes
 (`gc.routed_to`, `gc.execution_routed_to`) and no `task_kind`, that blocks the
 bead by its own edge, names the branch, and may name checks in
-`review_checks`. `gctk review
-ask` files one, and finds an ask of the same source and reason first, open or
-closed, so a re-run files nothing. The refinery's requeue of a PR on the record,
-`pr-facts.sh`'s conflict, red-check and feedback arms, a sitting's send-back,
-and a must-fix point a sitting or the mechanik puts on another open PR each file
-one. A run takes an ask only while `gctk bead holds` reads it clear, so an ask
-that waits on other work starts no round and spends no attempt, and holds the PR
-by its own edge until a run takes it. The loop's check closes each ask the run
-answered as it records the result, with the runtime's work record.
+`review_checks`. `gctk review ask` files one, and finds an ask of the same
+source and reason first, open or closed, so a re-run files nothing. The
+refinery's requeue of a PR on the record, `pr-facts.sh`'s conflict, red-check
+and feedback arms, a sitting's send-back, and a must-fix point a sitting or the
+mechanik puts on another open PR each file one. A run takes an ask only while
+`gctk bead holds` reads it clear, so an ask that waits on other work starts no
+round and spends no attempt, and holds the PR by its own edge until a run takes
+it. The loop's check closes each ask the run answered as it records the result,
+with the runtime's work record.
 
 **What the run reads of the check index and of `check_set`.** The index is the
 pack's `review-checks.toml` with the rows of the rig's own laid over it, which

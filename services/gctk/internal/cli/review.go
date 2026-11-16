@@ -291,14 +291,14 @@ is the loop's last attempt by the run's max_attempts var and does not pass,
 which Gas City then closes as exhausted. The result is {head, target, passed,
 run} for the last head the run judged and the run's target, run naming the
 run's root, in review_results on the bead that owns the PR, under the store's
-record lock, replacing the entry for the same head and target. It passes only when the iteration passed and no gate
-the run put a question to is open. Each ask the round at that head answered,
-ruled declined, deferred or answered, closes with its work record: shipped with
-the commit of the run's must-fix ruling of it, else no-op. At an exhausted loop
-it asks a person through a review-loop-exhausted gate on the bead
-(human-gate.sh), and it closes each person's finding whose ask closed
-(finding.sh close-answered), both from the scripts directory GCTK_SCRIPTS_DIR
-names. A shadow run (its shadow var reads true) writes and files nothing, and
+record lock, replacing the entry for the same head and target. It passes only
+when the iteration passed and no gate the run put a question to is open. Each
+ask the round at that head answered, ruled declined, deferred or answered,
+closes with its work record: shipped with the commit of the run's must-fix
+ruling of it, else no-op. At an exhausted loop it asks a person through a
+review-loop-exhausted gate on the bead (human-gate.sh), and it closes each
+person's finding whose ask closed (finding.sh close-answered), both from the
+scripts directory GCTK_SCRIPTS_DIR names. A shadow run (its shadow var reads true) writes and files nothing, and
 the command prints what it would have written. A record that does not land
 exits 75, so Gas City runs the check again without spending an attempt, and the
 retry replaces the same entry.

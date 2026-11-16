@@ -24,15 +24,15 @@ type Result struct {
 
 // The run's one write on the bead that owns the PR is its result for the last
 // head it judged and its target, an entry that names the run, which the loop's
-// check writes as it closes the loop, so no step of the run records it. The check records at the iteration
-// that ends the loop: one that passed, or the loop's last attempt, which Gas
-// City closes as exhausted when it does not pass. The result passes only when
-// the iteration passed and no gate the run filed is open, so a loop that
-// stopped on a question gets a result that does not pass while the question's
-// gate stays open, and an exhausted loop gets one that does not pass and asks
-// a person. A loop a step's hard failure ended runs no check and gets no
-// result, as does a run cancelled before its loop ended and a run that judged
-// no head.
+// check writes as it closes the loop, so no step of the run records it. The
+// check records at the iteration that ends the loop: one that passed, or the
+// loop's last attempt, which Gas City closes as exhausted when it does not
+// pass. The result passes only when the iteration passed and no gate the run
+// filed is open, so a loop that stopped on a question gets a result that does
+// not pass while the question's gate stays open, and an exhausted loop gets one
+// that does not pass and asks a person. A loop a step's hard failure ended runs
+// no check and gets no result, as does a run cancelled before its loop ended
+// and a run that judged no head.
 
 // LoopExhaustedKey keys the human gate the loop's check files on the bead that
 // owns the PR when the loop exhausts its attempts with no passed head.
