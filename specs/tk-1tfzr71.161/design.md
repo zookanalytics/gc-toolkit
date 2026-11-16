@@ -1,6 +1,6 @@
 ---
 name: Design — GitHub intake moves into the landing order's one read, and pr-facts.sh retires
-description: The design for tk-1tfzr71.161, the design child of initiative tk-1tfzr71.21, read at main 713e3a733, at the landing-order design in PR #1533's head 4d796d181, and against Gas City upstream main 76a06b2327 and gascity-packs main 0f07496d2f. A person's review, inline comment or conversation comment on a city PR becomes one ask on the PR's bead in the landing order's pass that reads it, the city's marks on GitHub are the receipts, the review run's record answers each post where it was made, and red checks and conflicts are acts of the same pass. It settles the read the intake works from, the receipts, the form of a person's comment, red checks and conflicts, the webhook, the write-back, the old path, the cadence's arms, the keys pr-facts.sh writes, what each held note and bead becomes, the comparison before the retirement, and the units the implementation child files. Read it to approve the design at its gate, or to build one of its units.
+description: The design for tk-1tfzr71.161, the design child of initiative tk-1tfzr71.21, read at main 713e3a733, at the landing-order design in PR #1533's head 4d796d181, and against Gas City upstream main 76a06b2327 and gascity-packs main 0f07496d2f. A person's review, inline comment or conversation comment on a city PR becomes one ask on the PR's bead in the landing order's pass that reads it, the city's marks on GitHub are the receipts, the review run's round that rules each post answers it where it was made, and red checks and conflicts are acts of the same pass. It settles the read the intake works from, the receipts, the form of a person's comment, red checks and conflicts, the webhook, the write-back, the old path, the cadence's arms, the keys pr-facts.sh writes, what each held note and bead becomes, the comparison before the retirement, and the units the implementation child files. Read it to approve the design at its gate, or to build one of its units.
 ---
 
 # Design: GitHub intake moves into the landing order's one read, and pr-facts.sh retires
@@ -31,8 +31,8 @@ this design replaces it for every PR on Gas Town's pending record:
   the landing order's pass that first reads it, and the city marks the comment
   👀 on GitHub. The review run rules it as it rules any ask: it fixes it,
   declines or defers it with a reason, answers it, or asks you through a gate.
-  When the run ends it answers the comment where it was made, with a reply in
-  an inline comment's thread and the thread resolved, or a 👍 where nothing
+  The round that rules it answers the comment where it was made, with a reply
+  in an inline comment's thread and the thread resolved, or a 👍 where nothing
   more is owed. A question stays open until you answer it, and a later comment
   that answers it closes its gate.
 - **The city's marks on GitHub are the receipts.** A comment is taken once it
@@ -97,7 +97,8 @@ The intake reads GitHub only through the landing order's pass, which
 tk-1tfzr71.149 builds: one request per repository that reads every PR the city
 owns, and a whole read of a PR only when what it found there moved
 ([that design's sections 1 to 3](../tk-1tfzr71.149/design.md#1-what-makes-a-pr-changed)).
-It adds no request of its own.
+It adds no request to the pass: its other GitHub calls are its acts, each made
+only where an act is due.
 
 - **The pass's read** holds, for each owned PR, its state, its required checks
   at the head, its labels, and the signs that its feedback moved: the newest
@@ -154,7 +155,7 @@ definition of feedback reads:
 | Mark | Put by | Says |
 |---|---|---|
 | 👀 (`EYES`) | the intake, once the post's ask is filed | the city has the post and owes it an answer |
-| 👍 (`THUMBS_UP`) | the review run's record, once the post's ask closes with nothing more owed | the city owes the post nothing more |
+| 👍 (`THUMBS_UP`) | the review run's rule-and-repair step, in the post that answers its round, once it rules the post's ask with nothing more owed | the city owes the post nothing more |
 
 A feedback post that carries neither is **untaken**. The definition stays one
 copy, in `assets/scripts/pr-post.sh`, which gctk reads through its feedback
@@ -222,7 +223,8 @@ bead removes the conversion once no open bead carries the keys
 (`gctk review ask`, `FileAsk` in `services/gctk/review/ask.go`): a review that
 carries a message, an inline comment, or a conversation comment. The ask's
 reason is one line naming the post: its kind, its author, the PR, an inline
-comment's file and line, and its URL. It is the ask the review-lanes design
+comment's file and the line it was made on (`originalLine`, which a later push
+does not move), and its URL. It is the ask the review-lanes design
 gives work on a PR's branch
 ([its section 1](../tk-1tfzr71.108/design.md#asks-work-on-the-prs-branch)), so
 no bead kind comes with it.
@@ -278,9 +280,9 @@ Each maps onto a ruling of the post's ask:
 
 | The operator's end | The ruling | What the PR shows |
 |---|---|---|
-| Act on it: fix it and mark it resolved | must-fix, with the commit that fixes it | the head's comment names the commit, and the record replies in the thread and resolves it once a judged head carries the fix |
-| Rule on it: ignore or decline it, and resolve it | declined, deferred or answered | the head's comment gives the reason, and the record replies and resolves, or puts 👍 where nothing was asked |
-| Talk to a human | question, with its gate | the gate asks you, the record replies naming it, and the thread stays open until you answer |
+| Act on it: fix it and mark it resolved | must-fix, with the commit that fixes it | the head's comment names the commit, and the round that rules it answered at a head carrying the fix replies in the thread and resolves it |
+| Rule on it: ignore or decline it, and resolve it | declined, deferred or answered | the head's comment gives the reason, and the round's post replies and resolves, or puts 👍 where nothing was asked |
+| Talk to a human | question, with its gate | the gate asks you, the round's post replies naming it, and the thread stays open until you answer |
 
 The same words say "a PR with new comments added, goes from whatever state it's
 in to working". On the record `prstatus.Render` reads an approved PR whose only
@@ -292,10 +294,11 @@ needs-attention there.
 
 **Room for tk-ileeqzz.** That bead asks triage to answer a comment that needs
 only an answer, with no ruling step. With one ask per comment, triage can rule
-one ask alone and leave the rest to the ruling step, and the record answers any
-ask that closed, whoever ruled it. What tk-ileeqzz still needs is its own:
-triage's ruling in its output, the pass rule and the result writer reading it,
-and a round that ends without the ruling step.
+one ask alone and leave the rest to the ruling step. What tk-ileeqzz still
+needs is its own: triage's ruling in its output, the pass rule and the result
+writer reading it, a round that ends without the ruling step, and triage's post
+of that answer, since the step that rules a post answers it
+([section 6](#6-the-write-back)) and triage posts nothing today.
 
 ## 4. Red checks and conflicts
 
@@ -329,18 +332,21 @@ The withdrawal of a red-check gate is never skipped:
   `FAILURE`, and whose name is not a deploy's, gets an ask naming the PR, the
   head, the failing checks with their run logs and the branch to fix, the
   reason `pr-facts.sh` gives its record-path ask today, one per head. Two
-  bounds read the bead's red-check asks, open or closed: a closed ask at this
-  head with the PR still red there files a gate (`pr-fix-unmoved.<n>`) in place
-  of a second ask, and three distinct heads that each drew an ask without the
-  PR going green file a gate (`pr-fix-capped.<n>`). A deploy's failure files a
-  gate.
+  bounds read the bead's red-check asks, open or closed, each of which names
+  its head: a closed ask at this head with the PR still red there files a gate
+  (`pr-fix-unmoved.<n>`) in place of a second ask, and a red head after three
+  earlier heads each drew an ask files a gate (`pr-fix-capped.<n>`) in place of
+  a fourth, as `pr-facts.sh`'s cap of three does today. A deploy's failure
+  files a gate.
 - **A non-code failure,** one that timed out, was cancelled, failed to start or
   wants an action. The order re-runs the failed jobs of its GitHub Actions run
-  once per head, and only once that run has no job queued or running, since
-  GitHub re-runs a run's failed jobs only once the whole run has finished. The
-  run's attempt number says whether it was re-run already, so no key records
-  it. A failure after the re-run files a gate (`pr-fix-noncode.<n>`) only on an
-  approved PR, and an unapproved one waits for its review.
+  once per head, and only once that run has finished, which its check suite's
+  status in the pass's read shows, since GitHub re-runs a run's failed jobs
+  only once the whole run has finished. The run's attempt number
+  (`run_attempt`, which the act reads from the run before it re-runs) says
+  whether it was re-run already, so no key records it. A failure after the
+  re-run files a gate (`pr-fix-noncode.<n>`) only on an approved PR, and an
+  unapproved one waits for its review.
 - **The gates withdrawn.** Each red-check gate on the bead closes as moot once
   the read shows every required check passing at the PR's head. The gate is
   named under its key by the order `human-gate.sh`'s dedup uses (created, then
@@ -408,40 +414,46 @@ effort.
 ## 6. The write-back
 
 The intake keeps one act on GitHub, the 👀 that takes a post. The review run's
-record makes the answers, because the record is the step of the work that
-knows what the round fixed, declined, deferred or asked. The rest goes.
+rule-and-repair step makes the answers, in the post that already answers its
+round in the head's comment (`review-run.sh post`, part 6 of the step in
+`formulas/mol-pr-review.toml`), because it is the step of the work that rules
+what the round fixed, declined, deferred or asked. The loop's check, which
+records the run's result, cannot make them: Gas City runs it with HOME set to
+the city's directory and a whitelist of variables that carries no GitHub token
+(`ConditionEnv.Environ` in `internal/convergence/condition.go`), so gh has no
+login there, and `gctk review passed` reads only the store. The rest goes.
 
 | Act today | What becomes of it |
 |---|---|
 | 👀 on each routed post (`pr-facts.sh`'s sweep) | the intake, right after the post's ask is filed |
-| A reply in an inline comment's thread with its answer | the record, for each post ask its round closed or put to a person |
-| Resolving the thread | the record, behind the reply its own read shows, for a closed ask; a question's thread stays open |
-| 👍 where nothing more is owed | the record, on a post its ask closed with nothing asked, and on each review message and conversation comment whose ask closed, whose answer is the head's comment |
+| A reply in an inline comment's thread with its answer | the round's post, for each post's ask the round ruled declined, deferred or answered, or put to a person |
+| Resolving the thread | the round's post, behind the reply its own read shows, for an ask the round ruled; a question's thread stays open |
+| 👍 where nothing more is owed | the round's post, on a post whose ask it ruled with nothing asked, and on each review message and conversation comment whose ask it ruled, whose answer is the head's comment |
 | One living answer per review (`review-answer.sh`) | goes: the head's comment (`gctk review comment`) shows each ask's ruling |
-| Dismissing a person's request for changes once every point is answered | goes, and the record asks for the person's review again once the last ask from their review closes |
+| Dismissing a person's request for changes once every point is answered | goes, and the round's post asks for the person's review again once the round has answered every ask from their reviews while their request for changes stands |
 | Dismissing the city's own superseded request for changes | goes: no open PR carries one (0 of 27 in the city's six repositories, 2026-11-16 05:31Z), and the sign-off posts a review that comments |
 | Posting an old-path machine finding to the PR | goes with the old path |
 
-**Bounds.** The record answers until 90 seconds into its check, whose limit is
-two minutes (`mol-pr-review.toml`), and then exits 75, so Gas City runs the
-check again without spending an attempt, within the loop's twenty such re-runs
-(`maxCheckInfraRetries` in `internal/dispatch/ralph.go`). Each answer is found
-again by the city's mark, which names its ask, so a re-run posts nothing twice.
-An ask closes only once its answer is on the PR. The check runs in the
-controller's environment, which the landing order's GitHub calls use already,
-and unit 4 checks that it reaches GitHub there.
+**Bounds.** Each reply carries a marker that names its ask, as the head's
+comment carries one that names its run and head
+(`services/gctk/review/comment.go`), and a 👍 is found by the city's own
+reaction, so a post run again posts nothing twice. A write that does not land
+exits 1, as the head's comment does today, and the step's exit criteria keep it
+open until the post lands. The loop's check closes the asks a round answered
+only after that round's step has closed, so an ask closes only once its answer
+is on the PR.
 
 **The thread rules from PR #1492's reworks,** recorded in tk-1tfzr71.21's notes
 of 2026-11-13, each kept:
 
-- Resolve every thread the city rules on behind its answer: the record.
-- Keep a needs-you thread open until its gate is ruled: the record leaves a
-  question's thread open.
+- Resolve every thread the city rules on behind its answer: the round's post.
+- Keep a needs-you thread open until its gate is ruled: the round's post
+  leaves a question's thread open.
 - Route a reply in a thread the city resolved as feedback: a new post carries
   no mark, so the intake takes it.
 - File no gate that mirrors GitHub's thread state: no thread gate exists.
 - Resolve a ruled thread only behind an owed reply the same read shows, never
-  on a stored stamp (tk-4g6ra0p): the record resolves after reading its reply.
+  on a stored stamp (tk-4g6ra0p): the post resolves after reading its reply.
 - A post whose own ruling declined or deferred it is answered by that ruling
   (tk-a4j0uiu): each post is its own ask, answered by its own ruling.
 - Resolve a declined or deferred machine finding's thread on any PR
@@ -454,8 +466,8 @@ it through `gc_city_handled`. `pr-post.test.sh` reads the two reaction names
 from `pr-facts.sh` (`WB_REACTION`, `WB_RESOLVED_REACTION`), and unit 4 points
 that check at the constants in the Go writer.
 
-Three other notes on the write-back are met by the record's answer being the
-ruling's reason. A point that went to a follow-up is answered with the
+Three other notes on the write-back are met by each answer being the ruling's
+reason. A point that went to a follow-up is answered with the
 follow-up, never as fixed, and its thread is resolved, as the operator said on
 2026-11-06: "resolve the comment if it's scheduled, that's more than sufficient
 for the city to resolve it". A declined lane finding has its answer beside its
@@ -523,10 +535,11 @@ So the driver outlives this member: after the retirement it drives the old
 review path's last arms, which close the residue that tk-1tfzr71.122's drain
 check counts. Its rows (`refinery-reconcile.sh` with its test, and
 `orders/refinery-reconcile.toml`) move to tk-1tfzr71.122, which deletes it with
-those arms. `pace-lib.sh` and its test move there too: its sourcers are
-`gate-ensure.sh`, `pr-open.sh` and `pre-open-rebase.sh`, and once
-tk-1tfzr71.70 has deleted `pre-open-rebase.sh` and the old-path walks of
-`pr-open.sh`, `gate-ensure.sh` is the last. The retirement removes arms 1, 4
+those arms. `pace-lib.sh` and its test move there too: besides `pr-facts.sh`,
+its sourcers are `gate-ensure.sh`, `pr-open.sh` and `pre-open-rebase.sh`, and
+once tk-1tfzr71.70 has deleted `pre-open-rebase.sh` and the old-path walks of
+`pr-open.sh`, and the retirement has deleted `pr-facts.sh`, `gate-ensure.sh` is
+the last. The retirement removes arms 1, 4
 and 7 and what is left of the block that holds the merge on the posture.
 
 **The order of the three retirements** is tk-1tfzr71.70, then this member's
@@ -573,6 +586,7 @@ and nothing else mirrors GitHub state into bead metadata." Each key
 | `pr_unengaged_threads` | goes | the old path's gate for unmarked threads under the city's login; no open bead carries it (2026-11-16), and the conversion resolves such threads |
 | `pr_check_rerun` | goes | the Actions run's attempt number says whether it was re-run |
 | `status_label_clear_owed` | goes | tk-1tfzr71.149's label comparison retries any clear |
+| `pr_url`, which it writes beside `status_label_clear_owed` on a bead that names none | the write goes | the PR's URL is the record's own key (`services/gctk/pr/record`) |
 | `signoff_dismissed` | goes | no city request for changes stands to dismiss |
 | `merged_sha` and `merge_record_failures` in its merged arm, `blocked_reason` in its abandoned and retargeted parks | go with the old path | on the record the landing order writes a bead's end and files its exceptions |
 | `pr_provenance_since` | stays, written by the landing order | a receipt of the city's own act |
@@ -609,17 +623,17 @@ wait on it. Each gets a row. "The retirement" is the bead section 12 files.
 | Rule 1 list (10-26): tk-ickub0o, a thread files a visit while the PR waits for review | made moot: no thread files a visit or a gate on the record, and a person's open thread holds the PR through GitHub's merge state where the base requires resolved threads |
 | tk-mg42wc8, a second copy of "routed" | made moot: "taken" is one rule in the definition, read through one Go function by the intake, the evaluator and the withdrawal |
 | tk-icggxv, inline comments a visit carries are not linked to it | made moot: each comment is its own ask, which names it |
-| tk-l7dka5, the arms guard demands but not other blockers | carried: an ask waits on what holds the bead and the run takes it only when nothing holds it (`gctk bead holds`), and a conflict or red-check ask is not filed while a gate holds the bead |
+| tk-l7dka5, the arms guard demands but not other blockers | carried: the order pours a run only while nothing else writes the branch and no human gate holds the bead, a run takes an ask only when nothing holds the ask (`gctk bead holds`), and a conflict or red-check ask is not filed while a hold or a gate holds the bead |
 | tk-nfdq56, routing coupled to conflict state | made moot: posts are taken whatever the merge state, and a conflict is its own ask |
 | held: review reads the posture (10-28) | carried, unit 2: the evaluator's condition for each untaken post |
 | What a dismissal retires (10-28) | carried, unit 1: `live_comments` moves into `pr-post.sh` |
-| The 👍 mark (10-28) | carried, unit 4: the record puts it, and `pr-post.test.sh` reads its name from the Go writer |
+| The 👍 mark (10-28) | carried, unit 4: the round's post puts it, and `pr-post.test.sh` reads its name from the Go writer |
 | `gctk pr owner` (gctk domain move) | dropped on purpose: no webhook or monitor calls it, and the pass reads each PR from the bead that owns it, so the verb would have no caller; unit 6 removes its row from `docs/gctk-architecture.md` |
 | Built-once rule 1 (blocked census) | carried: the acts read holds through the waits package and compute none |
 | `gate_for` names a key's gate (10-30) | carried, unit 5: the red-check gates are named under their key by `human-gate.sh`'s order |
 | tk-306xmm6, tk-5g3y4ds, tk-ec0b012, tk-8njghcm, tk-qnn0yhx (10-30) | see the beads below; tk-8njghcm closed after PR #1492 |
 | `review-dismissal.sh`'s `pr_coords` for the sign-off (10-30) | made moot: `converse-signoff.sh` no longer sources the file (read 2026-11-16), and the file moves to tk-1tfzr71.122 |
-| tk-a8nb8wo, the city's own posts after a misread (11-03) | carried: nothing is taken while the login does not resolve, and every post the record makes carries the city's mark |
+| tk-a8nb8wo, the city's own posts after a misread (11-03) | carried: nothing is taken while the login does not resolve, and every post the run makes carries the city's mark |
 | Test cost (11-05) | carried, the retirement deletes `pr-facts.test.sh` |
 | Approval comments (11-05) | carried, unit 2: an approval's message is a post |
 | A follow-up read as fixed (11-06) | carried, unit 4: the answer is the ruling's reason, and a scheduled point is resolved |
@@ -628,10 +642,10 @@ wait on it. Each gets a row. "The retirement" is the bead section 12 files.
 | The suite's per-run limit (11-06) | carried: new tests are Go tests, outside `tools/run-tests.sh`'s 900-second limit, and every shell suite a unit changes stays within it in a loaded `-j9` wave |
 | bead-rehome exit 5 (11-07) | made moot on the record: a PR closed unmerged is the landing order's exception, and a recorded disposition there is tk-1tfzr71.89's |
 | Dispatch by sling (11-08) and `route_finishing` (11-08) | made moot: an ask is unrouted and the order pours the run, so no child or route is written |
-| Parks file their gate first (11-09) | carried, unit 5: on the record the gate is the park, so nothing else is written |
+| Parks file their gate first (11-09) | carried: on the record a PR closed unmerged or a moved base is the landing order's exception, whose gate the next run files when one did not (`blocked` in `services/gctk/pr/landing.go`), and a red-check park is only its gate (unit 5) |
 | An open conversation defers a conflict rework (11-09) | carried, unit 5: no conflict ask while a conversation's gate holds the bead |
 | A declined lane finding answered (11-10) | made moot by tk-1tfzr71.22: the head's comment answers it beside its lane's verdict |
-| A required check that never reports (11-11, 11-12, two notes) | carried, unit 5 |
+| A required check that never reports (11-11, and two notes of 11-12) | carried, unit 5; the second 11-12 note's monitor, which reads the case as any BLOCKED PR, is moot, since no monitor runs |
 | The merge design's take-over (11-12) | carried: units 2 to 5; the monitor's join dropped on purpose (decision 1); the driver's row moved ([section 8](#8-the-cadence-and-its-order)) |
 | `countedReviewStates` (11-12) | carried, unit 2 |
 | What the record path owes (11-12) | carried, units 2 and 5; the city's superseded request dropped on purpose, with no live case; the label reconcile is tk-1tfzr71.149's |
@@ -687,8 +701,14 @@ whether gctk's reads find every post. Those differences show over each PR's
 whole history at one moment better than over a window of new comments.
 
 So unit 6 runs the intake's take rule read-only over every open PR in every
-rig, through a one-shot program in its spec directory that calls the pr
-domain's whole read and take rule from the effort branch and writes nothing. It
+rig. It does so through a test in the pr package that is skipped unless its
+environment names the stores to read and the report to write, and that a
+person runs by hand on the effort branch. A program in the unit's spec
+directory cannot do it: the whole read and the GitHub adapter it calls are
+internal to gctk, and the domain's exported entry points read only beads on the
+record, while every open PR is on the old path. The test calls the whole read
+and the take rule on each PR an open old-path bead names, writes nothing to a
+store or to GitHub, and writes its report into the unit's spec directory. It
 compares each feedback post's two receipts: `pr-facts.sh`'s, a post at or
 below a watermark or answered mark or in a batch ledger, and the intake's, the
 city's 👀 or 👍 on it. Each post on which they differ needs a reason, such as a
@@ -715,13 +735,13 @@ effort, on the default branch.
 
 | # | Unit | What it builds | Waits on |
 |---|---|---|---|
-| 1 | fix(pr): define the city's taken mark beside its handled mark, and keep what a dismissal retires in the definition of feedback | `gc_city_taken` in `pr-post.sh`'s definition, and `live_comments` moved there from `review-dismissal.sh`, so `feedback-def` no longer sources that file; `review-dismissal.sh` keeps `pr_coords`, `approval_phrase` and `unrouted_comment_ids`; `review-dismissal.test.sh` and `pr-post.test.sh` follow; the "Unanswered review threads" warrant re-verified | nothing |
+| 1 | feat(pr): define the city's taken mark beside its handled mark, and keep what a dismissal retires in the definition of feedback | `gc_city_taken` in `pr-post.sh`'s definition, and `live_comments` moved there from `review-dismissal.sh`, so `feedback-def` no longer sources that file; `review-dismissal.sh` keeps `pr_coords`, `approval_phrase` and `unrouted_comment_ids`; `review-dismissal.test.sh` and `pr-post.test.sh` follow; the "Unanswered review threads" warrant re-verified | nothing |
 | 2 | feat(gctk): take each person's post on a PR as its own ask, with the city's marks as receipts | in gctk's pr domain: the whole read reads the marks; the act files one ask per untaken post and marks it 👀; the saved read's `untaken`; the evaluator's condition per untaken post; `unrouted` over the marks; an approval's message counted; `pr_provenance_since` stamped by the landing order; `prstatus.Render` reads a PR with an untaken post or an open post ask as working; `prio_pr_approved` reads the saved read's approvers on the record; `pr-facts.sh` stops routing, posting, recording a posture and writing a conversation on the record. Tests: a late review below the newest id is taken; a post whose mark failed is taken again with no second ask; an edited post is not filed twice; an approval's message becomes an ask; a run merges over no untaken post; the withdrawal waits on an untaken comment; the rank on the record; working ahead of merging. The "Saved GitHub read" warrant re-verified | unit 1, and tk-1tfzr71.149 landing on main with the effort's branch brought current |
 | 3 | feat(gctk): convert the old path's receipts on a bead that moves onto the record | at a bead's first whole read on the record, while it carries `pr-facts.sh`'s watermarks, answered marks or batch ledgers: the city's 👀 on every feedback post at or below them, each unresolved thread that holds only the city's own posts resolved, each open human finding's post filed as its ask and the finding closed as superseded by it, and the old keys unset in the write that saves the read. Tests: each old key converted; a post at or below a watermark marked and filed nothing; a post above it taken; a human finding superseded by its post's ask; a thread of the city's own resolved and a person's left alone; a bead with no old keys untouched | unit 2 |
-| 4 | feat(review): answer each person's post where it was made, once its ask closes | the record replies in a thread and resolves it, puts 👍, leaves a question's thread open with its gate named, and asks again for the review of a person whose last ask closed, within 90 seconds of its check and found again by its mark; the call to `finding.sh close-answered` goes; `review-run.sh finding` and the prepare read's human findings go; the review-ruling skill's batch paragraph replaced, a post read at its URL, and a comment that answers a question closes its gate; the landing order pours a run for a post taken after the run's own question gates; `review-run.test.sh`'s defer case on a target other than `main`; `pr-post.test.sh` reads the reaction names from the Go writer. Tests: each ruling's answer by post kind; a re-run posts nothing twice; an ask stays open while its answer does not land; a check that runs out of time exits 75; a run poured behind a question gate for a newer post, and none behind any other gate | unit 2 |
+| 4 | feat(review): answer each person's post where it was made, in the round that rules it | `review-run.sh post`, in rule-and-repair, replies in a thread and resolves it, puts 👍, leaves a question's thread open with its gate named, and asks again for the review of a person whose request for changes stands once the round has answered every ask from their reviews, each reply found again by a marker naming its ask; part 6 of the step's text in `mol-pr-review.toml` names the answers; the loop's check makes no GitHub call, and its call to `finding.sh close-answered` goes; `review-run.sh finding` and the prepare read's human findings go; the review-ruling skill's batch paragraph replaced, a post read at its URL, and a comment that answers a question closes its gate; the landing order pours a run for a post taken after the run's own question gates; `review-run.test.sh`'s defer case on a target other than `main`; `pr-post.test.sh` reads the reaction names from the Go writer. Tests: each ruling's answer by post kind; a post run again posts nothing twice; an answer that does not land exits 1 and leaves its ask open; a run poured behind a question gate for a newer post, and none behind any other gate | unit 2 |
 | 5 | feat(gctk): route a PR's red checks and conflicts from the landing order's read | the pass's read gains the suites' status and creation time; the acts of [section 4](#4-red-checks-and-conflicts) with their gates and their withdrawal; the skill's conflict rule; `pr-facts.sh` stops its conflict and red-check arms on the record. Tests: a code failure's ask and both bounds; a non-code failure re-run once, after its run finished, and a gate only when approved; a gate withdrawn when the checks pass; the stuck suite toggled once and then gated; a conflict ask only on an approved PR that nothing holds | unit 2, and tk-1tfzr71.149 landing on main |
-| 6 | docs: state the GitHub intake on the record, and move the cadence's rows | `docs/architecture.md`, `docs/refinery-merge-cadence.md`, `docs/state-machine.md`, `docs/gctk-architecture.md` (the `gctk pr owner` row out, the debt entry), `docs/built-once-target.md` (the replacement named for `pr-facts.sh`, lane A's rows), `tools/deletion-plan.tsv` (the rows of section 8 moved to tk-1tfzr71.122), `lifecycle/lifecycle.toml` (the old receipts written only on the old path), `services/gctk/README.md`; and the comparison of [section 11](#11-the-comparison-before-pr-factssh-retires) | units 3, 4 and 5 |
-| R | refactor: retire pr-facts.sh and the GitHub intake's old path (outside the effort, target `main`) | its drain check: no open bead on the old path in any store, and none carrying the old receipt keys or an open human finding. Then it deletes `pr-facts.sh`, `review-answer.sh`, `record-failure-cap.sh`, `branch-supersession.sh`, the doctor check and their tests (16,399 lines with their tests at 713e3a733), and `lifecycle.sh` once no caller is left; removes arms 1, 4 and 7; removes the conversion and `prio_pr_approved`'s posture clause; registers [section 9](#9-one-writer)'s keys retired; moves `prstatus` under the pr domain onto the ledger; rewrites every live line that names `pr-facts.sh` ([section 14](#14-the-files-that-name-pr-factssh)) | tk-1tfzr71.21, tk-1tfzr71.149, tk-1tfzr71.70, and every rig's cutover bead (tk-1tfzr71.78, .80 to .84) |
+| 6 | docs: state the GitHub intake on the record, and move the cadence's rows | `docs/architecture.md`, `docs/refinery-merge-cadence.md`, `docs/state-machine.md`, `docs/gctk-architecture.md` (the `gctk pr owner` row out, the debt entry), `docs/built-once-target.md` (the replacement named for `pr-facts.sh`, lane A's rows), `tools/deletion-plan.tsv` (the rows of section 8 moved to tk-1tfzr71.122), `lifecycle/lifecycle.toml` (the old receipts written only on the old path), `services/gctk/README.md`; and the comparison of [section 11](#11-the-comparison-before-pr-factssh-retires), with its test in the pr package and its report | units 3, 4 and 5 |
+| R | refactor: retire pr-facts.sh and the GitHub intake's old path (outside the effort, target `main`) | its drain check: no open bead on the old path in any store, and none carrying the old receipt keys or an open human finding. Then it deletes `pr-facts.sh`, `review-answer.sh`, `record-failure-cap.sh`, `branch-supersession.sh`, the doctor check and their tests (16,399 lines with their tests at 713e3a733), and `lifecycle.sh` once no caller is left; removes arms 1, 4 and 7; removes the conversion, the comparison's test and `prio_pr_approved`'s posture clause; registers [section 9](#9-one-writer)'s keys retired; moves `prstatus` under the pr domain onto the ledger; rewrites every live line that names `pr-facts.sh` ([section 14](#14-the-files-that-name-pr-factssh)) | tk-1tfzr71.21, tk-1tfzr71.149, tk-1tfzr71.70, and every rig's cutover bead (tk-1tfzr71.78, .80 to .84) |
 
 Each unit's suites fit the runner's per-run limit in a loaded `-j9` wave: the new
 logic's tests are Go tests in gctk's packages, which `tools/run-tests.sh` does not
@@ -746,7 +766,11 @@ builds its own unit 1 after the review-lanes effort.
   summary task waits on it.
 - tk-1tfzr71.122's edge onto tk-1tfzr71.21 moves onto the retirement, with a
   note saying why ([section 8](#8-the-cadence-and-its-order)) and naming the
-  rows unit 6 moves to it.
+  rows unit 6 moves to it, and the test files that copy `review-dismissal.sh`
+  by name, which its deletion of that file changes: `converse-signoff.test.sh`,
+  `gc-helm-accept.test.sh`, `conversation-merge-hold.test.sh`,
+  `pr-sitting-comment-wiring.test.sh`, `work-submit.test.sh` and
+  `test-harness.sh`.
 - The held beads' edges move as [section 10](#10-what-each-held-note-and-bead-becomes)
   says, each with a close brief that names what the retirement or
   tk-1tfzr71.122 removes, and each keeps its validating closer's arm, armed
@@ -812,10 +836,15 @@ builds its own unit 1 after the review-lanes effort.
 - **The render on the record** (`prstatus.Render`): needs-attention, then
   merging, then working, then needs-review, and merging covers an approved PR
   with only the city's work left.
-- **The loop's check** in `formulas/mol-pr-review.toml` has a two-minute
-  timeout. Gas City re-runs a check that exits 75 or times out without spending
-  an attempt, up to twenty times in a loop (`maxCheckInfraRetries`,
-  `internal/dispatch/ralph.go` at 76a06b2327).
+- **The loop's check** (`review-passed-check.sh`, with a two-minute timeout in
+  `formulas/mol-pr-review.toml`) runs in Gas City's gate sandbox: HOME is the
+  city's directory, and the environment is a whitelist that carries no GitHub
+  token (`ConditionEnv.Environ` in `internal/convergence/condition.go` at
+  76a06b2327). Under that HOME, `gh api user` answered "To get started with
+  GitHub CLI, please run: gh auth login" on 2026-11-16, so the check reaches
+  only the store, as `gctk review passed`'s help says. The rule-and-repair
+  step runs in an agent's session, which pushes the round's fixes and posts the
+  head's comment today.
 - **The stores,** read 2026-11-16 at 05:31Z with `gc bd --db <store> list
   --status open,in_progress,blocked` over the seven stores `gc rig list` names:
   24 open beads with `merge_result=pull_request`, none on the pending record,
@@ -825,7 +854,9 @@ builds its own unit 1 after the review-lanes effort.
   the city's account requests changes.
 - **The cadence** (`assets/scripts/refinery-reconcile.sh`): a sixty-second
   cooldown, with the arms of [section 8](#8-the-cadence-and-its-order).
-- **The callers** of the files this member shares: `pace-lib.sh` is sourced by
+- **The callers** of the files this member shares, besides `pr-facts.sh`,
+  which sources `pace-lib.sh` and `review-dismissal.sh` and runs the other two:
+  `pace-lib.sh` is sourced by
   `gate-ensure.sh`, `pr-open.sh` and `pre-open-rebase.sh`;
   `record-failure-cap.sh` is run by `gctk merge` (`services/gctk/internal/cli/merge.go`);
   `branch-supersession.sh` by `pre-open-rebase.sh`; `review-dismissal.sh` is

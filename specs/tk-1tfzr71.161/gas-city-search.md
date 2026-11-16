@@ -110,11 +110,12 @@ same upstream sources when it touches the key.
 
 ## The answers on GitHub (unit 4)
 
-The need: once the review run closes a post's ask, a reply in an inline
+The need: once the review run rules a post's ask, a reply in an inline
 comment's thread with the ruling's answer and the thread resolved, a 👍 on a
 post owed nothing more, a reply naming the gate for a question, and a request
-for the person's review once the last ask from their review closes, each found
-again so a retry posts nothing twice.
+for the person's review once every ask from the reviews of a person whose
+request for changes stands is answered, each found again so a retry posts
+nothing twice.
 
 - **Gas City** has no command, order or doc that resolves a review thread,
   reacts to a post, requests a review or dismisses one:
@@ -129,13 +130,16 @@ again so a retry posts nothing twice.
   a thread, reacts on GitHub or requests a review: the same greps over the
   repository find `addReaction` only in the Slack adapter.
 
-So the record composes `pr-post.sh reply`, the pack's one writer of the city's
-mark, and adds GitHub's `resolveReviewThread`, `addReaction` and
-`requestReviews` mutations to gctk's GitHub adapter beside the mutations it
-holds (`markPullRequestReadyForReview`, `convertPullRequestToDraft`, the review
-dismissal). It runs in the review loop's check, which Gas City re-runs without
-spending an attempt when it exits 75 or times out, up to twenty times in a loop
-(`maxCheckInfraRetries` in `internal/dispatch/ralph.go`).
+So the review run's rule-and-repair step makes them, in `review-run.sh post`,
+the verb that already answers the round's rulings in the head's comment. It
+composes `pr-post.sh reply`, the pack's one writer of the city's posts, and adds
+GitHub's `resolveReviewThread`, `addReaction` and `requestReviews` mutations to
+gctk's GitHub adapter beside the mutations it holds
+(`markPullRequestReadyForReview`, `convertPullRequestToDraft`, the review
+dismissal). The review loop's check cannot hold them. Gas City runs a check
+with HOME set to the city's directory and only a whitelist of variables, none
+of them a GitHub token (`ConditionEnv.Environ` in
+`internal/convergence/condition.go` at 76a06b2327), so gh has no login there.
 
 ## A run behind its own question gates (unit 4)
 
