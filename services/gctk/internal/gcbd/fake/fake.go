@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -25,14 +26,15 @@ import (
 // a listing does. ClosedAt is when a closed bead closed. An edge carries the far
 // bead's fields as a show row reports them, so a closed row that names no close
 // time takes the one an edge onto it names. Assignee, AwaitType, AwaitID,
-// Description, Priority, Labels, CreatedAt, CloseReason and Notes are the row's
-// own fields a listing carries, and an update's --append-notes adds a line to
-// Notes. Ephemeral and Template put the row in the ephemeral plane or make it a
-// template.
+// Description, Priority, Labels, CreatedAt, UpdatedAt, CloseReason and Notes
+// are the row's own fields a listing carries, and an update's --append-notes
+// adds a line to Notes. Ephemeral and Template put the row in the ephemeral
+// plane or make it a template.
 type Bead struct {
 	ID, Title, Status, IssueType, ClosedAt string
 	Assignee, AwaitType, Description       string
 	AwaitID, CreatedAt, CloseReason, Notes string
+	UpdatedAt                              string
 	Priority                               int
 	Labels                                 []string
 	Ephemeral, Template                    bool
@@ -64,10 +66,16 @@ type Store struct {
 	ready   map[string]bool
 	writes  []Write
 	creates []Create
+	// lastWrites is the newest write the store records under each actor,
+	// which SetLastWrite sets.
+	lastWrites map[string]time.Time
+	// lastWriteReads is the actors each LastWrites read named.
+	lastWriteReads [][]string
 
-	// RowsErr, BlockedErr, FindErr and ReadyErr fail the matching read when
-	// set, UpdateErr fails every write and CreateErr every create.
-	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr, CreateErr error
+	// RowsErr, BlockedErr, FindErr, ReadyErr and LastWritesErr fail the
+	// matching read when set, UpdateErr fails every write and CreateErr every
+	// create.
+	RowsErr, BlockedErr, FindErr, ReadyErr, LastWritesErr, UpdateErr, CreateErr error
 
 	// OnFind, when set, runs before each find the store takes, outside the
 	// store's lock, and fails nothing. A test lands another actor's write in it.
@@ -584,6 +592,9 @@ func bead(b Bead, deps []any) gcbd.Bead {
 	}
 	if b.CreatedAt != "" {
 		out.CreatedAt = b.CreatedAt
+	}
+	if b.UpdatedAt != "" {
+		out.UpdatedAt = b.UpdatedAt
 	}
 	if b.CloseReason != "" {
 		out.CloseReason = b.CloseReason

@@ -55,9 +55,10 @@ import (
 // carries them on each far bead's row, and bd leaves a field out of a row when
 // its value is empty. DependencyType is the edge a `gc bd show` row's
 // dependency was reached by, and is empty on any other row. Description,
-// Priority, Labels, CreatedAt and CloseReason keep their JSON shapes too, each
-// read through its accessor, and so do Ephemeral, NoHistory and IsTemplate, the
-// columns that put a row in the store's ephemeral plane or make it a template.
+// Priority, Labels, CreatedAt, UpdatedAt and CloseReason keep their JSON shapes
+// too, each read through its accessor, and so do Ephemeral, NoHistory and
+// IsTemplate, the columns that put a row in the store's ephemeral plane or make
+// it a template.
 type Bead struct {
 	ID           string         `json:"id"`
 	Title        string         `json:"title"`
@@ -75,6 +76,7 @@ type Bead struct {
 	Priority     any            `json:"priority"`
 	Labels       any            `json:"labels"`
 	CreatedAt    any            `json:"created_at"`
+	UpdatedAt    any            `json:"updated_at"`
 	Ephemeral    any            `json:"ephemeral"`
 	NoHistory    any            `json:"no_history"`
 	IsTemplate   any            `json:"is_template"`
@@ -145,6 +147,9 @@ func (b *Bead) DescriptionString() string { return jqString(b.Description) }
 
 // CreatedAtString returns `.created_at // "" | tostring`.
 func (b *Bead) CreatedAtString() string { return jqString(b.CreatedAt) }
+
+// UpdatedAtString returns `.updated_at // "" | tostring`.
+func (b *Bead) UpdatedAtString() string { return jqString(b.UpdatedAt) }
 
 // CloseReasonString returns `.close_reason // "" | tostring`.
 func (b *Bead) CloseReasonString() string { return jqString(b.CloseReason) }

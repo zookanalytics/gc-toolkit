@@ -64,6 +64,9 @@ func (r *Record) AwaitID() string { return r.row.AwaitID }
 // CreatedAt is when the bead was created, as the row writes the time.
 func (r *Record) CreatedAt() string { return r.row.CreatedAtString() }
 
+// UpdatedAt is when the bead was last written, as the row writes the time.
+func (r *Record) UpdatedAt() string { return r.row.UpdatedAtString() }
+
 // ClosedAt is when the bead closed, as the row writes the time, "" while it is
 // live.
 func (r *Record) ClosedAt() string { return r.row.ClosedAtString() }
