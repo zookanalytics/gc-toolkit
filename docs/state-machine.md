@@ -1214,12 +1214,22 @@ and the dispatch on a lane are the old path's ([Debt](#debt)).
   parent-child edges, while a poured workflow's root has no parent, so a hold on
   the epic leaves the rebuild running. A bead that records an open PR
   (`pull_request_head_changed`) keeps its PR and its record, and goes back to
-  the PR's review run as an ask. The requeue records the PR pending again at
-  the head the prep read (`gctk pr record`), so the landing order reads the
-  bead, then files the ask with the reason (`gctk review ask`), and the order
-  pours a run at that head whose repair answers it. A record that does not land
-  writes nothing else, and an ask that does not land after it files a human
-  gate keyed `refinery-requeue-failed` on the bead. A convoy, such as a
+  the PR's review run as an ask. The requeue files the ask with the reason
+  (`gctk review ask`), opening on a line that names the head the prep read, or
+  takes the open ask an earlier requeue of that head filed. Only then does it
+  record the PR pending again at that head (`gctk pr record`), so the landing
+  order reads the bead and pours a run at that head whose repair answers the
+  ask. The ask goes first because its blocks edge onto the bead is a wait the
+  evaluator reads: wherever the requeue stops, no pass of the landing order
+  finds the head pending, with a passed result an earlier run may have left
+  there, and nothing asked of it. When the ask does not land, or the open asks
+  on the branch do not read, the requeue writes nothing, and the bead stays
+  with the refinery, whose next patrol retries it. A record refused because the
+  bead changed after the refinery read it leaves the bead as it stands, with
+  the ask holding its merge. A record that does not land for any other reason
+  also leaves the ask holding the merge, and files a human gate keyed
+  `refinery-requeue-failed` on the bead, which names the record to write by
+  hand. A convoy, such as a
   graduation's anchor, is never poured, because a run poured onto a convoy works
   on the beads it tracks, so it comes back as a rework child instead: a task on
   the same branch that carries the reason and blocks the bead, which stays

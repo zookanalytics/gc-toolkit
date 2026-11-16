@@ -183,6 +183,20 @@ has "$OUT" "ask $ASK, which an earlier requeue of $READ filed, is open" "…and 
 eq "$(bstatus p) $(meta p merge_result) $(meta p pr_head_sha)" "blocked pull_request_pending $READ" "the PR is recorded pending at that head"
 has "$OUT" "takes its ask $ASK" "…and the run takes the first ask"
 
+echo "# a record the bead's guard refuses leaves the bead as it stands, with the ask holding its merge"
+fresh
+branch_with polecat/p p.txt >/dev/null
+work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/7"}'
+prepared p polecat/p
+STUB_RECORD_RC=3 run --bead p --reason "test TestX fails"
+eq "$RC" 3 "a record the bead's guard refuses exits 3"
+has "$OUT" "changed after it was read" "it says the bead moved"
+ASK=$(jq -r '[ .[] | select((.title // "") | startswith("Review ask: ")) ][0].id // ""' "$STORE")
+[ -n "$ASK" ] && rt_ok "the ask filed first stands" || rt_bad "the ask filed first stands"
+has "$(cat "$STUB_HOLDS")" "p $ASK" "…and holds the bead"
+eq "$(bstatus p) $(bassignee p) $(meta p merge_result)" "open rig-a/gc-toolkit.refinery pull_request_head_changed" "the bead is left as it stands"
+hasnt "$(logged scripts)" "human-gate" "no person is asked"
+
 echo "# a convoy comes back as its rework child"
 fresh
 branch_with polecat/p p.txt >/dev/null
