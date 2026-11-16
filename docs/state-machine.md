@@ -313,9 +313,10 @@ so the bead's `blocks` edge onto the run's root holds the bead while the run
 lives. It pours one when the evaluator finds no passed result at the validated
 head and target, or when the bead carries an ask the run can take. It pours none
 while a run is attached, while another open bead other than an ask names the
-branch, while a conversation holds the bead, unless its sitting stays for the
-work it sent, or while a human gate holds it
-([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
+branch, or while a human gate holds it
+([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)). A
+conversation on the PR holds its merge and nothing else, so runs are poured
+while one is open.
 
 The run is a checked loop, and each iteration judges one head: the run's first
 head, the one the refinery validated, then each head its own repair pushes.
