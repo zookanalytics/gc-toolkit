@@ -354,11 +354,14 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   A stay comes back at the operator's next decision about its work, never
   after it. Gas City keeps the sitting's promise to return. It sleeps the
   sitting while the work is out and wakes it with its thread when the
-  return is due. For work that opens no PR, the return is due when the
-  work closes. For work that opens a PR, the next decision is the
-  approval, in every round: when a round ends at the head the refinery
-  validated, the landing order puts the conversation's hold on the PR's merge
-  and has Gas City wake the sitting. On each return the sitting compares the
+  return is due. The promise outlasts a visit to the sitting and a fresh
+  context for it, and ends before its return only when the operator ends the
+  stay or the sitting's session closes for good. For work with no PR, the
+  return is due when the work closes. For work on a PR, whether it opens one
+  or reworks the PR under discussion, the next decision is the approval, in
+  every round: when a round ends at the head the refinery validated, the
+  landing order puts the conversation's hold on the PR's merge and has Gas
+  City wake the sitting. On each return the sitting compares the
   work with what was agreed, tells the operator where it matches and where it
   departs, and waits for the operator, even when it finds that the work
   matches. The PR does not merge until the operator settles that exchange.
@@ -508,11 +511,13 @@ why a reader must know it, and the work that retires it.
   returned discussion. The effort tk-vrg93t0 builds the stay that
   [How humans engage](#how-humans-engage) describes, and a rig still on the old
   review path has it from its cutover onto the pending record.
-- **A visit to a sleeping sitting cancels its promise.** Gas City's attach
-  does not keep the promise of a sitting it starts, so the sitting tells the
-  operator the visit ended its promise and asks whether to promise again. The
-  change in Gas City that keeps the promise through an attach (gc-gspdoo)
-  retires this.
+- **Gas City does not keep a sitting's promise through a visit or a fresh
+  context.** An attach that starts a sleeping sitting ends its promise, and a
+  reset that gives the sitting a fresh context ends every promise it has
+  pending. The return is turned on only once the city's Gas City keeps the
+  promise through both, so until then a stay comes back only when its work
+  closes. Gas City's changes gc-gspdoo, for the attach, and gc-lwa1vp, for a
+  fresh restart, retire this.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds

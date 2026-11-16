@@ -1,6 +1,6 @@
 ---
 name: Gas City search for a stay that comes back before the operator's next decision
-description: Use when you review or build a unit of the design in specs/tk-ai367om/design.md, which has a staying sitting promise its return with a Gas City session wait and come back to discuss the result before the operator's next decision, and need the Gas City, bd and GitHub primitives each piece of its surface composes, what was searched for each and found not to cover it, and why the promise is a session wait the sitting registers, the sleep is a bd edge onto a convoy, the wake is the landing order's `gc wait ready`, the hold is the conversation's existing hold on a PR's merge, and a visit needs a change in Gas City.
+description: Use when you review or build a unit of the design in specs/tk-ai367om/design.md, which has a staying sitting promise its return with a Gas City session wait and come back to discuss the result before the operator's next decision, and need the Gas City, bd and GitHub primitives each piece of its surface composes, what was searched for each and found not to cover it, and why the promise is a session wait the sitting registers, the sleep is a bd edge onto a convoy, the wake is the landing order's `gc wait ready`, the hold is the conversation's existing hold on a PR's merge, and a visit and a fresh context need changes in Gas City, which the words unit waits on through a gate in this store.
 ---
 
 # Gas City search: a stay that comes back before the operator's next decision
@@ -152,8 +152,10 @@ today. No condition, key or state comes with it.
 - **A condition of the evaluator's**, which the earlier draft added for a stay
   that owed a reading. It read the stays, their rounds and the PR's comments on
   every pass. The edge is a wait the evaluator already reads.
-- **Keeping the PR a draft**, which call 1 (b) keeps in a narrower form. GitHub
-  requests no review on a draft and this repository's CI skips its suite on one
+- **Keeping the PR a draft**, which the previous revision kept as an option in
+  a narrower form and the operator ruled out, so that CI and GitHub's review
+  request go on while the sitting reads. GitHub requests no review on a draft
+  and this repository's CI skips its suite on one
   (`.github/workflows/tests.yml`), but a draft does not hold a PR that is ready
   already, as after a round with no push, so it cannot be the hold.
 - **`merge_hold`.** It is a hold a person sets by hand, which `prstatus` reads as
@@ -192,10 +194,12 @@ from it was delivered, cancelled or never registered.
   started fresh could read a delivered or cancelled promise by its id. It
   would be a second registry of the session's waits beside Gas City's, which the
   brief the operator approved in conversation tk-8e83do9 says not to make the
-  preferred architecture. Such a thread asks the operator whether to promise
-  again instead (the design's section 4).
+  preferred architecture. Such a thread instead registers each promise the
+  stay's hand-back names that is neither open nor held as a notice, so a
+  return whose notice reached the thread before it still comes back once (the
+  design's section 4).
 
-## Visits: Gas City's attach, and the change it needs
+## Visits and fresh contexts: the changes Gas City makes
 
 **What it composes.** `gc session attach` attaches to a running session and
 changes nothing else, so a visit while the sitting runs keeps the promise. On a
@@ -205,8 +209,27 @@ wake does" (`sessionAttach.attachOnceControllerStarts`, then `doSessionWake`, in
 `Store.WakeSession` cancels every wait the session has as it clears what keeps
 the session from starting (`wakeSessionFromBead` in
 `internal/session/wait_store.go`). A visit to a sleeping sitting therefore
-cancels its promise. The change that keeps the waits is Gas City's, filed as
-gc-gspdoo in the Gas City rig, held for the operator's placement.
+cancels its promise today.
+
+`gc session reset` asks for a fresh restart (`SessionHandle.Reset` in
+`internal/worker/handle_lifecycle.go`, then `Manager.RequestFreshRestart` in
+`internal/session/manager.go`). Once the start that consumes it has moved the
+session to its next `continuation_epoch`, each wait registered before it reads
+stale and is cancelled as `continuation-stale` (`WaitInfo.ContinuationStale` in
+`internal/session/waits.go`; `prepareWaitWakeStateHooked` in
+`cmd/gc/cmd_wait.go`). A return handed to a fresh context therefore cancels the
+sitting's other promises today. Gas City already carries one kind of wait across
+that restart: a wait registered while the reset is pending is marked
+`registered_reset_pending` (`CreateWait`) and is delivered in the conversation
+the restart opens (`DeliveryEpoch` and `HeldForPendingReset`).
+
+The operator ruled that keeping a promise through both is a prerequisite for
+turning the return on, built in the city's fork of Gas City ("Second operator
+rework ruling" on tk-ai367om, conversation tk-8e83do9, 2026-11-16). Both changes
+are Gas City's, each filed in the Gas City rig and held for the operator's
+placement. gc-gspdoo covers the attach, and gc-lwa1vp a fresh restart, which
+extends the fence a wait registered during a pending reset already has to the
+session's open waits.
 
 **What else was searched.**
 
@@ -218,11 +241,43 @@ gc-gspdoo in the Gas City rig, held for the operator's placement.
   approved in conversation tk-8e83do9 says not to make pack-side restoration the
   preferred architecture: the pack would keep its own copy of which waits a
   session should have, beside Gas City's.
+- **The sitting registering its other promises again while its reset is
+  pending**, which the existing fence would carry into the fresh conversation.
+  The controller stops the session once it acts on the reset's request, so the
+  writes would race the sitting's own restart. That would also be pack-side
+  restoration, which the brief rules out as the preferred architecture.
+- **A restriction on resets while a promise is pending**, which the ruling allows
+  until the reset change exists. It would bind only the resets a sitting makes
+  itself, not an operator's, and the gate already keeps the return off until
+  Gas City keeps the promise, so no promise exists for a reset to withdraw.
 - **A wrapper around engage's attach** that keeps the operator's terminal tab
   while the runtime sleeps. That is terminal work, which epic tk-uipsrmt holds.
 - **`--sleep` for a sitting that leaves.** No command sleeps a session on a wait
   it already has (`docs/reference/cli.md`, `gc session wait` and `gc wait`), and
   the idle window already sleeps a sitting whose conversation waits on open work.
+
+## The gate the words unit waits on
+
+**What it composes.** The words unit, which turns the return on, waits on
+gc-gspdoo and gc-lwa1vp, and both are in the Gas City rig's store. A `blocks`
+edge across two stores prints success and holds nothing, so a bead whose blocker
+is in another store waits on a human gate in its own store that names the
+blocker, which a person clears once the blocker lands (`skills/waits/SKILL.md`,
+"Make a bead wait on other work"; `human-gate.sh`). The implementation child
+files that gate on the words unit and arms the unit, so clearing it starts the
+unit.
+
+**What else was searched.**
+
+- **A `blocks` edge onto each Gas City bead.** It holds nothing across stores.
+- **bd's `gh:pr` gate on the fork's pull request.** It waits for the PR's merge
+  (`cmd/bd/gate.go`). The ruling's condition is that the fork's behavior is
+  built, verified and running in the city. The city's gc is built and installed
+  apart from the fork's merges, so its revision moves on its own, and a person
+  reads the condition.
+- **A gate on the landing bead.** It would hold the effort's merge too, but the
+  words unit would then be built before the changes it describes run, and no
+  unit would remove the Debt entry those changes retire.
 
 ## Ending a stay: `gc wait cancel`
 
@@ -238,18 +293,19 @@ never drains.
 
 ## What it leaves in place
 
-- **A promise that no longer stands.** A sitting whose session was closed, or
-  whose promise a visit cancelled before gc-gspdoo lands, is not woken at the end
-  of the round, and the landing order writes no hold for it. The PR merges on the
-  operator's approval, and the stay comes back when the work closes. The sitting
-  tells the operator when a visit cancels its promise.
+- **The return waits for Gas City.** Until the city's gc carries gc-gspdoo and
+  gc-lwa1vp, the words unit waits on its gate, and a stay comes back only when
+  its work closes, as it does today.
+- **A sitting whose session has closed** is not woken at the end of the round,
+  and the landing order writes no hold for it until a sitting takes the
+  conversation up again and promises again. Meanwhile a PR whose merge the
+  conversation does not hold through engage's edge merges on the operator's
+  approval, and the stay comes back when the work closes.
 - **The minute between the end of a round and the sitting's wake**, while the PR
   reads `working`.
-- **A promise a fresh thread cannot place.** Gas City lists only a session's
-  open waits, so a thread a reset started fresh cannot tell a promise delivered
-  to the thread it replaced from one cancelled or never registered. It asks the
-  operator whether to promise again, and a delivered promise's PR stays held for
-  that answer.
+- **A promise registered again waits for the next pass.** A fresh thread that
+  registers a promise whose round has already ended is woken on the landing
+  order's next pass, not at once.
 - **No command sleeps a session on a wait it already has**, so a sitting the
   operator leaves runs for up to its idle window.
 - **A rig on the old review path** has no end of a round to wake at. Its rework
