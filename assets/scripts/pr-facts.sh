@@ -241,11 +241,26 @@ HUMAN_GATE="$SCRIPTS_DIR/human-gate.sh"
 # write-back reports a review thread it cannot resolve through it
 # (wb_unresolvable).
 PATROL_FINDING="$SCRIPTS_DIR/patrol-finding.sh"
-# The one resolver of the check index: the two merge-readiness all-green reads
+# The check index, `gctk review checks`: the two merge-readiness all-green reads
 # below ask it for every declared lane (`--through merge` spans all phases),
 # which drops the non-lanes none/off and the approval merge rule in one place.
-REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
-[ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot reconcile" >&2; exit 1; }
+# With no binary the read fails, and the reads hold.
+# shellcheck source=gctk-resolve.sh
+. "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+review_checks() { local g; g=$(gctk_path) || return 1; GCTK_SCRIPTS_DIR="$SCRIPTS_DIR" "$g" review checks "$@"; }
+# review_ask <anchor> <reason> — on Gas Town's pending record a PR's branch has
+# one writer, its review run, so the conflict, red-check and feedback arms file
+# their fix unit as an ask the run takes (gctk review ask;
+# specs/tk-1tfzr71.108/design.md, section 6). Prints the ask's id, filed or
+# found by its reason. Non-zero, printing nothing, when the ask did not stand.
+review_ask() {
+  local g out
+  g=$(gctk_path) || return 1
+  out=$("$g" review ask "$1" --reason "$2" 2>/dev/null) || return 1
+  out="${out%% *}"
+  [ -n "$out" ] || return 1
+  printf '%s' "$out"
+}
 # Each lane those reads name derives its green through lane-state.sh, the one
 # derivation merge.sh holds on (lanes_green).
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
@@ -673,7 +688,7 @@ review_threads_load() { # <pr-number>
 # A check_set that declares no lane passes.
 lanes_green() { # <anchor-id> <check_set> <head-oid>
   local gates g
-  gates=$("$REVIEW_CHECKS" --resolve --check-set "$2" --through merge --at "${3:-}" 2>/dev/null) || return 1
+  gates=$(review_checks --resolve "$2" --through merge --at "${3:-}" 2>/dev/null) || return 1
   while IFS= read -r g; do
     [ -n "$g" ] || continue
     "$LANE_STATE" green --anchor "$1" --lane "$g" >/dev/null 2>&1 </dev/null || return 1
@@ -2993,6 +3008,16 @@ REAP_EOF
       if supersession_holds "$id" "$fix_branch" "$base" "$head_oid" "$num"; then
         skipped=$((skipped + 1)); continue
       fi
+      if on_record "$amr"; then
+        if ASK=$(review_ask "$id" "PR#$num conflicts with '$base' at head $head_oid. Bring '$fix_branch' current by merging origin/$base in, resolve the conflict, and push the merge as a fast-forward."); then
+          reworked=$((reworked + 1))
+          echo "$PROG: $id — PR#$num conflicts with '$base'; its review run takes ask $ASK"
+        else
+          echo "$PROG: $id — PR#$num conflicts, but the ask for its review run did not land; retry next pass" >&2
+          skipped=$((skipped + 1))
+        fi
+        continue
+      fi
       reuse=""
       if [ -n "$stranded" ]; then
         reuse="$stranded"
@@ -3079,7 +3104,20 @@ REAP_EOF
     if [ -n "$why" ]; then choice="human"; else choice="rework"; fi
     CSRC=$(feedback_reviews "$revs_open" "$rwm")
     DISP=""
-    if [ "$choice" = "rework" ]; then
+    if [ "$choice" = "rework" ] && on_record "$amr"; then
+      # On Gas Town's pending record the batch's fix unit is an ask the PR's
+      # review run takes, and each comment below still becomes a human finding
+      # naming it as its fix unit, which the run rules by its grade.
+      ABODY=$(feedback_body "$revs_open" "$cmts_open" "$rwm" "$cwm" "$icmts_raw" "$iwm")
+      [ -n "$ABODY" ] || ABODY="The bodies could not be rendered; read them at $live_url."
+      if ! ASK=$(review_ask "$id" "Review feedback on PR#$num is unanswered at head $head_oid, through review $max_r, comment $max_c, issue $max_i ($live_url). Each comment is a human finding on $id that names this ask as its fix unit (finding.fix_unit), which the review run rules by its grade.
+
+$ABODY"); then
+        echo "$PROG: WARN $id — PR#$num could not file the ask that carries its feedback to the review run; NOT watermarking (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      DISP="rework:$ASK"
+    elif [ "$choice" = "rework" ]; then
       # Same choice as the CONFLICTING arm's `stale-base-dispatch-mode`: the child
       # may have to bring the branch current before it can push a fix, and every
       # branch shape is brought current by MERGE, never a rebase/force-push.
@@ -3312,7 +3350,10 @@ $CBODY"
     # the batch retries next pass, and the routing's own dedup re-adopts the child
     # it already filed rather than twinning it. The routing above already holds the
     # merge, so the retry costs nothing.
-    if ! vpass_rows=$(bd_anchor_children "$id" "$LIVE_STATUSES"); then
+    if on_record "$amr"; then
+      # The review run rules the batch, so no validation pass is opened.
+      :
+    elif ! vpass_rows=$(bd_anchor_children "$id" "$LIVE_STATUSES"); then
       echo "$PROG: WARN $id — PR#$num validation-pass probe unreadable; nothing opened or watermarked (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     else
@@ -3961,6 +4002,16 @@ $CBODY"
             # branch shape is brought current by MERGE, never a rebase/force-push.
             rc_prepare=merge
             RC_REASON="Required check(s) failing on PR#$num at head $head_oid: $rc_names.${rc_urls:+ Run log(s): $rc_urls.} Fix the failing check(s) and push to '$rc_fix_branch'. Do NOT open a new PR: this reworks PR#$num."
+            if on_record "$amr"; then
+              if ASK=$(review_ask "$id" "Required check(s) failing on PR#$num at head $head_oid: $rc_names.${rc_urls:+ Run log(s): $rc_urls.} Fix the failing check(s) on '$rc_fix_branch'."); then
+                reworked=$((reworked + 1))
+                echo "$PROG: $id — PR#$num required check(s) failing ($rc_names); its review run takes ask $ASK"
+              else
+                echo "$PROG: $id — PR#$num has a red required check, but the ask for its review run did not land; retry next pass" >&2
+                skipped=$((skipped + 1))
+              fi
+              continue
+            fi
             reuse=""
             if [ -n "$rc_stranded" ]; then
               reuse="$rc_stranded"

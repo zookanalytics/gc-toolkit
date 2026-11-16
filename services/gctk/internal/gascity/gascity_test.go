@@ -268,3 +268,38 @@ func TestInStartsEveryCommandInItsDirectory(t *testing.T) {
 		t.Fatalf("the commands ran in %q, want %q", raw, want)
 	}
 }
+
+// A cook passes its vars in their names' order, as --var flags, and reads the
+// root from the summary line it prints with --json (formulaCookJSONResult in
+// cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). A cook that exits
+// non-zero names no root, and one whose output names none answers with none.
+func TestCookPassesItsVarsAndReadsTheRoot(t *testing.T) {
+	dir := t.TempDir()
+	gc := filepath.Join(dir, "gc")
+	if err := os.WriteFile(gc, []byte(`#!/bin/sh
+printf '%s\n' "$*" >> "$(dirname "$0")/log"
+case "$5" in
+  tk-1) echo 'warning: gc formula cook: projecting execution facts'; echo '{"schema_version":"1","ok":true,"formula":"mol-pr-review","mode":"attach","attach_bead_id":"tk-1","root_id":"tk-root","created":9}' ;;
+  tk-2) echo 'gc formula cook: attach bead tk-2: not found' >&2; exit 1 ;;
+  *) echo 'Root: tk-other' ;;
+esac
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &City{bin: gc}
+	got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-1", Vars: map[string]string{"target": "main", "head": "abc", "pr_bead": "tk-1"}})
+	if got.Code != 0 || got.Root != "tk-root" {
+		t.Fatalf("the cook answered %+v, want exit 0 and root tk-root", got)
+	}
+	if got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-2"}); got.Code != 1 || got.Root != "" {
+		t.Fatalf("a refused cook answered %+v, want exit 1 and no root", got)
+	}
+	if got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-3"}); got.Root != "" {
+		t.Fatalf("a cook with no summary line named root %q", got.Root)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "log"))
+	first := strings.Split(string(raw), "\n")[0]
+	if want := "formula cook mol-pr-review --attach tk-1 --json --var head=abc --var pr_bead=tk-1 --var target=main"; first != want {
+		t.Fatalf("the cook ran %q, want %q", first, want)
+	}
+}

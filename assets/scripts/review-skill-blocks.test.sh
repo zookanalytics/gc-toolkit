@@ -47,6 +47,11 @@ SHELLS="bash"; command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
 # The blocks run as an agent's shell runs them: nothing from the city reaches
 # them, and git reads no user or system config.
 unset GC_PACK_DIR GC_RIG_ROOT GC_RIG GC_CITY GC_CITY_PATH GC_REVIEW_CHECKS_INDEX GCTK_BIN 2>/dev/null || true
+# The check index is gctk's, built from this checkout, which a block reaches as
+# $GCTK_BIN.
+( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
+export GCTK_BIN="$TMP/gctk"
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2>/dev/null || true
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
@@ -129,7 +134,7 @@ run() {
 }
 
 echo "# every block of every check's skill runs on the record's values alone"
-NAMES=$("$ROOT/assets/scripts/review-checks.sh" --file "$ROOT/review-checks.toml" 2>/dev/null | cut -f1)
+NAMES=$("$GCTK_BIN" review checks --file "$ROOT/review-checks.toml" 2>/dev/null | cut -f1)
 [ -n "$NAMES" ] && ok "the pack's index declares checks" || bad "the pack's index declares checks" "none read"
 TOTAL=0
 while IFS= read -r c; do
@@ -158,17 +163,17 @@ for m in triage-index-read triage-round-read triage-index-gap; do
   awk -v m="$m" '$0 == "# <<< " m {f = 0} f {print} $0 == "# >>> " m {f = 1}' "$ROOT/skills/review-triage/SKILL.md" > "$TB/$m.tmpl"
   [ -s "$TB/$m.tmpl" ] && ok "$m extracts from the skill" || bad "$m extracts from the skill" "no '# >>> $m' block"
 done
-PACK_NAMES=$("$ROOT/assets/scripts/review-checks.sh" --file "$ROOT/review-checks.toml" 2>/dev/null | cut -f1 | tr '\n' ' ')
+PACK_NAMES=$("$GCTK_BIN" review checks --file "$ROOT/review-checks.toml" 2>/dev/null | cut -f1 | tr '\n' ' ')
 # triage <shell> <block> <oid> [env...] : the block filled in at <oid> and run.
 triage() { local sh="$1" m="$2" oid="$3"; shift 3; fill triage "$oid" < "$TB/$m.tmpl" > "$TB/$m.sh"; run "$sh" "$TB/$m.sh" "$@"; }
 for sh in $SHELLS; do
   triage "$sh" triage-index-read "$OID"
   eq "$RC" "0" "($sh) the index read exits 0"
   eq "$(printf '%s\n' "$OUT" | cut -f1 | tr '\n' ' ')" "${PACK_NAMES}ux " \
-     "($sh) the pack's resolver lists the pack's checks and the rig's own, from a checkout that holds no pack"
+     "($sh) the check index lists the pack's checks and the rig's own, from a checkout that holds no pack"
   has "$(printf '%s\n' "$OUT" | grep '^correctness')" "	p	pre-open" "($sh) …the rig's row laid over the pack's correctness"
-  grep -qx 'kit scripts-dir' "$STUB_LOG" && ok "($sh) the resolver is found through gc <binding> scripts-dir" \
-    || bad "($sh) the resolver is found through gc <binding> scripts-dir" "gc calls: $(tr '\n' ';' < "$STUB_LOG")"
+  grep -qx 'kit scripts-dir' "$STUB_LOG" && ok "($sh) the pack's index is found through gc <binding> scripts-dir" \
+    || bad "($sh) the pack's index is found through gc <binding> scripts-dir" "gc calls: $(tr '\n' ';' < "$STUB_LOG")"
   triage "$sh" triage-index-read "$NO_INDEX"
   eq "$RC" "0" "($sh) a commit with no index exits 0"
   eq "$(printf '%s\n' "$OUT" | cut -f1 | tr '\n' ' ')" "$PACK_NAMES" "($sh) …listing the pack's checks alone"

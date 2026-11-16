@@ -67,7 +67,8 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # still-unruled findings through it. Overridable so the hermetic test can stand
 # in for it without a live store.
 FINDING="${GC_FINDING_TOOL:-$HERE/finding.sh}"
-# The check-index resolver (review-checks.sh) lives beside this script.
+# The pack's check index is the one beside this script, which gctk review checks
+# reads through GCTK_SCRIPTS_DIR.
 SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 # The one writer of a rework child. request-changes files its fix unit through it,
 # under this review's provenance, and the writer proves the pool route, the work
@@ -245,7 +246,10 @@ is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/nu
 TRIAGE_GATE=triage
 # The check whose method owns the visual decision; no other check records one.
 VISUAL_GATE=demo
-INDEX_PARSER="$SCRIPT_DIR/review-checks.sh"
+# The check index, `gctk review checks` and `gctk review guidance`, through the
+# binary gctk-resolve.sh's chain names.
+# shellcheck source=gctk-resolve.sh
+. "$SCRIPT_DIR/gctk-resolve.sh" || { echo "signoff: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
 # A check_set as one lowercase token per line. The comma split comes first and
 # the whitespace strip is a per-line sed: a stream-wide `tr -d` would take the
 # newlines the split just made and fuse "correctness,triage" into one name
@@ -1018,10 +1022,11 @@ fi
 # resolver cannot read; INDEX_WHY then carries the resolver's reason.
 INDEX_WHY=""
 index_has_check() { # <check>
+  local gctk
   INDEX_WHY=""
-  [ -x "$INDEX_PARSER" ] || { INDEX_WHY="the check resolver is missing ($INDEX_PARSER)"; return 1; }
-  INDEX_WHY=$("$INDEX_PARSER" --check "$1" --at "$REVIEWED_OID" 2>&1 >/dev/null) && return 0
-  INDEX_WHY=$(printf '%s' "$INDEX_WHY" | tr '\n' ' ' | sed 's/^review-checks: //; s/ *$//')
+  gctk=$(gctk_path) || { INDEX_WHY="no gctk binary to read the check index with (GCTK_BIN='${GCTK_BIN:-}')"; return 1; }
+  INDEX_WHY=$(GCTK_SCRIPTS_DIR="$SCRIPT_DIR" "$gctk" review checks --check "$1" --at "$REVIEWED_OID" 2>&1 >/dev/null) && return 0
+  INDEX_WHY=$(printf '%s' "$INDEX_WHY" | tr '\n' ' ' | sed 's/^gctk review checks: //; s/ *$//')
   return 1
 }
 
@@ -1036,20 +1041,20 @@ index_has_check() { # <check>
 # branch left, or the resolver could not list them and says why.
 GUIDANCE_EDITS=""; GUIDANCE_WHY=""
 guidance_edits() {
-  local base err out rc
+  local base err out rc gctk
   base=${REVIEW_META[review_base]-}
   [ -n "$base" ] || base=${ANCHOR_META[merged_target]-}
   [ -n "$base" ] || base=${ANCHOR_META[target]-}
   [ -n "$base" ] || { GUIDANCE_WHY="neither the review nor its anchor names the base the branch left"; return 1; }
-  [ -x "$INDEX_PARSER" ] || { GUIDANCE_WHY="the check resolver is missing ($INDEX_PARSER)"; return 1; }
+  gctk=$(gctk_path) || { GUIDANCE_WHY="no gctk binary to list the guidance it edits with (GCTK_BIN='${GCTK_BIN:-}')"; return 1; }
   err=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-edits.XXXXXX") || { GUIDANCE_WHY="no scratch file for the resolver's reason"; return 1; }
-  out=$("$INDEX_PARSER" --edits --base "$base" --at "$REVIEWED_OID" 2>"$err"); rc=$?
+  out=$("$gctk" review guidance --edits --base "$base" --at "$REVIEWED_OID" 2>"$err"); rc=$?
   if [ "$rc" -eq 0 ]; then
     rm -f "$err"
     GUIDANCE_EDITS=$(printf '%s\n' "$out" | sed '/^$/d' | paste -sd' ' -)
     return 0
   fi
-  GUIDANCE_WHY=$(tr '\n' ' ' < "$err" | sed 's/review-checks: //g; s/ *$//')
+  GUIDANCE_WHY=$(tr '\n' ' ' < "$err" | sed 's/gctk review guidance: //g; s/ *$//')
   rm -f "$err"
   [ -n "$GUIDANCE_WHY" ] || GUIDANCE_WHY="the check resolver exited $rc"
   return 1

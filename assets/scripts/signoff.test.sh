@@ -23,6 +23,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/signoff.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# gctk, built from this checkout, reads the check index for the script under
+# test, through the stub git this suite puts on PATH.
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
+export GCTK_BIN="$TMP/gctk"
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -357,7 +362,7 @@ if [ "${_g[0]:-}" = "cat-file" ] && [ -n "${STUB_UNFETCHED:-}" ]; then
     "$STUB_UNFETCHED"*) grep -q -- " origin $STUB_UNFETCHED\$" "${STUB_FETCH_LOG:-/dev/null}" 2>/dev/null || exit 1 ;;
   esac
 fi
-# The backstop's path list, which the resolver's --edits reads:
+# The backstop's path list, which gctk review guidance --edits reads:
 # `-C <root> merge-base <base> <oid>` answers the fork point (STUB_FORK, set
 # empty for one that does not read), and `-C <root> diff --name-only` answers
 # STUB_DIFF_PATHS, one path per line. The path a rename left,
@@ -1505,7 +1510,7 @@ has "$(meta tk-anc check_set)" "arch" "…and arch reaches check_set from the pa
 echo "# every check the effective index declares but triage is refused --add-gates"
 # The pack's index of the tree under test, iterated: the owner of the widening is
 # the one check signoff.sh names for it, whatever the index declares.
-PACK_CHECKS=$("$HERE/review-checks.sh" --file "$HERE/../../review-checks.toml" 2>/dev/null | cut -f1)
+PACK_CHECKS=$("$GCTK_BIN" review checks --file "$HERE/../../review-checks.toml" 2>/dev/null | cut -f1)
 [ -n "$PACK_CHECKS" ] && ok "the pack's index lists its checks" || bad "the pack's index lists no checks"
 for c in $PACK_CHECKS; do
   [ "$c" = triage ] && continue

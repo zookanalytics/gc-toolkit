@@ -140,12 +140,16 @@ FINDING="$SCRIPTS_DIR/finding.sh"
 # Whether an automated actor holds the anchor's live blockers, the answer the
 # merge pass records its blocker verdict on.
 BLOCKER_HOLDER="$SCRIPTS_DIR/blocker-holder.sh"
-# The one resolver of the check index: the dispatch loop asks it for the lanes
+# The check index, `gctk review checks`: the dispatch loop asks it for the lanes
 # that gate the anchor's current stage (pre-open before the PR exists, through
 # open-as-draft once it is open), which drops the non-lanes none/off and the
-# approval merge rule in one place instead of this loop re-deriving it.
-REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
-[ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot gate" >&2; exit 1; }
+# approval merge rule in one place instead of this loop re-deriving it. The
+# binary is the one gctk-resolve.sh's chain names, read when an anchor needs
+# it, and the pack's index is the one beside these scripts. With no binary the
+# read fails, and the anchor is held.
+# shellcheck source=gctk-resolve.sh
+. "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+review_checks() { local g; g=$(gctk_path) || return 1; GCTK_SCRIPTS_DIR="$SCRIPTS_DIR" "$g" review checks "$@"; }
 WEDGE_KEY="review-wedge"
 
 # Origin pin for the live-head read through the GitHub API, which needs gh and a
@@ -860,7 +864,7 @@ while IFS= read -r tagged; do
   # empty gate list would dispatch nothing AND let this anchor settle on the axis
   # below while a lane is actually short of green. Fail closed — skip the whole
   # anchor this pass (no dispatch, no settle), retry next pass.
-  if ! gates=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through "$GE_THROUGH" --at "$head" 2>/dev/null); then
+  if ! gates=$(review_checks --resolve "$checkset" --through "$GE_THROUGH" --at "$head" 2>/dev/null); then
     echo "$PROG: $id gate resolver failed for check_set '$checkset'; dispatching nothing this pass (merge stays held, retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi

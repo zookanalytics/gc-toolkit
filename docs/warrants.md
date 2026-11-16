@@ -117,8 +117,8 @@ no warrant.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main a1eb65702 and
-  `gastownhall/gascity-packs` main 0f07496d2.
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main 8e7d91b583 and
+  `gastownhall/gascity-packs` main 0f07496d2fa.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
   is planned for the merge resume, since the refinery brings every branch current
@@ -126,7 +126,7 @@ no warrant.
   ([built-once-target.md](built-once-target.md#merge)).
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
   commit. `submit-and-exit`: the merge and review nouns it holds retire, the
-  bring-current guard among them with the review loop (`tk-1tfzr71.22`).
+  bring-current guard among them with the old review path (`tk-1tfzr71.122`).
 
 ## Dolt reclaim
 
@@ -233,7 +233,7 @@ no warrant.
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-14, at `gastownhall/gascity` main 420b7bb65f and
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main 8e7d91b583 and
   `gastownhall/beads` main 8cdfa796a (`BuildReadyWorkOrder` in
   `internal/storage/sqlbuild/ready.go` orders the priority policy by the bead's
   own priority), with bd 1.3.4 (7ef2fd05e).
@@ -442,8 +442,9 @@ no warrant.
 ## Saved GitHub read
 
 - **Covers.** The `pr_github_read` key, declared as `githubReadKey` in
-  `services/gctk/pr/read.go`. Its writer is the landing order: `blocked` and
-  `decide` in `services/gctk/pr/landing.go` save the read that `observe` in
+  `services/gctk/pr/read.go`. Its writer is the landing order: `blocked`,
+  `requeued` and `decide` in `services/gctk/pr/landing.go`, and `admit` and
+  `runFailed` in `services/gctk/pr/admit.go`, save the read that `observe` in
   `services/gctk/pr/read.go` makes. Its reader is `FromStore` in
   `services/gctk/pr/read.go`, which `answerFromStore` in
   `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
@@ -487,7 +488,7 @@ no warrant.
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main e9a628c50030,
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main d2254b579682,
   `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
   8cdfa796a8f5.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
@@ -548,6 +549,107 @@ no warrant.
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
   GitHub's review thread events. The count then moves onto that record.
+
+## Approval withdrawal
+
+- **Covers.** The `withdraw_head` key, declared in `services/gctk/pr/keys.go`,
+  on the task a withdrawal is. Its writer: `Withdraw` in
+  `services/gctk/pr/withdraw.go`, which the `withdraw` verb of
+  `services/gctk/internal/cli/prcycle.go` runs. Its carrier is the landing
+  order: `withdrawalsIn`, `carry` and `carryOne` in the same file, which the
+  order's run in `services/gctk/pr/landing.go` calls on each pass that reads
+  the record. Its reader for the review run: `WithdrawalFor` in the same file,
+  which the `output` verb of `services/gctk/internal/cli/reviewrun.go` reads
+  to refuse a triage output that rules its head material before the
+  withdrawal for that head is filed.
+- **Stands in for.** A withdrawal of a pull request's approvals once a head
+  changes what the PR does: an operation that dismisses each approval given on
+  a commit without that head, and holds the PR's bead from merging until GitHub
+  shows none standing.
+- **Evidence.**
+  - In `gastownhall/gascity`, no code dismisses a GitHub review or reads one.
+    The PR readiness monitor reads each open PR's author, draft
+    flag, merge state, branches, head and check rollup (`pullRequestsQuery` in
+    `internal/githubmonitor/client.go`). A search of the repository for a
+    dismissal finds a session's startup dialogs, mail and a dashboard note,
+    and no review.
+  - A dismissal can wait on routing, and GitHub can refuse it or not answer,
+    so the withdrawal must last until a later pass carries it out. Gas City
+    keeps no such wait for a write to an outside service: a failed order is not
+    retried ("No retry on dispatch failure" in
+    `engdocs/architecture/orders.md`), and `[steps.retry]` retries a step's
+    attempt within its run (section 3.2 of
+    `docs/reference/specs/formula-spec-v2.md`).
+  - In `gastownhall/gascity-packs`, no pack dismisses a review. The
+    `pr-review` pack posts one kind, a review that requests changes, from its
+    `mol-adopt-pr` and `mol-pr-merge-only` formulas. Gas Town's
+    refinery patrol and its `pr-merge-reconcile` read a PR through the pulls
+    API and none of its reviews (`gastown/formulas/mol-refinery-patrol.toml`
+    and `gastown/commands/pr-merge-reconcile/run.sh`), at packs main and at the
+    pin Gas City bundles. The approvals the `gascity` and `gastown` packs
+    record are review workflows' verdicts on beads
+    (`gascity/assets/scripts/checks/implementation-review-approved.sh` and
+    `gastown/assets/scripts/checks/adopt-pr-review-approved.sh`), not GitHub
+    reviews.
+  - The search is the draft cycle and the withdrawal in
+    [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main 294079d53f57, with
+  the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
+  main 0f07496d2fa4.
+- **Retires when.** Gas City dismisses a pull request's approvals given before
+  a head, or keeps a write to GitHub that a later pass carries out. The
+  withdrawal then moves onto that operation.
+
+## Asks
+
+- **Covers.** The `review_checks` key, declared in
+  `services/gctk/review/keys.go`, on the task an ask is. Its writer: `FileAsk`
+  in `services/gctk/review/ask.go`, which the `ask` verb of
+  `services/gctk/internal/cli/review.go` runs. Its readers, which know an ask
+  by its shape: `isAsk`, `IsAsk`, `AsksOn` and `AsksIn` in the same file,
+  `writers` in `services/gctk/pr/admit.go`, which leaves an ask out of a
+  branch's other writers, and `refinery_ask` in
+  `assets/scripts/refinery-lib.sh`, which applies the same rule to the beads
+  the refinery reads. Its close: `Record` in
+  `services/gctk/review/result.go`, which the loop's check runs through the
+  `passed` verb's `--record`.
+- **Stands in for.** A request held on a pull request's bead for the review run
+  that works it: a change on the PR's branch, or a check at its next head, that
+  no pool claims, so the run stays the branch's one writer, with the checks a
+  later run must run.
+- **Evidence.**
+  - In `gastownhall/gascity`, the one request the PR monitor files on a pull
+    request is its repair bead, which it routes and hands a workflow as it
+    files it (`ensureGitHubPRRepairBead` and `attachGitHubPRRepairWorkflow` in
+    `cmd/gc/cmd_github.go`, with `gc.routed_to` set in
+    `githubPRRepairMetadata`), so a pool works it as a writer of its own.
+  - In `gastownhall/gascity-packs`, a change a branch needs goes to a pool as
+    well. Gas Town's refinery reopens a rejected work bead with its
+    `rejection_reason` and routes it to the polecat pool
+    (`gastown/formulas/mol-refinery-patrol.toml`, at packs main and at the pin
+    Gas City bundles), and the `pr-review` pack's `mol-pr-iterate` is slung to
+    a polecat to address one piece of a PR's feedback
+    (`pr-review/formulas/mol-pr-iterate.formula.toml`).
+  - A search of both repositories finds no record on a bead of the checks a
+    later review must run.
+  - The rest of an ask is native: a task bead, a blocks edge onto the PR's
+    bead filed in the same create, the `branch` key the record declares, a
+    discovered-from edge to the bead it came from, and no route or assignee.
+    Gas City's sling stamps `gc.execution_routed_to` on a work bead whose
+    workflow it started, clears its `gc.routed_to` and `gc.run_target`, and
+    leaves the bead unassigned while the workflow's steps are claimed
+    (`restampWorkBeadRouting` in `internal/sling/sling_core.go`, read at
+    `gastownhall/gascity` main d2254b579682), so an ask carries neither route,
+    and never the role key `task_kind` that a rework child carries. The search
+    is asks in
+    [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main 294079d53f57, with
+  the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
+  main 0f07496d2fa4.
+- **Retires when.** Gas City files a request for a pull request's branch that
+  the run already attached to the PR's bead works, with no pool to claim it,
+  such as a PR monitor that hands its repair to that run. The ask then moves
+  onto that request.
 
 ## Agent home provisioning
 

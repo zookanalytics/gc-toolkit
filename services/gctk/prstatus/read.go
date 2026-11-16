@@ -123,6 +123,7 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 		}
 		f := RowFacts(rows[id].Metadata)
 		f.Gates, f.Owed, f.Staying, f.InFlightCount = h.Gates, h.Owed, h.Staying, len(inFlight[id])
+		f.Runs = runsOf(own[id])
 		facts[id] = f
 	}
 	return facts, errors.Join(errs...)

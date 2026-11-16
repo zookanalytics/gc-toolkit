@@ -75,13 +75,14 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # The review beads on an anchor are its children (bd-lib.sh's anchor graph).
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "review-outcome: cannot source bd-lib.sh beside this script" >&2; exit 1; }
-# The one resolver of the check index: the anchor-wide supersede asks it for
+# The check index, `gctk review checks`: the anchor-wide supersede asks it for
 # every declared lane (`--through merge` spans all phases), which drops the
 # non-lanes none/off and the approval merge rule in one place.
-REVIEW_CHECKS="$SCRIPT_DIR/review-checks.sh"
-# A missing resolver would supersede no lanes on a non-converged batch, leaving a
-# stale green that merges. Require it, so the supersede holds instead.
-[ -x "$REVIEW_CHECKS" ] || { echo "review-outcome: the check resolver is missing ($REVIEW_CHECKS)" >&2; exit 2; }
+# shellcheck source=gctk-resolve.sh
+. "$SCRIPT_DIR/gctk-resolve.sh" || { echo "review-outcome: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+# A missing binary would supersede no lanes on a non-converged batch, leaving a
+# stale green that merges. Its read fails instead, so the supersede holds.
+review_checks() { local g; g=$(gctk_path) || return 1; GCTK_SCRIPTS_DIR="$SCRIPT_DIR" "$g" review checks "$@"; }
 
 ALL_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"
 
@@ -342,7 +343,7 @@ cmd_supersede_anchor() {
   # anchor: a non-zero exit could not name the lanes and must fail closed (exit 2,
   # like the unreadable-anchor arms above), never collapse to a zero no-op that
   # leaves the merge open on a review the caller required.
-  if ! lanes=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through merge --at "$oid" 2>/dev/null); then
+  if ! lanes=$(review_checks --resolve "$checkset" --through merge --at "$oid" 2>/dev/null); then
     warn "the check resolver failed for anchor $anchor; refusing to supersede on an unreadable lane set"; exit 2
   fi
   [ -n "$lanes" ] || { echo 0; return 0; }

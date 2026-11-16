@@ -2,22 +2,18 @@ package pr
 
 import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 
-// The keys the evaluator reads beside Gas Town's pending record, which the
-// record package owns. No domain owns any of these yet, so each is declared
-// read-only here: shell writes the branch, the holds, the feedback receipts and
-// the anchor link, and their definitions stay in lifecycle/lifecycle.toml.
+// The keys the evaluator reads beside Gas Town's pending record and the PR's
+// branch, which the record package owns, and the review loop's results, which
+// the review domain owns and the evaluator reads through review.Results. No
+// domain owns any of these yet, so each is declared read-only here: shell
+// writes the holds, the feedback receipts and the anchor link, and their
+// definitions stay in lifecycle/lifecycle.toml.
 
 // reading is a key's read, through its own declaration or through the reading
 // face the key's owner exports.
 type reading interface {
 	Get(*ledger.Record) (string, bool, error)
 }
-
-// The branch the work is on, which the work formula's workspace-setup writes
-// (lifecycle/lifecycle.toml, [metadata.merge_identity]).
-var branchKey = ledger.ReadOnly("branch", ledger.String,
-	"The pr evaluator and the landing order hold a PR whose head branch is not this one. A composition reads "+
-		"it for the PR's source branch, and finds the beads whose work the branch carries by it.")
 
 // The holds a person sets by hand (lifecycle/lifecycle.toml, [holds] and
 // [metadata.holds]).
@@ -57,11 +53,3 @@ var (
 // edge (lifecycle/lifecycle.toml, [metadata.gates]).
 var anchorKey = ledger.ReadOnly("anchor_bead", ledger.String,
 	"The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge.")
-
-// The review loop's results, which the review lanes write once their loop
-// records a result for each head and target it judges. Until then nothing
-// writes it, and a PR on the pending record reads no review result.
-var reviewResultsKey = ledger.ReadOnly("review_results", ledger.JSON[[]ReviewResult](),
-	"The review loop's results on the bead that owns a PR, a JSON array of {head, target, passed}, "+
-		"one for each head and target the loop judged. The evaluator counts only a result for the PR's "+
-		"live head and target.")

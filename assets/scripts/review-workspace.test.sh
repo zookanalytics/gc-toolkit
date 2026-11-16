@@ -8,7 +8,9 @@
 # Covers path and its id rails; add making a detached worktree at the commit,
 # reusing it at the same commit, rebuilding it at another, re-creating one whose
 # directory was deleted by hand, and refusing an oid that is not a commit and a
-# workspace name that is a symlink; remove taking every worktree inside a
+# workspace name that is a symlink; a run's repair part kept past the head with
+# its commits and uncommitted files, and refused and kept when it is not at the
+# head or past it; remove taking every worktree inside a
 # workspace, a nested one included, with its registration, and a read-only
 # subtree, while another worktree's stale registration is left in place; the
 # formulas' own gather and remove lines, run as a pour fills them in; the
@@ -181,6 +183,58 @@ OUT="$(run remove --review-bead tk-rm)"
 eq "$?" "0" "remove of an absent workspace exits 0"
 has "$OUT" "no workspace" "and says there was none"
 
+# --- a review run's workspace --------------------------------------------------
+# A run's workspace is named for its root, and each step takes a part of it: a
+# directory per lane, one for triage and one for the repair, each holding a
+# detached worktree.
+eq "$(bash "$SUT" path --root tk-run)" "$WS/gc-review-tk-run" "path names a run's workspace for its root"
+LANE_A="$(bash "$SUT" add --root tk-run --lane correctness --oid "$C1" --repo "$REPO" 2>/dev/null)"
+eq "$LANE_A" "$WS/gc-review-tk-run/lane-correctness/wt" "a lane's worktree is in its own part"
+LANE_B="$(bash "$SUT" add --root tk-run --lane arch --oid "$C1" --repo "$REPO" 2>/dev/null)"
+REPAIR="$(bash "$SUT" add --root tk-run --repair --oid "$C1" --repo "$REPO" 2>/dev/null)"
+TRIAGE="$(bash "$SUT" add --root tk-run --triage --oid "$C1" --repo "$REPO" 2>/dev/null)"
+eq "$REPAIR|$TRIAGE" "$WS/gc-review-tk-run/repair/wt|$WS/gc-review-tk-run/triage/wt" "the repair and triage take parts of their own"
+for p in "$LANE_A" "$LANE_B" "$REPAIR" "$TRIAGE"; do
+    eq "$(git -C "$p" rev-parse HEAD 2>/dev/null)/$(git -C "$p" symbolic-ref -q HEAD || echo detached)" "$C1/detached" \
+        "${p#"$WS"/} is detached at the head"
+done
+touch "$WS/gc-review-tk-run/lane-correctness/capture.mp4"
+eq "$(bash "$SUT" add --root tk-run --lane correctness --oid "$C2" --repo "$REPO" 2>/dev/null)" "$LANE_A" "a lane at a later head keeps its part's path"
+eq "$(git -C "$LANE_A" rev-parse HEAD)" "$C2" "and its worktree moves to the new head"
+eq "$(git -C "$LANE_B" rev-parse HEAD)" "$C1" "while another lane's worktree stays where it was"
+if exists "$WS/gc-review-tk-run/lane-correctness/capture.mp4"; then ok "a file beside the worktree stays"; else bad "a file beside the worktree stays"; fi
+# The repair's part is the run's one writing tree: a read again at the head the
+# round judged keeps what the repair committed there and what it has not
+# committed yet, and a tree that is not at the head or past it is refused and
+# kept as it stands.
+rg() { git -C "$REPAIR" -c user.name=t -c user.email=t@example.com "$@"; }
+echo fix > "$REPAIR/f"; rg commit -q -am fix; FIXED="$(rg rev-parse HEAD)"
+echo draft > "$REPAIR/scratch.txt"
+GOT="$(bash "$SUT" add --root tk-run --repair --oid "$C1" --repo "$REPO" 2>"$TMP/err")"; RC=$?
+eq "$RC|$GOT" "0|$REPAIR" "the repair's read again at the head keeps its part's worktree"
+eq "$(git -C "$REPAIR" rev-parse HEAD)" "$FIXED" "with the repair's commit past the head"
+if exists "$REPAIR/scratch.txt"; then ok "…and its uncommitted file"; else bad "…and its uncommitted file"; fi
+has "$(cat "$TMP/err")" "1 commit(s) past $C1" "and it says how far past the head the tree is"
+eq "$(bash "$SUT" add --root tk-run --repair --oid "$FIXED" --repo "$REPO" 2>/dev/null)" "$REPAIR" "a read at the commit the repair made keeps it too"
+GOT="$(bash "$SUT" add --root tk-run --repair --oid "$C2" --repo "$REPO" 2>"$TMP/err")"; RC=$?
+eq "$RC|$GOT" "3|" "a repair tree that is not at the head or past it is refused (exit 3), naming no worktree"
+eq "$(git -C "$REPAIR" rev-parse HEAD)" "$FIXED" "and kept at its own commit"
+if exists "$REPAIR/scratch.txt"; then ok "…with its uncommitted file"; else bad "…with its uncommitted file"; fi
+has "$(cat "$TMP/err")" "which is not $C2 or past it" "and it says why"
+for args in "add --root tk-run --oid $C1" "add --lane arch --oid $C1" "add --root tk-run --lane arch --repair --oid $C1" \
+            "add --root tk-run --review-bead tk-abc --lane arch --oid $C1" "path --root tk-run --lane arch" \
+            "remove --root tk-run --repair" "add --root tk-run --lane ../x --oid $C1"; do
+    # shellcheck disable=SC2086
+    bash "$SUT" $args --repo "$REPO" >/dev/null 2>&1
+    eq "$?" "2" "'$args' is a usage error"
+done
+OUT="$(run remove --root tk-run)"
+eq "$?" "0" "remove takes a run's workspace by its root"
+if exists "$WS/gc-review-tk-run"; then bad "with every part"; else ok "with every part"; fi
+for p in "$LANE_A" "$LANE_B" "$REPAIR" "$TRIAGE"; do
+    if is_registered "$p"; then bad "remove deregisters ${p#"$WS"/}"; else ok "remove deregisters ${p#"$WS"/}"; fi
+done
+
 # --- the formulas' own lines ---------------------------------------------------
 extract() { # <toml> <marker>
     awk -v m="$2" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$1"
@@ -200,7 +254,11 @@ for v in GATHER REMOVE QREMOVE; do
 done
 # The pack gc names holds the scripts the gather calls and the libs they source.
 PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
-cp "$SUT" "$HERE/review-checks.sh" "$HERE/review-evidence.sh" "$HERE/bd-lib.sh" "$HERE/rig-check-lib.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
+cp "$SUT" "$HERE/review-evidence.sh" "$HERE/bd-lib.sh" "$HERE/rig-check-lib.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
+# The gather reads the rig's guidance through gctk, built from this checkout.
+harness_build_gctk
+[ -n "$GCTK_BUILT" ] || { echo "gctk did not build: $GCTK_BUILD_ERR" >&2; exit 1; }
+export GCTK_BIN="$GCTK_BUILT"
 # The gather fetches the base and the branch from origin before it makes the
 # worktree, and reads the anchor.
 ORIGIN="$TMP/origin.git"; git init -q --bare "$ORIGIN"

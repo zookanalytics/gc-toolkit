@@ -60,13 +60,6 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # disagree), and finding reads the anchor's open must-fix findings.
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
-# The one resolver of the check index: given a check_set and a transition, it
-# names the checks that gate it (dropping the non-lanes none/off/approval). Each
-# anchor's gates are resolved once, at the head, and that one answer feeds the
-# create gate, the draft decision and the published body. Without it nothing can
-# be gated, so nothing opens.
-REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
-[ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); NOTHING is opened or readied this pass" >&2; exit 1; }
 # The single writer of the workflow-owned `status:` PR label. A PR is born
 # check-green with no review yet, so its initial status is needs-review, or working
 # while it is a draft whose ready flip the city still owes; reconcile derives that
@@ -82,13 +75,20 @@ PR_POST="$SCRIPTS_DIR/pr-post.sh"
 # the one gctk-resolve.sh's chain names, read once a pass needs it.
 # shellcheck source=gctk-resolve.sh
 . "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+# The check index, `gctk review checks`: given a check_set and a transition, it
+# names the checks that gate it (dropping the non-lanes none/off/approval). Each
+# anchor's gates are resolved once, at the head, and that one answer feeds the
+# create gate, the draft decision and the published body. Without it nothing can
+# be gated, so nothing opens: with no binary the read fails, and the anchor is
+# held. The pack's index is the one beside these scripts.
+review_checks() { local g; g=$(gctk_path) || return 1; GCTK_SCRIPTS_DIR="$SCRIPTS_DIR" "$g" review checks "$@"; }
 
 # Every gate through the draft stage at <head_oid>, `<name>\t<phase>` per line.
 # Each anchor's gates are resolved once, and that one answer feeds its create
 # gate, its draft decision and the body composed for it. Non-zero when the
 # resolver fails: an unreadable set is never an empty one, and the caller holds.
 prs_resolve_phased() { # <check_set> <head_oid>
-  "$REVIEW_CHECKS" --resolve --check-set "${1:-}" --through open-as-draft --with-phase --at "${2:-}" 2>/dev/null
+  review_checks --resolve "${1:-}" --through open-as-draft --with-phase --at "${2:-}" 2>/dev/null
 }
 
 # One phase band of a resolved set: the names tagged <phase>, one per line.
@@ -824,7 +824,7 @@ while IFS=$'\x1f' read -r rid rcs rnum rhold rrhold rdisp; do
   # Every pre-open and open-as-draft gate must derive green at the live head,
   # remote allowed — the PR is open, so a GitHub approval can back a lane. An
   # unreadable gate set (a resolver crash) or lane holds the flip.
-  if ! RGATES=$("$REVIEW_CHECKS" --resolve --check-set "$rcs" --through open-as-draft --at "$rhead" 2>/dev/null); then
+  if ! RGATES=$(review_checks --resolve "$rcs" --through open-as-draft --at "$rhead" 2>/dev/null); then
     continue
   fi
   rungreen=""

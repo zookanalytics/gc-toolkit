@@ -5,8 +5,11 @@
 #   - with no PR open, the head is pushed under the lease and the PR opens as a
 #     draft with the composed title and body, then is recorded pending;
 #   - a PR open on the branch that the city's account opened and the bead never
-#     recorded is adopted: its title and body are edited, the head is pushed,
-#     and it is recorded, with no second PR;
+#     recorded is adopted: its title and body are edited, it is returned to
+#     draft, the head is pushed, and it is recorded, with no second PR;
+#   - a PR the bead records is returned to draft before the head is pushed onto
+#     it, and a PR that did not return to draft is not pushed onto, while a PR
+#     the step opens opens as a draft and needs no return;
 #   - a half-written record (the marker and existing_pr, no record) is taken
 #     again and recorded on the PR existing_pr names;
 #   - a PR another account opened, found on the branch or named by an old-path
@@ -72,6 +75,7 @@ eq "$(meta a merge_result)" "pull_request_pending" "the bead records its PR as p
 eq "$(meta a pr_head_sha)" "$HEAD_A" "…at the head the refinery validated"
 eq "$(bstatus a)" "blocked" "…and is blocked on it"
 hasnt "$(logged gh)" "pr edit" "a new PR needs no edit"
+hasnt "$(logged gctk)" "pr draft" "a PR that opens as a draft needs no return to draft"
 
 echo "# a PR the city's account opened and the bead never recorded is adopted"
 fresh
@@ -85,8 +89,30 @@ eq "$RC" 0 "the publication exits 0"
 has "$OUT" "adopting PR #41" "it says it adopts the open PR"
 hasnt "$(logged gh)" "pr create" "no second PR opens"
 has "$(logged gh)" "pr edit 41 --repo zook/rig --title feat: b (b) --body-file" "the PR's title and body are edited"
+has "$(logged gctk)" "pr draft b --pr https://github.com/zook/rig/pull/41" "the adopted PR is returned to draft"
 eq "$(tip polecat/b)" "$HEAD_B" "the prepared head is pushed"
 eq "$(meta b pr_url)" "https://github.com/zook/rig/pull/41" "the bead records the adopted PR"
+
+echo "# a recorded PR returns to draft before the push, and one that does not is not pushed onto"
+fresh
+BEFORE=$(branch_with polecat/d d.txt)
+work d polecat/d '{"merge_result":"pull_request_head_changed","pr_url":"https://github.com/zook/rig/pull/45","pr_number":"45"}'
+main_with d-later.txt >/dev/null
+prepared d polecat/d
+HEAD_D=$(git -C "$HOME_DIR/worktrees/d" rev-parse HEAD)
+eq "$([ "$HEAD_D" != "$BEFORE" ] && echo new)" "new" "the prep merged main that moved, so its prepared head is new"
+pr 45 polecat/d gc-city-bot
+STUB_DRAFT_RC=2 run --bead d
+eq "$RC" 1 "a PR that did not return to draft stops the step"
+has "$OUT" "did not return to draft, so the head is not pushed" "…and says why"
+eq "$(tip polecat/d)" "$BEFORE" "nothing is pushed onto the PR while it may be ready"
+hasnt "$(logged gctk)" "pr record" "…and nothing is recorded"
+reset_logs
+run --bead d
+eq "$RC" 0 "the next pass publishes"
+has "$(logged gctk)" "pr draft d --pr https://github.com/zook/rig/pull/45" "…returning the recorded PR to draft"
+eq "$(tip polecat/d)" "$HEAD_D" "…then pushing the head"
+eq "$(meta d merge_result)" "pull_request_pending" "…and recording it"
 
 echo "# a half-written record is taken again and recorded on the PR existing_pr names"
 fresh

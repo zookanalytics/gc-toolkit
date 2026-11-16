@@ -18,6 +18,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
 // `gctk merge` is arm 2 of the merge cadence, THE single writer of merged
@@ -37,8 +38,8 @@ import (
 // The lifecycle transitions it performs are in-process (cli.Lifecycle), the
 // writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git/jq
 // and the sibling shell helpers (human-gate.sh, record-failure-cap.sh,
-// lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh,
-// pr-status-label.sh, blocker-holder.sh, pr-post.sh), resolved from
+// lane-state.sh, finalize-gate.sh, render-seed-audit.sh, pr-status-label.sh,
+// blocker-holder.sh, pr-post.sh), resolved from
 // GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's directory
 // before it execs this binary.
 // Subprocess seams let merge.test.sh's stubs on PATH drive the binary, and keep
@@ -129,13 +130,6 @@ func Merge(args []string, stdout, stderr io.Writer) int {
 	scriptsDir := os.Getenv("GCTK_SCRIPTS_DIR")
 	if p := helperDirProblem(scriptsDir); p != "" {
 		fmt.Fprintf(stderr, "%s: %s; NOTHING is merged this pass\n", mergeProg, p)
-		return 1
-	}
-	// A missing check resolver would make every anchor read as having no lanes,
-	// which is merge's fail-open, so its absence holds the pass. It is checked
-	// before gh is looked for, so a pass without either exits 1 here.
-	if p := filepath.Join(scriptsDir, "review-checks.sh"); !isExecutable(p) {
-		fmt.Fprintf(stderr, "%s: the check resolver is missing (%s); merge held\n", mergeProg, p)
 		return 1
 	}
 	// A wrong merge cannot be retried away; merging nothing costs one pass. With
@@ -1153,28 +1147,33 @@ func (m *merger) prViewSettled(num string, pinnedRaw []byte) (outcome settledOut
 }
 
 // firstNotgreenLane returns the first declared lane that does not derive green.
-// The lanes are the ones review-checks.sh resolves for the merge at headOid, the
+// The lanes are the ones the check index resolves for the merge at headOid, the
 // head this pass merges with --match-head-commit, which drops the non-lanes
 // none/off and the approval merge rule. The caller holds an empty headOid before
-// it asks, since the resolver refuses a call that names no commit. ok=false is a
-// state the caller holds on: the resolver exited non-zero, or a lane was
-// unreadable (lane-state green exit 2). A resolver that dies prints nothing, and
-// reading that as no lanes would merge on approval alone. An empty lane with
-// ok=true means every declared lane is green.
+// it asks, since the index is read only at a commit. ok=false is a state the
+// caller holds on: the index did not read or resolve, or a lane was unreadable
+// (lane-state green exit 2), since reading that as no lanes would merge on
+// approval alone. An empty lane with ok=true means every declared lane is
+// green.
 func (m *merger) firstNotgreenLane(anchor, checkSet, headOid string) (lane string, ok bool) {
-	lanes, rrc := m.scriptCapture("review-checks.sh", "--resolve", "--check-set", checkSet, "--through", "merge", "--at", headOid)
-	if rrc != 0 {
+	src, err := indexSources("")
+	if err != nil {
 		return "", false
 	}
-	for _, l := range strings.Split(lanes, "\n") {
-		if l == "" {
-			continue
-		}
-		switch m.scriptRC("lane-state.sh", "green", "--anchor", anchor, "--lane", l) {
+	ix, err := review.ReadIndex(src, headOid)
+	if err != nil {
+		return "", false
+	}
+	gates, _, err := ix.Resolve(checkSet, "merge")
+	if err != nil {
+		return "", false
+	}
+	for _, g := range gates {
+		switch m.scriptRC("lane-state.sh", "green", "--anchor", anchor, "--lane", g.Name) {
 		case 0:
 			// green; next lane
 		case 1:
-			return l, true
+			return g.Name, true
 		default:
 			return "", false
 		}
@@ -1493,7 +1492,7 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // The pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, human-gate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, human-gate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }

@@ -393,11 +393,12 @@ its `locus` and `message` and the fields of its contract: its `severity`, its
  "verification": "CONFIRMED: <the evidence>"}
 ```
 
-`signoff.sh` refuses, with nothing written, a set that lacks one of these
-fields, an entry whose verification is REFUTED, an approve that carries a P0 or
-P1, and a request-changes that carries neither. It renders the set as the
-posted verdict's Findings block, the most severe first and counted per grade,
-as in `1 P1, 2 P2`. After `Filed:`, the trail carries a `Swept:` line that
+The verdict goes where the formula you run under says, and its write refuses,
+with nothing written, a set that lacks one of these fields, an entry whose
+verification is REFUTED, an approve that carries a P0 or P1, and a
+request-changes that carries neither. The posted verdict renders the set, the
+most severe first and counted per grade, as in `1 P1, 2 P2`. After `Filed:`,
+the trail carries a `Swept:` line that
 says how the sweep ran and what it added, then a `Refuted:` line for each
 candidate its check refuted, and it ends with the line that records the test
 evidence the review relied on:
@@ -408,7 +409,9 @@ Refuted: <locus>: <its failure scenario>. <file>:<line> reads `<the quoted line>
 Verification: <test evidence relied on; each suite run at the reviewed commit, N passed, M failed; or that no suite touches the diff, and how you found it>
 ```
 
-The check passes no `signoff.sh` flag of its own. An approve of a change that
-edits `review-checks.toml` or a `docs/review-*.md` carries the formula's
-`--needs-you`, saying what the edit changes about the review that ran under
-it, and `signoff.sh` refuses one without it.
+The check adds nothing of its own to the verdict the formula records. An
+approve of a change that edits `review-checks.toml` or a `docs/review-*.md`
+carries the verdict's needs-you note, `--needs-you` or the output's
+`needs_you` as the formula you run under names it, saying what the edit changes
+about the review that ran under it, and the verdict's write refuses one without
+it.

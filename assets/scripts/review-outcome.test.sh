@@ -6,10 +6,12 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-review-outcome-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
+# gctk, built from this checkout, reads the check index for review-outcome.sh.
+harness_build_gctk
 unset GC_RIG 2>/dev/null || true
 harness_init
-# The resolver beside review-outcome.sh reads the pack's index of the tree under
-# test. Point the override at a missing file so every check_set token is a lane
+# gctk review checks reads the pack's index beside review-outcome.sh, the tree
+# under test's. Point the override at a missing file so every check_set token is a lane
 # and the lanes do not follow that file.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 SUT="$HERE/review-outcome.sh"
