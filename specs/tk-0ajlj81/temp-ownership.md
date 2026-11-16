@@ -35,9 +35,9 @@ bead's notes record:
 
 ## Why the temp needs a reaper at all
 
-Every owner removes its own temp when it ends normally. 220 of the 258 suites
-make `gctk-*` temp, and each removes it on an EXIT trap, which bash runs on TERM
-and HUP as well (bash 5.3.20, probed 2026-11-15). The go command removes its
+Every owner removes its own temp when it ends normally. 217 of the 254 suites
+make `gctk-*` temp (counted 2026-11-16), and each removes it on an EXIT trap,
+which bash runs on TERM and HUP as well (bash 5.3.20, probed 2026-11-15). The go command removes its
 `$WORK` when it exits, and it keeps going through SIGINT and SIGQUIT to exit
 that way (`signalsToIgnore` and `closeBuilders` in `cmd/go/internal/base` and
 `cmd/go/internal/work`, go1.27.4). A formula removes its hand-off file at its
@@ -89,7 +89,7 @@ What each producer gets:
   waits for the host.
 - gascity's gc.test trees: unchanged.
 
-## A hand-off between sessions
+## A hand-off between steps
 
 mol-feedback-distiller and mol-feedback-miner hand a `gctk-*` file between
 steps. Each later step declares `gc.session_affinity = "require"`, so the step
