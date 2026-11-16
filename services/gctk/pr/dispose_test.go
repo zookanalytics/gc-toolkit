@@ -10,6 +10,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
@@ -239,6 +240,63 @@ func TestADispositionIsReadOnlyOnTheRefinerysBeadOnTheRecord(t *testing.T) {
 			d.pr.Facts.State = "CLOSED"
 			if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 || len(r.asked()) != 0 {
 				t.Fatalf("the order read it: %+v, and asked the writer %v", out, r.asked())
+			}
+		})
+	}
+}
+
+// rulingHub is GitHub while a ruling lands: rule records the ruling's
+// disposition on the bead as the run reads the PR, after the run read the bead.
+type rulingHub struct {
+	pr.Hub
+	rule func()
+}
+
+func (h rulingHub) PullRequest(repo string, number int) (*gh.PullRequest, error) {
+	h.rule()
+	return h.Hub.PullRequest(repo, number)
+}
+
+// A ruling records its disposition without the record lock and then closes the
+// PR, so a run that read the bead before the disposition landed can read the
+// PR the ruling closed. The run reads the bead again before it calls the close
+// the record's exception, and the bead goes to the disposition writer with no
+// gate filed, blocked on the record or a changed head the order sent back
+// behind a withdrawal.
+func TestAPRClosedByARulingAfterTheRunReadTheBeadIsRetired(t *testing.T) {
+	for name, setup := range map[string]func(*testing.T, *land){
+		"blocked on the record": func(*testing.T, *land) {},
+		"a changed head behind a withdrawal": func(t *testing.T, d *land) {
+			d.pr.Facts.HeadRefOid = later
+			d.edit(t, func(b *fake.Bead) {
+				b.Status = "open"
+				b.Metadata["merge_result"] = record.HeadChanged
+				b.Metadata["observed_pr_head_sha"] = later
+			})
+			d.withdraw(t, later)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := newCycle(t)
+			r := &rehome{store: d.store}
+			d.l.Dispositions = r
+			setup(t, d)
+			d.pr.Facts.State = "CLOSED"
+			hub := d.l.Hub
+			d.l.Hub = func(host string) pr.Hub {
+				return rulingHub{Hub: hub(host), rule: func() {
+					d.edit(t, func(b *fake.Bead) {
+						b.Metadata["gc.pr_close_disposition_kind"] = "not-needed"
+						b.Metadata["gc.pr_close_disposition_successor"] = conversation
+					})
+				}}
+			}
+			is(t, d.once(t), pr.ActDisposed)
+			if g := d.gates.list(); len(g) != 0 {
+				t.Fatalf("a ruling's close the run read late filed gates %v", g)
+			}
+			if want := []string{bead + " not-needed " + conversation}; !slices.Equal(r.asked(), want) {
+				t.Fatalf("the writer was asked %v, want %v", r.asked(), want)
 			}
 		})
 	}
