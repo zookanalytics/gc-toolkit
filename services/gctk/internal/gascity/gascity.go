@@ -1,10 +1,12 @@
 // Package gascity is gctk's runtime adapter: Gas City as gctk reaches it apart
 // from its store, which internal/gcbd reaches (docs/gctk-architecture.md, "The
 // adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
-// when it names none, names the city's root, and runs the pack's scripts that
-// ask a person. A domain reaches them only through Runtime. City is the city
-// gctk runs in, and gascity/fake records what a domain asked and answers as its
-// test says, so a domain's rules are tested in Go with no Gas City.
+// when it names none, names the city's root, runs the pack's scripts that ask
+// a person, runs gc doctor, and reads and records the city's events. A domain
+// reaches them only through Runtime, or through an interface of its own that
+// City meets. City is the city gctk runs in, and gascity/fake records what a
+// domain asked and answers as its test says, so a domain's rules are tested in
+// Go with no Gas City.
 package gascity
 
 import (

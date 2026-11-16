@@ -94,6 +94,7 @@ form gctk <noun> <verb>, called by an agent, a hook or an order
 	root.SetErr(stderr)
 	root.AddCommand(
 		newBeadCmd(stdout, stderr),
+		newDoctorCmd(stdout, stderr),
 		newEpicCmd(stdout, stderr),
 		newLifecycleCmd(stdout, stderr),
 		newMergeCmd(stdout, stderr),

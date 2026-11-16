@@ -128,6 +128,7 @@ bead.
 | `gctk seed render` | hook, order | render every agent's prompt and every formula's recipe into the audit under `generated/seed-audit/` | Gas City renders one prompt or recipe on demand and keeps no copy. The audit keeps them all in the tree, so a PR's diff shows what each agent will receive. It writes only the output it owns, which is what lets an order run it. |
 | `gctk seed check` | hook | whether the render is current | The pre-commit hook and a doctor check read it, so a stale audit is caught before it lands. |
 | `gctk dolt reclaim` | order | reclaim each store at or over the reclaim line | The reclaim line is a store's on-disk noms size of `GC_DOLT_RECLAIM_THRESHOLD_MIB`, 2048 MiB by default, the size at which Gas City's `dolt-noms-size` doctor check warns. The supervisor runs no Dolt GC, and scheduled compaction skips a store under its commit threshold ([warrants.md](warrants.md#dolt-reclaim)). |
+| `gctk doctor run --accepted <file>` | order | run gc doctor once and record the run as one event: each check that fails and since when, each the run did not measure, each the operator accepted, and each monitor order's last good run | Gas City keeps no doctor result: `gc doctor --json` prints its report and stores nothing, and the supervisor's API serves no doctor route ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)). So the verb records each run with `gc event emit` as one `gc-toolkit.doctor.ran` event, and the event log is the record. It adds what no primitive does. Each failing check carries the time it first failed and its streak, the runs in a row that measured it failing, from the previous run's event, so a reader can show only what two runs found. A run that did not complete, or did not measure a check, adds to no streak and ends none, as its help says. The checks `doctor/accepted.toml` names are marked accepted, which `[doctor]` config cannot express. Each monitor's newest `order.completed` is read from the events, because the city deletes a closed order-tracking bead. It runs `gc doctor` with no `--fix` under a deadline, and writes no bead. |
 | `gctk version` | hook | the revision this binary was built from | The build stamps the module's subtree hash, so a doctor check can tell whether the deployed binary is the one the checkout builds. |
 | `gctk lifecycle`, `gctk merge` | hook | the old merge path's anchor state machine and merge rule | Debt, in [the re-implementation register](#the-re-implementation-register). |
 
@@ -169,6 +170,10 @@ What each noun owns:
   config in the pack and the rig, and what a run judged is in its steps' outputs,
   which Gas City keeps on the run's beads, in the shape the review domain
   declares and checks.
+- **`doctor`:** the record of each doctor run, the `gc-toolkit.doctor.ran` event,
+  which `doctor run` alone records, and the shape of its payload. The accepted
+  file it reads, `doctor/accepted.toml`, is config in the pack, and a PR the
+  operator approves is the ruling on each entry.
 - **`dolt` and `session`:** nothing. A session's title is Gas City's record and
   the agent's own terminal.
 
@@ -443,7 +448,7 @@ and CI runs those tests on every PR.
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
-| runtime | Gas City | `gc` (sling, config, session, events, runtime), the supervisor API (runs, sessions), the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh`, and the seed audit's, `render-seed-audit.sh` and `seed-audit-reaudit.sh` | recorded responses |
+| runtime | Gas City | `gc` (sling, config, session, doctor, events and event emit, runtime), the supervisor API (runs, sessions), the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh`, and the seed audit's, `render-seed-audit.sh` and `seed-audit-reaudit.sh` | recorded responses |
 | host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start inside the sandbox a demo capture runs in | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
 
 The store's rules are the store's own. The store adapter asks the store whether
