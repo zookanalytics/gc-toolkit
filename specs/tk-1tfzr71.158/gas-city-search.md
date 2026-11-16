@@ -142,7 +142,7 @@ bound, judged on the patrol its live session runs.
 
 **Gap.** Gas Town's salvage, on the keys our polecats write, pushed under the
 refinery's lease. The verb moves the step's blocks into one tested call (rule
-2), and it releases nothing. The `work_dir` clear that comes before a removal is
+2), and it releases nothing. The `work_dir` clear that follows a removal is
 bd's conditional update, which writes nothing once the assignee or status it
 names has moved (`--if-assignee`, `--if-status`, beads v1.3.4
 `cmd/bd/update.go`).

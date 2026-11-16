@@ -203,7 +203,7 @@ where it goes:
 | Part 2b, a live owner's seat (:483-499) | Moves to check-polecat-health. |
 | Part 3, salvage through `branch-context.sh` (:501-627) | Kept, in the salvage script. `branch-context.sh` retires: the witness runs in its rig's worktree, so the script checks that the bead's `work_dir` shares the rig root's git common directory, as Gas Town's does, and refuses a salvage that does not. The push keeps the refinery's lease (`branch-push.sh`). |
 | Part 4, verify before reset (:629-657) | Kept, behind the fresh read below. A landed branch closes the bead and files `witness-orphan-work-landed`. An unknown verdict files the human gate `witness-branch-recovery-unknown`. An unmerged branch is left to Gas City's release. |
-| Part 5, the owning-store guard and the worktree's removal (:659-713) | Kept, behind the fresh read below, with Gas Town's checks before a removal: the tree is clean, its head is its branch's head on origin, and the removal takes no `--force` (W:956-1003). `work_dir` is cleared first, so the next claimer cuts a tree on the recorded branch, as Gas Town's cleanup does (W:1012). |
+| Part 5, the owning-store guard and the worktree's removal (:659-713) | Kept, behind the fresh read below, with Gas Town's checks before a removal: the tree is clean, its head is its branch's head on origin, and the removal takes no `--force` (W:956-1007). `work_dir` is cleared once the tree is gone, so the next claimer cuts a tree on the recorded branch. Gas Town's cleanup takes the same order: it removes the tree, keeps the bead as it is when git refuses (W:1001-1007), and unsets `work_dir` only after the removal (W:1009-1016). |
 | `orphan-dispose.sh` class `review` | Gas City's controller releases it to its review pool, or core's sweep resets it. |
 | class `workflow-root` | No write, as today. |
 | class `workflow-step` | The controller's release, which keeps the step's route, or core's sweep. A step claimed under a live alias stays with that alias. |
@@ -258,10 +258,23 @@ case to a separate salvage scan (W:165-170).
 act on what the script reads just before it acts, as Gas Town's safety gate
 does (W:930-992). The script closes the bead or removes its worktree only while
 no live session answers to the bead's owner and the bead's assignee is that
-owner or empty. It clears `work_dir` in one write guarded by the assignee and
-status it read (bd's `--if-assignee` and `--if-status`), and removes the
-worktree only once that write lands. A claim that lands first fails the write,
-and the worktree stays for its claimer.
+owner or empty. It removes the worktree first, in the order Gas Town's cleanup
+and `work-submit.sh` take, and then clears `work_dir` in one write guarded by
+the assignee and status it read (bd's `--if-assignee` and `--if-status`). When
+git refuses the removal, the tree and `work_dir` both stay, so the next claimer
+enters the recorded tree and the next pass tries again.
+
+Two cases leave `work_dir` naming a tree that is gone. In one, the script stops
+between the removal and the write. In the other, a claim lands between the
+fresh read and the removal, git removes the tree, and the guarded write then
+fails. That claimer loses no work: git removes only a clean tree, so a tracked
+or untracked change makes it refuse, and a commit the claimer made stays on the
+local branch. What a gone tree costs a claimer depends on the script its next
+step runs. `work-setup.sh` cuts a fresh tree in its place, and `work-enter.sh`
+stops on the missing path, so that run goes no further until the bead has a
+tree again. A later pass that reaches the bead finds no tree at that path and
+clears `work_dir` in the same guarded write, on the assignee and status that
+pass reads.
 
 ## 3. The deacon
 
