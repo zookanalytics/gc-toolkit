@@ -124,9 +124,11 @@ the rest it takes a rework child handed back before its anchor.
 
 Exit 0: the one line it printed is the bead this iteration acts for. Note it
 and close this step. Exit 3: no work. Write `IDLE: no work, exiting turn.` and
-end the turn; a polecat's hand-off wakes and nudges you, and Gas City nudges
-you once the last blocker of a bead assigned to you closes. Exit 1: a read did
-not answer; end the turn the same way, and the next patrol retries."""
+end the turn; a polecat's hand-off wakes and nudges you, Gas City nudges you
+once the last blocker of a bead assigned to you closes, and the landing order
+wakes and nudges you for a PR's new head that only conversations and asks
+hold. Exit 1: a read did not answer; end the turn the same way, and the next
+patrol retries."""
 
 [[steps]]
 id = "rebase"
