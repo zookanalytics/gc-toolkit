@@ -170,12 +170,12 @@ update is the call it makes, and nothing here has to change for it.
   `rule_matches` in `github/scripts/github_intake_common.py`). The service runs
   a rule's actions in order and stops at the first that fails
   (`process_event_rules`). An `order` action runs `gc order run <name> [--rig
-  <rig>]`, and a `command` action runs its argument list with `{{payload.path}}`
-  filled from the delivery and `GC_GITHUB_REPO`, `GC_GITHUB_PR_NUMBER`,
-  `GC_GITHUB_PR_URL` and the payload's file in its environment
-  (`execute_rule_action`, `github_event_env`). Covered: a rule whose command is
-  `gctk pr refresh` and whose next action runs the landing order (design,
-  section 8).
+  <rig>]`, and a `command` action runs its argument list with each `{{path}}`
+  filled from that path in the delivery's payload, and with `GC_GITHUB_REPO`,
+  `GC_GITHUB_PR_NUMBER`, `GC_GITHUB_PR_URL` and the payload's file in its
+  environment (`execute_rule_action`, `render_template`, `github_event_env`).
+  Covered: a rule whose command is `gctk pr refresh` and whose next action runs
+  the landing order (design, section 8).
 - **Gas City's own receiver.** `[[webhook]]` mounts a hook whose rules map an
   event onto an order, with args projected from the payload (`WebhookRule` in
   `internal/config/webhook.go`). A public hook may fire only a formula order,

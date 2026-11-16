@@ -335,8 +335,9 @@ that match on a thread of its own (`enqueue_event_rules`), so GitHub's 10
 seconds for an answer are never spent on them. It runs each rule's actions in
 order and stops at the first that fails (`process_event_rules`). An `order`
 action runs `gc order run <name> --rig <rig>`, and a `command` action runs its
-argument list with `{{payload.path}}` filled from the delivery and the PR's
-number in `GC_GITHUB_PR_NUMBER` (`execute_rule_action`, `github_event_env`). The
+argument list with each `{{path}}` filled from that path in the delivery's
+payload, and with the PR's number in `GC_GITHUB_PR_NUMBER`
+(`execute_rule_action`, `render_template`, `github_event_env`). The
 rules live in the city's `config/github-intake/rules.toml`. The call a rule
 makes for one PR, a review here:
 
@@ -384,11 +385,13 @@ saved labels differ, through the labels' one writer,
 `assets/scripts/pr-status-label.sh`, with the verbs it has: `reconcile` for an
 owned open PR and `clear` for an owned PR that merged or closed. It passes the
 saved labels as the labels GitHub shows (`--current-labels`), so the writer
-edits only what differs from them and reads nothing. A write repeated before
-the next refresh saves the labels it made asks GitHub to add a label already
-there or take off one already gone, which changes nothing. A write that does not
-land leaves the difference on the bead, and the next run writes it again. No key
-records it.
+edits only what differs from them. It reads the PR's labels itself only when
+the saved labels are empty, and a write that adds a label first lists the
+repository's labels to create any it lacks (`ensure_labels`). A write repeated
+before the next refresh saves the labels it made asks GitHub to add a label
+already there or take off one already gone, which changes nothing. A write that
+does not land leaves the difference on the bead, and the next run writes it
+again. No key records it.
 
 | The PR | The labels the store derives |
 |---|---|
@@ -399,10 +402,10 @@ records it.
 
 The PRs no bead owns are found by a search the net runs once a pass in each
 repository, `search(type: ISSUE, query: "repo:<repository> is:pr
-label:\"status: working\",...")` over the four `status:` values and the four
-`held:` values, reading one page of 100 a pass for 1 point. A PR on that page
-that no live bead owns gets `clear`, at most 20 a pass in each repository. On
-2026-11-16 the search found 527 closed PRs here that still carry a label, all
+label:\"status: working\",...")` over every `status:` and `held:` value the
+labels' writer names, reading one page of 100 a pass for 1 point. A PR on that
+page that no live bead owns gets `clear`, at most 20 a pass in each repository.
+On 2026-11-16 the search found 527 closed PRs here that still carry a label, all
 closed before 2026-10-30, which clear in 27 passes, about four and a half
 hours. A clear that does not land is found by the next pass's search.
 
@@ -413,7 +416,7 @@ none changes here (AGENTS.md, the rule that retiring code gets no new work):
 |---|---|---|
 | `pr-facts.sh` | its full pass's `reconcile`, and its clear at a merge or a close with `status_label_clear_owed` | tk-1tfzr71.21 (tools/deletion-plan.tsv) |
 | `gctk merge` | its clear at a merge, with `status_label_clear_owed` | tk-1tfzr71.70 (docs/built-once-target.md, lane A) |
-| `pr-open.sh` | `reconcile` at its create, its adoption and its draft-to-ready arm | its create and adoption with tk-1tfzr71.70, and its arm with the merge cadence (tk-1tfzr71.21) |
+| `pr-open.sh` | `reconcile` at its create, its adoption and its draft-to-ready arm | its create with tk-1tfzr71.70, and its adoption and its arm with the merge cadence that runs them (tk-1tfzr71.21) |
 | `signoff.sh` | `reconcile` after a verdict | tk-1tfzr71.122 (tools/deletion-plan.tsv) |
 
 Once they retire, the landing order and the net are the only callers.
@@ -493,7 +496,7 @@ and unit 1 names the one the one-PR update saves instead.
 
 Code a scheduled bead retires gets no change from any unit: `pr-facts.sh`, the
 merge cadence's arms and `refinery-reconcile.sh` (tk-1tfzr71.21), `gctk merge`
-and `pr-open.sh`'s create and adoption (tk-1tfzr71.70), and `signoff.sh` and the
+and `pr-open.sh`'s create (tk-1tfzr71.70), and `signoff.sh` and the
 review path (tk-1tfzr71.122). The units add no verb to `pr-status-label.sh`.
 
 Edges and notes the implementation child adds:
@@ -571,7 +574,7 @@ except the tests on this PR. Gas City's facts are in
   seconds at 100 for 2 points, with no errors. Without the dismissed count and
   the base's tip, 100 PRs took 3.35 to 4.27 seconds. Over each rig repository's
   open PRs, one request each: 6 PRs here, 15, 1, 1 and 5 in four others, 0.62 to
-  1.70 seconds and 1 point each. Two rig repositories had none.
+  1.70 seconds and 1 point each. The sixth rig's repository had none.
 - **The base's tip.** On this repository's six open PRs, `baseRefOid` equalled
   `baseRef.target.oid` on the five whose base had not moved, and on #1539 read
   6dd9d13ee while main's tip was 8b9c4caf3.
@@ -622,7 +625,7 @@ except the tests on this PR. Gas City's facts are in
 #     dismissed: reviews(states:[DISMISSED]){totalCount} labels(first:20){nodes{name}}
 #     commits(last:1){nodes{commit{statusCheckRollup{state contexts{totalCount
 #       checkRunCountsByState{state count} statusContextCountsByState{state count}}}}}} }
-# The net: the same, less the counts, plus
+# The net: the same less updatedAt and the comment, review and check counts, plus
 #     mergeStateStatus reviewDecision isInMergeQueue
 #     reviewThreads(first:100){totalCount pageInfo{hasNextPage} nodes{isResolved}}
 #     commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){
