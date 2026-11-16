@@ -274,8 +274,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    adopt an existing PR for the branch or
    `gh pr create` — as a draft when `check_set` names an `open-as-draft` check,
    so a preview can deploy before the change is surfaced, else ready — re-read
-   the created PR by number, refuse a moved head, replay the verdict as a comment
-   (never an approval), then one `lifecycle.sh` transition carrying
+   the created PR by number, refuse a moved head, replay each `pre-open` check's
+   verdict as a comment of its own (never an approval), then one `lifecycle.sh`
+   transition carrying
    `pr_url`/`pr_number`/`merged_target`. A later pass flips a draft to ready once
    its `open-as-draft` checks are green. That draft-to-ready walk runs after the
    pre-open walk, under the same deadline, and rotates on `pr-open.cursor.ready`
@@ -330,7 +331,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    kills before arm 7 would leave the operator's review stamped-as-seen by the
    posture yet unrouted while the anchor reads as handled. This arm closes that
    window: it re-reads each open anchor's feedback and dispatches the same
-   rework child or human gate and opens the same validation pass arm 7 would, then
+   rework child or human gate and opens the same validation pass arm 7 would, or
+   on a PR on the pending record files the same ask, then
    stops — no write-back sweep, no external-fact reconciliation, none of the
    arms that belong at the tail. A batch it routes is live work on the anchor,
    which the `status:` label reads, so it re-derives that PR's labels as it
@@ -385,9 +387,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    ([specs/tk-b7c72m/supersession-tells.md](../specs/tk-b7c72m/supersession-tells.md)).
    A failure here is not a merge hold — an anchor it could not observe is left
    exactly as the pass found it.
-6. **gate-ensure.sh** — check satisfiability. Every gating anchor declares a
-   non-empty `check_set` (the default is stamped when absent; the `none`
-   sentinel is respected), and every declared check is *raisable*: the lane
+6. **gate-ensure.sh** — check satisfiability, on the old review path, for an
+   anchor at `pre_open_gate` or `pull_request`; a PR on the pending record has a
+   review run instead ([state-machine.md](state-machine.md#checks)). Every gating
+   anchor declares a non-empty `check_set` (the default is stamped when absent;
+   the `none` sentinel is respected), and every declared check is *raisable*: the lane
    derives `green`, or a live routed review bead is in flight, else dispatch one
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
    back). A lane that derives `green` ends the arm's interest however far the
@@ -646,14 +650,18 @@ the cadence — the arms run whether or not any refinery session is awake.
    On a PR on the pending record every arm of this script runs but the three
    that record the PR merged, closed without merging or moved to another base,
    which are the landing order's ([The landing order](#the-landing-order)). Its
-   posture, its feedback routing, its conflict merge-in and its red-check park
-   reach that PR, and the park files only its human gate. The pass lists such an
+   posture, its feedback routing, its conflict merge-in and its red-check fix and
+   park reach that PR. The park files only its human gate. The merge-in, the
+   red-check fix and a feedback batch each go to the PR's review run as an ask
+   (`gctk review ask`), with no rework child and, for a batch, no validation
+   pass: each comment becomes a human finding the run rules. The pass lists such an
    anchor at `pull_request_pending` on a blocked bead and at
    `pull_request_head_changed` on an open one, beside `pull_request` on an open
    one. No transition of the machine writes a value of the record, so each of
    its writes on such a bead is one plain metadata write guarded on the status
    and assignee the pass read.
-8. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
+8. **review-sweep.sh** — cleanup over closed anchors on the old review path, no
+   merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
    marker to a commit and there is no commit, and `request-changes` would
@@ -665,7 +673,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
    residue is filed by two dispatchers, arm 6 and arm 7.
-9. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
+9. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors' old review
+   scaffolding, no merge authority.
    An anchor withdrawn won't-do or closed not-planned carries a disposition —
    the duplicates or supersedes edge `bead-rehome.sh` records onto its successor,
    or `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
@@ -854,11 +863,40 @@ have closed without merging.
 
 | The PR | The run |
 |---|---|
-| open at the head the refinery validated | asks the evaluator whether it is ready, and asks GitHub to squash-merge a ready one only while its head is that commit (`mergePullRequest` with `expectedHeadOid`), or adds it to its base's merge queue with that head where the base requires one; it records the check either way, and the next run reads the PR again |
-| open at another head | sends the bead back to the refinery, open, as `pull_request_head_changed` |
+| open at the head the refinery validated | marks a draft ready, without waiting for CI, once a review result passed at that head and target, no review run is attached and no ask a run can take is open. Otherwise it asks the evaluator whether the PR is ready, and asks GitHub to squash-merge a ready one only while its head is that commit (`mergePullRequest` with `expectedHeadOid`), or adds it to its base's merge queue with that head where the base requires one, and pours a review run for one that is not ready when no review result passed at that head and target, or an ask nothing holds is open on the bead (below). It records the check either way, and the next run reads the PR again |
+| open at another head | sends the bead back to the refinery, open, as `pull_request_head_changed`. The refinery validates the new head and records it pending again. When it will not land the head as it stands, such as on a conflict with the target, it files the reason as an ask and then records the PR pending at the head its prep read (`refinery-requeue.sh`), so the ask holds the merge before the head is pending, a later run pours the review run that answers it, and its find-work leaves the ask alone |
 | merged at the validated head, with the merge commit on the freshly fetched target | records `mr_merged` and closes the bead; when bd refuses that close, for an open child or a live blocker, records the exception `pull_request_merged_close_refused` with the merge's evidence, and files its human gate |
 | closed unmerged, merged at another head, or no longer the PR the record names | records the exception, keeps the bead blocked and files a human gate keyed by its value |
 | a lookup or a fetch that failed, or a merge commit not yet on the target | records why in `pr_reconcile_error`, and the next run reads it again |
+
+**Withdrawals come first.** While the PR is open, a run first carries out each
+open withdrawal on the bead, which a review run's triage files when it rules a
+head material (`gctk pr withdraw`). It waits while an approval it would dismiss
+carries an inline comment the intake has not routed. It dismisses each approval
+that stands on a commit that does not contain the withdrawal's head, by
+GitHub's compare of the two, or that GitHub refuses to compare, with the
+withdrawal's reason and the city's mark, then reads the reviews again and closes
+the withdrawal once none stands. When GitHub refuses a dismissal, it files a
+human gate on the bead keyed `approval-withdraw-refused`. A compare or a
+dismissal GitHub does not answer leaves the withdrawal for the next run. A
+withdrawal holds the bead from the refinery until it is carried out, so a record
+the run sends back to the refinery keeps its marker while one is open, and the
+order still reads it.
+
+**The review run.** A run pours a PR's review run, `mol-pr-review`, with
+`gc formula cook --attach` onto the bead under the record lock. Its vars are the
+record's PR bead, head, target and branch, and the pools and the binding the
+refinery's address names (`<rig>/<binding>refinery`): `review_target`
+`<rig>/<binding>polecat-codex`, `repair_target` `<rig>/<binding>polecat` and
+`binding_prefix` `<binding>`. It pours none while a run is attached to the bead,
+while another open bead names the PR's branch, such as a rework child, or while
+a human gate holds it. A conversation on the PR holds its merge and nothing
+else, so runs are poured while one is open, and the evaluator's wait holds the
+merge until it closes. A run that ended without a result is poured again.
+When the last two runs at the validated head both ended without one, counting
+only runs that ended after the bead's last `review-run-failed` gate closed, it
+files a human gate keyed `review-run-failed` instead, naming both runs and how
+each ended ([state-machine.md](state-machine.md#checks)).
 
 A merge request binds only the head the evaluator judged, so a push that lands
 first makes GitHub refuse it, and the next run finds the head moved. The order
@@ -908,7 +946,8 @@ run has reached its deadline, the next landing on the branch checks again. The
 landing's line says what the check found.
 
 **Reading what a run did.** Each record's outcome prints on a line of its own,
-`<bead> <action>: <detail>`. `gc order history pr-reconcile` lists the runs
+`<bead> <action>: <detail>`, where `readied` names a draft the run marked ready
+and `poured` a review run it attached. `gc order history pr-reconcile` lists the runs
 with their exits: 0 when every record read was handled, and 2 when the listing
 or the lock did not answer or a record's write failed.
 

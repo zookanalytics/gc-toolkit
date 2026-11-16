@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,8 @@ import (
 type Runtime interface {
 	// Sling runs one `gc sling` and returns what it answered.
 	Sling(s Sling) SlingResult
+	// Cook runs one `gc formula cook --attach` and returns what it answered.
+	Cook(c Cook) CookResult
 	// DefaultFormula is the formula sling s pours when it names none: the
 	// default sling formula the city's config gives the agent s.Target
 	// addresses, its own or else the one its pack's [agent_defaults] gives it.
@@ -52,6 +55,21 @@ type Result struct {
 	Code   int
 	Output string
 	Err    error
+}
+
+// Cook is one `gc formula cook <formula> --attach <bead> --var <k>=<v>...`: the
+// formula poured as a sub-workflow of its own, which the bead gains a blocks
+// edge onto, with each var passed as cook passes only its --var flags.
+type Cook struct {
+	Formula, Bead string
+	Vars          map[string]string
+}
+
+// CookResult is a cook's Result, with the root of the workflow it attached,
+// read from its --json line, "" when the cook did not answer with one.
+type CookResult struct {
+	Result
+	Root string
 }
 
 // SlingResult is a sling's Result. Live is the workflows gc sling named when it
@@ -113,6 +131,40 @@ func (c *City) Sling(s Sling) SlingResult {
 		out.Live = liveWorkflows(r.Output, s.Bead)
 	}
 	return out
+}
+
+// Cook runs the cook in gctk's own process group, its vars in their names'
+// order, and reads the root from the JSON line it prints, the summary whose
+// root_id names the workflow it attached (formulaCookJSONResult in
+// cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). Its standard input
+// reads nothing.
+func (c *City) Cook(k Cook) CookResult {
+	args := []string{"formula", "cook", k.Formula, "--attach", k.Bead, "--json"}
+	for _, name := range slices.Sorted(maps.Keys(k.Vars)) {
+		args = append(args, "--var", name+"="+k.Vars[name])
+	}
+	r := run(c.dir, c.bin, args...)
+	out := CookResult{Result: r}
+	if r.Code == 0 {
+		out.Root = cookedRoot(r.Output)
+	}
+	return out
+}
+
+// cookedRoot is the root_id of the last JSON line in output that names one,
+// "" when none does.
+func cookedRoot(output string) string {
+	root := ""
+	sc := bufio.NewScanner(strings.NewReader(output))
+	for sc.Scan() {
+		var line struct {
+			RootID string `json:"root_id"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(sc.Text())), &line) == nil && line.RootID != "" {
+			root = line.RootID
+		}
+	}
+	return root
 }
 
 // conflictLine opens the line gc sling prints for each source bead whose live

@@ -275,7 +275,7 @@ func rowFlight(r *ledger.Record) (string, error) {
 	for _, k := range []interface {
 		Get(*ledger.Record) (string, bool, error)
 		Name() string
-	}{branchKey, prrecord.Result, prrecord.Rejection} {
+	}{prrecord.Branch, prrecord.Result, prrecord.Rejection} {
 		v, _, err := k.Get(r)
 		if err != nil {
 			return "", err

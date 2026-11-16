@@ -353,3 +353,39 @@ func TestAnUpdateAGuardRefusedIsErrGuard(t *testing.T) {
 		t.Fatalf("another failure read as %v", err)
 	}
 }
+
+// A create names its store, its title and its arguments, and answers with the
+// id bd's reply names. A reply that names no bead, or a create that exits
+// non-zero, is an error that says whether the bead was filed is unknown, with
+// bd's own words.
+func TestACreateAnswersTheIDItsReplyNames(t *testing.T) {
+	bin := t.TempDir()
+	log := filepath.Join(bin, "args")
+	stub := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '" + log + "'\nprintf '%s' \"$STUB_REPLY\"\nexit \"${STUB_EXIT:-0}\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, reply := range []string{`{"id":"tk-9","title":"t"}`, `[{"id":"tk-9"}]`} {
+		t.Setenv("STUB_REPLY", reply)
+		id, err := New().In("/rig/.beads").Create("withdraw", "-t", "task", "--deps", "blocks:tk-1")
+		if err != nil || id != "tk-9" {
+			t.Fatalf("the reply %s read as %q, %v", reply, id, err)
+		}
+	}
+	raw, _ := os.ReadFile(log)
+	if got, want := string(raw), "bd\n--db\n/rig/.beads\ncreate\n--title\nwithdraw\n--json\n-t\ntask\n--deps\nblocks:tk-1\n"; got != want {
+		t.Fatalf("the create ran %q, want %q", got, want)
+	}
+	t.Setenv("STUB_REPLY", `{"error":"write commit result indeterminate","schema_version":1}`)
+	t.Setenv("STUB_EXIT", "1")
+	if _, err := New().Create("withdraw"); err == nil || !strings.Contains(err.Error(), "unknown") ||
+		!strings.Contains(err.Error(), "indeterminate") {
+		t.Fatalf("a failed create read as %v", err)
+	}
+	t.Setenv("STUB_REPLY", `{"title":"t"}`)
+	t.Setenv("STUB_EXIT", "0")
+	if _, err := New().Create("withdraw"); err == nil || !strings.Contains(err.Error(), "named no bead") {
+		t.Fatalf("a reply that named no bead read as %v", err)
+	}
+}

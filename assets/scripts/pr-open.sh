@@ -14,8 +14,8 @@
 # (finding.sh); `gh pr create` pinned to origin — a draft when the check_set
 # names an open-as-draft check, ready otherwise — body summarizing the polecat's
 # PR summary with the dispatch text demoted (the description only when no
-# summary was carried), read back BY NUMBER, refuse a moved head, replay the
-# recorded verdict as a COMMENT (never an approval);
+# summary was carried), read back BY NUMBER, refuse a moved head, replay each
+# pre-open check's recorded verdict as a COMMENT of its own (never an approval);
 # then ONE lifecycle.sh transition to pull_request carrying
 # pr_url/pr_number/merged_target. Every failure leaves pre_open_gate.
 # A second arm flips a draft the refinery opened to ready once its pre-open and
@@ -60,13 +60,6 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # disagree), and finding reads the anchor's open must-fix findings.
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
-# The one resolver of the check index: given a check_set and a transition, it
-# names the checks that gate it (dropping the non-lanes none/off/approval). Each
-# anchor's gates are resolved once, at the head, and that one answer feeds the
-# create gate, the draft decision and the published body. Without it nothing can
-# be gated, so nothing opens.
-REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
-[ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); NOTHING is opened or readied this pass" >&2; exit 1; }
 # The single writer of the workflow-owned `status:` PR label. A PR is born
 # check-green with no review yet, so its initial status is needs-review, or working
 # while it is a draft whose ready flip the city still owes; reconcile derives that
@@ -82,13 +75,20 @@ PR_POST="$SCRIPTS_DIR/pr-post.sh"
 # the one gctk-resolve.sh's chain names, read once a pass needs it.
 # shellcheck source=gctk-resolve.sh
 . "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+# The check index, `gctk review checks`: given a check_set and a transition, it
+# names the checks that gate it (dropping the non-lanes none/off/approval). Each
+# anchor's gates are resolved once, at the head, and that one answer feeds the
+# create gate, the draft decision and the published body. Without it nothing can
+# be gated, so nothing opens: with no binary the read fails, and the anchor is
+# held. The pack's index is the one beside these scripts.
+review_checks() { local g; g=$(gctk_path) || return 1; GCTK_SCRIPTS_DIR="$SCRIPTS_DIR" "$g" review checks "$@"; }
 
 # Every gate through the draft stage at <head_oid>, `<name>\t<phase>` per line.
 # Each anchor's gates are resolved once, and that one answer feeds its create
 # gate, its draft decision and the body composed for it. Non-zero when the
 # resolver fails: an unreadable set is never an empty one, and the caller holds.
 prs_resolve_phased() { # <check_set> <head_oid>
-  "$REVIEW_CHECKS" --resolve --check-set "${1:-}" --through open-as-draft --with-phase --at "${2:-}" 2>/dev/null
+  review_checks --resolve "${1:-}" --through open-as-draft --with-phase --at "${2:-}" 2>/dev/null
 }
 
 # One phase band of a resolved set: the names tagged <phase>, one per line.
@@ -690,22 +690,33 @@ GATES
     skipped=$((skipped + 1)); continue
   fi
 
-  # Replay the recorded verdict as a COMMENT — the city never approves (#185).
-  # It opens with the verdict's own first line, as every review comment does,
-  # and the comment-only note closes it.
-  REVIEW_ID=$(bd_anchor_children "$id" closed,open,in_progress \
-    | jq -r '[ .[] | select(((.metadata.task_kind // "") | tostring) == "review") ]
-             | sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
-  VERDICT=""
-  [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \
-    | jq -r '.[0].notes // ""' 2>/dev/null | verdict_body)
-  if [ -n "$VERDICT" ]; then
+  # Replay every pre-open check's recorded verdict as a COMMENT of its own, since
+  # the city never approves. Before the PR exists, signoff.sh records each
+  # check's verdict only in the notes of that check's review bead, so a verdict
+  # not replayed here never reaches the PR. A check's verdict is the one its
+  # latest review bead carries, matched by check_name as lane-state.sh matches
+  # it. Each comment opens with its verdict's own first line, as every review
+  # comment does, and the comment-only note closes it.
+  REVIEWS=$(bd_anchor_children "$id" closed,open,in_progress)
+  REPLAYED=""
+  while IFS= read -r g; do
+    [ -n "${g:-}" ] || continue
+    REVIEW_ID=$(printf '%s' "$REVIEWS" | jq -r --arg lane "$g" '[ .[]
+        | select(((.metadata.task_kind // "") | tostring) == "review")
+        | select((((.metadata.check_name // "") | tostring) | if . == "" then "correctness" else . end) == $lane) ]
+      | sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
+    VERDICT=""
+    [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \
+      | jq -r '.[0].notes // ""' 2>/dev/null | verdict_body)
+    [ -n "$VERDICT" ] || continue
     "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
       --body "$(printf '%s\n\nPre-open signoff (comment-only — not an approval).' "$VERDICT")" >/dev/null 2>&1 || true
-  else
-    "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
-      --body "Pre-open checks signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
-  fi
+    REPLAYED=1
+  done <<GATES
+$PREOPEN_GATES
+GATES
+  [ -n "$REPLAYED" ] || "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
+    --body "Pre-open checks signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
   [ -n "$SUP_NUM" ] && "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$SUP_NUM" \
     --body "Superseded by #$PR_NUMBER: branch \`$branch\` was re-implemented and re-gated at \`${head_oid:0:8}\`." >/dev/null 2>&1 || true
 
@@ -813,7 +824,7 @@ while IFS=$'\x1f' read -r rid rcs rnum rhold rrhold rdisp; do
   # Every pre-open and open-as-draft gate must derive green at the live head,
   # remote allowed — the PR is open, so a GitHub approval can back a lane. An
   # unreadable gate set (a resolver crash) or lane holds the flip.
-  if ! RGATES=$("$REVIEW_CHECKS" --resolve --check-set "$rcs" --through open-as-draft --at "$rhead" 2>/dev/null); then
+  if ! RGATES=$(review_checks --resolve "$rcs" --through open-as-draft --at "$rhead" 2>/dev/null); then
     continue
   fi
   rungreen=""

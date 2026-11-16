@@ -143,11 +143,9 @@ conflicts, which it listed. Exit 1: stop here and do not close this step. The
 script says why, and when the refusal is final it has already recorded what
 releases the work, cancelled the run and drained.
 
-**2. Conflicts: resolve, write the audit, then commit.** You are the only party
-that knows what collided and why you chose what you chose, so you write it
-down as you resolve. The round's account a person later reads, collapsed in
-the triage verdict on the PR, is composed from your entries, and triage rules
-on the round from them. This applies to any merge of the base you run in this
+**2. Conflicts: resolve, write the account, then commit.** You are the only
+party that knows what collided and why you chose what you chose, so you write
+it down as you resolve. This applies to any merge of the base you run in this
 bead. For each file git could not merge, resolve it, stage it, and record one
 entry before you commit the merge. An edit beyond what the merge needed, such as
 a test repair a conflict forced, owes an entry too, and on a bead whose only job
@@ -155,7 +153,16 @@ is the bring-current every file a commit of your own changes owes one:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/bring-current-audit.sh" add --bead "<the work bead>" --path "<file>" --rating "<routine|judgment>" --collided "<the two intents that met: what the base changed and why, what the branch changed and why>" --resolution "<what you kept or wrote, and why>" --check "<what a reviewer should look at to confirm it>"
 ```
-Then commit the merge, which also clears the rejection:
+Write the same account into the merge commit's message before you commit. A
+review bead's triage rules on the round from your entries, and the person who
+reads its verdict on the PR reads them there. A review run's triage reads the
+merge commit itself: its message, and the hunks you resolved, which
+`git show --remerge-diff` shows. Replace the file
+`git rev-parse --git-path MERGE_MSG` names with git's first line, then one
+paragraph for each entry, naming its file, what collided, what you kept or wrote
+and why, and what a reviewer should check. The commit keeps the file as written,
+so leave in no line that starts with `#`. Then commit the merge, which also
+clears the rejection:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-setup.sh" --conclude-merge --convoy {{convoy_id}}
 ```

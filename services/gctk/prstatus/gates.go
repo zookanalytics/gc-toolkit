@@ -12,18 +12,23 @@ import (
 
 // Blocker is the far end of one `blocks` edge, in the fields [Holding] and
 // [IsPersonBlocker] read of it. A [Store] fills it from its own read, and passes
-// the status and the issue type as they read, in any case. Assignee is the far
-// bead's assignee as it reads, which tells a conversation by its row
-// ([conversation.IsCandidate]). Metadata is the far bead's metadata whole, each
-// value as [Row.Metadata] renders it, so the definition decides which keys it
-// reads: the facts a merge anchor records about its own PR.
+// the status and the issue type as they read, in any case. AwaitID is the key a
+// gate was filed under, which tells a gate a review run's failure filed
+// ([IsMachineGate]). Assignee is the far bead's assignee as it reads, which
+// tells a conversation by its row ([conversation.IsCandidate]). ClosedAt is when
+// it closed, "" while it is live. Metadata is the far bead's metadata whole,
+// each value as [Row.Metadata] renders it, so the definition decides which keys
+// it reads: the facts a merge anchor records about its own PR, and the vars a
+// review run was poured with.
 type Blocker struct {
 	ID        string
 	Title     string
 	Status    string
 	IssueType string
 	AwaitType string
+	AwaitID   string
 	Assignee  string
+	ClosedAt  string
 	Metadata  map[string]string
 }
 
@@ -38,6 +43,20 @@ func (b Blocker) open() bool { return !strings.EqualFold(b.Status, "closed") }
 // one reader rule bd_human_gates applies in assets/scripts/bd-lib.sh.
 func IsHumanGate(issueType, awaitType string) bool {
 	return strings.EqualFold(issueType, "gate") && awaitType == "human"
+}
+
+// machineGates are the keys of the human gates a review run's failure files:
+// the landing order's, once the last two runs at a PR's head ended without a
+// result, and a run's own, once its loop exhausted its attempts
+// (specs/tk-1tfzr71.108/design.md, section 7). Each asks a person to look at
+// the city's own machinery, not to rule on the PR.
+var machineGates = []string{"review-run-failed", "review-loop-exhausted"}
+
+// IsMachineGate reports whether a blocker is a human gate a review run's
+// failure filed ([machineGates]). It holds the PR as any gate does, and reads
+// as the machine's fault, never as a person's hold or a ruling owed.
+func IsMachineGate(b Blocker) bool {
+	return IsHumanGate(b.IssueType, b.AwaitType) && slices.Contains(machineGates, b.AwaitID)
 }
 
 // IsPersonBlocker reports whether a blocker is a person's to clear and not a

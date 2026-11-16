@@ -31,7 +31,7 @@ formula = "mol-deacon-patrol"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol files a warrant routed to the dog, and an empty prefix renders a bare dog address that no agent holds."
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol finds the pack's scripts through `gc <binding> scripts-dir`, and an empty prefix names no binding gc knows."
 default = "gc-toolkit."
 
 [vars.event_timeout]
@@ -51,17 +51,14 @@ gc mail inbox
 ```
 Handle what you can directly; anything needing a human becomes a human gate on
 the bead it is about, through human-gate.sh, or a finding through
-patrol-finding.sh when it has no bead of its own. A `DOG_DONE:` notice is a
-completed shutdown dance on a
-warrant — note the outcome (the closed warrant carries the evidence) and
-archive. Archive processed messages — inbox near-empty after this step.
+patrol-finding.sh when it has no bead of its own. Archive processed messages —
+inbox near-empty after this step.
 
 Ledger what you ACTED on. A human gate records itself, so what is owed here
-is the message you resolved yourself and the outcome a `DOG_DONE:` reports:
+is the message you resolved yourself:
 ```bash
 LEDGER="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/gc-deacon-ledger.sh" && [ -x "$LEDGER" ] || LEDGER=""
 "$LEDGER" append recovery "<what you resolved, and how>" "mail:<message-id>"
-"$LEDGER" append warrant "<session> <pardoned|executed> by the dog" "bead:<warrant-id>"
 ```
 An inbox you only read and archived appends nothing.
 
@@ -423,38 +420,6 @@ LEDGER="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/gc-deacon-ledger.sh" 
 A sweep whose findings were all already tracked, and a `state=complete` with
 nothing but `ok`, append nothing. So does a sweep that only `started` — the
 ledger records what happened, not what is pending.
-
-Also run every cycle, whatever the sweep is doing:
-- Stuck sessions: read `$SCRIPTS/quota-park-nudge.sh --status`
-  (closed-field surface) instead of session panes. `quota_park=yes` is a
-  healthy park — never a warrant. A session it reports `escalated=1`
-  (nudging exhausted), or a live infrastructure session whose patrol wisp
-  is stale past the freshness you already treat as wedged, is
-  live-but-wedged: file ONE warrant for the dog pool via `file-warrant.sh` —
-  never kill directly. It resolves the session to the id dance-probe.sh
-  requires, dedups on it, and refuses if nothing live matches:
-  ```bash
-  # >>> warrant-file
-  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/file-warrant.sh" ] && [ -x "$SCRIPTS/gc-deacon-ledger.sh" ] || SCRIPTS=""
-  # file-warrant.sh resolves the owner to a live session id, validates it against
-  # dance-probe.sh's charset, dedups on that id, and files the warrant: exit 0
-  # filed a new one, 3 found one already open, 1 refused (no live session). Ledger
-  # the filing, not the skip — a warrant that already stood was recorded when it
-  # opened — so ledger only on 0. The filer's stdout is the warrant id (empty only
-  # when its re-read failed, which the entry then defaults to "-").
-  FILED=$("$SCRIPTS/file-warrant.sh" --owner "<session>" --role "<rig>/<role>" --reason "<what is stale and for how long>" --requester deacon --dog "{{binding_prefix}}dog")
-  case $? in
-    0) "$SCRIPTS/gc-deacon-ledger.sh" append warrant "<session> filed for the dog: <what is stale and for how long>" "${FILED:+bead:$FILED}" ;;
-    3) : ;;  # a warrant already stood; it was ledgered when it opened
-    *) echo "file-warrant.sh refused to file for <session> (it resolved to no live session id); report this wedged session as a deacon finding through patrol-finding.sh instead." >&2 ;;
-  esac
-  # <<< warrant-file
-  ```
-  The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
-  pardon-or-execute, DOG_DONE notice back); its probe re-checks the
-  quota-park surface, so a race with a fresh park still cannot execute a
-  parked session. The outcome comes back as a `DOG_DONE:` notice, which
-  check-inbox ledgers next cycle.
 
 Close this step after the script has been run and its state acted on."""
 

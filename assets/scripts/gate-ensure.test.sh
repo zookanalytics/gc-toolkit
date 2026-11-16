@@ -61,8 +61,8 @@ unset GC_RIG 2>/dev/null || true
 harness_build_gctk
 harness_init
 # No check index and no repository: the script under test runs from a private
-# directory, so the suite names a missing index outright, and review-checks.sh
-# then resolves every check_set token as a lane gating every transition. The
+# directory, so the suite names a missing index outright, and gctk review
+# checks then resolves every check_set token as a lane gating every transition. The
 # lanes do not depend on the checkout, and a case that needs a real index names
 # one itself.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
@@ -72,7 +72,7 @@ export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 # finding.sh (fix-in-flight), copied in unstubbed so the fixtures exercise the
 # real derivation.
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/blocker-holder.sh"
+mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/blocker-holder.sh"
 # human-gate.sh stub: records subject/key/message so the wedge arm's one-gate
 # contract can be asserted without a live store.
 export STUB_GATE_LOG="$TMP/gate.log"
@@ -1930,7 +1930,7 @@ echo "# the cursor is written as each anchor finishes, so a pass killed mid-anch
 # A private scripts dir whose finding.sh blocks while K2 is in hand, so the pass
 # can be killed inside its second anchor; every other call answers "none".
 KSD="$TMP/kill-scripts"
-mk_sut_dir "$KSD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/review-checks.sh"
+mk_sut_dir "$KSD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh"
 cp "$SD/human-gate.sh" "$KSD/"
 export KILL_STARTED="$TMP/kill-started" KILL_RELEASE="$TMP/kill-release"
 cat > "$KSD/finding.sh" <<'FS'
@@ -1962,11 +1962,11 @@ echo "# a resolver that dies mid-run dispatches nothing (never reads empty as 'n
 # short of green. It must skip the whole anchor instead.
 store "[$(anchor RX pull_request correctness "" polecat/rx)]"
 oid rx > "$GH_DIR/head_polecat_rx"
-cp "$SD/review-checks.sh" "$TMP/review-checks.real"
-printf '#!/usr/bin/env bash\nexit 3\n' > "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+# A gctk whose check index dies, and which runs every other verb.
+printf '#!/usr/bin/env bash\ncase "$1 ${2:-}" in "review checks") exit 3 ;; esac\nexec "%s" "$@"\n' "$GCTK_BIN" > "$TMP/gctk-index-dies"
+chmod +x "$TMP/gctk-index-dies"
 : > "$STUB_GC_LOG"
-out=$(run); rc=$?
-cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+out=$(GCTK_BIN="$TMP/gctk-index-dies" run); rc=$?
 has "$out" "gate resolver failed" "a resolver crash is caught and named"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "nothing is dispatched when the resolver dies"
 

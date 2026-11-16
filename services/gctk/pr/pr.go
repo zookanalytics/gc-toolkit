@@ -1,17 +1,21 @@
 // Package pr is gctk's pr domain: the pull request a bead owns
-// (docs/gctk-architecture.md). Its evaluator, [Ready], is the one definition of
-// whether a PR is ready to merge at its current revision, which the landing
-// order acts on and prstatus renders for the status label and the board. It
-// answers ready, with the head and the target it judged, or the conditions not
-// met, and it is computed at each read and stored nowhere, so no answer stands
-// as a permission on a commit another PR shares.
+// (docs/gctk-architecture.md). Its evaluator is the one definition of whether a
+// PR is ready to merge at its current revision: one rule over the bead's side,
+// read from the store, and GitHub's side of the PR at one head. [Ready] decides
+// over GitHub's side read live, and the landing order acts on its answer and
+// saves the read it made on the bead at each check. [FromStore] decides over
+// the read saved there, and reads no GitHub. Each answers ready, with the head
+// and the target it judged, or the conditions not met, which prstatus renders
+// as the PR's status. The answer is computed at each read and stored nowhere,
+// so no answer stands as a permission on a commit another PR shares, and what
+// the landing order saves is GitHub's facts, which grant nothing.
 //
-// The evaluator reads the bead's own waits through waits, the open beads whose
-// anchor_bead names the bead, the holds set by hand, the review loop's results
-// for the PR's live head and target, GitHub's live facts about the PR, and the
-// receipts of the feedback the intake has handled. A read that fails returns an
-// error and no answer, since a decision made on part of the facts is a decision
-// about another PR.
+// The bead's side is its pending record and branch, the holds set by hand, its
+// own waits through waits, the open beads whose anchor_bead names it, the
+// review loop's results, the receipts of the feedback the intake has handled
+// and the provenance instant the definition of feedback is applied from. A read
+// that fails returns an error and no answer, since a decision made on part of
+// the facts is a decision about another PR.
 //
 // Its composition, [Compose], is what the PR says of the bead. Gas Town's
 // refinery opens a PR with its bead's title and writes the body once. A
@@ -26,10 +30,12 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -41,6 +47,11 @@ const (
 	// GitHub reports is not the one the record names by its URL, number,
 	// repository, head branch or base.
 	KindRecord Kind = "record"
+	// KindGitHubUnread: GitHub's side of the PR is not read at the head the
+	// store holds for it: no read is saved on the bead, or the read names
+	// another PR, another head or another provenance instant. It stands in
+	// place of every condition of GitHub's.
+	KindGitHubUnread Kind = "github-unread"
 	// KindOpen: the PR is not open.
 	KindOpen Kind = "open"
 	// KindDraft: the PR is a draft.
@@ -94,22 +105,18 @@ type Condition struct {
 
 // Answer is the evaluator's answer for one bead's PR. Ready says the PR may
 // merge at Head into Target, the head and the base it judged. Otherwise
-// Conditions names each condition not met, and Head and Target name what it
-// read of GitHub, when it read the PR.
+// Conditions names each condition not met, and Head and Target name the head
+// and the base of the GitHub read it judged, empty when it judged none, for a
+// record that lacks a part or a side of GitHub's that is unread. ReviewResult
+// is the review loop's result for the head and the base it judged, passed or
+// not, and nil when none stands there or it judged no head.
 type Answer struct {
-	Bead       string      `json:"bead"`
-	Ready      bool        `json:"ready"`
-	Head       string      `json:"head,omitempty"`
-	Target     string      `json:"target,omitempty"`
-	Conditions []Condition `json:"conditions"`
-}
-
-// ReviewResult is one result of the review loop: the head and the target it
-// judged, and whether the review passed there.
-type ReviewResult struct {
-	Head   string `json:"head"`
-	Target string `json:"target"`
-	Passed bool   `json:"passed"`
+	Bead         string         `json:"bead"`
+	Ready        bool           `json:"ready"`
+	Head         string         `json:"head,omitempty"`
+	Target       string         `json:"target,omitempty"`
+	Conditions   []Condition    `json:"conditions"`
+	ReviewResult *review.Result `json:"review_result,omitempty"`
 }
 
 // GitHub is the reads the evaluator makes of GitHub, which the gh
@@ -123,13 +130,15 @@ type GitHub interface {
 	Login() (string, error)
 }
 
-// Sources are where the evaluator reads: the store, through the ledger;
+// Sources are where the evaluator reads live: the store, through the ledger;
 // GitHub, through the reads GitHub returns for the host a PR's URL names; and
-// the pack's definition of feedback, loaded in the rig's checkout.
+// the pack's definition of feedback, loaded in the rig's checkout. Now stamps
+// the GitHub read, the system's clock when nil.
 type Sources struct {
 	Ledger   *ledger.Ledger
 	GitHub   func(host string) GitHub
 	Feedback Feedback
+	Now      func() time.Time
 }
 
 // OnRecord reports whether a bead whose merge_result is v owns a PR on Gas
@@ -137,161 +146,24 @@ type Sources struct {
 func OnRecord(v string) bool { return record.OnRecord(v) }
 
 // Ready answers whether the PR the bead owns is ready to merge at its current
-// revision. A read that fails returns its error and no answer. A bead with no
-// complete pending record is not ready, and its answer says what the record
-// lacks without reading GitHub.
-func Ready(src Sources, bead string) (Answer, error) {
-	l := src.Ledger.Pass()
-	ans := Answer{Bead: bead, Conditions: []Condition{}}
-	rows, err := l.Find(ledger.ByID(bead).WithClosed())
+// revision, over GitHub's side read live, and returns the GitHub read it made.
+// It reads the bead's side, observes GitHub and decides. A read that fails
+// returns its error and no answer. A bead with no complete pending record is
+// not ready, and its answer says what the record lacks without reading GitHub,
+// so it returns no read.
+func Ready(src Sources, bead string) (Answer, *GitHubRead, error) {
+	b, _, err := readSide(src.Ledger.Pass(), bead)
 	if err != nil {
-		return Answer{}, err
+		return Answer{}, nil, err
 	}
-	if len(rows) == 0 {
-		return Answer{}, &ledger.ReadError{ID: bead, Reason: "the store holds no such bead"}
+	if len(b.missing) > 0 {
+		return decide(b, nil), nil, nil
 	}
-	r := rows[0]
-	read := func(k ledger.Key[string]) string {
-		v, _, e := k.Get(r)
-		if e != nil && err == nil {
-			err = e
-		}
-		return strings.TrimSpace(v)
-	}
-	rec, serr := record.Read(r)
-	if err == nil {
-		err = serr
-	}
-	branch := read(branchKey)
-	holds := []string{read(mergeHoldKey), read(rebaseHoldKey)}
-	rc := receipts{
-		review: mark(read(reviewWatermarkKey)), comment: mark(read(commentWatermarkKey)),
-		issueComment:   mark(read(issueCommentWatermarkKey)),
-		reviewAnswered: mark(read(reviewAnsweredKey)), commentAnswered: mark(read(commentAnsweredKey)),
-	}
-	since := read(provenanceKey)
-	results, _, rerr := reviewResultsKey.Get(r)
-	if err == nil {
-		err = rerr
-	}
+	read, err := observe(src.GitHub(b.host), src.Feedback, b.rec.Repo, b.number, b.since, stamp(src.Now))
 	if err != nil {
-		return Answer{}, err
+		return Answer{}, nil, err
 	}
-
-	// The record names the PR the rest is read about.
-	missing := recordGaps(rec, branch)
-	if !OnRecord(rec.Result) {
-		missing = append([]string{fmt.Sprintf("a pending merge_result (it reads %q)", rec.Result)}, missing...)
-	}
-	host, number := "", 0
-	if len(missing) == 0 {
-		host, _, number, _ = record.ParseURL(rec.URL)
-	}
-	if len(missing) > 0 {
-		ans.Conditions = append(ans.Conditions, Condition{Kind: KindRecord,
-			Detail: "the bead's pending record is incomplete: it lacks " + strings.Join(missing, ", ")})
-	}
-
-	// The bead's side: its holds, its own waits and the beads anchored to it.
-	for i, name := range []string{"merge hold", "rebase hold"} {
-		if isSet(holds[i]) {
-			ans.Conditions = append(ans.Conditions, Condition{Kind: KindHold,
-				Detail: fmt.Sprintf("a %s is set on the bead (%s)", name, holds[i])})
-		}
-	}
-	waitConds, err := ownWaits(l, bead)
-	if err != nil {
-		return Answer{}, err
-	}
-	ans.Conditions = append(ans.Conditions, waitConds...)
-	anchored, err := anchoredTo(l, bead)
-	if err != nil {
-		return Answer{}, err
-	}
-	ans.Conditions = append(ans.Conditions, anchored...)
-	if len(missing) > 0 {
-		return ans, nil
-	}
-
-	// GitHub's side, read fresh.
-	hub := src.GitHub(host)
-	p, err := hub.PullRequest(rec.Repo, number)
-	if err != nil {
-		return Answer{}, err
-	}
-	ans.Head, ans.Target = p.HeadRefOid, p.BaseRefName
-	// Empty rather than nil, so a ready answer's conditions encode as [].
-	front := []Condition{}
-	if ids := identityGaps(p, rec.URL, number, rec.Repo, branch, rec.Target); len(ids) > 0 {
-		front = append(front, Condition{Kind: KindRecord,
-			Detail: "the PR on GitHub is not the one the record names: " + strings.Join(ids, ", ")})
-	}
-	if p.State != "OPEN" {
-		front = append(front, Condition{Kind: KindOpen, Detail: "the PR is " + strings.ToLower(p.State)})
-	}
-	if p.IsDraft {
-		front = append(front, Condition{Kind: KindDraft, Detail: "the PR is a draft"})
-	}
-	if p.HeadRefOid != rec.Head {
-		front = append(front, Condition{Kind: KindHead,
-			Detail: fmt.Sprintf("the PR's head %s is not the head the refinery validated, %s", p.HeadRefOid, rec.Head)})
-	}
-	// GitHub reads a failing or pending required check as BLOCKED, so UNSTABLE
-	// leaves only checks the base does not require, which hold no merge, as the
-	// old merge pass also proceeds on it.
-	if p.MergeStateStatus != "CLEAN" && p.MergeStateStatus != "UNSTABLE" {
-		front = append(front, Condition{Kind: KindMergeState, Value: p.MergeStateStatus,
-			Detail: fmt.Sprintf("GitHub reports the PR's merge state %s, not CLEAN or UNSTABLE", p.MergeStateStatus)})
-	}
-	suites, err := hub.CheckSuites(rec.Repo, p.HeadRefOid, number)
-	if err != nil {
-		return Answer{}, err
-	}
-	front = append(front, checks(suites)...)
-	reviews, err := hub.Reviews(rec.Repo, number)
-	if err != nil {
-		return Answer{}, err
-	}
-	approvers, requesters := approval(reviews)
-	if len(approvers) == 0 {
-		front = append(front, Condition{Kind: KindApproval,
-			Detail: "no approval stands from an account that can push to the repository"})
-	}
-	for _, login := range requesters {
-		front = append(front, Condition{Kind: KindChangesRequested, Value: login,
-			Detail: login + " requests changes, and the request stands"})
-	}
-	if !passedAt(results, p.HeadRefOid, p.BaseRefName) {
-		front = append(front, Condition{Kind: KindReview,
-			Detail: fmt.Sprintf("no review result passed at head %s into %s", p.HeadRefOid, p.BaseRefName)})
-	}
-
-	// The feedback the intake has handled, read against its receipts.
-	self, err := hub.Login()
-	if err != nil {
-		return Answer{}, err
-	}
-	threads, err := hub.ReviewThreads(rec.Repo, number)
-	if err != nil {
-		return Answer{}, err
-	}
-	comments, err := hub.IssueComments(rec.Repo, number)
-	if err != nil {
-		return Answer{}, err
-	}
-	fresh, err := unhandled(src.Feedback, self, since, rc, reviews, threads, comments)
-	if err != nil {
-		return Answer{}, err
-	}
-	waiting, err := awaiting(src.Feedback, self, since, threads)
-	if err != nil {
-		return Answer{}, err
-	}
-	ans.Conditions = append(front, ans.Conditions...)
-	ans.Conditions = append(ans.Conditions, fresh...)
-	ans.Conditions = append(ans.Conditions, waiting...)
-	ans.Ready = len(ans.Conditions) == 0
-	return ans, nil
+	return decide(b, read), read, nil
 }
 
 // recordGaps names what a pending record lacks to name its PR, the one reading
@@ -353,15 +225,23 @@ func identityGaps(p *gh.PullRequest, rawURL string, number int, repo, branch, ta
 	return gaps
 }
 
-// passedAt reports whether a review result passed at head into target. A result
-// for another head or another target counts for nothing.
-func passedAt(results []ReviewResult, head, target string) bool {
+// resultAt is the review loop's result for head into target, the one entry the
+// loop's check keeps for that head and target, and nil when none stands. A
+// result for another head or another target counts for nothing.
+func resultAt(results []review.Result, head, target string) *review.Result {
 	for _, r := range results {
-		if r.Head == head && r.Target == target && r.Passed {
-			return true
+		if r.Head == head && r.Target == target {
+			return &r
 		}
 	}
-	return false
+	return nil
+}
+
+// passedAt reports whether the review loop's result for head into target
+// passed.
+func passedAt(results []review.Result, head, target string) bool {
+	r := resultAt(results, head, target)
+	return r != nil && r.Passed
 }
 
 // ownWaits is one condition for each wait of the bead's own, through waits,

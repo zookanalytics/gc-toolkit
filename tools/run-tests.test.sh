@@ -73,7 +73,9 @@
 #   - a change that names no file runs no suite, not even a tree-wide one: the
 #     run prints one line saying so and exits 0, and --list prints nothing;
 #   - a BASE git cannot read, a missing BASE, an option or a range where BASE
-#     belongs, and a PATH beside --affected are usage errors.
+#     belongs, and a PATH beside --affected are usage errors;
+#   - the runner runs no suite, and exits 2, unless its own bash and the first
+#     bash on PATH from the repository root are both 5.1 or later.
 #
 # Hermetic: runs a copy of the runner over throwaway fixture *.test.sh files
 # whose pass/fail is driven by a per-file invocation counter, so "fails the
@@ -403,7 +405,7 @@ echo "── floor: every file runs above the test floor ──"
 # CANARY stands in for the directory holding the real gc, bd and gh: each one
 # there records that it was reached. The fixture stubs gc the way a suite does,
 # in a directory at the front of PATH, then removes that directory, as a killed
-# suite's EXIT trap or the scratch reaper does, and calls gc again. Each call
+# suite's EXIT trap does, and calls gc again. Each call
 # runs in a subshell, as a script under test makes most of its calls, so each
 # one searches PATH afresh. A shell that ran gc itself remembers the stub's path
 # and fails on the missing file without searching again.
@@ -894,6 +896,106 @@ has "$OUT" "not the range 'base...HEAD'" "…that names the range"
 alist --affected base lib/tool.sh
 eq "$RC" 2 "a PATH beside --affected is a usage error"
 has "$OUT" "takes no PATH" "…that says why"
+
+echo "── 18. a bash older than 5.1 runs nothing ──"
+# macOS's /bin/bash is 3.2. The fixture marks the state directory when it runs.
+cat > "$FIX/ran.test.sh" <<'F'
+#!/usr/bin/env bash
+touch "$RUNTESTS_FIXTURE_STATE/ran"
+F
+OLD_BASH=/bin/bash
+old="$("$OLD_BASH" -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"' 2>/dev/null)"
+case "$old" in
+  [0-4].*|5.0)
+    old_version="$("$OLD_BASH" -c 'echo "$BASH_VERSION"')"
+    refused="run-tests: needs bash 5.1 or later, and $OLD_BASH is bash $old_version, so nothing ran"
+    reset_state
+    OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$OLD_BASH" "$RUNNER_COPY" -j 2 -t 30 "$FIX/ran.test.sh" 2>&1)"; RC=$?
+    eq "$RC" 2 "a run under bash $old is refused"
+    eq "$OUT" "$refused" "…with one line naming the bash"
+    eq "$(ls "$STATE")" "" "…and runs no suite"
+    gitc checkout -q tool
+    OUT="$("$OLD_BASH" "$AREPO/tools/run-tests.sh" --affected base 2>&1)"; RC=$?
+    eq "$RC" 2 "--affected over a branch's change under bash $old is refused, not passed"
+    eq "$OUT" "$refused" "…with the same one line"
+    OUT="$("$OLD_BASH" "$AREPO/tools/run-tests.sh" --list --affected base 2>&1)"; RC=$?
+    eq "$RC" 2 "--list under bash $old is refused too"
+    eq "$OUT" "$refused" "…listing nothing"
+    # The test's own bash runs the runner, and the older bash comes first on PATH.
+    mkdir -p "$TMP/old-first"; ln -s "$OLD_BASH" "$TMP/old-first/bash"
+    reset_state
+    OUT="$(PATH="$TMP/old-first:$PATH" RUNTESTS_FIXTURE_STATE="$STATE" "$BASH" "$RUNNER_COPY" -j 2 -t 30 "$FIX/ran.test.sh" 2>&1)"; RC=$?
+    eq "$RC" 2 "a run whose first bash on PATH is bash $old is refused under a newer bash too"
+    eq "$OUT" "run-tests: each file starts with the first bash on PATH, and $TMP/old-first/bash is bash $old_version, older than 5.1, so nothing ran" \
+      "…with one line naming the bash on PATH"
+    eq "$(ls "$STATE")" "" "…and starts no suite"
+    reset_state
+    run "$FIX/ran.test.sh"
+    eq "$RC" 0 "the same run under the bash on PATH passes"
+    if [ -e "$STATE/ran" ]; then ok "…having run the suite"; else bad "…having run the suite" "no mark in $STATE"; fi
+    alist --affected base
+    eq "$LIST" "$WANT" "the same --affected under the bash on PATH lists the change's subset"
+    ;;
+  *) printf '  SKIP  %s is bash %s, so the runner was not run under a bash older than 5.1\n' "$OLD_BASH" "${old:-unknown}" ;;
+esac
+
+echo "── 19. a file starts with the bash the runner held to its floor ──"
+# Each file starts from the repository root, so with bin first on PATH the
+# runner must judge and start the root's bin/bash, not the caller's.
+BREPO="$TMP/bash-repo"
+CALLER="$TMP/caller"
+mkdir -p "$BREPO/tools" "$BREPO/bin" "$CALLER/bin"
+cp "$RUNNER" "$BREPO/tools/run-tests.sh"
+cp -R "$HERE/test-floor" "$BREPO/tools/"
+git -C "$BREPO" init -q
+cat > "$TMP/bash-3.2" <<'F'
+#!/bin/sh
+[ "$1" = -c ] && echo "3.2 3.2.57(1)-release"
+exit 0
+F
+cat > "$TMP/no-version" <<'F'
+#!/bin/sh
+exit 0
+F
+chmod +x "$TMP/bash-3.2" "$TMP/no-version"
+cat > "$FIX/which.test.sh" <<'F'
+#!/usr/bin/env bash
+printf '%s\n' "$BASH" > "$RUNTESTS_FIXTURE_STATE/ran"
+F
+# from_caller <caller's bin/bash> <root's bin/bash> [runner-args...] -> RC and OUT
+from_caller() {
+  ln -sf "$1" "$CALLER/bin/bash"; ln -sf "$2" "$BREPO/bin/bash"; shift 2
+  reset_state
+  OUT="$(cd "$CALLER" && PATH="bin:$PATH" RUNTESTS_FIXTURE_STATE="$STATE" "$BASH" "$BREPO/tools/run-tests.sh" "$@" 2>&1)"; RC=$?
+}
+from_caller "$BASH" "$TMP/bash-3.2" -j 2 -t 30 "$FIX/which.test.sh"
+eq "$RC" 2 "an older bash in bin under the root is refused, though the caller's bin holds a newer one"
+eq "$OUT" "run-tests: each file starts with the first bash on PATH, and $BREPO/bin/bash is bash 3.2.57(1)-release, older than 5.1, so nothing ran" \
+  "…with one line naming the root's bash by its full path"
+eq "$(ls "$STATE")" "" "…and starts no suite"
+for t in 30 0; do
+  from_caller "$TMP/bash-3.2" "$BASH" -j 2 -t "$t" "$FIX/which.test.sh"
+  eq "$RC" 0 "a newer bash in bin under the root runs the file, though the caller's bin holds an older one (-t $t)"
+  eq "$(cat "$STATE/ran" 2>/dev/null)" "$BREPO/bin/bash" "…which starts under the root's bash, by its full path (-t $t)"
+done
+from_caller "$BASH" "$TMP/no-version" -j 2 -t 30 "$FIX/which.test.sh"
+eq "$RC" 2 "a bash that reports no version is refused"
+eq "$OUT" "run-tests: each file starts with the first bash on PATH, and $BREPO/bin/bash reports no bash version, so nothing ran" \
+  "…with one line naming it"
+eq "$(ls "$STATE")" "" "…and starts no suite"
+# Only the caller's directory reaches a bash, so from the root PATH has none.
+# The rest of PATH holds only the tools the runner calls for one file before it
+# looks bash up.
+NOBASH="$TMP/no-bash-path"
+mkdir -p "$NOBASH" "$CALLER/only"
+for t in dirname git awk sed paste sort grep cut; do ln -s "$(type -P "$t")" "$NOBASH/$t"; done
+ln -s "$BASH" "$CALLER/only/bash"
+reset_state
+OUT="$(cd "$CALLER" && PATH="only:$NOBASH" RUNTESTS_FIXTURE_STATE="$STATE" "$BASH" "$BREPO/tools/run-tests.sh" -j 2 -t 30 "$FIX/which.test.sh" 2>&1)"; RC=$?
+eq "$RC" 2 "a bash only the caller's directory reaches is refused, since from the root PATH has none"
+eq "$OUT" "run-tests: each file starts with the first bash on PATH, and PATH has no bash, so nothing ran" \
+  "…with one line saying so"
+eq "$(ls "$STATE")" "" "…and starts no suite"
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

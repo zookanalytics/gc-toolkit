@@ -4,7 +4,8 @@
 #
 #   - Every row of the pack's review-checks.toml has skills/review-<check>/,
 #     whose SKILL.md is named review-<check> and has a `## The verdict` section,
-#     and every skills/review-* directory has a row.
+#     and every skills/review-* directory has a row, but review-ruling, the bar
+#     the review run's rule-and-repair step loads, which is no check's.
 #   - Every signoff.sh flag a check's verdict section names is one signoff.sh
 #     accepts, and every skill a check's skill says to load is one the pack ships.
 #     Every field signoff.sh checks a finding set for is one the correctness
@@ -140,9 +141,14 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1${2:+ ($2)}"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi; }
 
-CHECKS="$ROOT/assets/scripts/review-checks.sh"
+# The check index and a rig's guidance, read through gctk built from this
+# checkout, with this checkout's index as the pack's.
+( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
+checks() { GCTK_SCRIPTS_DIR="$ROOT/assets/scripts" "$TMP/gctk" review checks "$@"; }
+guidance() { "$TMP/gctk" review guidance "$@"; }
 INDEX="$ROOT/review-checks.toml"
-NAMES=$("$CHECKS" --file "$INDEX" 2>/dev/null | cut -f1)
+NAMES=$(checks --file "$INDEX" 2>/dev/null | cut -f1)
 [ -n "$NAMES" ] && ok "the pack's index declares checks ($(printf '%s' "$NAMES" | paste -sd' ' -))" \
   || bad "the pack's index declares checks" "none read"
 
@@ -165,8 +171,18 @@ while IFS= read -r c; do
       || bad "$c: the skill it says to load, gc-toolkit.$s, ships"
   done
 done <<< "$NAMES"
+# review-ruling is the one review skill that is no check's method: the bar the
+# review run's rule-and-repair step applies, which the step loads by name.
 for d in "$ROOT"/skills/review-*/; do
   c=$(basename "$d"); c=${c#review-}
+  if [ "$c" = ruling ]; then
+    grep -qxF -- ruling <<< "$NAMES" && bad "ruling is no check, so the pack's index declares none" \
+      || ok "ruling is no check, so the pack's index declares none"
+    grep -qF '{{binding_prefix}}review-ruling' "$ROOT/formulas/mol-pr-review.toml" \
+      && ok "skills/review-ruling is the bar mol-pr-review's rule-and-repair loads" \
+      || bad "skills/review-ruling is the bar mol-pr-review's rule-and-repair loads"
+    continue
+  fi
   grep -qxF -- "$c" <<< "$NAMES" && ok "skills/review-$c has a row in the pack's index" \
     || bad "skills/review-$c has a row in the pack's index"
 done
@@ -224,14 +240,14 @@ printf '[checks.ux]\npurpose = "Does the change keep the flows a person uses int
 git -C "$RIG" add review-checks.toml; git -C "$RIG" commit -q -m "a check of the rig's own"
 AT=$(git -C "$RIG" rev-parse HEAD)
 [ -d "$ROOT/skills/review-ux" ] && bad "the fixture's check has no pack skill" || ok "the fixture's check has no pack skill"
-ROW=$(cd "$RIG" && "$CHECKS" --check ux --at "$AT" 2>/dev/null); rc=$?
+ROW=$(cd "$RIG" && checks --check ux --at "$AT" 2>/dev/null); rc=$?
 eq "$rc" "0" "--check of the rig's own check succeeds at its commit"
 eq "$(printf '%s' "$ROW" | cut -f2)" "Does the change keep the flows a person uses intact?" "…and prints the purpose the reviewer judges against"
-ERR=$(cd "$RIG" && "$CHECKS" --check nonesuch --at "$AT" 2>&1 >/dev/null); rc=$?
+ERR=$(cd "$RIG" && checks --check nonesuch --at "$AT" 2>&1 >/dev/null); rc=$?
 eq "$rc" "1" "--check of a token no index declares exits 1"
 case "$ERR" in *"does not declare check 'nonesuch'"*) ok "…saying no index declares it, the case the formula approves with --needs-you" ;;
   *) bad "…saying no index declares it" "got '$ERR'" ;; esac
-ERR=$(cd "$RIG" && "$CHECKS" --check ux --at 0000000000000000000000000000000000000000 2>&1 >/dev/null); rc=$?
+ERR=$(cd "$RIG" && checks --check ux --at 0000000000000000000000000000000000000000 2>&1 >/dev/null); rc=$?
 eq "$rc" "1" "--check at a commit nothing can read exits 1 too"
 case "$ERR" in *"does not declare"*) bad "…but never as a check declared nowhere" "got '$ERR'" ;;
   *) ok "…but never as a check declared nowhere, which nothing approves on" ;; esac
@@ -276,13 +292,13 @@ hasF "$ARCH_SKILL" 'When one of them is the pattern this change adds to, use the
 notF "$ARCH_SKILL" 'bd create' "…and files every follow-up through mol-review's probe, never a create of its own"
 notF "$ARCH_SKILL" 'divergence lens' "the pack's arch skill, which every rig's arch review loads, carries none of gc-toolkit's lens"
 # This checkout's guidance, committed in a scratch repository and read back
-# through --extension at that commit, the read load-dispatch makes for a review.
+# through gctk review guidance at that commit, the read load-dispatch makes for a review.
 OWN="$TMP/own"; git init -q "$OWN"; mkdir -p "$OWN/docs"
 cp "$ROOT/docs/review-arch.md" "$ROOT/docs/review-triage.md" "$OWN/docs/"
 git -C "$OWN" add docs; git -C "$OWN" commit -q -m "this repo's arch and triage guidance"
 OWN_AT=$(git -C "$OWN" rev-parse HEAD)
 for c in arch triage; do
-  (cd "$OWN" && "$CHECKS" --extension "$c" --at "$OWN_AT" 2>/dev/null) > "$TMP/own.$c"
+  (cd "$OWN" && guidance "$c" --at "$OWN_AT" 2>/dev/null) > "$TMP/own.$c"
 done
 hasF "$TMP/own.arch" "The lens holds new surface to Gas City's own documentation instead." "this repo's arch guidance holds new surface to Gas City's own docs, not the pack's account of Gas City"
 hasF "$TMP/own.arch" 'A converter is a finding on sight.' "…makes a converter between a pack noun and a Gas City noun a finding"

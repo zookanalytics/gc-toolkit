@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
 # doctor/check-hq-marooned-work — no rig-workable bead sits unclaimed in the HQ
 # (city) store where no worker will reach it. A city-scoped role (deacon,
-# mechanik, po, dog) runs with GC_RIG unset, so a bare `bd create` resolves to the
-# HQ store instead of a rig store. Rig pools never read the HQ store, so rig work
+# mechanik, po) runs with GC_RIG unset, so a bare `bd create` resolves to the HQ
+# store instead of a rig store. Rig pools never read the HQ store, so rig work
 # filed there is marooned by construction: invisible to every rig queue, surfaced
 # by nothing. A city-scoped pool DOES read the HQ store, so a bead routed to one
-# (a warrant to the dog) is reachable and belongs there. This check reads the HQ
-# store and flags each rig-workable bead that no worker is positioned to claim.
+# is reachable and belongs there. This check reads the HQ store and flags each
+# rig-workable bead that no worker is positioned to claim.
 #
 # Rig-workable = an OPEN, UNASSIGNED bead whose issue_type is not an infra type
 # (the INFRA_TYPES set defined below), which is neither city machinery nor
 # held-by-design, and which is unrouted or routed anywhere but a city-scoped
-# agent. The exclusions carve out the legitimate HQ
-# residents: a bead routed to a city-scoped agent (resolved from `gc agent list`)
-# is reachable there; a `warrant` label marks city machinery a rig never works; a
+# agent. The exclusions carve out the legitimate HQ residents: a bead routed to
+# a city-scoped agent (resolved from `gc agent list`) is reachable there; a
 # standing record (a task_kind assets/scripts/standing-kinds.sh lists) is a
 # held-by-design escalation host, not work; a bead an open human gate blocks
 # waits on a person's answer, which the board shows; a `deacon-ledger` label is
@@ -109,14 +108,11 @@ scrub() { tr -d '\000-\037'; }
 # A check that overlaps its probes runs each one as a background job, and a job
 # cannot hand its parent a variable, so every read lands in a file under one
 # scratch tree. reads_init <check> makes that tree, sets WORK to it, and removes
-# it when the check exits. It holds a file in the tree open on fd 9, because the
-# host's scratch reaper removes any gctk-* tree that no process holds open. It
-# returns non-zero when the tree cannot be made or held, and then nothing can be
-# read.
+# it when the check exits. It returns non-zero when the tree cannot be made, and
+# then nothing can be read.
 reads_init() {
     WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-$1.XXXXXX" 2>/dev/null) || { WORK=""; return 1; }
     trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
-    { exec 9>"$WORK/.hold"; } 2>/dev/null
 }
 # read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
 # <file> and its stderr in <file>.err, and returns the probe's own exit status.
@@ -191,7 +187,8 @@ city_path=""
 # City-scoped agents read the HQ store, so a bead routed to one is reachable, not
 # marooned. Resolve their identities from the same agent list (bare, the form a
 # route carries — resolve-route.sh). When the list cannot answer the set is
-# empty, and only the `warrant` label still exempts city machinery.
+# empty, so no route exempts a bead and only the exemptions that read no route
+# still hold.
 CITY_ROUTES='[]'
 [ "$agents_rc" -eq 0 ] && CITY_ROUTES=$(jq -c '[.agents[]? | select(.scope == "city") | .qualified_name // empty] | unique' "$WORK/agents.json" 2>/dev/null)
 [ -n "$CITY_ROUTES" ] || CITY_ROUTES='[]'
@@ -223,7 +220,6 @@ rows=$(jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES"
     | select(($infra | index($t)) == null)            # not HQ machinery (infra type)
     | select($as == "")                               # unassigned — not already claimed
     | select(($city_routes | index($rtb)) == null)    # not routed to a city-scoped agent that reads the HQ store
-    | select(($labels | index("warrant")) == null)    # not a warrant (city machinery a rig never works)
     | select(($b | is_standing_kind) | not)           # not a held-by-design standing record
     | select(($labels | index("deacon-ledger")) == null)  # not a daily digest
     | select(($labels | index("debt")) == null)       # not a parked tech-debt / advisory record

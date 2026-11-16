@@ -160,7 +160,7 @@ owner_pr() {
 refresh() {
   local gctk gates out title live moved body published edit=() rc=0
   gctk=$(gctk_path) || { echo "$PROG: no gctk binary composes PR #$PR_NUMBER's title and body" >&2; return 1; }
-  gates=$(cd "$HOME_DIR" && "$HERE/review-checks.sh" --resolve --check-set "$1" --through open-as-draft --with-phase --at "$HEAD_OID") \
+  gates=$(cd "$HOME_DIR" && GCTK_SCRIPTS_DIR="$HERE" "$gctk" review checks --resolve "$1" --through open-as-draft --with-phase --at "$HEAD_OID") \
     || { echo "$PROG: the gates of check set '$1' did not resolve at $HEAD_OID, so PR #$PR_NUMBER's body cannot name them" >&2; return 1; }
   published=$(mktemp "${TMPDIR:-/tmp}/refinery-land.XXXXXX") || return 1
   body=$(mktemp "${TMPDIR:-/tmp}/refinery-land.XXXXXX") || { rm -f "$published"; return 1; }

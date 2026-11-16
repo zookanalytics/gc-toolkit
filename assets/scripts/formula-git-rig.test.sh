@@ -50,6 +50,10 @@ done
 # cwd versus -C is the only thing steering it.
 unset GC_RIG_ROOT GC_RIG GC_CITY GC_CITY_PATH GC_PACK_DIR 2>/dev/null || true
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2>/dev/null || true
+# The gather reads the rig's guidance through gctk, built from this checkout.
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
+export GCTK_BIN="$TMP/gctk"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
@@ -179,7 +183,7 @@ eq "$(cd "$C/cwd" && git -C "" rev-parse --show-toplevel 2>/dev/null || true)" "
 # four steps that carry it to one text, so mol-review's copy runs for all four,
 # filled in as a pour fills it for a correctness review of feature onto main.
 # gc names this checkout as the pack, so the block runs the rig-root.sh,
-# review-workspace.sh and review-checks.sh under test.
+# review-workspace.sh under test, and gctk built from it.
 # formula-worktree-rig.test.sh proves where the worktree is registered, and
 # that every git call in the block names its repository.
 echo "── mol-review: review-gather ──"

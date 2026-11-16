@@ -117,8 +117,8 @@ trap 'rm -rf "$TMP"' EXIT
 harness_build_gctk
 harness_init
 # No check index and no repository: the script under test runs from a private
-# directory, so the suite names a missing index outright, and review-checks.sh
-# then resolves every check_set token as a lane gating every transition. The
+# directory, so the suite names a missing index outright, and gctk review
+# checks then resolves every check_set token as a lane gating every transition. The
 # lanes do not depend on the checkout, and a case that needs a real index names
 # one itself.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
@@ -135,9 +135,7 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-# A case that wraps review-checks.sh runs the real one from $TMP, beside this.
-mkdir -p "$TMP"; cp "$HERE/bd-lib.sh" "$TMP/bd-lib.sh"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/finalize-gate.sh" "$HERE/scaffolding-sweep.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/scaffolding-sweep.sh"
 # lane-state.sh's contract, answered from the environment: every lane derives
 # green unless STUB_LANE_UNGREEN names "<anchor>:<lane>" (or the bare anchor,
 # for each of its lanes), and STUB_LANE_UNREADABLE does the same for exit 2, a
@@ -1803,12 +1801,10 @@ store "[$(anchor D1 20)]"
 printf '%s' "$(prview 20 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_20.json"
 printf '[{"id":901,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","commit_id":"sha-OLD","submitted_at":"2026-08-19T00:00:00Z"}]' > "$GH_DIR/reviews_20.json"
 : > "$STUB_GH_LOG"
-# The resolver logs the arguments it is asked with, then runs as itself.
-cp "$SD/review-checks.sh" "$TMP/review-checks.real"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$TMP/resolver.log" "$TMP/review-checks.real" > "$SD/review-checks.sh"
-chmod +x "$SD/review-checks.sh"; : > "$TMP/resolver.log"
-out=$(run)
-cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+# gctk logs each check index call it is asked, then runs as itself.
+printf '#!/usr/bin/env bash\ncase "$1 ${2:-}" in "review checks") printf "%%s\\n" "$*" >> "%s" ;; esac\nexec "%s" "$@"\n' "$TMP/resolver.log" "$GCTK_BIN" > "$TMP/gctk-logged"
+chmod +x "$TMP/gctk-logged"; : > "$TMP/resolver.log"
+out=$(GCTK_BIN="$TMP/gctk-logged" run)
 has "$out" "dismissed our own superseded CHANGES_REQUESTED (review 901)" "the stale own block is dismissed"
 eq "$(meta D1 signoff_dismissed)" "901@sha-20" "signoff_dismissed recorded (and read back) first"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/20/reviews/901/dismissals" "the dismissal hit the pinned endpoint"
@@ -7960,6 +7956,32 @@ quiet_pr() { # num [jq edit of the PR view]
   echo '[]' > "$GH_DIR/reviews_$1.json"; echo '[]' > "$GH_DIR/comments_$1.json"
 }
 REQ_TEST='[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]'
+# On the record an arm's fix unit is an ask the review run takes, filed by gctk
+# review ask, whose rules its own suite proves. A wrapper stands in for that
+# verb alone: it files the ask in the stub store with its blocks edge onto the
+# bead, finds one of the same reason, and runs the real gctk for every other
+# verb.
+cat > "$TMP/gctk-ask" <<'ASK'
+#!/usr/bin/env bash
+if [ "$1 ${2:-}" = "review ask" ]; then
+  echo "$*" >> "$ASK_LOG"
+  bead="$3"; shift 3; reason=""
+  while [ $# -gt 0 ]; do case "$1" in --reason) reason="$2"; shift ;; esac; shift; done
+  found=$(jq -r --arg r "$reason" '[ .[] | select((.description // "") == $r) ][0].id // ""' "$STUB_STORE")
+  [ -z "$found" ] || { echo "$found found"; exit 0; }
+  id="ask-$bead"
+  t=$(mktemp "${TMPDIR:-/tmp}/gctk-ask.XXXXXX")
+  jq --arg id "$id" --arg r "$reason" '. + [{id: $id, title: "Review ask", status: "open", assignee: "", issue_type: "task",
+    description: $r, metadata: {}}]' "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"
+  echo "$id|blocks|$bead" >> "$STUB_DEPS"
+  echo "$id filed"
+  exit 0
+fi
+exec "$REAL_GCTK" "$@"
+ASK
+chmod +x "$TMP/gctk-ask"
+export ASK_LOG="$TMP/ask.log" REAL_GCTK="$GCTK_BIN"
+asked() { GCTK_BIN="$TMP/gctk-ask" run; }
 
 for RV in pull_request_pending pull_request_head_changed; do
 case "$RV" in pull_request_pending) RS=blocked; RN=0 ;; *) RS=open; RN=1 ;; esac
@@ -7999,33 +8021,37 @@ echo "# …an unchanged posture writes nothing ($RV)"
 out=$(run)
 eq "$(grep -c "^bd update RA$RN " "$STUB_GC_LOG" || true)" "0" "no write when nothing moved"
 
-echo "# a conflicting approved PR on the record gets its merge-in, the record standing ($RV)"
+echo "# a conflicting approved PR on the record sends its merge-in to the review run as an ask, the record standing ($RV)"
 N=$((9110 + RN))
 store "[$(ranchor "RB$RN" "$N" "$RV")]"
 printf '%s' "$(prview "$N" OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_$N.json"
 approve "$N"; echo '[]' > "$GH_DIR/comments_$N.json"
-out=$(run)
-RBK=$(reworks_of "RB$RN")
-has "$out" "RB$RN — PR#$N conflicts with 'main'; filed merge-mode rework $RBK routed to $FIX" "the conflict arm files its merge-in"
-eq "$(meta "$RBK" existing_pr)" "https://github.com/zook/gc-toolkit/pull/$N" "…reworking this PR"
-grep -qxF "$RBK|blocks|RB$RN" "$STUB_DEPS" && ok "…and it blocks the anchor, which holds the PR's merge" || bad "blocks edge missing"
+: > "$ASK_LOG"
+out=$(asked)
+has "$out" "RB$RN — PR#$N conflicts with 'main'; its review run takes ask ask-RB$RN" "the conflict arm files its merge-in as an ask"
+has "$(cat "$ASK_LOG")" "review ask RB$RN --reason PR#$N conflicts with 'main' at head sha-$N" "…with the conflict as its reason"
+eq "$(reworks_of "RB$RN")" "" "…and no rework child"
+grep -qxF "ask-RB$RN|blocks|RB$RN" "$STUB_DEPS" && ok "…the ask blocking the anchor, which holds the PR's merge" || bad "blocks edge missing"
 eq "$(rec_of "RB$RN")" "$REC" "the record stands"
 
-echo "# unanswered feedback on the record routes to a rework child, its watermark recorded, the record standing ($RV)"
+echo "# unanswered feedback on the record routes to an ask, each comment a finding naming it, its watermark recorded, the record standing ($RV)"
 N=$((9120 + RN))
 store "[$(ranchor "RC$RN" "$N" "$RV")]"
 quiet_pr "$N"
 printf '[{"id":5001,"user":{"login":"human1"},"body":"this path never runs","path":"docs/x.md"}]' > "$GH_DIR/comments_$N.json"
-out=$(run)
-RCK=$(reworks_of "RC$RN")
-has "$out" "RC$RN — PR#$N review comments routed to rework:$RCK" "the feedback routes to a rework child"
+: > "$ASK_LOG"
+out=$(asked)
+has "$out" "RC$RN — PR#$N review comments routed to rework:ask-RC$RN" "the feedback routes to an ask, the batch's fix unit"
+has "$(cat "$ASK_LOG")" "review ask RC$RN --reason Review feedback on PR#$N is unanswered at head sha-$N" "…which carries the batch"
+eq "$(reworks_of "RC$RN")" "" "…and no rework child"
+eq "$(jq -r --arg a "RC$RN" '[ .[] | select(.metadata.task_kind == "finding" and .metadata.anchor_bead == $a) | .metadata["finding.fix_unit"] ] | join(",")' "$STUB_STORE")" "ask-RC$RN" "the comment is a human finding naming the ask as its fix unit"
+eq "$(jq -r --arg a "RC$RN" '[ .[] | select(.metadata.task_kind == "validation" and .metadata.anchor_bead == $a) ] | length' "$STUB_STORE")" "0" "no validation pass is opened, since the review run rules the batch"
 eq "$(meta "RC$RN" pr_comment_watermark)" "5001" "…and its watermark is recorded, the receipt the landing order's evaluator reads"
-eq "$(meta "RC$RN" pr_comment_disposition)" "rework:$RCK" "…beside the disposition"
+eq "$(meta "RC$RN" pr_comment_disposition)" "rework:ask-RC$RN" "…beside the disposition"
 eq "$(meta_pinned "RC$RN" pr_posture)" "commented@sha-$N" "the posture says feedback is outstanding"
-eq "$(meta "$RCK" 'gc.routed_to')" "$FIX" "the child is routed to the fix pool"
 eq "$(rec_of "RC$RN")" "$REC" "the record stands"
-out=$(run)
-eq "$(reworks_of "RC$RN")" "$RCK" "the batch never re-fires"
+out=$(asked)
+eq "$(grep -c 'review ask' "$ASK_LOG")" "1" "the batch never re-fires"
 
 echo "# the write-back acknowledges a routed comment on the record, and answers it once its child closes ($RV)"
 N=$((9130 + RN))

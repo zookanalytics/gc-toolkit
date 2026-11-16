@@ -68,7 +68,9 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--dry-run]
 
   --step     the gc.step_ref of the step this shell is executing, e.g.
              mol-polecat-work.load-context, or a check loop's name, e.g.
-             self-review, for one of its iterations. The run is that step's
+             self-review, for one of its iterations, whose refs carry the
+             formula's name before the loop's from the second on, and for a
+             step bonded inside one. The run is that step's
              molecule. Before the cancel, a step this session has started goes
              back to not started, still in this session's name.
   --root     the run's root bead, for a caller that holds no step of it.
@@ -189,7 +191,8 @@ if [ -n "$STEP" ]; then
       ($ids | split("\n") | map(select(. != ""))) as $me
       | .[0] as $b
       | if $b == null then empty
-        elif ((($b.metadata["gc.step_ref"] // "") == $step or (($b.metadata["gc.step_ref"] // "") | startswith($step + ".iteration."))) | not) then empty
+        elif ((($b.metadata["gc.step_ref"] // "") as $ref | $ref == $step or ($ref | startswith($step + ".iteration."))
+              or ($ref | contains("." + $step + ".iteration."))) | not) then empty
         elif (($me | index($b.assignee // "")) == null) then empty
         else ($b.status // "") end
     ' 2>/dev/null

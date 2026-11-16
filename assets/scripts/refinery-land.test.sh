@@ -58,13 +58,19 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-refinery-land-test.XXXXXX")"
 TMP="$(cd "$TMP" && pwd -P)"
-trap 'rm -rf "$TMP"' EXIT
+# The check index is gctk's, built from this checkout once, beside the
+# directory each case empties.
+RT_GCTK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gctk-refinery-land-bin.XXXXXX")"
+trap 'rm -rf "$TMP" "$RT_GCTK_DIR"' EXIT
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$RT_GCTK_DIR/gctk" ./cmd/gctk ) >"$RT_GCTK_DIR/build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$RT_GCTK_DIR/build.log")" >&2; exit 1; }
+export RT_GCTK_REAL="$RT_GCTK_DIR/gctk"
 # shellcheck source=refinery-test-lib.sh
 . "$HERE/refinery-test-lib.sh"
 
 fresh() {
   rm -rf "${TMP:?}"/*
-  rt_init refinery-land.sh refinery-publish.sh direct-merge-push.sh rig-root.sh review-checks.sh
+  rt_init refinery-land.sh refinery-publish.sh direct-merge-push.sh rig-root.sh
   export GC_RIG_ROOT="$RIG" DIRECT_MERGE_PUSH_BACKOFF=0
 }
 run() { OUT=$("$SUT/refinery-land.sh" "$@" 2>&1); RC=$?; }
