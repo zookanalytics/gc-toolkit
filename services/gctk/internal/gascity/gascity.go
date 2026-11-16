@@ -40,12 +40,28 @@ type Runtime interface {
 	Script(name string, args ...string) Result
 	// CityRoot is the city's root directory, the one that holds its .gc.
 	CityRoot() (string, error)
+	// Nudge runs one `gc session nudge <target> <message>`.
+	Nudge(target, message string) Result
+	// ShowFormula runs one `gc formula show <name>`.
+	ShowFormula(name string) Result
+	// Agents reads the city's roster. A read that does not answer is an error.
+	Agents() ([]Agent, error)
+	// NamedSessions reads the named sessions the city's config lists. A read
+	// that does not answer is an error.
+	NamedSessions() ([]NamedSession, error)
+	// Rigs reads the rigs the city names, its HQ among them. A read that does
+	// not answer is an error.
+	Rigs() ([]Rig, error)
 }
 
 // Sling is one `gc sling <target> <bead> --on <formula> --title <title>`,
-// with gc's --rig when Rig names one.
+// with gc's --rig when Rig names one and no --title when Title is empty. A
+// sling with NoFormula set pours nothing and files no convoy (`gc sling <target>
+// <bead> --no-formula --no-convoy`): it routes the bead to the target's own
+// name, which a named session's hook serves.
 type Sling struct {
 	Rig, Target, Bead, Formula, Title string
+	NoFormula                         bool
 }
 
 // Result is what a command answered: its exit code and its output, standard
@@ -92,6 +108,14 @@ type City struct {
 	once   sync.Once
 	agents []agent
 	cfgErr error
+
+	namedOnce sync.Once
+	named     []NamedSession
+	namedErr  error
+
+	rigsOnce sync.Once
+	rigs     []Rig
+	rigsErr  error
 }
 
 var _ Runtime = (*City)(nil)
@@ -124,7 +148,15 @@ func (c *City) Sling(s Sling) SlingResult {
 	if s.Rig != "" {
 		args = append(args, "--rig", s.Rig)
 	}
-	args = append(args, s.Target, s.Bead, "--on", s.Formula, "--title", s.Title)
+	args = append(args, s.Target, s.Bead)
+	if s.NoFormula {
+		args = append(args, "--no-formula", "--no-convoy")
+	} else {
+		args = append(args, "--on", s.Formula)
+		if s.Title != "" {
+			args = append(args, "--title", s.Title)
+		}
+	}
 	r := run(c.dir, c.bin, args...)
 	out := SlingResult{Result: r}
 	if r.Code == 3 {

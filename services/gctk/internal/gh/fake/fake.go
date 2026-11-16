@@ -42,10 +42,19 @@ type GitHub struct {
 	OnMerge   func(method string, p *PR, head string) error
 	OnDismiss func(p *PR, review int64) error
 	Descends  map[string][]string
+	// Repos is each repository's default branch and the checks at each ref,
+	// by its owner/name.
+	Repos map[string]*Repo
 
 	mu    sync.Mutex
 	reads []string
 	asks  []Ask
+}
+
+// Repo is one repository's default branch and the checks at each ref.
+type Repo struct {
+	DefaultBranch string
+	Checks        map[string]*gh.HeadChecks
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
@@ -286,4 +295,47 @@ func (g *GitHub) Login() (string, error) {
 		return "", fmt.Errorf("github: gh named no account it acts as")
 	}
 	return g.Self, nil
+}
+
+// DefaultBranch answers the repository's default branch, failing as
+// Fail["DefaultBranch"] says, and for a repository Repos does not hold.
+func (g *GitHub) DefaultBranch(repo string) (string, error) {
+	r, err := g.repo("DefaultBranch", repo)
+	if err != nil {
+		return "", err
+	}
+	if r.DefaultBranch == "" {
+		return "", fmt.Errorf("github: %s named no default branch", repo)
+	}
+	return r.DefaultBranch, nil
+}
+
+// HeadChecks answers the checks Repos holds at ref, failing as
+// Fail["HeadChecks"] says, and for a ref it holds none at.
+func (g *GitHub) HeadChecks(repo, ref string) (*gh.HeadChecks, error) {
+	r, err := g.repo("HeadChecks", repo)
+	if err != nil {
+		return nil, err
+	}
+	h, ok := r.Checks[ref]
+	if !ok {
+		return nil, fmt.Errorf("github: no checks at %s in %s", ref, repo)
+	}
+	out := *h
+	out.Runs, out.Statuses = slices.Clone(h.Runs), slices.Clone(h.Statuses)
+	return &out, nil
+}
+
+func (g *GitHub) repo(read, repo string) (*Repo, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reads = append(g.reads, read)
+	if err := g.Fail[read]; err != nil {
+		return nil, err
+	}
+	r, ok := g.Repos[strings.ToLower(repo)]
+	if !ok {
+		return nil, fmt.Errorf("github: no repository %s", repo)
+	}
+	return r, nil
 }

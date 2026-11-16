@@ -21,6 +21,15 @@ type Store interface {
 	// Ready reads the beads q selects that the store reports ready, in the
 	// listing's shape. A read that fails returns a *ReadError.
 	Ready(q ReadyQuery) ([]Bead, error)
+	// ReadyIDs reads the id of every bead the store reports ready. A read that
+	// fails returns a *ReadError.
+	ReadyIDs() ([]string, error)
+	// SetState sets one state dimension of id to value, with reason, as one
+	// `gc bd set-state`. An error is a write that did not land.
+	SetState(id, dimension, value, reason string) error
+	// AddEdge gives id an edge of type typ onto far, as one `gc bd dep add`.
+	// An error is a write that did not land.
+	AddEdge(id, far, typ string) error
 	// Update makes one `gc bd update` of id with args, returning its output.
 	// An error is a write that did not land.
 	Update(id string, args ...string) (string, error)

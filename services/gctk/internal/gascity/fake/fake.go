@@ -36,12 +36,30 @@ type Runtime struct {
 	OnSling  func(gascity.Sling) gascity.SlingResult
 	OnScript func(Call) gascity.Result
 	OnCook   func(gascity.Cook) gascity.CookResult
+	// OnNudge answers a nudge, and nil answers exit 0.
+	OnNudge func(Nudge) gascity.Result
+	// Formulas the city resolves, which ShowFormula answers exit 0 for. Every
+	// other name answers exit 1.
+	Resolves []string
+	// Roster, Named and RigList answer the roster, the named sessions and the
+	// rig list, and RosterErr, NamedErr and RigsErr fail each read.
+	Roster                       []gascity.Agent
+	Named                        []gascity.NamedSession
+	RigList                      []gascity.Rig
+	RosterErr, NamedErr, RigsErr error
 
 	mu      sync.Mutex
 	slings  []gascity.Sling
 	asks    []gascity.Sling
 	scripts []Call
 	cooks   []gascity.Cook
+	nudges  []Nudge
+	reads   []string
+}
+
+// Nudge is one nudge: the agent it went to and its message.
+type Nudge struct {
+	Target, Message string
 }
 
 var _ gascity.Runtime = (*Runtime)(nil)
@@ -140,4 +158,76 @@ func (r *Runtime) Scripts() []Call {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.scripts)
+}
+
+// Nudge records the nudge and answers it.
+func (r *Runtime) Nudge(target, message string) gascity.Result {
+	n := Nudge{Target: target, Message: message}
+	r.mu.Lock()
+	r.nudges = append(r.nudges, n)
+	on := r.OnNudge
+	r.mu.Unlock()
+	if on != nil {
+		return on(n)
+	}
+	return gascity.Result{}
+}
+
+// Nudges returns every nudge the domain made, in order.
+func (r *Runtime) Nudges() []Nudge {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.nudges)
+}
+
+// ShowFormula answers exit 0 for a formula Resolves names, and exit 1 for any
+// other.
+func (r *Runtime) ShowFormula(name string) gascity.Result {
+	r.read("formula " + name)
+	if slices.Contains(r.Resolves, name) {
+		return gascity.Result{}
+	}
+	return gascity.Result{Code: 1, Output: "formula " + name + " not found"}
+}
+
+// Agents answers Roster, or RosterErr.
+func (r *Runtime) Agents() ([]gascity.Agent, error) {
+	r.read("roster")
+	if r.RosterErr != nil {
+		return nil, r.RosterErr
+	}
+	return slices.Clone(r.Roster), nil
+}
+
+// NamedSessions answers Named, or NamedErr.
+func (r *Runtime) NamedSessions() ([]gascity.NamedSession, error) {
+	r.read("named")
+	if r.NamedErr != nil {
+		return nil, r.NamedErr
+	}
+	return slices.Clone(r.Named), nil
+}
+
+// Rigs answers RigList, or RigsErr.
+func (r *Runtime) Rigs() ([]gascity.Rig, error) {
+	r.read("rigs")
+	if r.RigsErr != nil {
+		return nil, r.RigsErr
+	}
+	return slices.Clone(r.RigList), nil
+}
+
+func (r *Runtime) read(what string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reads = append(r.reads, what)
+}
+
+// Reads returns every read of the roster ("roster"), the named sessions
+// ("named"), the rig list ("rigs") and a formula ("formula <name>") the domain
+// made, in order.
+func (r *Runtime) Reads() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.reads)
 }
