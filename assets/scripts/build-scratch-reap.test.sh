@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Tests for build-scratch-reap.sh against a synthetic scratch root. Real
-# filesystem and real lsof and ps — holder detection is the whole safety model,
-# so the shell tools are NOT stubbed (harness_init would replace them), except
-# where a stand-in injects a fault.
+# filesystem and real lsof and ps: what they read is the evidence the safety
+# model rests on, so the shell tools are NOT stubbed (harness_init would replace
+# them), except where a stand-in injects a fault.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +28,11 @@ RROOT="$(cd "$ROOT" && pwd -P)"
 gone()  { if [ ! -e "$1" ]; then ok "$2"; else bad "$2 (still present: $1)"; fi; }
 kept()  { if [ -e "$1" ]; then ok "$2"; else bad "$2 (was removed: $1)"; fi; }
 
+# Backdate an entry and everything in it by <days>, so a fixture can show that
+# age never removes anything. The UTC ISO-8601 stamp is what GNU and BSD touch
+# -d both read, where only GNU reads @<epoch>.
+aged() { find "$1" -depth -exec touch -h -d "$(jq -nr --argjson t "$(( $(date +%s) - $2 * 86400 ))" '$t | todate')" {} +; }   # aged <path> <days>
+
 # Background holders must not inherit this script's (or a command
 # substitution's) stdout/stderr: a process that does keeps the pipe open and the
 # reader blocks on EOF until the holder exits. Each detaches all three streams.
@@ -44,18 +49,15 @@ hold_open() { ( exec 9>"$1"; exec sleep 300 ) </dev/null >/dev/null 2>&1 & HOLDE
 
 DEAD1="$(dead_pid)"; DEAD2="$(dead_pid)"; DEAD3="$(dead_pid)"; DEADH="$(dead_pid)"
 DEADN1="$(dead_pid)"; DEADN2="$(dead_pid)"; DEADN3="$(dead_pid)"; DEADN4="$(dead_pid)"
-DEADP="$(dead_pid)"
+DEADP="$(dead_pid)"; DEADS="$(dead_pid)"; DEADL1="$(dead_pid)"; DEADL2="$(dead_pid)"
 LIVE1="$(live_pid)"; LIVERUN="$(live_pid)"; HOLDERS+=("$LIVE1" "$LIVERUN")
 
-# --- dead scratch: must be reaped ---
+# --- dead scratch: must be reaped. The pid names the owner, so a tree goes on
+#     its dead pid however recently it was written. ---
 mkdir -p "$ROOT/gct${DEAD1}-111";           : >"$ROOT/gct${DEAD1}-111/f"
 mkdir -p "$ROOT/gct-${DEAD2}-222";          : >"$ROOT/gct-${DEAD2}-222/f"
 mkdir -p "$ROOT/run.${DEAD3}";              : >"$ROOT/run.${DEAD3}/f"
-mkdir -p "$ROOT/go-build99887766";          : >"$ROOT/go-build99887766/a.o"
-mkdir -p "$ROOT/go-link-55443322";          : >"$ROOT/go-link-55443322/exe"
-mkdir -p "$ROOT/gctk-liveness.deaddir"
-: >"$ROOT/gctk-pr-facts.deadfile"
-mkdir -p "$ROOT/go-build-sized"; head -c 65536 /dev/zero >"$ROOT/go-build-sized/obj"
+mkdir -p "$ROOT/run.${DEADS}"; head -c 65536 /dev/zero >"$ROOT/run.${DEADS}/obj"
 
 # --- live or held: must be kept ---
 mkdir -p "$ROOT/gct${LIVE1}-333"            # pid alive
@@ -63,8 +65,14 @@ mkdir -p "$ROOT/run.${LIVERUN}"             # pid alive
 mkdir -p "$ROOT/gct1-555"                   # pid 1: alive, and another uid's, so kill -0 is refused
 mkdir -p "$ROOT/gct${DEADH}-444"            # dead pid BUT an open holder inside
 hold_open "$ROOT/gct${DEADH}-444/.lock"
-mkdir -p "$ROOT/go-build-held"; hold_open "$ROOT/go-build-held/obj"   # no pid, held
-hold_open "$ROOT/gctk-held.file"            # held plain file
+
+# --- templated names record no owner: never reaped, though unheld and a month
+#     unwritten, because nothing outside the run can show the run has ended ---
+mkdir -p "$ROOT/go-build99887766";          : >"$ROOT/go-build99887766/a.o"
+mkdir -p "$ROOT/go-link-55443322";          : >"$ROOT/go-link-55443322/exe"
+mkdir -p "$ROOT/gctk-liveness.olddir";      : >"$ROOT/gctk-liveness.olddir/f"
+: >"$ROOT/gctk-pr-facts.oldfile"
+for p in go-build99887766 go-link-55443322 gctk-liveness.olddir gctk-pr-facts.oldfile; do aged "$ROOT/$p" 30; done
 
 # --- unparseable / unrecognized / cache: must be kept ---
 mkdir -p "$ROOT/gct12x-777"                 # matches gct<digit>, pid '12x' non-numeric
@@ -89,12 +97,13 @@ DRY="$(bash "$SUT" --root "$ROOT" --no-lock --dry-run 2>&1)"
 has "$DRY" "would reap" "dry-run reports a plan"
 has "$DRY" "dry-run" "dry-run summary names itself"
 kept "$ROOT/gct${DEAD1}-111" "dry-run removes nothing (dead gct tree still there)"
-kept "$ROOT/go-build99887766" "dry-run removes nothing (dead go-build still there)"
 case "$DRY" in
-    *"would reap $RROOT/go-build-sized (0"*) bad "dry-run reports the size of what it would reap (got zero)" ;;
-    *"would reap $RROOT/go-build-sized ("*)  ok "dry-run reports the size of what it would reap" ;;
+    *"would reap $RROOT/run.${DEADS} (0"*) bad "dry-run reports the size of what it would reap (got zero)" ;;
+    *"would reap $RROOT/run.${DEADS} ("*)  ok "dry-run reports the size of what it would reap" ;;
     *) bad "dry-run reports the size of what it would reap (not planned: $DRY)" ;;
 esac
+hasnt "$DRY" "would reap $RROOT/go-" "dry-run plans no templated Go tree"
+hasnt "$DRY" "would reap $RROOT/gctk-" "dry-run plans no gctk-* entry"
 
 # --- real pass ---
 OUT="$(bash "$SUT" --root "$ROOT" --no-lock --verbose 2>&1)"
@@ -103,18 +112,18 @@ has "$OUT" "reaped" "real pass prints a summary"
 gone "$ROOT/gct${DEAD1}-111"      "reaps gct<pid>-<n> with a dead pid"
 gone "$ROOT/gct-${DEAD2}-222"     "reaps gct-<pid>-<n> (dash form) with a dead pid"
 gone "$ROOT/run.${DEAD3}"         "reaps run.<pid> with a dead pid"
-gone "$ROOT/go-build99887766"     "reaps an unheld go-build tree"
-gone "$ROOT/go-link-55443322"     "reaps an unheld go-link tree"
-gone "$ROOT/gctk-liveness.deaddir" "reaps an unheld gctk-* dir"
-gone "$ROOT/gctk-pr-facts.deadfile" "reaps an unheld gctk-* file"
-gone "$ROOT/go-build-sized"       "reaps an unheld go-build tree with content"
+gone "$ROOT/run.${DEADS}"         "reaps a dead pid's tree with content"
+
+kept "$ROOT/go-build99887766"     "keeps a go-build tree a month unwritten and unheld (it records no owner)"
+kept "$ROOT/go-link-55443322"     "keeps a go-link tree a month unwritten and unheld"
+kept "$ROOT/gctk-liveness.olddir" "keeps a gctk-* dir a month unwritten and unheld"
+kept "$ROOT/gctk-pr-facts.oldfile" "keeps a gctk-* file a month unwritten and unheld"
+has "$OUT" "skip (records no owner): $RROOT/go-build99887766" "…and says it records no owner"
 
 kept "$ROOT/gct${LIVE1}-333"      "keeps gct<pid> whose pid is alive"
 kept "$ROOT/run.${LIVERUN}"       "keeps run.<pid> whose pid is alive"
 kept "$ROOT/gct1-555"             "keeps gct<pid> whose live pid another uid owns"
 kept "$ROOT/gct${DEADH}-444"      "keeps a dead-pid tree that still has an open holder"
-kept "$ROOT/go-build-held"        "keeps a held go-build tree (no pid, open fd inside)"
-kept "$ROOT/gctk-held.file"       "keeps a held gctk-* file"
 kept "$ROOT/gct12x-777"           "keeps a gct name whose pid is non-numeric (unparseable)"
 kept "$ROOT/gctfoo-1"             "keeps a gct name that is not a pid form"
 kept "$ROOT/run.bogus"            "keeps run.<non-numeric>"
@@ -136,17 +145,15 @@ has "$REFUSE" "refusing to reap" "refusal explains itself"
 kept "$ROOT/gct${DEAD1}-again" "refusal leaves dead scratch untouched"
 
 # --- a ps that cannot list this process shows no pid gone ---
-# The pid-named tree is kept while a tree whose name carries no pid, gated on
-# holders alone, is still reaped in the same pass. With ps answering, the same
-# pid-named tree goes.
+# The pid-named tree is kept, and with ps answering, the same tree goes.
 NOPS="$TMP/nops"; mkdir -p "$NOPS"
 printf '#!/bin/sh\nexit 1\n' >"$NOPS/ps"; chmod +x "$NOPS/ps"
 mkdir -p "$ROOT/gct${DEADP}-888";           : >"$ROOT/gct${DEADP}-888/f"
-mkdir -p "$ROOT/go-build-psblind";          : >"$ROOT/go-build-psblind/a.o"
-OUT="$(PATH="$NOPS:$PATH" bash "$SUT" --root "$ROOT" --no-lock --verbose 2>&1)"
+RC=0
+OUT="$(PATH="$NOPS:$PATH" bash "$SUT" --root "$ROOT" --no-lock --verbose 2>&1)" || RC=$?
+eq "$RC" "0" "a pass whose ps cannot list this process still exits 0"
 kept "$ROOT/gct${DEADP}-888"  "a ps that cannot list this process keeps a dead pid's tree"
 has "$OUT" "keep (pid '${DEADP}' not shown gone)" "and says the pid was not shown gone"
-gone "$ROOT/go-build-psblind" "while a tree with no pid in its name is reaped in the same pass"
 bash "$SUT" --root "$ROOT" --no-lock >/dev/null 2>&1
 gone "$ROOT/gct${DEADP}-888"  "with ps answering, the same dead pid's tree is reaped"
 
@@ -160,19 +167,19 @@ LOCKD="$TMP/lockdir"; mkdir -p "$LOCKD"
 LH=$!; HOLDERS+=("$LH")
 i=0; while [ ! -e "$TMP/lock-held" ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
 printf '%s %s\n' "$LH" "$(date -u +%s)" >"$LOCKD/pass.holder"
-mkdir -p "$ROOT/go-build-lockcase"; : >"$ROOT/go-build-lockcase/a.o"
+mkdir -p "$ROOT/run.${DEADL1}"; : >"$ROOT/run.${DEADL1}/a.o"
 OUT="$(BUILD_SCRATCH_REAP_LOCK_DIR="$LOCKD" bash "$SUT" --root "$ROOT" --verbose 2>&1)"
 has "$OUT" "another pass holds $LOCKD/pass.lock (pid $LH" "a held lock skips the pass, naming its holder"
-kept "$ROOT/go-build-lockcase" "a skipped pass removes nothing"
+kept "$ROOT/run.${DEADL1}" "a skipped pass removes nothing"
 printf '%s 1\n' "$LH" >"$LOCKD/pass.holder"
 OUT="$(BUILD_SCRATCH_REAP_LOCK_DIR="$LOCKD" BUILD_SCRATCH_REAP_LOCK_STALL_SECS=60 bash "$SUT" --root "$ROOT" 2>&1)"
 has "$OUT" "lock held past 60s (pid $LH" "a holder past the stall bound is reported"
-gone "$ROOT/go-build-lockcase" "…and does not stop the reap"
+gone "$ROOT/run.${DEADL1}" "…and does not stop the reap"
 : >"$TMP/lock-release"; wait "$LH" 2>/dev/null || true
-mkdir -p "$TMP/lockdir-blocked/pass.lock" "$ROOT/go-build-lockcase2"
+mkdir -p "$TMP/lockdir-blocked/pass.lock" "$ROOT/run.${DEADL2}"
 OUT="$(BUILD_SCRATCH_REAP_LOCK_DIR="$TMP/lockdir-blocked" bash "$SUT" --root "$ROOT" 2>&1)"
 has "$OUT" "lock unavailable (cannot create $TMP/lockdir-blocked/pass.lock); proceeding unlocked" "a lock that cannot be taken is reported"
-gone "$ROOT/go-build-lockcase2" "…and the pass runs unlocked"
+gone "$ROOT/run.${DEADL2}" "…and the pass runs unlocked"
 
 echo "build-scratch-reap.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
