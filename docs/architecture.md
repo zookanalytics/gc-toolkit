@@ -160,8 +160,8 @@ performer; the full transition table with writers is
    result, the landing order pours a review run. The run records the PR's
    review result, which the evaluator reads. While it works, the run is the
    one worker on the PR's branch. A converse sitting the operator rules edit the
-   branch with them can push while a run works it, and the lease keeps either
-   push from overwriting the other. Work that needs the branch changed, such as
+   branch with them can push while a run works it. Work that needs the branch
+   changed, such as
    a person's comment or a conflict with the target, is filed as an ask, and a
    run takes it. Each city writer returns the PR to draft before it pushes.
    The landing order marks the PR ready once a run has passed at the head the
