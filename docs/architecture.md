@@ -352,10 +352,10 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   until the work returns
   ([human-engagement.md](human-engagement.md#a-sitting-that-stays-for-the-return)).
   A stay comes back at the operator's next decision about its work, never
-  after it. The sitting promises its return with a Gas City session wait on
-  the work, and Gas City sleeps the sitting while the work is out and wakes it
-  with its thread when the wait is satisfied. Work that opens no PR satisfies
-  it when the work closes. For work that opens a PR, that decision is the
+  after it. Gas City keeps the sitting's promise to return. It sleeps the
+  sitting while the work is out and wakes it with its thread when the
+  return is due. For work that opens no PR, the return is due when the
+  work closes. For work that opens a PR, the next decision is the
   approval, in every round: when a round ends at the head the refinery
   validated, the landing order puts the conversation's hold on the PR's merge
   and has Gas City wake the sitting. On each return the sitting compares the
@@ -508,11 +508,11 @@ why a reader must know it, and the work that retires it.
   returned discussion. The effort tk-vrg93t0 builds the stay that
   [How humans engage](#how-humans-engage) describes, and a rig still on the old
   review path has it from its cutover onto the pending record.
-- **Gas City's attach cancels a stopped session's waits.** It starts a stopped
-  session the way Gas City's explicit wake does, which cancels every wait the
-  session has, so a promise such as a stay's does not survive the operator's
-  visit to a sleeping sitting. The change in Gas City that keeps a session's
-  waits through an attach (gc-gspdoo) retires this.
+- **A visit to a sleeping sitting cancels its promise.** Gas City's attach
+  does not keep the promise of a sitting it starts, so the sitting tells the
+  operator the visit ended its promise and asks whether to promise again. The
+  change in Gas City that keeps the promise through an attach (gc-gspdoo)
+  retires this.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
