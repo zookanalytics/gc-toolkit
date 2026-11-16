@@ -149,12 +149,14 @@ committed go to seed-audit-reaudit.sh, which slings the branch's one re-render,
 and the landing's line says what the check found. The check holds nothing, and
 one that does not run is asked for again at a later landing.
 
-It acts only on a bead it reads under the lock as carrying the marker and,
-unless the bead is closed, still assigned to the refinery --refinery names,
-with each write guarded on the status and assignee it read. A bead a release
-took from the refinery has its marker cleared and its PR named in a note, and
-nothing else written. It starts no record past --budget. Each record's outcome
-prints on a line of its own, as <bead> <action>: <detail>.
+It acts only on a bead it reads under the lock as carrying the marker, or as
+an open or blocked bead on the record that carries a ruling's disposition,
+with or without the marker, and, unless the bead is closed, still assigned to
+the refinery --refinery names, with each write guarded on the status and
+assignee it read. A bead a release took from the refinery has its marker
+cleared and its PR named in a note, and nothing else written. It starts no
+record past --budget. Each record's outcome prints on a line of its own, as
+<bead> <action>: <detail>.
 
 exit: 0 every record read was handled
       1 usage

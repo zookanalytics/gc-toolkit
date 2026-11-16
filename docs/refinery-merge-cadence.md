@@ -925,8 +925,10 @@ webhook fires the order, because an order a webhook fires skips Gas City's
 gates and each event would start a run of its own.
 
 **What a run acts on.** A run acts only on a bead it reads under the lock as
-carrying the marker and, unless the bead is closed, still assigned to the
-refinery, and each write is guarded on the status and assignee it read. A bead
+carrying the marker, or as an open or blocked bead on the record that carries a
+ruling's disposition, with or without the marker, and, unless the bead is
+closed, still assigned to the refinery, and each write is guarded on the status
+and assignee it read. A bead
 that a release took from the refinery has its marker cleared and its PR named
 in a note, and nothing else written.
 
