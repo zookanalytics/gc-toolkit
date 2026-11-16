@@ -1240,6 +1240,127 @@ for sh_ in $shells; do
         bad "($sh_) converse-edit: a rig that declares no ui_serve_command gets no copy, and the block says so" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
     fi
 done
+echo "── a sitting runs an open PR's checks in its tree ──"
+# The PR's bead records no tree, so the checks of an open PR's edit run from the
+# tree itself. The block runs as written. gc answers mol-polecat-work's vars for
+# the rig: lint as a command with quotes and a substitution, build declared
+# empty over a formula default, typecheck and setup with nothing declared, the
+# whole suite as the formula's own default, and the affected tests as
+# OC_AFFECTED, undeclared when that is empty. gctk logs where each call runs
+# and what it is given, and fails the check OC_FAIL names.
+OC="$TMP/open-pr-checks"
+mkdir -p "$OC/bin" "$OC/tree"
+cat >"$OC/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+[ "$*" = "formula show mol-polecat-work --rig rig-x --json" ] || { echo "gc: unexpected call: $*" >&2; exit 1; }
+jq -n --arg a "$OC_AFFECTED" '{ok: true, vars: [
+    {name: "setup_command", default: "", rig_default: null},
+    {name: "typecheck_command", default: ""},
+    {name: "lint_command", default: "", rig_default: "tools/lint.sh \"$(git diff --name-only origin/main...HEAD)\""},
+    {name: "build_command", default: "make", rig_default: ""},
+    {name: "affected_tests_command", default: "", rig_default: (if $a == "" then null else $a end)},
+    {name: "test_command", default: "tools/run-tests.sh", rig_default: null}]}'
+STUB
+cat >"$OC/gctk" <<'STUB'
+#!/usr/bin/env bash
+{ printf 'in %s:' "$(pwd -P)"; printf ' [%s]' "$@"; printf '\n'; } >>"$OC_LOG"
+[ "$2" != "$OC_FAIL" ]
+STUB
+chmod +x "$OC/bin/gc" "$OC/gctk"
+OC_TREE=$(cd "$OC/tree" && pwd -P)
+# oc_run <shell> <affected tests command> <the check gctk fails> — one run of
+# the block from no log; returns its exit.
+oc_run() {
+    rm -f "$OC/log"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV TREE="$OC/tree" GC_RIG=rig-x GCTK_BIN="$OC/gctk" OC_LOG="$OC/log" \
+        OC_AFFECTED="$2" OC_FAIL="$3" PATH="$OC/bin:$PATH" $1 "$OC/block" </dev/null >/dev/null 2>&1)
+}
+# oc_want <test scope> <test command> — the calls gctk gets: lint, then the test.
+oc_want() {
+    printf 'in %s: [rig] [lint] [--command] [%s]\nin %s: [rig] [test] [--scope] [%s] [--command] [%s]' \
+        "$OC_TREE" 'tools/lint.sh "$(git diff --name-only origin/main...HEAD)"' "$OC_TREE" "$1" "$2"
+}
+fenced_block "$EDIT" 'rig test --scope "$SCOPE" --command "$T"' >"$OC/block"
+OC_AFF='tools/run-tests.sh --affected origin/main'
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    oc_run "$run" "$OC_AFF" ""; rc=$?
+    if [ "$rc" -eq 0 ] && [ "$(cat "$OC/log" 2>/dev/null)" = "$(oc_want affected "$OC_AFF")" ]; then
+        ok "($sh_) converse-edit: an open PR's checks run each command the rig declares, as written, from the tree"
+    else
+        bad "($sh_) converse-edit: an open PR's checks run each command the rig declares, as written, from the tree" "exit $rc; gctk got: $(tr '\n' '|' <"$OC/log" 2>/dev/null)"
+    fi
+    oc_run "$run" "" ""; rc=$?
+    if [ "$rc" -eq 0 ] && [ "$(cat "$OC/log" 2>/dev/null)" = "$(oc_want full tools/run-tests.sh)" ]; then
+        ok "($sh_) converse-edit: a rig that declares no affected tests runs its whole suite on an open PR"
+    else
+        bad "($sh_) converse-edit: a rig that declares no affected tests runs its whole suite on an open PR" "exit $rc; gctk got: $(tr '\n' '|' <"$OC/log" 2>/dev/null)"
+    fi
+    oc_run "$run" "$OC_AFF" lint; rc=$?
+    if [ "$rc" -eq 1 ] && [ "$(cat "$OC/log" 2>/dev/null)" = "$(oc_want affected "$OC_AFF")" ]; then
+        ok "($sh_) converse-edit: a check that fails fails an open PR's checks, and the checks after it still run"
+    else
+        bad "($sh_) converse-edit: a check that fails fails an open PR's checks, and the checks after it still run" "exit $rc; gctk got: $(tr '\n' '|' <"$OC/log" 2>/dev/null)"
+    fi
+done
+echo "── a sitting removes an open PR's tree only once the branch holds its HEAD ──"
+# The let-go block runs as written against a real origin, from a home clone
+# whose tree is a checkout of the branch's tip with no local branch. A commit
+# the branch does not hold keeps the tree, and once a push puts it on the
+# branch the tree goes. gctk logs the copy's stop.
+LG="$TMP/let-go"
+mkdir -p "$LG/city/.gc/services/gctk/bin"
+cat >"$LG/city/.gc/services/gctk/bin/gctk" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$LG_LOG"
+STUB
+chmod +x "$LG/city/.gc/services/gctk/bin/gctk"
+fenced_block "$EDIT" 'merge-base --is-ancestor HEAD "origin/$BRANCH"' >"$LG/block"
+lgit() {
+    env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com \
+        GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com git "$@"
+}
+# lg_home <dir> — a home clone of a fresh origin, its tree checked out at the
+# branch's tip with one commit in it that the branch does not hold.
+lg_home() {
+    mkdir -p "$1" \
+        && lgit init -q --bare "$1/origin.git" 2>/dev/null \
+        && lgit clone -q "$1/origin.git" "$1/home" 2>/dev/null \
+        && lgit -C "$1/home" commit -q --allow-empty -m base \
+        && lgit -C "$1/home" push -q origin HEAD:refs/heads/main HEAD:refs/heads/polecat/tk-pr \
+        && lgit -C "$1/home" worktree add -q --detach "$1/home/worktrees/tk-pr" origin/polecat/tk-pr \
+        && lgit -C "$1/home/worktrees/tk-pr" commit -q --allow-empty -m edit
+}
+# lg_run <shell> <dir> — one run of the block from no log; returns its exit.
+lg_run() {
+    rm -f "$LG/log"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        TREE="$2/home/worktrees/tk-pr" BRANCH=polecat/tk-pr GC_DIR="$2/home" GC_CITY_PATH="$LG/city" LG_LOG="$LG/log" \
+        $1 "$LG/block" </dev/null >/dev/null 2>&1)
+}
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    d="$LG/$sh_"
+    if ! lg_home "$d"; then
+        bad "($sh_) converse-edit: the let-go's home clone did not set up"
+        continue
+    fi
+    lg_run "$run" "$d"; rc=$?
+    if [ "$rc" -ne 0 ] && [ -d "$d/home/worktrees/tk-pr" ] && [ "$(cat "$LG/log" 2>/dev/null)" = "rig serve --stop" ]; then
+        ok "($sh_) converse-edit: an open PR's tree that holds a commit the branch does not is kept, with its copy stopped"
+    else
+        bad "($sh_) converse-edit: an open PR's tree that holds a commit the branch does not is kept, with its copy stopped" "exit $rc; tree $([ -d "$d/home/worktrees/tk-pr" ] && echo kept || echo gone); gctk got: $(tr '\n' '|' <"$LG/log" 2>/dev/null)"
+    fi
+    lgit -C "$d/home/worktrees/tk-pr" push -q origin HEAD:refs/heads/polecat/tk-pr
+    lg_run "$run" "$d"; rc=$?
+    if [ "$rc" -eq 0 ] && [ ! -e "$d/home/worktrees/tk-pr" ]; then
+        ok "($sh_) converse-edit: once the branch holds the tree's HEAD, letting go removes the tree"
+    else
+        bad "($sh_) converse-edit: once the branch holds the tree's HEAD, letting go removes the tree" "exit $rc; tree $([ -d "$d/home/worktrees/tk-pr" ] && echo kept || echo gone)"
+    fi
+done
 # A capture of a rig's own app takes the same command the copy runs: the
 # demo:capture skill reads it for a rig, and its Demo a PR and the demo check
 # pass it to the capture as --serve.

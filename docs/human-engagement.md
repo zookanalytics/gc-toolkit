@@ -1049,8 +1049,8 @@ conversation and changes only its own rig's repository, the rig its
 conversation is filed in, because the hold below is a `blocks` edge, which holds
 only within one store. It never edits in its home, edits the branch of an
 open PR the old path reviews, cuts an integration effort's branch, pushes to a
-target branch, merges, or forces a push. The `gc-toolkit.converse-edit` skill carries a change from the
-ruling to the refinery.
+target branch, merges, or forces a push. The `gc-toolkit.converse-edit` skill
+carries a change from the ruling to the refinery.
 
 **The change is a bead the sitting files**, in its own rig's store, with its
 target in the create: the rig's default branch, or the integration branch of an

@@ -73,9 +73,9 @@ gc bd show "$PR" --json | jq -r '.[0].metadata.merge_result // ""'
 The edit is this conversation's change in flight, and the PR's bead carries
 it, so you file no bead and make no subject wait on one. Set `CHANGE` to
 `$PR`. Hold the branch and set up its tree as below, then read the polecat
-class's standards, edit a commit per agreed step, show a copy of the UI and run
-the rig's checks as those sections say, and then write the summary, push and
-let go as this section ends.
+class's standards, edit a commit per agreed step and show a copy of the UI as
+those sections say, and then run the checks, write the summary, push and let
+go as this section ends.
 
 **Hold the branch, before the first edit.** The bead's `blocks` edge onto the
 conversation holds the PR. While the conversation is open, the landing order
@@ -114,6 +114,37 @@ BRANCH=$(gc bd show "$PR" --json | jq -er '.[0].metadata.branch') \
 Never enter the tree with this shell, because you remove it when you let go.
 Edit its files by their full paths under the tree, and run git there as
 `git -C "$TREE"`.
+
+**Run the checks in the tree.** The PR's bead records no tree, so the call in
+Run the rig's checks, which enters the tree a bead records, cannot run them
+here. Run each check the rig declares for a polecat's self-review through
+`gctk rig`, from a subshell that enters the tree: the affected tests when the
+rig declares them, else the whole suite. Each result is recorded at the commit
+it ran at, as a polecat's is. Commit first, because a check refuses a tree with
+changes its commit does not hold:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+VARS=$(gc formula show mol-polecat-work --rig "$GC_RIG" --json) \
+  && printf '%s' "$VARS" | jq -e '.ok == true and (.vars | type == "array")' >/dev/null \
+  || { echo "the rig's declared checks did not read, so none ran" >&2; exit 1; }
+cmd() { printf '%s' "$VARS" | jq -r --arg n "$1" '[.vars[] | select(.name == $n)][0] | if . == null then "" elif .rig_default != null then .rig_default else (.default // "") end'; }
+( cd "$TREE" || exit 1
+  RC=0
+  for c in setup typecheck lint build; do
+    v=$(cmd "${c}_command") && { [ -z "$v" ] || "$GCTK" rig "$c" --command "$v"; } || RC=1
+  done
+  SCOPE=affected; T=$(cmd affected_tests_command)
+  [ -n "$T" ] || { SCOPE=full; T=$(cmd test_command); }
+  [ -z "$T" ] || "$GCTK" rig test --scope "$SCOPE" --command "$T" || RC=1
+  exit "$RC" )
+```
+
+It exits 0 when every check passes, and otherwise each check's line says what
+failed or why it could not say. Fix a failure with the operator as Run the
+rig's checks says, commit, and run the checks again.
 
 **Write the summary.** The PR's summary is recorded on its bead, and the
 refinery composes the PR's body from it when it validates your head. Read the
@@ -154,11 +185,14 @@ refused, such as work no commit holds. Exit 2 is a read or a push that did not
 answer, and it is safe to run again.
 
 **Let go.** Stop the copy of the UI, then remove the tree once its commits are
-pushed. Git refuses a tree that holds uncommitted edits:
+pushed. The removal runs only while the branch, as this clone last read it,
+holds the tree's HEAD, which your push leaves it holding, and git refuses a
+tree that holds uncommitted edits:
 
 ```bash
 ( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )
-git -C "${GC_DIR:-$PWD}" worktree remove "$TREE"
+git -C "$TREE" merge-base --is-ancestor HEAD "origin/$BRANCH" \
+  && git -C "${GC_DIR:-$PWD}" worktree remove "$TREE"
 ```
 
 The conversation still holds the PR. At the sign-off, answer the PR with
@@ -391,7 +425,8 @@ the commands the rig declares for it. They run through `gctk rig` in the tree,
 which records each result at the commit it ran at, so the pass is recorded at
 the head you hand off, and the correctness review reads it there as it reads a
 polecat's. Commit first, because a check refuses a tree with changes its commit
-does not hold:
+does not hold. An open PR's checks run in its tree instead, as An open PR's
+branch says, because the PR's bead records no tree for this call to enter:
 
 ```bash
 VARS=$(gc formula show mol-polecat-work --rig "$GC_RIG" --json) \
@@ -536,9 +571,11 @@ subject on, close it, or leave it waiting on other work, as the operator ruled,
 through the sign-off's cases (the converse-settle step).
 
 An edit of an open PR's branch files no bead, so its drop closes nothing. Stop
-the copy of the UI and remove the tree as letting go does, with `--force` once
-the operator rules that its unpushed commits go. What you pushed stays on the
-branch, and a ruling that it must go is a change of its own.
+the copy of the UI as letting go does. Once the operator rules that what the
+tree holds beyond the branch goes, its unpushed commits and its edits, remove
+it with `git -C "${GC_DIR:-$PWD}" worktree remove --force "$TREE"`. What you
+pushed stays on the branch, and a ruling that it must go is a change of its
+own.
 
 ## A change in flight at a restart, a hand-back or a dismiss
 
@@ -548,7 +585,8 @@ branch, and a ruling that it must go is a change of its own.
 - **A restart** runs your home's sync, which leaves the tree alone, and the
   entry reads `interrupted` with the hold standing, which re-opens the sitting
   at its hold (`converse-continue`). The conversation's record names
-  the change: run Work's setup again, and it re-enters the tree.
+  the change: run Work's setup again, and it re-enters the tree. An open PR's
+  tree is found again by the tree block of An open PR's branch.
 - **A sitting that must end with the change in flight**, for low context or
   because it was cut short, commits what the tree holds, records on the
   conversation where the change stands, and hands the conversation back
@@ -591,7 +629,8 @@ closer's arm. The converse-settle step carries the rest of the call:
 An epic subject names no wait on its member, because bd refuses that edge, and
 a subject that took no brief at filing takes no `--close-brief`. A resumed
 change is the subject itself, so its sign-off names no wait on it and passes no
-brief.
+brief. Nor does an edit of an open PR's branch, whose sign-off answers the PR
+with `--no-rework` (An open PR's branch, above).
 
 ## After the hand-off
 
