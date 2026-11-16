@@ -609,9 +609,9 @@ no warrant.
   by its shape: `isAsk`, `IsAsk`, `AsksOn` and `AsksIn` in the same file,
   `writers` in `services/gctk/pr/admit.go`, which leaves an ask out of a
   branch's other writers for the landing order's pour and for a sitting's push
-  (`Held` in `services/gctk/pr/sitting.go`), and `refinery_ask` in
-  `assets/scripts/refinery-lib.sh`, which applies the same rule to the beads
-  the refinery reads. Its close: `Record` in
+  (`held` in `services/gctk/pr/sitting.go`, the proof `Held` and `Push` run),
+  and `refinery_ask` in `assets/scripts/refinery-lib.sh`, which applies the
+  same rule to the beads the refinery reads. Its close: `Record` in
   `services/gctk/review/result.go`, which the loop's check runs through the
   `passed` verb's `--record`.
 - **Stands in for.** A request held on a pull request's bead for the review run

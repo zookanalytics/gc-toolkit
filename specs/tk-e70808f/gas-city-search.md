@@ -1,6 +1,6 @@
 ---
 name: Gas City search — a sitting's push onto an open PR's branch
-description: The search behind `gctk pr push`, the verb a converse sitting runs to push its commits onto the branch of a PR on the pending record, as AGENTS.md requires. It names each Gas City, Gas Town and bd primitive searched, at gastownhall/gascity e60ed864f346 and gastownhall/gascity-packs 0f07496d2fa4, what the verb composes, and why none covers the rest. Read it to judge the verb's divergence from Gas City, or before changing how a sitting writes an open PR's branch.
+description: The search behind `gctk pr push`, the verb a converse sitting runs to push its commits onto the branch of a PR on the pending record, as AGENTS.md requires. It names each Gas City, Gas Town, bd and git primitive searched, at gastownhall/gascity e60ed864f346 and gastownhall/gascity-packs 0f07496d2fa4, what the verb composes, and why none covers the rest. Read it to judge the verb's divergence from Gas City, or before changing how a sitting writes an open PR's branch.
 ---
 
 # Gas City search for tk-e70808f
@@ -13,9 +13,9 @@ Gas City is cited by page or by symbol, and Gas Town by path and line.
 The surface the change adds is one verb of gctk's pr noun,
 `gctk pr push <bead> --held-by <conversation> [--check]`. It proves that the
 sitting's conversation holds the branch of the PR the bead owns and that
-nothing else writes it, returns the PR to draft, and pushes the checkout's
-HEAD onto the branch under git's lease. `--check` proves the holding and
-changes nothing. The change adds no metadata key, bead kind, lifecycle state,
+nothing else writes it, checks that the checkout's origin is the PR's
+repository, returns the PR to draft, and pushes the checkout's HEAD onto the
+branch under git's lease. `--check` proves the holding and changes nothing. The change adds no metadata key, bead kind, lifecycle state,
 order or formula step. The `converse-edit` skill's text, which calls the verb,
 is not surface.
 
@@ -73,7 +73,33 @@ proves the holding. The verb composes what exists:
   read after a fetch of the branch, so the lease is on the tip origin holds
   and a HEAD that does not descend from it sends nothing;
 - the session's names are the four the gascity repository's guard reads, the
-  names a claim stamps as its assignee.
+  names a claim stamps as its assignee;
+- the proof and the push hold the pr domain's record lock, which the landing
+  order holds from its read of a record to its pour of a review run, so the
+  order pours no run between the proof and the push.
+
+## Where the push goes
+
+**Searched.**
+
+- **Gas City.** No gc command reports where a checkout fetches from or pushes
+  to. The JSONL archive's doctor check reads every URL a push to origin goes to
+  with `git remote get-url --push --all origin`, and judges from those rather
+  than the fetch URL because the export pushes (`archivePushURLs` in
+  `cmd/gc/jsonl_archive_doctor_check.go`, line 168). `gc registry publish` turns
+  a remote's URL into its GitHub repository (`normalizeGitHubRemoteURL`, called
+  at `cmd/gc/cmd_registry.go` line 491). Both are unexported helpers of the gc
+  binary, not a primitive a pack can call.
+- **git.** `git remote get-url` lists a remote's URLs with every `insteadOf`
+  and `pushInsteadOf` rewrite applied: `--push` lists the ones a push goes to
+  and `--all` lists every one (git-remote(1), `get-url`).
+
+**Composed.** The verb reads the checkout's origin as the doctor check reads its
+push URLs, `git remote get-url --all origin` with and without `--push`. It reads
+the fetch URLs too, because the push fetches the branch's tip from origin and
+takes its lease on that tip. A URL that names a repository other than the PR's,
+read by the pr domain's reading of an origin URL, the one `gctk pr draft` checks
+the rig's clone by, is refused before the PR returns to draft.
 
 ## The sitting's checkout of the PR's branch
 

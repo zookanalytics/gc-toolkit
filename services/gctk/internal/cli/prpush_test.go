@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -99,6 +100,68 @@ func TestPRPushExitsByWhatStoppedIt(t *testing.T) {
 	}
 }
 
+// A checkout whose origin is not the PR's repository is refused before
+// GitHub is asked anything or anything is pushed, though the rig's clone names
+// the PR's repository: the push is bound to where the checkout itself fetches
+// and pushes.
+func TestPRPushRefusesACheckoutOfAnotherRepository(t *testing.T) {
+	hermeticGit(t)
+	asSession(t, "rig/gc-toolkit.st-conv")
+	const b = "polecat/st-1"
+	root := t.TempDir()
+	fork := filepath.Join(root, "fork.git")
+	treeGit(t, root, "init", "-q", "--bare", fork)
+	seed := filepath.Join(root, "seed")
+	treeGit(t, root, "clone", "-q", fork, seed)
+	treeGit(t, seed, "checkout", "-q", "-b", b)
+	before := treeCommit(t, seed, "a.txt", "one\n")
+	treeGit(t, seed, "push", "-q", "origin", b)
+	tr := filepath.Join(root, "tree")
+	treeGit(t, root, "clone", "-q", fork, tr)
+	treeGit(t, tr, "checkout", "-q", "--detach", "origin/"+b)
+	treeCommit(t, tr, "a.txt", "two\n")
+	url := treeGit(t, tr, "remote", "get-url", "origin")
+
+	bin := t.TempDir()
+	calls := filepath.Join(t.TempDir(), "gh-calls")
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nprintf 'gh %s\\n' \"$*\" >> \"$GH_CALLS\"\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GH_CALLS", calls)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Chdir(tr)
+	_, errs, code := landingCmd(t, pushStore, "https://github.com/acme/widgets.git",
+		"pr", "push", "st-1", "--held-by", "st-conv", "--db", t.TempDir())
+	want := "the checkout's origin is not the PR's repository, github.com/acme/widgets: it fetches from and pushes to " + url + ", which names no repository on a host"
+	if code != 3 || !strings.Contains(errs, want) {
+		t.Fatalf("exit %d, stderr %q, want the refusal exit 3 saying %q", code, errs, want)
+	}
+	if raw, err := os.ReadFile(calls); err == nil {
+		t.Fatalf("GitHub was asked before the refusal:\n%s", raw)
+	}
+	if got := treeGit(t, fork, "rev-parse", b); got != before {
+		t.Fatalf("the fork's %s is %s, want %s, which nothing replaced", b, got, before)
+	}
+}
+
+// hermeticGit runs git with no global or system config, so no rewrite a host
+// configures moves a URL, and points GCTK_SCRIPTS_DIR at the pack's own
+// scripts.
+func hermeticGit(t *testing.T) {
+	t.Helper()
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(cfg, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	scripts, err := filepath.Abs("../../../../assets/scripts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GCTK_SCRIPTS_DIR", scripts)
+}
+
 // treeGit runs git in dir with no global or system config and a fixed identity,
 // and returns its trimmed output.
 func treeGit(t *testing.T, dir string, args ...string) string {
@@ -124,21 +187,12 @@ func treeCommit(t *testing.T, dir, file, text string) string {
 	return treeGit(t, dir, "rev-parse", "HEAD")
 }
 
-// The checkout pushes its HEAD through the pack's branch-push.sh, reads work no
+// The checkout reads where its origin fetches from and pushes to as git
+// resolves it, pushes its HEAD through the pack's branch-push.sh, reads work no
 // commit holds, and takes nothing onto a branch that holds a commit it does
 // not, until it holds that commit too.
 func TestTheSittingsCheckoutPushesThroughThePacksPusher(t *testing.T) {
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(cfg, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	scripts, err := filepath.Abs("../../../../assets/scripts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GCTK_SCRIPTS_DIR", scripts)
+	hermeticGit(t)
 	const b = "polecat/st-1"
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin.git")
@@ -156,6 +210,15 @@ func TestTheSittingsCheckoutPushesThroughThePacksPusher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	url := treeGit(t, tr, "remote", "get-url", "origin")
+	if fetch, push, err := s.Origin(); err != nil || !slices.Equal(fetch, []string{url}) || !slices.Equal(push, []string{url}) {
+		t.Fatalf("the checkout's origin read %q, %q, %v, want %s for both", fetch, push, err, url)
+	}
+	treeGit(t, tr, "config", "url.git@github.com:fork/.pushInsteadOf", url)
+	if fetch, push, err := s.Origin(); err != nil || !slices.Equal(fetch, []string{url}) || !slices.Equal(push, []string{"git@github.com:fork/"}) {
+		t.Fatalf("with a pushInsteadOf the checkout's origin read %q, %q, %v, want the push rewritten", fetch, push, err)
+	}
+	treeGit(t, tr, "config", "--remove-section", "url.git@github.com:fork/")
 	if left, err := s.Uncommitted(); err != nil || left != "" {
 		t.Fatalf("a clean checkout lists %q, %v", left, err)
 	}

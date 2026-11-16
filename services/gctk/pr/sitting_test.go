@@ -5,12 +5,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
@@ -28,36 +30,76 @@ const (
 // sitter is the names the sitting's session claims under.
 var sitter = []string{"tk-conv-session", alias}
 
-// tree is the sitting's checkout as a test sets it: what it holds that no
-// commit holds, the errors its reads and its push return, and each push it
-// was asked for, with whether the PR was a draft at that moment.
+// tree is the sitting's checkout as a test sets it: the URLs its origin
+// fetches from and pushes to, what it holds that no commit holds, the errors
+// its reads and its push return, and each push it was asked for, with whether
+// the PR was a draft at that moment. Each call it takes while the store's
+// record lock, in the .beads directory lock, is free is listed in free.
 type tree struct {
-	pr       *ghfake.PR
-	left     string
-	leftErr  error
-	pushErr  error
-	pushed   []string
-	asDrafts []bool
+	pr          *ghfake.PR
+	lock        string
+	fetch, push []string
+	originErr   error
+	left        string
+	leftErr     error
+	pushErr     error
+	pushed      []string
+	asDrafts    []bool
+	free        []string
 }
 
-func (t *tree) Uncommitted() (string, error) { return t.left, t.leftErr }
+func (t *tree) Origin() ([]string, []string, error) {
+	t.called("Origin")
+	return t.fetch, t.push, t.originErr
+}
+
+func (t *tree) Uncommitted() (string, error) {
+	t.called("Uncommitted")
+	return t.left, t.leftErr
+}
 
 func (t *tree) Push(branch string) error {
+	t.called("Push")
 	t.pushed = append(t.pushed, branch)
 	t.asDrafts = append(t.asDrafts, t.pr.Facts.IsDraft)
 	return t.pushErr
 }
 
-// newSitting is the world with the sitting's conversation holding the bead.
-func newSitting(t *testing.T) (*land, *tree) {
+func (t *tree) called(call string) {
+	if lockFree(t.lock) {
+		t.free = append(t.free, call)
+	}
+}
+
+// lockFree reports whether nothing holds the record lock of the store whose
+// .beads directory is dir.
+func lockFree(dir string) bool {
+	release, err := record.Lock(dir, 0)
+	if err != nil {
+		return false
+	}
+	release()
+	return true
+}
+
+// hold makes conversation conv in progress under the sitting, and gives the
+// bead its blocks edge onto it.
+func hold(t *testing.T, d *land) {
 	t.Helper()
-	d := newCycle(t)
 	d.store.Put(fake.Bead{ID: conv, Title: "Converse about the PR", Status: "in_progress", IssueType: "task", Assignee: alias})
 	d.edit(t, func(b *fake.Bead) {
 		b.Edges = append(b.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: conv, Status: "in_progress"})
 	})
 	d.store.List(bead, conv)
-	return d, &tree{pr: d.pr}
+}
+
+// newSitting is the world with the sitting's conversation holding the bead,
+// and its checkout a clone of the PR's repository.
+func newSitting(t *testing.T) (*land, *tree) {
+	t.Helper()
+	d := newCycle(t)
+	hold(t, d)
+	return d, &tree{pr: d.pr, lock: d.l.Dir, fetch: []string{origin}, push: []string{origin}}
 }
 
 // refusedFor reports whether err is a refusal whose reason says why.
@@ -92,7 +134,7 @@ func TestASittingThatHoldsTheBranchReturnsThePRToDraftBeforeItPushes(t *testing.
 func TestASittingProvesItHoldsTheBranchWithoutChangingIt(t *testing.T) {
 	d, tr := newSitting(t)
 	got, err := d.l.Held(bead, conv, sitter)
-	if err != nil || got != (pr.Holding{Bead: bead, Conversation: conv, Branch: branch}) {
+	if err != nil || got != (pr.Holding{Bead: bead, Conversation: conv, Branch: branch, PR: prURL}) {
 		t.Fatalf("the proof read %+v, %v", got, err)
 	}
 	if len(d.github.Asks()) != 0 || len(tr.pushed) != 0 || d.pr.Facts.IsDraft {
@@ -116,6 +158,12 @@ func TestASittingPushesOnlyABranchItHolds(t *testing.T) {
 		"a closed bead": {change: func(t *testing.T, d *land) {
 			d.edit(t, func(b *fake.Bead) { b.Status = "closed" })
 		}, why: "it is closed"},
+		"a record that names no PR": {change: func(t *testing.T, d *land) {
+			d.edit(t, func(b *fake.Bead) { delete(b.Metadata, "pr_url") })
+		}, why: "its record names no PR"},
+		"a record whose URL is no PR's": {change: func(t *testing.T, d *land) {
+			d.edit(t, func(b *fake.Bead) { b.Metadata["pr_url"] = "https://github.com/acme/widgets/issues/7" })
+		}, why: `"https://github.com/acme/widgets/issues/7" is not a pull request's URL`},
 		"no edge onto the conversation": {change: func(t *testing.T, d *land) {
 			d.edit(t, func(b *fake.Bead) { b.Edges = nil })
 		}, why: "no blocks edge onto conversation " + conv},
@@ -190,6 +238,133 @@ func TestAnAskOrAClosedChildLeavesTheSittingItsBranch(t *testing.T) {
 		Metadata: map[string]string{"branch": branch, "task_kind": "rework"}})
 	if _, err := d.l.Push(bead, conv, sitter, tr); err != nil || len(tr.pushed) != 1 {
 		t.Fatalf("an ask and a closed child kept the sitting off the branch: %v, pushes %v", err, tr.pushed)
+	}
+}
+
+// The push goes only to the PR's repository: a checkout whose origin fetches
+// from or pushes to any other, or names none, is refused before the PR returns
+// to draft. The refusal names each URL by the repository it names, so it
+// repeats no credentials. The PR's repository in any of origin's forms, in any
+// case, is the PR's.
+func TestTheCheckoutMustFetchFromAndPushToThePRsRepository(t *testing.T) {
+	const fork = "git@github.com:fork/widgets.git"
+	for name, c := range map[string]struct {
+		fetch, push []string
+		why         string
+	}{
+		"a fork it fetches from":    {fetch: []string{"https://github.com/fork/widgets.git"}, push: []string{origin}, why: "it fetches from github.com/fork/widgets"},
+		"a fork it pushes to":       {fetch: []string{origin}, push: []string{fork}, why: "it pushes to github.com/fork/widgets"},
+		"a fork's clone":            {fetch: []string{fork}, push: []string{fork}, why: "it fetches from and pushes to github.com/fork/widgets"},
+		"a second push URL":         {fetch: []string{origin}, push: []string{origin, fork}, why: "it pushes to github.com/fork/widgets"},
+		"another host":              {fetch: []string{origin}, push: []string{"git@gitlab.com:acme/widgets.git"}, why: "it pushes to gitlab.com/acme/widgets"},
+		"a path":                    {fetch: []string{"/srv/git/widgets.git"}, push: []string{"/srv/git/widgets.git"}, why: "it fetches from and pushes to /srv/git/widgets.git, which names no repository on a host"},
+		"no push URL":               {fetch: []string{origin}, why: "it pushes to no URL"},
+		"no URL":                    {why: "it fetches from no URL; it pushes to no URL"},
+		"a credentialed fork's URL": {fetch: []string{origin}, push: []string{"https://x-access-token:s3cret@github.com/fork/widgets.git"}, why: "it pushes to github.com/fork/widgets"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d, tr := newSitting(t)
+			tr.fetch, tr.push = c.fetch, c.push
+			_, err := d.l.Push(bead, conv, sitter, tr)
+			if !refusedFor(err, "the checkout's origin is not the PR's repository, github.com/acme/widgets: ") || !refusedFor(err, c.why) {
+				t.Fatalf("the push read %v, want a refusal saying %q", err, c.why)
+			}
+			if strings.Contains(err.Error(), "s3cret") {
+				t.Fatalf("the refusal repeats the URL's credentials: %v", err)
+			}
+			if len(d.github.Asks()) != 0 || len(tr.pushed) != 0 || d.pr.Facts.IsDraft {
+				t.Fatalf("a checkout of another repository changed something: asks %v, pushes %v, draft %v", asks(d.github), tr.pushed, d.pr.Facts.IsDraft)
+			}
+		})
+	}
+
+	d, tr := newSitting(t)
+	tr.fetch = []string{"https://github.com/acme/widgets"}
+	tr.push = []string{"ssh://git@github.com/Acme/Widgets.git", "https://x-access-token:s3cret@github.com/acme/widgets.git"}
+	if _, err := d.l.Push(bead, conv, sitter, tr); err != nil || len(tr.pushed) != 1 {
+		t.Fatalf("the PR's repository in other forms read %v, pushes %v", err, tr.pushed)
+	}
+
+	e, et := newSitting(t)
+	et.originErr = errors.New("git remote: error: No such remote 'origin'")
+	_, err := e.l.Push(bead, conv, sitter, et)
+	var refused *pr.PushRefusal
+	if err == nil || errors.As(err, &refused) || len(e.github.Asks()) != 0 || len(et.pushed) != 0 {
+		t.Fatalf("an origin that did not read read as %v, asks %v, pushes %v", err, asks(e.github), et.pushed)
+	}
+}
+
+// The proof reads under the record lock, so while another writer holds it the
+// proof and the push wait, and one that waited as long as it would changes
+// nothing and reads no checkout.
+func TestTheProofWaitsForTheRecordLock(t *testing.T) {
+	d, tr := newSitting(t)
+	release, err := record.Lock(d.l.Dir, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	d.l.Wait = 50 * time.Millisecond
+	if _, err := d.l.Held(bead, conv, sitter); !errors.Is(err, record.ErrLockWait) {
+		t.Fatalf("the proof under a held lock read %v, want the lock's wait error", err)
+	}
+	if _, err := d.l.Push(bead, conv, sitter, tr); !errors.Is(err, record.ErrLockWait) {
+		t.Fatalf("the push under a held lock read %v, want the lock's wait error", err)
+	}
+	if len(d.github.Asks()) != 0 || len(tr.pushed) != 0 || len(tr.free) != 0 {
+		t.Fatalf("a push that did not get the lock went on: asks %v, pushes %v, calls %v", asks(d.github), tr.pushed, tr.free)
+	}
+}
+
+// A run of the landing order that read the bead before the conversation held
+// it pours its review run under the record lock, so the proof made while that
+// run holds the lock waits for it, sees the run attached, and refuses.
+func TestARunPouredFromAReadBeforeTheHoldIsSeenByTheProof(t *testing.T) {
+	d := newAdmit(t)
+	there, goOn := pause(d.github)
+	ran := make(chan error, 1)
+	go func() { ran <- d.l.Reconcile(pr.Options{Count: 10}, func(pr.RunOutcome) {}) }()
+	<-there
+	hold(t, d.land)
+	proved := make(chan error, 1)
+	go func() {
+		_, err := d.l.Held(bead, conv, sitter)
+		proved <- err
+	}()
+	waits(t, proved, "the proof")
+	close(goOn)
+	if err := <-ran; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-proved; !refusedFor(err, "review run tk-run1 is attached to it") {
+		t.Fatalf("the proof after the run poured read %v, want a refusal naming the run", err)
+	}
+	if n := d.runs.count(); n != 1 {
+		t.Fatalf("the order poured %d review runs, want the one", n)
+	}
+}
+
+// The push holds the record lock from its proof to its end: the checkout's
+// reads, the draft's read of the PR and the push all run under it, and the
+// lock is free once the push returns. So no run of the landing order, whose
+// ready transition reads no conversation's hold, marks the PR ready between
+// its return to draft and the push.
+func TestThePushHoldsTheRecordLockToItsEnd(t *testing.T) {
+	d, tr := newSitting(t)
+	var free []string
+	d.github.OnRead = func(method string, _ *ghfake.PR) {
+		if lockFree(d.l.Dir) {
+			free = append(free, method)
+		}
+	}
+	if _, err := d.l.Push(bead, conv, sitter, tr); err != nil {
+		t.Fatal(err)
+	}
+	if len(free) != 0 || len(tr.free) != 0 || len(tr.pushed) != 1 {
+		t.Fatalf("calls made with the lock free: GitHub %v, checkout %v; pushes %v", free, tr.free, tr.pushed)
+	}
+	if !lockFree(d.l.Dir) {
+		t.Fatal("the push kept the record lock after it returned")
 	}
 }
 

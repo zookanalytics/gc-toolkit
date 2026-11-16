@@ -1156,17 +1156,22 @@ ruling, and the PR's bead carries the change, so the sitting files no bead. The
 bead's `blocks` edge onto the conversation, which every conversation on an open
 PR carries, keeps the landing order's review runs and the refinery off the
 branch while the conversation is open. The sitting proves that nothing else
-writes the branch (`gctk pr push --check`), edits a checkout of the branch's tip
-in a tree under its home that has no local branch, and pushes through
-`gctk pr push`, which returns the PR to draft and pushes under the lease, so a
-push another writer made is never overwritten. It rewrites the PR's summary to
-cover the edit and answers the PR with `--no-rework` at the sign-off. Once the
-conversation closes, the refinery validates the head the sitting left and the
-landing order pours one review run there, so the edit costs one triage, and the
-run repairs what it rules must-fix with no send-back to the sitting. On the old
-path the branch's writer is the PR's rework child, on which the review
-machinery keys, so a ruling that changes the branch files a rework through the
-sign-off.
+writes the branch (`gctk pr push --check`). The proof reads under the record
+lock, which the landing order holds from its read of a record to its pour of a
+run, so the proof sees any run the order poured from a read made before the
+edge. The sitting edits a checkout of the branch's tip in a tree under its home
+that has no local branch, and pushes through `gctk pr push`. The push proves the
+holding again and holds the lock until it ends, so the order neither pours a run
+nor marks the PR ready while it works. It refuses a checkout whose origin
+reaches any repository but the PR's, returns the PR to draft and pushes under
+the lease, so a push another writer made is never overwritten. The sitting
+rewrites the PR's summary to cover the edit and answers the PR with
+`--no-rework` at the sign-off. Once the conversation closes, the refinery
+validates the head the sitting left and the landing order pours one review run
+there, so the edit costs one triage, and the run repairs what it rules must-fix
+with no send-back to the sitting. On the old path the branch's writer is the
+PR's rework child, on which the review machinery keys, so a ruling that changes
+the branch files a rework through the sign-off.
 
 ## Accept
 

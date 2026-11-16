@@ -31,11 +31,16 @@ open on the pending record and names its branch, the conversation --held-by
 names is in progress under this session, the bead waits on that conversation
 through a blocks edge, no review run is attached to the bead, and no open bead
 other than an ask names its branch. While that edge holds the bead, the landing
-order pours no review run on it and the refinery does not take it. The
-checkout must hold no work its HEAD's commit does not. Then the PR returns to
-draft, and the checkout's HEAD goes onto the branch under git's lease on the
-tip read there, never forced, so a push another writer made is never
-overwritten. --check proves the holding and changes nothing.
+order pours no review run on it and the refinery does not take it. The proof
+reads under the store's record lock, which the landing order holds from its
+read of a record to its pour of a review run, and the push holds that lock to
+its end, so between the proof and the push the order neither pours a run nor
+marks the PR ready. Every URL the checkout's origin fetches from or pushes to
+must name the PR's repository, and the checkout must hold no work its HEAD's
+commit does not. Then the PR returns to draft, and the checkout's HEAD goes
+onto the branch under git's lease on the tip read there, never forced, so a
+push another writer made is never overwritten. --check proves the holding and
+changes nothing.
 
 Once the conversation closes, the refinery validates the head the sitting left
 and the landing order pours one review run there.
@@ -44,12 +49,13 @@ exit: 0 pushed, or the branch held the checkout's HEAD already; with --check,
         the sitting holds the branch
       1 usage, a PR outside the rig's own repository, or no branch-push.sh in
         the directory GCTK_SCRIPTS_DIR names
-      2 the store, GitHub or the push did not answer or failed, so the PR may
-        be a draft and the push may not have landed; a retry is safe, since a
-        push under the lease never overwrites another
-      3 refused: the sitting does not hold the branch, the checkout holds work
-        no commit holds, or the PR is not open from the bead's branch; nothing
-        was changed
+      2 the store, GitHub, git or the push did not answer or failed, or the
+        record lock stayed held as long as the verb waits, so the PR may be a
+        draft and the push may not have landed; a retry is safe, since a push
+        under the lease never overwrites another
+      3 refused: the sitting does not hold the branch, the checkout's origin is
+        not the PR's repository, the checkout holds work no commit holds, or
+        the PR is not open from the bead's branch; nothing was changed
       4 the branch holds a commit the checkout's HEAD does not, such as one
         another writer pushed, so nothing was pushed and the PR may be a
         draft: bring that commit into the checkout and push again`
@@ -146,8 +152,9 @@ func sessionNames() []string {
 	return out
 }
 
-// sittingTree is the checkout the verb runs in: its uncommitted work through
-// the git adapter, and its push through the pack's branch-push.sh.
+// sittingTree is the checkout the verb runs in: its origin's URLs and its
+// uncommitted work through the git adapter, and its push through the pack's
+// branch-push.sh.
 type sittingTree struct {
 	dir string
 	rt  gascity.Runtime
@@ -165,6 +172,8 @@ func newSittingTree(dir string) (sittingTree, error) {
 	}
 	return sittingTree{dir: dir, rt: gascity.New().In(dir)}, nil
 }
+
+func (s sittingTree) Origin() (fetch, push []string, err error) { return git.OriginURLs(s.dir) }
 
 func (s sittingTree) Uncommitted() (string, error) {
 	c, err := git.Open(s.dir)
