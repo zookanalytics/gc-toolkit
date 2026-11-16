@@ -41,7 +41,7 @@ beads. Approving this design splits its work into reading GitHub and acting:
 
 A pass in which nothing moved costs 1 GitHub point per repository and about a
 second and a half. At today's 28 open PRs in five repositories, the city's
-reading costs about 260 of the hour's 5,000 points, and 1 or 2 more for each PR
+reading costs about 230 of the hour's 5,000 points, and 1 or 2 more for each PR
 that moved.
 
 **Where this departs from the operator's words:**
@@ -310,8 +310,14 @@ No act starts more than 45 seconds into a run, and each act stops at 30
 seconds, with whatever GitHub call or fetch it is making. So a run whose first
 act is slow still starts the next one. Neither has a limit of its own today:
 gctk's GitHub adapter (services/gctk/internal/gh/gh.go) and the landing's fetch
-(`FetchBranch` in services/gctk/internal/git/git.go) wait for the call to end. A
-run takes the records that have an act in an order it shuffles. So a record
+(`FetchBranch` in services/gctk/internal/git/git.go) wait for the call to end.
+A fetch is stopped as `gitIn` (services/gctk/internal/cli/lifecycle.go) stops
+one today: a SIGTERM to git's process group, and a kill only if git still runs
+5 seconds later. Git removes the lock files a fetch holds in the rig checkout on
+SIGTERM and cannot on SIGKILL, and a lock left behind fails every later fetch of
+that branch there until a person deletes it.
+
+A run takes the records that have an act in an order it shuffles. So a record
 whose act is slow or keeps failing comes first in about one run in n, where n
 records have an act, and its act holds no other record back. A stopped or
 failed act leaves its difference, which a later run acts on, and nothing
@@ -323,7 +329,7 @@ bound on records per run (`--count`).
 | Order | Trigger | What a run does | GitHub points a pass |
 |---|---|---|---|
 | `pr-poll`, the cheap question | every 2 minutes | lists the owned PRs, asks GitHub about them, and runs the one-PR update for each that moved, starting none more than 90 seconds in | 1 per 50 owned PRs in the rig's repository, none when it owns none |
-| `pr-compare`, the net | every 10 minutes | reads every owned PR's comparable facts, runs the one-PR update for each that differs, and searches for labels on PRs no bead owns | 2 per 10 owned PRs, and 1 for each page of the search, which is 1 here |
+| `pr-compare`, the net | every 10 minutes | reads every owned PR's comparable facts, runs the one-PR update for each that differs, and searches for labels on PRs no bead owns | 1 for a request of up to 9 owned PRs and 2 for one of 10, and 1 for each page of the search, which is 1 here |
 | `pr-reconcile`, the landing order | every minute | acts from the beads | none to decide; the merge's own read when it merges |
 
 Each order is rig-scoped, as the landing order is, and reads its rig's
@@ -337,9 +343,13 @@ repository. At today's 28 open PRs in five of the six rigs' repositories:
 
 | Cadence of the net | Points an hour for the city | Run records an hour per rig |
 |---|---|---|
-| 5 minutes | about 216 | 12 |
-| 10 minutes | about 108 | 6 |
-| 30 minutes | about 36 | 2 |
+| 5 minutes | about 156 | 12 |
+| 10 minutes | about 78 | 6 |
+| 30 minutes | about 26 | 2 |
+
+A pass of the net costs about 13 points: 1 to read each of four repositories,
+3 to read the busiest, whose 15 PRs take a request of 10 and one of 5, and 6
+for the searches, one in each repository.
 
 The landing order every minute adds 60 run records an hour per rig, and every
 2 minutes 30. The one-PR updates add 1 or 2 points for each PR that moved. Gas
@@ -431,11 +441,10 @@ saved labels, which are the whole set ([section 1](#1-the-cheap-signs)), as the
 labels GitHub shows (`--current-labels`), so the writer edits only what differs
 from them. It reads the PR's labels itself only when the saved labels are
 empty, and a write that adds a label first lists the repository's labels to
-create any it lacks (`ensure_labels`). A write repeated
-before the next refresh saves the labels it made asks GitHub to add a label
-already there or take off one already gone, which changes nothing. A write that
-does not land leaves the difference on the bead, and the next run writes it
-again. No key records it.
+create any it lacks (`ensure_labels`). A write repeated before the next refresh
+saves the labels it made asks GitHub to add a label already there or take off
+one already gone, which changes nothing. A write that does not land leaves the
+difference on the bead, and the next run writes it again. No key records it.
 
 | The PR | The labels the store derives |
 |---|---|
@@ -531,7 +540,7 @@ changed, so the effort's branch is first brought current with main at or past
 | # | Unit | What it builds | Waits on |
 |---|---|---|---|
 | 1 | feat(gctk): read a PR only when GitHub shows it moved | The cheap question in gctk's GitHub adapter. `gctk pr refresh`, the one-PR update, with the saved read in four parts, each with its read instant and signs, and Gas Town's `pr_state` and `pr_last_checked_at` moved to it. `gctk pr poll` and its order, `orders/pr-poll.toml`, every 2 minutes. The landing order stops writing the saved read and those two keys, and keeps its own read until unit 2. | the branch brought current with main |
-| 2 | feat(gctk): have the landing order act from the beads | The landing order decides every record from the saved read and the store, reads GitHub only for the merge's own read, runs every minute with no `--count`, takes its acts in a shuffled order, starts none past 45 seconds and stops each at 30, and writes no `pr_reconcile_error` | unit 1 |
+| 2 | feat(gctk): have the landing order act from the beads | The landing order decides every record from the saved read and the store, reads GitHub only for the merge's own read, runs every minute with no `--count`, takes its acts in a shuffled order, starts none past 45 seconds and stops each at 30, a fetch as `gitIn` stops one, and writes no `pr_reconcile_error` | unit 1 |
 | 3 | feat(gctk): compare every owned PR in full every 10 minutes | `gctk pr compare` and its order, `orders/pr-compare.toml`: the full read in requests of at most 10 PRs, with each post's time, paged, and the one-PR update for each PR that differs | unit 1 |
 | 4 | feat(gctk): keep each PR's status labels equal to what the store derives | The landing order's label writes by comparison, the net's search, paged until it has found 20 PRs no bead owns, and its clears of them, and the labels' writer's header naming its callers | units 2 and 3 |
 | 5 | feat(board): show when GitHub was last asked | The age line on the board, from `pr-poll`'s run history | unit 1 |
@@ -675,7 +684,8 @@ except the tests on this PR. Gas City's facts are in
   at 10 and 2.82 to 5.08 at 15, 1 point each. In dry runs at 10 PRs here, the
   conversation comments' and reviews' times left the request at 1 point, and
   the inline comments made it 10 under `reviewThreads(first: 100)` and 2 under
-  `reviewThreads(first: 10)`.
+  `reviewThreads(first: 10)`. Dry runs of the whole read here cost 1 point at 1
+  to 9 PRs, 2 at 10 and at 15, and 3 at 20.
 - **The one-PR update's reads.** The PR part with the required checks: 0.90 to
   1.01 seconds on #1533 and 0.95 to 1.81 on the busiest repository's most
   discussed open PR, 1 point each. The conversation part: 0.76 to 0.89 and 0.98
@@ -688,7 +698,10 @@ except the tests on this PR. Gas City's facts are in
   `gh` with no time limit (`exec.Command` in services/gctk/internal/gh/gh.go),
   and so does the landing's fetch (`FetchBranch` and `Output` in
   services/gctk/internal/git/git.go). A fetch of this repository's main into its
-  checkout took 2.0 and 2.2 seconds.
+  checkout took 2.0 and 2.2 seconds. The fetch a `merged` transition makes stops
+  at 60 seconds by a SIGTERM to git's process group, and kills git only if it
+  still runs 5 seconds later (`gitIn`, `landingFetchTimeout` and
+  `landingStopGrace` in services/gctk/internal/cli/lifecycle.go).
 - **The store.** `gc bd list --json --limit 0` listed this rig's 857 live beads
   in 0.43 to 0.45 seconds. A read of one bead by its id took 0.15 to 0.19
   seconds and a metadata write guarded on its status 0.32 to 0.34, at a load
