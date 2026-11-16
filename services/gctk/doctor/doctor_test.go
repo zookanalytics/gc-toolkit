@@ -105,8 +105,8 @@ func TestAFirstRunListsWhatDoctorFound(t *testing.T) {
 		warn("orphan-sessions"),
 		gascity.DoctorResult{Name: "gc-toolkit:check-recycle-capable", Status: "error", Severity: "blocking", Message: "cycle-recycle cannot fire"},
 		timedOut("worktree-disk-size"),
-		gascity.DoctorResult{Name: "rig:sl:beads", Status: "ok", Message: "not checked: suspended (rig:sl)"},
-		gascity.DoctorResult{Name: "rig:gf:beads", Status: "warning", Message: "not checked: store not running (rig:gf) while the city's controller is running"},
+		gascity.DoctorResult{Name: "rig:b:beads", Status: "ok", Message: "not checked: suspended (rig:b)"},
+		gascity.DoctorResult{Name: "rig:a:beads", Status: "warning", Message: "not checked: store not running (rig:a) while the city's controller is running"},
 		warn("hold-label-routed-to"),
 		warn("dolt-compact-state"),
 		warn("orphan-sessions"),
@@ -122,8 +122,8 @@ func TestAFirstRunListsWhatDoctorFound(t *testing.T) {
 		t.Errorf("failing = %v", got)
 	}
 	wantUnmeasured := []Unmeasured{
-		{Name: "rig:gf:beads", Why: "not checked: store not running (rig:gf) while the city's controller is running"},
-		{Name: "rig:sl:beads", Why: "not checked: suspended (rig:sl)"},
+		{Name: "rig:a:beads", Why: "not checked: store not running (rig:a) while the city's controller is running"},
+		{Name: "rig:b:beads", Why: "not checked: suspended (rig:b)"},
 		{Name: "worktree-disk-size", Why: "timed_out"},
 	}
 	if !reflect.DeepEqual(rec.NotMeasured, wantUnmeasured) {
