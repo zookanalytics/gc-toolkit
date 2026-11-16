@@ -171,11 +171,15 @@ today. No condition, key or state comes with it.
 sitting why it woke. A session's start carries no wake cause (`PromptContext` in
 `cmd/gc/prompt.go` has no wake field), and the claim answers a staying sitting
 `drain` with the reason `no_work` while its conversation waits on open work. The
-sitting confirms the notice in the record: `gc wait list --session <session>
---json` names the wait, its beads and its state, which reads `ready` before
+sitting confirms the notice in the record: the notice names its wait, and
+`gc wait inspect <wait> --json` reads that wait in any state, `ready` before
 delivery, `closed` with the nudge's id after it (`CloseWaitFromNudge`), and
-`canceled` when something cancelled it (`CancelWait`). The same read finds a
-return still owed after a restart.
+`canceled` when something cancelled it (`CancelWait`; `GetWait` in
+`internal/session/wait_store.go`). A delivered or cancelled wait is a closed
+bead, so `gc wait list --session <session> --json` lists only the session's open
+waits, pending or ready (`ListWaits` and `WaitsForSession`). After a restart
+that list tells the sitting which promises still stand, and a promise missing
+from it was delivered, cancelled or never registered.
 
 **What else was searched.**
 
@@ -184,6 +188,12 @@ return still owed after a restart.
   The notice already says why the sitting woke, and the wait's record says
   whether it was delivered, so the entry needs no new answer and gctk no new
   key.
+- **The pack's own record of each promise's wait**, so that a thread a reset
+  started fresh could read a delivered or cancelled promise by its id. It
+  would be a second registry of the session's waits beside Gas City's, which the
+  brief the operator approved in conversation tk-8e83do9 says not to make the
+  preferred architecture. Such a thread asks the operator whether to promise
+  again instead (the design's section 4).
 
 ## Visits: Gas City's attach, and the change it needs
 
@@ -204,8 +214,9 @@ gc-gspdoo in the Gas City rig, held for the operator's placement.
   only an operator's suspend (`Store.ResumeHeld` in `internal/session/resume.go`;
   `internal/api/AGENTS.md`), so it cannot start a session that slept idle or
   under a wait hold.
-- **The pack registering a cancelled promise again.** The operator ruled it out
-  in conversation tk-8e83do9: the pack would keep its own copy of which waits a
+- **The pack registering a cancelled promise again.** The brief the operator
+  approved in conversation tk-8e83do9 says not to make pack-side restoration the
+  preferred architecture: the pack would keep its own copy of which waits a
   session should have, beside Gas City's.
 - **A wrapper around engage's attach** that keeps the operator's terminal tab
   while the runtime sleeps. That is terminal work, which epic tk-uipsrmt holds.
@@ -234,6 +245,11 @@ never drains.
   tells the operator when a visit cancels its promise.
 - **The minute between the end of a round and the sitting's wake**, while the PR
   reads `working`.
+- **A promise a fresh thread cannot place.** Gas City lists only a session's
+  open waits, so a thread a reset started fresh cannot tell a promise delivered
+  to the thread it replaced from one cancelled or never registered. It asks the
+  operator whether to promise again, and a delivered promise's PR stays held for
+  that answer.
 - **No command sleeps a session on a wait it already has**, so a sitting the
   operator leaves runs for up to its idle window.
 - **A rig on the old review path** has no end of a round to wake at. Its rework

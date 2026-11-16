@@ -111,12 +111,13 @@ What each command does in Gas City today, and what a stay uses it for:
 | `gc session wait <session> --on-beads <beads> --note <text>` | Records a durable wait for the session, as a bead of its own that names the beads. It turns ready when those beads close, or when someone marks it ready, and it is ready at once when they have closed already. A ready wait wakes the session, delivers the note as a queued nudge, and closes once the nudge is delivered. | The promise, registered once the stay has landed. |
 | `--sleep` on that command | Also sets the session's wait hold and asks the controller to sleep the session now. The hold keeps every other wake out, an attached client's included, until a wait is ready. It applies only when the wait is registered: no command sleeps a session on a wait it already has. | Not used. The operator is attached when the stay is signed off, and the idle window sleeps the sitting once they leave. |
 | `gc wait ready <wait>` | Marks a wait ready by hand. | The landing order's wake at the end of a round (section 3). |
-| `gc wait list [--session <session>] --json` | Lists waits with their session, state and the beads they watch. | How the landing order finds promises, and how the sitting reads its own. |
+| `gc wait list [--session <session>] --json` | Lists the waits still open, pending or ready, with their session, state and the beads they watch. A wait closes once its notice is delivered or it is cancelled, and the list then leaves it out. | How the landing order finds pending promises, and how the sitting finds its open ones (section 4). |
+| `gc wait inspect <wait> --json` | Reads one wait in any state: `pending`, `ready`, `closed` with its nudge's id once its notice is delivered, or `canceled`. | How the sitting confirms a notice, which names its wait. |
 | `gc wait cancel <wait>` | Cancels a wait. | Withdraws a promise when the operator ends the stay. |
 | `gc session attach <session>` | Attaches to a running session and changes nothing else. A session that is not running is started by the controller "as gc session wake does", which today cancels every wait the session has. | The way back in. Attaching to a sleeping sitting cancels its promise until gc-gspdoo lands (section 8). |
 | `gc runtime drain-ack` | Lets the controller stop the session, and the sitting's tab title then reads done. The core reaper closes a drained session after a day. | Never while staying, because the reaper's close would cancel the promise. A sign-off that ends the conversation drains. |
 | `gc session close` | Ends the session for good, and cancels its waits. | Not in a stay. |
-| `gc session reset` | Restarts the session with a fresh thread, and cancels each wait registered before the restart as stale. | Only in a return's hand-over, after the promise has been delivered. |
+| `gc session reset` | Restarts the session with a fresh thread, and cancels each wait registered before the restart as stale. | Only in a return's hand-over, after the promise has been delivered. A promise still pending on other work is cancelled with it (section 4). |
 
 The stay's wait in the store and its promise do different jobs. Gas City keeps a
 manual session awake while ready or claimed work is assigned to it, and sleeps
@@ -279,9 +280,9 @@ sitting lifts the hold, the label follows the PR's own conditions again.
 The sitting takes the return up on the promise's notice, in this order:
 
 1. **Confirm the notice.** A `Wait satisfied` notice is text in the prompt
-   stream, so the sitting reads the wait in the record
-   (`gc wait list --session "$GC_SESSION_ID" --json`) and acts only on a wait of
-   its own that names a bead its stay waits for.
+   stream, so the sitting reads the wait it names in the record
+   (`gc wait inspect <wait> --json`) and acts only on a wait of its own session,
+   ready or closed by that delivery, that names a bead its stay waits for.
 2. **Hold first.** It claims the conversation back and records the hold's
    `holding:` line in one guarded write: the claim-back's
    `gc bd update --if-assignee "$GC_ALIAS" --if-status open --status in_progress`
@@ -303,18 +304,29 @@ The sitting takes the return up on the promise's notice, in this order:
 the sitting carries the return on from its thread, or from the record when the
 thread is gone: the hold's line and what it has already posted on the PR. A
 restart between the notice and step 2 resumes the thread, which holds the
-notice. A thread a reset started fresh finds the conversation still staying, and
-the entry reads `waiting`. So before a sitting ends a `waiting` turn in which
-nobody spoke, it reads its promises
-(`gc wait list --session "$GC_SESSION_ID" --json`):
+notice.
 
-- A promise on a bead its stay names whose wait is ready, or closed by delivery
-  since the stay's `staying:` line, is a return still owed, and the sitting
-  carries it out.
-- A stay that promised a return and has no wait at all on its bead, as after a
-  restart between the stay and the promise, registers the promise now. That
-  finishes the stay's own step 3.
-- A promise whose wait reads `canceled` is section 8's case.
+**A promise that is gone.** Gas City lists only the waits still open, pending or
+ready, so a promise leaves `gc wait list --session "$GC_SESSION_ID" --json` once
+its notice is delivered, and when a visit (section 8) or a reset cancels it. A
+reset cancels every wait registered before it, so a return handed over through
+a reset also ends any promise still pending on other work. So on every entry
+that reads `waiting`, and when a thread a reset started fresh carries a return
+on, the sitting reads its open promises. For each bead its stay promised a
+return on, as the stay's hand-back says, that no open promise names:
+
+- A thread that registered the promise and holds no notice for it reads the
+  promise as cancelled.
+- A thread that never registered it, as after a restart between the stay and
+  the promise, registers it now. That finishes the stay's own step 3.
+- A thread a reset started fresh cannot tell a promise delivered to the thread
+  it replaced from one cancelled or never registered, and the record cannot
+  either, so it reads the promise as cancelled. A promise that was delivered
+  has put the hold on its PR already, so that PR waits for the operator's
+  answer.
+
+A cancelled promise is section 8's case: the sitting tells the operator, and
+asks whether to promise again.
 
 **The return at the work's close.** When the work closes, merged or closed
 without a PR, the stay's wait in the store clears, its promise turns ready as
@@ -438,11 +450,12 @@ local patch in the city's fork and its upstream path. No flag for it exists
 today, and nothing in the pack depends on one.
 
 **Until it lands.** A visit to a sleeping sitting cancels its promise. The
-sitting's entry on that visit reads `waiting`, the sitting reads its promises,
-finds the promise cancelled, and tells the operator three things: the visit
-ended the promise, the stay now comes back only when the work closes, which for
-a PR is after the merge, and the sitting asks whether to promise again. It holds
-the conversation for that answer, so the question reads as the operator's move.
+sitting's entry on that visit reads `waiting`, the sitting reads its open
+promises, finds the promise gone with no notice in its thread (section 4), and
+tells the operator three things: the visit ended the promise, the stay now comes
+back only when the work closes, which for a PR is after the merge, and the
+sitting asks whether to promise again. It holds the conversation for that
+answer, so the question reads as the operator's move.
 Promising again is section 1's step 3. The pack never registers a cancelled
 promise again by itself.
 
@@ -495,8 +508,8 @@ over:
   the result whatever it finds. On a `Wait satisfied` notice the prompt confirms
   the wait and runs the return (`converse-stay`).
 - **`converse-stay`**: the promise's command after the stay lands, the return's
-  steps with the hold first, a return cut short, settling, staying available,
-  visits and a cancelled promise, and ending.
+  steps with the hold first, a return cut short, a promise that is gone,
+  settling, staying available, visits and a cancelled promise, and ending.
 - **`converse-settle`**: send, then stay, then promise, and a stay on the
   conversation's own subject (section 7).
 - **`converse-hold`**: the hold of a returned exchange, recorded in the write
@@ -544,7 +557,7 @@ Each piece was weighed for whether this design still needs it:
   one the sign-off makes when no run has poured one.
 - **The entry's `ready` and its `READING`, `READ`, `WAIT` and `MOVE` values**:
   dropped. The notice says why the sitting woke, and the record, read with
-  `gc wait list`, confirms it.
+  `gc wait inspect`, confirms it.
 - **The clean return's lift of the merge hold**: dropped. Only the operator's
   settlement lifts it.
 - **Kept**: the wake at the end of a round, now with the hold put on before it;
@@ -640,6 +653,12 @@ Gas City, at upstream main 76a06b2327:
   `cmd/gc/compute_awake_set.go`), whether it slept idle or under a wait hold, and
   is delivered as a queued nudge and then closed with the nudge's id
   (`CloseWaitFromNudge`). A cancelled wait reads `canceled` (`CancelWait`).
+  The notice reads `Wait satisfied (<wait>): <note>`
+  (`dispatchReadyWaitNudgesWithSnapshot`).
+- A delivered or cancelled wait is a closed bead (`setWaitTerminalState`), so
+  `gc wait list` lists only the waits still open, pending or ready (`ListWaits`
+  and `WaitsForSession`), and `gc wait inspect <wait>` reads one wait in any
+  state (`GetWait`), all in `internal/session/wait_store.go`.
 - A manual session is wanted awake while ready or claimed work is assigned to
   it, and sleeps after its idle window while it is not attached and what is
   assigned to it only waits on something open. A wait hold keeps every
