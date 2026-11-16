@@ -6,11 +6,8 @@
 # A hermetic test puts its stub gc, bd, gh or git in a directory at the front of
 # PATH, and that directory is all that stands between the script under test and
 # the real binary. It lives in the test's temp dir, so it can go while a script
-# the test started is still running. A test killed by a signal its children do
-# not get removes its temp dir from its EXIT trap, and the scratch reaper
-# removes a run's temp dir once the run's process and every process in its
-# process group have ended, though a child that started a group of its own and
-# holds nothing open there may still be running. A PATH search that misses the
+# the test started is still running: a test killed by a signal its children do
+# not get removes its temp dir from its EXIT trap. A PATH search that misses the
 # stub finds the next directory instead. The real gc found there reaches the
 # live city from the working directory, the real gh reaches GitHub, and the real
 # git acts on the checkout.

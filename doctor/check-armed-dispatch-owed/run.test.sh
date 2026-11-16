@@ -151,9 +151,9 @@ GC
 #     gc.dispatch_when_ready`): BD_FAIL_LIST fails it, and BD_BLANK_LIST answers
 #     whitespace at rc 0. BD_BARRIER_DIR and BD_BARRIER_N make each listing wait
 #     until N have started (failing after 20s), BD_SLOW_STORE and BD_SLOW_SECS
-#     slow one store, BD_REAP_SCAN_AT removes the check's scratch from under it
-#     as a scratch reaper would, and BD_DONE gets the store's name once its
-#     listing has answered. With INFLIGHT set, each listing marks its store in
+#     slow one store, BD_REAP_SCAN_AT removes the check's scratch from under
+#     it, and BD_DONE gets the store's name once its listing has answered. With
+#     INFLIGHT set, each listing marks its store in
 #     flight for a second and appends how many stores were then in flight to
 #     INFLIGHT.peaks.
 #   * Every other read the dry run makes: BD_FAIL_BLOCKERS fails each such read
@@ -813,8 +813,8 @@ has "$OUT" "doctor budget before every store was scanned" "and it says the budge
 clear_stores
 
 # --- 31. a scan that cannot report is a store NOT checked, never a pass -------
-# The scans report through the check's scratch. Removed mid-run, as a scratch
-# reaper would remove it, the scan's report is lost and its store is named.
+# The scans report through the check's scratch. Removed mid-run, the scan's
+# report is lost and its store is named.
 mkdir -p "$TMP/scratch"
 armed_store alpha "$(aarmed r-1)"
 OUT=$(CHECK_TMPDIR="$TMP/scratch" BD_REAP_SCAN_AT=alpha run_check); RC=$?

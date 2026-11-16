@@ -4,38 +4,32 @@
 #
 # A run that exits normally removes its own temp: a script on its EXIT trap, the
 # go command when it exits. A run ended first, by a signal it does not handle or
-# by a crash, leaves its scratch in the host's shared temp. The scratch
-# this script reclaims is named for the process that owns it: the gascity
-# gc.test binary's per-run trees (gct<pid>-<n>, gct-<pid>-<n>), and run.<pid>,
-# which is the build scripts' Go scratch under /var/tmp/gotmp and the temp dir
-# tools/run-tests.sh gives each run, holding the suite's temp and any Go build
-# it starts. On a host whose temp is a per-uid tmpfs, these accumulate against
-# its quota until it is exhausted, at which point every agent's shell output
-# capture fails silently and the host loses its shells. This is the backstop
-# that reclaims them.
+# by a crash, leaves its scratch in the host's shared temp. This script
+# reclaims only the scratch named for the pid of the process that owns it: the
+# gascity gc.test binary's per-run trees (gct<pid>-<n>, gct-<pid>-<n>) and the
+# build scripts' Go scratch (run.<pid> under /var/tmp/gotmp). On a host whose
+# temp is a per-uid tmpfs, these accumulate against its quota until it is
+# exhausted, at which point every agent's shell output capture fails silently
+# and the host loses its shells. This is the backstop that reclaims them.
 #
-# Safety model: an entry goes only once the owner its name records has ended,
-# and never on age or size. The process with the pid in its name must be gone.
-# For a run.<pid>, the process group whose id is that pid must have no process
-# left as well: tools/run-tests.sh starts each run as the leader of such a
-# group, and a process the run started can outlive the leader there and still
-# use the tree. And the tree must have NO live holder: lsof reports no process
-# with a file inside it open and no process whose cwd is inside it, so a tree
-# that a child of the owner still uses is kept. Every gate is re-checked
-# immediately before the remove, because the scan-to-delete gap is a TOCTOU
-# window. Size never counts: a 6G gc.test tree nine minutes into a live run
-# holds a lock file and is kept; a 1K tree whose owner died is reaped. A name
-# that looks pid-encoded but whose pid is empty or non-numeric is unparseable
-# and is left alone, and so is a pid whose process cannot be shown gone, or a
-# run.<pid> whose group cannot be shown empty.
+# Safety model: an entry goes only once the owner its name records has ended.
+# The process with the pid in its name must be gone, and the tree must have NO
+# live holder: lsof reports no process with a file inside it open and no
+# process whose cwd is inside it, so a tree that a child of the owner still uses
+# is kept. Both gates are re-checked immediately before the remove, because the
+# scan-to-delete gap is a TOCTOU window. Age and size are never a signal: a 6G
+# gc.test tree nine minutes into a live run holds a lock file and is kept; a 1K
+# tree whose owner died is reaped. A name that looks pid-encoded but whose pid
+# is empty or non-numeric is unparseable and is left alone, and so is a pid
+# whose process cannot be shown gone.
 #
 # A templated name (go-build*, go-link*, gctk-*) records no owner, and nothing
 # outside its run can show that run has ended: a live run holds nothing open in
 # it for long stretches. So this script never removes one. The run that made it
 # removes it when it ends, and what a killed run leaves under such a name waits
-# for the host's own temp cleanup. A run that must not leave such scratch puts
-# its temp under a run.<pid> dir, as the build scripts and tools/run-tests.sh
-# do.
+# for the host's own temp cleanup. A run whose leftovers this script must
+# reclaim puts its temp under a run.<pid> dir named for its own pid, as the
+# build scripts do.
 #
 # Scope: the host's shared build/test scratch, under every root this host's
 # runs point their temp at (tmpfs today, /var/tmp if a run redirects there).
@@ -206,37 +200,18 @@ pid_is_dead() {
     return 0
 }
 
-# Is the process group gone? kill -0 to the group reaches a live member of this
-# uid. It is refused for a member this uid cannot signal, and on macOS for one
-# that has ended and is not yet reaped, and ps answers for those. A group with
-# a member returns 1. Empty is only ever what ps shows, and only when its
-# listing shows this very process; an unparseable id, or a listing that does
-# not show this process, reports "cannot tell" (return 2), never "empty".
-group_is_gone() {
-    local g="$1" rc=0
-    case "$g" in ''|*[!0-9]*) return 2 ;; esac
-    kill -0 -- "-$g" 2>/dev/null && return 1
-    awk -v g="$g" -v me="$$" '
-        $2 == g { member = 1 }
-        $1 == me { self = 1 }
-        END { exit member ? 1 : (self ? 0 : 2) }' < <(ps -A -o pid=,pgid= 2>/dev/null) || rc=$?
-    return "$rc"
-}
-
 # Phase 1 — the gates that need no holder scan: the name must be a pid-encoded
 # scratch form, the entry must be ours, and an entry whose pid is still alive
-# (or not shown gone) is kept untouched, as is a run.<pid> whose group still has
-# a process (or is not shown empty). What survives is dead scratch unless a
+# (or not shown gone) is kept untouched. What survives is dead scratch unless a
 # holder says otherwise, which phase 2 decides.
 CAND=()        # candidate paths, dead by name and pid, pending the holder gate
 CAND_PID=()    # parallel: the pid each name encodes
-CAND_GRP=()    # parallel: the group a run.<pid> waits on, "" for the other forms
 KEPT_N=0
 for root in "${SCAN_ROOTS[@]}"; do
     while IFS= read -r -d '' entry; do
         [ -e "$entry" ] || continue
         base="${entry##*/}"
-        pid=""; suf=""; grp=""
+        pid=""; suf=""
         case "$base" in
             .pnpm-store|node-compile-cache) log "keep (rebuild-cost cache): $entry"; KEPT_N=$((KEPT_N + 1)); continue ;;
             # gc.test per-run trees. The owned shapes are gct<pid>-<n> and
@@ -247,10 +222,8 @@ for root in "${SCAN_ROOTS[@]}"; do
             # directory. Parse the whole name here; the shape is validated below.
             gct-[0-9]*-[0-9]*) rest="${base#gct-}"; pid="${rest%%-*}"; suf="${rest#*-}" ;;
             gct[0-9]*-[0-9]*)  rest="${base#gct}";  pid="${rest%%-*}"; suf="${rest#*-}" ;;
-            # A run's own scratch: run.<pid>, the raw numeric pid with no suffix
-            # (the build scripts' GOTMP/run.$$, tools/run-tests.sh's per-run temp).
-            # It waits on the pid's process group too (see the header).
-            run.[0-9]*) pid="${base#run.}"; grp="$pid" ;;
+            # Go scratch: run.<pid>, the raw numeric pid with no suffix (GOTMP/run.$$).
+            run.[0-9]*) pid="${base#run.}" ;;
             # Templated temp records no owner, so it is never this pass's to remove
             # (see the header).
             go-build*|go-link*|gctk-*) log "skip (records no owner): $entry"; continue ;;
@@ -271,12 +244,7 @@ for root in "${SCAN_ROOTS[@]}"; do
         d=0; pid_is_dead "$pid" || d=$?
         if [ "$d" -eq 2 ]; then log "keep (pid '$pid' not shown gone): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
         if [ "$d" -eq 1 ]; then log "keep (pid $pid alive): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
-        if [ -n "$grp" ]; then
-            d=0; group_is_gone "$grp" || d=$?
-            if [ "$d" -eq 2 ]; then log "keep (group $grp not shown empty): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
-            if [ "$d" -eq 1 ]; then log "keep (group $grp has a process left): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
-        fi
-        CAND+=("$entry"); CAND_PID+=("$pid"); CAND_GRP+=("$grp")
+        CAND+=("$entry"); CAND_PID+=("$pid")
     done < <(find "$root" -maxdepth 1 -mindepth 1 \
                 \( -name 'go-build*' -o -name 'go-link*' -o -name 'gct*' -o -name 'run.*' \) \
                 -print0 2>/dev/null)
@@ -301,10 +269,10 @@ reap() {
 }
 
 # Phase 2 — the holder gate and its TOCTOU recheck. SNAP1 drops anything held at
-# scan time; SNAP2 is a fresh snapshot taken immediately before removal, and the
-# pid, and a run.<pid>'s group, are re-read per entry, closing the window
-# between proving an entry dead and removing it. An lsof that yields nothing is
-# a broken probe, not an idle host: refuse rather than reap blind.
+# scan time; SNAP2 is a fresh snapshot taken immediately before removal and the
+# pid is re-read per entry, closing the window between proving an entry dead and
+# removing it. An lsof that yields nothing is a broken probe, not an idle host:
+# refuse rather than reap blind.
 if [ "${#CAND[@]}" -gt 0 ]; then
     rc1=0; SNAP1="$(snapshot)" || rc1=$?
     if [ "$rc1" -ne 0 ] || [ -z "$SNAP1" ]; then
@@ -313,13 +281,13 @@ if [ "${#CAND[@]}" -gt 0 ]; then
     fi
     declare -A HELD1=()
     while IFS= read -r h; do [ -n "$h" ] && HELD1["$h"]=1; done < <(compute_held "$SNAP1")
-    REAP=(); REAP_PID=(); REAP_GRP=()
+    REAP=(); REAP_PID=()
     for i in "${!CAND[@]}"; do
         c="${CAND[$i]}"
         if [ -n "${HELD1[$c]:-}" ]; then
             log "keep (open holder): $c"; KEPT_N=$((KEPT_N + 1))
         else
-            REAP+=("$c"); REAP_PID+=("${CAND_PID[$i]}"); REAP_GRP+=("${CAND_GRP[$i]}")
+            REAP+=("$c"); REAP_PID+=("${CAND_PID[$i]}")
         fi
     done
     if [ "${#REAP[@]}" -gt 0 ]; then
@@ -330,14 +298,9 @@ if [ "${#CAND[@]}" -gt 0 ]; then
             declare -A HELD2=()
             while IFS= read -r h; do [ -n "$h" ] && HELD2["$h"]=1; done < <(compute_held "$SNAP2")
             for i in "${!REAP[@]}"; do
-                p="${REAP[$i]}"; pid="${REAP_PID[$i]}"; grp="${REAP_GRP[$i]}"
+                p="${REAP[$i]}"; pid="${REAP_PID[$i]}"
                 [ -e "$p" ] || continue   # a peer may have removed it since the scan
-                if [ -n "$pid" ]; then
-                    pid_is_dead "$pid" || { log "keep (pid $pid returned): $p"; KEPT_N=$((KEPT_N + 1)); continue; }
-                fi
-                if [ -n "$grp" ]; then
-                    group_is_gone "$grp" || { log "keep (group $grp has a process left): $p"; KEPT_N=$((KEPT_N + 1)); continue; }
-                fi
+                pid_is_dead "$pid" || { log "keep (pid $pid returned): $p"; KEPT_N=$((KEPT_N + 1)); continue; }
                 if [ -n "${HELD2[$p]:-}" ]; then
                     log "keep (holder appeared): $p"; KEPT_N=$((KEPT_N + 1)); continue
                 fi
