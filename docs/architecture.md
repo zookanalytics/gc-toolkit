@@ -455,6 +455,10 @@ first. Either way the change is a decision on the record, not a drift.
   order's read is not part of its decision to merge,** even when GitHub carries
   out the merge request after it.
 - **The landing order is the one path that admits work on a pending record.**
+- **Every PR the city owns is watched, and one update is the only way GitHub's
+  side of a PR reaches its bead.**
+- **The landing order acts from the beads,** and keeps the labels of each PR
+  the city owns equal to what the store derives.
 - **An approval stands across a push until triage reads the change as
   material.**
 - **No city push rewrites or overwrites a PR's commits,** so the PR keeps the
@@ -486,6 +490,11 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
+- **The landing order still reads GitHub to decide, and watches only the
+  pending record.** It reads each pending record's PR itself rather than acting
+  from the bead, and it watches no PR off the pending record. It writes no
+  label, so a PR on the pending record keeps its last label once it merges,
+  closes or meets an exception. The units of tk-1tfzr71.149 retire it.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
