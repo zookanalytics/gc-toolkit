@@ -66,8 +66,9 @@ reviewer's own sign-off.
 
 A PR on Gas Town's pending record, whose anchor's `merge_result` reads
 `pull_request_pending` or `pull_request_head_changed`, has one writer of its
-branch, its review run, so a send-back there is an ask the run takes, never a
-rework child or a supplement. The sign-off's `--rework` files it, with
+branch at a time: its review run, or the sitting whose conversation holds the
+PR while it edits the branch with the operator (`converse-edit`). So a
+send-back there is an ask the run takes, never a rework child or a supplement. The sign-off's `--rework` files it, with
 `--check <check>` once for each check the ruling sends back, and nothing returns
 to unreviewed, because the run triages the head its fix pushes. A must-fix point
 on such a PR that no sitting rules, such as one a sitting or the mechanik finds

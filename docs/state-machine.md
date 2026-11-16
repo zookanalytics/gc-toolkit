@@ -1288,8 +1288,12 @@ and the dispatch on a lane are the old path's ([Debt](#debt)).
   back a lane through the ruling: a review already in flight when the ruling is
   filed, whose verdict is on the head it read, and an operator's GitHub
   approval, which until it is dismissed backs every lane but one a later
-  bring-current round reopened. A sitting does not edit an open PR's branch,
-  so a ruling on an open PR files this ask or this rework, which a polecat runs.
+  bring-current round reopened. A sitting the operator rules make the change
+  with them edits the branch of an open PR on the pending record itself, pushes
+  through `gctk pr push` and answers the PR with `--no-rework`, and the head it
+  leaves is triaged once its conversation closes. Otherwise a ruling that
+  changes an open PR's branch files this ask, which the PR's review run takes,
+  or on the old path this rework, which a polecat runs.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
   acting on the anchor — a fix unit in flight (including the one answering an
   open `must-fix` finding on any lane), a validation pass in flight, or a full

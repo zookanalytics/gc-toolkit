@@ -1,18 +1,18 @@
 ---
 name: converse-edit
-description: Converse's edit of a change the operator rules a sitting make with them, and its hand-off to review.
+description: Converse's edit of a change the operator rules a sitting make with them, a new change or an open PR's branch, and its hand-off to review.
 ---
 
 # Editing a change with the operator
 
-The operator can rule, in this sitting, that you make a change with them. This
-skill carries that change from the ruling to the refinery. The steps keep their
-own skills: the hold still records what the operator owes, each hand-back is
-still recorded before you post it, and the sign-off still closes the
-conversation. Each tool call starts a fresh shell, so set `CONV`,
-`CONVERSATION` and `SUBJECT` literally, from the entry's output, at the top of
-every call below, and `CHANGE` and `TREE` too once the calls below have printed
-them.
+The operator can rule, in this sitting, that you make a change with them, a
+new change or one on an open PR's branch. This skill carries that change from
+the ruling to the refinery. The steps keep their own skills: the hold still
+records what the operator owes, each hand-back is still recorded before you
+post it, and the sign-off still closes the conversation. Each tool call starts
+a fresh shell, so set `CONV`, `CONVERSATION` and `SUBJECT` literally, from the
+entry's output, at the top of every call below, and `CHANGE` and `TREE`, with
+`PR` and `BRANCH` for an open PR, too once the calls below have printed them.
 
 ## The line
 
@@ -34,7 +34,8 @@ so and recommend sending it, and their ruling decides.
 Whatever the ruling, you never:
 
 - hold more than one change in flight in this conversation, so a second waits
-  until the first is handed off or dropped;
+  until the first is handed off, pushed onto its open PR and let go, or
+  dropped;
 - change a repository other than your own rig's, the rig your conversation is
   filed in. The hold below is a `blocks` edge, which holds only between two
   beads in one store, so a change to another rig's repository goes to that
@@ -42,21 +43,130 @@ Whatever the ruling, you never:
 - edit in your home, whose start syncs it to the default branch and refuses a
   start that finds an edit or a commit there;
 - push to a target branch, merge, or force a push: the hand-off pushes the
-  change's own branch, and the refinery lands it;
-- edit an open PR's branch (below);
+  change's own branch, an open PR's push goes onto that PR's branch, and the
+  refinery lands each;
+- edit the branch of an open PR the old path reviews, which takes a rework
+  (below);
 - cut an integration effort's branch, which stays the mechanik's recipe or
   `mol-design-convoy`'s step.
 
-## An open PR takes a rework
+## An open PR's branch
 
-You edit no open PR's branch. The branch takes one writer at a time, the PR's
-rework child, which a polecat runs, and the review machinery keys on that
-child: no review is dispatched while it is open, and a ruling's rework returns
-every lane to unreviewed. A push of your own would bypass both. So a ruling
-that changes what an open PR's branch must contain sends a rework through the
-sign-off's `--rework` (the converse-settle step). When more than one call
-stands between the PR's text and what the operator wants, settle them in the
-thread first (the `converse-iterate-document` step).
+A ruling that changes what an open PR's branch must contain is made on that
+branch when the PR is on the pending record. `PR` from here on is the bead that
+owns the PR: the subject when it owns one, else the bead its `anchor_bead`
+names. Read where it stands:
+
+```bash
+gc bd show "$PR" --json | jq -r '.[0].metadata.merge_result // ""'
+```
+
+- `pull_request_pending` or `pull_request_head_changed`: the PR is on the
+  pending record, and you edit its branch with the operator, as this section
+  says.
+- `pull_request`: the old path's review lanes key on the PR's rework child,
+  which a polecat runs, so the ruling sends a rework through the sign-off's
+  `--rework` (the converse-settle step). When more than one call stands between
+  the PR's text and what the operator wants, settle them in the thread first
+  (the `converse-iterate-document` step).
+
+The edit is this conversation's change in flight, and the PR's bead carries
+it, so you file no bead and make no subject wait on one. Set `CHANGE` to
+`$PR`. Hold the branch and set up its tree as below, then read the polecat
+class's standards, edit a commit per agreed step, show a copy of the UI and run
+the rig's checks as those sections say, and then write the summary, push and
+let go as this section ends.
+
+**Hold the branch, before the first edit.** The bead's `blocks` edge onto the
+conversation holds the PR. While the conversation is open, the landing order
+pours no review run on it, the refinery takes no bead it holds, and the PR does
+not merge. Every conversation on an open PR carries that edge, and bd takes an
+edge it holds already as a no-op, so add it whatever stands. Then prove that
+nothing else writes the branch, and record the ruling on the bead:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+gc bd dep add "$PR" "$CONVERSATION" --type=blocks \
+  && "$GCTK" pr push "$PR" --held-by "$CONVERSATION" --check \
+  && gc bd update "$PR" --append-notes "$(date -u +%Y-%m-%d): the operator ruled that conversation $CONVERSATION edit this PR's branch with them: \"<their words>\""
+```
+
+Exit 3 from the check names what else holds the branch, such as a review run
+attached to the bead or another bead working its branch. Tell the operator, and
+their ruling decides whether that work stops or you wait for it to end (the
+`work` skill, stopping work already sent).
+
+**Set up the tree.** The tree is a checkout of the branch's tip under your
+home, at `worktrees/<the PR's bead>`, with no local branch, so a tree that has
+the branch checked out does not refuse it. Run again after a restart, the block
+finds the tree and goes on:
+
+```bash
+BRANCH=$(gc bd show "$PR" --json | jq -er '.[0].metadata.branch') \
+  && TREE="${GC_DIR:-$PWD}/worktrees/$PR" \
+  && { [ -d "$TREE" ] || { git -C "${GC_DIR:-$PWD}" fetch origin "$BRANCH" \
+       && git -C "${GC_DIR:-$PWD}" worktree add --detach "$TREE" FETCH_HEAD; }; } \
+  && echo "BRANCH=$BRANCH TREE=$TREE"
+```
+
+Never enter the tree with this shell, because you remove it when you let go.
+Edit its files by their full paths under the tree, and run git there as
+`git -C "$TREE"`.
+
+**Write the summary.** The PR's summary is recorded on its bead, and the
+refinery composes the PR's body from it when it validates your head. Read the
+one it records with `"$GCTK" pr summary "$PR"`, then write the whole summary
+again to the standard the `gc-toolkit.commit-conventions` skill holds for a
+PR's summary, so it also says what your edit changes, quotes the ruling and
+says the edit was made with the operator in a sitting. Write it to a file
+outside the tree and outside your home, and record it. Add
+`--title "<the subject line>"` only when the ruling changes what the PR does:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" pr summary "$PR" --file "<the summary file>"
+```
+
+**Push on the operator's go.** Ask for the go once the steps they agreed are
+in, as for a new change. Commit first, because the push refuses a tree that
+holds changes no commit holds, and push from a subshell that enters the tree:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+( cd "$TREE" && GCTK_SCRIPTS_DIR="$CONV" "$GCTK" pr push "$PR" --held-by "$CONVERSATION" ) \
+  && gc bd comment "$CONVERSATION" "Edited the PR's branch with the operator: <what it changes, in plain words>"
+```
+
+The push proves the hold again, returns the PR to draft and pushes the tree's
+HEAD under the lease, so a push someone else made is never overwritten. Exit 0
+is pushed, and the comment records the push as one of the visit's actions. A
+later edit in this sitting is pushed the same way. Exit 4 means the branch
+holds a commit the tree does not, such as one the operator pushed themselves:
+bring it in with `git -C "$TREE" merge "origin/$BRANCH"`, which the push
+fetched, settle a conflict with the operator, and push again. Exit 3 names what
+refused, such as work no commit holds. Exit 2 is a read or a push that did not
+answer, and it is safe to run again.
+
+**Let go.** Stop the copy of the UI, then remove the tree once its commits are
+pushed. Git refuses a tree that holds uncommitted edits:
+
+```bash
+( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )
+git -C "${GC_DIR:-$PWD}" worktree remove "$TREE"
+```
+
+The conversation still holds the PR. At the sign-off, answer the PR with
+`--no-rework`, since its branch carries what the ruling asked for, and name no
+wait on it. Once the conversation closes, the refinery validates the head you
+left, and the landing order pours one review run there, whose triage judges
+your commits as it judges any head. The run repairs what it rules must-fix, and
+nothing it finds comes back into this sitting.
 
 ## File the change and hold it, before the first edit
 
@@ -425,6 +535,11 @@ Once the change has closed, the subject's wait on it holds nothing. Send the
 subject on, close it, or leave it waiting on other work, as the operator ruled,
 through the sign-off's cases (the converse-settle step).
 
+An edit of an open PR's branch files no bead, so its drop closes nothing. Stop
+the copy of the UI and remove the tree as letting go does, with `--force` once
+the operator rules that its unpushed commits go. What you pushed stays on the
+branch, and a ruling that it must go is a change of its own.
+
 ## A change in flight at a restart, a hand-back or a dismiss
 
 - **The idle sleep** stops a session's process and never touches its disk, and
@@ -447,7 +562,9 @@ through the sign-off's cases (the converse-settle step).
 
 - **A dismiss** closes the conversation and so ends the hold. The change stays
   open and unrouted with its tree, its subject keeps waiting on it, and the
-  operator engages the change to resume it or drops it.
+  operator engages the change to resume it or drops it. An open PR goes on
+  from the head you last pushed, and its tree keeps what you did not push for
+  a later sitting on the PR.
 - **The sign-off** closes the conversation too, so a change still in flight is
   left as a dismiss leaves it. Hand it off or drop it first, unless the operator
   rules that it waits for a later sitting.
@@ -484,6 +601,6 @@ the refinery's gate returns the change to the polecat pool with its branch kept
 and its rejection reason, and a review that requests changes files a rework
 child the pool runs. A polecat resumes your branch, because Work's setup takes
 the branch the change records. When the operator wants to react to a finding
-live, they engage the change. Its branch then takes a rework once it heads an
-open PR (An open PR takes a rework, above), and Work's writers refuse a change a
-polecat or the refinery holds.
+live, they engage the change. Once it heads an open PR on the pending record,
+you edit that PR's branch (An open PR's branch, above), and Work's writers
+refuse a change a polecat or the refinery holds.

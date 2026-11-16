@@ -230,8 +230,10 @@ yet. Each remaining difference names its reason and what ends it:
 - **One worker per branch.** While a review run is attached to the bead that
   owns a PR, the run is the one writer of the PR's branch, and the refinery's
   find-work skips the bead the run holds. Work that needs the branch changed,
-  such as a conflict with the target, a person's comment or a sitting's ruling,
-  is filed as an ask, which the run takes. A conflict on a branch whose rework
+  such as a conflict with the target, a person's comment or a sitting's ruling
+  whose change the sitting does not make itself, is filed as an ask, which the
+  run takes. A sitting that edits the branch does so while its conversation
+  holds the bead, which keeps any run off it. A conflict on a branch whose rework
   child is still open goes to that child's notes, on a rig not yet cut over and
   for a child a cutover left to finish, until the old path's retirement
   (tk-1tfzr71.122). Gas Town has no review run and no asks. Two writers on one
@@ -242,7 +244,8 @@ yet. Each remaining difference names its reason and what ends it:
 What a person owes is a native human gate on the bead it blocks, and a
 conversation is a task. A sitting is a converse session that holds the
 conversation doctrine, and it also edits a change on the operator's ruling,
-through Work's writers. Intake is slung work whose exits are native writes. The
+through Work's writers, or the branch of an open PR on the pending record,
+through `gctk pr push`. Intake is slung work whose exits are native writes. The
 subsystem owns the converse, first-reaction, mechanik and po prompts, the
 converse skills and the po's refinement skill, the operator's intake and the
 terminal surfaces.

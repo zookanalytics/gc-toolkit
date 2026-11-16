@@ -195,7 +195,10 @@ the finished branch. Once they have closed, it takes steps 6 to 9 like any bead
 bound for main.
 
 A converse sitting can take steps 4 and 5 itself, on the operator's ruling in
-the sitting, for a change whose next step is the operator's reaction.
+the sitting, for a change whose next step is the operator's reaction. On a PR
+on the pending record it can edit and push the PR's branch instead, while its
+conversation holds the PR, and once the conversation closes the head it left
+takes steps 6 to 8 as any other head does.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a `gc` build that moves the text the seed
@@ -343,7 +346,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   it blocks.
 - **A conversation is a task about one subject.** It tracks its subject,
   replies to each human gate it answers through bd's `replies-to` edge, and
-  blocks nothing but an open PR's anchor, whose merge it holds until it closes,
+  blocks nothing but an open PR's anchor, whose merge it holds until it closes
+  and whose review runs it holds while its sitting may edit the PR's branch,
   and the change its sitting makes, which it holds until the hand-off.
   It waits in the operator's queue, assigned to `human`, until
   the operator engages it. `gc-helm.sh open` files one, and so do the
@@ -477,7 +481,8 @@ first. Either way the change is a decision on the record, not a drift.
 - **No machine checks a landing's transitions,** and the doctor checks the
   beads after they are written.
 - **After the hand-off, a sitting's change takes every step a polecat's
-  takes,** and the sitting is not one of its checks.
+  takes,** as the head a sitting pushes onto an open PR takes every step any
+  head takes, and the sitting is not one of their checks.
 - **A copy of a rig's UI that a session runs from a change's tree serves
   fixture data,** never the live city's.
 
@@ -508,14 +513,12 @@ why a reader must know it, and the work that retires it.
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
   the memory intake.
-- **A sitting does not edit an open PR's branch.** A ruling on an open PR still
-  sends its change to a polecat: on the pending record as an ask the PR's review
-  run takes, and on the old path as a rework child. The sitting's live edit
-  (tk-e70808f) retires it.
 - **A PR's checks still run as review beads.** Until a rig's cutover, the merge
   cadence sends each check on a PR there out as a review bead, `signoff.sh`
   records its verdict and files its findings, and a validation pass rules them
-  for a rework child to fix, so step 7 is not what runs there. On that path a
+  for a rework child to fix, so step 7 is not what runs there, and a ruling
+  that changes such a PR's branch files a rework child where a sitting on the
+  pending record edits the branch itself. On that path a
   check no index declares is approved with `--needs-you`, so the operator
   decides whether it stays in the anchor's `check_set`. Each rig's cutover bead
   moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)

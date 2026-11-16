@@ -238,12 +238,12 @@ session carries `human`. A sitting starts only when the operator engages.
 ### A conversation on an open PR holds its merge
 
 A conversation on an open PR holds the PR's merge until it closes. The subject
-counts as an open PR when it is the PR's
-anchor (`merge_result=pull_request`, not closed), or a bead whose
-`anchor_bead` names that anchor, such as the PR's review, rework or
-supplement. The hold is bd's own: the anchor depends on the conversation
-through a `blocks` edge, so bd counts the anchor blocked while the
-conversation is open and lets it go once the conversation closes.
+counts as an open PR when it is the PR's anchor (`merge_result` `pull_request`,
+or `pull_request_pending` or `pull_request_head_changed` on the pending record,
+and not closed), or a bead whose `anchor_bead` names that anchor, such as the
+PR's review, rework or supplement. The hold is bd's own: the anchor depends on
+the conversation through a `blocks` edge, so bd counts the anchor blocked while
+the conversation is open and lets it go once the conversation closes.
 
 - **Opening the conversation adds the edge.** `gc-helm.sh open` adds it for a
   conversation it files and for one a second concern joins in the queue, and
@@ -1018,9 +1018,10 @@ the ruling left open. So when more than one call stands between a document's
 text and what the operator wants, the sitting settles them with the operator
 item by item, reading the operator's guidance for its intent and pushing back
 where it disagrees. The document then changes in one of two ways. The operator
-can rule that the sitting edit it with them (*A sitting's change*, below), or
-the sitting sends one rework that carries the decisions, which is also how a
-document on an open PR changes, because a sitting edits no open PR's branch.
+can rule that the sitting edit it with them (*A sitting's change*, below), on
+an open PR's branch too when the PR is on the pending record, or the sitting
+sends one rework that carries the decisions, which is also how a document on an
+open PR the old path reviews changes.
 The big picture between sittings is the subject's notes: the dated rulings and
 the newest `## Current state` block. That block with no open question left is
 the scaffold.
@@ -1046,9 +1047,9 @@ no reaction would spend their attention for nothing, and a pool does it as well
 without them. Whatever the ruling, a sitting holds one change in flight per
 conversation and changes only its own rig's repository, the rig its
 conversation is filed in, because the hold below is a `blocks` edge, which holds
-only within one store. It never edits in its home, edits an open PR's branch,
-cuts an integration effort's branch, pushes to a target branch, merges, or
-forces a push. The `gc-toolkit.converse-edit` skill carries a change from the
+only within one store. It never edits in its home, edits the branch of an
+open PR the old path reviews, cuts an integration effort's branch, pushes to a
+target branch, merges, or forces a push. The `gc-toolkit.converse-edit` skill carries a change from the
 ruling to the refinery.
 
 **The change is a bead the sitting files**, in its own rig's store, with its
@@ -1149,9 +1150,22 @@ conversation as the evidence, removes the tree and its local branch, and carries
 out what the ruling says of the subject. A tree whose sitting ended first stays
 on its branch, and Gas City's reaper removes it once the change closes.
 
-**An open PR's branch** takes one writer at a time, the PR's rework child, which
-a polecat runs and on which the review machinery keys. So a sitting does not
-edit it, and a ruling that changes an open PR's branch files a rework through the
+**An open PR's branch** takes one writer at a time. On the pending record the
+sitting is that writer while its conversation holds the PR, on the operator's
+ruling, and the PR's bead carries the change, so the sitting files no bead. The
+bead's `blocks` edge onto the conversation, which every conversation on an open
+PR carries, keeps the landing order's review runs and the refinery off the
+branch while the conversation is open. The sitting proves that nothing else
+writes the branch (`gctk pr push --check`), edits a checkout of the branch's tip
+in a tree under its home that has no local branch, and pushes through
+`gctk pr push`, which returns the PR to draft and pushes under the lease, so a
+push another writer made is never overwritten. It rewrites the PR's summary to
+cover the edit and answers the PR with `--no-rework` at the sign-off. Once the
+conversation closes, the refinery validates the head the sitting left and the
+landing order pours one review run there, so the edit costs one triage, and the
+run repairs what it rules must-fix with no send-back to the sitting. On the old
+path the branch's writer is the PR's rework child, on which the review
+machinery keys, so a ruling that changes the branch files a rework through the
 sign-off.
 
 ## Accept
