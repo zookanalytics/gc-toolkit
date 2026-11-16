@@ -161,7 +161,11 @@ performer; the full transition table with writers is
    review result, which the evaluator reads. While it works, the run is the
    one writer of the PR's branch. Work that needs the branch changed, such as
    a person's comment or a conflict with the target, is filed as an ask, and a
-   run takes it. Each city writer returns the PR to draft before it pushes.
+   run takes it. A run asks a person a question through a human gate on the
+   PR's bead, and a person's post on the PR can answer it. The landing order
+   pours a run for a later post while that gate still holds the bead, and that
+   run resolves the gate when the post answers the question. Each city writer
+   returns the PR to draft before it pushes.
    The landing order marks the PR ready once a run has passed at the head the
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
@@ -521,3 +525,7 @@ why a reader must know it, and the work that retires it.
   moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)
   deletes the old path once every rig has moved and the GitHub intake
   (tk-1tfzr71.21) has landed.
+- **A person's answer on the PR waits behind the question's gate.** The landing
+  order pours no run while a human gate holds a PR's bead, so until the GitHub
+  intake (tk-1tfzr71.21) lands, a person answers a run's question by resolving
+  its gate.
