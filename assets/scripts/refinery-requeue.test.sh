@@ -14,10 +14,14 @@
 #     cleared, since the work gate refuses a bead that carries one, and keeps
 #     the PR it may reuse;
 #   - a bead that owns an open PR on the record keeps it, and its branch goes
-#     to the review run: the PR is recorded pending at the head the prep read,
-#     and an ask with the reason is filed on the bead, with no rework child; a
-#     record that does not land writes nothing else, and an ask that does not
-#     land asks a person to file it;
+#     to the review run: an ask with the reason, opening on a line that names
+#     the head the prep read, is filed on the bead, and only then is the PR
+#     recorded pending at that head, with no rework child. An ask that does
+#     not land records nothing. A record that does not land after the ask
+#     leaves the bead as it was, held by the ask and so never pending without
+#     it, and asks a person to write the record; the next patrol's find-work
+#     takes the bead, and its requeue of the same head finds the open ask and
+#     files no second, whatever its reason;
 #   - a convoy keeps what it carries and comes back as its rework child: a task
 #     with the work order, joined to the bead and blocking it through edges in
 #     its create, settled and slung, while the bead stays with the refinery;
@@ -135,30 +139,49 @@ eq "$(bstatus p) $(meta p merge_result) $(meta p pr_head_sha)" "blocked pull_req
 ASK=$(jq -r '[ .[] | select((.title // "") | startswith("Review ask: ")) ][0].id // ""' "$STORE")
 [ -n "$ASK" ] && rt_ok "an ask is filed" || rt_bad "an ask is filed"
 eq "$(meta "$ASK" branch)" "polecat/p" "…naming the PR's branch"
-has "$(logged gctk)" "review ask p --reason Conflicts with main at abc" "…with the reason"
+eq "$(jq -r --arg id "$ASK" '.[] | select(.id == $id) | .description' "$STORE")" "The refinery sent $READ back:
+Conflicts with main at abc" "…whose reason opens on a line naming the head, then the refinery's"
+ASK_AT=$(grep -n "^review ask p " "$LOGS/gctk.log" | head -n 1 | cut -d: -f1)
+RECORD_AT=$(grep -n "^pr record p " "$LOGS/gctk.log" | head -n 1 | cut -d: -f1)
+[ -n "$ASK_AT" ] && [ -n "$RECORD_AT" ] && [ "$ASK_AT" -lt "$RECORD_AT" ] \
+  && rt_ok "the ask is filed before the PR is recorded pending" || rt_bad "the ask is filed before the PR is recorded pending" "ask at line ${ASK_AT:-none}, record at ${RECORD_AT:-none}"
 has "$(cat "$STUB_HOLDS")" "p $ASK" "the bead waits on its ask"
 hasnt "$(logged gc)" "sling" "nothing is slung, since the review run is the branch's one writer"
 has "$OUT" "takes its ask $ASK" "the requeue names the ask"
 
-echo "# a record that does not land files no ask, and the bead stays with the refinery"
-fresh
-branch_with polecat/p p.txt >/dev/null
-work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/7"}'
-prepared p polecat/p
-STUB_RECORD_RC=2 run --bead p --reason "Conflicts with main at abc"
-eq "$RC" 1 "a record that does not land stops the requeue (exit 1)"
-hasnt "$(logged gctk)" "review ask" "no ask is filed"
-eq "$(bstatus p) $(bassignee p) $(meta p merge_result)" "open rig-a/gc-toolkit.refinery pull_request_head_changed" "the bead stays with the refinery as it was"
-
-echo "# an ask that does not land asks a person to file it"
+echo "# an ask that does not land records nothing, and the bead stays with the refinery"
 fresh
 branch_with polecat/p p.txt >/dev/null
 work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/7"}'
 prepared p polecat/p
 STUB_ASK_RC=2 run --bead p --reason "test TestX fails"
 eq "$RC" 1 "an ask that does not land stops the requeue (exit 1)"
+hasnt "$(logged gctk)" "pr record" "the PR is not recorded pending"
+hasnt "$(logged scripts)" "human-gate" "no person is asked"
+eq "$(bstatus p) $(bassignee p) $(meta p merge_result)" "open rig-a/gc-toolkit.refinery pull_request_head_changed" "the bead stays with the refinery as it was"
+
+echo "# a record that does not land after the ask leaves the ask holding the bead, and asks a person to write it"
+fresh_patrol
+branch_with polecat/p p.txt >/dev/null
+work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/7"}'
+prepared p polecat/p
+READ=$(git -C "$HOME_DIR/worktrees/p" rev-parse refs/worktree/refinery/polecat/p)
+STUB_RECORD_RC=2 run --bead p --reason "test TestX fails"
+eq "$RC" 1 "a record that does not land stops the requeue (exit 1)"
+ASK=$(jq -r '[ .[] | select((.title // "") | startswith("Review ask: ")) ][0].id // ""' "$STORE")
+[ -n "$ASK" ] && rt_ok "the ask filed first stands" || rt_bad "the ask filed first stands"
+has "$(cat "$STUB_HOLDS")" "p $ASK" "…and holds the bead, so no merge waits only on the record"
+eq "$(bstatus p) $(bassignee p) $(meta p merge_result) $(meta p pr_head_sha)" "open rig-a/gc-toolkit.refinery pull_request_head_changed <absent>" "the bead is not recorded pending, so the landing order merges nothing at that head"
 has "$(logged scripts)" "human-gate --subject p --key refinery-requeue-failed" "a gate on the bead asks a person"
-has "$(logged scripts)" "review ask p --reason" "…naming the ask to file by hand"
+has "$(logged scripts)" "pr record p --pr https://github.com/zook/rig/pull/7 --head $READ --target main --refinery rig-a/gc-toolkit.refinery" "…naming the record to write by hand"
+find_work
+eq "$FW_RC $NAMED" "0 p" "the next patrol takes the bead the ask holds"
+run --bead p --reason "TestX fails at the second check"
+eq "$RC" 0 "the requeue of the same head exits 0"
+eq "$(jq '[ .[] | select((.title // "") | startswith("Review ask: ")) ] | length' "$STORE")" "1" "it files no second ask, though its reason differs"
+has "$OUT" "ask $ASK, which an earlier requeue of $READ filed, is open" "…and names the ask it found"
+eq "$(bstatus p) $(meta p merge_result) $(meta p pr_head_sha)" "blocked pull_request_pending $READ" "the PR is recorded pending at that head"
+has "$OUT" "takes its ask $ASK" "…and the run takes the first ask"
 
 echo "# a convoy comes back as its rework child"
 fresh

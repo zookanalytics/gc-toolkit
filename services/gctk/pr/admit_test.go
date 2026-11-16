@@ -436,6 +436,31 @@ func TestAnAskOnAPassedHeadStartsARound(t *testing.T) {
 	}
 }
 
+// A PR that is no draft, recorded pending at a head a run passed, has its
+// merge requested, but not while an ask is open on its bead, as one the
+// refinery files before it records a head it sends back: the order pours the
+// run that takes the ask, and asks GitHub for no merge.
+func TestAnOpenAskHoldsTheMergeOfAPassedHead(t *testing.T) {
+	passed := `[{"head":"` + head + `","target":"main","passed":true,"run":"tk-run0"}]`
+	d := newAdmit(t)
+	d.edit(t, func(b *fake.Bead) { b.Metadata["review_results"] = passed })
+	is(t, d.once(t), pr.ActRequested)
+
+	e := newAdmit(t)
+	e.edit(t, func(b *fake.Bead) { b.Metadata["review_results"] = passed })
+	a := e.ask(t, "The refinery sent "+head+" back:\ntest TestX fails")
+	o := e.once(t)
+	is(t, o, pr.ActPoured)
+	if !strings.Contains(o.Detail, a) {
+		t.Fatalf("the pour does not name the ask it is for: %s", o.Detail)
+	}
+	if slices.ContainsFunc(e.github.Asks(), func(x ghfake.Ask) bool {
+		return x.Method == "MergePullRequest" || x.Method == "EnqueuePullRequest"
+	}) {
+		t.Fatalf("a passed head with an open ask had its merge requested: %v", asks(e.github))
+	}
+}
+
 // A draft with an open ask that nothing holds is not marked ready, even while
 // a run is attached; once the ask closes and the run has ended, it is.
 func TestADraftWithAnOpenAskThatNothingHoldsIsNotMarkedReady(t *testing.T) {

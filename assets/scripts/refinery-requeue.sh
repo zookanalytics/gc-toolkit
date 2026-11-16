@@ -15,12 +15,20 @@
 # review run (specs/tk-1tfzr71.108/design.md, section 1), so the work goes to the
 # run as an ask (`gctk review ask`) with the reason, in place of a rework child.
 # The landing order pours a run only for a record pending at the PR's head, and
-# it cleared this record's marker when it sent the head back, so the PR is first
-# recorded pending at the head the prep read (`gctk pr record`), which the run
-# then judges. A record that does not land writes nothing else, and the bead
-# stays with the refinery for its next patrol. An ask that does not land after
-# it files a human gate keyed refinery-requeue-failed on the bead, which asks a
-# person to file it and keeps the order from pouring a run meanwhile.
+# it cleared this record's marker when it sent the head back, so once the ask
+# stands the PR is recorded pending at the head the prep read (`gctk pr
+# record`), which the run then judges. The ask goes first because its blocks
+# edge onto the bead is a wait the evaluator reads: no pass of the landing order
+# finds that head pending, with the passed result an earlier run may have left
+# there, and nothing asked of it, whenever this run stops. The ask's reason
+# opens on a line naming the head, and a requeue of a head whose open ask opens
+# on that line files no second ask, as when an earlier run stopped between the
+# two writes. An ask that does not land writes nothing else, and the bead stays
+# with the refinery for its next patrol, whose find-work takes a bead only asks
+# hold. A record that does not land after the ask did leaves the ask holding the
+# merge, and files a human gate keyed refinery-requeue-failed on the bead, which
+# names the record to write by hand, because a bead an ask blocks is no ready
+# work that brings the refinery back to it.
 #
 # A convoy, which gc sling would take as its run's input convoy rather than its
 # work, keeps what it carries and comes back as a rework child: a task on the
@@ -216,25 +224,36 @@ if [ "$(bead_meta merge_result)" = pull_request_head_changed ] || [ "$KIND" = co
   fi
   if [ "$KIND" != convoy ]; then
     [ -n "$PR" ] || stop "$BEAD owns an open PR on the record but names none (existing_pr and pr_url are empty)"
+    # The ask goes first and the record second (see the header).
+    LINE="The refinery sent $PREP_READ back:"
+    ON=$(bd_json list --metadata-field "branch=$BRANCH" --status=open --limit=0) \
+      && printf '%s' "$ON" | jq -e 'type == "array"' >/dev/null 2>&1 \
+      || stop "the open beads on $BRANCH did not read, so whether an ask for $PREP_READ already stands is unknown"
+    ASK=$(printf '%s' "$ON" | jq -r --arg b "$BRANCH" --arg l "$LINE" "$REFINERY_ASK_JQ"'[ .[] | select(refinery_ask($b))
+      | select(((.description // "") | split("\n") | .[0]) == $l) ] | sort_by(.created_at // .id) | .[0].id // empty')
+    if [ -n "$ASK" ]; then
+      echo "$PROG: ask $ASK, which an earlier requeue of $PREP_READ filed, is open on $BRANCH, so no second is filed" >&2
+    else
+      ARC=0
+      AOUT=$("$GCTK" review ask "$BEAD" --reason "$LINE
+$REASON" </dev/null 2>&1) || ARC=$?
+      [ "$ARC" = 0 ] || stop "the ask that sends $BRANCH to $BEAD's review run did not land ($(said "$AOUT" "gctk review ask")), so $PR is not recorded pending at $PREP_READ"
+      ASK=$(printf '%s\n' "$AOUT" | tail -n 1 | cut -d' ' -f1)
+      [ -n "$ASK" ] || stop "gctk review ask named no ask on $BEAD, so $PR is not recorded pending at $PREP_READ"
+    fi
     RRC=0
     ROUT=$(GC_RIG_ROOT="$HOME_DIR" "$GCTK" pr record "$BEAD" --pr "$PR" --head "$PREP_READ" --target "$TARGET" \
       --refinery "$GC_AGENT" </dev/null 2>&1) || RRC=$?
     case "$RRC" in
       0) ;;
-      3) echo "$PROG: $BEAD changed after it was read, so it was left as it is: $(said "$ROUT" "gctk pr record")" >&2
+      3) echo "$PROG: $BEAD changed after it was read, so it was left as it is, and ask $ASK holds its merge: $(said "$ROUT" "gctk pr record")" >&2
          exit 3 ;;
-      *) stop "the record of $PR as pending at $PREP_READ did not land ($(said "$ROUT" "gctk pr record")), and the landing order pours the run that takes an ask only for a record pending at the PR's head" ;;
+      *) HAND="GC_RIG_ROOT=$(printf '%q' "$HOME_DIR") $GCTK pr record $BEAD --pr $PR --head $PREP_READ --target $TARGET --refinery $GC_AGENT"
+         "$HERE/human-gate.sh" --subject "$BEAD" --key refinery-requeue-failed --message "The refinery filed ask $ASK to send $BEAD's branch $BRANCH back to its review run ($REASON), but recording $PR as pending at $PREP_READ did not land ($(said "$ROUT" "gctk pr record")). The ask holds the merge, no run takes it until the record names that head, and a bead an ask blocks is no ready work that brings the refinery back. Record it by hand: $HAND, then clear this gate." >/dev/null \
+           || echo "$PROG: no refinery-requeue-failed gate landed on $BEAD either; record it by hand: $HAND" >&2
+         stop "ask $ASK holds $BEAD's merge, and the record of $PR as pending at $PREP_READ did not land ($(said "$ROUT" "gctk pr record")), so a refinery-requeue-failed gate asks a person to write it" ;;
     esac
-    ARC=0
-    AOUT=$("$GCTK" review ask "$BEAD" --reason "$REASON" </dev/null 2>&1) || ARC=$?
-    if [ "$ARC" != 0 ]; then
-      HAND="$GCTK review ask $BEAD --reason $(printf '%q' "$REASON")"
-      "$HERE/human-gate.sh" --subject "$BEAD" --key refinery-requeue-failed --message "The refinery recorded $PR as pending at $PREP_READ to send $BEAD's branch $BRANCH back to its review run ($REASON), but the ask the run takes did not land ($(said "$AOUT" "gctk review ask")), so nothing works it, and the landing order pours no run while this gate stands. File it by hand: $HAND, then clear this gate." >/dev/null \
-        || echo "$PROG: no refinery-requeue-failed gate landed on $BEAD either; file the ask by hand: $HAND" >&2
-      echo "$PROG: $PR is recorded pending at $PREP_READ, and the ask for $BEAD's branch did not land ($(said "$AOUT" "gctk review ask")), so a refinery-requeue-failed gate asks a person to file it" >&2
-      exit 1
-    fi
-    echo "$PROG: $BEAD keeps its PR $PR, recorded pending at $PREP_READ, and the review run the landing order pours takes its ask ${AOUT%% *}: $REASON"
+    echo "$PROG: $BEAD keeps its PR $PR, recorded pending at $PREP_READ, and the review run the landing order pours takes its ask $ASK: $REASON"
     exit 0
   fi
   ORDER=$(jq -nc --arg a "$BEAD" --arg b "$BRANCH" --arg t "$TARGET" --arg r "$REASON" --arg p "$PR" \
