@@ -17,7 +17,8 @@
 #      pack directory, or GC_PACK_DIR in text an agent session runs, where gc
 #      never sets it.
 #   2. Each kind of text names the binding the way its rendering allows: a
-#      formula drops the dot from {{binding_prefix}}, a prompt or fragment
+#      formula drops the dot from {{binding_prefix}}, an expansion formula from
+#      {binding_prefix}, the form its template renders, a prompt or fragment
 #      renders {{ .BindingName }}, and a skill writes <binding> for the agent
 #      to fill in.
 #   3. A formula's resolver line, run under a stub gc, takes the directory gc
@@ -120,25 +121,28 @@ else bad "no loop probes candidate directories for a pack file" "$(printf '%s\n'
 
 echo "── 2. each kind of text names the binding its rendering carries ──"
 FORMULA_FORM="\$(b='{{binding_prefix}}'; gc \"\${b%.}\" scripts-dir)"
+EXPANSION_FORM="\$(b='{binding_prefix}'; gc \"\${b%.}\" scripts-dir)"
 calls=0; wrong=""
 for f in "$ROOT"/formulas/*.toml "$ROOT"/packs/gascity-keeper/formulas/*.toml; do
+  form=$FORMULA_FORM
+  grep -q -E '^type[[:space:]]*=[[:space:]]*"expansion"' "$f" && form=$EXPANSION_FORM
   while IFS= read -r line; do
     calls=$((calls + 1))
     case "$line" in
-      *"$FORMULA_FORM"*) ;;
+      *"$form"*) ;;
       *) wrong="$wrong${f##*/}: $line"$'\n' ;;
     esac
   done < <(grep -E 'gc [^ ]+ scripts-dir|scripts-dir\)' "$f" | grep -v -E '^description[[:space:]]*=' || true)
 done
 [ "$calls" -ge 100 ] && ok "the formulas call scripts-dir ($calls lines)" \
   || bad "the formulas call scripts-dir on only $calls lines; the scan is not reading them"
-[ -z "$wrong" ] && ok "every formula call drops the dot from {{binding_prefix}}: $FORMULA_FORM" \
+[ -z "$wrong" ] && ok "every formula call drops the dot from {{binding_prefix}}, or an expansion's from {binding_prefix}: $FORMULA_FORM" \
   || bad "every formula call drops the dot from {{binding_prefix}}" "$(printf '%s' "$wrong" | head -10)"
 # A formula that names the var declares it with a default, which an order's
 # pour takes (formula-binding-prefix-default.test.sh holds the default).
 undeclared=""
 for f in "$ROOT"/formulas/*.toml "$ROOT"/packs/gascity-keeper/formulas/*.toml; do
-  grep -qF "$FORMULA_FORM" "$f" || continue
+  grep -qF -e "$FORMULA_FORM" -e "$EXPANSION_FORM" "$f" || continue
   grep -Eq '^\[vars\.binding_prefix\][[:blank:]]*$' "$f" || undeclared="$undeclared ${f##*/}"
 done
 [ -z "$undeclared" ] && ok "every formula that resolves the pack declares [vars.binding_prefix]" \

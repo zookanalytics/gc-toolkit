@@ -1,7 +1,9 @@
 package prstatus
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 )
@@ -72,17 +74,21 @@ func Render(a pr.Answer, f Facts) State {
 }
 
 // RenderReasons returns what holds a PR on Gas Town's pending record, in the
-// order [Reasons] gives: each open human gate the walk names, the review
-// threads the evaluator finds waiting on the city's answer, and each bead a
-// person owes the next move on. The threads hold the PR only while nothing of
-// the city's acts on them, the rule [unansweredFeedback] applies on the old
-// record. The merge pass's blocked verdict and its count of threads are no
-// reason here: that pass reads only the old record, so on a bead on this one
-// they stand as it last wrote them.
+// order [Reasons] gives: each open human gate the walk names, a review run that
+// ended without a result at the PR's head, the review threads the evaluator
+// finds waiting on the city's answer, and each bead a person owes the next move
+// on. The threads hold the PR only while nothing of the city's acts on them,
+// the rule [unansweredFeedback] applies on the old record. The merge pass's
+// blocked verdict and its count of threads are no reason here: that pass reads
+// only the old record, so on a bead on this one they stand as it last wrote
+// them.
 func RenderReasons(a pr.Answer, f Facts) []Reason {
 	var out []Reason
 	for _, g := range f.Gates {
-		out = append(out, Reason{Held: HeldGate, ID: g.ID, Title: g.Title})
+		out = append(out, gateReason(g))
+	}
+	if r, failed := runFailed(a, f); failed {
+		out = append(out, r)
 	}
 	if n := threadsHeld(a, f); n > 0 {
 		out = append(out, Reason{Held: HeldReview, Title: threadsAwaiting(n)})
@@ -91,6 +97,34 @@ func RenderReasons(a pr.Answer, f Facts) []Reason {
 		out = append(out, Reason{Held: HeldBlocked, ID: b.ID, Title: b.Title})
 	}
 	return out
+}
+
+// runFailed is the reason a review run that ended without a result holds the
+// PR, the machine's fault: the evaluator finds no passed result at the head it
+// judged, no run attached to the anchor is live, the answer carries no result
+// for that head and target at all ([pr.Answer.ReviewResult]), and a run
+// attached to the anchor at that head and target has closed. It names the run
+// that closed last. A run that is live is the city's work in flight, and the
+// landing order pours another once the last one closed, so the reason stands
+// until a run is attached again.
+func runFailed(a pr.Answer, f Facts) (Reason, bool) {
+	if a.Head == "" || !slices.ContainsFunc(a.Conditions, func(c pr.Condition) bool { return c.Kind == pr.KindReview }) {
+		return Reason{}, false
+	}
+	var last *Run
+	for i, r := range f.Runs {
+		if !strings.EqualFold(r.Status, "closed") {
+			return Reason{}, false
+		}
+		if r.Head == a.Head && r.Target == a.Target && (last == nil || r.ClosedAt > last.ClosedAt) {
+			last = &f.Runs[i]
+		}
+	}
+	if last == nil || a.ReviewResult != nil {
+		return Reason{}, false
+	}
+	return Reason{ID: last.ID, Title: fmt.Sprintf("review run %s ended without a result at %s, and the landing order pours another; "+
+		"a second that ends so asks a person through a review-run-failed gate", last.ID, a.Head)}, true
 }
 
 // RenderHeld returns the held: value of each of [RenderReasons], once each, as

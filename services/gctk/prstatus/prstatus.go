@@ -221,6 +221,31 @@ type Facts struct {
 	// pr.OnRecord names is a PR on Gas Town's pending record, which the pr
 	// domain's evaluator answers for and [Render] renders.
 	MergeResult string
+	// Runs are the review runs attached to the anchor, open and closed: the
+	// roots of mol-pr-review its own `blocks` edges name.
+	Runs []Run
+}
+
+// Run is a review run attached to an anchor, as its root reads: its id, its
+// status, the head and the target it was poured at, and when it closed.
+type Run struct {
+	ID, Status, Head, Target, ClosedAt string
+}
+
+// reviewFormula is the formula of a review run.
+const reviewFormula = "mol-pr-review"
+
+// runsOf is the review runs among an anchor's blockers.
+func runsOf(blockers []Blocker) []Run {
+	var out []Run
+	for _, b := range blockers {
+		if b.Metadata["gc.kind"] != "workflow" || b.Metadata["gc.formula_name"] != reviewFormula {
+			continue
+		}
+		out = append(out, Run{ID: b.ID, Status: b.Status, Head: b.Metadata["gc.var.head"],
+			Target: b.Metadata["gc.var.target"], ClosedAt: b.ClosedAt})
+	}
+	return out
 }
 
 // InFlightStatuses are the statuses at which a bead carrying anchor_bead is in
@@ -244,8 +269,9 @@ func Derive(f Facts) State {
 	threads, _ := splitDated(f.PRUnansweredThreads)
 
 	// needs-attention: a blocker the city will not clear on its own. A hold
-	// stands, or something [Held] names, each a thing a person has to act on.
-	if isSet(f.MergeHold) || isSet(f.RebaseHold) || len(Held(f)) > 0 {
+	// stands, or something [Reasons] names, each a thing a person has to act
+	// on.
+	if isSet(f.MergeHold) || isSet(f.RebaseHold) || len(Reasons(f)) > 0 {
 		return NeedsAttention
 	}
 	// A recorded posture, verdict or thread count outside the vocabulary its
@@ -315,11 +341,12 @@ func Blocked(f Facts) bool {
 // held value of their own.
 func Held(f Facts) []Hold { return holdsOf(Reasons(f)) }
 
-// holdsOf is the held: value of each reason, once each, in their order.
+// holdsOf is the held: value of each reason, once each, in their order. A
+// reason that is the machine's fault stands for none.
 func holdsOf(reasons []Reason) []Hold {
 	var held []Hold
 	for _, r := range reasons {
-		if !slices.Contains(held, r.Held) {
+		if r.Held != "" && !slices.Contains(held, r.Held) {
 			held = append(held, r.Held)
 		}
 	}
@@ -330,11 +357,24 @@ func holdsOf(reasons []Reason) []Hold {
 // what it is. A human gate or a bead a person owes the next move on is a bead,
 // which ID names and Title quotes, and engaging that bead is how a person acts
 // on it. Review threads and the merge pass's blocked verdict are the PR's own,
-// so ID is empty and Title says what holds it.
+// so ID is empty and Title says what holds it. Held is empty for the machine's
+// own fault, which no held: label names: a review run that ended without a
+// result at the PR's head, or a gate a review run's failure filed
+// ([IsMachineGate]). It reads needs-attention, as the city's machinery failing
+// rather than a person's hold or a ruling owed.
 type Reason struct {
 	Held  Hold   `json:"held"`
 	ID    string `json:"id"`
 	Title string `json:"title"`
+}
+
+// gateReason is the reason a human gate holds the PR: a person's hold, or the
+// machine's fault for a gate a review run's failure filed.
+func gateReason(g Blocker) Reason {
+	if IsMachineGate(g) {
+		return Reason{ID: g.ID, Title: g.Title}
+	}
+	return Reason{Held: HeldGate, ID: g.ID, Title: g.Title}
 }
 
 // Reasons returns each thing that holds the PR, in the order of the held:
@@ -346,7 +386,7 @@ type Reason struct {
 func Reasons(f Facts) []Reason {
 	var out []Reason
 	for _, g := range f.Gates {
-		out = append(out, Reason{Held: HeldGate, ID: g.ID, Title: g.Title})
+		out = append(out, gateReason(g))
 	}
 	blocked := Blocked(f)
 	if blocked && f.PRMachineCause == CauseReviewThreads {

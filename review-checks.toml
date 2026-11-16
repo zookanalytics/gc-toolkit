@@ -16,7 +16,8 @@
 # takes the rig's rows at the commit it judges (git show <oid>:review-checks.toml),
 # so a branch is judged against the index it carries. In gc-toolkit both layers
 # read this path: the pack's layer is the installed copy, and the rig's layer is
-# the copy at the commit being judged. assets/scripts/review-checks.sh is the one
+# the copy at the commit being judged. gctk's review domain
+# (services/gctk/review/index.go), through `gctk review checks`, is the one
 # parser and the one resolver of that grammar and of the layering.
 #
 # Which lanes an anchor starts with is configuration, not this file: the default

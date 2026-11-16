@@ -21,6 +21,9 @@
 #     neither holds its bead nor works its branch, so the bead is taken and the
 #     child named; one in flight, assigned, armed, labeled with a hold, held,
 #     or filed for a review still does, and so does any other wait on the bead;
+#   - an ask on the bead's PR is neither a wait on it nor a writer of its
+#     branch, so the bead is taken; a rework child or another wait still holds
+#     it;
 #   - a bead the old path's cadence drives is left, and named;
 #   - no work exits 3, and a read that does not answer exits 1.
 set -uo pipefail
@@ -188,6 +191,35 @@ printf 'p c\np gate-2\n' > "$STUB_HOLDS"
 run
 eq "$RC" 3 "a bead another wait holds is left beside its unsent child"
 has "$ERR" "p waits on gate-2" "…and names that wait"
+
+echo "# an ask on the bead's PR is no wait and no writer"
+ask() { put "$(jq -nc --arg id "$1" --argjson m "${2:-{\}}" '{id: $id, title: "Review ask: x", status: "open", assignee: "", issue_type: "task", notes: "",
+  metadata: ({branch: "polecat/p"} + $m)}')"; }
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/52"}'
+ask k
+echo "p k" > "$STUB_HOLDS"
+run
+eq "$RC $OUT" "0 p" "the bead an ask holds, on the ask's branch, is taken"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+ask k
+printf 'p k\np gate-3\n' > "$STUB_HOLDS"
+run
+eq "$RC" 3 "a bead another wait holds is left beside its ask"
+has "$ERR" "p waits on gate-3" "…and names that wait"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+ask k '{"gc.routed_to":"rig-a/gc-toolkit.polecat"}'
+echo "p k" > "$STUB_HOLDS"
+run
+eq "$RC" 3 "a routed bead on the branch is no ask, and still holds the bead"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+ask k '{"gc.execution_routed_to":"rig-a/gc-toolkit.polecat"}'
+echo "p k" > "$STUB_HOLDS"
+run
+eq "$RC" 3 "a bead on the branch whose workflow Gas City's sling started is no ask, and still holds the bead"
 
 echo "# a bead the old path's cadence drives is left and named"
 fresh

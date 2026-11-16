@@ -125,19 +125,26 @@ func (k Key[T]) Get(r *Record) (v T, ok bool, err error) {
 	return v, false, nil
 }
 
-// Set adds the key's value to w. A key declared read-only, or a value that does
-// not encode, fails the write.
-func (k Key[T]) Set(w *Write, v T) {
+// Act is an act a key's value is set in: a Write on a bead, or the Filing of a
+// new one.
+type Act interface {
+	set(name, text string)
+	fail(err error)
+}
+
+// Set adds the key's value to a. A key declared read-only, or a value that does
+// not encode, fails the act.
+func (k Key[T]) Set(a Act, v T) {
 	if k.decl.readOnly {
-		w.fail(fmt.Errorf("%s is declared read-only by %s, since no domain owns it yet", k.decl.name, k.decl.pkg))
+		a.fail(fmt.Errorf("%s is declared read-only by %s, since no domain owns it yet", k.decl.name, k.decl.pkg))
 		return
 	}
 	text, err := k.codec.Encode(v)
 	if err != nil {
-		w.fail(fmt.Errorf("%s does not encode as %s: %w", k.decl.name, k.decl.typ, err))
+		a.fail(fmt.Errorf("%s does not encode as %s: %w", k.decl.name, k.decl.typ, err))
 		return
 	}
-	w.set(k.decl.name, text)
+	a.set(k.decl.name, text)
 }
 
 // Clear adds the key's removal to w: its current spelling and every alias.

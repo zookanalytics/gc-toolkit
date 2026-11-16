@@ -11,8 +11,11 @@
 # claim moved on therefore refuses, rather than closing the next step unrun.
 #
 # <ref> is the step's gc.step_ref, such as mol-review.review. For a check loop's
-# step it is the loop's name, such as self-review, whose claims carry
-# self-review.iteration.<n>.
+# step it is the loop's name, such as self-review. Its claims carry the name, a
+# run's first iteration as self-review.iteration.1 and each later one with the
+# formula's name before it, as mol-polecat-work.self-review.iteration.2, and a
+# step bonded inside an iteration, such as a review lane, carries its bond's
+# formula name before that.
 #
 # A bead already closed is reported and exits 0, so a close whose call was
 # interrupted can be run again. A plain routed bead with no steps is refused like
@@ -91,7 +94,7 @@ fi
 
 REF=$(printf '%s' "$ROW" | jq -r '.[0].metadata["gc.step_ref"] // ""')
 case "$REF" in
-  "$STEP"|"$STEP".iteration.*) ;;
+  "$STEP"|"$STEP".iteration.*|*."$STEP".iteration.*) ;;
   *)
     echo "$PROG: this session's current claim is $ID (${REF:-not a formula step}), not $STEP, so nothing was closed. When you have not claimed $STEP yet, run gc hook --claim --json first." >&2
     exit 2 ;;

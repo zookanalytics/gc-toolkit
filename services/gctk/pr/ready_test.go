@@ -15,6 +15,7 @@ import (
 	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
 // Each test starts from a PR the evaluator reads ready, and changes the one
@@ -281,28 +282,59 @@ func TestApproval(t *testing.T) {
 	}
 }
 
+// A review result counts only at the PR's live head and target, and the answer
+// carries the one it found there, passed or not, which prstatus reads to tell a
+// closed run that recorded a result from one that ended without one.
 func TestReviewResultCountsOnlyAtTheLiveHeadAndTarget(t *testing.T) {
-	cases := map[string]string{
-		"a result for another head":  `[{"head":"` + other + `","target":"main","passed":true}]`,
-		"a result for another base":  `[{"head":"` + head + `","target":"release","passed":true}]`,
-		"a result that did not pass": `[{"head":"` + head + `","target":"main","passed":false}]`,
-		"no result":                  ``,
+	carries := func(t *testing.T, a pr.Answer, want *review.Result) {
+		t.Helper()
+		if !reflect.DeepEqual(a.ReviewResult, want) {
+			t.Fatalf("the answer carries the review result %+v, want %+v", a.ReviewResult, want)
+		}
 	}
-	for name, results := range cases {
+	cases := map[string]struct {
+		results string
+		want    *review.Result
+	}{
+		"a result for another head": {`[{"head":"` + other + `","target":"main","passed":true}]`, nil},
+		"a result for another base": {`[{"head":"` + head + `","target":"release","passed":true}]`, nil},
+		"a result that did not pass": {`[{"head":"` + head + `","target":"main","passed":false,"run":"tk-run1"}]`,
+			&review.Result{Head: head, Target: "main", Run: "tk-run1"}},
+		"no result": {``, nil},
+	}
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			w := ready()
-			if results == "" {
+			if c.results == "" {
 				delete(w.md, "review_results")
 			} else {
-				w.md["review_results"] = results
+				w.md["review_results"] = c.results
 			}
-			only(t, w.answer(t), pr.KindReview)
+			a := w.answer(t)
+			only(t, a, pr.KindReview)
+			carries(t, a, c.want)
 		})
 	}
 	t.Run("a branch taken back to a head the loop judged finds that head's result again", func(t *testing.T) {
 		w := ready()
 		w.md["review_results"] = `[{"head":"` + head + `","target":"main","passed":true},{"head":"` + other + `","target":"main","passed":false}]`
-		isReady(t, w.answer(t))
+		a := w.answer(t)
+		isReady(t, a)
+		carries(t, a, &review.Result{Head: head, Target: "main", Passed: true})
+	})
+	t.Run("an answer that judged no head carries no result", func(t *testing.T) {
+		const failed = `[{"head":"` + head + `","target":"main","passed":false,"run":"tk-run1"}]`
+		w := ready()
+		w.md["review_results"] = failed
+		a := w.fromStore(t, w.md)
+		only(t, a, pr.KindGitHubUnread)
+		carries(t, a, nil)
+		w = ready()
+		w.md["review_results"] = failed
+		delete(w.md, "branch")
+		a = w.answer(t)
+		only(t, a, pr.KindRecord)
+		carries(t, a, nil)
 	})
 }
 

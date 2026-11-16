@@ -106,6 +106,40 @@ func unhandled(rc receipts, n NewestFeedback) []Condition {
 	return out
 }
 
+// unrouted is the ids of the inline comments that dismissing the reviews named
+// would retire before the intake routes them, in id order: each is carried by
+// one of those reviews, is feedback by the definition, which also leaves out a
+// comment a dismissal already retired, and is newer than the comment watermark
+// and the mark the threads have answered through. It is the rule a dismisser
+// waits by (unrouted_comment_ids in assets/scripts/review-dismissal.sh), the
+// definition applied to the comments it names.
+func unrouted(rule Feedback, self, since string, rc receipts, threads []gh.Thread, reviews []int64) ([]int64, error) {
+	var carried []feedback.Comment
+	for _, t := range threads {
+		for _, c := range t.Comments {
+			if c.Review != nil && slices.Contains(reviews, c.Review.ID) {
+				carried = append(carried, commentOf(c))
+			}
+		}
+	}
+	if len(carried) == 0 {
+		return nil, nil
+	}
+	ids, err := rule.Comments(self, since, carried)
+	if err != nil {
+		return nil, err
+	}
+	floor := max(rc.comment, rc.commentAnswered)
+	var out []int64
+	for _, id := range ids {
+		if id > floor {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 // newest is the highest id above floor among ids, of those only names when it
 // is not nil, or 0 when there is none.
 func newest(ids []int64, floor int64, only map[int64]bool) int64 {
