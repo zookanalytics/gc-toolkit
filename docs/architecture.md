@@ -158,16 +158,16 @@ performer; the full transition table with writers is
    ([state-machine.md](state-machine.md#the-pending-record)).
 7. **Review.** For each head the refinery validates without a passed review
    result, the landing order pours a review run. The run records the PR's
-   review result, which the evaluator reads. While it works, the run is the one
-   worker on the PR's branch. Work that needs the branch changed, such as a
-   person's comment or a conflict with the target, is filed as an ask, and a
-   run takes it. A converse sitting the operator rules edit the branch with
-   them can push while a run works it, and the lease keeps either push from
-   overwriting the other. Each city writer returns the PR to draft before it
-   pushes. The landing order marks the PR ready once a run has passed at the
-   head the refinery validated. When a run rules a head's change material, the
-   landing order dismisses each approval given on a commit that does not
-   contain that head.
+   review result, which the evaluator reads. While it works, the run is the
+   one worker on the PR's branch. A converse sitting the operator rules edit the
+   branch with them can push while a run works it, and the lease keeps either
+   push from overwriting the other. Work that needs the branch changed, such as
+   a person's comment or a conflict with the target, is filed as an ask, and a
+   run takes it. Each city writer returns the PR to draft before it pushes.
+   The landing order marks the PR ready once a run has passed at the head the
+   refinery validated. When a run rules a head's change material, the landing
+   order dismisses each approval given on a commit that does not contain that
+   head.
 8. **Merge.** The landing order has GitHub merge each PR on the pending record
    at the head the refinery validated, once the evaluator reads the PR ready,
    and closes the bead once the merge commit is on the target
