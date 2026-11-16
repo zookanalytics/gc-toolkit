@@ -16,6 +16,8 @@ AI changed the cost of work. Agent iteration, parallel exploration, and self-cri
 
 **Agents earn every interaction.** Make it count: do the cheap work, plan ahead, and frame the choice. Every interruption justifies the attention it claims.
 
+**Interrupts stay out of conversation.** An alert or an escalation that arrives unasked does not flow to where a person is expected to engage and discuss with an LLM.
+
 **Agents improve.** Lessons come from doing; the system carries them across restarts so the next conversation starts smarter.
 
 **Agents make their edges visible.** Looking smart and being smart are different. Legible agents show which.
@@ -23,6 +25,8 @@ AI changed the cost of work. Agent iteration, parallel exploration, and self-cri
 **Decisions have a home.** Documentation is the system's memory. What's written survives; what isn't, doesn't.
 
 **The pack borrows before it invents.** Most coordination problems aren't new, and many AI-era patterns are already published. gc-toolkit aggregates and cites; reinvention is the fallback when nothing fits.
+
+**Deterministic code does deterministic work.** Running an LLM on work that is completely scriptable wastes tokens. Decisions still go to LLMs.
 
 ## Boundaries
 
