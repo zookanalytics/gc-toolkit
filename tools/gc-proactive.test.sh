@@ -851,12 +851,14 @@ rm -f "$TMP/scan.json" "$TMP/beads.json"
 # These cases run the tool's real reads, run-lib.sh's included, against a stub
 # gc over a JSON store, a stub gctk and a stub human-gate.sh. The stub gc
 # answers each read the way bd does: `list` hides a gate-typed row unless
-# --include-gates is passed and a closed row unless --all is, `show` answers
-# the rows it finds and an error when it finds none, and `dep list --direction
-# up` answers the beads that track the one named. A read whose arguments match
-# a pattern in LIVE_FAIL answers bd's error object instead. gc sling answers
-# per bead from sling/<bead>.out and .rc. The rig map names a path with no
-# .beads directory, so no read is pinned to a store.
+# --include-gates is passed and a closed row unless --all is, and its
+# --has-metadata-key matches a key whatever its value, an empty one included;
+# `show` answers the rows it finds and an error when it finds none, and `dep
+# list --direction up` answers the beads that track the one named. A read whose
+# arguments match a pattern in LIVE_FAIL answers bd's error object instead, and
+# a list read whose arguments match one in LIVE_TWICE prints its answer twice.
+# gc sling answers per bead from sling/<bead>.out and .rc. The rig map names a
+# path with no .beads directory, so no read is pinned to a store.
 LIVE="$TMP/live"
 mkdir -p "$LIVE/bin" "$LIVE/show" "$LIVE/holds" "$LIVE/sling"
 cat > "$LIVE/bin/gc" <<'SH'
@@ -868,6 +870,12 @@ while IFS= read -r pat; do
     # shellcheck disable=SC2053  # a pattern on purpose
     [[ "$*" == $pat ]] && fail "database is locked"
 done <<< "${LIVE_FAIL:-}"
+twice=""
+while IFS= read -r pat; do
+    [ -n "$pat" ] || continue
+    # shellcheck disable=SC2053  # a pattern on purpose
+    [[ "$*" == $pat ]] && twice=1
+done <<< "${LIVE_TWICE:-}"
 case "$1" in
   rig) [ "$*" = "rig list --json" ] && { printf '{"rigs":[{"name":"gc-toolkit","prefix":"tk","path":"/nonexistent/gc-toolkit"}]}'; exit 0; } ;;
   agent) printf '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.proactive","pool":{"max":2}}]}'; exit 0 ;;
@@ -918,13 +926,14 @@ case "$1" in
         --limit|--db) shift 2 ;;
         *) fail "unexpected list flag: $1" ;;
     esac; done
-    jq -c --arg ids "$ids" --arg hk "$hk" --arg all "$all" --arg gates "$gates" --args '
+    jq -c --arg ids "$ids" --arg hk "$hk" --arg all "$all" --arg gates "$gates" --arg twice "$twice" --args '
         ($ARGS.positional | map(split("=") | {k: .[0], v: (.[1:] | join("="))})) as $mf
         | [ .[] | select($ids == "" or (.id as $i | ($ids | split(",") | index($i)) != null))
                 | select($all != "" or ((.status // "open") != "closed"))
                 | select($gates != "" or ((.issue_type // "") != "gate"))
-                | select($hk == "" or ((((.metadata // {})[$hk]) // "") | tostring) != "")
-                | select(. as $r | all($mf[]; ((($r.metadata // {})[.k]) // "" | tostring) == .v)) ]' \
+                | select($hk == "" or ((.metadata // {}) | has($hk)))
+                | select(. as $r | all($mf[]; ((($r.metadata // {})[.k]) // "" | tostring) == .v)) ]
+        | if $twice == "" then . else (., .) end' \
         "${mf[@]}" < "$LIVE/store.json" ;;
   *) fail "unexpected bd call: $*" ;;
 esac
@@ -1128,6 +1137,36 @@ LIVE_FAIL='bd list --has-metadata-key gc.instantiating*' live scan --json
 IDS="$(printf '%s' "$OUT" | grep '^\[' | jq -r '.[].id' | sort | tr '\n' ' ' || true)"
 has "$OUT" "could not read whether the live first reactions' pours finished" "(INFLIGHT-READS) marks that do not read are named"
 hasnt "$IDS" "tk-sf" "(INFLIGHT-READS) …and every live first reaction's bead stays out of the sweep"
+
+echo "# the marks of an unfinished pour: reads larger than ARG_MAX, each one list"
+# The fenced read matches the key whatever its value, so it answers every bead
+# whose fence Gas City cleared to an empty value, each row whole. These cleared
+# fences, one on a step under the live reaction tk-root-reacting, come to more
+# than ARG_MAX, the cap on a command's arguments.
+ARG_MAX_BYTES="$(getconf ARG_MAX)"
+cp "$LIVE/store.json" "$LIVE/store.small.json"
+jq -c --argjson max "$ARG_MAX_BYTES" '. + [ range(24) as $i
+    | {id: "tk-cleared-\($i)", status: "closed", issue_type: "task", description: ("x" * ($max / 16 | floor)),
+       metadata: {"gc.instantiating": "", "gc.root_bead_id": (if $i == 0 then "tk-root-reacting" else "tk-root-old-\($i)" end)}} ]' \
+    "$LIVE/store.small.json" > "$LIVE/store.json"
+FENCED_BYTES="$(env PATH="$LIVE/bin:$PATH" LIVE="$LIVE" gc bd list --has-metadata-key gc.instantiating --all --include-gates --include-ephemeral --limit 0 --json | wc -c | tr -d '[:space:]' || true)"
+[ "$FENCED_BYTES" -gt "$ARG_MAX_BYTES" ] 2>/dev/null && ok "(MARKS-READS) the fenced read answers more than ARG_MAX ($FENCED_BYTES > $ARG_MAX_BYTES bytes)" \
+    || bad "(MARKS-READS) the fenced read answers more than ARG_MAX (got '$FENCED_BYTES' bytes, ARG_MAX $ARG_MAX_BYTES)"
+live sling tk-reacting --check --run tk-root-reacting
+eq "$RC" 0 "(MARKS-READS) the reaction's own check passes over its run (exit 0)"
+has "$OUT" "tk-reacting takes this first reaction (run tk-root-reacting)" "(MARKS-READS) …having read its runs"
+live sling tk-reacting
+eq "$RC" 3 "(MARKS-READS) a sling onto the live reaction is refused (exit 3)"
+has "$OUT" "a first reaction already runs on it (tk-root-reacting)" "(MARKS-READS) …the fence cleared under its root marking no unfinished pour"
+live scan --json
+IDS="$(printf '%s' "$OUT" | grep '^\[' | jq -r '.[].id' | sort | tr '\n' ' ' || true)"
+hasnt "$OUT" "could not read whether the live first reactions' pours finished" "(MARKS-READS) the scan reads the marks"
+has "$IDS" "tk-sf" "(MARKS-READS) …keeping the bead whose only run is a pour its fence still holds"
+hasnt "$IDS" "tk-reacting" "(MARKS-READS) …and dropping the one a live first reaction runs on"
+mv "$LIVE/store.small.json" "$LIVE/store.json"
+LIVE_TWICE='bd list --metadata-field molecule_failed=true*' live sling tk-reacting --check --run tk-root-reacting
+eq "$RC" 1 "(MARKS-READS) a marks read that answers twice decides nothing (exit 1)"
+has "$OUT" "cannot read the runs that work tk-reacting" "(MARKS-READS) …saying why"
 
 echo "# the ready read: one read, and a failure in any shape fails the scan"
 live scan --json
