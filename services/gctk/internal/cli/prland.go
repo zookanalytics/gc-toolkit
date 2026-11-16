@@ -113,10 +113,9 @@ as its vars, and the pools and binding the refinery's address names
 repair_target <rig>/<binding>polecat and binding_prefix <binding>. No run is
 poured while one is attached to the bead, while another open bead names the
 PR's branch, such as a rework child, or while a human gate holds the bead. A
-conversation that holds the bead keeps the run off the branch too, since its
-sitting may be editing it, unless the sitting stays for the work its ruling
-sent, because it edits nothing until that work lands. A run that ended without
-a result is poured again. When the last two runs at the validated head both
+conversation on the PR holds only its merge, so runs are poured while it is
+open, and the merge waits until it closes. A run that ended without a result
+is poured again. When the last two runs at the validated head both
 ended without one, counting only runs that ended after the bead's last
 review-run-failed gate closed, it files a human gate on the bead keyed
 review-run-failed instead, naming both runs and how each ended.
