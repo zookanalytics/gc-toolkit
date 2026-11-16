@@ -108,14 +108,16 @@ back to the refinery included, since the withdrawal holds the bead from the
 refinery until it is carried out.
 
 A PR a ruling retired is read apart from these: its bead carries the
-disposition pr-dispose.sh records before it closes the PR, and the run
-requests no merge for it, pours no review run, marks nothing ready, carries out
-no withdrawal and saves no GitHub read. Once the PR has closed and no review run
-is attached, the run closes the withdrawals and asks still open on the bead,
-and the bead closes onto the ruling's successor through bead-rehome.sh, run as
-the refinery once the record lock is free. A close the script holds for now,
-such as one the ruling's open conversation holds, is tried again by the next
-run. A retired PR that merged all the same lands as any other.
+disposition pr-dispose.sh records before it closes the PR, under the record
+lock, so a run reads the disposition or has made its last write of the record
+before the disposition lands. The run requests no merge for such a PR, pours no
+review run, marks nothing ready, carries out no withdrawal and saves no GitHub
+read. Once the PR has closed and no review run is attached, the run closes the
+withdrawals and asks still open on the bead, and the bead closes onto the
+ruling's successor through bead-rehome.sh, run as the refinery once the record
+lock is free. A close the script holds for now, such as one the ruling's open
+conversation holds, is tried again by the next run. A retired PR that merged
+all the same lands as any other.
 
 The review run is mol-pr-review, poured with gc formula cook --attach onto the
 bead under the record lock, with the record's PR bead, head, target and branch

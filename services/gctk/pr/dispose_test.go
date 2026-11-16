@@ -245,60 +245,71 @@ func TestADispositionIsReadOnlyOnTheRefinerysBeadOnTheRecord(t *testing.T) {
 	}
 }
 
-// rulingHub is GitHub while a ruling lands: rule records the ruling's
-// disposition on the bead as the run reads the PR, after the run read the bead.
+// rulingHub is GitHub while a ruling waits for the record lock, which it takes
+// from its read of the bead to its stamp of the disposition (pr-dispose.sh): at
+// the run's read of the PR and at its merge request, the ruling tries the lock
+// once, and tries records what each try found.
 type rulingHub struct {
 	pr.Hub
-	rule func()
+	dir   string
+	tries *[]string
+}
+
+func (h rulingHub) try(at string) {
+	release, err := record.Lock(h.dir, 0)
+	switch {
+	case err == nil:
+		release()
+		*h.tries = append(*h.tries, at+": free")
+	case errors.Is(err, record.ErrLockWait):
+		*h.tries = append(*h.tries, at+": held")
+	default:
+		*h.tries = append(*h.tries, at+": "+err.Error())
+	}
 }
 
 func (h rulingHub) PullRequest(repo string, number int) (*gh.PullRequest, error) {
-	h.rule()
+	h.try("read")
 	return h.Hub.PullRequest(repo, number)
 }
 
-// A ruling records its disposition without the record lock and then closes the
-// PR, so a run that read the bead before the disposition landed can read the
-// PR the ruling closed. The run reads the bead again before it calls the close
-// the record's exception, and the bead goes to the disposition writer with no
-// gate filed, blocked on the record or a changed head the order sent back
-// behind a withdrawal.
-func TestAPRClosedByARulingAfterTheRunReadTheBeadIsRetired(t *testing.T) {
-	for name, setup := range map[string]func(*testing.T, *land){
-		"blocked on the record": func(*testing.T, *land) {},
-		"a changed head behind a withdrawal": func(t *testing.T, d *land) {
-			d.pr.Facts.HeadRefOid = later
-			d.edit(t, func(b *fake.Bead) {
-				b.Status = "open"
-				b.Metadata["merge_result"] = record.HeadChanged
-				b.Metadata["observed_pr_head_sha"] = later
-			})
-			d.withdraw(t, later)
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			d := newCycle(t)
-			r := &rehome{store: d.store}
-			d.l.Dispositions = r
-			setup(t, d)
-			d.pr.Facts.State = "CLOSED"
-			hub := d.l.Hub
-			d.l.Hub = func(host string) pr.Hub {
-				return rulingHub{Hub: hub(host), rule: func() {
-					d.edit(t, func(b *fake.Bead) {
-						b.Metadata["gc.pr_close_disposition_kind"] = "not-needed"
-						b.Metadata["gc.pr_close_disposition_successor"] = conversation
-					})
-				}}
-			}
-			is(t, d.once(t), pr.ActDisposed)
-			if g := d.gates.list(); len(g) != 0 {
-				t.Fatalf("a ruling's close the run read late filed gates %v", g)
-			}
-			if want := []string{bead + " not-needed " + conversation}; !slices.Equal(r.asked(), want) {
-				t.Fatalf("the writer was asked %v, want %v", r.asked(), want)
-			}
-		})
+func (h rulingHub) MergePullRequest(id, head string) error {
+	h.try("merge")
+	return h.Hub.MergePullRequest(id, head)
+}
+
+// A run holds the record lock from its read of the bead to its last write, so a
+// ruling that comes while the run reads an open PR the evaluator finds ready
+// waits for the run: the merge is requested before the ruling records that the
+// work will not land, never after it. The ruling records its disposition once
+// the lock is free, and the next run finds the PR merged and lands it as any
+// merge, asking nothing of the disposition writer.
+func TestARulingThatComesWhileARunReadsAnOpenPRWaitsForTheRun(t *testing.T) {
+	d := newCycle(t)
+	r := &rehome{store: d.store}
+	d.l.Dispositions = r
+	var tries []string
+	hub := d.l.Hub
+	d.l.Hub = func(host string) pr.Hub { return rulingHub{Hub: hub(host), dir: d.l.Dir, tries: &tries} }
+	is(t, d.once(t), pr.ActRequested)
+	if want := []string{"read: held", "merge: held"}; !slices.Equal(tries, want) {
+		t.Fatalf("the ruling's tries at the lock found %v, want %v", tries, want)
+	}
+	if want := []string{"MergePullRequest PR_7 " + head}; !slices.Equal(asks(d.github), want) {
+		t.Fatalf("GitHub was asked %v, want %v", asks(d.github), want)
+	}
+	release, err := record.Lock(d.l.Dir, 0)
+	if err != nil {
+		t.Fatalf("the ruling did not get the lock once the run ended: %v", err)
+	}
+	d.edit(t, func(b *fake.Bead) {
+		b.Metadata["gc.pr_close_disposition_kind"] = "not-needed"
+		b.Metadata["gc.pr_close_disposition_successor"] = conversation
+	})
+	release()
+	is(t, d.once(t), pr.ActLanded)
+	if len(r.asked()) != 0 {
+		t.Fatalf("a merged PR asked the disposition writer %v", r.asked())
 	}
 }
 

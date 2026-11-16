@@ -19,11 +19,12 @@ import (
 // and the landing order's runs read each record with Reconcile: they request
 // the merge of a PR the evaluator finds ready, close the bead once the merge
 // commit is on the target, send a changed head back to the refinery, and keep
-// the exceptions blocked behind a human gate. A PR a ruling retired, whose
-// bead carries the disposition the ruling recorded before it closed the PR, is
-// never merged, and once it has closed its bead goes to the disposition writer,
-// bead-rehome.sh, which closes it onto the successor the ruling named, with the
-// lock free. Each check of an open PR saves
+// the exceptions blocked behind a human gate. A ruling that retires a PR
+// records its disposition on the bead under the record lock and then closes
+// the PR (pr-dispose.sh). A run requests no merge of a PR whose bead carries
+// it, and once the PR has closed the bead goes to the disposition writer,
+// bead-rehome.sh, which closes it onto the successor the ruling named, with
+// the lock free. Each check of an open PR saves
 // GitHub's side of it on the bead, whole, in the write that records the check
 // (specs/tk-1tfzr71.134/design.md, section 3), and nothing the run acts on
 // reads that saved read back. Both take the store's record
@@ -694,8 +695,7 @@ func withdrawing(s state) bool {
 // so the bead goes to the refinery once nothing the order owes holds it, and a
 // check that keeps the marker saves GitHub's side as read after the carry. A PR
 // that closed or merged meanwhile is the record's exception, as on a pending
-// record, unless a ruling's disposition reached the bead and closed the PR
-// after the run read the bead (ruledSince).
+// record.
 func (u *run) requeued(s state) RunOutcome {
 	r := s.rec
 	retry := func(state, why string) RunOutcome {
@@ -738,9 +738,6 @@ func (u *run) requeued(s state) RunOutcome {
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActSettled,
 			Detail: "its changed head waits on the refinery's validation, and the marker is cleared: " + note})
 	case "CLOSED":
-		if out, done := u.ruledSince(s, p.Number, retry); done {
-			return out
-		}
 		return u.except(s, record.ClosedUnmerged, "closed_unmerged", "Pull request "+r.URL+" closed without merging.",
 			fmt.Sprintf("Pull request %s closed without merging while a withdrawal of its approvals was open, so %s stays "+
 				"blocked, and what waits on it stays held. Decide what becomes of the work: reopen the pull request and "+
@@ -753,9 +750,7 @@ func (u *run) requeued(s state) RunOutcome {
 
 // blocked handles a blocked bead the refinery holds: the record must be whole
 // and must read pending, or a verified merge whose close did not land. Its PR is
-// read from GitHub by its number. A PR that closed without merging is the
-// record's exception, unless a ruling's disposition reached the bead and closed
-// the PR after the run read the bead (ruledSince).
+// read from GitHub by its number.
 func (u *run) blocked(s state) RunOutcome {
 	r := s.rec
 	if record.Exception(r.Result) {
@@ -827,9 +822,6 @@ func (u *run) blocked(s state) RunOutcome {
 		}
 		return u.decide(s, host, hub, p, retry, note)
 	case "CLOSED":
-		if out, done := u.ruledSince(s, p.Number, retry); done {
-			return out
-		}
 		return u.except(s, record.ClosedUnmerged, "closed_unmerged", "Pull request "+r.URL+" closed without merging.",
 			fmt.Sprintf("Pull request %s closed without merging, so %s stays blocked, and what waits on it stays "+
 				"held. Decide what becomes of the work: reopen the pull request and send %s back to the refinery, "+
@@ -880,35 +872,6 @@ func (u *run) disposed(s state, d Disposition) RunOutcome {
 		return u.merged(s, p.HeadRefOid, p.MergeCommit, p.MergedAt, retry)
 	}
 	return retry("unknown", fmt.Sprintf("GitHub returned unknown PR state %q; will retry", p.State))
-}
-
-// ruledSince handles a PR the run read closed on a bead on the record that
-// carried no ruling's disposition when the run read it. A ruling records its
-// disposition without the record lock and then closes the PR (pr-dispose.sh),
-// so the close the run read can be a ruling's whose disposition reached the
-// bead after the run read it. The run reads the bead again, and a whole
-// disposition retires the PR as it would had the first read found it, and a
-// read that does not answer leaves the bead to the next run. done is false when
-// the bead carries none, and the closed PR is the record's exception.
-func (u *run) ruledSince(s state, number int, retry func(string, string) RunOutcome) (out RunOutcome, done bool) {
-	if !record.OnRecord(s.rec.Result) {
-		return RunOutcome{}, false
-	}
-	r, err := u.read(s.id)
-	if err != nil {
-		return retry("closed", "the bead did not read again for a ruling's disposition; will retry: "+err.Error()), true
-	}
-	if r == nil {
-		return RunOutcome{}, false
-	}
-	d, whole, err := dispositionOf(r)
-	if err != nil {
-		return retry("closed", "the disposition did not read; will retry: "+err.Error()), true
-	}
-	if !whole {
-		return RunOutcome{}, false
-	}
-	return u.retire(s, d, number, d.ruling(), retry), true
 }
 
 // retire handles a PR a ruling retired once it has closed. While a review run
@@ -1116,7 +1079,10 @@ func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry fun
 	// read once more just before it: a close or a release that took no lock and
 	// landed during the run's reads stops it here. One that lands after this
 	// read is the residual the design names, a merge requested before the run
-	// could read the release.
+	// could read the release. A ruling's disposition takes the record lock, so
+	// none lands while the run holds the record: one recorded before the run
+	// read the bead took the run to disposed, and one that comes later waits
+	// for the lock and lands after the request.
 	now, err := u.read(s.id)
 	if err != nil {
 		return retried("lookup_failed", "the bead did not read again before the merge request; will retry: "+err.Error())

@@ -1633,7 +1633,10 @@ and files the rework-or-close human gate.
 On the pending record the landing order consummates the same marker.
 `pr-facts.sh`'s close arm keeps to `pull_request`, so the landing order stays
 the one reader of the record's close. It requests no merge of a PR whose anchor
-carries the marker, and it reads such an anchor's record whatever its own
+carries the marker. `pr-dispose.sh` reads the anchor and stamps the marker under
+the store's record lock, which a run holds from its read of a record to its
+last write of it, so a merge a run requests comes before the marker, never
+after it. The landing order reads such an anchor's record whatever its own
 `pr_reconcile_pending`, so a changed head it had sent back to the refinery is
 read too. Once the PR reads CLOSED and no review run is attached to the anchor,
 it closes the asks and the approval withdrawals still open on the anchor, which

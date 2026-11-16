@@ -18,6 +18,18 @@
 # pending record the landing order also requests no merge of a PR whose anchor
 # carries the keys.
 #
+# The read of the anchor and the stamp hold the store's record lock, a flock on
+# pr-record.lock in the .beads directory of the store that holds the anchor
+# (bead-store.sh --db), which the landing order holds for each record from its
+# read of the record to its last write of it. So the stamp lands before a run
+# reads the anchor, and that run requests no merge, or after the run's last
+# write, and never between a run's read of the anchor and its merge request.
+# The lock is taken before the anchor is read and released once the stamp has
+# landed, before the PR is read or closed. Every gc call made while it is held
+# runs with its descriptor closed, so no process a store read leaves running
+# holds the lock. It waits up to $PR_RECORD_LOCK_WAIT_SECS (300) for the lock,
+# and a lock that does not come writes nothing. --dry-run takes no lock.
+#
 # The anchor must own an open PR that a closer reads: OPEN at
 # merge_result=pull_request, the state pr-facts enumerates, or not closed on the
 # pending record, which the landing order reads while the refinery holds the
@@ -41,13 +53,17 @@
 # operator close-outs — the PR side of the bead-rehome disposition doctrine
 # (docs/state-machine.md "Disposition").
 # The current store must be the anchor's rig (GC_RIG, or run in its checkout).
-# Exit: 0 stamped (PR closed) or already disposed · 1 error · 2 usage.
+# Exit: 0 stamped (PR closed) or already disposed · 1 error, a record lock that
+# did not come within the wait among them · 2 usage.
 set -uo pipefail
 
 PROG="pr-dispose"
 # The single writer of the city's PR posts: the closing comment goes through it
 # so it carries the city's mark and is never read back as feedback.
 PR_POST="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/pr-post.sh"
+# The one resolver of a bead's store, which names the store whose record lock
+# the stamp takes.
+BEAD_STORE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/bead-store.sh"
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -80,7 +96,9 @@ usage: pr-dispose.sh --anchor <bead-id> --successor <bead-id>
 Records a deliberate supersede/not-planned PR-close disposition on the open
 anchor and closes the PR; the PR's closer then closes the anchor through
 bead-rehome.sh instead of filing a human gate: pr-facts.sh at
-merge_result=pull_request, the landing order on the pending record.
+merge_result=pull_request, the landing order on the pending record. The read
+of the anchor and the stamp hold the store's record lock, waiting up to
+$PR_RECORD_LOCK_WAIT_SECS (300) while the landing order holds it.
 
   --anchor          the open work bead the PR gates (merge_result=pull_request,
                     pull_request_pending or pull_request_head_changed)
@@ -123,15 +141,33 @@ esac
 command -v gc >/dev/null 2>&1 || die "gc is required" 1
 command -v jq >/dev/null 2>&1 || die "jq is required" 1
 
+# The store's record lock (the header's rule), taken on fd 9 before the anchor
+# is read and held through the stamp.
+RECORD_LOCK_WAIT="${PR_RECORD_LOCK_WAIT_SECS:-300}"
+case "$RECORD_LOCK_WAIT" in ''|*[!0-9]*) RECORD_LOCK_WAIT=300 ;; esac
+take_record_lock() {
+  local db lock
+  db=$("$BEAD_STORE" --db "$ANCHOR" 2>/dev/null) && [ -n "$db" ] \
+    || die "the store that holds $ANCHOR did not resolve ('bead-store.sh --db $ANCHOR' says why), so its record lock cannot be taken; nothing written" 1
+  lock="$db/pr-record.lock"
+  command -v flock >/dev/null 2>&1 \
+    || die "flock is not on PATH, so the store's record lock ($lock) cannot be taken; nothing written" 1
+  exec 9>>"$lock" \
+    || die "the store's record lock ($lock) does not open; nothing written" 1
+  flock -w "$RECORD_LOCK_WAIT" 9 \
+    || die "another writer of a PR's pending record held the store's record lock ($lock) for ${RECORD_LOCK_WAIT}s; nothing written. Re-run this disposition" 1
+}
+[ "$DRY" -eq 1 ] || take_record_lock
+
 # Read the anchor from the current store.
-AJSON=$(gc bd show "$ANCHOR" --json 2>/dev/null | scrub)
+AJSON=$(gc bd show "$ANCHOR" --json 2>/dev/null 9>&- | scrub)
 printf '%s' "$AJSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
   || die "could not read anchor $ANCHOR from the current store; set GC_RIG to its rig, or run in that rig's checkout" 1
 A_STATUS=$(printf '%s' "$AJSON" | jq -r '.[0].status // ""')
 A_MR=$(printf '%s' "$AJSON" | jq -r '(.[0].metadata.merge_result // "") | tostring')
 # The disposition is read off the anchor's list row, which carries an edge onto
 # a successor in another rig's store as well.
-A_PRIOR=$(bd_disposed_to "$ANCHOR" || true)
+A_PRIOR=$(bd_disposed_to "$ANCHOR" 9>&- || true)
 [ -n "$PRNUM" ] || PRNUM=$(printf '%s' "$AJSON" | jq -r '(.[0].metadata.pr_number // "") | tostring')
 
 # Already disposed: bead-rehome already recorded its successor. Nothing to add.
@@ -172,7 +208,7 @@ PRNUM="$URL_NUM"
 # Best-effort: confirm the successor resolves. bead-rehome is the authority at
 # consummation (it searches every store), so an unresolved successor here only
 # warns — a false refusal on a cross-store successor would be worse.
-if ! gc bd show "$SUCCESSOR" --json 2>/dev/null | scrub | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+if ! gc bd show "$SUCCESSOR" --json 2>/dev/null 9>&- | scrub | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
   warn "could not confirm successor $SUCCESSOR in the current store; bead-rehome validates it at dispose time (pass --successor-store rig:<name> if its prefix is ambiguous)"
 fi
 
@@ -199,8 +235,10 @@ if [ -n "$STORE" ]; then
 else
   SET_ARGS+=(--unset-metadata "gc.pr_close_disposition_successor_store")
 fi
-gc bd update "$ANCHOR" "${SET_ARGS[@]}" >/dev/null 2>&1 \
+gc bd update "$ANCHOR" "${SET_ARGS[@]}" >/dev/null 2>&1 9>&- \
   || die "the store refused the disposition marker on $ANCHOR; NOT closing the PR, since a close now would abandon the anchor as an unknown close. Re-run once the store accepts the write" 1
+# The stamp has landed, so the record lock goes free before GitHub is read.
+exec 9>&-
 echo "$PROG: $ANCHOR — recorded PR-close disposition ($KIND -> $SUCCESSOR${STORE:+ in $STORE})"
 
 # Close the PR unless the caller closes it themselves. The closer consummates

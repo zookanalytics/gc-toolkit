@@ -50,6 +50,12 @@ while [ $# -gt 0 ]; do
     *)      [ -z "$num" ] && num="$1"; shift ;;
   esac
 done
+# STUB_LOCK_PROBE names the record lock: each call then records whether the lock
+# was free while GitHub was reached.
+if [ -n "${STUB_LOCK_PROBE:-}" ]; then
+  if flock -n "$STUB_LOCK_PROBE" true; then s=free; else s=held; fi
+  printf 'pr %s: lock %s\n' "$v" "$s" >> "$STUB_LOCK_PROBE.probe"
+fi
 case "$v" in
   view)  [ -n "${STUB_PR_VIEW_RC:-}" ] && { echo "gh (stub): simulated pr view failure" >&2; exit "$STUB_PR_VIEW_RC"; }
          f="$STUB_GH_DIR/pr_state_$num"; st="OPEN"; [ -s "$f" ] && st="$(cat "$f")"
@@ -65,6 +71,35 @@ case "$v" in
 esac
 GH
 chmod +x "$BIN/gh"
+
+# bead-store.sh: pr-dispose takes the record lock of the store that holds the
+# anchor, which it asks bead-store.sh --db to name. The stub names a store
+# directory of the suite's own for every id, refuses while STUB_BS_RC is set,
+# and logs each call.
+DB="$TMP/rig/.beads"; mkdir -p "$DB"
+LOCK="$DB/pr-record.lock"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$SD/bead-store.sh" <<'BS'
+printf '%s\n' "$*" >> "${STUB_BS_LOG:?}"
+[ -z "${STUB_BS_RC:-}" ] || { echo "bead-store: (stub) no rig carries the prefix" >&2; exit "$STUB_BS_RC"; }
+[ "${1:-}" = --db ] || { echo "bead-store stub: only --db" >&2; exit 2; }
+printf '%s\n' "${STUB_BS_DB:?}"
+BS
+chmod +x "$SD/bead-store.sh"
+export STUB_BS_LOG="$TMP/bead-store.log" STUB_BS_DB="$DB" STUB_BS_RC=""
+: > "$STUB_BS_LOG"
+
+# hold_lock [<jq filter>] — another writer of the record, such as a run of the
+# landing order, holds the lock until release_lock. Given a filter, it applies
+# it to the store as its last write, while it still holds the lock.
+hold_lock() {
+  rm -f "$TMP/held" "$TMP/go"; mkfifo "$TMP/go"
+  flock "$LOCK" bash -c '
+    : > "$1/held"; read -r _ < "$1/go"
+    [ -z "$2" ] || { jq -c "$2" "$3" > "$3.tmp" && mv "$3.tmp" "$3"; }' _ "$TMP" "${1:-}" "$STUB_STORE" &
+  HOLDER=$!
+  for _ in $(seq 50); do [ -e "$TMP/held" ] && break; sleep 0.1; done
+}
+release_lock() { echo go > "$TMP/go"; wait "$HOLDER" 2>/dev/null || true; }
 
 # An OPEN anchor gating a PR, plus the successor it points to. The pr_url
 # defaults to the checkout's own repo but can be overridden (arg 4) to prove the
@@ -156,6 +191,83 @@ for c in "A32 closed pull_request_pending" "A33 blocked pull_request_closed_unme
   eq "$(meta "$1" 'gc.pr_close_disposition_kind')" "<absent>" "…with no marker stamped"
   hasnt "$(cat "$STUB_GH_LOG")" "pr " "…and no gh call"
 done
+
+pending() { anchor "$1" "$2" | jq -c '.status = "blocked" | .metadata.merge_result = "pull_request_pending"'; }
+
+echo "# the read of the anchor and the stamp wait while another writer holds the record lock"
+store "[$(pending A40 110), $(succ S40)]"
+: > "$STUB_GH_LOG"; : > "$STUB_BS_LOG"
+hold_lock
+"$SUT" --anchor A40 --successor S40 --kind not-needed >"$TMP/out" 2>&1 &
+RULING=$!
+sleep 1
+eq "$(meta A40 'gc.pr_close_disposition_kind')" "<absent>" "no marker is stamped while the lock is held"
+hasnt "$(cat "$STUB_GH_LOG")" "pr " "…and GitHub is not reached"
+release_lock
+rc=0; wait "$RULING" || rc=$?
+eq "$rc" 0 "the ruling goes ahead once the lock is free"
+eq "$(meta A40 'gc.pr_close_disposition_kind')" "not-needed" "…the marker is stamped"
+has "$(cat "$STUB_GH_LOG")" "pr close 110" "…and the PR is closed"
+eq "$(cat "$STUB_BS_LOG")" "--db A40" "the lock is the one in the store that holds the anchor"
+
+echo "# a run's last write before the lock frees is what the ruling reads"
+# The run that held the lock read the PR closed with no ruling on the anchor and
+# recorded the record's exception, so the ruling that waited finds an anchor
+# past the pending record and stamps nothing.
+store "[$(pending A41 111), $(succ S41)]"
+: > "$STUB_GH_LOG"
+hold_lock '(.[] | select(.id == "A41") | .metadata.merge_result) = "pull_request_closed_unmerged"'
+"$SUT" --anchor A41 --successor S41 --kind not-needed >"$TMP/out" 2>&1 &
+RULING=$!
+sleep 1
+release_lock
+rc=0; wait "$RULING" || rc=$?
+eq "$rc" 1 "the ruling reads the anchor the run left and refuses it"
+has "$(cat "$TMP/out")" "bead-rehome.sh --origin A41" "…naming the direct disposition verb"
+eq "$(meta A41 'gc.pr_close_disposition_kind')" "<absent>" "…with no marker stamped"
+hasnt "$(cat "$STUB_GH_LOG")" "pr " "…and no gh call"
+
+echo "# a lock that does not come within the wait writes nothing and closes no PR"
+store "[$(pending A42 112), $(succ S42)]"
+: > "$STUB_GH_LOG"
+hold_lock
+out=$(PR_RECORD_LOCK_WAIT_SECS=1 "$SUT" --anchor A42 --successor S42 --kind not-needed 2>&1); rc=$?
+eq "$rc" 1 "exits 1"
+has "$out" "record lock" "…naming the lock"
+eq "$(meta A42 'gc.pr_close_disposition_kind')" "<absent>" "…with no marker stamped"
+hasnt "$(cat "$STUB_GH_LOG")" "pr " "…and no gh call"
+
+echo "# --dry-run takes no lock"
+rc=0; out=$(timeout 10 "$SUT" --anchor A42 --successor S42 --kind not-needed --dry-run 2>&1) || rc=$?
+eq "$rc" 0 "a dry run answers while the lock is held"
+release_lock
+
+echo "# a store that does not resolve writes nothing"
+store "[$(pending A43 113), $(succ S43)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_BS_RC=1 "$SUT" --anchor A43 --successor S43 --kind not-needed 2>&1); rc=$?
+eq "$rc" 1 "exits 1"
+has "$out" "did not resolve" "…saying the store did not resolve"
+eq "$(meta A43 'gc.pr_close_disposition_kind')" "<absent>" "…with no marker stamped"
+hasnt "$(cat "$STUB_GH_LOG")" "pr " "…and no gh call"
+
+echo "# a gc call made under the lock runs without its descriptor, and GitHub is reached with the lock free"
+store "[$(pending A44 114), $(succ S44)]"
+: > "$STUB_GH_LOG"; rm -f "$LOCK.probe"
+mv "$BIN/gc" "$BIN/gc.stub"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'GC'
+if { : >&9; } 2>/dev/null; then printf 'gc %s: fd 9 open\n' "$*" >> "${STUB_FD_LOG:?}"; fi
+exec "$0.stub" "$@"
+GC
+chmod +x "$BIN/gc"
+export STUB_FD_LOG="$TMP/fd9.log"; : > "$STUB_FD_LOG"
+out=$(STUB_LOCK_PROBE="$LOCK" "$SUT" --anchor A44 --successor S44 --kind not-needed 2>&1); rc=$?
+mv "$BIN/gc.stub" "$BIN/gc"
+eq "$rc" 0 "exits 0"
+eq "$(meta A44 'gc.pr_close_disposition_kind')" "not-needed" "…with the marker stamped"
+eq "$(cat "$STUB_FD_LOG")" "" "no gc call holds the lock's descriptor"
+has "$(cat "$LOCK.probe" 2>/dev/null)" "pr close: lock free" "the PR is closed with the lock free"
+hasnt "$(cat "$LOCK.probe" 2>/dev/null)" "held" "…and every gh call finds it free"
 
 echo "# a pull_request anchor with no parseable pr_url is refused before stamping"
 store "[{\"id\":\"A6\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"pull_request\",\"pr_number\":\"80\"}}, $(succ S6)]"
@@ -288,10 +400,11 @@ echo "# in close mode with gh missing, the marker is recorded but the exit is no
 store "[$(anchor A24 94), $(succ S24)]"
 : > "$STUB_GH_LOG"
 # gh is on the system PATH, so simulate its absence with a curated PATH: the two
-# stubs plus the real coreutils the SUT and the gc stub need, and no gh.
+# stubs plus the real tools the SUT and the gc stub need, flock among them, and
+# no gh.
 NOGH="$TMP/nogh"; mkdir -p "$NOGH"
 for s in gc git; do ln -sf "$BIN/$s" "$NOGH/$s"; done
-for t in bash env jq tr awk cat cp mv rm mktemp sed grep dirname; do
+for t in bash env jq tr awk cat cp mv rm mktemp sed grep dirname flock; do
   p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$NOGH/$t"
 done
 out=$(PATH="$NOGH" "$SUT" --anchor A24 --successor S24 --kind duplicate 2>&1); rc=$?
