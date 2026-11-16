@@ -23,7 +23,10 @@
 #     store's wait edges are lines of $STUB_HOLDS, "<bead> <what it waits on>":
 #     a blocks edge a create or `gc bd dep` writes is added there, `gc bd dep
 #     list` reads them, and `gctk bead holds` answers from the ones whose far
-#     bead the store does not hold closed.
+#     bead the store does not hold closed. `gctk bead holds` asked about the
+#     bead $STUB_HOLDS_FAIL names exits 1 with no answer. `gc session list`
+#     prints $STUB_SESSIONS_JSON, and nothing when it is unset, which is a list
+#     that cannot be read.
 # No live city, store, GitHub or network.
 
 PASS=0; FAIL=0
@@ -43,7 +46,7 @@ rt_init() {
   here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   SUT="$TMP/sut"; BIN="$TMP/bin"; GH_DIR="$TMP/gh"; LOGS="$TMP/logs"
   mkdir -p "$SUT" "$BIN" "$GH_DIR" "$LOGS"
-  for f in bd-lib.sh refinery-lib.sh dispatch-path.sh gctk-resolve.sh branch-push.sh pr-post.sh "$@"; do
+  for f in bd-lib.sh refinery-lib.sh dispatch-path.sh gctk-resolve.sh branch-push.sh pr-post.sh work-lib.sh run-lib.sh "$@"; do
     cp "$here/$f" "$SUT/"; chmod +x "$SUT/$f"
   done
   for f in human-gate patrol-finding lifecycle preexisting-failure rig-check-pre-existing stand-down pool-route queue-priority; do
@@ -174,6 +177,7 @@ case "$1 $2" in
   "formula show") cat "$STUB_VARS"; exit 0 ;;
   "sling "*) exit "${STUB_SLING_RC:-0}" ;;
   "workflow delete-source") exit 0 ;;
+  "session list") [ -z "${STUB_SESSIONS_JSON:-}" ] || printf '%s\n' "$STUB_SESSIONS_JSON"; exit 0 ;;
   "session "*|"mail "*) exit 0 ;;
 esac
 [ "$1" = bd ] || { echo "gc stub: unsupported $*" >&2; exit 2; }
@@ -350,6 +354,7 @@ case "$1 $2" in
       "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE" ;;
   "bead holds")
     shift 2
+    case " $* " in *" ${STUB_HOLDS_FAIL:-<none>} "*) echo "gctk: the store did not answer" >&2; exit 1 ;; esac
     for id in "$@"; do
       waits=$(awk -v i="$id" '$1 == i { print $2 }' "$STUB_HOLDS" | jq -Rsc --slurpfile s "$STORE" \
         '[ split("\n")[] | select(. != "") | . as $w | select(any($s[0][]; .id == $w and .status == "closed") | not) | {id: .} ]')

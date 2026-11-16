@@ -25,7 +25,7 @@
 # operator's hold, rebase_hold, or a live human gate on the anchor dispatches
 # nothing this pass, since rebasing is one horn of what a person may be asked; a
 # branch whose conflict is a
-# landed change deleting or rewriting the code it edits gets the operator's
+# landed change deleting the code it edits gets the operator's
 # supersession decision instead of a child (branch-supersession.sh);
 # dismissal of our OWN superseded CHANGES_REQUESTED (the city's own by
 # gc_city_own, never a review that is feedback; signoff_dismissed read back
@@ -2985,7 +2985,7 @@ REAP_EOF
         skipped=$((skipped + 1)); continue
       fi
       # A conflict is not always drift. When a change already on the base deleted
-      # or rewrote the code this branch edits, bringing it current decides whether
+      # the code this branch edits, bringing it current decides whether
       # the branch still has work to do, and a child sent to merge it would stop
       # and ask. This is read after the dedup above, so a live child (one a sitting
       # sent to re-scope the branch, say) stands the arm down first, and before the

@@ -59,6 +59,7 @@
     "name": "epic_hypothesis",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "An epic's one-sentence hypothesis (docs/epics.md). An epic under an epic that carries none is a Delivery."
@@ -75,6 +76,7 @@
     "name": "epic_ruling",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "The latest ruling on an epic's hypothesis: continue, shift or close (docs/epics.md)."
@@ -83,6 +85,7 @@
     "name": "epic_ruling_at",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "When the operator made the latest ruling on an epic."
@@ -91,9 +94,26 @@
     "name": "epic_ruling_reason",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "Why the latest ruling on an epic was made, written with it."
+  },
+  {
+    "name": "epic_shifted_at",
+    "type": "string",
+    "readers": [
+      "epic"
+    ],
+    "doc": "When the operator last ruled shift on an epic, written with that ruling and left standing by a later one, so a shift a later ruling followed still reads (skills/converse-epic-review/SKILL.md). An epic that carries none records no shift beyond its ruling keys."
+  },
+  {
+    "name": "epic_weighed_at",
+    "type": "string",
+    "readers": [
+      "epic"
+    ],
+    "doc": "The time of the read the rig's po last weighed an epic from at a portfolio sync, the time gctk epic unweighed prints first, written with the sync's note on the epic (skills/portfolio-sync/SKILL.md). An epic that carries none has not been weighed."
   },
   {
     "name": "existing_pr",
@@ -280,6 +300,13 @@
       "pr"
     ],
     "doc": "The highest inline comment id the intake has routed. A value that is not a whole number reads as 0."
+  },
+  {
+    "name": "pr_github_read",
+    "type": "json",
+    "owner": "pr",
+    "warrant": "saved-github-read",
+    "doc": "GitHub's side of a PR on Gas Town's pending record as the landing order last read it whole, one JSON object on the bead that owns the PR: read_at; since, the provenance instant the definition of feedback was applied with; the PR's url, number, repository, head_branch and base; its head, state, draft and merge_state; checks, the required check runs at that head as {name, status, conclusion}; approvers and requesters, the accounts that can push whose approval or request for changes stands; feedback, the newest feedback id in each id space as {review, inline, conversation}; and awaiting, the review threads waiting on the city's answer. The landing order writes it in the write that records each check of an open PR, and a read that fails partway leaves the last whole one. It holds no answer. The pr evaluator decides over it for a display, as current only while it names the record's repository and number, its head is the head the store holds (observed_pr_head_sha on a changed head, pr_head_sha otherwise) and its since is the bead's pr_provenance_since. Absent or not current, GitHub's side of the PR reads as unread."
   },
   {
     "name": "pr_head_sha",

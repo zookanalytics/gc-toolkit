@@ -1437,12 +1437,14 @@ keys = [
 # dated record docs/epics.md calls for. No key marks an epic as reviewed, and no
 # pack script writes the ruling's keys. finalize-gate.sh
 # (clause_epic_ruling_recorded) and doctor/check-epic-closed-implies-ruled read
-# epic_hypothesis, epic_ruling and epic_ruling_reason.
+# epic_hypothesis, epic_ruling and epic_ruling_reason, and `gctk epic
+# unweighed` reads the ruling's keys, epic_shifted_at and epic_weighed_at.
 keys = [
   "epic_handle", "epic_hypothesis", "epic_boundaries",
   "epic_closure_condition", "epic_indicators",
   "epic_ruling", "epic_ruling_reason",
   "epic_ruling_at", "epic_ruling_by", "epic_ruling_evidence",
+  "epic_shifted_at", "epic_weighed_at",
 ]
 # epic_handle / epic_hypothesis / epic_boundaries — the elaboration floor
 #   (docs/epics.md): a 3-5 word handle, a one-sentence hypothesis, and the
@@ -1467,6 +1469,14 @@ keys = [
 #   made the latest ruling, who recorded it, and the human gate whose resolve
 #   carried it. Bookkeeping beside epic_ruling; absent leaves the provenance
 #   unstated.
+# epic_shifted_at — when the operator last ruled shift, stamped with that
+#   ruling and left standing by a later continue or close, so the rig's po
+#   still weighs the shift at its next portfolio sync. Absent records no shift
+#   beyond the ruling's own keys.
+# epic_weighed_at — the time of the read the rig's po last weighed the epic
+#   from at a portfolio sync, which `gctk epic unweighed` prints first, stamped
+#   with the sync's note on the epic. A close or shift on or after its day
+#   lists at the next sync. Absent means no sync has weighed the epic.
 
 [metadata.human_surface]
 keys = [

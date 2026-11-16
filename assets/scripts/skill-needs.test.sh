@@ -550,19 +550,44 @@ have "the settle step takes a subject's recommendation through the sign-off" '--
 have "the continue skill gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$CONTINUE"
 have "the prs skill gives the PR post calls the return uses" 'pr-post.sh" reply --host github.com' "$PRS_SKILL"
 # A sitting that sends work agrees with the operator whether it ends at its
-# hand-off or stays for the work's return, and recommends staying only where
-# the discussion helps judge the result. One that stays sleeps with its
-# conversation open, and the entry (converse-entry.sh, its own suite) tells its
-# return, and a wake while the work is out, from a fresh sitting.
+# hand-off or stays for the work's return, and says when the stay would come
+# back. A return after the merge comes too late to change the work, so the
+# sitting recommends ending when the stay would come back after the merge, as
+# for new work that opens its own PR, and otherwise recommends staying only
+# where the discussion helps judge the result. Each skill that puts the choice
+# carries the same table of when each stay comes back. One that stays sleeps
+# with its conversation open, and the entry (converse-entry.sh, its own suite)
+# tells its return, and a wake while the work is out, from a fresh sitting.
 tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-stay"
-have "the prompt recommends staying when the discussion helps judge the result" \
-    'Recommend staying when the discussion will help judge the result' "$TMP/prompt-stay"
+have "the prompt says when a stay would come back" \
+    'and say when the stay would come back, in the operator'"'"'s terms.' "$TMP/prompt-stay"
+have "…recommends ending when the stay would come back after the merge, as for new work with its own PR" \
+    'So when the stay would come back after the merge, as it does for new work that opens its own PR, recommend ending at the hand-off, with what was agreed written into the work'"'"'s brief in full, and say why.' "$TMP/prompt-stay"
+have "…and otherwise staying when the discussion helps judge the result" \
+    'Otherwise recommend staying when the discussion will help judge the result' "$TMP/prompt-stay"
 have "…and ending when the brief and the ordinary checks suffice" \
-    'Recommend ending when the brief and the work'"'"'s ordinary checks suffice.' "$TMP/prompt-stay"
+    'and ending when the brief and the work'"'"'s ordinary checks suffice.' "$TMP/prompt-stay"
 have "…puts the choice to the operator, so they need not know to ask" \
     'Put the choice to the operator with your recommendation, so they need not know to ask, and never stay without their agreement.' "$TMP/prompt-stay"
 have "…and says a sitting that ends promises nothing it cannot keep" \
     'makes no promise of its own to confirm, check, watch or follow up' "$TMP/prompt-stay"
+for f in "$HOLD" "$SETTLE" "$STAY"; do
+    skill=$(basename "$(dirname "$f")")
+    have "$skill: a stay for a rework of the PR comes back before its merge" \
+        '| A rework of the PR under discussion | When the rework reaches the PR'"'"'s branch, before the merge, which waits for the return | Staying when the discussion will help judge the result, and ending otherwise. Say that the PR'"'"'s checks review the reworked branch again. |' "$f"
+    have "$skill: …one for new work with its own PR only after that PR merges, so it recommends ending" \
+        '| New work that opens its own PR | Only after that PR has merged | Ending at the hand-off, with what was agreed written into the work'"'"'s brief in full. Say that a stay would report only after the merge. |' "$f"
+    have "$skill: …and one for work with no PR of its own when that work closes" \
+        '| Work that opens no PR of its own | When the work closes | Staying when the discussion will help judge the result, and ending otherwise. |' "$f"
+done
+tr -s '[:space:]' ' ' <"$HOLD" >"$TMP/hold-stay"
+have "the framing's decision says when a stay would come back" \
+    'It says when a stay would come back, in the operator'"'"'s terms, and recommends ending at the hand-off when that is after the merge' "$TMP/hold-stay"
+tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-stay"
+have "the settle skill puts the choice with when a stay would come back" \
+    'Put it to them with your recommendation, and say when a stay would come back, in their terms' "$TMP/settle-stay"
+have "…and writes what was agreed into the brief in full for a sitting that ends on new work with its own PR" \
+    'When the sitting ends at the hand-off for new work that opens its own PR, write what was agreed into the create'"'"'s description in full' "$TMP/settle-stay"
 have "the prompt enters through converse-entry.sh, which tells each entry apart" \
     '/converse-entry.sh"' "$PROMPT"
 # A sitting still up when its work closes gets no wake, only Gas City's notice
@@ -586,6 +611,10 @@ have "the stay skill stays through the sign-off" \
     '--stay "<what the operator agreed, which the return compares the work with, one line>"' "$STAY"
 tr -s '[:space:]' ' ' <"$STAY" >"$TMP/stay-squeezed"
 have "…and a stay drains nothing" 'A stay closes nothing, so it drains nothing' "$TMP/stay-squeezed"
+have "…and its hand-back says when the sitting comes back" \
+    'says when the sitting comes back, in the table'"'"'s terms, to compare the work with what was agreed' "$TMP/stay-squeezed"
+have "…and more work ruled while it stays puts the choice again, since the return waits for the last of it" \
+    'Put the choice to them again, as Stay (above) says, because the return waits for the last of the work' "$TMP/stay-squeezed"
 have "the stay skill gives the return its sign-off" \
     'Sign off with the stay'"'"'s call less `--stay`, with `--no-wait` in place of its waits and brief, and with `--no-rework` in place of a `--rework`' "$TMP/stay-squeezed"
 have "…which leaves out the --pr-anchor of a rework that picked its PR" \

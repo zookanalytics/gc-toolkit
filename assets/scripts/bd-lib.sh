@@ -232,11 +232,14 @@ bd_list() {
 # answers a bead it cannot find, prints nothing and returns 1, so "no gate" and
 # "could not read" stay apart. `bd gate list <bead>` is not this read: it
 # returns the gates a bead reaches through an edge of any type, without saying
-# which edge.
+# which edge. A read with no control byte and no notice at its start is one
+# line that the notice strip and scrub leave as it is.
 bd_human_gates() {
   local raw
   raw=$(_bd_call dep list "$1" --type blocks --json </dev/null 2>/dev/null) || return 1
-  raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub)
+  case "$raw" in
+    *[[:cntrl:]]*|'gc bd:'*) raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub) ;;
+  esac
   printf '%s' "$raw" | jq -ce 'if type == "array"
     then [ .[] | select((.issue_type // "") == "gate" and (.await_type // "") == "human") ]
     else error("not an array") end' 2>/dev/null

@@ -87,6 +87,14 @@ writer of the record holds it. It reads each PR from GitHub by its number:
   - a lookup or a fetch that failed, or a merge commit not yet on the target:
     recorded in pr_reconcile_error, and read again by the next run
 
+Each check of an open PR, at the validated head or at another, reads GitHub's
+side of it whole and saves that read on the bead as pr_github_read, in the
+write that records the check: the PR's state, draft flag, head and merge state,
+the required checks at that head, who approved or asked for changes, the newest
+feedback in each comment space and the review threads waiting on the city. A
+read that fails partway saves nothing, so the bead keeps the last whole read.
+The merge acts on the run's own read, never on the saved one.
+
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the run fetched it, once the lock is free, in a clone
 that carries one (render-seed-audit.sh). The pages that no longer render as

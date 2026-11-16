@@ -29,9 +29,9 @@ func passStore() *fake.Store {
 }
 
 // Once a pass has read every live bead, it answers each selection of live
-// beads from those rows, by id, by a key's presence and by its value, and
-// reads the store again only for what they cannot answer: a closed bead, once,
-// and a bead the store does not hold, once.
+// beads from those rows, by id, by a key's presence and by its value, and by
+// issue type, and reads the store again only for what they cannot answer: a
+// closed bead, once, and a bead the store does not hold, once.
 func TestPassAnswersLiveSelectionsFromItsListing(t *testing.T) {
 	s := passStore()
 	k := Key[string]{decl: &decl{name: "gc.x", typ: "string"}, codec: String}
@@ -50,6 +50,7 @@ func TestPassAnswersLiveSelectionsFromItsListing(t *testing.T) {
 		{"the beads that carry the key", Carrying(k), []string{"a", "b"}},
 		{"the beads whose key holds a value", Matching(k, "cv"), []string{"a"}},
 		{"every live bead", Every(), []string{"a", "b", "e"}},
+		{"the live beads of one type", Typed("epic"), []string{"e"}},
 	} {
 		got, err := l.Find(tc.sel)
 		if err != nil || !slices.Equal(recordIDs(got), tc.want) {
@@ -133,7 +134,7 @@ func TestRecordCarriesTheRowsFields(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "w", Title: "a task", Status: "open", IssueType: "gate", AwaitType: "human", Assignee: "human",
 		Description: "the whole text", Priority: 2, Labels: []string{"hold:mayor"}, CreatedAt: "2026-11-01T00:00:00Z",
-		Metadata: map[string]string{"gc.routed_to": "human"}})
+		CloseReason: "not yet", Metadata: map[string]string{"gc.routed_to": "human"}})
 	got, err := New(s).Find(ByID("w"))
 	if err != nil || len(got) != 1 {
 		t.Fatalf("Find = %v, %v", got, err)
@@ -141,9 +142,9 @@ func TestRecordCarriesTheRowsFields(t *testing.T) {
 	r := got[0]
 	if r.Title() != "a task" || r.Description() != "the whole text" || r.Priority() != 2 || r.Assignee() != "human" ||
 		!slices.Equal(r.Labels(), []string{"hold:mayor"}) || r.AwaitType() != "human" || r.CreatedAt() != "2026-11-01T00:00:00Z" ||
-		r.ClosedAt() != "" {
-		t.Errorf("record = %q %q %d %q %q %q %q %q", r.Title(), r.Description(), r.Priority(), r.Assignee(), r.Labels(),
-			r.AwaitType(), r.CreatedAt(), r.ClosedAt())
+		r.ClosedAt() != "" || r.CloseReason() != "not yet" {
+		t.Errorf("record = %q %q %d %q %q %q %q %q %q", r.Title(), r.Description(), r.Priority(), r.Assignee(), r.Labels(),
+			r.AwaitType(), r.CreatedAt(), r.ClosedAt(), r.CloseReason())
 	}
 	if md := r.Rendered(); len(md) != 1 || md["gc.routed_to"] != "human" {
 		t.Errorf("rendered = %v", md)

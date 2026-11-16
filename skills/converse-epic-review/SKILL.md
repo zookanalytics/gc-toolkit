@@ -205,7 +205,7 @@ Grades: <each graded criterion and the operator's grade, or why it has no way to
 Indicators: <each leading indicator and the backstop invariant, as read, or none>
 Deliveries: <each landed Delivery's aim and what its landing showed, or none>
 Open: <each judgment still owed, the gate that asks it and the work that waits on it, or none>
-Next: <what comes next; on a close, each piece of open work and what becomes of it>
+Next: <what comes next; on a close, each piece of open work and what becomes of it; on a close or shift, that the po's next portfolio sync weighs what it changes>
 Mechanical: <what was mechanical>
 Judgment: <what took judgment>
 Contract lacked: <what the contract lacked>
@@ -224,9 +224,12 @@ closes wait on.** Whatever the ruling, record each contract field it sets in its
 own key: a change the operator took, a field they stated, or a shift's new aim.
 Leave out the line of each field the ruling does not set. A proposal the
 operator did not take stays out of the keys, and the block says what became of
-it. `epic_ruling_at` is when the operator ruled, which is now, and
-`epic_ruling_evidence` names each human gate the ruling clears. Those are among
-the gates the conversation replies to, which this lists:
+it. `epic_ruling_at` is when the operator ruled, which is now. On a shift,
+`epic_shifted_at` is that time too, and a continue or a close leaves its line
+out, so the po's next portfolio sync still weighs the shift once a later review
+has continued or closed the epic. `epic_ruling_evidence` names each human gate
+the ruling clears. Those are among the gates the conversation replies to, which
+this lists:
 ```bash
 gc bd list --id "$CONVERSATION" --all --json | jq -r '[.[0].dependencies[]? | select(.type == "replies-to") | .depends_on_id] | join(" ")'
 ```
@@ -239,6 +242,7 @@ gc bd update "$EPIC" --set-metadata epic_hypothesis="<the sentence: for whom, wh
   --set-metadata epic_ruling=<continue|shift|close> \
   --set-metadata epic_ruling_reason="<why; on a close, the outcome>" \
   --set-metadata epic_ruling_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --set-metadata epic_shifted_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --set-metadata epic_ruling_by="$GC_SESSION_NAME" \
   --set-metadata epic_ruling_evidence="<each gate the ruling clears, separated by spaces>"
 ```
@@ -388,4 +392,10 @@ PR standing. Add `--leave <gate>` for each gate write 2 left owed: the sign-off
 answers every gate the conversation replies to that no `--leave` names, which
 would release the work still waiting on that judgment. When a gate left owed
 holds the subject, leave out `--no-wait` too, because the subject is then parked
-for a person. Then drain.
+for a person.
+
+A close or shift can change what the epic's rig works on and in what order,
+beyond the epic itself, and the rig's po weighs that with the operator. So on a
+close or shift, the sign-off you post also tells the operator that the po's
+next portfolio sync weighs it, and gives the command that opens the po:
+`gc-helm po --rig <the epic's rig>`. Then drain.

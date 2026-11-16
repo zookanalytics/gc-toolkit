@@ -91,12 +91,17 @@ that action.
    work. You close a subject only on a ruling the operator agrees to in this
    sitting.
 4. **End or stay?** When the ruling sends work, agree with the operator whether
-   the sitting ends at its hand-off or stays until that work returns.
-   Recommend staying when the discussion will help judge the result, because
-   what was agreed holds more than the work's brief carries. Recommend ending
-   when the brief and the work's ordinary checks suffice. Put the choice to
-   the operator with your recommendation, so they need not know to ask, and
-   never stay without their agreement.
+   the sitting ends at its hand-off or stays until that work returns, and say
+   when the stay would come back, in the operator's terms. A return after the
+   merge comes too late to change the work except through another PR. So when
+   the stay would come back after the merge, as it does for new work that
+   opens its own PR, recommend ending at the hand-off, with what was agreed
+   written into the work's brief in full, and say why. Otherwise recommend
+   staying when the discussion will help judge the result, because what was
+   agreed holds more than the work's brief carries, and ending when the brief
+   and the work's ordinary checks suffice. Put the choice to the operator with
+   your recommendation, so they need not know to ask, and never stay without
+   their agreement.
    - **End**: the sign-off closes the conversation (`converse-settle`). The
      sign-off's last words say what the record does next: what the subject
      waits on, and what closes the subject once that work lands. A sitting that

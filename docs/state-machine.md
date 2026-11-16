@@ -519,9 +519,10 @@ review bead carrying it. A store that will not take the record costs a
 re-run: signoff exits 2 with nothing posted and the review left open.
 
 Pre-open, the verdict body is read back off the same bead on the same terms.
-Its notes are the only copy: `pr-open.sh` replays them as the PR's first
-comment when it opens one, and a request-changes child names the bead it came
-from in `source_review_bead` and has nowhere else to read its findings. So an
+Its notes are the only copy: when `pr-open.sh` opens the PR, it replays every
+pre-open check's verdict, each as a comment of its own read from that check's
+latest review bead, and a request-changes child names the bead it came from in
+`source_review_bead` and has nowhere else to read its findings. So an
 append that did not land also costs a re-run, rather than a backing or a
 rework child standing on findings nobody can read.
 
@@ -707,14 +708,17 @@ it leads to, and the verdict is what remains when neither stands. A hold that on
 `needs-attention` with no rule of its own.
 
 For a PR on the pending record, the status renders the evaluator's answer for
-its anchor, which reads the PR on GitHub, with the same precedence
-(`prstatus.Render`, which `gctk pr status` prints). It reads `merging` once the
-evaluator finds the PR ready, or approved with only the city's work left;
-`working` while it waits on the city's work and on an approval; `needs-review`
-when only an approval, or the lift of a request for changes, is left; and
+its anchor, with the same precedence (`prstatus.Render`, which `gctk pr status`
+prints). The evaluator decides over the store as it stands and the GitHub read
+the landing order saved on the bead, and reads nothing on GitHub, so the label
+and the rig board give one answer. It reads `merging` once the evaluator finds
+the PR ready, or approved with only the city's work left; `working` while it
+waits on the city's work and on an approval, or while the landing order has yet
+to read the PR on GitHub at the head the store holds; `needs-review` when only
+an approval, or the lift of a request for changes, is left; and
 `needs-attention` when something only a person clears holds it. The `held:`
 reasons are the gates and the beads a person owes that the walk below names,
-and the review threads the evaluator finds waiting on the city's answer while
+and the review threads the saved read finds waiting on the city's answer while
 no work of the city's acts on them. The merge pass's blocked verdict and its
 thread count are no reason there, since that pass reads only the old record.
 The draft flag is GitHub's, read through the evaluator as the city's work in
@@ -1134,8 +1138,8 @@ review's result set.
   current is routinely one horn of what a person is being asked, so a child
   filed under one answers the question by performing it. Clearing the gate is
   what releases the dispatch. A conflict that is not drift gets no child
-  either. When a change that landed first deleted or rewrote code the branch
-  edits, `branch-supersession.sh` files a human gate under
+  either. When a change that landed first deleted code the branch edits,
+  `branch-supersession.sh` files a human gate under
   `rework-base-supersession` on the anchor, because whether the branch still
   has work to do is the operator's call. That gate holds the dispatch while it
   is open. Clearing it `benign:` (the overlap was incidental) lets the next pass
