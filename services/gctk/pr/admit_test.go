@@ -429,7 +429,7 @@ func TestAConversationHoldsTheMergeUntilItCloses(t *testing.T) {
 			d.conversation(t, c.status, c.assignee, "")
 			o := d.once(t)
 			is(t, o, pr.ActChecked)
-			if d.runs.count() != 0 || !strings.Contains(o.Detail, "wait") {
+			if d.runs.count() != 0 || o.Detail != "not ready: wait" {
 				t.Fatalf("a passed head with a conversation %s was not held on its wait: %d runs (%s)", c.name, d.runs.count(), o.Detail)
 			}
 			if slices.ContainsFunc(d.github.Asks(), merges) {

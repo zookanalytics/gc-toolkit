@@ -238,13 +238,13 @@ session carries `human`. A sitting starts only when the operator engages.
 ### A conversation on an open PR holds its merge
 
 A conversation on an open PR holds the PR's merge until it closes. The subject
-counts as an open PR when it is the PR's anchor, not closed, whose
-`merge_result` is `pull_request`, or on the pending record
-`pull_request_pending` or `pull_request_head_changed`, or a bead whose
+counts as an open PR when it is the PR's anchor, not closed, or a bead whose
 `anchor_bead` names that anchor, such as the PR's review, rework or
-supplement. The hold is bd's own: the anchor depends on the conversation
-through a `blocks` edge, so bd counts the anchor blocked while the
-conversation is open and lets it go once the conversation closes.
+supplement. An anchor counts only while its `merge_result` is `pull_request`,
+or on the pending record `pull_request_pending` or
+`pull_request_head_changed`. The hold is bd's own: the anchor depends on the
+conversation through a `blocks` edge, so bd counts the anchor blocked while
+the conversation is open and lets it go once the conversation closes.
 
 - **Opening the conversation adds the edge.** `gc-helm.sh open` adds it for a
   conversation it files and for one a second concern joins in the queue, and
@@ -264,10 +264,10 @@ conversation is open and lets it go once the conversation closes.
   the merge. Reviews, reworks and supplements keep running, because each is a
   bead the anchor waits on, which the edge does not block. On the pending
   record the landing order's evaluator reads the edge as a wait of the bead's
-  own, which holds the merge, and the landing order pours the PR's review runs
-  and the refinery's find-work takes the PR's bead at a new head, as each would
-  with no conversation, whether the conversation waits in the operator's queue
-  or a sitting holds it.
+  own, which holds the merge. The landing order pours the PR's review runs, and
+  the refinery's find-work takes the PR's bead at a new head, as each would with
+  no conversation, whether the conversation waits in the operator's queue or a
+  sitting holds it.
 - **Every close frees the merge.** The sign-off, a dismiss, the premise
   re-check's moot or benign close and a close by hand each end the hold with
   the close itself, and nothing writes a release. A close that does not land
