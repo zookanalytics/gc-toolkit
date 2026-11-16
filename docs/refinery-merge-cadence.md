@@ -889,9 +889,10 @@ record's PR bead, head, target and branch, and the pools and the binding the
 refinery's address names (`<rig>/<binding>refinery`): `review_target`
 `<rig>/<binding>polecat-codex`, `repair_target` `<rig>/<binding>polecat` and
 `binding_prefix` `<binding>`. It pours none while a run is attached to the bead,
-while another open bead names the PR's branch, such as a rework child, while a
-conversation holds the bead, unless its sitting stays for the work it sent, or
-while a human gate holds it. A run that ended without a result is poured again.
+while another open bead names the PR's branch, such as a rework child, or while
+a human gate holds it. A conversation on the PR holds its merge and nothing
+else, so runs are poured while one is open, and the evaluator's wait holds the
+merge until it closes. A run that ended without a result is poured again.
 When the last two runs at the validated head both ended without one, counting
 only runs that ended after the bead's last `review-run-failed` gate closed, it
 files a human gate keyed `review-run-failed` instead, naming both runs and how

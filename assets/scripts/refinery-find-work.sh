@@ -27,6 +27,11 @@
 #   - An ask on the bead's PR (refinery-lib.sh) is the review run's work, never
 #     the refinery's. It is neither a wait on the bead nor a writer of its
 #     branch, so the bead is taken as if the ask were not there.
+#   - A conversation on the bead's PR (conversation.sh) holds the PR's merge and
+#     nothing else, through the landing order's evaluator. It is neither a wait
+#     on the bead here nor a writer of its branch, so the bead is taken as if
+#     the conversation were not there, whether it waits in the operator's
+#     queue, a sitting holds it or its sitting stays.
 #
 # A bead on the old path's cadence, merge_result pull_request or
 # pre_open_gate, is the cadence's to drive, never this queue's, so it is named
@@ -48,6 +53,8 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$HERE/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
 # shellcheck source=work-lib.sh
 . "$HERE/work-lib.sh" || { echo "$PROG: cannot source work-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=conversation.sh
+. "$HERE/conversation.sh" || { echo "$PROG: cannot source conversation.sh beside this script" >&2; exit 1; }
 # shellcheck source=run-lib.sh
 . "${GC_RUN_LIB:-$HERE/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 1; }
 
@@ -108,13 +115,24 @@ if [ "$(printf '%s' "$SENDS" | jq 'length')" != 0 ]; then
   UNSENT=$(judge "$SENDS" "$KHOLDS" | jq -c '[ .[] | select(.holds.status == "clear") | {id, anchor} ]' 2>/dev/null)
   printf '%s' "$UNSENT" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "gctk bead holds did not answer for every unsent rework child"
 fi
+# The conversations among what holds the beads (conversation.sh), as CONVS: a
+# conversation holds its PR's merge and nothing else, so it neither holds the
+# bead here nor works its branch. The beads waited on are read once, by id.
+CONVS='[]'
+WAITED=$(printf '%s' "$JUDGED" | jq -r '[ .[] | select(.holds.status != "clear") | (.holds.waits // [])[]
+  | ((.id // "") | tostring) | select(. != "") ] | unique | join(",")')
+if [ -n "$WAITED" ]; then
+  WROWS=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --id "$WAITED" --all --limit=0) || unread "the beads that hold the beads did not list"
+  CONVS=$(printf '%s' "$WROWS" | jq -c "$CONVERSATION_JQ"'[ .[] | objects | select(conversation) | .id ]' 2>/dev/null)
+  printf '%s' "$CONVS" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "the beads that hold the beads did not parse"
+fi
 # A bead's asks (refinery-lib.sh), as .asks: the review run's work, so they
 # neither hold the bead nor work its branch.
-JUDGED=$(printf '%s\n%s\n%s' "$JUDGED" "$UNSENT" "$BUSY" | jq -sc "$REFINERY_ASK_JQ"'.[1] as $u | .[2] as $busy | [ .[0][] | .id as $id
+JUDGED=$(printf '%s\n%s\n%s\n%s' "$JUDGED" "$UNSENT" "$BUSY" "$CONVS" | jq -sc "$REFINERY_ASK_JQ"'.[1] as $u | .[2] as $busy | .[3] as $convs | [ .[0][] | .id as $id
   | ((.metadata.branch // "") | tostring) as $b
   | ([ $u[] | select(.anchor == $id) | .id ]) as $mine
   | ([ $busy[] | select(.id != $id) | select(refinery_ask($b)) | .id ] | unique) as $asks
-  | ([ (.holds.waits // [])[] | ((.id // "") | tostring) | select(. as $w | (($mine + $asks) | index($w)) == null) ]) as $other
+  | ([ (.holds.waits // [])[] | ((.id // "") | tostring) | select(. as $w | (($mine + $asks + $convs) | index($w)) == null) ]) as $other
   | . + {unsent: $mine, asks: $asks, held: (.holds.status != "clear" and (((.holds.waits // []) | length) == 0 or ($other | length) > 0)),
          waits_on: ($other[0] // "?")} ]' 2>/dev/null)
 printf '%s' "$JUDGED" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "what holds the beads could not be weighed"

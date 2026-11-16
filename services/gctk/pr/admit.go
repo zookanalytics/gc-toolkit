@@ -7,12 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
 // The landing order admits the review run (specs/tk-1tfzr71.108/design.md,
@@ -20,12 +18,14 @@ import (
 // pours one review run, attached to the bead that owns the PR, when the
 // evaluator finds no passed result there or the bead carries an ask a run can
 // take, and only while nothing else writes the branch and no person is asked:
-// no run is attached, no open bead other than an ask names the branch, no
-// conversation whose sitting may be editing the branch holds the bead, and no
-// human gate holds it. A sitting that stays for the work its ruling sent edits
-// nothing until that work lands, so its conversation keeps no run off the
-// branch. The pour runs under the record lock the run holds for the record, so
-// two runs that overlap pour one review run.
+// no run is attached, no open bead other than an ask names the branch, and no
+// human gate holds it. A conversation on the PR holds its merge and nothing
+// else, so runs are poured while one is open, whether it waits in the
+// operator's queue, a sitting holds it or its sitting stays: the evaluator
+// reads the conversation's blocks edge as a wait of the bead's own, so the PR
+// merges only once the conversation closes. The pour runs under the record
+// lock the run holds for the record, so two runs that overlap pour one review
+// run.
 //
 // The runs attached to a bead are its blocks edges onto roots of the review
 // formula, open or closed, and each root carries the vars it was poured with,
@@ -78,11 +78,7 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 	if len(s.runs) > 0 {
 		return checked("review run " + strings.Join(s.runs, ", ") + " is attached, and the bead waits on it: " + why)
 	}
-	by, err := u.heldBy(s)
-	if err != nil {
-		return checked("no review run is poured, because what the conversations on the bead wait on did not read; the next run reads it: " + err.Error())
-	}
-	if by != "" {
+	if by := heldBy(s); by != "" {
 		return checked("no review run is poured while " + by + ": " + why)
 	}
 	writers, err := u.writers(s)
@@ -126,50 +122,18 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 		"review run %s poured at %s into %s, attached to the bead: %s", root, s.rec.Head, s.rec.Target, why), note)}), true
 }
 
-// heldBy names what keeps the order from pouring a run on the bead s read: an
-// open human gate on it, which asks a person, or an open conversation that
-// holds it, whose sitting may be editing the branch. A conversation its sitting
-// stays in edits nothing while the work it sent is out, and that work can be
-// the ask its ruling filed, which only a run takes, so it keeps no run off the
-// branch. It is empty when neither stands. A read of what a conversation waits
-// on that fails returns its error.
-func (u *run) heldBy(s state) (string, error) {
+// heldBy names the open human gate on the bead s read, which keeps the order
+// from pouring a run on it, because a gate asks a person and the next run
+// starts from the answer. It is empty when no gate is open on the bead. An
+// open conversation on the PR is no such hold, since it holds the PR's merge
+// and nothing else.
+func heldBy(s state) string {
 	for _, b := range s.blockers {
-		if b.Status() == "closed" {
-			continue
-		}
-		switch {
-		case isHumanGate(b):
-			return fmt.Sprintf("human gate %s (%s) holds the bead", b.ID, firstOf(b.AwaitID(), "no key")), nil
-		case conversation.IsCandidate(strings.ToLower(b.IssueType()), b.Assignee(), b.ID):
-			stays, err := u.staying(b)
-			if err != nil {
-				return "", err
-			}
-			if !stays {
-				return fmt.Sprintf("conversation %s holds the bead, and its sitting may be editing the branch", b.ID), nil
-			}
+		if b.Status() != "closed" && isHumanGate(b) {
+			return fmt.Sprintf("human gate %s (%s) holds the bead", b.ID, firstOf(b.AwaitID(), "no key"))
 		}
 	}
-	return "", nil
-}
-
-// staying reports whether the conversation b is one its sitting stays in
-// ([conversation.Staying]), with a wait of its own holding it as waits answers,
-// which is how the helm board reads a stay.
-func (u *run) staying(b *ledger.Record) (bool, error) {
-	if !conversation.Staying(b.Status(), b.Assignee(), true) {
-		return false, nil
-	}
-	snap, err := waits.Read(u.Ledger, b.ID)
-	if err != nil {
-		return false, err
-	}
-	h, err := snap.Holds(b.ID)
-	if err != nil {
-		return false, err
-	}
-	return h.Status == waits.Blocked, nil
+	return ""
 }
 
 // isHumanGate reports whether b is a human gate: Gas City's native bead for a
