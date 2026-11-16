@@ -74,7 +74,7 @@ assumptions:
 | merge | the pack's own refinery on Gas Town's flow and record, with the pack's approval contract | 15.4k / 25.2k | 2.0k / 2.0k |
 | human engagement | native human gates and conversation tasks | 16.8k / 25.0k | 5.5k / 4.0k |
 | board | a ranked render of platform objects | 21.0k / 26.4k | 5.0k / 5.0k |
-| patrol | Gas City's orders, plus the patrols' judgment | 9.5k / 16.1k | 2.5k / 2.0k |
+| patrol | Gas City's orders, plus the witness's judgment | 9.5k / 16.1k | 2.5k / 2.0k |
 | doctor | one check per surviving invariant | 7.5k / 9.3k | 3.0k / 3.0k |
 | shared glue | one call per series of native steps | 10.6k / 24.0k | 5.0k / 5.0k |
 | gctk | the rig's actions: its check runner and records, and a copy of its UI | 11.5k / 10.6k | 1.5k / 1.5k |
@@ -280,21 +280,25 @@ equal all go. The web page is the board's one view for people, and
 
 ### Patrol
 
-Gas City's orders keep the fleet clean: core's orphan sweep, reaper, wisp
-compaction, spawn-storm detection, convoy backstop and branch pruning, the
-controller's closed-bead worktree reaper, and the dolt pack's orders. The
-controller's work ladder recovers a stuck pool seat. The pack's patrols carry
-only judgment: the witness's HELP-mail triage, salvage, watch on the refinery's
-queue and finding on a pool seat that keeps printing while its work stands
-still, and the deacon running `gc doctor` from an order. Patrol owns the
-warranted Dolt reclaim and suspended-store backup, and the reapers no native one
-covers: scratch and the review workspaces outside `.gc/worktrees/`.
+Gas City's orders keep the fleet clean: core's orphan sweep, reaper,
+spawn-storm detection, convoy backstop and branch pruning, and the dolt pack's
+orders. Its controller releases a dead session's pool claims, ends the
+processes a closed session left behind, collects wisps and reaps a closed
+bead's worktree, and its work ladder recovers a stuck pool seat. The pack's
+patrol is the witness, which carries HELP-mail triage, salvage, the watch on the
+refinery's queue and a finding on a pool seat that keeps printing while its work
+stands still. An order runs `gc doctor` and keeps one record of each failing
+check, among them the pack's checks of whether each backup holds its store's
+writes and whether each witness's patrol advances. Patrol owns the warranted
+Dolt reclaim and suspended-store backup, and the reapers no native one covers:
+scratch and the review workspaces outside `.gc/worktrees/`.
 
-The trade: the liveness census stops filing human gates, and the incident
-ledger moves onto events and bead notes (tk-1tfzr71.19).
+The trade: the deacon, boot health, the incident ledger and the liveness census
+retire (tk-1tfzr71.19).
 
-The witness's target is Gas Town's witness. Each remaining difference names its
-reason and what ends it:
+The witness's target is Gas Town's witness at gascity-packs 7f86098c04ea, the
+commit the refinery's copy follows. Each remaining difference names its reason
+and what ends it:
 
 - **The spacing.** Its `next-iteration` defers the next wisp an hour, so Gas
   City's reassignment restart starts the next pass once the hour has passed. Gas
@@ -310,15 +314,27 @@ reason and what ends it:
   owns little and takes none of that load, and the operator ruled at
   tk-rl8gz4b.29's design that it stays. This ends when an operator ruling gives
   the po escalation handling. Gas Town's formula addresses `mayor/` by name,
-  which reaches no seat in this city, so a copy taken by import would send its
-  escalations to no reader. Such a copy keeps findings and human gates, or the
-  import is ruled (tk-1tfzr71.19).
-- **No stuck-polecat check.** The liveness sweep covers it. This ends when
-  tk-1tfzr71.19 retires the sweep.
-- **The nudge order.** Gas Town's deacon does this through a command and a step
-  we do not carry. This ends when we take Gas Town's deacon or Gas City closes
-  issue #4090 with a fix that also reaches a session stopped short of
-  `next-iteration`.
+  which reaches no seat in this city.
+- **Recovery returns nothing to the pool.** Gas Town's reopens a dead owner's
+  bead. Gas City's controller and core's orphan sweep release the claim within
+  minutes, and a second writer raced them. This ends when Gas Town's witness
+  leaves the release to them.
+- **Salvage keeps `work_dir`.** Gas Town's moves the path to `artifact_dir`,
+  and our polecats resume from `work_dir`. This ends when the work formula
+  records `artifact_dir`.
+- **A finding in place of a warrant on a stuck polecat.** Its
+  check-polecat-health judges a pool seat by the seat's own writes and files a
+  finding, because the work ladder recovers a quiet seat and no dog serves a
+  warrant here. This ends when Gas City paces a busy pool seat by its progress.
+- **No deacon watches it.** A pack doctor check reports a witness whose patrol
+  stops advancing, where Gas Town's deacon runs `witness-heartbeat-check`. This
+  ends when Gas City reports a named session whose work stops advancing.
+- **The nudge order.** Gas City gives an always-on session no further turn, so
+  an order prompts a witness that stopped short of `next-iteration`. This ends
+  when Gas City closes issue #4090 with a fix that also reaches a session
+  stopped short of `next-iteration`.
+- **No refinery wake for a stale pending check.** The landing order runs the
+  pending record with no refinery turn. No end is planned.
 
 ### Doctor
 

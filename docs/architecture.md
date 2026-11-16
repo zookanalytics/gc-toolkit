@@ -194,9 +194,10 @@ session dying, a `gc` build that moves the text the seed
 audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
 the cadence), or the landing order for a PR on the pending record, records PR
 events and files a human gate, the witness patrol
-recovers work orphaned by dead sessions,
+salvages the unpushed work of a dead session,
 `witness-nudge.sh` gives a witness whose patrol pass stopped its next turn,
-`boot-health.sh` detects a wedged deacon (report-only by design),
+the doctor order keeps one record of each failing `gc doctor` check in the
+po's queue until the check passes,
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
 edit no writer saw, and `seed-audit-reaudit.sh`, which a landing on the default
 branch calls, slings the one re-render of the default branch's
@@ -207,7 +208,9 @@ reconstructs pack-written state after the fact.
 Gas City's controller recovers a pool seat that holds work and either goes
 quiet or is refused by its provider for a rate limit. It does not act on a pool
 seat that keeps printing while its work stands still, and the witness patrol
-files a finding on that seat. No part of the pack kills a stuck session.
+files a finding on that seat. The controller and core's orphan sweep release
+the claims of a dead session, and the witness releases none. No part of the
+pack kills a stuck session.
 
 ## What the pack supplies and what a rig supplies
 
@@ -499,6 +502,11 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
+- **The witness still releases orphaned claims, and the deacon still runs
+  `gc doctor`.** Until the patrols member's units land, the witness's orphan
+  recovery returns a dead session's work to the pool beside Gas City's release,
+  and the deacon runs `gc doctor` in its session and files each failure as a
+  patrol finding for a first reaction. The units of tk-1tfzr71.19 retire both.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
