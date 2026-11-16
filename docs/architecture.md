@@ -333,8 +333,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   though two writers in the same instant can each file one, because bd keeps
   no idempotency at create. Each gate blocks that
   bead, so the bead leaves `bd ready` and the pool's offer, and bd refuses its
-  close, until a person resolves the gate with the answer as its reason, headed
-  `ruled:`, `moot:` or `benign:`
+  close, until the gate is resolved with a person's answer as its reason,
+  headed `ruled:`, `moot:` or `benign:`
   ([component-model.md](component-model.md#4-where-each-component-sits) has the
   helper's contract). A situation that needs a person is a human gate, not
   mail to the po. A patrol files a human gate on the bead a
