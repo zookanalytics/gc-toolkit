@@ -2,7 +2,6 @@ package git
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -66,17 +65,10 @@ func FetchCommit(dir, oid string) error {
 // forced, so the ref names the tip origin holds now. Like FetchCommit it
 // fetches no tags and writes no FETCH_HEAD.
 func FetchTip(dir, branch string) error {
-	return FetchTipContext(context.Background(), dir, branch)
-}
-
-// FetchTipContext is FetchTip for a caller with a deadline: a fetch still
-// running once ctx is done is stopped with the ssh that carries it, and returns
-// an error that wraps ctx's cause.
-func FetchTipContext(ctx context.Context, dir, branch string) error {
 	if !ValidBranch(branch) {
 		return fmt.Errorf("git fetch: %q is not a branch name", branch)
 	}
-	_, err := output(ctx, dir, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin",
+	_, err := Output(dir, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin",
 		"+refs/heads/"+branch+":refs/remotes/origin/"+branch)
 	return err
 }

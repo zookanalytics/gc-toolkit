@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -29,9 +28,8 @@ import (
 
 // recordLockWait is how long either verb waits for the store's record lock. A
 // run of the landing order holds it for one record at a time, and its order's
-// time limit ends any run, which frees the lock, sooner than this. A sitting's
-// push holds it for at most half of this. A variable so a test can shorten it.
-var recordLockWait = 5 * time.Minute
+// time limit ends any run, which frees the lock, sooner than this.
+const recordLockWait = 5 * time.Minute
 
 // runYield is how long a run leaves the lock free between two records, so a
 // publication waiting for it takes it there.
@@ -267,9 +265,7 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 // clone, and the runtime adapter for human gates, for the city's mark, which
 // `pr-post.sh mark` prints, for a review run's pour, which runs in the clone,
 // so gc resolves the rig's store there, and, where the clone carries one, for
-// the seed audit, whose scripts run in the clone. Its Within binds the store
-// and GitHub calls to a context, each `gc bd` and gh call in a process group
-// of its own that the context's end stops.
+// the seed audit, whose scripts run in the clone.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -291,7 +287,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if carriesSeedAudit(dir) {
 		audit = seedAudit{rt: rt.In(dir), dir: dir}
 	}
-	out := pr.Landing{
+	return pr.Landing{
 		Ledger:   l,
 		Dir:      db,
 		Refinery: refinery,
@@ -309,14 +305,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		Runs:     runs{rt: rt.In(dir)},
 		Audit:    audit,
 		Wait:     recordLockWait,
-	}
-	out.Within = func(ctx context.Context) pr.Landing {
-		in := out
-		in.Ledger = ledger.New(gcbd.New().WithContext(ctx).In(db))
-		in.Hub = func(host string) pr.Hub { return gh.NewContext(ctx, host) }
-		return in
-	}
-	return out, nil
+	}, nil
 }
 
 // cityMark reads the city's mark from the writer of the city's posts, which

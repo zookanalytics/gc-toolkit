@@ -13,19 +13,15 @@ package gh
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
-	"time"
 )
 
 // Runner runs gh with args and returns its stdout. A failure carries gh's own
@@ -39,70 +35,19 @@ type Client struct {
 }
 
 // New returns a client for host, such as github.com, that runs the gh on PATH.
-func New(host string) *Client { return NewContext(context.Background(), host) }
-
-// NewContext is New for a caller with a deadline: each gh call the client
-// makes ends when ctx does, and a call ctx ended returns an error that wraps
-// ctx's cause. The call runs in a process group of its own, and once ctx is
-// done the whole group is killed ([killGroup]), so nothing gh started outlives
-// the call. gh holds no file a kill leaves locked.
-func NewContext(ctx context.Context, host string) *Client {
-	return &Client{host: host, run: func(args ...string) ([]byte, error) { return gh(ctx, args...) }}
-}
+func New(host string) *Client { return &Client{host: host, run: gh} }
 
 // NewWithRunner returns a client for host that runs gh through run, so the
 // adapter's own tests serve recorded answers.
 func NewWithRunner(host string, run Runner) *Client { return &Client{host: host, run: run} }
 
-// stopGrace is how long the stop of a call its context ended goes on killing
-// the call's process group, and then how long the call may hold its output
-// open before the wait for it gives up. The stop kills every process the call
-// started, so only one that left the call's process group can hold it that
-// long.
-const stopGrace = 2 * time.Second
-
-// groupPoll is how often a stop kills again a group that is not yet empty.
-const groupPoll = 25 * time.Millisecond
-
-// killGroup sends SIGKILL to the process group pgid leads until no process is
-// left in it, for at most stopGrace, since darwin's kill(2) to a group does not
-// reach a child whose fork is under way as it runs. darwin answers EPERM, not
-// ESRCH, for a group whose only members have exited and wait to be reaped, so
-// only ESRCH reads as empty. A group already gone is os.ErrProcessDone.
-func killGroup(pgid int) error {
-	if errors.Is(signalGroup(pgid, syscall.SIGKILL), syscall.ESRCH) {
-		return os.ErrProcessDone
-	}
-	for deadline := time.Now().Add(stopGrace); time.Now().Before(deadline); time.Sleep(groupPoll) {
-		if errors.Is(signalGroup(pgid, syscall.SIGKILL), syscall.ESRCH) {
-			return nil
-		}
-	}
-	return nil
-}
-
-// signalGroup sends sig to the process group pgid leads. A variable so a test
-// can stand in for a kill(2) that misses a process.
-var signalGroup = func(pgid int, sig syscall.Signal) error { return syscall.Kill(-pgid, sig) }
-
-// gh runs the gh on PATH, bound by ctx ([NewContext]). A ctx that is never
-// done runs it in this process's group, so whatever stops this process's group
-// stops it too.
-func gh(ctx context.Context, args ...string) ([]byte, error) {
+// gh runs the gh on PATH.
+func gh(args ...string) ([]byte, error) {
 	cmd := exec.Command("gh", args...)
-	if ctx.Done() != nil {
-		cmd = exec.CommandContext(ctx, "gh", args...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
-		cmd.WaitDelay = stopGrace
-	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("gh: stopped, with every process it started: %w", context.Cause(ctx))
-		}
 		var ee *exec.ExitError
 		if msg := strings.TrimSpace(stderr.String()); errors.As(err, &ee) && msg != "" {
 			return nil, fmt.Errorf("gh: %s", msg)

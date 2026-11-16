@@ -488,7 +488,7 @@ no warrant.
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
-- **Verified.** 2026-11-16, at `gastownhall/gascity` main 5e60a76af64c,
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main d2254b579682,
   `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
   8cdfa796a8f5.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
@@ -608,10 +608,9 @@ no warrant.
   `services/gctk/internal/cli/review.go` runs. Its readers, which know an ask
   by its shape: `isAsk`, `IsAsk`, `AsksOn` and `AsksIn` in the same file,
   `writers` in `services/gctk/pr/admit.go`, which leaves an ask out of a
-  branch's other writers for the landing order's pour and for a sitting's push
-  (`held` in `services/gctk/pr/sitting.go`, the proof `Held` and `Push` run),
-  and `refinery_ask` in `assets/scripts/refinery-lib.sh`, which applies the
-  same rule to the beads the refinery reads. Its close: `Record` in
+  branch's other writers, and `refinery_ask` in
+  `assets/scripts/refinery-lib.sh`, which applies the same rule to the beads
+  the refinery reads. Its close: `Record` in
   `services/gctk/review/result.go`, which the loop's check runs through the
   `passed` verb's `--record`.
 - **Stands in for.** A request held on a pull request's bead for the review run
@@ -644,7 +643,7 @@ no warrant.
     and never the role key `task_kind` that a rework child carries. The search
     is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-16, at `gastownhall/gascity` main e60ed864f346, with
+- **Verified.** 2026-11-15, at `gastownhall/gascity` main 294079d53f57, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 0f07496d2fa4.
 - **Retires when.** Gas City files a request for a pull request's branch that

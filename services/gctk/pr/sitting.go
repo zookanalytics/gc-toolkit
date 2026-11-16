@@ -1,12 +1,10 @@
 package pr
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -16,29 +14,15 @@ import (
 // A converse sitting's push onto the branch of a PR on the pending record
 // (specs/tk-1tfzr71.108/design.md, section 10). The sitting edits the branch on
 // the operator's ruling while its conversation holds the bead that owns the PR
-// through a blocks edge, the edge a conversation on an open PR writes. While
-// that edge holds the bead, the landing order pours no review run on it
-// (heldBy) and the refinery's find-work does not take it, so the sitting is the
-// branch's one writer. The proof reads under the store's record lock, which the
-// landing order holds from its read of a record to its pour, so a run that read
-// the bead before the edge was added has poured before the proof reads, and the
-// proof sees it attached. The push holds the lock from its proof to its end, so
-// in that time the order pours no run, and its ready transition, which reads no
-// conversation's hold, does not mark the PR ready between its return to draft
-// and the push. Every other writer of the record waits for that lock, so the
-// push holds it for at most half of Wait, the time this landing's own writers
-// wait for it. A call to GitHub, origin or the store still running then is
-// stopped with every process it started, and the lock goes free only once
-// they have ended, since a push that landed after that could land on a PR the
-// order had marked ready in the meantime. The checkout's own reads, its
-// origin's URLs and its status, read files and reach no remote, so nothing
-// bounds them. The push goes only to the PR's repository: every URL the
-// checkout's origin fetches from or pushes to must name it. It returns the PR
-// to draft first, as every writer of the city does, and goes under git's lease
-// on the tip it reads on the branch, so a push another writer made is never
-// overwritten. Once the conversation closes, the refinery validates the head
-// the sitting left and the landing order pours one review run there, as for
-// any other head.
+// through a blocks edge, the edge a conversation on an open PR writes, which
+// holds the PR's merge. The push returns the PR to draft first, as every writer
+// of the city does. A review run or another writer may work the branch at the
+// same time, so the push goes under git's lease on the tip it reads on the
+// branch: a push another writer made is never overwritten, and the sitting
+// merges that commit into its checkout and pushes again. The push goes only to
+// the PR's repository: every URL the checkout's origin fetches from or pushes
+// to must name it. The refinery validates the head the sitting left, and the
+// landing order pours a review run there, as for any other head.
 
 // Tree is the sitting's checkout of the PR's branch.
 type Tree interface {
@@ -52,10 +36,8 @@ type Tree interface {
 	// under git's lease on the tip it reads there, and never forces it. It
 	// returns a *Moved when that tip is a commit HEAD does not descend from,
 	// or when the branch moved between the read and the push, and then
-	// nothing landed. A push still running once ctx is done is stopped with
-	// every process it started before Push returns, with an error that wraps
-	// ctx's cause.
-	Push(ctx context.Context, branch string) error
+	// nothing landed.
+	Push(branch string) error
 }
 
 // Moved is a push that took nothing because the branch holds a commit the
@@ -75,34 +57,8 @@ func (e *PushRefusal) Error() string {
 	return fmt.Sprintf("%s: nothing was changed: %s", e.Bead, e.Why)
 }
 
-// LockTimeUp is the cause of a call that was stopped because the push had held
-// the store's record lock for After, the most it may, so that a writer waiting
-// for the lock gets it. What the push had done by then stands, so the PR may be
-// a draft and the push may have landed.
-type LockTimeUp struct{ After time.Duration }
-
-func (e *LockTimeUp) Error() string {
-	return fmt.Sprintf("the push held the store's record lock for %s, the most it may", e.After)
-}
-
-// underLock takes the record lock, waiting up to l.Wait while another writer
-// holds it and no longer once ctx is done, and returns the context the calls
-// made under the lock run in and the call that ends that context and releases
-// the lock. The context ends once the lock has been held for half of l.Wait,
-// with a *LockTimeUp as its cause, so a writer that waits as long gets the
-// lock, with time to spare for the stop of a call still running.
-func (l Landing) underLock(ctx context.Context) (context.Context, func(), error) {
-	release, err := record.LockContext(ctx, l.Dir, l.Wait)
-	if err != nil {
-		return nil, nil, err
-	}
-	most := l.Wait / 2
-	ctx, cancel := context.WithTimeoutCause(ctx, most, &LockTimeUp{After: most})
-	return ctx, func() { cancel(); release() }, nil
-}
-
-// Holding is what the proof found: the branch of the PR the bead owns, which
-// the conversation holds, and PR, the URL of the PR its record names.
+// Holding is what the proof found: the branch of the PR the bead owns, whose
+// merge the conversation holds, and PR, the URL of the PR its record names.
 type Holding struct{ Bead, Conversation, Branch, PR string }
 
 // Pushed is what Push did: the holding it proved and the PR it returned to
@@ -112,28 +68,14 @@ type Pushed struct {
 	Drafted
 }
 
-// Held proves that the sitting that holds conversation conv may write the branch of
-// the PR bead owns, where conv is the conversation's id and self names this
-// session as a claim records it. The bead
-// must own a PR on the pending record and name its branch. The conversation
-// must be in progress under this session, and the bead must wait on it
-// through a blocks edge. No review run may be attached to the bead, and no
-// open bead other than an ask may name its branch. It reads under the record
-// lock, as Push does, and its reads end once it has held the lock for half of
-// l.Wait or once ctx is done. A *PushRefusal names every reason the proof
-// failed, and a read that did not answer, or a lock another writer held as
-// long as l.Wait, is an error.
-func (l Landing) Held(ctx context.Context, bead, conv string, self []string) (Holding, error) {
-	ctx, release, err := l.underLock(ctx)
-	if err != nil {
-		return Holding{}, err
-	}
-	defer release()
-	return l.within(ctx).held(bead, conv, self)
-}
-
-// held is Held's proof, read by a caller that holds the record lock.
-func (l Landing) held(bead, conv string, self []string) (Holding, error) {
+// Held proves that the sitting that holds conversation conv may write the
+// branch of the PR bead owns, where conv is the conversation's id and self
+// names this session as a claim records it. The bead must own a PR on the
+// pending record and name its branch. The conversation must be in progress
+// under this session, and the bead must wait on it through a blocks edge. A
+// *PushRefusal names every reason the proof failed, and a read that did not
+// answer is an error.
+func (l Landing) Held(bead, conv string, self []string) (Holding, error) {
 	r, err := l.read(bead)
 	if err != nil {
 		return Holding{}, err
@@ -183,23 +125,7 @@ func (l Landing) held(bead, conv string, self []string) (Holding, error) {
 		return Holding{}, err
 	}
 	if !slices.ContainsFunc(blockers, func(b *ledger.Record) bool { return b.ID == conv }) {
-		why = append(why, "it has no blocks edge onto conversation "+conv+", which keeps the landing order's review runs and the refinery off its branch")
-	}
-	runs, err := runsIn(blockers)
-	if err != nil {
-		return Holding{}, err
-	}
-	if len(runs) > 0 {
-		why = append(why, "review run "+strings.Join(runs, ", ")+" is attached to it and works its branch")
-	}
-	if branch != "" {
-		others, err := l.writers(bead, branch)
-		if err != nil {
-			return Holding{}, err
-		}
-		if len(others) > 0 {
-			why = append(why, strings.Join(others, ", ")+" works its branch "+branch)
-		}
+		why = append(why, "it has no blocks edge onto conversation "+conv+", the edge that holds the PR's merge while the sitting edits its branch")
 	}
 	if len(why) > 0 {
 		return Holding{}, &PushRefusal{Bead: bead, Why: strings.Join(why, "; ")}
@@ -208,25 +134,14 @@ func (l Landing) held(bead, conv string, self []string) (Holding, error) {
 }
 
 // Push pushes the commit at the tree's HEAD onto the branch of the PR bead
-// owns, for the sitting that holds conversation conv. It takes the record lock
-// and holds it to its end, proves the holding first as Held does, refuses a
-// tree whose origin reaches a repository other than the PR's or that holds work
-// no commit holds, and returns the PR to draft before it pushes, so a draft
-// that did not land pushes nothing. A branch that holds a commit the tree's
-// HEAD does not returns a *Moved, with the PR left a draft for the push that
-// follows once the tree holds that commit too. Once it has held the lock for
-// half of l.Wait, or once ctx is done, the store, GitHub or tree call still
-// running is stopped with every process it started, and Push returns that
-// call's error, which wraps a *LockTimeUp or ctx's cause, and releases the lock
-// only once the call has returned.
-func (l Landing) Push(ctx context.Context, bead, conv string, self []string, t Tree) (Pushed, error) {
-	ctx, release, err := l.underLock(ctx)
-	if err != nil {
-		return Pushed{}, err
-	}
-	defer release()
-	in := l.within(ctx)
-	h, err := in.held(bead, conv, self)
+// owns, for the sitting that holds conversation conv. It proves the holding
+// first (Held), refuses a tree whose origin reaches a repository other than the
+// PR's or that holds work no commit holds, and returns the PR to draft before
+// it pushes, so a draft that did not land pushes nothing. A branch that holds a
+// commit the tree's HEAD does not returns a *Moved, with the PR left a draft
+// for the push that follows once the tree holds that commit too.
+func (l Landing) Push(bead, conv string, self []string, t Tree) (Pushed, error) {
+	h, err := l.Held(bead, conv, self)
 	if err != nil {
 		return Pushed{}, err
 	}
@@ -244,11 +159,11 @@ func (l Landing) Push(ctx context.Context, bead, conv string, self []string, t T
 	if strings.TrimSpace(left) != "" {
 		return Pushed{Holding: h}, &PushRefusal{Bead: bead, Why: "the checkout holds work no commit holds, which a push would leave behind: " + joinLines(left)}
 	}
-	d, err := in.Draft(bead, h.PR)
+	d, err := l.Draft(bead, h.PR)
 	if err != nil {
 		return Pushed{Holding: h, Drafted: d}, err
 	}
-	if err := t.Push(ctx, h.Branch); err != nil {
+	if err := t.Push(h.Branch); err != nil {
 		var moved *Moved
 		if errors.As(err, &moved) {
 			return Pushed{Holding: h, Drafted: d}, err

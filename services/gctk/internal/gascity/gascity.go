@@ -10,7 +10,6 @@ package gascity
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,8 +20,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
-	"time"
 )
 
 // Runtime is Gas City as one gctk process reaches it.
@@ -348,17 +345,10 @@ func (c *City) readAgents() ([]agent, error) {
 // Script runs the script from the directory GCTK_SCRIPTS_DIR names, which the
 // pack's caller of gctk sets, as gctk-resolve.sh does for a bridge.
 func (c *City) Script(name string, args ...string) Result {
-	return c.ScriptContext(context.Background(), name, args...)
-}
-
-// ScriptContext is Script for a caller with a deadline: a script still running
-// once ctx is done is stopped with every process it started ([command]), and
-// its Result's Err wraps ctx's cause.
-func (c *City) ScriptContext(ctx context.Context, name string, args ...string) Result {
 	if c.scriptsDir == "" {
 		return Result{Code: -1, Err: errors.New("GCTK_SCRIPTS_DIR names no pack scripts directory, so " + name + " cannot be run")}
 	}
-	return runContext(ctx, c.dir, filepath.Join(c.scriptsDir, name), args...)
+	return run(c.dir, filepath.Join(c.scriptsDir, name), args...)
 }
 
 // CityRoot is GC_CITY_PATH, GC_CITY or GC_CITY_ROOT, the first that names an
@@ -401,12 +391,7 @@ func isDir(p string) bool {
 // is empty, its standard input reading nothing, and returns its exit code and
 // its output.
 func run(dir, bin string, args ...string) Result {
-	return runContext(context.Background(), dir, bin, args...)
-}
-
-// runContext is run bound by ctx ([command]).
-func runContext(ctx context.Context, dir, bin string, args ...string) Result {
-	cmd := command(ctx, bin, args...)
+	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
@@ -415,73 +400,12 @@ func runContext(ctx context.Context, dir, bin string, args ...string) Result {
 	switch {
 	case err == nil:
 		return Result{Code: 0, Output: out.String()}
-	case ctx.Err() != nil:
-		return Result{Code: -1, Output: out.String(), Err: fmt.Errorf("stopped, with every process it started: %w", context.Cause(ctx))}
 	case errors.As(err, &ee):
 		return Result{Code: ee.ExitCode(), Output: out.String()}
 	default:
 		return Result{Code: -1, Output: out.String(), Err: err}
 	}
 }
-
-// StopGrace is how long a command its caller's context stopped has between
-// SIGTERM and SIGKILL. A script such as branch-push.sh runs git, which removes
-// its lock files on SIGTERM and cannot on SIGKILL. A variable so a test can
-// shorten it.
-var StopGrace = 5 * time.Second
-
-// groupPoll is how often a stop looks for processes left in the command's
-// group.
-const groupPoll = 25 * time.Millisecond
-
-// command is bin with args, bound by ctx. A ctx that is never done gives the
-// command exec.Command gives, which runs in this process's group, so whatever
-// stops this process's group, such as an order's timeout, stops it too.
-// Otherwise the command leads a process group of its own, out of reach of a
-// signal sent to this process's group, and once ctx is done the group is
-// stopped ([stopGroup]). The wait for the command lasts until that stop has
-// ended, because a process the command starts can outlive it: branch-push.sh
-// runs git under a command substitution, so git holds none of the script's
-// output and can still be removing its lock files once the script has exited.
-func command(ctx context.Context, bin string, args ...string) *exec.Cmd {
-	if ctx.Done() == nil {
-		return exec.Command(bin, args...)
-	}
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return stopGroup(cmd.Process.Pid) }
-	cmd.WaitDelay = StopGrace
-	return cmd
-}
-
-// stopGroup sends SIGTERM to the process group pgid leads, and SIGKILL to
-// whatever is left of it after StopGrace, and returns once the group is empty.
-// A child that ignores SIGTERM runs on after the command has exited, so the
-// command's exit does not end the stop. darwin's kill(2) to a group does not
-// reach a child whose fork is under way as it runs, so SIGKILL goes again
-// until no process is left, for at most StopGrace more. darwin answers EPERM,
-// not ESRCH, for a group whose only members have exited and wait to be reaped,
-// so only ESRCH reads as empty. A group already gone is os.ErrProcessDone.
-func stopGroup(pgid int) error {
-	if errors.Is(signalGroup(pgid, syscall.SIGTERM), syscall.ESRCH) {
-		return os.ErrProcessDone
-	}
-	for deadline := time.Now().Add(StopGrace); time.Now().Before(deadline); time.Sleep(groupPoll) {
-		if errors.Is(signalGroup(pgid, 0), syscall.ESRCH) {
-			return nil
-		}
-	}
-	for deadline := time.Now().Add(StopGrace); time.Now().Before(deadline); time.Sleep(groupPoll) {
-		if errors.Is(signalGroup(pgid, syscall.SIGKILL), syscall.ESRCH) {
-			return nil
-		}
-	}
-	return nil
-}
-
-// signalGroup sends sig to the process group pgid leads. A variable so a test
-// can stand in for a kill(2) that misses a process.
-var signalGroup = func(pgid int, sig syscall.Signal) error { return syscall.Kill(-pgid, sig) }
 
 // why is a result's failure in one line: why it did not run, or its exit and
 // its output's last line.

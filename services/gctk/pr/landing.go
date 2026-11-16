@@ -1,7 +1,6 @@
 package pr
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -85,10 +84,6 @@ type Gates interface {
 // the rig's seed audit, nil for a rig whose repository carries none. Wait
 // bounds how long a writer waits for the lock, and Yield is how long a run lets
 // the lock stand free between two records, so a writer waiting for it takes it.
-// Within is the landing with every store and GitHub call it makes ending when
-// ctx does, the processes the call started ended with it, for a writer that
-// bounds how long it holds the lock, and nil for a landing whose calls take no
-// context, as a test's fakes do.
 type Landing struct {
 	Ledger   *ledger.Ledger
 	Dir      string
@@ -103,15 +98,6 @@ type Landing struct {
 	Now      func() time.Time
 	Wait     time.Duration
 	Yield    time.Duration
-	Within   func(ctx context.Context) Landing
-}
-
-// within is the landing whose store and GitHub calls end when ctx does.
-func (l Landing) within(ctx context.Context) Landing {
-	if l.Within == nil {
-		return l
-	}
-	return l.Within(ctx)
 }
 
 // stamp is the time a write records, RFC 3339 UTC to the second, the form whose
