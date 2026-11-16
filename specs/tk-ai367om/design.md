@@ -218,9 +218,9 @@ session waits that name the bead (`gc wait list --json`). For each whose session
 is the sitting of a conversation that is open or in progress, which is the
 session `gc session list --json` lists with that conversation's assignee as its
 alias (`conversation.IsAssignee`), it first writes the PR's bead's `blocks` edge
-onto the conversation, and then marks the wait ready (`gc wait ready <wait>`). It does both before it marks a draft
-ready or asks the evaluator about a PR that is ready, so the pass that ends the
-round requests no merge.
+onto the conversation, and then marks the wait ready (`gc wait ready <wait>`).
+It does both before it marks a draft ready or asks the evaluator about a PR that
+is ready, so the pass that ends the round requests no merge.
 
 - An edge already there, as engage writes it for the conversation's own
   subject, is a no-op.
@@ -478,12 +478,14 @@ belongs to the conversation the restart opens, and is delivered there
 **The change for a fresh context, which is Gas City's (gc-lwa1vp).** A fresh
 restart of a session that stays open keeps its open waits, pending or ready.
 Each goes on into the conversation the restart opens, as a wait registered while
-the reset is pending does already, and a ready one's notice is delivered there. Only `gc wait cancel`, the session's close and the close
-of the watched beads end a wait. The narrowest change covers the restart a
-session or its operator asks for. Whether the controller's own fresh restarts,
-the other writers of `continuation_reset_pending`, keep waits too is Gas City's
-call. gc-lwa1vp is filed beside gc-gspdoo in the Gas City rig and held for the
-operator's placement.
+the reset is pending does already, and a ready one's notice is delivered there.
+A fresh restart then ends no wait, so a wait still ends once its notice is
+delivered, once `gc wait cancel` cancels it, or once its session closes. The
+narrowest change covers the restart a session or its operator asks for. Whether
+the controller's own fresh restarts, the other writers of
+`continuation_reset_pending`, keep waits too is Gas City's call. gc-lwa1vp is
+filed beside gc-gspdoo in the Gas City rig and held for the operator's
+placement.
 
 **Until both land, the return is not on.** The operator ruled in conversation
 tk-8e83do9 on 2026-11-16 ("Second operator rework ruling" on tk-ai367om, items 1

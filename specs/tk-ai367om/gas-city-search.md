@@ -237,10 +237,16 @@ session's open waits.
   only an operator's suspend (`Store.ResumeHeld` in `internal/session/resume.go`;
   `internal/api/AGENTS.md`), so it cannot start a session that slept idle or
   under a wait hold.
-- **The pack registering a cancelled promise again.** The brief the operator
-  approved in conversation tk-8e83do9 says not to make pack-side restoration the
-  preferred architecture: the pack would keep its own copy of which waits a
-  session should have, beside Gas City's.
+- **The pack registering a cancelled promise again, as the way a visit or a
+  reset keeps it.** The ruling makes keeping a session's pending waits and
+  their queued notices Gas City's work and a prerequisite for the return, and
+  the brief the operator approved in conversation tk-8e83do9 says not to make
+  pack-side restoration the preferred architecture. The sitting's entry
+  registers a promise again only where Gas City's list cannot hold it once Gas
+  City keeps waits through both: a promise never registered, a notice that
+  reached a thread which ended before it held the conversation, and a sitting
+  that takes the conversation up after its session closed (the design's
+  section 4).
 - **The sitting registering its other promises again while its reset is
   pending**, which the existing fence would carry into the fresh conversation.
   The controller stops the session once it acts on the reset's request, so the
