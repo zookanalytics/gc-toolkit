@@ -385,7 +385,7 @@ bd 1.3.2.
 
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
-| the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.18 to .22 |
+| the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.19 to .22 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
 | `pr-facts.sh` polling and its mirrored keys | the PR monitor and webhook receiver | tk-1tfzr71.21 |
 
@@ -462,12 +462,11 @@ is a design convoy lands only after the operator approves its design.
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring, the merge cadence's driver and its pacing, the failure cap and the supersession check | 18,145 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
 | A | tk-1tfzr71.70 | the old merge path, once every rig's cutover has moved its PRs onto the pending record: `gctk merge` and the transition machine, `pr-open.sh`'s create, `pre-open-rebase.sh`, `merge-tail-report.sh` | 1,288, and the rows it adds |
-| B | tk-1tfzr71.18 | pin keepalive, boot health, quota park, each after its re-check | 4,877 |
-| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps, the salvage's branch context | 8,317 |
+| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, boot health, the copied patrol steps, the salvage's branch context | 9,290 |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,490 |
 
-The whole files that the migration members name come to 48k of
+The whole files that the migration members name come to 44k of
 the 220k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas and the sign-off. The page's own items below carry

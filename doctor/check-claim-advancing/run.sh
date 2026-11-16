@@ -253,10 +253,9 @@ stale_roster=0
 [ "$cache_age" -gt "$STALL" ] && stale_roster=1
 
 # Liveness is read from `.state` (a holder is live iff state == "active"), the
-# field both `gc session list --json` schemas carry — the same rule
-# quota-park-nudge.sh follows, because `.running` is
-# null during controller churn and absent from the CLI-fallback shape, so a
-# filter on it drops exactly the live sessions. If the roster carries neither
+# field both `gc session list --json` schemas carry, because `.running` is null
+# during controller churn and absent from the CLI-fallback shape, so a filter
+# on it drops exactly the live sessions. If the roster carries neither
 # `state` nor `running` on any session, its schema has drifted past what
 # liveness can be read from: judging every holder against the absent field
 # would classify them all DEAD and every pool scaled to zero. Decline instead —

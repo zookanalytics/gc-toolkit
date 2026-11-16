@@ -503,10 +503,6 @@ why a reader must know it, and the work that retires it.
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
   the memory intake.
-- **The pack still nudges a session parked behind a provider limit.**
-  `quota-park-nudge.sh` nudges it, though the controller already restarts a
-  pool seat its provider refuses for a rate limit. The last session-liveness
-  unit retires the nudge (tk-1tfzr71.157).
 - **A sitting does not edit an open PR's branch.** A ruling on an open PR still
   files a rework a polecat runs. A unit that waits on the review-lanes member
   (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it

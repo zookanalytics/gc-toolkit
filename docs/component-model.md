@@ -516,8 +516,6 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-deacon-patrol.toml` | patrol | City infrastructure health: Dolt, orphan processes, doctor sweep. |
 | `orders/boot-health.toml` | patrol | Fires the wedged-deacon detector. |
 | `orders/liveness-sweep.toml` | patrol | Condition-triggered: runs the sweep once the precheck proves a delta. |
-| `orders/pin-keepalive.toml` | patrol | Condition-triggered, city-scoped: pins standing conversational named sessions (mechanik today) so config-drift restart keeps deferring on them. |
-| `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
 | `orders/witness-nudge.toml` | patrol | Fires the witness nudge every 5m, city-wide. |
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
 | `orders/build-scratch-reap.toml` | patrol | Fires the build/test scratch reaper hourly, city-wide. |
@@ -532,9 +530,6 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/liveness-recheck.sh` | patrol | Re-validates a liveness-sweep gate's census when a person acts on it, run as the command the gate's message carries (`--ids`, `--carried`, `--pass-at`). A bead an open human gate blocks reads as held, and a bead carrying a hold label reads as the placement wait and is not on the live agenda. |
 | `assets/scripts/liveness-sweep-precheck.sh` | patrol | The order's condition check: proves a pass has something to say before one runs. |
 | `assets/scripts/liveness-sweep.sh` | patrol | Classifies every open bead; unnamed waits batch into one human gate on the rig's standing triage subject, its census the re-check command in the gate's message. A new set a person already ruled on is not filed again. |
-| `assets/scripts/pin-keepalive-precheck.sh` | patrol | The pin-keepalive order's condition check: runs `pin-keepalive.sh --check`, read-only. |
-| `assets/scripts/pin-keepalive.sh` | patrol | The pass, and (in `--check` mode) its own condition gate on one predicate: pins every standing conversational named session (`configured_named_session`, provider `claude`) that is not already pinned. |
-| `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
 | `assets/scripts/seat-progress.sh` | patrol | The witness's judgment of a live pool seat that holds a claim: it reads the seat's own writes to the rig's store and the city's, and files `no-progress.<session>` through `patrol-finding.sh` when the seat's pane still prints but it has written nothing for three hours. It kills nothing. |
 | `assets/scripts/witness-nudge.sh` | patrol | Gives a witness whose patrol pass stopped, with its wisp still in progress, its next turn. |
 | `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions that have ended, and of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |

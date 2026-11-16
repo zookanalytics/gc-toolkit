@@ -643,29 +643,6 @@ no warrant.
   and the order, the dispatch lock, the title token, the cap and
   `doctor/check-armed-dispatch-owed` retire.
 
-## Quota-park nudging
-
-- **Covers.** `assets/scripts/quota-park-nudge.sh`,
-  `orders/quota-park-nudge.toml`, the nudge episode files under the city's
-  `.gc/runtime/quota-park`, and
-  [quota-park-recovery.md](quota-park-recovery.md).
-- **Stands in for.** Waking a live session that sits idle under a provider's
-  usage-limit banner once the limit resets.
-- **Evidence.** In `gastownhall/gascity`:
-  - The session reconciler classifies only a dead session's exit. A live
-    session short-circuits the classification and is never classified
-    (`ExitFacts.Alive` in `internal/session/lifecycle_exits.go`).
-  - Its provider-screen lane runs for a dead crash candidate. A session whose
-    process died on a provider's limit screen sleeps for a fixed 30 minutes,
-    after which the quarantine clears (`checkRateLimitStability` in
-    `cmd/gc/session_reconcile.go`, `defaultRateLimitQuarantineDuration` in
-    `cmd/gc/session_types.go`). Nothing wakes or nudges a live session idle
-    under the banner.
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main 221b1476dc10.
-- **Retires when.** Gas City wakes a session parked on a provider's limit once
-  the limit resets, or every provider the city runs resumes such a session by
-  itself.
-
 ## Feedback patterns
 
 - **Covers.** The `feedback-pattern` name, the `evidence_count`,

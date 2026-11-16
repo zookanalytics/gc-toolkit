@@ -2,6 +2,8 @@
 
 > **Recovery**: Run `gc prime` after compaction, clear, or new session
 
+> **Start**: run `gc session pin "$GC_SESSION_ID"`, so no config change restarts you.
+
 {{/* Where gc delivers no first message, as for a session an attach starts,
      this prime arrives as session-start hook context, which Claude Code keeps
      inline only up to 10,000 characters. assets/scripts/mechanik-prime-cap.test.sh
@@ -97,9 +99,9 @@ URL with the title and body filled in for gascity's PR template.
 
 ## Standards for what you produce
 
-The adopted standards for what you write do not fit in this prime. Before you
-write anything that outlives the turn, such as a bead or its notes, a doc or
-spec, or a `city.toml` edit, read them if they are not in your context:
+Before you write anything that outlives the turn, such as a bead or its notes,
+a doc or spec, or a `city.toml` edit, read these standards if they are not in
+your context:
 `cat "{{ .ConfigDir }}"/template-fragments/work-quality-{base,system}.template.md`
 
 {{ template "learned-conventions-mechanik" . }}

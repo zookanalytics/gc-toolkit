@@ -1832,7 +1832,7 @@ keys = [
   "gc.claimed_at", "gc.kind", "gc.synthetic", "gc.step_id", "gc.step_ref",
   "gc.root_bead_id", "gc.root_store_ref", "gc.input_convoy_id", "gc.formula_source",
   "gc.native_step_dependencies.v1", "gc.graphv2_*", "gc.var.*",
-  "pin_awake", "configured_named_session",
+  "pin_awake",
   "gc.formula_contract", "gc.work_dir", "gc.work_commit", "gc.work_branch",
   "gc.work_outcome", "work_outcome",
 ]
@@ -1898,12 +1898,6 @@ keys = [
 #   from a branch's ledger, and each falls back to the legacy bare `work_outcome`
 #   alias. Absent leaves the
 #   disposition unstated. Never cleared.
-# configured_named_session — on a session bead, the authoritative "standing
-#   named" gate: "true" marks a session the pack's [[named_session]] config
-#   declares standing, applied by the runtime. pin-keepalive.sh reads it beside
-#   pin_awake to decide which conversational sessions to keep pinned; the pack
-#   does not write it. Absent or any value but "true" means the session is not a
-#   standing named one. A boolean-valued string.
 # gc.synthetic — "true" on a machine-minted convoy, written by the runtime that
 #   mints it. liveness-sweep.sh's machine_convoy test reads it, with the sling-
 #   and input-convoy title prefixes, as a signal that a convoy is machine-owned
