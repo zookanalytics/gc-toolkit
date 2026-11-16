@@ -160,8 +160,18 @@ performer; the full transition table with writers is
    result, the landing order pours a review run. The run records the PR's
    review result, which the evaluator reads. While it works, the run is the
    one writer of the PR's branch. Work that needs the branch changed, such as
-   a person's comment or a conflict with the target, is filed as an ask, and a
-   run takes it. Each city writer returns the PR to draft before it pushes.
+   a person's comment or a conflict with the target, is filed as an ask. An
+   ask is a small record of one piece of work on the PR's branch: an open bead
+   that blocks the bead owning the PR and names the PR's branch. No pool
+   claims an ask, so only the PR's review run takes it, and one run rules
+   every ask open on its PR together. A run asks a person a question in one
+   place, a human gate on the PR's bead, which the person answers on the board
+   as any gate. The PR points at the gate and asks nothing itself. A person's
+   comment made while the question is open is feedback like any other, and
+   the landing order pours a run for it while the gate still holds the bead.
+   When the comment settles the question, that run resolves the gate, names
+   the comment as its answer, and says so in its reply to the comment. Each
+   city writer returns the PR to draft before it pushes.
    The landing order marks the PR ready once a run has passed at the head the
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
@@ -329,8 +339,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   though two writers in the same instant can each file one, because bd keeps
   no idempotency at create. Each gate blocks that
   bead, so the bead leaves `bd ready` and the pool's offer, and bd refuses its
-  close, until a person resolves the gate with the answer as its reason, headed
-  `ruled:`, `moot:` or `benign:`
+  close, until the gate is resolved with a person's answer as its reason,
+  headed `ruled:`, `moot:` or `benign:`
   ([component-model.md](component-model.md#4-where-each-component-sits) has the
   helper's contract). A situation that needs a person is a human gate, not
   mail to the po. A patrol files a human gate on the bead a
@@ -521,3 +531,7 @@ why a reader must know it, and the work that retires it.
   moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)
   deletes the old path once every rig has moved and the GitHub intake
   (tk-1tfzr71.21) has landed.
+- **A comment made while a question is open waits behind its gate.** The
+  landing order pours no run while a human gate holds a PR's bead, so until the
+  GitHub intake (tk-1tfzr71.21) lands, such a comment waits until the person
+  answers the question on the board.
