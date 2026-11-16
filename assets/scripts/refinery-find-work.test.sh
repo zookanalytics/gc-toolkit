@@ -24,6 +24,12 @@
 #   - an ask on the bead's PR is neither a wait on it nor a writer of its
 #     branch, so the bead is taken; a rework child or another wait still holds
 #     it;
+#   - a conversation on the bead's PR, waiting in the operator's queue, held by
+#     a sitting or stayed in, is neither a wait on it nor a writer of its
+#     branch, so the bead is taken; another wait still holds it, a task that
+#     tracks no bead or whose alias names another bead is no conversation and
+#     holds it, the beads that hold it not reading exits 1, and a bead nothing
+#     holds reads no other bead;
 #   - a bead the old path's cadence drives is left, and named;
 #   - no work exits 3, and a read that does not answer exits 1.
 set -uo pipefail
@@ -220,6 +226,53 @@ ask k '{"gc.execution_routed_to":"rig-a/gc-toolkit.polecat"}'
 echo "p k" > "$STUB_HOLDS"
 run
 eq "$RC" 3 "a bead on the branch whose workflow Gas City's sling started is no ask, and still holds the bead"
+
+echo "# a conversation on the bead's PR is no wait and no writer"
+# conv <id> <status> <assignee>: a task that tracks p, as a conversation about
+# p's PR does, which p's blocks edge onto it holds the merge of.
+conv() { put "$(jq -nc --arg id "$1" --arg s "$2" --arg a "$3" '{id: $id, title: "Converse about the PR", status: $s, assignee: $a,
+  issue_type: "task", notes: "", metadata: {}, dependencies: [{issue_id: $id, depends_on_id: "p", type: "tracks"}]}')"; }
+for c in "open human" "in_progress rig-a/gc-toolkit.tk-c" "open rig-a/gc-toolkit.c-tk-c"; do
+  fresh
+  work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/52"}'
+  # shellcheck disable=SC2086  # the conversation's status and assignee
+  conv tk-c $c
+  echo "p tk-c" > "$STUB_HOLDS"
+  run
+  eq "$RC $OUT" "0 p" "the bead a conversation holds ($c) is taken"
+done
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+conv tk-c open human
+put '{"id":"gate-4","title":"a gate","status":"open","assignee":"","issue_type":"gate","notes":"","metadata":{}}'
+printf 'p tk-c\np gate-4\n' > "$STUB_HOLDS"
+run
+eq "$RC" 3 "a bead another wait holds is left beside its conversation"
+has "$ERR" "p waits on gate-4" "…and names that wait"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+put '{"id":"owed","title":"Do a thing","status":"open","assignee":"human","issue_type":"task","notes":"","metadata":{}}'
+echo "p owed" > "$STUB_HOLDS"
+run
+eq "$RC" 3 "work a person owes, which tracks no bead, is no conversation and still holds the bead"
+has "$ERR" "p waits on owed" "…and names it"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+conv tk-x open rig-a/gc-toolkit.tk-c
+echo "p tk-x" > "$STUB_HOLDS"
+run
+eq "$RC" 3 "a task assigned to an alias that names another bead is no conversation and still holds the bead"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+conv tk-c open human
+echo "p tk-c" > "$STUB_HOLDS"
+STUB_GC_ID_FAIL=1 run
+eq "$RC" 1 "what holds the bead not reading by id exits 1"
+eq "$OUT" "" "…and names no bead"
+fresh
+work a polecat/a
+run
+hasnt "$(logged gc)" "--id" "with nothing holding the bead, no bead is read by id"
 
 echo "# a bead the old path's cadence drives is left and named"
 fresh

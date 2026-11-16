@@ -51,7 +51,7 @@ rt_init() {
   here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   SUT="$TMP/sut"; BIN="$TMP/bin"; GH_DIR="$TMP/gh"; LOGS="$TMP/logs"
   mkdir -p "$SUT" "$BIN" "$GH_DIR" "$LOGS"
-  for f in bd-lib.sh refinery-lib.sh dispatch-path.sh gctk-resolve.sh branch-push.sh pr-post.sh work-lib.sh run-lib.sh "$@"; do
+  for f in bd-lib.sh refinery-lib.sh dispatch-path.sh gctk-resolve.sh branch-push.sh pr-post.sh work-lib.sh run-lib.sh conversation.sh "$@"; do
     cp "$here/$f" "$SUT/"; chmod +x "$SUT/$f"
   done
   for f in human-gate patrol-finding lifecycle preexisting-failure rig-check-pre-existing stand-down pool-route queue-priority; do
