@@ -392,7 +392,7 @@ func TestTheResultIsReplacedAtTheSameHeadAndTarget(t *testing.T) {
 		`{"head":"` + h2 + `","target":"main","passed":true},{"head":"` + h1 + `","target":"other","passed":false}]`
 	w.store.Put(pr)
 	w.record(1)
-	want := []review.Result{{Head: h2, Target: "main", Passed: true}, {Head: h1, Target: "other"}, {Head: h1, Target: "main", Passed: true}}
+	want := []review.Result{{Head: h2, Target: "main", Passed: true}, {Head: h1, Target: "other"}, {Head: h1, Target: "main", Passed: true, Run: root}}
 	if got := w.results(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("review_results = %+v; want %+v", got, want)
 	}
@@ -431,7 +431,7 @@ func TestARoundThatPassesRecordsOnceAndOnlyOnce(t *testing.T) {
 	if again := w.record(2); len(again.Closed) != 0 {
 		t.Fatalf("the check run again closed %+v again", again.Closed)
 	}
-	if got := w.results(); !reflect.DeepEqual(got, []review.Result{{Head: h2, Target: target, Passed: true}}) {
+	if got := w.results(); !reflect.DeepEqual(got, []review.Result{{Head: h2, Target: target, Passed: true, Run: root}}) {
 		t.Fatalf("review_results = %+v; want one passed entry at the head the round judged", got)
 	}
 }
@@ -447,7 +447,7 @@ func TestARecordThatDoesNotPass(t *testing.T) {
 	w.output(repair(1, h1, h2, review.Ruling{Check: "correctness", Finding: "F1", Ruling: review.RulingMustFix, Commit: fix}))
 	w.output(triage(2, h2, "correctness"))
 	got := w.record(2)
-	if !got.Exhausted || !got.Gated || !reflect.DeepEqual(w.results(), []review.Result{{Head: h2, Target: target}}) {
+	if !got.Exhausted || !got.Gated || !reflect.DeepEqual(w.results(), []review.Result{{Head: h2, Target: target, Run: root}}) {
 		t.Fatalf("an exhausted loop recorded %+v, %+v; want a result at its last judged head that does not pass, gated", got, w.results())
 	}
 	if !slices.Equal(w.gates.calls, []string{prBead + " " + review.LoopExhaustedKey}) ||
@@ -463,7 +463,7 @@ func TestARecordThatDoesNotPass(t *testing.T) {
 		w.output(repair(1, h1, "", review.Ruling{Check: "correctness", Finding: "F1", Ruling: review.RulingQuestion, Gate: "tk-gate"}))
 		w.store.Put(bead{ID: "tk-gate", Status: gate, IssueType: "gate"})
 		w.record(1)
-		want := []review.Result{{Head: h1, Target: target, Passed: gate == "closed"}}
+		want := []review.Result{{Head: h1, Target: target, Passed: gate == "closed", Run: root}}
 		if got := w.results(); !reflect.DeepEqual(got, want) {
 			t.Fatalf("with the question's gate %s, review_results = %+v; want %+v", gate, got, want)
 		}
@@ -482,7 +482,7 @@ func TestARecordThatFailsSpendsNoRound(t *testing.T) {
 	}
 	w.store.UpdateErr = nil
 	w.record(1)
-	if got := w.results(); !reflect.DeepEqual(got, []review.Result{{Head: h1, Target: target, Passed: true}}) {
+	if got := w.results(); !reflect.DeepEqual(got, []review.Result{{Head: h1, Target: target, Passed: true, Run: root}}) {
 		t.Fatalf("the retry recorded %+v", got)
 	}
 
@@ -571,7 +571,7 @@ func TestRecordClosesTheAsksTheRunAnswered(t *testing.T) {
 	if row, _ := w.store.Row("tk-asked"); row.Status != "open" {
 		t.Fatalf("the ask put to a person closed")
 	}
-	if !reflect.DeepEqual(w.results(), []review.Result{{Head: h2, Target: target}}) {
+	if !reflect.DeepEqual(w.results(), []review.Result{{Head: h2, Target: target, Run: root}}) {
 		t.Fatalf("with the question's gate open, review_results = %+v", w.results())
 	}
 
@@ -582,16 +582,23 @@ func TestRecordClosesTheAsksTheRunAnswered(t *testing.T) {
 }
 
 // A closed run recorded its result when its loop closed passed, or exhausted
-// at a head it judged while its bound reads, since its check records before it
-// closes the loop either way. A cancel, a hard failure, a loop that never
+// at a head it judged while its bound reads, and the bead holds its check's
+// entry for that head and target, naming the run. A loop that closed either
+// way with no such entry, as when Gas City grades a check whose write kept
+// failing as an ordinary failure, leaves it with no result, and so does
+// another run's entry at the head, a cancel, a hard failure, a loop that never
 // closed, an exhausted loop with no bound to read and a run that judged no
-// head each leave it with no result.
+// head.
 func TestHowARunEnded(t *testing.T) {
 	closeRoot := func(w *world, outcome string) {
 		r, _ := w.store.Row(root)
 		r.Status = "closed"
 		r.Metadata["gc.outcome"] = outcome
 		w.store.Put(r)
+	}
+	exhausted := func(w *world) {
+		w.output(triage(1, h1, "correctness"))
+		w.output(triage(2, h1, "correctness"))
 	}
 	for _, c := range []struct {
 		name   string
@@ -600,15 +607,34 @@ func TestHowARunEnded(t *testing.T) {
 	}{
 		{"its loop passed", func(w *world) {
 			w.passing()
+			w.record(1)
 			w.closeLoop(map[string]string{"gc.outcome": "pass"})
 			closeRoot(w, "pass")
 		}, true},
 		{"its loop exhausted", func(w *world) {
-			w.output(triage(1, h1, "correctness"))
-			w.output(triage(2, h1, "correctness"))
+			exhausted(w)
+			w.record(2)
 			w.closeLoop(map[string]string{"gc.outcome": "fail", "gc.failed_attempt": "2"})
 			closeRoot(w, "fail")
 		}, true},
+		{"its loop passed and its check's record never landed", func(w *world) {
+			w.passing()
+			w.closeLoop(map[string]string{"gc.outcome": "pass"})
+			closeRoot(w, "pass")
+		}, false},
+		{"its loop exhausted and its check's record never landed", func(w *world) {
+			exhausted(w)
+			w.closeLoop(map[string]string{"gc.outcome": "fail", "gc.failed_attempt": "2"})
+			closeRoot(w, "fail")
+		}, false},
+		{"its loop exhausted, and the entry at its head is another run's", func(w *world) {
+			exhausted(w)
+			pr, _ := w.store.Row(prBead)
+			pr.Metadata["review_results"] = `[{"head":"` + h1 + `","target":"` + target + `","passed":false,"run":"tk-other"}]`
+			w.store.Put(pr)
+			w.closeLoop(map[string]string{"gc.outcome": "fail", "gc.failed_attempt": "2"})
+			closeRoot(w, "fail")
+		}, false},
 		{"its loop exhausted with no bound to read", func(w *world) {
 			r, _ := w.store.Row(root)
 			delete(r.Metadata, "gc.var.max_attempts")

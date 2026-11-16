@@ -6,10 +6,12 @@ import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 // that owns a PR, and the checks an ask sends back.
 var (
 	resultsKey = ledger.Declare("review_results", ledger.JSON[[]Result](),
-		"The review loop's results on the bead that owns a PR, a JSON array of {head, target, passed}, one for "+
-			"each head and target a run judged, which the loop's check writes through gctk review passed --record "+
-			"under the store's record lock, replacing the entry for the same head and target. The pr evaluator "+
-			"counts only a result for the PR's live head and target, and reads none while the key is absent.")
+		"The review loop's results on the bead that owns a PR, a JSON array of {head, target, passed, run}, one "+
+			"for each head and target a run judged, run naming the root of the run that recorded it, which the "+
+			"loop's check writes through gctk review passed --record under the store's record lock, replacing the "+
+			"entry for the same head and target. The pr evaluator counts only a result for the PR's live head and "+
+			"target, and reads none while the key is absent. The landing order counts a closed run as one that "+
+			"recorded its result only while the entry for its last head names it.")
 	checksKey = ledger.Declare("review_checks", ledger.String,
 		"On an ask, the checks it sends back, a comma list of names from the check index at the PR's validated "+
 			"head, which gctk review ask writes as it files the ask. A review run picks each at the first head it "+

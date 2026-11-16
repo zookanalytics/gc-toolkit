@@ -143,6 +143,20 @@ and record the result for the head and the target the evaluator reads.
   `gc.work_outcome=no-op`, and a loop of two attempts that never passed
   recorded `passed: false` at its last judged head and filed the
   `review-loop-exhausted` gate on the PR's bead before the loop closed failed.
+- **Whether a closed run's record landed.** Read at `gastownhall/gascity` main
+  d2254b579682: the loop's control bead keeps `gc.attempt_log`, one entry per
+  graded attempt holding the check's outcome and its stderr
+  (`appendAttemptLogValue` in `internal/dispatch/control.go`), and
+  `gc.check_infra_retry`, the count of re-runs that spent no attempt
+  (`spendCheckInfraRetry` in `internal/dispatch/ralph.go`). Once that count
+  reaches `maxCheckInfraRetries`, `evaluateRalphIteration` grades the next
+  blind read an ordinary failure, so a loop whose record never landed closes
+  `gc.outcome = fail` with no `gc.final_disposition`, as a loop whose check
+  recorded and exited 1 does, and neither key says whether the check's write
+  landed. **Not covered**: each `review_results` entry names the root of the
+  run that recorded it (`run`), and the landing order counts a closed run as
+  one with a result only while the entry for its last head and target names
+  it.
 - **The landing order's pass**, which the sitting proposed for an exhausted
   loop, already reads how each run ended. It would record an exhausted run only
   after the run closed, and would have to keep which exhausted runs it had

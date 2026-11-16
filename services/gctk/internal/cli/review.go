@@ -288,10 +288,10 @@ ruled, and so does a question put to a person through a gate.
 With --record it is the loop's check, run after each iteration, which records
 the run's result when the iteration ends the loop: when it passes, or when it
 is the loop's last attempt by the run's max_attempts var and does not pass,
-which Gas City then closes as exhausted. The result is {head, target, passed}
-for the last head the run judged and the run's target, in review_results on the
-bead that owns the PR, under the store's record lock, replacing the entry for
-the same head and target. It passes only when the iteration passed and no gate
+which Gas City then closes as exhausted. The result is {head, target, passed,
+run} for the last head the run judged and the run's target, run naming the
+run's root, in review_results on the bead that owns the PR, under the store's
+record lock, replacing the entry for the same head and target. It passes only when the iteration passed and no gate
 the run put a question to is open. Each ask the round at that head answered,
 ruled declined, deferred or answered, closes with its work record: shipped with
 the commit of the run's must-fix ruling of it, else no-op. At an exhausted loop

@@ -351,15 +351,19 @@ spending an attempt.
 The check is also the run's final validate and record, so no step records the
 result. At the iteration that ends the loop, a pass or the loop's last attempt,
 it writes the run's result for the last head it judged and the target, a
-`{head, target, passed}` entry in the bead's `review_results`, under the
-store's record lock, before the loop closes. `passed` is true only when the
+`{head, target, passed, run}` entry in the bead's `review_results`, `run`
+naming the run's root, under the store's record lock, before the loop closes.
+`passed` is true only when the
 iteration passed and no gate the run filed is open. A loop that spent its
 attempts records `passed: false` and files a human gate keyed
 `review-loop-exhausted`, and a loop that a step's hard failure closed runs no
 check and records nothing. A record that does not land exits 75 as well. The
 evaluator counts a result only for the PR's live head and target.
 A run that ends without a result is poured again, and a second such run at the
-same head files a human gate keyed `review-run-failed`
+same head files a human gate keyed `review-run-failed`. A closed run counts as
+one that recorded its result only while the entry for its last head and target
+names it, because Gas City grades a check whose re-runs ran out as an ordinary
+failure, which closes the loop as a recorded `passed: false` does
 ([The machine axis](#the-machine-axis)).
 
 **Asks.** Work the PR's branch needs, or a check owed at its next head, is an

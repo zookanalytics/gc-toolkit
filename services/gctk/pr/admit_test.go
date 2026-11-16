@@ -237,10 +237,20 @@ func TestARunThatRecordedItsResultIsNoFailureOfTheReOffer(t *testing.T) {
 	}
 }
 
-// recorded writes the steps of a run that judged the head and exhausted its
-// loop, whose bound the root carries as Gas City's cook stamps every var, as a
-// run whose loop's check recorded its result leaves them.
+// recorded writes what a run whose loop's check recorded its result leaves:
+// the steps of a run that judged the head and exhausted its loop (judged), and
+// the entry the check wrote for that head and target, naming the run.
 func recorded(t *testing.T, d *admitting, root string) {
+	t.Helper()
+	judged(t, d, root)
+	d.edit(t, func(b *fake.Bead) {
+		b.Metadata["review_results"] = `[{"head":"` + head + `","target":"main","passed":false,"run":"` + root + `"}]`
+	})
+}
+
+// judged writes the steps of a run that judged the head and exhausted its
+// loop, whose bound the root carries as Gas City's cook stamps every var.
+func judged(t *testing.T, d *admitting, root string) {
 	t.Helper()
 	r, ok := d.store.Row(root)
 	if !ok {
@@ -261,6 +271,28 @@ func recorded(t *testing.T, d *admitting, root string) {
 	member(root+"-loop", "ralph", "mol-pr-review.review-loop", "fail", "")
 	member(root+"-triage", "", "review-loop.iteration.1.triage", "pass",
 		`{"review":"triage","iteration":1,"head":"`+head+`","checks":[],"material":false}`)
+}
+
+// A run whose loop closed exhausted at the head with no entry of its own for
+// that head, as when Gas City spends a check's infrastructure budget on a
+// record that keeps failing and grades the last re-run an ordinary failure,
+// ended without a result: two such runs at the head get the review-run-failed
+// gate, whose message says the record never landed.
+func TestARunWhoseRecordNeverLandedEndedWithoutAResult(t *testing.T) {
+	d := newAdmit(t)
+	is(t, d.once(t), pr.ActPoured)
+	judged(t, d, "tk-run1")
+	d.end(t, "tk-run1", "fail", "2026-11-12T09:10:00Z")
+	is(t, d.once(t), pr.ActPoured)
+	judged(t, d, "tk-run2")
+	d.end(t, "tk-run2", "fail", "2026-11-12T09:20:00Z")
+	is(t, d.once(t), pr.ActExcepted)
+	if !gated(d, "review-run-failed") || d.runs.count() != 2 {
+		t.Fatalf("two runs whose records never landed filed %v and poured %d runs, want the gate and two runs", d.gates.list(), d.runs.count())
+	}
+	if msg := d.gates.messages[len(d.gates.messages)-1]; !strings.Contains(msg, "record never landed") {
+		t.Fatalf("the gate's message does not say the record never landed: %s", msg)
+	}
 }
 
 // A cleared review-run-failed or review-loop-exhausted gate gets one more run:
