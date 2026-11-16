@@ -42,6 +42,7 @@ flowchart LR
   OP([operator])
   subgraph city["Gas City runtime — not this repo"]
     LEDGER[(bead ledger<br/>Dolt)]
+    EVT[(event log)]
     POOL[pools + routing]
     ORD[order runner]
   end
@@ -81,6 +82,7 @@ flowchart LR
   BR --> PR
   PR -->|GitHub merges| BR
   HELM -.->|derives per render| LEDGER
+  HELM -.->|order runs| EVT
   DOC -.->|asserts| LEDGER
   DOC -.->|asserts| FORM
 ```
@@ -195,10 +197,8 @@ External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a `gc` build that moves the text the seed
 audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
 the cadence), or the landing order for a PR on the pending record, records PR
-events and files a human gate, one order finds a dead session's unpushed work
-and another salvages it,
-the doctor order runs `gc doctor` each hour and records the run, which the
-board shows,
+events and files a human gate, a pack order salvages a dead session's unpushed
+work, a pack order runs `gc doctor` and records each run, which the board shows,
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
 edit no writer saw, and `seed-audit-reaudit.sh`, which a landing on the default
 branch calls, slings the one re-render of the default branch's
@@ -209,9 +209,8 @@ reconstructs pack-written state after the fact.
 Gas City's controller recovers a pool seat that holds work and either goes
 quiet or is refused by its provider for a rate limit. It does not act on a pool
 seat that keeps printing while its work stands still, and a pack order files a
-finding on that seat. The controller and core's orphan sweep release the claims
-of a dead session, and no pack order releases one. No part of the pack kills a
-stuck session.
+finding on that seat. No pack order releases a dead session's claim, and no part
+of the pack kills a stuck session.
 
 ## What the pack supplies and what a rig supplies
 
@@ -384,15 +383,18 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   and re-ranks the work that follows it, workflows already poured included
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
-  per render from the ledger. `gc-helm.sh` carries the write verbs open,
-  engage, react, takeaway, dismiss, accept, park, priority and place, and the
-  read-only verb resolve. Accept clears a first reaction's recommendation gate
-  and nothing else, under the bead's acceptance lock, and is offered only while
-  no other human gate blocks the bead. The po's backlog refinement works the
-  queue, every bead `hold:mayor` holds in any spelling
-  ([steering.md](steering.md#the-queue-the-po-works)). Everything works without
-  the board: it spends no state, so it can never be wrong for longer than one
-  render.
+  per render from the ledger, from Gas City's `human` mailbox, and from Gas
+  City's event log, which holds doctor's runs and each monitor order's last
+  good run. `gc-helm.sh` carries the write verbs open, engage, react, takeaway,
+  dismiss, accept, park, priority and place, and the read-only verb resolve.
+  The board's one write that `gc-helm.sh` does not carry is archiving a
+  mailbox message, which Gas City's mail performs. Accept clears a first
+  reaction's recommendation gate and nothing else, under the bead's acceptance
+  lock, and is offered only while no other human gate blocks the bead. The po's
+  backlog refinement works the queue, every bead `hold:mayor` holds in any
+  spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
+  works without the board: it spends no state, so it can never be wrong for
+  longer than one render.
 
 The discipline throughout is *agents earn every interaction*: prep done before
 the operator arrives, the choice framed, every surface branded so the operator
