@@ -145,9 +145,11 @@ performer; the full transition table with writers is
 5. **Hand off.** Push, verify the push landed, then one atomic `gc bd update`
    carries the handoff — target, refinery assignee, cleared route (branch was
    stamped at workspace-setup). All-or-nothing: a dead session mid-handoff
-   leaves either the pre-handoff state (witness orphan recovery re-routes it)
-   or the complete post-handoff state, never a half. The bead carries no
-   landing record yet, and the refinery writes its first.
+   leaves either the pre-handoff state (Gas City's release, by the controller
+   or core's orphan sweep, frees the dead session's claim and keeps the route
+   the bead carries, so the pool offers the work again) or the complete
+   post-handoff state, never a half. The bead carries no landing record yet,
+   and the refinery writes its first.
 6. **Land.** The refinery takes each bead handed to it through Gas Town's
    refinery flow. A `direct` bead lands on its target with no PR. For an `mr`
    bead the refinery opens the PR as a draft, or updates the PR the bead owns,
