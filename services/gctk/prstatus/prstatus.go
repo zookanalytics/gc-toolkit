@@ -221,10 +221,6 @@ type Facts struct {
 	// pr.OnRecord names is a PR on Gas Town's pending record, which the pr
 	// domain's evaluator answers for and [Render] renders.
 	MergeResult string
-	// ReviewResults is metadata.review_results, the review runs' results for
-	// the heads and targets they judged, as stored, which [Render] reads to tell
-	// a head that has a result from one that has none.
-	ReviewResults string
 	// Runs are the review runs attached to the anchor, open and closed: the
 	// roots of mol-pr-review its own `blocks` edges name.
 	Runs []Run

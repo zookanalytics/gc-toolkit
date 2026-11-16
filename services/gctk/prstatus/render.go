@@ -1,13 +1,11 @@
 package prstatus
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
 // Render returns where a PR on Gas Town's pending record stands, in the status
@@ -103,11 +101,12 @@ func RenderReasons(a pr.Answer, f Facts) []Reason {
 
 // runFailed is the reason a review run that ended without a result holds the
 // PR, the machine's fault: the evaluator finds no passed result at the head it
-// judged, no run attached to the anchor is live, no result for that head and
-// target stands at all, and a run attached to the anchor at that head and
-// target has closed. It names the run that closed last. A run that is live is
-// the city's work in flight, and the landing order pours another once the last
-// one closed, so the reason stands until a run is attached again.
+// judged, no run attached to the anchor is live, the answer carries no result
+// for that head and target at all ([pr.Answer.ReviewResult]), and a run
+// attached to the anchor at that head and target has closed. It names the run
+// that closed last. A run that is live is the city's work in flight, and the
+// landing order pours another once the last one closed, so the reason stands
+// until a run is attached again.
 func runFailed(a pr.Answer, f Facts) (Reason, bool) {
 	if a.Head == "" || !slices.ContainsFunc(a.Conditions, func(c pr.Condition) bool { return c.Kind == pr.KindReview }) {
 		return Reason{}, false
@@ -121,21 +120,11 @@ func runFailed(a pr.Answer, f Facts) (Reason, bool) {
 			last = &f.Runs[i]
 		}
 	}
-	if last == nil || resultAt(f.ReviewResults, a.Head, a.Target) {
+	if last == nil || a.ReviewResult != nil {
 		return Reason{}, false
 	}
 	return Reason{ID: last.ID, Title: fmt.Sprintf("review run %s ended without a result at %s, and the landing order pours another; "+
 		"a second that ends so asks a person through a review-run-failed gate", last.ID, a.Head)}, true
-}
-
-// resultAt reports whether the stored review results hold one for head and
-// target, passed or not. Results that do not read hold none.
-func resultAt(raw, head, target string) bool {
-	var results []review.Result
-	if json.Unmarshal([]byte(raw), &results) != nil {
-		return false
-	}
-	return slices.ContainsFunc(results, func(r review.Result) bool { return r.Head == head && r.Target == target })
 }
 
 // RenderHeld returns the held: value of each of [RenderReasons], once each, as

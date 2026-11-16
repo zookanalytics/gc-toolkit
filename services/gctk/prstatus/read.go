@@ -148,6 +148,5 @@ func RowFacts(md map[string]string) Facts {
 		OpenedAsDraft:       md["opened_as_draft"],
 		DraftReadied:        md["draft_readied"],
 		MergeResult:         md["merge_result"],
-		ReviewResults:       md["review_results"],
 	}
 }

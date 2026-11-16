@@ -6,6 +6,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
 // Render puts the evaluator's answer in the status vocabulary, by Derive's
@@ -167,15 +168,15 @@ func TestRenderReasons(t *testing.T) {
 // none reads as a person's hold or a ruling owed.
 func TestTheReviewConditionRendersWithTheRunsState(t *testing.T) {
 	const at = "1111111111111111111111111111111111111111"
-	review := pr.Answer{Head: at, Target: "main", Conditions: []pr.Condition{
+	attached := pr.Answer{Head: at, Target: "main", Conditions: []pr.Condition{
 		{Kind: pr.KindReview}, {Kind: pr.KindWait, ID: "tk-run2"}}}
 	live := prstatus.Facts{Runs: []prstatus.Run{
 		{ID: "tk-run1", Status: "closed", Head: at, Target: "main", ClosedAt: "2026-11-12T09:10:00Z"},
 		{ID: "tk-run2", Status: "open", Head: at, Target: "main"}}}
-	if got := prstatus.Render(review, live); got != prstatus.Merging {
+	if got := prstatus.Render(attached, live); got != prstatus.Merging {
 		t.Fatalf("a run attached rendered %s, want the city's work in flight on an approved PR, merging", got)
 	}
-	if got := prstatus.RenderReasons(review, live); len(got) != 0 {
+	if got := prstatus.RenderReasons(attached, live); len(got) != 0 {
 		t.Fatalf("a run attached gave reasons %+v, want none", got)
 	}
 
@@ -195,9 +196,9 @@ func TestTheReviewConditionRendersWithTheRunsState(t *testing.T) {
 	if held := prstatus.RenderHeld(ended, closed); len(held) != 0 {
 		t.Fatalf("the machine's fault named held values %v, want none", held)
 	}
-	withResult := closed
-	withResult.ReviewResults = `[{"head":"` + at + `","target":"main","passed":false}]`
-	if got := prstatus.RenderReasons(ended, withResult); len(got) != 0 {
+	withResult := ended
+	withResult.ReviewResult = &review.Result{Head: at, Target: "main", Run: "tk-run2"}
+	if got := prstatus.RenderReasons(withResult, closed); len(got) != 0 {
 		t.Fatalf("a run that recorded a result that did not pass gave %+v, want none", got)
 	}
 

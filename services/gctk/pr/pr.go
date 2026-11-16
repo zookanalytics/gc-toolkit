@@ -107,13 +107,16 @@ type Condition struct {
 // merge at Head into Target, the head and the base it judged. Otherwise
 // Conditions names each condition not met, and Head and Target name the head
 // and the base of the GitHub read it judged, empty when it judged none, for a
-// record that lacks a part or a side of GitHub's that is unread.
+// record that lacks a part or a side of GitHub's that is unread. ReviewResult
+// is the review loop's result for the head and the base it judged, passed or
+// not, and nil when none stands there or it judged no head.
 type Answer struct {
-	Bead       string      `json:"bead"`
-	Ready      bool        `json:"ready"`
-	Head       string      `json:"head,omitempty"`
-	Target     string      `json:"target,omitempty"`
-	Conditions []Condition `json:"conditions"`
+	Bead         string         `json:"bead"`
+	Ready        bool           `json:"ready"`
+	Head         string         `json:"head,omitempty"`
+	Target       string         `json:"target,omitempty"`
+	Conditions   []Condition    `json:"conditions"`
+	ReviewResult *review.Result `json:"review_result,omitempty"`
 }
 
 // GitHub is the reads the evaluator makes of GitHub, which the gh
@@ -222,15 +225,23 @@ func identityGaps(p *gh.PullRequest, rawURL string, number int, repo, branch, ta
 	return gaps
 }
 
-// passedAt reports whether a review result passed at head into target. A result
-// for another head or another target counts for nothing.
-func passedAt(results []review.Result, head, target string) bool {
+// resultAt is the review loop's result for head into target, the one entry the
+// loop's check keeps for that head and target, and nil when none stands. A
+// result for another head or another target counts for nothing.
+func resultAt(results []review.Result, head, target string) *review.Result {
 	for _, r := range results {
-		if r.Head == head && r.Target == target && r.Passed {
-			return true
+		if r.Head == head && r.Target == target {
+			return &r
 		}
 	}
-	return false
+	return nil
+}
+
+// passedAt reports whether the review loop's result for head into target
+// passed.
+func passedAt(results []review.Result, head, target string) bool {
+	r := resultAt(results, head, target)
+	return r != nil && r.Passed
 }
 
 // ownWaits is one condition for each wait of the bead's own, through waits,

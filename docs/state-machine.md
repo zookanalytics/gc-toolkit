@@ -1025,7 +1025,8 @@ machinery is still moving the PR, or has stopped on a fault of its own, so the
 board and the `status:` label tell a failed machine from a person's hold.
 
 On the pending record nothing stores it. `prstatus` renders the evaluator's
-`review` condition with the state of the PR's review runs, the roots of
+`review` condition, and the review result its answer carries for the head and
+target it judged, with the state of the PR's review runs, the roots of
 `mol-pr-review` that the bead's `blocks` edges name, open or closed. A run
 attached is the city's work in flight. A run that closed with no result at the
 evaluator's head and target, while no run is live, reads `needs-attention` and
