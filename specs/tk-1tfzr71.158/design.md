@@ -41,8 +41,9 @@ makes the changes below, and it adds no mayor.
    something, and a second order that acts on that event after reading each
    item again: it pushes, closes, removes a worktree, or files the finding or
    human gate (section 2). Cost: seven orders join the city's dispatch ring,
-   and an order that cannot read shows on the board only after three failed
-   runs, where the loop filed a finding at once.
+   and an order that cannot read shows on the board only once it has failed
+   three runs in a row and two doctor runs have found that, where the loop
+   filed a finding at once.
 2. **The witness runs only to read its mail.** Today its session is always on.
    It becomes an on-demand session, as the refinery and the Product Owner are,
    and every mail to it carries `--notify`, which asks Gas City to wake it. Its
@@ -68,10 +69,14 @@ makes the changes below, and it adds no mayor.
    their cause.** All 24 spawn-storm alerts since 2026-11-11 were false, because
    each rework the pack files carries `rejection_reason`, the key Gas City's
    detector reads as a bead sent back to the pool. A rework carries a key of
-   the pack's own instead. Two of the three scripts that file a rework retire
-   with the old review path (tk-1tfzr71.122) and the GitHub intake
-   (tk-1tfzr71.21), so the key change waits for both, and the board's inbox
-   lands after it. Its cutover archives the old mail whose matter has ended
+   the pack's own instead. Three of the four scripts that file a rework retire
+   with the old review path (tk-1tfzr71.122), the GitHub intake
+   (tk-1tfzr71.21) and the old merge path (tk-1tfzr71.70), so the key change
+   waits for all three, and the board's inbox lands after it. The dolt pack's
+   backup advisory is false on an idle store as well, and only Gas City can
+   change its rule, so the inbox also waits on a human gate that you clear once
+   that fix reaches the city, or once you rule that the inbox shows the
+   advisory. Its cutover archives the old mail whose matter has ended
    (section 6). Cost: until then the board shows no inbox, as today.
 6. **The backup check and the patrol-advancing check are dropped.** Gas City's
    `bd-backup-freshness` check and `mol-dog-backup` order judge backups, and no
@@ -129,11 +134,15 @@ as prompt doctrine, and it needs no loop:
 - **Who sends it mail.** Every instruction that mails the witness adds
   `--notify`: the HELP block in `template-fragments/polecat-doctrine.template.md`
   and in `agents/proactive/prompt.template.md`, the work formula's NOTICE line
-  and its load-context text (`formulas/mol-polecat-work.toml`), and the text
+  and its load-context text (`formulas/mol-polecat-work.toml`), the text
   `assets/scripts/converse-entry.sh` and `assets/scripts/store-only-exit.sh`
-  print. The unit greps for every other sender again. `--notify` asks for a turn
-  "even with earlier unread mail", so a wake that did not land is made up by
-  the next one, and that turn reads every unread mail.
+  print, the converse prompt's lines for an unreadable claim and a refused
+  acknowledgement (`agents/_converse/prompt.template.md`), and the work
+  skill's block that mails a patrol (`skills/work/SKILL.md`), which also stops
+  saying that a patrol reads its mail every cycle. The unit greps for every
+  other sender again. `--notify` asks for a turn "even with earlier unread
+  mail", so a wake that did not land is made up by the next one, and that turn
+  reads every unread mail.
 - **Its prompt.** check-inbox's doctrine moves into the witness's prompt: HELP
   triage, a NOTICE filed as a finding through one call (`gctk mail finding`),
   and a defect filed as a bead held for placement. The prompt says nothing of
@@ -254,8 +263,9 @@ bead is still open (`docs/tutorials/07-orders.md`, Duplicate prevention), but
 its watchdog closes an open tracking bead two minutes old
 (`orderTrackingSweepWatchdogStaleAfter`, `cmd/gc/order_dispatch.go`), so a run
 longer than that can overlap the next one. Each act is therefore safe to run
-twice at once, because every write it makes is guarded or changes nothing the
-second time. This area's incidents came from a script that judged liveness from
+twice at once: every write it makes is guarded or changes nothing the second
+time, except that two runs in the same instant can each file a finding (below).
+This area's incidents came from a script that judged liveness from
 state that moved under it. The witness released a step that a fresh session had
 taken under the dead one's alias (tk-8a6akou), and the scratch reaper deleted
 temp directories a live build still used (#1528). The salvage act's guards
@@ -275,8 +285,9 @@ answer that:
   replaces a commit it did not read.
 
 The seat and queue acts only file a finding or a gate, under the key the
-look's reader derives, and `patrol-finding.sh` and `human-gate.sh` file
-nothing while one is open under that key.
+look's reader derives. `patrol-finding.sh` and `human-gate.sh` file nothing
+while one is open under that key, though two runs in the same instant can each
+file one, because bd keeps no idempotency at create.
 
 ## 3. Orphan recovery
 
@@ -491,9 +502,10 @@ because the operator holds that interrupts do not belong where a person talks
 with an LLM (conversation tk-9l9pg0x).
 
 **Each monitor order's last good run.** The monitors are the orders whose job
-is to notice a problem: the four orders of sections 2 and 5 that look, and Gas
+is to notice a problem: the four orders of sections 2 and 5 that look, Gas
 City's that mail the `human` mailbox, `spawn-storm-detect`, `orphan-sweep`,
-`reaper`, `dolt-health`, `mol-dog-doctor` and `mol-dog-backup`. For each, the
+`reaper`, `mol-dog-doctor` and `mol-dog-backup`, and the dolt pack's
+`dolt-health`, which reports only by failing its run. For each, the
 verb reads the newest `order.completed` event, which Gas City records when an
 exec run exits 0 (`dispatchExec`, `cmd/gc/order_dispatch.go`). It reads events
 because `gc order history` lists order-tracking beads, and this city deletes a
@@ -507,9 +519,10 @@ checks, so the page holds no second rule for them. Both read ok when run on
 
 **How the page's reads cache.** One cached unit is the newest doctor event,
 which changes once an hour, so the page reads it at most every five minutes.
-The read is bounded with `since=2h`, because the newest event is never older
-than the order's cadence while doctor runs, and an older one is the lateness
-the page marks.
+The read takes no time bound, so a doctor that has stopped still shows when it
+last ran and what that run found, beside the late mark. While doctor runs, the
+server's backward read of the log ends within its last two hours
+(`fetchEventPageAscending`, `internal/api/huma_handlers_events.go`).
 
 **The deacon's findings at the cutover.** When the sitting on this PR read
 them on 2026-11-16, 18 of the deacon's doctor findings were open in this store,
@@ -562,18 +575,21 @@ The ways to fix it, weighed:
 - **A key of the pack's own on a rework (this design's).** A rework records its
   reason under `rework_reason`, and `rejection_reason` stays on a bead the
   refinery sends back itself (`refinery-requeue.sh`), which is what the
-  detector is for. The reworks' writer and the readers of a rework's reason
+  detector is for. The reworks' writers and the readers of a rework's reason
   move: `work-setup.sh`'s resume by merge, the work formula's load-context and
   the polecat doctrine's resume, and gctk's waits, PR record and lifecycle,
-  where they read it. Three scripts file a rework: `rework-child.sh`, which
+  where they read it. Four scripts file a rework: `rework-child.sh`, which
   files a review's and a ruling's, `pr-facts.sh`, which files one for a PR's
-  review comments, and `refinery-requeue.sh`, which files one when the
-  refinery will not land a bead whose PR is open. The first retires with the
-  old review path (tk-1tfzr71.122) on main's deletion plan and the second with
-  the GitHub intake (tk-1tfzr71.21), and AGENTS.md's rule gives code the plan
-  retires no new work. So the change waits for both retirements, then moves
-  the writers that remain, the readers and the open reworks' key in one change,
-  and no reader ever takes both keys.
+  review comments, a conflict with its base or a red required check,
+  `pre-open-rebase.sh`, which files one to bring a branch current before its
+  PR opens, and `refinery-requeue.sh`, which files one when the refinery will
+  not land a bead whose PR is open. The first retires with the old review path
+  (tk-1tfzr71.122) on main's deletion plan, the second with the GitHub intake
+  (tk-1tfzr71.21) and the third with the old merge path (tk-1tfzr71.70), and
+  AGENTS.md's rule gives code the plan retires no new work. So the change
+  waits for the three retirements, then moves the writers that remain, the
+  readers and the open reworks' key in one change, and no reader ever takes
+  both keys.
 - **The detector's threshold.** The town could raise `SPAWN_STORM_THRESHOLD`
   through an order override's `env` (`OrderOverride.Env`,
   `internal/config/config.go`). A rework would still be counted each time a
@@ -586,11 +602,28 @@ The ways to fix it, weighed:
   waits, would fix this for every city. A change asked of Gas City is the
   operator's send (section 14, ask 4).
 
+**The dolt pack's backup advisory is false on an idle store too.**
+`mol-dog-doctor` dates each backup by its manifest's age at 12 hours (section
+7), the rule the deacon's judge applied when it raised the idle-store findings
+section 13 holds, and a sync with nothing to copy writes no manifest, so an idle
+store's complete backup reads stale. It mailed the `human` mailbox one store's
+12-hour-old backup on 2026-11-11, and that message was archived within six
+minutes. Its healthy pass archives its advisories once the condition clears
+(`advisory_archive_superseded`, `examples/bd/dolt/assets/scripts/advisory_state.sh`),
+so a census of unread mail, such as the one above, can miss one. Its rule is
+Gas City's, so its fix at the cause is a change asked of Gas City, which is the
+operator's send (section 14, ask 2).
+
 **The inbox's own unit lands after the rework key,** and after the second
 landing, so neither the false spawn-storm alerts nor boot health's reach it. It
-adds a list to the city page: the `human` mailbox's unarchived messages, newest
-first, read from `GET /v0/city/{city}/mail?agent=human&status=unread`
-(`MailListInput`, `internal/api/huma_types_mail.go`), with an archive on each
+also waits on a human gate about the backup advisory, which the operator clears
+once Gas City's fix reaches the city's gc, or sooner by ruling that the inbox
+shows the advisory while a store sits idle. It adds a list to the city page:
+the `human` mailbox's unarchived messages, read or unread, newest first, read
+from `GET /v0/city/{city}/mail?agent=human&status=all`, which lists every
+open message where `status=unread` leaves out one already read
+(`MailListInput`, `internal/api/huma_types_mail.go`; `mailAllForQuery`,
+`internal/api/handler_mail.go`), with an archive on each
 row that calls `POST /v0/city/{city}/mail/{id}/archive`, one native write. The
 page's lead counts its messages beside its failing checks. One cached unit is
 the inbox's answer, read at most once a minute and dropped when the operator
@@ -628,14 +661,14 @@ backup current while its syncs return, idle stores included, and reaches the
 city page as a doctor check, and `mol-dog-backup`'s mail about a failed sync
 reaches the inbox. The five backup findings held on this member (section 13)
 were one false alarm, which the deacon's own manifest-age check raised on idle
-stores, and
-`bd-backup-freshness` read those stores ok and reported October's real
-problem (tk-hqf2nl7). The `human` mailbox held no `mol-dog-doctor` advisory when
-read. What nothing judges now: bd stamps `last_sync` when a sync returns,
-whether it carried the store's writes or not (`updateDoltBackupState`, beads
-v1.3.4 `cmd/bd/backup_dolt.go`), so a sync that returns without them reads
-fresh. Section 14 keeps the ask for a judge of what a backup holds, and it is
-the operator's send.
+stores, and `bd-backup-freshness` read those stores ok and reported October's
+real problem (tk-hqf2nl7). `mol-dog-doctor` dates a backup by the same manifest
+age, so it misreads an idle store as well, and its advisory reaches the `human`
+mailbox (section 6). What nothing judges now: bd stamps `last_sync` when a sync
+returns, whether it carried the store's writes or not
+(`updateDoltBackupState`, beads v1.3.4 `cmd/bd/backup_dolt.go`), so a sync
+that returns without them reads fresh. Section 14 keeps the ask for a judge of
+what a backup holds, and it is the operator's send.
 
 The suspended-store backup and Dolt reclaim keep their warrants and their
 orders.
@@ -785,14 +818,14 @@ scratch pack with that line, and the binding's resolution stays tested.
 | The ledger's label read and I12 (rework tk-9dmph8i) | Section 9 |
 | No new continuation that waits on the model; the witness-nudge order goes with the loop it serves (tk-r4c0g67, tk-q4tvdyo, tk-afr00th) | The loop and the order both go (section 1). The deacon's hook goes (section 4). |
 | Worked is judged by a live run (tk-v6d9rka) | Section 8 |
-| No suspended-rig exception; a stale store's alarm is real except when the store is idle (tk-56m3hts, tk-cpfrmai, tk-veejeg2, tk-0m719df, tk-r358gzg, tk-qdunipz) | Section 7: the manifest-age judge that raised the idle stores' alarm retires, and Gas City's checks read an idle store current |
+| No suspended-rig exception; a stale store's alarm is real except when the store is idle (tk-56m3hts, tk-cpfrmai, tk-veejeg2, tk-0m719df, tk-r358gzg, tk-qdunipz) | Section 7: the deacon's manifest-age judge that raised the idle stores' alarm retires, and `bd-backup-freshness` reads an idle store current. `mol-dog-doctor` keeps the manifest-age rule, so its advisory misreads an idle store until Gas City changes it (sections 6 and 14, ask 2). |
 | Import or copy, the `work_dir` layout, check-polecat-health, the side-by-side week (visit tk-dbpz6t2) | Sections 1, 2 and 12 |
 | Every waiting bead reachable by title (tk-ppqwgmo) | Section 8 |
 | dolt-compact-state's designed retry (first reaction to tk-fijsqig, tk-945d0wq) | Section 5 |
 | Read the default `gc session list --json`, not `--state all` (tk-1wfb7bd) | Section 3 |
 | The census's test cost and its visit filters retire (tk-pgl0s8j, conversation tk-u4uo3wb) | Section 8 |
 | A placed bead whose run ended; `mayor/` mail in a copy (tk-rl8gz4b.30) | Sections 8 and 1 |
-| `dispatch-path.test.sh` drops the deleted readers (tk-rl8gz4b.32) | Section 12, unit 7 |
+| `dispatch-path.test.sh` drops the deleted readers (tk-rl8gz4b.32) | Section 12, unit 6 |
 | `hold:external` is its own wait (tk-rl8gz4b.32's self-review) | Section 8 |
 | One shared "is anything live behind this bead" (tk-8gradm4.7) | The census's copies retire, and the salvage reader is the one the look and the act share (sections 2 and 3). Its closer checks what remains. |
 | A person's hold read from the open human gate (tk-1tfzr71.37) | Section 3 |
@@ -858,7 +891,7 @@ implementation child files with its landing bead and summary task:
 
 | Unit | What it does | Waits on |
 |---|---|---|
-| 4. The acts and the witness | `--act` for each of the three verbs, with its guards (section 2), and the three act orders; the witness on demand, its prompt and the senders' `--notify` (section 1); `formulas/mol-witness-patrol.toml`, `orders/witness-nudge.toml`, `witness-nudge.sh`, `orphan-dispose.sh`, `branch-context.sh` and `seat-progress.sh` go, with their tests and the step extraction tests (section 10); `pack-self-location.test.sh` takes its own root-only formula. | the comparison |
+| 4. The acts and the witness | `--act` for each of the three verbs, with its guards (section 2), and the three act orders; the witness on demand, its prompt and the senders' `--notify` (section 1); `formulas/mol-witness-patrol.toml`, `orders/witness-nudge.toml`, `witness-nudge.sh`, `orphan-dispose.sh`, `branch-context.sh` and `seat-progress.sh` go, with their tests and the step extraction tests (section 10); `pack-self-location.test.sh` takes its own root-only formula; the pages and skills that describe the witness's loop or its recovery follow, among them `docs/authority-map.md` and `docs/component-model.md`. | the comparison |
 | 5. The deacon retires | `agents/deacon/`, its named session and the pack's patch for it, `formulas/mol-deacon-patrol.toml`, `doctor-sweep.sh` and its test, boot health's three files, `gc-deacon-ledger.sh` and its test, the continue hook with its test and settings entry, `human-gate.sh`'s ledger append, `check-hq-marooned-work`'s ledger exemption, the deacon and boot health in `patrol-finding.sh`'s caller list and its reserved `doctor-*` keys, the deacon's tests and the pages that name them, among them `docs/pack-authoring.md`'s patrol startup section (tk-a89659h). The city page landed first, so the deacon's doctor step retires after the board shows doctor's results. | unit 4 |
 | 6. The census retires | the census's eight files and its order, `standing-kinds.sh` with its test and its readers' exclusions, the reader lists of `dispatch-path.test.sh` and `run-lib.test.sh`, `skills/converse-prep`'s re-check, the witness prompt's line about the sweep, and the pages and registry entries that name the census or the bucket kind. It brings the branch current with main first, so #1531's edit of `liveness-sweep.sh` arrives before the deletion. | unit 5 |
 
@@ -889,8 +922,8 @@ checkout's reconcile. Then a cutover bead, armed on the landing:
 
 | Bead | What it does | Waits on |
 |---|---|---|
-| 7. The rework key | A rework records its reason under `rework_reason` in every writer that files one then, its readers move, and the open reworks' key is rewritten once (section 6). | the old review path's retirement (tk-1tfzr71.122) and the GitHub intake (tk-1tfzr71.21) |
-| 8. The inbox | The city page's list of the `human` mailbox with an archive on each row, and its cutover's archive of the old mail (section 6). | bead 7, and the second landing, so boot health's mail has stopped |
+| 7. The rework key | A rework records its reason under `rework_reason` in every writer that files one then, its readers move, and the open reworks' key is rewritten once (section 6). | the retirements of the old review path (tk-1tfzr71.122), the old merge path (tk-1tfzr71.70) and the GitHub intake (tk-1tfzr71.21) |
+| 8. The inbox | The city page's list of the `human` mailbox with an archive on each row, and its cutover's archive of the old mail (section 6). | bead 7; the second landing, so boot health's mail has stopped; and the human gate on the backup advisory (section 6) |
 
 ## 13. Edges and notes the implementation child adds
 
@@ -900,8 +933,9 @@ by the unit before it and armed to dispatch when that closes, and the landing
 bead (tk-1tfzr71.19) and its summary task (tk-1tfzr71.160) wait on all three.
 It files the first landing's cutover bead, the comparison task, the second
 landing with its integration branch, summary task and units 4 to 6, the two
-town changes for the mechanik, the second landing's cutover bead, and beads 7
-and 8, with the edges section 12 names. The second landing waits on the first town change, and the second town
+town changes for the mechanik, the second landing's cutover bead, beads 7 and
+8, and the human gate bead 8 waits on, with the edges section 12 names. The
+second landing waits on the first town change, and the second town
 change and the cutover wait on the second landing. It surveys the open
 branches against each unit's files before it files, since they move.
 
@@ -913,7 +947,7 @@ landing that retires its code closes:
 | tk-wcdwhxm, tk-8a6akou | `orphan-dispose.sh` and the witness's release of a dead session's claims | No pack order or script writes a step's status, route or assignee it does not hold. |
 | tk-1vdtaza | the deacon's sweep and its restart | The doctor order's runs complete, and every non-ok result is in its run's event. |
 | tk-2lor8sg, tk-ujz8d10 | the deacon's doctor findings | The check, if it still fails, shows on the city page. |
-| tk-cpfrmai, tk-veejeg2, tk-0m719df, tk-r358gzg, tk-qdunipz | the deacon's manifest-age judge | No backup alarm is raised on an idle store. |
+| tk-cpfrmai, tk-veejeg2, tk-0m719df, tk-r358gzg, tk-qdunipz | the deacon's manifest-age judge | No backup alarm is raised on an idle store. `mol-dog-doctor`'s advisory still raises one until Gas City changes its rule (section 14, ask 2), so the closer asks a person and names that rule. |
 | tk-1erda9g, tk-ppqwgmo, tk-8gradm4.12 | the census | Nothing files a census gate. |
 | tk-8gradm4.7 | the census's copies of the live-behind check | Which readers remain, and whether they share one rule. |
 | tk-a89659h | the deacon and boot health | `docs/pack-authoring.md` names no boot agent and no shared startup fragment. |
@@ -927,9 +961,10 @@ It appends a note to each bead below:
   owed list of section 8. The city page and the inbox are this member's, and
   they read supervisor objects, events and mail, so the board member has
   nothing to migrate in them.
-- **tk-1tfzr71.122 and tk-1tfzr71.21.** Bead 7 waits on each. A writer either
-  one builds to file a rework in place of `rework-child.sh` or `pr-facts.sh` is
-  one that bead 7 moves to `rework_reason`.
+- **tk-1tfzr71.122, tk-1tfzr71.70 and tk-1tfzr71.21.** Bead 7 waits on each. A
+  writer any of them builds to file a rework in place of `rework-child.sh`,
+  `pre-open-rebase.sh` or `pr-facts.sh` is one that bead 7 moves to
+  `rework_reason`.
 - **tk-1tfzr71.25.** The keys this member registers as retired: `recovered`,
   `recovered_at`, `recovered_count`, the `triage.*` keys, the `triage-subject`
   kind and the ledger's label.
@@ -968,7 +1003,7 @@ sent.
 2. **A backup judge of what the backup holds.** `mol-dog-doctor` and
    `bd-backup-freshness` judge a file's age or a sync's return, so an idle
    store's manifest reads stale and a sync that returns without carrying the
-   store's writes reads fresh.
+   store's writes reads fresh. The inbox's human gate waits on it (section 6).
 3. **A keyed problem record.** It would retire the patrol finding.
 4. **`spawn-storm-detect` counts a return to the pool.** It counts any write
    to a waiting bead that carries `rejection_reason` or `recovered`, so a bead
