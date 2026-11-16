@@ -163,9 +163,9 @@ performer; the full transition table with writers is
    a person's comment or a conflict with the target, is filed as an ask, and a
    run takes it. A run asks a person a question through a human gate on the
    PR's bead, and a person's post on the PR can answer it. The landing order
-   pours a run for a later post while that gate still holds the bead, and that
-   run resolves the gate when the post answers the question. Each city writer
-   returns the PR to draft before it pushes.
+   pours a run for a later post while that gate still holds the bead. When the
+   post answers the question, that run resolves the gate and names the post as
+   its answer. Each city writer returns the PR to draft before it pushes.
    The landing order marks the PR ready once a run has passed at the head the
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
