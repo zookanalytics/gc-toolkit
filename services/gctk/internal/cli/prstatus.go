@@ -85,10 +85,11 @@ func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 	return group("pr", "a bead's pull request",
 		"The pull request a bead owns: where it stands, what its title and body say, the account of the change "+
 			"they carry, its record from publication to the verified merge, its draft between rounds of the city's "+
-			"work, and the withdrawal of approvals a material change leaves behind.",
+			"work, the withdrawal of approvals a material change leaves behind, and the push of a converse "+
+			"sitting that edits its branch.",
 		status, newPRComposeCmd(stdout, stderr), newPRSummaryCmd(stdout, stderr),
 		newPRRecordCmd(stdout, stderr), newPRReconcileCmd(stdout, stderr),
-		newPRDraftCmd(stdout, stderr), newPRWithdrawCmd(stdout, stderr))
+		newPRDraftCmd(stdout, stderr), newPRWithdrawCmd(stdout, stderr), newPRPushCmd(stdout, stderr))
 }
 
 // prStatus prints the state prstatus.Derive returns for the facts prstatus.Read

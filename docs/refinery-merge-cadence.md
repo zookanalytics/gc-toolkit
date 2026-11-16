@@ -889,9 +889,10 @@ record's PR bead, head, target and branch, and the pools and the binding the
 refinery's address names (`<rig>/<binding>refinery`): `review_target`
 `<rig>/<binding>polecat-codex`, `repair_target` `<rig>/<binding>polecat` and
 `binding_prefix` `<binding>`. It pours none while a run is attached to the bead,
-while another open bead names the PR's branch, such as a rework child, while a
-conversation holds the bead, unless its sitting stays for the work it sent, or
-while a human gate holds it. A run that ended without a result is poured again.
+while another open bead names the PR's branch, such as a rework child, or while
+a human gate holds it. A conversation on the PR holds its merge and nothing
+else, so runs are poured while one is open, and the evaluator's wait holds the
+merge until it closes. A run that ended without a result is poured again.
 When the last two runs at the validated head both ended without one, counting
 only runs that ended after the bead's last `review-run-failed` gate closed, it
 files a human gate keyed `review-run-failed` instead, naming both runs and how
@@ -911,7 +912,8 @@ store's record lock, a `flock` on `pr-record.lock` in the store's `.beads`
 directory, from its read of the record to its last write of it, and leaves the
 lock free a moment between two records so a publication waiting for it takes it
 there. Two runs that overlap act on one record one after the other, the second
-from the record as the first left it. The refinery's `gctk pr record` and
+from the record as the first left it. The refinery's `gctk pr record`, a
+review run's `gctk pr withdraw` and `gctk review passed --record`, and
 `bead-rehome.sh`'s close take the same lock. The kernel frees the lock of a run
 the timeout stops, and the records it did not reach wait for the next run. No
 webhook fires the order, because an order a webhook fires skips Gas City's

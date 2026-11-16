@@ -13,9 +13,12 @@ import (
 // .beads directory, the path every writer of the record names the same way
 // (specs/tk-1tfzr71.66/design.md, section 4). `gctk pr record` holds it across
 // both of a publication's writes, `gctk pr reconcile` holds it for one record
-// at a time, from its read of the record to its last write of it, and
-// bead-rehome.sh holds it from its read of a bead to its close. Nothing that
-// holds it takes another lock, so no two writers wait on each other in a cycle.
+// at a time, from its read of the record to its last write of it,
+// `gctk pr withdraw` holds it from its read of a bead to its filing of the
+// withdrawal, `gctk review passed --record` holds it from its read of the PR's
+// bead to its close of the asks the run answered, and bead-rehome.sh holds it
+// from its read of a bead to its close. Nothing that holds it takes another
+// lock, so no two writers wait on each other in a cycle.
 const LockFile = "pr-record.lock"
 
 // lockPoll is how often a writer waiting for the lock asks for it again.

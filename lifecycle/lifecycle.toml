@@ -1352,14 +1352,10 @@ keys = [
 #   known, not as a stray.
 # gc.reaction_subject / _store — RETIRED. On a reaction bead, the subject it
 #   tracked and, where the id prefix was ambiguous, that subject's store.
-#   Nothing writes them. The proactive prompt's clause for a leftover reaction
-#   bead reads gc.reaction_subject to find the subject, which it slings a first
-#   reaction, and nothing reads _store. Registered so that residue on a
+#   Nothing writes or reads them. Registered so that residue on a
 #   pre-retirement bead reads as known, not as a stray. Bead id / store.
 # gc.reacted_by — RETIRED. On a subject, the reaction bead whose exit landed.
-#   Nothing writes it. The proactive prompt's clause for a leftover reaction
-#   bead reads it on that bead's subject, and slings the subject a reaction
-#   unless it names that bead. Registered so that residue on a pre-retirement
+#   Nothing writes or reads it. Registered so that residue on a pre-retirement
 #   bead reads as known, not as a stray. A bead id.
 # gc.proactive_reaction — RETIRED. `1`, on a subject, the proof an older first
 #   reaction stamped once its exit had landed. Nothing writes or reads it.
@@ -1906,7 +1902,6 @@ keys = [
 #   mol-refinery-patrol.toml's rework hand-back close and from the review
 #   loop's check (`gctk review passed --record`) closing an ask an earlier
 #   round fixed, and `no-op` from
-#   the proactive prompt's clause on a leftover reaction bead it closes,
 #   mol-validate-close, work-outcome.sh on every conversation close, the
 #   observation-filing recipes, the review loop's check closing any other ask
 #   the run answered, the landing order's close of a withdrawal it carried out,

@@ -127,9 +127,6 @@ no-op drain.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
-# MINER_DIR is not a gctk-* name: the build-scratch reaper removes a top-level
-# gctk-* entry nothing holds open, and the directory must outlive each tool call
-# until §4 of mine-and-file removes it.
 [[steps]]
 id = "mine-and-file"
 title = "Sweep the window's PR conversations, condense the outside posts, judge the city's, and file observations"
@@ -156,7 +153,7 @@ RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 # <<< feedback-miner-repo
 [ -n "$REPO" ] || { echo "feedback-miner: cannot resolve the rig root — nothing to mine this run."; "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-miner.mine-and-file --outcome pass; gc runtime drain-ack; exit 0; }
-MINER_DIR=$(mktemp -d "${TMPDIR:-/tmp}/feedback-miner.XXXXXX")
+MINER_DIR=$(mktemp -d "${TMPDIR:-/tmp}/gctk-feedback-miner.XXXXXX")
 echo "FM=$FM MINER_DIR=$MINER_DIR"
 if ! "$FM" sweep --checkout "$REPO" \\
       --days {{miner_window_days}} --backfill-days {{outside_backfill_days}} --dir "$MINER_DIR"; then

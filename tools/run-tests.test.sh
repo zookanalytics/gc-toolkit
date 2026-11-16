@@ -405,7 +405,7 @@ echo "── floor: every file runs above the test floor ──"
 # CANARY stands in for the directory holding the real gc, bd and gh: each one
 # there records that it was reached. The fixture stubs gc the way a suite does,
 # in a directory at the front of PATH, then removes that directory, as a killed
-# suite's EXIT trap or the scratch reaper does, and calls gc again. Each call
+# suite's EXIT trap does, and calls gc again. Each call
 # runs in a subshell, as a script under test makes most of its calls, so each
 # one searches PATH afresh. A shell that ran gc itself remembers the stub's path
 # and fails on the missing file without searching again.
