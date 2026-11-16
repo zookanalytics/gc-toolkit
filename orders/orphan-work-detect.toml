@@ -1,0 +1,12 @@
+# orphan-work-detect — every 15 minutes, record each bead whose owner no live
+# session answers to as one gc-toolkit.orphan-work.found event, writing no bead
+# (specs/tk-1tfzr71.158/design.md, section 2). The verb's 90-second read
+# deadline and 20-second event bound end inside the 120s timeout, as
+# services/gctk/worktree's test holds. Tune from city.toml [[orders.overrides]].
+[order]
+description = "Record each bead whose owner no live session answers to as one gc-toolkit.orphan-work.found event"
+trigger = "cooldown"
+interval = "15m"
+timeout = "120s"
+exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" worktree salvage"
+scope = "city"

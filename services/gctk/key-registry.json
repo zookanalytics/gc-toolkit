@@ -225,9 +225,10 @@
     "readers": [
       "pr",
       "review",
-      "waits"
+      "waits",
+      "worktree"
     ],
-    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root. A review run's loop is the bead of its run that reads ralph, the control bead of its checked step."
+    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root. A review run's loop is the bead of its run that reads ralph, the control bead of its checked step. The salvage reader leaves out a topology root, whose kind is workflow, scope or spec (WorkflowTopologyKinds in internal/beadmeta/kindsets.go at gastownhall/gascity c7eb6d2f43)."
   },
   {
     "name": "gc.outcome",
@@ -265,6 +266,22 @@
       "review"
     ],
     "doc": "gctk bead arm refuses a routed bead, which is dispatched already. An ask carries none, so no pool claims it and the review run is the one that works it. The pool, agent or person a bead is routed to (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A bead on a branch that a pool still holds has not pushed its work. The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
+  },
+  {
+    "name": "gc.session_id",
+    "type": "string",
+    "readers": [
+      "session"
+    ],
+    "doc": "The session that claimed a bead, written by Gas City's claim and left by its release (lifecycle/lifecycle.toml, [metadata.runtime_owned]). The session domain reads it as the first identity a bead names its owner by, and the seat-progress look as the seat a claim belongs to."
+  },
+  {
+    "name": "gc.session_name",
+    "type": "string",
+    "readers": [
+      "session"
+    ],
+    "doc": "The runtime name of the session that holds a bead, written by Gas City beside gc.session_id (lifecycle/lifecycle.toml, [metadata.runtime_owned]). The session domain reads it as an identity a bead names its owner by."
   },
   {
     "name": "gc.step_ref",
@@ -346,6 +363,14 @@
     "doc": "A work bead's self-reported disposition (lifecycle/lifecycle.toml, [metadata.runtime_owned]). A bead reading no-op put no work on its branch. A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's (lifecycle/lifecycle.toml, [metadata.runtime_owned])."
   },
   {
+    "name": "last_woke_at",
+    "type": "string",
+    "readers": [
+      "session"
+    ],
+    "doc": "When a session last woke, RFC 3339 in UTC, which Gas City writes on its session bead at each wake and clears when it stops (internal/session/lifecycle_transition.go at gastownhall/gascity c7eb6d2f43). The seat-progress look counts a seat's silence from no earlier than it, so a seat restarted in place is judged only on the time it has run."
+  },
+  {
     "name": "merge_hold",
     "type": "string",
     "readers": [
@@ -384,6 +409,14 @@
     "type": "string",
     "owner": "pr/record",
     "doc": "The head the landing order found on a PR open at a head the refinery has not validated. The next publication clears it."
+  },
+  {
+    "name": "pool_managed",
+    "type": "string",
+    "readers": [
+      "session"
+    ],
+    "doc": "true on the bead of a session Gas City runs as a pool seat, which its work ladder paces (ladderGoverns in cmd/gc/work_ladder_lane.go at gastownhall/gascity c7eb6d2f43). The seat-progress look judges only such a seat."
   },
   {
     "name": "pr_comment_answered",
@@ -557,5 +590,13 @@
     "type": "string",
     "owner": "pr",
     "doc": "The head a withdrawal of a PR's approvals names, on the bead `gctk pr withdraw` files, which blocks the bead that owns the PR. The landing order dismisses each approval that stands on a commit that does not contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is filed, and never cleared."
+  },
+  {
+    "name": "work_dir",
+    "type": "string",
+    "readers": [
+      "worktree"
+    ],
+    "doc": "The worktree a work bead's work is in, which the work formula's workspace-setup writes. The salvage reader names it for each bead it finds, where the act salvages from."
   }
 ]

@@ -291,6 +291,7 @@ func TestMonitorsLastGoodRun(t *testing.T) {
 	c.Add(
 		gascity.Event{Type: "order.completed", Subject: "mol-dog-backup", Ts: at(-25 * time.Hour)},
 		gascity.Event{Type: "order.completed", Subject: "orphan-sweep", Ts: at(-30 * time.Minute)},
+		gascity.Event{Type: "order.completed", Subject: "orphan-work-detect", Ts: at(-10 * time.Minute)},
 		gascity.Event{Type: "order.completed", Subject: "orphan-sweep", Ts: at(-5 * time.Minute)},
 		gascity.Event{Type: "order.completed", Subject: "reaper", Ts: at(-2 * time.Hour)},
 		gascity.Event{Type: "order.completed", Subject: "reaper:rig:b", Ts: at(-3 * time.Hour)},
@@ -308,17 +309,18 @@ func TestMonitorsLastGoodRun(t *testing.T) {
 		})
 	}
 	out := c.runAt(t, t0, nil)
-	want := []string{"doctor-run=none", "spawn-storm-detect=none", "orphan-sweep=-5m0s", "reaper=-2h0m0s", "reaper:rig:a=-4h0m0s", "reaper:rig:b=-3h0m0s", "mol-dog-doctor=none", "mol-dog-backup=none", "dolt-health=none"}
+	want := []string{"doctor-run=none", "orphan-work-detect=-10m0s", "seat-progress-detect=none", "refinery-queue-detect=none", "spawn-storm-detect=none", "orphan-sweep=-5m0s", "reaper=-2h0m0s", "reaper:rig:a=-4h0m0s", "reaper:rig:b=-3h0m0s", "mol-dog-doctor=none", "mol-dog-backup=none", "dolt-health=none"}
 	if got := rows(out.Record.Monitors); !reflect.DeepEqual(got, want) {
 		t.Fatalf("first run's monitors = %v", got)
 	}
 	c.Add(
 		gascity.Event{Type: "order.completed", Subject: "orphan-sweep", Ts: at(55 * time.Minute)},
 		gascity.Event{Type: "order.completed", Subject: "doctor-run", Ts: at(4 * time.Minute)},
+		gascity.Event{Type: "order.completed", Subject: "seat-progress-detect", Ts: at(30 * time.Minute)},
 		gascity.Event{Type: "order.completed", Subject: "mol-dog-backup", Ts: at(-24 * time.Hour)},
 	)
 	out = c.runAt(t, t0.Add(time.Hour), nil)
-	want = []string{"doctor-run=4m0s", "spawn-storm-detect=none", "orphan-sweep=55m0s", "reaper=-2h0m0s", "reaper:rig:a=-4h0m0s", "reaper:rig:b=-3h0m0s", "mol-dog-doctor=none", "mol-dog-backup=none", "dolt-health=none"}
+	want = []string{"doctor-run=4m0s", "orphan-work-detect=-10m0s", "seat-progress-detect=30m0s", "refinery-queue-detect=none", "spawn-storm-detect=none", "orphan-sweep=55m0s", "reaper=-2h0m0s", "reaper:rig:a=-4h0m0s", "reaper:rig:b=-3h0m0s", "mol-dog-doctor=none", "mol-dog-backup=none", "dolt-health=none"}
 	if got := rows(out.Record.Monitors); !reflect.DeepEqual(got, want) {
 		t.Fatalf("second run's monitors = %v", got)
 	}
@@ -341,6 +343,17 @@ func TestAnUnreadPreviousEventRecordsNothing(t *testing.T) {
 	}
 }
 
+// monitor is the row of the monitor order named, a row with no order when the
+// list has none.
+func monitor(ms []Monitor, order string) Monitor {
+	for _, m := range ms {
+		if m.Order == order {
+			return m
+		}
+	}
+	return Monitor{}
+}
+
 // A run whose read of the monitors' runs fails records the previous run's,
 // says why, and fails. The run after it reads the whole window, so a monitor
 // that ran between the two runs before it is not missed.
@@ -355,7 +368,7 @@ func TestAnUnreadMonitorsReadKeepsThePreviousRuns(t *testing.T) {
 	if !out.Recorded || !rec.Completed || rec.MonitorsUnread != "walk budget spent" || len(out.Failures) != 1 {
 		t.Fatalf("answered %+v, record %+v", out, rec)
 	}
-	if m := rec.Monitors[3]; m.Order != "reaper" || m.LastGood == nil || !m.LastGood.Equal(t0.Add(-time.Hour)) {
+	if m := monitor(rec.Monitors, "reaper"); m.LastGood == nil || !m.LastGood.Equal(t0.Add(-time.Hour)) {
 		t.Fatalf("monitors = %+v", rec.Monitors)
 	}
 	c.ReadErr = nil
@@ -363,7 +376,7 @@ func TestAnUnreadMonitorsReadKeepsThePreviousRuns(t *testing.T) {
 	if r := c.Reads(); r[len(r)-1] != (fake.Read{Type: "order.completed", Since: window}) {
 		t.Errorf("the run after the unread one read the monitors' runs as %+v", r[len(r)-1])
 	}
-	if m := out.Record.Monitors[5]; m.Order != "mol-dog-backup" || m.LastGood == nil || !m.LastGood.Equal(t0.Add(20*time.Minute)) {
+	if m := monitor(out.Record.Monitors, "mol-dog-backup"); m.LastGood == nil || !m.LastGood.Equal(t0.Add(20*time.Minute)) {
 		t.Fatalf("the run after the unread one has monitors %+v", out.Record.Monitors)
 	}
 }
