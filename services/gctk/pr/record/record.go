@@ -181,11 +181,12 @@ func Retry(w *ledger.Write, state, reason, now string) {
 
 // Requeue sends a PR open at a head the refinery has not validated back to the
 // refinery: the bead open, merge_result head changed, the head found, and why,
-// keeping the validated head. The marker goes, because the refinery's next
-// publication arms it again, unless held: a withdrawal still open on the bead
-// holds it from the refinery, so the marker stays for the landing order to
-// carry the withdrawal out.
-func Requeue(w *ledger.Write, prURL, observed, reason, now string, held bool) {
+// keeping the validated head. The marker goes, as in Gas Town's requeue
+// (requeue_changed_open_head), unless kept: the landing order keeps it while a
+// withdrawal still open on the bead or a review run attached to it holds the
+// head from the refinery, and until it has woken a refinery that nothing else
+// tells of the head, and then clears it (Settle).
+func Requeue(w *ledger.Write, prURL, observed, reason, now string, keep bool) {
 	w.Status("open")
 	mergeResultKey.Set(w, HeadChanged)
 	existingPRKey.Set(w, prURL)
@@ -196,7 +197,7 @@ func Requeue(w *ledger.Write, prURL, observed, reason, now string, held bool) {
 	for _, k := range []ledger.Key[string]{blockedReasonKey, reconcileErrorKey} {
 		k.Clear(w)
 	}
-	if !held {
+	if !keep {
 		pendingKey.Clear(w)
 	}
 }
@@ -206,9 +207,13 @@ func Requeue(w *ledger.Write, prURL, observed, reason, now string, held bool) {
 // waits for the order to carry it out.
 func Mark(w *ledger.Write) { pendingKey.Set(w, "true") }
 
-// Settle clears the marker of an open bead whose changed head already waits on
-// the refinery's validation, as Gas Town's recovery of an interrupted requeue
-// does.
+// Waiting records a run that read the record of a changed head, found it still
+// held from the refinery and read no PR: when the run read it.
+func Waiting(w *ledger.Write, now string) { checkedAtKey.Set(w, now) }
+
+// Settle clears the marker of an open bead whose changed head the landing order
+// has handed to the refinery, the write Gas Town's recovery of an interrupted
+// requeue makes.
 func Settle(w *ledger.Write) {
 	for _, k := range []ledger.Key[string]{pendingKey, blockedReasonKey, reconcileErrorKey} {
 		k.Clear(w)
