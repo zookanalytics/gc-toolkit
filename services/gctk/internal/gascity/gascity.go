@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -65,11 +66,13 @@ type Sling struct {
 }
 
 // Result is what a command answered: its exit code and its output, standard
-// output and standard error together. Code is -1 when it did not run, and Err
-// then says why.
+// output and standard error together, with its standard output alone in
+// Stdout, which carries the answer of a script that prints its notes on
+// standard error. Code is -1 when it did not run, and Err then says why.
 type Result struct {
 	Code   int
 	Output string
+	Stdout string
 	Err    error
 }
 
@@ -425,17 +428,17 @@ func isDir(p string) bool {
 func run(dir, bin string, args ...string) Result {
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
+	var out, stdout bytes.Buffer
+	cmd.Stdout, cmd.Stderr = io.MultiWriter(&out, &stdout), &out
 	err := cmd.Run()
 	var ee *exec.ExitError
 	switch {
 	case err == nil:
-		return Result{Code: 0, Output: out.String()}
+		return Result{Code: 0, Output: out.String(), Stdout: stdout.String()}
 	case errors.As(err, &ee):
-		return Result{Code: ee.ExitCode(), Output: out.String()}
+		return Result{Code: ee.ExitCode(), Output: out.String(), Stdout: stdout.String()}
 	default:
-		return Result{Code: -1, Output: out.String(), Err: err}
+		return Result{Code: -1, Output: out.String(), Stdout: stdout.String(), Err: err}
 	}
 }
 

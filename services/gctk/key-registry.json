@@ -4,9 +4,10 @@
     "type": "string",
     "readers": [
       "listing",
-      "pr"
+      "pr",
+      "reaction"
     ],
-    "doc": "The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it."
+    "doc": "The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool."
   },
   {
     "name": "blocked_reason",
@@ -244,6 +245,12 @@
       "review"
     ],
     "doc": "A step's structured output, one JSON object, which the step writes before it closes. A review run's triage, lanes and rule-and-repair each write theirs in the shape the review domain declares."
+  },
+  {
+    "name": "gc.recommended_formula",
+    "type": "string",
+    "owner": "reaction",
+    "doc": "The execution formula a first reaction's recommend exit puts to the operator: the board offers Accept, which slings that formula at the bead, beside the exit's human gate. gctk reaction dispose sets it once the gate is filed and clears it before any exit acts, so no recommendation is older than the newest first-reaction gate. gc-helm.sh accept and converse-invalidate-recommendation.sh clear it, and converse-signoff.sh reads it, in shell (docs/gctk-architecture.md, Debt). Absent or empty, the bead carries no recommendation."
   },
   {
     "name": "gc.root_bead_id",

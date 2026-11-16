@@ -99,6 +99,16 @@ var waitTypes = []string{ledger.EdgeBlocks, ledger.EdgeConditionalBlocks, ledger
 
 func isWait(e ledger.Edge) bool { return slices.Contains(waitTypes, e.Type) }
 
+// notHeld is why Holds answers a bead the store does not hold.
+const notHeld = "the store holds no such bead"
+
+// NotHeld reports whether err is Holds' answer for a bead the store does not
+// hold, such as one in another store, rather than a read that failed.
+func NotHeld(err error) bool {
+	var re *ledger.ReadError
+	return errors.As(err, &re) && re.Reason == notHeld
+}
+
 // Snapshot is one pass's read of what holds the beads named: the ledger's
 // snapshot of them and their ancestors with the store's blocked set, the
 // listing's view of each one's edges, and the runs that tell whether each is in
@@ -146,7 +156,7 @@ func Read(l *ledger.Ledger, ids ...string) (*Snapshot, error) {
 	var held []string
 	for _, id := range ids {
 		if _, ok := edges[id]; !ok {
-			s.missing[id] = &ledger.ReadError{ID: id, Reason: "the store holds no such bead"}
+			s.missing[id] = &ledger.ReadError{ID: id, Reason: notHeld}
 			continue
 		}
 		held = append(held, id)
