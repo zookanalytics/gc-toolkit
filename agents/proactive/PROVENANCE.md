@@ -77,8 +77,7 @@ The first reaction NEVER closes its subject — every disposition advances it
 and leaves it open, the `close` disposition included: it routes the subject to a
 validating closer (mol-validate-close), which re-checks the no-work call and
 closes the subject on its own confident check or escalates.
-`assets/scripts/first-reaction-dispose.sh` performs each of them through native
-writes. No key on the subject records that a reaction landed: the run is the
+`gctk reaction dispose` performs each of them through native writes. No key on the subject records that a reaction landed: the run is the
 record while it runs, `gc sling` refuses a second, and the state the exit wrote
 and its headline keep the subject out of the scan afterwards. A worker that dies
 before it closes its step leaves the step to the next, whose check passes only
@@ -98,6 +97,5 @@ reacting agent's rubric (`agents/proactive/prompt.template.md`), not in an
 origin gate on the script.
 
 Gate: `tools/gc-proactive.test.sh` covers the sling, its refusals, the check and
-the scan; `assets/scripts/first-reaction-dispose.test.sh` covers the exits
-themselves. Design refs: specs/tk-1tfzr71.105/design.md; design-doc.md Key
+the scan; the Go tests of `services/gctk/reaction` cover the exits themselves. Design refs: specs/tk-1tfzr71.105/design.md; design-doc.md Key
 Components 5-6, Phase 4.

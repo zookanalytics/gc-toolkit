@@ -200,8 +200,8 @@ is not a `blocks` edge, and hears at its next turn. Nothing nudges on a raw
 `bd update --assignee` either, so a person hands work to a named agent through
 the work skill's send.
 
-`first-reaction-dispose.sh` hands a bead to the mechanik as a route and to the
-refinery or the keeper as the assignee, and refuses the deacon, the witness and
+`gctk reaction dispose` hands a bead to the mechanik as a route and to the
+refinery as the assignee, and refuses the deacon, the witness, the keeper and
 any agent this section does not name before it writes anything. Once the bead
 is handed over, either exit reads whether `bd` reports it ready, and nudges the
 agent when it does. That covers a `--then-assign` bead whose blocker closed

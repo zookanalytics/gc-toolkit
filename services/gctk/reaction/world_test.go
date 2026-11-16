@@ -201,7 +201,7 @@ func (w *world) script(c rtfake.Call) gascity.Result {
 			w.store.Put(s)
 			w.sync()
 		}
-		return gascity.Result{Output: open + "\n", Stdout: open + "\n"}
+		return gascity.Result{Output: "human-gate: a note on stderr\n" + open + "\n"}
 	}
 	return gascity.Result{Code: 127, Err: fmt.Errorf("no script %s", c.Name)}
 }

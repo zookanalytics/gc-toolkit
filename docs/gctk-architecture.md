@@ -695,9 +695,17 @@ why a reader must know it, and the work that retires it.
   scripts themselves.** They retire whole with the old merge path
   (tk-1tfzr71.70, [the register](#the-re-implementation-register)), so they get
   no layering work.
-- **The first reaction still runs from shell.** Until the port lands
-  (tk-ssm8qns.19), `tools/gc-proactive.sh` and
-  `assets/scripts/first-reaction-dispose.sh` hold the `reaction` verbs, and
-  every caller names the scripts. They decode bead rows and GitHub's answers in
-  jq, outside the adapters, and the emergency check passes the checks at the
-  default branch's head to jq as arguments.
+- **The first reaction's check, sling, sweep and pool answer still run from
+  shell.** `tools/gc-proactive.sh` holds those `reaction` verbs, and every
+  caller of them names the script. It decodes bead rows in jq, outside the
+  adapters. The move's second unit (tk-ssm8qns.25) ports them, and this entry
+  goes with it.
+- **Shell still reads and clears the recommendation `reaction` owns.**
+  `gc.recommended_formula` is declared in `reaction`, whose `recommend` exit is
+  its one setter, but `gc-helm.sh accept` and
+  `converse-invalidate-recommendation.sh` clear it and `converse-signoff.sh`
+  reads it, each spelling the key, against rules 1 and 6, so the key stays
+  registered in `lifecycle/lifecycle.toml`. The board's own read of it is under
+  the board's entry above. tk-ssm8qns.23 moves those reads and clears onto the
+  domain, and the key's entry in `lifecycle/lifecycle.toml` goes with the last
+  of them.

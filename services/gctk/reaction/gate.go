@@ -117,10 +117,9 @@ func (r *Reactions) fileGate(d *Dispose) (string, error) {
 	if f := res.Failure(); f != "" {
 		return "", fmt.Errorf("could not file the human gate on %s (human-gate.sh: %s). Clear the cause and re-run this command", d.Bead, f)
 	}
-	gate := strings.TrimSpace(res.Stdout)
-	if i := strings.LastIndex(gate, "\n"); i >= 0 {
-		gate = strings.TrimSpace(gate[i+1:])
-	}
+	// human-gate.sh prints the gate's id as its last act, after any note, and
+	// the script's output reaches the runtime as one stream in write order.
+	gate := res.Tail()
 	if !beadID.MatchString(gate) {
 		return "", fmt.Errorf("human-gate.sh exited 0 on %s and named no gate (it printed %q), so whether the gate is filed is unknown. Re-run this command: it finds a gate that landed", d.Bead, gate)
 	}

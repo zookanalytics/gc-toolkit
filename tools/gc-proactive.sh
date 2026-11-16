@@ -43,7 +43,7 @@ FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 # The formula a first reaction is a run of.
 REACTION_FORMULA="mol-first-reaction"
 # The situation key the reaction's own recommend and ruling exits file their
-# human gate under (first-reaction-dispose.sh). A gate under it whose message
+# human gate under (gctk reaction dispose). A gate under it whose message
 # names the asking run is that run's own, which --check passes over.
 REACTION_GATE_KEY="first-reaction"
 # The situation key of the gate sling files on a subject where Gas City left a

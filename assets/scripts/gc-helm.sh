@@ -1654,11 +1654,11 @@ cmd_takeaway() {
         if [ -n "$blocked_by$route_waits" ] && [ "$dest_flag" = "--route" ]; then
             _rerun="Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest."
             [ -z "$route_waits" ] || _rerun="Re-run without --route, which still lands the headline, the release and the waits, and leaves the bead at rest."
-            echo "$PROG: takeaway: --route '$route' on $bead, ${blocked_by:+which is blocked by $blocked_by}${blocked_by:+${route_waits:+, and }}${route_waits:+whose --waiting-on names$route_waits}. None of those is a human gate on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever.${route_unread:+ The row of$route_unread did not read, so nothing shows it closed or a human gate.} $_rerun A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
+            echo "$PROG: takeaway: --route '$route' on $bead, ${blocked_by:+which is blocked by $blocked_by}${blocked_by:+${route_waits:+, and }}${route_waits:+whose --waiting-on names$route_waits}. None of those is a human gate on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever.${route_unread:+ The row of$route_unread did not read, so nothing shows it closed or a human gate.} $_rerun A bead that should reach a pool once its blocker clears is gctk reaction dispose --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
             exit 2
         fi
         if [ -n "$blocked_by" ]; then
-            echo "$PROG: takeaway: --assign '$assign' on $bead, which is blocked by $blocked_by. None of those is a human gate on $bead, so the work is on them: assigned, $bead reaches '$assign' once they close, as a record of work that already happened. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach '$assign' once its blocker clears names that wait: first-reaction-dispose.sh --disposition blocked --then-assign '$assign'." >&2
+            echo "$PROG: takeaway: --assign '$assign' on $bead, which is blocked by $blocked_by. None of those is a human gate on $bead, so the work is on them: assigned, $bead reaches '$assign' once they close, as a record of work that already happened. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach '$assign' once its blocker clears names that wait: gctk reaction dispose --disposition blocked --then-assign '$assign'." >&2
             exit 2
         fi
     fi
@@ -1739,7 +1739,7 @@ EOF
         fi
     fi
     # What follows a zero exit cannot be taken back: the run's end below, and
-    # what a caller writes next, as when first-reaction-dispose.sh arms, hands
+    # what a caller writes next, as when gctk reaction dispose arms, hands
     # over or holds the bead, or converse-signoff.sh resolves gates and closes
     # the conversation. So a refused update ends the verb here, with no wait
     # edge and no run's end, and a re-run writes the whole update again.
