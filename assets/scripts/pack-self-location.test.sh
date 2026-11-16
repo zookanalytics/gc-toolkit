@@ -269,10 +269,12 @@ else
   RIG_KIT=$(IN_DIR="$CITY/rigs/probe" in_city gc kit scripts-dir 2>/dev/null)
   [ -n "$KIT" ] && [ "$RIG_KIT" = "$KIT" ] && ok "a shell in the rig gets the same answer" \
     || bad "a shell in the rig gets the same answer" "named '$RIG_KIT'"
-  COOK=$(in_city gc formula cook mol-dog-shutdown-dance --var binding_prefix=kit. --json 2>/dev/null)
-  STEP=$(printf '%s' "$COOK" | jq -r '.id_mapping["mol-dog-shutdown-dance.receive-warrant"] // empty' 2>/dev/null)
-  [ -n "$STEP" ] && ok "the city pours mol-dog-shutdown-dance from the fetched pack" \
-    || bad "the city pours mol-dog-shutdown-dance from the fetched pack" "cook answered: $COOK"
+  # A graph.v2 formula pours only in a city that runs a control-dispatcher, and
+  # this one runs none, so the pour is a formula with no formula_compiler need.
+  COOK=$(in_city gc formula cook mol-witness-patrol --var binding_prefix=kit. --json 2>/dev/null)
+  STEP=$(printf '%s' "$COOK" | jq -r '.id_mapping["mol-witness-patrol.check-inbox"] // empty' 2>/dev/null)
+  [ -n "$STEP" ] && ok "the city pours mol-witness-patrol from the fetched pack" \
+    || bad "the city pours mol-witness-patrol from the fetched pack" "cook answered: $COOK"
   jq -r --arg id "$STEP" '[.. | objects | select(.id? == $id) | .description] | .[0] // empty' "$CITY/.gc/beads.json" > "$TMP/step.md" 2>/dev/null
   LINE=$(grep -m1 -E "^SCRIPTS=\\\$\(b='kit\.'; gc " "$TMP/step.md")
   [ -n "$LINE" ] && ok "the poured step names the binding its pour carried" \

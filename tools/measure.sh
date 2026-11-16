@@ -67,7 +67,7 @@ pre	config	^(pack\.toml|review-checks\.toml|lifecycle/|commands/|overlays/|asset
 pre	work	^agents/polecat/
 pre	review	^agents/(polecat-codex|demo)/
 pre	merge	^agents/refinery/
-pre	patrol	^agents/(witness|deacon|dog)/
+pre	patrol	^agents/(witness|deacon)/
 pre	engagement	^agents/
 pre	engagement	^skills/(converse-|session-title/|backlog-refinement/|portfolio-sync/)
 pre	review	^skills/(review-|specialist-stance/|demo-capture/|gc-demo-script/)
@@ -82,7 +82,7 @@ post	work	^assets/scripts/(self-review-check|convoy-seed|submit-branch-gate|load
 post	merge	^assets/scripts/(merge-tail|pr-status-label|pr-summary-region|one-anchor-per-pr|refinery-|mr-aware|find-work|unrecorded-direct|downstream-court)
 post	review	^assets/scripts/(review-|demo-deliver|rig-demo-capture|migrate-approval|signoff-gate|check-set-normalize|mol-validate-refuse|mol-rig-demo)
 post	feedback	^assets/scripts/(learning-recurrence|distiller-)
-post	patrol	^assets/scripts/(branch-context|file-warrant|orphan-dispose|dolt-backup|deacon-|witness-|patrol-|crash-loop|doctor-|notice-finding|host-bead|topology-root|liveness-lookup|candidate-pipeline|owning-store|dog-escalation|cycle-recycle|worktree-cleanup)
+post	patrol	^assets/scripts/(branch-context|orphan-dispose|dolt-backup|deacon-|witness-|patrol-|crash-loop|doctor-|notice-finding|host-bead|topology-root|liveness-lookup|candidate-pipeline|owning-store|cycle-recycle|worktree-cleanup)
 post	shared	^assets/scripts/
 RULES
 )

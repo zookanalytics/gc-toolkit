@@ -45,8 +45,7 @@ when one is named, and are not committed:
 - [`converse-opus`](agents/converse-opus.md)
 - [`deacon`](agents/deacon.md)
 - [`demo`](agents/demo.md)
-- [`bd.dog`](agents/bd.dog.md)
-- [`gc-toolkit.dog`](agents/gc-toolkit.dog.md)
+- [`dog`](agents/dog.md)
 - [`gemini`](agents/gemini.md)
 - [`keeper`](agents/keeper.md)
 - [`mechanik`](agents/mechanik.md)
@@ -70,7 +69,6 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` |
 | [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` |
-| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` |

@@ -118,8 +118,6 @@ bead.
 | `gctk review guidance <check>` | hook | the rig's guidance for a check at the reviewed commit | Part of the check index: a rig's guidance, read at the commit under review rather than the one checked out. |
 | `gctk review passed <bead>` | hook | whether every lane has passed at the head: the loop's pass-or-iterate check | The check script that a review formula's check loop runs after each round. It holds the pass rule over the lanes, which the loop itself cannot. |
 | `gctk session title` | agent | give a session a title its record and its terminal show | `gc session rename` writes only the title on Gas City's record. An agent's terminal shows the name the agent's own `/rename` sets, typed into its input box, so the verb renames the session and has Gas City type `/rename <title>` into it through `gc session submit`, for Claude Code and Codex alike. |
-| `gctk quota-park nudge` | order | nudge each live session parked at a provider's limit banner, backing off per session and telling a person once an episode | Nothing in Gas City wakes a live session idle under a limit banner ([warrants.md](warrants.md#quota-park-nudging)). A nudge costs a busy or still-blocked agent nothing, and the pass polls rather than trusting the banner's reset time, because quota returns by routes no banner predicts. The standing revisit of its cadence, backoff and scope is tk-vtnyw8d. |
-| `gctk quota-park status <session>` | hook | whether this session is parked on a provider limit | The patrols read it, rather than the session's pane, before they warrant a session. |
 | `gctk seed render` | hook, order | render every agent's prompt and every formula's recipe into the audit under `generated/seed-audit/` | Gas City renders one prompt or recipe on demand and keeps no copy. The audit keeps them all in the tree, so a PR's diff shows what each agent will receive. It writes only the output it owns, which is what lets an order run it. |
 | `gctk seed check` | hook | whether the render is current | The pre-commit hook and a doctor check read it, so a stale audit is caught before it lands. |
 | `gctk dolt reclaim` | order | reclaim each store at or over the reclaim line | The reclaim line is a store's on-disk noms size of `GC_DOLT_RECLAIM_THRESHOLD_MIB`, 2048 MiB by default, the size at which Gas City's `dolt-noms-size` doctor check warns. The supervisor runs no Dolt GC, and scheduled compaction skips a store under its commit threshold ([warrants.md](warrants.md#dolt-reclaim)). |
@@ -155,8 +153,6 @@ What each noun owns:
   records are the first: the records under the rig clone's git common
   directory, and their copies on beads. Beside them is the record of each copy
   of the rig's UI that runs.
-- **`quota-park`:** the nudge episode of each parked session, under the city's
-  runtime directory.
 - **`seed`:** the rendered audit under `generated/seed-audit/`.
 - **`review`, `dolt` and `session`:** nothing. The check index is config in the
   pack and the rig, and a session's title is Gas City's record and the agent's

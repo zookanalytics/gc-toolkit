@@ -1670,13 +1670,15 @@ keys = ["seed_audit_reaudit"]
 #   statuses, so a branch owns at most one live re-audit. Never cleared. A branch
 #   name.
 
-# Warrant beads (label=warrant, routed to the dog pool): the due-process kill
-# request a patrol detector files against a live-but-wedged session
-# (docs/authority-map.md; formulas/mol-dog-shutdown-dance.toml). Renamed from
-# the pre-rewrite bare target/reason/requester — bare `target` collides with
-# the merge_identity key above.
+# Warrant beads (label=warrant): the kill request a patrol filed against a live
+# session, for the dog pool's shutdown dance. The pack has neither now, since
+# Gas City's work ladder recovers a stuck pool seat.
 [metadata.warrant]
 keys = ["warrant.target", "warrant.reason", "warrant.requester"]
+# warrant.target / warrant.reason / warrant.requester — RETIRED. The session a
+#   warrant named, why the patrol filed it, and the patrol the dance answered
+#   when it finished. Nothing writes or reads them now. Registered so that
+#   residue on a pre-retirement bead reads as known, not as a stray.
 
 [metadata.deferred_dispatch]
 # The arm itself, gc.dispatch_when_ready and its _args, _armed_by, _armed_at,
@@ -1830,7 +1832,7 @@ keys = [
   "gc.claimed_at", "gc.kind", "gc.synthetic", "gc.step_id", "gc.step_ref",
   "gc.root_bead_id", "gc.root_store_ref", "gc.input_convoy_id", "gc.formula_source",
   "gc.native_step_dependencies.v1", "gc.graphv2_*", "gc.var.*",
-  "pin_awake", "configured_named_session",
+  "pin_awake",
   "gc.formula_contract", "gc.work_dir", "gc.work_commit", "gc.work_branch",
   "gc.work_outcome", "work_outcome",
 ]
@@ -1896,12 +1898,6 @@ keys = [
 #   from a branch's ledger, and each falls back to the legacy bare `work_outcome`
 #   alias. Absent leaves the
 #   disposition unstated. Never cleared.
-# configured_named_session — on a session bead, the authoritative "standing
-#   named" gate: "true" marks a session the pack's [[named_session]] config
-#   declares standing, applied by the runtime. pin-keepalive.sh reads it beside
-#   pin_awake to decide which conversational sessions to keep pinned; the pack
-#   does not write it. Absent or any value but "true" means the session is not a
-#   standing named one. A boolean-valued string.
 # gc.synthetic — "true" on a machine-minted convoy, written by the runtime that
 #   mints it. liveness-sweep.sh's machine_convoy test reads it, with the sling-
 #   and input-convoy title prefixes, as a signal that a convoy is machine-owned

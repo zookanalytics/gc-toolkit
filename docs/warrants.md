@@ -21,8 +21,7 @@ it.
 **Boundaries.** The rule and the tests that decide what needs a warrant are
 [foundation.md](foundation.md#boundaries), and the arch check holds a change to
 them ([review-arch.md](review-arch.md)). A pack noun missing from this page has
-no warrant. The `warrant` bead the `dog` pool executes to stop a wedged session
-shares only the word ([authority-map.md](authority-map.md)).
+no warrant.
 
 ## An entry
 
@@ -263,8 +262,8 @@ shares only the word ([authority-map.md](authority-map.md)).
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-10, at `gastownhall/gascity` main f1f75f53c and
-  `gastownhall/gascity-packs` main c6f0a9aa6. The config reference's `[github]`
+- **Verified.** 2026-11-16, at `gastownhall/gascity` main 437715530 and
+  `gastownhall/gascity-packs` main 0f07496d2. The config reference's `[github]`
   table declares pull-request monitors, whose `authors` allow-list scopes the
   pull requests a monitor acts on, and scopes no agent's writes. GitHub's
   *Managing your personal access tokens* page was read on 2026-11-05.
@@ -643,29 +642,6 @@ shares only the word ([authority-map.md](authority-map.md)).
   arm then becomes a plain `gc sling <pool> <bead> --on <formula>` at arm time,
   and the order, the dispatch lock, the title token, the cap and
   `doctor/check-armed-dispatch-owed` retire.
-
-## Quota-park nudging
-
-- **Covers.** `assets/scripts/quota-park-nudge.sh`,
-  `orders/quota-park-nudge.toml`, the nudge episode files under the city's
-  `.gc/runtime/quota-park`, and
-  [quota-park-recovery.md](quota-park-recovery.md).
-- **Stands in for.** Waking a live session that sits idle under a provider's
-  usage-limit banner once the limit resets.
-- **Evidence.** In `gastownhall/gascity`:
-  - The session reconciler classifies only a dead session's exit. A live
-    session short-circuits the classification and is never classified
-    (`ExitFacts.Alive` in `internal/session/lifecycle_exits.go`).
-  - Its provider-screen lane runs for a dead crash candidate. A session whose
-    process died on a provider's limit screen sleeps for a fixed 30 minutes,
-    after which the quarantine clears (`checkRateLimitStability` in
-    `cmd/gc/session_reconcile.go`, `defaultRateLimitQuarantineDuration` in
-    `cmd/gc/session_types.go`). Nothing wakes or nudges a live session idle
-    under the banner.
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main 221b1476dc10.
-- **Retires when.** Gas City wakes a session parked on a provider's limit once
-  the limit resets, or every provider the city runs resumes such a session by
-  itself.
 
 ## Feedback patterns
 
