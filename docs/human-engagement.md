@@ -1150,28 +1150,30 @@ conversation as the evidence, removes the tree and its local branch, and carries
 out what the ruling says of the subject. A tree whose sitting ended first stays
 on its branch, and Gas City's reaper removes it once the change closes.
 
-**An open PR's branch** takes one writer at a time. On the pending record the
-sitting is that writer while its conversation holds the PR, on the operator's
-ruling, and the PR's bead carries the change, so the sitting files no bead. The
-bead's `blocks` edge onto the conversation, which every conversation on an open
-PR carries, keeps the landing order's review runs and the refinery off the
-branch while the conversation is open. The sitting proves that nothing else
-writes the branch (`gctk pr push --check`). The proof reads under the record
-lock, which the landing order holds from its read of a record to its pour of a
-run, so the proof sees any run the order poured from a read made before the
-edge. The sitting edits a checkout of the branch's tip in a tree under its home
-that has no local branch, and pushes through `gctk pr push`. The push proves the
-holding again and holds the lock until it ends, so the order neither pours a run
-nor marks the PR ready while it works. It refuses a checkout whose origin
-reaches any repository but the PR's, returns the PR to draft and pushes under
-the lease, so a push another writer made is never overwritten. The sitting
+**An open PR's branch** on the pending record is one the sitting can edit
+itself, on the operator's ruling, while its conversation holds the PR's merge,
+and the PR's bead carries the change, so the sitting files no bead. The sitting
+proves that it holds the PR (`gctk pr push --check`): the bead owns a PR on the
+pending record and waits on the conversation through the `blocks` edge every
+conversation on an open PR carries, and the conversation is in progress under
+the sitting. It edits a checkout of the branch's tip in a tree under its home
+that has no local branch, and pushes through `gctk pr push`, which proves the
+holding again, refuses a checkout whose origin reaches any repository but the
+PR's, returns the PR to draft and pushes under the lease. A review run or
+another writer can work the branch at the same time, and the lease keeps
+either push from overwriting the other: when the branch holds a commit the tree
+does not, the push sends nothing, and the sitting merges that commit in and
+pushes again. The push takes no lock. A review run's pass on a head the edit
+replaces counts for nothing, since the evaluator counts only a passed result
+that names the PR's head. The landing order's ready switch reads no
+conversation, so it can mark the PR ready between the push's return to draft
+and its push, which starts the PR's CI before the edit's review. The sitting
 rewrites the PR's summary to cover the edit and answers the PR with
-`--no-rework` at the sign-off. Once the conversation closes, the refinery
-validates the head the sitting left and the landing order pours one review run
-there, so the edit costs one triage, and the run repairs what it rules must-fix
-with no send-back to the sitting. On the old path the branch's writer is the
-PR's rework child, on which the review machinery keys, so a ruling that changes
-the branch files a rework through the sign-off.
+`--no-rework` at the sign-off. The refinery validates the head the sitting
+left, and the landing order pours a review run there, which repairs what it
+rules must-fix with no send-back to the sitting. On the old path the branch's
+writer is the PR's rework child, on which the review machinery keys, so a
+ruling that changes the branch files a rework through the sign-off.
 
 ## Accept
 

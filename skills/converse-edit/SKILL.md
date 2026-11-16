@@ -72,17 +72,16 @@ gc bd show "$PR" --json | jq -r '.[0].metadata.merge_result // ""'
 
 The edit is this conversation's change in flight, and the PR's bead carries
 it, so you file no bead and make no subject wait on one. Set `CHANGE` to
-`$PR`. Hold the branch and set up its tree as below, then read the polecat
+`$PR`. Hold the PR and set up its tree as below, then read the polecat
 class's standards, edit a commit per agreed step and show a copy of the UI as
 those sections say, and then run the checks, write the summary, push and let
 go as this section ends.
 
-**Hold the branch, before the first edit.** The bead's `blocks` edge onto the
-conversation holds the PR. While the conversation is open, the landing order
-pours no review run on it, the refinery takes no bead it holds, and the PR does
-not merge. Every conversation on an open PR carries that edge, and bd takes an
-edge it holds already as a no-op, so add it whatever stands. Then prove that
-nothing else writes the branch, and record the ruling on the bead:
+**Hold the PR, before the first edit.** The bead's `blocks` edge onto the
+conversation holds the PR's merge while the conversation is open. Every
+conversation on an open PR carries that edge, and bd takes an edge it holds
+already as a no-op, so add it whatever stands. Then prove that you hold the PR,
+and record the ruling on the bead:
 
 ```bash
 # >>> gctk-bin
@@ -93,10 +92,13 @@ gc bd dep add "$PR" "$CONVERSATION" --type=blocks \
   && gc bd update "$PR" --append-notes "$(date -u +%Y-%m-%d): the operator ruled that conversation $CONVERSATION edit this PR's branch with them: \"<their words>\""
 ```
 
-Exit 3 from the check names what else holds the branch, such as a review run
-attached to the bead or another bead working its branch. Tell the operator, and
-their ruling decides whether that work stops or you wait for it to end (the
-`work` skill, stopping work already sent).
+Exit 3 from the check names each reason it refused, such as a PR that is no
+longer on the pending record. Tell the operator, and edit nothing until the
+check passes.
+
+A review run, or another writer such as the operator, can push onto the branch
+while you edit it. Your push never overwrites theirs: it stops, and you merge
+their commits into the tree and push again, as Push on the operator's go says.
 
 **Set up the tree.** The tree is a checkout of the branch's tip under your
 home, at `worktrees/<the PR's bead>`, with no local branch, so a tree that has
@@ -178,11 +180,12 @@ The push proves the hold again, returns the PR to draft and pushes the tree's
 HEAD under the lease, so a push someone else made is never overwritten. Exit 0
 is pushed, and the comment records the push as one of the visit's actions. A
 later edit in this sitting is pushed the same way. Exit 4 means the branch
-holds a commit the tree does not, such as one the operator pushed themselves:
-bring it in with `git -C "$TREE" merge "origin/$BRANCH"`, which the push
-fetched, settle a conflict with the operator, and push again. Exit 3 names what
-refused, such as work no commit holds. Exit 2 is a read or a push that did not
-answer, and it is safe to run again.
+holds a commit the tree does not, such as a review run's fix or one the
+operator pushed themselves: merge it in with
+`git -C "$TREE" merge "origin/$BRANCH"`, which the push fetched, settle a
+conflict with the operator, and push again. Exit 3 names what refused, such as
+work no commit holds. Exit 2 is a read or a push that did not answer, and it is
+safe to run again.
 
 **Let go.** Stop the copy of the UI, then remove the tree once its commits are
 pushed. The removal runs only while the branch, as this clone last read it,
@@ -195,12 +198,12 @@ git -C "$TREE" merge-base --is-ancestor HEAD "origin/$BRANCH" \
   && git -C "${GC_DIR:-$PWD}" worktree remove "$TREE"
 ```
 
-The conversation still holds the PR. At the sign-off, answer the PR with
-`--no-rework`, since its branch carries what the ruling asked for, and name no
-wait on it. Once the conversation closes, the refinery validates the head you
-left, and the landing order pours one review run there, whose triage judges
-your commits as it judges any head. The run repairs what it rules must-fix, and
-nothing it finds comes back into this sitting.
+The conversation still holds the PR's merge. At the sign-off, answer the PR
+with `--no-rework`, since its branch carries what the ruling asked for, and
+name no wait on it. The refinery validates the head you left, and the landing
+order pours a review run there, whose triage judges your commits as it judges
+any head. The run repairs what it rules must-fix, and nothing it finds comes
+back into this sitting.
 
 ## File the change and hold it, before the first edit
 

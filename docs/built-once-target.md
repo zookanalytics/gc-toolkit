@@ -228,16 +228,17 @@ yet. Each remaining difference names its reason and what ends it:
   has no integration efforts. This ends when the convoys member (tk-1tfzr71.23)
   moves efforts onto `gc convoy land`.
 - **One worker per branch.** While a review run is attached to the bead that
-  owns a PR, the run is the one writer of the PR's branch, and the refinery's
+  owns a PR, the run is the one worker on the PR's branch, and the refinery's
   find-work skips the bead the run holds. Work that needs the branch changed,
   such as a conflict with the target, a person's comment or a sitting's ruling
   whose change the sitting does not make itself, is filed as an ask, which the
-  run takes. A sitting that edits the branch does so while its conversation
-  holds the bead, which keeps any run off it. A conflict on a branch whose rework
-  child is still open goes to that child's notes, on a rig not yet cut over and
-  for a child a cutover left to finish, until the old path's retirement
-  (tk-1tfzr71.122). Gas Town has no review run and no asks. Two writers on one
-  branch would overwrite each other's work. No end is planned.
+  run takes. A sitting that edits the branch with the operator can push while a
+  run works it, and the lease keeps either push from overwriting the other. A
+  conflict on a branch whose rework child is still open goes to that child's
+  notes, on a rig not yet cut over and for a child a cutover left to finish,
+  until the old path's retirement (tk-1tfzr71.122). Gas Town has no review run
+  and no asks. Two workers on one branch would overwrite each other's work. No
+  end is planned.
 
 ### Human engagement
 

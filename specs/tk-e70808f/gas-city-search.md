@@ -12,12 +12,12 @@ Gas City is cited by page or by symbol, and Gas Town by path and line.
 
 The surface the change adds is one verb of gctk's pr noun,
 `gctk pr push <bead> --held-by <conversation> [--check]`. It proves that the
-sitting's conversation holds the branch of the PR the bead owns and that
-nothing else writes it, checks that the checkout's origin is the PR's
-repository, returns the PR to draft, and pushes the checkout's HEAD onto the
-branch under git's lease. `--check` proves the holding and changes nothing.
-The change adds no metadata key, bead kind, lifecycle state, order or formula
-step. The `converse-edit` skill's text, which calls the verb, is not surface.
+sitting's conversation holds the PR the bead owns, checks that the checkout's
+origin is the PR's repository, returns the PR to draft, and pushes the
+checkout's HEAD onto the branch under git's lease. `--check` proves the holding
+and changes nothing. The change adds no metadata key, bead kind, lifecycle
+state, order or formula step. The `converse-edit` skill's text, which calls the
+verb, is not surface.
 
 ## A session's push onto an open PR's branch
 
@@ -63,20 +63,13 @@ proves the holding. The verb composes what exists:
 
 - the hold is bd's `blocks` edge from the PR's bead onto the conversation,
   which the pack already writes for every conversation on an open PR, and
-  which keeps the landing order's review runs and the refinery's find-work off
-  the bead while the conversation is open;
-- the proof's reads of an attached review run and of the open beads that work
-  the branch are the pr domain's, the reads the landing order keeps a run off
-  a held branch by;
+  which holds the PR's merge while the conversation is open;
 - the return to draft is `gctk pr draft`'s rule;
 - the push is the pack's one pusher, `branch-push.sh`, with its `--from-origin`
   read after a fetch of the branch, so the lease is on the tip origin holds
   and a HEAD that does not descend from it sends nothing;
 - the session's names are the four the gascity repository's guard reads, the
-  names a claim stamps as its assignee;
-- the proof and the push hold the pr domain's record lock, which the landing
-  order holds from its read of a record to its pour of a review run, so the
-  order pours no run between the proof and the push.
+  names a claim stamps as its assignee.
 
 ## Where the push goes
 

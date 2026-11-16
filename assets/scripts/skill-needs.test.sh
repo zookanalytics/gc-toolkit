@@ -1188,7 +1188,7 @@ have "…cuts its tree through Work's setup under --held-by" '"$CONV/work-setup.
 have "…and hands it off through Work's hand-off under --held-by" '"$CONV/work-submit.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
 have "…and reads the polecat class's standards before the first edit" 'template-fragments/work-quality-polecats.template.md' "$EDIT"
 have "…holds an open PR's branch through its conversation's edge on the PR's bead" 'gc bd dep add "$PR" "$CONVERSATION" --type=blocks' "$EDIT"
-have "…proves nothing else writes that branch before the first edit" '"$GCTK" pr push "$PR" --held-by "$CONVERSATION" --check' "$EDIT"
+have "…proves it holds the PR before the first edit" '"$GCTK" pr push "$PR" --held-by "$CONVERSATION" --check' "$EDIT"
 have "…pushes it through gctk with the pack's pusher, from the tree" '( cd "$TREE" && GCTK_SCRIPTS_DIR="$CONV" "$GCTK" pr push "$PR" --held-by "$CONVERSATION" )' "$EDIT"
 have "…and answers the PR it edited with --no-rework at the sign-off" '`--no-rework`, since its branch carries what the ruling asked for' "$EDIT"
 have "…shows the operator a copy of a UI change at an address of its own" 'GCTK_SCRIPTS_DIR="$CONV" "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --command "$SERVE"' "$EDIT"

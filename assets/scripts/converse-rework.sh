@@ -16,7 +16,7 @@
 # (docs/authority-map.md).
 #
 # On Gas Town's pending record (merge_result pull_request_pending or
-# pull_request_head_changed) the PR's branch has one writer, its review run
+# pull_request_head_changed) the PR's branch has one worker, its review run
 # (specs/tk-1tfzr71.108/design.md, section 1), so the ruling goes to the run as
 # an ask (`gctk review ask`) instead: the ruling as its reason, the conversation
 # as its source, and the checks the ruling names (--check), which the run picks

@@ -158,14 +158,16 @@ performer; the full transition table with writers is
    ([state-machine.md](state-machine.md#the-pending-record)).
 7. **Review.** For each head the refinery validates without a passed review
    result, the landing order pours a review run. The run records the PR's
-   review result, which the evaluator reads. While it works, the run is the
-   one writer of the PR's branch. Work that needs the branch changed, such as
-   a person's comment or a conflict with the target, is filed as an ask, and a
-   run takes it. Each city writer returns the PR to draft before it pushes.
-   The landing order marks the PR ready once a run has passed at the head the
-   refinery validated. When a run rules a head's change material, the landing
-   order dismisses each approval given on a commit that does not contain that
-   head.
+   review result, which the evaluator reads. While it works, the run is the one
+   worker on the PR's branch. Work that needs the branch changed, such as a
+   person's comment or a conflict with the target, is filed as an ask, and a
+   run takes it. A converse sitting the operator rules edit the branch with
+   them can push while a run works it, and the lease keeps either push from
+   overwriting the other. Each city writer returns the PR to draft before it
+   pushes. The landing order marks the PR ready once a run has passed at the
+   head the refinery validated. When a run rules a head's change material, the
+   landing order dismisses each approval given on a commit that does not
+   contain that head.
 8. **Merge.** The landing order has GitHub merge each PR on the pending record
    at the head the refinery validated, once the evaluator reads the PR ready,
    and closes the bead once the merge commit is on the target
@@ -197,8 +199,8 @@ bound for main.
 A converse sitting can take steps 4 and 5 itself, on the operator's ruling in
 the sitting, for a change whose next step is the operator's reaction. On a PR
 on the pending record it can edit and push the PR's branch instead, while its
-conversation holds the PR, and once the conversation closes the head it left
-takes steps 6 to 8 as any other head does.
+conversation holds the PR's merge, and the head it left takes steps 6 to 8 as
+any other head does.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a `gc` build that moves the text the seed
@@ -346,8 +348,7 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   it blocks.
 - **A conversation is a task about one subject.** It tracks its subject,
   replies to each human gate it answers through bd's `replies-to` edge, and
-  blocks nothing but an open PR's anchor, whose merge it holds until it closes
-  and whose review runs it holds while its sitting may edit the PR's branch,
+  blocks nothing but an open PR's anchor, whose merge it holds until it closes,
   and the change its sitting makes, which it holds until the hand-off.
   It waits in the operator's queue, assigned to `human`, until
   the operator engages it. `gc-helm.sh open` files one, and so do the
