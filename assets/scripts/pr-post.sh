@@ -61,9 +61,8 @@
 #                        only whether a post is the city's own pays for no read.
 #   pr-post.sh feedback-def
 #                        print the own-def definitions, gc_not_for_review,
-#                        gc_feedback($self; $since), the definitions of what a
-#                        dismissal retires (review-dismissal.sh, beside this
-#                        script), gc_city_handled and
+#                        gc_feedback($self; $since), live_comments($revs),
+#                        gc_city_taken, gc_city_handled and
 #                        gc_thread_awaits_answer($self; $since), for a reader of
 #                        feedback to prepend to its program. It reads the rig's
 #                        declaration and embeds its prefixes.
@@ -86,8 +85,8 @@
 #
 # Exit: 0 posted (or printed); 1 the post failed, with gh's error on stderr,
 #       not-for-review refused part of the declaration or could not read the
-#       default branch, feedback-def could not read review-dismissal.sh, or
-#       acting-login resolved no login, and printed nothing; 2 usage.
+#       default branch, or acting-login resolved no login, and printed nothing;
+#       2 usage.
 set -u
 
 PROG=pr-post
@@ -268,6 +267,49 @@ nfr_defs() {
   printf '%s' "$NFR_DEF"
 }
 
+# What a dismissal retires. A dismissal drops the review out of the approval
+# rule (review-verdict.sh), and it retires the inline comments the review
+# carried: GitHub keeps them on /pulls/N/comments, but they stop counting as
+# feedback. live_comments gives the inline comments on input that no dismissal
+# has retired, given the review list $revs, and a reader that counts or routes
+# the feedback in the comment space reads it through live_comments first. A
+# dismissal is the only thing that retires a comment. A comment naming no
+# review, or naming one $revs does not carry, is standalone and stays. Each kept
+# comment is stamped with its review submission instant as
+# gc_review_submitted_at, the instant gc_city_own dates an inline comment by: a
+# comment drafted in a pending review is published when the review is
+# submitted, so a review drafted before the provenance cutover and submitted
+# after it reads as feedback whole.
+LIVE_DEF='def live_comments($revs):
+  ([ $revs[]
+     | select(((.state // "") | tostring) == "DISMISSED")
+     | ((.id // 0) | tostring) ]) as $retired
+  | ([ $revs[]
+       | select(((.submitted_at // "") | tostring) != "")
+       | { key: ((.id // 0) | tostring), value: ((.submitted_at) | tostring) } ]
+     | from_entries) as $submitted
+  | [ .[]
+      | (((.pull_request_review_id // "") | tostring)) as $parent
+      | select(($retired | index($parent)) == null)
+      | if ($submitted[$parent] // "") != ""
+        then . + { gc_review_submitted_at: $submitted[$parent] } else . end ];
+'
+
+# The city's two marks on a post, each a reaction of its own. Its EYES says
+# the city has taken the post and owes it an answer (gc_city_taken): the
+# write-back in pr-facts.sh puts it on a post the city picked up
+# (WB_REACTION). Its THUMBS_UP says the city owes the post nothing more
+# (gc_city_handled): the write-back puts it in place of the EYES
+# (WB_RESOLVED_REACTION). A post that carries either mark is one the city has
+# taken, so a reader asking whether the city has taken a post asks both.
+# viewerHasReacted names the reader's own reaction, so a reader reads the posts
+# as the acting login and asks for each one's reactionGroups.
+MARKS_DEF='def gc_city_taken:
+  any((.reactionGroups // [])[]; .content == "EYES" and .viewerHasReacted == true);
+def gc_city_handled:
+  any((.reactionGroups // [])[]; .content == "THUMBS_UP" and .viewerHasReacted == true);
+'
+
 # gc_thread_awaits_answer asks of a review thread, a GraphQL reviewThread node
 # with its comments, whether its feedback waits on the city: the thread is
 # unresolved, and the newest of its posts that asks or answers is feedback.
@@ -275,27 +317,19 @@ nfr_defs() {
 # every post before it, whether it says the point was fixed, declined or
 # deferred, so a thread the city answered and left open for the reviewer does
 # not wait on the city. A post not for review neither asks nor answers, whoever
-# posted it, the city included. Neither does a post the city marked handled, or
-# a post a dismissal retired.
+# posted it, the city included. Neither does a post the city marked handled
+# (gc_city_handled), which for a point declined with no reply owed is the only
+# answer the post gets, or a post a dismissal retired.
 #
-# A post the city marked handled carries its THUMBS_UP (gc_city_handled), the
-# reaction the write-back in pr-facts.sh puts in place of its EYES once it owes
-# the post nothing more (WB_RESOLVED_REACTION). For a point declined with no
-# reply owed, that reaction is the only answer the post gets. viewerHasReacted
-# names the reader's own reaction, so a reader reads the threads as the acting
-# login and asks for each comment's reactionGroups.
-#
-# A post a dismissal retired is one live_comments in review-dismissal.sh sets
-# aside: a comment node names its own review, so each post is paired with that
-# review under a key of the post's own, the shape live_comments reads. A reader
-# therefore asks for each comment's pullRequestReview with its state and
-# submittedAt. With no $self nothing is the city's own, so a reader without the
-# acting login does not ask. feedback-def prints the rule after
-# review-dismissal.sh's definitions, since jq resolves a call only to a
-# definition before it.
-THREAD_DEF='def gc_city_handled:
-  any((.reactionGroups // [])[]; .content == "THUMBS_UP" and .viewerHasReacted == true);
-def gc_thread_awaits_answer($self; $since):
+# A post a dismissal retired is one live_comments sets aside: a comment node
+# names its own review, so each post is paired with that review under a key of
+# the post's own, the shape live_comments reads. A reader therefore asks for
+# each comment's pullRequestReview with its state and submittedAt, beside its
+# reactionGroups. With no $self nothing is the city's own, so a reader without
+# the acting login does not ask. feedback-def prints the rule after
+# live_comments and the marks, since jq resolves a call only to a definition
+# before it.
+THREAD_DEF='def gc_thread_awaits_answer($self; $since):
   [ (.comments.nodes // []) | to_entries[]
     | .value + { pull_request_review_id: ("p" + (.key | tostring)) } ] as $posts
   | [ $posts[] | select((.pullRequestReview | type) == "object")
@@ -345,12 +379,9 @@ case "$VERB" in
     printf '%s' "$NFR_PREFIXES" | jq -r '.[]'
     [ -z "$NFR_REFUSED" ]; exit $? ;;
   feedback-def)
-    # shellcheck source=review-dismissal.sh
-    . "$(dirname -- "${BASH_SOURCE[0]}")/review-dismissal.sh" \
-      || { echo "$PROG: cannot source review-dismissal.sh beside this script, so no definition is printed" >&2; exit 1; }
     nfr_load
     [ -z "$NFR_REFUSED" ] || printf '%s\n' "$NFR_REFUSED" | sed "s/^/$PROG: /" >&2
-    printf '%s\n' "$OWN_DEF"; nfr_defs; printf '%s\n' "$REVIEW_DISMISSAL_DEF"; printf '%s' "$THREAD_DEF"; exit 0 ;;
+    printf '%s\n' "$OWN_DEF"; nfr_defs; printf '%s' "$LIVE_DEF$MARKS_DEF$THREAD_DEF"; exit 0 ;;
   acting-login)
     shift
     LOGIN_HOST=()

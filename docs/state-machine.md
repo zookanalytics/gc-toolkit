@@ -888,7 +888,7 @@ unresolved and the newest of its posts that asks or answers is feedback
 nor answers, whoever posted it. Neither does a post the city marked handled with
 the THUMBS_UP that `pr-facts.sh`'s write-back puts on a post it owes nothing
 more, which is the only answer a point declined with no reply owed gets. Nor
-does a post a dismissal retired (`live_comments` in `review-dismissal.sh`). The
+does a post a dismissal retired (`live_comments`, also in `pr-post.sh`). The
 count holds the PR at the head the posture was read at, while nothing is in
 flight on the anchor, because work in flight is the city answering, and while
 no feedback waits for `pr-facts.sh` to route it (posture `commented`). A thread

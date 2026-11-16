@@ -208,8 +208,9 @@ mk_sut_dir() { # <dir> <file>...
   for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh" "$here/conversation.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
-  # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
-  # retires, review-answer.sh, what the living answer to a review shows,
+  # review-verdict.sh, the approval rule, review-dismissal.sh, the comments a
+  # dismissal would retire unrouted and how the approval dismissers name what
+  # they act on, review-answer.sh, what the living answer to a review shows,
   # dispatch-path.sh, the one definition of a dispatch path and a label hold,
   # which gc-helm.sh sources to ask how a bead is dispatched, priority-lib.sh,
   # the priority function, whose reading of a PR's approval pr-facts.sh

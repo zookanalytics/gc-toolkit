@@ -506,9 +506,10 @@ no warrant.
   `services/gctk/internal/cli/merge.go`, which `assets/scripts/merge.sh` runs.
   The definition it counts by: `gc_thread_awaits_answer` in
   `assets/scripts/pr-post.sh`, which reads a thread's posts through
-  `live_comments` in `assets/scripts/review-dismissal.sh` and sets aside a post
-  carrying the reaction the write-back in `assets/scripts/pr-facts.sh` marks a
-  handled post with (`WB_RESOLVED_REACTION`). Its reader is package
+  `live_comments` in the same file and sets aside a post carrying the
+  city's handled mark (`gc_city_handled`), the reaction the write-back in
+  `assets/scripts/pr-facts.sh` marks a handled post with
+  (`WB_RESOLVED_REACTION`). Its reader is package
   `services/gctk/prstatus`: `RowFacts` reads it off the anchor and
   `unansweredFeedback` decides from it. `prstatus.Read` gathers it for
   `gctk pr status` in `services/gctk/internal/cli/prstatus.go` and for the
@@ -542,9 +543,9 @@ no warrant.
     findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
     or answer. Neither keeps a record of the thread.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-13, at `gastownhall/gascity` main cb9105579667 with
+- **Verified.** 2026-11-16, at `gastownhall/gascity` main 192fa2d39407 with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
-  main 1f6d8e41c5b0, and `gastownhall/beads` main 526c1c877e26.
+  main 0f07496d2fa4, and `gastownhall/beads` main 8cdfa796a8f5.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from

@@ -2,12 +2,14 @@
 # pr-post.test.sh — hermetic coverage of the city's single PR posting helper:
 # each verb makes the gh call its callers made, with the provenance mark
 # appended; own-def tells the city's own post from any other, reading nothing,
-# and the feedback-def predicates tell a post not for review, and feedback, on
-# every shape the readers hand them; not-for-review and feedback-def read the
-# rig's declaration from its default branch; acting-login prints a login only
-# on gh's exit 0 and in a login's shape; no reader carries the no-review rule of
-# its own; and no file in the pack posts to a pull request any other way. A gh
-# stub records each call's argv and the body it would post; no network, no city.
+# and the feedback-def predicates tell a post not for review, feedback, a post a
+# dismissal retired and the city's marks on a post, on every shape the readers
+# hand them, with no file beside the script; not-for-review and feedback-def
+# read the rig's declaration from its default branch; acting-login prints a
+# login only on gh's exit 0 and in a login's shape; no reader carries the rule
+# of its own; and no file in the pack posts to a pull request any other way. A
+# gh stub records each call's argv and the body it would post; no network, no
+# city.
 #
 # run-tests-scope: tree
 set -u
@@ -273,6 +275,12 @@ case "$FB" in "$DEF"*) ok "feedback-def opens with the own-def definitions" ;;
   *) bad "feedback-def opens with the own-def definitions" "got: ${FB:0:200}" ;; esac
 eq "$(printf '%s' '{"user":{"login":"x"},"body":"Please rename this."}' | jq -r "$FB"'gc_feedback("bot"; "")' 2>&1)" true \
   "…and goes on to the feedback rule"
+# Copied alone, with no file beside it, feedback-def still prints the whole
+# definition: it sources nothing for it.
+mkdir -p "$TMPD/alone"; cp "$SUT" "$TMPD/alone/pr-post.sh"
+ALONE="$(cd "$TMPD/alone" && GIT_CEILING_DIRECTORIES="$TMPD" env -u GC_RIG_ROOT "$TMPD/alone/pr-post.sh" feedback-def 2>&1)"; ARC=$?
+eq "$ARC|$(printf '{}' | jq -c "$ALONE"'[live_comments([]), gc_city_taken, gc_city_handled]' 2>&1)" '0|[[],false,false]' \
+  "feedback-def needs no file beside it to print the whole definition"
 
 echo "# feedback-def: a post not for review is not feedback, whoever posted it"
 # gitq <dir> <git args...> — git in a fixture repository, unsigned, with no
@@ -385,6 +393,25 @@ eq "$(awaits "$NDEF" '{"isResolved":false}')" false "…nor one the read carries
 eq "$(printf '%s' "$(thread false "$OP" "$REPLY")" | jq -r --arg self "" --arg since "$CUT" "$NDEF"'gc_thread_awaits_answer($self; $since)')" true \
   "with no login, nothing is the city's own, so even its reply reads as feedback"
 
+echo "# feedback-def: a dismissal retires the inline comments its review carried"
+# rv <id> <login> <state> <submitted_at> — a review row, as /pulls/N/reviews
+# lists it. cm <id> <review-id> <login> <body> — an inline comment row, as
+# /pulls/N/comments lists it.
+rv() { printf '{"id":%s,"user":{"login":"%s"},"state":"%s","submitted_at":"%s","body":""}' "$1" "$2" "$3" "$4"; }
+cm() { printf '{"id":%s,"pull_request_review_id":%s,"user":{"login":"%s"},"body":"%s","path":"a.sh","line":1}' "$1" "$2" "$3" "$4"; }
+# An approval with a comment, a dismissed review with one, a standalone
+# comment, a comment naming a review the list does not carry, and the city's
+# own review carrying a marked post and an unmarked one.
+REVS="[$(rv 11 human1 APPROVED 2026-10-01T00:00:00Z),$(rv 12 human2 DISMISSED 2026-10-02T00:00:00Z),$(rv 13 bot COMMENTED 2026-10-03T00:00:00Z)]"
+CMTS="[$(cm 101 11 human1 'rename this'),$(cm 102 12 human2 'old point'),$(cm 103 null human3 'standalone'),$(cm 104 99 human4 'orphan'),$(cm 105 13 bot '<!-- gc:city --> reply'),$(cm 106 13 bot 'unmarked reply')]"
+live() { printf '%s' "$CMTS" | jq -c --argjson revs "$REVS" "$NDEF"'live_comments($revs) | '"$1"; } # <jq filter>
+eq "$(live 'map(.id)')" '[101,103,104,105,106]' \
+  "a dismissed review's comment is retired, and a standalone comment and one naming an unlisted review stay"
+eq "$(live '[ .[] | select(.id == 101) | .gc_review_submitted_at ]')" '["2026-10-01T00:00:00Z"]' \
+  "a kept comment carries its review's submission instant"
+eq "$(live '[ .[] | select(.id == 103) | has("gc_review_submitted_at") ]')" '[false]' \
+  "…and a standalone comment carries none"
+
 echo "# feedback-def: a post a dismissal retired neither asks nor answers"
 # in_review <comment-json> <state> — the comment, carried by a review in <state>
 # that was submitted when the comment was made.
@@ -425,6 +452,22 @@ eq "$(awaits "$NDEF" "$(thread false "$(reacted "$OP" "$WB_HANDLED" false)")")" 
   "the same reaction from another login marks nothing handled"
 eq "$(awaits "$NDEF" "$(thread false "$(reacted "$OP" "$WB_ROUTED" true)")")" true \
   "the city's reaction that it routed a post is no answer"
+
+echo "# feedback-def: the city's taken mark beside its handled mark"
+# The reaction the write-back marks a post it picked up with is the taken mark,
+# and the one it trades that for is the handled mark.
+mark() { printf '%s' "$2" | jq -r "$NDEF$1"; } # <predicate> <post-json>
+eq "$(mark gc_city_taken "$(reacted "$OP" "$WB_ROUTED" true)")" true \
+  "the city's reaction that it picked up a post marks the post taken"
+eq "$(mark gc_city_taken "$(reacted "$OP" "$WB_ROUTED" false)")" false \
+  "…and the same reaction from another login does not"
+eq "$(mark gc_city_taken "$OP")" false "a post with no reaction is not taken"
+eq "$(mark gc_city_taken "$(reacted "$OP" "$WB_HANDLED" true)")" false "the handled mark is not the taken mark"
+eq "$(mark gc_city_handled "$(reacted "$OP" "$WB_ROUTED" true)")" false "…nor the taken mark the handled one"
+BOTH=$(printf '%s' "$OP" | jq -c --arg t "$WB_ROUTED" --arg h "$WB_HANDLED" \
+  '. + {reactionGroups: [{content: $t, viewerHasReacted: false}, {content: $h, viewerHasReacted: true}]}')
+eq "$(mark gc_city_taken "$BOTH")|$(mark gc_city_handled "$BOTH")" "false|true" \
+  "each mark reads its own reaction's group: another login's taken reaction beside the city's handled one marks the post handled alone"
 
 echo "# feedback-def: the mark counts only among the HTML comments a body opens with"
 row() { jq -nc --arg l "$1" --arg t "$2" --arg b "$3" '{user: {login: $l, type: $t}, body: $b}'; } # <login> <type> <body>
@@ -646,8 +689,8 @@ echo "# one definition: no reader carries the no-review rule of its own"
 if git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1; then
   eq "$(git -C "$REPO" grep -l -F -e 'gc:no-review' -- 'assets/' 'formulas/' 'services/' 'tools/' ':!assets/scripts/pr-post.sh' ':!*.test.sh' ':!*_test.go' 2>/dev/null)" "" \
     "no file but pr-post.sh tests for the no-review mark"
-  eq "$(git -C "$REPO" grep -l -E -e 'def (gc_not_for_review|gc_feedback|gc_no_review_mark|gc_opens_with_mark|gc_thread_awaits_answer)[:(]' -- . ':!assets/scripts/pr-post.sh' 2>/dev/null)" "" \
-    "no file but pr-post.sh defines the rule"
+  eq "$(git -C "$REPO" grep -l -E -e 'def (gc_not_for_review|gc_feedback|gc_no_review_mark|gc_opens_with_mark|gc_thread_awaits_answer|live_comments|gc_city_taken|gc_city_handled)[:(]' -- . ':!assets/scripts/pr-post.sh' 2>/dev/null)" "" \
+    "no file but pr-post.sh defines the rule, what a dismissal retires or the city's marks"
   # The miner's fallback for a rig that declares nothing is the one exception:
   # it skips Vercel's deployment notice there until the rig declares a prefix.
   # Searching for [vc finds the marker written plain and as an escaped regex.

@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/review-dismissal.sh, what dismissing a review
-# retires and what the approval dismissers share. Covers:
+# Hermetic test for assets/scripts/review-dismissal.sh, the feedback a dismissal
+# would retire before it is routed, and what the approval dismissers share.
+# Covers:
 #   (DEF)      sourcing the file exposes $REVIEW_DISMISSAL_DEF, pr_coords and
 #              approval_phrase, and the defs compile behind pr-post.sh's feedback-def
-#   (LIVE)     live_comments drops the comments of a dismissed review and keeps
-#              every other one, standalone comments included, each stamped
-#              with its review's submission instant
 #   (UNROUTED) unrouted_comment_ids: the live comments under the named reviews
 #              that are feedback, neither the city's own post nor marked as not
 #              for review, and sit above the higher of the anchor's two routing
@@ -13,11 +11,11 @@
 #   (COORDS)   pr_coords: the host and owner/repo of a PR url naming the
 #              number; a url naming another number, or no PR, sets neither
 #   (PHRASE)   approval_phrase: each login once, noun and verb by count
-#   (READERS)  every reader sources this file and applies what it reads, the
-#              thread rule pr-post.sh prints among them
-#   (NO-COPY)  no other file in the pack defines the rule, applies the
-#              retirement inline, or carries the dismissers' PR-url parse or
-#              approver list
+#   (READERS)  every reader sources this file and applies what it reads
+#   (NO-COPY)  no file but pr-post.sh defines what a dismissal retires or
+#              applies the retirement inline, no file but this one defines the
+#              rule for the comments a dismissal would retire unrouted, and no
+#              other file carries the dismissers' PR-url parse or approver list
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree
@@ -58,19 +56,10 @@ cm() { # id review-id login body
 # own review carrying a marked post and an unmarked one.
 REVS="[$(rv 11 human1 APPROVED 2026-10-01T00:00:00Z),$(rv 12 human2 DISMISSED 2026-10-02T00:00:00Z),$(rv 13 $SELF COMMENTED 2026-10-03T00:00:00Z)]"
 CMTS="[$(cm 101 11 human1 'rename this'),$(cm 102 12 human2 'old point'),$(cm 103 null human3 'standalone'),$(cm 104 99 human4 'orphan'),$(cm 105 13 $SELF '<!-- gc:city --> reply'),$(cm 106 13 $SELF 'unmarked reply')]"
-live() { printf '%s' "$CMTS" | jq -c --argjson revs "$REVS" "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'live_comments($revs) | '"$1"; }
 unrouted() { # <rids-json> <anchor-metadata-json>
     printf '%s' "$CMTS" | jq -c --argjson revs "$REVS" --argjson rids "$1" --argjson m "$2" --arg self "$SELF" \
         "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'unrouted_comment_ids($revs; $rids; $m; $self)'
 }
-
-echo "# the comments no dismissal has retired"
-eq "$(live 'map(.id)')" '[101,103,104,105,106]' \
-   "(LIVE) a dismissed review's comment is retired; a standalone comment and one naming an unlisted review stay"
-eq "$(live '[ .[] | select(.id == 101) | .gc_review_submitted_at ]')" '["2026-10-01T00:00:00Z"]' \
-   "(LIVE) a kept comment carries its review's submission instant"
-eq "$(live '[ .[] | select(.id == 103) | has("gc_review_submitted_at") ]')" '[false]' \
-   "(LIVE) a standalone comment carries none"
 
 echo "# the feedback a dismissal would retire before it is routed"
 eq "$(unrouted '[11]' '{}')" '[101]' "(UNROUTED) a comment under a named review above both marks"
@@ -117,12 +106,10 @@ echo "# every reader sources the one definition"
 reads() { # <file> <what> <pattern>
     grep -qE -- "$3" "$ROOT/$1" && ok "(READERS) $1 $2" || bad "(READERS) $1 $2"
 }
-for r in assets/scripts/pr-facts.sh assets/scripts/approval-withdraw.sh assets/scripts/bring-current-guard.sh assets/scripts/pr-post.sh; do
+for r in assets/scripts/pr-facts.sh assets/scripts/approval-withdraw.sh assets/scripts/bring-current-guard.sh; do
     reads "$r" "sources review-dismissal.sh" '^[[:space:]]*\.[[:space:]].*review-dismissal\.sh'
 done
 reads assets/scripts/pr-facts.sh "reads the comment space through live_comments" 'REVIEW_DISMISSAL_DEF.*live_comments\(\$revs\)'
-reads assets/scripts/pr-post.sh "reads a review thread's posts through live_comments" '\$posts \| live_comments\(\$revs\)\[\]'
-reads assets/scripts/pr-post.sh "prints the definitions ahead of its thread rule" 'REVIEW_DISMISSAL_DEF".*THREAD_DEF'
 reads assets/scripts/approval-withdraw.sh "asks unrouted_comment_ids" 'unrouted_comment_ids\('
 for r in assets/scripts/approval-withdraw.sh assets/scripts/bring-current-guard.sh; do
     reads "$r" "names its PR through pr_coords" '^[[:space:]]*(if ! )?pr_coords '
@@ -130,25 +117,29 @@ for r in assets/scripts/approval-withdraw.sh assets/scripts/bring-current-guard.
 done
 
 echo "# no private copies"
-# A copy is a jq def of the rule under any of its names, or the dismissers'
-# PR-url parse or approver list. Specs and generated renders are history and
-# output, not readers.
-copies() { # <regex>
+# A copy is a jq def of a rule under any of its names, or the dismissers'
+# PR-url parse or approver list, anywhere but the rule's home. What a dismissal
+# retires lives in pr-post.sh's definition of feedback, and the rest lives in
+# this file. Specs and generated renders are history and output, not readers.
+copies() { # <home> <regex>
     local d hits out=""
     for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
         [ -d "$ROOT/$d" ] || continue
-        hits=$(grep -rlE -- "$1" "$ROOT/$d" 2>/dev/null | grep -vxF "$LIB" | grep -v '\.test\.sh$' || true)
+        hits=$(grep -rlE -- "$2" "$ROOT/$d" 2>/dev/null | grep -vxF "$1" | grep -v '\.test\.sh$' || true)
         [ -n "$hits" ] && out="$out $hits"
     done
     printf '%s' "$out" | sed 's#'"$ROOT"'/##g' | tr -s ' ' | sed 's/^ //'
 }
-eq "$(copies 'def (live_comments|unrouted_comment_ids|comment_routed_through)[[:space:]]*\(')" "" \
-   "(NO-COPY) no file but review-dismissal.sh defines the rule"
-eq "$(copies 'index\(\$parent\)\) == null')" "" \
-   "(NO-COPY) no file but review-dismissal.sh retires a dismissed review's comments inline"
-eq "$(copies 's#\^https://\\\(\[\^/\]\*\\\)/\[\^/\]\*/\[\^/\]\*/pull/')" "" \
+POST="$HERE/pr-post.sh"
+eq "$(copies "$POST" 'def live_comments[[:space:]]*\(')" "" \
+   "(NO-COPY) no file but pr-post.sh defines what a dismissal retires"
+eq "$(copies "$POST" 'index\(\$parent\)\) == null')" "" \
+   "(NO-COPY) no file but pr-post.sh retires a dismissed review's comments inline"
+eq "$(copies "$LIB" 'def (unrouted_comment_ids|comment_routed_through)[[:space:]]*\(')" "" \
+   "(NO-COPY) no file but review-dismissal.sh defines the comments a dismissal would retire unrouted"
+eq "$(copies "$LIB" 's#\^https://\\\(\[\^/\]\*\\\)/\[\^/\]\*/\[\^/\]\*/pull/')" "" \
    "(NO-COPY) no file but review-dismissal.sh parses a PR url the dismissers' way"
-eq "$(copies 'join\(", "\)\) \+ " and "')" "" \
+eq "$(copies "$LIB" 'join\(", "\)\) \+ " and "')" "" \
    "(NO-COPY) no file but review-dismissal.sh builds the approver list"
 
 echo

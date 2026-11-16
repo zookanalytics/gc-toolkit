@@ -1,56 +1,28 @@
 #!/usr/bin/env bash
-# review-dismissal.sh — what dismissing a pull request review retires, and what
-# the approval dismissers share. Sourced, never executed.
+# review-dismissal.sh — the feedback a dismissal would retire before it is
+# routed, and what the approval dismissers share. Sourced, never executed.
 #
-# A dismissal drops the review out of the approval rule (review-verdict.sh),
-# and it retires the inline comments the review carried. GitHub keeps those
-# comments on /pulls/N/comments, but they stop counting as feedback.
-# REVIEW_DISMISSAL_DEF states that second rule once, for every reader of the
-# comment space. pr-facts.sh reads only the comments no dismissal has retired
-# (live_comments) before it counts or routes any feedback, and pr-post.sh's
-# gc_thread_awaits_answer reads a review thread's posts through it before it
-# asks whether the thread waits on the city's answer. A dismisser asks
-# which comments a dismissal would retire before pr-facts.sh routes them
-# (unrouted_comment_ids), so it never drops feedback nobody has read. One
-# definition, no copies: review-dismissal.test.sh fails when a reader stops
-# sourcing this file or carries a rule of its own.
+# A dismissal retires the inline comments the review carried (live_comments,
+# in the definition of feedback that `pr-post.sh feedback-def` prints). A
+# dismisser asks which comments a dismissal would retire before pr-facts.sh
+# routes them (unrouted_comment_ids), so it never drops feedback nobody has
+# read. REVIEW_DISMISSAL_DEF states that rule once. One definition, no copies:
+# review-dismissal.test.sh fails when a reader stops sourcing this file or a
+# file carries a rule of its own.
 #
 # The approval dismissers, approval-withdraw.sh and bring-current-guard.sh,
 # also share how they name the PR they act on (pr_coords) and the approvals
 # they dismiss (approval_phrase).
 #
 # Usage follows the in-variable jq convention (review-verdict.sh): prepend the
-# defs to a jq program. unrouted_comment_ids reads gc_feedback, the feedback
-# rule pr-post.sh prints with `pr-post.sh feedback-def`, so a program prepends
+# defs to a jq program. unrouted_comment_ids reads live_comments and
+# gc_feedback, which `pr-post.sh feedback-def` prints, so a program prepends
 # that definition first:
-#   jq -n "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'... live_comments($revs) ...'
-# feedback-def prints these definitions too, ahead of its thread rule, so a
-# program composed this way defines each of them twice, the same way.
+#   jq -n "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'... unrouted_comment_ids(...) ...'
 # No comment inside the program may carry an apostrophe: the program is one
 # single-quoted shell word.
 # shellcheck disable=SC2034  # read by the scripts that source this file
 REVIEW_DISMISSAL_DEF='
-  # The inline comments on input that no dismissal has retired, given the
-  # review list $revs. A dismissal is the only thing that retires a comment. A
-  # comment naming no review, or naming one $revs does not carry, is standalone
-  # and stays. Each kept comment is stamped with its review submission instant
-  # as gc_review_submitted_at, the instant gc_city_own dates an inline comment
-  # by: a comment drafted in a pending review is published when the review is
-  # submitted, so a review drafted before the provenance cutover and submitted
-  # after it reads as feedback whole.
-  def live_comments($revs):
-    ([ $revs[]
-       | select(((.state // "") | tostring) == "DISMISSED")
-       | ((.id // 0) | tostring) ]) as $retired
-    | ([ $revs[]
-         | select(((.submitted_at // "") | tostring) != "")
-         | { key: ((.id // 0) | tostring), value: ((.submitted_at) | tostring) } ]
-       | from_entries) as $submitted
-    | [ .[]
-        | (((.pull_request_review_id // "") | tostring)) as $parent
-        | select(($retired | index($parent)) == null)
-        | if ($submitted[$parent] // "") != ""
-          then . + { gc_review_submitted_at: $submitted[$parent] } else . end ];
   # The line at or below which pr-facts.sh has routed every inline comment, or
   # seen its thread answer it: the higher of the anchor metadata $m marks
   # pr_comment_watermark and pr_comment_answered. A mark that is not a whole
