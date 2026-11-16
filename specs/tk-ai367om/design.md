@@ -588,9 +588,12 @@ surface of the pack's. None of the surface is a store, a lifecycle state, a bead
 kind or a metadata key.
 
 The landing order's step is Go in gctk's pr domain. The two scripts change what
-an existing mode writes and what the entry reads, and add no verb, mode or key,
-so the build changes them in place under the rule for a script that already
-exists (`AGENTS.md`, "New pack code is written in Go, in gctk").
+an existing mode writes and what the entry reads. That corrects what the stay's
+first Debt entry in `docs/architecture.md` names: a stay that comes back only
+when its work closes, and that is refused on the conversation's own subject.
+They add no verb, mode or key, so the build changes them in place under the rule
+for a script that already exists (`AGENTS.md`, "New pack code is written in Go,
+in gctk").
 
 ## 13. The units
 
