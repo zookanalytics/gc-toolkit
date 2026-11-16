@@ -268,13 +268,13 @@ Two cases leave `work_dir` naming a tree that is gone. In one, the script stops
 between the removal and the write. In the other, a claim lands between the
 fresh read and the removal, git removes the tree, and the guarded write then
 fails. That claimer loses no work: git removes only a clean tree, so a tracked
-or untracked change makes it refuse, and a commit the claimer made stays on the
-local branch. What a gone tree costs a claimer depends on the script its next
-step runs. `work-setup.sh` cuts a fresh tree in its place, and `work-enter.sh`
-stops on the missing path, so that run goes no further until the bead has a
-tree again. A later pass that reaches the bead finds no tree at that path and
-clears `work_dir` in the same guarded write, on the assignee and status that
-pass reads.
+or untracked change makes it refuse, and the script deletes no branch, so a
+commit the claimer made stays on the local branch. What a gone tree costs a
+claimer depends on the script its next step runs. `work-setup.sh` cuts a fresh
+tree in its place, and `work-enter.sh` stops on the missing path, so that run
+goes no further until the bead has a tree again. A later pass that reaches the
+bead finds no tree at that path and clears `work_dir` in the same guarded
+write, on the assignee and status that pass reads.
 
 ## 3. The deacon
 
@@ -516,16 +516,18 @@ which is before its transaction commits. An event's `created_at` is the
 statement's whole second (`NowAuxTime`,
 `internal/storage/issueops/derivedid.go`). A time bd binds to a bead, such as
 its `updated_at`, is rounded to the nearest second when Dolt's SQL engine
-stores it in a `DATETIME` column (`ConvertToTime`, go-mysql-server
-`sql/types/datetime.go`, at the version Gas City's `go.mod` requires at
-918f45f71). So the last write a backup holds can read one second past its
-working-set time. A write the sync missed can read any of those seconds too. A
-label bd adds in the working-set time's own second, after the sync took the
-root, reads that second. A write whose statement ran before the working-set
-time, in a transaction that committed after the sync took the root, reads an
-earlier one. Counting the rows of those seconds would date the gap from a write
-the backup holds, such as an idle store's last write, and flag an idle store at
-its first write after a backup.
+stores it in a `DATETIME` column. The store's server, this host's dolt 2.7.3,
+rounds it in `datetimeType.Convert` (go-mysql-server `sql/types/datetime.go`,
+at the version dolt 2.7.3's `go.mod` requires). At the version Gas City's
+`go.mod` requires at 918f45f71, `ConvertToTime` rounds it. So the last write a
+backup holds can read one second past its working-set time. A write the sync
+missed can read any of those seconds too. A label bd adds in the working-set
+time's own second, after the sync took the root, reads that second. A write
+whose statement ran before the working-set time, in a transaction that
+committed after the sync took the root, reads an earlier one. Counting the rows
+of those seconds would date the gap from a write the backup holds, such as an
+idle store's last write, and flag an idle store at its first write after a
+backup.
 
 bd writes an event row, with its own `created_at`, for each label it adds or
 removes (`AddLabelInTx` and `RemoveLabelInTx`,
