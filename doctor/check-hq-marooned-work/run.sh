@@ -190,7 +190,8 @@ city_path=""
 # City-scoped agents read the HQ store, so a bead routed to one is reachable, not
 # marooned. Resolve their identities from the same agent list (bare, the form a
 # route carries — resolve-route.sh). When the list cannot answer the set is
-# empty, and only the `warrant` label still exempts city machinery.
+# empty, so no route exempts a bead and only the exemptions that read no route
+# still hold.
 CITY_ROUTES='[]'
 [ "$agents_rc" -eq 0 ] && CITY_ROUTES=$(jq -c '[.agents[]? | select(.scope == "city") | .qualified_name // empty] | unique' "$WORK/agents.json" 2>/dev/null)
 [ -n "$CITY_ROUTES" ] || CITY_ROUTES='[]'
