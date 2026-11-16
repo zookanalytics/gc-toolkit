@@ -32,9 +32,10 @@ run:
 - **A stay is a promise to come back before your next decision about the
   work.** The sitting registers it with Gas City as a session wait on the work,
   and Gas City wakes the sitting with its thread when the wait is satisfied. For
-  work that opens a PR, your next decision is the approval, so the promise is
-  satisfied when the PR is ready for it, in every round. For work that opens no
-  PR, it is satisfied when the work closes.
+  work on a PR, whether it opens one or reworks the PR under discussion, your
+  next decision is the approval, so the promise is satisfied when the PR is
+  ready for it, in every round. For work with no PR, it is satisfied when the
+  work closes.
 - **The sitting always comes back to you.** It reads the result against what you
   agreed, posts what it found on the PR and in its hand-back, and waits to
   discuss it with you, even when it finds that the work matches. What it finds
