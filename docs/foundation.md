@@ -16,8 +16,6 @@ AI changed the cost of work. Agent iteration, parallel exploration, and self-cri
 
 **Agents earn every interaction.** Make it count: do the cheap work, plan ahead, and frame the choice. Every interruption justifies the attention it claims.
 
-**Interrupts stay out of conversation.** An alert or an escalation that arrives unasked does not flow to where a person is expected to engage and discuss with an LLM.
-
 **Agents improve.** Lessons come from doing; the system carries them across restarts so the next conversation starts smarter.
 
 **Agents make their edges visible.** Looking smart and being smart are different. Legible agents show which.
