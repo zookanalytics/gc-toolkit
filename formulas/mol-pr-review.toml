@@ -161,7 +161,12 @@ this step applies. Load it from your skill catalog and apply it.
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" repair`
 It makes the run's worktree at the head the round judged and prints each lane's
 verdict and findings, each ask the round can take, and each lane's part of the
-workspace, which holds its evidence.
+workspace, which holds its evidence. A worktree an earlier session of this step
+left is kept as it stands, and the read prints its commits past the head and
+its uncommitted edits: go on from them. Exit 3: the worktree is not at the head
+or past it, so the run must stop. Cancel it, and the landing order pours one at
+the PR's head:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the run's worktree is not at the head the round judged"`
 
 **3. Rule every finding and every ask, by the bar.** Fix each must-fix point in
 the run's worktree with a commit of its own, its siblings with it, and name the

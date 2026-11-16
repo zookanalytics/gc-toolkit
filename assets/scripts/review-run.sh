@@ -146,10 +146,17 @@ repo() {
 
 # worktree <part flag...> — the step's worktree at the head, in WT. It sets WT
 # rather than printing the path, so a worktree that did not land stops the
-# verb here and not only a subshell.
+# verb here and not only a subshell. The repair's worktree is kept when it is
+# at the head or past it, and one at any other commit is refused, which stops
+# the run (exit 3).
 worktree() {
-    WT=$("$HERE/review-workspace.sh" add --root "$RUN" "$@" --oid "$HEAD" --repo "$REPO") && [ -n "$WT" ] \
-        || die 1 "the worktree did not land"
+    local rc
+    WT=$("$HERE/review-workspace.sh" add --root "$RUN" "$@" --oid "$HEAD" --repo "$REPO"); rc=$?
+    case "$rc" in
+        0) [ -n "$WT" ] || die 1 "the worktree did not land" ;;
+        3) die 3 "the run's worktree holds work that is not on $HEAD, the head the round judged, or past it, so it is kept as it stands and the run must stop" ;;
+        *) die 1 "the worktree did not land" ;;
+    esac
 }
 
 print_run() {
@@ -245,9 +252,16 @@ cmd_lane() {
 
 cmd_repair() {
     load; owns rule-and-repair; repo
-    local wt
+    local wt ahead edits
     worktree --repair; wt=$WT
     print_run
+    ahead=$(git -C "$wt" log --oneline "$HEAD..HEAD") || die 2 "the run's worktree does not read"
+    edits=$(git -C "$wt" status --short) || die 2 "the run's worktree does not read"
+    if [ -n "$ahead$edits" ]; then
+        printf '%s\n' "== The round's work already in the run's worktree, kept as it stands: its commits past $HEAD, then its uncommitted edits"
+        [ -z "$ahead" ] || printf '%s\n' "$ahead"
+        [ -z "$edits" ] || printf '%s\n' "$edits"
+    fi
     printf '%s\n' "== The round to rule"
     "$gctk" review passed "$ID" --explain || true
     printf '%s\n' "== Each lane's files, its evidence on disk"

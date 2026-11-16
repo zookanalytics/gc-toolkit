@@ -33,7 +33,11 @@
 #       already there at that commit is reused as it stands.
 #   review-workspace.sh add    --root <id> (--triage | --lane <check> | --repair)
 #                              --oid <commit> [--repo <dir>]
-#       the same for the run's part: print <workspace>/<part>/wt
+#       the same for the run's part: print <workspace>/<part>/wt. The repair
+#       part is the run's one writing tree, so a worktree there at <commit> or
+#       at a commit that descends from it is kept as it stands, with its own
+#       commits and its uncommitted edits, and one at any other commit is
+#       refused and kept (exit 3), never made again at <commit>
 #   review-workspace.sh remove (--review-bead <id> | --root <id>)
 #       remove the workspace now
 #   review-workspace.sh reap [--dry-run]
@@ -61,7 +65,8 @@
 # Env: REVIEW_WORKSPACE_DIR, REVIEW_WORKSPACE_IDLE_AFTER (seconds).
 # Exit: 0 done, or nothing to do · 1 add could not make the worktree, remove
 #       left the workspace behind, or reap could not read the city's rigs ·
-#       2 usage.
+#       2 usage · 3 add refused the repair part's worktree, which is not at
+#       --oid or past it, and kept it as it stands.
 # Callers: formulas/mol-review.toml and mol-review-quorum-signoff.toml (add,
 # path, remove); formulas/mol-rig-demo.toml (add); review-run.sh, for the
 # steps of formulas/mol-pr-review.toml and mol-pr-review-lane.toml (path and
@@ -182,9 +187,27 @@ cmd_add() {
         exec 9<"$ws" && flock -w 300 9 \
             || { echo "$PROG: timed out waiting for another add on $ws" >&2; exit 1; }
     fi
-    if [ -f "$wt/.git" ] && [ "$(git -C "$wt" rev-parse --verify -q HEAD 2>/dev/null)" = "$commit" ]; then
-        printf '%s\n' "$wt"
-        return 0
+    if [ -f "$wt/.git" ]; then
+        local at
+        at="$(git -C "$wt" rev-parse --verify -q HEAD 2>/dev/null)"
+        if [ -n "$at" ] && [ "$at" = "$commit" ]; then
+            printf '%s\n' "$wt"
+            return 0
+        fi
+        # The repair part holds the round's fixes: its commits on the head and
+        # the edits not yet committed, which a tree made again at the head
+        # would lose. So it keeps a tree that is at the head or past it, and
+        # refuses any other rather than remove it. Triage's and the lanes'
+        # parts only read, so theirs are made again at the head they read.
+        if [ "$PART" = repair ]; then
+            if [ -n "$at" ] && git -C "$wt" merge-base --is-ancestor "$commit" "$at" 2>/dev/null; then
+                echo "$PROG: keeping $wt as it stands, $(git -C "$wt" rev-list --count "$commit..$at") commit(s) past $commit" >&2
+                printf '%s\n' "$wt"
+                return 0
+            fi
+            echo "$PROG: $wt is at ${at:-no commit git can read}, which is not $commit or past it, so it is kept as it stands and not made again at $commit" >&2
+            exit 3
+        fi
     fi
     gone "$wt" || teardown "$wt" || { echo "$PROG: cannot clear $wt" >&2; exit 1; }
     # --force: a registration whose directory was deleted by hand still claims

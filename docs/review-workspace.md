@@ -16,7 +16,11 @@ and its evidence beside its worktree, a capture among them, where the round
 reads them before it rules, so lanes that build, test or capture never share a
 tree. `review-workspace.sh add --root <root>` with `--triage`, `--lane <check>`
 or `--repair` makes a part, triage's first, and the hourly reap removes the
-directory once the run's root closes.
+directory once the run's root closes. A part read again at another head is
+made again there, except the repair's, which holds the round's fixes: a
+worktree there at the head the round judged or past it is kept as it stands,
+with its commits and its uncommitted edits, which the repair's read prints, and
+one at any other commit is refused and kept, which stops the run.
 
 On a rig not yet cut over, a review bead reads its pinned commit in a detached
 worktree and runs there any suite its check calls for. It writes its verdict

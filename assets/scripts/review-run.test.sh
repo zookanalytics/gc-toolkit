@@ -22,8 +22,10 @@
 # question put to a gate; a person's batch, whose human findings the round's
 # read lists and the finding verb rules through finding.sh, a deferral's
 # follow-up taking the PR's target; triage's read at a head that already
-# passed; and the reads making each step's worktree in its own part of the
-# workspace, and stopping when it does not land.
+# passed; the repair's read again keeping the round's commit and uncommitted
+# edit and showing them, and stopping the run on a worktree that is not at the
+# head or past it; and the reads making each step's worktree in its own part of
+# the workspace, and stopping when it does not land.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -222,6 +224,32 @@ facts review-loop.iteration.1.rule-and-repair repair 1 true
 run push
 eq "$(called 'pr draft')" 0 "a shadow run drafts nothing"
 has "$(cat "$WS/repair/shadow-writes.txt")" "push: 1 commit(s) onto polecat/tk-pr" "and keeps the push it made none of"
+
+# --- the repair's read keeps the round's work -------------------------------------
+# A session that restarts reads the round again at the head it judged: the
+# run's worktree keeps the commit the round made and the edit it has not
+# committed, and the read shows both. A worktree that is not at that head or
+# past it stops the run, and is kept as it stands.
+facts review-loop.iteration.1.rule-and-repair repair 1
+rm -rf "$WS/repair"
+run repair
+WT="$WS/repair/wt"
+echo kept > "$WT/f"; gw commit -q -am "the round's fix"; KEPT="$(gw rev-parse HEAD)"
+echo draft > "$WT/notes.txt"
+run repair
+eq "$RC" 0 "the repair's read again keeps the run's worktree"
+eq "$(git -C "$WT" rev-parse HEAD)" "$KEPT" "with the commit the round made"
+if [ -e "$WT/notes.txt" ]; then ok "…and the edit it has not committed"; else bad "…and the edit it has not committed"; fi
+has "$OUT" "== The round's work already in the run's worktree, kept as it stands" "and the read shows the session what it kept"
+has "$OUT" "the round's fix" "…the commit past the head"
+has "$OUT" "?? notes.txt" "…and the uncommitted edit"
+gw checkout -q --detach origin/main
+run repair
+eq "$RC" 3 "a run's worktree that is not at the head or past it stops the repair's read (exit 3)"
+has "$OUT" "the run must stop" "and says the run must stop"
+eq "$(git -C "$WT" rev-parse HEAD)" "$(git -C "$TMP/rig" rev-parse origin/main)" "and the worktree is kept as it stands"
+if [ -e "$WT/notes.txt" ]; then ok "…with its uncommitted edit"; else bad "…with its uncommitted edit"; fi
+git -C "$TMP/rig" worktree remove --force --force "$WT" 2>/dev/null; rm -rf "$WS/repair"
 
 # --- post ------------------------------------------------------------------------
 facts review-loop.iteration.1.rule-and-repair repair 1
