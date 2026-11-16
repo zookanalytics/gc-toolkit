@@ -90,8 +90,9 @@ type hold struct {
 // the refinery's to take yet. What holds the bead is the store's answer through
 // waits, as the evaluator reads it (ownWaits), and each wait's row, read here,
 // says what the wait is. A conversation has the shape conversation.sh gives
-// the scripts, and an ask is review.IsAsk's on the bead's branch, the two
-// waits refinery-find-work.sh takes a bead past.
+// the scripts, and an ask is review.IsAsk's on the bead's branch with the
+// status open, as refinery-lib.sh's refinery_ask reads one: the two waits
+// refinery-find-work.sh takes a bead past.
 func (u *run) mergeHolds(s state) ([]hold, error) {
 	snap, err := waits.Read(u.Ledger, s.id)
 	if err != nil {
@@ -123,7 +124,7 @@ func (u *run) mergeHolds(s state) ([]hold, error) {
 			return nil, nil
 		case isConversation(rows[i]):
 			holds = append(holds, hold{id: id, kind: "conversation"})
-		case rows[i].Status() != "closed" && review.IsAsk(rows[i], s.branch):
+		case rows[i].Status() == "open" && review.IsAsk(rows[i], s.branch):
 			holds = append(holds, hold{id: id, kind: "ask"})
 		default:
 			return nil, nil

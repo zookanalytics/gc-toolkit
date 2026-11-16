@@ -208,8 +208,12 @@ func Requeue(w *ledger.Write, prURL, observed, reason, now string, keep bool) {
 func Mark(w *ledger.Write) { pendingKey.Set(w, "true") }
 
 // Waiting records a run that read the record of a changed head, found it still
-// held from the refinery and read no PR: when the run read it.
-func Waiting(w *ledger.Write, now string) { checkedAtKey.Set(w, now) }
+// held from the refinery and read no PR: when the run read it, with any earlier
+// error cleared.
+func Waiting(w *ledger.Write, now string) {
+	checkedAtKey.Set(w, now)
+	reconcileErrorKey.Clear(w)
+}
 
 // Settle clears the marker of an open bead whose changed head the landing order
 // has handed to the refinery, the write Gas Town's recovery of an interrupted

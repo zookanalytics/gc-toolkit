@@ -112,9 +112,9 @@ func TestARequeueOnlyAConversationHoldsWakesTheRefinery(t *testing.T) {
 
 // A head a review run's repair pushed waits on that run while it is attached:
 // the requeue keeps the marker and wakes no one, and each run that reads the
-// record while the review run lives stamps the read and reads no PR. The first
-// run after the review run ends wakes the refinery, since the conversation
-// still holds the bead, and clears the marker.
+// record while the review run lives stamps the read, clears an earlier run's
+// error and reads no PR. The first run after the review run ends wakes the
+// refinery, since the conversation still holds the bead, and clears the marker.
 func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {
 	d := newHanding(t)
 	d.conversation(t, "open", "human", "")
@@ -128,6 +128,7 @@ func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {
 	d.wokeNone(t)
 
 	d.l.Now = func() time.Time { return time.Date(2026, 11, 12, 9, 10, 0, 0, time.UTC) }
+	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_reconcile_error"] = "an earlier run's read did not decide" })
 	reads := len(d.github.Reads())
 	o = d.once(t)
 	is(t, o, pr.ActChecked)
@@ -135,7 +136,8 @@ func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {
 	if more := d.github.Reads()[reads:]; len(more) > 0 {
 		t.Fatalf("a read of a head that waits on its run read GitHub: %v", more)
 	}
-	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "true", "pr_last_checked_at": "2026-11-12T09:10:00Z"})
+	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "true", "pr_last_checked_at": "2026-11-12T09:10:00Z",
+		"pr_reconcile_error": "<absent>"})
 	d.wokeNone(t)
 
 	d.end(t, "tk-run1", "pass", "2026-11-12T09:30:00Z")
@@ -178,7 +180,8 @@ func TestAChangedHeadNoConversationHoldsWakesNoOne(t *testing.T) {
 // refinery's to take while that wait holds it, as with a human gate. An ask is
 // the review run's work, a merge hold find-work takes the bead past as it does
 // a conversation, so the refinery is woken for an ask beside the conversation
-// and for an ask alone.
+// and for an ask alone. find-work reads only an open ask as one, so an ask at
+// another status holds the bead as other work does, and wakes no one.
 func TestWhatElseHoldsTheBeadDecidesTheWake(t *testing.T) {
 	t.Run("a human gate", func(t *testing.T) {
 		d := newHanding(t)
@@ -211,6 +214,19 @@ func TestWhatElseHoldsTheBeadDecidesTheWake(t *testing.T) {
 		says(t, o, "only ask "+id+" holds the bead, so the refinery was woken and nudged")
 		meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
 		d.wokeOnce(t, id)
+	})
+	t.Run("an ask that is not open", func(t *testing.T) {
+		d := newHanding(t)
+		d.conversation(t, "open", "human", "")
+		id := d.ask(t, "rename the flag")
+		a, _ := d.store.Row(id)
+		a.Status = "deferred"
+		d.store.Put(a)
+		d.store.List(bead, "tk-conv", id)
+		d.pr.Facts.HeadRefOid = other
+		is(t, d.once(t), pr.ActRequeued)
+		meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "<absent>"})
+		d.wokeNone(t)
 	})
 }
 

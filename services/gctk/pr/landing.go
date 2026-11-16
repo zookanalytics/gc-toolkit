@@ -91,9 +91,9 @@ type Waker interface {
 // mark, which a dismissal's message carries, from the writer that owns it. Runs
 // pours a PR's review run. Audit is the rig's seed audit, nil for a rig whose
 // repository carries none. Wake gives the refinery a turn for a changed head
-// that only conversations hold. Wait bounds how long a writer waits for the
-// lock, and Yield is how long a run lets the lock stand free between two
-// records, so a writer waiting for it takes it.
+// that only conversations and asks hold. Wait bounds how long a writer waits
+// for the lock, and Yield is how long a run lets the lock stand free between
+// two records, so a writer waiting for it takes it.
 type Landing struct {
 	Ledger   *ledger.Ledger
 	Dir      string
