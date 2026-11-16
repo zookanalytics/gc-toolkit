@@ -88,17 +88,20 @@ to the change or the person that knows it.
   `restore`, `sync`, `sync-url`, dolt 2.7.3), and no dolt pack command reads one
   (`examples/bd/dolt/commands/`).
 
-**Gap.** None reports the newest commit a backup holds, and commits are what a
-backup carries, since `DOLT_BACKUP` "syncs COMMITTED history"
-(`commitWorkingSetBeforeBackup`, beads v1.3.4 `cmd/bd/backup_proxied_server.go`).
+**Gap.** None compares what a backup holds with its store. A sync copies the
+store's whole root, its commits and its working set (`syncRemote`,
+`go/libraries/doltcore/sqle/dprocedures/dolt_backup.go` in Dolt's repository),
+so neither a file's age nor a sync's report says which writes the backup lacks.
 So an idle store reads stale, and a sync that returns without carrying a write
-reads fresh. A restore copies the whole store to read it, and the backups here
-reached 9.2 GB on 2026-11-16. The check reads that commit from the backup's own
-files through Dolt's storage packages (`nbs.NewLocalStore`,
-`go/store/nbs/store.go` in `github.com/dolthub/dolt/go`), and it dates what the
-store holds beyond that commit from the store's own commits and from the write
-times its rows carry (`dolt_diff`). It is a pack doctor check, so `gc doctor`
-runs it and the doctor order records it, and its `run.sh` only calls gctk.
+reads fresh. Dolt's `dolt_hashof_db()` hashes a working set only in a database
+a server serves, and a restore copies the whole store to read it: the backups
+here reached 9.2 GB on 2026-11-16. The check reads the backup's working set,
+with the time Dolt stamps on it, from the backup's own files through Dolt's
+storage packages (`nbs.NewLocalStore`, `go/store/nbs/store.go`). It compares
+that working set's hash with the store's `dolt_hashof_db()`, and dates what the
+backup lacks by the write times the store's rows carry after that time. It is a
+pack doctor check, so `gc doctor` runs it and the doctor order records it, and
+its `run.sh` only calls gctk.
 
 ## `gctk patrol cold` and `doctor/check-patrol-advancing`
 

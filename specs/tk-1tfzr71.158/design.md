@@ -8,17 +8,18 @@ description: The design record for tk-1tfzr71.158, the design child of initiativ
 This is the design record for tk-1tfzr71.158, the design child of the
 initiative tk-1tfzr71.19. The pack was read at e01b53e94, the commit
 `integration/tk-1tfzr71.19` was cut from, and every pack line number is at that
-commit. Main has since moved to 713e3a733 (#1531), whose only edit to a file
-this design retires is seven lines of `liveness-sweep.sh`. Gas City is cited by
-symbol at upstream main 918f45f71, and section 12 names where the city's gc
-build differs. Gas Town is cited at two gascity-packs commits: 66897e7132c9,
-which Gas City's `go.mod` pins and which is gastown 0.1.13, and 7f86098c04ea,
-which the pack's refinery copy follows. Gas Town's witness and deacon formulas
-are byte-identical at 7f86098c04ea and at packs main 0f07496d2fa4. `W:` cites
-`gastown/formulas/mol-witness-patrol.toml` at 7f86098c04ea. The stores, the
-`human` mailbox and the doctor sweep's last run were read on 2026-11-16 between
-04:00Z and 04:50Z. This repository is public, so the ids of beads in other
-stores are in this bead's notes, not here.
+commit. Main has since moved to 6dd9d13ee. Of the files this design retires,
+PR #1531 edits only seven lines of `liveness-sweep.sh`, and PR #1535 edits
+none. Gas City is cited by symbol at upstream main 918f45f71, and section 12
+names where the city's gc build differs. Gas Town is cited at two gascity-packs
+commits: 66897e7132c9, which Gas City's `go.mod` pins and which is gastown
+0.1.13, and 7f86098c04ea, which the pack's refinery copy follows. Gas Town's
+witness and deacon formulas are byte-identical at 7f86098c04ea and at packs
+main 0f07496d2fa4. `W:` cites `gastown/formulas/mol-witness-patrol.toml` at
+7f86098c04ea. The stores, the `human` mailbox and the doctor sweep's last run
+were read on 2026-11-16 between 04:00Z and 04:50Z, except where a section names
+a later read. This repository is public, so the ids of beads in other stores
+are in this bead's notes, not here.
 
 ## What the operator approves
 
@@ -64,7 +65,7 @@ These calls carry a cost either way:
    store, which the pack's `check-claim-advancing` reads. On a rig's other
    beads nothing reports it, because `session-model` reads only the city's
    store. No rig's store held such a claim when each was read at
-   2026-11-16T06:23Z, and section 12 asks Gas City to read every store.
+   2026-11-16T06:57Z, and section 12 asks Gas City to read every store.
    Nothing notices a bead that keeps killing the sessions that take it, because
    Gas City's spawn-storm check counts only a bead stamped by a recovery or a
    rejection, and its releases stamp neither. The witness's own count has seen
@@ -233,11 +234,12 @@ routed to no pool, which the controller does not release and the sweep, reading
 in-progress claims, does not reach. Another is an in-progress claim the sweep
 keeps because it could not verify its holder dead, which it names in an
 `order.skipped` outcome and retries. That is the loss call 2 presents. When
-each rig's store was read at 2026-11-16T06:23Z, none of their 1,150 open and
-in-progress beads was assigned to a session bead id that no live session
-carries, and the six that sessions held were held by live ones. Section 12 asks
-Gas City for a `session-model` that reads every store, as core's orphan sweep
-walks every rig.
+each rig's store was read at 2026-11-16T06:57Z, 39 of their 1,154 open and
+in-progress beads named an assignee. One named `human`, a person's assignment
+that core's sweep never resets, and each of the others named a live session,
+by its id or its alias (`gc session list --json`). Section 12 asks Gas City for
+a `session-model` that reads every store, as core's orphan sweep walks every
+rig.
 
 **What salvage still reaches.** A graph.v2 run claims its steps, not its work
 bead, so a run's work bead names no owner, and a released step's next claimer
@@ -343,8 +345,8 @@ It takes no first reaction.
   while the controller runs (`StoreNotRunningMessage` and
   `StoreSuspendedMessage`, `internal/doctor/store_liveness.go`;
   `doctorStoreGate.checkOr`, `cmd/gc/doctor_store_gate.go`). Neither changes its
-  check's record. The record of the run itself, below, names each timed-out
-  check and each stand-in that warns.
+  check's record. A run with a timed-out check or a stand-in that warns opens
+  or updates the record of the run itself, below, which names each of them.
 - **A check the run leaves out keeps its record.** Doctor registers its checks
   conditionally, run by run (`CheckNames`, `internal/doctor/select.go`). It
   leaves out every store-dependent check when `bead-store-preflight` finds the
@@ -362,9 +364,10 @@ It takes no first reaction.
   pack unit that deletes one of the pack's checks closes that check's records
   as retired. The po closes as retired the record of a Gas City check an
   upgrade removed. `gc doctor --check <name> --json`, run while every store
-  reads, confirms the removal by answering `unknown_check` with the names the
-  city registers (`doctorUnknownCheckFailure`, `cmd/gc/cmd_doctor.go`). A
-  `retired:` close ends the episode as an `ok:` close does.
+  reads and the check's rig, if it has one, is not suspended, confirms the
+  removal by answering `unknown_check` with the names the city registers
+  (`doctorUnknownCheckFailure`, `cmd/gc/cmd_doctor.go`). A `retired:` close
+  ends the episode as an `ok:` close does.
 - **A person's close rules the episode.** A record closed with any reason but
   `ok:` or `retired:` stays closed while its check keeps failing, until a result
   names a rig the record did not, which opens a new record. The first run that
@@ -402,12 +405,19 @@ a bug. Its record is ruled once and stays closed until the check passes.
 
 **The deacon's findings at the cutover.** 48 of the deacon's and boot health's
 findings were open in this store when read, and several name checks that no
-longer report, because nothing ends a finding's episode. The cutover closes each
-one that no closer is armed on, naming the doctor result that took its place.
-Where its check has none, the close says the doctor order now keeps that check,
-so the check's next measured failure opens a record, and a check a run left out
-at the cutover is not taken for one that retired. The held findings are left to
-their closers (section 11).
+longer report, because nothing ends a finding's episode. Some name checks that
+are gone: when read at 2026-11-16T06:58Z, open findings named the pack's
+`check-refinery-patrol-live`, `check-routed-work-claimable`,
+`check-until-resolved-owed` and `check-visit-outcome-recorded`, which the pack
+has deleted, and `binary-freshness`, which neither Gas City commit cited here
+carries. The cutover closes each finding that no closer is armed on. One whose
+check has a doctor result names that result as its place. One whose check is
+gone closes as retired, on the facts section 4 accepts: the pack's deletion of
+the check, or `gc doctor --check` answering `unknown_check` under the
+conditions section 4 names. Any other says the doctor order now keeps its
+check, so the check's next measured failure opens a record, and a check a run
+left out at the cutover is not taken for one that retired. The held findings
+are left to their closers (section 11).
 
 ## 5. Dolt health and backups
 
@@ -431,58 +441,66 @@ condition word `backup`, so a second store going stale sends nothing new
 own, `doctor/check-backup-current`, whose `run.sh` calls `gctk dolt unbacked`,
 and the doctor order records its result per rig.
 
-A backup holds commits. A sync first commits what the store has pending
-(`bd: pre-backup commit`), then calls `DOLT_BACKUP('sync')`, which "syncs
-COMMITTED history" (beads v1.3.4: `cmd/bd/backup_dolt.go`,
-`versioncontrolops.BackupSync`, `commitWorkingSetBeforeBackup`). Between syncs
-this city's writes wait uncommitted in the store's working set, because the
-city's and the gc-toolkit rig's bd configs set `dolt.auto-commit: "batch"`,
-which defers a commit to an explicit commit point (`--dolt-auto-commit`,
-`cmd/bd/main.go`). No file time dates a write either. A store's own `manifest`
-lags its writes, which go to Dolt's chunk journal: the gc-toolkit store's was
-last written at 05:34Z on 2026-11-16, while its journal took writes past
-06:20Z. And bd stamps `last_sync` when a sync returns, whether it carried a
-write or not (`updateDoltBackupState`), so no sync's report enters the age.
+A backup holds the whole store as a sync read it, including the writes bd has
+not committed. A sync first commits what bd has pending (`bd: pre-backup
+commit`), then calls `DOLT_BACKUP('sync')` (beads v1.3.4:
+`cmd/bd/backup_dolt.go`, `versioncontrolops.BackupSync`). Dolt saves the
+calling session's working set and copies the database's root, which names each
+branch's commits and its working set (`syncRemote`,
+`go/libraries/doltcore/sqle/dprocedures/dolt_backup.go`; `actions.SyncRoots`,
+`go/libraries/doltcore/env/actions/remotes.go`). So a backup carries the writes
+this city's bd leaves uncommitted, which wait in the working set because the
+city's and the gc-toolkit rig's bd configs set `dolt.auto-commit: "batch"`
+(`--dolt-auto-commit`, `cmd/bd/main.go`). It carries the rows of the tables
+each store keeps in `dolt_ignore` too, among them wisps and bd's `events`. On
+2026-11-16 a scratch database's backup, synced and restored with this host's
+dolt 2.7.3, held a row another server session wrote and never committed, and a
+row of an ignored table. bd's comment that a sync carries only committed
+history (`commitWorkingSetBeforeBackup`, `cmd/bd/backup_proxied_server.go`) is
+not what Dolt does. The pre-backup commit decides only whether those writes are
+in a commit when the backup takes them.
 
-So for each store the backup covers, the check reads the newest commit the
-backup holds from the backup's own files, through Dolt's storage packages,
-which open a directory of table files with no chunk journal, as a backup is
-(`nbs.NewLocalStore`, `go/store/nbs/store.go` in `github.com/dolthub/dolt/go`,
-at the version Gas City's `go.mod` requires at 918f45f71). It reads the rest
-from the store's server, and judges the age of the oldest write the backup does
-not hold:
+No file time dates what a backup lacks. A store's own `manifest` lags its
+writes, which go to Dolt's chunk journal: the gc-toolkit store's was last
+written at 05:34Z on 2026-11-16, while its journal took writes past 06:20Z. And
+bd stamps `last_sync` when a sync returns, whether it carried a write or not
+(`updateDoltBackupState`), so no sync's report enters the age.
 
-- The backup's newest commit is in the store's history. The writes the backup
-  lacks are the store's commits after it and what its working set holds beyond
-  them, which the diff from that commit to the working set shows
-  (`dolt_diff`). Their age counts from the older of two times: the first commit
-  after the backup's, whose writes all came before it, and the oldest write
-  time among the rows the diff shows changed (a bead's `updated_at`, a
-  dependency's or a comment's `created_at`). The store is flagged once that
-  time is older than one backup cadence plus its grace, and with no such write
-  the backup holds every write, whatever either file's age. A sync that returns
-  without carrying a write leaves the backup's newest commit where it was, so
-  the age keeps growing however fresh `last_sync` is. That holds too when its
-  pre-backup commit fails and it warns that the backup "may miss the newest
-  writes", since the writes it left still differ from the backup's commit. A
-  write that lands while a sync runs, or after an idle stretch, counts from its
-  own time.
-- The backup's newest commit is not in the store's history, because the dolt
-  pack's compactor flattened the history that held it
-  (`examples/bd/dolt/commands/compact/help.md`), or the backup comes from
-  another lineage. Nothing can be diffed against it, so the age is bounded by
-  that commit's own time, and the store is flagged once the commit is older than
-  one cadence plus its grace. The sync that carries the flattened history ends
-  it.
+So for each store the backup covers, the check reads the backup's working set
+from the backup's own files, through Dolt's storage packages, which open a
+directory of table files with no chunk journal, as a backup is
+(`nbs.NewLocalStore`, `go/store/nbs/store.go`). With the working set comes the
+time Dolt stamps on it at each change, which every SQL transaction sets
+(`WorkingSetMeta`, `go/store/datas/workingset.go`;
+`DoltTransaction.WorkingSetMeta`,
+`go/libraries/doltcore/sqle/dsess/transactions.go`). In a backup it is the time
+of the last change the sync carried, so every write the store made after it is
+one the backup lacks. These paths are in Dolt's repository, at the version of
+`github.com/dolthub/dolt/go` that Gas City's `go.mod` requires at 918f45f71.
+The check reads the rest from the store's server:
+
+- The store's working set hashes as the backup's does (`dolt_hashof_db()`):
+  the backup holds every write, whatever either file's age.
+- They differ: the age counts from the oldest write time the store's rows carry
+  that is later than the backup's working-set time (a bead's `updated_at`, a
+  dependency's, a comment's or an event's `created_at`), and the store is
+  flagged once that time is older than one backup cadence plus its grace. A
+  write that lands while a sync runs, after it, or after an idle stretch counts
+  from its own time, however fresh `last_sync` is. A row's own time needs no
+  shared history, so a history the dolt pack's compactor flattened
+  (`examples/bd/dolt/commands/compact/help.md`) changes nothing here.
 - A file in the backup newer than its manifest past the grace is a torn sync,
   flagged as today.
-- A backup, a commit or a history it cannot read flags the store as unreadable,
-  never healthy.
+- A backup or a working set it cannot read flags the store as unreadable, never
+  healthy.
 
-The rows a store keeps in its `dolt_ignore`d tables, among them wisps and bd's
-`events` table, reach no backup by design, so the check counts no write to
-them. A change to a row with no time of its own, such as a label, counts from
-the first commit that holds it.
+bd writes an event row, with its own `created_at`, for each label it adds or
+removes (`AddLabelInTx` and `RemoveLabelInTx`,
+`internal/storage/issueops/labels.go`), so a label is dated by its event. A
+change that leaves no time at all, such as a bead's removal, which takes the
+bead's events with it, adds no age. A store whose only missing writes are such
+changes reads current until the next sync carries them, and a store whose syncs
+stop is what `bd-backup-freshness` reports, at 24 hours.
 
 The suspended-store backup and Dolt reclaim keep their warrants and their
 orders.
@@ -711,7 +729,7 @@ whole files this design retires beyond the twenty already listed.
 | Unit | What it does | Waits on | Releases |
 |---|---|---|---|
 | 1. The doctor order | `gctk doctor record`, `orders/doctor-record.toml` and the doctor result of section 4; the keyed-problem-record warrant; the pack checks that report per rig name each rig as `rig <name>`; the deacon's system-health step, `doctor-sweep.sh` and its test, and the doctor parts of `deacon-human-gate-wiring.test.sh` go, and so do `patrol-finding.sh`'s `--check`, its reserved `doctor-*` keys and their drift guard, whose one caller was that step. Its PR shows a dry run against the live city beside the deacon's open doctor findings. | nothing | the doctor's results through one pass with no session |
-| 2. The backup check | `gctk dolt unbacked` and `doctor/check-backup-current`; the backup-currency warrant; gctk's build gains Dolt's Go module, which Gas City's own build carries; the deacon's dolt-health step and `dolt-backup-manifest-check.test.sh` go. Its PR shows the check's dry run beside the deacon's backup findings of the week, and the newest commit it reads in the smallest backup beside the head of that backup restored into a scratch directory (`dolt backup restore`). | unit 1 | the closers of the five backup beads, once the landing closes |
+| 2. The backup check | `gctk dolt unbacked` and `doctor/check-backup-current`; the backup-currency warrant; gctk's build gains Dolt's Go module, which Gas City's own build carries; the deacon's dolt-health step and `dolt-backup-manifest-check.test.sh` go. Its PR shows the check's dry run beside the deacon's backup findings of the week, and the working-set hash and time it reads from the smallest backup's files beside `dolt_hashof_db()` and the newest row times in that backup restored into a scratch directory (`dolt backup restore`). | unit 1 | the closers of the five backup beads, once the landing closes |
 | 3. The cold-patrol check | `gctk patrol cold` and `doctor/check-patrol-advancing`; the patrol-liveness warrant. | unit 2 | a report of a cold witness |
 | 4. The deacon retires | `agents/deacon/`, its named session and the pack's patch for it, `formulas/mol-deacon-patrol.toml`, boot health's three files, `gc-deacon-ledger.sh` and its test, the continue hook with its test and settings entry, `human-gate.sh`'s ledger append, `check-hq-marooned-work`'s ledger exemption, the deacon and boot health in `patrol-finding.sh`'s caller list, the deacon's tests and the pages that name them, among them `docs/pack-authoring.md`'s patrol startup section (tk-a89659h). | unit 3 | the deacon's session, and tk-hpy4lgk's closer |
 | 5. The witness's recovery | recover-orphaned-beads calls `gctk worktree salvage`, which acts on section 2's fresh read, check-polecat-health calls `gctk session progress`, and `orphan-dispose.sh`, `branch-context.sh`, `seat-progress.sh` with their tests and the step's extraction tests go. | unit 4 | the closers of tk-wcdwhxm and tk-8a6akou |
@@ -803,8 +821,8 @@ These asks stay proposed. Posting them is your decision, and none is sent.
 
 1. **A backup judge of what the backup holds.** `mol-dog-doctor` and
    `bd-backup-freshness` judge a file's age or a sync's return, so an idle
-   store reads stale. A judge of the newest commit the backup holds would
-   retire `check-backup-current`.
+   store reads stale. A judge that compares a backup's working set with its
+   store's would retire `check-backup-current`.
 2. **`mol-dog-doctor`'s advisory keyed per database.** Its dedup on the
    condition word hides a second store going stale.
 3. **A keyed problem record.** It would retire the patrol finding and the
