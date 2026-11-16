@@ -23,6 +23,8 @@
 #     while one that writes nothing for the timeout is ended as hung, with every
 #     process in its group, and reported as a TIMEOUT whose log says why;
 #   - a run ends once the runner that started it is gone;
+#   - a run ended as hung in the parallel wave that passes alone is recovered,
+#     so the wave's TIMEOUT does not follow it to its serial re-run;
 #   - a file that fails once then passes is recovered on serial re-run (default);
 #   - a file that fails every time stays failed and the suite exits 1;
 #   - --no-retry and --retry 0 report the raw parallel result;
@@ -375,6 +377,22 @@ else
 fi
 gone "$(cat "$STATE/talker.child" 2>/dev/null)" && ok "and so does the child it left running" \
   || bad "and so does the child it left running" "pid $(cat "$STATE/talker.child" 2>/dev/null) still runs"
+
+# Goes quiet on its first run and passes on every later one.
+cat > "$FIX/hangonce.test.sh" <<'F'
+#!/usr/bin/env bash
+c="$RUNTESTS_FIXTURE_STATE/hangonce.count"
+n=$(( $(cat "$c" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$c"
+echo "hangonce run $n"
+[ "$n" -ge 2 ] || sleep 60
+F
+
+echo "── guard: a run ended as hung in the wave that passes alone is recovered ──"
+reset_state
+OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 1 -t 2 "$FIX/hangonce.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a run that passes on its serial re-run passes the suite"
+has "$OUT" "TIMEOUT    $FIX/hangonce.test.sh" "the wave reports its run as a timeout"
+has "$OUT" "recovered serially after 1 attempt" "its re-run is judged on its own, not by the wave's timeout"
 
 echo "── parts: only the opening comment block declares parts ──"
 reset_state

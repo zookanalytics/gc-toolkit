@@ -567,16 +567,22 @@ fi
 # so it ignores the TERM it sends there, and the KILL that follows ends it with
 # the run. Before it ends a run for silence it writes the run's hang mark, which
 # the report reads as a TIMEOUT whatever status the signal leaves the run with.
-# Its output is the run's log. In any subshell $$ is the runner's pid.
+# The mark is named for the run's pid, and the run clears it before its guard
+# starts. No process is given a pid while a process group of that id lives, and
+# each guard sits in its run's group, so once a run has cleared its mark no
+# other run's guard can write it. Its output is the run's log. In any subshell
+# $$ is the runner's pid.
 guard() { # <run-pid> <log> <mark>
   local run="$1" log="$2" mark="$3" size grown="" since="$EPOCHSECONDS" i
   trap '' TERM
   while kill -0 "$run" 2>/dev/null; do
     kill -0 "$$" 2>/dev/null || break
     size="$(wc -c <"$log" 2>/dev/null)"
+    # EPOCHSECONDS counts whole seconds, so a difference equal to the timeout
+    # can be up to a second short of it.
     if [ "$size" != "$grown" ]; then
       grown="$size"; since="$EPOCHSECONDS"
-    elif [ $((EPOCHSECONDS - since)) -ge "$TIMEOUT" ]; then
+    elif [ $((EPOCHSECONDS - since)) -gt "$TIMEOUT" ]; then
       : >"$mark"
       printf '\nrun-tests: nothing written for %ss, so the run has hung and is ended\n' "$TIMEOUT"
       break
@@ -599,9 +605,8 @@ guard() { # <run-pid> <log> <mark>
 # whatever the caller exported. Any words after the index are a command the run
 # starts through, such as LOW_PRIORITY.
 spawn() { # <run-index> [<command>...]
-  local t="${RUN_FILE[$1]}" part="${RUN_PART[$1]}" log="$LOGDIR/$1.log" mark="$LOGDIR/$1.hung"
+  local t="${RUN_FILE[$1]}" part="${RUN_PART[$1]}" log="$LOGDIR/$1.log"
   shift
-  rm -f "$mark"
   (
     cd "$ROOT" || exit 2
     if [ -n "$part" ]; then
@@ -613,7 +618,8 @@ spawn() { # <run-index> [<command>...]
       # An async command's words expand after the fork, where BASHPID would
       # name the guard, so the run's pid is read before it.
       run_pid="$BASHPID"
-      guard "$run_pid" "$log" "$mark" &
+      rm -f "$LOGDIR/$run_pid.hung"
+      guard "$run_pid" "$log" "$LOGDIR/$run_pid.hung" &
     fi
     exec "$@" "$FILE_BASH" "$t"
   ) >"$log" 2>&1 &
@@ -630,7 +636,7 @@ finish() {
   local pid="$1" rc="$2" idx dur rel status
   idx="${PID_IDX[$pid]}"
   kill -- -"$pid" 2>/dev/null   # reap anything the file left running in its group
-  [ ! -e "$LOGDIR/$idx.hung" ] || rc=124
+  [ ! -e "$LOGDIR/$pid.hung" ] || rc=124
   dur=$(( SECONDS - PID_START[$pid] ))
   rel="$(label "$idx")"
   if [ "$rc" -eq 0 ]; then
@@ -654,7 +660,7 @@ rerun_serial() {
   pid=$!
   wait "$pid"; rc=$?
   kill -- -"$pid" 2>/dev/null   # reap anything the file left in its group
-  [ ! -e "$LOGDIR/$idx.hung" ] || rc=124
+  [ ! -e "$LOGDIR/$pid.hung" ] || rc=124
   return "$rc"
 }
 
