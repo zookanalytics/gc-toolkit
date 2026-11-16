@@ -246,6 +246,30 @@
     "doc": "A step's structured output, one JSON object, which the step writes before it closes. A review run's triage, lanes and rule-and-repair each write theirs in the shape the review domain declares."
   },
   {
+    "name": "gc.pr_close_disposition_kind",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The kind of close a ruling recorded for a bead whose PR will not land: re-homed, folded, fixed-upstream, duplicate or not-needed, the kinds bead-rehome.sh closes a bead under."
+  },
+  {
+    "name": "gc.pr_close_disposition_successor",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The bead a recorded disposition closes its bead onto: the bead that carries the work now, or under not-needed the evidence that ruled the work out, such as the conversation of the sitting that ruled."
+  },
+  {
+    "name": "gc.pr_close_disposition_successor_store",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The store of a recorded disposition's successor, rig:\u003cname\u003e, when its id prefix alone does not place it."
+  },
+  {
     "name": "gc.root_bead_id",
     "type": "string",
     "readers": [
@@ -486,7 +510,7 @@
     "name": "pr_state",
     "type": "string",
     "owner": "pr/record",
-    "doc": "The PR's state as the landing order last read it: open, merged, or the state a read that could not decide or an exception left, such as lookup_failed, merge_unreachable or closed_unmerged."
+    "doc": "The PR's state as the landing order last read it: open, merged, closed for a PR a ruling retired whose bead waits on its close, or the state a read that could not decide or an exception left, such as lookup_failed, merge_unreachable or closed_unmerged."
   },
   {
     "name": "pr_summary",
