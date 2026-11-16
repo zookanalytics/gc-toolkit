@@ -1,6 +1,7 @@
 package record
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -18,8 +19,9 @@ import (
 // withdrawal, `gctk review passed --record` holds it from its read of the PR's
 // bead to its close of the asks the run answered, bead-rehome.sh holds it from
 // its read of a bead to its close, and `gctk pr push` holds it from its
-// proof's first read to the end of its push. Nothing that holds it takes
-// another lock, so no two writers wait on each other in a cycle.
+// proof's first read to the end of its push, for at most half as long as a
+// `gctk pr` verb waits for it. Nothing that holds it takes another lock, so no
+// two writers wait on each other in a cycle.
 const LockFile = "pr-record.lock"
 
 // lockPoll is how often a writer waiting for the lock asks for it again.
@@ -37,6 +39,12 @@ var ErrLockWait = errors.New("another writer of the record held the record lock 
 // ends, so a holder that dies, or that an order's time limit stops, holds
 // nothing.
 func Lock(dir string, wait time.Duration) (release func(), err error) {
+	return LockContext(context.Background(), dir, wait)
+}
+
+// LockContext is Lock for a writer that stops waiting once ctx is done, which
+// returns an error that wraps ctx's cause.
+func LockContext(ctx context.Context, dir string, wait time.Duration) (release func(), err error) {
 	if dir == "" {
 		return nil, errors.New("record lock: the store's .beads directory is not named")
 	}
@@ -47,6 +55,10 @@ func Lock(dir string, wait time.Duration) (release func(), err error) {
 	}
 	deadline := time.Now().Add(wait)
 	for {
+		if ctx.Err() != nil {
+			f.Close()
+			return nil, fmt.Errorf("record lock: %s: %w", path, context.Cause(ctx))
+		}
 		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
 			break
@@ -59,7 +71,10 @@ func Lock(dir string, wait time.Duration) (release func(), err error) {
 			f.Close()
 			return nil, fmt.Errorf("record lock: %s after %s: %w", path, wait, ErrLockWait)
 		}
-		time.Sleep(lockPoll)
+		select {
+		case <-ctx.Done():
+		case <-time.After(lockPoll):
+		}
 	}
 	return func() {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)

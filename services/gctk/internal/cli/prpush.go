@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -35,12 +38,16 @@ order pours no review run on it and the refinery does not take it. The proof
 reads under the store's record lock, which the landing order holds from its
 read of a record to its pour of a review run, and the push holds that lock to
 its end, so between the proof and the push the order neither pours a run nor
-marks the PR ready. Every URL the checkout's origin fetches from or pushes to
-must name the PR's repository, and the checkout must hold no work its HEAD's
-commit does not. Then the PR returns to draft, and the checkout's HEAD goes
-onto the branch under git's lease on the tip read there, never forced, so a
-push another writer made is never overwritten. --check proves the holding and
-changes nothing.
+marks the PR ready. The push holds the lock for at most two and a half
+minutes, half the five a writer waits for it: a call to GitHub, origin or the
+store still running then is stopped with every process it started, and the
+lock goes free once they have ended. A SIGTERM or SIGINT stops it the same
+way, and it then exits as that signal would. Every URL the checkout's origin
+fetches from or pushes to must name the PR's repository, and the checkout must
+hold no work its HEAD's commit does not. Then the PR returns to draft, and the
+checkout's HEAD goes onto the branch under git's lease on the tip read there,
+never forced, so a push another writer made is never overwritten. --check
+proves the holding and changes nothing.
 
 Once the conversation closes, the refinery validates the head the sitting left
 and the landing order pours one review run there.
@@ -49,10 +56,11 @@ exit: 0 pushed, or the branch held the checkout's HEAD already; with --check,
         the sitting holds the branch
       1 usage, a PR outside the rig's own repository, or no branch-push.sh in
         the directory GCTK_SCRIPTS_DIR names
-      2 the store, GitHub, git or the push did not answer or failed, or the
-        record lock stayed held as long as the verb waits, so the PR may be a
-        draft and the push may not have landed; a retry is safe, since a push
-        under the lease never overwrites another
+      2 the store, GitHub, git or the push did not answer or failed, the
+        record lock stayed held as long as the verb waits, or the push held it
+        as long as it may and the call still running was stopped, so the PR
+        may be a draft and the push may not have landed; a retry is safe,
+        since a push under the lease never overwrites another
       3 refused: the sitting does not hold the branch, the checkout's origin is
         not the PR's repository, the checkout holds work no commit holds, or
         the PR is not open from the bead's branch; nothing was changed
@@ -87,7 +95,20 @@ func newPRPushCmd(stdout, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
+// prPush runs the push or its proof under a context a SIGTERM or SIGINT ends,
+// and once the push has let the record lock go, exits as that signal would.
 func prPush(bead, conv, db string, check bool, stdout, stderr io.Writer) int {
+	ctx, stop := untilSignal()
+	defer stop()
+	code := pushIn(ctx, bead, conv, db, check, stdout, stderr)
+	var sig signalled
+	if errors.As(context.Cause(ctx), &sig) {
+		return 128 + int(sig.sig)
+	}
+	return code
+}
+
+func pushIn(ctx context.Context, bead, conv, db string, check bool, stdout, stderr io.Writer) int {
 	dir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk pr push: the checkout's directory did not read: %v\n", err)
@@ -107,14 +128,14 @@ func prPush(bead, conv, db string, check bool, stdout, stderr io.Writer) int {
 	}
 	self := sessionNames()
 	if check {
-		h, err := l.Held(bead, conv, self)
+		h, err := l.Held(ctx, bead, conv, self)
 		if err != nil {
 			return pushFailed(bead, err, stderr)
 		}
 		fmt.Fprintf(stdout, "%s: conversation %s holds its branch %s, and nothing else writes it\n", bead, h.Conversation, h.Branch)
 		return 0
 	}
-	p, err := l.Push(bead, conv, self, tree)
+	p, err := l.Push(ctx, bead, conv, self, tree)
 	if err != nil {
 		return pushFailed(bead, err, stderr)
 	}
@@ -140,6 +161,42 @@ func pushFailed(bead string, err error, stderr io.Writer) int {
 	return 2
 }
 
+// signalled is the cause of a push's context that a SIGTERM or SIGINT ended.
+type signalled struct{ sig syscall.Signal }
+
+func (s signalled) Error() string {
+	return fmt.Sprintf("gctk was sent signal %d (%s)", int(s.sig), s.sig)
+}
+
+// untilSignal returns a context that ends once SIGTERM or SIGINT reaches this
+// process, with a signalled as its cause, and the call that stops listening.
+// The push's calls run in process groups of their own, out of reach of a
+// signal sent to this process's group, such as a terminal's Ctrl-C or an order
+// runner's stop, so the context's end is what stops them. A signal this process
+// inherited as ignored stays ignored.
+func untilSignal() (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	got := make(chan os.Signal, 1)
+	for _, s := range []os.Signal{syscall.SIGTERM, syscall.SIGINT} {
+		if !signal.Ignored(s) {
+			signal.Notify(got, s)
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case s := <-got:
+			cancel(signalled{s.(syscall.Signal)})
+		case <-done:
+		}
+	}()
+	return ctx, func() {
+		signal.Stop(got)
+		close(done)
+		cancel(nil)
+	}
+}
+
 // sessionNames are the names this session's claims record, the ones Gas City
 // stamps as a claim's assignee.
 func sessionNames() []string {
@@ -156,8 +213,8 @@ func sessionNames() []string {
 // uncommitted work through the git adapter, and its push through the pack's
 // branch-push.sh.
 type sittingTree struct {
-	dir string
-	rt  gascity.Runtime
+	dir  string
+	city *gascity.City
 }
 
 // newSittingTree is the checkout at dir, once the directory GCTK_SCRIPTS_DIR
@@ -170,7 +227,7 @@ func newSittingTree(dir string) (sittingTree, error) {
 	if fi, err := os.Stat(filepath.Join(scripts, "branch-push.sh")); err != nil || fi.IsDir() || fi.Mode()&0o111 == 0 {
 		return sittingTree{}, fmt.Errorf("%s holds no runnable branch-push.sh, so nothing can push; nothing was changed", scripts)
 	}
-	return sittingTree{dir: dir, rt: gascity.New().In(dir)}, nil
+	return sittingTree{dir: dir, city: gascity.New().In(dir)}, nil
 }
 
 func (s sittingTree) Origin() (fetch, push []string, err error) { return git.OriginURLs(s.dir) }
@@ -187,17 +244,21 @@ func (s sittingTree) Uncommitted() (string, error) {
 // pushes HEAD onto it with branch-push.sh's --from-origin read: the lease is on
 // the tip the script reads on origin, and a HEAD that does not descend from it
 // sends nothing. Its exits 3 (the branch moved after the read) and 4 (HEAD does
-// not descend from the tip) are a *pr.Moved.
-func (s sittingTree) Push(branch string) error {
-	if err := git.FetchTip(s.dir, branch); err != nil {
+// not descend from the tip) are a *pr.Moved. The fetch and the script each run
+// in a process group of their own, which ctx's end stops with SIGTERM first, so
+// git removes its lock files, and the ssh that carries them is stopped too.
+func (s sittingTree) Push(ctx context.Context, branch string) error {
+	if err := git.FetchTipContext(ctx, s.dir, branch); err != nil {
 		return err
 	}
-	res := s.rt.Script("branch-push.sh", "--repo", s.dir, "--branch", branch, "--head", "HEAD", "--from-origin")
+	res := s.city.ScriptContext(ctx, "branch-push.sh", "--repo", s.dir, "--branch", branch, "--head", "HEAD", "--from-origin")
 	switch {
 	case res.Err == nil && res.Code == 0:
 		return nil
 	case res.Err == nil && (res.Code == 3 || res.Code == 4):
 		return &pr.Moved{Branch: branch, Why: res.Tail()}
+	case res.Err != nil:
+		return fmt.Errorf("branch-push.sh: %w", res.Err)
 	}
 	return fmt.Errorf("branch-push.sh: %s", res.Failure())
 }

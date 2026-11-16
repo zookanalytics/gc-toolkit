@@ -914,10 +914,13 @@ there. Two runs that overlap act on one record one after the other, the second
 from the record as the first left it. The refinery's `gctk pr record`,
 `gctk pr withdraw`, a review run's `gctk review passed --record`,
 `bead-rehome.sh`'s close and a converse sitting's `gctk pr push` take the same
-lock, and the push holds it from its proof to the end of its push. The kernel
-frees the lock of a run the timeout stops, and the records it did not reach
-wait for the next run. No webhook fires the order, because an order a webhook
-fires skips Gas City's gates and each event would start a run of its own.
+lock. The push holds it from its proof to the end of its push, for at most two
+and a half minutes, half the five a `gctk pr` verb waits for it: a call to
+GitHub, origin or the store still running then is stopped with every process
+it started, and the lock goes free once they have ended. The kernel frees the
+lock of a run the timeout stops, and the records it did not reach wait for the
+next run. No webhook fires the order, because an order a webhook fires skips
+Gas City's gates and each event would start a run of its own.
 
 **What a run acts on.** A run acts only on a bead it reads under the lock as
 carrying the marker and, unless the bead is closed, still assigned to the

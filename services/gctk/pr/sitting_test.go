@@ -1,7 +1,9 @@
 package pr_test
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
@@ -34,7 +37,8 @@ var sitter = []string{"tk-conv-session", alias}
 // fetches from and pushes to, what it holds that no commit holds, the errors
 // its reads and its push return, and each push it was asked for, with whether
 // the PR was a draft at that moment. Each call it takes while the store's
-// record lock, in the .beads directory lock, is free is listed in free.
+// record lock, in the .beads directory lock, is free is listed in free. A push
+// with stall set does not answer until stall returns.
 type tree struct {
 	pr          *ghfake.PR
 	lock        string
@@ -43,6 +47,7 @@ type tree struct {
 	left        string
 	leftErr     error
 	pushErr     error
+	stall       func(ctx context.Context) error
 	pushed      []string
 	asDrafts    []bool
 	free        []string
@@ -58,10 +63,13 @@ func (t *tree) Uncommitted() (string, error) {
 	return t.left, t.leftErr
 }
 
-func (t *tree) Push(branch string) error {
+func (t *tree) Push(ctx context.Context, branch string) error {
 	t.called("Push")
 	t.pushed = append(t.pushed, branch)
 	t.asDrafts = append(t.asDrafts, t.pr.Facts.IsDraft)
+	if t.stall != nil {
+		return t.stall(ctx)
+	}
 	return t.pushErr
 }
 
@@ -113,14 +121,14 @@ func refusedFor(err error, why string) bool {
 // draft and converts nothing.
 func TestASittingThatHoldsTheBranchReturnsThePRToDraftBeforeItPushes(t *testing.T) {
 	d, tr := newSitting(t)
-	got, err := d.l.Push(bead, conv, sitter, tr)
+	got, err := d.l.Push(t.Context(), bead, conv, sitter, tr)
 	if err != nil || !got.Converted || got.Branch != branch || got.URL != prURL || got.Conversation != conv {
 		t.Fatalf("the push read %+v, %v", got, err)
 	}
 	if !slices.Equal(tr.pushed, []string{branch}) || !slices.Equal(tr.asDrafts, []bool{true}) {
 		t.Fatalf("pushed %v with the PR a draft %v, want one push onto %s once it is a draft", tr.pushed, tr.asDrafts, branch)
 	}
-	again, err := d.l.Push(bead, conv, sitter, tr)
+	again, err := d.l.Push(t.Context(), bead, conv, sitter, tr)
 	if err != nil || again.Converted || len(tr.pushed) != 2 {
 		t.Fatalf("the round's later push read %+v, %v, after %d pushes", again, err, len(tr.pushed))
 	}
@@ -133,7 +141,7 @@ func TestASittingThatHoldsTheBranchReturnsThePRToDraftBeforeItPushes(t *testing.
 // sitting can ask before its first edit.
 func TestASittingProvesItHoldsTheBranchWithoutChangingIt(t *testing.T) {
 	d, tr := newSitting(t)
-	got, err := d.l.Held(bead, conv, sitter)
+	got, err := d.l.Held(t.Context(), bead, conv, sitter)
 	if err != nil || got != (pr.Holding{Bead: bead, Conversation: conv, Branch: branch, PR: prURL}) {
 		t.Fatalf("the proof read %+v, %v", got, err)
 	}
@@ -197,10 +205,10 @@ func TestASittingPushesOnlyABranchItHolds(t *testing.T) {
 			if c.self != nil {
 				self = c.self
 			}
-			if _, err := d.l.Held(bead, conv, self); !refusedFor(err, c.why) {
+			if _, err := d.l.Held(t.Context(), bead, conv, self); !refusedFor(err, c.why) {
 				t.Fatalf("the proof read %v, want a refusal saying %q", err, c.why)
 			}
-			if _, err := d.l.Push(bead, conv, self, tr); !refusedFor(err, c.why) {
+			if _, err := d.l.Push(t.Context(), bead, conv, self, tr); !refusedFor(err, c.why) {
 				t.Fatalf("the push read %v, want a refusal saying %q", err, c.why)
 			}
 			if len(d.github.Asks()) != 0 || len(tr.pushed) != 0 {
@@ -218,7 +226,7 @@ func TestTheProofNamesEveryReasonItFails(t *testing.T) {
 		b.Metadata["merge_result"] = "pull_request"
 		b.Edges = nil
 	})
-	_, err := d.l.Held(bead, conv, sitter)
+	_, err := d.l.Held(t.Context(), bead, conv, sitter)
 	if !refusedFor(err, "no PR open on the pending record") || !refusedFor(err, "no blocks edge onto conversation") {
 		t.Fatalf("the proof read %v, want both reasons", err)
 	}
@@ -236,7 +244,7 @@ func TestAnAskOrAClosedChildLeavesTheSittingItsBranch(t *testing.T) {
 	d.store.List(bead, conv, id)
 	d.store.Put(fake.Bead{ID: "tk-kid", Title: "Rework the branch", Status: "closed", IssueType: "task",
 		Metadata: map[string]string{"branch": branch, "task_kind": "rework"}})
-	if _, err := d.l.Push(bead, conv, sitter, tr); err != nil || len(tr.pushed) != 1 {
+	if _, err := d.l.Push(t.Context(), bead, conv, sitter, tr); err != nil || len(tr.pushed) != 1 {
 		t.Fatalf("an ask and a closed child kept the sitting off the branch: %v, pushes %v", err, tr.pushed)
 	}
 }
@@ -265,7 +273,7 @@ func TestTheCheckoutMustFetchFromAndPushToThePRsRepository(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			d, tr := newSitting(t)
 			tr.fetch, tr.push = c.fetch, c.push
-			_, err := d.l.Push(bead, conv, sitter, tr)
+			_, err := d.l.Push(t.Context(), bead, conv, sitter, tr)
 			if !refusedFor(err, "the checkout's origin is not the PR's repository, github.com/acme/widgets: ") || !refusedFor(err, c.why) {
 				t.Fatalf("the push read %v, want a refusal saying %q", err, c.why)
 			}
@@ -281,13 +289,13 @@ func TestTheCheckoutMustFetchFromAndPushToThePRsRepository(t *testing.T) {
 	d, tr := newSitting(t)
 	tr.fetch = []string{"https://github.com/acme/widgets"}
 	tr.push = []string{"ssh://git@github.com/Acme/Widgets.git", "https://x-access-token:s3cret@github.com/acme/widgets.git"}
-	if _, err := d.l.Push(bead, conv, sitter, tr); err != nil || len(tr.pushed) != 1 {
+	if _, err := d.l.Push(t.Context(), bead, conv, sitter, tr); err != nil || len(tr.pushed) != 1 {
 		t.Fatalf("the PR's repository in other forms read %v, pushes %v", err, tr.pushed)
 	}
 
 	e, et := newSitting(t)
 	et.originErr = errors.New("git remote: error: No such remote 'origin'")
-	_, err := e.l.Push(bead, conv, sitter, et)
+	_, err := e.l.Push(t.Context(), bead, conv, sitter, et)
 	var refused *pr.PushRefusal
 	if err == nil || errors.As(err, &refused) || len(e.github.Asks()) != 0 || len(et.pushed) != 0 {
 		t.Fatalf("an origin that did not read read as %v, asks %v, pushes %v", err, asks(e.github), et.pushed)
@@ -305,10 +313,10 @@ func TestTheProofWaitsForTheRecordLock(t *testing.T) {
 	}
 	defer release()
 	d.l.Wait = 50 * time.Millisecond
-	if _, err := d.l.Held(bead, conv, sitter); !errors.Is(err, record.ErrLockWait) {
+	if _, err := d.l.Held(t.Context(), bead, conv, sitter); !errors.Is(err, record.ErrLockWait) {
 		t.Fatalf("the proof under a held lock read %v, want the lock's wait error", err)
 	}
-	if _, err := d.l.Push(bead, conv, sitter, tr); !errors.Is(err, record.ErrLockWait) {
+	if _, err := d.l.Push(t.Context(), bead, conv, sitter, tr); !errors.Is(err, record.ErrLockWait) {
 		t.Fatalf("the push under a held lock read %v, want the lock's wait error", err)
 	}
 	if len(d.github.Asks()) != 0 || len(tr.pushed) != 0 || len(tr.free) != 0 {
@@ -328,7 +336,7 @@ func TestARunPouredFromAReadBeforeTheHoldIsSeenByTheProof(t *testing.T) {
 	hold(t, d.land)
 	proved := make(chan error, 1)
 	go func() {
-		_, err := d.l.Held(bead, conv, sitter)
+		_, err := d.l.Held(t.Context(), bead, conv, sitter)
 		proved <- err
 	}()
 	waits(t, proved, "the proof")
@@ -357,7 +365,7 @@ func TestThePushHoldsTheRecordLockToItsEnd(t *testing.T) {
 			free = append(free, method)
 		}
 	}
-	if _, err := d.l.Push(bead, conv, sitter, tr); err != nil {
+	if _, err := d.l.Push(t.Context(), bead, conv, sitter, tr); err != nil {
 		t.Fatal(err)
 	}
 	if len(free) != 0 || len(tr.free) != 0 || len(tr.pushed) != 1 {
@@ -373,7 +381,7 @@ func TestThePushHoldsTheRecordLockToItsEnd(t *testing.T) {
 func TestWorkNoCommitHoldsIsRefusedBeforeThePRReturnsToDraft(t *testing.T) {
 	d, tr := newSitting(t)
 	tr.left = " M skills/converse-edit/SKILL.md\n?? notes.txt\n"
-	if _, err := d.l.Push(bead, conv, sitter, tr); !refusedFor(err, "M skills/converse-edit/SKILL.md; ?? notes.txt") {
+	if _, err := d.l.Push(t.Context(), bead, conv, sitter, tr); !refusedFor(err, "M skills/converse-edit/SKILL.md; ?? notes.txt") {
 		t.Fatalf("uncommitted work read as %v", err)
 	}
 	if len(d.github.Asks()) != 0 || len(tr.pushed) != 0 {
@@ -381,7 +389,7 @@ func TestWorkNoCommitHoldsIsRefusedBeforeThePRReturnsToDraft(t *testing.T) {
 	}
 	e, et := newSitting(t)
 	et.leftErr = errors.New("git status: not a git repository")
-	if _, err := e.l.Push(bead, conv, sitter, et); err == nil || len(e.github.Asks()) != 0 || len(et.pushed) != 0 {
+	if _, err := e.l.Push(t.Context(), bead, conv, sitter, et); err == nil || len(e.github.Asks()) != 0 || len(et.pushed) != 0 {
 		t.Fatalf("an unread checkout read as %v, asks %v, pushes %v", err, asks(e.github), et.pushed)
 	}
 }
@@ -391,11 +399,11 @@ func TestWorkNoCommitHoldsIsRefusedBeforeThePRReturnsToDraft(t *testing.T) {
 func TestADraftThatDidNotLandPushesNothing(t *testing.T) {
 	d, tr := newSitting(t)
 	d.github.Fail["ConvertToDraft"] = errors.New("gh: error connecting to api.github.com")
-	if _, err := d.l.Push(bead, conv, sitter, tr); err == nil || len(tr.pushed) != 0 {
+	if _, err := d.l.Push(t.Context(), bead, conv, sitter, tr); err == nil || len(tr.pushed) != 0 {
 		t.Fatalf("an unanswered draft read as %v, pushes %v", err, tr.pushed)
 	}
 	delete(d.github.Fail, "ConvertToDraft")
-	if got, err := d.l.Push(bead, conv, sitter, tr); err != nil || !got.Converted || len(tr.pushed) != 1 {
+	if got, err := d.l.Push(t.Context(), bead, conv, sitter, tr); err != nil || !got.Converted || len(tr.pushed) != 1 {
 		t.Fatalf("the retry read %+v, %v, pushes %v", got, err, tr.pushed)
 	}
 }
@@ -406,16 +414,146 @@ func TestADraftThatDidNotLandPushesNothing(t *testing.T) {
 func TestABranchThatMovedTakesNothingAndLeavesThePRADraft(t *testing.T) {
 	d, tr := newSitting(t)
 	tr.pushErr = &pr.Moved{Branch: branch, Why: "a commit landed on the branch after the read"}
-	_, err := d.l.Push(bead, conv, sitter, tr)
+	_, err := d.l.Push(t.Context(), bead, conv, sitter, tr)
 	var moved *pr.Moved
 	if !errors.As(err, &moved) || !d.pr.Facts.IsDraft {
 		t.Fatalf("a moved branch read as %v, the PR a draft %v", err, d.pr.Facts.IsDraft)
 	}
 	e, et := newSitting(t)
 	et.pushErr = errors.New("remote: Permission to acme/widgets.git denied")
-	_, err = e.l.Push(bead, conv, sitter, et)
+	_, err = e.l.Push(t.Context(), bead, conv, sitter, et)
 	var refused *pr.PushRefusal
 	if err == nil || errors.As(err, &moved) || errors.As(err, &refused) || !strings.Contains(err.Error(), "did not land") {
 		t.Fatalf("a failed push read as %v", err)
+	}
+}
+
+// stalledHub is GitHub whose read of a PR does not answer until ctx ends, and
+// then fails as the github adapter's stopped calls do.
+type stalledHub struct {
+	*ghfake.GitHub
+	ctx context.Context
+}
+
+func (s stalledHub) PullRequest(string, int) (*gh.PullRequest, error) {
+	<-s.ctx.Done()
+	return nil, fmt.Errorf("gh: stopped, with every process it started: %w", context.Cause(s.ctx))
+}
+
+// stalledStore is the store, whose reads do not answer until ctx ends, and
+// then fail as the store adapter's stopped reads do.
+type stalledStore struct {
+	*fake.Store
+	ctx context.Context
+}
+
+func (s stalledStore) Find(gcbd.Query) ([]gcbd.Bead, error) {
+	<-s.ctx.Done()
+	cause := context.Cause(s.ctx)
+	return nil, &gcbd.ReadError{Reason: "gc bd list was stopped: " + cause.Error(), Err: cause}
+}
+
+// A push still running once the push has held the record lock for half the
+// time a writer waits for it is stopped, and Push lets the lock go only once
+// that call has returned, so nothing the push started lands after a writer
+// waiting for the lock has taken it.
+func TestAPushThatDoesNotAnswerIsStoppedBeforeTheLockGoesFree(t *testing.T) {
+	d, tr := newSitting(t)
+	d.l.Wait = 400 * time.Millisecond
+	heldAtStop := false
+	tr.stall = func(ctx context.Context) error {
+		<-ctx.Done()
+		// Stopping a push's processes takes a moment, which the lock waits out.
+		time.Sleep(50 * time.Millisecond)
+		heldAtStop = !lockFree(d.l.Dir)
+		return fmt.Errorf("branch-push.sh: stopped, with every process it started: %w", context.Cause(ctx))
+	}
+	start := time.Now()
+	_, err := d.l.Push(t.Context(), bead, conv, sitter, tr)
+	took := time.Since(start)
+	var up *pr.LockTimeUp
+	if !errors.As(err, &up) || up.After != d.l.Wait/2 || !strings.Contains(err.Error(), "did not land") {
+		t.Fatalf("a push that did not answer read %v, want the push's time under the lock spent", err)
+	}
+	if took < d.l.Wait/2 || took > 5*time.Second {
+		t.Fatalf("the push returned after %s, want once its %s under the lock was spent", took, d.l.Wait/2)
+	}
+	if !heldAtStop {
+		t.Fatal("the lock went free while the push was still being stopped")
+	}
+	if !lockFree(d.l.Dir) {
+		t.Fatal("the push kept the record lock after it returned")
+	}
+}
+
+// A read of the PR that GitHub does not answer is stopped the same way, so the
+// PR is neither converted nor pushed onto, and the lock goes free.
+func TestAGitHubReadThatDoesNotAnswerIsStoppedAndPushesNothing(t *testing.T) {
+	d, tr := newSitting(t)
+	d.l.Wait = 400 * time.Millisecond
+	d.l.Within = func(ctx context.Context) pr.Landing {
+		in := d.l
+		in.Hub = func(string) pr.Hub { return stalledHub{GitHub: d.github, ctx: ctx} }
+		return in
+	}
+	_, err := d.l.Push(t.Context(), bead, conv, sitter, tr)
+	var up *pr.LockTimeUp
+	if !errors.As(err, &up) {
+		t.Fatalf("a push whose read of the PR did not answer read %v, want the push's time under the lock spent", err)
+	}
+	if len(tr.pushed) != 0 || len(d.github.Asks()) != 0 {
+		t.Fatalf("a push whose read of the PR did not answer went on: pushes %v, asks %v", tr.pushed, asks(d.github))
+	}
+	if !lockFree(d.l.Dir) {
+		t.Fatal("the push kept the record lock after it returned")
+	}
+}
+
+// The proof's reads end the same way, for the push and for its check, and
+// neither reads the checkout or GitHub.
+func TestAProofWhoseStoreDoesNotAnswerLetsTheLockGo(t *testing.T) {
+	d, tr := newSitting(t)
+	d.l.Wait = 400 * time.Millisecond
+	d.l.Within = func(ctx context.Context) pr.Landing {
+		in := d.l
+		in.Ledger = ledger.New(stalledStore{Store: d.store, ctx: ctx})
+		return in
+	}
+	var up *pr.LockTimeUp
+	if _, err := d.l.Held(t.Context(), bead, conv, sitter); !errors.As(err, &up) {
+		t.Fatalf("a check whose store did not answer read %v, want the time under the lock spent", err)
+	}
+	if !lockFree(d.l.Dir) {
+		t.Fatal("the check kept the record lock after it returned")
+	}
+	if _, err := d.l.Push(t.Context(), bead, conv, sitter, tr); !errors.As(err, &up) {
+		t.Fatalf("a push whose store did not answer read %v, want the time under the lock spent", err)
+	}
+	if !lockFree(d.l.Dir) || len(tr.free) != 0 || len(tr.pushed) != 0 || len(d.github.Asks()) != 0 {
+		t.Fatalf("a push whose proof did not answer went on: checkout calls %v, pushes %v, asks %v", tr.free, tr.pushed, asks(d.github))
+	}
+}
+
+// A push that waits for the record lock stops waiting once its context ends,
+// as it does on a SIGTERM, and changes nothing.
+func TestAPushStopsWaitingForTheLockOnceItsContextEnds(t *testing.T) {
+	d, tr := newSitting(t)
+	release, err := record.Lock(d.l.Dir, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	signalled := errors.New("gctk was sent signal 15 (terminated)")
+	ctx, cancel := context.WithCancelCause(t.Context())
+	time.AfterFunc(100*time.Millisecond, func() { cancel(signalled) })
+	start := time.Now()
+	if _, err := d.l.Push(ctx, bead, conv, sitter, tr); !errors.Is(err, signalled) {
+		t.Fatalf("a push whose context ended while it waited for the lock read %v", err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("the push waited %s for the lock after its context ended, toward its %s wait", took, d.l.Wait)
+	}
+	if len(d.github.Asks()) != 0 || len(tr.pushed) != 0 || len(tr.free) != 0 {
+		t.Fatalf("a push that did not get the lock went on: asks %v, pushes %v, calls %v", asks(d.github), tr.pushed, tr.free)
 	}
 }

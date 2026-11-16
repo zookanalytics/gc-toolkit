@@ -13,6 +13,7 @@ package gh
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // Runner runs gh with args and returns its stdout. A failure carries gh's own
@@ -35,19 +38,45 @@ type Client struct {
 }
 
 // New returns a client for host, such as github.com, that runs the gh on PATH.
-func New(host string) *Client { return &Client{host: host, run: gh} }
+func New(host string) *Client { return NewContext(context.Background(), host) }
+
+// NewContext is New for a caller with a deadline: each gh call the client
+// makes ends when ctx does, and a call ctx ended returns an error that wraps
+// ctx's cause. The call runs in a process group of its own, and once ctx is
+// done the whole group is killed, so nothing gh started outlives the call. gh
+// holds no file a kill leaves locked.
+func NewContext(ctx context.Context, host string) *Client {
+	return &Client{host: host, run: func(args ...string) ([]byte, error) { return gh(ctx, args...) }}
+}
 
 // NewWithRunner returns a client for host that runs gh through run, so the
 // adapter's own tests serve recorded answers.
 func NewWithRunner(host string, run Runner) *Client { return &Client{host: host, run: run} }
 
-// gh runs the gh on PATH.
-func gh(args ...string) ([]byte, error) {
+// stopGrace is how long a call its context stopped may hold its output open
+// before the wait for it gives up. The stop kills every process the call
+// started, so only one that left the call's process group can hold it that
+// long.
+const stopGrace = 2 * time.Second
+
+// gh runs the gh on PATH, bound by ctx ([NewContext]). A ctx that is never
+// done runs it in this process's group, so whatever stops this process's group
+// stops it too.
+func gh(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.Command("gh", args...)
+	if ctx.Done() != nil {
+		cmd = exec.CommandContext(ctx, "gh", args...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+		cmd.WaitDelay = stopGrace
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("gh: stopped, with every process it started: %w", context.Cause(ctx))
+		}
 		var ee *exec.ExitError
 		if msg := strings.TrimSpace(stderr.String()); errors.As(err, &ee) && msg != "" {
 			return nil, fmt.Errorf("gh: %s", msg)

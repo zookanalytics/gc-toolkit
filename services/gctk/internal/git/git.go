@@ -5,6 +5,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // objectID is a full git object name, SHA-1 or SHA-256.
@@ -23,11 +26,20 @@ func IsObjectID(s string) bool { return objectID.MatchString(s) }
 // Output runs `git -C dir args...` and returns its stdout. A failure carries
 // git's own stderr.
 func Output(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	return output(context.Background(), dir, args...)
+}
+
+// output is Output bound by ctx ([command]): a git that ctx stopped returns an
+// error that wraps ctx's cause.
+func output(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := command(ctx, "git", append([]string{"-C", dir}, args...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("git %s: stopped, with every process it started: %w", args[0], context.Cause(ctx))
+		}
 		var ee *exec.ExitError
 		if msg := strings.TrimSpace(stderr.String()); errors.As(err, &ee) && msg != "" {
 			return "", fmt.Errorf("git %s: %s", args[0], msg)
@@ -35,6 +47,52 @@ func Output(dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %w", args[0], err)
 	}
 	return string(out), nil
+}
+
+// StopGrace is how long a git its caller's context stopped has between
+// SIGTERM and SIGKILL. git removes its lock files on SIGTERM and cannot on
+// SIGKILL, and a lock file left behind fails every later fetch of that ref in
+// the clone until a person deletes it. A variable so a test can shorten it.
+var StopGrace = 5 * time.Second
+
+// groupPoll is how often a stop looks for processes left in git's group.
+const groupPoll = 25 * time.Millisecond
+
+// command is name with args, bound by ctx. A ctx that is never done gives the
+// command exec.Command gives, which runs in this process's group, so whatever
+// stops this process's group stops it too. Otherwise the command leads a
+// process group of its own, out of reach of a signal sent to this process's
+// group, and once ctx is done the group is stopped ([stopGroup]). The wait for
+// the command lasts until that stop has ended, because a process git starts,
+// such as the ssh that carries a fetch, can outlive git.
+func command(ctx context.Context, name string, args ...string) *exec.Cmd {
+	if ctx.Done() == nil {
+		return exec.Command(name, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return stopGroup(cmd.Process.Pid) }
+	cmd.WaitDelay = StopGrace
+	return cmd
+}
+
+// stopGroup sends SIGTERM to the process group pgid leads, and SIGKILL to
+// whatever is left of it after StopGrace, and returns once the group is empty
+// or has been sent SIGKILL. A child that ignores SIGTERM runs on after git has
+// exited, so git's exit does not end the stop. darwin answers EPERM, not
+// ESRCH, for a group whose only members have exited and wait to be reaped, so
+// only ESRCH reads as empty. A group already gone is os.ErrProcessDone.
+func stopGroup(pgid int) error {
+	if errors.Is(syscall.Kill(-pgid, syscall.SIGTERM), syscall.ESRCH) {
+		return os.ErrProcessDone
+	}
+	for deadline := time.Now().Add(StopGrace); time.Now().Before(deadline); time.Sleep(groupPoll) {
+		if errors.Is(syscall.Kill(-pgid, 0), syscall.ESRCH) {
+			return nil
+		}
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	return nil
 }
 
 // Checkout is a worktree's place in its clone and the commit at its HEAD.
