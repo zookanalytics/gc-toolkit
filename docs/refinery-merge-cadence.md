@@ -911,8 +911,8 @@ store's record lock, a `flock` on `pr-record.lock` in the store's `.beads`
 directory, from its read of the record to its last write of it, and leaves the
 lock free a moment between two records so a publication waiting for it takes it
 there. Two runs that overlap act on one record one after the other, the second
-from the record as the first left it. The refinery's `gctk pr record`,
-`gctk pr withdraw`, a review run's `gctk review passed --record` and
+from the record as the first left it. The refinery's `gctk pr record`, a
+review run's `gctk pr withdraw` and `gctk review passed --record`, and
 `bead-rehome.sh`'s close take the same lock. The kernel frees the lock of a run
 the timeout stops, and the records it did not reach wait for the next run. No
 webhook fires the order, because an order a webhook fires skips Gas City's

@@ -237,8 +237,9 @@ yet. Each remaining difference names its reason and what ends it:
   conflict on a branch whose rework child is still open goes to that child's
   notes, on a rig not yet cut over and for a child a cutover left to finish,
   until the old path's retirement (tk-1tfzr71.122). Gas Town has no review run
-  and no asks. Two workers on one branch would overwrite each other's work. No
-  end is planned.
+  and no asks. Two workers on one branch would move it under each other, and
+  the lease refuses the second push until its worker merges the first. No end
+  is planned.
 
 ### Human engagement
 
