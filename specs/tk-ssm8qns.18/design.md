@@ -335,7 +335,8 @@ These are the ones a port is most likely to lose:
 - **The exits.** Usage is refused before any read. The subject's status is read
   before the first write, and a subject that is not open takes none and exits 3.
   Each exit keeps the order of its writes, so the write that dispatches, holds
-  or gates the subject comes last and a re-run resumes. The blocker a blocked
+  or gates the subject comes last, and a re-run of the same call after the exit
+  stopped part way repeats its earlier writes harmlessly. The blocker a blocked
   exit filed is found among the subject's pending waits by its title, a gate
   under the same key and brief is reused, and a superseded first-reaction gate
   is withdrawn before the new one is filed. A recommendation is cleared before
@@ -343,6 +344,50 @@ These are the ones a port is most likely to lose:
   the route, the hold is the last write, and the close exit's brief and headline
   land before its closer. The po, the deacon and the witness are refused, the
   mechanik takes a route, and the refinery and the keeper take the assignee.
+- **An exit whose worker died.** The reaction re-offered in the worker's place
+  runs the exit again only while the check passes. The check refuses a subject
+  once the exit has written its assignee, a route, an arm, the `hold:mayor`
+  label, the closer's run or a wait on an open human gate that is not the run's
+  own. Gas City retires a re-offered run before its check when another agent is
+  the subject's assignee (`workflowInputMembersSettled`, under
+  `hookRetireIfInputSettled` in `cmd/gc/cmd_hook_claim.go`). A re-offer
+  therefore finishes an exit its worker left before the first of those writes,
+  and an exit that makes that write its last leaves nothing undone. In three
+  cases an act follows that write, and a worker that dies between the write and
+  the act leaves the act undone, as the scripts leave it today. The port adds no
+  recovery for any of them, and the first act writes each owner a note naming
+  its window (section 9).
+  - **A hand-off's nudge.** A hand-off to a named agent writes the assignee or
+    the route, and then reads whether the subject is ready and nudges the
+    agent. Without the nudge, the subject sits in the agent's hook and the
+    agent is not told. When the subject waits on a blocker, Gas City nudges the
+    agent as the blocker closes (core's `cascade-nudge-on-blocker-close`
+    order). A subject ready at the hand-off waits for the agent's next turn,
+    which comes from a launch, a nudge or a person's typing. Gas City's claim
+    backstop nudges a session for work it has not claimed, and it governs pool
+    sessions only (`poolClaimBackstop.governs` in `cmd/gc/idle_nudge.go`).
+    gc-pn2gms, in the gascity rig's store, owns this window. It asks Gas City
+    for a claim backstop for named sessions, a nudge when bd reports ready a
+    bead assigned to an idle session that has not claimed it, which would reach
+    every writer of an assignee. The first act's note on it asks the same for a
+    bead routed to a named session, which is the mechanik's form.
+  - **A blocked hand-off's named waits.** A blocked exit that hands the subject
+    to the refinery or the keeper writes the assignee in `gc-helm.sh takeaway`'s
+    one write with the headline and the release, and takeaway writes the edges
+    onto the beads `--waiting-on` names after that write. A worker that dies
+    between them leaves the subject with the agent and held on none of those
+    beads, so the agent can take it up before they close. An edge bd refuses
+    leaves the subject assigned and not held on that bead until the exit is
+    re-run. A blocker the exit files carries its edge from its create, so it
+    holds the subject either way. tk-v209ua2 owns this window, because its
+    follow-up settles the blocked exit's edges on the Go exit (section 6).
+  - **What follows a wait on another's gate.** A blocked or close exit whose
+    wait is an open human gate that is not the run's own writes its arm, its
+    intake hold or the mechanik's route after the edge onto that gate. The
+    subject then waits on the gate with nothing to send it on once the gate
+    clears, and the sweep passes over it, because it carries a headline.
+    tk-itv781b.1 owns this window under its target 1, which settles a crash
+    re-offer at the offer path.
 
 **How it is pinned.** Each of the 80 cases of `tools/gc-proactive.test.sh` and
 the 92 of `assets/scripts/first-reaction-dispose.test.sh` becomes a Go test on
@@ -382,9 +427,9 @@ tk-ssm8qns.17, and its validating closer is armed for when that closes.
 | tk-0u5trz, the blocked exit's blocker churns as demand | no longer applies after #1520 | A blocker the exit files is new work nobody has decided on, and it takes one reaction like any other: `gc sling` refuses a second while one runs, and the headline its exit writes keeps it out of every later sweep. |
 | tk-6121i3p, a duplicate's hold takes two writes | no longer applies after #1439 and #1520 | A duplicate is closed at once through `bead-rehome.sh`, which writes bd's own `duplicates` edge, and `duplicate_of` is retired with its sweep. A reaction that finds a duplicate takes the close exit, one call. |
 | tk-rvj7wg0, no exit for a bead another bead resolves, and a hold check that accepts any edge | carries on, narrowed | The hold check is gone: `gc-helm.sh takeaway` exits 4 on a refused edge, and the exit stops before any arm. The `until` edge is retired, and the close exit's `--waiting-on` holds a bead whose job another bead's landing ends. What remains is a duplicate's close reaching you through the validating closer, which is that closer's policy and outside the port. The edge collision it also names is tk-v209ua2's. |
-| tk-v209ua2, a related edge passes the blocked exit's hold check | carries on, narrowed, held on the landing | The early dispatch no longer happens, as for tk-rvj7wg0. What remains is its own open choice. When the subject already has an edge of another type onto the bead it waits on, bd refuses the `blocks` edge and the exit stops with the remedy named, and the port keeps that refusal. Whether the exit converts the edge instead is the follow-up, which builds on the Go exit, so it waits on the landing. |
+| tk-v209ua2, a related edge passes the blocked exit's hold check | carries on, narrowed, held on the landing | The arm's early dispatch no longer happens, as for tk-rvj7wg0. What remains is its own open choice, and the window section 5 names in a blocked hand-off to the refinery or the keeper, whose assignee lands before its edges. When the subject already has an edge of another type onto the bead it waits on, bd refuses the `blocks` edge and the exit stops with the remedy named, and the port keeps that refusal. The follow-up decides whether the exit converts the edge instead and whether such a hand-off waits for its edges. It builds on the Go exit, so it waits on the landing. |
 | tk-kvcgj8, the close exit does not release the subject's claim | no longer applies after #1520 | A worker claims the react step, never the subject, so the subject reaches every exit open and unassigned. |
-| tk-itv781b.1, the reaction redesign | carries on, narrowed | #1520 meets its target 4, since no key records a reaction, and most of target 1: `gc sling` refuses a second live reaction, the pour refuses a closed subject, and Gas City retires a run whose subject closed or took an assignee before a worker claims it. The port meets target 3, since each exit's flags are its own. Target 2, a prompt with no case on exit statuses, remains, because the check's and the dispose's exits each call for a different act, and so does the part of target 1 a refusal that arises after the sling reaches. This table settles its list of candidate absorptions. |
+| tk-itv781b.1, the reaction redesign | carries on, narrowed | #1520 meets its target 4, since no key records a reaction, and most of target 1: `gc sling` refuses a second live reaction, the pour refuses a closed subject, and Gas City retires a run whose subject closed or took an assignee before a worker claims it. The port meets target 3, since each exit's flags are its own. Target 2, a prompt with no case on exit statuses, remains, because the check's and the dispose's exits each call for a different act, and so does the part of target 1 a refusal that arises after the sling reaches. Target 1 also takes the window section 5 names after a wait on another's gate, a re-offer its check refuses before the exit is done. This table settles its list of candidate absorptions. |
 | tk-1wqr0qk, the fixture no runner runs | no longer applies after #1520 | #1520 deleted `tools/proactive-first-reaction-fixture.sh`, and the PROVENANCE Gate paragraph names suites the runner selects. After the port it names the Go tests, which CI runs on every PR. |
 | tk-at5hqqy, no guard for a subject closed between the pour and the reaction | no longer applies after #1520 | The steps it names are gone. The check refuses a subject that is not open, every exit writes nothing to one, and Gas City retires a run whose input closed before its step is claimed. |
 | tk-8gradm4.7, one shared check for anything live behind a bead | carries on | Its closer is armed for tk-1tfzr71.19. The port moves the sweep's and the sling's reads of runs onto `waits`' run link, so the proactive scan is no longer one of the readers it lists. |
@@ -472,7 +517,9 @@ report that no longer applies gets a close brief and the validating closer.
 tk-nyctwpz and tk-1tfzr71.117 each get a close brief, a `blocks` edge onto
 tk-ssm8qns.17 and the closer's arm, after a disarm of the arm each carries.
 tk-v209ua2 gets a `blocks` edge onto tk-ssm8qns.17, and each report that carries
-on gets a note. It then writes the edge and the notes of section 7.
+on gets a note, which for tk-v209ua2 names the window section 5 gives it. It
+then writes the edge and the notes of section 7, and a note on gc-pn2gms and one
+on tk-itv781b.1, each naming the window section 5 gives it.
 
 **Unit 1: the exits.**
 
@@ -532,4 +579,4 @@ since `proactive-scan-sling` keeps its name and only its exec line changes.
 | `check`, `sling` | `gc sling`'s refusals (`internal/sling`, `cmd/gc/cmd_sling.go`) | A bead no store holds (`MissingBeadError`), a route across rigs (`CrossRigRouteError`, in `preflight`) or stores (`CrossStoreRouteError`, `validateBuiltInRouteStoreReachable`), a target the city does not configure, a second live run of the formula (`checkLegacySourceWorkflowConflict` and `liveConvoyTrackedWorkflowRoots`, under `withGraphV2SourceWorkflowLock`), and a closed target at the pour (`CreateSingleItemInputConvoy`, `internal/graphv2/invocation.go`). The sling passes exit 3 through and reports the rest as errors. The check leans on Gas City's retirement of a run whose input closed or took an assignee before its step was claimed (`hookRetireIfInputSettled`, `cmd/gc/cmd_hook_claim.go`). | `internal/sling` reads no hold label (`beadmeta.HasDispatchHold`, `internal/beadmeta/hold_labels.go`, has no caller there), no readiness and no human gate. It clears an assignee only under `--reassign`, which is false by default, and it admits a run of another formula, which its conflict check calls legitimate concurrent work. A conversation, a standing record and a feedback pattern are the pack's. An unfinished pour is a live root to Gas City (`markFailed` and `fenceGraphWorkflowBead`, `internal/molecule/molecule.go`; `carriedPoolRoute` in `cmd/gc/route_recovery.go` counts any fence that is not blank), and nothing finishes it. |
 | `sweep` | the default work query, bd's ready set, and order triggers | bd's ready set is the sweep's one read (`bd ready --unassigned --exclude-type=epic --sort priority`). | The work query offers only work routed to the claiming pool (`hookCandidateClaimable` and `hookClaimMatchesRoute`, `cmd/gc/cmd_hook_claim.go`), and a bead nobody has decided on has no route. bd's ready flags select a key's presence or one value and a label's exact text, and the candidate rule needs keys to be absent, so it runs in Go over the one read. An order on `bead.created` (`BeadCreated`, `internal/events/events.go`) is told no bead (`cmd/gc/order_dispatch.go`, "Auto-triggered orders carry no args channel"; the [orders tutorial](https://github.com/gastownhall/gascity/blob/e60ed864f346e9bf9151f8b30d2b83539e8b16cb/docs/tutorials/07-orders.md), "Formula orders vs. exec orders"), so the order sweeps on its cooldown. Gas City ends an exec order at its timeout by signalling its process group (`shellExecRunner`), so the sweep keeps its own deadline. |
 | `deliverable` | the roster, `gc agent list --json`, and `gc sling`'s dry run | The roster's qualified name, suspension and pool maximum are the three facts the answer reads. | `gc sling`'s dry run computes the same warnings (`newTargetResult`, `internal/sling/sling_core.go`) but answers for one sling of one bead, and this command's callers ask about the pool with no bead in hand. One rule over the roster answers that form and the dispose's. |
-| `dispose` | each exit's native writes | The human gate (bd's `gate create --type=human`, through `human-gate.sh`), the hold (`gc bd set-state <bead> hold=mayor`, Gas City's hold label), the hand-off (`gc sling <agent> <bead> --no-formula --no-convoy`), the closer (`gc sling <pool> <bead> --on mol-validate-close`), the nudge (`gc session nudge`), the ready read (bd's `list --ready`) and the arm (`gctk bead arm`). bd's own duplicate and supersede are composed by the closer the close exit hands to: `bead-rehome.sh` writes bd's `duplicates` and `supersedes` edges, and no exit records a successor. | The order of the writes, which lets a re-offered reaction resume; intake's rule; the rule that only an emergency's named check confirms it; and the form each named agent takes its work in (docs/authority-map.md, Route work). `default_sling_formula` in the [config reference](https://github.com/gastownhall/gascity/blob/e60ed864f346e9bf9151f8b30d2b83539e8b16cb/docs/reference/config.md) is what makes an arm on the proactive pool pour a reaction. |
+| `dispose` | each exit's native writes | The human gate (bd's `gate create --type=human`, through `human-gate.sh`), the hold (`gc bd set-state <bead> hold=mayor`, Gas City's hold label), the hand-off (`gc sling <agent> <bead> --no-formula --no-convoy`), the closer (`gc sling <pool> <bead> --on mol-validate-close`), the nudge (`gc session nudge`), the ready read (bd's `list --ready`) and the arm (`gctk bead arm`). bd's own duplicate and supersede are composed by the closer the close exit hands to: `bead-rehome.sh` writes bd's `duplicates` and `supersedes` edges, and no exit records a successor. | The order of the writes, which lets a re-run resume an exit, and a re-offered reaction resume one its worker left before the first write the check refuses (section 5); intake's rule; the rule that only an emergency's named check confirms it; and the form each named agent takes its work in (docs/authority-map.md, Route work). `default_sling_formula` in the [config reference](https://github.com/gastownhall/gascity/blob/e60ed864f346e9bf9151f8b30d2b83539e8b16cb/docs/reference/config.md) is what makes an arm on the proactive pool pour a reaction. |
