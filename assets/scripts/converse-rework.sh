@@ -146,7 +146,10 @@ case "$MERGE_RESULT" in
   pull_request_pending|pull_request_head_changed)
     ASK_ARGS=(review ask "$ANCHOR" --reason "$REASON" --source "$RULING_BEAD")
     for c in "${CHECKS[@]+"${CHECKS[@]}"}"; do ASK_ARGS+=(--check "$c"); done
-    ASK_OUT=$("$GCTK" "${ASK_ARGS[@]}" 2>&1) \
+    # The checks --check names are read from the pack's check index beside
+    # the pack's scripts directory, this script's own, whatever binding the rig
+    # imports the pack under.
+    ASK_OUT=$(GCTK_SCRIPTS_DIR="$SCRIPT_DIR" "$GCTK" "${ASK_ARGS[@]}" 2>&1) \
       || die "the ask that carries the ruling to $ANCHOR's review run did not stand ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' ')); a re-run finds one that landed"
     read -r ASK HOW _ <<< "$(printf '%s\n' "$ASK_OUT" | tail -n 1)"
     [ -n "$ASK" ] || die "gctk review ask named no ask for $ANCHOR; a re-run finds one that landed"

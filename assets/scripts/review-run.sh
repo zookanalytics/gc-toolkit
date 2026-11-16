@@ -94,6 +94,10 @@ done
 # shellcheck source=gctk-resolve.sh
 . "$HERE/gctk-resolve.sh" || die 1 "cannot source gctk-resolve.sh beside this script"
 gctk=$(gctk_path) || die 2 "no gctk binary to read the run with"
+# gctk reads the pack's check index beside the pack's scripts directory, which
+# is this script's own whatever binding the rig imports the pack under, and
+# without GCTK_SCRIPTS_DIR it asks gc for the gc-toolkit binding's.
+export GCTK_SCRIPTS_DIR="$HERE"
 
 # The step this session holds, and the run's facts for it.
 ID=$(gc hook current --id-only </dev/null 2>/dev/null) && [ -n "$ID" ] \

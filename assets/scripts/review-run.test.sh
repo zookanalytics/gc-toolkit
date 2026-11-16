@@ -22,7 +22,8 @@
 # question put to a gate; a person's batch, whose human findings the round's
 # read lists and the finding verb rules through finding.sh, a deferral's
 # follow-up taking the PR's target; triage's read at a head that already
-# passed; the repair's read again keeping the round's commit and uncommitted
+# passed, its read of the check index naming the scripts directory beside it
+# for any binding; the repair's read again keeping the round's commit and uncommitted
 # edit and showing them, and stopping the run on a worktree that is not at the
 # head or past it; and the reads making each step's worktree in its own part of
 # the workspace, and stopping when it does not land.
@@ -35,7 +36,7 @@ PASS=0; FAIL=0
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-review-run-test.XXXXXX")"
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
-unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
+unset "${!GC_@}" "${!BEADS_@}" GCTK_SCRIPTS_DIR 2>/dev/null || true
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 # The scripts directory: the script under test and review-workspace.sh with the
@@ -87,6 +88,7 @@ esac
 STUB
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gctk" <<'STUB'
 printf 'gctk %s\n' "$*" >> "$LOG"
+[ "$1 $2" != "review checks" ] || printf 'gctk-scripts-dir %s\n' "${GCTK_SCRIPTS_DIR:-unset}" >> "$LOG"
 case "$1 $2" in
     "review step")
         case " $* " in *" --stands "*)
@@ -356,6 +358,8 @@ facts review-loop.iteration.1.triage triage 1
 run triage
 eq "$RC" 0 "triage reads"
 eq "$(git -C "$WS/triage/wt" rev-parse HEAD 2>/dev/null)" "$HEAD1" "in its own worktree at the head"
+has "$(cat "$LOG")" "gctk-scripts-dir $SD" \
+    "its read of the check index names the pack's scripts beside review-run.sh, with none in the caller's environment and no binding gc knows"
 has "$OUT" "The change to judge: git diff origin/main...$HEAD1 (the whole PR)" "and prints the change and the rule that chose it"
 facts review-loop.iteration.1.triage triage 1 false "$HEAD1" "the head already passed into its target"
 run triage

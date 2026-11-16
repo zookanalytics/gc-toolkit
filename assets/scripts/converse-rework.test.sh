@@ -21,7 +21,9 @@
 # converse-signoff.sh runs it, files, edges and dispatches the child there, and
 # a run from the conversation's rig cannot prove the edge and dispatches
 # nothing. An anchor on the pending record takes the ruling as an ask to its
-# review run instead, with the checks the ruling names, and nothing superseded.
+# review run instead, with the checks the ruling names, read from the check
+# index beside this checkout's scripts whatever the binding, and nothing
+# superseded.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -375,6 +377,7 @@ echo "# --- an open PR on the pending record takes the ruling as an ask to its r
 cat > "$TMP/gctk-ask" <<'ASK'
 #!/usr/bin/env bash
 echo "$*" >> "$TMP_ASK_LOG"
+echo "${GCTK_SCRIPTS_DIR:-unset}" >> "$TMP_ASK_LOG.env"
 [ "${STUB_ASK_RC:-0}" = 0 ] || { echo "gctk review ask: anc-1: the check index at the head declares no check \"nope\"" >&2; exit 3; }
 echo "ask-1 ${STUB_ASK_HOW:-filed}"
 ASK
@@ -383,9 +386,10 @@ export TMP_ASK_LOG="$TMP/ask.log"
 for rec in "pull_request_pending blocked" "pull_request_head_changed open"; do
   set -- $rec
   reset "$(printf '%s' "$ANCHOR_PR" | jq -c --arg mr "$1" --arg st "$2" 'map(.metadata.merge_result = $mr | .status = $st)')"
-  : > "$TMP_ASK_LOG"
-  OUT=$(GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment directly to docs/material-layers.md" --check arch 2>&1); RC=$?
+  : > "$TMP_ASK_LOG"; : > "$TMP_ASK_LOG.env"
+  OUT=$(env -u GCTK_SCRIPTS_DIR GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment directly to docs/material-layers.md" --check arch 2>&1); RC=$?
   eq "$RC" "0" "$1: exit 0 once the ask stands"
+  eq "$(cat "$TMP_ASK_LOG.env")" "$HERE" "$1: the checked ask names the pack's scripts beside converse-rework.sh, with none in the caller's environment"
   eq "$(created)" "0" "$1: no rework child is filed"
   eq "$(cat "$TMP_ASK_LOG")" "review ask anc-1 --reason operator ruling (conversation vis-1): apply the amendment directly to docs/material-layers.md --source vis-1 --check arch" "$1: the ask carries the ruling, the conversation as its source, and the checks it names"
   eq "$(printf '%s\n' "$OUT" | tail -n 1)" "ask-1 ask filed" "$1: the last line names the ask, as a child's line names the child"
