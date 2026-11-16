@@ -195,9 +195,9 @@ from it was delivered, cancelled or never registered.
   would be a second registry of the session's waits beside Gas City's, which the
   brief the operator approved in conversation tk-8e83do9 says not to make the
   preferred architecture. Such a thread instead registers each promise the
-  stay's hand-back names that is neither open nor held as a notice, so a
-  return whose notice reached the thread before it still comes back once (the
-  design's section 4).
+  stay's hand-back names that is neither open, nor held as a notice, nor a
+  return it carries on, so a return whose notice reached the thread before it
+  still comes back once (the design's section 4).
 
 ## Visits and fresh contexts: the changes Gas City makes
 
@@ -244,7 +244,7 @@ session's open waits.
   pack-side restoration the preferred architecture. The sitting's entry
   registers a promise again only where Gas City's list cannot hold it once Gas
   City keeps waits through both: a promise never registered, a notice that
-  reached a thread which ended before it held the conversation, and a sitting
+  reached a thread which ended before it took that return up, and a sitting
   that takes the conversation up after its session closed (the design's
   section 4).
 - **The sitting registering its other promises again while its reset is

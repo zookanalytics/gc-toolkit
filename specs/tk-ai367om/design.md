@@ -312,25 +312,27 @@ notice.
 ready, so a promise leaves `gc wait list --session "$GC_SESSION_ID" --json` once
 its notice is delivered, when the operator's ending cancels it, and when the
 session closes. A visit and a fresh context keep it (section 8). So on every
-entry that reads `waiting`, the sitting reads its open promises. It then
-registers each promise the stay's hand-back names that no open promise names
-and whose notice its thread does not hold, as the stay's own step 3 does. That
-covers three cases:
+entry that reads `waiting`, and on the first entry of a thread a reset started
+fresh, the sitting reads its open promises. It then registers each promise the
+stay's hand-back names that no open promise names and whose notice its thread
+does not hold, other than a return it carries on from a hand-over or from the
+hold's line, as the stay's own step 3 does. That covers three cases:
 
 - **A restart between the stay and the promise.** The promise was never
   registered, and this registers it.
-- **A notice that reached a thread which ended before it held the
-  conversation**, such as a thread a reset replaced at that moment. The round's
-  end still holds at the PR's head, so the landing order marks the new promise
-  ready on its next pass, finds its hold there already, and the sitting comes
-  back once. On work that has closed, Gas City marks the promise ready at once.
+- **A notice that reached a thread which ended before it took that return up**,
+  such as a thread a reset replaced at that moment, whether it was waiting or
+  held the conversation for another return. The round's end still holds at the
+  PR's head, so the landing order marks the new promise ready on its next pass,
+  finds its hold there already, and the sitting comes back once. On work that
+  has closed, Gas City marks the promise ready at once.
 - **A sitting that takes the conversation up after its session closed.** The
   stay still owes its returns, so the new sitting promises them.
 
-A return the sitting has taken up holds the conversation, so its entry reads the
-hold that stands, not `waiting`, and it registers nothing. A settled stay names
-no promise. The sitting never asks the operator whether to promise again, and
-nothing records a promise beside Gas City's own list and the stay's hand-back.
+A thread that resumed holds every notice it was given, so when its entry reads
+the hold that stands, it registers nothing. A settled stay names no promise. The
+sitting never asks the operator whether to promise again, and nothing records a
+promise beside Gas City's own list and the stay's hand-back.
 
 **A hand-over while another return is pending.** A return handed to a fresh
 context resets the session (`converse-stay`, "When your context runs low during
@@ -338,7 +340,10 @@ the return"). The promise it is returning on was delivered already. Each other
 promise still pending goes on into the fresh thread, because gc-lwa1vp keeps a
 session's open waits through a fresh restart (section 8). The fresh thread
 finishes the return from the hand-over, and each other promise brings it back
-when its work is ready, as it would have brought back the thread before it.
+when its work is ready, as it would have brought back the thread before it. A
+notice that reached the thread before the reset, for a return the hand-over
+does not give, closed its wait with that delivery, so the fresh thread registers
+that promise again on its entry (above).
 
 **The return at the work's close.** When the work closes, merged or closed
 without a PR, the stay's wait in the store clears, its promise turns ready as
@@ -660,7 +665,7 @@ bead's close.
 | 0. Gas City keeps a session's waits through an attach that starts it (gc-gspdoo) and through a fresh restart (gc-lwa1vp) | The changes of section 8, built by Gas City: their local patch in the city's fork, and their upstream path. Each bead's "Done when" is its test: a wait still pending after the attach, and after a reset that hands one return over while another wait is pending, wakes the session with its note once marked ready. | nothing in this effort | unit 3, through the gate of section 14, which the operator clears once the city's gc carries both, built, verified and running |
 | 1. The hold and the wake at the end of a round (gctk) | First, a probe in a scratch city: a session wait with no `--sleep`, on a session that has slept, marked ready with `gc wait ready`, wakes the session and delivers its note. Then, in the pr domain: in the landing order's pass, at the end of a round on a draft or on a PR that is ready already, for each pending session wait on the bead whose session is the sitting of an open or in-progress conversation, the bead's `blocks` edge onto that conversation, then `gc wait ready`, before the ready transition or the evaluator's read. Tests: the hold and the wake for new work, for a rework and for the subject; a send-back the run answers with no push wakes the sitting at the round's end on a ready PR, and an approval from an earlier round does not merge it; a promise registered after its round ended, as section 4's fresh thread registers it, is marked ready on the next pass, with the hold already there left alone; a round with no pending promise writes nothing; a wait of another session, a wait already ready, a wait whose conversation has closed and an edge already there are left alone; a failed read or write leaves the wait pending and is retried; a PR in its base's merge queue is left to GitHub. | the effort's branch brought current with main | unit 2 |
 | 2. The stay waits through a convoy (scripts) | `converse-signoff.sh --stay`: the wait onto the newest open convoy that tracks each bead it waits on, or onto one it makes with `gc convoy create`; a stay on the subject, with the subject left waiting on nothing of its own convoy, from PR #1515's head with its open-convoy fix; on the review path, a stay on the PR whose merge the conversation holds; on the old path, that stay refused as today. `converse-entry.sh`: `waiting` and `returned` read through the convoy. Tests, one per row of section 2 and of section 9: what the sign-off writes, a convoy made when none is open, a closed convoy that is no wait, the entry before and after the convoy closes, and the old path's refusal. | unit 1 | unit 3 |
-| 3. The words | The converse prompt's "End or stay?" and its handling of a `Wait satisfied` notice; `converse-stay`, `converse-settle` and `converse-hold` (section 10); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; `docs/lifecycle-composition.md`'s close signal; the skill-needs pins of the table and of each example's call through the real parsers, among them a hand-over while another promise is pending, whose reset cancels no promise, and the entry that reads `waiting` registering only a promise that is neither open nor held as a notice; the stay's first Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path, and its second, the promise Gas City does not keep, removed. A check in a scratch city on the city's gc: a sitting's promise still pending after an attach that starts it from sleep, and after a reset that hands one return over while another promise is pending, brings the sitting back when marked ready. | unit 2, and the gate of section 14 | the landing |
+| 3. The words | The converse prompt's "End or stay?" and its handling of a `Wait satisfied` notice; `converse-stay`, `converse-settle` and `converse-hold` (section 10); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; `docs/lifecycle-composition.md`'s close signal; the skill-needs pins of the table and of each example's call through the real parsers, among them a hand-over while another promise is pending, whose reset cancels no promise, a hand-over after another return's notice reached the thread, whose fresh thread registers that promise again, and the entry that reads `waiting`, or starts a thread a reset made fresh, registering only a promise that is neither open, nor held as a notice, nor a return it carries on; the stay's first Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path, and its second, the promise Gas City does not keep, removed. A check in a scratch city on the city's gc: a sitting's promise still pending after an attach that starts it from sleep, and after a reset that hands one return over while another promise is pending, brings the sitting back when marked ready. | unit 2, and the gate of section 14 | the landing |
 
 The initiative's "Done when" asks for a test of each row of the table. Units 1
 and 2 hold the rows in their suites, and unit 3 pins them in the words.
