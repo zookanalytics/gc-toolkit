@@ -195,11 +195,10 @@ External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a `gc` build that moves the text the seed
 audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
 the cadence), or the landing order for a PR on the pending record, records PR
-events and files a human gate, the witness patrol
-salvages the unpushed work of a dead session,
-`witness-nudge.sh` gives a witness whose patrol pass stopped its next turn,
-the doctor order keeps one record of each failing `gc doctor` check in the
-po's queue until the check passes,
+events and files a human gate, one order finds a dead session's unpushed work
+and another salvages it,
+the doctor order runs `gc doctor` each hour and records the run, which the
+board shows,
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
 edit no writer saw, and `seed-audit-reaudit.sh`, which a landing on the default
 branch calls, slings the one re-render of the default branch's
@@ -209,10 +208,10 @@ reconstructs pack-written state after the fact.
 
 Gas City's controller recovers a pool seat that holds work and either goes
 quiet or is refused by its provider for a rate limit. It does not act on a pool
-seat that keeps printing while its work stands still, and the witness patrol
-files a finding on that seat. The controller and core's orphan sweep release
-the claims of a dead session, and the witness releases none. No part of the
-pack kills a stuck session.
+seat that keeps printing while its work stands still, and a pack order files a
+finding on that seat. The controller and core's orphan sweep release the claims
+of a dead session, and no pack order releases one. No part of the pack kills a
+stuck session.
 
 ## What the pack supplies and what a rig supplies
 
@@ -320,10 +319,11 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   disposable.
 - **A human gate is a wait for a person.** Two channels carry a signal, and
   which applies depends on who can answer it. Mail is the agent-to-agent
-  pathway: a worker mails the witness, which unblocks what it can and promotes
-  what needs a person. A human gate is the human engagement: Gas City's native
-  gate (`await_type=human`) on the bead that waits, which any pack, formula or
-  person files natively or through `human-gate.sh`. The helper files nothing
+  pathway: a worker mails the witness, the mail wakes it, and it unblocks what
+  it can and promotes what needs a person. A human gate is the human
+  engagement: Gas City's native gate (`await_type=human`) on the bead that
+  waits, which any pack, formula or person files natively or through
+  `human-gate.sh`. The helper files nothing
   while an open gate under the call's situation key already blocks the bead,
   though two writers in the same instant can each file one, because bd keeps
   no idempotency at create. Each gate blocks that
@@ -504,11 +504,12 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
-- **The witness still releases orphaned claims, and the deacon still runs
-  `gc doctor`.** Until the patrols member's units land, the witness's orphan
-  recovery returns a dead session's work to the pool beside Gas City's release,
-  and the deacon runs `gc doctor` in its session and files each failure as a
-  patrol finding for a first reaction. The units of tk-1tfzr71.19 retire both.
+- **The witness still patrols, and the deacon still runs `gc doctor`.** Until
+  the patrols member's second landing, the witness's hourly loop salvages,
+  checks pool seats and the refinery's queue in its session, and returns a dead
+  session's work to the pool beside Gas City's release, and the deacon runs
+  `gc doctor` and files each failure as a patrol finding for a first reaction.
+  The second landing of tk-1tfzr71.19 retires both.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
