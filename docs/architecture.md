@@ -472,7 +472,9 @@ first. Either way the change is a decision on the record, not a drift.
 - **No display reads GitHub.** The board, a PR's status label and
   `gctk pr status` derive a PR's status by the evaluator's one rule from the
   GitHub read the one-PR update saved on the PR's bead and the store as it is
-  at the read. Every reader of GitHub draws on one API allowance.
+  at the read. The board says for each rig when GitHub was last asked, from Gas
+  City's record of the runs of the rig's `pr-poll` order. Every reader of
+  GitHub draws on one API allowance.
 - **Only the merge acts on a fresh read of GitHub,** and the saved GitHub read
   grants nothing. The evaluator's answer is computed at each read and stored
   nowhere.

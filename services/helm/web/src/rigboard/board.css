@@ -200,6 +200,11 @@ a:focus-visible {
   font-weight: 500;
 }
 
+.status--stale {
+  color: #8a5300;
+  font-weight: 500;
+}
+
 .lead {
   display: flex;
   flex-wrap: wrap;

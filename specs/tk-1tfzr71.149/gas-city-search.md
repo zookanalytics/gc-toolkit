@@ -247,3 +247,32 @@ GitHub, which the board can show and mark stale.
 Conclusion: the run history covers it. The board's unit reads it through the
 supervisor's API, as the board reads the city today
 (services/helm/internal/source/supervisor.go).
+
+Read again when unit 5 was built, on 2026-11-17 at `gastownhall/gascity` main
+09518c191, where none of the files cited here changed after 294079d53f:
+
+- **What says a run exited 0.** An exec order's run records no exit code.
+  `humaHandleOrderHistory` fills `exit_code` from `convergence.gate_exit_code`
+  (`GateOutputFromMetadata`), which only the convergence handler writes
+  (`internal/convergence/handler.go`). `dispatchExec` in
+  `cmd/gc/order_dispatch.go` records how the run ended as a label on its record
+  instead, through `SetOutcome`: `exec` when the command exited 0,
+  `exec-failed` when it did not, and `exec-env-failed` when its environment
+  could not be built (`RunOutcome.Labels` in `internal/orders/store.go`). The
+  history lists each run's `labels`, and `gc order history` prints neither
+  (`cmd/gc/cmd_order.go`). The board reads a run that exited 0 by its `exec`
+  label.
+- **The order's interval.** `GET /v0/city/{city}/order/{name}`
+  (`humaHandleOrderGet`, and `toOrderResponse` in
+  `internal/api/handler_orders.go`) answers the order's `interval` and
+  `enabled` after the city's `[[orders.overrides]]` (`OrdersAll` in
+  `cmd/gc/api_state.go`), and 404 for an order the city does not hold.
+  Covered: the board takes three of that interval, and reads a rig with no
+  enabled `pr-poll` as unwatched.
+- **How far the history reaches.** The run retention,
+  `[beads.policies.order_tracking] delete_after_close`, is in no answer of the
+  supervisor's API: the config read (`humaHandleConfigGet` in
+  `internal/api/huma_handlers_config.go`) carries the workspace, agents, rigs,
+  providers and patches. Not covered: with no run that exited 0, the board
+  gives the start of the oldest run the history holds, where the design gave
+  the retention's 30 minutes.
