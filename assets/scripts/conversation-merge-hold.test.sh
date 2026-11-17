@@ -383,9 +383,9 @@ skill_block() {
          inb { buf = buf $0 "\n"; if (index($0, m)) hit = 1 }' "$ROOT/skills/$1/SKILL.md"
 }
 # The premise re-check's close, a moot reading filled in for its placeholders.
-# A reading that states the premise and what is true instead runs past the 140
-# characters gc-helm.sh takeaway takes, so only its short sentence fits the
-# headline.
+# A reading that states the premise and what is true instead runs past the
+# headline's cap, TAKEAWAY_MAX in gc-helm.sh, so only its short sentence fits
+# the headline.
 MOOT_WHY="the conversation asked whether the PR should land as built, and the operator has since answered that on GitHub, so the merge it holds waits on no person and nothing is left to ask"
 MOOT_HEADLINE="the PR it asked about was answered on GitHub"
 skill_block converse-recheck-premise 'closed $CONVERSATION as $KIND' \
