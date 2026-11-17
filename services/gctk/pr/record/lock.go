@@ -16,9 +16,11 @@ import (
 // at a time, from its read of the record to its last write of it,
 // `gctk pr withdraw` holds it from its read of a bead to its filing of the
 // withdrawal, `gctk review passed --record` holds it from its read of the PR's
-// bead to its close of the asks the run answered, and bead-rehome.sh holds it
-// from its read of a bead to its close. Nothing that holds it takes another
-// lock, so no two writers wait on each other in a cycle.
+// bead to its close of the asks the run answered, bead-rehome.sh holds it
+// from its read of a bead to its close, and pr-dispose.sh holds it from its
+// read of the bead that owns a PR to its stamp of a ruling's disposition.
+// Nothing that holds it takes another lock, so no two writers wait on each
+// other in a cycle.
 const LockFile = "pr-record.lock"
 
 // lockPoll is how often a writer waiting for the lock asks for it again.

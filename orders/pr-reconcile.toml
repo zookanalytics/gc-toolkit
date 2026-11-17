@@ -5,7 +5,9 @@
 # queue, and its bead closes once the merge commit is on the freshly fetched
 # target. A PR open at another head goes back to the refinery, which a run
 # wakes and nudges for it when only a conversation or an ask holds the PR's
-# bead, and the exceptions stay blocked behind a human gate. A PR open at its
+# bead, and the exceptions stay blocked behind a human gate. A PR a ruling
+# retired (pr-dispose.sh) is never merged, and once it has closed its bead
+# closes onto the ruling's successor through bead-rehome.sh. A PR open at its
 # validated head with no passed review result there, or with an ask a run can
 # take, gets its review run poured here (gctk pr reconcile's help says when),
 # and a run that ends without a result is poured again once before a human
