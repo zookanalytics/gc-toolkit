@@ -204,9 +204,10 @@
 #     and before every other write, and when it does not complete nothing else
 #     is written. A re-run of the same ruling with the same answer acts on the
 #     PR the record names, the one --pr-anchor named or the ruling reached
-#     then, even once it has closed, as a retired PR closes when pr-facts
-#     consummates its disposition; a PR that reads closed has nothing left for
-#     the rework or the retirement to do, so the re-run goes on without it.
+#     then, even once it has closed, as a retired PR's anchor closes when its
+#     closer, pr-facts or the landing order, consummates its disposition; a PR
+#     that reads closed has nothing left for the rework or the retirement to
+#     do, so the re-run goes on without it.
 #     The record also names the child a --rework filed, written once
 #     converse-rework.sh reports it, and a re-run that finds that child closed
 #     files no second rework and supersedes no review again: the ruling's
@@ -703,13 +704,13 @@ fi
 #
 # The PR a ruling's rework or retirement acts on is recorded on the conversation
 # (gc.ruling_consequence, keyed by the ruling's answer) before it acts, because
-# what it acts on can close in between: pr-facts consummates a retirement by
-# closing the retired PR's anchor, and a closed bead is no open PR the ruling
-# reaches. A re-run of the same ruling with the same answer recovers that PR
-# from the record, so it never falls back to the subject or acts on another PR,
-# and a recorded PR that reads closed has nothing left for the answer to do. A
-# re-run that answers differently is a new answer, and the record does not
-# bind it.
+# what it acts on can close in between: the retired PR's closer, pr-facts or
+# the landing order, consummates a retirement by closing its anchor, and a
+# closed bead is no open PR the ruling reaches. A re-run of the same ruling
+# with the same answer recovers that PR from the record, so it never falls back
+# to the subject or acts on another PR, and a recorded PR that reads closed has
+# nothing left for the answer to do. A re-run that answers differently is a new
+# answer, and the record does not bind it.
 #
 # A rework's record also names the child it filed, once converse-rework.sh
 # reports it, because the store cannot name it later: a conversation's rework
