@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -71,6 +72,9 @@ func (c *CLI) MemoryDir(a Ask) (Answer, error) {
 		"--settings", settings, prompt)
 	cmd.Dir = a.Dir
 	cmd.Env = sessionless(os.Environ())
+	// Claude Code writes its config file while it runs, so a timeout stops it
+	// with SIGTERM, and a kill comes only once stopGrace has passed.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = stopGrace
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

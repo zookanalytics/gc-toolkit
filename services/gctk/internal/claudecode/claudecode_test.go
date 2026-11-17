@@ -65,8 +65,11 @@ func TestMemoryDirFailsWithNoInitRecord(t *testing.T) {
 	}
 }
 
+// An ask that does not answer in time is stopped with SIGTERM, which lets
+// Claude Code finish writing its config file, not killed outright.
 func TestMemoryDirEndsAnAskThatDoesNotAnswer(t *testing.T) {
-	c, _ := stub(t, `exec sleep 30`)
+	c, log := stub(t, `trap 'echo stopped >> "$(dirname "$0")/log"; exit 143' TERM
+while :; do sleep 0.05; done`)
 	c.timeout = 200 * time.Millisecond
 	start := time.Now()
 	_, err := c.MemoryDir(Ask{Dir: t.TempDir()})
@@ -75,6 +78,9 @@ func TestMemoryDirEndsAnAskThatDoesNotAnswer(t *testing.T) {
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Errorf("the ask ran %s past its bound", time.Since(start))
+	}
+	if got := logged(t, log); !strings.Contains(got, "stopped\n") {
+		t.Errorf("the ask was not stopped with SIGTERM:\n%s", got)
 	}
 }
 
