@@ -71,7 +71,14 @@
 #               the library in, the skill's resolve block runs, and an engine
 #               call hands the engine the arguments and the profile this suite's
 #               bash does and drops the variables that point at the city, for a
-#               server the engine starts and for a rig's app on this host
+#               server the engine starts and for a rig's app on this host, and
+#               the surface the engine names for a script is printed
+#   (SURFACE)   demo_engine_script_kind prints the surface the engine's surface
+#               command names, whatever the script's lines say, asking inside
+#               the sandbox, and resolves the engine first only when nothing
+#               chose one. An engine with no surface command, one that refuses,
+#               and an answer that names no surface each print nothing and exit
+#               1 with the reason, which names the command
 # What each capture adds to the policy is tested beside it, in
 # rig-demo-capture.test.sh and demo-screenshot.test.sh.
 #
@@ -249,7 +256,11 @@ NOLSOF="$TMPD/bin-nolsof"; mkdir -p "$NOLSOF"
 for s in jq node npx npm gc ffmpeg sandbox-exec; do ln -s "$BIN/$s" "$NOLSOF/$s"; done
 
 # The engine's CLI: help lists its commands, lint passes, run writes the clip
-# and the engine's closing report, and screenshot writes the PNG.
+# and the engine's closing report, and screenshot writes the PNG. surface
+# prints $SURFACE_ANSWER, {"surface":"page"} when it is empty, and reads no line
+# of the script. With SURFACE_REFUSE set it refuses as the engine refuses a
+# script that is missing, with nothing on stdout, and with ENGINE_NO_SURFACE set
+# it answers as an engine with no surface command does.
 ENGINE_STUB="$TMPD/engine"
 cat >"$ENGINE_STUB" <<'ENGINE'
 #!/usr/bin/env bash
@@ -258,6 +269,13 @@ o=""; prev=""
 for a in "$@"; do [ "$prev" = "-o" ] && o="$a"; prev="$a"; done
 case "${1:-}" in
   help) printf 'Usage:\n  sprintshow run <demo.md> [options]\n  sprintshow screenshot <demo.md> -o <file.png> [options]\n' ;;
+  surface)
+    if [ -n "${ENGINE_NO_SURFACE:-}" ]; then
+      printf 'unknown command: surface\n\n' >&2; printf 'Usage:\n  sprintshow run <demo.md> [options]\n'; exit 1
+    fi
+    if [ -n "${SURFACE_REFUSE:-}" ]; then printf '\n✖ demo script not found: %s\n' "${2:-}" >&2; exit 1; fi
+    ans=${SURFACE_ANSWER:-}; [ -n "$ans" ] || ans='{"surface":"page"}'
+    printf '%s\n' "$ans" ;;
   run)
     printf 'mp4-bytes\n' >"$o"
     printf '\n✅ silent demo → %s\n' "$o" ;;
@@ -465,6 +483,65 @@ for cap in video screenshot; do
   has "npx not found" "$(err)" "($cap) it says npx is missing"
   not_captured "$cap"
 done
+
+# kind_run <script> [VAR=VAL ...]: source the library in a fresh bash, from
+# $WORK, against the stubs, and run demo_engine_script_kind on the script, with
+# stdout in $OUTF, stderr in $ERRF and the exit status in $RC.
+kind_run() {
+  local script="$1"; shift
+  : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV"
+  ( cd "$WORK" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+      ENGINE_STUB="$ENGINE_STUB" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" \
+      "$@" bash -c '. "$1" && demo_engine_script_kind "$2"' kind "$LIB" "$script" >"$OUTF" 2>"$ERRF" )
+  RC=$?
+}
+kind_out() { cat "$OUTF"; }
+TERMSCRIPT="$WORK/terminal.md"
+printf '# Demo: a report\n\n**Terminal:** 100x30\n\n## Steps\n\n1. **It prints**\n   `run true`\n' >"$TERMSCRIPT"
+
+echo "# SURFACE: demo_engine_script_kind prints the surface the engine's surface command names, asking inside the sandbox"
+kind_run "$SCRIPT" SS_RIG="$ENGINE"
+eq "$RC" 0 "(surface) the engine names a script's surface"
+eq "$(kind_out)" "page" "(surface) it prints the surface the engine names"
+has "engine = local sprintshow rig ($ENGINE)" "$(err)" "(surface) with no engine chosen, it resolves one first"
+P=$(line_of "provision:browser"); S=$(line_of "engine surface $SCRIPT")
+ok "(surface) the engine is resolved before it is asked (provision line $P, surface line $S)" "[ '$P' -gt 0 ] && [ '$S' -gt '$P' ]"
+has "node [$ENGINE/src/cli.ts] [surface] [$SCRIPT]" "$(calls)" "(surface) it asks the checkout's CLI"
+has "(allow file-read-data (subpath \"$SCRIPT\"))" "$(profile)" "(surface) inside the sandbox, which lets the engine read the script"
+kind_run "$TERMSCRIPT" SS_RIG="$ENGINE"
+eq "$(kind_out)" "page" "(surface) a script whose lines declare **Terminal:** is the surface the engine names, so no line of it is read"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" SURFACE_ANSWER='{"surface":"terminal"}'
+eq "$(kind_out)" "terminal" "(surface) and a script whose lines declare nothing is a terminal script when the engine names it one"
+kind_run "$SCRIPT" SURFACE_ANSWER='{"surface":"ios"}'
+eq "$RC" 0 "(surface) the published package names a script's surface"
+eq "$(kind_out)" "ios" "(surface) and a surface beyond page and terminal is printed as the engine names it"
+has "npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell" "$(calls)" "(surface) the published package is resolved first"
+has "npx --yes @zookanalytics/sprintshow surface $SCRIPT" "$(calls)" "(surface) then asked"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" DEMO_ENGINE_DIR="$ENGINE"
+eq "$RC" 0 "(surface) an engine already chosen names the surface"
+hasnt "provision:browser" "$(calls)" "(surface) and is not resolved again"
+has "node [$ENGINE/src/cli.ts] [surface] [$SCRIPT]" "$(calls)" "(surface) but asked as it was chosen"
+
+echo "# SURFACE: an engine that names no surface prints nothing and exits 1, naming the surface command"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" ENGINE_NO_SURFACE=1
+eq "$RC" 1 "(surface) an engine with no surface command exits 1"
+eq "$(kind_out)" "" "(surface) and prints nothing, its help included"
+has "the SprintShow engine ($ENGINE) has no surface command, so it cannot name the surface '$SCRIPT' drives; update it to a SprintShow whose 'sprintshow help' lists 'sprintshow surface'" "$(err)" "(surface) it names the missing command"
+kind_run "$WORK/missing.md" SS_RIG="$ENGINE" SURFACE_REFUSE=1
+eq "$RC" 1 "(surface) a script the engine refuses exits 1"
+eq "$(kind_out)" "" "(surface) and prints nothing"
+has "demo script not found: $WORK/missing.md" "$(err)" "(surface) the engine's reason reaches the caller"
+has "named no surface for '$WORK/missing.md' ('sprintshow surface' exited 1)" "$(err)" "(surface) with the command that named none"
+for ans in '{"surface":""}' '{"surface":42}' '{"surface":"two words"}' 'page' '{"surface":"page"}{"surface":"page"}' '{}'; do
+  kind_run "$SCRIPT" SS_RIG="$ENGINE" SURFACE_ANSWER="$ans"
+  eq "$RC" 1 "(surface) the answer $ans names no surface, so it exits 1"
+  eq "$(kind_out)" "" "(surface) and prints nothing for $ans"
+  has "answered 'sprintshow surface' for '$SCRIPT' with no surface" "$(err)" "(surface) it says the answer named none"
+done
+STUB_PATH="$NOSBX" kind_run "$SCRIPT" SS_RIG="$ENGINE"
+eq "$RC" 1 "(surface) a host with no sandbox names no surface"
+has "sandbox-exec not found" "$(err)" "(surface) it says why"
+hasnt "engine surface" "$(calls)" "(surface) and the engine is never asked"
 
 # A city for the sandbox's cases. gc's home lists it, and the environment names
 # it, one of its rigs and that rig's store. Its rig map lists that rig, a rig
@@ -1063,6 +1140,10 @@ shell_run() {
       "${CITY_ENV[@]}" "$@" "$sh" "$blk" >"$OUTF" 2>"$ERRF" )
   RC=$?
 }
+printf '. "%s" && demo_engine_script_kind demo.md\n' "$LIB" >"$TMPD/kind.sh"
+shell_run bash "$TMPD/kind.sh"
+eq "$RC" 0 "(shells) this suite's bash asks the engine for a script's surface"
+eq "$(cat "$OUTF")" "page" "(shells) and prints the surface it names"
 shell_run bash "$TMPD/skill-serve.sh"
 eq "$RC" 0 "(shells) this suite's bash runs the engine call"
 has "node [$ENGINE/src/cli.ts] [run] [demo.md] [--serve-dir] [app] [--port] [5199] [-o] [clip.mp4]" "$(calls)" "(shells) and the engine gets its arguments"
@@ -1085,6 +1166,9 @@ for sh in /bin/zsh /bin/bash; do
   shell_run "$sh" "$TMPD/skill-resolve.sh"
   eq "$RC" 0 "(shells) $sh runs the resolve block"
   has "engine = local sprintshow rig ($ENGINE)" "$(err)" "(shells) $sh chooses the local engine"
+  shell_run "$sh" "$TMPD/kind.sh"
+  eq "$RC" 0 "(shells) $sh asks the engine for a script's surface"
+  eq "$(cat "$OUTF")" "page" "(shells) $sh prints the surface it names"
   shell_run "$sh" "$TMPD/skill-serve.sh"
   eq "$RC" 0 "(shells) $sh runs the engine call"
   eq "$(calls)" "$SERVE_CALLS" "(shells) $sh hands the engine the same arguments"

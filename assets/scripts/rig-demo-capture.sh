@@ -17,14 +17,14 @@
 # Playwright headlessly): the only path available to a pool session, which
 # carries no browser MCP.
 #
-# A script drives one of the engine's two surfaces, and the engine's parser
-# tells them apart: a script that declares **Terminal:** among its head lines,
-# the lines above its first ## heading, drives a bash session in the engine's
-# own terminal, and any other drives an app in a page. Both take the same
-# options. A page script needs the app it drives: one app target, named with
-# the flags below. A terminal script brings up no app, and the engine refuses
-# an app target or a --port for one, so this script refuses them first. Its
-# shell starts in --cwd.
+# A script drives the surface the engine's parser names for it. One that drives
+# an app, such as a page, needs that app: one app target, named with the flags
+# below. A terminal script drives a bash session in the engine's own terminal
+# and brings up no app, so it takes none, and its shell starts in --cwd. The
+# engine refuses a script given an app target its surface does not take, or
+# given none when it needs one, so this script never asks a script's surface.
+# Given two app targets the engine drives one and says nothing of the other, so
+# this script refuses two.
 #
 # The engine runs inside the sandbox demo-engine-lib.sh defines, where the live
 # city cannot be reached. A --serve command's app runs as a copy of the rig's UI
@@ -64,9 +64,9 @@
 #                or an app that a worktree of a rig serves on this host. Any
 #                other server on this host is refused, as is the app of a rig
 #                that city.toml sets to app_reads_city = "true".
-#                A page script takes exactly one of --serve-dir / --serve /
-#                --base-url; it is how this rig's app is reached. A terminal
-#                script takes none of the three.
+#                A script that drives an app takes one of --serve-dir /
+#                --serve / --base-url; it is how this rig's app is reached. A
+#                terminal script takes none of the three.
 #   --port       port for --serve-dir (default: a free port). A port that a
 #                server already answers on is refused.
 #   --cwd        the checkout a --serve command serves the app from, the
@@ -88,8 +88,9 @@
 # resolved the engine.
 #
 # Exit: 0 captured and every step's proof held (output exists and is non-empty),
-# 3 captured but at least one step failed its proof, 2 bad arguments or a page
-# script with no app among them, 1 anything that stopped the capture.
+# 3 captured but at least one step failed its proof, 2 bad arguments, such as
+# two app targets, 1 anything that stopped the capture, including the engine's
+# refusal of the app target it was given, or of none.
 set -u
 
 PROG=rig-demo-capture
@@ -127,27 +128,17 @@ done
 [ -f "$SCRIPT" ] || { echo "$PROG: --script '$SCRIPT' does not exist" >&2; exit 1; }
 case "$MODE" in walkthrough|proof) ;; *) echo "$PROG: --mode must be walkthrough or proof, not '$MODE'" >&2; exit 2 ;; esac
 
-# --- the script's surface ----------------------------------------------------
-# The engine reads a script as a terminal script or a page script by its head
-# lines, and demo-engine-lib.sh holds that rule.
-KIND=$(demo_engine_script_kind "$SCRIPT") || exit 1
-
-# A page script needs exactly one app target. The engine needs one way to reach
-# the app and rejects more than one; enforce it here so the error names the
-# rig-specific input. A terminal script brings up no app, and the engine
-# refuses an app target or a --port for one, so this names that refusal before
-# the browser is provisioned.
+# --- the app target ------------------------------------------------------
+# A script's surface decides whether it takes an app target, and the engine
+# refuses a script given one its surface does not take, or none when it needs
+# one. Of two app targets the engine drives one and says nothing of the other,
+# so two are refused here, naming the rig-specific input.
 TARGETS=0
 [ -n "$SERVE_DIR" ] && TARGETS=$((TARGETS + 1))
 [ -n "$SERVE_CMD" ] && TARGETS=$((TARGETS + 1))
 [ -n "$BASE_URL" ] && TARGETS=$((TARGETS + 1))
-if [ "$KIND" = terminal ]; then
-  if [ "$TARGETS" -ne 0 ] || [ -n "$PORT" ]; then
-    echo "$PROG: '$SCRIPT' is a terminal script, which runs in the engine's own terminal and takes no --serve-dir / --serve / --base-url or --port; its shell starts in --cwd" >&2
-    usage >&2; exit 2
-  fi
-elif [ "$TARGETS" -ne 1 ]; then
-  echo "$PROG: give exactly one of --serve-dir / --serve / --base-url (got $TARGETS)" >&2
+if [ "$TARGETS" -gt 1 ]; then
+  echo "$PROG: give at most one of --serve-dir / --serve / --base-url (got $TARGETS)" >&2
   usage >&2; exit 2
 fi
 [ -z "$SERVE_CWD" ] || [ -d "$SERVE_CWD" ] || { echo "$PROG: --cwd '$SERVE_CWD' is not a directory" >&2; exit 1; }
@@ -212,7 +203,8 @@ if [ -n "$SERVE_DIR" ]; then
 elif [ -n "$BASE_URL" ]; then
   set -- "$@" --base-url "$BASE_URL"
 else
-  # A terminal script: its shell starts in --cwd, or here.
+  # No app target, as a terminal script takes none: its shell starts in --cwd,
+  # or here. The engine refuses a script that needs an app.
   [ -z "$SERVE_CWD" ] || set -- "$@" --cwd "$SERVE_CWD"
 fi
 [ -z "$PORT" ]     || set -- "$@" --port "$PORT"

@@ -51,13 +51,30 @@ OUT="$TMPD/out.mp4"
 # (narrated, silent), in the engine's words. $RUN_FAILED writes the clip, prints
 # that report with its failed-proof line for that many steps, and exits 1, as
 # the engine does when a step of a captured clip fails its proof. $RUN_LATE_RC
-# writes the clip and then exits with that code without any report.
+# writes the clip and then exits with that code without any report. The stub
+# reads no line of the script: $SURFACE says which surface the engine's parser
+# names for it, page when it is empty, and `run` refuses what the engine refuses
+# for that surface, with the engine's words. It answers `surface` as an engine
+# with no such command does, so a capture that asked it would fail.
 STUB="$TMPD/sprintshow-stub"
 cat >"$STUB" <<'STUB'
 #!/usr/bin/env bash
 if [ "${1:-}" = "lint" ]; then exit "${LINT_RC:-0}"; fi
+if [ "${1:-}" = "surface" ]; then
+  printf 'unknown command: surface\n\n' >&2; printf 'Usage:\n  sprintshow run <demo.md> [options]\n'; exit 1
+fi
 if [ "${1:-}" = "run" ]; then
   printf '%s\n' "$*" >>"${RUNLOG:?}"
+  case "${SURFACE:-page}" in
+    terminal)
+      case " $* " in *" --serve-dir "*|*" --serve "*|*" --base-url "*|*" --port "*)
+        printf '\n✖ terminal: a terminal script runs in the engine'"'"'s own terminal and takes no server; drop --base-url, --serve, --serve-dir and --port\n' >&2; exit 1 ;;
+      esac ;;
+    *)
+      case " $* " in *" --serve-dir "*|*" --serve "*|*" --base-url "*) ;; *)
+        printf '\n✖ no server: pass --base-url <url>, --serve "<command>", or --serve-dir <dir>\n' >&2; exit 1 ;;
+      esac ;;
+  esac
   o=""; prev=""
   for a in "$@"; do [ "$prev" = "-o" ] && o="$a"; prev="$a"; done
   [ "${RUN_RC:-0}" != 0 ] && exit "${RUN_RC}"
@@ -155,9 +172,10 @@ RUNLOG="$TMPD/run.log"
 # run [KEY=VAL ...] -- <sut args...>; per-call knobs, combined stdout+stderr.
 # $RUN_PATH replaces the sandbox directory on PATH for one call.
 run() {
-  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0 copy_running="" copy_found="" copy_fail="" copy_other=""
+  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0 copy_running="" copy_found="" copy_fail="" copy_other="" surface=""
   while [ $# -gt 0 ]; do
     case "$1" in
+      SURFACE=*) surface="${1#*=}" ;;
       COPY_RUNNING=*) copy_running="${1#*=}" ;;
       COPY_FOUND=*) copy_found="${1#*=}" ;;
       COPY_FAIL=*) copy_fail="${1#*=}" ;;
@@ -179,7 +197,7 @@ run() {
       LINT_RC="$lint_rc" RUN_RC="$run_rc" RUN_NOFILE="$nofile" RUN_EMPTY="$empty" \
       RUN_REPORT="$report" RUN_FAILED="$failed" RUN_LATE_RC="$late_rc" \
       GCTK_BIN="$SBX/gctk" COPY_STATE="$COPY_STATE" COPY_RUNNING="$copy_running" COPY_FOUND="$copy_found" COPY_FAIL="$copy_fail" COPY_OTHER="$copy_other" \
-      bash "$SUT" "$@" 2>&1 )
+      SURFACE="$surface" bash "$SUT" "$@" 2>&1 )
 }
 
 echo "# happy path: lint + capture + a non-empty file -> exit 0"
@@ -195,6 +213,7 @@ has "captured $OUT" "$out" "it reports the captured file"
 has "sandbox-exec $STUB lint $SCRIPT" "$(cat "$SANDBOX_LOG")" "the stand-in engine lints inside the sandbox"
 has "sandbox-exec $STUB run $SCRIPT" "$(cat "$SANDBOX_LOG")" "and captures inside it"
 has "--port 50123" "$RL" "a --serve-dir is given the free port the sandbox opens"
+hasnt "$STUB surface" "$(cat "$SANDBOX_LOG")" "and the engine, which has no surface command, is never asked for the script's surface"
 
 echo "# a relative --serve-dir resolves against --cwd, and --cwd goes no further"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --serve-dir app --cwd "$TMPD")"; rc=$?
@@ -265,12 +284,12 @@ out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --port 43
 ok "--port with --serve exits 2" "[ '$rc' = 2 ]"
 has "--port names the --serve-dir server's port" "$out" "it says --port is the --serve-dir server's"
 
-# A terminal script declares **Terminal:** among its head lines and drives a
-# shell in the engine's own terminal.
+# A terminal script drives a shell in the engine's own terminal. The stub reads
+# no line of it, so each case names its surface with SURFACE=terminal.
 TSCRIPT="$TMPD/terminal.md"
 printf '# Demo: a report\n\n**Terminal:** 100x30\n\n## Steps\n\n1. **The report prints**\n   `run true`\n' >"$TSCRIPT"
 echo "# a terminal script records with no app target, linted and captured in the sandbox, and its shell starts in --cwd"
-out="$(run -- --script "$TSCRIPT" --output "$OUT" --cwd "$SERVE_DIR")"; rc=$?
+out="$(run SURFACE=terminal -- --script "$TSCRIPT" --output "$OUT" --cwd "$SERVE_DIR")"; rc=$?
 ok "a terminal script with no app target exits 0" "[ '$rc' = 0 ]"
 ok "the clip exists and is non-empty" "[ -s '$OUT' ]"
 has "captured $OUT" "$out" "it reports the captured clip"
@@ -280,48 +299,40 @@ has "--cwd $SERVE_DIR" "$RL" "its shell starts in --cwd"
 for f in --serve-dir --serve --base-url --port; do hasnt "$f " "$RL" "the engine is given no $f"; done
 has "sandbox-exec $STUB lint $TSCRIPT" "$(cat "$SANDBOX_LOG")" "it lints the terminal script inside the sandbox"
 has "sandbox-exec $STUB run $TSCRIPT" "$(cat "$SANDBOX_LOG")" "and records it inside the sandbox"
-out="$(run -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+hasnt "$STUB surface" "$(cat "$SANDBOX_LOG")" "and never asks the engine for its surface"
+out="$(run SURFACE=terminal -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
 ok "a terminal script with no --cwd exits 0" "[ '$rc' = 0 ]"
 hasnt "--cwd" "$(cat "$RUNLOG")" "its shell starts where the capture runs"
-out="$(run LINT_RC=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+out="$(run SURFACE=terminal LINT_RC=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
 ok "a terminal script the linter rejects exits 1" "[ '$rc' = 1 ]"
 ok "and nothing is recorded" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
-out="$(run RUN_NOFILE=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+out="$(run SURFACE=terminal RUN_NOFILE=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
 ok "a terminal capture that leaves no clip exits 1" "[ '$rc' = 1 ]"
 has "does not exist" "$out" "it catches the silent non-delivery"
-out="$(run RUN_FAILED=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
+out="$(run SURFACE=terminal RUN_FAILED=1 -- --script "$TSCRIPT" --output "$OUT")"; rc=$?
 ok "a terminal clip with a failed proof exits 3" "[ '$rc' = 3 ]"
 
-echo "# a terminal script takes no app target and no --port -> exit 2, before anything is linted"
-for args in "--serve-dir $SERVE_DIR" "--serve true" "--base-url https://preview.example.com" "--port 4321"; do
+echo "# the engine refuses a terminal script given an app target -> exit 1 with its reason, and no clip"
+for args in "--serve-dir $SERVE_DIR" "--base-url https://preview.example.com"; do
   # shellcheck disable=SC2086 # each case is a flag and a value without blanks
-  out="$(run -- --script "$TSCRIPT" --output "$OUT" $args)"; rc=$?
-  ok "a terminal script with ${args%% *} exits 2" "[ '$rc' = 2 ]"
-  has "is a terminal script, which runs in the engine's own terminal" "$out" "it says a terminal script takes no ${args%% *}"
-  ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
+  out="$(run SURFACE=terminal -- --script "$TSCRIPT" --output "$OUT" $args)"; rc=$?
+  ok "a terminal script with ${args%% *} exits 1" "[ '$rc' = 1 ]"
+  has "a terminal script runs in the engine's own terminal and takes no server" "$out" "the engine's refusal of ${args%% *} reaches the caller"
+  has "capture failed" "$out" "it reports the capture failure"
+  ok "no clip is written" "[ ! -e '$OUT' ]"
 done
+out="$(run SURFACE=terminal -- --script "$TSCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
+ok "a terminal script with --serve exits 1" "[ '$rc' = 1 ]"
+has "a terminal script runs in the engine's own terminal and takes no server" "$out" "the engine's refusal reaches the caller"
+RL="$(cat "$RUNLOG")"
+has "gctk rig serve --stop (in $SITE)" "$RL" "the copy the capture started for it is stopped"
+ok "no clip is written" "[ ! -e '$OUT' ]"
 
-echo "# the engine's rule for a terminal script: **Terminal:** in any case, among the lines above the first ## heading"
-LSCRIPT="$TMPD/lower.md"
-printf '# Demo: lower\n\n   **terminal:**\n\n## Steps\n\n1. **The report prints**\n   `run true`\n' >"$LSCRIPT"
-out="$(run -- --script "$LSCRIPT" --output "$OUT")"; rc=$?
-ok "an indented, lowercase **terminal:** declares a terminal script" "[ '$rc' = 0 ]"
-PSCRIPT="$TMPD/late.md"
-printf '# Demo: late\n\n**Start:** `/`\n\n## Notes\n\n**Terminal:** 80x24\n\n## Steps\n\n1. **It opens**\n' >"$PSCRIPT"
-out="$(run -- --script "$PSCRIPT" --output "$OUT")"; rc=$?
-ok "a **Terminal:** line below a ## heading leaves a page script, which needs its app (exit 2)" "[ '$rc' = 2 ]"
-has "exactly one of --serve-dir" "$out" "it asks for the page's app target"
-USCRIPT="$TMPD/unreadable.md"
-cp "$SCRIPT" "$USCRIPT" && chmod 000 "$USCRIPT"
-if [ -r "$USCRIPT" ]; then
-  ok "a script no read can be refused to here, where the user reads every file, so its case does not run"
-else
-  out="$(run -- --script "$USCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
-  ok "a script whose head lines do not read exits 1" "[ '$rc' = 1 ]"
-  has "could not read the head lines of '$USCRIPT'" "$out" "it says the lines that name its surface did not read"
-  ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
-fi
-chmod 600 "$USCRIPT"
+echo "# --port without --serve-dir -> exit 2, before anything is linted"
+out="$(run SURFACE=terminal -- --script "$TSCRIPT" --output "$OUT" --port 4321)"; rc=$?
+ok "--port with no app target exits 2" "[ '$rc' = 2 ]"
+has "--port names the --serve-dir server's port" "$out" "it says --port is the --serve-dir server's"
+ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
 
 echo "# fail closed: lint rejects the script -> exit 1, no capture"
 out="$(run LINT_RC=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
@@ -381,11 +392,17 @@ out="$(run -- --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
 ok "missing --script exits 2" "[ '$rc' = 2 ]"
 out="$(run -- --script "$SCRIPT" --serve-dir "$SERVE_DIR")"; rc=$?
 ok "missing --output exits 2" "[ '$rc' = 2 ]"
-out="$(run -- --script "$SCRIPT" --output "$OUT")"; rc=$?
-ok "no app target exits 2" "[ '$rc' = 2 ]"
-has "exactly one of --serve-dir" "$out" "it names the app-target requirement"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR" --base-url http://x)"; rc=$?
 ok "two app targets exits 2" "[ '$rc' = 2 ]"
+has "give at most one of --serve-dir / --serve / --base-url (got 2)" "$out" "it names the app-target requirement"
+ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
+
+echo "# the engine refuses a page script given no app target -> exit 1 with its reason"
+out="$(run -- --script "$SCRIPT" --output "$OUT")"; rc=$?
+ok "a page script with no app target exits 1" "[ '$rc' = 1 ]"
+has "no server: pass --base-url <url>" "$out" "the engine's refusal reaches the caller"
+has "capture failed" "$out" "it reports the capture failure"
+ok "no clip is written" "[ ! -e '$OUT' ]"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR" --mode fast)"; rc=$?
 ok "bad --mode exits 2" "[ '$rc' = 2 ]"
 
