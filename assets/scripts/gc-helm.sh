@@ -784,22 +784,28 @@ bead_conversations() {
           end' 2>/dev/null
 }
 
-# live_sittings — the converse sessions `gc session list` holds that have not
-# ended, one {id, alias, session_name, created_at, attached, state} object each,
-# as a JSON array. A converse session is one whose template names converse. A
-# sleeping session is listed, because attaching wakes it, and so is an open
-# one listed with no state, which Gas City's own wait for a new session reads
-# as a create still under way, as a sitting just spawned can read while gc
-# answers from the supervisor's read cache. A closed session and one whose
-# create failed are left out. Returns 1 when the list did not answer, which
-# proves no sitting live and none gone.
+# session_list_from_store — `gc session list --json` from the city's store
+# (GC_NO_API=1), which lists a session from its create on, as the supervisor's
+# read cache does not. Every read here that decides a sitting is live reads it.
+session_list_from_store() {
+    GC_NO_API=1 gc session list --json 2>/dev/null
+}
+
+# live_sittings — the converse sessions the store's session list
+# (session_list_from_store) holds that have not ended, one {id, alias,
+# session_name, created_at, attached, state} object each, as a JSON array. A
+# converse session is one whose template names converse. A sleeping session is
+# listed, because attaching wakes it, and so is an open one listed with no
+# state, which Gas City's own wait for a new session reads as a create still
+# under way. A closed session and one whose create failed are left out. Returns
+# 1 when the list did not answer, which proves no sitting live and none gone.
 live_sittings() {
-    _ls_raw=$(gc session list --json 2>/dev/null) || return 1
+    _ls_raw=$(session_list_from_store) || return 1
     live_sittings_in "$_ls_raw"
 }
 
-# live_sittings_in <session-list> — live_sittings over a `gc session list
-# --json` already read, so one read answers it and the seats (SEATS_JQ).
+# live_sittings_in <session-list> — live_sittings over a session list already
+# read from the store, so one read answers it and the seats (SEATS_JQ).
 live_sittings_in() {
     printf '%s' "$1" | scrub | jq -ce '
         if type == "object" and ((.sessions // null) | type) == "array"
@@ -3543,19 +3549,20 @@ cmd_handback() {
 }
 
 # sitting_session_of <conversation-row> — the live converse session holding a
-# conversation, printed as "<session-id> own" when it is the session this verb
-# runs in and "<session-id> other" when it is not, else nothing. The holder is
-# the session the conversation's gc.session_id names, else the one its
-# gc.session_name or assignee names: the claim stamps both pins, and a bind the
-# sitting never claimed leaves the assignee alone. Only a converse template
-# counts, so a bead some other agent holds never stops that agent, and a
-# listing that will not read names nobody.
+# conversation, as the store's session list (session_list_from_store) holds it,
+# printed as "<session-id> own" when it is the session this verb runs in and
+# "<session-id> other" when it is not, else nothing. The holder is the session
+# the conversation's gc.session_id names, else the one its gc.session_name or
+# assignee names: the claim stamps both pins, and a bind the sitting never
+# claimed leaves the assignee alone. Only a converse template counts, so a bead
+# some other agent holds never stops that agent, and a listing that will not
+# read names nobody.
 sitting_session_of() {
     _sso_sid=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.session_id"] // ""' 2>/dev/null || true)
     _sso_sn=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.session_name"] // ""' 2>/dev/null || true)
     _sso_as=$(printf '%s' "$1" | jq -r '.assignee // ""' 2>/dev/null || true)
     [ -n "$_sso_sid$_sso_sn$_sso_as" ] || return 0
-    gc session list --json 2>/dev/null | scrub | jq -r \
+    session_list_from_store | scrub | jq -r \
         --arg id "$_sso_sid" --arg sn "$_sso_sn" --arg as "$_sso_as" --arg me "$(session_identities)" '
         ($me | split("\n") | map(select(. != ""))) as $mine
         | if type == "object" and ((.sessions // null) | type) == "array" then
@@ -5560,7 +5567,7 @@ cmd_engage() {
         # listing that does not answer with a sessions array names no holder
         # and proves none gone.
         _ah_list_ok=1
-        _ah_holder=$(gc session list --json 2>/dev/null | scrub | jq -er --arg c "$CONV" "$CONVERSATION_JQ"'
+        _ah_holder=$(session_list_from_store | scrub | jq -er --arg c "$CONV" "$CONVERSATION_JQ"'
             if (type == "object" and ((.sessions // null) | type) == "array")
             then ([ .sessions[]
                     | select((.closed // false) == false)
@@ -5880,15 +5887,17 @@ cmd_conversations() {
     fi
 }
 
-# conversations_in_store <rig> <db> <live> — the open conversations in one rig's
-# store as $READINESS_JQ rows, each with its subject's title. Every task in a
-# live status is read in one listing, and the shared rule ($CONVERSATION_JQ's
-# conversation) picks the conversations out by their own rows. So a
-# conversation waiting in the queue, one its sitting claimed, and one bound to a
-# sitting that ended before it claimed it are each found, whatever the state of
-# a session. The listing is --brief, because a row is read for its assignee,
-# edges, title and metadata, never its description. Returns 1 when a read did
-# not answer.
+# conversations_in_store <rig> <db> — the open conversations in one rig's store,
+# each as {rig, subject_title, row}: the rig's name, the title of the
+# conversation's subject, and the conversation's own row, which
+# conversations_all reads as a $READINESS_JQ row once it has read the sessions.
+# Every task in a live status is read in one listing, and the shared rule
+# ($CONVERSATION_JQ's conversation) picks the conversations out by their own
+# rows. So a conversation waiting in the queue, one its sitting claimed, and
+# one bound to a sitting that ended before it claimed it are each found,
+# whatever the state of a session. The listing is --brief, because a row is
+# read for its assignee, edges, title and metadata, never its description.
+# Returns 1 when a read did not answer.
 conversations_in_store() {
     _cis_all=$(bd_rows list --db "$2" --status open,in_progress,blocked,deferred,hooked,pinned --type task --brief --limit 0) || return 1
     _cis_rows=$(printf '%s' "$_cis_all" | jq -c "$CONVERSATION_JQ"'
@@ -5900,10 +5909,9 @@ conversations_in_store() {
     if [ -n "$_cis_subj" ]; then
         _cis_titles=$(bd_rows list --db "$2" --id "$_cis_subj" --all --limit 0) || _cis_titles='[]'
     fi
-    printf '%s' "$_cis_rows" | jq -c --arg rig "$1" --argjson live "$3" --argjson subj "$_cis_titles" \
-        "$CONVERSATION_JQ$SITTING_JQ$READINESS_JQ"'
+    printf '%s' "$_cis_rows" | jq -c --arg rig "$1" --argjson subj "$_cis_titles" "$CONVERSATION_JQ"'
         ([ $subj[] | objects | {key: ((.id // "") | tostring), value: ((.title // "") | tostring)} ] | from_entries) as $t
-        | [ .[] | readiness_row($live; $rig) | . + {subject_title: ($t[.subject] // "")} ]' 2>/dev/null
+        | [ .[] | {rig: $rig, subject_title: ($t[conversation_subjects[0] // ""] // ""), row: .} ]' 2>/dev/null
 }
 
 # conversations_all — `conversations` with no reference: every rig's store is
@@ -5918,10 +5926,6 @@ conversations_in_store() {
 # list nothing and fail.
 conversations_all() {
     enumerate_rigs
-    if ! _ca_list=$(gc session list --json 2>/dev/null) || ! _ca_live=$(live_sittings_in "$_ca_list"); then
-        echo "$PROG: conversations: could not read 'gc session list', so which sittings are live is unknown. Nothing listed." >&2
-        exit 4
-    fi
     _ca_tmp=$(mktemp -d "${TMPDIR:-/tmp}/gc-helm-conversations.XXXXXX") \
         || { echo "$PROG: conversations: could not make a scratch directory under ${TMPDIR:-/tmp}" >&2; exit 3; }
     # One rig a line, its name and path apart by the unit separator, which read
@@ -5936,7 +5940,7 @@ conversations_all() {
     while IFS="$_ca_us" read -r _ca_name _ca_path; do
         _ca_i=$((_ca_i + 1))
         [ -n "$_ca_path" ] && [ -d "$_ca_path/.beads" ] || continue
-        ( conversations_in_store "${_ca_name:-$_ca_path}" "$_ca_path/.beads" "$_ca_live" > "$_ca_tmp/$_ca_i.json" 2>/dev/null \
+        ( conversations_in_store "${_ca_name:-$_ca_path}" "$_ca_path/.beads" > "$_ca_tmp/$_ca_i.json" 2>/dev/null \
             && : > "$_ca_tmp/$_ca_i.done" ) &
     done < "$_ca_tmp/rigs"
     wait
@@ -5964,6 +5968,17 @@ conversations_all() {
     _ca_unread=$(printf '%s' "$_ca_unread_names" | jq -Rsc 'split("\n") | map(select(. != ""))' 2>/dev/null) || _ca_unread=""
     rm -rf "$_ca_tmp"
     if [ -z "$_ca_rows" ] || [ -z "$_ca_unread" ]; then
+        echo "$PROG: conversations: the lists the stores answered could not be put together into one, so the list would not be complete. Nothing listed." >&2
+        exit 4
+    fi
+    # Read after the rows: engage spawns a sitting before it binds the
+    # conversation, so a row that shows the bind finds the sitting.
+    if ! _ca_list=$(session_list_from_store) || ! _ca_live=$(live_sittings_in "$_ca_list"); then
+        echo "$PROG: conversations: could not read 'gc session list', so which sittings are live is unknown. Nothing listed." >&2
+        exit 4
+    fi
+    if ! _ca_rows=$(printf '%s' "$_ca_rows" | jq -c --argjson live "$_ca_live" "$CONVERSATION_JQ$SITTING_JQ$READINESS_JQ"'
+            [ .[] | .rig as $rig | .subject_title as $t | .row | readiness_row($live; $rig) + {subject_title: $t} ]' 2>/dev/null); then
         echo "$PROG: conversations: the lists the stores answered could not be put together into one, so the list would not be complete. Nothing listed." >&2
         exit 4
     fi

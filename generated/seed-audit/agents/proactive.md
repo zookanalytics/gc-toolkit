@@ -489,12 +489,15 @@ one with `--quiet-window`.
   and your elaboration of a ruling each name their real source, and a
   decision you record before the operator rules on it says it is proposed.
 
-<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator) adopted:2026-10-31 -->
-- A command, flag, key or name that the operator or a reviewer sketches in
-  passing shows what they want, not the shape it must take. Derive the
-  shape from the conventions of the surface it joins, starting with the
-  commands and names already beside it, and say where the result departs
-  from the sketch.
+<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator), pr:#1394:comment:4482935072 (operator feedback), bead:tk-v0itc10 (operator), bead:tk-lfi5zph (operator) adopted:2026-10-31 updated:2026-11-17 -->
+- The operator's guidance, and a reviewer's, gives the direction they
+  want, not words or a shape to copy unless they offer it as exact text,
+  and a lean or belief they state is an idea to test, not a premise.
+  Build on the conventions of the surface it joins, starting with the
+  commands and names already beside it, check what would tell against
+  their lean before you build on it, push back where you disagree, even
+  with an earlier ruling, and say where your recommendation departs from
+  what they said.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,

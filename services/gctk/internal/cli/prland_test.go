@@ -2,11 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
+	gcfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 )
 
 // The record's two commands run through the store stub the bead holds tests
@@ -162,6 +168,90 @@ func TestLandingFilesItsGatesThroughTheRuntime(t *testing.T) {
 	t.Setenv("STUB_EXIT", "1")
 	if err := l.Gates.File("tk-1", "k", "m"); err == nil || !strings.Contains(err.Error(), "the store refused it") {
 		t.Fatalf("a gate the script refused read as %v", err)
+	}
+}
+
+// The refinery's wake is gc session wake, then gc session nudge, through the
+// runtime. The nudge goes whether or not the wake landed, since a session that
+// is up gets its turn from the nudge alone, and the error names each call that
+// did not exit 0.
+func TestTheRefinerysWakeWakesThenNudgesThroughTheRuntime(t *testing.T) {
+	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/gc-toolkit.refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := l.Wake.(wakes); !ok {
+		t.Fatalf("the landing order wakes through %T, not the runtime", l.Wake)
+	}
+	rt := &gcfake.Runtime{}
+	w := wakes{rt: rt}
+	if err := w.Wake("rig/gc-toolkit.refinery", "PR head changed on tk-1. Run 'gc prime'."); err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.Wakes(); !slices.Equal(got, []string{"rig/gc-toolkit.refinery"}) {
+		t.Fatalf("woke %q", got)
+	}
+	want := gcfake.Nudge{Session: "rig/gc-toolkit.refinery", Message: "PR head changed on tk-1. Run 'gc prime'."}
+	if got := rt.Nudges(); !slices.Equal(got, []gcfake.Nudge{want}) {
+		t.Fatalf("nudged %+v", got)
+	}
+
+	rt = &gcfake.Runtime{OnWake: func(string) gascity.Result {
+		return gascity.Result{Code: 1, Output: "gc session wake: session not found"}
+	}}
+	err = wakes{rt: rt}.Wake("rig/gc-toolkit.refinery", "m")
+	if err == nil || !strings.Contains(err.Error(), "gc session wake rig/gc-toolkit.refinery: exit 1: gc session wake: session not found") ||
+		strings.Contains(err.Error(), "nudge") || len(rt.Nudges()) != 1 {
+		t.Fatalf("a wake that did not land answered %v, with nudges %+v", err, rt.Nudges())
+	}
+	rt = &gcfake.Runtime{OnNudge: func(gcfake.Nudge) gascity.Result {
+		return gascity.Result{Code: 1, Output: "gc session nudge: no such session"}
+	}}
+	if err := (wakes{rt: rt}).Wake("rig/gc-toolkit.refinery", "m"); err == nil || !strings.Contains(err.Error(), "gc session nudge rig/gc-toolkit.refinery") {
+		t.Fatalf("a nudge that did not land answered %v", err)
+	}
+}
+
+// The landing order closes a bead whose PR a ruling retired through the
+// runtime adapter: the pack's bead-rehome.sh, from GCTK_SCRIPTS_DIR, gets the
+// bead, the disposition, the note and the run's judgment of the bead, and runs
+// as the refinery the bead is assigned to. Its exits 4 and 5 are a close held
+// for now, and any other failure is an error carrying the script's own words.
+func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing.T) {
+	scripts := t.TempDir()
+	log := filepath.Join(scripts, "calls")
+	stub := "#!/bin/sh\nprintf 'actor=%s\\n' \"$BEADS_ACTOR\" >> '" + log + "'\n" +
+		"for a in \"$@\"; do printf '%s\\n' \"$a\"; done >> '" + log + "'\n" +
+		"[ \"${STUB_EXIT:-0}\" = 0 ] || echo 'bead-rehome: the close is held by tk-conv' >&2\nexit \"${STUB_EXIT:-0}\"\n"
+	if err := os.WriteFile(filepath.Join(scripts, "bead-rehome.sh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GCTK_SCRIPTS_DIR", scripts)
+	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/gc-toolkit.refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "rig/gc-toolkit.refinery", Note: "PR #7 closed",
+		Disposition: pr.Disposition{Kind: "not-needed", Successor: "tk-conv", Store: "rig:rig"}}
+	if err := l.Dispositions.Close(x); err != nil {
+		t.Fatal(err)
+	}
+	want := "actor=rig/gc-toolkit.refinery\n--origin\ntk-1\n--successor\ntk-conv\n--kind\nnot-needed\n--note\nPR #7 closed\n" +
+		"--successor-store\nrig:rig\n--if-status\nblocked\n--if-assignee\nrig/gc-toolkit.refinery\n--if-ruled\n"
+	if raw, _ := os.ReadFile(log); string(raw) != want {
+		t.Fatalf("bead-rehome.sh got %q, want %q", raw, want)
+	}
+	for _, code := range []string{"4", "5"} {
+		t.Setenv("STUB_EXIT", code)
+		var held *pr.HeldClose
+		if err := l.Dispositions.Close(x); !errors.As(err, &held) || !strings.Contains(held.Why, "held by tk-conv") {
+			t.Fatalf("exit %s read as %v", code, err)
+		}
+	}
+	t.Setenv("STUB_EXIT", "3")
+	var held *pr.HeldClose
+	if err := l.Dispositions.Close(x); err == nil || errors.As(err, &held) || !strings.Contains(err.Error(), "exit 3") {
+		t.Fatalf("exit 3 read as %v", err)
 	}
 }
 

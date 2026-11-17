@@ -73,12 +73,39 @@ func TestABoundedReadEndsAtItsLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	r := runBounded(dir, 200*time.Millisecond, bin, "agent", "list")
+	r := (&City{dir: dir}).runBounded(200*time.Millisecond, bin, "agent", "list")
 	if r.Code != -1 || r.Err == nil || !strings.Contains(r.Err.Error(), "did not answer within") {
 		t.Fatalf("a read past its limit answered %+v", r)
 	}
 	if took := time.Since(start); took > 10*time.Second {
 		t.Fatalf("the read ended %s after it started", took)
+	}
+}
+
+// A city As an actor makes its bounded reads, as it runs every other command,
+// with BEADS_ACTOR naming that actor and in the directory its commands start in.
+func TestABoundedReadActsAsItsActorInItsDirectory(t *testing.T) {
+	base := t.TempDir()
+	log := filepath.Join(base, "who")
+	stub := "#!/bin/sh\nprintf '%s %s\\n' \"${BEADS_ACTOR:-none}\" \"$(pwd -P)\" >> '" + log + "'\necho '{\"agents\":[]}'\n"
+	if err := os.WriteFile(filepath.Join(base, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEADS_ACTOR", "")
+	there := t.TempDir()
+	from := (&City{bin: filepath.Join(base, "gc")}).In(there)
+	for _, c := range []*City{from.As("rig/gc-toolkit.refinery"), from} {
+		if _, err := c.Agents(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(there)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(log)
+	if want := "rig/gc-toolkit.refinery " + resolved + "\nnone " + resolved + "\n"; string(raw) != want {
+		t.Fatalf("the reads ran as %q, want %q", raw, want)
 	}
 }
 

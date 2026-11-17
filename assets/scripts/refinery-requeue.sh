@@ -14,8 +14,8 @@
 # pull_request_head_changed) keeps its PR, and its branch has one writer, the
 # review run (specs/tk-1tfzr71.108/design.md, section 1), so the work goes to the
 # run as an ask (`gctk review ask`) with the reason, in place of a rework child.
-# The landing order pours a run only for a record pending at the PR's head, and
-# it cleared this record's marker when it sent the head back, so once the ask
+# The landing order pours a run only for a record pending at the PR's head,
+# never for one open at a changed head, as this record is, so once the ask
 # stands the PR is recorded pending at the head the prep read (`gctk pr
 # record`), which the run then judges. The ask goes first because its blocks
 # edge onto the bead is a wait the evaluator reads: no pass of the landing order

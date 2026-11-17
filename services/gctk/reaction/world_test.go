@@ -102,7 +102,7 @@ func newWorld(t *testing.T) *world {
 		return gascity.SlingResult{}
 	}
 	w.rt.OnNudge = func(n rtfake.Nudge) gascity.Result {
-		w.add("NUDGE " + n.Target + " " + n.Message)
+		w.add("NUDGE " + n.Session + " " + n.Message)
 		if w.nudgeFails {
 			return gascity.Result{Code: 1, Output: "gc session nudge: fake refusal"}
 		}

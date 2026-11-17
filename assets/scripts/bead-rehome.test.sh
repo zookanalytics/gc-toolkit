@@ -111,7 +111,15 @@
 #   (aw) with no identity of its own the writer compares an assignee with the actor
 #       bd itself defaults to, read off a create's preview that writes nothing, and
 #       passes that actor on its writes. It asks only when the origin has an
-#       assignee, and a preview that does not read holds an assigned origin.
+#       assignee, and a preview that does not read holds an assigned origin;
+#   (ay) a caller's judgment of the origin holds the close to it: --if-status
+#       and --if-assignee (an empty one naming an unassigned origin) to the
+#       status and assignee the origin has when this run reads it, and --if-ruled
+#       to the ruling recorded on it, kind, successor and the store the call
+#       names, none included. A release, a moved status, a closed origin or a
+#       second ruling recorded while the close waited for the record lock writes
+#       nothing (exit 4), the close that lands is held to the judged status and
+#       assignee, and --check refuses the same judgment with exit 1.
 # The evidence gates this writer enforces for every caller:
 #   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
 #   (gate-held) EVERY kind — no close over a bead another session holds
@@ -1991,6 +1999,123 @@ eq "$rc" 5 "(ax) a lock that does not come within the wait holds the close (exit
 eq "$(snap alpha al-lock4)" "$BEFORE" "(ax) …and nothing is written"
 has "$(cat "$TMP/err")" "record lock" "(ax) …and the refusal names the lock"
 release_lock
+
+# --- (ay) the caller's judgment: --if-status, --if-assignee, --if-ruled -------
+# The landing order judges a bead under the record lock and runs this writer as
+# the refinery once the lock is free, naming what it judged.
+REFINERY="rig/alpha.refinery"
+# ruled <bead> <kind> <successor> [store] — the ruling pr-dispose.sh records.
+ruled() {
+    printf 'm.gc.pr_close_disposition_kind=%s\nm.gc.pr_close_disposition_successor=%s\n' "$2" "$3" >> "$ALPHA/$1"
+    [ -z "${4:-}" ] || printf 'm.gc.pr_close_disposition_successor_store=%s\n' "$4" >> "$ALPHA/$1"
+}
+# judged <bead> <successor> [args...] — the landing order's call: as the
+# refinery, judging the bead blocked under it and carrying out its ruling.
+judged() {
+    local b="$1" s="$2"; shift 2
+    BEADS_ACTOR="$REFINERY" run --origin "$b" --successor "$s" --kind not-needed \
+        --if-status blocked --if-assignee "$REFINERY" --if-ruled "$@"
+}
+mkbead alpha blocked al-j1; mkbead alpha open al-j1-conv
+printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j1"; ruled al-j1 not-needed al-j1-conv
+export FAKE_UPDATE_LOG="$TMP/updates.log"; : > "$FAKE_UPDATE_LOG"
+rc=0; judged al-j1 al-j1-conv || rc=$?
+eq "$rc/$(field alpha status al-j1)" "0/closed" "(ay) a bead still as its caller judged it closes"
+eq "$(edge alpha al-j1 al-j1-conv)" supersedes "(ay) …onto the ruling's successor"
+has "$(grep -- '--status=closed' "$FAKE_UPDATE_LOG" | grep '^al-j1 ' || true)" "--if-status=blocked --if-assignee=$REFINERY --status=closed" \
+    "(ay) …in a close held to the status and assignee the caller judged"
+unset FAKE_UPDATE_LOG
+
+# A release that lands once the caller has freed the lock, as hand-back.sh's,
+# leaves the bead to its new route: it is open and unassigned, and an
+# unassigned origin is one any actor may close, so only the judgment refuses it.
+mkbead alpha open al-j2; mkbead alpha open al-j2-conv; ruled al-j2 not-needed al-j2-conv
+BEFORE=$(snap alpha al-j2)
+rc=0; judged al-j2 al-j2-conv || rc=$?
+eq "$rc" 4 "(ay) a bead released since its caller judged it is refused (exit 4)"
+eq "$(snap alpha al-j2)" "$BEFORE" "(ay) …and nothing is written on it"
+has "$(cat "$TMP/err")" "al-j2 is open and unassigned now, not blocked under $REFINERY as the caller of this close judged it" \
+    "(ay) …and the refusal names both"
+rc=0; BEADS_ACTOR="$REFINERY" run --origin al-j2 --successor al-j2-conv --kind not-needed || rc=$?
+eq "$rc/$(field alpha status al-j2)" "0/closed" "(ay) …while a call that names no judgment closes it"
+# A release that keeps the status, as refinery-requeue.sh's of an open bead,
+# is refused on its assignee alone.
+mkbead alpha open al-j2b; mkbead alpha open al-j2b-conv; ruled al-j2b not-needed al-j2b-conv
+rc=0; BEADS_ACTOR="$REFINERY" run --origin al-j2b --successor al-j2b-conv --kind not-needed \
+    --if-status open --if-assignee "$REFINERY" --if-ruled || rc=$?
+eq "$rc/$(field alpha status al-j2b)" "4/open" "(ay) a release that keeps the status is refused on the assignee alone"
+# A status that moved under the same assignee refuses as well.
+mkbead alpha open al-j3; mkbead alpha open al-j3-conv
+printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j3"; ruled al-j3 not-needed al-j3-conv
+rc=0; judged al-j3 al-j3-conv || rc=$?
+eq "$rc/$(field alpha status al-j3)" "4/open" "(ay) a status that moved since the caller's judgment refuses the close"
+# An empty --if-assignee names an unassigned origin, as bd's guard does.
+mkbead alpha open al-j4; mkbead alpha open al-j4-1
+printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$ALPHA/al-j4"
+rc=0; run --origin al-j4 --successor al-j4-1 --kind folded --if-assignee "" || rc=$?
+eq "$rc/$(field alpha status al-j4)" "4/open" "(ay) --if-assignee '' refuses an assigned origin"
+has "$(cat "$TMP/err")" "al-j4 is open under $BEADS_ACTOR now, not unassigned" "(ay) …and says it was judged unassigned"
+mkbead alpha open al-j5; mkbead alpha open al-j5-1
+rc=0; run --origin al-j5 --successor al-j5-1 --kind folded --if-status open --if-assignee "" || rc=$?
+eq "$rc/$(field alpha status al-j5)" "0/closed" "(ay) …and closes an unassigned one"
+# A closed origin is not the open one its caller judged, so no repair runs.
+mkbead alpha closed al-j6; mkbead alpha open al-j6-1
+BEFORE=$(snap alpha al-j6)
+rc=0; run --origin al-j6 --successor al-j6-1 --kind folded --if-status open || rc=$?
+eq "$rc" 4 "(ay) an origin closed since its caller judged it open is refused"
+eq "$(snap alpha al-j6)" "$BEFORE" "(ay) …and the repair path writes nothing"
+
+# The ruling a second sitting records once the caller has freed the lock, as
+# pr-dispose.sh records it under the lock, is read under the lock here: a call
+# that carries out the first ruling closes nothing, and one that carries out
+# the second closes onto it.
+mkbead alpha blocked al-j7; mkbead alpha open al-j7-old; mkbead alpha open al-j7-new
+printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j7"; ruled al-j7 not-needed al-j7-old
+hold_lock
+BEADS_ACTOR="$REFINERY" "$SCRIPT" --origin al-j7 --successor al-j7-old --kind not-needed \
+    --if-status blocked --if-assignee "$REFINERY" --if-ruled >"$TMP/out" 2>"$TMP/err" &
+CLOSER=$!
+sleep 0.5
+ruled al-j7 not-needed al-j7-new
+BEFORE=$(snap alpha al-j7)
+release_lock
+rc=0; wait "$CLOSER" || rc=$?
+eq "$rc" 4 "(ay) a ruling recorded while the close waited for the lock refuses the one it replaced (exit 4)"
+eq "$(snap alpha al-j7)" "$BEFORE" "(ay) …nothing is written: no edge onto the old successor and no close"
+has "$(cat "$TMP/err")" "al-j7 records the ruling not-needed onto al-j7-new, not the not-needed onto al-j7-old this close carries out" \
+    "(ay) …and the refusal names both rulings"
+rc=0; judged al-j7 al-j7-new || rc=$?
+eq "$rc/$(field alpha status al-j7)/$(edge alpha al-j7 al-j7-new)" "0/closed/supersedes" "(ay) …and the current ruling closes it"
+# A kind, a store or a ruling that is not on the origin refuses as well, and a
+# store matches only the store the call names, none included.
+mkbead alpha blocked al-j8; mkbead alpha open al-j8-1
+printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j8"; ruled al-j8 re-homed al-j8-1
+rc=0; judged al-j8 al-j8-1 || rc=$?
+eq "$rc/$(field alpha status al-j8)" "4/blocked" "(ay) a ruling of another kind refuses the close"
+mkbead alpha blocked al-j9; mkbead beta open bt-j9
+printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j9"; ruled al-j9 not-needed bt-j9 rig:beta
+rc=0; judged al-j9 bt-j9 || rc=$?
+eq "$rc/$(field alpha status al-j9)" "4/blocked" "(ay) a ruling that names a store the call does not refuses the close"
+has "$(cat "$TMP/err")" "records the ruling not-needed onto bt-j9 in rig:beta, not the not-needed onto bt-j9 this close" \
+    "(ay) …and the refusal names the store"
+rc=0; judged al-j9 bt-j9 --successor-store rig:beta || rc=$?
+eq "$rc/$(field alpha status al-j9)" "0/closed" "(ay) …and the call that names it closes"
+mkbead alpha blocked al-j10; mkbead alpha open al-j10-1
+printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j10"
+rc=0; judged al-j10 al-j10-1 || rc=$?
+eq "$rc/$(field alpha status al-j10)" "4/blocked" "(ay) an origin that records no ruling refuses --if-ruled"
+has "$(cat "$TMP/err")" "al-j10 records no ruling" "(ay) …and says so"
+
+# --check compares the same judgment and writes nothing.
+mkbead alpha open al-j11; mkbead alpha open al-j11-conv; ruled al-j11 not-needed al-j11-conv
+BEFORE=$(snap alpha al-j11)
+rc=0; judged al-j11 al-j11-conv --check || rc=$?
+eq "$rc" 1 "(ay) --check refuses a judgment that no longer holds"
+has "$(cat "$TMP/err")" "--check refused: al-j11 is open and unassigned now" "(ay) …and says why"
+eq "$(snap alpha al-j11)" "$BEFORE" "(ay) …writing nothing"
+printf 'status=blocked\nassignee=%s\n' "$REFINERY" >> "$ALPHA/al-j11"
+rc=0; judged al-j11 al-j11-conv --check || rc=$?
+eq "$rc" 0 "(ay) …and passes one that holds"
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"

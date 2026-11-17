@@ -269,6 +269,31 @@ func TestInStartsEveryCommandInItsDirectory(t *testing.T) {
 	}
 }
 
+// A city As an actor runs every command with BEADS_ACTOR naming that actor,
+// and keeps the directory its commands start in. The city it came from runs
+// as the process does.
+func TestAsActsAsItsActorInItsDirectory(t *testing.T) {
+	base := t.TempDir()
+	log := filepath.Join(base, "who")
+	stub := "#!/bin/sh\nprintf '%s %s\\n' \"${BEADS_ACTOR:-none}\" \"$(pwd -P)\" >> '" + log + "'\n"
+	if err := os.WriteFile(filepath.Join(base, "bead-rehome.sh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEADS_ACTOR", "")
+	there := t.TempDir()
+	from := (&City{scriptsDir: base}).In(there)
+	from.As("rig/gc-toolkit.refinery").Script("bead-rehome.sh")
+	from.Script("bead-rehome.sh")
+	resolved, err := filepath.EvalSymlinks(there)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(log)
+	if want := "rig/gc-toolkit.refinery " + resolved + "\nnone " + resolved + "\n"; string(raw) != want {
+		t.Fatalf("the commands ran as %q, want %q", raw, want)
+	}
+}
+
 // A cook passes its vars in their names' order, as --var flags, and reads the
 // root from the summary line it prints with --json (formulaCookJSONResult in
 // cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). A cook that exits
@@ -301,5 +326,38 @@ esac
 	first := strings.Split(string(raw), "\n")[0]
 	if want := "formula cook mol-pr-review --attach tk-1 --json --var head=abc --var pr_bead=tk-1 --var target=main"; first != want {
 		t.Fatalf("the cook ran %q, want %q", first, want)
+	}
+}
+
+// A wake and a nudge name the session, and a nudge passes its message as one
+// argument, whatever spaces and quotes it holds. A command that exits non-zero
+// answers with its exit and its last line.
+func TestAWakeAndANudgeNameTheSessionAndPassTheMessageWhole(t *testing.T) {
+	dir := t.TempDir()
+	gc := filepath.Join(dir, "gc")
+	if err := os.WriteFile(gc, []byte(`#!/bin/sh
+for a in "$@"; do printf '%s\n' "$a"; done >> "$(dirname "$0")/log"
+echo -- >> "$(dirname "$0")/log"
+[ "$3" = rig/gone.refinery ] && { echo "gc session $2: session not found" >&2; exit 1; }
+exit 0
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &City{bin: gc}
+	msg := "PR head changed on tk-1: run 'gc prime' to check merge queue and begin processing."
+	if r := c.Wake("rig/gc-toolkit.refinery"); r.Failure() != "" {
+		t.Fatalf("the wake answered %+v", r)
+	}
+	if r := c.Nudge("rig/gc-toolkit.refinery", msg); r.Failure() != "" {
+		t.Fatalf("the nudge answered %+v", r)
+	}
+	if f := c.Nudge("rig/gone.refinery", msg).Failure(); f != "exit 1: gc session nudge: session not found" {
+		t.Fatalf("a nudge gc refused failed with %q", f)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "log"))
+	want := "session\nwake\nrig/gc-toolkit.refinery\n--\nsession\nnudge\nrig/gc-toolkit.refinery\n" + msg + "\n--\n" +
+		"session\nnudge\nrig/gone.refinery\n" + msg + "\n--\n"
+	if string(raw) != want {
+		t.Fatalf("gc ran with\n%s\nwant\n%s", raw, want)
 	}
 }

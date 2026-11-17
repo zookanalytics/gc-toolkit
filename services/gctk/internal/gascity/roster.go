@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -62,7 +63,7 @@ type Rig struct {
 // Agents reads the city's roster, bounded by RosterWait. A read that fails,
 // runs out of time or answers with no list of agents is an error.
 func (c *City) Agents() ([]Agent, error) {
-	r := runBounded(c.dir, RosterWait, c.bin, "agent", "list", "--json")
+	r := c.runBounded(RosterWait, c.bin, "agent", "list", "--json")
 	if r.Code != 0 {
 		return nil, fmt.Errorf("gc agent list did not read the city's roster: %s", r.why())
 	}
@@ -87,7 +88,7 @@ func (c *City) NamedSessions() ([]NamedSession, error) {
 }
 
 func (c *City) readNamed() ([]NamedSession, error) {
-	r := runBounded(c.dir, RosterWait, c.bin, "config", "show", "--json")
+	r := c.runBounded(RosterWait, c.bin, "config", "show", "--json")
 	if r.Code != 0 {
 		return nil, fmt.Errorf("gc config show did not read the city's config: %s", r.why())
 	}
@@ -113,7 +114,7 @@ func (c *City) Rigs() ([]Rig, error) {
 }
 
 func (c *City) readRigs() ([]Rig, error) {
-	r := run(c.dir, c.bin, "rig", "list", "--json")
+	r := c.run(c.bin, "rig", "list", "--json")
 	if r.Code != 0 {
 		return nil, fmt.Errorf("gc rig list did not read the city's rigs: %s", r.why())
 	}
@@ -129,25 +130,22 @@ func (c *City) readRigs() ([]Rig, error) {
 	return *list.Rigs, nil
 }
 
-// Nudge runs one `gc session nudge <target> <message>`, which gives a running
-// agent a turn with message and wakes one that is not running.
-func (c *City) Nudge(target, message string) Result {
-	return run(c.dir, c.bin, "session", "nudge", target, message)
-}
-
 // ShowFormula runs one `gc formula show <name>`, which exits 0 only for a
 // formula the city resolves.
 func (c *City) ShowFormula(name string) Result {
-	return run(c.dir, c.bin, "formula", "show", name)
+	return c.run(c.bin, "formula", "show", name)
 }
 
 // runBounded is run with a time limit: once limit passes, the command's whole
 // process group is killed and the result says it did not answer in time.
-func runBounded(dir string, limit time.Duration, bin string, args ...string) Result {
+func (c *City) runBounded(limit time.Duration, bin string, args ...string) Result {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = dir
+	cmd.Dir = c.dir
+	if c.actor != "" {
+		cmd.Env = append(os.Environ(), "BEADS_ACTOR="+c.actor)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 2 * time.Second
