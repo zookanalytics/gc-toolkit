@@ -12,7 +12,7 @@
 # the operator on the board); FALLBACK files a conversation in the operator's
 # queue directly — taken on --no-react, whenever `gctk reaction deliverable`
 # answers no (divert-on-no is the contract — a reaction routed into a downed
-# pool waits invisibly; today's tool always says yes), and when a first
+# pool waits invisibly), and when a first
 # reaction already runs on the subject or an open conversation tracks it
 # (gc-helm react exit 5), a live workflow already drives it (exit 6), it is
 # already routed or armed, held, assigned, not open, or waits on a person's

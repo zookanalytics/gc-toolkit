@@ -77,6 +77,9 @@ func newReactionCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 		RunE: func(c *cobra.Command, args []string) error {
 			const prog = "gctk reaction check"
 			bead := strings.TrimSpace(args[0])
+			if bead == "" {
+				return errors.New("name the subject: gctk reaction check <bead> --run <root>")
+			}
 			if err := reaction.CheckRun(run); err != nil {
 				return err
 			}
@@ -132,6 +135,9 @@ func newReactionSlingCmd(stdout, stderr io.Writer) *cobra.Command {
 		RunE: func(c *cobra.Command, args []string) error {
 			const prog = "gctk reaction sling"
 			bead := strings.TrimSpace(args[0])
+			if bead == "" {
+				return errors.New("name the subject: gctk reaction sling <bead>")
+			}
 			if strings.TrimSpace(os.Getenv("GC_RIG")) == "" {
 				fmt.Fprintf(stderr, "%s: %v. No first reaction is slung\n", prog, reaction.ErrNoRig)
 				return exit(1)
