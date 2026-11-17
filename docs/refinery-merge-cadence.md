@@ -1029,10 +1029,12 @@ landing's line says what the check found.
 **Reading what a run did.** Each record's outcome prints on a line of its own,
 `<bead> <action>: <detail>`, where `readied` names a draft the run marked ready,
 `poured` a review run it attached, `retry` an act that did not complete and
-`left` an act the run's 45 seconds left for the next run. `gc order history
-pr-reconcile` lists the runs with their exits: 0 when every record was decided
-and every act the run started completed, and 2 when the listing did not answer,
-or a record could not be decided or its act did not complete.
+`left` an act the run's 45 seconds left for the next run. A run exits 0 when
+every record was decided and every act the run started completed, and 2 when
+the listing did not answer, or a record could not be decided or its act did not
+complete. Gas City labels the run's record by that exit, `exec` or
+`exec-failed`. `gc order history pr-reconcile` lists the runs and each run's
+record bead without the exit, and `gc bd show <bead>` shows a record's labels.
 
 ## Adjacent order: rig-checkout sync
 
