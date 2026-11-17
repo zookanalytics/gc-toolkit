@@ -347,22 +347,36 @@ func TestStartInTheSandboxRunsTheCommandThroughTheLibraryFromItsDirectory(t *tes
 
 func TestStartGivesStdoutTheStandardOutputAloneRelayedOrNot(t *testing.T) {
 	h := Local()
-	for _, relay := range []bool{true, false} {
+	for _, k := range []struct{ relay, noOut bool }{{true, false}, {false, false}, {true, true}, {false, true}} {
 		var out, errs bytes.Buffer
-		c, err := h.Start(Spec{
+		s := Spec{
 			Argv:   []string{"bash", "-c", `echo one; echo err >&2; printf two`},
 			Out:    &errs,
 			Stdout: &out,
-			Relay:  relay,
-		})
+			Relay:  k.relay,
+		}
+		if k.noOut {
+			s.Out = nil
+		}
+		c, err := h.Start(s)
 		if err != nil {
 			t.Fatal(err)
 		}
-		c.Wait()
-		<-c.Relayed()
-		if out.String() != "one\ntwo" || errs.String() != "err\n" {
-			t.Errorf("relay %v: Stdout got %q and Out %q, want the standard output and the standard error apart", relay, out.String(), errs.String())
+		// A relayed process's output is copied once Relayed says so, and any
+		// other's once the process has been waited for.
+		if k.relay {
+			<-c.Relayed()
+		} else {
+			c.Wait()
 		}
+		wantErr := "err\n"
+		if k.noOut {
+			wantErr = ""
+		}
+		if out.String() != "one\ntwo" || errs.String() != wantErr {
+			t.Errorf("relay %v, no Out %v: Stdout got %q and Out %q, want the standard output and the standard error apart", k.relay, k.noOut, out.String(), errs.String())
+		}
+		c.Wait()
 	}
 }
 

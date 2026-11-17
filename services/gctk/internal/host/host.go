@@ -171,7 +171,7 @@ func (local) Start(s Spec) (Child, error) {
 	if s.Stdout != nil {
 		stdout = s.Stdout
 	}
-	if !s.Relay || s.Out == nil {
+	if !s.Relay || stdout == nil {
 		cmd.Stdout, cmd.Stderr = stdout, s.Out
 		if err := cmd.Start(); err != nil {
 			return nil, err
@@ -183,7 +183,11 @@ func (local) Start(s Spec) (Child, error) {
 		r, w *os.File
 		to   io.Writer
 	}
-	relays := []relay{{to: s.Out}}
+	errOut := s.Out
+	if errOut == nil {
+		errOut = io.Discard
+	}
+	relays := []relay{{to: errOut}}
 	if s.Stdout != nil {
 		relays = append(relays, relay{to: s.Stdout})
 	}
