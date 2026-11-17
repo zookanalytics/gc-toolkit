@@ -707,12 +707,13 @@ created (`gc.handback_at`, which `gc-helm handback` stamps on each framing),
 ready once it has, and ended when its sitting's session has closed while the
 conversation stays open. The list reads the sessions after the conversations,
 from Gas City's store (`GC_NO_API=1 gc session list --json`) rather than the
-supervisor's read cache, which can be missing a sitting until its next
-re-scan. The store lists a sitting from the create that spawned it until its
-session closes, and engage spawns a sitting before it binds the conversation to
-it, so a conversation whose row shows the bind finds its sitting and reads
-starting from the moment the bind lands. Each row says whether a terminal is
-attached to the sitting. `gc-helm attach` opens the conversation form on that list, those no
+supervisor's read cache, which can be missing a sitting until its
+next re-scan. The store lists a sitting from the create that
+spawned it until its session closes, and engage spawns a sitting
+before it binds the conversation to it, so a conversation whose row
+shows the bind finds its sitting and reads starting from the moment
+the bind lands. Each row says whether a terminal is attached to the
+sitting. `gc-helm attach` opens the conversation form on that list, those no
 terminal is attached to first, by readiness and then newest first, and reads it
 again every ten seconds while it is on screen. What is picked is a
 conversation, so a read that re-sorts the list keeps it picked, and one that
