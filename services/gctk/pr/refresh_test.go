@@ -53,9 +53,9 @@ func newWatched(t *testing.T) *watched {
 }
 
 // poll runs one pass and fails if the store's listing did not read.
-func (d *watched) poll(t *testing.T) pr.PollReport {
+func (d *watched) poll(t *testing.T) pr.PassReport {
 	t.Helper()
-	rep, err := d.w.Poll(pr.PollOptions{Window: 90 * time.Second})
+	rep, err := d.w.Poll(pr.PassOptions{Window: 90 * time.Second})
 	if err != nil {
 		t.Fatalf("Poll: %v", err)
 	}
@@ -89,7 +89,7 @@ func (d *watched) saved(t *testing.T, id string) *pr.SavedRead {
 func (d *watched) readsSince(n int) []string { return d.github.Reads()[n:] }
 
 // updated fails unless the pass saved one PR's parts named, and nothing failed.
-func updated(t *testing.T, rep pr.PollReport, parts string) {
+func updated(t *testing.T, rep pr.PassReport, parts string) {
 	t.Helper()
 	if len(rep.Failed) != 0 || len(rep.Updates) != 1 {
 		t.Fatalf("the pass failed %v and updated %+v, want one update", rep.Failed, rep.Updates)
@@ -425,7 +425,7 @@ func TestThePollStartsNoUpdatePastItsWindow(t *testing.T) {
 	// Each read of the clock moves it 20 seconds: PR 7's update starts 40
 	// seconds in and reads it three times, so PR 8's would start 120 seconds in.
 	d.w.Now = func() time.Time { d.clock = d.clock.Add(20 * time.Second); return d.clock }
-	rep, err := d.w.Poll(pr.PollOptions{Window: 90 * time.Second})
+	rep, err := d.w.Poll(pr.PassOptions{Window: 90 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

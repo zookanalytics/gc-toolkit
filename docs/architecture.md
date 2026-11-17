@@ -78,7 +78,7 @@ flowchart LR
   ORD -->|landing order: one run per head| RUN
   ORD -->|landing order: ready, merge request| PR
   ORD -->|landing order: record, then close| LEDGER
-  ORD -.->|PR watch: asks what moved| PR
+  ORD -.->|PR watch: asks what moved, and reads each PR in full| PR
   ORD -->|PR watch: GitHub read of a PR that moved| LEDGER
   CAD -->|reads + writes| LEDGER
   CAD -->|labels| PR

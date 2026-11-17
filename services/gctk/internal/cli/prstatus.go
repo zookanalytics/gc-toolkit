@@ -88,7 +88,7 @@ func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 			"its draft between rounds of the city's work, the withdrawal of approvals a material change leaves "+
 			"behind, and the push of a converse sitting that edits its branch.",
 		status, newPRComposeCmd(stdout, stderr), newPRSummaryCmd(stdout, stderr),
-		newPRPollCmd(stdout, stderr), newPRRefreshCmd(stdout, stderr),
+		newPRPollCmd(stdout, stderr), newPRCompareCmd(stdout, stderr), newPRRefreshCmd(stdout, stderr),
 		newPRRecordCmd(stdout, stderr), newPRReconcileCmd(stdout, stderr),
 		newPRDraftCmd(stdout, stderr), newPRWithdrawCmd(stdout, stderr), newPRPushCmd(stdout, stderr))
 }

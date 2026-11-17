@@ -1,0 +1,39 @@
+# pr-compare — the net: read every PR the rig's beads own in full every 10
+# minutes, and read and save each one that differs from the read saved on its
+# bead (specs/tk-1tfzr71.149/design.md, sections 2, 6 and 7). It catches the
+# changes no cheap sign shows, which orders/pr-poll.toml cannot see: a review
+# thread resolved or reopened, an edit to a post that left the PR's updatedAt
+# as it was, a check the PR comes to require or stops requiring, and a review
+# decision, merge state or merge-queue flag that a change of the repository's
+# rules moves.
+# What it reads: for each PR the store's live beads own, the cheap question's
+# signs, its merge state, review decision and merge-queue flags, each review
+# thread's resolution, the time each conversation comment, review and inline
+# comment last changed, and the check runs at its last commit with whether the
+# PR requires each, in one request for each 10 PRs in a repository, with each
+# list read on past its first page. It reads no post's text. For each part of a
+# PR that differs, or whose signs moved, it runs the one-PR update, `gctk pr
+# refresh`, the one writer of pr_github_read, so a pass in which nothing
+# differs writes no bead.
+# What it costs: a request of up to 9 PRs costs 1 GitHub point and one of 10
+# costs 2, plus 1 for each page past a list's first, and each update 1 or 2
+# more. A request of 10 PRs took about 2 seconds.
+# Exec, not a formula: reads and guarded writes need no LLM. Rig-scoped: one
+# pass per importing rig against its own store, named by --db, loading the
+# pack's definition of feedback in the rig's checkout. GCTK_SCRIPTS_DIR names
+# the pack's scripts, where that definition lives.
+# Each update writes under the store's record lock and keeps each part's read
+# instant, so a pass that overlaps one of pr-poll's never replaces a newer read
+# with an older one.
+# `timeout` holds the pass's 3 minutes of starting updates, the last update's
+# 30-second wait for the record lock and its reads; gctk's cli test asserts the
+# window and the lock wait sit below it. A pass that fails to read a PR exits 2,
+# so Gas City records the run failed, and the next pass reads it again. Tune
+# from city.toml [[orders.overrides]].
+[order]
+description = "PR watch's net: read every PR the rig's beads own in full, and read and save on its bead each one that differs from its saved read"
+trigger = "cooldown"
+interval = "10m"
+timeout = "300s"
+exec = "GCTK_SCRIPTS_DIR=\"$PACK_DIR/assets/scripts\" \"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" pr compare --db \"$GC_RIG_ROOT/.beads\""
+scope = "rig"

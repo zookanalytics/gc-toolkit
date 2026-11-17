@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -55,7 +56,10 @@ const labelsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:
   repository(owner:$owner,name:$name){pullRequest(number:$number){
     labels(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{name}}}}}`
 
-// signsNode is one PR's signs as the cheap question asks for them.
+// signsNode is one PR's signs as the cheap question asks for them. The net's
+// read (full.go) asks for the same fields and pages more of two of them: the
+// time each review on the first page last changed, and the check runs among
+// the head's contexts.
 type signsNode struct {
 	Number      int    `json:"number"`
 	State       string `json:"state"`
@@ -71,6 +75,7 @@ type signsNode struct {
 	Comments  int    `json:"totalCommentsCount"`
 	Reviews   *struct {
 		TotalCount int `json:"totalCount"`
+		connection[postTime]
 	} `json:"reviews"`
 	Dismissed *struct {
 		TotalCount int `json:"totalCount"`
@@ -79,12 +84,14 @@ type signsNode struct {
 	Commits *struct {
 		Nodes []struct {
 			Commit *struct {
+				Oid    string `json:"oid"`
 				Rollup *struct {
 					State    string `json:"state"`
 					Contexts *struct {
 						TotalCount int          `json:"totalCount"`
 						Runs       []stateCount `json:"checkRunCountsByState"`
 						Statuses   []stateCount `json:"statusContextCountsByState"`
+						connection[contextNode]
 					} `json:"contexts"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
@@ -112,6 +119,7 @@ func counts(l []stateCount) map[string]int {
 	return out
 }
 
+// signs is the node's signs with the labels on its first page.
 func (n signsNode) signs() (Signs, error) {
 	if n.Reviews == nil || n.Dismissed == nil || n.Labels == nil || n.Commits == nil {
 		return Signs{}, fmt.Errorf("the signs of PR %d lack a part GitHub always gives", n.Number)
@@ -138,6 +146,29 @@ func (n signsNode) signs() (Signs, error) {
 	return s, nil
 }
 
+// signsOf is PR number's signs in owner/name from its node, with its labels
+// read on past the first page until they end, sorted.
+func (c *Client) signsOf(owner, name string, number int, n *signsNode) (Signs, error) {
+	s, err := n.signs()
+	if err != nil {
+		return Signs{}, err
+	}
+	if !n.Labels.PageInfo.HasNextPage {
+		slices.Sort(s.Labels)
+		return s, nil
+	}
+	more, err := pageOn(c, labelsQuery, pageVars(owner, name, number), n.Labels.PageInfo.EndCursor,
+		prList[labelNode]("labels"))
+	if err != nil {
+		return Signs{}, fmt.Errorf("the labels of PR %d: %w", number, err)
+	}
+	for _, l := range more {
+		s.Labels = append(s.Labels, l.Name)
+	}
+	slices.Sort(s.Labels)
+	return s, nil
+}
+
 // Signs asks GitHub for the signs of each PR numbered in repo, owner/name, in
 // one request for each SignsBatch of them, with one aliased field for each PR.
 // A PR whose labels pass the first page has its labels read on, a page at a
@@ -147,7 +178,18 @@ func (n signsNode) signs() (Signs, error) {
 // A request that did not answer, or whose answer names an error for no one PR,
 // fails every PR it asked about.
 func (c *Client) Signs(repo string, numbers []int) (map[int]Signs, map[int]error) {
-	read, failed := map[int]Signs{}, map[int]error{}
+	return readBatched(c, repo, numbers, SignsBatch, "signs", func(int) string { return "...signs" },
+		signsFragment, (*Client).signsOf)
+}
+
+// readBatched reads each PR numbered in repo, owner/name, in one request for
+// each size of them through aliasedRead, selecting field for each PR with
+// fragments after the query, and makes each PR's result of its node with take,
+// which can read on what the node leaves on a later page. It returns each PR's
+// result and the error of each PR that has none.
+func readBatched[T, R any](c *Client, repo string, numbers []int, size int, what string, field func(int) string,
+	fragments string, take func(c *Client, owner, name string, number int, node *T) (R, error)) (map[int]R, map[int]error) {
+	read, failed := map[int]R{}, map[int]error{}
 	owner, name, err := splitRepo(repo)
 	if err != nil {
 		for _, n := range numbers {
@@ -156,21 +198,32 @@ func (c *Client) Signs(repo string, numbers []int) (map[int]Signs, map[int]error
 		return read, failed
 	}
 	numbers = slices.Compact(slices.Sorted(slices.Values(numbers)))
-	for start := 0; start < len(numbers); start += SignsBatch {
-		batch := numbers[start:min(start+SignsBatch, len(numbers))]
-		c.signsBatch(owner, name, batch, read, failed)
-	}
-	for n, s := range read {
-		if s.Labels == nil {
-			continue
+	for start := 0; start < len(numbers); start += size {
+		batch := numbers[start:min(start+size, len(numbers))]
+		nodes, errs := aliasedRead[T](c, owner, name, what, batch, field, fragments)
+		maps.Copy(failed, errs)
+		for _, n := range slices.Sorted(maps.Keys(nodes)) {
+			r, err := take(c, owner, name, n, nodes[n])
+			if err != nil {
+				failed[n] = fmt.Errorf("github: %w", err)
+				continue
+			}
+			read[n] = r
 		}
-		slices.Sort(s.Labels)
-		read[n] = s
 	}
 	return read, failed
 }
 
-func (c *Client) signsBatch(owner, name string, batch []int, read map[int]Signs, failed map[int]error) {
+// aliasedRead asks GitHub in one request for one aliased field of each PR
+// numbered in batch, p<number>, holding what field selects for that PR, with
+// fragments after the query, and decodes each PR's field as a T. It returns the
+// field of each PR it read and the error of each PR it did not: one an error of
+// the answer names by its path, and one GitHub returned nothing for. A request
+// that did not answer, or whose answer names an error for no one PR, fails every
+// PR in batch. what names the read in an error.
+func aliasedRead[T any](c *Client, owner, name, what string, batch []int, field func(int) string,
+	fragments string) (map[int]*T, map[int]error) {
+	nodes, failed := map[int]*T{}, map[int]error{}
 	var q strings.Builder
 	q.WriteString("query($owner:String!,$name:String!){repository(owner:$owner,name:$name){")
 	for _, n := range batch {
@@ -178,9 +231,9 @@ func (c *Client) signsBatch(owner, name string, batch []int, read map[int]Signs,
 			failed[n] = fmt.Errorf("github: %d is no pull request number", n)
 			continue
 		}
-		fmt.Fprintf(&q, "\n  p%d:pullRequest(number:%d){...signs}", n, n)
+		fmt.Fprintf(&q, "\n  p%d:pullRequest(number:%d){%s}", n, n, field(n))
 	}
-	q.WriteString("}}\n" + signsFragment)
+	q.WriteString("}}\n" + fragments)
 	failAll := func(err error) {
 		for _, n := range batch {
 			if _, done := failed[n]; !done {
@@ -192,7 +245,7 @@ func (c *Client) signsBatch(owner, name string, batch []int, read map[int]Signs,
 		"-f", "owner="+owner, "-f", "name="+name)
 	var page struct {
 		Data *struct {
-			Repository map[string]*signsNode `json:"repository"`
+			Repository map[string]*T `json:"repository"`
 		} `json:"data"`
 		Errors []struct {
 			Path    []any  `json:"path"`
@@ -204,31 +257,31 @@ func (c *Client) signsBatch(owner, name string, batch []int, read map[int]Signs,
 			runErr = errors.New("github: the read returned no page")
 		}
 		failAll(runErr)
-		return
+		return nodes, failed
 	}
 	if err := json.Unmarshal(raw, &page); err != nil {
-		failAll(fmt.Errorf("github: the signs did not decode: %w", err))
-		return
+		failAll(fmt.Errorf("github: the %s did not decode: %w", what, err))
+		return nodes, failed
 	}
 	if runErr != nil && len(page.Errors) == 0 {
 		failAll(runErr)
-		return
+		return nodes, failed
 	}
 	for _, e := range page.Errors {
 		n, ok := aliased(e.Path)
 		if !ok {
-			failAll(fmt.Errorf("github: the signs failed: %s", e.Message))
-			return
+			failAll(fmt.Errorf("github: the %s failed: %s", what, e.Message))
+			return nodes, failed
 		}
-		failed[n] = fmt.Errorf("github: the signs of PR %d failed: %s", n, e.Message)
+		failed[n] = fmt.Errorf("github: the %s of PR %d failed: %s", what, n, e.Message)
 	}
 	if page.Data == nil || page.Data.Repository == nil {
 		err := runErr
 		if err == nil {
-			err = errors.New("github: the signs held no data")
+			err = fmt.Errorf("github: the %s held no data", what)
 		}
 		failAll(err)
-		return
+		return nodes, failed
 	}
 	for _, n := range batch {
 		if _, done := failed[n]; done {
@@ -239,16 +292,9 @@ func (c *Client) signsBatch(owner, name string, batch []int, read map[int]Signs,
 			failed[n] = fmt.Errorf("github: %s/%s holds no pull request %d", owner, name, n)
 			continue
 		}
-		s, err := node.signs()
-		if err == nil && node.Labels.PageInfo.HasNextPage {
-			s.Labels, err = c.moreLabels(owner, name, n, node.Labels.PageInfo.EndCursor, s.Labels)
-		}
-		if err != nil {
-			failed[n] = fmt.Errorf("github: %w", err)
-			continue
-		}
-		read[n] = s
+		nodes[n] = node
 	}
+	return nodes, failed
 }
 
 // aliased reads the PR an error's path names through its alias, p<number>,
@@ -265,31 +311,48 @@ func aliased(path []any) (int, bool) {
 	return n, err == nil && n > 0
 }
 
-// moreLabels reads PR number's labels on from after, a page at a time, until
-// they end, and returns them after have.
-func (c *Client) moreLabels(owner, name string, number int, after string, have []string) ([]string, error) {
+// pageVars are the variables of a query for a later page of one of PR
+// number's lists in owner/name.
+func pageVars(owner, name string, number int) []string {
+	return []string{"-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + strconv.Itoa(number)}
+}
+
+// prList finds field, one of a PR's lists, in a page of a query that reads it.
+func prList[T any](field string) func(json.RawMessage) (*connection[T], error) {
+	return func(data json.RawMessage) (*connection[T], error) {
+		var page struct {
+			Repository *struct {
+				PullRequest map[string]*connection[T] `json:"pullRequest"`
+			} `json:"repository"`
+		}
+		if err := json.Unmarshal(data, &page); err != nil {
+			return nil, err
+		}
+		if page.Repository == nil || page.Repository.PullRequest == nil || page.Repository.PullRequest[field] == nil {
+			return nil, fmt.Errorf("the page holds no %s", field)
+		}
+		return page.Repository.PullRequest[field], nil
+	}
+}
+
+// pageOn reads a list on from after, the end cursor of a page already read, a
+// page at a time until the list ends, through query, which takes where its page
+// starts as $endCursor beside vars. list finds the list in a page's data.
+func pageOn[T any](c *Client, query string, vars []string, after string,
+	list func(json.RawMessage) (*connection[T], error)) ([]T, error) {
+	var out []T
 	for after != "" {
 		var next string
-		err := c.graphql(labelsQuery, []string{"-f", "owner=" + owner, "-f", "name=" + name,
-			"-F", "number=" + strconv.Itoa(number), "-f", "endCursor=" + after}, false, func(data json.RawMessage) error {
-			var page struct {
-				Repository *struct {
-					PullRequest *struct {
-						Labels *connection[labelNode] `json:"labels"`
-					} `json:"pullRequest"`
-				} `json:"repository"`
-			}
-			if err := json.Unmarshal(data, &page); err != nil {
+		err := c.graphql(query, append(slices.Clone(vars), "-f", "endCursor="+after), false, func(data json.RawMessage) error {
+			l, err := list(data)
+			if err != nil {
 				return err
 			}
-			if page.Repository == nil || page.Repository.PullRequest == nil || page.Repository.PullRequest.Labels == nil {
-				return fmt.Errorf("the page holds no labels of PR %d", number)
-			}
-			l := page.Repository.PullRequest.Labels
-			for _, n := range l.Nodes {
-				have = append(have, n.Name)
-			}
+			out = append(out, l.Nodes...)
 			if l.PageInfo.HasNextPage {
+				if l.PageInfo.EndCursor == "" {
+					return fmt.Errorf("the page after %s says more follow and names no end cursor", after)
+				}
 				next = l.PageInfo.EndCursor
 			}
 			return nil
@@ -298,11 +361,29 @@ func (c *Client) moreLabels(owner, name string, number int, after string, have [
 			return nil, err
 		}
 		if next == after {
-			return nil, fmt.Errorf("the labels of PR %d page past %s to itself", number, after)
+			return nil, fmt.Errorf("the list pages past %s to itself", after)
 		}
 		after = next
 	}
-	return have, nil
+	return out, nil
+}
+
+// whole is the list whose first page is first, read on through query from
+// where that page ended while more follow, as pageOn reads it.
+func whole[T any](c *Client, first *connection[T], query string, vars []string,
+	list func(json.RawMessage) (*connection[T], error)) ([]T, error) {
+	out := slices.Clone(first.Nodes)
+	if !first.PageInfo.HasNextPage {
+		return out, nil
+	}
+	if first.PageInfo.EndCursor == "" {
+		return nil, errors.New("the first page says more follow and names no end cursor")
+	}
+	more, err := pageOn(c, query, vars, first.PageInfo.EndCursor, list)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, more...), nil
 }
 
 // PRPart is a PR's own facts, read in one request with, when asked, the check

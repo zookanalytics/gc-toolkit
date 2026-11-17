@@ -139,6 +139,11 @@ type parts struct{ pr, checks, conversation, labels bool }
 
 func (p parts) any() bool { return p.pr || p.checks || p.conversation || p.labels }
 
+// plus is each part p or q names.
+func (p parts) plus(q parts) parts {
+	return parts{p.pr || q.pr, p.checks || q.checks, p.conversation || q.conversation, p.labels || q.labels}
+}
+
 // every is each part.
 var every = parts{true, true, true, true}
 
@@ -204,6 +209,55 @@ func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 	p.conversation = counts || c.UpdatedAt != s.UpdatedAt
 	p.pr = saved.PR.Signs != prSigns(s) || p.checks || counts
 	return p
+}
+
+// differs is the parts of saved that the net's read f shows differ from
+// GitHub's side of the PR (specs/tk-1tfzr71.149/design.md, section 2), beside
+// the signs moved compares: the PR part when the PR's state, draft flag, head,
+// base, merge state or either merge-queue flag differs; the checks when they
+// were read at another commit than f's, or the check runs the PR requires there
+// differ in a name or a result; and the conversation when the review decision,
+// the unresolved threads or the newest post time differs. A merge state f reads
+// as UNKNOWN differs in nothing, since GitHub reads an open PR's so until it
+// has computed one, and a merged or closed PR's for good. A part saved does not
+// hold is moved's to read.
+func differs(saved *SavedRead, f gh.Full) parts {
+	var p parts
+	if saved == nil {
+		return p
+	}
+	if s := saved.PR; s != nil {
+		p.pr = s.State != f.State || s.Draft != f.IsDraft || s.Head != f.HeadRefOid || s.Base != f.BaseRefName ||
+			s.InMergeQueue != f.InMergeQueue || s.MergeQueueEnabled != f.MergeQueueEnabled ||
+			(f.MergeStateStatus != "UNKNOWN" && s.MergeState != f.MergeStateStatus)
+	}
+	if s := saved.Checks; s != nil {
+		p.checks = s.Head != f.ChecksAt || !sameRuns(s.Runs, requiredRuns([]gh.CheckSuite{{Runs: f.Checks}}))
+	}
+	if s := saved.Conversation; s != nil {
+		newest := ""
+		for _, at := range f.Posts {
+			newest = later(newest, at)
+		}
+		p.conversation = s.ReviewDecision != f.ReviewDecision || s.Signs.NewestPost != newest ||
+			!slices.Equal(listed(s.Unresolved), listed(f.Unresolved))
+	}
+	return p
+}
+
+// sameRuns reports whether a and b hold the same check runs with the same
+// results, in whatever order each read listed them: the check suites at a head
+// list them by suite, and the check rollup by context.
+func sameRuns(a, b []RequiredRun) bool {
+	keys := func(runs []RequiredRun) []string {
+		out := make([]string, 0, len(runs))
+		for _, r := range runs {
+			out = append(out, r.Name+"\x00"+r.Status+"\x00"+r.Conclusion)
+		}
+		slices.Sort(out)
+		return out
+	}
+	return slices.Equal(keys(a), keys(b))
 }
 
 // owned is a live bead that owns a PR, as the PR watch reads it: the bead, its

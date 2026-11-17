@@ -14,20 +14,24 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
-// The PR watch (specs/tk-1tfzr71.149/design.md, sections 1, 4, 6 and 7). A
+// The PR watch (specs/tk-1tfzr71.149/design.md, sections 1, 2, 4, 6 and 7). A
 // pass of the cheap question, Poll, asks GitHub whether each PR the city owns
 // moved, in one request for each gh.SignsBatch PRs in a repository, and runs
-// the one-PR update, Refresh, for each PR whose signs moved. The update reads
-// only the parts of the PR the moved signs make stale and saves them on the
-// bead that owns the PR. It is the one writer of the saved read, and of Gas
+// the one-PR update, Refresh, for each PR whose signs moved. A pass of the net,
+// Compare, reads each owned PR in full, in one request for each
+// gh.FullReadBatch PRs, and runs the update for each PR whose read differs
+// from the read saved on its bead, which catches the changes no sign shows.
+// The update reads only the parts of the PR its caller names and saves them on
+// the bead that owns the PR. It is the one writer of the saved read, and of Gas
 // Town's pr_state and pr_last_checked_at on a bead on the pending record. A
-// pass in which nothing moved writes no bead.
+// pass in which nothing moved or differs writes no bead.
 
-// Watch is GitHub as the PR watch reads it: the cheap question over many PRs,
-// a PR's own facts with or without the checks at its head, its conversation,
-// and the login the city's account acts as.
+// Watch is GitHub as the PR watch reads it: the cheap question and the net's
+// full read over many PRs, a PR's own facts with or without the checks at its
+// head, its conversation, and the login the city's account acts as.
 type Watch interface {
 	Signs(repo string, numbers []int) (map[int]gh.Signs, map[int]error)
+	FullRead(repo string, numbers []int) (map[int]gh.Full, map[int]error)
 	PullRequestPart(repo string, number int, checks bool) (*gh.PRPart, error)
 	Conversation(repo string, number int) (*gh.Conversation, error)
 	Login() (string, error)
@@ -214,19 +218,18 @@ func (w Watcher) Refresh(url string) (Refreshed, error) {
 	if !ok {
 		return Refreshed{URL: url, Bead: o.id}, errors.New("GitHub returned no signs for the PR")
 	}
-	return u.update(o, hub, s, at)
+	return u.update(o, hub, s, at, moved(o.saved, s, o.stale()))
 }
 
-// update is the one-PR update over the signs s, which a read sent at signsAt
-// returned: it reads the parts of the PR the signs say moved, then, under the
-// record lock, reads the bead again and saves each part that is newer than the
-// saved one and differs from it, in one write guarded on the status and the
+// update is the one-PR update over the parts due names, with the signs s, which
+// a read sent at signsAt returned: it reads those parts of the PR, then, under
+// the record lock, reads the bead again and saves each part that is newer than
+// the saved one and differs from it, in one write guarded on the status and the
 // assignee that read shows. A bead on the pending record has its pr_state and
 // pr_last_checked_at in the same write. A read that fails saves nothing, so the
-// PR's signs stay as they were and the next pass reads it again.
-func (u *watchRun) update(o owned, hub Watch, s gh.Signs, signsAt string) (Refreshed, error) {
+// PR's saved read stays as it was and the next pass reads it again.
+func (u *watchRun) update(o owned, hub Watch, s gh.Signs, signsAt string, due parts) (Refreshed, error) {
 	out := Refreshed{URL: o.url, Bead: o.id}
-	due := moved(o.saved, s, o.stale())
 	if !due.any() {
 		out.Action, out.Detail = ActUnchanged, "no sign moved"
 		return out, nil
@@ -250,10 +253,12 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 			return nil, err
 		}
 		signs := prSigns(s)
-		// GitHub computes a merge state after a push or a base move, and reads
-		// it unknown until then: the part keeps its earlier signs, so the next
-		// pass finds the PR moved and reads it again.
-		if p.MergeStateStatus == "UNKNOWN" {
+		// GitHub computes an open PR's merge state after a push or a base
+		// move, and reads it unknown until then: the part keeps its earlier
+		// signs, so the next pass finds the PR moved and reads it again. A
+		// merged or closed PR's merge state reads unknown for good, so its part
+		// keeps the signs read with it.
+		if p.MergeStateStatus == "UNKNOWN" && p.State == "OPEN" {
 			signs = PRSigns{}
 			if o.saved != nil && o.saved.PR != nil {
 				signs = o.saved.PR.Signs
@@ -387,36 +392,108 @@ func (u *watchRun) save(o owned, fresh *SavedRead, due parts) (Refreshed, error)
 	return out, nil
 }
 
-// PollOptions bound one pass: Window is how long after its start it starts
-// another update.
-type PollOptions struct {
+// PassOptions bound one pass of the watch: Window is how long after its start
+// the pass starts another update.
+type PassOptions struct {
 	Window time.Duration
 }
 
-// PollReport is what a pass did: the PRs it asked about, the repositories they
-// are in, each PR whose signs moved, and each PR that failed with its error.
-type PollReport struct {
+// PassReport is what a pass did: the PRs it asked about, the repositories they
+// are in, each update it ran, each PR that failed with its error, and each PR
+// its window left for the next pass.
+type PassReport struct {
 	Asked, Repositories int
 	Updates             []Refreshed
 	Failed              map[string]error
 	Late                []string
 }
 
+// sighting is what a pass saw of one PR: the signs it hands the update, and the
+// parts of the PR's saved read it found stale.
+type sighting struct {
+	signs gh.Signs
+	due   parts
+}
+
+// asker reads, for a pass, every PR owners own in repo through hub, and returns
+// a sighting of each PR it read and the error of each PR it did not.
+type asker func(hub Watch, repo string, owners []owned) (map[int]sighting, map[int]error)
+
 // Poll is one pass of the cheap question over the PRs the store's live beads
 // own: it asks GitHub about every one, in one request for each gh.SignsBatch
 // PRs in a repository, and runs the one-PR update for each whose signs moved,
-// starting none past o.Window. A PR whose signs did not read keeps its saved
-// signs, and the pass reports it failed, as it does a PR owned by more than
-// one bead and an update that did not save. A PR the window left is read at
-// the next pass, since nothing saved its signs. It returns an error when the
-// store's listing did not read.
-func (w Watcher) Poll(o PollOptions) (PollReport, error) {
+// over the parts they make stale, starting none past o.Window. A PR whose signs
+// did not read keeps its saved read, and the pass reports it failed.
+func (w Watcher) Poll(o PassOptions) (PassReport, error) {
+	return w.pass(o, func(hub Watch, repo string, owners []owned) (map[int]sighting, map[int]error) {
+		signs, errs := hub.Signs(repo, prNumbers(owners))
+		read, failed := map[int]sighting{}, map[int]error{}
+		for _, ow := range owners {
+			s, ok := signs[ow.number]
+			switch {
+			case errs[ow.number] != nil:
+				failed[ow.number] = fmt.Errorf("its signs did not read: %w", errs[ow.number])
+			case !ok:
+				failed[ow.number] = errors.New("GitHub returned no signs for it")
+			default:
+				read[ow.number] = sighting{signs: s, due: moved(ow.saved, s, ow.stale())}
+			}
+		}
+		return read, failed
+	})
+}
+
+// Compare is one pass of the net over the PRs the store's live beads own: it
+// reads every one in full, in one request for each gh.FullReadBatch PRs in a
+// repository, and runs the one-PR update for each whose read differs from the
+// read saved on its bead, over each part that differs (differs) or whose signs
+// moved (moved), starting none past o.Window. So a change no cheap sign shows,
+// such as a review thread resolved or an edit to a post that left the PR's
+// updatedAt as it was, reaches the saved read within one pass. A PR whose read
+// failed keeps its saved read, and the pass reports it failed.
+func (w Watcher) Compare(o PassOptions) (PassReport, error) {
+	return w.pass(o, func(hub Watch, repo string, owners []owned) (map[int]sighting, map[int]error) {
+		full, errs := hub.FullRead(repo, prNumbers(owners))
+		read, failed := map[int]sighting{}, map[int]error{}
+		for _, ow := range owners {
+			f, ok := full[ow.number]
+			switch {
+			case errs[ow.number] != nil:
+				failed[ow.number] = fmt.Errorf("its full read did not answer: %w", errs[ow.number])
+			case !ok:
+				failed[ow.number] = errors.New("GitHub returned no full read of it")
+			default:
+				due := moved(ow.saved, f.Signs, ow.stale()).plus(differs(ow.saved, f))
+				read[ow.number] = sighting{signs: f.Signs, due: due}
+			}
+		}
+		return read, failed
+	})
+}
+
+// prNumbers are the numbers of the PRs owners own.
+func prNumbers(owners []owned) []int {
+	out := make([]int, 0, len(owners))
+	for _, o := range owners {
+		out = append(out, o.number)
+	}
+	return out
+}
+
+// pass is one pass of the watch over the PRs the store's live beads own: ask
+// reads every owned PR in a repository, and the pass runs the one-PR update
+// over the parts of each PR the read found stale, starting none past o.Window.
+// A PR that did not read keeps its saved read, and the pass reports it failed,
+// as it does a PR owned by more than one bead and an update that did not save.
+// A PR the window left is read at the next pass, since nothing saved it. It
+// returns an error when the store's listing did not read.
+func (w Watcher) pass(o PassOptions, ask asker) (PassReport, error) {
 	now := w.Now
 	if now == nil {
 		now = time.Now
 	}
 	start := now()
-	report := PollReport{Failed: map[string]error{}}
+	report := PassReport{Failed: map[string]error{}}
 	all, err := w.owners()
 	if err != nil {
 		return report, err
@@ -440,30 +517,26 @@ func (w Watcher) Poll(o PollOptions) (PollReport, error) {
 	for _, k := range keys {
 		owners := byRepo[k]
 		hub := w.GitHub(k.host)
-		var numbers []int
-		for _, ow := range owners {
-			numbers = append(numbers, ow.number)
-		}
 		at := instant(w.Now)
-		signs, failed := hub.Signs(owners[0].repo, numbers)
+		read, failed := ask(hub, owners[0].repo, owners)
 		for _, ow := range owners {
 			if err := failed[ow.number]; err != nil {
-				report.Failed[ow.url] = fmt.Errorf("its signs did not read: %w", err)
+				report.Failed[ow.url] = err
 				continue
 			}
-			s, ok := signs[ow.number]
+			r, ok := read[ow.number]
 			if !ok {
-				report.Failed[ow.url] = errors.New("GitHub returned no signs for it")
+				report.Failed[ow.url] = errors.New("the pass read nothing of it")
 				continue
 			}
-			if !moved(ow.saved, s, ow.stale()).any() {
+			if !r.due.any() {
 				continue
 			}
 			if o.Window > 0 && now().Sub(start) > o.Window {
 				report.Late = append(report.Late, ow.url)
 				continue
 			}
-			done, err := u.update(ow, hub, s, at)
+			done, err := u.update(ow, hub, r.signs, at, r.due)
 			if err != nil {
 				report.Failed[ow.url] = err
 				continue

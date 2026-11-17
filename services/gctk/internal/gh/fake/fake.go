@@ -37,7 +37,7 @@ type PR struct {
 // GitHub is an in-memory GitHub. Self is the login the reads run as. Fail
 // fails a read or a request by its method's name, such as "Reviews", with its
 // error. SignsFail fails the cheap question for the PRs it numbers, each with
-// its error. OnRead, when set, runs as a read of a PR starts, so a test can change
+// its error, and FullFail the net's read. OnRead, when set, runs as a read of a PR starts, so a test can change
 // GitHub or another writer's state while a read is in flight. OnMerge, when
 // set, answers a merge request or an enqueue in place of the default, which
 // refuses a request whose head is not the PR's and otherwise merges the PR, or
@@ -53,11 +53,13 @@ type GitHub struct {
 	OnDismiss func(p *PR, review int64) error
 	Descends  map[string][]string
 	SignsFail map[int]error
+	FullFail  map[int]error
 
 	mu    sync.Mutex
 	reads []string
 	asks  []Ask
 	signs [][]int
+	full  [][]int
 }
 
 // SignsAsked returns the PRs each cheap question asked about, in order.
@@ -65,6 +67,13 @@ func (g *GitHub) SignsAsked() [][]int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return slices.Clone(g.signs)
+}
+
+// FullAsked returns the PRs each of the net's reads asked about, in order.
+func (g *GitHub) FullAsked() [][]int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.full)
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
@@ -85,7 +94,7 @@ func (g *GitHub) Asks() []Ask {
 // New returns a GitHub that reads as self and holds no PR.
 func New(self string) *GitHub {
 	return &GitHub{Self: self, PRs: map[string]*PR{}, Fail: map[string]error{}, Descends: map[string][]string{},
-		SignsFail: map[int]error{}}
+		SignsFail: map[int]error{}, FullFail: map[int]error{}}
 }
 
 // Put adds p under its repository and number.
@@ -372,6 +381,61 @@ func (p *PR) signs() gh.Signs {
 		}
 	}
 	return s
+}
+
+// FullRead answers the net's read for each PR numbered in repo from the PR's
+// state: its signs, as Signs answers them, its merge state, review decision and
+// merge-queue flags, the time each review, inline comment and conversation
+// comment last changed, the threads that are not resolved, and every check run
+// in the check suites at its head, listed by name: GitHub's check rollup lists
+// them in an order of its own, not suite by suite. It records one read,
+// "FullRead", for the whole read, and a PR it holds no such PR for, or one
+// FullFail numbers, fails alone.
+func (g *GitHub) FullRead(repo string, numbers []int) (map[int]gh.Full, map[int]error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reads = append(g.reads, "FullRead")
+	g.full = append(g.full, slices.Sorted(slices.Values(numbers)))
+	read, failed := map[int]gh.Full{}, map[int]error{}
+	for _, n := range numbers {
+		if err := g.Fail["FullRead"]; err != nil {
+			failed[n] = err
+			continue
+		}
+		if err := g.FullFail[n]; err != nil {
+			failed[n] = err
+			continue
+		}
+		p, ok := g.PRs[key(repo, n)]
+		if !ok {
+			failed[n] = fmt.Errorf("github: %s holds no pull request %d", repo, n)
+			continue
+		}
+		f := gh.Full{Signs: p.signs(), MergeStateStatus: p.Facts.MergeStateStatus, ReviewDecision: p.ReviewDecision,
+			InMergeQueue: p.Facts.InMergeQueue, MergeQueueEnabled: p.Facts.MergeQueueEnabled, Posts: []string{},
+			Unresolved: []string{}, ChecksAt: p.Facts.HeadRefOid, Checks: []gh.CheckRun{}}
+		for _, v := range p.Reviews {
+			f.Posts = append(f.Posts, v.UpdatedAt)
+		}
+		for _, t := range p.Threads {
+			if !t.Resolved {
+				f.Unresolved = append(f.Unresolved, t.ID)
+			}
+			for _, c := range t.Comments {
+				f.Posts = append(f.Posts, c.UpdatedAt)
+			}
+		}
+		for _, c := range p.Comments {
+			f.Posts = append(f.Posts, c.UpdatedAt)
+		}
+		slices.Sort(f.Unresolved)
+		for _, s := range p.Suites[p.Facts.HeadRefOid] {
+			f.Checks = append(f.Checks, s.Runs...)
+		}
+		slices.SortStableFunc(f.Checks, func(a, b gh.CheckRun) int { return strings.Compare(a.Name, b.Name) })
+		read[n] = f
+	}
+	return read, failed
 }
 
 // PullRequestPart returns the PR's facts and, with checks, the check suites at

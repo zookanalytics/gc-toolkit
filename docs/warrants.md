@@ -445,18 +445,21 @@ no warrant.
   `services/gctk/pr/read.go`, in the four parts `SavedRead` declares in
   `services/gctk/pr/saved.go`. Its one writer is the one-PR update, `update`
   and `save` in `services/gctk/pr/refresh.go`, which `Poll` there runs for each
-  PR whose cheap signs moved (`gctk pr poll`, from `orders/pr-poll.toml`) and
-  `Refresh` runs for one PR (`gctk pr refresh`). Its readers are `FromStore` in
+  PR whose cheap signs moved (`gctk pr poll`, from `orders/pr-poll.toml`),
+  `Compare` runs for each PR whose full read differs from it (`gctk pr compare`,
+  from `orders/pr-compare.toml`), and `Refresh` runs for one PR
+  (`gctk pr refresh`). Its readers are `FromStore` in
   `services/gctk/pr/read.go`, which `answerFromStore` in
   `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
   `PRAnswers` in `services/gctk/listing/pr.go` calls for the rig board, from
-  `services/helm/internal/rigboard/gather.go`, and the update itself, which
+  `services/helm/internal/rigboard/gather.go`, and the PR watch itself, which
   compares a PR's signs with the ones each part keeps (`moved` in
-  `services/gctk/pr/saved.go`).
+  `services/gctk/pr/saved.go`) and the net's full read with each part's facts
+  (`differs` there).
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
   of reading GitHub, and against which a pass of the PR watch tells whether the
-  PR moved. The facts are the PR's state, draft flag, head and merge state, the
+  PR moved or differs from it. The facts are the PR's state, draft flag, head and merge state, the
   required checks at that head, the standing approvals and requests for
   changes, the newest feedback in each comment space, the review threads
   waiting on the city's answer and those unresolved, and the PR's labels, in
@@ -497,7 +500,7 @@ no warrant.
     and the search for the parts, their signs and their one writer is
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
     read at `gastownhall/gascity` main 9a4b1e718.
-- **Verified.** 2026-11-16, at `gastownhall/gascity` main 192fa2d39407,
+- **Verified.** 2026-11-17, at `gastownhall/gascity` main 09518c191d1a,
   `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
   8cdfa796a8f5.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull

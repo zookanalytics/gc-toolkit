@@ -19,11 +19,13 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
-// `gctk pr poll` and `gctk pr refresh` are the PR watch
-// (specs/tk-1tfzr71.149/design.md, sections 1, 4 and 6): the pass that asks
+// `gctk pr poll`, `gctk pr compare` and `gctk pr refresh` are the PR watch
+// (specs/tk-1tfzr71.149/design.md, sections 1, 2, 4 and 6): the pass that asks
 // GitHub cheaply whether each PR the city owns moved, which orders/pr-poll.toml
-// runs on a cooldown, and the one-PR update that reads and saves a PR that
-// did, which the pass runs and a webhook's rule can call for the PR an event
+// runs on a cooldown, the net's pass that reads each owned PR in full and
+// compares it with the read saved on its bead, which orders/pr-compare.toml
+// runs, and the one-PR update that reads and saves a PR that moved or differs,
+// which both passes run and a webhook's rule can call for the PR an event
 // names. Each builds the pr domain's Watcher over the adapters.
 
 // watchLockWait is how long an update waits for the store's record lock. A run
@@ -34,6 +36,10 @@ const watchLockWait = 30 * time.Second
 // pollWindow is how long into a pass the pass starts another update, so the
 // pass ends before the next one is due two minutes after it started.
 const pollWindow = 90 * time.Second
+
+// compareWindow is how long into a pass of the net the pass starts another
+// update, so the pass ends before its order's timeout stops it.
+const compareWindow = 3 * time.Minute
 
 const prRefreshLong = `The one-PR update: reads GitHub's side of the PR at --pr and saves it on the
 live bead that owns it, as pr_github_read, the one writer of that read. A bead
@@ -81,6 +87,37 @@ exit: 0 every owned PR was asked, and every update it started saved
       2 the store's listing did not read, or a PR failed: its signs or a read
         of it did not answer, its write did not land, or more than one live
         bead owns it`
+
+const prCompareLong = `One pass of the net over the store's live beads: it lists the PRs they own,
+reads each in full in one request for each 10 PRs in a repository, and runs
+the one-PR update (gctk pr refresh) for each PR whose read differs from the
+read saved on its bead, over each part that differs or whose cheap signs
+moved. It starts no update more than 3 minutes in. A pass in which nothing
+differs writes no bead.
+
+The full read is the cheap signs gctk pr poll reads and the facts no sign
+shows: the PR's merge state, its review decision, whether it is in a merge
+queue and whether its base requires one, each review thread's resolution, the
+time each conversation comment, review and inline comment last changed, and
+the check runs at its last commit with whether the PR requires each. It reads
+no post's text, and reads a list past its first page on until it ends. It
+compares those facts with the PR part, the required check runs with the
+checks, and the review decision, the unresolved threads and the newest post
+time with the conversation. A merge state GitHub reads as UNKNOWN differs in
+nothing. So a review thread resolved or reopened, or an edit to a post that
+left the PR's updatedAt as it was, reaches the saved read within one pass.
+
+A PR whose read failed keeps its saved read and is read again at the next
+pass, as is a PR the 3 minutes left. Each update prints on a line of its own,
+as <bead> <url> <action>: <detail>, each PR that failed as <url> failed:
+<why>, and each PR left for the next pass as <url> left; the pass ends with a
+line counting the PRs it compared.
+
+exit: 0 every owned PR was read, and every update it started saved
+      1 usage
+      2 the store's listing did not read, or a PR failed: its full read or a
+        read the update made did not answer, its write did not land, or more
+        than one live bead owns it`
 
 func newPRRefreshCmd(stdout, stderr io.Writer) *cobra.Command {
 	var url, db string
@@ -138,14 +175,42 @@ func newPRPollCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 func prPoll(db string, stdout, stderr io.Writer) int {
+	return prPass("gctk pr poll", "Asked about", db, pollWindow, pr.Watcher.Poll, stdout, stderr)
+}
+
+func newPRCompareCmd(stdout, stderr io.Writer) *cobra.Command {
+	var db string
+	cmd := &cobra.Command{
+		Use:         "compare",
+		Short:       "read each PR the store's beads own in full, and refresh each that differs from its saved read",
+		Long:        prCompareLong,
+		Args:        cobra.NoArgs,
+		Annotations: map[string]string{usageExitKey: "1"},
+		RunE: func(*cobra.Command, []string) error {
+			return exit(prCompare(db, stdout, stderr))
+		},
+	}
+	cmd.Flags().StringVar(&db, "db", "", "the store's .beads directory, else the store gc resolves here")
+	return cmd
+}
+
+func prCompare(db string, stdout, stderr io.Writer) int {
+	return prPass("gctk pr compare", "Compared", db, compareWindow, pr.Watcher.Compare, stdout, stderr)
+}
+
+// prPass runs one pass of the watch, bounded by window, and prints what it did:
+// each update, each PR that failed and each PR left for the next pass, then a
+// line counting the PRs the pass read, which counted opens.
+func prPass(prog, counted, db string, window time.Duration, pass func(pr.Watcher, pr.PassOptions) (pr.PassReport, error),
+	stdout, stderr io.Writer) int {
 	w, err := watcher(db)
 	if err != nil {
-		fmt.Fprintf(stderr, "gctk pr poll: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", prog, err)
 		return 2
 	}
-	rep, err := w.Poll(pr.PollOptions{Window: pollWindow})
+	rep, err := pass(w, pr.PassOptions{Window: window})
 	if err != nil {
-		fmt.Fprintf(stderr, "gctk pr poll: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", prog, err)
 		return 2
 	}
 	for _, u := range rep.Updates {
@@ -155,12 +220,12 @@ func prPoll(db string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s failed: %v\n", url, rep.Failed[url])
 	}
 	for _, url := range rep.Late {
-		fmt.Fprintf(stdout, "%s left: the pass reached its %s, so the next pass reads it\n", url, pollWindow)
+		fmt.Fprintf(stdout, "%s left: the pass reached its %s, so the next pass reads it\n", url, window)
 	}
-	fmt.Fprintf(stdout, "Asked about %d PRs in %d repositories: %d updated, %d failed, %d left for the next pass.\n",
-		rep.Asked, rep.Repositories, len(rep.Updates), len(rep.Failed), len(rep.Late))
+	fmt.Fprintf(stdout, "%s %d PRs in %d repositories: %d updated, %d failed, %d left for the next pass.\n",
+		counted, rep.Asked, rep.Repositories, len(rep.Updates), len(rep.Failed), len(rep.Late))
 	if len(rep.Failed) > 0 {
-		fmt.Fprintf(stderr, "gctk pr poll: %d PRs failed\n", len(rep.Failed))
+		fmt.Fprintf(stderr, "%s: %d PRs failed\n", prog, len(rep.Failed))
 		return 2
 	}
 	return 0

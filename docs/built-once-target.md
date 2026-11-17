@@ -211,17 +211,18 @@ yet. Each remaining difference names its reason and what ends it:
   ends when Gas Town's command escalates a close it cannot make.
 - **A cheap question watches every PR, and an update reads one.** A pass asks
   GitHub whether each PR the city owns moved, in one request for each 50 PRs in
-  a repository, and reads and saves a PR only when one of its signs moved. Gas
-  Town's command reads each pending PR by its URL at each find-work and writes
-  the check on the record each time. The city's readers of GitHub share one
-  allowance, and a pass whose cost follows the number of PRs cannot watch them
-  all every few minutes. A pass writes nothing for a PR that did not move, so
-  `pr_last_checked_at` says when the PR was last read and saved, not when it was
-  last asked about, and `pr_state` is the PR's state as that read found it, so a
-  landing's evidence is its merge commit and its time. A read or an act that
-  fails is recorded by no key, where Gas Town writes `pr_reconcile_error`,
-  because the next pass finds the same difference and acts on it. No end is
-  planned.
+  a repository, and reads and saves a PR only when one of its signs moved, or
+  when the net, which reads every PR in full every 10 minutes, finds it differs
+  from the read saved on its bead. Gas Town's command reads each pending PR by
+  its URL at each find-work and writes the check on the record each time. The
+  city's readers of GitHub share one allowance, and a pass whose cost follows
+  the number of PRs cannot watch them all every few minutes. A pass writes
+  nothing for a PR that did not move or differ, so `pr_last_checked_at` says
+  when the PR was last read and saved, not when it was last asked about, and
+  `pr_state` is the PR's state as that read found it, so a landing's evidence is
+  its merge commit and its time. A read or an act that fails is recorded by no
+  key, where Gas Town writes `pr_reconcile_error`, because the next pass finds
+  the same difference and acts on it. No end is planned.
 - **find-work reads waits.** It skips a bead something holds or whose branch
   another open bead works on, and takes a rework child before its anchor. Gas
   Town takes any bead assigned to the refinery. Two writers on one branch would

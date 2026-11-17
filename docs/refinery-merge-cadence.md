@@ -848,7 +848,10 @@ never invisible.
 `orders/pr-poll.toml` asks GitHub every 2 minutes whether each PR the rig's
 beads own moved, and saves GitHub's side of each PR that did on its bead. It is
 a rig-scoped cooldown exec order with a 180-second timeout, which runs
-`gctk pr poll --db "$GC_RIG_ROOT/.beads"`.
+`gctk pr poll --db "$GC_RIG_ROOT/.beads"`. `orders/pr-compare.toml`, the net,
+reads each of those PRs in full every 10 minutes and saves each one that
+differs from the read saved on its bead, which catches the changes no cheap
+sign shows (the net, below).
 
 A PR is owned when a live bead names it as its own and is no other bead's
 child: an anchor names it in `pr_url` beside a `merge_result`, and a bead the
@@ -887,14 +890,51 @@ reads the bead again and writes once, guarded on the status and the assignee
 it read, with each part whose read was sent after the saved part's and which
 differs from it, so an older read never replaces a newer one. A bead on the
 pending record gets `pr_state`, the PR's state lower-cased, and
-`pr_last_checked_at` in the same write. A merge state GitHub reads as
-`UNKNOWN`, which it computes after a push or a base move, is saved with the PR
-part's earlier signs, so the next pass reads the part again. A read that fails
-saves nothing. The update is the one writer of these three keys.
+`pr_last_checked_at` in the same write. An open PR's merge state that GitHub
+reads as `UNKNOWN`, which it computes after a push or a base move, is saved
+with the PR part's earlier signs, so the next pass reads the part again. A
+merged or closed PR's merge state reads `UNKNOWN` for good, so its part is
+saved with the signs read with it. A read that fails saves nothing. The update
+is the one writer of these three keys.
 
 `gctk pr refresh --pr <url>` is the same update run alone for one PR, which
 reads the PR's signs itself first: the call a webhook's rule can make for the PR
 an event names. A PR no live bead owns has nothing to save, and it exits 0.
+
+**The net.** Some changes move no cheap sign: a review thread resolved or
+reopened, an edit to a post that left the PR's `updatedAt` as it was, a check
+the PR comes to require or stops requiring, and a review decision, merge state
+or merge-queue flag that a change of the repository's rules moves.
+`orders/pr-compare.toml` reads each owned PR in full every 10 minutes for them.
+It is a rig-scoped cooldown exec order with a 300-second timeout, which runs
+`gctk pr compare --db "$GC_RIG_ROOT/.beads"`.
+
+A pass reads each owned PR with one aliased `pullRequest(number:)` field, at
+most 10 PRs a request: the cheap signs, the merge state, the review decision,
+both merge-queue flags, each review thread's resolution, the time each
+conversation comment, review and inline comment last changed, read through the
+review threads 10 a page, and the check runs at the PR's last commit, each with
+whether the PR requires it. It reads no post's text. A list past its first page
+is read on until it ends: the labels, the conversation comments, the reviews,
+the threads, a thread's comments and the check runs, these last at the commit
+the first page read. A request of up to 9 PRs costs 1 point and one of 10 costs
+2.
+
+The net compares what it read with the saved read, and runs the one-PR update
+over each part that differs, and over each part whose signs moved:
+
+| What differs | What the update reads |
+|---|---|
+| the PR's state, draft flag, head, base, merge state or either merge-queue flag | the PR's own facts |
+| the commit the checks were read at, or a name or a result among the check runs the PR requires there | the PR's own facts with the required check runs at the head, in one request |
+| the review decision, the unresolved threads, or the newest post time, the latest time any post changed | the conversation |
+
+A merge state GitHub reads as `UNKNOWN` differs in nothing, since GitHub reads
+an open PR's so until it has computed one, and a merged or closed PR's for
+good. So a change no cheap sign shows reaches the saved read within one pass
+of the net. A pass in which nothing differs writes no bead. The net starts no
+update more than 3 minutes in, and a PR whose read failed keeps its saved read
+and fails the pass, as in the cheap question's pass.
 
 **Reading what a pass did.** A pass in which nothing moved writes no bead and
 costs 1 point for each 50 owned PRs, and Gas City still writes its run record.
@@ -902,7 +942,10 @@ Each update prints a line, `<bead> <url> <action>: <detail>`, where the action
 is `saved` or `unchanged`. A PR that failed prints `<url> failed: <why>`, one
 the 90 seconds left prints `<url> left`, and the last line counts what the pass
 asked about. `gc order history pr-poll` lists the passes with their exits: 0
-when every owned PR was asked and every update saved, and 2 otherwise.
+when every owned PR was asked and every update saved, and 2 otherwise. A pass
+of the net prints the same lines, its window being 3 minutes and its last line
+counting the PRs it compared, and `gc order history pr-compare` lists its
+passes.
 
 ## The landing order
 

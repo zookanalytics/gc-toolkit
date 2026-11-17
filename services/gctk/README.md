@@ -26,7 +26,8 @@ through `gc bd` and the supervisor's API.
 | `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it over the store and the GitHub read the one-PR update saved on the PR's bead, so the verb reads no GitHub, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
 | `pr record` | the refinery's record of the PR a bead owns as pending until its merge is verified, in Gas Town's two writes under the store's record lock, each guarded on the status and assignee it read, so a bead that a close or a release reached first gets no record | `gctk pr record --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
 | `pr poll` | one pass of the PR watch: the PRs the store's live beads own asked about in one request for each 50 in a repository, reading their cheap signs and no detail, and the one-PR update run for each PR whose signs moved, none started past 90 seconds, so a pass in which nothing moved writes no bead | `gctk pr poll --help`, `internal/cli/prwatch.go`, `pr` |
-| `pr refresh` | the one-PR update, the one writer of GitHub's side on a bead: the parts of the PR its signs say moved read and saved on the live bead that owns it, in four parts that each keep the instant their read was sent, in one write under the store's record lock guarded on what it read, with pr_state and pr_last_checked_at on a bead on the pending record | `gctk pr refresh --help`, `internal/cli/prwatch.go`, `pr` |
+| `pr compare` | one pass of the net: the PRs the store's live beads own read in full in one request for each 10 in a repository, their signs, merge state, review decision, merge-queue flags, review threads' resolutions, posts' times and required check runs, with each list read on to its end and no post's text, and the one-PR update run over each part of each PR that differs from its saved read, none started past 3 minutes, so a thread resolved or a post edited with no sign moved reaches the saved read within one pass | `gctk pr compare --help`, `internal/cli/prwatch.go`, `pr` |
+| `pr refresh` | the one-PR update, the one writer of GitHub's side on a bead: the parts of the PR its signs say moved, or the net finds differ, read and saved on the live bead that owns it, in four parts that each keep the instant their read was sent, in one write under the store's record lock guarded on what it read, with pr_state and pr_last_checked_at on a bead on the pending record | `gctk pr refresh --help`, `internal/cli/prwatch.go`, `pr` |
 | `pr reconcile` | one run of the landing order over the store's pending records, in a shuffled order, each under the store's record lock: the withdrawals filed on a bead carried out, a draft whose review result passed at its validated head marked ready, a ready PR merged with its head pinned, a bead closed once its merge commit is on the target, a changed head sent back to the refinery, and each exception kept blocked behind a human gate, with none of what it reads of GitHub saved | `gctk pr reconcile --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
 | `pr draft` | the PR a bead owns returned to draft before a writer of the city pushes onto it, read from its draft flag first and converted only when it is ready, so a round's later pushes change nothing | `gctk pr draft --help`, `internal/cli/prcycle.go`, `pr` |
 | `pr withdraw` | the withdrawal of the approvals a material change leaves behind: a bead that blocks the bead that owns the PR and names the head, which the landing order carries out by dismissing each approval given on a commit that does not contain it | `gctk pr withdraw --help`, `internal/cli/prcycle.go`, `pr` |
@@ -178,8 +179,9 @@ internal/gcbd/       the store adapter: bead reads and writes through `gc bd` an
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
 internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
-internal/gh/         the GitHub adapter: one `gh api` call per read, paged to its end, and
-                     the cheap question, the signs of up to 50 PRs in one call
+internal/gh/         the GitHub adapter: one `gh api` call per read, paged to its end, the
+                     cheap question, the signs of up to 50 PRs in one call, and the net's
+                     full read of up to 10
 internal/gh/fake/    the GitHub adapter's in-memory fake, for the domains' tests
 internal/feedback/   the pack's one definition of feedback, pr-post.sh's feedback-def, run
                      through jq
@@ -190,11 +192,12 @@ arm/record/          the arm's keys, which it owns, the arm they decode to, and 
 pr/                  the pr domain: whether the PR a bead owns is ready to merge at its
                      current revision, from the store, GitHub and the definition of
                      feedback, or from the store and the GitHub read the one-PR update
-                     saved there, which the PR watch reads only when GitHub shows it
-                     moved; the account of the change its author records, the PR
-                     summary; and what the PR's title and body say: its title, and its
-                     body's managed summary region and branch-beads section, with the
-                     renders they replaced pinned under testdata
+                     saved there, which the PR watch reads when GitHub shows it moved,
+                     or when the net's full read finds it differs; the account of the
+                     change its author records, the PR summary; and what the PR's
+                     title and body say: its title, and its body's managed summary
+                     region and branch-beads section, with the renders they replaced
+                     pinned under testdata
 epic/                which closes and shifts of a rig's epics no portfolio sync has weighed,
                      from the ruling's keys and each sync's mark, read-only
 prstatus/            the PR status derivation, exported for the helm board
