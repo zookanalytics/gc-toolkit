@@ -3,20 +3,19 @@
 # each PR it publishes as pending on the bead that owns it (gctk pr record), and
 # this order acts on those records from the beads: a run decides each record
 # from the store and the read the one-PR update saved on its bead
-# (orders/pr-poll.toml), and reads GitHub only for a merge, which it decides
-# again on its own read of the PR and pins to the head it judged, or adds to
-# its base's merge queue with it. Its bead closes once the merge commit is on
-# the freshly fetched target. A PR open at another head goes back to the
-# refinery, and the exceptions stay blocked behind a human gate. A PR open at
-# its validated head with no passed review result there, or with an ask a run
-# can take, gets its review run poured here (gctk pr reconcile's help says
-# when), and a run that ends without a result is poured again once before a
+# (orders/pr-poll.toml and orders/pr-compare.toml), and reads GitHub only for a
+# merge, which it decides again on its own read of the PR and pins to the head
+# it judged, or adds to its base's merge queue with it. Its bead closes once the
+# merge commit is on the freshly fetched target. A PR open at another head goes
+# back to the refinery, and the exceptions stay blocked behind a human gate. A
+# PR open at its validated head with no passed review result there, or with an
+# ask a run can take, gets its review run poured here (gctk pr reconcile's help
+# says when), and a run that ends without a result is poured again once before a
 # human gate asks you. A PR that waits on your approval or its checks holds no
-# agent: the wait is this order's next run. Once a PR lands on the rig's
-# default branch, a run checks that branch's seed audit, where the rig's clone
-# carries one, and hands the pages stale there to seed-audit-reaudit.sh, which
-# slings the branch's one re-render. No PR waits on the check or on the
-# re-render.
+# agent: the wait is this order's next run. Once a PR lands on the rig's default
+# branch, a run checks that branch's seed audit, where the rig's clone carries
+# one, and hands the pages stale there to seed-audit-reaudit.sh, which slings
+# the branch's one re-render. No PR waits on the check or on the re-render.
 #
 # Exec, not a formula: a run reads records and writes guarded updates, with no
 # judgment for an LLM. Rig-scoped, each run against its own rig's store, with
