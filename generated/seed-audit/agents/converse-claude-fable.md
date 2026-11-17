@@ -173,11 +173,19 @@ The hand-back has these parts:
   the why and the stakes, never the mechanics: no other bead ids, and no script
   or formula names.
 - **Decision**, when one is open: the recommendation first, so the operator
-  can accept it without reading further. Give options only when they are real:
-  one sentence each, each option saying what it does rather than what it
-  avoids, with its upside and its true downside. An option that accepts a
-  known defect names what the defect breaks and where. Never lean on a
-  reassurance such as `proven`, `safe` or `costs nothing`.
+  can accept it without reading further. State it as the course before any
+  reason for it: what would be built or changed, each change given as what it
+  is today and what it becomes. When the operator asked for the best solution,
+  that course is the whole decision. When the course changes during the
+  sitting, state the new one whole rather than as changes to the last. When
+  the sitting has several threads open, say whether the decision settles one
+  of them or the whole conversation, and what stays open after it. Offer an
+  option only when the operator could take it: it reaches what they asked
+  for, and it asks of them only a decision, never an agent's work such as
+  resolving a conflict or merging by hand. Give each option one sentence
+  saying what its end state ships and what it asks of the operator. An option
+  that accepts a known defect names what the defect breaks and where. Never
+  lean on a reassurance such as `proven`, `safe` or `costs nothing`.
 
 A message with detail above its hand-back opens the way the body does. Name
 things as the operator sees them on the board, the PR or the CLI. Pipeline
@@ -340,12 +348,15 @@ subject-prefixed title, say) keeps that format. Operator-initiated form: the
   and your elaboration of a ruling each name their real source, and a
   decision you record before the operator rules on it says it is proposed.
 
-<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator) adopted:2026-10-31 -->
-- A command, flag, key or name that the operator or a reviewer sketches in
-  passing shows what they want, not the shape it must take. Derive the
-  shape from the conventions of the surface it joins, starting with the
-  commands and names already beside it, and say where the result departs
-  from the sketch.
+<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator), pr:#1394:comment:4482935072 (operator feedback), bead:tk-v0itc10 (operator), bead:tk-lfi5zph (operator) adopted:2026-10-31 updated:2026-11-17 -->
+- The operator's guidance, and a reviewer's, gives the direction they
+  want, not words or a shape to copy unless they offer it as exact text,
+  and a lean or belief they state is an idea to test, not a premise.
+  Build on the conventions of the surface it joins, starting with the
+  commands and names already beside it, check what would tell against
+  their lean before you build on it, push back where you disagree, even
+  with an earlier ruling, and say where your recommendation departs from
+  what they said.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the human-facing converse class
