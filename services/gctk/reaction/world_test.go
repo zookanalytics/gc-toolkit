@@ -74,6 +74,9 @@ func newWorld(t *testing.T) *world {
 			}{Max: &two}},
 			{QualifiedName: "gc-toolkit.mechanik", Name: "mechanik", Scope: "city"},
 			{QualifiedName: "gc-toolkit/gc-toolkit.refinery", Name: "refinery", Dir: "gc-toolkit", Scope: "rig"},
+			{QualifiedName: "gc-toolkit/gc-toolkit.proactive", Name: "proactive", Dir: "gc-toolkit", Scope: "rig", Pool: &struct {
+				Max *int `json:"max"`
+			}{Max: &two}},
 		},
 		Named: []gascity.NamedSession{{Template: "mechanik"}, {Template: "refinery", Dir: "gc-toolkit"}},
 		RigList: []gascity.Rig{
@@ -405,4 +408,118 @@ func errHas(t *testing.T, err error, text, what string) {
 	if err == nil || !strings.Contains(err.Error(), text) {
 		t.Errorf("%s: the error %v does not hold %q", what, err, text)
 	}
+}
+
+// put adds each bead to the store, and makes the store's blocked answer for
+// each what its edges say, as sync does for the subject: blocked by each bead a
+// blocks edge names that is not closed.
+func (w *world) put(beads ...fake.Bead) {
+	w.t.Helper()
+	for _, b := range beads {
+		w.store.Put(b)
+	}
+	for _, b := range beads {
+		var by []string
+		for _, e := range b.Edges {
+			if far, held := w.store.Row(e.ID); held && e.Type == gcbd.EdgeBlocks && !strings.EqualFold(far.Status, "closed") {
+				by = append(by, e.ID)
+			}
+		}
+		if len(by) > 0 {
+			w.store.List(b.ID, by...)
+			w.store.Mark(b.ID)
+		}
+	}
+}
+
+// input is an open task nobody has decided on, with a description, its fields
+// as f sets them.
+func input(id string, f func(*fake.Bead)) fake.Bead {
+	b := fake.Bead{ID: id, Title: "raw input " + id, Status: "open", IssueType: "task", Description: "a raw input bead", Metadata: map[string]string{}}
+	if f != nil {
+		f(&b)
+	}
+	return b
+}
+
+// run puts a live run of formula, rooted at root, over an input convoy that
+// tracks bead, closed when status says so.
+func (w *world) run(root, formula, bead, status string) {
+	w.t.Helper()
+	convoy := "cv-" + root
+	w.put(fake.Bead{ID: convoy, Status: "open", IssueType: "convoy", Edges: []gcbd.Edge{{Type: "tracks", ID: bead}}},
+		fake.Bead{ID: root, Title: formula, Status: status, IssueType: "task",
+			Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_name": formula, "gc.input_convoy_id": convoy}})
+}
+
+// sling runs the sling as the command does, and returns the code it would
+// exit with and what it says: 0 slung, a refusal's code, or 1 for an error.
+func (w *world) sling(bead string) (int, string) {
+	w.t.Helper()
+	refusal, err := w.r.Sling(bead)
+	return outcome(refusal, err)
+}
+
+// check runs the check of the reaction whose run is run, as sling does.
+func (w *world) check(bead, run string) (int, string) {
+	w.t.Helper()
+	refusal, err := w.r.Check(bead, run)
+	var use *UsageError
+	if errors.As(err, &use) {
+		return 2, err.Error()
+	}
+	return outcome(refusal, err)
+}
+
+func outcome(refusal *Refusal, err error) (int, string) {
+	switch {
+	case err != nil:
+		return 1, err.Error()
+	case refusal != nil:
+		return refusal.Code, refusal.Why
+	}
+	return 0, ""
+}
+
+// slings is the beads the log shows slung as a first reaction.
+func (w *world) slings() []string {
+	var out []string
+	for _, l := range w.lines("SLING ") {
+		f := strings.Fields(l)
+		if len(f) >= 3 && strings.Contains(l, "--on "+Formula) {
+			out = append(out, f[2])
+		}
+	}
+	return out
+}
+
+// failing is the world's store with a find that fails when fail says so, or
+// answers without the rows omit names, which a test points at one read among a
+// command's reads.
+type failing struct {
+	*fake.Store
+	fail func(gcbd.Query) bool
+	omit func(q gcbd.Query, id string) bool
+}
+
+func (f failing) Find(q gcbd.Query) ([]gcbd.Bead, error) {
+	if f.fail != nil && f.fail(q) {
+		return nil, &gcbd.ReadError{Reason: "the fake store failed this find"}
+	}
+	rows, err := f.Store.Find(q)
+	if f.omit != nil {
+		rows = slices.DeleteFunc(rows, func(b gcbd.Bead) bool { return f.omit(q, b.ID) })
+	}
+	return rows, err
+}
+
+// failFind makes the reactions' finds fail the reads fail selects.
+func (w *world) failFind(fail func(gcbd.Query) bool) {
+	w.r.Ledger = ledger.New(failing{Store: w.store, fail: fail})
+}
+
+// omitFind makes the reactions' finds answer without each row omit names, as a
+// listing does for a bead deleted since an earlier read named it.
+func (w *world) omitFind(omit func(q gcbd.Query, id string) bool) {
+	w.r.Ledger = ledger.New(failing{Store: w.store, omit: omit})
 }

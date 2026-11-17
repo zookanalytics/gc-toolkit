@@ -99,13 +99,22 @@ func raw(k stringKey, r *ledger.Record) string {
 // It returns nil when bead takes the reaction. An error is a read that did not
 // answer, which decides nothing.
 func (r *Reactions) Check(bead, run string) (*Refusal, error) {
-	if run == "" {
-		return nil, usage("the check names the asking reaction's run, --run <root>, so its own run is not taken for a second reaction")
-	}
-	if !runID.MatchString(run) {
-		return nil, usage("--run needs the root of the reaction's run, one bead id of [A-Za-z0-9._-] (got %q)", run)
+	if err := CheckRun(run); err != nil {
+		return nil, err
 	}
 	return r.refusal(bead, run)
+}
+
+// CheckRun refuses, as a *UsageError, a check that names no asking run or one
+// that is no bead id.
+func CheckRun(run string) error {
+	if run == "" {
+		return usage("the check names the asking reaction's run, --run <root>, so its own run is not taken for a second reaction")
+	}
+	if !runID.MatchString(run) {
+		return usage("--run needs the root of the reaction's run, one bead id of [A-Za-z0-9._-] (got %q)", run)
+	}
+	return nil
 }
 
 // Sling slings a first reaction on bead through the rig's proactive pool, as

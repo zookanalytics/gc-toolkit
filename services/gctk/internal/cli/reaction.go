@@ -77,6 +77,9 @@ func newReactionCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 		RunE: func(c *cobra.Command, args []string) error {
 			const prog = "gctk reaction check"
 			bead := strings.TrimSpace(args[0])
+			if err := reaction.CheckRun(run); err != nil {
+				return err
+			}
 			r, err := reactionFor(bead, db, stderr, prog)
 			if err != nil {
 				fmt.Fprintf(stderr, "%s: %v. The check decides nothing; ask again once the store answers\n", prog, err)
