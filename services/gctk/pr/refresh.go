@@ -256,8 +256,8 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 		// GitHub computes an open PR's merge state after a push or a base
 		// move, and reads it unknown until then: the part keeps its earlier
 		// signs, so the next pass finds the PR moved and reads it again. A
-		// merged or closed PR's merge state reads unknown for good, so its part
-		// keeps the signs read with it.
+		// merged PR's merge state reads unknown for good, so the part of a PR
+		// that is not open keeps the signs read with it.
 		if p.MergeStateStatus == "UNKNOWN" && p.State == "OPEN" {
 			signs = PRSigns{}
 			if o.saved != nil && o.saved.PR != nil {

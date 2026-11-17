@@ -892,10 +892,10 @@ differs from it, so an older read never replaces a newer one. A bead on the
 pending record gets `pr_state`, the PR's state lower-cased, and
 `pr_last_checked_at` in the same write. An open PR's merge state that GitHub
 reads as `UNKNOWN`, which it computes after a push or a base move, is saved
-with the PR part's earlier signs, so the next pass reads the part again. A
-merged or closed PR's merge state reads `UNKNOWN` for good, so its part is
-saved with the signs read with it. A read that fails saves nothing. The update
-is the one writer of these three keys.
+with the PR part's earlier signs, so the next pass reads the part again.
+GitHub reads a merged PR's merge state as `UNKNOWN` for good, so the part of a
+PR that is not open is saved with the signs read with it. A read that fails
+saves nothing. The update is the one writer of these three keys.
 
 `gctk pr refresh --pr <url>` is the same update run alone for one PR, which
 reads the PR's signs itself first: the call a webhook's rule can make for the PR
@@ -930,11 +930,11 @@ over each part that differs, and over each part whose signs moved:
 | the review decision, the unresolved threads, or the newest post time, the latest time any post changed | the conversation |
 
 A merge state GitHub reads as `UNKNOWN` differs in nothing, since GitHub reads
-an open PR's so until it has computed one, and a merged or closed PR's for
-good. So a change no cheap sign shows reaches the saved read within one pass
-of the net. A pass in which nothing differs writes no bead. The net starts no
-update more than 3 minutes in, and a PR whose read failed keeps its saved read
-and fails the pass, as in the cheap question's pass.
+an open PR's so until it has computed one, and a merged PR's for good. So a
+change no cheap sign shows reaches the saved read within one pass of the net.
+A pass in which nothing differs writes no bead. The net starts no update more
+than 3 minutes in, and a PR whose read failed keeps its saved read and fails
+the pass, as in the cheap question's pass.
 
 **Reading what a pass did.** A pass in which nothing moved writes no bead and
 costs 1 point for each 50 owned PRs, and Gas City still writes its run record.

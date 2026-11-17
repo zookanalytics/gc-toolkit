@@ -219,8 +219,8 @@ func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 // differ in a name or a result; and the conversation when the review decision,
 // the unresolved threads or the newest post time differs. A merge state f reads
 // as UNKNOWN differs in nothing, since GitHub reads an open PR's so until it
-// has computed one, and a merged or closed PR's for good. A part saved does not
-// hold is moved's to read.
+// has computed one, and a merged PR's for good. A part saved does not hold is
+// moved's to read.
 func differs(saved *SavedRead, f gh.Full) parts {
 	var p parts
 	if saved == nil {
