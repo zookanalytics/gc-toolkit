@@ -615,19 +615,24 @@ func TestAnOpenChangedHeadIsRequeuedForValidation(t *testing.T) {
 }
 
 // The refinery pushes a head and then records it, so a read the watch saved
-// before the push finds the PR at a head the validated one descends from. That
-// read is older than the record: nothing is sent back on it, and once the
-// watch reads the PR again, the record stands at its head.
+// before the push finds the PR at a head the validated one descends from. The
+// act fetches the PR's branch and finds the validated head on it, so the read
+// is older than the record: nothing is sent back on it, and once the watch
+// reads the PR again, the record stands at its head.
 func TestASavedReadOlderThanTheValidatedHeadSendsNothingBack(t *testing.T) {
 	d := newLand(t)
 	d.refresh(t)
 	d.co.descends[other] = []string{head}
+	d.co.tip = other
 	d.pr.Facts.HeadRefOid = other
 	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_head_sha"] = other })
 	o := d.run(t)
 	is(t, o, pr.ActChecked)
 	if !strings.Contains(o.Detail, "read before the refinery recorded its head") {
 		t.Fatalf("the stale read's outcome says %q", o.Detail)
+	}
+	if !slices.Equal(d.co.branches, []string{branch}) {
+		t.Fatalf("the act fetched %v, want the PR's branch %s", d.co.branches, branch)
 	}
 	readsNoGitHub(t, d)
 	if ws := d.runWrites(); len(ws) != 0 {
@@ -636,6 +641,62 @@ func TestASavedReadOlderThanTheValidatedHeadSendsNothingBack(t *testing.T) {
 	o = d.once(t)
 	if o.Action == pr.ActRequeued || d.row(t).Metadata["merge_result"] != record.Pending {
 		t.Fatalf("once the watch read the PR at the validated head, the run did %+v", o)
+	}
+}
+
+// A person resets the PR's branch to a head the validated one descends from,
+// and the watch saves its read there. The act fetches the branch and finds a
+// tip that does not contain the validated head, so the bead goes back to the
+// refinery as on any other head.
+func TestABranchResetToAnAncestorOfTheValidatedHeadIsRequeued(t *testing.T) {
+	d := newLand(t)
+	d.refresh(t)
+	d.co.descends[other] = []string{head}
+	d.co.tip = head
+	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_head_sha"] = other })
+	o := d.run(t)
+	is(t, o, pr.ActRequeued)
+	if !strings.Contains(o.Detail, "origin/"+branch+" is at "+head) {
+		t.Fatalf("the requeue's outcome %q does not name the branch's tip", o.Detail)
+	}
+	b := d.row(t)
+	if b.Status != "open" || b.Assignee != refinery {
+		t.Fatalf("a reset branch left the bead %s under %s", b.Status, b.Assignee)
+	}
+	meta(t, b, map[string]string{"merge_result": record.HeadChanged, "observed_pr_head_sha": head, "pr_head_sha": other,
+		"existing_pr": prURL, "pr_reconcile_pending": "<absent>", "blocked_reason": "<absent>"})
+	if !strings.Contains(b.Metadata["rejection_reason"], head) {
+		t.Fatalf("the requeue's reason %q does not name the head found", b.Metadata["rejection_reason"])
+	}
+	readsNoGitHub(t, d)
+}
+
+// While the saved read is at a head the validated one descends from, a fetch
+// of the PR's branch or a read of its tip that fails sends nothing back, and
+// the next run decides again.
+func TestAFailedReadOfTheBranchSendsNothingBack(t *testing.T) {
+	for name, fail := range map[string]func(*checkout){
+		"fetch": func(c *checkout) { c.fetchErr = errors.New("git fetch: the remote hung up") },
+		"tip":   func(c *checkout) { c.tipErr = errors.New("origin/" + branch + " names no commit in the clone") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := newLand(t)
+			d.refresh(t)
+			d.co.descends[other] = []string{head}
+			d.co.tip = head
+			fail(d.co)
+			d.edit(t, func(b *fake.Bead) { b.Metadata["pr_head_sha"] = other })
+			o := d.run(t)
+			is(t, o, pr.ActRetry)
+			if !strings.Contains(o.Detail, "nothing is sent back") {
+				t.Fatalf("the failed read's outcome says %q", o.Detail)
+			}
+			if ws := d.runWrites(); len(ws) != 0 {
+				t.Fatalf("a failed read of the branch wrote %+v", ws)
+			}
+			d.co.fetchErr, d.co.tipErr = nil, nil
+			is(t, d.run(t), pr.ActRequeued)
+		})
 	}
 }
 
@@ -1724,6 +1785,7 @@ func TestAnActWaitsWhileARecordWriteHoldsTheLockThenDecidesOnTheWholeRecord(t *t
 	d.refresh(t)
 	d.pr.Facts.HeadRefOid = other // the refinery validated a new head and pushed it
 	d.co.descends[other] = []string{head}
+	d.co.tip = other
 	between, goOn := make(chan struct{}), make(chan struct{})
 	n := 0
 	d.store.BeforeUpdate = func(string, []string) error {

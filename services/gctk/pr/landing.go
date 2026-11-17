@@ -1271,13 +1271,16 @@ func (u *run) dispose(x Disposal, out RunOutcome) RunOutcome {
 
 // decideHeadChanged decides a PR the saved read finds open at a head other than
 // the one the refinery validated. A saved head the validated one descends from
-// is a read made before the refinery pushed and recorded that head, which the
-// PR watch reads again, since the read is not current for the bead: nothing is
-// sent back on it, and the record's withdrawals are carried out alone. Any
-// other head goes back to the refinery, after the withdrawals, keeping the
-// marker while one is still open or a review run is attached, and until the
-// hand-over has woken a refinery that nothing else tells of the head
-// (handOver).
+// is a read made before the refinery pushed and recorded that head, or a
+// branch a person reset to that ancestor, so the act fetches the PR's branch
+// and reads its tip. A tip that contains the validated head says the push
+// landed and the read is older than it, which the PR watch reads again, since
+// the read is not current for the bead: nothing is sent back on it, and the
+// record's withdrawals are carried out alone. A tip that does not contain it
+// is a branch reset or rewritten off the validated head, which goes back as
+// any other head does, and a fetch or a read that does not answer sends
+// nothing back, so the next run decides again. Any other head goes back to the
+// refinery after the withdrawals (sendBack).
 func (u *run) decideHeadChanged(s state, saved *SavedRead) plan {
 	r, seen := s.rec, saved.PR.Head
 	older, err := u.holds(r.Head, seen)
@@ -1285,40 +1288,81 @@ func (u *run) decideHeadChanged(s state, saved *SavedRead) plan {
 		return none(s, ActRetry, fmt.Sprintf("whether the validated head %s descends from %s, the head the saved read "+
 			"found, did not read, so nothing is sent back; the next run decides again: %v", r.Head, seen, err))
 	}
-	if older {
-		return u.withCarry(s, saved, none(s, ActChecked, fmt.Sprintf("the saved read is at %s, a head the validated %s "+
-			"descends from, so it was read before the refinery recorded its head, and the PR watch reads the PR again "+
-			"before anything is sent back", seen, r.Head)))
+	if !older {
+		return u.withCarry(s, saved, doing(func(ctx context.Context, c carriedOut) RunOutcome {
+			return u.sendBack(ctx, s, seen, "", c)
+		}))
 	}
 	return u.withCarry(s, saved, doing(func(ctx context.Context, c carriedOut) RunOutcome {
-		reason := fmt.Sprintf("PR head changed after refinery validation (%s -> %s); quality gates must run again", r.Head, seen)
-		detail := withNote(reason, c.note)
-		if !c.held && len(s.runs) > 0 {
-			detail = withNote(reason+"; "+onRuns(s), c.note)
+		at := fmt.Sprintf("the saved read is at %s, a head the validated %s descends from", seen, r.Head)
+		retry := func(why string) RunOutcome {
+			return RunOutcome{Bead: s.id, Action: ActRetry,
+				Detail: withNote(at+", and "+why+", so nothing is sent back; the next run decides again", c.note)}
 		}
-		// The requeue keeps the marker while a withdrawal or an attached run
-		// holds the changed head, and for the hand-over that wakes the
-		// refinery once the requeue lands, or that reads what holds the bead
-		// again when this read fails.
-		watched := c.held || len(s.runs) > 0
-		var holds []hold
-		var unread error
-		if !watched {
-			holds, unread = u.mergeHolds(s)
+		if err := u.fetchBranch(ctx, s.branch); err != nil {
+			return retry(fmt.Sprintf("origin/%s did not fetch: %v", s.branch, err))
 		}
-		keep := watched || unread != nil || len(holds) > 0
-		w := u.Ledger.Write(s.id)
-		record.Requeue(w, r.URL, seen, reason, keep)
-		done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: detail})
-		if done.Action != ActRequeued || !keep || watched {
-			return done
+		tip, err := u.Checkout.Tip(s.branch)
+		if err != nil {
+			return retry("the branch's tip did not read: " + err.Error())
 		}
-		s.status = "open"
-		if unread != nil {
-			return u.handOverLater(s, detail, "what holds the bead did not read, so the next run reads it again: "+unread.Error())
+		landed, err := u.holds(tip, r.Head)
+		if err != nil {
+			return retry(fmt.Sprintf("whether origin/%s at %s contains the validated head did not read: %v", s.branch, tip, err))
 		}
-		return u.wakeAndSettle(ctx, s, holds, ActRequeued, detail)
+		if !landed {
+			return u.sendBack(ctx, s, seen, fmt.Sprintf("origin/%s is at %s, which does not contain the validated head", s.branch, tip), c)
+		}
+		action := ActChecked
+		if c.failed {
+			action = ActRetry
+		}
+		return RunOutcome{Bead: s.id, Action: action, Detail: withNote(fmt.Sprintf("%s, and origin/%s at %s contains the "+
+			"validated head, so it was read before the refinery recorded its head, and the PR watch reads the PR again "+
+			"before anything is sent back", at, s.branch, tip), c.note)}
 	}))
+}
+
+// sendBack sends the bead back to the refinery at seen, the head the saved
+// read found in place of the one the refinery validated, once the act has
+// carried out the record's withdrawals as c says. The bead keeps its marker
+// while a withdrawal is still open or a review run is attached, and until the
+// hand-over has woken a refinery that nothing else tells of the head
+// (handOver). shown, when set, says for the outcome what showed that the head
+// is not the validated one.
+func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carriedOut) RunOutcome {
+	r := s.rec
+	reason := fmt.Sprintf("PR head changed after refinery validation (%s -> %s); quality gates must run again", r.Head, seen)
+	said := reason
+	if shown != "" {
+		said = reason + "; " + shown
+	}
+	detail := withNote(said, c.note)
+	if !c.held && len(s.runs) > 0 {
+		detail = withNote(said+"; "+onRuns(s), c.note)
+	}
+	// The requeue keeps the marker while a withdrawal or an attached run holds
+	// the changed head, and for the hand-over that wakes the refinery once the
+	// requeue lands, or that reads what holds the bead again when this read
+	// fails.
+	watched := c.held || len(s.runs) > 0
+	var holds []hold
+	var unread error
+	if !watched {
+		holds, unread = u.mergeHolds(s)
+	}
+	keep := watched || unread != nil || len(holds) > 0
+	w := u.Ledger.Write(s.id)
+	record.Requeue(w, r.URL, seen, reason, keep)
+	done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: detail})
+	if done.Action != ActRequeued || !keep || watched {
+		return done
+	}
+	s.status = "open"
+	if unread != nil {
+		return u.handOverLater(s, detail, "what holds the bead did not read, so the next run reads it again: "+unread.Error())
+	}
+	return u.wakeAndSettle(ctx, s, holds, ActRequeued, detail)
 }
 
 // decideAtHead decides a PR the saved read finds open at the validated head. A
