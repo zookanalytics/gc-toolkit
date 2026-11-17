@@ -506,7 +506,7 @@ func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, co
 		}
 		if len(refused) > 0 {
 			// GitHub refused: a person dismisses them, or rules otherwise.
-			if err := u.Gates.File(s.id, withdrawRefusedKey, refusedWithdrawal(s, p, w, refused, why)); err != nil {
+			if err := u.Gates.File(ctx, s.id, withdrawRefusedKey, refusedWithdrawal(s, p, w, refused, why)); err != nil {
 				return waits(fmt.Sprintf("GitHub refused to dismiss %s, and the gate %s did not file; the next run files it: %v",
 					approvalNames(refused), withdrawRefusedKey, err), true)
 			}

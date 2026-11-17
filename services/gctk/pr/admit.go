@@ -45,6 +45,16 @@ type Runs interface {
 // one head ended without a result.
 const runFailedKey = "review-run-failed"
 
+// pourReserve is how much of its bound an act must have left to start a review
+// run's pour. The pour is the one call an act does not stop: gc formula cook
+// --attach makes the run before it adds the edge that attaches it, and a cook
+// stopped between the two leaves a run whose steps the pools take and that the
+// order never reads, so the next run pours a second. A pour is a few store
+// calls, which take seconds, so a pour started with this much left ends inside
+// the bound. One that does not, such as a cook the store keeps waiting, holds
+// the record lock until it ends or the order's timeout ends the run.
+const pourReserve = 10 * time.Second
+
 // admit decides the review run the record s read is owed: the pour, or the
 // gate that asks a person once two runs at its head ended without a result,
 // or why none is poured. It returns false when the bead is owed no run, so the
@@ -84,7 +94,7 @@ func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 		return checked("no review run is poured, because how its earlier runs ended did not read; the next run reads it: " + err.Error())
 	}
 	if len(failed) == 2 {
-		return doing(func(_ context.Context, c carriedOut) RunOutcome { return u.runFailed(s, failed, c.note) }), true
+		return doing(func(ctx context.Context, c carriedOut) RunOutcome { return u.runFailed(ctx, s, failed, c.note) }), true
 	}
 	vars, err := reviewVars(u.Refinery)
 	if err != nil {
@@ -94,7 +104,12 @@ func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 	if u.Runs == nil {
 		return checked("no review run is poured, because nothing pours one here: " + why)
 	}
-	return doing(func(_ context.Context, c carriedOut) RunOutcome {
+	return doing(func(ctx context.Context, c carriedOut) RunOutcome {
+		if left, ok := ctx.Deadline(); ok && time.Until(left) < pourReserve {
+			return RunOutcome{Bead: s.id, Action: ActLeft, Detail: withNote(fmt.Sprintf("the act had less than the %s "+
+				"a review run's pour reserves left of its bound, so the next run pours the run at %s", pourReserve,
+				s.rec.Head), c.note)}
+		}
 		root, err := u.Runs.Pour(reviewFormula, s.id, vars)
 		if err != nil {
 			return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(fmt.Sprintf(
@@ -226,7 +241,7 @@ func closedTime(b *ledger.Record) (time.Time, error) {
 // validated head that ended without a result. The gate holds the bead, so no
 // run is poured until a person clears it, and then the next run of the order
 // pours one more.
-func (u *run) runFailed(s state, failed []review.Ending, note string) RunOutcome {
+func (u *run) runFailed(ctx context.Context, s state, failed []review.Ending, note string) RunOutcome {
 	var parts []string
 	for _, e := range failed {
 		parts = append(parts, fmt.Sprintf("%s, where %s", e.Root, e.How))
@@ -235,7 +250,7 @@ func (u *run) runFailed(s state, failed []review.Ending, note string) RunOutcome
 		"The landing order pours a run that ends without a result again once, so this is the city's machinery failing at "+
 		"this head, not a ruling the PR (%s) waits on. Look at the two runs and fix what stopped them, then clear this "+
 		"gate, and the landing order pours one more run.", s.id, s.rec.Head, s.rec.Target, strings.Join(parts, "; and "), s.rec.URL)
-	if err := u.Gates.File(s.id, runFailedKey, message); err != nil {
+	if err := u.Gates.File(ctx, s.id, runFailedKey, message); err != nil {
 		return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(
 			fmt.Sprintf("%s: the human gate did not file; the next run files it: %v", runFailedKey, err), note)}
 	}

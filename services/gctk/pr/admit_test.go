@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -82,6 +83,28 @@ func newAdmit(t *testing.T) *admitting {
 	p := &pours{store: d.store, t: t}
 	d.l.Runs = p
 	return &admitting{land: d, runs: p}
+}
+
+// A review run's pour is the one call an act does not stop, since a cook
+// stopped before it attaches its run leaves a run the order never reads, so an
+// act starts it only while the pour's reserve of its bound is left. An act
+// with less left pours nothing and fails no run, and the next run, whose act
+// has its whole bound, pours it.
+func TestAPourStartsOnlyWhileItsReserveIsLeft(t *testing.T) {
+	d := newAdmit(t)
+	d.refresh(t)
+	out := d.reconcile(t, pr.Options{Stop: 5 * time.Second})
+	if len(out) != 1 {
+		t.Fatalf("one record, %d outcomes: %+v", len(out), out)
+	}
+	is(t, out[0], pr.ActLeft)
+	if !strings.Contains(out[0].Detail, "reserves") || d.runs.count() != 0 {
+		t.Fatalf("an act short of the reserve says %q and poured %d runs", out[0].Detail, d.runs.count())
+	}
+	is(t, d.run(t), pr.ActPoured)
+	if n := d.runs.count(); n != 1 {
+		t.Fatalf("the next run poured %d runs, want 1", n)
+	}
 }
 
 // end closes the run, as a run's end closes its root, with the outcome given,

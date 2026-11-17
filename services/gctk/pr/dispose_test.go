@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -41,7 +42,7 @@ type rehome struct {
 	err   error
 }
 
-func (r *rehome) Close(x pr.Disposal) error {
+func (r *rehome) Close(_ context.Context, x pr.Disposal) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	d := x.Disposition
@@ -153,7 +154,7 @@ func TestTheDispositionWriterRunsWithTheRecordLockFree(t *testing.T) {
 	d, _ := retired(t)
 	d.pr.Facts.State = "CLOSED"
 	free := false
-	d.l.Dispositions = closeFunc(func() error {
+	d.l.Dispositions = closeFunc(func(context.Context) error {
 		release, err := record.Lock(d.l.Dir, 0)
 		if err == nil {
 			free = true
@@ -170,10 +171,40 @@ func TestTheDispositionWriterRunsWithTheRecordLockFree(t *testing.T) {
 	}
 }
 
-// closeFunc is a disposition writer that runs a function.
-type closeFunc func() error
+// closeFunc is a disposition writer that runs a function with the context it
+// is stopped by.
+type closeFunc func(context.Context) error
 
-func (f closeFunc) Close(pr.Disposal) error { return f() }
+func (f closeFunc) Close(ctx context.Context, _ pr.Disposal) error { return f(ctx) }
+
+// A writer that does not answer is stopped at the act's bound, since it takes
+// the record lock itself, and the next run hands the close over again.
+func TestADispositionWriterThatHangsIsStoppedAtTheActsBound(t *testing.T) {
+	d, r := retired(t)
+	d.pr.Facts.State = "CLOSED"
+	d.refresh(t)
+	d.l.Dispositions = closeFunc(func(ctx context.Context) error {
+		<-ctx.Done()
+		return fmt.Errorf("bead-rehome.sh was stopped: %w", ctx.Err())
+	})
+	start := time.Now()
+	out := d.reconcile(t, pr.Options{Stop: 300 * time.Millisecond})
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("a stopped writer took %s", elapsed.Round(time.Millisecond))
+	}
+	if len(out) != 1 {
+		t.Fatalf("one record, %d outcomes: %+v", len(out), out)
+	}
+	is(t, out[0], pr.ActRetry)
+	if !strings.Contains(out[0].Detail, "stopped") {
+		t.Fatalf("a stopped writer says %q", out[0].Detail)
+	}
+	if b := d.row(t); b.Status != "blocked" {
+		t.Fatalf("a stopped writer left the bead %s", b.Status)
+	}
+	d.l.Dispositions = r
+	is(t, d.once(t), pr.ActDisposed)
+}
 
 // A close the writer holds for now, as the ruling's open conversation holds it,
 // leaves the bead blocked with its marker, and the next run tries it again. It
@@ -239,9 +270,9 @@ type gap struct {
 	once   sync.Once
 }
 
-func (g *gap) Close(x pr.Disposal) error {
+func (g *gap) Close(ctx context.Context, x pr.Disposal) error {
 	g.once.Do(g.change)
-	return g.rehome.Close(x)
+	return g.rehome.Close(ctx, x)
 }
 
 // A release that lands once the act has freed the record lock, as

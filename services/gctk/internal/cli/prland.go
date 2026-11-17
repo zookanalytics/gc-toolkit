@@ -39,10 +39,11 @@ const runYield = 200 * time.Millisecond
 
 // The run's bounds (specs/tk-1tfzr71.149/design.md, section 5): no act starts
 // more than actWindow into a run, and each act is stopped at actStop, with
-// whatever GitHub call or fetch it is making, and waits for the record lock no
-// longer. A run decides from the store and reads no record's PR to decide, so
-// it takes every record that owes an act, in a shuffled order, and a slow act
-// holds the next one back by actStop at most.
+// whatever it is making of the calls pr.Options names, and waits for the
+// record lock no longer. A run decides from the store and reads no record's PR
+// to decide, so it takes every record that owes an act, in a shuffled order,
+// and a slow act holds the next one back by actStop at most, unless it started
+// a review run's pour, the one call the stop does not end (pr's pourReserve).
 const (
 	actWindow = 45 * time.Second
 	actStop   = 30 * time.Second
@@ -98,9 +99,15 @@ on its bead, reading no GitHub to decide:
 
 The records that owe an act are taken in a shuffled order. No act starts more
 than 45 seconds into the run, and each act is stopped at 30 seconds, with
-whatever GitHub call or fetch it is making: a fetch gets a SIGTERM to git's
+whatever GitHub call, fetch, store read or write, human gate's filing or
+refinery's wake it is making, and with the disposition writer it hands a
+retired PR's bead to once it frees the lock: a fetch gets a SIGTERM to git's
 process group, so git removes the lock files it holds in the clone, and a kill
-only if it still runs 5 seconds later. Each act takes the store's record lock,
+only if it still runs 5 seconds later. A review run's pour is the one call the
+stop does not end, since a cook stopped before it attaches its run leaves a
+run that this order never reads: an act starts a pour only while 10 seconds of
+its 30 remain, and otherwise leaves it to the next run, and a pour runs to its
+end. Each act takes the store's record lock,
 waiting no longer than its 30 seconds while another writer holds it, reads
 its record again under it, decides again from that read, and writes guarded on
 the status and assignee it read there. An act that did not complete, such as a
@@ -349,7 +356,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		},
 		Mark:         func() (string, error) { return cityMark(rt) },
 		Checkout:     checkout{dir: dir},
-		Gates:        gates{rt: rt},
+		Gates:        actGates{rt: rt},
 		Runs:         runs{rt: rt.In(dir)},
 		Dispositions: dispositions{rt: rt.As(refinery)},
 		Audit:        audit,
@@ -363,15 +370,16 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 // calls a polecat's hand-off to the refinery makes (work-submit.sh). It makes
 // the nudge whether or not the wake landed, since a session that is up gets
 // its turn from the nudge alone, and an error names each call that did not
-// exit 0.
+// exit 0. Both calls stop once ctx ends.
 type wakes struct{ rt gascity.Runtime }
 
-func (w wakes) Wake(session, message string) error {
+func (w wakes) Wake(ctx context.Context, session, message string) error {
+	rt := w.rt.Within(ctx)
 	var failed []string
-	if f := w.rt.Wake(session).Failure(); f != "" {
+	if f := rt.Wake(session).Failure(); f != "" {
 		failed = append(failed, "gc session wake "+session+": "+f)
 	}
-	if f := w.rt.Nudge(session, message).Failure(); f != "" {
+	if f := rt.Nudge(session, message).Failure(); f != "" {
 		failed = append(failed, "gc session nudge "+session+": "+f)
 	}
 	if len(failed) > 0 {
@@ -507,18 +515,18 @@ func (r runs) Pour(formula, bead string, vars map[string]string) (string, error)
 // the ruling the run read there. The script's exit 4 (the bead is not as the
 // run judged it, or a write did not land, as when the bead moved since the
 // script's own read) and exit 5 (the close is held, as by an open wait) are a
-// close held for now. Any other failure, or a script that did not run, is an
-// error carrying why.
+// close held for now. Any other failure, or a script that did not run, such as
+// one stopped once ctx ended, is an error carrying why.
 type dispositions struct{ rt gascity.Runtime }
 
-func (d dispositions) Close(x pr.Disposal) error {
+func (d dispositions) Close(ctx context.Context, x pr.Disposal) error {
 	r := x.Disposition
 	args := []string{"--origin", x.Bead, "--successor", r.Successor, "--kind", r.Kind, "--note", x.Note}
 	if r.Store != "" {
 		args = append(args, "--successor-store", r.Store)
 	}
 	args = append(args, "--if-status", x.Status, "--if-assignee", x.Assignee, "--if-ruled")
-	res := d.rt.Script("bead-rehome.sh", args...)
+	res := d.rt.Within(ctx).Script("bead-rehome.sh", args...)
 	switch {
 	case res.Err == nil && res.Code == 0:
 		return nil
@@ -540,4 +548,14 @@ func (g gates) File(subject, key, message string) error {
 		return fmt.Errorf("human gate on %s [%s]: %s", subject, key, f)
 	}
 	return nil
+}
+
+// actGates files the landing order's human gates through gates, stopped once
+// the act's context ends. human-gate.sh files a gate and its edge onto the bead
+// in one create, so a filing the stop ends has filed the whole gate or none,
+// and the next run finds the open gate or files it.
+type actGates struct{ rt gascity.Runtime }
+
+func (g actGates) File(ctx context.Context, subject, key, message string) error {
+	return gates{rt: g.rt.Within(ctx)}.File(subject, key, message)
 }

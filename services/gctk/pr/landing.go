@@ -85,16 +85,18 @@ type Audit interface {
 	Reaudit(branch, seenBy string, pages []string) (string, error)
 }
 
-// Gates files a human gate on a bead under a key, or finds the one open there.
+// Gates files a human gate on a bead under a key, or finds the one open there,
+// stopped once ctx ends.
 type Gates interface {
-	File(subject, key, message string) error
+	File(ctx context.Context, subject, key, message string) error
 }
 
 // Waker wakes a session and nudges it with a message, so a session that is
 // asleep starts and one that is up gets a turn, as a polecat's hand-off to the
-// refinery does (work-submit.sh). An error says which of the two did not land.
+// refinery does (work-submit.sh), stopped once ctx ends. An error says which
+// of the two did not land.
 type Waker interface {
-	Wake(session, message string) error
+	Wake(ctx context.Context, session, message string) error
 }
 
 // Dispositions is the writer of a close that is not a landing, bead-rehome.sh,
@@ -106,9 +108,10 @@ type Waker interface {
 // the bead only while the bead still has the status and assignee the run
 // judged it under and still records the ruling the run read. A close the writer
 // holds for now, because a wait on the bead is still open or the bead moved
-// since the run judged it or since the writer read it, is a *HeldClose.
+// since the run judged it or since the writer read it, is a *HeldClose. The
+// writer is stopped once ctx ends.
 type Dispositions interface {
-	Close(x Disposal) error
+	Close(ctx context.Context, x Disposal) error
 }
 
 // Disposal is the close a run owes a bead whose PR closed under a ruling's
@@ -316,7 +319,8 @@ const (
 	// the record knows.
 	ActSkipped = "skipped"
 	// ActLeft: the run had used its window before it reached the record's act,
-	// so the next run acts on it.
+	// or the act had less of its bound left than a review run's pour reserves
+	// (pourReserve), so the next run acts on it.
 	ActLeft = "left"
 	// ActFailed: a write or a read of the store failed in a way the next run may
 	// not clear.
@@ -325,7 +329,12 @@ const (
 
 // Options bound one run: Window is how long into the run it starts another
 // act, and Stop how long one act runs before it is stopped, with whatever
-// GitHub call or fetch it is making. A bound of zero is no bound.
+// GitHub call, fetch, store read or write, human gate's filing or refinery's
+// wake it is making. A review run's pour is the one call an act does not stop,
+// since a cook stopped before it attaches its run leaves a run the order never
+// reads, so an act starts a pour only while pourReserve of its bound is left.
+// The disposition writer a closed retired PR's bead goes to once the act has
+// freed the lock runs inside the act's bound too. A bound of zero is no bound.
 type Options struct {
 	Window time.Duration
 	Stop   time.Duration
@@ -402,11 +411,13 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 			}
 			continue
 		}
+		ctx, cancel := bounded(o.Stop)
 		u.landed, u.disposal = nil, nil
-		out := u.one(id, o.Stop)
+		out := u.one(ctx, id, o.Stop)
 		if u.disposal != nil {
-			out = u.dispose(*u.disposal, out)
+			out = u.dispose(ctx, *u.disposal, out, o.Stop)
 		}
+		cancel()
 		if u.landed != nil {
 			out.Detail += u.audit(*u.landed, start, o.Window)
 		}
@@ -819,15 +830,15 @@ func (u *run) state(l *ledger.Ledger, r *ledger.Record) (state, *RunOutcome) {
 }
 
 // one acts on one record: under the record lock it reads the record afresh,
-// decides again from that read, and makes the act it owes, stopped at stop.
-// A lock that does not come free inside the act's bound is an act that did not
-// complete.
-func (u *run) one(id string, stop time.Duration) RunOutcome {
-	ctx, cancel := context.Background(), context.CancelFunc(func() {})
-	if stop > 0 {
-		ctx, cancel = context.WithTimeout(ctx, stop)
-	}
-	defer cancel()
+// decides again from that read, and makes the act it owes, stopped once ctx,
+// which ends stop after the act starts, ends, its reads and writes of the
+// store among what the stop ends. A lock that does not come free inside the
+// act's bound, or an act the stop ended, is an act that did not complete.
+func (u *run) one(ctx context.Context, id string, stop time.Duration) RunOutcome {
+	// Acts run one at a time, so the run's ledger is the act's for its length.
+	unbound := u.Ledger
+	u.Ledger = unbound.Within(ctx)
+	defer func() { u.Ledger = unbound }()
 	wait := u.Wait
 	if stop > 0 && (wait <= 0 || stop < wait) {
 		wait = stop
@@ -852,10 +863,20 @@ func (u *run) one(id string, stop time.Duration) RunOutcome {
 		return p.out
 	}
 	out := p.act(ctx, carriedOut{})
-	if ctx.Err() != nil && out.Action == ActRetry {
+	if ctx.Err() != nil && (out.Action == ActRetry || out.Action == ActFailed) {
+		out.Action = ActRetry
 		out.Detail = fmt.Sprintf("the act was stopped at its %s: %s", stop, out.Detail)
 	}
 	return out
+}
+
+// bounded is a context that ends stop from now, or one that never ends when
+// stop is zero.
+func bounded(stop time.Duration) (context.Context, context.CancelFunc) {
+	if stop > 0 {
+		return context.WithTimeout(context.Background(), stop)
+	}
+	return context.Background(), func() {}
 }
 
 // decide is what the record s read owes.
@@ -939,8 +960,8 @@ func (u *run) decideOpen(s state) plan {
 	case s.rec.Result == record.HeadChanged && len(s.runs) > 0:
 		return none(s, ActChecked, onRuns(s))
 	case s.rec.Result == record.HeadChanged:
-		return doing(func(context.Context, carriedOut) RunOutcome {
-			return u.handOver(s, ActSettled, "its changed head waits on the refinery's validation")
+		return doing(func(ctx context.Context, _ carriedOut) RunOutcome {
+			return u.handOver(ctx, s, ActSettled, "its changed head waits on the refinery's validation")
 		})
 	case s.rec.Result == record.Pending && len(recordGaps(s.rec, s.branch)) == 0:
 		return doing(func(ctx context.Context, c carriedOut) RunOutcome {
@@ -1030,7 +1051,7 @@ func (u *run) decideRequeued(s state) plan {
 			}
 			return none(s, action, "its changed head waits on the refinery, behind the withdrawal: "+note)
 		}
-		return u.withCarry(s, saved, doing(func(_ context.Context, c carriedOut) RunOutcome {
+		return u.withCarry(s, saved, doing(func(ctx context.Context, c carriedOut) RunOutcome {
 			if c.held || len(s.runs) > 0 {
 				action := ActChecked
 				if c.failed {
@@ -1042,7 +1063,7 @@ func (u *run) decideRequeued(s state) plan {
 				}
 				return RunOutcome{Bead: s.id, Action: action, Detail: detail}
 			}
-			return u.handOver(s, ActSettled, withNote("its changed head waits on the refinery's validation", c.note))
+			return u.handOver(ctx, s, ActSettled, withNote("its changed head waits on the refinery's validation", c.note))
 		}))
 	case "CLOSED":
 		return u.excepting(s, record.ClosedUnmerged, "Pull request "+r.URL+" closed without merging.",
@@ -1067,8 +1088,8 @@ func (u *run) decideBlocked(s state) plan {
 		if r.Result == record.CloseRefused {
 			message = refusedMessage(s.id, firstOf(r.BlockedReason, "A verified merge's close was refused"))
 		}
-		return doing(func(context.Context, carriedOut) RunOutcome {
-			return u.gate(s, r.Result, message,
+		return doing(func(ctx context.Context, _ carriedOut) RunOutcome {
+			return u.gate(ctx, s, r.Result, message,
 				RunOutcome{Bead: s.id, Action: ActExcepted, Detail: r.Result + ": the gate an earlier run did not file is filed"})
 		})
 	}
@@ -1227,12 +1248,14 @@ func (u *run) moot(id, status, assignee, note string) error {
 // answer after it. A close the writer holds for now, such as one an open wait
 // on the bead holds, or the close of a bead released or ruled again since the
 // act judged it, waits for the next run, which reads the bead again under the
-// lock, so it reports as checked.
-func (u *run) dispose(x Disposal, out RunOutcome) RunOutcome {
+// lock, so it reports as checked. The writer takes the record lock itself, so
+// it runs inside the act's bound, stopped once ctx, the act's, ends, and a
+// writer the stop ended is an act that did not complete.
+func (u *run) dispose(ctx context.Context, x Disposal, out RunOutcome, stop time.Duration) RunOutcome {
 	if u.Dispositions == nil {
 		return RunOutcome{Bead: x.Bead, Action: ActFailed, Detail: out.Detail + ", but no disposition writer is set"}
 	}
-	err := u.Dispositions.Close(x)
+	err := u.Dispositions.Close(ctx, x)
 	var held *HeldClose
 	switch {
 	case err == nil:
@@ -1240,6 +1263,9 @@ func (u *run) dispose(x Disposal, out RunOutcome) RunOutcome {
 	case errors.As(err, &held):
 		return RunOutcome{Bead: x.Bead, Action: ActChecked,
 			Detail: out.Detail + ", which holds its close for now, and the next run reads it again: " + held.Why}
+	case ctx.Err() != nil:
+		return RunOutcome{Bead: x.Bead, Action: ActRetry, Detail: fmt.Sprintf(
+			"%s, which was stopped at its %s, and the next run hands it over again: %v", out.Detail, stop, err)}
 	}
 	return RunOutcome{Bead: x.Bead, Action: ActFailed, Detail: out.Detail + ", which did not answer: " + err.Error()}
 }
@@ -1265,7 +1291,7 @@ func (u *run) decideHeadChanged(s state, saved *SavedRead) plan {
 			"descends from, so it was read before the refinery recorded its head, and the PR watch reads the PR again "+
 			"before anything is sent back", seen, r.Head)))
 	}
-	return u.withCarry(s, saved, doing(func(_ context.Context, c carriedOut) RunOutcome {
+	return u.withCarry(s, saved, doing(func(ctx context.Context, c carriedOut) RunOutcome {
 		reason := fmt.Sprintf("PR head changed after refinery validation (%s -> %s); quality gates must run again", r.Head, seen)
 		detail := withNote(reason, c.note)
 		if !c.held && len(s.runs) > 0 {
@@ -1292,7 +1318,7 @@ func (u *run) decideHeadChanged(s state, saved *SavedRead) plan {
 		if unread != nil {
 			return u.handOverLater(s, detail, "what holds the bead did not read, so the next run reads it again: "+unread.Error())
 		}
-		return u.wakeAndSettle(s, holds, ActRequeued, detail)
+		return u.wakeAndSettle(ctx, s, holds, ActRequeued, detail)
 	}))
 }
 
@@ -1463,7 +1489,7 @@ func (u *run) land(ctx context.Context, s state, commit, at string) RunOutcome {
 	if err != nil || !on {
 		if r.Result == record.Merged && err == nil {
 			why := fmt.Sprintf("the recorded merge commit %s is no longer on origin/%s", commit, r.Target)
-			return u.except(s, record.EvidenceContradiction, why, contradictionMessage(s, why))
+			return u.except(ctx, s, record.EvidenceContradiction, why, contradictionMessage(s, why))
 		}
 		why := fmt.Sprintf("PR merge commit %s is not reachable from origin/%s; the next run acts again", commit, r.Target)
 		if err != nil {
@@ -1486,7 +1512,7 @@ func (u *run) land(ctx context.Context, s state, commit, at string) RunOutcome {
 		return RunOutcome{Bead: s.id, Action: ActMoved,
 			Detail: "the bead moved since this run read it, so nothing landed: the merge at " + short(commit) + " is verified"}
 	case closeRefused(err):
-		return u.refused(s, landing, err)
+		return u.refused(ctx, s, landing, err)
 	}
 	// A write the store failed says nothing about the close, so the record
 	// stands and the next run tries again.
@@ -1564,7 +1590,7 @@ func closeRefused(err error) bool { return strings.Contains(err.Error(), "cannot
 // gate, the exception CloseRefused, with the merge's evidence recorded: what
 // holds the close is no fact the landing order can change, so a person
 // resolves it.
-func (u *run) refused(s state, l record.Landing, why error) RunOutcome {
+func (u *run) refused(ctx context.Context, s state, l record.Landing, why error) RunOutcome {
 	said := why.Error()
 	if i := strings.Index(said, "cannot close"); i >= 0 {
 		said = said[i:]
@@ -1578,7 +1604,7 @@ func (u *run) refused(s state, l record.Landing, why error) RunOutcome {
 		return done
 	}
 	s.status = "blocked"
-	return u.gate(s, record.CloseRefused, refusedMessage(s.id, reason), done)
+	return u.gate(ctx, s, record.CloseRefused, refusedMessage(s.id, reason), done)
 }
 
 // refusedMessage is the message of a CloseRefused gate: what merged, what bd
@@ -1611,13 +1637,13 @@ func contradictionMessage(s state, why string) string {
 
 // excepting is the act that records an exception and files its gate (except).
 func (u *run) excepting(s state, result, reason, message string) plan {
-	return doing(func(context.Context, carriedOut) RunOutcome { return u.except(s, result, reason, message) })
+	return doing(func(ctx context.Context, _ carriedOut) RunOutcome { return u.except(ctx, s, result, reason, message) })
 }
 
 // except records the exception with the bead blocked, guarded on what the run
 // read, then files the human gate keyed by it and clears the marker. A bead that
 // moved since the read gets neither the record nor the gate.
-func (u *run) except(s state, result, reason, message string) RunOutcome {
+func (u *run) except(ctx context.Context, s state, result, reason, message string) RunOutcome {
 	w := u.Ledger.Write(s.id)
 	record.Except(w, result, reason)
 	done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: result + ": " + reason})
@@ -1625,14 +1651,14 @@ func (u *run) except(s state, result, reason, message string) RunOutcome {
 		return done
 	}
 	s.status = "blocked"
-	return u.gate(s, result, message, done)
+	return u.gate(ctx, s, result, message, done)
 }
 
 // gate files the exception's human gate on a bead the record already holds
 // blocked, then clears the marker. A gate that does not file leaves the
 // marker, and the exception the record holds, so the next run files it.
-func (u *run) gate(s state, result, message string, done RunOutcome) RunOutcome {
-	if err := u.Gates.File(s.id, result, message); err != nil {
+func (u *run) gate(ctx context.Context, s state, result, message string, done RunOutcome) RunOutcome {
+	if err := u.Gates.File(ctx, s.id, result, message); err != nil {
 		return RunOutcome{Bead: s.id, Action: ActRetry,
 			Detail: fmt.Sprintf("%s: the human gate did not file; the next run files it: %v", result, err)}
 	}

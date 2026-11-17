@@ -51,16 +51,20 @@
 # minutes at the most, the PR watch's two and each run's start at the next lane
 # pass included (specs/tk-1tfzr71.149/design.md, section 6). A run takes the
 # records that owe an act in a shuffled order, starts none more than 45 seconds
-# in, and stops each at 30 seconds with whatever GitHub call or fetch it is
+# in, and stops each at 30 seconds with whatever GitHub call, fetch, store read
+# or write, human gate's filing, refinery's wake or disposition writer it is
 # making: a fetch gets a SIGTERM to git's process group, so git removes the
 # lock files it holds in the checkout, and a kill only if it still runs 5
-# seconds later. An act that fails or is stopped records nothing on the bead:
-# its difference stays, the next run acts on it, and the run exits 2, so Gas
-# City's run record holds the failure. `timeout` holds the 45 seconds of
-# starting acts, the last act's 30 seconds and its fetch's 5, the listing and
-# the seed audit's check, which starts only inside the 45 seconds; gctk's cli
-# test asserts the bounds sit below it. Tune from city.toml
-# [[orders.overrides]].
+# seconds later. A review run's pour is the one call the stop does not end,
+# since a cook stopped before it attaches its run leaves a run this order never
+# reads, so an act starts a pour only while 10 seconds of its 30 remain. An act
+# that fails or is stopped records nothing on the bead: its difference stays,
+# the next run acts on it, and the run exits 2, so Gas City's run record holds
+# the failure. `timeout` holds the 45 seconds of starting acts, the last act's
+# 30 seconds and its fetch's 5, the listing and the seed audit's check, which
+# starts only inside the 45 seconds; gctk's cli test asserts the bounds sit
+# below it. A pour that runs past its act's 30 seconds is the one call only
+# `timeout` ends. Tune from city.toml [[orders.overrides]].
 [order]
 description = "Landing order: act from the beads on each PR the refinery recorded as pending, merge a ready one on its own read with its head pinned, close its bead once the merge commit is on the target, and keep each owned PR's labels equal to what the store derives"
 trigger = "cooldown"

@@ -157,15 +157,24 @@ func (d *land) timed() *clock {
 	return c
 }
 
-// gates records each gate filed, and fails a filing when err is set.
+// gates records each gate filed, fails a filing when err is set, and while
+// stall is set answers no filing until the act's context ends.
 type gates struct {
 	mu       sync.Mutex
 	filed    []string
 	messages []string
 	err      error
+	stall    bool
 }
 
-func (g *gates) File(subject, key, message string) error {
+func (g *gates) File(ctx context.Context, subject, key, message string) error {
+	g.mu.Lock()
+	stall := g.stall
+	g.mu.Unlock()
+	if stall {
+		<-ctx.Done()
+		return fmt.Errorf("human-gate.sh was stopped: %w", ctx.Err())
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.err != nil {
@@ -965,9 +974,10 @@ func TestNoActStartsPastTheRunsWindow(t *testing.T) {
 	}
 }
 
-// Each act is stopped at its bound with whatever GitHub call or fetch it is
-// making, so a run whose first act does not end still starts the next one. A
-// stopped act writes nothing, and the next run acts on it again.
+// Each act is stopped at its bound with whatever GitHub call, fetch, human
+// gate's filing or refinery's wake it is making, so a run whose first act does
+// not end still starts the next one. A stopped act's difference stays on the
+// bead, and the next run acts on it again.
 func TestAnActIsStoppedAtItsBoundAndTheNextActStarts(t *testing.T) {
 	t.Run("a GitHub call", func(t *testing.T) {
 		d := newLand(t)
@@ -1012,6 +1022,70 @@ func TestAnActIsStoppedAtItsBoundAndTheNextActStarts(t *testing.T) {
 		d.co.fetchBlocks = false
 		is(t, d.run(t), pr.ActLanded)
 	})
+	t.Run("a human gate's filing", func(t *testing.T) {
+		d := newLand(t)
+		d.pr.Facts.State = "CLOSED"
+		d.refresh(t)
+		d.also(t, "tk-2", "blocked")
+		d.gates.stall = true
+		start := time.Now()
+		out := d.reconcile(t, pr.Options{Window: time.Minute, Stop: 300 * time.Millisecond})
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Fatalf("two stopped filings took %s", elapsed.Round(time.Millisecond))
+		}
+		if len(out) != 2 {
+			t.Fatalf("two records, %d outcomes: %+v", len(out), out)
+		}
+		for _, o := range out {
+			is(t, o, pr.ActRetry)
+			if !strings.Contains(o.Detail, "stopped") || !strings.Contains(o.Detail, record.ClosedUnmerged) {
+				t.Fatalf("a stopped filing says %q", o.Detail)
+			}
+		}
+		if g := d.gates.list(); len(g) != 0 {
+			t.Fatalf("a stopped filing filed %v", g)
+		}
+		d.gates.stall = false
+		for _, o := range d.reconcile(t, pr.Options{Window: time.Minute, Stop: 300 * time.Millisecond}) {
+			is(t, o, pr.ActExcepted)
+		}
+		if g := d.gates.list(); !slices.Equal(g, []string{bead + " " + record.ClosedUnmerged, "tk-2 " + record.ClosedUnmerged}) {
+			t.Fatalf("the next run filed %v", g)
+		}
+	})
+	t.Run("the refinery's wake", func(t *testing.T) {
+		d := newHanding(t)
+		d.conversation(t, "open", "human", "")
+		d.pr.Facts.HeadRefOid = other
+		d.refresh(t)
+		d.l.Wake = stalledWake{}
+		start := time.Now()
+		out := d.reconcile(t, pr.Options{Window: time.Minute, Stop: 300 * time.Millisecond})
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Fatalf("a stopped wake took %s", elapsed.Round(time.Millisecond))
+		}
+		if len(out) != 1 {
+			t.Fatalf("one record, %d outcomes: %+v", len(out), out)
+		}
+		is(t, out[0], pr.ActRetry)
+		if !strings.Contains(out[0].Detail, "stopped") || !strings.Contains(out[0].Detail, "wake did not land") {
+			t.Fatalf("a stopped wake says %q", out[0].Detail)
+		}
+		meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
+		d.l.Wake = d.wakes
+		o := d.run(t)
+		is(t, o, pr.ActSettled)
+		d.wokeOnce(t, "tk-conv")
+	})
+}
+
+// stalledWake is a refinery whose wake does not answer until the act's context
+// ends.
+type stalledWake struct{}
+
+func (stalledWake) Wake(ctx context.Context, _, _ string) error {
+	<-ctx.Done()
+	return fmt.Errorf("gc session wake was stopped: %w", ctx.Err())
 }
 
 // stalled is GitHub answering no merge's read or request until the act's

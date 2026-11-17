@@ -1,6 +1,7 @@
 package pr_test
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -27,7 +28,7 @@ type waking struct {
 	err error
 }
 
-func (w *waking) Wake(session, message string) error {
+func (w *waking) Wake(_ context.Context, session, message string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.got = append(w.got, session+": "+message)
