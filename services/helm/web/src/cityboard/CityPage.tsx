@@ -50,10 +50,12 @@ export function CityPage() {
   );
 }
 
-/** A time the document gives, in the reader's own zone. */
-function when(at: string): string {
+/** A time the document gives, to the minute, in the reader's own zone. */
+export function when(at: string): string {
   const d = new Date(at);
-  return Number.isNaN(d.getTime()) ? at : d.toLocaleString();
+  return Number.isNaN(d.getTime())
+    ? at
+    : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 /** When the page on screen was read, and the latest read's failure beside it.

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import golden from '../../../internal/cityboard/testdata/city.json';
 import { Page } from '../rigboard/Board';
+import { when } from './CityPage';
 import type { Check, Document, Doctor, Response as CityResponse } from './document.gen';
 
 // The page runs here on the document the city's read builds from a live
@@ -97,7 +98,7 @@ describe('the city page', () => {
     expect(rows.map(titleOf)).toEqual(live.city.doctor.failing.map((c) => c.name));
     const first = rows[0];
     expect(text(first.querySelector('.tag'))).toBe('error');
-    const since = new Date(live.city.doctor.failing[0].first_failed ?? '').toLocaleString();
+    const since = when(live.city.doctor.failing[0].first_failed ?? '');
     expect(text(first.querySelector('.signal'))).toBe(`failing since ${since}2 runs in a row`);
     expect(text(first.querySelector('.line-2'))).toBe(live.city.doctor.failing[0].message);
     expect(text(first.querySelector('.line-3'))).toBe('blocking');
@@ -106,7 +107,7 @@ describe('the city page', () => {
   it('says when doctor last ran, and marks a run over two hours old late', async () => {
     render(<Page />);
     await loaded();
-    const started = new Date(live.city.doctor.started ?? '').toLocaleString();
+    const started = when(live.city.doctor.started ?? '');
     const note = screen.getByText(new RegExp(`^Doctor last ran at ${started.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
     expect(text(note)).toContain('Late: doctor runs every hour, and this run started over two hours ago.');
   });
@@ -135,7 +136,7 @@ describe('the city page', () => {
     const rows = rowsUnder('Monitor orders');
     expect(rows.map(titleOf)).toEqual(live.city.doctor.monitors.map((m) => m.order));
     expect(text(rows[0].querySelector('.signal'))).toBe('no good run known');
-    const good = new Date(live.city.doctor.monitors[1].last_good ?? '').toLocaleString();
+    const good = when(live.city.doctor.monitors[1].last_good ?? '');
     expect(text(rows[1].querySelector('.signal'))).toBe(`last good run ${good}`);
   });
 
@@ -214,7 +215,7 @@ describe('a lead that reaches zero, or has nothing to count', () => {
     render(<Page />);
     await loaded();
     expect(screen.getByText(/^Doctor last ran at /).textContent).toContain(
-      `That run did not complete: gc doctor did not finish within 20m0s. The checks below are what the run at ${new Date(measured).toLocaleString()} measured.`,
+      `That run did not complete: gc doctor did not finish within 20m0s. The checks below are what the run at ${when(measured)} measured.`,
     );
     cleanup();
     cityReads = [() => json(withDoctor({ completed: false, why: 'gc doctor exited 2', measured: undefined, count: 0, failing: [], accepted: [] }))];
