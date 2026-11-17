@@ -57,9 +57,11 @@ The order cooks with no target, under the store's record lock that each of its
 runs holds for a record, so two pours for one bead run one after the other, as
 under the per-source lock. It gives each bead the cook created the bead's
 priority in one `bd update`, then writes the bead's `blocks` edge onto the root
-with `bd dep add`. A pour that stops after the cook leaves a live root that no
-edge of the bead names, and the next run finds it by its `gc.var.pr_bead` and
-writes the edge in place of a pour. A root the bead's store does not hold gets
+with `bd dep add`. A pour that stops after the cook leaves a root that no edge
+of the bead names, which can end before the next run reads it. The next run
+finds it by its `gc.var.pr_bead`, live or closed, and writes the edge before it
+counts the runs that ended without a result, and a live one takes the place of
+a pour. A root the bead's store does not hold gets
 no edge, since bd adds an edge onto an id outside its own prefix that holds
 nothing, and the order files a human gate on the bead, which keeps it from
 pouring another. That root is what a city that serves graph beads from a store

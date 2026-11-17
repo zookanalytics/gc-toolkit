@@ -339,7 +339,7 @@
       "pr",
       "review"
     ],
-    "doc": "A review run's pr_bead var: the bead that owns the PR the run judges. Gas City stamps it on a review run's root at the pour. Before a pour, the landing order gives the bead it names its blocks edge onto a live run that names the bead and has no such edge, as a pour that stopped before its edge landed leaves it, and pours no other."
+    "doc": "A review run's pr_bead var: the bead that owns the PR the run judges. Gas City stamps it on a review run's root at the pour. Before it counts how the bead's runs ended, the landing order gives the bead it names its blocks edge onto each run, live or ended, that names the bead and has no such edge, as a pour that stopped before its edge landed leaves it, and pours no other while such a run is live."
   },
   {
     "name": "gc.var.shadow",

@@ -30,13 +30,14 @@ import (
 // The runs attached to a bead are its blocks edges onto roots of the review
 // formula, open or closed, and each root carries the vars it was poured with,
 // so the order keeps no list of its own. The pour gives every bead it created
-// the bead's priority, then the bead its blocks edge onto the root. A live run
-// whose pr_bead var names the bead and that no edge of the bead names, a pour
-// that stopped before its edge landed, gets that edge from the next run, which
-// pours no other. A run that ended without a result is poured again. When the
-// last two runs at the validated head both ended without one, counting only
-// runs that ended after the bead's last review-run-failed gate closed, the run
-// asks a person through a gate under that key instead.
+// the bead's priority, then the bead its blocks edge onto the root. A run whose
+// pr_bead var names the bead and that no edge of the bead names, live or ended,
+// as a pour that stopped before its edge landed leaves it, gets that edge from
+// the next run before that run counts how the bead's runs ended, and while it is
+// live the next run pours no other. A run that ended without a result is poured
+// again. When the last two runs at the validated head both ended without one,
+// counting only runs that ended after the bead's last review-run-failed gate
+// closed, the run asks a person through a gate under that key instead.
 
 // Runs pours a review run: the formula, as a workflow of its own, with its
 // vars.
@@ -102,6 +103,35 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 	if len(writers) > 0 {
 		return checked(fmt.Sprintf("no review run is poured while %s works %s: %s", strings.Join(writers, ", "), s.branch, why))
 	}
+	retry := func(detail string) (RunOutcome, bool) {
+		w := u.Ledger.Write(s.id)
+		record.Retry(w, "open", detail, s.now)
+		if gr != nil {
+			githubReadKey.Set(w, gr)
+		}
+		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(detail, note)}), true
+	}
+	strays, err := u.unattached(s)
+	if err != nil {
+		return checked("no review run is poured, because the runs poured for the bead did not read; the next run reads them: " + err.Error())
+	}
+	var live, ended []string
+	for _, r := range strays {
+		if err := u.Ledger.AddBlocker(s.id, r.ID); err != nil {
+			return retry(fmt.Sprintf("review run %s was poured for the bead with no edge onto it, and the edge did not land; the next run attaches it: %v", r.ID, err))
+		}
+		if r.Status() != "closed" {
+			live = append(live, r.ID)
+			continue
+		}
+		s.blockers, ended = append(s.blockers, r), append(ended, r.ID)
+	}
+	if len(ended) > 0 {
+		note = withNote(fmt.Sprintf("review run %s ended with no edge of the bead onto it, and has that edge now", strings.Join(ended, ", ")), note)
+	}
+	if len(live) > 0 {
+		return checked(fmt.Sprintf("review run %s was poured for the bead with no edge onto it, and the bead waits on it now: %s", strings.Join(live, ", "), why))
+	}
 	failed, err := u.failedRuns(s)
 	if err != nil {
 		return checked("no review run is poured, because how its earlier runs ended did not read; the next run reads it: " + err.Error())
@@ -116,26 +146,6 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 	vars["pr_bead"], vars["head"], vars["target"], vars["branch"] = s.id, s.rec.Head, s.rec.Target, s.branch
 	if u.Runs == nil {
 		return checked("no review run is poured, because nothing pours one here: " + why)
-	}
-	retry := func(detail string) (RunOutcome, bool) {
-		w := u.Ledger.Write(s.id)
-		record.Retry(w, "open", detail, s.now)
-		if gr != nil {
-			githubReadKey.Set(w, gr)
-		}
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(detail, note)}), true
-	}
-	strays, err := u.unattached(s)
-	if err != nil {
-		return checked("no review run is poured, because the runs poured for the bead did not read; the next run reads them: " + err.Error())
-	}
-	if len(strays) > 0 {
-		for _, root := range strays {
-			if err := u.Ledger.AddBlocker(s.id, root); err != nil {
-				return retry(fmt.Sprintf("review run %s was poured for the bead with no edge onto it, and the edge did not land; the next run attaches it: %v", root, err))
-			}
-		}
-		return checked(fmt.Sprintf("review run %s was poured for the bead with no edge onto it, and the bead waits on it now: %s", strings.Join(strays, ", "), why))
 	}
 	poured, err := u.Runs.Pour(reviewFormula, vars)
 	if err != nil {
@@ -159,15 +169,15 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 		"review run %s poured at %s into %s, attached to the bead%s: %s", poured.Root, s.rec.Head, s.rec.Target, ranked, why), note)}), true
 }
 
-// unattached names the live runs of the review formula whose pr_bead var names
-// the bead s read and that no blocks edge of the bead names, in id order,
-// leaving out a shadow run, which writes nothing outside itself.
-func (u *run) unattached(s state) ([]string, error) {
-	rows, err := u.Ledger.Find(ledger.Matching(runPRBeadVar, s.id))
+// unattached reads the runs of the review formula, live and closed, whose
+// pr_bead var names the bead s read and that no blocks edge of the bead names,
+// in id order, leaving out a shadow run, which writes nothing outside itself.
+func (u *run) unattached(s state) ([]*ledger.Record, error) {
+	rows, err := u.Ledger.Find(ledger.Matching(runPRBeadVar, s.id).WithClosed())
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	var out []*ledger.Record
 	for _, r := range rows {
 		if !isReviewRoot(r) || slices.ContainsFunc(s.blockers, func(b *ledger.Record) bool { return b.ID == r.ID }) {
 			continue
@@ -177,10 +187,10 @@ func (u *run) unattached(s state) ([]string, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(shadow) != "true" {
-			out = append(out, r.ID)
+			out = append(out, r)
 		}
 	}
-	slices.Sort(out)
+	slices.SortFunc(out, func(a, b *ledger.Record) int { return strings.Compare(a.ID, b.ID) })
 	return out, nil
 }
 

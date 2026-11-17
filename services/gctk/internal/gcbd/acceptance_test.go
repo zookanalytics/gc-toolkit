@@ -203,6 +203,27 @@ func TestStoreAcceptance(t *testing.T) {
 		t.Errorf("adapter: an edge onto an id of another prefix = %v: %s; want exit 0 and no edge a show names", err, out)
 	}
 
+	// A find widened to closed beads finds a closed run by its var, and bd adds
+	// the edge onto it, which the listing the order reads the bead by carries:
+	// how the order attaches a run that ended before its edge landed.
+	ended := s.Create("the run that ended")
+	s.Run("update", ended, "--set-metadata", "gc.var.pr_bead="+waits)
+	s.Run("close", ended)
+	if rows, err := c.Find(Query{Key: "gc.var.pr_bead", Value: waits, Closed: true}); err != nil || len(rows) != 1 || rows[0].ID != ended {
+		t.Errorf("adapter: the closed run's var found %+v (%v), want %s", rows, err, ended)
+	}
+	if out, err := c.AddEdge(waits, ended, EdgeBlocks); err != nil {
+		t.Fatalf("adapter: the edge from %s onto the closed %s = %v: %s", waits, ended, err, out)
+	}
+	held, err := c.Find(Query{IDs: []string{waits}, Closed: true})
+	if err != nil || len(held) != 1 {
+		t.Fatalf("adapter: %s listed %+v (%v)", waits, held, err)
+	}
+	edges, err = held[0].Edges()
+	if err != nil || !slices.ContainsFunc(edges, func(e Edge) bool { return e.ID == ended && e.Type == EdgeBlocks }) || held[0].StatusLower() != "blocked" {
+		t.Errorf("adapter: the bead lists %s with edges %+v (%v), want blocked with a blocks edge onto the closed %s", held[0].StatusLower(), edges, err, ended)
+	}
+
 	// One update names several beads, and gives each the priority.
 	second := s.Create("the run's step")
 	if out, err := c.Update(run, second, "--priority=1"); err != nil {

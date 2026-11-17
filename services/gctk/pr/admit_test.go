@@ -60,13 +60,13 @@ func (p *pours) Pour(formula string, vars map[string]string) (pr.Poured, error) 
 }
 
 // listing is the fake store with bd's blocked rule for the edge the order adds
-// onto a run: a blocks edge from a bead makes the store's blocked listing hold
-// the bead on the bead it names.
+// onto a run: a blocks edge from a bead onto an open bead makes the store's
+// blocked listing hold the bead on it.
 type listing struct{ *fake.Store }
 
 func (s listing) AddEdge(id, target, typ string) (string, error) {
 	out, err := s.Store.AddEdge(id, target, typ)
-	if err == nil && typ == gcbd.EdgeBlocks {
+	if far, held := s.Store.Row(target); err == nil && typ == gcbd.EdgeBlocks && held && far.Status != "closed" {
 		s.Store.List(id, target)
 	}
 	return out, err
@@ -654,6 +654,47 @@ func TestAnEdgeThatDidNotLandIsWrittenByTheNextRun(t *testing.T) {
 	is(t, d.once(t), pr.ActChecked)
 	if d.runs.count() != 1 || !edged(t, d, "tk-run1") {
 		t.Fatalf("the next run poured %d runs and attached the first %v, want one run, attached", d.runs.count(), edged(t, d, "tk-run1"))
+	}
+}
+
+// A run that ended before its edge landed is attached all the same, before the
+// runs that ended are counted. While its edge does not land, no other run is
+// poured. Once it lands, the run counts toward the two runs at the head that
+// ended without a result, in the pass that attaches it.
+func TestARunThatEndedBeforeItsEdgeLandedCountsTowardTheGate(t *testing.T) {
+	d := newAdmit(t)
+	d.store.EdgeErr = errors.New("bd: dep add: database is locked")
+	is(t, d.once(t), pr.ActRetry)
+	d.end(t, "tk-run1", "canceled", "2026-11-17T09:00:01Z")
+	ofRead(t, d.land, head)
+	is(t, d.once(t), pr.ActRetry)
+	if d.runs.count() != 1 {
+		t.Fatalf("a pass whose edge onto an ended run did not land poured %d runs, want the one", d.runs.count())
+	}
+	ofRead(t, d.land, head)
+	d.store.EdgeErr = nil
+	o := d.once(t)
+	is(t, o, pr.ActPoured)
+	if !edged(t, d, "tk-run1") || !edged(t, d, "tk-run2") || !strings.Contains(o.Detail, "tk-run1 ended with no edge") {
+		t.Fatalf("the pass attached the ended run %v and the run it poured %v (%s)", edged(t, d, "tk-run1"), edged(t, d, "tk-run2"), o.Detail)
+	}
+	d.end(t, "tk-run2", "canceled", "2026-11-17T09:00:02Z")
+	ofRead(t, d.land, head)
+	is(t, d.once(t), pr.ActExcepted)
+	if !gated(d, "review-run-failed") || d.runs.count() != 2 {
+		t.Fatalf("the second failure filed %v and poured %d runs, want the gate and two runs", d.gates.list(), d.runs.count())
+	}
+
+	e := newAdmit(t)
+	e.stray("tk-lost1", "false")
+	e.stray("tk-lost2", "false")
+	e.end(t, "tk-lost1", "canceled", "2026-11-17T09:00:01Z")
+	e.end(t, "tk-lost2", "canceled", "2026-11-17T09:00:02Z")
+	o = e.once(t)
+	is(t, o, pr.ActExcepted)
+	if !gated(e, "review-run-failed") || e.runs.count() != 0 || !edged(t, e, "tk-lost1") || !edged(t, e, "tk-lost2") {
+		t.Fatalf("two ended runs with no edge filed %v, poured %d runs and were attached %v, %v (%s)", e.gates.list(),
+			e.runs.count(), edged(t, e, "tk-lost1"), edged(t, e, "tk-lost2"), o.Detail)
 	}
 }
 
