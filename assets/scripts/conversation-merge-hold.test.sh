@@ -25,6 +25,10 @@
 #   (SIGNOFF, DISMISS, MOOT, BARE-CLOSE) every close of the conversation, the
 #                  sign-off, dismiss, the premise re-check's moot close and a
 #                  bare `gc bd close`, frees the merge, with no write to the edge
+#   (MOOT)         a moot close whose reading runs past the headline's cap
+#                  closes the conversation: the close reason and the subject's
+#                  notes keep the reading whole, and the headline it writes is
+#                  the reading's short sentence
 #   (REVIEW-RULING) a ruling in a conversation on the PR's review reaches the PR
 #                  whose merge it holds, and its rework is filed against the
 #                  anchor and lands before the conversation's close
@@ -325,6 +329,7 @@ setf() { jq -c --arg k "$2" --arg v "$3" '.[$k] = $v' "$STORE/b/$1.json" > "$STO
 setm() { jq -c --arg k "$2" --arg v "$3" '.metadata[$k] = $v' "$STORE/b/$1.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$1.json"; }
 edge() { jq -c --arg t "$2" --arg o "$3" '.deps += [{type: $t, on: $o}]' "$STORE/b/$1.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$1.json"; }
 field() { jq -r --arg k "$2" '.[$k] // "" | tostring' "$STORE/b/$1.json" 2>/dev/null; }
+meta() { jq -r --arg k "$2" '.metadata[$k] // "" | tostring' "$STORE/b/$1.json" 2>/dev/null; }
 deps_of() { jq -r --arg t "$2" '[ .deps[] | select(.type == $t) | .on ] | sort | join(" ")' "$STORE/b/$1.json" 2>/dev/null; }
 acts() { jq -r '[.[].text] | join("|")' "$STORE/b/$1.comments.json" 2>/dev/null; }
 # An open PR's anchor, and the PR's review in flight.
@@ -378,9 +383,15 @@ skill_block() {
          inb { buf = buf $0 "\n"; if (index($0, m)) hit = 1 }' "$ROOT/skills/$1/SKILL.md"
 }
 # The premise re-check's close, a moot reading filled in for its placeholders.
+# A reading that states the premise and what is true instead runs past the 140
+# characters gc-helm.sh takeaway takes, so only its short sentence fits the
+# headline.
+MOOT_WHY="the conversation asked whether the PR should land as built, and the operator has since answered that on GitHub, so the merge it holds waits on no person and nothing is left to ask"
+MOOT_HEADLINE="the PR it asked about was answered on GitHub"
 skill_block converse-recheck-premise 'closed $CONVERSATION as $KIND' \
     | sed -e 's#KIND="<moot|benign>"#KIND="moot"#' \
-          -e 's#WHY="<[^>]*>"#WHY="the PR it asked about was answered on GitHub"#' \
+          -e "s#WHY=\"<[^>]*>\"#WHY=\"$MOOT_WHY\"#" \
+          -e "s#HEADLINE=\"<[^>]*>\"#HEADLINE=\"$MOOT_HEADLINE\"#" \
           -e 's#ACTION="<[^>]*>"#ACTION="The visit ended: its question was already answered."#' > "$TMP/moot-close.sh"
 [ -s "$TMP/moot-close.sh" ] && ok "the premise re-check's close is found in the skill" \
     || bad "the premise re-check's close is found in the skill"
@@ -471,6 +482,9 @@ run_block "$TMP/moot-close.sh" "$C" tk-anc
 eq "$RC" 0 "(MOOT) the moot close exits 0"
 has "$OUT" "closed $C as moot" "(MOOT) …closing the conversation"
 has "$OUT" "replaced the headline of tk-anc, which waited on nothing" "(MOOT) …and the conversation, about to close, kept no headline"
+eq "$(meta tk-anc gc.takeaway)" "moot: $MOOT_HEADLINE" "(MOOT) …the headline it wrote is the reading's short sentence"
+eq "$(field "$C" close_reason)" "moot: $MOOT_WHY" "(MOOT) …while the conversation's close reason keeps the whole reading"
+has "$(field tk-anc notes)" "moot (conversation $C): $MOOT_WHY" "(MOOT) …and so do the subject's notes"
 no_release && ok "(MOOT) …with nothing written to release the merge" \
     || bad "(MOOT) …with nothing written to release the merge ($(tr '\n' ';' < "$CALLS"))"
 eq "$(status_of tk-anc)" "needs-review []" "(MOOT) the PR derives what it did before the conversation opened"
