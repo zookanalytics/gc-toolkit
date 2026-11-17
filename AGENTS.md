@@ -20,7 +20,7 @@ page's rule 1 links the whole files each scheduled bead retires. A problem found
 in that code is not a new fix. Append it to the notes of the bead that retires
 the code, so the retirement carries it. A problem that already has a bead of its
 own is folded into the retiring bead and sent nowhere else, by a session that
-may close a bead onto a successor (the Close-with-successor row of
+may close a bead as folded (the Close-with-successor row of
 [authority-map.md](docs/authority-map.md)). Append the problem to the retiring
 bead's notes, then close the bead as folded into it:
 
