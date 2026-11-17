@@ -346,3 +346,5 @@ worktree.
 {{ template "work-quality-system" . }}
 
 {{ template "where-to-search" . }}
+
+{{ template "memory-notes" . }}

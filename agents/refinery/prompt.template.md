@@ -175,3 +175,5 @@ nothing — log the verdict line and move on.
 {{ template "scratch-reclaim" . }}
 
 {{ template "where-to-search" . }}
+
+{{ template "memory-notes" . }}

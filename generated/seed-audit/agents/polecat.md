@@ -673,6 +673,28 @@ operator's wording as `## Statement`, and `"obs.source": "operator"` plus
 
 
 
+## Memory notes
+
+A memory note holds something that should change the next agent's behavior.
+The learning loop reads each note, keeps it while the lesson it shows is judged
+or fixed, and removes it once that lesson is settled or the note holds nothing
+worth keeping.
+
+Write a lesson so it can be acted on: what you did, what happened, the
+instruction, command or script that led there, what it cost, and whether it
+happened before.
+
+A rule is the operator's only with their words and where they said them.
+Otherwise it is yours, and the note says so.
+
+What is to be evaluated goes in a report, an observation bead the
+`gc-toolkit.records` skill files: corrective feedback from a review, a rework or
+the operator, feedback whose reach you cannot tell, and a change that needs
+approval. The state of open work goes on its bead's notes. Leave out what the
+pack already says.
+
+
+
 ## Learned conventions
 
 <!-- managed by the learning distiller; every bullet carries its anchor. cap: 15 -->

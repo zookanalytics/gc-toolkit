@@ -224,3 +224,5 @@ mechanism.
 {{ template "where-to-search" . }}
 
 {{ template "file-feedback-observations" . }}
+
+{{ if eq .ProviderKey "claude" }}{{ template "memory-notes" . }}{{ end }}
