@@ -2180,6 +2180,19 @@ has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --r
 has "$(cat "$CALLS")" "bd dep add tk-conv tk-ask --type blocks" "(STAY-REWORK-ASK) …and waiting on the ask, read as this conversation's rework by its discovered-from edge"
 run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "fix the retry" --no-rework --check arch --no-wait
 eq "$RC" 2 "(CHECK-NEEDS-REWORK) --check without --rework is refused"
+# A ruling that sends the PR back once another PR lands names that PR's anchor
+# as the rework's wait, which the writer passes on as the ask's own wait. It is
+# no wait of the subject's, so the headline does not carry it.
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "sent back once #78 lands" --ruled yes --ruling "fix the retry once #78 lands" --rework --check arch --rework-waiting-on tk-pr2 --no-wait
+eq "$RC" 0 "(REWORK-WAITS) a ruling whose rework waits on another PR signs off, exit 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry once #78 lands --check arch --waiting-on tk-pr2" "(REWORK-WAITS) …passing that PR's anchor on as the ask's wait"
+TAKEAWAY=$(grep '^gc-helm takeaway tk-anc ' "$CALLS")
+has "$TAKEAWAY" "--no-wait" "(REWORK-WAITS) …writing the subject's headline with the wait the sitting stated"
+hasnt "$TAKEAWAY" "tk-pr2" "(REWORK-WAITS) …and without the bead the rework waits on"
+open_pr; bead tk-pr2
+run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "fix the retry" --no-rework --rework-waiting-on tk-pr2 --no-wait
+eq "$RC $(writes)" "2 0" "(REWORK-WAITS-NEEDS-REWORK) --rework-waiting-on without --rework is refused, with nothing written"
 # A ruling that reaches two open PRs reworks the one its --pr-anchor names. The
 # return leaves that --pr-anchor out with the --rework, since --no-rework takes
 # none and leaves both PRs standing.

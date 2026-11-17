@@ -378,7 +378,7 @@ cat > "$TMP/gctk-ask" <<'ASK'
 #!/usr/bin/env bash
 echo "$*" >> "$TMP_ASK_LOG"
 echo "${GCTK_SCRIPTS_DIR:-unset}" >> "$TMP_ASK_LOG.env"
-[ "${STUB_ASK_RC:-0}" = 0 ] || { echo "gctk review ask: anc-1: the check index at the head declares no check \"nope\"" >&2; exit 3; }
+[ "${STUB_ASK_RC:-0}" = 0 ] || { echo "${STUB_ASK_ERR:-gctk review ask: anc-1: the check index at the head declares no check \"nope\"}" >&2; exit "$STUB_ASK_RC"; }
 echo "ask-1 ${STUB_ASK_HOW:-filed}"
 ASK
 chmod +x "$TMP/gctk-ask"
@@ -401,9 +401,35 @@ eq "$RC $(printf '%s\n' "$OUT" | tail -n 1)" "0 ask-1 ask found" "a re-run names
 OUT=$(STUB_ASK_RC=3 GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" --check nope 2>&1); RC=$?
 eq "$RC" "2" "an ask the writer refuses exits 2"
 has "$OUT" "declares no check" "…naming why"
+hasnt "$OUT" "a re-run finds one that landed" "…promising no ask to a re-run the writer refuses the same way"
+OUT=$(STUB_ASK_RC=2 STUB_ASK_ERR="gctk review ask: anc-1: ledger: the filing may not have landed" GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
+eq "$RC" "2" "an ask whose create did not answer exits 2"
+has "$OUT" "a re-run finds one that landed" "…saying a re-run finds the ask if it landed"
+# A ruling that must wait for other work passes each bead it waits on to the
+# writer, which files the ask with those waits in the one create, or refuses a
+# bead its store does not hold with nothing filed.
+: > "$TMP_ASK_LOG"; : > "$STUB_GC_LOG"
+OUT=$(GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "rename the flag once #43 lands" --check arch --waiting-on anc-43 --waiting-on anc-44 2>&1); RC=$?
+eq "$RC $(created)" "0 0" "a ruling that waits on other work exits 0 once the ask stands, filing no rework child"
+eq "$(cat "$TMP_ASK_LOG")" "review ask anc-1 --reason operator ruling (conversation vis-1): rename the flag once #43 lands --source vis-1 --check arch --waiting-on anc-43 --waiting-on anc-44" "…the ask carries each bead the ruling waits on"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and nothing is slung"
+: > "$STUB_GC_LOG"
+OUT=$(STUB_ASK_RC=3 STUB_ASK_ERR="gctk review ask: nothing filed on anc-1: its store holds no bead gf-43 for the ask to wait on, and a wait on a bead in another store holds nothing" \
+  GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "rename the flag once gf-43 lands" --waiting-on gf-43 2>&1); RC=$?
+eq "$RC $(created)" "2 0" "a wait on a bead in another store, which the writer refuses, exits 2 with nothing filed"
+has "$OUT" "holds no bead gf-43" "…naming the bead the ask could not wait on"
+eq "$(grep -c -E '^(bd update|bd dep|bd create|sling)' "$STUB_GC_LOG")" "0" "…with nothing written"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" --waiting-on 2>&1); RC=$?
+eq "$RC" "2" "--waiting-on with no bead is refused"
 reset "$ANCHOR_PR"
 OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" --check arch 2>&1); RC=$?
 eq "$RC $(created)" "2 0" "--check on the old path is refused, with nothing filed"
+: > "$TMP_ASK_LOG"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "rename the flag once #43 lands" --waiting-on anc-43 2>&1); RC=$?
+eq "$RC $(created)" "2 0" "--waiting-on on the old path is refused, with no rework child filed"
+has "$OUT" "cannot wait; nothing filed" "…saying the old path's rework child cannot wait"
+eq "$(grep -c -E '^(bd update|bd dep|bd create|sling)' "$STUB_GC_LOG")" "0" "…with nothing written or slung"
+eq "$(cat "$TMP_ASK_LOG")" "" "…and no ask asked for"
 
 echo "# --- guard: a non-PR anchor is refused, nothing filed ---"
 reset '[{"id":"anc-1","status":"open","metadata":{"merge_result":"","branch":"polecat/anc-1","target":"main"}}]'
