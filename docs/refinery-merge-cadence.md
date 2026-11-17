@@ -901,8 +901,12 @@ costs 1 point for each 50 owned PRs, and Gas City still writes its run record.
 Each update prints a line, `<bead> <url> <action>: <detail>`, where the action
 is `saved` or `unchanged`. A PR that failed prints `<url> failed: <why>`, one
 the 90 seconds left prints `<url> left`, and the last line counts what the pass
-asked about. `gc order history pr-poll` lists the passes with their exits: 0
-when every owned PR was asked and every update saved, and 2 otherwise.
+asked about. A pass exits 0 when every owned PR was asked and every update
+saved, and 2 otherwise. Gas City labels the pass's run record by that exit,
+`exec` or `exec-failed`, and its run history
+(`GET /v0/city/{city}/orders/history`) lists each record with its labels. The
+board reads there when GitHub was last asked. `gc order history pr-poll` lists
+the passes without their exits.
 
 ## The landing order
 

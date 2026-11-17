@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActuateError, engage } from '../actuate/client';
-import type { NeedKind, Response as RigResponse } from './document.gen';
+import type { Asked, NeedKind, Response as RigResponse } from './document.gen';
 import { EpicsPage, MatchesPage, NeedsYouPage, UnprioritizedPage, WorkQueuePage } from './pages';
 import { SidePanel } from './Panel';
 import { READ_TIMEOUT_MS, readRigs, rigAddress, rigFromAddress } from './read';
@@ -243,9 +243,34 @@ function timeOf(at: string | Date): string {
   return Number.isNaN(d.getTime()) ? String(at) : d.toLocaleTimeString();
 }
 
+/** When GitHub was last asked about the rig's pull requests, as the read
+ *  judged it: the start of the newest pass of the rig's pr-poll order that
+ *  exited 0, stale past three of the order's intervals. */
+function AskedLine({ asked }: { asked: Asked }) {
+  switch (asked.state) {
+    case 'asked':
+      return <p className="status">GitHub last asked at {timeOf(asked.at ?? '')}.</p>;
+    case 'stale':
+      return <p className="status status--stale">GitHub last asked at {timeOf(asked.at ?? '')}, which is stale.</p>;
+    case 'not_asked':
+      return (
+        <p className="status status--stale">
+          {asked.since !== undefined
+            ? `GitHub not asked: no pass since ${timeOf(asked.since)} succeeded.`
+            : "GitHub not asked: Gas City's run history holds no pass."}
+        </p>
+      );
+    case 'unwatched':
+      return <p className="status">GitHub is not asked about this rig's pull requests.</p>;
+    case 'unread':
+      return <p className="status status--failed">When GitHub was last asked could not be read: {asked.error}.</p>;
+  }
+}
+
 /** When the board on screen was read, and the latest read's failure beside
- *  it. A failed read never draws an empty board: with no document read yet,
- *  the page shows the failure alone. */
+ *  it, then when GitHub was last asked as of that read. A failed read never
+ *  draws an empty board: with no document read yet, the page shows the failure
+ *  alone. */
 function ReadStatus({ rig, state }: { rig: string; state: RigDocumentState }) {
   const last: RigResponse | undefined = state.last;
   if (last === undefined) {
@@ -258,13 +283,17 @@ function ReadStatus({ rig, state }: { rig: string; state: RigDocumentState }) {
     }
     return <Note>Reading the {rig} board…</Note>;
   }
-  if (state.failure !== undefined) {
-    return (
-      <p className="status status--failed" role="alert">
-        The latest read failed at {timeOf(state.failure.at)}: {state.failure.message}. This is the board read at{' '}
-        {timeOf(last.read_at)}.
-      </p>
-    );
-  }
-  return <p className="status">Read at {timeOf(last.read_at)}.</p>;
+  return (
+    <>
+      {state.failure !== undefined ? (
+        <p className="status status--failed" role="alert">
+          The latest read failed at {timeOf(state.failure.at)}: {state.failure.message}. This is the board read at{' '}
+          {timeOf(last.read_at)}.
+        </p>
+      ) : (
+        <p className="status">Read at {timeOf(last.read_at)}.</p>
+      )}
+      <AskedLine asked={last.asked} />
+    </>
+  );
 }

@@ -40,9 +40,9 @@ type errorBody struct {
 	Reason string `json:"reason"`
 }
 
-// rigList and rigAnswer mirror the bodies of helm-svc's rig board routes
-// (rigboard.Rigs and rigboard.Response, internal/server/rigboard.go), which the
-// page reads.
+// rigList, rigAnswer and askedLine mirror the bodies of helm-svc's rig board
+// routes (rigboard.Rigs, rigboard.Response and rigboard.Asked,
+// internal/server/rigboard.go), which the page reads.
 type rigList struct {
 	ReadAt string   `json:"read_at"`
 	Rigs   []string `json:"rigs"`
@@ -51,6 +51,12 @@ type rigList struct {
 type rigAnswer struct {
 	ReadAt string          `json:"read_at"`
 	Board  json.RawMessage `json:"board"`
+	Asked  askedLine       `json:"asked"`
+}
+
+type askedLine struct {
+	State string `json:"state"`
+	At    string `json:"at,omitempty"`
 }
 
 // Handler returns the fixture's routes.
@@ -59,9 +65,9 @@ type rigAnswer struct {
 //     as JSON, whatever the method.
 //   - GET /helm/rigs lists the one rig rig's document names, and
 //     GET /helm/rigs/{rig} answers that document for that rig, with the time
-//     the fixture started as its read time, in the places helm-svc answers the
-//     rig board. Any other rig answers 404, as helm-svc answers a rig the city
-//     does not list.
+//     the fixture started as its read time and as the time GitHub was last
+//     asked, in the places helm-svc answers the rig board. Any other rig answers
+//     404, as helm-svc answers a rig the city does not list.
 //   - POST /helm/<verb> answers with that verb's canned answer. A verb with none
 //     answers 503 with reason "unavailable", as helm-svc answers a write when it
 //     has no write tool, so the app shows its refusal and nothing runs.
@@ -103,7 +109,7 @@ func Handler(board, rig []byte, answers map[string]Answer, spa http.Handler) (ht
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": name + ": the city lists no such rig"})
 			return
 		}
-		writeJSON(w, http.StatusOK, rigAnswer{ReadAt: readAt, Board: rig})
+		writeJSON(w, http.StatusOK, rigAnswer{ReadAt: readAt, Board: rig, Asked: askedLine{State: "asked", At: readAt}})
 	})
 	mux.HandleFunc("/helm/", func(w http.ResponseWriter, r *http.Request) {
 		verb := strings.TrimPrefix(r.URL.Path, "/helm/")

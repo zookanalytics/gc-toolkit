@@ -540,7 +540,11 @@ bubble's clock, and no rule's test needs a tool on the machine.
   pass that lists the store once, decodes each key the page shows through the
   listing's declarations, and answers `waits`, `prstatus` and `queue` from those
   rows. The page lists work in the order `queue` gives for the open work the
-  page names, the order the work is expected to land in. Its ranking, bands and
+  page names, the order the work is expected to land in. Beside those rows it
+  shows when GitHub was last asked about the rig's pull requests: the start of
+  the newest run of the rig's `pr-poll` order that exited 0, read from Gas
+  City's run history through the supervisor's API, since a pass in which
+  nothing moved writes nothing to a pull request's bead. Its ranking, bands and
   grouping are its own. A question that a loop also acts on belongs to a domain,
   not to the board.
 
