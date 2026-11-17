@@ -47,7 +47,7 @@ type sessionRow struct {
 // Sessions reads `gc session list --json` once. A read that fails, or prints
 // no JSON object carrying a sessions list, is an error, never an empty list.
 func (c *City) Sessions(ctx context.Context) ([]Session, error) {
-	b := runBounded(ctx, c.dir, c.bin, "session", "list", "--json")
+	b := c.runBounded(ctx, c.bin, "session", "list", "--json")
 	if f := b.Failure(); f != "" {
 		return nil, fmt.Errorf("gc session list did not read: %s", f)
 	}
@@ -88,7 +88,7 @@ func (r Rig) Store() string { return filepath.Join(r.Path, ".beads") }
 // Rigs reads `gc rig list --json` once. A read that fails, prints no rigs list
 // that reads, or lists a rig with no name or no path is an error.
 func (c *City) Rigs(ctx context.Context) ([]Rig, error) {
-	b := runBounded(ctx, c.dir, c.bin, "rig", "list", "--json")
+	b := c.runBounded(ctx, c.bin, "rig", "list", "--json")
 	if f := b.Failure(); f != "" {
 		return nil, fmt.Errorf("gc rig list did not read: %s", f)
 	}
@@ -121,7 +121,7 @@ type Agent struct {
 // list that reads, or lists an agent with no name or no qualified name is an
 // error.
 func (c *City) Agents(ctx context.Context) ([]Agent, error) {
-	b := runBounded(ctx, c.dir, c.bin, "agent", "list", "--json")
+	b := c.runBounded(ctx, c.bin, "agent", "list", "--json")
 	if f := b.Failure(); f != "" {
 		return nil, fmt.Errorf("gc agent list did not read: %s", f)
 	}

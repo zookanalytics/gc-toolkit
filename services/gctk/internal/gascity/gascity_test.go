@@ -269,6 +269,31 @@ func TestInStartsEveryCommandInItsDirectory(t *testing.T) {
 	}
 }
 
+// A city As an actor runs every command with BEADS_ACTOR naming that actor,
+// and keeps the directory its commands start in. The city it came from runs
+// as the process does.
+func TestAsActsAsItsActorInItsDirectory(t *testing.T) {
+	base := t.TempDir()
+	log := filepath.Join(base, "who")
+	stub := "#!/bin/sh\nprintf '%s %s\\n' \"${BEADS_ACTOR:-none}\" \"$(pwd -P)\" >> '" + log + "'\n"
+	if err := os.WriteFile(filepath.Join(base, "bead-rehome.sh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEADS_ACTOR", "")
+	there := t.TempDir()
+	from := (&City{scriptsDir: base}).In(there)
+	from.As("rig/gc-toolkit.refinery").Script("bead-rehome.sh")
+	from.Script("bead-rehome.sh")
+	resolved, err := filepath.EvalSymlinks(there)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(log)
+	if want := "rig/gc-toolkit.refinery " + resolved + "\nnone " + resolved + "\n"; string(raw) != want {
+		t.Fatalf("the commands ran as %q, want %q", raw, want)
+	}
+}
+
 // A cook passes its vars in their names' order, as --var flags, and reads the
 // root from the summary line it prints with --json (formulaCookJSONResult in
 // cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). A cook that exits

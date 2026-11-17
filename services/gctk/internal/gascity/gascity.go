@@ -91,11 +91,13 @@ type SlingResult struct {
 
 // City is the Gas City gctk runs in, reached through `gc` on PATH and the
 // pack's scripts directory GCTK_SCRIPTS_DIR names. Every command it runs starts
-// in dir, the process's own working directory when dir is empty.
+// in dir, the process's own working directory when dir is empty, and acts as
+// actor when one is named.
 type City struct {
 	bin        string
 	scriptsDir string
 	dir        string
+	actor      string
 
 	once   sync.Once
 	agents []agent
@@ -121,7 +123,14 @@ func (c *City) In(dir string) *City {
 	if abs, err := filepath.Abs(scripts); scripts != "" && err == nil {
 		scripts = abs
 	}
-	return &City{bin: c.bin, scriptsDir: scripts, dir: dir}
+	return &City{bin: c.bin, scriptsDir: scripts, dir: dir, actor: c.actor}
+}
+
+// As returns the city with every command it runs acting as actor, which
+// BEADS_ACTOR names to it, as bead-rehome.sh reads its actor, which a bead
+// assigned to someone must be for the script to close it.
+func (c *City) As(actor string) *City {
+	return &City{bin: c.bin, scriptsDir: c.scriptsDir, dir: c.dir, actor: actor}
 }
 
 // Sling runs the sling in gctk's own process group, so whatever stops gctk's
@@ -133,7 +142,7 @@ func (c *City) Sling(s Sling) SlingResult {
 		args = append(args, "--rig", s.Rig)
 	}
 	args = append(args, s.Target, s.Bead, "--on", s.Formula, "--title", s.Title)
-	r := run(c.dir, c.bin, args...)
+	r := c.run(c.bin, args...)
 	out := SlingResult{Result: r}
 	if r.Code == 3 {
 		out.Live = liveWorkflows(r.Output, s.Bead)
@@ -151,7 +160,7 @@ func (c *City) Cook(k Cook) CookResult {
 	for _, name := range slices.Sorted(maps.Keys(k.Vars)) {
 		args = append(args, "--var", name+"="+k.Vars[name])
 	}
-	r := run(c.dir, c.bin, args...)
+	r := c.run(c.bin, args...)
 	out := CookResult{Result: r}
 	if r.Code == 0 {
 		out.Root = cookedRoot(r.Output)
@@ -272,7 +281,7 @@ func (c *City) dryRunFormula(s Sling) (string, error) {
 		args = append(args, "--rig", s.Rig)
 	}
 	args = append(args, s.Target, s.Bead, "--dry-run", "--force")
-	r := run(c.dir, c.bin, args...)
+	r := c.run(c.bin, args...)
 	if r.Code != 0 {
 		return "", fmt.Errorf("%s names no default formula of its own, and gc sling --dry-run did not say which its pack gives it: %s", s.Target, r.why())
 	}
@@ -323,7 +332,7 @@ func dryRunDefault(preview string) (formula string, ok bool) {
 }
 
 func (c *City) readAgents() ([]agent, error) {
-	r := run(c.dir, c.bin, "config", "show", "--json")
+	r := c.run(c.bin, "config", "show", "--json")
 	if r.Code != 0 {
 		return nil, fmt.Errorf("gc config show did not read the city's config: %s", r.why())
 	}
@@ -355,7 +364,7 @@ func (c *City) readAgents() ([]agent, error) {
 // configured agent (gc session wake in docs/reference/cli.md, at
 // gastownhall/gascity 192fa2d394). Its standard input reads nothing.
 func (c *City) Wake(session string) Result {
-	return run(c.dir, c.bin, "session", "wake", session)
+	return c.run(c.bin, "session", "wake", session)
 }
 
 // Nudge runs the nudge in gctk's own process group, with gc's default
@@ -365,7 +374,7 @@ func (c *City) Wake(session string) Result {
 // cmd/gc/cmd_nudge.go, at gastownhall/gascity 192fa2d394). Its standard input
 // reads nothing.
 func (c *City) Nudge(session, message string) Result {
-	return run(c.dir, c.bin, "session", "nudge", session, message)
+	return c.run(c.bin, "session", "nudge", session, message)
 }
 
 // Script runs the script from the directory GCTK_SCRIPTS_DIR names, which the
@@ -374,7 +383,7 @@ func (c *City) Script(name string, args ...string) Result {
 	if c.scriptsDir == "" {
 		return Result{Code: -1, Err: errors.New("GCTK_SCRIPTS_DIR names no pack scripts directory, so " + name + " cannot be run")}
 	}
-	return run(c.dir, filepath.Join(c.scriptsDir, name), args...)
+	return c.run(filepath.Join(c.scriptsDir, name), args...)
 }
 
 // CityRoot is GC_CITY_PATH, GC_CITY or GC_CITY_ROOT, the first that names an
@@ -387,7 +396,7 @@ func (c *City) CityRoot() (string, error) {
 			return p, nil
 		}
 	}
-	r := run(c.dir, c.bin, "rig", "list", "--json")
+	r := c.run(c.bin, "rig", "list", "--json")
 	if r.Code != 0 {
 		return "", fmt.Errorf("no city root: GC_CITY_PATH, GC_CITY and GC_CITY_ROOT name none, and gc rig list did not read: %s", r.why())
 	}
@@ -413,12 +422,15 @@ func isDir(p string) bool {
 	return err == nil && fi.IsDir()
 }
 
-// run runs bin with args in dir, the process's own working directory when dir
-// is empty, its standard input reading nothing, and returns its exit code and
-// its output.
-func run(dir, bin string, args ...string) Result {
+// run runs bin with args in the city's directory, the process's own working
+// directory when it names none, as the city's actor when it names one, its
+// standard input reading nothing, and returns its exit code and its output.
+func (c *City) run(bin string, args ...string) Result {
 	cmd := exec.Command(bin, args...)
-	cmd.Dir = dir
+	cmd.Dir = c.dir
+	if c.actor != "" {
+		cmd.Env = append(os.Environ(), "BEADS_ACTOR="+c.actor)
+	}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()

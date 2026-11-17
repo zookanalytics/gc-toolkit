@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync/atomic"
@@ -71,7 +72,7 @@ type DoctorRun struct {
 // with it. gc doctor exits 0 when no blocking check failed and 1 when one did,
 // and prints its report on standard output either way (doDoctor there).
 func (c *City) Doctor(ctx context.Context) DoctorRun {
-	b := runBounded(ctx, c.dir, c.bin, "doctor", "--json")
+	b := c.runBounded(ctx, c.bin, "doctor", "--json")
 	out := DoctorRun{Bounded: b}
 	if b.Err != nil {
 		return out
@@ -108,7 +109,7 @@ func (c *City) Events(ctx context.Context, typ string, since time.Duration) ([]E
 	if since > 0 {
 		args = append(args, "--since", since.Round(time.Second).String())
 	}
-	b := runBounded(ctx, c.dir, c.bin, args...)
+	b := c.runBounded(ctx, c.bin, args...)
 	if f := b.Failure(); f != "" {
 		return nil, fmt.Errorf("gc events --type %s did not read: %s", typ, f)
 	}
@@ -157,7 +158,7 @@ func (c *City) Emit(ctx context.Context, e Emit) error {
 	if len(e.Payload) > 0 {
 		args = append(args, "--payload", string(e.Payload))
 	}
-	b := runBounded(ctx, c.dir, c.bin, args...)
+	b := c.runBounded(ctx, c.bin, args...)
 	if f := b.Failure(); f != "" {
 		return fmt.Errorf("gc event emit %s did not run: %s", e.Type, f)
 	}
@@ -173,13 +174,17 @@ func (c *City) Emit(ctx context.Context, e Emit) error {
 	return nil
 }
 
-// runBounded runs bin with args in dir, the process's own working directory
-// when dir is empty, in a process group the command leads, its standard input
-// reading nothing. When ctx ends first it kills that whole group, so the
-// processes the command started end with it, and answers ErrDeadline.
-func runBounded(ctx context.Context, dir, bin string, args ...string) Bounded {
+// runBounded runs bin with args in the city's directory, the process's own
+// working directory when it names none, as the city's actor when it names one,
+// in a process group the command leads, its standard input reading nothing.
+// When ctx ends first it kills that whole group, so the processes the command
+// started end with it, and answers ErrDeadline.
+func (c *City) runBounded(ctx context.Context, bin string, args ...string) Bounded {
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = dir
+	cmd.Dir = c.dir
+	if c.actor != "" {
+		cmd.Env = append(os.Environ(), "BEADS_ACTOR="+c.actor)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

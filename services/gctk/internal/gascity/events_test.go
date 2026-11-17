@@ -100,6 +100,32 @@ func TestDoctorEndsItsGroupAtTheDeadline(t *testing.T) {
 	}
 }
 
+// A bounded command starts in the city's directory, and on a city As an actor
+// it runs with BEADS_ACTOR naming that actor, as every command the city runs
+// does. The city it came from runs as the process does.
+func TestBoundedActsAsItsActorInItsDirectory(t *testing.T) {
+	base := t.TempDir()
+	log := filepath.Join(base, "who")
+	bin := filepath.Join(base, "gc")
+	stub := "#!/bin/sh\nprintf '%s %s\\n' \"${BEADS_ACTOR:-none}\" \"$(pwd -P)\" >> '" + log + "'\n"
+	if err := os.WriteFile(bin, []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEADS_ACTOR", "")
+	there := t.TempDir()
+	from := (&City{bin: bin}).In(there)
+	from.As("rig/gc-toolkit.refinery").Doctor(context.Background())
+	from.Doctor(context.Background())
+	resolved, err := filepath.EvalSymlinks(there)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(log)
+	if want := "rig/gc-toolkit.refinery " + resolved + "\nnone " + resolved + "\n"; string(raw) != want {
+		t.Fatalf("the commands ran as %q, want %q", raw, want)
+	}
+}
+
 // Events reads one type, with --since when a window is given, from the JSON
 // lines gc events prints, and leaves its notices on standard error out.
 func TestEventsReadsTheLines(t *testing.T) {
