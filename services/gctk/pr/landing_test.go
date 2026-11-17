@@ -45,8 +45,8 @@ const (
 
 // checkout is the rig's clone as a test sets it: its origin, a fetch that fails
 // when fetchErr is set, runs onFetch first when it is set, or blocks until its
-// context ends when fetchBlocks is set, and the commits on the target once a
-// fetch has run. Its
+// context ends when fetchBlocks is set, the branches each fetch named, and the
+// commits on the target once a fetch has run. Its
 // default branch is def, main when that is empty, and its tip once a fetch has
 // run is tip, else the merge commit. defErr and tipErr fail their reads.
 // descends names, for each commit, the commits it descends from, which
@@ -58,6 +58,7 @@ type checkout struct {
 	onFetch     func()
 	fetchBlocks bool
 	fetched     bool
+	branches    []string
 	reachable   map[string]bool
 	def, tip    string
 	defErr      error
@@ -94,9 +95,10 @@ func (c *checkout) Tip(branch string) (string, error) {
 	return merged, nil
 }
 
-func (c *checkout) FetchBranch(ctx context.Context, _ string) error {
+func (c *checkout) FetchBranch(ctx context.Context, branch string) error {
 	c.mu.Lock()
 	on, blocks, err := c.onFetch, c.fetchBlocks, c.fetchErr
+	c.branches = append(c.branches, branch)
 	c.mu.Unlock()
 	if blocks {
 		<-ctx.Done()

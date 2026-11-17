@@ -949,14 +949,16 @@ waits while an approval it would dismiss carries an inline comment the intake
 has not routed. It dismisses each approval that stands on a commit that does
 not contain the withdrawal's head in the history the rig's clone holds, with
 the withdrawal's reason and the city's mark, and closes the withdrawal once
-GitHub has dismissed each, or once none stands. A commit the clone does not
-hold, such as one a force-push left behind, contains no head, so its approval
-is dismissed. When GitHub refuses a dismissal, it files a human gate on the
-bead keyed `approval-withdraw-refused`. A dismissal GitHub does not answer, or
-a read of the clone's history that does not answer, leaves the withdrawal for
-the next run. A withdrawal holds the bead from the refinery until it is carried
-out, so a record the run sends back to the refinery keeps its marker while one
-is open, and the order still reads it.
+GitHub has dismissed each, or once none stands. Before it dismisses any, it
+fetches the PR's branch into the clone, so an approved commit someone pushed
+from outside the city is judged by its own history. A commit the clone still
+does not hold, such as one a force-push left behind, contains no head, so its
+approval is dismissed. When GitHub refuses a dismissal, it files a human gate
+on the bead keyed `approval-withdraw-refused`. A dismissal GitHub does not
+answer, a fetch that fails, or a read of the clone's history that does not
+answer, leaves the withdrawal for the next run. A withdrawal holds the bead
+from the refinery until it is carried out, so a record the run sends back to
+the refinery keeps its marker while one is open, and the order still reads it.
 
 **The review run.** A run pours a PR's review run, `mol-pr-review`, with
 `gc formula cook --attach` onto the bead under the record lock. Its vars are the

@@ -448,17 +448,52 @@ func TestAWithdrawalHoldsThePRUntilNoApprovalWithoutItsHeadStands(t *testing.T) 
 	is(t, d.once(t), pr.ActRequested)
 }
 
-// A commit the clone does not hold, as one a force-push left behind, is not
-// shown to contain the head, so the approval of it is dismissed and the
-// withdrawal closes, where waiting would hold the PR on every run with no one
-// asked. An approval of the head itself stands, since its commit is the head.
+// A commit the clone does not hold once the act has fetched the PR's branch, as
+// one a force-push left behind, is not shown to contain the head, so the
+// approval of it is dismissed and the withdrawal closes, where waiting would
+// hold the PR on every run with no one asked. An approval of the head itself
+// stands, since its commit is the head.
 func TestAnApprovalOfACommitTheCloneDoesNotHoldIsDismissed(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Reviews = []gh.Review{approved(100, "former", rewrite), approved(101, "reviewer", head)}
 	id := d.withdraw(t, head)
 	d.once(t)
 	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed", "approved"}) {
-		t.Fatalf("a refused compare left the withdrawal %s with reviews %v", status(t, d, id), states(d.pr))
+		t.Fatalf("a commit the clone does not hold left the withdrawal %s with reviews %v", status(t, d, id), states(d.pr))
+	}
+	if !slices.Equal(d.co.branches, []string{branch}) {
+		t.Fatalf("the act fetched %v before it dismissed, not the PR's branch %s", d.co.branches, branch)
+	}
+}
+
+// An approval of a commit the clone has not fetched yet, such as one a person
+// pushed onto the PR's branch, is judged once the act has fetched the branch,
+// and stands when that commit contains the head. A fetch that fails dismisses
+// nothing, and the next run acts again.
+func TestAnApprovalOfAPushTheCloneHasNotFetchedIsJudgedOnceTheBranchIsFetched(t *testing.T) {
+	d := newCycle(t)
+	pushed := "5555555555555555555555555555555555555555"
+	d.pr.Reviews = []gh.Review{approved(100, "operator", older), approved(101, "operator", pushed)}
+	id := d.withdraw(t, head)
+	d.co.fetchErr = errors.New("git fetch: could not read from remote repository")
+	o := d.once(t)
+	is(t, o, pr.ActRetry)
+	if !strings.Contains(o.Detail, "did not fetch") || status(t, d, id) != "open" ||
+		slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "DismissReview" }) {
+		t.Fatalf("a branch that did not fetch read %s, the withdrawal %s, with asks %v", o.Detail, status(t, d, id), asks(d.github))
+	}
+	d.co.fetchErr = nil
+	d.co.onFetch = func() {
+		d.co.mu.Lock()
+		defer d.co.mu.Unlock()
+		d.co.descends[pushed] = []string{head, older}
+	}
+	d.once(t)
+	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed", "approved"}) {
+		t.Fatalf("once the branch fetched, the withdrawal is %s with reviews %v", status(t, d, id), states(d.pr))
+	}
+	if !slices.Equal(d.co.branches, []string{branch, branch}) {
+		t.Fatalf("the acts fetched %v, not the PR's branch %s once each", d.co.branches, branch)
 	}
 }
 

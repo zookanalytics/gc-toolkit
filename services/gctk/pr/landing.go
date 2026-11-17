@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"regexp"
 	"slices"
@@ -346,7 +347,8 @@ func (l Landing) read(id string) (*ledger.Record, error) {
 // run is one run of the landing order, which loads the definition of feedback
 // and reads the city's mark and the clone's origin once, when a record first
 // needs each, reads the login the city's account acts as once for each host,
-// and asks the clone whether one commit contains another once for each pair.
+// and asks the clone whether one commit contains another once for each pair,
+// until it fetches a PR's branch, which fetched names, once for each branch.
 // landed is the merge the act just made closed its bead on, for the seed
 // audit's check once the lock is free, and audited names, for each tip of the
 // default branch the run has checked, the bead whose landing checked it.
@@ -357,6 +359,7 @@ type run struct {
 	origin   *string
 	logins   map[string]string
 	contains map[[2]string]bool
+	fetched  map[string]bool
 	landed   *landedMerge
 	audited  map[string]string
 }
@@ -447,6 +450,24 @@ func (u *run) holds(commit, ancestor string) (bool, error) {
 	}
 	u.contains[k] = v
 	return v, nil
+}
+
+// fetchBranch fetches a PR's branch into the clone once a run, stopped when ctx
+// ends. A commit it brings can contain one the clone showed none to, so each
+// answer that a commit does not contain another is asked again.
+func (u *run) fetchBranch(ctx context.Context, branch string) error {
+	if u.fetched[branch] {
+		return nil
+	}
+	if err := u.Checkout.FetchBranch(ctx, branch); err != nil {
+		return err
+	}
+	if u.fetched == nil {
+		u.fetched = map[string]bool{}
+	}
+	u.fetched[branch] = true
+	maps.DeleteFunc(u.contains, func(_ [2]string, in bool) bool { return !in })
+	return nil
 }
 
 // readHub is GitHub as the evaluator reads it on the merge's own read: the hub

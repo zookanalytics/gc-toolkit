@@ -575,10 +575,10 @@ no warrant.
   `judge` in the same file, which the order's run in
   `services/gctk/pr/landing.go` calls on each act that reads the record, from
   the approvals the saved GitHub read holds and the history the rig's clone
-  holds. Its reader for the review run: `WithdrawalFor` in the same file,
-  which the `output` verb of `services/gctk/internal/cli/reviewrun.go` reads
-  to refuse a triage output that rules its head material before the
-  withdrawal for that head is filed.
+  holds once the act fetches the PR's branch. Its reader for the review run:
+  `WithdrawalFor` in the same file, which the `output` verb of
+  `services/gctk/internal/cli/reviewrun.go` reads to refuse a triage output
+  that rules its head material before the withdrawal for that head is filed.
 - **Stands in for.** A withdrawal of a pull request's approvals once a head
   changes what the PR does: an operation that dismisses each approval given on
   a commit without that head, and holds the PR's bead from merging until GitHub

@@ -113,13 +113,14 @@ read holds: it waits while an approval it would dismiss carries an inline
 comment the intake has not routed, dismisses each approval that stands on a
 commit that does not contain the withdrawal's head in the clone's history,
 with the withdrawal's reason and the city's mark, and closes the withdrawal
-once GitHub has dismissed each, or once none stands. A commit the clone does
+once GitHub has dismissed each, or once none stands. Before it dismisses any,
+it fetches the PR's branch into the clone, and a commit the clone still does
 not hold contains no head. When GitHub refuses a dismissal, it files a human
 gate on the bead keyed approval-withdraw-refused. A dismissal GitHub does not
-answer leaves the withdrawal for the next run, and the record keeps its marker
-while a withdrawal is open, its changed head sent back to the refinery
-included, since the withdrawal holds the bead from the refinery until it is
-carried out.
+answer, or a fetch that fails, leaves the withdrawal for the next run, and the
+record keeps its marker while a withdrawal is open, its changed head sent back
+to the refinery included, since the withdrawal holds the bead from the
+refinery until it is carried out.
 
 The review run is mol-pr-review, poured with gc formula cook --attach onto the
 bead under the record lock, with the record's PR bead, head, target and branch

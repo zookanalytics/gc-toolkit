@@ -296,12 +296,13 @@ func conversationFor(s state, saved *SavedRead) (*SavedConversation, string) {
 // gone, which this act dismissed for an earlier withdrawal. An approval stands
 // on a commit that does not contain the head unless its commit is the head, or
 // descends from it in the clone's history (Checkout.Contains). A commit the
-// clone does not hold is not shown to contain the head, and neither is an
-// approval that names no commit, so each is dismissed, which errs toward a
-// dismissal: otherwise a commit no one holds would keep the withdrawal waiting
-// on every run, with no one asked. An approval of the head, or of any later head
-// of the branch, contains it, since every push onto a PR's branch on the record
-// is a fast-forward.
+// clone does not hold once the act has fetched the PR's branch (carryOne), such
+// as one a force-push left behind, is not shown to contain the head, and
+// neither is an approval that names no commit, so each is dismissed, which errs
+// toward a dismissal: otherwise a commit no one holds would keep the withdrawal
+// waiting on every run, with no one asked. An approval of the head, or of any
+// later head of the branch, contains it, since every push onto a PR's branch on
+// the record is a fast-forward.
 func (u *run) judge(s state, conv *SavedConversation, w withdrawal, gone map[int64]bool) verdict {
 	var targets []Approval
 	for _, a := range conv.Approvals {
@@ -460,6 +461,15 @@ func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, co
 		return at + " waits for the next run: " + why, true, failed
 	}
 	v := u.judge(s, conv, w, gone)
+	if v.wait == "" && len(v.dismiss) > 0 && !u.fetched[s.branch] {
+		// An approved commit the clone has not fetched, such as one a person
+		// pushed onto the PR's branch, can contain the head, so the act fetches
+		// the branch before it dismisses any approval, and judges them again.
+		if err := u.fetchBranch(ctx, s.branch); err != nil {
+			return waits(fmt.Sprintf("origin/%s did not fetch, so no approval is dismissed: %v", s.branch, err), true)
+		}
+		v = u.judge(s, conv, w, gone)
+	}
 	if v.wait != "" {
 		return waits(v.wait, v.failed)
 	}
