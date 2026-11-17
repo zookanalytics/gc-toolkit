@@ -128,7 +128,8 @@ still open: a review comment of the operator's that the branch has not
 answered, and a finding of the city's review that its round put to a person or
 deferred to a later fix. The PR's conversation holds both, with the city's
 review comment saying how its round ruled each finding. `converse-prep` read
-it when the subject is the PR's anchor. Otherwise read it from the anchor with
+it when the subject's metadata carries the PR's `pr_number` or `pr_url`.
+Otherwise read it from the anchor with
 `"$CONV/converse-pr-conversation.sh" <the anchor>`. The PR's status names what
 still holds it, such as a question a person owes or a review thread that waits
 on the city's answer:
