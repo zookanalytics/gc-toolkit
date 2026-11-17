@@ -70,13 +70,10 @@ proves the deletion happened.
 
 Agents are told the rule rather than a set of habits. The `scratch-reclaim`
 prompt fragment states that a scratchpad belongs to one session and does not
-outlive it, and it names where a session's other files go, since its agent home
-takes none: `assets/scripts/worktree-setup.sh` fails a home's start on a file
-git neither tracks nor ignores. It carries two habits beyond that. A command
-that writes a file begins with a `cd` into one of those places, so that a path
-that comes out relative does not land in the home. And build artifacts and
-whole-store bead dumps stay out of scratch, because the reaper cannot cover
-them: a single turn can exhaust the quota between passes.
+outlive it, and it names where a file that must outlive the session goes
+instead. It also tells agents to keep build artifacts and whole-store bead
+dumps out of scratch, because the reaper cannot cover them: a single turn can
+exhaust the quota between passes.
 
 ## Ended sessions
 
