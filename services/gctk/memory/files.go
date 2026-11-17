@@ -3,19 +3,122 @@ package memory
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// Agents write memory without the intake's lock, so every write the intake
-// makes to a memory directory is guarded on the text it read.
+// Agents write memory without the intake's lock, so the intake never replaces
+// or removes a file in a memory directory by its name, which would take a save
+// a writer made there after the intake's last read. It first displaces the
+// file, keeping it whole under another name, and then checks the displaced
+// file against the text it read.
+//
+// A new text goes in by an exchange: the new file and the file under the name
+// swap in one step, so the name holds a whole file at every moment. A
+// displaced file that fails the check is a writer's save, and it is swapped
+// back. A removal, once the note's text is kept, moves the file aside to a new
+// name in the same directory. A moved file that fails the check goes back by a
+// rename that fails when a writer has made a new file under the name since.
+//
+// A write through a handle a writer opened before the exchange or the move
+// lands in the displaced file, so the check sees it, unless it lands after the
+// check, and then it is removed with the displaced file. A run killed while a
+// file is displaced leaves it under its .memory-intake.* name. It holds the
+// text the intake replaced or has kept, unless a writer saved in the moment
+// before the exchange or the move.
 
 // errMoved is a rewrite whose file another writer kept changing.
 var errMoved = errors.New("it kept changing while it was written")
 
 // errChanged is an edit that refused text other than the text it was given.
 var errChanged = errors.New("it changed since it was listed")
+
+// beforeStep runs before each step of a write to file, named by the step, so a
+// test can land an agent's save or a kill there. A rewrite takes "swap", the
+// exchange, then "check", the read of the displaced file, then "back", the
+// exchange that returns a displaced file that failed the check. A removal
+// takes "move", the move aside, then "check", then "finish", the removal of
+// the moved file.
+var beforeStep = func(step, file string) {}
+
+// put swaps the file at tmp, which holds after, in under file's name while
+// file holds text, and reports whether it did.
+func put(file, tmp, text, after string) (bool, error) {
+	beforeStep("swap", file)
+	if err := exchange(tmp, file); err != nil {
+		os.Remove(tmp)
+		return false, err
+	}
+	beforeStep("check", file)
+	if now, err := os.ReadFile(tmp); err == nil && string(now) == text {
+		os.Remove(tmp)
+		return true, nil
+	}
+	beforeStep("back", file)
+	if err := exchange(tmp, file); err != nil {
+		return false, fmt.Errorf("%s holds the intake's edit, and the save it displaced is at %s: %w", file, tmp, err)
+	}
+	if now, err := os.ReadFile(tmp); err == nil && string(now) == after {
+		os.Remove(tmp)
+		return false, nil
+	}
+	return false, fmt.Errorf("%s was saved twice while it was written: it holds the first save, and what was under its name after that is at %s", file, tmp)
+}
+
+// aside moves file to a new name beside it, and returns that name.
+func aside(file string) (string, error) {
+	f, err := os.CreateTemp(filepath.Dir(file), ".memory-intake.*")
+	if err != nil {
+		return "", err
+	}
+	f.Close()
+	if err := os.Rename(file, f.Name()); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+// back renames the file moved aside to moved back to file's name. When a
+// writer has made a new file under the name since the move, both stay, and the
+// error says where the moved one is.
+func back(moved, file string) error {
+	err := renameNew(moved, file)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, fs.ErrExist):
+		return fmt.Errorf("%s was saved twice while it was removed: the newer save is under its name, and the older one is at %s", file, moved)
+	}
+	return fmt.Errorf("%s is at %s and could not be put back under its name: %w", file, moved, err)
+}
+
+// take removes file while it holds the text whose hash is full.
+func take(file, full string) (removal, error) {
+	beforeStep("move", file)
+	moved, err := aside(file)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return stays, nil
+	case err != nil:
+		return failed, err
+	}
+	beforeStep("check", file)
+	now, err := os.ReadFile(moved)
+	if err == nil && sum(string(now)) == full {
+		beforeStep("finish", file)
+		if err := os.Remove(moved); err != nil {
+			return failed, errors.Join(err, back(moved, file))
+		}
+		return removed, nil
+	}
+	if berr := back(moved, file); berr != nil || err != nil {
+		return failed, errors.Join(err, berr)
+	}
+	return stays, nil
+}
 
 // rewrite replaces file's text with edit(text) while the file still holds the
 // text edit read, and tries again, up to three times, when another writer moved
@@ -47,17 +150,12 @@ func rewrite(file string, edit func(string) (string, error)) (string, bool, erro
 			os.Remove(tmp.Name())
 			return "", false, err
 		}
-		now, err := os.ReadFile(file)
-		if err == nil && string(now) == string(before) {
-			if err := os.Rename(tmp.Name(), file); err != nil {
-				os.Remove(tmp.Name())
-				return "", false, err
-			}
-			return after, true, nil
-		}
-		os.Remove(tmp.Name())
+		wrote, err := put(file, tmp.Name(), string(before), after)
 		if err != nil {
 			return "", false, err
+		}
+		if wrote {
+			return after, true, nil
 		}
 	}
 	return "", false, errMoved
@@ -82,10 +180,6 @@ func keep(state, name, hash, text string) (string, bool, error) {
 	}
 	return dest, true, nil
 }
-
-// afterKeep runs between a removal's keeping of a note's text and its last
-// read, so a test can land an agent's edit there.
-var afterKeep = func(string) {}
 
 // A removal's result: the unit is gone with its text kept, it stays because it
 // changed or is gone, or it stays because a write failed.
@@ -114,20 +208,14 @@ func removeNote(state, dir, name, full string) (removal, string, error) {
 	if err != nil {
 		return failed, "", fmt.Errorf("its text was not kept: %w", err)
 	}
-	afterKeep(file)
-	if now, err := os.ReadFile(file); err == nil && sum(string(now)) == full {
-		if err := os.Remove(file); err != nil {
-			if made {
-				os.Remove(kept)
-			}
-			return failed, "", err
+	r, err := take(file, full)
+	if r != removed {
+		if made {
+			os.Remove(kept)
 		}
-		return removed, kept, nil
+		return r, "", err
 	}
-	if made {
-		os.Remove(kept)
-	}
-	return stays, "", nil
+	return removed, kept, nil
 }
 
 // removeEntry takes an entry out of its collection note once its text is kept,

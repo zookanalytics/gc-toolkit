@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -89,6 +90,201 @@ func TestRewriteIsGuardedOnTheTextItRead(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(filepath.Dir(f)); len(entries) != 1 {
 		t.Errorf("the rewrite left %d files beside the note", len(entries)-1)
+	}
+}
+
+// A rewrite keeps a save an agent makes at any step of it. A save before the
+// swap is displaced, fails the check and is swapped back, and the rewrite
+// edits it on its next try. A save after the swap lands over the edit, as a
+// later save would.
+func TestRewriteKeepsASaveMadeAtEachStep(t *testing.T) {
+	edit := func(text string) (string, error) { return text + "intake\n", nil }
+	for name, c := range map[string]struct {
+		land func(t *testing.T)
+		want string
+	}{
+		"in place before the swap": {func(t *testing.T) {
+			landAt(t, "swap", func(f string) { appendTo(t, f, "agent\n") })
+		}, "one\nagent\nintake\n"},
+		"by rename before the swap": {func(t *testing.T) {
+			landAt(t, "swap", func(f string) { saveByRename(t, f, "one\nagent\n") })
+		}, "one\nagent\nintake\n"},
+		"through a handle opened before the swap": {func(t *testing.T) {
+			var h *os.File
+			landAt(t, "swap", func(f string) { h = openAppend(t, f) })
+			landAt(t, "check", func(string) {
+				if _, err := h.WriteString("agent\n"); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}, "one\nagent\nintake\n"},
+		"in place after the swap": {func(t *testing.T) {
+			landAt(t, "check", func(f string) { write(t, f, "one\nagent\n") })
+		}, "one\nagent\n"},
+		"by rename after the swap": {func(t *testing.T) {
+			landAt(t, "check", func(f string) { saveByRename(t, f, "one\nagent\n") })
+		}, "one\nagent\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := filepath.Join(t.TempDir(), "n.md")
+			write(t, f, "one\n")
+			c.land(t)
+			if _, wrote, err := rewrite(f, edit); err != nil || !wrote || read(t, f) != c.want {
+				t.Errorf("rewrite = %v, %v; the file reads %q, want %q", wrote, err, read(t, f), c.want)
+			}
+			if left := beside(t, f); len(left) != 0 {
+				t.Errorf("the rewrite left %q beside the note", left)
+			}
+		})
+	}
+}
+
+// When one save fails the check and another lands over the edit before the
+// swap back, both stay, and the rewrite fails naming where the second one is.
+func TestRewriteKeepsBothSavesOfTwoWriters(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "n.md")
+	write(t, f, "one\n")
+	landAt(t, "swap", func(f string) { appendTo(t, f, "first\n") })
+	landAt(t, "back", func(f string) { write(t, f, "second\n") })
+	_, wrote, err := rewrite(f, func(text string) (string, error) { return text + "intake\n", nil })
+	if wrote || err == nil || errors.Is(err, errMoved) {
+		t.Fatalf("rewrite = %v, %v; want it to fail on the two saves", wrote, err)
+	}
+	left := beside(t, f)
+	if read(t, f) != "one\nfirst\n" || len(left) != 1 {
+		t.Fatalf("the file reads %q, with %q beside it; want the first save, and one file beside it", read(t, f), left)
+	}
+	for name, text := range left {
+		if text != "second\n" || !strings.Contains(err.Error(), name) {
+			t.Errorf("failed %v, with %q at %s; want the second save where the error says", err, text, name)
+		}
+	}
+}
+
+// A rewrite killed at any step leaves a whole file under the name, and every
+// text it displaced beside it.
+func TestARewriteKilledAtAnyStepLeavesAWholeFile(t *testing.T) {
+	edit := func(text string) (string, error) { return text + "intake\n", nil }
+	for _, c := range []struct {
+		step, race, name, left string
+	}{
+		{"swap", "", "one\n", "one\nintake\n"},
+		{"check", "", "one\nintake\n", "one\n"},
+		{"back", "agent\n", "one\nintake\n", "one\nagent\n"},
+	} {
+		t.Run(c.step, func(t *testing.T) {
+			f := filepath.Join(t.TempDir(), "n.md")
+			write(t, f, "one\n")
+			if c.race != "" {
+				landAt(t, "swap", func(f string) { appendTo(t, f, c.race) })
+			}
+			killedAt(t, c.step, func() { rewrite(f, edit) })
+			left := beside(t, f)
+			if read(t, f) != c.name || len(left) != 1 {
+				t.Fatalf("the file reads %q, with %q beside it; want %q, and one file beside it", read(t, f), left, c.name)
+			}
+			for _, text := range left {
+				if text != c.left {
+					t.Errorf("beside the file %q; want %q", text, c.left)
+				}
+			}
+		})
+	}
+}
+
+// A removal keeps a save an agent makes at any step of it. A save before the
+// move fails the check, so the note goes back with it and stays, and a save
+// under the name after the move is a new file the removal leaves.
+func TestRemoveNoteKeepsASaveMadeAtEachStep(t *testing.T) {
+	for name, c := range map[string]struct {
+		land func(t *testing.T)
+		want removal
+	}{
+		"in place before the move": {func(t *testing.T) {
+			landAt(t, "move", func(f string) { appendTo(t, f, "agent\n") })
+		}, stays},
+		"by rename before the move": {func(t *testing.T) {
+			landAt(t, "move", func(f string) { saveByRename(t, f, "d lesson.\nagent\n") })
+		}, stays},
+		"through a handle opened before the move": {func(t *testing.T) {
+			var h *os.File
+			landAt(t, "move", func(f string) { h = openAppend(t, f) })
+			landAt(t, "check", func(string) {
+				if _, err := h.WriteString("agent\n"); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}, stays},
+		"as a new file before the check": {func(t *testing.T) {
+			landAt(t, "check", func(f string) { write(t, f, "d lesson.\nagent\n") })
+		}, removed},
+		"as a new file after the check": {func(t *testing.T) {
+			landAt(t, "finish", func(f string) { write(t, f, "d lesson.\nagent\n") })
+		}, removed},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir, state := t.TempDir(), t.TempDir()
+			f := filepath.Join(dir, "d.md")
+			write(t, f, "d lesson.\n")
+			c.land(t)
+			r, kept, err := removeNote(state, dir, "d.md", sum("d lesson.\n"))
+			if r != c.want || err != nil {
+				t.Fatalf("removeNote = %v, %v; want %v", r, err, c.want)
+			}
+			if read(t, f) != "d lesson.\nagent\n" {
+				t.Errorf("the note reads %q; want the agent's save", read(t, f))
+			}
+			if left := beside(t, f); len(left) != 0 {
+				t.Errorf("the removal left %q beside the note", left)
+			}
+			all, _ := filepath.Glob(filepath.Join(state, "removed", "*"))
+			if r == removed && (len(all) != 1 || read(t, kept) != "d lesson.\n") {
+				t.Errorf("kept %v; want the text listed", all)
+			}
+			if r == stays && len(all) != 0 {
+				t.Errorf("kept %v for a note that stayed", all)
+			}
+		})
+	}
+}
+
+// When one save fails a removal's check and another makes a new file under
+// the name while the note is moved aside, both stay, and the removal fails
+// naming where the first one is.
+func TestRemoveNoteKeepsBothSavesOfTwoWriters(t *testing.T) {
+	dir, state := t.TempDir(), t.TempDir()
+	f := filepath.Join(dir, "d.md")
+	write(t, f, "d lesson.\n")
+	landAt(t, "move", func(f string) { appendTo(t, f, "first\n") })
+	landAt(t, "check", func(f string) { write(t, f, "second\n") })
+	r, _, err := removeNote(state, dir, "d.md", sum("d lesson.\n"))
+	if r != failed || err == nil {
+		t.Fatalf("removeNote = %v, %v; want it to fail on the two saves", r, err)
+	}
+	left := beside(t, f)
+	if read(t, f) != "second\n" || len(left) != 1 {
+		t.Fatalf("the note reads %q, with %q beside it; want the second save, and one file beside it", read(t, f), left)
+	}
+	for name, text := range left {
+		if text != "d lesson.\nfirst\n" || !strings.Contains(err.Error(), name) {
+			t.Errorf("failed %v, with %q at %s; want the first save where the error says", err, text, name)
+		}
+	}
+}
+
+// A removal killed at any step leaves the note's text under its name or kept.
+func TestARemovalKilledAtAnyStepKeepsTheText(t *testing.T) {
+	for _, step := range []string{"move", "check", "finish"} {
+		t.Run(step, func(t *testing.T) {
+			dir, state := t.TempDir(), t.TempDir()
+			f := filepath.Join(dir, "d.md")
+			write(t, f, "d lesson.\n")
+			killedAt(t, step, func() { removeNote(state, dir, "d.md", sum("d lesson.\n")) })
+			kept := filepath.Join(state, "removed", "d.md@"+sum("d lesson.\n"))
+			if exists(f) && read(t, f) != "d lesson.\n" || !exists(f) && read(t, kept) != "d lesson.\n" {
+				t.Errorf("the note's text is neither under its name nor kept")
+			}
+		})
 	}
 }
 

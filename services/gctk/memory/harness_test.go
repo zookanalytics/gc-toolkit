@@ -182,6 +182,78 @@ func appendTo(t *testing.T, file, text string) {
 	}
 }
 
+// openAppend opens file to append to, as a writer holds it open, and closes it
+// when the test ends.
+func openAppend(t *testing.T, file string) *os.File {
+	t.Helper()
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	return f
+}
+
+// saveByRename saves text to file through a new file beside it, renamed onto
+// the name, as an atomic save does.
+func saveByRename(t *testing.T, file, text string) {
+	t.Helper()
+	write(t, file+".tmp.0a1b2c3d", text)
+	if err := os.Rename(file+".tmp.0a1b2c3d", file); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// landAt runs land the first time a write reaches step, as an agent's save
+// would land there, with the file the write is on.
+func landAt(t *testing.T, step string, land func(file string)) {
+	t.Helper()
+	prev, done := beforeStep, false
+	beforeStep = func(s, file string) {
+		prev(s, file)
+		if s == step && !done {
+			done = true
+			land(file)
+		}
+	}
+	t.Cleanup(func() { beforeStep = func(string, string) {} })
+}
+
+// killedAt runs write and stops it the first time it reaches step, as a kill
+// there would, so the test reads what the kill leaves.
+func killedAt(t *testing.T, step string, write func()) {
+	t.Helper()
+	type kill struct{}
+	landAt(t, step, func(string) { panic(kill{}) })
+	defer func() {
+		switch r := recover(); r.(type) {
+		case kill:
+		case nil:
+			t.Errorf("the write never reached %q", step)
+		default:
+			panic(r)
+		}
+	}()
+	write()
+}
+
+// beside is the text of each file in file's directory other than file, by
+// name.
+func beside(t *testing.T, file string) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Dir(file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		if p := filepath.Join(filepath.Dir(file), e.Name()); p != file {
+			out[e.Name()] = read(t, p)
+		}
+	}
+	return out
+}
+
 func read(t *testing.T, file string) string {
 	t.Helper()
 	raw, err := os.ReadFile(file)

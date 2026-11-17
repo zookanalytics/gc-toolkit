@@ -436,8 +436,7 @@ func TestANoteEditedWhileItIsRemovedStays(t *testing.T) {
 	f := filepath.Join(m, "d.md")
 	write(t, f, "d lesson.\n")
 	r := refOf(c.due(), "d.md")
-	afterKeep = func(file string) { appendTo(t, file, "An edit made while it was being removed.\n") }
-	t.Cleanup(func() { afterKeep = func(string) {} })
+	landAt(t, "move", func(file string) { appendTo(t, file, "An edit made while it was being removed.\n") })
 	a := c.apply(r + " drop")
 	if !said(a.Said, "refused "+r) || !strings.Contains(read(t, f), "An edit made") || dueOf(c.due(), "d.md") != DueNew {
 		t.Errorf("said %q; want the note to stay with the edit, due", a.Said)

@@ -300,8 +300,7 @@ func TestASettleKeepsANoteEditedWhileItIsRemoved(t *testing.T) {
 	c.apply(refOf(c.due(), "s.md") + " waits tk-p1")
 	s.Put(closedPattern("tk-p1", "proposal_bead", "tk-f1"))
 	s.Put(merged("tk-f1", onMain, "main"))
-	afterKeep = func(file string) { appendTo(t, file, "An edit made while it was being removed.\n") }
-	t.Cleanup(func() { afterKeep = func(string) {} })
+	landAt(t, "move", func(file string) { appendTo(t, file, "An edit made while it was being removed.\n") })
 	if got := c.settle(); got.Left != 0 || !exists(f) {
 		t.Fatalf("left %d; want the edited note kept", got.Left)
 	}
