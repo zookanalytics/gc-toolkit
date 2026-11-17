@@ -256,20 +256,20 @@ func (s *Snapshot) readFlight(l *ledger.Ledger, ids []string) error {
 	if len(unsettled) == 0 {
 		return nil
 	}
-	runs, err := liveRuns(l)
+	runs, err := LiveRuns(l)
 	if err != nil {
 		return err
 	}
 	for _, r := range runs {
-		if r.bead == "" || !slices.Contains(unsettled, r.bead) || s.flight[r.bead] != "" {
+		if r.Bead == "" || !slices.Contains(unsettled, r.Bead) || s.flight[r.Bead] != "" {
 			continue
 		}
-		past, err := pastLoadContext(l, r.root)
+		past, err := pastLoadContext(l, r.Root)
 		if err != nil {
 			return err
 		}
 		if past {
-			s.flight[r.bead] = "workflow " + r.root + " past load-context"
+			s.flight[r.Bead] = "workflow " + r.Root + " past load-context"
 		}
 	}
 	return nil

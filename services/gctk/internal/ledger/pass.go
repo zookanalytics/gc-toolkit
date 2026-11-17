@@ -69,6 +69,10 @@ func (p *pass) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) { return p.store.Re
 // does.
 func (p *pass) ReadyIDs() ([]string, error) { return p.store.ReadyIDs() }
 
+// Dependents reads the store afresh each time it is asked: its rows carry no
+// edges, so the pass keeps none of them in place of a listing's row.
+func (p *pass) Dependents(id, typ string) ([]gcbd.Bead, error) { return p.store.Dependents(id, typ) }
+
 // Blocked reads the store's blocked set the first time it is asked, and answers
 // with that read every time after.
 func (p *pass) Blocked() (*gcbd.BlockedSet, error) {

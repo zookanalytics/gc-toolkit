@@ -121,3 +121,55 @@ func TestFakeFindAnswersAsTheListingDoes(t *testing.T) {
 		t.Errorf("Find of a lost bead = %v, %v; want its row, since a list is one query", rows, err)
 	}
 }
+
+// The fake's dependents of a bead are the beads with an edge of the type onto
+// it, closed ones among them, each the dependent's own row with the edge's type
+// and none of its edges, and a bead the store does not hold refuses the read.
+func TestFakeDependentsAnswerAsTheDependentsReadDoes(t *testing.T) {
+	s := New()
+	s.Put(Bead{ID: "b-1", Status: "open"})
+	s.Put(Bead{ID: "cv-1", Status: "open", IssueType: "convoy", Metadata: map[string]string{"gc.synthetic": "true"},
+		Edges: []gcbd.Edge{{Type: "tracks", ID: "b-1"}}})
+	s.Put(Bead{ID: "cv-2", Status: "closed", IssueType: "convoy", Edges: []gcbd.Edge{{Type: "tracks", ID: "b-1"}}})
+	s.Put(Bead{ID: "b-2", Status: "open", Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "b-1"}}})
+	rows, err := s.Dependents("b-1", "tracks")
+	var got []string
+	for _, r := range rows {
+		got = append(got, r.ID+"/"+r.DependencyType)
+		if e, _ := r.Edges(); len(e) != 0 {
+			t.Errorf("%s's dependents row carries edges %+v", r.ID, e)
+		}
+	}
+	if err != nil || !slices.Equal(got, []string{"cv-1/tracks", "cv-2/tracks"}) || rows[0].Meta("gc.synthetic") != "true" {
+		t.Errorf("Dependents(b-1, tracks) = %v, %v; want both convoys, with their keys", got, err)
+	}
+	if rows, err := s.Dependents("gone", "tracks"); err == nil {
+		t.Errorf("Dependents of a bead the store does not hold = %v; want a read error", rows)
+	}
+}
+
+// The fake's ready read of every bead answers each open bead MakeReady named
+// that the rule serves, by priority when asked, and refuses a read that names
+// both a key and every bead, or neither.
+func TestFakeReadyReadsEveryBeadByPriority(t *testing.T) {
+	s := New()
+	s.Put(Bead{ID: "b-1", Status: "open", Priority: 2})
+	s.Put(Bead{ID: "b-2", Status: "open", Priority: 0})
+	s.Put(Bead{ID: "b-3", Status: "open", Priority: 1, Assignee: "someone"})
+	s.Put(Bead{ID: "b-4", Status: "closed", Priority: 0})
+	s.Put(Bead{ID: "b-5", Status: "open", Priority: 1, IssueType: "epic"})
+	s.MakeReady("b-1", "b-2", "b-3", "b-4", "b-5")
+	rows, err := s.Ready(gcbd.ReadyQuery{Every: true, Unassigned: true, ExcludeTypes: []string{"epic"}, ByPriority: true})
+	var got []string
+	for _, r := range rows {
+		got = append(got, r.ID)
+	}
+	if err != nil || !slices.Equal(got, []string{"b-2", "b-1"}) {
+		t.Errorf("the ready read by priority = %v, %v; want b-2 then b-1", got, err)
+	}
+	for _, q := range []gcbd.ReadyQuery{{Unassigned: true}, {HasKey: "k", Every: true}} {
+		if rows, err := s.Ready(q); err == nil {
+			t.Errorf("Ready(%+v) = %v; want a refusal", q, rows)
+		}
+	}
+}

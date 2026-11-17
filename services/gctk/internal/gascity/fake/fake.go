@@ -1,7 +1,7 @@
-// Package fake is the runtime adapter's fake: it records each sling, cook,
-// session wake, nudge and script call a domain makes and answers as its test
-// says, so a domain's rules about Gas City are tested in Go with no Gas City
-// (docs/gctk-architecture.md, "The adapters").
+// Package fake is the runtime adapter's fake: it records each call a domain
+// makes of gascity.Runtime and answers as its test says, so a domain's rules
+// about Gas City are tested in Go with no Gas City (docs/gctk-architecture.md,
+// "The adapters").
 package fake
 
 import (

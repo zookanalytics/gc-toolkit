@@ -80,12 +80,12 @@ type Store struct {
 	states  []State
 	added   []Edge
 
-	// RowsErr, BlockedErr, FindErr and ReadyErr fail the matching read when
-	// set, ReadyErr failing ReadyIDs too. UpdateErr fails every update,
-	// CreateErr every create, StateErr every set-state and EdgeErr every edge
-	// write.
+	// RowsErr, BlockedErr, FindErr, ReadyErr and DependentsErr fail the
+	// matching read when set, ReadyErr failing ReadyIDs too. UpdateErr fails
+	// every update, CreateErr every create, StateErr every set-state and
+	// EdgeErr every edge write.
 	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr, CreateErr error
-	StateErr, EdgeErr                                            error
+	StateErr, EdgeErr, DependentsErr                             error
 
 	// OnWrite, when set, runs after each write the store takes, outside the
 	// store's lock: its kind (update, create, set-state or dep-add), the bead
@@ -140,26 +140,31 @@ func (s *Store) MakeReady(ids ...string) {
 	}
 }
 
-// Ready returns, in id order, the row of each bead MakeReady named that q
-// selects, in a listing's shape: an open bead that carries q's key, unassigned
-// when q asks, of no type q leaves out and with no label q leaves out, each
-// compared exactly, as bd's flags compare them.
+// Ready returns the row of each bead MakeReady named that q selects, in a
+// listing's shape: an open bead that carries q's key, or any open bead when q
+// selects every bead, unassigned when q asks, of no type q leaves out and with
+// no label q leaves out, each compared exactly, as bd's flags compare them. The
+// rows come in id order, or by priority, the lowest number first, when q asks.
 func (s *Store) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ReadyErr != nil {
 		return nil, s.ReadyErr
 	}
-	if q.HasKey == "" {
-		return nil, &gcbd.ReadError{Reason: "the fake store takes no ready read that names no key"}
+	if (q.HasKey == "") == !q.Every {
+		return nil, &gcbd.ReadError{Reason: "the fake store takes a ready read that names a key or every bead, one of the two"}
+	}
+	ids := slices.Sorted(maps.Keys(s.rows))
+	if q.ByPriority {
+		slices.SortStableFunc(ids, func(a, b string) int { return s.rows[a].Priority - s.rows[b].Priority })
 	}
 	var out []gcbd.Bead
-	for _, id := range slices.Sorted(maps.Keys(s.rows)) {
+	for _, id := range ids {
 		b := s.rows[id]
 		if !s.ready[id] || !strings.EqualFold(b.Status, "open") {
 			continue
 		}
-		if _, held := b.Metadata[q.HasKey]; !held {
+		if _, held := b.Metadata[q.HasKey]; q.HasKey != "" && !held {
 			continue
 		}
 		if q.Unassigned && b.Assignee != "" {
@@ -305,6 +310,32 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 			continue
 		}
 		out = append(out, s.listing(b))
+	}
+	return out, nil
+}
+
+// Dependents returns, in id order, the row of each bead with an edge of type
+// typ onto id, closed ones among them, as a dependents read gives it: the
+// bead's own fields with the edge's type, and none of its edges. An id the
+// store does not hold fails the read, as bd fails to resolve it.
+func (s *Store) Dependents(id, typ string) ([]gcbd.Bead, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.DependentsErr != nil {
+		return nil, s.DependentsErr
+	}
+	if _, held := s.rows[id]; !held {
+		return nil, &gcbd.ReadError{ID: id, Reason: "the fake store holds no bead " + id}
+	}
+	var out []gcbd.Bead
+	for _, dep := range slices.Sorted(maps.Keys(s.rows)) {
+		b := s.rows[dep]
+		if !slices.ContainsFunc(b.Edges, func(e gcbd.Edge) bool { return e.Type == typ && e.ID == id }) {
+			continue
+		}
+		row := bead(b, nil)
+		row.DependencyType = typ
+		out = append(out, row)
 	}
 	return out, nil
 }

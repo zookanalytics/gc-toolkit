@@ -32,6 +32,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -200,9 +201,9 @@ func waiting(h waits.Holds, anchorOf func(id string) string) []string {
 // scheduled reports whether the city takes a piece of work as things stand:
 // it is in flight (waits' answer), or no dispatch hold holds it and it is
 // armed to start by itself, routed to a pool or an agent, or assigned to one.
-// A dispatch hold is one of Gas City's hold labels, hold:mayor and
-// hold:external, read as its HasDispatchHold reads a label, trimmed and in any
-// case. Gas City serves a bead that carries one to no worker, and the
+// A dispatch hold is one of Gas City's hold labels, as the runtime adapter
+// reads one (gascity.HasDispatchHold). Gas City serves a bead that carries one
+// to no worker, and the
 // deferred-dispatch pass slings no armed bead while one holds it, so its route,
 // arm or assignee waits for the hold to lift. Work in flight is underway, so it
 // counts whatever it carries.
@@ -210,25 +211,8 @@ func scheduled(h waits.Holds, routedTo, assignee string, labels []string) bool {
 	if h.InFlight != "" {
 		return true
 	}
-	return !hasDispatchHold(labels) && ((h.Arm != nil && strings.TrimSpace(h.Arm.Target) != "") ||
+	return !gascity.HasDispatchHold(labels) && ((h.Arm != nil && strings.TrimSpace(h.Arm.Target) != "") ||
 		strings.TrimSpace(routedTo) != "" || strings.TrimSpace(assignee) != "")
-}
-
-// dispatchHolds are Gas City's hold labels (DispatchHoldLabels in its package
-// beadmeta).
-var dispatchHolds = []string{"hold:mayor", "hold:external"}
-
-// hasDispatchHold reports whether labels carry a dispatch hold, comparing each
-// label as HasDispatchHold does.
-func hasDispatchHold(labels []string) bool {
-	for _, l := range labels {
-		for _, hold := range dispatchHolds {
-			if strings.EqualFold(strings.TrimSpace(l), hold) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // canGo reports whether a status lets a bead go now: open, which bd's ready

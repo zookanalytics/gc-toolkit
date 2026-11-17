@@ -674,13 +674,11 @@ why a reader must know it, and the work that retires it.
   `session title` runs `gc session rename` and `gc session submit`, and the
   rig domain runs a check's command itself.
   `epic create` and `session title` also read beads through the store adapter,
-  around the ledger. The runtime adapter (`internal/gascity`) holds only what
-  the arm's start and the landing order ask of Gas City, a sling, a human gate,
-  a review run's cook and a retired PR's close, and the
-  host adapter only what a copy of a rig's UI needs, so the tests of these
-  verbs stub `gc` on `PATH` or run real processes, and none of these verbs is
-  the model for a new one. tk-ssm8qns.16 puts them behind the ledger and the
-  adapters.
+  around the ledger. The runtime adapter's `Runtime` (`internal/gascity`)
+  holds no session rename or submit, and the host adapter only what a copy of
+  a rig's UI needs, so the tests of these verbs stub `gc` on `PATH` or run
+  real processes, and none of these verbs is the model for a new one.
+  tk-ssm8qns.16 puts them behind the ledger and the adapters.
 - **Readers outside the `bead` domain read the arm's keys.** The arm's record
   (`services/gctk/arm/record`) declares the arm's keys and is their one writer,
   but the scripts, doctor checks, skills and the helm board that read an arm
