@@ -113,3 +113,39 @@ func TestPRAnswersAskTheEvaluatorOverTheListingsPass(t *testing.T) {
 		}
 	}
 }
+
+// PRLabels derives the labels `gctk pr status` gives the labels' writer: a PR
+// on the pending record from the evaluator's answer, any other from the facts
+// its row and its edges hold, each over the rows of a pass the caller already
+// holds (Over), which it lists no second time. A bead nothing reads gets its
+// error and no labels.
+func TestPRLabelsDeriveWhatTheWriterWrites(t *testing.T) {
+	s := rig()
+	s.Put(fake.Bead{ID: "tk-p", Title: "ready work", Status: "blocked", IssueType: "task",
+		Metadata: onRecord(t, "7", readyRead())})
+	pass := ledger.New(s).Pass()
+	if _, err := pass.Find(ledger.Every()); err != nil {
+		t.Fatal(err)
+	}
+	listed := len(s.Finds())
+	ls, err := Over(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels, failed := ls.PRLabels([]string{"tk-p", "tk-e.2", "tk-gone", "tk-p"})
+	want := map[string][]string{
+		"tk-p":   {"status: merging"},
+		"tk-e.2": {"status: needs-attention", "held: gate"},
+	}
+	if !reflect.DeepEqual(labels, want) {
+		t.Errorf("labels = %q, want %q", labels, want)
+	}
+	if _, ok := failed["tk-gone"]; !ok || len(failed) != 1 {
+		t.Errorf("failed = %v, want tk-gone, which the store does not hold, alone", failed)
+	}
+	for _, q := range s.Finds()[listed:] {
+		if q.HasKey != "" || q.Key != "" || q.Every {
+			t.Errorf("PRLabels read the store by a key or whole: %+v", q)
+		}
+	}
+}
