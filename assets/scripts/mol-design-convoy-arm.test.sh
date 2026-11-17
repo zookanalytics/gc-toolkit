@@ -485,6 +485,8 @@ line_of()    { awk -v t="$1" 'index($0, t) { print NR; f = 1; exit } END { if (!
 last_line_of() { awk -v t="$1" 'index($0, t) { n = NR } END { print n + 0 }' "$GC_LOG"; }
 # says <id> <text>: the bead's description holds <text>.
 says()       { case "$(field "$1" description)" in *"$2"*) return 0 ;; esac; return 1; }
+# says_flat <id> <text>: as says, reading the description's line breaks as spaces.
+says_flat()  { case "$(field "$1" description | tr '\n' ' ')" in *"$2"*) return 0 ;; esac; return 1; }
 before()     { local a b; a=$(line_of "$1"); b=$(line_of "$2"); [ "$a" -gt 0 ] && [ "$b" -gt 0 ] && [ "$a" -lt "$b" ]; }
 # all_before <text> <text2>: every log line holding <text> precedes the first holding <text2>.
 all_before() { local a b; a=$(last_line_of "$1"); b=$(line_of "$2"); [ "$a" -gt 0 ] && [ "$b" -gt 0 ] && [ "$a" -lt "$b" ]; }
@@ -566,6 +568,10 @@ for sh in "${SHELLS[@]}"; do
   eq "$(meta dz-sub gc.design_child)" "dz-design" "[$sh] design create: gc.design_child is recorded on the subject"
   says dz-design "It is a stage" && ok "[$sh] design create: design-gated, the brief says it is a stage" \
     || bad "[$sh] design create: the gated brief does not say the child is a stage"
+  says_flat dz-design "changes docs/architecture.md in the change that lands its doc" \
+    && says_flat dz-design "the effort dz-sub as the work that builds it" && says_flat dz-design "Each narrows that Debt entry or removes it" \
+    && ok "[$sh] design create: design-gated, the brief asks the design to change docs/architecture.md itself and name the effort under Debt, and its units to narrow that entry" \
+    || bad "[$sh] design create: the gated brief does not ask the design to change docs/architecture.md itself"
   eq "$(parents dz-design)" "ep-1" "[$sh] design create: it is filed under the subject's epic, beside the subject"
 
   fixture '.[2:] = [] | .[1]._deps = []'; subject_json; export DESIGN_CHILD="" NEXT_ID=dz-design DESIGN_GATED=true
@@ -576,6 +582,10 @@ for sh in "${SHELLS[@]}"; do
   run_block file-design-create "$sh"
   says dz-design "with no PR of its own" && ok "[$sh] design create: all-in-one, the brief says it lands with no PR of its own" \
     || bad "[$sh] design create: the all-in-one brief does not say how it lands"
+  says_flat dz-design "changes docs/architecture.md in the change that lands its doc" \
+    && says_flat dz-design "the effort dz-sub as the work that builds it" && says_flat dz-design "Each narrows that Debt entry or removes it" \
+    && ok "[$sh] design create: all-in-one, the brief asks the design to change docs/architecture.md itself and name the effort under Debt, and its units to narrow that entry" \
+    || bad "[$sh] design create: the all-in-one brief does not ask the design to change docs/architecture.md itself"
 
   fixture '.[2:] = []'; subject_json; export DESIGN_CHILD="" CREATE_FAIL=1
   run_block file-design-create "$sh"

@@ -245,7 +245,13 @@ effort.
 
 ## Deliverable
 A design doc committed to $BRANCH. The design defines the implementation
-child's breakdown. Use the filing-documentation skill for placement.")
+child's breakdown. Use the filing-documentation skill for placement.
+
+A design that moves the architecture changes docs/architecture.md in the
+change that lands its doc, as 'What a change owes the document' in the
+architecture-document skill says. Its Debt entry names the part not built yet
+and the effort $SUBJECT as the work that builds it. No unit the design defines
+carries the architecture change. Each narrows that Debt entry or removes it.")
   [ -z "$EPIC" ] || DESIGN_ARGS+=(--parent "$EPIC")
   CREATE_JSON=$(gc bd create "${DESIGN_ARGS[@]}" --json | tr -d '[:cntrl:]')
   DESIGN_CHILD=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
