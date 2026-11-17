@@ -58,7 +58,9 @@ review or dismissed count or when GitHub last changed the PR moved, and its
 labels, which are their own signs. A read that is missing a part, or is not
 current for the bead, is read whole. Under the store's record lock it reads
 the bead again and writes once, guarded on the status and assignee it read,
-each part read after the saved one's instant and differing from it. A bead on
+each part read after the saved one's instant: the part when it differs from
+the saved one, and its read's instant alone when it holds the same, so a read
+sent before it is never saved after it. A bead on
 Gas Town's pending record gets pr_state and pr_last_checked_at in the same
 write. A merge state GitHub reads as UNKNOWN is saved with the PR part's
 earlier signs, so the next pass reads it again. It prints the bead, the PR and

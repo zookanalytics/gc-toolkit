@@ -59,10 +59,11 @@ type Watcher struct {
 // The actions an update reports.
 const (
 	// ActSaved: the update read the parts the signs made stale and saved those
-	// that differ from the saved read.
+	// that differ from the saved read, or, of a part that holds what the bead
+	// holds, the instant of its read.
 	ActSaved = "saved"
-	// ActUnchanged: nothing moved, or the parts the update read hold what the
-	// bead already holds, so it wrote nothing.
+	// ActUnchanged: nothing moved, or the parts the update read are no newer
+	// than the ones the bead holds, so it wrote nothing.
 	ActUnchanged = "unchanged"
 	// ActUnowned: no live bead owns the PR, so there is nothing to save.
 	ActUnowned = "unowned"
@@ -353,9 +354,10 @@ func later(a, b string) string {
 	return a
 }
 
-// save writes the parts of fresh that the bead does not already hold newer or
-// the same, under the record lock, as the bead reads under it. A bead that no
-// longer owns the PR gets nothing.
+// save writes the parts of fresh that the bead does not already hold newer,
+// under the record lock, as the bead reads under it: a part's facts and signs
+// when they differ, and its instant when they are the same (merge). A bead that
+// no longer owns the PR gets nothing.
 func (u *watchRun) save(o owned, fresh *SavedRead, due parts) (Refreshed, error) {
 	out := Refreshed{URL: o.url, Bead: o.id}
 	release, err := record.Lock(u.Dir, u.Wait)
@@ -380,9 +382,9 @@ func (u *watchRun) save(o owned, fresh *SavedRead, due parts) (Refreshed, error)
 	if err != nil {
 		saved = nil
 	}
-	merged, took := merge(saved, fresh)
-	if !took.any() {
-		out.Action, out.Detail = ActUnchanged, fmt.Sprintf("read %s, which the bead already holds", due)
+	merged, took, restamped := merge(saved, fresh)
+	if !took.any() && !restamped.any() {
+		out.Action, out.Detail = ActUnchanged, fmt.Sprintf("read %s, which the bead holds newer", due)
 		return out, nil
 	}
 	w := u.Ledger.Write(o.id)
@@ -398,6 +400,9 @@ func (u *watchRun) save(o owned, fresh *SavedRead, due parts) (Refreshed, error)
 		return out, err
 	}
 	out.Action, out.Detail = ActSaved, fmt.Sprintf("read %s, saved %s", due, took)
+	if !took.any() {
+		out.Detail = fmt.Sprintf("read %s, which holds what the bead holds, and saved its instant", due)
+	}
 	return out, nil
 }
 

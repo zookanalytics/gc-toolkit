@@ -265,7 +265,8 @@ and "update" would read as a write to the PR on GitHub.
    bead and writes the saved read once, guarded on the status and assignee that
    read shows, with each part whose read is newer than the saved one
    ([section 7](#7-an-older-read-never-replaces-a-newer-one)) and whose facts or
-   signs differ. The read of the bead and the guarded write took about half a
+   signs differ, and the instant alone of a newer read whose facts and signs are
+   the same. The read of the bead and the guarded write took about half a
    second together.
 
 ## 5. How the landing order starts
@@ -372,7 +373,9 @@ a run record two minutes after it is made whether or not the run still works
 
 Each part of the saved read keeps the instant its read was sent. Under the
 record lock, the update writes a part only when its own read of that part was
-sent after the saved part's instant. A part and its signs are written together,
+sent after the saved part's instant, and a newer read that finds the facts and
+signs the part holds writes the part's instant, so a read sent before it and
+still in flight is not saved after it. A part and its signs are written together,
 and the signs were read no later than the facts beside them. So an older read
 never replaces a newer part, and saved signs never claim a state newer than the
 saved facts. When the signs a caller hands the update were read some seconds

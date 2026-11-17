@@ -346,29 +346,35 @@ func sameButInstant[T any](a, b *T, instant func(*T) *string) bool {
 }
 
 // merge is saved with each part of fresh that was read after the saved part's
-// instant and whose facts or signs differ from it, and which parts it took. It
-// changes neither argument.
-func merge(saved, fresh *SavedRead) (*SavedRead, parts) {
-	out := &SavedRead{}
+// instant. took names the parts whose facts or signs differ from the saved
+// ones, and restamped the parts that hold the same ones, of which only the
+// instant moves: the instant of the latest read of a part, so an older read
+// still in flight, of facts that have moved on since, is never saved after it.
+// It changes neither argument.
+func merge(saved, fresh *SavedRead) (out *SavedRead, took, restamped parts) {
+	out = &SavedRead{}
 	if saved != nil {
 		*out = *saved
 	}
-	var took parts
-	if f := fresh.PR; f != nil && (out.PR == nil || after(f.ReadAt, out.PR.ReadAt)) &&
-		!sameButInstant(f, out.PR, func(p *SavedPR) *string { return &p.ReadAt }) {
-		out.PR, took.pr = f, true
+	out.PR, took.pr, restamped.pr = newer(out.PR, fresh.PR, func(p *SavedPR) *string { return &p.ReadAt })
+	out.Checks, took.checks, restamped.checks = newer(out.Checks, fresh.Checks,
+		func(p *SavedChecks) *string { return &p.ReadAt })
+	out.Conversation, took.conversation, restamped.conversation = newer(out.Conversation, fresh.Conversation,
+		func(p *SavedConversation) *string { return &p.ReadAt })
+	out.Labels, took.labels, restamped.labels = newer(out.Labels, fresh.Labels,
+		func(p *SavedLabels) *string { return &p.ReadAt })
+	return out, took, restamped
+}
+
+// newer is the part merge keeps of saved and fresh, two reads of one part:
+// fresh when it was read after saved, saved otherwise. took says fresh holds
+// other facts or signs, and restamped that it holds the same ones.
+func newer[T any](saved, fresh *T, instant func(*T) *string) (kept *T, took, restamped bool) {
+	if fresh == nil || (saved != nil && !after(*instant(fresh), *instant(saved))) {
+		return saved, false, false
 	}
-	if f := fresh.Checks; f != nil && (out.Checks == nil || after(f.ReadAt, out.Checks.ReadAt)) &&
-		!sameButInstant(f, out.Checks, func(p *SavedChecks) *string { return &p.ReadAt }) {
-		out.Checks, took.checks = f, true
+	if sameButInstant(fresh, saved, instant) {
+		return fresh, false, true
 	}
-	if f := fresh.Conversation; f != nil && (out.Conversation == nil || after(f.ReadAt, out.Conversation.ReadAt)) &&
-		!sameButInstant(f, out.Conversation, func(p *SavedConversation) *string { return &p.ReadAt }) {
-		out.Conversation, took.conversation = f, true
-	}
-	if f := fresh.Labels; f != nil && (out.Labels == nil || after(f.ReadAt, out.Labels.ReadAt)) &&
-		!sameButInstant(f, out.Labels, func(p *SavedLabels) *string { return &p.ReadAt }) {
-		out.Labels, took.labels = f, true
-	}
-	return out, took
+	return fresh, true, false
 }

@@ -289,6 +289,46 @@ func TestAnOlderReadNeverReplacesANewerOne(t *testing.T) {
 	}
 }
 
+// A later read that finds the facts the bead already holds keeps its instant
+// on the part, so an earlier read of other facts, still in flight when the
+// later one was saved, is not saved after it (section 7). Here a new comment
+// makes both updates read the PR part, the later finds the merge state the
+// bead holds, and the earlier read returns another.
+func TestALaterReadOfTheSavedFactsKeepsItsInstant(t *testing.T) {
+	d := newWatched(t)
+	d.poll(t)
+	before := d.saved(t, bead).PR
+	d.pr.Comments = []gh.IssueComment{{ID: 300, Author: "operator", Body: "looks fine", CreatedAt: "2026-11-16T09:30:00Z",
+		UpdatedAt: "2026-11-16T09:30:00Z"}}
+	crossed := false
+	var later pr.Refreshed
+	d.github.OnRead = func(method string, p *ghfake.PR) {
+		if method != "PullRequestPart" || crossed {
+			return
+		}
+		crossed = true
+		var err error
+		if later, err = d.w.Refresh(prURL); err != nil {
+			t.Errorf("the later update: %v", err)
+		}
+		// The earlier read, sent before the later one, returns a merge state
+		// GitHub had computed then.
+		p.Facts.MergeStateStatus = "BLOCKED"
+	}
+	rep := d.poll(t)
+	if len(rep.Failed) != 0 || len(rep.Updates) != 1 {
+		t.Fatalf("the earlier update reported %+v, failed %v", rep.Updates, rep.Failed)
+	}
+	s := d.saved(t, bead)
+	if s.PR.MergeState != before.MergeState || s.PR.ReadAt <= before.ReadAt {
+		t.Fatalf("the saved PR part is %s read at %s, want the later read's %s at an instant after %s", s.PR.MergeState,
+			s.PR.ReadAt, before.MergeState, before.ReadAt)
+	}
+	if later.Action != pr.ActSaved {
+		t.Fatalf("the later update reported %+v, want it saved", later)
+	}
+}
+
 func TestAFailedReadKeepsTheSavedSignsAndFailsThePass(t *testing.T) {
 	t.Run("the cheap question fails for one PR alone", func(t *testing.T) {
 		d := newWatched(t)

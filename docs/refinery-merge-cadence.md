@@ -888,8 +888,10 @@ It saves what it read on the bead as `pr_github_read`, in four parts: the PR,
 its checks, its conversation and its labels. Each part keeps the instant its
 read was sent and the signs read with it. Under the store's record lock it
 reads the bead again and writes once, guarded on the status and the assignee
-it read, with each part whose read was sent after the saved part's and which
-differs from it, so an older read never replaces a newer one. A bead on the
+it read, with each part whose read was sent after the saved part's: the part
+when its facts or signs differ, and its read's instant alone when they are the
+same, so an older read never replaces a newer one, even a newer one that found
+nothing new. A bead on the
 pending record gets `pr_state`, the PR's state lower-cased, and
 `pr_last_checked_at` in the same write. An open PR's merge state that GitHub
 reads as `UNKNOWN`, which it computes after a push or a base move, is saved
