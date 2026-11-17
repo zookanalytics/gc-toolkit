@@ -100,8 +100,8 @@ export GCTK_BIN
 # 60 s default caps any one probe at 30 s, so host load alone could cut a pass
 # short and turn its verdict into "NOT checked". Every run here therefore gets a
 # budget sized for the largest fixture, whatever the caller's environment holds.
-# It still bounds each probe, at 300 s, well inside run-tests.sh's 900 s per-file
-# timeout.
+# It still bounds each probe, at 300 s, well inside the 900 s that run-tests.sh
+# lets a run write nothing before it ends the run as hung.
 export GC_DOCTOR_CHECK_TIMEOUT=600
 run_check() { RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
 iso_ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate'; }
