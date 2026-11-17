@@ -1261,11 +1261,14 @@ keys = ["status_label_clear_owed"]
 
 [metadata.pr_close_disposition]
 # The disposition a deliberate supersede/not-planned PR close records on the
-# still-OPEN anchor (merge_result=pull_request) before the PR closes, so
-# pr-facts.sh's close arm consummates it through bead-rehome.sh instead of
-# filing a rework-or-close gate. Written by assets/scripts/pr-dispose.sh, read
-# by assets/scripts/pr-facts.sh; the marker is intent only — bead-rehome.sh
-# stays the sole writer of the disposition edge these name.
+# anchor that still owns the open PR before the PR closes, so the PR's closer
+# consummates it through bead-rehome.sh instead of filing a rework-or-close
+# gate: pr-facts.sh's close arm for an anchor at merge_result=pull_request, and
+# the landing order (gctk pr reconcile) for one on the pending record, which
+# requests no merge of a PR whose anchor carries it. Written by
+# assets/scripts/pr-dispose.sh, read by assets/scripts/pr-facts.sh and gctk's pr
+# domain; the marker is intent only — bead-rehome.sh stays the sole writer of
+# the disposition edge these name.
 keys = [
   "gc.pr_close_disposition_kind", "gc.pr_close_disposition_successor",
   "gc.pr_close_disposition_successor_store",
