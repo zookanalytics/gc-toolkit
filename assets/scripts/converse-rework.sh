@@ -163,6 +163,7 @@ case "$MERGE_RESULT" in
     ASK_OUT=$(GCTK_SCRIPTS_DIR="$SCRIPT_DIR" "$GCTK" "${ASK_ARGS[@]}" 2>&1); rc=$?
     case "$rc" in
       0) ;;
+      1) die "gctk review ask did not take the arguments of the ask that would carry the ruling to $ANCHOR's review run, and filed nothing ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' '))" ;;
       3) die "gctk review ask refused the ask that would carry the ruling to $ANCHOR's review run and filed nothing ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' '))" ;;
       *) die "the ask that carries the ruling to $ANCHOR's review run did not stand ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' ')); a re-run finds one that landed" ;;
     esac

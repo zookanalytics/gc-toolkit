@@ -402,6 +402,12 @@ OUT=$(STUB_ASK_RC=3 GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead
 eq "$RC" "2" "an ask the writer refuses exits 2"
 has "$OUT" "declares no check" "…naming why"
 hasnt "$OUT" "a re-run finds one that landed" "…promising no ask to a re-run the writer refuses the same way"
+: > "$STUB_GC_LOG"
+OUT=$(STUB_ASK_RC=1 STUB_ASK_ERR="gctk review ask: unknown flag: --waiting-on" GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" --waiting-on anc-43 2>&1); RC=$?
+eq "$RC $(created)" "2 0" "an ask whose arguments the writer does not take, such as a gctk older than the option, exits 2 with nothing filed"
+has "$OUT" "unknown flag: --waiting-on" "…naming the argument it did not take"
+hasnt "$OUT" "a re-run finds one that landed" "…promising no ask to a re-run"
+eq "$(grep -c -E '^(bd update|bd dep|bd create|sling)' "$STUB_GC_LOG")" "0" "…with nothing written"
 OUT=$(STUB_ASK_RC=2 STUB_ASK_ERR="gctk review ask: anc-1: ledger: the filing may not have landed" GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
 eq "$RC" "2" "an ask whose create did not answer exits 2"
 has "$OUT" "a re-run finds one that landed" "…saying a re-run finds the ask if it landed"
