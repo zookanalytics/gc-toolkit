@@ -20,14 +20,16 @@ import (
 // refs/remotes/origin/<branch>.lock, and removes it in its SIGTERM handler,
 // which a SIGKILL never runs.
 
-// fakeFetch puts an executable `git` running script, for a fetch, at the front
-// of PATH, in a fresh directory it returns. Every process the script starts
-// leads or joins git's own group, and the cleanup kills whatever of that group
-// is still running.
-func fakeFetch(t *testing.T, script string) string {
+// fakeFetch puts an executable `git` at the front of PATH, in a fresh directory
+// it returns, which for a fetch sets trap first, then writes its pid to git.pid,
+// so a test that waits for git.pid signals a git whose handler is in place, and
+// then runs script. Every process the script starts leads or joins git's own
+// group, and the cleanup kills whatever of that group is still running.
+func fakeFetch(t *testing.T, trap, script string) string {
 	t.Helper()
 	dir := t.TempDir()
-	body := "#!/bin/sh\ncase \"$1\" in check-ref-format) exit 0 ;; esac\necho $$ > '" + filepath.Join(dir, "git.pid") + "'\n" + script
+	body := "#!/bin/sh\ncase \"$1\" in check-ref-format) exit 0 ;; esac\n" + trap + "\necho $$ > '" +
+		filepath.Join(dir, "git.pid") + "'\n" + script
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -61,18 +63,25 @@ func shortGrace(t *testing.T, grace time.Duration) {
 	t.Cleanup(func() { fetchStopGrace = g })
 }
 
-// holdsALock is a fetch that takes a lock file in dir and removes it on
-// SIGTERM, recording the signal, as git's handler removes the locks it holds.
-func holdsALock(dir string) string {
+// holdsALock is a fetch whose SIGTERM handler records the signal and removes a
+// lock file in dir, as git's handler removes the locks it holds, and which then
+// takes the lock and runs on.
+func holdsALock(dir string) (trap, script string) {
 	lock, term := filepath.Join(dir, "main.lock"), filepath.Join(dir, "git.term")
-	return "touch '" + lock + "'\ntrap 'touch \"" + term + "\"; rm -f \"" + lock + "\"; exit 143' TERM\nsleep 30 &\nwait $!\n"
+	return "trap 'touch \"" + term + "\"; rm -f \"" + lock + "\"; exit 143' TERM",
+		"touch '" + lock + "'\nsleep 30 &\nwait $!\n"
 }
+
+// fetchBound is the bound the tests stop a fetch at, long enough for a loaded
+// host to start the fake git and set its handler first.
+const fetchBound = 2 * time.Second
 
 func TestAFetchStoppedAtItsBoundGetsASIGTERMAndLeavesNoLock(t *testing.T) {
 	marks := t.TempDir()
-	dir := fakeFetch(t, holdsALock(marks))
+	trap, script := holdsALock(marks)
+	dir := fakeFetch(t, trap, script)
 	shortGrace(t, 30*time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), fetchBound)
 	defer cancel()
 
 	start := time.Now()
@@ -92,9 +101,9 @@ func TestAFetchStoppedAtItsBoundGetsASIGTERMAndLeavesNoLock(t *testing.T) {
 }
 
 func TestAFetchThatOutlivesItsStopGraceIsKilled(t *testing.T) {
-	dir := fakeFetch(t, "trap '' TERM\nsleep 30\n")
+	dir := fakeFetch(t, "trap '' TERM", "sleep 30\n")
 	shortGrace(t, time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), fetchBound)
 	defer cancel()
 
 	start := time.Now()
@@ -116,7 +125,8 @@ func TestAStopSignalReachesGitsGroupAndEndsTheFetch(t *testing.T) {
 	// process's group does not reach it. The fetch passes it on and returns
 	// Interrupted, for the caller to end the process with.
 	marks := t.TempDir()
-	dir := fakeFetch(t, holdsALock(marks))
+	trap, script := holdsALock(marks)
+	dir := fakeFetch(t, trap, script)
 	shortGrace(t, 30*time.Second)
 	// The test's own relay, so a fetch that does not take the signal fails this
 	// test rather than ending the test binary.
