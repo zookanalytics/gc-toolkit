@@ -51,9 +51,10 @@ func findCalls(t *testing.T, log string) []string {
 	return strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
 }
 
-// Each query is one `gc bd list` that reads every type a listing hides unless
-// asked, wisps, gates, infrastructure beads and templates, with no row limit,
-// and reads closed beads only when asked.
+// Each query is one `gc bd list` with no row limit that reads every type a
+// listing hides unless asked, wisps, gates, infrastructure beads and templates,
+// unless it asks for only what the listing shows, and reads closed beads only
+// when asked.
 func TestFindAsksTheListing(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -72,6 +73,10 @@ func TestFindAsksTheListing(t *testing.T) {
 			"bd list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --all --parent tk-e"},
 		{"the beads of one issue type, closed ones included", Query{Type: "epic", Closed: true},
 			"bd list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --all --type epic"},
+		{"one assignee's open beads that the listing shows", Query{Assignee: "tools/gc-toolkit.refinery", Statuses: []string{"open"}, Listed: true},
+			"bd list --json --limit 0 --assignee tools/gc-toolkit.refinery --status open"},
+		{"the beads in two statuses that the listing shows", Query{Every: true, Statuses: []string{"open", "in_progress"}, Listed: true},
+			"bd list --json --limit 0 --status open,in_progress"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			log := findStub(t, `[]`)

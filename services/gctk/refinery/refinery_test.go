@@ -189,6 +189,92 @@ func TestAFreshHandoffsHoldsAreNotRead(t *testing.T) {
 	}
 }
 
+// counted is a store that keeps how many rows each of its finds returned.
+type counted struct {
+	*fake.Store
+	rows []int
+}
+
+func (s *counted) Find(q gcbd.Query) ([]gcbd.Bead, error) {
+	rows, err := s.Store.Find(q)
+	s.rows = append(s.rows, len(rows))
+	return rows, err
+}
+
+// unrelated puts n rows of each kind that is not in a refinery's queue, each
+// past the bound and carrying a branch: a wisp, a template, a gate and an
+// agent bead assigned to the refinery, a closed and a claimed bead assigned to
+// it, another agent's handoff, and unassigned work.
+func unrelated(s *fake.Store, n int) {
+	for i := range n {
+		for _, b := range []fake.Bead{
+			{ID: fmt.Sprintf("tk-wisp-%d", i), Status: "open", IssueType: "task", Assignee: ref, Ephemeral: true},
+			{ID: fmt.Sprintf("tk-mol-%d", i), Status: "open", IssueType: "molecule", Assignee: ref, Template: true},
+			{ID: fmt.Sprintf("tk-gate-%d", i), Status: "open", IssueType: "gate", Assignee: ref},
+			{ID: fmt.Sprintf("tk-agent-%d", i), Status: "open", IssueType: "agent", Assignee: ref},
+			{ID: fmt.Sprintf("tk-done-%d", i), Status: "closed", IssueType: "task", Assignee: ref},
+			{ID: fmt.Sprintf("tk-claimed-%d", i), Status: "in_progress", IssueType: "task", Assignee: ref},
+			{ID: fmt.Sprintf("tk-witness-%d", i), Status: "open", IssueType: "task", Assignee: "tools/gc-toolkit.witness"},
+			{ID: fmt.Sprintf("tk-step-%d", i), Status: "open", IssueType: "task"},
+		} {
+			b.Title, b.UpdatedAt, b.Metadata = b.ID, stamp(9*time.Hour), map[string]string{"branch": "polecat/" + b.ID}
+			s.Put(b)
+		}
+	}
+}
+
+// The look reads a rig's queue through one bounded selection for each of its
+// refineries, the refinery's open beads that bd's listing shows, and after it
+// only by the ids of what holds a handoff past the bound. So rows of any other
+// kind, however many the store holds, add neither a read nor a row to the pass,
+// and every read runs under the look's deadline.
+func TestTheQueueReadIsBoundedAndKeepsItsBudget(t *testing.T) {
+	type pass struct {
+		finds []gcbd.Query
+		rows  []int
+		left  time.Duration
+	}
+	look := func(noise int) pass {
+		c := newCity()
+		c.handoff("tk-stuck", 5*time.Hour)
+		c.handoff("tk-fresh", time.Hour)
+		unrelated(c.stores[tools.Store()], noise)
+		s := &counted{Store: c.stores[tools.Store()]}
+		var p pass
+		open := func(ctx context.Context, db string) (*ledger.Ledger, error) {
+			if db != tools.Store() {
+				return c.open(ctx, db)
+			}
+			if d, ok := ctx.Deadline(); ok {
+				p.left = time.Until(d)
+			}
+			return ledger.New(s), nil
+		}
+		out := (&Queue{City: c, Open: open, Now: func() time.Time { return t0 }}).Run()
+		if len(out.Failures) > 0 || !reflect.DeepEqual(stuckIDs(out.Record), []string{"tk-stuck"}) {
+			t.Fatalf("with %d unrelated rows of each kind: failures %v, stuck %v", noise, out.Failures, stuckIDs(out.Record))
+		}
+		p.finds, p.rows = s.Finds(), s.rows
+		return p
+	}
+	quiet, noisy := look(0), look(50)
+	want := gcbd.Query{Assignee: ref, Statuses: []string{"open"}, Listed: true}
+	if len(quiet.finds) == 0 || !reflect.DeepEqual(quiet.finds[0], want) || quiet.rows[0] != 2 {
+		t.Fatalf("the reads = %+v of %v rows; want the first %+v, of the two handoffs", quiet.finds, quiet.rows, want)
+	}
+	for _, q := range quiet.finds[1:] {
+		if len(q.IDs) == 0 {
+			t.Errorf("a read after the queue's = %+v; want a read by the ids of what holds the handoff past the bound", q)
+		}
+	}
+	if !reflect.DeepEqual(noisy.finds, quiet.finds) || !reflect.DeepEqual(noisy.rows, quiet.rows) {
+		t.Errorf("unrelated rows changed the pass: reads %+v of %v rows, want %+v of %v", noisy.finds, noisy.rows, quiet.finds, quiet.rows)
+	}
+	if noisy.left <= 0 || noisy.left > Deadline {
+		t.Errorf("the queue was read with %s left; want every read under the look's deadline of %s", noisy.left, Deadline)
+	}
+}
+
 // A rig list or an agent list that does not read judges nothing and fails the
 // run.
 func TestAReadTheLookRestsOnFailsTheRun(t *testing.T) {

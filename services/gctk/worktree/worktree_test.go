@@ -183,6 +183,86 @@ func TestTheReaderLeavesOutWhatIsNoLostWork(t *testing.T) {
 	}
 }
 
+// counted is a store that keeps how many rows each of its finds returned.
+type counted struct {
+	*fake.Store
+	rows []int
+}
+
+func (s *counted) Find(q gcbd.Query) ([]gcbd.Bead, error) {
+	rows, err := s.Store.Find(q)
+	s.rows = append(s.rows, len(rows))
+	return rows, err
+}
+
+// The reader reads a rig's store through one bounded selection, its open and
+// in-progress beads that bd's listing shows, and after it only by ids, or by a
+// key that marks a live run, for what holds the beads it found. So rows outside
+// that set, however many the store holds, add neither a read nor a row to the
+// pass, though each names a dead owner: closed, blocked and deferred beads, and
+// wisps, templates, gates and infrastructure beads. Every read runs under the
+// look's deadline.
+func TestTheReadIsBoundedAndKeepsItsBudget(t *testing.T) {
+	type pass struct {
+		finds []gcbd.Query
+		rows  []int
+		left  time.Duration
+	}
+	look := func(noise int) pass {
+		c := newCity()
+		c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "hq-dead", Metadata: meta("gc.session_id", "hq-dead")})
+		c.put(fake.Bead{ID: "tk-released", Status: "open", Metadata: meta("gc.session_id", "hq-gone")})
+		for i := range noise {
+			for _, b := range []fake.Bead{
+				{ID: fmt.Sprintf("tk-closed-%d", i), Status: "closed"},
+				{ID: fmt.Sprintf("tk-blocked-%d", i), Status: "blocked"},
+				{ID: fmt.Sprintf("tk-deferred-%d", i), Status: "deferred"},
+				{ID: fmt.Sprintf("tk-wisp-%d", i), Status: "in_progress", Ephemeral: true},
+				{ID: fmt.Sprintf("tk-template-%d", i), Status: "in_progress", IssueType: "molecule", Template: true},
+				{ID: fmt.Sprintf("tk-gate-%d", i), Status: "open", IssueType: "gate"},
+				{ID: fmt.Sprintf("tk-agent-%d", i), Status: "open", IssueType: "agent"},
+				{ID: fmt.Sprintf("tk-message-%d", i), Status: "open", IssueType: "message"},
+			} {
+				b.Assignee, b.Metadata = "hq-dead", meta("gc.session_id", "hq-dead")
+				c.put(b)
+			}
+		}
+		s := &counted{Store: c.stores[tools.Store()]}
+		var p pass
+		open := func(ctx context.Context, db string) (*ledger.Ledger, error) {
+			if db != tools.Store() {
+				return c.open(ctx, db)
+			}
+			if d, ok := ctx.Deadline(); ok {
+				p.left = time.Until(d)
+			}
+			return ledger.New(s), nil
+		}
+		out := (&Salvage{City: c, Open: open, Now: func() time.Time { return t0 }}).Run()
+		if len(out.Failures) > 0 || !reflect.DeepEqual(found(out.Record), []string{"tk-claim", "tk-released"}) {
+			t.Fatalf("with %d unrelated rows of each kind: failures %v, found %v", noise, out.Failures, found(out.Record))
+		}
+		p.finds, p.rows = s.Finds(), s.rows
+		return p
+	}
+	quiet, noisy := look(0), look(50)
+	want := gcbd.Query{Every: true, Statuses: []string{"open", "in_progress"}, Listed: true}
+	if len(quiet.finds) == 0 || !reflect.DeepEqual(quiet.finds[0], want) || quiet.rows[0] != 2 {
+		t.Fatalf("the reads = %+v of %v rows; want the first %+v, of the two candidates", quiet.finds, quiet.rows, want)
+	}
+	for _, q := range quiet.finds[1:] {
+		if q.Every || (len(q.IDs) == 0 && q.HasKey == "") {
+			t.Errorf("a read after the rig's = %+v; want a read by ids or by a key", q)
+		}
+	}
+	if !reflect.DeepEqual(noisy.finds, quiet.finds) || !reflect.DeepEqual(noisy.rows, quiet.rows) {
+		t.Errorf("unrelated rows changed the pass: reads %+v of %v rows, want %+v of %v", noisy.finds, noisy.rows, quiet.finds, quiet.rows)
+	}
+	if noisy.left <= 0 || noisy.left > Deadline {
+		t.Errorf("the rig was read with %s left; want every read under the look's deadline of %s", noisy.left, Deadline)
+	}
+}
+
 // A bead a person holds through an open human gate is theirs, whether the gate
 // is its own wait or holds it through its parent, and a gate a person answered
 // holds nothing.

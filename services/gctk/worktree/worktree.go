@@ -86,14 +86,16 @@ type Reader struct {
 // target, a conversation, a workflow's topology root, and a bead a person holds
 // through an open human gate among its waits ([waits.Holds]). A candidate is
 // orphaned when no live session answers to any identity its owner goes by
-// ([session.Live.Answers]). A read that fails answers its error and no beads.
+// ([session.Live.Answers]). It reads the rig's open and in-progress beads that
+// bd's listing shows, and then only what holds the orphans among them. A read
+// that fails answers its error and no beads.
 func (rd Reader) Rig(ctx context.Context, live *session.Live, rig gascity.Rig) ([]Orphan, error) {
 	l, err := rd.Open(ctx, rig.Store())
 	if err != nil {
 		return nil, err
 	}
 	pass := l.Pass()
-	recs, err := pass.Find(ledger.Every())
+	recs, err := pass.Find(ledger.Every().InStatus("open", "in_progress").Listed())
 	if err != nil {
 		return nil, err
 	}

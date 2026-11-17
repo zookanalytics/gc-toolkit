@@ -173,16 +173,22 @@ func (q *Queue) Run() Outcome {
 	return out
 }
 
-// rig reads one rig's queue and returns its stuck handoffs.
+// rig reads one rig's queue and returns its stuck handoffs. It reads each
+// refinery's open beads that bd's listing shows, and then only what holds the
+// handoffs past the bound.
 func (q *Queue) rig(ctx context.Context, rig gascity.Rig, refineries []string, now time.Time) ([]Stuck, error) {
 	l, err := q.Open(ctx, rig.Store())
 	if err != nil {
 		return nil, err
 	}
 	pass := l.Pass()
-	recs, err := pass.Find(ledger.Every())
-	if err != nil {
-		return nil, err
+	var recs []*ledger.Record
+	for _, ref := range refineries {
+		queue, err := pass.Find(ledger.Assigned(ref).InStatus("open").Listed())
+		if err != nil {
+			return nil, err
+		}
+		recs = append(recs, queue...)
 	}
 	type handoff struct {
 		id, refinery string

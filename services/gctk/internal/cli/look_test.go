@@ -98,8 +98,8 @@ func TestWorktreeSalvageRecordsWhatItFound(t *testing.T) {
 	got := calls()
 	for _, want := range []string{
 		"session list --json\nrig list --json\n",
-		"bd --db /city/.beads list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0\n",
-		"bd --db /city/rigs/tools/.beads list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0\n",
+		"bd --db /city/.beads list --json --limit 0 --status open,in_progress\n",
+		"bd --db /city/rigs/tools/.beads list --json --limit 0 --status open,in_progress\n",
 		"event emit gc-toolkit.orphan-work.found --json --actor gctk --message beads whose owner no live session answers to: tk-1 --payload {",
 	} {
 		if !strings.Contains(got, want) {
@@ -199,7 +199,12 @@ func TestRefineryStuckRecordsWhatItFound(t *testing.T) {
 	if strings.Contains(got, "/city/.beads") {
 		t.Errorf("the HQ's store was read:\n%s", got)
 	}
-	for _, want := range []string{"rig list --json\nagent list --json\n", "bd --db /city/rigs/tools/.beads blocked --json", "event emit gc-toolkit.refinery-queue.stuck --json --actor gctk"} {
+	for _, want := range []string{
+		"rig list --json\nagent list --json\n",
+		"bd --db /city/rigs/tools/.beads list --json --limit 0 --assignee tools/gc-toolkit.refinery --status open\n",
+		"bd --db /city/rigs/tools/.beads blocked --json",
+		"event emit gc-toolkit.refinery-queue.stuck --json --actor gctk",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("gc was not called with %q:\n%s", want, got)
 		}

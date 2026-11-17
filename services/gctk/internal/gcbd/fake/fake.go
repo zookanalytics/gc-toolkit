@@ -246,8 +246,11 @@ func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
 // Find returns, in id order, the row of each bead q selects, in a listing's
 // shape: every edge, with the far bead's id and the edge's type alone. A bead q
 // names that the store does not hold is left out, as a listing leaves it out.
-// A parent selects the beads whose own parent-child edge names it, and a type
-// the beads whose issue type is that one exactly.
+// A parent selects the beads whose own parent-child edge names it, a type the
+// beads whose issue type is that one exactly, an assignee the beads assigned
+// to it exactly, and statuses the beads whose status is one of them. Listed
+// leaves out each row bd's listing hides unless asked
+// ([gcbd.Bead.ListedByDefault]).
 func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 	if s.OnFind != nil {
 		s.OnFind(q)
@@ -258,7 +261,8 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 	if s.FindErr != nil {
 		return nil, s.FindErr
 	}
-	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && q.Type == "" && !q.Every {
+	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && q.Type == "" &&
+		q.Assignee == "" && len(q.Statuses) == 0 && !q.Every {
 		return nil, &gcbd.ReadError{Reason: "the fake store takes no find that selects no beads"}
 	}
 	ids := slices.Sorted(maps.Keys(s.rows))
@@ -288,7 +292,17 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 		if q.Type != "" && b.IssueType != q.Type {
 			continue
 		}
-		out = append(out, s.listing(b))
+		if q.Assignee != "" && b.Assignee != q.Assignee {
+			continue
+		}
+		if len(q.Statuses) > 0 && !slices.Contains(q.Statuses, b.Status) {
+			continue
+		}
+		row := s.listing(b)
+		if q.Listed && !row.ListedByDefault() {
+			continue
+		}
+		out = append(out, row)
 	}
 	return out, nil
 }

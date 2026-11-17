@@ -10,8 +10,9 @@ import (
 // Selection is the beads one Find reads: the beads named, the beads that carry a
 // declared key, the beads whose key holds one value, the beads the store lists
 // under a parent, the beads whose title holds a text, the beads of one issue
-// type, or every bead. It reads live beads alone unless WithClosed widens it. A
-// key's selection matches its current spelling, not its legacy aliases.
+// type, the beads assigned to one assignee, or every bead. It reads live beads
+// alone unless WithClosed widens it, and InStatus and Listed narrow it. A key's
+// selection matches its current spelling, not its legacy aliases.
 type Selection struct {
 	q    gcbd.Query
 	none bool
@@ -56,9 +57,30 @@ func Matching[T any](k Key[T], v T) Selection {
 	return Selection{q: gcbd.Query{Key: k.decl.name, Value: text}}
 }
 
+// Assigned selects the beads assigned to who, as the store's listing matches an
+// assignee: exactly.
+func Assigned(who string) Selection {
+	return Selection{q: gcbd.Query{Assignee: who}, none: who == ""}
+}
+
 // WithClosed widens s to closed beads as well as live ones.
 func (s Selection) WithClosed() Selection {
 	s.q.Closed = true
+	return s
+}
+
+// InStatus narrows s to the beads whose status is one of statuses.
+func (s Selection) InStatus(statuses ...string) Selection {
+	s.q.Statuses = slices.Clone(statuses)
+	s.none = s.none || len(statuses) == 0
+	return s
+}
+
+// Listed narrows s to the beads bd's listing shows when asked for nothing more,
+// so the store leaves out the rows it hides unless asked
+// ([Record.ListedByDefault]): wisps, templates, gates and infrastructure beads.
+func (s Selection) Listed() Selection {
+	s.q.Listed = true
 	return s
 }
 
