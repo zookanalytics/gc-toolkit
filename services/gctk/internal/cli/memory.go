@@ -143,8 +143,10 @@ ask-use, for a whole note, adds the line that asks its users to record the days
 they use it, one dated line a day, and a decision without it takes that line
 out and leaves the use lines. A drop keeps the unit's text under its
 directory's state, removes it, and takes the pointers to a removed note out of
-the index and the collection notes. A decision acts only on the text its ref
-names, so one whose unit changed since due listed it is refused and stays due.
+the index and the collection notes while its name holds no file. A pointer
+that does not come out goes on the next apply or settle. A decision acts only
+on the text its ref names, so one whose unit changed since due listed it is
+refused and stays due.
 
 exit: 0 each decision recorded, removed or refused as changed
       1 a decision could not be read or done, as stderr says
@@ -194,7 +196,8 @@ whose bead closed on a merge that reached its repository's default branch is
 removed with its text kept, for a feedback pattern once a follow-up has landed
 and none is on its way, and a merge into an integration branch counts once the
 effort's landing bead has. A unit whose wait ended with no fix landed is due at
-once, as old as the day it ended. A row whose unit is gone leaves the list.
+once, as old as the day it ended. A row whose unit is gone leaves the list,
+and a pointer to a removed note that an earlier run could not take out goes.
 It prints each place and what it ended.
 
 A place whose memory directory Claude Code does not name is one patrol finding,

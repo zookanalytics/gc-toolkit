@@ -73,9 +73,10 @@ type Applied struct {
 // due again on a day, with ask-use asking a note's users to record the days
 // they use it, or is dropped. A drop keeps the unit's text and removes it, then
 // takes the pointers to a removed note out of the index and the collection
-// notes. A decision acts only on the text the ref names, and one whose unit
-// changed since it was listed is refused and stays due. An error is a city
-// whose places did not read.
+// notes while its name holds no file, those of an earlier run's removals that
+// did not come out with them. A decision acts only on the text the ref names,
+// and one whose unit changed since it was listed is refused and stays due. An
+// error is a city whose places did not read.
 func (in *Intake) Apply(decisions string) (Applied, error) {
 	var a Applied
 	today := in.today()
@@ -188,7 +189,11 @@ func (in *Intake) applyIn(ps Places, p Place, ds []decision, a *Applied) {
 		a.Failed = append(a.Failed, err.Error())
 		return
 	}
-	gone := map[string]bool{}
+	gone, err := readGone(state)
+	if err != nil {
+		a.Failed = append(a.Failed, err.Error())
+		return
+	}
 	now := in.now().Format(time.RFC3339)
 	for _, d := range ds {
 		u, ok := unitFor(units, d)
@@ -223,10 +228,8 @@ func (in *Intake) applyIn(ps Places, p Place, ds []decision, a *Applied) {
 		}
 		a.Said = append(a.Said, "recorded "+d.ref+": due again on "+d.arg+asked+withdrawn)
 	}
-	if len(gone) > 0 {
-		a.Failed = append(a.Failed, prune(state, p.Dir, gone)...)
-		rows = withoutFiles(rows, gone)
-	}
+	a.Failed = append(a.Failed, unlink(state, p.Dir, gone)...)
+	rows = withoutFiles(rows, gone)
 	if err := writeList(state, rows); err != nil {
 		a.Failed = append(a.Failed, err.Error())
 	}

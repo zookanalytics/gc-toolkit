@@ -314,6 +314,29 @@ func TestASettleKeepsANoteEditedWhileItIsRemoved(t *testing.T) {
 	}
 }
 
+// A wait that ends removes the text it judged, and keeps the pointer to a note
+// an agent saves under the name while it is removed.
+func TestASettleKeepsThePointerToANoteSavedUnderItsName(t *testing.T) {
+	c := newCity(t)
+	m := c.rig("r", "tk")
+	onMain, _ := origin(t, c.checkout("r"), "main")
+	s := c.store("r")
+	s.Put(openPattern("tk-p1"))
+	f, index := filepath.Join(m, "s.md"), filepath.Join(m, indexName)
+	write(t, index, "- [S](s.md) — the lesson\n")
+	write(t, f, "s lesson.\n")
+	c.apply(refOf(c.due(), "s.md") + " waits tk-p1")
+	s.Put(closedPattern("tk-p1", "proposal_bead", "tk-f1"))
+	s.Put(merged("tk-f1", onMain, "main"))
+	landOn(t, "check", f, func() { saveByRename(t, f, "s lesson, saved again.\n") })
+	if got := c.settle(); got.Left != 1 || len(got.Failed) > 0 {
+		t.Fatalf("left %d, failed %q; want the judged text removed", got.Left, got.Failed)
+	}
+	if read(t, f) != "s lesson, saved again.\n" || read(t, index) != "- [S](s.md) — the lesson\n" {
+		t.Errorf("s.md reads %q and the index %q; want the new save and its pointer", read(t, f), read(t, index))
+	}
+}
+
 // A row whose unit is gone from its directory leaves the list.
 func TestARowWhoseUnitIsGoneLeavesTheList(t *testing.T) {
 	c := newCity(t)

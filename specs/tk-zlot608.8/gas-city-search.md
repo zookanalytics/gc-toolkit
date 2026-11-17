@@ -110,7 +110,8 @@ GitHub nothing.
 **Covered: Gas City's pack state directory.** `citylayout.PackStateDir`
 (`internal/citylayout/runtime.go`) names `<city>/.gc/runtime/packs/<pack>`, and
 the noun keeps one directory there per memory directory, named for the SHA-256
-of its real path.
+of its real path. The names of the removed notes whose pointers did not all
+come out, which the next run takes out, are kept in the same directory.
 
 ## Report a place the intake cannot learn
 

@@ -315,6 +315,8 @@ For each memory directory, the run keeps these in the pack's state directory,
   has not passed has, in place of a wait, the date it is next due.
 - **Each removed note's text**, as it was when removed, filed under its name and
   hash. Nothing prunes these.
+- **The names of the removed notes whose pointers did not all come out**, which
+  the next run takes out.
 - **The directory's real path**, so a person can tell which directory a key
   belongs to.
 
@@ -324,8 +326,8 @@ characters would merge directories: with each `/` and `.` as `-`, `/x/a.b`,
 `/x/a-b` and `/x-a/b` share one.
 
 A note is due when the list does not hold it at its current hash, or holds the
-date it is next due and that date has come, so the list is all the next run
-needs of the last. The run keeps no copy of the directory and no findings
+date it is next due and that date has come, so the list and those names are
+all the next run needs of the last. The run keeps no copy of the directory and no findings
 record. The town repository ignores `.gc/`, and no session loads it.
 
 Other writers and other runs:
@@ -335,8 +337,10 @@ Other writers and other runs:
   read, and a note changed since is due again.
 - The index, `MEMORY.md`, holds pointers and is never judged. Claude Code loads
   its first 200 lines or 25 KB into every session. When the run removes a note,
-  it takes out each pointer to it in the index or a collection note, and a line
-  left with no pointer goes.
+  it takes out each pointer to it in the index or a collection note while its
+  name holds no file, so a note a session saves under that name keeps them. A
+  line left with no pointer goes, and a pointer that does not come out goes on
+  the next run.
 - A collection note (`hub-*.md`) is judged entry by entry, as the backlog record
   sorted it. A line that links a whole note stands for that note. An entry with
   text of its own is judged like a note and keyed on the list by its own hash.

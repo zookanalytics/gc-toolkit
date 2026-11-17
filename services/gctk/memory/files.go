@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -29,6 +30,13 @@ import (
 // file is displaced leaves it under its .memory-intake.* name. It holds the
 // text the intake replaced or has kept, unless a writer saved in the moment
 // before the exchange or the move.
+//
+// A removal leaves a note's name free only until a writer saves under it, so
+// a pointer to a removed note comes out only while its name holds no file. A
+// rewrite's check runs its edit again on the text it read, since an edit can
+// read more than its file, as the one that takes pointers out reads each name.
+// A save under the name before the check swaps the rewrite back, and its next
+// try keeps the pointer.
 
 // errMoved is a rewrite whose file another writer kept changing.
 var errMoved = errors.New("it kept changing while it was written")
@@ -38,15 +46,16 @@ var errChanged = errors.New("it changed since it was listed")
 
 // beforeStep runs before each step of a write to file, named by the step, so a
 // test can land an agent's save or a kill there. A rewrite takes "swap", the
-// exchange, then "check", the read of the displaced file, then "back", the
-// exchange that returns a displaced file that failed the check. A removal
-// takes "move", the move aside, then "check", then "finish", the removal of
-// the moved file.
+// exchange, then "check", the read of the displaced file and the edit run
+// again, then "back", the exchange that returns a displaced file that failed
+// the check. A removal takes "move", the move aside, then "check", then
+// "finish", the removal of the moved file.
 var beforeStep = func(step, file string) {}
 
 // put swaps the file at tmp, which holds after, in under file's name while
-// file holds text, and reports whether it did.
-func put(file, tmp, text, after string) (bool, error) {
+// file holds text and edit still makes after of it, and reports whether it
+// did.
+func put(file, tmp, text, after string, edit func(string) (string, error)) (bool, error) {
 	beforeStep("swap", file)
 	if err := exchange(tmp, file); err != nil {
 		os.Remove(tmp)
@@ -54,8 +63,10 @@ func put(file, tmp, text, after string) (bool, error) {
 	}
 	beforeStep("check", file)
 	if now, err := os.ReadFile(tmp); err == nil && string(now) == text {
-		os.Remove(tmp)
-		return true, nil
+		if again, err := edit(text); err == nil && again == after {
+			os.Remove(tmp)
+			return true, nil
+		}
 	}
 	beforeStep("back", file)
 	if err := exchange(tmp, file); err != nil {
@@ -122,9 +133,10 @@ func take(file, full string) (removal, error) {
 }
 
 // rewrite replaces file's text with edit(text) while the file still holds the
-// text edit read, and tries again, up to three times, when another writer moved
-// it. It returns the text written, or the text as it stands when edit changed
-// nothing, and whether it wrote.
+// text edit read and edit still makes the same text of it, and tries again, up
+// to three times, when another writer moved what it read. It returns the text
+// written, or the text as it stands when edit changed nothing, and whether it
+// wrote.
 func rewrite(file string, edit func(string) (string, error)) (string, bool, error) {
 	for range 3 {
 		before, err := os.ReadFile(file)
@@ -151,7 +163,7 @@ func rewrite(file string, edit func(string) (string, error)) (string, bool, erro
 			os.Remove(tmp.Name())
 			return "", false, err
 		}
-		wrote, err := put(file, tmp.Name(), string(before), after)
+		wrote, err := put(file, tmp.Name(), string(before), after, edit)
 		if err != nil {
 			return "", false, err
 		}
@@ -325,16 +337,49 @@ func pruneLinks(text string, gone map[string]bool) string {
 	return joinedLike(text, out)
 }
 
-// prune takes the pointers to each note in gone out of the index and every
-// collection note, and removes, with its text kept, a collection note that this
-// leaves with no list item, whose own pointers then go in turn, until a pass
-// removes no collection note. gone gains the collection notes it removes.
+// unlink takes out the pointers to each note in gone, and keeps the names
+// under state while a pointer did not come out, so the next run reads them
+// into its gone and tries again. gone ends holding those of its notes, and of
+// the collection notes prune removed, whose names hold no file. It returns
+// what it could not do.
+func unlink(state, dir string, gone map[string]bool) []string {
+	var failures []string
+	if len(gone) > 0 {
+		failures = prune(state, dir, gone)
+	}
+	left := absent(dir, gone)
+	maps.DeleteFunc(gone, func(name string, _ bool) bool { return !left[name] })
+	if len(failures) == 0 {
+		clear(left)
+	}
+	if err := writeGone(state, left); err != nil {
+		failures = append(failures, err.Error())
+	}
+	return failures
+}
+
+// absent is each note in gone whose name holds no file in dir.
+func absent(dir string, gone map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for name := range gone {
+		if _, err := os.Lstat(filepath.Join(dir, name)); errors.Is(err, fs.ErrNotExist) {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// prune takes the pointers to each note in gone whose name holds no file out
+// of the index and every collection note, and removes, with its text kept, a
+// collection note that this leaves with no list item, whose own pointers then
+// go in turn, until a pass removes no collection note. gone gains the
+// collection notes it removes.
 func prune(state, dir string, gone map[string]bool) []string {
 	var failures []string
 	for more := true; more; {
 		names, err := hubs(dir)
 		if err != nil {
-			return append(failures, fmt.Sprintf("cannot list %s, so the links to the notes removed were not taken out: %v", dir, err))
+			return append(failures, fmt.Sprintf("cannot list %s, so the links to the notes removed were not taken out, and the next run tries again: %v", dir, err))
 		}
 		more = false
 		for _, name := range names {
@@ -342,10 +387,10 @@ func prune(state, dir string, gone map[string]bool) []string {
 			had := false
 			written, wrote, err := rewrite(file, func(text string) (string, error) {
 				had = hasEntries(text)
-				return pruneLinks(text, gone), nil
+				return pruneLinks(text, absent(dir, gone)), nil
 			})
 			if err != nil {
-				failures = append(failures, fmt.Sprintf("the links in %s were not taken out: %v", file, err))
+				failures = append(failures, fmt.Sprintf("the links in %s were not taken out, and the next run tries again: %v", file, err))
 				continue
 			}
 			if !wrote || name == indexName || !had || hasEntries(written) {

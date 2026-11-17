@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -484,6 +485,141 @@ func TestANoteEditedWhileItIsRemovedStays(t *testing.T) {
 	}
 	if kept, _ := filepath.Glob(filepath.Join(c.state(m), "removed", "d.md@*")); len(kept) != 0 {
 		t.Errorf("text kept for a note that stayed: %v", kept)
+	}
+}
+
+// A note an agent saves under a dropped note's name while the drop removes it
+// keeps the pointers to that name, the collection note that holds them and
+// the index's pointer to that collection note, and is due as new.
+func TestADropKeepsThePointersToANoteSavedUnderItsName(t *testing.T) {
+	c := newCity(t)
+	m := c.rig("r", "tk")
+	n, hub, index := filepath.Join(m, "n.md"), filepath.Join(m, "hub-a.md"), filepath.Join(m, indexName)
+	write(t, index, "- [Hub](hub-a.md) — topics\n")
+	write(t, hub, "- [N](n.md) — the lesson\n")
+	write(t, n, "Old lesson.\n")
+	r := refOf(c.due(), "n.md")
+	landOn(t, "check", n, func() { saveByRename(t, n, "New lesson.\n") })
+	a := c.apply(r + " drop")
+	if len(a.Failed) > 0 || !said(a.Said, "removed "+r) {
+		t.Fatalf("said %q, failed %q; want the judged text removed", a.Said, a.Failed)
+	}
+	if got := read(t, n); got != "New lesson.\n" {
+		t.Errorf("n.md reads %q; want the new save", got)
+	}
+	if !exists(hub) || read(t, hub) != "- [N](n.md) — the lesson\n" || read(t, index) != "- [Hub](hub-a.md) — topics\n" {
+		t.Error("the pointers to the new save, or to the collection note that holds them, were taken out")
+	}
+	if dueOf(c.due(), "n.md") != DueNew {
+		t.Error("the new save is not due as new")
+	}
+}
+
+// A note an agent saves under a dropped note's name while its pointer is taken
+// out keeps the pointer.
+func TestADropKeepsAPointerWhoseNoteIsSavedWhileItGoes(t *testing.T) {
+	c := newCity(t)
+	m := c.rig("r", "tk")
+	n, index := filepath.Join(m, "n.md"), filepath.Join(m, indexName)
+	write(t, index, "- [N](n.md) — the lesson\n- [O](o.md) — another\n")
+	write(t, n, "Old lesson.\n")
+	write(t, filepath.Join(m, "o.md"), "Other lesson.\n")
+	r := refOf(c.due(), "n.md")
+	landOn(t, "check", index, func() { saveByRename(t, n, "New lesson.\n") })
+	if a := c.apply(r + " drop"); len(a.Failed) > 0 {
+		t.Fatal(a.Failed)
+	}
+	if got := read(t, index); read(t, n) != "New lesson.\n" || got != "- [N](n.md) — the lesson\n- [O](o.md) — another\n" {
+		t.Errorf("the index reads %q; want the pointer to the new save kept", got)
+	}
+}
+
+// stuckPointer drops n.md while an agent edits the index at each try to take
+// its pointer out, so the pointer stays for the next run, and returns the city,
+// the memory directory and the index.
+func stuckPointer(t *testing.T) (*city, string, string) {
+	t.Helper()
+	c := newCity(t)
+	m := c.rig("r", "tk")
+	index := filepath.Join(m, indexName)
+	write(t, index, "- [N](n.md) — the lesson\n- [O](o.md) — another\n")
+	write(t, filepath.Join(m, "n.md"), "n lesson.\n")
+	write(t, filepath.Join(m, "o.md"), "o lesson.\n")
+	r := refOf(c.due(), "n.md")
+	racing := true
+	landOn(t, "swap", index, func() {
+		if racing {
+			appendTo(t, index, "- An agent's line.\n")
+		}
+	})
+	a := c.apply(r + " drop")
+	racing = false
+	if !said(a.Failed, "the links in "+index+" were not taken out, and the next run tries again") ||
+		exists(filepath.Join(m, "n.md")) || !strings.Contains(read(t, index), "(n.md)") {
+		t.Fatalf("failed %q; want n.md removed and its pointer left for the next run", a.Failed)
+	}
+	if got := read(t, filepath.Join(c.state(m), goneFile)); got != "\"n.md\"\n" {
+		t.Fatalf("recorded %q for the next run; want n.md", got)
+	}
+	return c, m, index
+}
+
+// A pointer the index kept changing too fast to take out goes on the next run,
+// a settle or an apply, which then records nothing more for it.
+func TestAPointerThatDidNotComeOutGoesOnTheNextRun(t *testing.T) {
+	for verb, next := range map[string]func(*city) []string{
+		"settle": func(c *city) []string { return c.settle().Failed },
+		"apply":  func(c *city) []string { return c.apply(refOf(c.due(), "o.md") + " next 2026-12-01").Failed },
+	} {
+		t.Run(verb, func(t *testing.T) {
+			c, m, index := stuckPointer(t)
+			if failed := next(c); len(failed) > 0 {
+				t.Fatal(failed)
+			}
+			want := "- [O](o.md) — another\n- An agent's line.\n- An agent's line.\n- An agent's line.\n"
+			if got := read(t, index); got != want {
+				t.Errorf("the index reads %q, want %q", got, want)
+			}
+			if exists(filepath.Join(c.state(m), goneFile)) {
+				t.Error("n.md is still recorded once its pointer is out")
+			}
+		})
+	}
+}
+
+// A note saved under the name of one whose pointer is left for the next run
+// keeps that pointer and the judge's decision on it, and is recorded no more.
+func TestAPointerLeftForTheNextRunStaysForANoteSavedUnderItsName(t *testing.T) {
+	c, m, index := stuckPointer(t)
+	write(t, filepath.Join(m, "n.md"), "n lesson, saved again.\n")
+	if a := c.apply(refOf(c.due(), "n.md") + " next 2026-12-01"); len(a.Failed) > 0 {
+		t.Fatal(a.Failed)
+	}
+	if got := read(t, index); !strings.Contains(got, "- [N](n.md) — the lesson\n") {
+		t.Errorf("the index reads %q; want the pointer to the new save kept", got)
+	}
+	if ds := c.due(); dueOf(ds, "n.md") != "" {
+		t.Errorf("due %s; want the decision on the new save kept", names(ds))
+	}
+	if exists(filepath.Join(c.state(m), goneFile)) {
+		t.Error("n.md is still recorded though its name holds a note")
+	}
+}
+
+// The notes recorded for the next run read back as written, whatever their
+// names hold.
+func TestTheNotesLeftForTheNextRunReadBack(t *testing.T) {
+	state := t.TempDir()
+	want := map[string]bool{"a lesson.md": true, "hub-x\ny.md": true, `say "it".md`: true}
+	if err := writeGone(state, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readGone(state)
+	if err != nil || !maps.Equal(got, want) {
+		t.Errorf("read %v, %v; want %v", got, err, want)
+	}
+	if err := writeGone(state, nil); err != nil || exists(filepath.Join(state, goneFile)) {
+		t.Errorf("an empty record left its file: %v", err)
 	}
 }
 

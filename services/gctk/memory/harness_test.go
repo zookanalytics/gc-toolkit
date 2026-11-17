@@ -219,6 +219,20 @@ func landAt(t *testing.T, step string, land func(file string)) {
 	t.Cleanup(func() { beforeStep = func(string, string) {} })
 }
 
+// landOn runs land each time a write to file reaches step, as an agent's saves
+// would land there.
+func landOn(t *testing.T, step, file string, land func()) {
+	t.Helper()
+	prev := beforeStep
+	beforeStep = func(s, f string) {
+		prev(s, f)
+		if s == step && f == file {
+			land()
+		}
+	}
+	t.Cleanup(func() { beforeStep = func(string, string) {} })
+}
+
 // killedAt runs write and stops it the first time it reaches step, as a kill
 // there would, so the test reads what the kill leaves.
 func killedAt(t *testing.T, step string, write func()) {

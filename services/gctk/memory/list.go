@@ -4,20 +4,24 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
 // A directory's state, under Places.State/<key>: its list, its real path, each
-// removed unit's text, and the lock a writer holds.
+// removed unit's text, the notes removed whose pointers did not all come out,
+// and the lock a writer holds.
 const (
 	listFile    = "list.tsv"
 	pathFile    = "path"
 	removedDir  = "removed"
+	goneFile    = "gone"
 	lockFile    = "lock"
 	listHead    = "#memory-intake list 1\tkind\tname\thash\tjudged\twait\tnext\twhy"
 	lockPoll    = 20 * time.Millisecond
@@ -90,6 +94,42 @@ func writeList(state string, rows []row) error {
 		b.WriteString(strings.Join([]string{r.Kind, r.Name, r.Hash, r.Judged, r.Wait, r.Next, oneLine(r.Why)}, "\t") + "\n")
 	}
 	return replace(filepath.Join(state, listFile), b.String(), 0o644)
+}
+
+// readGone reads the notes removed whose pointers did not all come out, kept
+// under state one quoted name a line, none when it keeps none.
+func readGone(state string) (map[string]bool, error) {
+	gone := map[string]bool{}
+	raw, err := os.ReadFile(filepath.Join(state, goneFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return gone, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("the notes under %s whose pointers are still to come out did not read: %w", state, err)
+	}
+	for _, l := range lines(string(raw)) {
+		if name, err := strconv.Unquote(l); err == nil && name != "" {
+			gone[name] = true
+		}
+	}
+	return gone, nil
+}
+
+// writeGone keeps the notes in gone under state, and removes the file when
+// gone is empty.
+func writeGone(state string, gone map[string]bool) error {
+	file := filepath.Join(state, goneFile)
+	if len(gone) == 0 {
+		if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("cannot remove %s: %w", file, err)
+		}
+		return nil
+	}
+	var b strings.Builder
+	for _, name := range slices.Sorted(maps.Keys(gone)) {
+		b.WriteString(strconv.Quote(name) + "\n")
+	}
+	return replace(file, b.String(), 0o644)
 }
 
 // lock takes the lock on a directory's state, making the state and its path
