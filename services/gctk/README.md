@@ -66,10 +66,12 @@ last good binary.
 shell and takes their values from `gctk pr status`. It resolves the
 binary the same way, and when there is none, or the binary is too old to carry
 `pr status` or its `--json`, it leaves the labels unchanged. `gctk pr reconcile`
-and `gctk pr compare` run it through the runtime adapter, with its `reconcile`
-and `clear` verbs, and compare the labels with the same derivation first
-(`listing.PRLabels`, and `prstatus.Labels` for the labels' names), so they run
-it only where the labels differ. `gc-helm.sh` engage
+and `gctk pr compare` run it through the runtime adapter. The landing order
+compares each owned PR's saved labels with the same derivation first
+(`listing.PRLabels`, and `prstatus.Labels` for the labels' names), and runs
+`reconcile` or `clear` only where they differ. The net derives nothing: it
+searches for the labels `prstatus.LabelNames` lists and runs `clear` on each PR
+it finds that no live bead owns. `gc-helm.sh` engage
 lists what holds a bead from the reasons in the same verb's `--json` answer, and
 the helm board imports the package behind it, `prstatus`, so the labels, engage
 and the board read one definition of what holds a PR. For a PR on Gas Town's
