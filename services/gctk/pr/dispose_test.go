@@ -463,10 +463,16 @@ func TestARetiredPRsCloseWaitsForAnAttachedReviewRun(t *testing.T) {
 // The asks and the withdrawals still open on the bead are closed once the PR
 // has closed, each with a no-op work record and a note saying why, since no
 // run takes an ask and no withdrawal is carried out on a closed PR, and both
-// would hold the bead's close.
+// would hold the bead's close. One that closed before the PR is left as it is.
 func TestARetiredPRsAsksAndWithdrawalsCloseWithIt(t *testing.T) {
 	d, r := retired(t)
 	d.store.WorkRecordGate = true
+	gone := []string{d.withdraw(t, other), (&admitting{land: d}).ask(t, "drop the flag")}
+	for _, id := range gone {
+		b, _ := d.store.Row(id)
+		b.Status = "closed"
+		d.store.Put(b)
+	}
 	w := d.withdraw(t, later)
 	a := (&admitting{land: d}).ask(t, "rename the flag")
 	d.pr.Facts.State = "CLOSED"
@@ -479,6 +485,11 @@ func TestARetiredPRsAsksAndWithdrawalsCloseWithIt(t *testing.T) {
 		}
 		if !strings.Contains(o.Detail, id) {
 			t.Fatalf("the outcome %q does not name %s", o.Detail, id)
+		}
+	}
+	for _, id := range gone {
+		if b, _ := d.store.Row(id); strings.Contains(b.Notes, "PR #7 closed") || strings.Contains(o.Detail, id) {
+			t.Fatalf("%s, closed before the PR, was closed again: notes %q, outcome %q", id, b.Notes, o.Detail)
 		}
 	}
 	if len(r.asked()) != 1 {
