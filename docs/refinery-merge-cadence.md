@@ -886,19 +886,28 @@ the run sends back to the refinery keeps its marker while one is open, and the
 order still reads it.
 
 **The review run.** A run pours a PR's review run, `mol-pr-review`, with
-`gc formula cook --attach` onto the bead under the record lock. Its vars are the
-record's PR bead, head, target and branch, and the pools and the binding the
-refinery's address names (`<rig>/<binding>refinery`): `review_target`
+`gc formula cook` under the record lock, and names no bead to the cook:
+`gc hook --claim` retires a run attached with `--attach` to a bead the refinery
+holds, at its first claim ([the
+search](../specs/tk-1tfzr71.208/gas-city-search.md)). Its vars are the record's
+PR bead, head, target and branch, and the pools and the binding the refinery's
+address names (`<rig>/<binding>refinery`): `review_target`
 `<rig>/<binding>polecat-codex`, `repair_target` `<rig>/<binding>polecat` and
-`binding_prefix` `<binding>`. It pours none while a run is attached to the bead,
+`binding_prefix` `<binding>`. The run gives each bead the cook created the
+bead's priority, then attaches the run to the bead by the bead's `blocks` edge
+onto its root. A live run whose `gc.var.pr_bead` names the bead and that no edge
+of the bead names, as a pour that stopped before its edge landed leaves it, gets
+that edge from the next run in place of a pour, and a pour whose root the bead's
+store does not hold files a human gate on the bead keyed
+`review-run-outside-store`. It pours none while a run is attached to the bead,
 while another open bead names the PR's branch, such as a rework child, or while
 a human gate holds it. A conversation on the PR holds its merge and nothing
 else, so runs are poured while one is open, and the evaluator's wait holds the
-merge until it closes. A run that ended without a result is poured again.
-When the last two runs at the validated head both ended without one, counting
-only runs that ended after the bead's last `review-run-failed` gate closed, it
-files a human gate keyed `review-run-failed` instead, naming both runs and how
-each ended ([state-machine.md](state-machine.md#checks)).
+merge until it closes. A run that ended without a result is poured again. When
+the last two runs at the validated head both ended without one, counting only
+runs that ended after the bead's last `review-run-failed` gate closed, it files
+a human gate keyed `review-run-failed` instead, naming both runs and how each
+ended ([state-machine.md](state-machine.md#checks)).
 
 **How the refinery hears of a changed head.** A changed head is the refinery's
 to take once no withdrawal is open on the bead and no review run is attached to

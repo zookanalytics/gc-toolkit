@@ -443,9 +443,9 @@ no warrant.
 
 - **Covers.** The `pr_github_read` key, declared as `githubReadKey` in
   `services/gctk/pr/read.go`. Its writer is the landing order: `blocked`,
-  `requeued` and `decide` in `services/gctk/pr/landing.go`, and `admit` and
-  `runFailed` in `services/gctk/pr/admit.go`, save the read that `observe` in
-  `services/gctk/pr/read.go` makes. Its reader is `FromStore` in
+  `requeued` and `decide` in `services/gctk/pr/landing.go`, and `admit`,
+  `runFailed` and `runOutside` in `services/gctk/pr/admit.go`, save the read that
+  `observe` in `services/gctk/pr/read.go` makes. Its reader is `FromStore` in
   `services/gctk/pr/read.go`, which `answerFromStore` in
   `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
   `PRAnswers` in `services/gctk/listing/pr.go` calls for the rig board, from
@@ -488,7 +488,7 @@ no warrant.
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
-- **Verified.** 2026-11-16, at `gastownhall/gascity` main 192fa2d39407,
+- **Verified.** 2026-11-17, at `gastownhall/gascity` main 08fa6180490d,
   `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
   8cdfa796a8f5.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
