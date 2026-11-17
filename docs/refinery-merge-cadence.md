@@ -855,9 +855,10 @@ nothing and exits 2 for the next tick, and a rig whose roster names no refinery
 has no record to read. The order acts only on pending records, so on a rig
 still on the old path it finds none.
 
-Each run takes up to 20 beads that carry the marker `pr_reconcile_pending`,
-the least recently checked first (`pr_last_checked_at`), and starts none after
-four minutes (its `--count` and `--budget`). It reads each PR from GitHub by its
+Each run takes up to 20 beads that carry the marker `pr_reconcile_pending`, or
+that the refinery holds on the record with a ruling's disposition on them, the
+least recently checked first (`pr_last_checked_at`), and starts none after four
+minutes (its `--count` and `--budget`). It reads each PR from GitHub by its
 number, never from a list of open PRs, because a PR missing from that list can
 have closed without merging.
 
@@ -867,6 +868,7 @@ have closed without merging.
 | open at another head | sends the bead back to the refinery, open, as `pull_request_head_changed`, and wakes the refinery for it while only conversations and asks hold the bead (below). The refinery validates the new head and records it pending again. When it will not land the head as it stands, such as on a conflict with the target, it files the reason as an ask and then records the PR pending at the head its prep read (`refinery-requeue.sh`), so the ask holds the merge before the head is pending, a later run pours the review run that answers it, and its find-work leaves the ask alone |
 | merged at the validated head, with the merge commit on the freshly fetched target | records `mr_merged` and closes the bead; when bd refuses that close, for an open child or a live blocker, records the exception `pull_request_merged_close_refused` with the merge's evidence, and files its human gate |
 | closed unmerged, merged at another head, or no longer the PR the record names | records the exception, keeps the bead blocked and files a human gate keyed by its value |
+| retired by a ruling, whose bead carries the disposition `pr-dispose.sh` records under the record lock before it closes the PR | requests no merge, pours no review run and marks nothing ready while the PR is open. Once the PR has closed and no review run is attached, it closes the asks and the withdrawals still open on the bead, then, with the record lock free, closes the bead onto the ruling's successor through `bead-rehome.sh`, run as the refinery ([state-machine.md](state-machine.md#disposition)). The script closes it only while it still has the status and assignee the run read under the lock and still records the ruling the run read, so a bead released or ruled again once the lock is free goes to the next run, which reads it again. A close the script holds, such as one the ruling's open conversation holds, is tried again by the next run. A retired PR that merged all the same lands as any other |
 | a lookup or a fetch that failed, or a merge commit not yet on the target | records why in `pr_reconcile_error`, and the next run reads it again |
 
 **Withdrawals come first.** While the PR is open, a run first carries out each
@@ -936,15 +938,20 @@ directory, from its read of the record to its last write of it, and leaves the
 lock free a moment between two records so a publication waiting for it takes it
 there. Two runs that overlap act on one record one after the other, the second
 from the record as the first left it. The refinery's `gctk pr record`, a
-review run's `gctk pr withdraw` and `gctk review passed --record`, and
-`bead-rehome.sh`'s close take the same lock. The kernel frees the lock of a run
+review run's `gctk pr withdraw` and `gctk review passed --record`,
+`bead-rehome.sh`'s close and `pr-dispose.sh`'s stamp of a ruling's disposition
+take the same lock. So a ruling's disposition lands before a run reads the
+bead, or waits until the run's last write of it, and a merge the run requests
+comes before the ruling, never after it. The kernel frees the lock of a run
 the timeout stops, and the records it did not reach wait for the next run. No
 webhook fires the order, because an order a webhook fires skips Gas City's
 gates and each event would start a run of its own.
 
 **What a run acts on.** A run acts only on a bead it reads under the lock as
-carrying the marker and, unless the bead is closed, still assigned to the
-refinery, and each write is guarded on the status and assignee it read. A bead
+carrying the marker, or as an open or blocked bead on the record that carries a
+ruling's disposition, with or without the marker, and, unless the bead is
+closed, still assigned to the refinery, and each write is guarded on the status
+and assignee it read. A bead
 that a release took from the refinery has its marker cleared and its PR named
 in a note, and nothing else written.
 
