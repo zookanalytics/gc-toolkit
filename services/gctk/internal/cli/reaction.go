@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,11 +21,264 @@ import (
 )
 
 func newReactionCmd(stdout, stderr io.Writer) *cobra.Command {
-	return group("reaction", "a bead's first reaction: the exit it takes",
+	return group("reaction", "a bead's first reaction: whether it takes one, its sling, and the exit it takes",
 		`A first reaction is the run of mol-first-reaction every new bead gets: it reads
 the bead once, writes a card on it, and takes one of five exits, which dispose
-performs (docs/human-engagement.md).`,
+performs (docs/human-engagement.md). sling starts one on a bead nobody has
+decided on, sweep starts one on each such bead in the rig, check is the
+reaction's own first act, and deliverable says whether the rig's proactive pool
+can take one now.`,
+		newReactionCheckCmd(stdout, stderr),
+		newReactionSlingCmd(stdout, stderr),
+		newReactionSweepCmd(stdout, stderr),
+		newReactionDeliverableCmd(stdout),
 		newReactionDisposeCmd(stdout, stderr))
+}
+
+// reactionRefusals is the refusals check and sling apply, in their order, with
+// their codes, for their help.
+const reactionRefusals = `A first reaction triages a bead nobody has decided on, so a bead whose next
+move is someone's already is refused, by the first of these that holds:
+
+  6  its kind takes none: a standing record or a feedback pattern
+  5  its status is not open, it is assigned, it is routed or armed, or it
+     carries hold:mayor or hold:external
+  3  an open conversation tracks it
+  3  a first reaction already runs on it
+  4  a live run of another formula works it
+  5  an open human gate holds it, on the bead or on an ancestor
+
+A read that does not answer decides nothing and exits 1.
+
+--db names the store, a store's .beads directory. Without it the subject's
+store is the one its id's prefix names in the city's rig list.`
+
+const reactionCheckLong = `The first act of the reaction whose run is <root>: whether <bead> takes it. It
+applies sling's refusals and writes nothing. The asking run is no second
+reaction, and a gate under first-reaction whose message names <root> among its
+words is the run's own, which it filed before it was re-offered, so both are
+passed over.
+
+` + reactionRefusals + ` Under the check that is no refusal either: ask again
+once the store answers.
+
+exit: 0 the bead takes this reaction
+      3, 4, 5 or 6 a refusal: decline the run with the message as its reason
+      1 decided nothing
+      2 usage`
+
+func newReactionCheckCmd(stdout, stderr io.Writer) *cobra.Command {
+	var run, db string
+	cmd := &cobra.Command{
+		Use:   "check <bead> --run <root> [--db <path>]",
+		Short: "whether this run of mol-first-reaction may still react to its subject",
+		Long:  reactionCheckLong,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			const prog = "gctk reaction check"
+			bead := strings.TrimSpace(args[0])
+			r, err := reactionFor(bead, db, stderr, prog)
+			if err != nil {
+				fmt.Fprintf(stderr, "%s: %v. The check decides nothing; ask again once the store answers\n", prog, err)
+				return exit(1)
+			}
+			refusal, err := r.Check(bead, run)
+			var use *reaction.UsageError
+			switch {
+			case errors.As(err, &use):
+				return err
+			case err != nil:
+				fmt.Fprintf(stderr, "%s: %v. The check decides nothing; ask again once the store answers\n", prog, err)
+				return exit(1)
+			case refusal != nil:
+				fmt.Fprintf(stderr, "%s: %s: %s\n", prog, bead, refusal.Why)
+				return exit(refusal.Code)
+			}
+			fmt.Fprintf(stdout, "%s: %s takes this first reaction (run %s): no refusal holds\n", prog, bead, run)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&run, "run", "", "the root of the asking reaction's run, the root_bead_id its react step's claim returned")
+	cmd.Flags().StringVar(&db, "db", "", "the store, a store's .beads directory")
+	return cmd
+}
+
+const reactionSlingLong = `Slings a first reaction on <bead>, a run of mol-first-reaction through the
+rig's proactive pool, GC_RIG/gc-toolkit.proactive:
+
+  gc sling --rig <rig> <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction
+
+unless a refusal holds. gc sling refuses a second live run of the formula on a
+bead, and that refusal is 3.
+
+` + reactionRefusals + ` So does an unset GC_RIG, a bead its store does not
+hold, and a sling gc sling refuses for any other cause.
+
+exit: 0 slung
+      3, 4, 5 or 6 a refusal, nothing slung
+      1 an error, nothing slung
+      2 usage`
+
+func newReactionSlingCmd(stdout, stderr io.Writer) *cobra.Command {
+	var db string
+	cmd := &cobra.Command{
+		Use:   "sling <bead> [--db <path>]",
+		Short: "sling a first reaction on a bead nobody has decided on",
+		Long:  reactionSlingLong,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			const prog = "gctk reaction sling"
+			bead := strings.TrimSpace(args[0])
+			if strings.TrimSpace(os.Getenv("GC_RIG")) == "" {
+				fmt.Fprintf(stderr, "%s: %v. No first reaction is slung\n", prog, reaction.ErrNoRig)
+				return exit(1)
+			}
+			r, err := reactionFor(bead, db, stderr, prog)
+			if err != nil {
+				fmt.Fprintf(stderr, "%s: %v. No first reaction is slung\n", prog, err)
+				return exit(1)
+			}
+			refusal, err := r.Sling(bead)
+			switch {
+			case err != nil:
+				fmt.Fprintf(stderr, "%s: %v. No first reaction is slung\n", prog, err)
+				return exit(1)
+			case refusal != nil:
+				fmt.Fprintf(stderr, "%s: %s: %s. No first reaction is slung\n", prog, bead, refusal.Why)
+				return exit(refusal.Code)
+			}
+			fmt.Fprintf(stdout, "%s: slung a first reaction on %s\n", prog, bead)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&db, "db", "", "the store, a store's .beads directory")
+	return cmd
+}
+
+const reactionSweepLong = `Slings a first reaction at each bead in the rig's store that nobody has
+decided on, highest priority first. Its one read is bd's ready set, unassigned
+and not an epic. It keeps the raw input among it: a task, bug, feature or spike
+with a description that is no workflow root, scope, spec or step, no standing
+record, feedback pattern or review lane, carries no headline, no work marker
+and no parent, has no route or arm, and carries no hold:mayor or hold:external.
+It drops every bead a live run works, and a run map that does not read drops
+nothing, which it says. Each sling applies sling's refusals again.
+
+A slung run waits for a pool slot at no cost, so the sweep has no cap. It
+starts no sling once less of its deadline is left than its slowest sling took,
+each figure taken in whole seconds as its upper bound, and the next sweep takes
+the rest. The deadline is GC_PROACTIVE_SWEEP_TIMEOUT, seconds alone or with an
+s, m or h suffix, 300s when unset. A rig whose proactive pool cannot take a
+reaction is skipped.
+
+Each candidate gets one JSON line on stdout: its id, title, priority and
+outcome, which is slung, refused (with the refusal's code and why), failed
+(with why), or left for the next sweep. The summary on stderr counts each skip
+by its cause. --dry-run slings nothing, and prints each candidate as
+would-sling: its sling reads the refusals again.
+
+--db names the store, a store's .beads directory. Without it the store is the
+one gc resolves here.
+
+exit: 0 swept, or no sweep in a rig whose pool cannot take a reaction
+      1 nothing slung: the ready read or the candidate rule failed, GC_RIG is
+        unset, or the deadline does not read
+      2 usage`
+
+func newReactionSweepCmd(stdout, stderr io.Writer) *cobra.Command {
+	var db string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "sweep [--db <path>] [--dry-run]",
+		Short: "sling a first reaction at each ready bead in the rig that nobody has decided on",
+		Long:  reactionSweepLong,
+		Args:  cobra.NoArgs,
+		RunE: func(c *cobra.Command, args []string) error {
+			const prog = "gctk reaction sweep"
+			timeout := os.Getenv("GC_PROACTIVE_SWEEP_TIMEOUT")
+			if timeout == "" {
+				timeout = reaction.SweepTimeout
+			}
+			deadline, err := reaction.SweepDeadline(timeout)
+			if err != nil {
+				fmt.Fprintf(stderr, "%s: %v\n", prog, err)
+				return exit(1)
+			}
+			rig := strings.TrimSpace(os.Getenv("GC_RIG"))
+			if rig == "" {
+				fmt.Fprintf(stderr, "%s: %v. No first reaction is slung\n", prog, reaction.ErrNoRig)
+				return exit(1)
+			}
+			l, err := ledger.Open(db)
+			if err != nil {
+				fmt.Fprintf(stderr, "%s: could not open the store (%v). No first reaction is slung\n", prog, err)
+				return exit(1)
+			}
+			r := &reaction.Reactions{Ledger: l, Runtime: gascity.New(), Rig: rig, Now: time.Now,
+				Log: func(line string) { fmt.Fprintf(stderr, "%s: %s\n", prog, line) }}
+			enc := json.NewEncoder(stdout)
+			summary, err := r.Sweep(dryRun, deadline, func(s reaction.Swept) { _ = enc.Encode(s) })
+			if err != nil {
+				fmt.Fprintf(stderr, "%s: %v\n", prog, err)
+				return exit(1)
+			}
+			fmt.Fprintf(stderr, "%s: %s\n", prog, summary)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&db, "db", "", "the store, a store's .beads directory")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "sling nothing, and print each candidate the sweep would sling")
+	return cmd
+}
+
+const reactionDeliverableLong = `Whether the rig's proactive pool, GC_RIG/gc-toolkit.proactive, can take a
+first reaction now. A slung reaction waits for a slot at no cost, but one routed
+to a pool the city's roster shows absent, suspended or capped at zero waits for
+nobody. No is a positive finding only: a roster that does not read answers yes,
+since it is no evidence that the pool is gone. It prints yes or no, and why, on
+stdout.
+
+exit: 0 yes
+      1 no`
+
+func newReactionDeliverableCmd(stdout io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "deliverable",
+		Short: "whether this rig's proactive pool can take a first reaction now",
+		Long:  reactionDeliverableLong,
+		Args:  cobra.NoArgs,
+		RunE: func(c *cobra.Command, args []string) error {
+			rig := strings.TrimSpace(os.Getenv("GC_RIG"))
+			if rig == "" {
+				fmt.Fprintf(stdout, "no: %v\n", reaction.ErrNoRig)
+				return exit(1)
+			}
+			r := &reaction.Reactions{Runtime: gascity.New(), Rig: rig}
+			ok, why := r.ProactiveDeliverable()
+			if !ok {
+				fmt.Fprintf(stdout, "no: %s\n", why)
+				return exit(1)
+			}
+			fmt.Fprintf(stdout, "yes: %s\n", why)
+			return nil
+		},
+	}
+}
+
+// reactionFor is the reaction over bead's store, --db or else the one its id's
+// prefix names in the city's rig list, in the caller's rig, saying each line to
+// stderr.
+func reactionFor(bead, db string, stderr io.Writer, prog string) (*reaction.Reactions, error) {
+	rt := gascity.New()
+	if db == "" {
+		db = subjectStore(rt, bead)
+	}
+	l, err := ledger.Open(db, bead)
+	if err != nil {
+		return nil, fmt.Errorf("could not open %s's store (%v)", bead, err)
+	}
+	return &reaction.Reactions{Ledger: l, Runtime: rt, Rig: strings.TrimSpace(os.Getenv("GC_RIG")), DB: db, Now: time.Now,
+		Log: func(line string) { fmt.Fprintf(stderr, "%s: %s\n", prog, line) }}, nil
 }
 
 const reactionDisposeLong = `Takes one exit of a first reaction on its subject, <bead>, and leaves the

@@ -1,11 +1,16 @@
 // Package reaction is gctk's first reaction: the run of mol-first-reaction
 // every new bead gets, which reads the bead once, writes a card on it and takes
-// one of five exits (docs/human-engagement.md). It holds `gctk reaction
-// dispose`, each exit's writes in their order and the rules that decide them:
-// intake's (docs/steering.md), an emergency's confirmation on the default
-// branch, the form each named agent takes its work in, and whether a route or a
-// hand-off reaches someone. It asks waits what holds a bead, the arm to arm one,
-// and prstatus which beads are human gates, and no domain asks it.
+// one of five exits (docs/human-engagement.md). It holds the rule of which bead
+// may take a first reaction, which `gctk reaction check`, `sling` and `sweep`
+// apply the same way, the sweep's candidate rule and its deadline, and
+// `gctk reaction dispose`, each exit's writes in their order and the rules that
+// decide them: intake's (docs/steering.md), an emergency's confirmation on the
+// default branch, the form each named agent takes its work in, and whether a
+// route or a hand-off reaches someone, which `gctk reaction deliverable` asks of
+// the rig's proactive pool. It asks waits what holds a bead and which runs work
+// it, the arm to arm one, the arm's record and the PR record what a bead
+// carries, conversation which tasks are conversations, and prstatus which beads
+// are human gates, and no domain asks it.
 //
 // A reaction disposes its subject and never closes it. Each exit orders its
 // writes so that the write which dispatches, holds or gates the subject comes
@@ -98,11 +103,7 @@ func (r *Reactions) say(format string, args ...any) {
 }
 
 func (r *Reactions) stamp() string {
-	now := time.Now
-	if r.Now != nil {
-		now = r.Now
-	}
-	return now().UTC().Format("2006-01-02T15:04:05Z")
+	return r.now().UTC().Format("2006-01-02T15:04:05Z")
 }
 
 // UsageError is a call refused for what it asks, before anything is written.
