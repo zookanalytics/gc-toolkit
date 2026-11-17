@@ -21,6 +21,7 @@ through `gc bd` and the supervisor's API.
 | `epic unweighed` | the time it read a rig's epics, which a portfolio sync marks each epic it weighs with, then each close and each latest shift of those epics that no sync has weighed, oldest first, one line each, from one read of the rig's epics, and a read that stops and says so when the store does not answer | `gctk epic unweighed --help`, `internal/cli/epic_unweighed.go`, `epic` |
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
+| `memory due`, `memory apply`, `memory settle` | the learning loop's memory intake, which the feedback distiller's steps call: the agent memory notes due for its judge as JSON, oldest first, read from each memory directory Claude Code names for a session in each rig's checkout and the city's root; the judge's decision on each note recorded on its directory's list, a dropped note's text kept before it goes; and each note's wait ended once its fix has landed on the default branch, or with the note due again when it ended with none, with one finding for a place Claude Code names no directory for | `gctk memory --help`, `internal/cli/memory.go`, `memory`, `internal/claudecode` |
 | `pr compose` | a PR's title and body as the bead that owns it says they should be: its title with the conventional-commit type a repository's title check requires, and its body's managed summary region and branch-beads section, each read by its markers and kept current while the text people add stays as it is | `gctk pr compose --help`, `internal/cli/prcompose.go`, `pr` |
 | `pr summary` | the account of what a change does, for its PR: the bead's PR summary and the change's subject line as its title, recorded in one write whose exit decides, or the summary recorded, printed for a reader of the PR's text | `gctk pr summary --help`, `internal/cli/prsummary.go`, `pr` |
 | `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it over the store and the GitHub read the landing order saved on the PR's bead, so the verb reads no GitHub, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
@@ -169,7 +170,8 @@ internal/host/       the host adapter: the processes gctk starts and signals, th
                      table, and the loopback ports and their listeners
 internal/host/fake/  the host adapter's in-memory fake, for the domains' tests
 internal/gascity/    the runtime adapter: gc sling, an agent's default formula from the city's
-                     config, the city's root, and the pack's scripts that ask a person
+                     config, the city's root, its rigs, the settings file its Claude sessions
+                     start with, and the pack's scripts that ask a person or file a finding
 internal/gascity/fake/  the runtime adapter's fake, which records each call and answers as a test says
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, the store's listing, and its blocked set
@@ -180,6 +182,9 @@ internal/gh/         the GitHub adapter: one `gh api` call per read, paged to it
 internal/gh/fake/    the GitHub adapter's in-memory fake, for the domains' tests
 internal/feedback/   the pack's one definition of feedback, pr-post.sh's feedback-def, run
                      through jq
+internal/claudecode/ the Claude Code adapter: where a session started in a directory keeps
+                     its auto memory, asked of Claude Code itself
+internal/claudecode/fake/  the Claude Code adapter's fake, which answers as a test says
 internal/rig/        rig's runner, its commit-keyed record store, and a copy of the rig's UI
 arm/                 the arm's verbs and its start: what arm refuses, the dispatch lock, and the
                      steps that send each armed bead once
@@ -193,6 +198,9 @@ pr/                  the pr domain: whether the PR a bead owns is ready to merge
                      renders they replaced pinned under testdata
 epic/                which closes and shifts of a rig's epics no portfolio sync has weighed,
                      from the ruling's keys and each sync's mark, read-only
+memory/              the memory intake: each memory directory's list of the notes the
+                     distiller's judge kept, the due notes, the judge's decisions, and the
+                     waits that end once a fix lands
 prstatus/            the PR status derivation, exported for the helm board
 listing/             one pass's read of a store for the helm board: every live bead, the
                      closed beads under a parent, the keys it decodes, and waits',
