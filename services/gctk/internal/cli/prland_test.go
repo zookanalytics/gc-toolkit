@@ -284,7 +284,7 @@ func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing
 	}
 	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "rig/gc-toolkit.refinery", Note: "PR #7 closed",
 		Disposition: pr.Disposition{Kind: "not-needed", Successor: "tk-conv", Store: "rig:rig"}}
-	if err := l.Dispositions.Close(context.Background(), x); err != nil {
+	if err := l.Dispositions.Close(x); err != nil {
 		t.Fatal(err)
 	}
 	want := "actor=rig/gc-toolkit.refinery\n--origin\ntk-1\n--successor\ntk-conv\n--kind\nnot-needed\n--note\nPR #7 closed\n" +
@@ -295,18 +295,15 @@ func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing
 	for _, code := range []string{"4", "5"} {
 		t.Setenv("STUB_EXIT", code)
 		var held *pr.HeldClose
-		if err := l.Dispositions.Close(context.Background(), x); !errors.As(err, &held) || !strings.Contains(held.Why, "held by tk-conv") {
+		if err := l.Dispositions.Close(x); !errors.As(err, &held) || !strings.Contains(held.Why, "held by tk-conv") {
 			t.Fatalf("exit %s read as %v", code, err)
 		}
 	}
 	t.Setenv("STUB_EXIT", "3")
 	var held *pr.HeldClose
-	if err := l.Dispositions.Close(context.Background(), x); err == nil || errors.As(err, &held) || !strings.Contains(err.Error(), "exit 3") {
+	if err := l.Dispositions.Close(x); err == nil || errors.As(err, &held) || !strings.Contains(err.Error(), "exit 3") {
 		t.Fatalf("exit 3 read as %v", err)
 	}
-	t.Setenv("STUB_EXIT", "0")
-	t.Setenv("STUB_SLEEP", "30")
-	stopsWithItsAct(t, func(ctx context.Context) error { return l.Dispositions.Close(ctx, x) })
 }
 
 // auditClone is a clone at $GC_RIG_ROOT that carries a rendered seed audit

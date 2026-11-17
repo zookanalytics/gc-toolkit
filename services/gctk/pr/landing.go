@@ -108,10 +108,12 @@ type Waker interface {
 // the bead only while the bead still has the status and assignee the run
 // judged it under and still records the ruling the run read. A close the writer
 // holds for now, because a wait on the bead is still open or the bead moved
-// since the run judged it or since the writer read it, is a *HeldClose. The
-// writer is stopped once ctx ends.
+// since the run judged it or since the writer read it, is a *HeldClose. An act
+// does not stop the writer, since it ends the bead's branch on the git remote
+// once the close has landed, and a stop between the two would leave the branch
+// of a closed bead, which no run of the order reads again.
 type Dispositions interface {
-	Close(ctx context.Context, x Disposal) error
+	Close(x Disposal) error
 }
 
 // Disposal is the close a run owes a bead whose PR closed under a ruling's
@@ -330,11 +332,12 @@ const (
 // Options bound one run: Window is how long into the run it starts another
 // act, and Stop how long one act runs before it is stopped, with whatever
 // GitHub call, fetch, store read or write, human gate's filing or refinery's
-// wake it is making. A review run's pour is the one call an act does not stop,
-// since a cook stopped before it attaches its run leaves a run the order never
-// reads, so an act starts a pour only while pourReserve of its bound is left.
-// The disposition writer a closed retired PR's bead goes to once the act has
-// freed the lock runs inside the act's bound too. A bound of zero is no bound.
+// wake it is making. A review run's pour is the one call in an act the stop
+// does not end, since a cook stopped before it attaches its run leaves a run
+// the order never reads, so an act starts a pour only while pourReserve of its
+// bound is left. The disposition writer a closed retired PR's bead goes to once
+// the act has freed the lock runs past the bound too (Dispositions). A bound
+// of zero is no bound.
 type Options struct {
 	Window time.Duration
 	Stop   time.Duration
@@ -414,10 +417,10 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 		ctx, cancel := bounded(o.Stop)
 		u.landed, u.disposal = nil, nil
 		out := u.one(ctx, id, o.Stop)
-		if u.disposal != nil {
-			out = u.dispose(ctx, *u.disposal, out, o.Stop)
-		}
 		cancel()
+		if u.disposal != nil {
+			out = u.dispose(*u.disposal, out)
+		}
 		if u.landed != nil {
 			out.Detail += u.audit(*u.landed, start, o.Window)
 		}
@@ -1248,14 +1251,13 @@ func (u *run) moot(id, status, assignee, note string) error {
 // answer after it. A close the writer holds for now, such as one an open wait
 // on the bead holds, or the close of a bead released or ruled again since the
 // act judged it, waits for the next run, which reads the bead again under the
-// lock, so it reports as checked. The writer takes the record lock itself, so
-// it runs inside the act's bound, stopped once ctx, the act's, ends, and a
-// writer the stop ended is an act that did not complete.
-func (u *run) dispose(ctx context.Context, x Disposal, out RunOutcome, stop time.Duration) RunOutcome {
+// lock, so it reports as checked. The writer runs to its end, past the act's
+// bound (Dispositions).
+func (u *run) dispose(x Disposal, out RunOutcome) RunOutcome {
 	if u.Dispositions == nil {
 		return RunOutcome{Bead: x.Bead, Action: ActFailed, Detail: out.Detail + ", but no disposition writer is set"}
 	}
-	err := u.Dispositions.Close(ctx, x)
+	err := u.Dispositions.Close(x)
 	var held *HeldClose
 	switch {
 	case err == nil:
@@ -1263,9 +1265,6 @@ func (u *run) dispose(ctx context.Context, x Disposal, out RunOutcome, stop time
 	case errors.As(err, &held):
 		return RunOutcome{Bead: x.Bead, Action: ActChecked,
 			Detail: out.Detail + ", which holds its close for now, and the next run reads it again: " + held.Why}
-	case ctx.Err() != nil:
-		return RunOutcome{Bead: x.Bead, Action: ActRetry, Detail: fmt.Sprintf(
-			"%s, which was stopped at its %s, and the next run hands it over again: %v", out.Detail, stop, err)}
 	}
 	return RunOutcome{Bead: x.Bead, Action: ActFailed, Detail: out.Detail + ", which did not answer: " + err.Error()}
 }

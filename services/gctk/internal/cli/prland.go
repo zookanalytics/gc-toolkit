@@ -43,7 +43,8 @@ const runYield = 200 * time.Millisecond
 // record lock no longer. A run decides from the store and reads no record's PR
 // to decide, so it takes every record that owes an act, in a shuffled order,
 // and a slow act holds the next one back by actStop at most, unless it started
-// a review run's pour, the one call the stop does not end (pr's pourReserve).
+// a review run's pour (pr's pourReserve) or handed a retired PR's bead to the
+// disposition writer, the two calls the stop does not end (pr.Options).
 const (
 	actWindow = 45 * time.Second
 	actStop   = 30 * time.Second
@@ -100,15 +101,17 @@ on its bead, reading no GitHub to decide:
 The records that owe an act are taken in a shuffled order. No act starts more
 than 45 seconds into the run, and each act is stopped at 30 seconds, with
 whatever GitHub call, fetch, store read or write, human gate's filing or
-refinery's wake it is making, and with the disposition writer it hands a
-retired PR's bead to once it frees the lock: a fetch gets a SIGTERM to git's
-process group, so git removes the lock files it holds in the clone, and a kill
-only if it still runs 5 seconds later. A review run's pour is the one call the
-stop does not end, since a cook stopped before it attaches its run leaves a
-run that this order never reads: an act starts a pour only while 10 seconds of
+refinery's wake it is making: a fetch gets a SIGTERM to git's process group,
+so git removes the lock files it holds in the clone, and a kill only if it
+still runs 5 seconds later. The stop ends no review run's pour and no
+disposition writer. A cook stopped before it attaches its run leaves a run
+that this order never reads, so an act starts a pour only while 10 seconds of
 its 30 remain, and otherwise leaves it to the next run, and a pour runs to its
-end. Each act takes the store's record lock,
-waiting no longer than its 30 seconds while another writer holds it, reads
+end. The disposition writer a retired PR's bead goes to once the act frees the
+lock ends the bead's branch once its close lands, and a stop between the two
+would leave the branch of a closed bead that no run reads again. Each act
+takes the store's record lock, waiting no longer than its 30 seconds while
+another writer holds it, reads
 its record again under it, decides again from that read, and writes guarded on
 the status and assignee it read there. An act that did not complete, such as a
 request GitHub refused or did not answer, a fetch that failed, a merge commit
@@ -515,18 +518,18 @@ func (r runs) Pour(formula, bead string, vars map[string]string) (string, error)
 // the ruling the run read there. The script's exit 4 (the bead is not as the
 // run judged it, or a write did not land, as when the bead moved since the
 // script's own read) and exit 5 (the close is held, as by an open wait) are a
-// close held for now. Any other failure, or a script that did not run, such as
-// one stopped once ctx ended, is an error carrying why.
+// close held for now. Any other failure, or a script that did not run, is an
+// error carrying why.
 type dispositions struct{ rt gascity.Runtime }
 
-func (d dispositions) Close(ctx context.Context, x pr.Disposal) error {
+func (d dispositions) Close(x pr.Disposal) error {
 	r := x.Disposition
 	args := []string{"--origin", x.Bead, "--successor", r.Successor, "--kind", r.Kind, "--note", x.Note}
 	if r.Store != "" {
 		args = append(args, "--successor-store", r.Store)
 	}
 	args = append(args, "--if-status", x.Status, "--if-assignee", x.Assignee, "--if-ruled")
-	res := d.rt.Within(ctx).Script("bead-rehome.sh", args...)
+	res := d.rt.Script("bead-rehome.sh", args...)
 	switch {
 	case res.Err == nil && res.Code == 0:
 		return nil
@@ -551,9 +554,12 @@ func (g gates) File(subject, key, message string) error {
 }
 
 // actGates files the landing order's human gates through gates, stopped once
-// the act's context ends. human-gate.sh files a gate and its edge onto the bead
-// in one create, so a filing the stop ends has filed the whole gate or none,
-// and the next run finds the open gate or files it.
+// the act's context ends. The stop kills human-gate.sh, not a call the script
+// already started (gascity.City.Within), so the create that files the gate
+// with its edge onto the bead lands whole or not at all, with the message under
+// bd's own head when the stop came before the script set the description. The
+// next run finds the open gate under its key or files it, and files a second
+// only when that create has still not landed by the time it reads the gates.
 type actGates struct{ rt gascity.Runtime }
 
 func (g actGates) File(ctx context.Context, subject, key, message string) error {

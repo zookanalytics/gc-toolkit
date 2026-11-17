@@ -997,15 +997,17 @@ records. It takes the records that owe an act in a shuffled order, so a record
 whose act is slow or keeps failing holds no other back, starts no act more than
 45 seconds into the run, and stops each act at 30 seconds with whatever GitHub
 call, fetch, store read or write, human gate's filing or refinery's wake it is
-making, and with the disposition writer it hands a retired PR's bead to once it
-frees the lock. A fetch it stops gets a SIGTERM to git's process group, so git
-removes the lock files it holds in the checkout, and a kill only if it still
-runs 5 seconds later. A review run's pour is the one call the stop does not
-end, because `gc formula cook --attach` makes the run before it adds the edge
-that attaches it, and a cook stopped between the two leaves a run whose steps
-the pools take and that the order never reads, so the next run would pour a
-second. An act starts a pour only while 10 seconds of its 30 remain, which a
-pour's few store calls fit inside, and otherwise leaves it to the next run.
+making. A fetch it stops gets a SIGTERM to git's process group, so git removes
+the lock files it holds in the checkout, and a kill only if it still runs 5
+seconds later. The stop ends no review run's pour and no disposition writer.
+`gc formula cook --attach` makes the run before it adds the edge that attaches
+it, and a cook stopped between the two leaves a run whose steps the pools take
+and that the order never reads, so the next run would pour a second. An act
+starts a pour only while 10 seconds of its 30 remain, which a pour's few store
+calls fit inside, and otherwise leaves it to the next run. The disposition
+writer a retired PR's bead goes to once the act frees the lock ends the bead's
+branch on the git remote once its close lands, and a stop between the two
+would leave the branch of a closed bead that no run reads again.
 Each act reads its record again under the record lock and decides again from
 that read. An act that does not complete records nothing on the bead: its
 difference stays, the next run acts on it, and the run exits 2. A run saves
