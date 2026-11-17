@@ -69,10 +69,11 @@ exit: 0 recorded
       3 refused: the bead is closed or not the refinery's, so nothing was
         written, or it moved between the two writes, so only the marker landed`
 
-const prReconcileLong = `One run of the landing order over the store's pending records, the beads that
-carry the marker pr_reconcile_pending. It reads the store once and decides
-each record from the store and the read the one-PR update (gctk pr refresh)
-saved on its bead, reading no GitHub to decide:
+const prReconcileLong = `One run of the landing order over the store's pending records: the beads that
+carry the marker pr_reconcile_pending, and the refinery's beads on the record
+that carry a ruling's disposition. It reads the store once and decides each
+record from the store and the read the one-PR update (gctk pr refresh) saved
+on its bead, reading no GitHub to decide:
 
   - open at the head the refinery validated: a draft whose review result
     passed at that head and target, with no review run attached and no ask a
@@ -130,6 +131,22 @@ the run wakes the refinery and nudges it (gc session wake, then gc session
 nudge) before it clears the marker. A wake that does not land keeps the
 marker, and the next run wakes the refinery again.
 
+A PR a ruling retired is decided apart from these: its bead carries the
+disposition pr-dispose.sh records before it closes the PR, under the record
+lock, so an act reads the disposition or has made its last write of the record
+before the disposition lands. The run requests no merge for such a PR, pours no
+review run, marks nothing ready and carries out no withdrawal. Once the saved
+read finds the PR closed and no review run is attached, an act closes the
+withdrawals and asks still open on the bead, and the bead closes onto the
+ruling's successor through bead-rehome.sh, run as the refinery once the record
+lock is free. The script closes it only while it still has the status and
+assignee the act read under the lock and still records the ruling the act
+read, so a release or a second ruling that lands once the lock is free leaves
+the bead to the next run, which reads it again. A close the script holds for
+now, such as one the ruling's open conversation holds, is reported as checked,
+and the next run hands it over again. A retired PR that merged all the same
+lands as any other.
+
 The review run is mol-pr-review, poured with gc formula cook --attach onto the
 bead under the record lock, with the record's PR bead, head, target and branch
 as its vars, and the pools and binding the refinery's address names
@@ -167,12 +184,14 @@ slings the branch's one re-render, and the landing's line says what the check
 found. The check holds nothing, and one that does not run is asked for again
 at a later landing.
 
-It acts only on a bead it reads under the lock as carrying the marker and,
-unless the bead is closed, still assigned to the refinery --refinery names,
-with each write guarded on the status and assignee it read. A bead a release
-took from the refinery has its marker cleared and its PR named in a note, and
-nothing else written. Each outcome prints on a line of its own, as
-<bead> <action>: <detail>, where a label write's action is labeled.
+It acts only on a bead it reads under the lock as carrying the marker, or as
+an open or blocked bead on the record that carries a ruling's disposition,
+with or without the marker, and, unless the bead is closed, still assigned to
+the refinery --refinery names, with each write guarded on the status and
+assignee it read. A bead a release took from the refinery has its marker
+cleared and its PR named in a note, and nothing else written. Each outcome
+prints on a line of its own, as <bead> <action>: <detail>, where a label
+write's action is labeled.
 
 exit: 0 every record and every PR's labels were decided, and every act the
         run started completed
@@ -292,9 +311,9 @@ func prReconcile(refinery, db string, stdout, stderr io.Writer) int {
 // the working directory, the pack's definition of feedback, loaded in that
 // clone, and the runtime adapter for human gates, for the city's mark, which
 // `pr-post.sh mark` prints, for a review run's pour, which runs in the clone,
-// so gc resolves the rig's store there, for the refinery's wake, for the
-// labels' writer, and, where the clone carries one, for the seed audit, whose
-// scripts run in the clone.
+// so gc resolves the rig's store there, for the disposition writer, which runs
+// as the refinery, for the refinery's wake, for the labels' writer, and, where
+// the clone carries one, for the seed audit, whose scripts run in the clone.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -328,14 +347,15 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 			}
 			return rule, nil
 		},
-		Mark:     func() (string, error) { return cityMark(rt) },
-		Checkout: checkout{dir: dir},
-		Gates:    gates{rt: rt},
-		Runs:     runs{rt: rt.In(dir)},
-		Audit:    audit,
-		Wake:     wakes{rt: rt},
-		Labels:   prLabels{rt: rt},
-		Wait:     recordLockWait,
+		Mark:         func() (string, error) { return cityMark(rt) },
+		Checkout:     checkout{dir: dir},
+		Gates:        gates{rt: rt},
+		Runs:         runs{rt: rt.In(dir)},
+		Dispositions: dispositions{rt: rt.As(refinery)},
+		Audit:        audit,
+		Wake:         wakes{rt: rt},
+		Labels:       prLabels{rt: rt},
+		Wait:         recordLockWait,
 	}, nil
 }
 
@@ -476,6 +496,36 @@ func (r runs) Pour(formula, bead string, vars map[string]string) (string, error)
 		return "", fmt.Errorf("gc formula cook %s --attach %s named no root: %s", formula, bead, res.Tail())
 	}
 	return res.Root, nil
+}
+
+// dispositions closes a bead whose PR a ruling retired through the runtime
+// adapter, which runs the pack's bead-rehome.sh from the scripts directory
+// GCTK_SCRIPTS_DIR names, as the refinery the bead is assigned to, since the
+// script closes an assigned bead only as its assignee. It names the run's
+// judgment of the bead, so the script closes it only while the bead still has
+// the status and assignee the run read under the record lock and still records
+// the ruling the run read there. The script's exit 4 (the bead is not as the
+// run judged it, or a write did not land, as when the bead moved since the
+// script's own read) and exit 5 (the close is held, as by an open wait) are a
+// close held for now. Any other failure, or a script that did not run, is an
+// error carrying why.
+type dispositions struct{ rt gascity.Runtime }
+
+func (d dispositions) Close(x pr.Disposal) error {
+	r := x.Disposition
+	args := []string{"--origin", x.Bead, "--successor", r.Successor, "--kind", r.Kind, "--note", x.Note}
+	if r.Store != "" {
+		args = append(args, "--successor-store", r.Store)
+	}
+	args = append(args, "--if-status", x.Status, "--if-assignee", x.Assignee, "--if-ruled")
+	res := d.rt.Script("bead-rehome.sh", args...)
+	switch {
+	case res.Err == nil && res.Code == 0:
+		return nil
+	case res.Err == nil && (res.Code == 4 || res.Code == 5):
+		return &pr.HeldClose{Why: "bead-rehome.sh: " + res.Failure()}
+	}
+	return fmt.Errorf("bead-rehome.sh: %s", res.Failure())
 }
 
 // gates files human gates through the runtime adapter, which runs the pack's

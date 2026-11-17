@@ -582,10 +582,13 @@ no warrant.
   `services/gctk/internal/cli/prcycle.go` runs. Its carrier is the landing
   order: `withdrawalsIn`, `carrying`, `withCarry`, `carry`, `carryOne` and
   `judge` in the same file, which the order's run in
-  `services/gctk/pr/landing.go` calls on each act that reads the record, from
-  the approvals the saved GitHub read holds and the history the rig's clone
-  holds once the act fetches the PR's branch. Its reader for the review run:
-  `WithdrawalFor` in the same file, which the `output` verb of
+  `services/gctk/pr/landing.go` calls on each act that reads the record of a
+  PR no ruling retired, from the approvals the saved GitHub read holds and the
+  history the rig's clone holds once the act fetches the PR's branch. Once a
+  ruling has retired the PR and the saved read finds it closed,
+  `decideRetired` in `landing.go` closes each withdrawal still open, since no
+  approval it withdraws can merge a closed PR. Its reader for the review run:
+  `WithdrawalFor` in `withdraw.go`, which the `output` verb of
   `services/gctk/internal/cli/reviewrun.go` reads to refuse a triage output
   that rules its head material before the withdrawal for that head is filed.
 - **Stands in for.** A withdrawal of a pull request's approvals once a head

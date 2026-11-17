@@ -1302,9 +1302,11 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   closed one stands that no recorded ruling names, since the attempt that
   stopped may have filed it.
   `--retire` records the
-  disposition and closes the PR through `pr-dispose.sh`, and `pr-facts.sh`
-  then takes the anchor through the `pull_request → closed (disposed)`
-  transition. On `--rework` for a PR on the pending record,
+  disposition and closes the PR through `pr-dispose.sh`. On the old path
+  `pr-facts.sh` then takes the anchor through the
+  `pull_request → closed (disposed)` transition, and on the pending record the
+  landing order closes the anchor once the PR reads closed
+  ([Disposition](#disposition)). On `--rework` for a PR on the pending record,
   `converse-rework.sh` files an ask on the anchor that carries the ruling, sourced
   by the conversation, with each check the ruling sends back (`--check`), and
   supersedes nothing, since the run triages the head its fix pushes. On the old
@@ -1660,10 +1662,28 @@ pool; a child a worker still holds (`in_progress`) or one an operator froze
 resolves. A close with no recorded disposition still transitions to `abandoned`
 and files the rework-or-close human gate.
 
-A PR on the pending record has no such path yet. `pr-facts.sh`'s close arm
-keeps to `pull_request`, so the landing order is the one reader of the record's
-close, and it reads no disposition marker: a PR retired through `pr-dispose.sh`
-leaves its bead behind the `pull_request_closed_unmerged` exception's gate.
+On the pending record the landing order consummates the same marker.
+`pr-facts.sh`'s close arm keeps to `pull_request`, so the landing order stays
+the one reader of the record's close. It requests no merge of a PR whose anchor
+carries the marker. `pr-dispose.sh` reads the anchor and stamps the marker
+under the store's record lock, which a run's act holds from its read of a
+record to its last write of it, so a merge an act requests comes before the
+marker, never after it. The landing order reads such an anchor's record
+whatever its own `pr_reconcile_pending`, so a changed head it had sent back to
+the refinery is read too. Once the saved read finds the PR CLOSED and no review
+run is attached to the anchor, it closes the asks and the approval withdrawals
+still open on the anchor, which nothing takes once the PR is closed, and then,
+with the record lock free, runs `bead-rehome.sh` as the refinery the anchor is
+assigned to. It names the status and assignee it read the anchor under and the
+ruling it read there, so `bead-rehome.sh` closes the anchor only while its own
+read under the lock still finds them, and a release or a second ruling that
+lands once the lock is free leaves the anchor to the next run, which reads it
+again. A close `bead-rehome.sh` holds, such as one the ruling's open
+conversation holds, is tried again by the next run, with no gate filed. A
+changed head the refinery is already validating can reach the refinery's
+publication before that close, and the publication finds the PR closed and
+parks the anchor behind `refinery-invalid-existing-pr`, which a stand-down
+under that key answers.
 
 That drop reaches only the parked, branch-carrying children. The rest of the
 machine review scaffolding is a fix unit, the finding beads and the validation
