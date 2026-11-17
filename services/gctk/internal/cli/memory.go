@@ -197,6 +197,10 @@ effort's landing bead has. A unit whose wait ended with no fix landed is due at
 once, as old as the day it ended. A row whose unit is gone leaves the list.
 It prints each place and what it ended.
 
+A place whose memory directory Claude Code does not name is one patrol finding,
+memory-intake.places, filed through the pack's patrol-finding.sh in the scripts
+directory GCTK_SCRIPTS_DIR names, and cleared once every place is learned.
+
 exit: 0 done
       1 something could not be read or written, as stderr says
       3 a place whose memory directory it could not learn; the rest settled`,

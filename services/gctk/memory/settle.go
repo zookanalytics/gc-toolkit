@@ -46,8 +46,9 @@ const landingDepth = 3
 // name, its proposal_bead and its eng_bead. A merge into an integration
 // branch lands when the effort's landing bead does. A wait that ended with no
 // fix landed makes its unit due at once, as old as the day it ended, with why.
-// A row whose unit is gone from its directory leaves the list. An error is a
-// city whose places did not read.
+// A row whose unit is gone from its directory leaves the list. A place whose
+// memory directory it cannot learn is one patrol finding. An error is a city
+// whose places did not read.
 func (in *Intake) Settle() (Settled, error) {
 	ps, err := in.Places()
 	if err != nil {
@@ -71,7 +72,40 @@ func (in *Intake) Settle() (Settled, error) {
 	for _, p := range ps.Read {
 		in.settleIn(ps, p, outcomes, &s)
 	}
+	in.report(ps, &s)
 	return s, nil
+}
+
+// The patrol finding a settle keeps for the places it cannot learn.
+const (
+	findingScope = "memory-intake"
+	findingKey   = "memory-intake.places"
+)
+
+// report files one finding that names each place whose memory directory the
+// intake could not learn, through patrol-finding.sh, which updates the live
+// finding of its key, and clears that finding once every place is learned.
+func (in *Intake) report(ps Places, s *Settled) {
+	args := []string{"--scope", findingScope, "--key", findingKey}
+	if len(ps.Unknown) == 0 {
+		args = append(args, "--cleared", "--message", "The memory intake learns every place's memory directory again.")
+		if f := in.Runtime.Script("patrol-finding.sh", args...).Failure(); f != "" {
+			s.Failed = append(s.Failed, "the finding "+findingKey+" was not cleared: "+f)
+		}
+		return
+	}
+	var names, why []string
+	for _, u := range ps.Unknown {
+		names = append(names, u.Name)
+		why = append(why, "- "+u.Name+": "+u.Why)
+	}
+	args = append(args, "--title", "Memory intake cannot learn where Claude Code keeps the memory of "+strings.Join(names, ", "),
+		"--message", "The learning loop's memory intake asks Claude Code where the sessions of each rig and of the "+
+			"city's root keep memory, and reads and removes nothing where it cannot learn that:\n"+strings.Join(why, "\n"),
+		"--type", "bug", "--priority", "3")
+	if f := in.Runtime.Script("patrol-finding.sh", args...).Failure(); f != "" {
+		s.Failed = append(s.Failed, "the finding "+findingKey+" did not record: "+f)
+	}
 }
 
 // decide reads every bead a unit waits on, from one read of each store, and

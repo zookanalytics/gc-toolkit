@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
+	gfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 )
@@ -328,8 +330,9 @@ func TestARowWhoseUnitIsGoneLeavesTheList(t *testing.T) {
 	}
 }
 
-// Settle names a place it cannot learn and settles the rest.
-func TestSettleNamesAPlaceItCannotLearn(t *testing.T) {
+// Settle files one finding that names each place it cannot learn, settles the
+// rest, and clears the finding once every place is learned.
+func TestSettleFilesAFindingForAPlaceItCannotLearn(t *testing.T) {
 	c := newCity(t)
 	m := c.rig("ok", "tk")
 	c.rig("none", "a")
@@ -338,5 +341,26 @@ func TestSettleNamesAPlaceItCannotLearn(t *testing.T) {
 	got := c.settle()
 	if len(got.Places.Unknown) != 1 || got.Places.Unknown[0].Name != "none" || !said(got.Said, "ok: "+m+", 1 notes and 0 entries") {
 		t.Errorf("unknown %+v, said %q", got.Places.Unknown, got.Said)
+	}
+	calls := c.rt.Scripts()
+	if len(calls) != 1 || calls[0].Name != "patrol-finding.sh" {
+		t.Fatalf("scripts %+v; want one finding", calls)
+	}
+	args := strings.Join(calls[0].Args, "\x00")
+	for _, want := range []string{"--scope\x00memory-intake", "--key\x00memory-intake.places",
+		"--title\x00Memory intake cannot learn where Claude Code keeps the memory of none",
+		"- none: Claude Code 2.1.326 named no memory directory", "--type\x00bug"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("the finding's args %q lack %q", calls[0].Args, want)
+		}
+	}
+	c.claude.Dirs[c.checkout("none")] = m
+	c.settle()
+	if calls := c.rt.Scripts(); len(calls) != 2 || !strings.Contains(strings.Join(calls[1].Args, " "), "--key memory-intake.places --cleared") {
+		t.Errorf("scripts %+v; want the finding cleared", calls)
+	}
+	c.rt.OnScript = func(gfake.Call) gascity.Result { return gascity.Result{Code: 1, Output: "could not file"} }
+	if got := c.settle(); !said(got.Failed, "the finding memory-intake.places was not cleared: exit 1: could not file") {
+		t.Errorf("failed %q; want the clear's failure said", got.Failed)
 	}
 }
