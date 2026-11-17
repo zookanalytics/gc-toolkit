@@ -171,9 +171,11 @@ performer; the full transition table with writers is
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
    head.
-8. **Merge.** The landing order has GitHub merge each PR on the pending record
-   at the head the refinery validated, once the evaluator reads the PR ready,
-   and closes the bead once the merge commit is on the target
+8. **Merge.** The landing order acts from the beads every minute. It has
+   GitHub merge each PR on the pending record at the head the refinery
+   validated, once the evaluator reads the PR ready over the read the PR watch
+   saved and again over the merge's own read of GitHub, and closes the bead once
+   the merge commit is on the target
    ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 9. **Close propagates.** `closed` is the one signal waiting parties key on
    ([lifecycle-composition.md](lifecycle-composition.md)). A landing closes a
@@ -517,10 +519,10 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
-- **The landing order still reads GitHub to decide.** It reads each pending
-  record's PR itself rather than acting from the bead. It writes no label, so
-  a PR on the pending record keeps its last label once it merges, closes or
-  meets an exception. The units of tk-1tfzr71.149 retire it.
+- **The landing order writes no label.** It acts from the beads and reads
+  GitHub only for a merge, but it writes no label, so a PR on the pending
+  record keeps its last label once it merges, closes or meets an exception. The
+  PR watch's label unit (tk-1tfzr71.173) retires it.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
