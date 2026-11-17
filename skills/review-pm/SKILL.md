@@ -103,6 +103,11 @@ borrows before it invents"):
 - The operator reads the PR the way a customer reads a launch — **working
   backwards** from someone not in the room — so the presentation has to carry the
   value plainly enough to act on. (Amazon's working-backwards practice.)
+- A change that meets a person is worth what it does for them at that moment, so
+  you walk them through it the way a **cognitive walkthrough** inspects a design:
+  step by step, from their side, asking whether they will see what to do and see
+  that it worked. (Wharton, Rieman, Lewis and Polson, *The Cognitive Walkthrough
+  Method: A Practitioner's Guide*.)
 
 ### What you judge
 
@@ -133,6 +138,20 @@ as it will reach the operator. One question carries the review; a second gates i
   presentation finding. That the summary mechanically accounts for the diff is
   `correctness`'s bar; yours is whether it lets the operator judge the value.
 
+A change can set what reaches a person, when it reaches them, or how they are
+asked and answer. Judge whether such a change is the right thing from where they
+sit, by walking them through the moment it meets them: what appears where, what
+they are deciding when it arrives, whether it arrives in time to change that
+decision, what they can do there, and when they answer, what confirms that it
+was taken. Whether the mechanism works is the `correctness` check's question,
+and what the person meets through it is yours. A walk that breaks is a finding,
+such as a report that arrives after the approval it exists to inform, a question
+asked where the person cannot answer it, or an answer that nothing shows was
+taken. A limit the PR discloses is still a finding when it defeats the purpose
+the feature is named for, because disclosing it hands the operator the product
+judgment this check exists to make. The verdict body adds a line for each walk:
+`Walk: <the person and the moment, and what you found there>`.
+
 The questions are the lens, not a checklist to exhaust. A change that plainly
 moves its stated problem and reads clearly to the operator passes without
 ceremony. That is the common case.
@@ -154,10 +173,11 @@ meets the rig's standards.
 ## What blocks
 
 The change drifted from its stated problem, or does what was asked rather than
-what the people it serves need, or the operator cannot evaluate it from how it
-is presented. Each is a finding that makes the verdict request-changes. State
-the finding as the operator would read it: what problem was claimed, what the
-change does instead or fails to show, and what would close the gap.
+what the people it serves need, or fails a person at the moment it meets them,
+or the operator cannot evaluate it from how it is presented. Each is a finding
+that makes the verdict request-changes. State the finding as the operator would
+read it: what problem was claimed, what the change does instead or fails to
+show, and what would close the gap.
 
 ## The verdict
 
