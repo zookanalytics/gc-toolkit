@@ -35,11 +35,14 @@
 #     each rig checkout in the city's rig map. A directory's listing and a file's
 #     contents are denied, and their metadata is not, because node resolves a
 #     path by reading the metadata of each directory above it.
-#   - every loopback port but one, and every Unix socket but the system
-#     resolver's, so the supervisor's API, the Dolt server and the session
-#     server do not answer. The one port is the engine's own --serve-dir
-#     server's, the port of a rig's app that a --base-url on this host names, as
-#     below, or, for a copy, the copy's own.
+#   - every loopback port but the run's own, and every Unix socket but the
+#     system resolver's, so the supervisor's API, the Dolt server and the
+#     session server do not answer. The run's own port is the engine's own
+#     --serve-dir server's, the port of a rig's app that a --base-url on this
+#     host names, as below, or, for a copy, the copy's own. A run whose
+#     --base-url names an iOS app on a simulator, ios-simulator://<device
+#     UDID>/<bundle id>, has three: free ports picked before it starts, which
+#     the engine is given as --port for the servers it drives the app through.
 #   - signals to any process outside the sandbox.
 # The CLI also runs without the environment variables that point a command at
 # the city: GC_*, GT_*, BEADS_*, BD_*, DOLT_*, TMUX and TMUX_PANE.
@@ -66,6 +69,8 @@
 #     would capture that server, which runs outside the sandbox. A --serve-dir
 #     given no --port is given a free one, because the sandbox opens only a
 #     port it knows;
+#   - an iOS app run is given --port, because its ports are the ones the
+#     sandbox opens, which the run picks;
 #   - --base-url names this host, whose servers run outside the sandbox, unless
 #     a copy that `gctk rig serve` runs holds its port, as `gctk rig serve
 #     --check` answers in the checkout a process listening there works in, or
@@ -103,8 +108,10 @@
 #   demo_engine_cli      Runs the CLI of the engine demo_engine_resolve chose,
 #                        inside the sandbox, with the arguments it is given, in
 #                        the caller's working directory, and returns the CLI's
-#                        exit status. Returns 1, having said why on stderr,
-#                        when the run is refused.
+#                        exit status. For a run that drives an iOS app it first
+#                        installs, through the engine's own provision command,
+#                        the Appium the engine drives the app with. Returns 1,
+#                        having said why on stderr, when the run is refused.
 #   demo_engine_sandboxed <port> <dir> <command...>
 #                        Runs the command inside the sandbox, in the caller's
 #                        working directory, with <port> the one loopback port
@@ -116,8 +123,10 @@
 #   demo_engine_copy <dir> <command>
 #                        Serves an app a command serves as a copy that `gctk
 #                        rig serve` runs from the checkout <dir> sits in, with
-#                        no address, and sets DEMO_ENGINE_COPY_URL to the
-#                        loopback URL a capture's --base-url gives the engine.
+#                        no address, and sets DEMO_ENGINE_COPY_URL to where the
+#                        copy's app is, which a capture's --base-url gives the
+#                        engine: the copy's loopback URL, or the URL of the app
+#                        its command printed it brought up.
 #                        A checkout has one copy, so captures from one checkout
 #                        run one after another. One that already runs the
 #                        command is the one captured, and it keeps running
@@ -128,6 +137,10 @@
 #   demo_engine_copy_stop
 #                        Ends the copy demo_engine_copy started, if it started
 #                        one.
+#   demo_engine_ios_app <url>
+#                        Returns 0 when the URL names an iOS app on a
+#                        simulator, in the engine's scheme for one,
+#                        ios-simulator://, and 1 otherwise.
 #   demo_engine_script_kind <script>
 #                        Prints the surface a demo script drives, page or
 #                        terminal, by the engine's own rule: a terminal script
@@ -268,6 +281,13 @@ demo_engine_script_kind() {
   esac
 }
 
+demo_engine_ios_app() {
+  case "$(printf '%s' "$1" | sed 's/^[[:space:]]*//' | tr '[:upper:]' '[:lower:]')" in
+    ios-simulator:*) return 0 ;;
+  esac
+  return 1
+}
+
 # --- the sandbox -------------------------------------------------------------
 
 _demo_engine_sandbox_ok() {
@@ -276,13 +296,19 @@ _demo_engine_sandbox_ok() {
   return 1
 }
 
-# _demo_engine_free_port: prints a loopback port that nothing listens on, for
-# the engine's own --serve-dir server, or returns 1.
-_demo_engine_free_port() {
-  local port
-  port=$(node -e 'const s = require("net").createServer(); s.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port)); s.close(); });' 2>/dev/null)
-  case "$port" in ''|*[!0-9]*|0*) return 1 ;; esac
-  printf '%s\n' "$port"
+# _demo_engine_free_ports <count>: prints that many distinct loopback ports
+# that nothing listens on, one per line, or returns 1.
+_demo_engine_free_ports() {
+  local ports p n=0
+  ports=$(DEMO_ENGINE_PORT_COUNT="$1" node -e 'const net = require("net"); const n = Number(process.env.DEMO_ENGINE_PORT_COUNT); const all = Array.from({ length: n }, () => net.createServer()); let left = n; all.forEach((s) => s.listen(0, "127.0.0.1", () => { if (--left === 0) { process.stdout.write(all.map((x) => x.address().port).join("\n")); all.forEach((x) => x.close()); } }));' 2>/dev/null)
+  while IFS= read -r p; do
+    case "$p" in ''|*[!0-9]*|0*) return 1 ;; esac
+    n=$((n + 1))
+  done <<EOF
+$ports
+EOF
+  [ "$n" -eq "$1" ] || return 1
+  printf '%s\n' "$ports"
 }
 
 # _demo_engine_port_answers <port>: true when a server answers on that loopback
@@ -303,6 +329,21 @@ _demo_engine_loopback() {
   case "$(printf '%s' "$h" | tr '[:upper:]' '[:lower:]')" in
     localhost|localhost.|*.localhost|*.localhost.|127.*|::1|0.0.0.0|::) return 0 ;;
   esac
+  return 1
+}
+
+# _demo_engine_provision_ios: installs, through the engine's own provision
+# command, the Appium an iOS app run drives the app with, unless an executable
+# stands in for the engine. Returns 1, having said why, when it cannot.
+_demo_engine_provision_ios() {
+  [ -z "${DEMO_ENGINE_BIN:-}" ] || return 0
+  if [ -n "${DEMO_ENGINE_DIR:-}" ]; then
+    ( cd "$DEMO_ENGINE_DIR" && npm run provision:appium ) >&2 && return 0
+    _demo_engine_say "could not provision Appium for the iOS app run ('npm run provision:appium' failed in the sprintshow rig checkout)"
+  else
+    npx --yes "$DEMO_ENGINE_PACKAGE" provision appium >&2 && return 0
+    _demo_engine_say "could not provision Appium for the iOS app run (the published engine's 'provision appium' failed)"
+  fi
   return 1
 }
 
@@ -661,11 +702,23 @@ demo_engine_cli() {
   if [ -d "$pos" ]; then cand="$cand$NL$pos"; elif [ -f "$pos" ]; then files="$files$NL$pos"; fi
   [ -z "${DEMO_ENGINE_BIN:-}" ] || files="$files$NL$DEMO_ENGINE_BIN"
 
-  # The one loopback port the run may reach is its --serve-dir server's, where
-  # nothing may answer before the run starts, or the port of a rig's app that a
-  # --base-url on this host names.
+  # The loopback ports the run may reach are its --serve-dir server's, where
+  # nothing may answer before the run starts, the port of a rig's app that a
+  # --base-url on this host names, or the three an iOS app run's servers use.
   _demo_engine_city || return 1
-  if [ -n "$base" ] && _demo_engine_loopback "$base"; then
+  if [ -n "$base" ] && demo_engine_ios_app "$base"; then
+    if [ -n "$serve_dir" ]; then
+      _demo_engine_say "--base-url $base and --serve-dir each name an app to capture; give one"
+      return 1
+    fi
+    if [ -n "$port" ]; then
+      _demo_engine_say "an iOS app run takes no --port: the capture picks its servers' ports, the ones the sandbox opens"
+      return 1
+    fi
+    _demo_engine_provision_ios || return 1
+    open=$(_demo_engine_free_ports 3) || { _demo_engine_say "could not find three free ports for the servers of the iOS app run"; return 1; }
+    args+=(--port "$(printf '%s' "$open" | tr '\n' ',')")
+  elif [ -n "$base" ] && _demo_engine_loopback "$base"; then
     if [ -n "$serve_dir" ]; then
       _demo_engine_say "--base-url $base and --serve-dir each name an app to capture; give one"
       return 1
@@ -674,7 +727,7 @@ demo_engine_cli() {
   fi
   if [ -n "$serve_dir" ]; then
     if [ -z "$port" ]; then
-      open=$(_demo_engine_free_port) || { _demo_engine_say "could not find a free port for the --serve-dir server"; return 1; }
+      open=$(_demo_engine_free_ports 1) || { _demo_engine_say "could not find a free port for the --serve-dir server"; return 1; }
       args+=(--port "$open")
     else
       open="$port"
@@ -715,10 +768,10 @@ demo_engine_sandboxed() {
 $dir" "" "$@"
 }
 
-# _demo_engine_sandbox_run <port> <dirs> <files> <command...>: after
+# _demo_engine_sandbox_run <ports> <dirs> <files> <command...>: after
 # _demo_engine_city, runs the command inside the sandbox, in the caller's
-# working directory, with the port, when one is given, the one loopback port it
-# may reach. Each of <dirs>, one per line, is read and written as
+# working directory, with the ports given, one per line, the only loopback
+# ports it may reach. Each of <dirs>, one per line, is read and written as
 # _demo_engine_reach widens it, each of <files> is read, and the engine
 # checkout, when one was chosen, is read. Returns the command's exit status, or
 # 1, having said why, when the run is refused.
@@ -792,7 +845,11 @@ EOF
   profile="$profile$NL(deny network-outbound (remote unix-socket))"
   profile="$profile$NL(allow network-outbound (remote unix-socket (path-literal \"/private/var/run/mDNSResponder\")))"
   profile="$profile$NL(deny network-outbound (remote ip \"localhost:*\"))"
-  [ -z "$open" ] || profile="$profile$NL(allow network-outbound (remote ip \"localhost:$open\"))"
+  while IFS= read -r p; do
+    [ -z "$p" ] || profile="$profile$NL(allow network-outbound (remote ip \"localhost:$p\"))"
+  done <<EOF
+$open
+EOF
   profile="$profile$NL(deny signal)$NL(allow signal (target same-sandbox))"
 
   unsets=()
@@ -806,7 +863,7 @@ EOF
 _demo_engine_gctk() { printf '%s\n' "${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"; }
 
 demo_engine_copy() {
-  local dir="${1:-}" command="${2:-}" gctk rep state port
+  local dir="${1:-}" command="${2:-}" gctk rep state
   DEMO_ENGINE_COPY_URL=""; DEMO_ENGINE_COPY_STOP=""
   gctk=$(_demo_engine_gctk)
   [ -x "$gctk" ] || { _demo_engine_say "no gctk binary at $gctk, which runs the copy a capture serves the app as; the gctk-build order publishes it, or set GCTK_BIN"; return 1; }
@@ -827,12 +884,9 @@ demo_engine_copy() {
   else
     _demo_engine_say "a copy (gctk rig serve) of this command already runs from $dir, so the capture takes it and leaves it running"
   fi
-  port=$(printf '%s' "$rep" | jq -r '.port // empty' 2>/dev/null)
-  case "$port" in
-    ''|*[!0-9]*) _demo_engine_say "gctk rig serve reported no port for the app's copy"; return 1 ;;
-  esac
   # shellcheck disable=SC2034 # the capture that sourced this file reads it
-  DEMO_ENGINE_COPY_URL="http://127.0.0.1:$port/"
+  DEMO_ENGINE_COPY_URL=$(printf '%s' "$rep" | jq -r '.app_url // empty' 2>/dev/null)
+  [ -n "$DEMO_ENGINE_COPY_URL" ] || { _demo_engine_say "gctk rig serve reported no app_url, where the app's copy is"; return 1; }
 }
 
 demo_engine_copy_stop() {

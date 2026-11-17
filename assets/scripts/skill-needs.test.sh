@@ -1209,7 +1209,7 @@ STUB
 cat >"$LC/city/.gc/services/gctk/bin/gctk" <<'STUB'
 #!/usr/bin/env bash
 { printf 'in %s\n' "$(pwd -P)"; printf 'scripts %s\n' "$GCTK_SCRIPTS_DIR"; printf '%s\n' "$@"; } >"$LC_LOG"
-printf '%s\n' '{"state":"running","address":"https://host:1/","port":1}'
+printf '%s\n' '{"state":"running","address":"https://host:1/","port":1,"app_url":"http://127.0.0.1:1/"}'
 STUB
 chmod +x "$LC/bin/gc" "$LC/city/.gc/services/gctk/bin/gctk"
 LC_TREE=$(cd "$LC/tree" && pwd -P)

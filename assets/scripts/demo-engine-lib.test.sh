@@ -46,6 +46,11 @@
 #   (PORTS)     a --serve-dir with no --port gets a free one; a port a server
 #               already answers on, and a --base-url on this host where nothing
 #               of this user's listens, stop the capture
+#   (IOS)       a --base-url that names an iOS app on a simulator provisions
+#               Appium through the engine first, and opens three free ports,
+#               no other, which the engine gets as --port; its screenshot takes
+#               no --scale; a call that also names a --serve-dir or a --port is
+#               refused, and zsh and bash 3.2 open the same three ports
 #   (LOCAL-APP) a --base-url on this host captures when every process that
 #               listens on its port works in a worktree of a rig whose
 #               app_reads_city setting is "false", and the sandbox opens that
@@ -618,6 +623,28 @@ for cap in video screenshot; do
   capture "$cap" SS_RIG="$ENGINE" -- --base-url https://preview.example.com
   eq "$RC" 0 "($cap) a deployed preview captures"
   hasnt "(allow network-outbound (remote ip" "$(profile)" "($cap) and opens no loopback port"
+
+  echo "# ($cap) IOS: an iOS app on a simulator gets three free ports, opened in the sandbox and handed to the engine, once Appium is provisioned"
+  IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+  capture "$cap" SS_RIG="$ENGINE" FREE_PORT="$(printf '50301\n50302\n50303')" -- --base-url "$IOS_APP"
+  eq "$RC" 0 "($cap) an iOS app captures"
+  for p in 50301 50302 50303; do
+    has "(allow network-outbound (remote ip \"localhost:$p\"))" "$(profile)" "($cap) the sandbox opens port $p"
+  done
+  eq "$(profile | grep -c 'allow network-outbound (remote ip')" 3 "($cap) and no other loopback port"
+  has "[--base-url] [$IOS_APP]" "$(calls)" "($cap) the engine drives the app the URL names"
+  has "[--port] [50301,50302,50303]" "$(calls)" "($cap) and gets the three ports as --port"
+  P=$(line_of "npm run provision:appium (in $ENGINE)"); E=$(line_of "$(local_call "$cap")")
+  ok "($cap) the engine checkout provisions Appium before the capture runs (lines $P, $E)" "[ '$P' -gt 0 ] && [ '$E' -gt '$P' ]"
+  [ "$cap" != screenshot ] || hasnt "[--scale]" "$(calls)" "(screenshot) an iOS app's PNG is the device's own, with no --scale"
+  capture "$cap" FREE_PORT="$(printf '50301\n50302\n50303')" -- --base-url "$IOS_APP"
+  eq "$RC" 0 "($cap) an iOS app captures on the published engine"
+  P=$(line_of "npx --yes @zookanalytics/sprintshow provision appium"); E=$(line_of "$(published_call "$cap")")
+  ok "($cap) which provisions Appium first (lines $P, $E)" "[ '$P' -gt 0 ] && [ '$E' -gt '$P' ]"
+  capture "$cap" SS_RIG="$ENGINE" FREE_PORT="$(printf '50301\n50302')" -- --base-url "$IOS_APP"
+  eq "$RC" 1 "($cap) an iOS app with fewer than three free ports exits 1"
+  has "could not find three free ports" "$(err)" "($cap) it says so"
+  not_run "$cap"
 done
 
 # local_refused <cap> <case> <wanted reason>: the capture just run was refused
@@ -1080,6 +1107,23 @@ shell_run bash "$TMPD/skill-engine-serve.sh"
 eq "$RC" 1 "(shells) an engine call that names --serve exits 1"
 has "the engine's --serve would start a server whose port the sandbox cannot vouch for; serve the app as a copy with gctk rig serve" "$(err)" "(shells) it says why, and what serves the app instead"
 hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
+IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP -o clip.mp4#" >"$TMPD/skill-ios.sh"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP --port 4723,8100,9100 -o clip.mp4#" >"$TMPD/skill-ios-port.sh"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP --serve-dir app -o clip.mp4#" >"$TMPD/skill-ios-two.sh"
+THREE="$(printf '50301\n50302\n50303')"
+shell_run bash "$TMPD/skill-ios.sh" FREE_PORT="$THREE"
+eq "$RC" 0 "(shells) this suite's bash runs an engine call on an iOS app"
+has "[--base-url] [$IOS_APP] [-o] [clip.mp4] [--port] [50301,50302,50303]" "$(calls)" "(shells) and the engine gets the three ports"
+IOS_CALLS="$(calls)"; IOS_PROFILE="$(profile)"
+shell_run bash "$TMPD/skill-ios-port.sh" FREE_PORT="$THREE"
+eq "$RC" 1 "(shells) an engine call on an iOS app that names --port exits 1"
+has "an iOS app run takes no --port" "$(err)" "(shells) it says the capture picks those ports"
+hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
+shell_run bash "$TMPD/skill-ios-two.sh" FREE_PORT="$THREE"
+eq "$RC" 1 "(shells) an engine call that names an iOS app and a --serve-dir exits 1"
+has "--base-url $IOS_APP and --serve-dir each name an app to capture" "$(err)" "(shells) it says the call names two apps"
+hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
 for sh in /bin/zsh /bin/bash; do
   if [ ! -x "$sh" ]; then echo "# SHELLS: $sh SKIPPED (not on this host)"; continue; fi
   shell_run "$sh" "$TMPD/skill-resolve.sh"
@@ -1097,16 +1141,21 @@ for sh in /bin/zsh /bin/bash; do
   shell_run "$sh" "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4243 $BWT"
   eq "$RC" 1 "(shells) $sh refuses the same call when a worktree of a rig set to \"true\" serves the port"
   has "for which city.toml sets app_reads_city = \"true\"" "$(err)" "(shells) $sh names why"
+  shell_run "$sh" "$TMPD/skill-ios.sh" FREE_PORT="$THREE"
+  eq "$RC" 0 "(shells) $sh runs the engine call on an iOS app"
+  eq "$(calls)" "$IOS_CALLS" "(shells) $sh hands it the same arguments"
+  eq "$(profile)" "$IOS_PROFILE" "(shells) $sh opens the same three ports"
 done
 
 echo "# NO-COPY: no other script, and no skill's example code, finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
 # One grep finds the files that name a step anywhere; only those are read again
-# without their comment lines, so a script that names a step in prose passes.
-# A skill is read again as its fenced code blocks alone, so its prose can name
-# a step too. The steps are the browser install, by either installer, the rig
-# lookup's select, however a copy spaces them, the Node version read, and the
-# path of the engine's CLI in a checkout.
-STEPS='provision:browser|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"|node[[:space:]]+--version|src/cli\.ts'
+# without their comment lines, so a script that names a step in prose passes. A
+# skill is read again as its fenced code blocks alone, so its prose can name a
+# step too. The steps are the browser install, by either installer, Appium's, by
+# either form of the engine's provision command, the rig lookup's select,
+# however a copy spaces them, the Node version read, and the path of the
+# engine's CLI in a checkout.
+STEPS='provision:browser|provision:appium|provision[[:space:]]+appium|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"|node[[:space:]]+--version|src/cli\.ts'
 COPIES=""
 while IFS= read -r f; do
   case "$f" in ""|"$LIB"|*.test.sh) continue ;; esac
