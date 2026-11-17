@@ -1,10 +1,11 @@
 // Package gascity is gctk's runtime adapter: Gas City as gctk reaches it apart
 // from its store, which internal/gcbd reaches (docs/gctk-architecture.md, "The
 // adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
-// when it names none, names the city's root, and runs the pack's scripts that
-// ask a person. A domain reaches them only through Runtime. City is the city
-// gctk runs in, and gascity/fake records what a domain asked and answers as its
-// test says, so a domain's rules are tested in Go with no Gas City.
+// when it names none, wakes and nudges a session, names the city's root, and
+// runs the pack's scripts that ask a person. A domain reaches them only through
+// Runtime. City is the city gctk runs in, and gascity/fake records what a domain
+// asked and answers as its test says, so a domain's rules are tested in Go with
+// no Gas City.
 package gascity
 
 import (
@@ -13,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +27,8 @@ import (
 type Runtime interface {
 	// Sling runs one `gc sling` and returns what it answered.
 	Sling(s Sling) SlingResult
+	// Cook runs one `gc formula cook --attach` and returns what it answered.
+	Cook(c Cook) CookResult
 	// DefaultFormula is the formula sling s pours when it names none: the
 	// default sling formula the city's config gives the agent s.Target
 	// addresses, its own or else the one its pack's [agent_defaults] gives it.
@@ -32,6 +36,11 @@ type Runtime interface {
 	// does not read or no agent in the config answers to s.Target. It reads
 	// s.Rig, s.Target and s.Bead.
 	DefaultFormula(s Sling) (string, error)
+	// Wake runs one `gc session wake <session>` and returns what it answered.
+	Wake(session string) Result
+	// Nudge runs one `gc session nudge <session> <message>` and returns what it
+	// answered.
+	Nudge(session, message string) Result
 	// Script runs one of the pack's scripts, by its file name in the pack's
 	// scripts directory, and returns what it answered.
 	Script(name string, args ...string) Result
@@ -52,6 +61,21 @@ type Result struct {
 	Code   int
 	Output string
 	Err    error
+}
+
+// Cook is one `gc formula cook <formula> --attach <bead> --var <k>=<v>...`: the
+// formula poured as a sub-workflow of its own, which the bead gains a blocks
+// edge onto, with each var passed as cook passes only its --var flags.
+type Cook struct {
+	Formula, Bead string
+	Vars          map[string]string
+}
+
+// CookResult is a cook's Result, with the root of the workflow it attached,
+// read from its --json line, "" when the cook did not answer with one.
+type CookResult struct {
+	Result
+	Root string
 }
 
 // SlingResult is a sling's Result. Live is the workflows gc sling named when it
@@ -113,6 +137,40 @@ func (c *City) Sling(s Sling) SlingResult {
 		out.Live = liveWorkflows(r.Output, s.Bead)
 	}
 	return out
+}
+
+// Cook runs the cook in gctk's own process group, its vars in their names'
+// order, and reads the root from the JSON line it prints, the summary whose
+// root_id names the workflow it attached (formulaCookJSONResult in
+// cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). Its standard input
+// reads nothing.
+func (c *City) Cook(k Cook) CookResult {
+	args := []string{"formula", "cook", k.Formula, "--attach", k.Bead, "--json"}
+	for _, name := range slices.Sorted(maps.Keys(k.Vars)) {
+		args = append(args, "--var", name+"="+k.Vars[name])
+	}
+	r := run(c.dir, c.bin, args...)
+	out := CookResult{Result: r}
+	if r.Code == 0 {
+		out.Root = cookedRoot(r.Output)
+	}
+	return out
+}
+
+// cookedRoot is the root_id of the last JSON line in output that names one,
+// "" when none does.
+func cookedRoot(output string) string {
+	root := ""
+	sc := bufio.NewScanner(strings.NewReader(output))
+	for sc.Scan() {
+		var line struct {
+			RootID string `json:"root_id"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(sc.Text())), &line) == nil && line.RootID != "" {
+			root = line.RootID
+		}
+	}
+	return root
 }
 
 // conflictLine opens the line gc sling prints for each source bead whose live
@@ -288,6 +346,24 @@ func (c *City) readAgents() ([]agent, error) {
 		out = append(out, ag)
 	}
 	return out, nil
+}
+
+// Wake runs the wake in gctk's own process group, and Gas City's reconciler
+// starts the session on its next tick when it has a reason to run, such as a
+// configured agent (gc session wake in docs/reference/cli.md, at
+// gastownhall/gascity 192fa2d394). Its standard input reads nothing.
+func (c *City) Wake(session string) Result {
+	return run(c.dir, c.bin, "session", "wake", session)
+}
+
+// Nudge runs the nudge in gctk's own process group, with gc's default
+// delivery, wait-idle: the message arrives as a prompt at the session's next
+// idle boundary, and a session that is asleep, or not yet at a boundary, gets
+// it queued (gc session nudge in docs/reference/cli.md, and gc nudge in
+// cmd/gc/cmd_nudge.go, at gastownhall/gascity 192fa2d394). Its standard input
+// reads nothing.
+func (c *City) Nudge(session, message string) Result {
+	return run(c.dir, c.bin, "session", "nudge", session, message)
 }
 
 // Script runs the script from the directory GCTK_SCRIPTS_DIR names, which the

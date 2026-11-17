@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
 // Request is what a composition takes besides the bead: the PR as GitHub has
@@ -121,7 +122,7 @@ func Compose(l *ledger.Ledger, id string, req Request) (*Composition, error) {
 // bead with no target opens into the rig's default branch, and a retargeted
 // bead's merged_target names its earlier base until its next record.
 func readRegion(bead *ledger.Record, req Request) (region, string, error) {
-	keys := []reading{summaryKey, branchKey, checkSetKey}
+	keys := []reading{summaryKey, record.Branch, checkSetKey}
 	vals := make([]string, len(keys))
 	for i, k := range keys {
 		v, err := value(bead, k)

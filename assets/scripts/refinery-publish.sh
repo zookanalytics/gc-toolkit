@@ -32,12 +32,17 @@
 #
 # The title and body are composed by `gctk pr compose` from the owner, at the
 # prepared head. On a PR the step takes, it edits the title and body first,
-# then pushes the head, so a review started at that head reads the current
-# body. With no PR open, it pushes the head and opens the PR as a draft with
-# them. Every push goes under the lease on the commit the prep read on the
-# branch (branch-push.sh), so a push someone made after the prep is never
-# overwritten: the step stops, and the next pass prepares the branch again.
-# The PR's ready transitions are the review loop's, so the step records no
+# then returns the PR to draft (`gctk pr draft`), then pushes the head, so a
+# review started at that head reads the current body, and the push starts a
+# round of the city's work on a draft. With no PR open, it pushes the head and
+# opens the PR as a draft with them. Every push goes under the lease on the
+# commit the prep read on the branch (branch-push.sh), so a push someone made
+# after the prep is never overwritten: the step stops, and the next pass
+# prepares the branch again. The PR is a draft while the city works on it:
+# `gctk pr draft` converts only a PR that is ready, so a round's later push
+# changes nothing, and the landing order marks the PR ready once the review
+# loop has passed at the head the refinery validated. A PR that did not return
+# to draft is not pushed onto, and the step stops. The step records no
 # opened_as_draft.
 #
 # It then writes the owner's pending record with `gctk pr record`, which takes
@@ -214,6 +219,8 @@ if [ -n "$PR_URL" ]; then
     gh pr edit "$PR_NUMBER" --repo "$REPO" "${EDIT[@]}" </dev/null >/dev/null \
       || stop "the title and body of PR #$PR_NUMBER did not take, so the head is not pushed under a stale body"
   fi
+  GC_RIG_ROOT="$HOME_DIR" "$gctk" pr draft "$OWNER" --pr "$PR_URL" </dev/null >&2 \
+    || stop "PR #$PR_NUMBER did not return to draft, so the head is not pushed onto it while it is ready"
   push
 else
   compose || stop "the title and body of $OWNER's PR did not compose"

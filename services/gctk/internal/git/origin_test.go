@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -39,6 +40,42 @@ func TestOriginURLNamesTheClonesOrigin(t *testing.T) {
 	}
 	if _, err := OriginURL(t.TempDir()); err == nil {
 		t.Fatal("read an origin outside a clone")
+	}
+}
+
+// OriginURLs lists what a fetch from origin and a push to it reach once git
+// rewrites the remote's URLs: a pushurl and a pushInsteadOf move only the
+// push, an insteadOf moves both, and every URL the remote carries is listed.
+func TestOriginURLsListWhereAFetchAndAPushGo(t *testing.T) {
+	const (
+		real = "https://github.com/acme/widgets.git"
+		fork = "git@github.com:fork/widgets.git"
+	)
+	for name, c := range map[string]struct {
+		config      [][]string
+		fetch, push []string
+	}{
+		"the remote's url":  {fetch: []string{real}, push: []string{real}},
+		"a pushurl":         {config: [][]string{{"remote.origin.pushurl", fork}}, fetch: []string{real}, push: []string{fork}},
+		"a pushInsteadOf":   {config: [][]string{{"url.git@github.com:fork/.pushInsteadOf", "https://github.com/acme/"}}, fetch: []string{real}, push: []string{fork}},
+		"an insteadOf":      {config: [][]string{{"url.git@github.com:fork/.insteadOf", "https://github.com/acme/"}}, fetch: []string{fork}, push: []string{fork}},
+		"two urls":          {config: [][]string{{"--add", "remote.origin.url", fork}}, fetch: []string{real, fork}, push: []string{real, fork}},
+		"two pushurls kept": {config: [][]string{{"remote.origin.pushurl", real}, {"--add", "remote.origin.pushurl", fork}}, fetch: []string{real}, push: []string{real, fork}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := repo(t)
+			gitIn(t, dir, "remote", "add", "origin", real)
+			for _, kv := range c.config {
+				gitIn(t, dir, append([]string{"config"}, kv...)...)
+			}
+			fetch, push, err := OriginURLs(dir)
+			if err != nil || !slices.Equal(fetch, c.fetch) || !slices.Equal(push, c.push) {
+				t.Fatalf("OriginURLs = %q, %q, %v, want %q, %q", fetch, push, err, c.fetch, c.push)
+			}
+		})
+	}
+	if _, _, err := OriginURLs(repo(t)); err == nil {
+		t.Fatal("a clone with no origin listed its URLs")
 	}
 }
 

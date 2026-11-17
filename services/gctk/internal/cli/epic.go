@@ -99,7 +99,8 @@ type epicOpts struct {
 func newEpicCmd(stdout, stderr io.Writer) *cobra.Command {
 	create := newEpicCreateCmd(func(o epicOpts) int { return epicCreate(o, stdout, stderr) })
 	return group("epic", "actions on an epic",
-		"Actions on an epic: file one with its contract (docs/epics.md).", create)
+		"Actions on an epic: file one with its contract, and list the closes and shifts of a rig's epics "+
+			"that no portfolio sync has weighed (docs/epics.md).", create, newEpicUnweighedCmd(stdout, stderr))
 }
 
 // newEpicCreateCmd builds create, which hands the epic its flags describe to

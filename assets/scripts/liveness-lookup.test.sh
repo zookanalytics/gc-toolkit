@@ -247,12 +247,11 @@ eq "$(bead_state "$MAP_STEP" '{"id":"st4","assignee":"gc-toolkit--gc-toolkit__po
 # (S) A workflow root is topology, not recoverable work — topology-root-skip
 #     drops it before the lookup, so it never resolves to a liveness state at
 #     all. Its gc.session_name is a stamp the controller copies from its worked
-#     steps: resolved live it could send the root to the warrant path against a
-#     session doing other work, and resolved dead it would churn a
-#     salvage-refused notice on a bead that never had a worktree. Kind decides,
-#     not liveness: the same drop whether the name is live or dead.
+#     steps, and resolved dead it would churn a salvage-refused notice on a bead
+#     that never had a worktree. Kind decides, not liveness: the same drop
+#     whether the name is live or dead.
 eq "$(bead_state "$MAP_STEP" '{"id":"rt1","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "" \
-   "(S) workflow root on a LIVE session name is dropped, never resolved (no warrant against a live session)"
+   "(S) workflow root on a LIVE session name is dropped, never resolved"
 eq "$(bead_state "$MAP_STEP" '{"id":"rt2","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit__polecat-hq-7xcse"}}')" "" \
    "(S) workflow root on a dead per-instance name is dropped too (kind decides, not liveness)"
 # (T) With no session id to be more specific than it, the assignee decides —

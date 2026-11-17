@@ -14,8 +14,9 @@
 # PR + supersede note; same-head close is a human decision left alone); holds
 # gating the create path; the all-lanes-green gate over every check the anchor
 # declares, which no head move disturbs; the moved-head refusal on the created
-# PR; the comment-not-approval verdict replay, which starts at the last line in
-# the shape a verdict opens with and replays notes with no such line whole; and
+# PR; the comment-not-approval verdict replay, which gives each pre-open check
+# that signed a comment of its own, starts at the last line in the shape a
+# verdict opens with and replays notes with no such line whole; and
 # the de-duplicated ## Summary
 # heading. The phase model: a draft create when an open-as-draft check gates the
 # PR, the draft-to-ready arm (its prefilter, holds, must-fix, loud enumeration
@@ -35,15 +36,15 @@ trap 'rm -rf "$TMP"' EXIT
 harness_build_gctk
 harness_init
 # No check index and no repository: the script under test runs from a private
-# directory, so the suite names a missing index outright, and review-checks.sh
-# then resolves every check_set token as a lane gating every transition. The
+# directory, so the suite names a missing index outright, and gctk review
+# checks then resolves every check_set token as a lane gating every transition. The
 # lanes do not depend on the checkout, and a case that needs a real index names
 # one itself.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/lifecycle.sh" \
-  "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
+  "$HERE/lane-state.sh" "$HERE/finding.sh"
 SUT="$SD/pr-open.sh"
 
 pre() { # id branch extra-json [check_set]  (4th arg empty = no check_set key)
@@ -471,6 +472,34 @@ ghlog=$(cat "$STUB_GH_LOG")
 has "$ghlog" "--body PM: approve. Needs you: decide whether the board shows parked work." "the replay opens with the later verdict's first line"
 hasnt "$ghlog" "Nothing needs you" "…and carries nothing of the earlier one"
 
+echo "# every pre-open check that signed replays its own verdict, each as a comment of its own"
+# Before the PR exists each check's verdict lives only in its own review bead's
+# notes, so a replay that read one bead would leave every other check's verdict,
+# and the decision it asks, off the PR.
+lane_rev() { # anchor lane updated_at notes
+  jq -nc --arg a "$1" --arg l "$2" --arg u "$3" --arg n "$4" '{id: ("rev-" + $a + "-" + $l), status: "closed", assignee: "",
+    notes: $n, updated_at: $u, metadata: {task_kind: "review", anchor_bead: $a, check_name: $l,
+    reviewed_oid: ("sha-" + ($a | ascii_downcase)), signoff_verdict: "approve"}}'
+}
+store "[$(pre C4 polecat/c4 '' 'correctness,pm'),
+        $(lane_rev C4 correctness 2026-11-01T08:00:00Z "Correctness: approve. Needs you: decide whether preview access needs a passkey.
+
+Anchor: C4 — check.correctness @ sha-c4"),
+        $(lane_rev C4 pm 2026-11-01T09:00:00Z "PM: approve. Nothing needs you.
+
+Anchor: C4 — check.pm @ sha-c4")]"
+echo "sha-c4" > "$GH_DIR/head_polecat_c4"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/80"
+printf '%s' "$(prrow 80 OPEN polecat/c4 sha-c4 main)" > "$GH_DIR/pr_view_80.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#80" "the PR was opened"
+ghlog=$(cat "$STUB_GH_LOG")
+eq "$(grep -c '^PRCOMMENT 80$' "$STUB_GH_LOG")" "2" "each check that signed is replayed as a comment of its own"
+has "$ghlog" "--body Correctness: approve. Needs you: decide whether preview access needs a passkey." \
+  "the check that signed first reaches the PR, opening with its own first line and its ask"
+has "$ghlog" "--body PM: approve. Nothing needs you." "…and so does the check that signed last"
+
 echo "# the body summarizes the diff, and demotes the dispatch text"
 # A reviewer who was not in the originating conversation opens this body. The
 # anchor's description is dispatch text — what the work was asked to do — so
@@ -882,23 +911,23 @@ eq "$(meta ad5 merge_result)" "pre_open_gate" "an unreadable draft owner holds t
 has "$out" "draft ownership unreadable" "…and says why"
 
 echo "# each anchor's gates are resolved once, and a resolver that fails holds the create"
-# A counting shim stands in for review-checks.sh: it logs each call and runs the
-# real resolver, or fails when RC_FAIL is set.
-mv "$SD/review-checks.sh" "$SD/review-checks.real.sh"
-cat > "$SD/review-checks.sh" <<'SH'
+# A counting gctk stands in for the suite's: it logs each check index call and
+# runs it, or fails it when RC_FAIL is set, and runs every other verb.
+cat > "$TMP/gctk-counting" <<SH
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "${RC_CALL_LOG:?}"
-[ -z "${RC_FAIL:-}" ] || exit 1
-exec "$(dirname "$0")/review-checks.real.sh" "$@"
+case "\$1 \${2:-}" in
+  "review checks") printf '%s\n' "\$*" >> "\${RC_CALL_LOG:?}"; [ -z "\${RC_FAIL:-}" ] || exit 1 ;;
+esac
+exec "$GCTK_BIN" "\$@"
 SH
-chmod +x "$SD/review-checks.sh"
+chmod +x "$TMP/gctk-counting"
 export RC_CALL_LOG="$TMP/rc-calls.log"
 store "[$(pre ro1 polecat/ro1 '' 'correctness,demo'), $(rev ro1)]"
 echo "sha-ro1" > "$GH_DIR/head_polecat_ro1"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/86"
 printf '%s' "$(prrow 86 OPEN polecat/ro1 sha-ro1 main)" > "$GH_DIR/pr_view_86.json"
 : > "$RC_CALL_LOG"; : > "$STUB_GH_LOG"
-out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+out=$(GCTK_BIN="$TMP/gctk-counting" GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 has "$out" "opened PR#86" "the anchor opens"
 eq "$(grep -c -- '--resolve' "$RC_CALL_LOG")" "1" "its gates are resolved ONCE for the create gate, the draft decision and the body"
 has "$(cat "$STUB_GH_LOG")" "--draft" "the draft decision reads that one answer"
@@ -906,17 +935,14 @@ has "$(cat "$GH_DIR/pr_create_body.txt")" 'Draft-stage gates `demo`' "…and so 
 store "[$(pre ro2 polecat/ro2 '' 'correctness,demo'), $(rev ro2)]"
 echo "sha-ro2" > "$GH_DIR/head_polecat_ro2"
 : > "$STUB_GH_LOG"
-out=$(RC_FAIL=1 GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+out=$(GCTK_BIN="$TMP/gctk-counting" RC_FAIL=1 GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 has "$out" "gate set unreadable" "a failed resolve is reported"
 eq "$(meta ro2 merge_result)" "pre_open_gate" "…the anchor stays pre_open_gate"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and no PR opens, ready or draft"
-rm -f "$SD/review-checks.sh"
 : > "$STUB_GH_LOG"
-out=$("$SUT" 2>&1); rc=$?
-eq "$rc" "1" "a missing resolver fails the arm"
-has "$out" "check resolver is missing" "…and says so"
-hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…before anything is opened"
-mv "$SD/review-checks.real.sh" "$SD/review-checks.sh"
+out=$(GCTK_BIN=none GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+has "$out" "gate set unreadable" "with no gctk binary to read the index, the gate set is unreadable"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and no PR opens"
 
 echo "# heads come from one pass fetch; an anchor held on a red lane pays no API read"
 store "[$(pre hf1 polecat/hf1 '' 'correctness')]"

@@ -57,9 +57,16 @@
 # re-check's moot or benign close under stubs, and fails unless the close
 # settles a headline that still waits on a subject nothing holds any more,
 # leaves one that an open blocker holds, and closes the conversation only once
-# every read and write before it has answered. It pins that every skill and
-# formula names a pack skill to load by its catalog name, never by its path, so
-# an agent in any tree loads the installed pack's copy.
+# every read and write before it has answered. It runs the edit skill's copy of a
+# UI under a stub gc, and fails unless the copy runs the command the rig declares
+# as its ui_serve_command, as written, from the tree, with the city's publisher,
+# and starts no copy for a rig that declares none. It pins that the demo:capture
+# skill and the demo check read that command for a capture of the rig's app, and
+# that they start a drafted terminal script's shell at the worktree's root, as
+# the drafter's script expects. It pins that every skill and formula names a
+# pack skill to load by its catalog
+# name, never by its path, so an agent in any tree loads the installed pack's
+# copy.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc. The one case
@@ -543,19 +550,44 @@ have "the settle step takes a subject's recommendation through the sign-off" '--
 have "the continue skill gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$CONTINUE"
 have "the prs skill gives the PR post calls the return uses" 'pr-post.sh" reply --host github.com' "$PRS_SKILL"
 # A sitting that sends work agrees with the operator whether it ends at its
-# hand-off or stays for the work's return, and recommends staying only where
-# the discussion helps judge the result. One that stays sleeps with its
-# conversation open, and the entry (converse-entry.sh, its own suite) tells its
-# return, and a wake while the work is out, from a fresh sitting.
+# hand-off or stays for the work's return, and says when the stay would come
+# back. A return after the merge comes too late to change the work, so the
+# sitting recommends ending when the stay would come back after the merge, as
+# for new work that opens its own PR, and otherwise recommends staying only
+# where the discussion helps judge the result. Each skill that puts the choice
+# carries the same table of when each stay comes back. One that stays sleeps
+# with its conversation open, and the entry (converse-entry.sh, its own suite)
+# tells its return, and a wake while the work is out, from a fresh sitting.
 tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-stay"
-have "the prompt recommends staying when the discussion helps judge the result" \
-    'Recommend staying when the discussion will help judge the result' "$TMP/prompt-stay"
+have "the prompt says when a stay would come back" \
+    'and say when the stay would come back, in the operator'"'"'s terms.' "$TMP/prompt-stay"
+have "…recommends ending when the stay would come back after the merge, as for new work with its own PR" \
+    'So when the stay would come back after the merge, as it does for new work that opens its own PR, recommend ending at the hand-off, with what was agreed written into the work'"'"'s brief in full, and say why.' "$TMP/prompt-stay"
+have "…and otherwise staying when the discussion helps judge the result" \
+    'Otherwise recommend staying when the discussion will help judge the result' "$TMP/prompt-stay"
 have "…and ending when the brief and the ordinary checks suffice" \
-    'Recommend ending when the brief and the work'"'"'s ordinary checks suffice.' "$TMP/prompt-stay"
+    'and ending when the brief and the work'"'"'s ordinary checks suffice.' "$TMP/prompt-stay"
 have "…puts the choice to the operator, so they need not know to ask" \
     'Put the choice to the operator with your recommendation, so they need not know to ask, and never stay without their agreement.' "$TMP/prompt-stay"
 have "…and says a sitting that ends promises nothing it cannot keep" \
     'makes no promise of its own to confirm, check, watch or follow up' "$TMP/prompt-stay"
+for f in "$HOLD" "$SETTLE" "$STAY"; do
+    skill=$(basename "$(dirname "$f")")
+    have "$skill: a stay for a rework of the PR comes back before its merge" \
+        '| A rework of the PR under discussion | When the rework reaches the PR'"'"'s branch, before the merge, which waits for the return | Staying when the discussion will help judge the result, and ending otherwise. Say that the PR'"'"'s checks review the reworked branch again. |' "$f"
+    have "$skill: …one for new work with its own PR only after that PR merges, so it recommends ending" \
+        '| New work that opens its own PR | Only after that PR has merged | Ending at the hand-off, with what was agreed written into the work'"'"'s brief in full. Say that a stay would report only after the merge. |' "$f"
+    have "$skill: …and one for work with no PR of its own when that work closes" \
+        '| Work that opens no PR of its own | When the work closes | Staying when the discussion will help judge the result, and ending otherwise. |' "$f"
+done
+tr -s '[:space:]' ' ' <"$HOLD" >"$TMP/hold-stay"
+have "the framing's decision says when a stay would come back" \
+    'It says when a stay would come back, in the operator'"'"'s terms, and recommends ending at the hand-off when that is after the merge' "$TMP/hold-stay"
+tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-stay"
+have "the settle skill puts the choice with when a stay would come back" \
+    'Put it to them with your recommendation, and say when a stay would come back, in their terms' "$TMP/settle-stay"
+have "…and writes what was agreed into the brief in full for a sitting that ends on new work with its own PR" \
+    'When the sitting ends at the hand-off for new work that opens its own PR, write what was agreed into the create'"'"'s description in full' "$TMP/settle-stay"
 have "the prompt enters through converse-entry.sh, which tells each entry apart" \
     '/converse-entry.sh"' "$PROMPT"
 # A sitting still up when its work closes gets no wake, only Gas City's notice
@@ -579,6 +611,10 @@ have "the stay skill stays through the sign-off" \
     '--stay "<what the operator agreed, which the return compares the work with, one line>"' "$STAY"
 tr -s '[:space:]' ' ' <"$STAY" >"$TMP/stay-squeezed"
 have "…and a stay drains nothing" 'A stay closes nothing, so it drains nothing' "$TMP/stay-squeezed"
+have "…and its hand-back says when the sitting comes back" \
+    'says when the sitting comes back, in the table'"'"'s terms, to compare the work with what was agreed' "$TMP/stay-squeezed"
+have "…and more work ruled while it stays puts the choice again, since the return waits for the last of it" \
+    'Put the choice to them again, as Stay (above) says, because the return waits for the last of the work' "$TMP/stay-squeezed"
 have "the stay skill gives the return its sign-off" \
     'Sign off with the stay'"'"'s call less `--stay`, with `--no-wait` in place of its waits and brief, and with `--no-rework` in place of a `--rework`' "$TMP/stay-squeezed"
 have "…which leaves out the --pr-anchor of a rework that picked its PR" \
@@ -1151,9 +1187,198 @@ have "the edit skill holds the change on the conversation" 'gc bd dep add "$CHAN
 have "…cuts its tree through Work's setup under --held-by" '"$CONV/work-setup.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
 have "…and hands it off through Work's hand-off under --held-by" '"$CONV/work-submit.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
 have "…and reads the polecat class's standards before the first edit" 'template-fragments/work-quality-polecats.template.md' "$EDIT"
+have "…holds an open PR's branch through its conversation's edge on the PR's bead" 'gc bd dep add "$PR" "$CONVERSATION" --type=blocks' "$EDIT"
+have "…proves it holds the PR before the first edit" '"$GCTK" pr push "$PR" --held-by "$CONVERSATION" --check' "$EDIT"
+have "…pushes it through gctk with the pack's pusher, from the tree" '( cd "$TREE" && GCTK_SCRIPTS_DIR="$CONV" "$GCTK" pr push "$PR" --held-by "$CONVERSATION" )' "$EDIT"
+have "…and answers the PR it edited with --no-rework at the sign-off" '`--no-rework`, since its branch carries what the ruling asked for' "$EDIT"
 have "…shows the operator a copy of a UI change at an address of its own" 'GCTK_SCRIPTS_DIR="$CONV" "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --command "$SERVE"' "$EDIT"
 have "…with the city's publisher" '--publish-command "$(var ui_publish_command)" --address-pattern "$(var ui_address_pattern)"' "$EDIT"
 have "…and stops the copy" '( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )' "$EDIT"
+echo "── a sitting's copy of a UI runs the command the rig declares ──"
+# The copy's block runs as written. gc answers the formula's vars for the rig,
+# whose ui_serve_command is LC_SERVE, unset when that is empty, and gctk records
+# where it runs and what it is given. A stale SERVE in the environment names
+# nothing.
+LC="$TMP/live-copy"
+mkdir -p "$LC/bin" "$LC/city/.gc/services/gctk/bin" "$LC/tree"
+cat >"$LC/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+[ "$*" = "formula show mol-rig-demo --rig rig-x --json" ] || { echo "gc: unexpected call: $*" >&2; exit 1; }
+jq -n --arg c "$LC_SERVE" '{ok: true, vars: [{name: "ui_serve_command", default: "", rig_default: (if $c == "" then null else $c end)}, {name: "ui_publish_command", default: "", rig_default: "publish $PORT"}, {name: "ui_address_pattern", default: "", rig_default: "https://host:$PORT/"}]}'
+STUB
+cat >"$LC/city/.gc/services/gctk/bin/gctk" <<'STUB'
+#!/usr/bin/env bash
+{ printf 'in %s\n' "$(pwd -P)"; printf 'scripts %s\n' "$GCTK_SCRIPTS_DIR"; printf '%s\n' "$@"; } >"$LC_LOG"
+printf '%s\n' '{"state":"running","address":"https://host:1/","port":1}'
+STUB
+chmod +x "$LC/bin/gc" "$LC/city/.gc/services/gctk/bin/gctk"
+LC_TREE=$(cd "$LC/tree" && pwd -P)
+# lc_run <shell> <ui_serve_command> — one run of the block from no log; prints
+# its stdout and stderr.
+lc_run() {
+    rm -f "$LC/log"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV CONV="$REPO/assets/scripts" TREE="$LC/tree" GC_RIG=rig-x \
+        GC_CITY_PATH="$LC/city" LC_LOG="$LC/log" LC_SERVE="$2" SERVE=stale PATH="$LC/bin:$PATH" $1 "$LC/block" </dev/null 2>&1)
+}
+fenced_block "$EDIT" 'rig serve --command "$SERVE"' >"$LC/block"
+LC_CMD='cd app && exec ./serve --port $PORT'
+LC_WANT=$(printf 'in %s\nscripts %s\nrig\nserve\n--command\n%s\n--publish-command\n%s\n--address-pattern\n%s' \
+    "$LC_TREE" "$REPO/assets/scripts" "$LC_CMD" 'publish $PORT' 'https://host:$PORT/')
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    out=$(lc_run "$run" "$LC_CMD")
+    if [ "$(cat "$LC/log" 2>/dev/null)" = "$LC_WANT" ]; then
+        ok "($sh_) converse-edit: the copy runs the rig's ui_serve_command as written, from the tree, with the city's publisher"
+    else
+        bad "($sh_) converse-edit: the copy runs the rig's ui_serve_command as written, from the tree, with the city's publisher" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
+    fi
+    out=$(lc_run "$run" "")
+    if [ ! -e "$LC/log" ] && printf '%s\n' "$out" | grep -qF 'declares no ui_serve_command, so it offers no copy'; then
+        ok "($sh_) converse-edit: a rig that declares no ui_serve_command gets no copy, and the block says so"
+    else
+        bad "($sh_) converse-edit: a rig that declares no ui_serve_command gets no copy, and the block says so" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
+    fi
+done
+echo "── a sitting runs an open PR's checks in its tree ──"
+# The PR's bead records no tree, so the checks of an open PR's edit run from the
+# tree itself. The block runs as written. gc answers mol-polecat-work's vars for
+# the rig: lint as a command with quotes and a substitution, build declared
+# empty over a formula default, typecheck and setup with nothing declared, the
+# whole suite as the formula's own default, and the affected tests as
+# OC_AFFECTED, undeclared when that is empty. gctk logs where each call runs
+# and what it is given, and fails the check OC_FAIL names.
+OC="$TMP/open-pr-checks"
+mkdir -p "$OC/bin" "$OC/tree"
+cat >"$OC/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+[ "$*" = "formula show mol-polecat-work --rig rig-x --json" ] || { echo "gc: unexpected call: $*" >&2; exit 1; }
+jq -n --arg a "$OC_AFFECTED" '{ok: true, vars: [
+    {name: "setup_command", default: "", rig_default: null},
+    {name: "typecheck_command", default: ""},
+    {name: "lint_command", default: "", rig_default: "tools/lint.sh \"$(git diff --name-only origin/main...HEAD)\""},
+    {name: "build_command", default: "make", rig_default: ""},
+    {name: "affected_tests_command", default: "", rig_default: (if $a == "" then null else $a end)},
+    {name: "test_command", default: "tools/run-tests.sh", rig_default: null}]}'
+STUB
+cat >"$OC/gctk" <<'STUB'
+#!/usr/bin/env bash
+{ printf 'in %s:' "$(pwd -P)"; printf ' [%s]' "$@"; printf '\n'; } >>"$OC_LOG"
+[ "$2" != "$OC_FAIL" ]
+STUB
+chmod +x "$OC/bin/gc" "$OC/gctk"
+OC_TREE=$(cd "$OC/tree" && pwd -P)
+# oc_run <shell> <affected tests command> <the check gctk fails> — one run of
+# the block from no log; returns its exit.
+oc_run() {
+    rm -f "$OC/log"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV TREE="$OC/tree" GC_RIG=rig-x GCTK_BIN="$OC/gctk" OC_LOG="$OC/log" \
+        OC_AFFECTED="$2" OC_FAIL="$3" PATH="$OC/bin:$PATH" $1 "$OC/block" </dev/null >/dev/null 2>&1)
+}
+# oc_want <test scope> <test command> — the calls gctk gets: lint, then the test.
+oc_want() {
+    printf 'in %s: [rig] [lint] [--command] [%s]\nin %s: [rig] [test] [--scope] [%s] [--command] [%s]' \
+        "$OC_TREE" 'tools/lint.sh "$(git diff --name-only origin/main...HEAD)"' "$OC_TREE" "$1" "$2"
+}
+fenced_block "$EDIT" 'rig test --scope "$SCOPE" --command "$T"' >"$OC/block"
+OC_AFF='tools/run-tests.sh --affected origin/main'
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    oc_run "$run" "$OC_AFF" ""; rc=$?
+    if [ "$rc" -eq 0 ] && [ "$(cat "$OC/log" 2>/dev/null)" = "$(oc_want affected "$OC_AFF")" ]; then
+        ok "($sh_) converse-edit: an open PR's checks run each command the rig declares, as written, from the tree"
+    else
+        bad "($sh_) converse-edit: an open PR's checks run each command the rig declares, as written, from the tree" "exit $rc; gctk got: $(tr '\n' '|' <"$OC/log" 2>/dev/null)"
+    fi
+    oc_run "$run" "" ""; rc=$?
+    if [ "$rc" -eq 0 ] && [ "$(cat "$OC/log" 2>/dev/null)" = "$(oc_want full tools/run-tests.sh)" ]; then
+        ok "($sh_) converse-edit: a rig that declares no affected tests runs its whole suite on an open PR"
+    else
+        bad "($sh_) converse-edit: a rig that declares no affected tests runs its whole suite on an open PR" "exit $rc; gctk got: $(tr '\n' '|' <"$OC/log" 2>/dev/null)"
+    fi
+    oc_run "$run" "$OC_AFF" lint; rc=$?
+    if [ "$rc" -eq 1 ] && [ "$(cat "$OC/log" 2>/dev/null)" = "$(oc_want affected "$OC_AFF")" ]; then
+        ok "($sh_) converse-edit: a check that fails fails an open PR's checks, and the checks after it still run"
+    else
+        bad "($sh_) converse-edit: a check that fails fails an open PR's checks, and the checks after it still run" "exit $rc; gctk got: $(tr '\n' '|' <"$OC/log" 2>/dev/null)"
+    fi
+done
+echo "── a sitting removes an open PR's tree only once the branch holds its HEAD ──"
+# The let-go block runs as written against a real origin, from a home clone
+# whose tree is a checkout of the branch's tip with no local branch. A commit
+# the branch does not hold keeps the tree, and once a push puts it on the
+# branch the tree goes. gctk logs the copy's stop.
+LG="$TMP/let-go"
+mkdir -p "$LG/city/.gc/services/gctk/bin"
+cat >"$LG/city/.gc/services/gctk/bin/gctk" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$LG_LOG"
+STUB
+chmod +x "$LG/city/.gc/services/gctk/bin/gctk"
+fenced_block "$EDIT" 'merge-base --is-ancestor HEAD "origin/$BRANCH"' >"$LG/block"
+lgit() {
+    env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com \
+        GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com git "$@"
+}
+# lg_home <dir> — a home clone of a fresh origin, its tree checked out at the
+# branch's tip with one commit in it that the branch does not hold.
+lg_home() {
+    mkdir -p "$1" \
+        && lgit init -q --bare "$1/origin.git" 2>/dev/null \
+        && lgit clone -q "$1/origin.git" "$1/home" 2>/dev/null \
+        && lgit -C "$1/home" commit -q --allow-empty -m base \
+        && lgit -C "$1/home" push -q origin HEAD:refs/heads/main HEAD:refs/heads/polecat/tk-pr \
+        && lgit -C "$1/home" worktree add -q --detach "$1/home/worktrees/tk-pr" origin/polecat/tk-pr \
+        && lgit -C "$1/home/worktrees/tk-pr" commit -q --allow-empty -m edit
+}
+# lg_run <shell> <dir> — one run of the block from no log; returns its exit.
+lg_run() {
+    rm -f "$LG/log"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        TREE="$2/home/worktrees/tk-pr" BRANCH=polecat/tk-pr GC_DIR="$2/home" GC_CITY_PATH="$LG/city" LG_LOG="$LG/log" \
+        $1 "$LG/block" </dev/null >/dev/null 2>&1)
+}
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    d="$LG/$sh_"
+    if ! lg_home "$d"; then
+        bad "($sh_) converse-edit: the let-go's home clone did not set up"
+        continue
+    fi
+    lg_run "$run" "$d"; rc=$?
+    if [ "$rc" -ne 0 ] && [ -d "$d/home/worktrees/tk-pr" ] && [ "$(cat "$LG/log" 2>/dev/null)" = "rig serve --stop" ]; then
+        ok "($sh_) converse-edit: an open PR's tree that holds a commit the branch does not is kept, with its copy stopped"
+    else
+        bad "($sh_) converse-edit: an open PR's tree that holds a commit the branch does not is kept, with its copy stopped" "exit $rc; tree $([ -d "$d/home/worktrees/tk-pr" ] && echo kept || echo gone); gctk got: $(tr '\n' '|' <"$LG/log" 2>/dev/null)"
+    fi
+    lgit -C "$d/home/worktrees/tk-pr" push -q origin HEAD:refs/heads/polecat/tk-pr
+    lg_run "$run" "$d"; rc=$?
+    if [ "$rc" -eq 0 ] && [ ! -e "$d/home/worktrees/tk-pr" ]; then
+        ok "($sh_) converse-edit: once the branch holds the tree's HEAD, letting go removes the tree"
+    else
+        bad "($sh_) converse-edit: once the branch holds the tree's HEAD, letting go removes the tree" "exit $rc; tree $([ -d "$d/home/worktrees/tk-pr" ] && echo kept || echo gone)"
+    fi
+done
+# A capture of a rig's own app takes the same command the copy runs: the
+# demo:capture skill reads it for a rig, and its Demo a PR and the demo check
+# pass it to the capture as --serve.
+DEMO_SKILL="$REPO/skills/demo-capture/SKILL.md"
+DEMO_CHECK="$REPO/skills/review-demo/SKILL.md"
+START_READ='SERVE=$(gc formula show mol-rig-demo --rig <rig> --json | jq -r '"'"'[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty'"'"')'
+have "the demo:capture skill reads a rig's start command, its ui_serve_command" "$START_READ" "$DEMO_SKILL"
+have "…and its Demo a PR captures a page script with it" 'rig-demo-capture.sh" --script <script.md> --output <clip.mp4> --serve "$SERVE" --cwd .' "$DEMO_SKILL"
+have "the demo check's capture reads the same command, for the review's rig" 'SERVE=$(gc formula show mol-rig-demo --rig "${GC_RIG:-}" --json | jq -r '"'"'[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty'"'"')' "$DEMO_CHECK"
+have "…and serves it from the reviewed worktree" 'Give it as `--serve "$SERVE" --cwd <worktree>`.' "$DEMO_CHECK"
+# A terminal script the drafter writes runs on three paths, mol-rig-demo, the
+# demo check and Demo a PR. Each starts its shell at the worktree's root, which
+# mol-rig-demo-capture-arm.test.sh runs for mol-rig-demo, so the draft changes
+# into the directory its guide names in its first step.
+have "the drafter's terminal script changes into the directory its guide names, in its first step" \
+    'changes into it before its other actions, as `run cd <dir>`,' "$REPO/skills/gc-demo-script/SKILL.md"
+have "…which Demo a PR captures from the worktree's root" 'A terminal script takes `--cwd .` alone,' "$DEMO_SKILL"
+have "…and so does the demo check" '`--cwd <worktree>`, the root its shell starts in on every demo path.' "$DEMO_CHECK"
 echo "── a moot or benign close settles a headline that waits on nothing ──"
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The

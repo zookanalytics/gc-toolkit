@@ -35,7 +35,7 @@ one rule for whether a bead is blocked by
 ## The boundary
 
 Four parties, one data plane. Lifecycle transitions, dispositions, routes,
-waits and review verdicts are all written on beads.
+waits, review verdicts and review results are all written on beads.
 
 ```mermaid
 flowchart LR
@@ -50,7 +50,7 @@ flowchart LR
     REF[refinery<br/>the landing writer]
     DISP[bead-rehome.sh<br/>the disposition writer]
     CAD[merge cadence]
-    SIGN[signoff.sh<br/>the verdict writer]
+    RUN[review run<br/>the result writer]
     DOC[doctor/<br/>invariant checks]
     HELM[helm board<br/>render-only]
   end
@@ -72,10 +72,12 @@ flowchart LR
   FORM -->|disposition| DISP
   CAD -->|disposition| DISP
   DISP -->|successor edge, then checked close| LEDGER
-  SIGN -->|verdicts on review beads| LEDGER
+  RUN -->|review result| LEDGER
+  RUN -->|repair push| BR
   ORD -->|every 60s| CAD
-  ORD -->|landing order: merge request| PR
-  ORD -->|landing order: record, then close| LEDGER
+  ORD -->|landing order: one run per head| RUN
+  ORD -->|landing order: ready, merge request| PR
+  ORD -->|landing order: record, GitHub read, then close| LEDGER
   CAD -->|reads + writes| LEDGER
   CAD -->|labels| PR
   BR --> PR
@@ -87,8 +89,10 @@ flowchart LR
 
 **Legend.** Solid = writes state. Dashed = reads without writing. Each write
 path that matters has one writer. The refinery writes landings, and the landing
-order writes merges. `bead-rehome.sh` writes dispositions, the closes that name
-a successor. `signoff.sh` writes check verdicts. Everything else reads.
+order writes merges and the GitHub read each PR's status is derived from.
+`bead-rehome.sh` writes dispositions, the closes that name a successor. A PR's
+review run writes the PR's review result, for the last head the run judged.
+Everything else reads.
 
 **The PRs the city lands.** A PR another account opened, such as a person's,
 Dependabot's or one from a fork, stays outside the city's landing, even when it
@@ -112,8 +116,8 @@ are recorded and where the records live.
   outlive any one worktree. A re-clone loses them, and the loss costs one run
   of each check.
 - **What a record is not.** A record is evidence about a commit. It is neither
-  workflow state nor a review's verdict, and both of those stay on beads,
-  written by their own writers. Nor is it a judgment of whose failure a fail
+  workflow state nor a review's verdict or result, and each of those stays on
+  beads, written by its own writer. Nor is it a judgment of whose failure a fail
   is: a caller that finds a recorded fail red on the base too writes that on a
   bead as `rig_check_pre_existing.<check>`, holding the record it judged, so a
   run that replaces that record needs a judgment of its own.
@@ -152,11 +156,18 @@ performer; the full transition table with writers is
    bead the refinery opens the PR as a draft, or updates the PR the bead owns,
    and puts the PR on Gas Town's pending record
    ([state-machine.md](state-machine.md#the-pending-record)).
-7. **Review.** The merge cadence's gate-ensure arm makes every declared check
-   raisable; a review bead is routed to the polecat-codex pool; the reviewer's
-   single call to `signoff.sh` records the verdict on the review bead and, on
-   request-changes, files one rework child. The review loop moves the PR
-   between draft and ready for review.
+7. **Review.** For each head the refinery validates without a passed review
+   result, the landing order pours a review run. The run records the PR's
+   review result, which the evaluator reads. While it works, the run is the
+   one worker on the PR's branch. A converse sitting the operator rules edit the
+   branch with them can push while a run works it. Work that needs the branch
+   changed, such as
+   a person's comment or a conflict with the target, is filed as an ask, and a
+   run takes it. Each city writer returns the PR to draft before it pushes.
+   The landing order marks the PR ready once a run has passed at the head the
+   refinery validated. When a run rules a head's change material, the landing
+   order dismisses each approval given on a commit that does not contain that
+   head.
 8. **Merge.** The landing order has GitHub merge each PR on the pending record
    at the head the refinery validated, once the evaluator reads the PR ready,
    and closes the bead once the merge commit is on the target
@@ -189,16 +200,17 @@ the finished branch. Once they have closed, it takes steps 6 to 9 like any bead
 bound for main.
 
 A converse sitting can take steps 4 and 5 itself, on the operator's ruling in
-the sitting, for a change whose next step is the operator's reaction.
+the sitting, for a change whose next step is the operator's reaction. On a PR
+on the pending record it can edit and push the PR's branch instead, while its
+conversation holds the PR's merge, and the head it left takes steps 6 to 8 as
+any other head does.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a provider quota park, a `gc` build that moves the text the seed
+session dying, a `gc` build that moves the text the seed
 audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
 the cadence), or the landing order for a PR on the pending record, records PR
 events and files a human gate, the witness patrol
-recovers work orphaned by dead sessions, the `dog` pool is warrant executor for
-due-process recovery of wedged sessions (demand-scaled 0-2),
-`quota-park-nudge.sh` nudges a session parked behind a provider limit,
+recovers work orphaned by dead sessions,
 `witness-nudge.sh` gives a witness whose patrol pass stopped its next turn,
 `boot-health.sh` detects a wedged deacon (report-only by design),
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
@@ -207,6 +219,11 @@ branch calls, slings the one re-render of the default branch's
 `generated/seed-audit`. See [authority-map.md](authority-map.md). There is no
 healer category: writers complete their own transitions, so nothing
 reconstructs pack-written state after the fact.
+
+Gas City's controller recovers a pool seat that holds work and either goes
+quiet or is refused by its provider for a rate limit. It does not act on a pool
+seat that keeps printing while its work stands still, and the witness patrol
+files a finding on that seat. No part of the pack kills a stuck session.
 
 ## What the pack supplies and what a rig supplies
 
@@ -224,31 +241,31 @@ is the rig's, so it lives in the root [`AGENTS.md`](../AGENTS.md), which every
 session that works in a gc-toolkit worktree loads, or in one of the rig's docs
 or checks. It is never written into the pack content every rig runs.
 
-A review is where the two meet. It reads its values from the record its dispatch
-wrote, and every other piece either from the installed pack, as that checkout
-stands when the piece is read, or from the rig at the reviewed commit. The
-reviewed commit is the branch's head when the review was dispatched, and nothing
-moves it afterwards.
+A review is where the two meet. It takes its values from the part that starts
+it, and reads every other piece either from the installed pack, as that
+checkout stands when the piece is read, or from the rig at the reviewed commit.
+The reviewed commit is the head a check judges. It is fixed when the check
+starts, and nothing moves it afterwards.
 
 | What the reviewer uses | Where it comes from | Which version |
 |---|---|---|
-| The review's steps, `mol-review` or `mol-review-quorum-signoff` | The pack's formula. Each rig's `.beads/formulas` entry for it is a link Gas City makes into the installed pack. | The installed pack when the review is poured. A poured review keeps its step text. |
-| The review's values: its check, anchor, branch, base, reviewed commit and PR, and why it went out | The record `assets/scripts/gate-ensure.sh` writes on the review bead and passes to the pour as formula vars | Fixed at dispatch |
-| The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the var `gc sling` adds to every pour. | The installed pack when the reviewer loads it |
+| The review's steps | The pack's formulas. Each rig's `.beads/formulas` entry for one is a link Gas City makes into the installed pack. | The installed pack when each formula is poured. A poured formula keeps its step text. |
+| The review's values: the bead that owns the PR, its branch and target, and each check with the head it judges | The landing order, which starts the review, and the review itself, which starts each check | Fixed when the review starts, and for each check when that check starts |
+| The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the binding the rig runs the pack under, which the landing order passes when it starts the review and the review passes on to each check it starts. | The installed pack when the reviewer loads it |
 | The specialist stance, the skill `gc-toolkit.specialist-stance`, held by arch, demo, pm and a check of the rig's own | The reviewer's skill catalog | The installed pack when the reviewer loads it |
 | The architecture-document standard, the skill `gc-toolkit.architecture-document`, which the arch method holds the rig's architecture document to | The reviewer's skill catalog | The installed pack when the reviewer loads it |
-| The pack's scripts, and the pack's check index | The installed pack's script directory, which every caller reaches through `gc <binding> scripts-dir`: a formula step with the `binding_prefix` it is poured with, and a skill with the binding its catalog shows. `assets/scripts/review-checks.sh` reads the `review-checks.toml` at the root of the pack it ships in. | The installed pack when the script runs |
+| The pack's scripts, and the pack's check index | The installed pack's script directory, which every caller reaches through `gc <binding> scripts-dir`: a formula step with the `binding_prefix` it is poured with, and a skill with the binding its catalog shows. `gctk review checks` reads the `review-checks.toml` at the installed pack's root. | The installed pack when the script runs |
 | The rig's check index rows | The rig's `review-checks.toml`, laid over the pack's rows | The reviewed commit |
 | The rig's guidance for the check | The rig's `docs/review-<check>.md`, which the formula prints | The reviewed commit |
 | The diff, and the docs a check stewards, such as `docs/architecture.md` for arch and `docs/product-goals.md` for pm | The review's worktree ([review-workspace.md](review-workspace.md)) | The reviewed commit |
 
 The header of [`review-checks.toml`](../review-checks.toml) states how the
-pack's check index and a rig's are layered. `review-checks.sh` resolves both
+pack's check index and a rig's are layered. `gctk review checks` resolves both
 for every reader of the index, not only the review, and every reader takes the
 rig's rows at the commit it judges. [skills.md](skills.md) states how a pack
 skill is named and surfaced, and `gc skill list` prints the file each catalog
-entry points at. The method-load paragraph of `formulas/mol-review.toml` states
-which skill a review loads, and what the reviewer does when its catalog has
+entry points at. The method-load paragraph of the formula a check runs states
+which skill the check loads, and what its reviewer does when the catalog has
 none.
 
 - **A rig supplies no skill to a review.** The review names the method and the
@@ -256,22 +273,20 @@ none.
   installed pack. Skills a rig's repository carries for its own agents can
   appear in a reviewer's skill list, and no review step names one. A check that
   a rig's index declares, and that the pack ships no skill for, is judged
-  against the purpose its row states, with the specialist stance held. A check
-  no index declares is approved with `--needs-you`, so the operator decides
-  whether it stays in the anchor's `check_set`.
+  against the purpose its row states, with the specialist stance held.
 - **A rig's guidance is read at the reviewed commit, not from the rig's
   default branch,** so a branch is judged against the guidance it carries. A
   guidance fix merged on the default branch reaches an open PR when that PR
-  next merges its base.
+  next merges its base. So a correctness approve of a branch that edits its own
+  guidance, `review-checks.toml` or a `docs/review-*.md`, names the edit to the
+  person who approves the merge.
 - **When gc-toolkit reviews itself, the pack and the rig are the same files at
   two commits.** A branch that edits a check's method, the specialist stance, a
   review formula or a script the review calls is reviewed under the installed
   copy, not its own. A branch that edits `review-checks.toml` or a
   `docs/review-<check>.md` is reviewed under its own edit, because that
   guidance is read at the reviewed commit. The index's rows at that commit are
-  laid over the installed copy's. In any rig, `signoff.sh` refuses a
-  correctness approve on a change that edits its own review guidance until
-  `--needs-you` names the edit to the person who approves the merge.
+  laid over the installed copy's.
 - **Only a skill's catalog name reaches its installed copy.** A path such as
   `skills/<name>/SKILL.md` resolves against whatever tree the agent stands in:
   another rig's checkout, or in gc-toolkit a reviewer's home worktree or the
@@ -466,8 +481,13 @@ first. Either way the change is a decision on the record, not a drift.
   opens.**
 - **The pack keeps no landing state of its own beside Gas Town's pending
   record.**
-- **The board and the merge both read the evaluator's answer,** which is
-  computed at each read and stored nowhere.
+- **No display reads GitHub.** The board, a PR's status label and
+  `gctk pr status` derive a PR's status by the evaluator's one rule from the
+  GitHub read the landing order saved at its last check of the PR and the store
+  as it is at the read. Every reader of GitHub draws on one API allowance.
+- **Only the merge acts on a fresh read of GitHub,** and the saved GitHub read
+  grants nothing. The evaluator's answer is computed at each read and stored
+  nowhere.
 - **A review, a hold or a change of base that arrives after the landing
   order's read is not part of its decision to merge,** even when GitHub carries
   out the merge request after it.
@@ -479,7 +499,8 @@ first. Either way the change is a decision on the record, not a drift.
 - **No machine checks a landing's transitions,** and the doctor checks the
   beads after they are written.
 - **After the hand-off, a sitting's change takes every step a polecat's
-  takes,** and the sitting is not one of its checks.
+  takes,** as the head a sitting pushes onto an open PR takes every step any
+  head takes, and the sitting is not one of their checks.
 - **A copy of a rig's UI that a session runs from a change's tree serves
   fixture data,** never the live city's.
 
@@ -493,11 +514,14 @@ why a reader must know it, and the work that retires it.
   takes a PR open on a work bead's branch whoever opened it, keeps its own
   record of an open PR, and checks each landing write against its transition
   machine, so steps 6 to 8 are not what runs there today. Each rig's cutover
-  bead moves the rig onto the pending record once the review loop
-  (tk-1tfzr71.22) lands, along with the board's phase of a pending PR by the
-  evaluator's answer (tk-1tfzr71.88) and a sitting's retirement of one
-  (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which waits on
-  every cutover, deletes the old path once no open bead is on it.
+  bead moves the rig onto the pending record, along with a sitting's
+  retirement of one (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which
+  waits on every cutover, deletes the old path once no open bead is on it.
+- **The agents' board derives a pending PR's status by another rule.**
+  `helm-svc board` phases a PR on the pending record with the old path's rule
+  over the keys its beads source reads, so its phase can differ from the PR's
+  status label. The board member (tk-1tfzr71.24) replaces that source with a
+  reader of the evaluator's rule over the saved GitHub read.
 - **The merge cadence still admits work on a pending record.** It files work
   for a PR on the pending record beside the landing order
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
@@ -522,7 +546,14 @@ why a reader must know it, and the work that retires it.
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
   the memory intake.
-- **A sitting does not edit an open PR's branch.** A ruling on an open PR still
-  files a rework a polecat runs. A unit that waits on the review-lanes member
-  (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it
-  (tk-e70808f).
+- **A PR's checks still run as review beads.** Until a rig's cutover, the merge
+  cadence sends each check on a PR there out as a review bead, `signoff.sh`
+  records its verdict and files its findings, and a validation pass rules them
+  for a rework child to fix, so step 7 is not what runs there, and a ruling
+  that changes such a PR's branch files a rework child where a sitting on the
+  pending record edits the branch itself. On that path a
+  check no index declares is approved with `--needs-you`, so the operator
+  decides whether it stays in the anchor's `check_set`. Each rig's cutover bead
+  moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)
+  deletes the old path once every rig has moved and the GitHub intake
+  (tk-1tfzr71.21) has landed.

@@ -18,10 +18,7 @@ have nothing to process.
 
 **What you never do:**
 
-- Start/stop/restart agents (controller), or kill agents directly — a
-  live-but-wedged session gets ONE warrant bead for the dog pool (the
-  formula's stuck-session duty carries the command); the `DOG_DONE:` notice
-  in your inbox reports the outcome — acknowledge and archive it.
+- Start, stop, restart or kill agents. The controller owns their lifecycle.
 - Per-rig orphaned-bead recovery (witness) or polecat health (witness).
 - Write code or fix bugs (polecats).
 - Restart Dolt without collecting diagnostics first — a blind restart

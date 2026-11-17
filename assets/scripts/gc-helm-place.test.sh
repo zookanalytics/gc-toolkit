@@ -381,6 +381,8 @@ export GCTK_BUILT GCTK_BIN="$TMP/bin/gctk-arm"
 #   tk-raw      open, no hold, no dispatch
 #   tk-armed    no hold, armed
 #   tk-ran      no hold, a live run (tk-wf9 over tk-cv9) works it
+#   tk-reacted  held, and a live first reaction (tk-wf8 over tk-cv8) runs on
+#               it, as in the seconds between its held exit and its run's end
 reset_store() {
   cat > "$STUB_STORE" <<'JSON'
 [
@@ -403,7 +405,10 @@ reset_store() {
  {"id":"tk-armed","status":"open","issue_type":"task","title":"placed and armed","priority":2,"labels":[],"metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"},"deps":[]},
  {"id":"tk-ran","status":"open","issue_type":"task","title":"placed, and running","priority":2,"labels":[],"metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"},"deps":[]},
  {"id":"tk-cv9","status":"open","issue_type":"convoy","title":"input convoy for tk-ran","labels":[],"metadata":{"gc.synthetic":"true"},"deps":[{"on":"tk-ran","type":"tracks"}]},
- {"id":"tk-wf9","status":"in_progress","issue_type":"task","title":"mol-polecat-work","labels":[],"metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv9","gc.formula_name":"mol-polecat-work"},"deps":[]}
+ {"id":"tk-wf9","status":"in_progress","issue_type":"task","title":"mol-polecat-work","labels":[],"metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv9","gc.formula_name":"mol-polecat-work"},"deps":[]},
+ {"id":"tk-reacted","status":"open","issue_type":"task","title":"held by a first reaction","priority":2,"labels":["hold:mayor"],"metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.proactive"},"deps":[]},
+ {"id":"tk-cv8","status":"open","issue_type":"convoy","title":"input convoy for tk-reacted","labels":[],"metadata":{"gc.synthetic":"true"},"deps":[{"on":"tk-reacted","type":"tracks"}]},
+ {"id":"tk-wf8","status":"in_progress","issue_type":"task","title":"mol-first-reaction","labels":[],"metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv8","gc.formula_name":"mol-first-reaction"},"deps":[]}
 ]
 JSON
 }
@@ -528,6 +533,12 @@ run_place tk-ran --standalone
 eq "$RC" "0" "(PLACED) a bead with no hold that a live run works exits 0"
 has "$OUT" "already placed (live run tk-wf9)" "(PLACED) and is reported as placed"
 unchanged "(PLACED) with nothing written"
+reset_store
+run_place tk-reacted --standalone
+eq "$RC" "0" "(REACTION-RUN) a held bead a first reaction still runs on is placed, exit 0"
+has "$CALLS" "sling " "(REACTION-RUN) …by a dispatch of its own, since a first reaction's run works none of it"
+hasnt "$OUT" "already dispatched" "(REACTION-RUN) …and is not taken for an earlier dispatch"
+eq "$(labels tk-reacted)" "" "(REACTION-RUN) …and its hold is lifted"
 reset_store
 run_place tk-armed --standalone
 eq "$RC" "0" "(PLACED) a bead with no hold that an arm dispatches exits 0"

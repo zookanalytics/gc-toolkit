@@ -123,10 +123,10 @@ harness_init() {
   _write_gc_stub; _write_gh_stub; _write_git_stub
   chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git"
   # The stubs live in TMP, which can go while a script under test still runs:
-  # the suite killed by a signal its children never get, its EXIT trap removing
-  # TMP, or the scratch reaper removing it. The test floor goes directly beneath
-  # them, so a PATH search that misses a stub lands on a refusal, never on the
-  # real gc that finds the live city from the working directory
+  # a suite killed by a signal its children never get removes TMP from its EXIT
+  # trap. The test floor goes directly beneath them, so a PATH search that
+  # misses a stub lands on a refusal, never on the real gc that finds the live
+  # city from the working directory
   # (tools/test-floor/refuse.sh). harness/ refuses git, which this harness
   # stubs and other suites run for real. A tree without the floor does not run.
   local floor

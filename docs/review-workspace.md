@@ -5,17 +5,33 @@ description: Where a review keeps its worktree and scratch on disk, and when tha
 
 # Review workspace
 
-A review reads its pinned commit in a detached worktree and runs there any
-suite its check calls for. It writes its verdict body and its finding set
-beside the worktree, as `findings.md` and `findings.json`, and signoff.sh reads
+A review run keeps one directory for the whole run, named for the run's root,
+`<dir>/gc-review-<root>`, where `<dir>` is `$TMPDIR`, or `/tmp` when `TMPDIR`
+is unset. Its steps are claimed by different sessions, so each step that reads
+the PR takes a part of the directory of its own, holding a worktree detached at
+the head it judges: `triage`, one `lane-<check>` for each lane, and `repair`,
+the run's one worktree, from which rule-and-repair pushes the round's fixes onto
+the PR's branch under a lease on the head it judged. A lane writes its output
+and its evidence beside its worktree, a capture among them, where the round
+reads them before it rules, so lanes that build, test or capture never share a
+tree. `review-workspace.sh add --root <root>` with `--triage`, `--lane <check>`
+or `--repair` makes a part, triage's first, and the hourly reap removes the
+directory once the run's root closes. A part read again at another head is
+made again there, except the repair's, which holds the round's fixes: a
+worktree there at the head the round judged or past it is kept as it stands,
+with its commits and its uncommitted edits, which the repair's read prints, and
+one at any other commit is refused and kept, which stops the run.
+
+On a rig not yet cut over, a review bead reads its pinned commit in a detached
+worktree and runs there any suite its check calls for. It writes its verdict
+body and its finding set beside the worktree, as `findings.md` and `findings.json`, and signoff.sh reads
 them from there. A quorum lane writes no file: the block that stores its lane
 output on its step bead takes the object inline. It needs no workspace, so a
 lane whose gather failed before making one still records its `blocked` output.
 The reviewer may also write logs, probe output, or a second worktree at the
 base.
 All of it lives in one directory named for the review bead,
-`<dir>/gc-review-<review-bead>`, where `<dir>` is `$TMPDIR`, or `/tmp` when
-`TMPDIR` is unset. `assets/scripts/review-workspace.sh` owns that directory: it
+`<dir>/gc-review-<review-bead>`. `assets/scripts/review-workspace.sh` owns that directory: it
 makes the worktree, and it removes the directory when the review ends.
 None of it goes in the agent's home, where a pool session's shell starts,
 because a home that holds a file gc did not write fails its session's next
@@ -26,8 +42,10 @@ start (`assets/scripts/worktree-setup.sh`).
 **Mandate:** the directory a review works in on disk: where it lives, how a
 review gets its worktree, and when and how the directory is removed.
 
-**Boundaries:** the review lifecycle belongs to `formulas/mol-review.toml` and
-`formulas/mol-review-quorum-signoff.toml`, and what a review reads, runs and
+**Boundaries:** the review lifecycle belongs to `formulas/mol-pr-review.toml`
+and `formulas/mol-pr-review-lane.toml`, and on the old path to
+`formulas/mol-review.toml` and `formulas/mol-review-quorum-signoff.toml`, and
+what a review reads, runs and
 judges to its check's method. A polecat's per-bead worktree goes at its
 hand-off or to the controller's closed-bead reaper
 ([worktree-reclaim.md](worktree-reclaim.md)). Harness session
@@ -42,8 +60,8 @@ are done with the worktree, or never runs at all when the setup is split
 across calls. Each checkout left behind counts against the tmpfs quota, and
 exhausting that quota takes every agent's shell output down at once.
 
-So the directory's path depends only on the review bead, and every shell
-rebuilds it. `review-workspace.sh add --review-bead <id> --oid <commit>`
+So the directory's path depends only on the run's root or the review bead, and
+every shell rebuilds it. `review-workspace.sh add --review-bead <id> --oid <commit>`
 prints `<workspace>/wt`, a worktree detached at the commit. It makes the
 worktree on the first call and returns the same one on every later call at
 that commit, so a later block gets the worktree back by running the same line.
@@ -66,8 +84,11 @@ reap removes it once the mol closes that bead.
   next gets the same worktree back.
 - **By the hourly reap.** `orders/review-workspace-reap.toml` runs
   `review-workspace.sh reap`, city scope, no LLM and no agent. It takes the
-  directories of reviews that closed without reaching the verdict step, after
-  a crash, a drain, or a close by another writer such as review-sweep.
+  directory of a review run once its root closes, however the run ended, so a
+  lane's evidence stays readable until every finding is ruled, and those of
+  reviews that closed without reaching the verdict
+  step, after a crash, a drain, or a close by another writer such as
+  review-sweep.
 
 The reap reads every `gc-review-*` entry this user owns directly under the temp
 directory, and under `/tmp` as well. It removes an entry only when no process

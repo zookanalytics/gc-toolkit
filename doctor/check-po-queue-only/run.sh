@@ -37,7 +37,10 @@
 #     lift, or a sling made while the bead was held, and `gc-helm.sh place`
 #     finishes either. An arm for the validating closer (mol-validate-close) is
 #     neither: the bead waits on another bead to land and is checked then, so
-#     its hold is lifted, not placed (skills/waits/SKILL.md).
+#     its hold is lifted, not placed (skills/waits/SKILL.md). A run of
+#     mol-first-reaction sends nothing either: a first reaction triages the
+#     bead and works none of it, and its held exit writes hold:mayor seconds
+#     before its run ends.
 #
 # The po's addresses are every identity Gas City serves its work under, which
 # its session.AssigneeIdentities names: the session bead's id, its runtime
@@ -134,14 +137,11 @@ scrub() { tr -d '\000-\037'; }
 # A check that overlaps its probes runs each one as a background job, and a job
 # cannot hand its parent a variable, so every read lands in a file under one
 # scratch tree. reads_init <check> makes that tree, sets WORK to it, and removes
-# it when the check exits. It holds a file in the tree open on fd 9, because the
-# host's scratch reaper removes any gctk-* tree that no process holds open. It
-# returns non-zero when the tree cannot be made or held, and then nothing can be
-# read.
+# it when the check exits. It returns non-zero when the tree cannot be made, and
+# then nothing can be read.
 reads_init() {
     WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-$1.XXXXXX" 2>/dev/null) || { WORK=""; return 1; }
     trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
-    { exec 9>"$WORK/.hold"; } 2>/dev/null
 }
 # read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
 # <file> and its stderr in <file>.err, and returns the probe's own exit status.
@@ -409,6 +409,7 @@ scan_store() {
     done <<< "$(printf '%s' "$runs" | jq -r --arg q " $queued " '.[] | objects
         | ((.bead // "") | tostring) as $id
         | select(.live == true and $id != "" and ($q | contains(" " + $id + " ")))
+        | select(((.formula // "") | tostring) != "mol-first-reaction")
         | "queued bead \($id) is worked by live run \((.root // "?") | tostring)\(((.formula // "") | tostring) as $f | if $f == "" then "" else " (" + $f + ")" end): it was slung while held. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without a second run"
         | gsub("[[:cntrl:]]"; " ")' 2>/dev/null)"
 }

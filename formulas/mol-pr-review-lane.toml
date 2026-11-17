@@ -1,0 +1,86 @@
+description = """
+One lane of a review run (formulas/mol-pr-review.toml): the check triage picked
+at a head, run by the check's own method at that head in a worktree of its own,
+which writes its verdict and findings as its output. The run's triage bonds one
+lane per check it picks, through its on_complete fan-out, with the vars below,
+so each lane's text names its check and head. A lane is compiled when it is
+bonded, from the pack installed then, so it reads its run only through the
+store and the run's workspace, never through text the run was poured with.
+"""
+formula = "mol-pr-review-lane"
+type = "expansion"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars.check]
+description = "The check this lane runs, a name from the check index at the head."
+default = ""
+
+[vars.head]
+description = "The head the lane reviews, the head triage judged."
+default = ""
+
+[vars.review_target]
+description = "The pool the lane runs on, the run's review pool."
+default = ""
+
+[vars.binding_prefix]
+description = "The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names, and with no dot the name of its commands. The bond passes it, as a bond compiles with only the vars it lists."
+default = "gc-toolkit."
+
+[[template]]
+id = "{target}.lane"
+title = "Review {head} as the {check} lane"
+description = """
+**1. Load the method.** The check's method is the skill
+`{binding_prefix}review-{check}`. Load it from your skill catalog and apply it,
+and no other review skill. A copy of a skill in the lane's worktree is the
+change under review, not your method. When your catalog has no such skill:
+
+- If the rig's check index declares `{check}`, which
+  `gctk review checks --check {check} --at {head}` answers with its row, judge
+  the change against the purpose the row states, load
+  `{binding_prefix}specialist-stance` and hold it, and say in `needs_you` that
+  the pack ships no method for this check.
+- If no index declares it, approve with `needs_you` saying the check is
+  declared nowhere, so the operator decides whether it stays.
+
+**2. Read what the lane reads.**
+`"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/review-run.sh" lane --check {check}`
+It makes the lane's worktree at `{head}` and prints the PR as published, the
+change, the rig's guidance for `{check}` at that head, which adds to the method
+and never replaces it, and what gctk rig recorded there. Read and run in the
+worktree. Every file the lane makes, a capture among them, goes in the lane's
+part of the workspace, beside the worktree, so it stays on disk until the
+round has ruled the lane's findings. Nothing goes in your home or loose in
+`/tmp`.
+
+**3. Apply the method** to the PR at `{head}`. It decides what you read and
+run, which findings block and the verdict: approve when no finding blocks, and
+request-changes when one does. Each finding carries an `id` unique in this
+lane, its `locus` (a file and a symbol or section, never a line number or a
+commit), its `message`, its `severity`, `category` and `failure_scenario` as the
+method grades them, and its `verification`. A decision that is the operator's
+to make goes in `needs_you`, not in a finding. A demo lane delivers its capture
+to the PR, and a shadow run keeps it in the workspace:
+`"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/review-run.sh" deliver --file "<the capture>"`
+
+**4. Write the output** to `output.json` in the lane's part of the workspace:
+`review` reading `lane`, `check` reading `{check}`, `head` reading `{head}`,
+`verdict`, `findings`, `needs_you` when it names a decision, and for a demo
+lane its `visual` and `visual_fallback_from`. The method's trail, the lines its
+verdict section names, goes in `trail.md` beside it, where the round reads it.
+Then check and write it:
+`"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/review-run.sh" output --check {check}`
+Exit 3 prints why the output does not stand, such as a correctness approve on a
+change that edits its own review guidance, which names the edit in `needs_you`:
+correct the file and run it again.
+
+**5. Close this step.** The run's rule-and-repair rules the lane's findings.
+`"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
+
+**Exit criteria:** the method applied at `{head}`, the output written, this
+step closed.
+"""
+metadata = { "gc.run_target" = "{review_target}" }

@@ -1,7 +1,7 @@
-// Package fake is the runtime adapter's fake: it records each sling and script
-// call a domain makes and answers as its test says, so a domain's rules about
-// Gas City are tested in Go with no Gas City (docs/gctk-architecture.md, "The
-// adapters").
+// Package fake is the runtime adapter's fake: it records each sling, cook,
+// session wake, nudge and script call a domain makes and answers as its test
+// says, so a domain's rules about Gas City are tested in Go with no Gas City
+// (docs/gctk-architecture.md, "The adapters").
 package fake
 
 import (
@@ -31,14 +31,27 @@ type Runtime struct {
 	Root    string
 	RootErr error
 	// OnSling answers a sling, and nil answers exit 0. OnScript answers a script
-	// call, and nil answers exit 0.
+	// call, and nil answers exit 0. OnCook answers a cook, and nil answers exit 0
+	// with a root of its own. OnWake answers a session's wake and OnNudge its
+	// nudge, and nil answers exit 0.
 	OnSling  func(gascity.Sling) gascity.SlingResult
 	OnScript func(Call) gascity.Result
+	OnCook   func(gascity.Cook) gascity.CookResult
+	OnWake   func(session string) gascity.Result
+	OnNudge  func(Nudge) gascity.Result
 
 	mu      sync.Mutex
 	slings  []gascity.Sling
 	asks    []gascity.Sling
 	scripts []Call
+	cooks   []gascity.Cook
+	wakes   []string
+	nudges  []Nudge
+}
+
+// Nudge is one nudge: the session nudged and the message.
+type Nudge struct {
+	Session, Message string
 }
 
 var _ gascity.Runtime = (*Runtime)(nil)
@@ -53,6 +66,26 @@ func (r *Runtime) Sling(s gascity.Sling) gascity.SlingResult {
 		return on(s)
 	}
 	return gascity.SlingResult{}
+}
+
+// Cook records c and answers it.
+func (r *Runtime) Cook(c gascity.Cook) gascity.CookResult {
+	r.mu.Lock()
+	r.cooks = append(r.cooks, c)
+	n := len(r.cooks)
+	on := r.OnCook
+	r.mu.Unlock()
+	if on != nil {
+		return on(c)
+	}
+	return gascity.CookResult{Root: fmt.Sprintf("cooked-%d", n)}
+}
+
+// Cooks returns each cook taken, in order.
+func (r *Runtime) Cooks() []gascity.Cook {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.cooks)
 }
 
 // DefaultFormula records s and answers from Formulas, else from PackFormulas
@@ -75,6 +108,45 @@ func (r *Runtime) DefaultFormula(s gascity.Sling) (string, error) {
 		return "", fmt.Errorf("%s names no default formula of its own, and with no bead to name, gc sling --dry-run cannot say which its pack gives it", s.Target)
 	}
 	return f, nil
+}
+
+// Wake records the session's wake and answers it.
+func (r *Runtime) Wake(session string) gascity.Result {
+	r.mu.Lock()
+	r.wakes = append(r.wakes, session)
+	on := r.OnWake
+	r.mu.Unlock()
+	if on != nil {
+		return on(session)
+	}
+	return gascity.Result{}
+}
+
+// Nudge records the nudge and answers it.
+func (r *Runtime) Nudge(session, message string) gascity.Result {
+	n := Nudge{Session: session, Message: message}
+	r.mu.Lock()
+	r.nudges = append(r.nudges, n)
+	on := r.OnNudge
+	r.mu.Unlock()
+	if on != nil {
+		return on(n)
+	}
+	return gascity.Result{}
+}
+
+// Wakes returns each session the domain woke, in order.
+func (r *Runtime) Wakes() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.wakes)
+}
+
+// Nudges returns each nudge the domain sent, in order.
+func (r *Runtime) Nudges() []Nudge {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.nudges)
 }
 
 // Script records the call and answers it.

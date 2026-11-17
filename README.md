@@ -29,7 +29,6 @@ All agents are native to this pack — no gastown import.
 | `refinery` | patrol | merge judgment: rejection, blocked/refused calls; the mechanical cadence runs as an order |
 | `witness` | patrol | rig recovery: orphaned beads, stalled workflows |
 | `deacon` | patrol | city infra health: dolt, doctor sweep |
-| `dog` | warrant executor | due-process recovery of wedged sessions ([authority-map.md](docs/authority-map.md)); demand-scaled 0→2 |
 | `converse-claude-opus`, `converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra` | conversation sitting | one per engaged conversation: `gc-helm engage` starts it on a conversation about a board row's bead, and it holds that conversation |
 | `mechanik` | named session | city-scoped structural engineer: formulas, prompts, conventions |
 | `proactive` | optional | always-on first-reaction pass (2-slot pool) |
@@ -87,6 +86,7 @@ render's byte and token counts.
 - [docs/foundation.md](docs/foundation.md) — beliefs and operating discipline (the charter)
 - [docs/architecture.md](docs/architecture.md) — how the workflows compose Gas City's primitives, and the consistency test for new work
 - [docs/warrants.md](docs/warrants.md) — the warrants in force: what the pack keeps because Gas City lacks the primitive, the upstream evidence and when it was verified, and the trigger that retires each
+- [docs/pull-request-states.md](docs/pull-request-states.md) — what a pull request's labels and its bead's merge state mean, whose move it is, and what you can do
 - [docs/state-machine.md](docs/state-machine.md) — the anchor state machine: every state, every transition, every writer
 - [docs/component-model.md](docs/component-model.md) — the primitives, and every invariant bound to its doctor check
 - [docs/epics.md](docs/epics.md) — what an epic is, the contract it carries, how it is reviewed and when it closes, and the Delivery it may land through

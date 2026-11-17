@@ -64,8 +64,36 @@ That also returns every review lane to unreviewed, so the whole branch is
 reviewed again once the rework lands. A review verdict reaches it through the
 reviewer's own sign-off.
 
-Scope found while the PR is open, with no ruling behind it, rides a supplement
-bead instead. A supplement is PR-finishing work, and its create sets up
+A PR on Gas Town's pending record, whose anchor's `merge_result` reads
+`pull_request_pending` or `pull_request_head_changed`, has one worker on its
+branch, its review run, and a sitting whose conversation holds the PR can edit
+the branch beside it with the operator, pushing under the lease
+(`converse-edit`). A send-back there that the sitting does not make itself is an
+ask the run takes, never a rework child or a supplement. The sign-off's
+`--rework` files it, with
+`--check <check>` once for each check the ruling sends back, and nothing returns
+to unreviewed, because the run triages the head its fix pushes. A must-fix point
+on such a PR that no sitting rules, such as one a sitting or the mechanik finds
+on another open PR, is an ask of its own on that PR's bead. It holds that PR's
+merge from the moment it is filed, and the first run that can take it rules it
+as it rules a person's comment:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" review ask <the anchor of the PR> --reason "<what must change, why, and what done looks like>" --source <the bead the point came from>
+```
+
+Add `--check <check>` for each check the point sends back. Exit 0 prints
+`<ask> filed`, or `<ask> found` for an ask of the same source and reason, open
+or closed. Exit 3 refuses an anchor that owns no PR on the pending record,
+which takes the rework or the supplement here instead, and a check the index
+does not declare. Exit 2 is a read that did not answer, and the next call finds
+an ask that landed.
+
+Scope found while a PR on the old path is open, with no ruling behind it, rides
+a supplement bead instead. A supplement is PR-finishing work, and its create sets up
 everything the PR needs from it before it is sent to the polecat pool:
 
 - `--rig <rig>` names the rig whose store holds the anchor. A pool reads only

@@ -17,6 +17,17 @@ signs off here rather than waiting for a dismiss. A sitting that stays runs
 everything below up to the sign-off, then signs off through `converse-stay` in
 place of the close.
 
+Whether a sitting that sends work ends here or stays is the operator's choice.
+Put it to them with your recommendation, and say when a stay would come back,
+in their terms (the prompt's End or stay). Recommend ending at the hand-off
+when the stay would come back after the merge:
+
+| The ruling sends | A stay comes back | You recommend |
+|---|---|---|
+| A rework of the PR under discussion | When the rework reaches the PR's branch, before the merge, which waits for the return | Staying when the discussion will help judge the result, and ending otherwise. Say that the PR's checks review the reworked branch again. |
+| New work that opens its own PR | Only after that PR has merged | Ending at the hand-off, with what was agreed written into the work's brief in full. Say that a stay would report only after the merge. |
+| Work that opens no PR of its own | When the work closes | Staying when the discussion will help judge the result, and ending otherwise. |
+
 ## Record
 
 Append the outcome to the subject's notes (the `records` skill). Notes are
@@ -47,10 +58,13 @@ resolve reason.
 When the ruling needs work, file the work and send it before the sign-off, then
 name it in the sign-off's `--waiting-on`, with a `--close-brief` when the
 sign-off arms the subject's validating closer (Sign off, below). The `work`
-skill says which bead carries the work and how to choose its formula. In the
-block below, the sling runs only once the create has returned the bead's id.
-The comment then records the dispatch as one of the visit's actions, which the
-comment on the subject's PR lists:
+skill says which bead carries the work and how to choose its formula. When the
+sitting ends at the hand-off for new work that opens its own PR, write what was
+agreed into the create's description in full, because the brief is then all
+the work carries of the discussion. In the block below, the sling runs only
+once the create has returned the bead's id. The comment then records the
+dispatch as one of the visit's actions, which the comment on the subject's PR
+lists:
 
 ```bash
 WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -er '.id') \
@@ -297,8 +311,12 @@ Take the case that fits the ruling:
 PR. A ruling reaches the subject's PR, the PR whose merge this conversation
 holds, and any PR that a gate the ruling answers releases. Pass one of these:
 
-- `--rework` when the PR's branch must change (the `prs` skill);
-- `--no-rework` when the PR stands as it is;
+- `--rework` when the PR's branch must change and you do not make the change
+  yourself (the `prs` skill), with `--check <check>` once for each check the
+  ruling sends back when the PR is on Gas Town's pending record, whose review
+  run then takes the ruling as an ask;
+- `--no-rework` when the PR stands as it is, as it does once you have pushed
+  the change the ruling asked for onto its branch yourself (`converse-edit`);
 - `--retire <kind>` when the PR will not land: `not-needed`, with this
   conversation as the evidence, or `duplicate`, `folded`, `re-homed` or
   `fixed-upstream`, with `--successor <bead>`.

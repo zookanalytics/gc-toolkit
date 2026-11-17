@@ -1,17 +1,22 @@
 ---
 name: review-triage
-description: Use when you hold a review bead whose check is triage, or when asked which review checks a diff warrants.
+description: Use when you hold a review bead whose check is triage, triage's step of a review run, or when asked which review checks a diff warrants.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
 # Review triage
 
 You are classifying, not judging. Whether the change is correct is the
-`correctness` check's question and it is already dispatched. Yours is narrower:
+`correctness` check's question, not yours. Yours is narrower:
 **which specialist checks does this diff warrant?** The usual honest answer is
 none.
 
 ## What it reads
+
+Triage judges one change, at the head the formula you run under names. A review
+bead's formula runs it once per review, at the reviewed commit. A review run's
+formula runs it at every head the run judges: the run's first head and each
+head its own repair pushes.
 
 Three inputs, in this order.
 
@@ -24,20 +29,25 @@ Three inputs, in this order.
    which the review formula printed when the commit carries one. A rig steers
    triage there in words, such as never adding a check, or adding one only for
    one kind of change: advice you weigh beside your own reading of the diff.
-3. **The diff, at the reviewed commit** — in `<worktree>`,
-   `git diff --stat origin/<review_base>...HEAD` first, then a skim of the
-   files the stat names. A skim is the method here; reading every hunk is the
-   specialist reviewer's job, not yours.
+3. **The change, at the reviewed commit** — the formula names the change and
+   its base. A review bead's is the whole PR, `git diff --stat
+   origin/<review_base>...HEAD` in `<worktree>`. A review run's read prints the
+   change at its head: none at a head that already passed into the run's
+   target, since the last head that passed, the run's own repair since its
+   first head, which you read with the rulings its push answers, or else the
+   whole PR. Read its stat first, then skim the files the stat names.
+   A skim is the method here; reading every hunk is the specialist reviewer's
+   job, not yours.
 
 ### The index
 
-Read the index through the pack's resolver rather than eyeballing a file. It
+Read the index through `gctk review checks` rather than eyeballing a file. It
 has two layers. The pack's own index declares every check the pack ships a
 skill for, so every rig has them. The reviewed repo's `review-checks.toml` at
 the commit under review, when it keeps one, adds checks of the rig's own and
-can change a pack check's purpose or phase for that rig. The resolver is the
-pack's own copy, which `gc <binding> scripts-dir` finds from any rig: it prints
-the directory holding the pack's scripts. `<binding>` is the name the city
+can change a pack check's purpose or phase for that rig. The pack's index sits
+beside the pack's scripts, which `gc <binding> scripts-dir` finds from any rig:
+it prints the directory holding them. `<binding>` is the name the city
 imports the pack under, which gc puts in front of this skill's name:
 `gc-toolkit` in `gc-toolkit.review-triage`. `gc skill list` prints it in this
 skill's FROM column. The rig's rows come out of `<reviewed_oid>`, not off disk —
@@ -46,7 +56,10 @@ and a branch may change the index it is judged against:
 
 ```bash
 # >>> triage-index-read
-"$(gc <binding> scripts-dir)/review-checks.sh" --show --at "<reviewed_oid>"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" review checks --show --at "<reviewed_oid>"
 # <<< triage-index-read
 ```
 
@@ -90,17 +103,21 @@ OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty
 # <<< triage-index-gap
 ```
 
-### A bring-current round that conflicted
+### A merge resolved by hand
 
 Bringing the branch current means merging its base in. When that took
-resolution by hand, the worker wrote one audit entry per conflicted file and
-per edit beyond the merge, `bring-current-guard.sh` stored the entries on the
+resolution by hand, the worker wrote what collided and what it decided, and the
+formula prints the account: on a review run, each merge commit in the change,
+which you read with `git show --remerge-diff <commit>`, showing exactly the
+hunks resolved by hand, and its message, where the worker wrote the account. On
+a review bead, the worker wrote one audit entry per conflicted file and per
+edit beyond the merge, `bring-current-guard.sh` stored the entries on the
 anchor beside its own diff evidence, and it reopened this lane. So the anchor's
 `bring_current_record` holds a conflicted round with no `triage` ruling, the
 reason the review formula prints says so, and your verdict also rules on that
-round. `signoff.sh` refuses the verdict without the ruling.
+round, which its write refuses to record without the ruling.
 
-Read the round first:
+On a review bead, read the round first:
 
 ```bash
 # >>> triage-round-read
@@ -128,6 +145,16 @@ rules bound the judgment:
   formula-poured mechanical change — none earns a specialist review. Widening
   costs a cadence hop and a session per anchor, and the feedback distiller
   watches the add-rate for exactly that drift.
+
+**Whether the change is material** is also yours to rule. A change is material
+when it made a call that is the operator's to make: it changed what the PR
+does, by inferring one side's intent or by choosing between two live designs.
+A change that only alters how the approved behavior is achieved is not
+material. A review run asks this at every head, and at a material one the
+formula's withdrawal call withdraws the approvals given before that head,
+naming the call, what it means for the PR, and where to look, before you write
+the output, which the output check refuses until that withdrawal is filed. A
+review bead asks it of a conflicted round, below.
 
 A round that conflicted is also yours to rule on. Each entry says what collided
 (the two intents), what the worker decided and why, what a reviewer should
@@ -166,26 +193,31 @@ lift, so that tells the operator nothing.
 
 ## What blocks
 
-Nothing. Triage never blocks: its verdict is always `approve`, the classifying
-pass that derives the triage lane green and lets the rest of the cadence
-proceed. Triage files no findings, so it has no findings block.
+Nothing. Triage never blocks: on a review bead its verdict is always `approve`,
+the classifying pass that derives the triage lane green and lets the rest of the
+cadence proceed, and on a review run its output carries no verdict. Triage files
+no findings, so it has no findings block.
 
 - It never judges correctness, and it never files findings about the code. A
   defect you notice while skimming belongs in the `correctness` review, not here;
   say so in the verdict body and let that check hold it.
 - It never fixes anything, and it never touches the anchor other than through
-  `signoff.sh`.
-- It never re-runs because the branch grew. Its verdict binds the lane to no
-  commit: an appended commit does not re-stale the triage lane, and no pass
-  re-classifies the grown diff. Two things reopen the lane: a rewrite that takes
-  the reviewed commit off the branch supersedes the review, and a bring-current
-  round that conflicted reopens it to rule on that round. gate-ensure then pours
-  a fresh triage at the live head.
+  the calls its formula names.
 
 ## The verdict
 
-The formula's one `signoff.sh` call carries the verdict and the widening
-together, `approve` with these flags:
+The verdict goes where the formula you run under says. A review run's triage
+writes it as its step's output: the head it judged, each check it picks as one
+`{"check", "head"}`, which the run bonds as a lane at that head, with nothing
+picked the common case, and whether the change is `material`. At the PR's first
+judged head the rig's first check, `correctness`, is picked whatever the diff,
+and the checks an ask the run can take sends back are picked whatever the
+change. At a head that already passed into the run's target, the read says
+there is no change to judge, because its checks ran and their findings were
+ruled: pick only the checks an ask the run can take sends back, and nothing
+when no ask sends one. The rest of this section is a review bead's verdict, whose
+formula's one `signoff.sh` call carries the verdict and the widening together,
+`approve` with these flags:
 
 - **`--add-gates`** takes the checks you add, one or several, comma-separated,
   as in `--add-gates demo,arch`. Adding nothing needs no flag: approve on its

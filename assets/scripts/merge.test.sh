@@ -58,18 +58,15 @@ if [ -z "$GCTK_BUILT" ]; then
     exit 1
 fi
 # No check index and no repository: the script under test runs from a private
-# directory, so the suite names a missing index outright, and review-checks.sh
+# directory, so the suite names a missing index outright, and the check index
 # then resolves every check_set token as a lane gating every transition. The
 # lanes do not depend on the checkout, and a case that needs a real index names
 # one itself.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 SD="$TMP/scripts"
-# A case that wraps review-checks.sh runs the real one from $TMP, beside this.
-mkdir -p "$TMP"; cp "$HERE/bd-lib.sh" "$TMP/bd-lib.sh"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
-  "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/review-checks.sh" \
-  "$HERE/blocker-holder.sh"
+  "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/blocker-holder.sh"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$SD/human-gate.sh"
 chmod +x "$SD/human-gate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
@@ -216,18 +213,13 @@ eq "$(grep -c '^bd update ML5' "$STUB_GC_LOG" || true)" "1" "…in the one trans
 eq "$(bstatus ML6) $(meta ML6 merge_result) $(meta ML6 status_label_clear_owed) $(meta ML6 pr_url)" "closed merged 182 https://github.com/zook/gc-toolkit/pull/182" "a recovered record lands naming it too"
 rm -f "$SD/pr-status-label.sh"
 
-echo "# the lanes are resolved at the head the merge is pinned to"
-# The resolver logs the arguments it is asked with, then runs as itself.
+echo "# the merge is pinned to the head its lanes are resolved at"
 store "[$(anchor MA1 9063), $(rev MA1)]"
 printf '%s' "$(prview 9063 OPEN CLEAN)" > "$GH_DIR/pr_view_9063.json"
 approved 9063
-cp "$SD/review-checks.sh" "$TMP/review-checks.real"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$TMP/resolver.log" "$TMP/review-checks.real" > "$SD/review-checks.sh"
-chmod +x "$SD/review-checks.sh"; : > "$TMP/resolver.log"; : > "$STUB_GH_LOG"
+: > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1); rc=$?
-cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
 has "$(cat "$STUB_GH_LOG")" "pr merge 9063 --repo github.com/zook/gc-toolkit --squash --match-head-commit sha-9063" "the merge is pinned to the PR head"
-eq "$(grep -c -- '--through merge --at sha-9063$' "$TMP/resolver.log")" "2" "…and both lane checks, the gate and the terminal re-read, resolve at that head"
 
 echo "# a head the pinned read does not answer holds before any lane is resolved"
 # The lanes are resolved at the head and the merge is pinned to it, so with no
@@ -235,48 +227,27 @@ echo "# a head the pinned read does not answer holds before any lane is resolved
 store "[$(anchor MH1 9064), $(rev MH1)]"
 prview 9064 OPEN CLEAN | jq -c '.headRefOid = ""' > "$GH_DIR/pr_view_9064.json"
 approved 9064
-cp "$SD/review-checks.sh" "$TMP/review-checks.real"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$TMP/resolver.log" "$TMP/review-checks.real" > "$SD/review-checks.sh"
-chmod +x "$SD/review-checks.sh"; : > "$TMP/resolver.log"; : > "$STUB_GH_LOG"
+: > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1); rc=$?
-cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
 has "$out" "PR#9064 live head unresolved" "a PR whose head did not read is held under the head's name"
 hasnt "$out" "lane state unreadable" "…not as unreadable lane state"
-eq "$(cat "$TMP/resolver.log")" "" "…before any lane is resolved"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 9064" "…and nothing is merged"
 eq "$(bstatus MH1)" "open" "…and the anchor stays open"
 
-echo "# a resolver that dies mid-run holds the merge (never reads empty as 'no lanes')"
-# The lane check captures the resolver's exit status: a crash prints nothing,
-# and an empty lane list would read as all-green and merge on approval alone. Here
-# the lane IS backed green and the PR IS approved, so ONLY the resolver's failure
-# can hold it — proving the merge does not proceed on approval alone when it dies.
+echo "# an index that does not resolve holds the merge (never reads empty as 'no lanes')"
+# A lane list that did not resolve prints nothing, and reading it as no lanes
+# would read as all-green and merge on approval alone. Here the lane IS backed
+# green and the PR IS approved, so ONLY the index's failure can hold it: the
+# index declares the lane at a phase outside the ordered set.
 store "[$(anchor MR1 61), $(rev MR1)]"
 printf '%s' "$(prview 61 OPEN CLEAN)" > "$GH_DIR/pr_view_61.json"
 approved 61
-cp "$SD/review-checks.sh" "$TMP/review-checks.real"
-printf '#!/usr/bin/env bash\nexit 3\n' > "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+printf '[checks.correctness]\nphase = "Merge"\n' > "$TMP/bad-phase.toml"
 : > "$STUB_GH_LOG"
-out=$("$SUT" 2>&1); rc=$?
-cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
-has "$out" "lane state unreadable" "a resolver crash holds the merge as lane-state-unreadable"
-hasnt "$(cat "$STUB_GH_LOG")" "pr merge 61" "the PR is NOT merged on approval alone when the resolver died"
+out=$(GC_REVIEW_CHECKS_INDEX="$TMP/bad-phase.toml" "$SUT" 2>&1); rc=$?
+has "$out" "lane state unreadable" "an index that does not resolve holds the merge as lane-state-unreadable"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 61" "the PR is NOT merged on approval alone when the index did not resolve"
 eq "$(bstatus MR1)" "open" "the anchor stays open"
-
-echo "# a missing check resolver holds the whole pass before it reads a PR"
-# A pack-integrity gap, not one anchor's state: with no resolver every anchor
-# would read as having no lanes, so the pass exits 1 rather than hold each one.
-store "[$(anchor MR2 62), $(rev MR2)]"
-printf '%s' "$(prview 62 OPEN CLEAN)" > "$GH_DIR/pr_view_62.json"
-approved 62
-mv "$SD/review-checks.sh" "$TMP/review-checks.moved"
-: > "$STUB_GH_LOG"
-out=$("$SUT" 2>&1); rc=$?
-mv "$TMP/review-checks.moved" "$SD/review-checks.sh"
-eq "$rc" 1 "a missing check resolver fails the pass"
-has "$out" "merge: the check resolver is missing ($SD/review-checks.sh); merge held" "…naming the resolver it could not find"
-eq "$(cat "$STUB_GH_LOG")" "" "…before it reads a single PR"
-eq "$(bstatus MR2)" "open" "…and the anchor stays open"
 
 echo "# a broken lane or finalize helper holds its own anchor, never the pass"
 # Only the check resolver is required up front. lane-state.sh and finalize-gate.sh

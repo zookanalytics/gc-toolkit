@@ -37,11 +37,11 @@
 #
 # Arm 1 judges steps alone. Core's orphan-sweep order resets a claim on any
 # bead whose holder no longer exists, every five minutes. The bare beads a pool
-# claims, which are rework children, first-reaction beads, warrants and reviews
-# returned to their pool, are each a piece the deletion schedule removes, and
-# its members replace them with poured runs where the work has a formula, so
-# every pool claim becomes a step. Judging the bare beads now would hold their
-# pools to a stall bound nobody has measured for them.
+# claims, which are rework children and reviews returned to their pool, are
+# each a piece the deletion schedule removes, and its members replace them with
+# poured runs where the work has a formula, so every pool claim becomes a step.
+# Judging the bare beads now would hold their pools to a stall bound nobody has
+# measured for them.
 #
 # Arm 2 — UNCLAIMED. A claim is not the first thing that can fail to happen. A
 # step poured, routed to a pool and never claimed by anybody stays `open`, so
@@ -253,10 +253,9 @@ stale_roster=0
 [ "$cache_age" -gt "$STALL" ] && stale_roster=1
 
 # Liveness is read from `.state` (a holder is live iff state == "active"), the
-# field both `gc session list --json` schemas carry — the same rule
-# quota-park-nudge.sh follows, because `.running` is
-# null during controller churn and absent from the CLI-fallback shape, so a
-# filter on it drops exactly the live sessions. If the roster carries neither
+# field both `gc session list --json` schemas carry, because `.running` is null
+# during controller churn and absent from the CLI-fallback shape, so a filter
+# on it drops exactly the live sessions. If the roster carries neither
 # `state` nor `running` on any session, its schema has drifted past what
 # liveness can be read from: judging every holder against the absent field
 # would classify them all DEAD and every pool scaled to zero. Decline instead —

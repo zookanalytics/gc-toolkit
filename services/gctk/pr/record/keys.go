@@ -13,8 +13,16 @@ import (
 // pr_number, merged_target, merged_sha, existing_pr, blocked_reason and
 // rejection_reason) keep those shell writers, whose definitions stay in
 // lifecycle/lifecycle.toml's [metadata.merge_identity], until the merge
-// member's retirement removes them.
+// member's retirement removes them. So does branch, the merge identity's
+// source branch, which the work formula's workspace-setup writes, and which a
+// review ask names through NameBranch.
 var (
+	branchKey = ledger.Declare("branch", ledger.String,
+		"The source branch a work bead's change is on, which the work formula's workspace-setup writes, and "+
+			"the PR's branch on each ask gctk review ask files. A bead carrying it is in flight. The pr "+
+			"evaluator and the landing order hold a PR whose head branch is not this one, a PR's composition "+
+			"finds the beads whose work the branch carries by it, and a review run takes only an ask that names "+
+			"the branch of its PR.")
 	mergeResultKey = ledger.Declare("merge_result", ledger.String,
 		"Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads "+
 			Pending+", "+HeadChanged+", "+Merged+", "+Incomplete+" or one of the exceptions, "+Invalid+", "+
@@ -58,14 +66,16 @@ var (
 		"Why the work was sent back to the refinery: a head it has not validated, or a record left half "+
 			"written. A publication clears it.")
 	reconcileErrorKey = ledger.Declare("pr_reconcile_error", ledger.String,
-		"Why the landing order's last read could not decide, such as a lookup that failed or a merge commit "+
-			"not yet on the fetched target. The next run reads the record again, and a read that decides clears it.")
+		"Why the landing order's last read could not decide or finish, such as a lookup that failed, a merge "+
+			"commit not yet on the fetched target, or a wake of the refinery that did not land. The next run reads "+
+			"the record again, and a read that decides clears it.")
 	pendingKey = ledger.Declare("pr_reconcile_pending", ledger.String,
 		"true while a reconciliation of the record is still owed, the marker the landing order selects the "+
 			"records it reads by. The record's first write sets it, and the order clears it when the bead "+
-			"closes on a verified merge, goes back to the refinery, meets an exception or has been released "+
-			"from the refinery. A disposition's close clears it in the same write, through bead-rehome.sh, "+
-			"the one shell writer that spells it, because only that write closes the bead under the record lock.")
+			"closes on a verified merge, has its changed head handed to the refinery, meets an exception or has "+
+			"been released from the refinery. A disposition's close clears it in the same write, through "+
+			"bead-rehome.sh, the one shell writer that spells it, because only that write closes the bead under "+
+			"the record lock.")
 )
 
 // The reading faces of the record's keys whose value is another domain's whole
@@ -76,7 +86,16 @@ var (
 	PRURL     = prURLKey.View()
 	PRNumber  = prNumberKey.View()
 	Rejection = rejectionReasonKey.View()
+	Branch    = branchKey.View()
 )
+
+// OnBranch selects the beads whose branch is branch: the ones whose work the
+// branch carries, and the asks on its PR.
+func OnBranch(branch string) ledger.Selection { return ledger.Matching(branchKey, branch) }
+
+// NameBranch names, in a, the branch the bead's work is on, as an ask's filing
+// names the branch of the PR it asks a change of.
+func NameBranch(a ledger.Act, branch string) { branchKey.Set(a, branch) }
 
 // OnTarget selects the beads whose merged_target is branch: the ones whose PR
 // is to merge into it, and the ones whose work landed on it.

@@ -34,12 +34,12 @@ usage: resolve-route.sh <name>
 
 Prints the live agent identity <name> resolves to. Accepts the identity
 itself, the rig-unqualified form of one (`gc-toolkit.polecat`), a form
-carrying a qualifier the identity does not (`gc-toolkit/gc-toolkit.dog`), or a
-bare role (`refinery`).
+carrying a qualifier the identity does not (`gc-toolkit/gc-toolkit.deacon`), or
+a bare role (`refinery`).
 
 Route to what it prints, and file nothing when it prints nothing:
-  ROUTE=$(resolve-route.sh gc-toolkit.dog) || true
-  [ -n "$ROUTE" ] && gc sling "$ROUTE" <bead> --no-formula --no-convoy
+  ROUTE=$(resolve-route.sh polecat) || true
+  [ -n "$ROUTE" ] && gc sling "$ROUTE" <bead>
 
 `|| true`, not `|| ROUTE=""`: only a refusal prints nothing, and an
 unverified name arrives on stdout with a non-zero status that the second

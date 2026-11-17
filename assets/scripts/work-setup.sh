@@ -195,16 +195,17 @@ fi
 
 git fetch --prune origin >&2 || echo "$PROG: git fetch --prune origin failed; going on with the refs already here" >&2
 
-store_read() { gc bd "$@"; }
-
-# Whether work is in flight on another bead: a live run works it, or a session the
-# list names holds its claim. A list that cannot be read proves nobody gone.
+# Whether work is in flight on another bead, by the test of a branch's writer the
+# refinery's find-work reads too (work_writing in work-lib.sh): a live run works
+# it, or a session the list names holds its claim. A store that cannot answer
+# stops the step.
 in_flight() { # <bead> <status> <assignee>
-  local runs
-  runs=$(run_lib runs store_read "$1") || work_outage "could not read the runs that work $1"
-  printf '%s' "$runs" | jq -e 'any(.[]; .live)' >/dev/null 2>&1 && return 0
-  [ "$2" = in_progress ] && [ -n "$3" ] && ! work_is_self "$3" || return 1
-  [ "$(work_owner_listed "$3")" != 0 ]
+  work_writing "$@"
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+  esac
+  work_outage "could not read the runs that work $1"
 }
 
 # The other unclosed beads on the branch that record <tree>, which can be more than

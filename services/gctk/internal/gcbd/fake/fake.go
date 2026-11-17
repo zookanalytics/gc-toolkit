@@ -9,6 +9,7 @@
 package fake
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -23,14 +24,15 @@ import (
 // into another store: Rows leaves it out, as a show does, and Find keeps it, as
 // a listing does. ClosedAt is when a closed bead closed. An edge carries the far
 // bead's fields as a show row reports them, so a closed row that names no close
-// time takes the one an edge onto it names. Assignee, AwaitType, Description,
-// Priority, Labels, CreatedAt and Notes are the row's own fields a listing
-// carries, and an update's --append-notes adds a line to Notes. Ephemeral and
-// Template put the row in the ephemeral plane or make it a template.
+// time takes the one an edge onto it names. Assignee, AwaitType, AwaitID,
+// Description, Priority, Labels, CreatedAt, CloseReason and Notes are the row's
+// own fields a listing carries, and an update's --append-notes adds a line to
+// Notes. Ephemeral and Template put the row in the ephemeral plane or make it a
+// template.
 type Bead struct {
 	ID, Title, Status, IssueType, ClosedAt string
 	Assignee, AwaitType, Description       string
-	CreatedAt, Notes                       string
+	AwaitID, CreatedAt, CloseReason, Notes string
 	Priority                               int
 	Labels                                 []string
 	Ephemeral, Template                    bool
@@ -44,20 +46,28 @@ type Write struct {
 	Args []string
 }
 
+// Create is one create the store took: the bead it filed, its title and the
+// create's arguments.
+type Create struct {
+	ID, Title string
+	Args      []string
+}
+
 // Store is an in-memory gcbd.Store, safe for concurrent use as the city's
 // store is.
 type Store struct {
-	mu     sync.Mutex
-	rows   map[string]Bead
-	lost   map[string]bool
-	listed map[string][]string
-	marked []string
-	ready  map[string]bool
-	writes []Write
+	mu      sync.Mutex
+	rows    map[string]Bead
+	lost    map[string]bool
+	listed  map[string][]string
+	marked  []string
+	ready   map[string]bool
+	writes  []Write
+	creates []Create
 
 	// RowsErr, BlockedErr, FindErr and ReadyErr fail the matching read when
-	// set, and UpdateErr fails every write.
-	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr error
+	// set, UpdateErr fails every write and CreateErr every create.
+	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr, CreateErr error
 
 	// OnFind, when set, runs before each find the store takes, outside the
 	// store's lock, and fails nothing. A test lands another actor's write in it.
@@ -67,6 +77,24 @@ type Store struct {
 	// lock, so a test can land another writer's change between a read and a
 	// write, or refuse the write with the error it returns.
 	BeforeUpdate func(id string, args []string) error
+
+	// CloseTime, when set, is the close time an update that closes a bead
+	// stamps on a row that names none, as bd stamps a close. With none set, an
+	// update stamps nothing, and a test names a close time itself.
+	CloseTime string
+
+	// WorkRecordGate, when set, refuses an update that closes a plain task bead
+	// as Gas City's work-record gate refuses it under GC_WORK_RECORD_ENFORCE,
+	// which gc bd runs before it hands bd the update, so it is the door's rule
+	// and not the store's: the work record the bead carries with the update's
+	// keys applied names no gc.work_outcome, or one that is not shipped, no-op,
+	// blocked or abandoned, or a shipped one with no gc.work_commit or no
+	// gc.work_branch (Gated and ValidateOnClose in internal/workrecord/gate.go,
+	// and evaluateWorkRecordCloseGate in cmd/gc/work_record_gate.go, at Gas City
+	// upstream e9a628c500). The gate's last test, whether the branch reaches the
+	// commit, asks a rig's checkout, which the fake does not hold. A refused
+	// update writes nothing.
+	WorkRecordGate bool
 
 	finds []gcbd.Query
 }
@@ -142,6 +170,16 @@ func (s *Store) List(id string, by ...string) {
 	s.listed[id] = slices.Clone(by)
 }
 
+// Unlist leaves each bead named out of the store's blocked listing, as the store
+// leaves a bead once nothing holds it.
+func (s *Store) Unlist(ids ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range ids {
+		delete(s.listed, id)
+	}
+}
+
 // Mark makes the store mark ids blocked.
 func (s *Store) Mark(ids ...string) {
 	s.mu.Lock()
@@ -200,7 +238,8 @@ func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
 // Find returns, in id order, the row of each bead q selects, in a listing's
 // shape: every edge, with the far bead's id and the edge's type alone. A bead q
 // names that the store does not hold is left out, as a listing leaves it out.
-// A parent selects the beads whose own parent-child edge names it.
+// A parent selects the beads whose own parent-child edge names it, and a type
+// the beads whose issue type is that one exactly.
 func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 	if s.OnFind != nil {
 		s.OnFind(q)
@@ -211,7 +250,7 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 	if s.FindErr != nil {
 		return nil, s.FindErr
 	}
-	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && !q.Every {
+	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && q.Type == "" && !q.Every {
 		return nil, &gcbd.ReadError{Reason: "the fake store takes no find that selects no beads"}
 	}
 	ids := slices.Sorted(maps.Keys(s.rows))
@@ -236,6 +275,9 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 			continue
 		}
 		if q.TitleContains != "" && !strings.Contains(b.Title, q.TitleContains) {
+			continue
+		}
+		if q.Type != "" && b.IssueType != q.Type {
 			continue
 		}
 		out = append(out, s.listing(b))
@@ -304,6 +346,9 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 			delete(b.Metadata, value)
 		case "--status":
 			b.Status = value
+			if strings.EqualFold(value, "closed") && b.ClosedAt == "" {
+				b.ClosedAt = s.CloseTime
+			}
 		case "--assignee":
 			b.Assignee = value
 		case "--append-notes":
@@ -325,9 +370,144 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 			return "", fmt.Errorf("fake store: update takes no %s", name)
 		}
 	}
+	if s.WorkRecordGate && closesStatus(args) && workRecordGated(s.rows[id]) {
+		if why := workRecordRefusal(b.Metadata); why != "" {
+			return "", fmt.Errorf("fake store: work-record gate (enforced): close of %s: %s", id, why)
+		}
+	}
 	s.rows[id] = b
 	s.writes = append(s.writes, Write{ID: id, Args: slices.Clone(args)})
 	return "", nil
+}
+
+// closesStatus reports whether an update's arguments move the bead to closed.
+func closesStatus(args []string) bool {
+	closes := false
+	for i := 0; i < len(args); i++ {
+		if v, ok := strings.CutPrefix(args[i], "--status="); ok {
+			closes = strings.EqualFold(v, "closed")
+		} else if args[i] == "--status" && i+1 < len(args) {
+			i++
+			closes = strings.EqualFold(args[i], "closed")
+		}
+	}
+	return closes
+}
+
+// workRecordGated reports whether the work-record gate reads the close of b: a
+// task, or a bead of no type, that carries no gc.kind, gc.step_id or
+// gc.step_ref.
+func workRecordGated(b Bead) bool {
+	if t := strings.TrimSpace(b.IssueType); t != "" && t != "task" {
+		return false
+	}
+	for _, k := range []string{"gc.kind", "gc.step_id", "gc.step_ref"} {
+		if strings.TrimSpace(b.Metadata[k]) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// workRecordRefusal is why the work-record gate refuses a close whose bead
+// carries meta once the update lands, "" when it does not.
+func workRecordRefusal(meta map[string]string) string {
+	outcome := strings.TrimSpace(meta["gc.work_outcome"])
+	switch outcome {
+	case "":
+		return "missing gc.work_outcome"
+	case "no-op", "blocked", "abandoned":
+		return ""
+	case "shipped":
+	default:
+		return fmt.Sprintf("invalid gc.work_outcome=%q", outcome)
+	}
+	var missing []string
+	for _, k := range []string{"gc.work_commit", "gc.work_branch"} {
+		if strings.TrimSpace(meta[k]) == "" {
+			missing = append(missing, k)
+		}
+	}
+	if len(missing) > 0 {
+		return "gc.work_outcome=shipped requires " + strings.Join(missing, " and ")
+	}
+	return ""
+}
+
+// Creates returns every create the store took, in order.
+func (s *Store) Creates() []Create {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.creates)
+}
+
+// Create files a bead titled title, open, as fk-<n> for the nth create, with
+// the create's -t, -d, --metadata, a JSON object of strings, and --deps, read
+// as bd's --deps reads it: an entry blocks:<id> gives bead id a blocks edge
+// onto the new bead, a bare id, depends-on:<id> and blocked-by:<id> name a bead
+// the new one waits on by a blocks edge, and any other type, such as
+// discovered-from, gives the new bead its own edge of that type. A bead --deps
+// names that the store does not hold refuses the create.
+func (s *Store) Create(title string, args ...string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.CreateErr != nil {
+		return "", s.CreateErr
+	}
+	id := fmt.Sprintf("fk-%d", len(s.creates)+1)
+	b := Bead{ID: id, Title: title, Status: "open", IssueType: "task", Metadata: map[string]string{}}
+	var blocks []string
+	for i := 0; i < len(args); i++ {
+		name := args[i]
+		if name == "--json" {
+			continue
+		}
+		if i+1 >= len(args) {
+			return "", fmt.Errorf("fake store: %s needs a value", name)
+		}
+		i++
+		value := args[i]
+		switch name {
+		case "-t", "--type":
+			b.IssueType = value
+		case "-d", "--description":
+			b.Description = value
+		case "--metadata":
+			var m map[string]string
+			if err := json.Unmarshal([]byte(value), &m); err != nil {
+				return "", fmt.Errorf("fake store: --metadata %q is not a JSON object of strings: %w", value, err)
+			}
+			maps.Copy(b.Metadata, m)
+		case "--deps":
+			for _, d := range strings.Split(value, ",") {
+				typ, far, ok := strings.Cut(d, ":")
+				if !ok {
+					typ, far = "blocked-by", d
+				}
+				if _, held := s.rows[far]; !held {
+					return "", fmt.Errorf("fake store: --deps names %s, which the store does not hold", far)
+				}
+				switch typ {
+				case gcbd.EdgeBlocks:
+					blocks = append(blocks, far)
+				case "blocked-by", "depends-on":
+					b.Edges = append(b.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: far, Status: s.rows[far].Status})
+				default:
+					b.Edges = append(b.Edges, gcbd.Edge{Type: typ, ID: far, Status: s.rows[far].Status})
+				}
+			}
+		default:
+			return "", fmt.Errorf("fake store: create takes no %s", name)
+		}
+	}
+	for _, far := range blocks {
+		r := s.rows[far]
+		r.Edges = append(slices.Clone(r.Edges), gcbd.Edge{Type: gcbd.EdgeBlocks, ID: id, Title: title, Status: "open"})
+		s.rows[far] = r
+	}
+	s.rows[id] = b
+	s.creates = append(s.creates, Create{ID: id, Title: title, Args: slices.Clone(args)})
+	return id, nil
 }
 
 // row renders b as gcbd decodes a `gc bd show --json` row, whose edges carry
@@ -389,7 +569,7 @@ func bead(b Bead, deps []any) gcbd.Bead {
 		meta[k] = v
 	}
 	out := gcbd.Bead{ID: b.ID, Title: b.Title, Status: &status, Metadata: meta, Dependencies: deps,
-		AwaitType: b.AwaitType, Priority: float64(b.Priority)}
+		AwaitType: b.AwaitType, AwaitID: b.AwaitID, Priority: float64(b.Priority)}
 	if b.IssueType != "" {
 		out.IssueType = b.IssueType
 	}
@@ -404,6 +584,9 @@ func bead(b Bead, deps []any) gcbd.Bead {
 	}
 	if b.CreatedAt != "" {
 		out.CreatedAt = b.CreatedAt
+	}
+	if b.CloseReason != "" {
+		out.CloseReason = b.CloseReason
 	}
 	if b.Notes != "" {
 		out.Notes = b.Notes

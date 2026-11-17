@@ -128,6 +128,15 @@
 #   demo_engine_copy_stop
 #                        Ends the copy demo_engine_copy started, if it started
 #                        one.
+#   demo_engine_script_kind <script>
+#                        Prints the surface a demo script drives, page or
+#                        terminal, by the engine's own rule: a terminal script
+#                        declares **Terminal:**, in any case, on a line above
+#                        its first ## heading, each line read without the
+#                        blanks around it (parseDemoScript in the engine's
+#                        src/demo-script.ts), and any other script drives a
+#                        page. Returns 1, having said why on stderr, when the
+#                        script does not read.
 #
 # DEMO_ENGINE_PACKAGE names the package. DEMO_ENGINE_BIN, when set, names an
 # executable that demo_engine_cli runs in the engine's place, in the same
@@ -242,6 +251,21 @@ demo_engine_resolve() {
     fi
     _demo_engine_say "engine = published $DEMO_ENGINE_PACKAGE (no local rig checkout)"
   fi
+}
+
+# --- a demo script's surface -------------------------------------------------
+
+demo_engine_script_kind() {
+  local kind
+  kind=$(awk '
+    { l = $0; sub(/^[ \t]+/, "", l); sub(/[ \t\r]+$/, "", l) }
+    l ~ /^##[ \t]+[^ \t]/ { exit }
+    tolower(l) ~ /^\*\*terminal:\*\*/ { k = "terminal"; exit }
+    END { print (k == "" ? "page" : k) }' "$1" 2>/dev/null)
+  case "$kind" in
+    (page|terminal) printf '%s\n' "$kind" ;;
+    (*) _demo_engine_say "could not read the head lines of '$1', which say whether it drives a page or a terminal"; return 1 ;;
+  esac
 }
 
 # --- the sandbox -------------------------------------------------------------

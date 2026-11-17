@@ -152,6 +152,45 @@ func TestStoreOfNamesTheLongestPrefix(t *testing.T) {
 	}
 }
 
+// RigStore names the .beads directory under the path the rig list gives the
+// rig of that name, the city's among them, from one listing each. A prefix is
+// no rig's name, a rig the list binds to no path has no store, and a listing
+// that fails or does not decode is a *ReadError.
+func TestRigStoreNamesTheRigsBeadsDirectory(t *testing.T) {
+	log := routeStub(t)
+	t.Setenv("STUB_RIGS", routeRigs)
+	c := &Client{bin: "gc"}
+	cases := []struct {
+		name, want string
+		ok         bool
+	}{
+		{"gc-toolkit", "/city/rigs/gc-toolkit/.beads", true},
+		{"city", "/city/.beads", true},
+		{"tk", "", false},
+		{"unbound", "", false},
+		{"nowhere", "", false},
+	}
+	for _, tc := range cases {
+		got, ok, err := c.RigStore(tc.name)
+		if err != nil || got != tc.want || ok != tc.ok {
+			t.Errorf("RigStore(%q) = %q, %v, %v; want %q, %v", tc.name, got, ok, err, tc.want, tc.ok)
+		}
+	}
+	if got := findCalls(t, log); len(got) != len(cases) || slices.ContainsFunc(got, func(c string) bool { return c != "rig list --json" }) {
+		t.Errorf("calls = %q, want one rig list each", got)
+	}
+	var re *ReadError
+	t.Setenv("STUB_RIGS_RC", "1")
+	if _, _, err := c.RigStore("gc-toolkit"); !errors.As(err, &re) {
+		t.Errorf("RigStore with a failed listing = %v; want a *ReadError", err)
+	}
+	t.Setenv("STUB_RIGS_RC", "0")
+	t.Setenv("STUB_RIGS", "not json")
+	if _, _, err := c.RigStore("gc-toolkit"); !errors.As(err, &re) {
+		t.Errorf("RigStore with a listing that did not decode = %v; want a *ReadError", err)
+	}
+}
+
 // Route keeps the store gc resolves when its prefix begins the first id, and
 // lists the stores only for a bead in another, as gc routes a read that names a
 // bead and no store. A listing that fails leaves the resolved store.

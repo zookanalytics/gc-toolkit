@@ -17,11 +17,8 @@
   {
     "name": "branch",
     "type": "string",
-    "readers": [
-      "pr",
-      "waits"
-    ],
-    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight. The pr evaluator and the landing order hold a PR whose head branch is not this one. A composition reads it for the PR's source branch, and finds the beads whose work the branch carries by it."
+    "owner": "pr/record",
+    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes, and the PR's branch on each ask gctk review ask files. A bead carrying it is in flight. The pr evaluator and the landing order hold a PR whose head branch is not this one, a PR's composition finds the beads whose work the branch carries by it, and a review run takes only an ask that names the branch of its PR."
   },
   {
     "name": "check_set",
@@ -59,6 +56,7 @@
     "name": "epic_hypothesis",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "An epic's one-sentence hypothesis (docs/epics.md). An epic under an epic that carries none is a Delivery."
@@ -75,6 +73,7 @@
     "name": "epic_ruling",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "The latest ruling on an epic's hypothesis: continue, shift or close (docs/epics.md)."
@@ -83,6 +82,7 @@
     "name": "epic_ruling_at",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "When the operator made the latest ruling on an epic."
@@ -91,9 +91,26 @@
     "name": "epic_ruling_reason",
     "type": "string",
     "readers": [
+      "epic",
       "listing"
     ],
     "doc": "Why the latest ruling on an epic was made, written with it."
+  },
+  {
+    "name": "epic_shifted_at",
+    "type": "string",
+    "readers": [
+      "epic"
+    ],
+    "doc": "When the operator last ruled shift on an epic, written with that ruling and left standing by a later one, so a shift a later ruling followed still reads (skills/converse-epic-review/SKILL.md). An epic that carries none records no shift beyond its ruling keys."
+  },
+  {
+    "name": "epic_weighed_at",
+    "type": "string",
+    "readers": [
+      "epic"
+    ],
+    "doc": "The time of the read the rig's po last weighed an epic from at a portfolio sync, the time gctk epic unweighed prints first, written with the sync's note on the epic (skills/portfolio-sync/SKILL.md). An epic that carries none has not been weighed."
   },
   {
     "name": "existing_pr",
@@ -108,6 +125,14 @@
       "pr"
     ],
     "doc": "The branch a bead's work was folded onto by a polecat (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it has its work on that branch."
+  },
+  {
+    "name": "gc.attempt",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "The iteration a review run's step runs in, from 1, which Gas City writes on every step of a check loop's iteration, a lane bonded there included. A step's output names the same iteration."
   },
   {
     "name": "gc.dispatch_when_ready",
@@ -147,12 +172,36 @@
     "doc": "Why the bead was armed, as free text."
   },
   {
+    "name": "gc.execution_routed_to",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "The route Gas City's sling stamps on a work bead whose workflow it started, which stays while the bead is unassigned and its workflow's steps are claimed. An ask carries none, so a bead that names a PR's branch and carries one is work of its own on the branch."
+  },
+  {
+    "name": "gc.final_disposition",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "How the runtime finally closed a control bead. A review run's loop that reads hard_fail was ended by a step's hard failure, so the run records no result."
+  },
+  {
     "name": "gc.formula_contract",
     "type": "string",
     "readers": [
       "waits"
     ],
     "doc": "The formula contract a root was poured under. A root reading graph.v2 is a run's root."
+  },
+  {
+    "name": "gc.formula_name",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The formula a workflow root was poured from, which Gas City stamps at the pour (lifecycle/lifecycle.toml, [metadata.runtime_owned]). A live root of mol-pr-review that a blocks edge of a PR's bead names is a review run attached to the bead, and the landing order marks no PR ready while one is."
   },
   {
     "name": "gc.input_convoy_id",
@@ -174,18 +223,37 @@
     "name": "gc.kind",
     "type": "string",
     "readers": [
+      "pr",
+      "review",
       "waits"
     ],
-    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root."
+    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root. A review run's loop is the bead of its run that reads ralph, the control bead of its checked step."
+  },
+  {
+    "name": "gc.outcome",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "The terminal disposition a step records. A review run's loop that closed reading pass passed its check."
+  },
+  {
+    "name": "gc.output_json",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A step's structured output, one JSON object, which the step writes before it closes. A review run's triage, lanes and rule-and-repair each write theirs in the shape the review domain declares."
   },
   {
     "name": "gc.root_bead_id",
     "type": "string",
     "readers": [
       "arm",
+      "review",
       "waits"
     ],
-    "doc": "The workflow root a step was poured under. The start reads the fence of each bead poured under a root to tell a pour Gas City left unfinished."
+    "doc": "The workflow root a step was poured under. The start reads the fence of each bead poured under a root to tell a pour Gas City left unfinished. A review run's outputs are on the beads that name its root."
   },
   {
     "name": "gc.routed_to",
@@ -193,17 +261,36 @@
     "readers": [
       "arm",
       "listing",
-      "pr"
+      "pr",
+      "review"
     ],
-    "doc": "gctk bead arm refuses a routed bead, which is dispatched already. The pool, agent or person a bead is routed to (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A bead on a branch that a pool still holds has not pushed its work. The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
+    "doc": "gctk bead arm refuses a routed bead, which is dispatched already. An ask carries none, so no pool claims it and the review run is the one that works it. The pool, agent or person a bead is routed to (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A bead on a branch that a pool still holds has not pushed its work. The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
   },
   {
     "name": "gc.step_ref",
     "type": "string",
     "readers": [
+      "review",
       "waits"
     ],
-    "doc": "The formula step a step bead carries out, as \u003cformula\u003e.\u003cstep\u003e. A live run with an open step whose ref ends in .load-context has not passed load-context."
+    "doc": "The formula step a step bead carries out, as \u003cformula\u003e.\u003cstep\u003e. A live run with an open step whose ref ends in .load-context has not passed load-context. A review run's step's place in its formula. Its last part names the step, triage, rule-and-repair or lane, which says the output the step writes."
+  },
+  {
+    "name": "gc.var.branch",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A review run's branch var: the PR's branch, read when the bead that owns the PR names none."
+  },
+  {
+    "name": "gc.var.head",
+    "type": "string",
+    "readers": [
+      "pr",
+      "review"
+    ],
+    "doc": "A review run's head var: the head the refinery validated, the run's first head. A review run's head var, which Gas City stamps on its root at the pour: the head the landing order poured it at. The order counts a closed run at the PR's validated head toward its re-offer."
   },
   {
     "name": "gc.var.issue",
@@ -212,6 +299,39 @@
       "waits"
     ],
     "doc": "The bead a classic molecule's issue variable names, which a root that names no input convoy works. A root whose input convoy tracks another bead works none."
+  },
+  {
+    "name": "gc.var.max_attempts",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A review run's max_attempts var: the loop's bound, which Gas City compiles the loop's check from, so the iteration that reaches it is the loop's last and its check records the run's result when it does not pass."
+  },
+  {
+    "name": "gc.var.pr_bead",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A review run's pr_bead var: the bead that owns the PR the run judges."
+  },
+  {
+    "name": "gc.var.shadow",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A review run's shadow var. Reading true, the run writes nothing outside itself, so the loop's check records no result, closes no ask and files no gate."
+  },
+  {
+    "name": "gc.var.target",
+    "type": "string",
+    "readers": [
+      "pr",
+      "review"
+    ],
+    "doc": "A review run's target var: the branch the PR merges into, the target its result is for. A review run's target var, which Gas City stamps on its root at the pour: the target its result is for. The order counts a closed run for the record's target toward its re-offer."
   },
   {
     "name": "gc.work_outcome",
@@ -282,6 +402,13 @@
     "doc": "The highest inline comment id the intake has routed. A value that is not a whole number reads as 0."
   },
   {
+    "name": "pr_github_read",
+    "type": "json",
+    "owner": "pr",
+    "warrant": "saved-github-read",
+    "doc": "GitHub's side of a PR on Gas Town's pending record as the landing order last read it whole, one JSON object on the bead that owns the PR: read_at; since, the provenance instant the definition of feedback was applied with; the PR's url, number, repository, head_branch and base; its head, state, draft and merge_state; checks, the required check runs at that head as {name, status, conclusion}; approvers and requesters, the accounts that can push whose approval or request for changes stands; feedback, the newest feedback id in each id space as {review, inline, conversation}; and awaiting, the review threads waiting on the city's answer. The landing order writes it in the write that records each check of an open PR, and a read that fails partway leaves the last whole one. It holds no answer. The pr evaluator decides over it for a display, as current only while it names the record's repository and number, its head is the head the store holds (observed_pr_head_sha on a changed head, pr_head_sha otherwise) and its since is the bead's pr_provenance_since. Absent or not current, GitHub's side of the PR reads as unread."
+  },
+  {
     "name": "pr_head_sha",
     "type": "string",
     "owner": "pr/record",
@@ -325,13 +452,13 @@
     "name": "pr_reconcile_error",
     "type": "string",
     "owner": "pr/record",
-    "doc": "Why the landing order's last read could not decide, such as a lookup that failed or a merge commit not yet on the fetched target. The next run reads the record again, and a read that decides clears it."
+    "doc": "Why the landing order's last read could not decide or finish, such as a lookup that failed, a merge commit not yet on the fetched target, or a wake of the refinery that did not land. The next run reads the record again, and a read that decides clears it."
   },
   {
     "name": "pr_reconcile_pending",
     "type": "string",
     "owner": "pr/record",
-    "doc": "true while a reconciliation of the record is still owed, the marker the landing order selects the records it reads by. The record's first write sets it, and the order clears it when the bead closes on a verified merge, goes back to the refinery, meets an exception or has been released from the refinery. A disposition's close clears it in the same write, through bead-rehome.sh, the one shell writer that spells it, because only that write closes the bead under the record lock."
+    "doc": "true while a reconciliation of the record is still owed, the marker the landing order selects the records it reads by. The record's first write sets it, and the order clears it when the bead closes on a verified merge, has its changed head handed to the refinery, meets an exception or has been released from the refinery. A disposition's close clears it in the same write, through bead-rehome.sh, the one shell writer that spells it, because only that write closes the bead under the record lock."
   },
   {
     "name": "pr_repo",
@@ -388,12 +515,16 @@
     "doc": "Why the work was sent back to the refinery: a head it has not validated, or a record left half written. A publication clears it."
   },
   {
+    "name": "review_checks",
+    "type": "string",
+    "owner": "review",
+    "doc": "On an ask, the checks it sends back, a comma list of names from the check index at the PR's validated head, which gctk review ask writes as it files the ask. A review run picks each at the first head it judges once it can take the ask. Absent, the ask sends back no check."
+  },
+  {
     "name": "review_results",
     "type": "json",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The review loop's results on the bead that owns a PR, a JSON array of {head, target, passed}, one for each head and target the loop judged. The evaluator counts only a result for the PR's live head and target."
+    "owner": "review",
+    "doc": "The review loop's results on the bead that owns a PR, a JSON array of {head, target, passed, run}, one for each head and target a run judged, run naming the root of the run that recorded it, which the loop's check writes through gctk review passed --record under the store's record lock, replacing the entry for the same head and target. The pr evaluator counts only a result for the PR's live head and target, and reads none while the key is absent. The landing order counts a closed run as one that recorded its result only while the entry for its last head names it."
   },
   {
     "name": "rig_check.lint",
@@ -412,5 +543,19 @@
     "type": "json",
     "owner": "internal/rig",
     "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
+  },
+  {
+    "name": "task_kind",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A bead's role (lifecycle/lifecycle.toml). An ask carries none, so a bead that names a PR's branch and carries one, such as a rework child, is work of its own on the branch."
+  },
+  {
+    "name": "withdraw_head",
+    "type": "string",
+    "owner": "pr",
+    "doc": "The head a withdrawal of a PR's approvals names, on the bead `gctk pr withdraw` files, which blocks the bead that owns the PR. The landing order dismisses each approval that stands on a commit that does not contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is filed, and never cleared."
   }
 ]

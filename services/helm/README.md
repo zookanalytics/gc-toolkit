@@ -1491,7 +1491,8 @@ asked of the listing's rows, so one document never mixes two reads of a bead:
 | `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), or a row of the store's ephemeral plane |
 | `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
 | `services/gctk/prstatus` (`Holding` over `Listing.Blockers`) | what a person owes on a bead through its `blocks` edges |
-| `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | where an open pull request stands and what holds it |
+| `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | each open pull request's facts, and where one on the old record stands and what holds it |
+| `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it: the evaluator's answer over the listing's rows and the GitHub read the landing order saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to |
 | `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows and waits' answers, and whether the city takes each piece as things stand |
 
@@ -1501,7 +1502,10 @@ out a wisp, a row stored with no history, such as an order run's tracking bead,
 and a template molecule. `internal/rigboard/table.go` is the one table that
 turns the readers' answers into a row's group and signal, first match wins,
 and the only place those words are chosen. The read adds no rule about what
-holds a bead, whose move it is or whether work is moving.
+holds a bead, whose move it is or whether work is moving. The blocked status
+Gas Town's pending record writes on a bead whose pull request it holds is the
+record's own and holds nothing, so such a pull request reads "Pull request
+#n" with where it stands, in the Work queue.
 `specs/tk-yhquh93.2/gas-city-search.md` says why it reads through `gc bd list`
 rather than the supervisor's bead routes.
 

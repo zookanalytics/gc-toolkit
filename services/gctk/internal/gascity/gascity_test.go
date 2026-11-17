@@ -268,3 +268,71 @@ func TestInStartsEveryCommandInItsDirectory(t *testing.T) {
 		t.Fatalf("the commands ran in %q, want %q", raw, want)
 	}
 }
+
+// A cook passes its vars in their names' order, as --var flags, and reads the
+// root from the summary line it prints with --json (formulaCookJSONResult in
+// cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). A cook that exits
+// non-zero names no root, and one whose output names none answers with none.
+func TestCookPassesItsVarsAndReadsTheRoot(t *testing.T) {
+	dir := t.TempDir()
+	gc := filepath.Join(dir, "gc")
+	if err := os.WriteFile(gc, []byte(`#!/bin/sh
+printf '%s\n' "$*" >> "$(dirname "$0")/log"
+case "$5" in
+  tk-1) echo 'warning: gc formula cook: projecting execution facts'; echo '{"schema_version":"1","ok":true,"formula":"mol-pr-review","mode":"attach","attach_bead_id":"tk-1","root_id":"tk-root","created":9}' ;;
+  tk-2) echo 'gc formula cook: attach bead tk-2: not found' >&2; exit 1 ;;
+  *) echo 'Root: tk-other' ;;
+esac
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &City{bin: gc}
+	got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-1", Vars: map[string]string{"target": "main", "head": "abc", "pr_bead": "tk-1"}})
+	if got.Code != 0 || got.Root != "tk-root" {
+		t.Fatalf("the cook answered %+v, want exit 0 and root tk-root", got)
+	}
+	if got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-2"}); got.Code != 1 || got.Root != "" {
+		t.Fatalf("a refused cook answered %+v, want exit 1 and no root", got)
+	}
+	if got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-3"}); got.Root != "" {
+		t.Fatalf("a cook with no summary line named root %q", got.Root)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "log"))
+	first := strings.Split(string(raw), "\n")[0]
+	if want := "formula cook mol-pr-review --attach tk-1 --json --var head=abc --var pr_bead=tk-1 --var target=main"; first != want {
+		t.Fatalf("the cook ran %q, want %q", first, want)
+	}
+}
+
+// A wake and a nudge name the session, and a nudge passes its message as one
+// argument, whatever spaces and quotes it holds. A command that exits non-zero
+// answers with its exit and its last line.
+func TestAWakeAndANudgeNameTheSessionAndPassTheMessageWhole(t *testing.T) {
+	dir := t.TempDir()
+	gc := filepath.Join(dir, "gc")
+	if err := os.WriteFile(gc, []byte(`#!/bin/sh
+for a in "$@"; do printf '%s\n' "$a"; done >> "$(dirname "$0")/log"
+echo -- >> "$(dirname "$0")/log"
+[ "$3" = rig/gone.refinery ] && { echo "gc session $2: session not found" >&2; exit 1; }
+exit 0
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &City{bin: gc}
+	msg := "PR head changed on tk-1: run 'gc prime' to check merge queue and begin processing."
+	if r := c.Wake("rig/gc-toolkit.refinery"); r.Failure() != "" {
+		t.Fatalf("the wake answered %+v", r)
+	}
+	if r := c.Nudge("rig/gc-toolkit.refinery", msg); r.Failure() != "" {
+		t.Fatalf("the nudge answered %+v", r)
+	}
+	if f := c.Nudge("rig/gone.refinery", msg).Failure(); f != "exit 1: gc session nudge: session not found" {
+		t.Fatalf("a nudge gc refused failed with %q", f)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "log"))
+	want := "session\nwake\nrig/gc-toolkit.refinery\n--\nsession\nnudge\nrig/gc-toolkit.refinery\n" + msg + "\n--\n" +
+		"session\nnudge\nrig/gone.refinery\n" + msg + "\n--\n"
+	if string(raw) != want {
+		t.Fatalf("gc ran with\n%s\nwant\n%s", raw, want)
+	}
+}

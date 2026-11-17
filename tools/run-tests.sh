@@ -13,7 +13,8 @@
 #                [--affected BASE | PATH ...]
 #
 #   -j, --jobs N       concurrent runs (default: $TEST_JOBS or half the cores)
-#   -t, --timeout SECS per-run wall limit, 0 disables (default: $TEST_TIMEOUT or 900)
+#   -t, --timeout SECS end a run that writes nothing for SECS (below), 0 disables
+#                      (default: $TEST_TIMEOUT or 900)
 #       --retry N      serial re-runs for a run that failed in parallel
 #                      (default: $TEST_RETRY or 1); --no-retry sets 0
 #       --affected BASE
@@ -64,9 +65,9 @@
 #
 #   # run-tests-parts: <part> [<part> ...]
 #
-# Such a file runs once per part, and each run has its own timeout, its own
-# report line (FILE[PART]) and its own serial re-run, so a file whose sections
-# together outlast one timeout stays one file. Each run gets
+# Such a file runs once per part, and each run has its own report line
+# (FILE[PART]) and its own serial re-run, so a long file runs on several cores
+# at once and stays one file. Each run gets
 # RUN_TESTS_PART=<part> and RUN_TESTS_PARTS=<every declared part> in its
 # environment, and the file executes only that part's sections (part() in
 # assets/scripts/test-harness.sh). Run directly, with RUN_TESTS_PART unset, the
@@ -78,6 +79,19 @@
 # does) therefore cannot wedge the runner on a pipe that never reaches EOF, and
 # the group is killed once the file's own process exits so the child cannot
 # outlive the file that spawned it.
+#
+# The timeout ends a run that has hung, never one that is only slow. A suite
+# writes a line for each assertion, and a loaded host makes a sound run take
+# longer without making it go quiet, so the runner judges a run by its silence,
+# not its length. A guard starts beside each run, in the run's process group,
+# and reads the size of the run's log once a second. Once the log has not grown
+# for the timeout, the guard writes a line saying so into the log and sends the
+# group TERM, and KILL five seconds later if the run has not ended. The run is
+# reported as TIMEOUT.
+# The guard also ends its run once the runner is gone, so a stopped runner
+# leaves no run behind. A run that hangs while it goes on writing, such as a
+# loop that prints forever, is outside the guard's reach. The caller's own
+# limit ends it, such as a CI job's timeout-minutes. -t 0 starts no guard.
 #
 # The suite yields to whatever else the host runs, such as a city's agents and
 # their bead calls. A file forks a stub for every gc and bd call it makes, so at
@@ -95,9 +109,8 @@
 # failed file is re-run serially, where no sibling competes with it. A file that
 # then passes was a parallel-contention false failure and counts as a pass; only
 # a file that fails serially too is a real failure. --no-retry (or --retry 0)
-# reports the raw parallel result. A serial re-run keeps the caller's priority.
-# It runs alone, so it cannot crowd the host, and a file the wave's lower
-# priority slowed past its timeout is not slowed the same way again.
+# reports the raw parallel result. A serial re-run keeps the caller's priority,
+# because it runs alone and cannot crowd the host.
 #
 # Every file runs with commit and tag signing off, added after any
 # GIT_CONFIG_COUNT entries the caller already exported. A test that commits
@@ -134,11 +147,22 @@
 # under either prefix that is meant for one file, such as
 # GC_TMUX_TEST_WAIT_SECS, reaches it only then.
 #
+# The runner needs bash 5.1 or later, both its own and the first on PATH, which
+# starts each file.
+#
 # Exit: 0 every file passed, or passed on a serial re-run, or the subset was
 # empty; 1 one or more failed serially too; 2 a usage or enumeration error,
-# such as a BASE git cannot read.
+# such as a BASE git cannot read, or no bash of 5.1 or later.
 
 set -uo pipefail
+
+# The oldest bash the runner runs under (see the header). bash sets
+# BASH_VERSINFO itself and never takes it from the environment.
+case "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" in
+  [0-4].*|5.0)
+    echo "run-tests: needs bash 5.1 or later, and $BASH is bash $BASH_VERSION, so nothing ran" >&2
+    exit 2 ;;
+esac
 
 usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
@@ -472,6 +496,26 @@ export TMPDIR="$tmp_real"
   echo "run-tests: no test floor at $ROOT/tools/test-floor; not running" >&2; exit 2; }
 export PATH="$ROOT/tools/test-floor:$PATH"
 
+# The bash every file starts with, held to the runner's own floor (see the
+# header). spawn starts each file from ROOT, so the first bash on PATH is looked
+# up from ROOT, and spawn starts each file with the full path found here, the
+# file whose version this reads. type -P answers from the locations the shell
+# remembers before it searches PATH, so the lookup forgets them first.
+FILE_BASH="$(cd "$ROOT" && hash -r && type -P bash)" || {
+  echo "run-tests: each file starts with the first bash on PATH, and PATH has no bash, so nothing ran" >&2
+  exit 2; }
+case "$FILE_BASH" in /*) ;; *) FILE_BASH="$ROOT/$FILE_BASH" ;; esac
+file_bash_v="$("$FILE_BASH" -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]} $BASH_VERSION"' 2>/dev/null)"
+case "$file_bash_v" in
+  [0-4].*|5.0\ *)
+    echo "run-tests: each file starts with the first bash on PATH, and $FILE_BASH is bash ${file_bash_v#* }, older than 5.1, so nothing ran" >&2
+    exit 2 ;;
+  [0-9]*.[0-9]*\ *) ;;
+  *)
+    echo "run-tests: each file starts with the first bash on PATH, and $FILE_BASH reports no bash version, so nothing ran" >&2
+    exit 2 ;;
+esac
+
 # The caller's variables every file runs without, and the one value handed on
 # (see the header). The runner is the only source of RUN_TESTS_GC_BIN, so one
 # the caller exported is replaced.
@@ -488,11 +532,16 @@ trap 'rm -rf "$LOGDIR"' EXIT
 total="${#RUN_FILE[@]}"
 [ "$JOBS" -gt "$total" ] && JOBS="$total"
 START="$SECONDS"
+if [ "$TIMEOUT" -gt 0 ]; then
+  guard_note="a run silent for ${TIMEOUT}s is ended"
+else
+  guard_note="no run is ended for silence"
+fi
 if [ "$QUIET" -eq 0 ]; then
   if [ "$total" -eq "${#TESTS[@]}" ]; then
-    printf 'run-tests: %d files, %d parallel, timeout %ss\n' "$total" "$JOBS" "$TIMEOUT"
+    printf 'run-tests: %d files, %d parallel, %s\n' "$total" "$JOBS" "$guard_note"
   else
-    printf 'run-tests: %d files as %d runs, %d parallel, timeout %ss\n' "${#TESTS[@]}" "$total" "$JOBS" "$TIMEOUT"
+    printf 'run-tests: %d files as %d runs, %d parallel, %s\n' "${#TESTS[@]}" "$total" "$JOBS" "$guard_note"
   fi
 fi
 
@@ -514,10 +563,47 @@ if ionice -c 2 -n 7 true >/dev/null 2>&1; then
   LOW_PRIORITY+=(ionice -c 2 -n 7)
 fi
 
-# Start one run in the background, under the timeout, its output to its log. A
-# part's run is told which part it is and which parts its file declares; a run
-# of a whole file gets neither, whatever the caller exported. Any words after
-# the index are a command the run starts through, such as LOW_PRIORITY.
+# The guard beside a run (see the header). It sits in the run's process group,
+# so it ignores the TERM it sends there, and the KILL that follows ends it with
+# the run. Before it ends a run for silence it writes the run's hang mark, which
+# the report reads as a TIMEOUT whatever status the signal leaves the run with.
+# The mark is named for the run's pid, and the run clears it before its guard
+# starts. No process is given a pid while a process group of that id lives, and
+# each guard sits in its run's group, so once a run has cleared its mark no
+# other run's guard can write it. Its output is the run's log. In any subshell
+# $$ is the runner's pid.
+guard() { # <run-pid> <log> <mark>
+  local run="$1" log="$2" mark="$3" size grown="" since="$EPOCHSECONDS" i
+  trap '' TERM
+  while kill -0 "$run" 2>/dev/null; do
+    kill -0 "$$" 2>/dev/null || break
+    size="$(wc -c <"$log" 2>/dev/null)"
+    # EPOCHSECONDS counts whole seconds, so a difference equal to the timeout
+    # can be up to a second short of it.
+    if [ "$size" != "$grown" ]; then
+      grown="$size"; since="$EPOCHSECONDS"
+    elif [ $((EPOCHSECONDS - since)) -gt "$TIMEOUT" ]; then
+      : >"$mark"
+      printf '\nrun-tests: nothing written for %ss, so the run has hung and is ended\n' "$TIMEOUT"
+      break
+    fi
+    sleep 1
+  done
+  kill -0 "$run" 2>/dev/null || return 0
+  kill -TERM -- "-$run" 2>/dev/null
+  for i in 1 2 3 4 5; do
+    sleep 1
+    kill -0 "$run" 2>/dev/null || return 0
+  done
+  kill -KILL -- "-$run" 2>/dev/null
+}
+
+# Start one run in the background with FILE_BASH, its output to its log, and
+# its guard beside it while the timeout is on. The run is the background job
+# itself, so its pid leads its process group. A part's run is told which part
+# it is and which parts its file declares; a run of a whole file gets neither,
+# whatever the caller exported. Any words after the index are a command the run
+# starts through, such as LOW_PRIORITY.
 spawn() { # <run-index> [<command>...]
   local t="${RUN_FILE[$1]}" part="${RUN_PART[$1]}" log="$LOGDIR/$1.log"
   shift
@@ -529,10 +615,13 @@ spawn() { # <run-index> [<command>...]
       unset RUN_TESTS_PART RUN_TESTS_PARTS
     fi
     if [ "$TIMEOUT" -gt 0 ]; then
-      exec "$@" timeout -k 5 -s TERM "$TIMEOUT" bash "$t"
-    else
-      exec "$@" bash "$t"
+      # An async command's words expand after the fork, where BASHPID would
+      # name the guard, so the run's pid is read before it.
+      run_pid="$BASHPID"
+      rm -f "$LOGDIR/$run_pid.hung"
+      guard "$run_pid" "$log" "$LOGDIR/$run_pid.hung" &
     fi
+    exec "$@" "$FILE_BASH" "$t"
   ) >"$log" 2>&1 &
 }
 
@@ -547,6 +636,7 @@ finish() {
   local pid="$1" rc="$2" idx dur rel status
   idx="${PID_IDX[$pid]}"
   kill -- -"$pid" 2>/dev/null   # reap anything the file left running in its group
+  [ ! -e "$LOGDIR/$pid.hung" ] || rc=124
   dur=$(( SECONDS - PID_START[$pid] ))
   rel="$(label "$idx")"
   if [ "$rc" -eq 0 ]; then
@@ -562,7 +652,7 @@ finish() {
 }
 
 # Re-run one run serially (no sibling jobs) at the caller's priority, reusing
-# the same timeout and process-group reap as the parallel path. Used after the
+# the same guard and process-group reap as the parallel path. Used after the
 # parallel wave to tell a parallel-contention false failure from a real one.
 rerun_serial() {
   local idx="$1" pid rc
@@ -570,6 +660,7 @@ rerun_serial() {
   pid=$!
   wait "$pid"; rc=$?
   kill -- -"$pid" 2>/dev/null   # reap anything the file left in its group
+  [ ! -e "$LOGDIR/$pid.hung" ] || rc=124
   return "$rc"
 }
 

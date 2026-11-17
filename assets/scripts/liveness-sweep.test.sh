@@ -12,6 +12,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/liveness-sweep.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-sweep-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# gctk, built from this checkout, reads the check index for the scripts under
+# test.
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
+export GCTK_BIN="$TMP/gctk"
 
 # The census phases its pre-open gates against the check index, which the
 # resolver reads at each anchor's head, laid over the pack's own, so by default

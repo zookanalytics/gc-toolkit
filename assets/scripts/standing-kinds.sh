@@ -8,7 +8,7 @@
 # Sourced (never executed) by the readers that tell a standing record from
 # work or input: the liveness sweep, its precheck and its claim-time re-check
 # (liveness-sweep.sh, liveness-sweep-precheck.sh, liveness-recheck.sh), the
-# proactive scan (tools/gc-proactive.sh), and the doctor checks
+# proactive scan and sling (tools/gc-proactive.sh), and the doctor checks
 # check-blocked-work-armed and check-hq-marooned-work. The sweep and its
 # precheck read the list through their shared classifier
 # (liveness-classify.sh). One definition, no copies: a kind added here is

@@ -4,12 +4,11 @@
 # THE GUARDRAIL: mol-witness-patrol's recover-orphaned-beads must not run its
 # liveness loop over a graph.v2 topology ROOT. A root carries gc.kind in the
 # topology set (workflow, scope, spec) and names a session only in
-# gc.session_name, a stamp the controller copies from its worked steps. The
-# host-bead-skip owner filter still stamps that name as the root's owner.
-# Resolved ACTIVE, the root reaches the live-but-wedged warrant path, and a
-# warrant against that session can kill unrelated live work. Resolved the other
-# way, absent, a root only churns a witness-salvage-refused notice: it has no
-# worktree, and orphan-dispose.sh already refuses it as root_not_schedulable. A
+# gc.session_name, a stamp the controller copies from its worked steps, so that
+# session's liveness says nothing about the run. The host-bead-skip owner filter
+# still stamps that name as the root's owner. Resolved absent, a root churns a
+# witness-salvage-refused notice: it has no worktree, and orphan-dispose.sh
+# already refuses it as root_not_schedulable. A
 # topology root is not recoverable work — its STEP beads carry the work and
 # their own holder fields, and its close is the control-dispatcher's
 # workflow-finalize — so it is dropped from the candidate set before the loop.
@@ -141,7 +140,7 @@ eq "$(printf '%s' '[{"id":"f1","owner":"hq-9","metadata":{"gc.session_id":"hq-9"
 # The exact shape the finding reported: an OWNED workflow ROOT — no
 # assignee, no gc.session_id, only a gc.session_name naming a live session.
 # host-bead-skip KEEPS it (it names an owner), so topology-root-skip is what
-# must drop it, leaving the loop nothing to warrant.
+# must drop it, leaving the loop nothing of it to judge.
 # The genuine step orphan beside it (a dead gc.session_id, no topology kind)
 # survives to be recovered.
 FIX4='[

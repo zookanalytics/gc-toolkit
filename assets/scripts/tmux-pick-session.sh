@@ -5,7 +5,7 @@
 #
 # Default filter hides the sessions an operator does not reach one at a
 # time: the polecats (folded into the per-rig count), control-dispatcher,
-# deacon, witness, dog (the warrant-executor pool), boot. The
+# deacon, witness, dog (the bd pack's Dolt maintenance pool), boot. The
 # currently-attached session is always shown.
 # --all disables the filter; toggle from inside the menu via [.].
 # --city-path is the absolute path of the city this binding belongs
