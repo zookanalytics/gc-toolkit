@@ -380,9 +380,10 @@ PR does, carries its own `blocks` edge onto each bead it waits on from the
 create that files it (`--waiting-on`), so no pass reads it clear before it
 waits. Each such bead is in the PR bead's own store, since an edge into
 another store holds nothing, and a re-run that names a wait the ask it finds
-lacks is refused. The refinery's requeue of a PR on the record, `pr-facts.sh`'s conflict, red-check
-and feedback arms, a sitting's send-back, and a must-fix point a sitting or the
-mechanik puts on another open PR each file one. A run takes an ask only while
+lacks is refused. The refinery's requeue of a PR on the record,
+`pr-facts.sh`'s conflict, red-check and feedback arms, a sitting's send-back,
+and a must-fix point a sitting or the mechanik puts on another open PR each
+file one. A run takes an ask only while
 `gctk bead holds` reads it clear, so an ask that waits on other work starts no
 round and spends no attempt, and holds the PR by its own edge until a run takes
 it. The loop's check closes each ask the run answered as it records the result,

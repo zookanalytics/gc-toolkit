@@ -290,9 +290,10 @@
 #     and with --no-rework in place of a --rework, whose child has landed. The
 #     return leaves out the --pr-anchor that named the PR the rework went to,
 #     since --pr-anchor goes only with --rework or --retire, and --no-rework
-#     leaves every PR the ruling reaches standing. The closer the stay armed
-#     already checks that work, and a --waiting-on on work that has landed
-#     would arm it again once its arm has sent it.
+#     leaves every PR the ruling reaches standing. It leaves out each --check
+#     and --rework-waiting-on too, which go only with --rework. The closer the
+#     stay armed already checks that work, and a --waiting-on on work that has
+#     landed would arm it again once its arm has sent it.
 # Exit: 0 signed off, or with --answer the named gates answered, or with --stay
 #   the conversation left waiting on the work; 1 stopped short — a read
 #   failed, the rework did not file or its record did not land, the PR did not
