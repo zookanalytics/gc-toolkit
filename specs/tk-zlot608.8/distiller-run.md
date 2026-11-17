@@ -14,7 +14,10 @@ named the city's seven places, and the bead store was read only.
 
 Claude Code 2.1.326 was asked in each place, with `CLAUDE_CONFIG_DIR` set to a
 scratch directory, so each answer named a directory under it (`<cfg>`), and no
-real memory directory was read. The scratch config holds no sign-in, so each
+real memory directory was read. In the output, `hq` is the city's HQ, whose
+checkout is the city's root, `rig-a` to `rig-e` are its rigs other than
+gc-toolkit, and `<city>` is the city's path as a project directory's name spells
+it. The scratch config holds no sign-in, so each
 ask's turn failed after its init record, which the ask reads, and no model call
 was made. Each ask made its place's directory, and the adapter removed it again,
 which is why the second settle still finds six places with none. The home rig's
@@ -30,24 +33,24 @@ prompt-update that closed with no merge.
 
 ```text
 === settle, before the home rig has a memory directory
-loomington: no memory directory at <cfg>/projects/-Users-gc-Code-loomington/memory/
-gc-toolkit: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-gc-toolkit/memory/
-signal-loom: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-signal-loom/memory/
-gascity: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-gascity/memory/
-shutupandlisten: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-shutupandlisten/memory/
-sprintshow: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-sprintshow/memory/
-growth-factor: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-growth-factor/memory/
+hq: no memory directory at <cfg>/projects/<city>/memory/
+gc-toolkit: no memory directory at <cfg>/projects/<city>-rigs-gc-toolkit/memory/
+rig-a: no memory directory at <cfg>/projects/<city>-rigs-rig-a/memory/
+rig-b: no memory directory at <cfg>/projects/<city>-rigs-rig-b/memory/
+rig-c: no memory directory at <cfg>/projects/<city>-rigs-rig-c/memory/
+rig-d: no memory directory at <cfg>/projects/<city>-rigs-rig-d/memory/
+rig-e: no memory directory at <cfg>/projects/<city>-rigs-rig-e/memory/
 waits ended: 0 units removed with a fix landed, each one's text kept; 0 units due again with no fix landed
 exit 0
 
 === settle, with the home rig's directory seeded
-loomington: no memory directory at <cfg>/projects/-Users-gc-Code-loomington/memory/
-signal-loom: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-signal-loom/memory/
-gascity: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-gascity/memory/
-shutupandlisten: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-shutupandlisten/memory/
-sprintshow: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-sprintshow/memory/
-growth-factor: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-growth-factor/memory/
-gc-toolkit: <cfg>/projects/-Users-gc-Code-loomington-rigs-gc-toolkit/memory, 6 notes and 1 entries
+hq: no memory directory at <cfg>/projects/<city>/memory/
+rig-a: no memory directory at <cfg>/projects/<city>-rigs-rig-a/memory/
+rig-b: no memory directory at <cfg>/projects/<city>-rigs-rig-b/memory/
+rig-c: no memory directory at <cfg>/projects/<city>-rigs-rig-c/memory/
+rig-d: no memory directory at <cfg>/projects/<city>-rigs-rig-d/memory/
+rig-e: no memory directory at <cfg>/projects/<city>-rigs-rig-e/memory/
+gc-toolkit: <cfg>/projects/<city>-rigs-gc-toolkit/memory, 6 notes and 1 entries
 waits ended: 0 units removed with a fix landed, each one's text kept; 0 units due again with no fix landed
 exit 0
 
@@ -116,13 +119,13 @@ note	moment.md	4bc61834893881a5292aa42df473119a5a3da41504355d17a11dead086359695	
 note	unsure.md	0ada3a688b058e79bf93eb276134667635266e02cf9dc40cb1648d938b86c8ec	2026-11-17T02:44:51Z		2026-12-15	
 
 === settle: tk-0rhvews closed with its proposal merged on main, tk-g7cn1bd closed with no merge, tk-7p37ddd open
-loomington: no memory directory at <cfg>/projects/-Users-gc-Code-loomington/memory/
-signal-loom: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-signal-loom/memory/
-gascity: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-gascity/memory/
-shutupandlisten: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-shutupandlisten/memory/
-sprintshow: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-sprintshow/memory/
-growth-factor: no memory directory at <cfg>/projects/-Users-gc-Code-loomington-rigs-growth-factor/memory/
-gc-toolkit: <cfg>/projects/-Users-gc-Code-loomington-rigs-gc-toolkit/memory, 5 notes and 1 entries
+hq: no memory directory at <cfg>/projects/<city>/memory/
+rig-a: no memory directory at <cfg>/projects/<city>-rigs-rig-a/memory/
+rig-b: no memory directory at <cfg>/projects/<city>-rigs-rig-b/memory/
+rig-c: no memory directory at <cfg>/projects/<city>-rigs-rig-c/memory/
+rig-d: no memory directory at <cfg>/projects/<city>-rigs-rig-d/memory/
+rig-e: no memory directory at <cfg>/projects/<city>-rigs-rig-e/memory/
+gc-toolkit: <cfg>/projects/<city>-rigs-gc-toolkit/memory, 5 notes and 1 entries
 waits ended: 1 unit removed with a fix landed, each one's text kept; 1 unit due again with no fix landed
 exit 0
 
