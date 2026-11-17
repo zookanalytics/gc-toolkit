@@ -26,7 +26,8 @@
 # itself, never from the event that started the run, because pr-size.yml's
 # runs need not start in the order of their events. It writes only while both
 # are still as it read them, since a push or a change of that branch starts a
-# run of its own.
+# run of its own. pr-size.yml's concurrency group keeps two runs of one pull
+# request from writing at once.
 #
 # Usage: pr-size.sh --repo <host/owner/name> --pr <n>
 #   It runs from inside a checkout that holds the branch the pull request

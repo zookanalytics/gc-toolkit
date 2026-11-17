@@ -34,14 +34,18 @@ on:
     workflows: [tests]
     types: [completed]
 
-# A newer run that measures cancels the one before it. An edit of the title or
-# body measures nothing, and the city rewrites a pull request's body as its
-# summary moves, so such an edit takes a group of its own and cancels no run
-# that measures. The end of a tests run takes a group of its own for its pull
-# request, because a push cancels the tests run before it, and the end of that
-# cancelled run must not cancel the run that measures the push.
+# Every run whose job measures a pull request takes that pull request's group,
+# whichever event started it, so no two runs write its comment at once, and a
+# newer run cancels the one before it. Runs take a group in the order they
+# start waiting on it, not the order of their events, so pr-size.sh measures
+# the pull request as it stands when the run starts. The end of a tests run
+# that a push cancelled therefore measures the push, as the run it cancels
+# would have. A run whose job measures nothing takes a group of its own and
+# cancels no run that measures: an edit of the title or body, which the city
+# makes as a pull request's summary moves, and the end of a tests run that no
+# pull request started.
 concurrency:
-  group: pr-size-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}${{ github.event_name == 'workflow_run' && '-tests' || github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
+  group: pr-size-${{ github.event.pull_request.number || github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0].number || github.run_id }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 # GitHub lists the issue-comment endpoints, which a pull request's comments

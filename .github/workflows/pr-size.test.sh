@@ -5,7 +5,8 @@
 # starts, and writes only while the pull request still has them. pr-size.yml
 # runs as the default branch carries it, from the tip of the pull request's
 # base branch, again when the pull request changes that branch, and again when
-# one of its tests runs ends.
+# one of its tests runs ends, and every run that measures one pull request takes
+# that pull request's one concurrency group.
 #
 # The cases build a repository whose base commit carries tools/measure.sh and a
 # deletion plan, and whose head adds lines to a file the plan retires while it
@@ -47,8 +48,9 @@ commit() { git add -A && git commit -q -m "$1"; }
 # GH_PR_HEAD and GH_PR_BASE as its head and base, and each later read gets
 # GH_PR_HEAD_LATER and GH_PR_BASE_LATER where a case sets them. A tests run list
 # gets GH_RUNS or no run, a run gets no jobs and no artifacts, and a write
-# echoes what gh would. GH_FAIL fails every call whose words hold it, and all
-# fails every call.
+# echoes what gh would. With GH_KEEP set, a post leaves the bot's comment 99
+# among the comments the next run reads. GH_FAIL fails every call whose words
+# hold it, and all fails every call.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -67,7 +69,10 @@ case "$1 $2" in
     fi ;;
   "api repos/o/r/actions/workflows/"*) if [ -n "${GH_RUNS:-}" ]; then printf '%s' "$GH_RUNS"; else echo '{"workflow_runs":[]}'; fi ;;
   "api repos/o/r/actions/runs/"*) case "$2" in */jobs*) echo '{"jobs":[]}' ;; *) echo '{"artifacts":[]}' ;; esac ;;
-  "pr comment") echo "https://github.com/o/r/pull/7#issuecomment-99" ;;
+  "pr comment")
+    [ -z "${GH_KEEP:-}" ] \
+      || printf '[{"id":99,"user":{"login":"github-actions[bot]"},"body":"<!-- gc-toolkit:pr-size -->"}]' > "$GH_COMMENTS"
+    echo "https://github.com/o/r/pull/7#issuecomment-99" ;;
   *) echo '{}' ;;
 esac
 EOF
@@ -207,6 +212,17 @@ eq "$RC" 0 "a run whose pull request changes the branch it merges into while it 
 eq "$(ccalls | wc -l | tr -d ' ')" 2 "…and reads and writes no comment"
 has "$OUT" "PR#7 is now head ${HEAD_SHA:0:12} into integration, so nothing is written for head $SHORT into main" "…and its log says why"
 
+echo "# runs of one pull request, which its concurrency group runs one at a time, keep one comment"
+KEEP=$(page '[]' keep.json)
+GH_KEEP=1 GH_RUNS='{"workflow_runs":[{"id":901,"status":"in_progress","conclusion":null,"html_url":"u"}]}' run "$KEEP" "$HEAD_SHA"
+eq "$(ccalls | tail -n 1 | cut -d' ' -f1-2)" "pr comment" "the first run posts the comment"
+has "$(posted)" "has not finished" "…while the tests run it read has not finished"
+GH_RUNS='{"workflow_runs":[{"id":901,"status":"completed","conclusion":"success","html_url":"u"}]}' run "$KEEP" "$HEAD_SHA"
+eq "$(ccalls | tail -n 1 | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/99" \
+  "the run after it rewrites that comment and posts no second one"
+has "$(posted)" "From the [tests run](u) at head \`$SHORT\`" "…with the time of the tests run as it read it, finished"
+hasnt "$(posted)" "has not finished" "…and nothing of what the run before it read"
+
 echo "# a pull request or comments that cannot be read get no post"
 GH_FAIL=all run "$NONE" "$HEAD_SHA"
 eq "$RC" 1 "a pull request whose head and base cannot be read exits 1"
@@ -318,8 +334,10 @@ has "$ON" "types: [opened, synchronize, reopened, edited]" \
   "it runs on edited, which is how GitHub reports a change of the base branch"
 eq "$(grep -E '^    if:' "$WF")" "    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] || github.event_name == 'pull_request_target' && (github.event.action != 'edited' || github.event.changes.base)" \
   "…and the job runs for an edit only when the edit changes the base branch, and for a tests run only when a pull request started it"
-eq "$(grep -E '^  group:' "$WF")" "  group: pr-size-\${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}\${{ github.event_name == 'workflow_run' && '-tests' || github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}" \
-  "…while any other edit takes a concurrency group of its own, so it cancels no run that measures, and so does a tests run's end"
+GROUP=$(grep -E '^  group:' "$WF")
+eq "$GROUP" "  group: pr-size-\${{ github.event.pull_request.number || github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0].number || github.run_id }}\${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}" \
+  "…and every run whose job measures takes its pull request's concurrency group, while any other edit and the end of a tests run no pull request started take groups of their own, so they cancel no run that measures"
+hasnt "$GROUP" event_name "…so the event that started a run never sets it apart, and no two runs write one pull request's comment at once"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

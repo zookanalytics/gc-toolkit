@@ -74,6 +74,23 @@ only lines of the runner's shape and runs nothing from them. The trigger also
 names the run's pull request (`workflow_run.pull_requests[]`), which pr-size.sh
 takes as `--pr`.
 
+## Keep one writer for each pull request's comment
+
+**Covered by GitHub Actions' `concurrency`.** The concurrency page
+(`data/reusables/actions/actions-group-concurrency.md`) says a group holds "at
+most one running" job or workflow at a time, that `cancel-in-progress: true`
+also cancels "any currently running job or workflow in the same concurrency
+group", and that runs in a group "are processed in first-in-first-out (FIFO)
+order according to the time each one started waiting on the concurrency group,
+not the time each workflow was dispatched". So pr-size.yml gives every run that
+measures a pull request that pull request's one group, whichever event started
+it, and no two runs write its comment at once.
+
+A run's place in the group does not follow its event, so the head and base an
+event carries can be older than the pull request's. pr-size.sh reads both from
+the pull request ("Get a pull request" in the REST API) when it starts, and
+again before it writes, and it writes nothing when either moved.
+
 ## Read the head's run, its jobs and main's latest runs
 
 **Covered by the REST API, through `gh`.** "List workflow runs for a workflow"
