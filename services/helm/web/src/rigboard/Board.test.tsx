@@ -243,6 +243,12 @@ describe('the line saying when GitHub was last asked', () => {
     expect(line?.className).toBe('status status--stale');
   });
 
+  it('gives the date of a pass that started on another day than the read', async () => {
+    const at = '2026-11-09T16:30:00Z';
+    const line = await drawn({ state: 'stale', at });
+    expect(text(line)).toBe(`GitHub last asked at ${new Date(at).toLocaleString()}, which is stale.`);
+  });
+
   it('says since when no pass the history holds succeeded', async () => {
     const since = '2026-11-11T16:10:00Z';
     const line = await drawn({ state: 'not_asked', since });

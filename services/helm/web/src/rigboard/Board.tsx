@@ -243,20 +243,32 @@ function timeOf(at: string | Date): string {
   return Number.isNaN(d.getTime()) ? String(at) : d.toLocaleTimeString();
 }
 
-/** When GitHub was last asked about the rig's pull requests, as the read
- *  judged it: the start of the newest pass of the rig's pr-poll order that
- *  exited 0, stale past three of the order's intervals. */
-function AskedLine({ asked }: { asked: Asked }) {
+/** The time of day of at, with its date when it falls on another day than the
+ *  read at readAt. */
+function whenOf(at: string, readAt: string): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) {
+    return at;
+  }
+  return d.toDateString() === new Date(readAt).toDateString() ? d.toLocaleTimeString() : d.toLocaleString();
+}
+
+/** When GitHub was last asked about the rig's pull requests, as the read at
+ *  readAt judged it: the start of the newest pass of the rig's pr-poll order
+ *  that exited 0, stale past three of the order's intervals. */
+function AskedLine({ asked, readAt }: { asked: Asked; readAt: string }) {
   switch (asked.state) {
     case 'asked':
-      return <p className="status">GitHub last asked at {timeOf(asked.at ?? '')}.</p>;
+      return <p className="status">GitHub last asked at {whenOf(asked.at ?? '', readAt)}.</p>;
     case 'stale':
-      return <p className="status status--stale">GitHub last asked at {timeOf(asked.at ?? '')}, which is stale.</p>;
+      return (
+        <p className="status status--stale">GitHub last asked at {whenOf(asked.at ?? '', readAt)}, which is stale.</p>
+      );
     case 'not_asked':
       return (
         <p className="status status--stale">
           {asked.since !== undefined
-            ? `GitHub not asked: no pass since ${timeOf(asked.since)} succeeded.`
+            ? `GitHub not asked: no pass since ${whenOf(asked.since, readAt)} succeeded.`
             : "GitHub not asked: Gas City's run history holds no pass."}
         </p>
       );
@@ -293,7 +305,7 @@ function ReadStatus({ rig, state }: { rig: string; state: RigDocumentState }) {
       ) : (
         <p className="status">Read at {timeOf(last.read_at)}.</p>
       )}
-      <AskedLine asked={last.asked} />
+      <AskedLine asked={last.asked} readAt={last.read_at} />
     </>
   );
 }

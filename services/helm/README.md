@@ -1320,8 +1320,9 @@ again, and after a write it sends. A read that fails keeps the last good
 document on screen, with the time it was read and the failure beside it, and a
 failed read with no document before it shows the failure alone, never an empty
 list. Under the read time, a line says when GitHub was last asked about the
-rig's pull requests, as the read judged it, in amber when it is stale or GitHub
-was not asked, and in red when it could not be read.
+rig's pull requests, as the read judged it, with the date when that was on
+another day than the read. The line is amber when it is stale or GitHub was not
+asked, and red when it could not be read.
 
 **How it draws.** Two views make up the pages. Needs you is one entry per need
 (a question, a decision, a conversation, a pull request waiting on the
