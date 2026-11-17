@@ -75,10 +75,13 @@ type Spec struct {
 	// Out takes its standard output and its standard error, and nil discards
 	// them. Its standard input reads nothing.
 	Out io.Writer
-	// Relay has the process write into a pipe that this process copies into
-	// Out, so the process needs no access to where Out leads, and dies at its
-	// next write once this process is gone. Child.Relayed says when the copy
-	// is done.
+	// Stdout, when set, takes its standard output in place of Out, which then
+	// takes its standard error alone.
+	Stdout io.Writer
+	// Relay has the process write into pipes that this process copies into
+	// Out and Stdout, so the process needs no access to where they lead, and
+	// dies at its next write once this process is gone. Child.Relayed says
+	// when the copy is done.
 	Relay bool
 	// Session starts the process in a session of its own, so it leads a
 	// process group of its own, which outlives this process. Without it the
@@ -164,28 +167,67 @@ func (local) Start(s Spec) (Child, error) {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	}
 	c := &child{cmd: cmd, relayed: make(chan struct{})}
+	stdout := s.Out
+	if s.Stdout != nil {
+		stdout = s.Stdout
+	}
 	if !s.Relay || s.Out == nil {
-		cmd.Stdout, cmd.Stderr = s.Out, s.Out
+		cmd.Stdout, cmd.Stderr = stdout, s.Out
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
 		close(c.relayed)
 		return c, nil
 	}
-	pr, pw, err := os.Pipe()
+	type relay struct {
+		r, w *os.File
+		to   io.Writer
+	}
+	relays := []relay{{to: s.Out}}
+	if s.Stdout != nil {
+		relays = append(relays, relay{to: s.Stdout})
+	}
+	closeAll := func() {
+		for _, r := range relays {
+			if r.r != nil {
+				r.r.Close()
+				r.w.Close()
+			}
+		}
+	}
+	for i := range relays {
+		pr, pw, err := os.Pipe()
+		if err != nil {
+			closeAll()
+			return nil, err
+		}
+		relays[i].r, relays[i].w = pr, pw
+	}
+	cmd.Stdout, cmd.Stderr = relays[0].w, relays[0].w
+	if len(relays) > 1 {
+		cmd.Stdout = relays[1].w
+	}
+	err := cmd.Start()
+	for _, r := range relays {
+		r.w.Close()
+	}
 	if err != nil {
+		for _, r := range relays {
+			r.r.Close()
+		}
 		return nil, err
 	}
-	cmd.Stdout, cmd.Stderr = pw, pw
-	err = cmd.Start()
-	pw.Close()
-	if err != nil {
-		pr.Close()
-		return nil, err
+	var wg sync.WaitGroup
+	for _, r := range relays {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = io.Copy(r.to, r.r)
+			r.r.Close()
+		}()
 	}
 	go func() {
-		_, _ = io.Copy(s.Out, pr)
-		pr.Close()
+		wg.Wait()
 		close(c.relayed)
 	}()
 	return c, nil

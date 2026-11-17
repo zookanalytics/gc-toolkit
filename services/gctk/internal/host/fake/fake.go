@@ -74,6 +74,7 @@ type Process struct {
 	parent  int
 	spec    host.Spec
 	out     io.Writer
+	stdout  io.Writer
 	file    *os.File
 	notify  map[os.Signal][]chan<- os.Signal
 	ignored map[os.Signal]bool
@@ -143,24 +144,36 @@ func (p *Process) Spec() host.Spec { return p.spec }
 // Done is closed once the process has ended.
 func (p *Process) Done() <-chan struct{} { return p.done }
 
-// Out is where the process's output goes, as Spec's Out names it. A write
-// once the process has ended fails, as a write to a pipe whose reader has
-// gone does.
-func (p *Process) Out() io.Writer { return output{p} }
+// Out is where the process's output goes, as Spec's Out names it: its
+// standard error, and its standard output too unless Spec's Stdout takes it. A
+// write once the process has ended fails, as a write to a pipe whose reader
+// has gone does.
+func (p *Process) Out() io.Writer { return output{p: p} }
 
-type output struct{ p *Process }
+// Stdout is where the process's standard output goes: Spec's Stdout, or Out
+// when the spec names none.
+func (p *Process) Stdout() io.Writer { return output{p: p, stdout: true} }
+
+type output struct {
+	p      *Process
+	stdout bool
+}
 
 func (w output) Write(b []byte) (int, error) {
 	m := w.p.m
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	to := w.p.out
+	if w.stdout && w.p.stdout != nil {
+		to = w.p.stdout
+	}
 	switch {
 	case w.p.ended:
 		return 0, syscall.EPIPE
-	case w.p.out == nil:
+	case to == nil:
 		return len(b), nil
 	}
-	return w.p.out.Write(b)
+	return to.Write(b)
 }
 
 // Listen has the process listen on the loopback port until it ends.
@@ -251,7 +264,7 @@ func (p *Process) Start(s host.Spec) (host.Child, error) {
 		group = m.lastPid
 	}
 	q := m.add(m.lastPid, group, p.pid, s)
-	q.out = s.Out
+	q.out, q.stdout = s.Out, s.Stdout
 	if file != nil {
 		q.out, q.file = file, file
 	}

@@ -345,6 +345,27 @@ func TestStartInTheSandboxRunsTheCommandThroughTheLibraryFromItsDirectory(t *tes
 	}
 }
 
+func TestStartGivesStdoutTheStandardOutputAloneRelayedOrNot(t *testing.T) {
+	h := Local()
+	for _, relay := range []bool{true, false} {
+		var out, errs bytes.Buffer
+		c, err := h.Start(Spec{
+			Argv:   []string{"bash", "-c", `echo one; echo err >&2; printf two`},
+			Out:    &errs,
+			Stdout: &out,
+			Relay:  relay,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Wait()
+		<-c.Relayed()
+		if out.String() != "one\ntwo" || errs.String() != "err\n" {
+			t.Errorf("relay %v: Stdout got %q and Out %q, want the standard output and the standard error apart", relay, out.String(), errs.String())
+		}
+	}
+}
+
 // Group 1 and below would reach every process the caller may signal, or the
 // caller's own group, so no signal goes there.
 func TestSignalRefusesWhatNamesNoOneProcessOrGroup(t *testing.T) {
