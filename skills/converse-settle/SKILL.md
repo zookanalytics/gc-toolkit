@@ -207,6 +207,7 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
      # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work, unless the sign-off arms no closer for the subject (below)
      # --rework, --no-rework or --retire <kind>: one is required when the ruling reaches an open PR
+     # --rework-waiting-on <bead> beside --rework, once for each bead the rework waits for, such as another PR's anchor (below)
      # --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one
      # --accept when the ruling takes the subject's recommendation (below)
 then
@@ -314,7 +315,17 @@ holds, and any PR that a gate the ruling answers releases. Pass one of these:
 - `--rework` when the PR's branch must change and you do not make the change
   yourself (the `prs` skill), with `--check <check>` once for each check the
   ruling sends back when the PR is on Gas Town's pending record, whose review
-  run then takes the ruling as an ask;
+  run then takes the ruling as an ask. When the PR goes back only once other
+  work lands, add `--rework-waiting-on <bead>` once for each bead it waits
+  for, such as the anchor of the PR that must land first. The ask carries that
+  wait from the create that files it, so the run takes the ask only once each
+  bead has closed. Give the wait in the sign-off, never as an edge written
+  after it, because the landing order can start the run in between. The
+  sign-off's `--waiting-on` is the subject's wait, which holds no ask. The
+  sign-off stops with nothing filed on the old path, and for a bead in another
+  store, whose edge would hold nothing. A re-run that names a wait the
+  ruling's ask was filed without stops and names that ask, since a run may
+  already have taken it;
 - `--no-rework` when the PR stands as it is, as it does once you have pushed
   the change the ruling asked for onto its branch yourself (`converse-edit`);
 - `--retire <kind>` when the PR will not land: `not-needed`, with this
