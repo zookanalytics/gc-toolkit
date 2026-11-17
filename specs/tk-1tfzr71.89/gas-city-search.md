@@ -21,8 +21,11 @@ The surface the change grows is the landing order, `gctk pr reconcile`: it
 reads the disposition `pr-dispose.sh` already records before it closes a PR,
 requests no merge of such a PR, and once the PR has closed it runs the pack's
 disposition writer, `bead-rehome.sh`, as the refinery. Its output gains one
-outcome, `disposed`, and `pr_state` one value, `closed`. The change adds no
-script, order, metadata key, bead kind or lifecycle state.
+outcome, `disposed`, and `pr_state` one value, `closed`. The writer gains three
+flags that name a caller's judgment of the bead, `--if-status`, `--if-assignee`
+and `--if-ruled`, which the landing order passes because it judges the bead
+under the store's record lock and runs the writer once that lock is free. The
+change adds no script, order, metadata key, bead kind or lifecycle state.
 
 ## Searched
 
@@ -46,9 +49,25 @@ script, order, metadata key, bead kind or lifecycle state.
   reads a closed PR or closes the bead that owns one.
 - **bd's disposition commands.** bd records a successor with its own
   `supersedes` and `duplicates` edges, which `bead-rehome.sh` already writes and
-  reads back before its checked close. The change reuses that writer as it
-  stands, so no bd command is composed here that the pack does not already
-  compose.
+  reads back before its checked close. The change reuses that writer, so no bd
+  command is composed here that the pack does not already compose.
+- **bd's update guards.** `updateGuardsFromFlags` in `cmd/bd/update.go` reads
+  two guards, `--if-assignee`, where an empty value means unassigned, and
+  `--if-status`, and the update applies only while the bead still has them.
+  The command's flags in that file's `init` declare no guard on a metadata
+  value and no other fence. `bead-rehome.sh`'s close already rides both guards,
+  set from its own read of the bead. The new `--if-status` and `--if-assignee`
+  name the same two values as the landing order read them under the lock, and
+  the writer compares them with its own read under the same lock, so the
+  guarded close holds the landing order's judgment to the end.
+- **Gas City's conditional writes.** `CloseIfMatch` and
+  `CompareAndSetMetadataKey` in `internal/beads/bdstore_conditional.go` close a
+  bead, or set a metadata key, only while the bead's revision still matches,
+  over bd's `--if-revision` fence. They are methods of `gc`'s own store, which
+  no pack script reaches through `gc bd`, and the fence needs a bd whose
+  `update` and `close` take `--if-revision`, which bd v1.3.4 does not
+  declare, so on the city's bd Gas City answers them with
+  `ErrConditionalWriteUnsupported`.
 
 ## Why none covers the need
 
@@ -60,3 +79,13 @@ path's reconcile (`pr-facts.sh`) already consummates the same way, and
 `bead-rehome.sh`, the one writer of a close with a successor. The landing order
 is where the city reads a pending PR's close, so it is where the recorded
 disposition is read.
+
+The writer's close keeps bd's guards on status and assignee, now set to what
+the landing order judged. No guard covers the ruling, since bd has no value
+guard on metadata and Gas City's compare-and-set needs a revision fence the
+city's bd does not take. The writer therefore compares the recorded ruling on
+its own read, under the record lock that `pr-dispose.sh` takes for its stamp,
+so no stamp lands between that read and the close. The comparison stays in
+`bead-rehome.sh` rather than in gctk, because it has to sit inside the writer's
+own hold of the lock, between its read of the bead and its close, and a check
+gctk made before the call would leave the window open.

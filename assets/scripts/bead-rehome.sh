@@ -17,6 +17,17 @@
 # first, and a close any of these holds writes nothing. bd's update sets no close
 # reason, so the disposition's prose rides the close as an appended note.
 #
+# A caller that judged the origin before it asked for the close can name that
+# judgment, and then the close goes ahead only while the judgment still holds:
+# --if-status and --if-assignee name the status and assignee the caller read,
+# and --if-ruled says the ruling recorded on the origin (pr-dispose.sh) is this
+# call's kind, successor and successor store. Each is compared with the origin
+# as this run reads it under the record lock, a mismatch writes nothing (exit
+# 4), and the checked close holds the status and assignee to the end. The
+# landing order names all three, because it judges the bead under the lock and
+# runs this writer once the lock is free, when a release or a second ruling can
+# land before this run takes the lock.
+#
 # The close takes the store's record lock, a flock on pr-record.lock in the
 # origin store's .beads directory, which gctk's pr domain names and its two
 # writers of a PR's pending record take: `gctk pr record` across both of its
@@ -122,7 +133,8 @@
 # closer's word.
 # Callers: converse dispositions, operator re-homes, pr-facts.sh (a PR closed
 # with a pre-recorded disposition, and that branch's parked rework children),
-# stand-down.sh (a person's ruling that work a human gate holds will not go
+# the landing order, gctk pr reconcile (a PR on the pending record closed under
+# a pre-recorded disposition), stand-down.sh (a person's ruling that work a human gate holds will not go
 # on), scaffolding-sweep.sh (a finding a disposed PR leaves unanswered, closed
 # onto the bug that carries it).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
@@ -160,6 +172,9 @@ BRANCH_END="${GC_BRANCH_END_TOOL:-$HERE/branch-end.sh}"
 
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""
 ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""; CHECK=""; EXCEPT_KEY=""
+# The caller's judgment of the origin (the header's rule). Each *_SET says the
+# flag was given, since an empty --if-assignee names an unassigned origin.
+IF_STATUS=""; IF_STATUS_SET=""; IF_ASSIGNEE=""; IF_ASSIGNEE_SET=""; IF_RULED=""
 
 usage() {
     cat <<'U'
@@ -168,6 +183,7 @@ Usage:
                  --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
                  [--note "<one sentence of why>"] \
                  [--origin-store rig:<name>] [--successor-store rig:<name>] \
+                 [--if-status <status>] [--if-assignee <assignee>] [--if-ruled] \
                  [--except-key <situation-key>] [--check] [--dry-run]
 
 Closes the origin and records its successor in bd's own edge from it:
@@ -207,6 +223,14 @@ disposition and still carries the marker has it cleared in a write of its own,
 which lands only while the origin has the status and assignee this run read
 (exit 4 otherwise).
 
+--if-status, --if-assignee and --if-ruled name what the caller judged before it
+asked for this close: the status and the assignee it read, an empty
+--if-assignee naming an unassigned origin, and that the ruling recorded on the
+origin (pr-dispose.sh) is this call's --kind, --successor and --successor-store,
+a store this call names none of included. The origin, read under the record
+lock, must still have each one given, or nothing is written (exit 4), and the
+checked close holds that status and assignee.
+
 --check evaluates that evidence and a duplicate's waiters, and exits 0
 (eligible) or non-zero (refused, reason on stderr) without writing anything.
 With --except-key it also reads what would hold the close.
@@ -226,8 +250,9 @@ person still holds, and so does every gate under any other key, every other
 live blocker and every open child: then nothing is resolved or closed.
 
 Exit: 0 disposed (or already recorded) · 1 --check refused · 2 a store does not
-resolve · 3 the origin or successor does not exist · 4 a write did not land: the
-origin changed since it was judged, or a waiter's edge onto the canonical or the
+resolve · 3 the origin or successor does not exist · 4 the origin is not as the
+caller judged it (--if-status, --if-assignee, --if-ruled), or a write did not
+land: the origin changed since it was judged, or a waiter's edge onto the canonical or the
 origin's own edge did not write or read back, or a write after the close did not
 land, which leaves the close standing · 5 the close is held or refused, a
 waiter that cannot wait on the canonical included · 6 the origin already names
@@ -245,6 +270,9 @@ while [ $# -gt 0 ]; do
         --note)             NOTE="${2:-}"; shift 2 ;;
         --origin-store)     ORIGIN_STORE="${2:-}"; shift 2 ;;
         --successor-store)  SUCCESSOR_STORE="${2:-}"; shift 2 ;;
+        --if-status)        IF_STATUS="${2:-}"; IF_STATUS_SET=1; shift 2 ;;
+        --if-assignee)      IF_ASSIGNEE="${2:-}"; IF_ASSIGNEE_SET=1; shift 2 ;;
+        --if-ruled)         IF_RULED=1; shift ;;
         --except-key)       EXCEPT_KEY="${2:-}"; shift 2 ;;
         --check)            CHECK=1; shift ;;
         --dry-run)          DRY_RUN=1; shift ;;
@@ -296,6 +324,9 @@ store_for_bead() {
     return 0
 }
 
+# The store this call names for its successor, before an id prefix places it,
+# is what --if-ruled compares with the store a ruling recorded.
+SUCCESSOR_STORE_NAMED="$SUCCESSOR_STORE"
 if [ -z "$ORIGIN_STORE" ]; then store_for_bead "$ORIGIN"; ORIGIN_STORE="$STORE_FOR_BEAD"; fi
 if [ -z "$SUCCESSOR_STORE" ]; then store_for_bead "$SUCCESSOR"; SUCCESSOR_STORE="$STORE_FOR_BEAD"; fi
 [ -n "$ORIGIN_STORE" ] \
@@ -420,6 +451,42 @@ eval "$ROW_FIELDS"
 CLEAR_MARKER=()
 if [ "$ORIGIN_MARKER" = true ]; then
     CLEAR_MARKER=(--unset-metadata pr_reconcile_pending)
+fi
+
+# The caller's judgment (the header's rule), compared with the origin as this
+# run has just read it, under the record lock unless this is --check or a dry
+# run. A judgment that no longer holds is the caller's to make again, so
+# nothing is written.
+held_as() { # <status> <assignee> -> how a status and an assignee read in a refusal
+    if [ -n "$2" ]; then printf '%s under %s' "${1:-of no status}" "$2"; else printf '%s and unassigned' "${1:-of no status}"; fi
+}
+JUDGMENT_STOP=""
+if { [ -n "$IF_STATUS_SET" ] && [ "$JUDGED_STATUS" != "$IF_STATUS" ]; } \
+        || { [ -n "$IF_ASSIGNEE_SET" ] && [ "$JUDGED_ASSIGNEE" != "$IF_ASSIGNEE" ]; }; then
+    JUDGED_BY_CALLER=""
+    [ -z "$IF_STATUS_SET" ] || JUDGED_BY_CALLER="$IF_STATUS"
+    if [ -n "$IF_ASSIGNEE_SET" ] && [ -n "$IF_ASSIGNEE" ]; then
+        JUDGED_BY_CALLER="${JUDGED_BY_CALLER:+$JUDGED_BY_CALLER }under $IF_ASSIGNEE"
+    elif [ -n "$IF_ASSIGNEE_SET" ]; then
+        JUDGED_BY_CALLER="${JUDGED_BY_CALLER:+$JUDGED_BY_CALLER and }unassigned"
+    fi
+    JUDGMENT_STOP="$ORIGIN is $(held_as "$JUDGED_STATUS" "$JUDGED_ASSIGNEE") now, not $JUDGED_BY_CALLER as the caller of this close judged it"
+fi
+if [ -n "$IF_RULED" ] && { [ "$RULED_KIND" != "$KIND" ] || [ "$RULED_SUCC" != "$SUCCESSOR" ] \
+        || [ "$RULED_SUCC_STORE" != "$SUCCESSOR_STORE_NAMED" ]; }; then
+    if [ -n "$RULED_KIND$RULED_SUCC$RULED_SUCC_STORE" ]; then
+        RULED_NOW="records the ruling ${RULED_KIND:-of no kind} onto ${RULED_SUCC:-no successor}${RULED_SUCC_STORE:+ in $RULED_SUCC_STORE}"
+    else
+        RULED_NOW="records no ruling"
+    fi
+    JUDGMENT_STOP="${JUDGMENT_STOP:+$JUDGMENT_STOP; }$ORIGIN $RULED_NOW, not the $KIND onto $SUCCESSOR${SUCCESSOR_STORE_NAMED:+ in $SUCCESSOR_STORE_NAMED} this close carries out"
+fi
+if [ -n "$JUDGMENT_STOP" ]; then
+    if [ -n "$CHECK" ]; then
+        echo "bead-rehome: --check refused: $JUDGMENT_STOP" >&2
+        exit 1
+    fi
+    die "$JUDGMENT_STOP. Nothing written, $ORIGIN untouched; judge it again as it stands now" 4
 fi
 
 # With no identity of its own, a caller's writes run as bd's default actor, which
