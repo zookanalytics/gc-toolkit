@@ -797,7 +797,8 @@ no warrant.
 - **Covers.** `services/gctk/memory`, and the state it keeps for each memory
   directory under the city's `.gc/runtime/packs/gc-toolkit/memory-intake`: the
   list of the notes the distiller kept, each with the bead it waits on or the
-  date it is next due, and the text of each note it removed.
+  date it is next due, the text of each note it removed, and the names of the
+  removed notes whose pointers did not all come out.
 - **Stands in for.** A lifecycle for an agent's memory note: a wait that holds
   a note, a file in Claude Code's memory directory, until the bead that carries
   its lesson is done or a date comes, and the record of what the judge decided
@@ -817,11 +818,11 @@ no warrant.
   - Claude Code keeps memory files out of its retention sweep: "`MEMORY.md`
     and topic files stay until you or Claude edits or deletes them"
     ([memory](https://code.claude.com/docs/en/memory), "Storage location"). It
-    turns memory off only for a whole session or project ("Enable or disable
-    auto memory").
+    turns memory off only whole, for a session, a project or every project of a
+    user ("Enable or disable auto memory").
   - The search is
     [specs/tk-zlot608.8/gas-city-search.md](../specs/tk-zlot608.8/gas-city-search.md).
-- **Verified.** 2026-11-17, at `gastownhall/gascity` main 5f7cd988a6be and
+- **Verified.** 2026-11-17, at `gastownhall/gascity` main 6cf1cccd640d and
   `gastownhall/beads` main 8cdfa796a8f5. Claude Code's memory page as read on
   2026-11-17.
 - **Retires when.** Gas City or bd ships a wait that can hold an agent's
