@@ -27,6 +27,8 @@
 #   (REASON-NEW) --reason files a fresh conversation even when one waits
 #   (CONVID-REASON) --reason on an explicit conversation id is refused
 #   (LIVE)    a conversation a live sitting holds is attached to, not doubled
+#   (LIVE-STORE) the sessions are read from the store (GC_NO_API=1), so a
+#             sitting the supervisor's read cache does not list yet is live
 #   (PR-HOLD*) a sitting engage starts on a conversation about an open PR holds
 #             the PR's merge first, through the anchor's blocks edge onto the
 #             conversation, one whose sitting ended included; a live sitting it
@@ -292,7 +294,11 @@ case "$1 ${2:-}" in
         [ -f "$_f" ] && _spawned="$_spawned $(cat "$_f")=${_f##*/held.}"
       done
     fi
-    _live=$(awk 'NF == 2 {printf "%s=%s ", $1, $2}' "$ST/live" 2>/dev/null)
+    # $CACHE_MISSES names sittings $STATE/live seeds that a read without
+    # GC_NO_API=1 leaves out, as the supervisor's read cache leaves out a
+    # sitting spawned since its last re-scan. A read with it is the store's.
+    _live=$(awk -v miss=" ${CACHE_MISSES:-} " -v store="${GC_NO_API:-}" \
+      'NF == 2 && (store == "1" || index(miss, " " $1 " ") == 0) {printf "%s=%s ", $1, $2}' "$ST/live" 2>/dev/null)
     _salias="$(cat "$ST/spawned-alias" 2>/dev/null || true)"
     # The sittings $STATE/live seeds read active, unless $LIVE_STATES walks
     # their state, one entry per listing, the last repeating, with the same
@@ -880,6 +886,17 @@ eq "$RC" 0 "(PR-HOLD-LIVE) attaching to a live sitting on an open PR exits 0"
 hasnt "$CALLED" "--type blocks" "(PR-HOLD-LIVE) …and adds no edge: the live sitting keeps the hold as it left it"
 unset LIVE_SITTINGS
 
+echo "# a sitting the supervisor's read cache does not list yet is live, as the store lists it"
+# gc-60 was just spawned and tk-conv bound to it. Engage reads the sessions
+# from the store, which lists gc-60, while the cache does not yet.
+export LIVE_SITTINGS="gc-60=gc-toolkit/gc-toolkit.tk-conv" CACHE_MISSES=gc-60
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv open
+run_engage tk-subj --no-attach
+eq "$RC" 0 "(LIVE-STORE) engaging a conversation whose sitting the cache does not list yet exits 0"
+hasnt "$CALLED" "session new" "(LIVE-STORE) …spawning no second sitting"
+has "$OUT" "the live sitting gc-60 holds conversation tk-conv for tk-subj" "(LIVE-STORE) …naming the sitting the store lists as live"
+unset LIVE_SITTINGS CACHE_MISSES
+
 echo "# a sitting engage starts on an open PR holds the PR's merge first"
 reset; SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
 eq "$RC" 0 "(PR-HOLD) engaging a queued conversation on an open PR's anchor exits 0"
@@ -1003,11 +1020,10 @@ has "$OUT" "gc session close gc-60" "(CUT-SHORT-STUCK) …and naming the session
 unset LIVE_SITTINGS
 
 echo "# the session a conversation is bound to is not closed as cut short, even when the first listing missed it"
-# The listing engage chose by can miss the sitting that holds the conversation,
-# as one the supervisor answers from its read cache can. Bound to that
-# sitting's alias, the conversation is the sitting's, so the session is no
-# sitting cut short: engage closes nothing, and the spawn its alias refuses
-# hands engage that sitting to attach.
+# Should the listing engage chose by miss the sitting that holds the
+# conversation, the conversation, bound to that sitting's alias, is still the
+# sitting's, so the session is no sitting cut short: engage closes nothing, and
+# the spawn its alias refuses hands engage that sitting to attach.
 export LIVE_SITTINGS="gc-60=gc-toolkit/gc-toolkit.tk-conv" ALIAS_HELD=gc-60
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 FAKE_CLOCK="$TMP/clock" GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="gone active" run_engage tk-subj
