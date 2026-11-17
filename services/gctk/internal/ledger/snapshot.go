@@ -82,6 +82,11 @@ func (r *Record) EphemeralPlane() bool { return r.row.InEphemeralPlane() }
 // Template reports whether the bead is a template molecule.
 func (r *Record) Template() bool { return r.row.Template() }
 
+// ListedByDefault reports whether bd's listing shows the bead when asked for
+// nothing more: it is outside the ephemeral plane, no template molecule, and
+// neither a gate nor an infrastructure bead.
+func (r *Record) ListedByDefault() bool { return r.row.ListedByDefault() }
+
 // Rendered is every metadata value the row holds, each as the pack's scripts
 // render it, `(.metadata[k] // "") | tostring`. It is the input of a domain
 // that still spells the keys it reads, prstatus's Store among them

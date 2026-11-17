@@ -179,6 +179,18 @@ func (b *Bead) InEphemeralPlane() bool { return b.Ephemeral == true || b.NoHisto
 // leaves out unless asked.
 func (b *Bead) Template() bool { return b.IsTemplate == true }
 
+// hiddenTypes are the issue types bd's listing leaves out unless asked: gates,
+// and the infrastructure types agent, role and message (`gc bd list --help`,
+// --include-gates and --include-infra).
+var hiddenTypes = []string{"gate", "agent", "role", "message"}
+
+// ListedByDefault reports whether bd's listing shows the bead when asked for
+// nothing more: it is outside the ephemeral plane, no template molecule, and of
+// no issue type the listing hides.
+func (b *Bead) ListedByDefault() bool {
+	return !b.InEphemeralPlane() && !b.Template() && !slices.Contains(hiddenTypes, strings.ToLower(b.IssueTypeString()))
+}
+
 // LabelStrings returns the bead's labels, in the row's order, leaving out a
 // label that is not a string.
 func (b *Bead) LabelStrings() []string {

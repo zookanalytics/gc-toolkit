@@ -115,8 +115,9 @@ func TestAHandoffPastTheBoundIsStuck(t *testing.T) {
 }
 
 // Only the refinery's own unprepared handoffs are in its queue: a bead with a
-// merge_result, an epic, a bead with no branch, one not open, and one assigned
-// to another agent are each passed over.
+// merge_result, an epic, a bead with no branch, one not open, one assigned to
+// another agent, and one bd's default listing hides, a wisp or a gate, are
+// each passed over.
 func TestOnlyTheQueuesUnpreparedHandoffsAreJudged(t *testing.T) {
 	c := newCity()
 	s := c.stores[tools.Store()]
@@ -124,6 +125,12 @@ func TestOnlyTheQueuesUnpreparedHandoffsAreJudged(t *testing.T) {
 	epic := c.handoff("tk-epic", 9*time.Hour)
 	epic.IssueType = "epic"
 	s.Put(epic)
+	wisp := c.handoff("tk-wisp", 9*time.Hour)
+	wisp.Ephemeral = true
+	s.Put(wisp)
+	gate := c.handoff("tk-gate", 9*time.Hour)
+	gate.IssueType = "gate"
+	s.Put(gate)
 	nob := c.handoff("tk-nobranch", 9*time.Hour)
 	delete(nob.Metadata, "branch")
 	s.Put(nob)

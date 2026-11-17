@@ -55,12 +55,6 @@ var (
 // internal/beadmeta/kindsets.go at gastownhall/gascity c7eb6d2f43).
 var topologyKinds = []string{"workflow", "scope", "spec"}
 
-// hiddenTypes are the issue types bd's default listing hides, beside its wisp
-// plane and its templates: gates, and the infrastructure types agent, role
-// and message (`gc bd list --help`, --include-gates and --include-infra). A
-// bead of one carries no work a session claimed.
-var hiddenTypes = []string{"gate", "agent", "role", "message"}
-
 // inFlightResults are the merge_result values of a bead whose work is in a PR
 // on its way to its target: the old path's two values that hold a PR, and both
 // values of Gas Town's pending record ([record.OnRecord]). The refinery's path
@@ -150,7 +144,7 @@ func candidate(r *ledger.Record) (session.Owner, bool, error) {
 	if s := r.Status(); s != "open" && s != "in_progress" {
 		return session.Owner{}, false, nil
 	}
-	if r.EphemeralPlane() || r.Template() || slices.Contains(hiddenTypes, strings.ToLower(r.IssueType())) {
+	if !r.ListedByDefault() {
 		return session.Owner{}, false, nil
 	}
 	o, err := session.OwnerOf(r)

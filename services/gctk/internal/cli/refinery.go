@@ -28,12 +28,13 @@ agent list --json names in the rig, and records one Gas City event,
 gc-toolkit.refinery-queue.stuck, when it finds a handoff stuck there. It writes
 no bead. A rig whose roster names no refinery is a queue that cannot be read.
 
-A handoff is a bead of any type but epic that carries a branch and no
-merge_result. It is stuck when its last write is more than four hours old,
-nothing holds it (gctk bead holds answers clear), and the close of the last
-wait that held it is more than four hours old too. A handoff turns over within
-a poll interval, and a rebase or rework task once the fix pool claims it, so
-one past that bound is not churn.
+A handoff is a bead of no kind bd's default listing hides (a wisp, a template,
+a gate, or an agent, role or message bead), and no epic, that carries a branch
+and no merge_result. It is stuck when its last write is more than four hours
+old, nothing holds it (gctk bead holds answers clear), and the close of the
+last wait that held it is more than four hours old too. A handoff turns over
+within a poll interval, and a rebase or rework task once the fix pool claims
+it, so one past that bound is not churn.
 
 A rig list or an agent list that does not read judges nothing. The event's
 payload holds:

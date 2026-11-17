@@ -110,9 +110,9 @@ type Queue struct {
 // that rig's directory, by the identity work assigned to it names, and a rig
 // that no such agent serves is a queue whose address does not resolve, which
 // fails the run as the witness's check reported it. A handoff in the
-// queue is a bead of any type but epic that carries the branch its work is on
-// and no merge_result, since a merge_result marks the work as past
-// preparation. It is stuck when its last write is Bound old, nothing holds it
+// queue is a bead of no kind bd's default listing hides, and no epic, that
+// carries the branch its work is on and no merge_result, since a merge_result
+// marks the work as past preparation. It is stuck when its last write is Bound old, nothing holds it
 // ([waits.Holds]), and the close of the last wait that held it is Bound old
 // too. A rig list or an agent list that does not read judges nothing. A rig
 // whose queue does not read, or what holds a handoff past the bound, is left
@@ -190,7 +190,7 @@ func (q *Queue) rig(ctx context.Context, rig gascity.Rig, refineries []string, n
 	}
 	var past []handoff
 	for _, r := range recs {
-		if r.Status() != "open" || strings.EqualFold(r.IssueType(), "epic") || !slices.Contains(refineries, r.Assignee()) {
+		if r.Status() != "open" || !r.ListedByDefault() || strings.EqualFold(r.IssueType(), "epic") || !slices.Contains(refineries, r.Assignee()) {
 			continue
 		}
 		branch, _, err := record.Branch.Get(r)
