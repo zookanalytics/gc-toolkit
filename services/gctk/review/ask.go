@@ -185,9 +185,9 @@ func (e *Refusal) Error() string { return "nothing filed on " + e.Bead + ": " + 
 // which index reads. It refuses a wait on a bead that the bead's own store does
 // not hold, because an edge into another store holds nothing. It refuses to
 // return an ask it finds that does not wait on every bead req names, because a
-// run can take that ask before they close. A refusal files nothing. A read that
-// fails returns its error with nothing filed, and a create that fails may still
-// have filed the ask, which the next call finds.
+// run can take that ask before they close, or already has. A refusal files
+// nothing. A read that fails returns its error with nothing filed, and a create
+// that fails may still have filed the ask, which the next call finds.
 func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, error)) (id string, filed bool, err error) {
 	owner, err := one(l, req.Bead)
 	if err != nil {
@@ -242,9 +242,13 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 			}
 		}
 		if len(lacks) > 0 {
-			return "", false, &Refusal{Bead: req.Bead, Why: fmt.Sprintf(
-				"ask %s of the same source and reason stands, and it does not wait on %s, so a run can take it before that work lands",
-				a.ID, strings.Join(lacks, " or "))}
+			why := fmt.Sprintf("ask %s of the same source and reason is open and does not wait on %s, so a run can take it before that work lands",
+				a.ID, strings.Join(lacks, " or "))
+			if !a.Open() {
+				why = fmt.Sprintf("ask %s of the same source and reason closed without waiting on %s, so a run may have worked it before that work landed",
+					a.ID, strings.Join(lacks, " or "))
+			}
+			return "", false, &Refusal{Bead: req.Bead, Why: why}
 		}
 		return a.ID, false, nil
 	}

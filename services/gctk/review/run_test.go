@@ -801,8 +801,15 @@ func TestARerunNamingAWaitTheAskLacksIsRefused(t *testing.T) {
 	waiting.WaitingOn = []string{"tk-other"}
 	_, _, err = review.FileAsk(w.ledger(), waiting, nil)
 	var refused *review.Refusal
-	if !errors.As(err, &refused) || !strings.Contains(err.Error(), first) || !strings.Contains(err.Error(), "tk-other") {
-		t.Fatalf("a re-run waiting on tk-other, beside an ask that does not wait: %v; want a refusal naming %s and tk-other", err, first)
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), first) || !strings.Contains(err.Error(), "tk-other") || !strings.Contains(err.Error(), "can take it") {
+		t.Fatalf("a re-run waiting on tk-other, beside an open ask that does not wait: %v; want a refusal naming %s and tk-other, which a run can take", err, first)
+	}
+	row, _ := w.store.Row(first)
+	row.Status = "closed"
+	w.store.Put(row)
+	_, _, err = review.FileAsk(w.ledger(), waiting, nil)
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), first) || !strings.Contains(err.Error(), "closed without waiting on tk-other") || strings.Contains(err.Error(), "can take it") {
+		t.Fatalf("a re-run waiting on tk-other, beside a closed ask that did not wait: %v; want a refusal saying %s closed without that wait", err, first)
 	}
 
 	later := review.AskRequest{Bead: prBead, Reason: "Fix the cap.", Source: "tk-later", WaitingOn: []string{"tk-other"}}
