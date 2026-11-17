@@ -26,7 +26,7 @@ func stamp(d time.Duration) string { return ago(d).Format(time.RFC3339) }
 // The city the tests run in: an HQ whose store holds the session beads, and one
 // rig, tools.
 var (
-	hq    = gascity.Rig{Name: "city", Path: "/city", Prefix: "lx", HQ: true}
+	hq    = gascity.Rig{Name: "city", Path: "/city", Prefix: "hq", HQ: true}
 	tools = gascity.Rig{Name: "tools", Path: "/city/rigs/tools", Prefix: "tk"}
 )
 
@@ -95,19 +95,19 @@ func stalledIDs(rec *Record) []string {
 // A busy pool seat that has written nothing since it woke over three hours
 // ago is stalled, and the look records one event that names it.
 func TestASeatSilentSinceItWokeIsStalled(t *testing.T) {
-	c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
-	c.seat(busy("lx-1"), pool(4*time.Hour))
-	c.claim(tools, "tk-1", "in_progress", "lx-1", "lx-1")
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
+	c.seat(busy("hq-1"), pool(4*time.Hour))
+	c.claim(tools, "tk-1", "in_progress", "hq-1", "hq-1")
 	out := c.progress(t)
 	if len(out.Failures) > 0 || !out.Recorded {
 		t.Fatalf("failures %v, recorded %v", out.Failures, out.Recorded)
 	}
-	want := []Stalled{{Rig: "tools", Bead: "tk-1", Session: "lx-1", Identity: "lx-1", Agent: "tools/gc-toolkit.polecat-1", Since: ago(4 * time.Hour)}}
+	want := []Stalled{{Rig: "tools", Bead: "tk-1", Session: "hq-1", Identity: "hq-1", Agent: "tools/gc-toolkit.polecat-1", Since: ago(4 * time.Hour)}}
 	if !reflect.DeepEqual(out.Record.Stalled, want) {
 		t.Fatalf("stalled %+v", out.Record.Stalled)
 	}
 	got := c.Emitted()
-	if len(got) != 1 || got[0].Type != EventType || got[0].Actor != Actor || !strings.Contains(got[0].Message, "lx-1 holding tk-1") {
+	if len(got) != 1 || got[0].Type != EventType || got[0].Actor != Actor || !strings.Contains(got[0].Message, "hq-1 holding tk-1") {
 		t.Fatalf("emitted %+v", got)
 	}
 	var rec Record
@@ -119,30 +119,30 @@ func TestASeatSilentSinceItWokeIsStalled(t *testing.T) {
 // A seat's silence runs from its newest write as its identity, in the claim's
 // store or the city's, and from no earlier than its last wake.
 func TestTheSilenceRunsFromTheNewestWriteSinceTheWake(t *testing.T) {
-	c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
-	for _, id := range []string{"lx-rig", "lx-city", "lx-old", "lx-stale"} {
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
+	for _, id := range []string{"hq-rig", "hq-city", "hq-old", "hq-stale"} {
 		c.seat(busy(id), pool(6*time.Hour))
 	}
-	c.seat(busy("lx-woke"), pool(2*time.Hour))
-	c.claim(tools, "tk-rig", "in_progress", "lx-rig", "lx-rig")
-	c.claim(tools, "tk-city", "in_progress", "lx-city", "lx-city")
-	c.claim(tools, "tk-old", "in_progress", "lx-old", "lx-old")
-	c.claim(tools, "tk-stale", "in_progress", "lx-stale", "lx-stale")
-	c.claim(tools, "tk-woke", "in_progress", "lx-woke", "lx-woke")
-	c.stores[tools.Store()].SetLastWrite("lx-rig", ago(time.Hour))
-	c.stores[hq.Store()].SetLastWrite("lx-city", ago(2*time.Hour))
-	c.stores[tools.Store()].SetLastWrite("lx-old", ago(4*time.Hour))
-	c.stores[hq.Store()].SetLastWrite("lx-stale", ago(5*time.Hour))
-	c.stores[tools.Store()].SetLastWrite("lx-woke", ago(5*time.Hour))
+	c.seat(busy("hq-woke"), pool(2*time.Hour))
+	c.claim(tools, "tk-rig", "in_progress", "hq-rig", "hq-rig")
+	c.claim(tools, "tk-city", "in_progress", "hq-city", "hq-city")
+	c.claim(tools, "tk-old", "in_progress", "hq-old", "hq-old")
+	c.claim(tools, "tk-stale", "in_progress", "hq-stale", "hq-stale")
+	c.claim(tools, "tk-woke", "in_progress", "hq-woke", "hq-woke")
+	c.stores[tools.Store()].SetLastWrite("hq-rig", ago(time.Hour))
+	c.stores[hq.Store()].SetLastWrite("hq-city", ago(2*time.Hour))
+	c.stores[tools.Store()].SetLastWrite("hq-old", ago(4*time.Hour))
+	c.stores[hq.Store()].SetLastWrite("hq-stale", ago(5*time.Hour))
+	c.stores[tools.Store()].SetLastWrite("hq-woke", ago(5*time.Hour))
 	out := c.progress(t)
 	if len(out.Failures) > 0 {
 		t.Fatal(out.Failures)
 	}
-	if got := stalledIDs(out.Record); !reflect.DeepEqual(got, []string{"lx-old@tk-old", "lx-stale@tk-stale"}) {
+	if got := stalledIDs(out.Record); !reflect.DeepEqual(got, []string{"hq-old@tk-old", "hq-stale@tk-stale"}) {
 		t.Fatalf("stalled %v", got)
 	}
 	if s := out.Record.Stalled[0]; !s.Wrote || !s.Since.Equal(ago(4*time.Hour)) {
-		t.Errorf("lx-old %+v", s)
+		t.Errorf("hq-old %+v", s)
 	}
 }
 
@@ -150,26 +150,26 @@ func TestTheSilenceRunsFromTheNewestWriteSinceTheWake(t *testing.T) {
 // seat, a bead not in progress, a session not listed, and a claim assigned to
 // another identity than the one its seat's writes carry are each passed over.
 func TestOnlyABusyPoolSeatsClaimIsJudged(t *testing.T) {
-	c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
-	quiet := busy("lx-quiet")
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
+	quiet := busy("hq-quiet")
 	quiet.LastActive = ago(5 * time.Minute)
 	c.seat(quiet, pool(5*time.Hour))
-	c.seat(busy("lx-named"), map[string]string{"last_woke_at": stamp(5 * time.Hour)})
-	c.seat(busy("lx-open"), pool(5*time.Hour))
-	aliased := busy("lx-alias")
+	c.seat(busy("hq-named"), map[string]string{"last_woke_at": stamp(5 * time.Hour)})
+	c.seat(busy("hq-open"), pool(5*time.Hour))
+	aliased := busy("hq-alias")
 	aliased.Alias = "tools/gc-toolkit.tk-9"
 	c.seat(aliased, pool(5*time.Hour))
-	c.claim(tools, "tk-quiet", "in_progress", "lx-quiet", "lx-quiet")
-	c.claim(tools, "tk-named", "in_progress", "lx-named", "lx-named")
-	c.claim(tools, "tk-open", "open", "lx-open", "lx-open")
-	c.claim(tools, "tk-gone", "in_progress", "lx-gone", "lx-gone")
-	c.claim(tools, "tk-by-id", "in_progress", "lx-alias", "lx-alias")
-	c.claim(tools, "tk-by-alias", "in_progress", "tools/gc-toolkit.tk-9", "lx-alias")
+	c.claim(tools, "tk-quiet", "in_progress", "hq-quiet", "hq-quiet")
+	c.claim(tools, "tk-named", "in_progress", "hq-named", "hq-named")
+	c.claim(tools, "tk-open", "open", "hq-open", "hq-open")
+	c.claim(tools, "tk-gone", "in_progress", "hq-gone", "hq-gone")
+	c.claim(tools, "tk-by-id", "in_progress", "hq-alias", "hq-alias")
+	c.claim(tools, "tk-by-alias", "in_progress", "tools/gc-toolkit.tk-9", "hq-alias")
 	out := c.progress(t)
 	if len(out.Failures) > 0 {
 		t.Fatal(out.Failures)
 	}
-	if got := stalledIDs(out.Record); !reflect.DeepEqual(got, []string{"lx-alias@tk-by-alias"}) {
+	if got := stalledIDs(out.Record); !reflect.DeepEqual(got, []string{"hq-alias@tk-by-alias"}) {
 		t.Fatalf("stalled %v", got)
 	}
 	if out.Record.Stalled[0].Identity != "tools/gc-toolkit.tk-9" {
@@ -180,24 +180,24 @@ func TestOnlyABusyPoolSeatsClaimIsJudged(t *testing.T) {
 // A seat whose session bead names no wake is counted from when its session was
 // created.
 func TestASeatWithNoWakeCountsFromItsCreation(t *testing.T) {
-	c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
-	young := busy("lx-young")
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
+	young := busy("hq-young")
 	young.CreatedAt = ago(time.Hour)
 	c.seat(young, map[string]string{"pool_managed": "true"})
-	c.seat(busy("lx-elder"), map[string]string{"pool_managed": "true"})
-	c.claim(tools, "tk-young", "in_progress", "lx-young", "lx-young")
-	c.claim(tools, "tk-elder", "in_progress", "lx-elder", "lx-elder")
+	c.seat(busy("hq-elder"), map[string]string{"pool_managed": "true"})
+	c.claim(tools, "tk-young", "in_progress", "hq-young", "hq-young")
+	c.claim(tools, "tk-elder", "in_progress", "hq-elder", "hq-elder")
 	out := c.progress(t)
-	if got := stalledIDs(out.Record); len(out.Failures) > 0 || !reflect.DeepEqual(got, []string{"lx-elder@tk-elder"}) {
+	if got := stalledIDs(out.Record); len(out.Failures) > 0 || !reflect.DeepEqual(got, []string{"hq-elder@tk-elder"}) {
 		t.Fatalf("stalled %v, failures %v", got, out.Failures)
 	}
 }
 
 // A look that finds no stalled seat records nothing and succeeds.
 func TestNothingFoundRecordsNothing(t *testing.T) {
-	c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
-	c.seat(busy("lx-1"), pool(time.Hour))
-	c.claim(tools, "tk-1", "in_progress", "lx-1", "lx-1")
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
+	c.seat(busy("hq-1"), pool(time.Hour))
+	c.claim(tools, "tk-1", "in_progress", "hq-1", "hq-1")
 	out := c.progress(t)
 	if len(out.Failures) > 0 || out.Recorded || len(out.Record.Stalled) != 0 || len(c.Emitted()) != 0 {
 		t.Fatalf("outcome %+v, emitted %+v", out, c.Emitted())
@@ -219,9 +219,9 @@ func TestAReadTheLookRestsOnFailsTheRun(t *testing.T) {
 		{"no hq", func(c *city) { c.RigList = []gascity.Rig{tools} }, "names no HQ"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
-			c.seat(busy("lx-1"), pool(5*time.Hour))
-			c.claim(tools, "tk-1", "in_progress", "lx-1", "lx-1")
+			c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
+			c.seat(busy("hq-1"), pool(5*time.Hour))
+			c.claim(tools, "tk-1", "in_progress", "hq-1", "hq-1")
 			tc.set(c)
 			out := c.progress(t)
 			if out.Record != nil || out.Recorded || len(out.Failures) != 1 || !strings.Contains(out.Failures[0], tc.want) {
@@ -237,12 +237,12 @@ func TestAReadTheLookRestsOnFailsTheRun(t *testing.T) {
 // A rig whose store does not read is left out and fails the run, and a seat
 // found in another rig is still recorded.
 func TestAnUnreadRigFailsTheRunAndKeepsWhatWasFound(t *testing.T) {
-	c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
 	other := gascity.Rig{Name: "other", Path: "/city/rigs/other", Prefix: "ot"}
 	c.RigList = append(c.RigList, other)
 	c.openErr[other.Store()] = errors.New("the store's read failed: gc bd list exited 1")
-	c.seat(busy("lx-1"), pool(5*time.Hour))
-	c.claim(tools, "tk-1", "in_progress", "lx-1", "lx-1")
+	c.seat(busy("hq-1"), pool(5*time.Hour))
+	c.claim(tools, "tk-1", "in_progress", "hq-1", "hq-1")
 	out := c.progress(t)
 	if !out.Recorded || len(out.Record.Stalled) != 1 {
 		t.Fatalf("outcome %+v", out)
@@ -258,9 +258,9 @@ func TestAnUnreadRigFailsTheRunAndKeepsWhatWasFound(t *testing.T) {
 // A store whose write log does not read leaves the seats it would judge
 // unjudged, and fails the run.
 func TestAnUnreadWriteLogLeavesItsSeatsUnjudged(t *testing.T) {
-	c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
-	c.seat(busy("lx-1"), pool(5*time.Hour))
-	c.claim(tools, "tk-1", "in_progress", "lx-1", "lx-1")
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
+	c.seat(busy("hq-1"), pool(5*time.Hour))
+	c.claim(tools, "tk-1", "in_progress", "hq-1", "hq-1")
 	c.stores[tools.Store()].LastWritesErr = errors.New("the store's read failed: gc bd sql exited 1")
 	out := c.progress(t)
 	if out.Recorded || len(out.Record.Stalled) != 0 || len(out.Failures) != 1 || !strings.Contains(out.Failures[0], "tk-1 in tools was not judged") {
@@ -271,11 +271,11 @@ func TestAnUnreadWriteLogLeavesItsSeatsUnjudged(t *testing.T) {
 // A session bead the city's store does not hold, or one whose wake does not
 // read as a time, leaves its claim unjudged.
 func TestAnUnreadSessionBeadLeavesItsClaimUnjudged(t *testing.T) {
-	c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
-	c.SessionList = append(c.SessionList, busy("lx-nobead"))
-	c.seat(busy("lx-bad"), map[string]string{"pool_managed": "true", "last_woke_at": "yesterday"})
-	c.claim(tools, "tk-nobead", "in_progress", "lx-nobead", "lx-nobead")
-	c.claim(tools, "tk-bad", "in_progress", "lx-bad", "lx-bad")
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
+	c.SessionList = append(c.SessionList, busy("hq-nobead"))
+	c.seat(busy("hq-bad"), map[string]string{"pool_managed": "true", "last_woke_at": "yesterday"})
+	c.claim(tools, "tk-nobead", "in_progress", "hq-nobead", "hq-nobead")
+	c.claim(tools, "tk-bad", "in_progress", "hq-bad", "hq-bad")
 	out := c.progress(t)
 	if len(out.Failures) != 2 || len(out.Record.Unread) != 2 {
 		t.Fatalf("outcome %+v", out)
@@ -287,9 +287,9 @@ func TestAnUnreadSessionBeadLeavesItsClaimUnjudged(t *testing.T) {
 
 // An event that is not recorded fails the run.
 func TestAnUnrecordedEventFailsTheRun(t *testing.T) {
-	c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
-	c.seat(busy("lx-1"), pool(5*time.Hour))
-	c.claim(tools, "tk-1", "in_progress", "lx-1", "lx-1")
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
+	c.seat(busy("hq-1"), pool(5*time.Hour))
+	c.claim(tools, "tk-1", "in_progress", "hq-1", "hq-1")
 	c.EmitErr = errors.New("gc event emit did not submit the event")
 	out := c.progress(t)
 	if out.Recorded || len(out.Failures) != 1 || !strings.Contains(out.Failures[0], "was not recorded") {
@@ -302,12 +302,12 @@ func TestAnUnrecordedEventFailsTheRun(t *testing.T) {
 // exactly. A dead session answers to none.
 func TestAnswers(t *testing.T) {
 	live, err := Read([]gascity.Session{
-		{ID: "lx-a", Name: "rig__polecat-lx-a", SessionName: "rig__polecat-lx-a", AgentName: "rig/gc-toolkit.polecat-1", State: "active"},
-		{ID: "lx-b", Alias: "rig/gc-toolkit.refinery", State: "asleep"},
-		{ID: "lx-c", Alias: "rig/gc-toolkit.tk-1", State: "closed"},
-		{ID: "lx-d", Alias: "other/gc-toolkit.tk-1", State: "active"},
-		{ID: "lx-e", Alias: "gc-toolkit.tk-2", State: "draining"},
-		{ID: "lx-f", Alias: "rig/gc-toolkit.tk-3", State: "failed-create"},
+		{ID: "hq-a", Name: "rig__polecat-hq-a", SessionName: "rig__polecat-hq-a", AgentName: "rig/gc-toolkit.polecat-1", State: "active"},
+		{ID: "hq-b", Alias: "rig/gc-toolkit.refinery", State: "asleep"},
+		{ID: "hq-c", Alias: "rig/gc-toolkit.tk-1", State: "closed"},
+		{ID: "hq-d", Alias: "other/gc-toolkit.tk-1", State: "active"},
+		{ID: "hq-e", Alias: "gc-toolkit.tk-2", State: "draining"},
+		{ID: "hq-f", Alias: "rig/gc-toolkit.tk-3", State: "failed-create"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -316,16 +316,16 @@ func TestAnswers(t *testing.T) {
 		names []string
 		want  bool
 	}{
-		{[]string{"lx-a"}, true},
-		{[]string{"rig__polecat-lx-a"}, true},
+		{[]string{"hq-a"}, true},
+		{[]string{"rig__polecat-hq-a"}, true},
 		{[]string{"rig/gc-toolkit.polecat-1"}, true},
 		{[]string{"rig/gc-toolkit.refinery"}, true},
 		{[]string{"rig/gc-toolkit.tk-1"}, false},
-		{[]string{"lx-c"}, false},
+		{[]string{"hq-c"}, false},
 		{[]string{"rig/gc-toolkit.tk-2"}, true},
 		{[]string{"rig/gc-toolkit.tk-3"}, false},
-		{[]string{"lx-gone"}, false},
-		{[]string{"lx-gone", "", "rig/gc-toolkit.refinery"}, true},
+		{[]string{"hq-gone"}, false},
+		{[]string{"hq-gone", "", "rig/gc-toolkit.refinery"}, true},
 		{nil, false},
 	} {
 		if got := live.Answers(tc.names...); got != tc.want {
@@ -342,17 +342,17 @@ func TestAnswers(t *testing.T) {
 func TestOwnerOf(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "tk-1", Status: "open", Assignee: "rig/gc-toolkit.refinery",
-		Metadata: map[string]string{"gc.session_id": "lx-a", "gc.session_name": "rig__polecat-lx-a"}})
+		Metadata: map[string]string{"gc.session_id": "hq-a", "gc.session_name": "rig__polecat-hq-a"}})
 	s.Put(fake.Bead{ID: "tk-2", Status: "open"})
 	recs, err := ledger.New(s).Find(ledger.ByID("tk-1", "tk-2"))
 	if err != nil || len(recs) != 2 {
 		t.Fatal(recs, err)
 	}
 	o, err := OwnerOf(recs[0])
-	if err != nil || o != (Owner{SessionID: "lx-a", Assignee: "rig/gc-toolkit.refinery", SessionName: "rig__polecat-lx-a"}) {
+	if err != nil || o != (Owner{SessionID: "hq-a", Assignee: "rig/gc-toolkit.refinery", SessionName: "rig__polecat-hq-a"}) {
 		t.Fatalf("owner %+v, %v", o, err)
 	}
-	if !slices.Equal(o.Names(), []string{"lx-a", "rig/gc-toolkit.refinery", "rig__polecat-lx-a"}) {
+	if !slices.Equal(o.Names(), []string{"hq-a", "rig/gc-toolkit.refinery", "rig__polecat-hq-a"}) {
 		t.Errorf("names %v", o.Names())
 	}
 	if o, err := OwnerOf(recs[1]); err != nil || len(o.Names()) != 0 {
@@ -396,14 +396,14 @@ func TestThePayloadsKeys(t *testing.T) {
 
 // A suspended rig's store is not read, as core's orphan sweep reads none.
 func TestASuspendedRigIsNotRead(t *testing.T) {
-	c := newCity(gascity.Session{ID: "lx-ctl", State: "active"})
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
 	off := gascity.Rig{Name: "off", Path: "/city/rigs/off", Prefix: "of", Suspended: true}
 	c.RigList = append(c.RigList, off)
 	c.openErr[off.Store()] = errors.New("the suspended rig's store was opened")
-	c.seat(busy("lx-1"), pool(5*time.Hour))
-	c.claim(tools, "tk-1", "in_progress", "lx-1", "lx-1")
+	c.seat(busy("hq-1"), pool(5*time.Hour))
+	c.claim(tools, "tk-1", "in_progress", "hq-1", "hq-1")
 	out := c.progress(t)
-	if len(out.Failures) > 0 || !reflect.DeepEqual(stalledIDs(out.Record), []string{"lx-1@tk-1"}) {
+	if len(out.Failures) > 0 || !reflect.DeepEqual(stalledIDs(out.Record), []string{"hq-1@tk-1"}) {
 		t.Fatalf("outcome %+v", out)
 	}
 }

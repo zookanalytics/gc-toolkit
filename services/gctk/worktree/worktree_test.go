@@ -21,12 +21,12 @@ import (
 var t0 = time.Date(2026, 11, 16, 23, 0, 0, 0, time.UTC)
 
 var (
-	hq    = gascity.Rig{Name: "city", Path: "/city", Prefix: "lx", HQ: true}
+	hq    = gascity.Rig{Name: "city", Path: "/city", Prefix: "hq", HQ: true}
 	tools = gascity.Rig{Name: "tools", Path: "/city/rigs/tools", Prefix: "tk"}
 )
 
 // city is the runtime and the stores the look reads. Its listed sessions are a
-// controller session, a live polecat lx-live, and a refinery that carries its
+// controller session, a live polecat hq-live, and a refinery that carries its
 // alias.
 type city struct {
 	*gcfake.Roster
@@ -39,9 +39,9 @@ func newCity() *city {
 	return &city{
 		Roster: &gcfake.Roster{
 			SessionList: []gascity.Session{
-				{ID: "lx-ctl", Alias: "control-dispatcher", State: "active"},
-				{ID: "lx-live", SessionName: "tools__polecat-lx-live", AgentName: "tools/gc-toolkit.polecat-1", State: "active"},
-				{ID: "lx-ref", Alias: "tools/gc-toolkit.refinery", State: "asleep"},
+				{ID: "hq-ctl", Alias: "control-dispatcher", State: "active"},
+				{ID: "hq-live", SessionName: "tools__polecat-hq-live", AgentName: "tools/gc-toolkit.polecat-1", State: "active"},
+				{ID: "hq-ref", Alias: "tools/gc-toolkit.refinery", State: "asleep"},
 			},
 			RigList: []gascity.Rig{hq, tools},
 		},
@@ -98,16 +98,16 @@ func found(rec *Record) []string {
 // The look records one event naming each, with the tree and branch it names.
 func TestADeadOwnersWorkIsFound(t *testing.T) {
 	c := newCity()
-	c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "lx-dead",
-		Metadata: meta("gc.session_id", "lx-dead", "gc.session_name", "tools__polecat-lx-dead", "work_dir", "/wt/tk-claim", "branch", "polecat/tk-claim")})
-	c.put(fake.Bead{ID: "tk-released", Status: "open", Metadata: meta("gc.session_id", "lx-gone", "gc.session_name", "tools__polecat-lx-gone")})
+	c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "hq-dead",
+		Metadata: meta("gc.session_id", "hq-dead", "gc.session_name", "tools__polecat-hq-dead", "work_dir", "/wt/tk-claim", "branch", "polecat/tk-claim")})
+	c.put(fake.Bead{ID: "tk-released", Status: "open", Metadata: meta("gc.session_id", "hq-gone", "gc.session_name", "tools__polecat-hq-gone")})
 	out := c.salvage(t)
 	if len(out.Failures) > 0 || !out.Recorded {
 		t.Fatalf("failures %v, recorded %v", out.Failures, out.Recorded)
 	}
 	want := []Orphan{
-		{Rig: "tools", Bead: "tk-claim", Status: "in_progress", Assignee: "lx-dead", SessionID: "lx-dead", SessionName: "tools__polecat-lx-dead", WorkDir: "/wt/tk-claim", Branch: "polecat/tk-claim"},
-		{Rig: "tools", Bead: "tk-released", Status: "open", SessionID: "lx-gone", SessionName: "tools__polecat-lx-gone"},
+		{Rig: "tools", Bead: "tk-claim", Status: "in_progress", Assignee: "hq-dead", SessionID: "hq-dead", SessionName: "tools__polecat-hq-dead", WorkDir: "/wt/tk-claim", Branch: "polecat/tk-claim"},
+		{Rig: "tools", Bead: "tk-released", Status: "open", SessionID: "hq-gone", SessionName: "tools__polecat-hq-gone"},
 	}
 	if !reflect.DeepEqual(out.Record.Found, want) {
 		t.Fatalf("found %+v", out.Record.Found)
@@ -128,9 +128,9 @@ func TestADeadOwnersWorkIsFound(t *testing.T) {
 // runtime name or a rig-qualified form of its alias.
 func TestAnOwnerAnyLiveSessionAnswersToIsLive(t *testing.T) {
 	c := newCity()
-	c.put(fake.Bead{ID: "tk-live", Status: "in_progress", Assignee: "lx-live", Metadata: meta("gc.session_id", "lx-live")})
-	c.put(fake.Bead{ID: "tk-alias", Status: "open", Assignee: "tools/gc-toolkit.refinery", Metadata: meta("gc.session_id", "lx-dead")})
-	c.put(fake.Bead{ID: "tk-name", Status: "in_progress", Metadata: meta("gc.session_name", "tools__polecat-lx-live")})
+	c.put(fake.Bead{ID: "tk-live", Status: "in_progress", Assignee: "hq-live", Metadata: meta("gc.session_id", "hq-live")})
+	c.put(fake.Bead{ID: "tk-alias", Status: "open", Assignee: "tools/gc-toolkit.refinery", Metadata: meta("gc.session_id", "hq-dead")})
+	c.put(fake.Bead{ID: "tk-name", Status: "in_progress", Metadata: meta("gc.session_name", "tools__polecat-hq-live")})
 	c.put(fake.Bead{ID: "tk-bare", Status: "in_progress", Assignee: "other/control-dispatcher"})
 	c.put(fake.Bead{ID: "tk-unowned", Status: "open"})
 	out := c.salvage(t)
@@ -145,14 +145,14 @@ func TestAnOwnerAnyLiveSessionAnswersToIsLive(t *testing.T) {
 func TestTheReaderLeavesOutWhatIsNoLostWork(t *testing.T) {
 	c := newCity()
 	dead := func(id string, kv ...string) fake.Bead {
-		return fake.Bead{ID: id, Status: "in_progress", Assignee: "lx-dead", Metadata: meta(append([]string{"gc.session_id", "lx-dead"}, kv...)...)}
+		return fake.Bead{ID: id, Status: "in_progress", Assignee: "hq-dead", Metadata: meta(append([]string{"gc.session_id", "hq-dead"}, kv...)...)}
 	}
 	for _, mr := range []string{"pre_open_gate", "pull_request", "pull_request_pending", "pull_request_head_changed"} {
 		c.put(dead("tk-"+mr, "merge_result", mr))
 	}
 	c.put(dead("tk-merged", "merge_result", "merged"))
 	c.put(fake.Bead{ID: "tk-asked", Status: "open", Assignee: "human"})
-	c.put(fake.Bead{ID: "tk-sitting", Status: "in_progress", Assignee: "tools/gc-toolkit.tk-sitting", Metadata: meta("gc.session_id", "lx-dead")})
+	c.put(fake.Bead{ID: "tk-sitting", Status: "in_progress", Assignee: "tools/gc-toolkit.tk-sitting", Metadata: meta("gc.session_id", "hq-dead")})
 	c.put(fake.Bead{ID: "tk-sitting2", Status: "in_progress", Assignee: "c-tk-sitting2"})
 	for _, kind := range []string{"workflow", "scope", "spec"} {
 		c.put(dead("tk-"+kind, "gc.kind", kind))
@@ -195,20 +195,20 @@ func TestABeadAPersonHoldsIsLeftOut(t *testing.T) {
 	gate("tk-gate", "open")
 	gate("tk-answered", "closed")
 	c.put(fake.Bead{ID: "tk-machine", Status: "open", IssueType: "gate", AwaitType: "timer"})
-	c.put(fake.Bead{ID: "tk-held", Status: "in_progress", Assignee: "lx-dead", Metadata: meta("gc.session_id", "lx-dead"),
+	c.put(fake.Bead{ID: "tk-held", Status: "in_progress", Assignee: "hq-dead", Metadata: meta("gc.session_id", "hq-dead"),
 		Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "tk-gate", Status: "open"}}})
 	s.List("tk-held", "tk-gate")
 	s.Mark("tk-held")
 	c.put(fake.Bead{ID: "tk-parent", Status: "open", IssueType: "epic", Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "tk-gate", Status: "open"}}})
 	s.List("tk-parent", "tk-gate")
 	s.Mark("tk-parent")
-	c.put(fake.Bead{ID: "tk-child", Status: "open", Metadata: meta("gc.session_id", "lx-dead"),
+	c.put(fake.Bead{ID: "tk-child", Status: "open", Metadata: meta("gc.session_id", "hq-dead"),
 		Edges: []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "tk-parent", Status: "open"}}})
 	s.List("tk-child", "tk-parent")
 	s.Mark("tk-child")
-	c.put(fake.Bead{ID: "tk-ruled", Status: "in_progress", Assignee: "lx-dead", Metadata: meta("gc.session_id", "lx-dead"),
+	c.put(fake.Bead{ID: "tk-ruled", Status: "in_progress", Assignee: "hq-dead", Metadata: meta("gc.session_id", "hq-dead"),
 		Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "tk-answered", Status: "closed", ClosedAt: "2026-11-16T20:00:00Z"}}})
-	c.put(fake.Bead{ID: "tk-timed", Status: "in_progress", Assignee: "lx-dead", Metadata: meta("gc.session_id", "lx-dead"),
+	c.put(fake.Bead{ID: "tk-timed", Status: "in_progress", Assignee: "hq-dead", Metadata: meta("gc.session_id", "hq-dead"),
 		Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "tk-machine", Status: "open"}}})
 	s.List("tk-timed", "tk-machine")
 	s.Mark("tk-timed")
@@ -235,7 +235,7 @@ func TestAReadTheLookRestsOnFailsTheRun(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newCity()
-			c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "lx-dead", Metadata: meta("gc.session_id", "lx-dead")})
+			c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "hq-dead", Metadata: meta("gc.session_id", "hq-dead")})
 			tc.set(c)
 			out := c.salvage(t)
 			if out.Record != nil || out.Recorded || len(out.Failures) != 1 || !strings.Contains(out.Failures[0], tc.want) || len(c.Emitted()) != 0 {
@@ -263,8 +263,8 @@ func TestAnUnreadRigFailsTheRunAndKeepsWhatWasFound(t *testing.T) {
 			other := gascity.Rig{Name: "other", Path: "/city/rigs/other", Prefix: "ot"}
 			c.RigList = append(c.RigList, other)
 			c.stores[other.Store()] = fake.New()
-			c.stores[other.Store()].Put(fake.Bead{ID: "ot-claim", Title: "o", Status: "in_progress", IssueType: "task", Metadata: meta("gc.session_id", "lx-dead")})
-			c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "lx-dead", Metadata: meta("gc.session_id", "lx-dead")})
+			c.stores[other.Store()].Put(fake.Bead{ID: "ot-claim", Title: "o", Status: "in_progress", IssueType: "task", Metadata: meta("gc.session_id", "hq-dead")})
+			c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "hq-dead", Metadata: meta("gc.session_id", "hq-dead")})
 			tc.set(c, c.stores[other.Store()])
 			out := c.salvage(t)
 			if !out.Recorded || !reflect.DeepEqual(found(out.Record), []string{"tk-claim"}) {
@@ -284,7 +284,7 @@ func TestTheEvent(t *testing.T) {
 	if out := c.salvage(t); len(out.Failures) > 0 || out.Recorded || out.Record == nil || len(c.Emitted()) != 0 {
 		t.Fatalf("an empty look %+v", out)
 	}
-	c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "lx-dead", Metadata: meta("gc.session_id", "lx-dead")})
+	c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "hq-dead", Metadata: meta("gc.session_id", "hq-dead")})
 	c.EmitErr = errors.New("gc event emit did not submit the event")
 	out := c.salvage(t)
 	if out.Recorded || len(out.Failures) != 1 || !strings.Contains(out.Failures[0], "was not recorded") {
@@ -332,7 +332,7 @@ func TestASuspendedRigIsNotRead(t *testing.T) {
 	off := gascity.Rig{Name: "off", Path: "/city/rigs/off", Prefix: "of", Suspended: true}
 	c.RigList = append(c.RigList, off)
 	c.openErr[off.Store()] = errors.New("the suspended rig's store was opened")
-	c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "lx-dead", Metadata: meta("gc.session_id", "lx-dead")})
+	c.put(fake.Bead{ID: "tk-claim", Status: "in_progress", Assignee: "hq-dead", Metadata: meta("gc.session_id", "hq-dead")})
 	out := c.salvage(t)
 	if len(out.Failures) > 0 || !reflect.DeepEqual(found(out.Record), []string{"tk-claim"}) {
 		t.Fatalf("outcome %+v", out)

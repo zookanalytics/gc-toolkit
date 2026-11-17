@@ -11,7 +11,7 @@ import (
 // Sessions reads each row's identities, its state and its times, and reads a
 // last_active of "" or one that does not parse as no time.
 func TestSessionsReadsTheList(t *testing.T) {
-	c, log := stubGC(t, `printf '%s\n' '{"schema_version":"1","_cache_age_s":2.5,"filters":{},"sessions":[{"id":"lx-1","name":"rig__polecat-lx-1","template":"rig/gc-toolkit.polecat","state":"active","rig":"rig","agent_name":"rig/gc-toolkit.polecat-3","session_name":"rig__polecat-lx-1","created_at":"2026-11-16T20:00:00Z","last_active":"2026-11-16T23:15:36Z","attached":false,"closed":false},{"id":"lx-2","name":"rig/gc-toolkit.refinery","template":"rig/gc-toolkit.refinery","state":"asleep","alias":"rig/gc-toolkit.refinery","created_at":"2026-11-01T00:00:00Z","last_active":""},{"id":"lx-3","state":"active","created_at":"2026-11-01T00:00:00Z","last_active":"yesterday"}],"summary":{"total":3}}'
+	c, log := stubGC(t, `printf '%s\n' '{"schema_version":"1","_cache_age_s":2.5,"filters":{},"sessions":[{"id":"hq-1","name":"rig__polecat-hq-1","template":"rig/gc-toolkit.polecat","state":"active","rig":"rig","agent_name":"rig/gc-toolkit.polecat-3","session_name":"rig__polecat-hq-1","created_at":"2026-11-16T20:00:00Z","last_active":"2026-11-16T23:15:36Z","attached":false,"closed":false},{"id":"hq-2","name":"rig/gc-toolkit.refinery","template":"rig/gc-toolkit.refinery","state":"asleep","alias":"rig/gc-toolkit.refinery","created_at":"2026-11-01T00:00:00Z","last_active":""},{"id":"hq-3","state":"active","created_at":"2026-11-01T00:00:00Z","last_active":"yesterday"}],"summary":{"total":3}}'
 `)
 	got, err := c.Sessions(context.Background())
 	if err != nil {
@@ -21,7 +21,7 @@ func TestSessionsReadsTheList(t *testing.T) {
 		t.Fatalf("read %d sessions: %+v", len(got), got)
 	}
 	s := got[0]
-	if s.ID != "lx-1" || s.AgentName != "rig/gc-toolkit.polecat-3" || s.SessionName != "rig__polecat-lx-1" || s.State != "active" || s.Rig != "rig" {
+	if s.ID != "hq-1" || s.AgentName != "rig/gc-toolkit.polecat-3" || s.SessionName != "rig__polecat-hq-1" || s.State != "active" || s.Rig != "rig" {
 		t.Errorf("first row %+v", s)
 	}
 	if !s.LastActive.Equal(time.Date(2026, 11, 16, 23, 15, 36, 0, time.UTC)) || !s.CreatedAt.Equal(time.Date(2026, 11, 16, 20, 0, 0, 0, time.UTC)) {
@@ -58,12 +58,12 @@ func TestSessionsFailsClosed(t *testing.T) {
 // Rigs reads each rig's name, path, prefix and HQ flag, and refuses a rig with
 // no name or no path.
 func TestRigsReadsTheList(t *testing.T) {
-	c, log := stubGC(t, `printf '%s\n' '{"city_name":"c","rigs":[{"name":"c","path":"/c","prefix":"lx","hq":true,"suspended":false,"beads":"initialized"},{"name":"tools","path":"/c/rigs/tools","prefix":"tk","hq":false,"suspended":true}]}'`)
+	c, log := stubGC(t, `printf '%s\n' '{"city_name":"c","rigs":[{"name":"c","path":"/c","prefix":"hq","hq":true,"suspended":false,"beads":"initialized"},{"name":"tools","path":"/c/rigs/tools","prefix":"tk","hq":false,"suspended":true}]}'`)
 	got, err := c.Rigs(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Rig{{Name: "c", Path: "/c", Prefix: "lx", HQ: true}, {Name: "tools", Path: "/c/rigs/tools", Prefix: "tk", Suspended: true}}
+	want := []Rig{{Name: "c", Path: "/c", Prefix: "hq", HQ: true}, {Name: "tools", Path: "/c/rigs/tools", Prefix: "tk", Suspended: true}}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("read %+v", got)
 	}

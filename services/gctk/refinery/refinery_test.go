@@ -25,7 +25,7 @@ func stamp(d time.Duration) string { return t0.Add(-d).Format(time.RFC3339) }
 const ref = "tools/gc-toolkit.refinery"
 
 var (
-	hq    = gascity.Rig{Name: "city", Path: "/city", Prefix: "lx", HQ: true}
+	hq    = gascity.Rig{Name: "city", Path: "/city", Prefix: "hq", HQ: true}
 	tools = gascity.Rig{Name: "tools", Path: "/city/rigs/tools", Prefix: "tk"}
 )
 

@@ -48,7 +48,7 @@ func lookStub(t *testing.T, c lookCity) (calls func() string) {
 echo "$*" >> '` + log + `'
 case "$*" in
   "session list --json") cat '` + answer("sessions", c.sessions) + `' ;;
-  "rig list --json") cat '` + answer("rigs", `{"rigs":[{"name":"city","path":"/city","prefix":"lx","hq":true},{"name":"tools","path":"/city/rigs/tools","prefix":"tk","hq":false}]}`) + `' ;;
+  "rig list --json") cat '` + answer("rigs", `{"rigs":[{"name":"city","path":"/city","prefix":"hq","hq":true},{"name":"tools","path":"/city/rigs/tools","prefix":"tk","hq":false}]}`) + `' ;;
   "agent list --json") cat '` + answer("agents", `{"agents":[{"name":"refinery","qualified_name":"tools/gc-toolkit.refinery","dir":"tools"}]}`) + `' ;;
   "bd --db /city/.beads list "*) cat '` + answer("hq", c.hq) + `' ;;
   "bd --db /city/rigs/tools/.beads list "*) cat '` + answer("rig", c.rig) + `' ;;
@@ -74,7 +74,7 @@ esac
 
 func agoStamp(d time.Duration) string { return time.Now().UTC().Add(-d).Format(time.RFC3339) }
 
-const liveSessions = `{"schema_version":"1","sessions":[{"id":"lx-ctl","alias":"control-dispatcher","state":"active","created_at":"2026-11-01T00:00:00Z","last_active":""}]}`
+const liveSessions = `{"schema_version":"1","sessions":[{"id":"hq-ctl","alias":"control-dispatcher","state":"active","created_at":"2026-11-01T00:00:00Z","last_active":""}]}`
 
 // salvage finds a claim whose session no live session answers to, records it
 // as one event, prints the record and a summary, and exits 0.
@@ -82,7 +82,7 @@ func TestWorktreeSalvageRecordsWhatItFound(t *testing.T) {
 	calls := lookStub(t, lookCity{
 		sessions: liveSessions,
 		hq:       "[]",
-		rig:      `[{"id":"tk-1","title":"t","status":"in_progress","issue_type":"task","assignee":"lx-dead","metadata":{"gc.session_id":"lx-dead","work_dir":"/wt/tk-1"}},{"id":"tk-2","title":"t","status":"in_progress","issue_type":"task","assignee":"control-dispatcher"}]`,
+		rig:      `[{"id":"tk-1","title":"t","status":"in_progress","issue_type":"task","assignee":"hq-dead","metadata":{"gc.session_id":"hq-dead","work_dir":"/wt/tk-1"}},{"id":"tk-2","title":"t","status":"in_progress","issue_type":"task","assignee":"control-dispatcher"}]`,
 	})
 	var out, errb bytes.Buffer
 	if code := Run([]string{"worktree", "salvage"}, "", &out, &errb); code != 0 {
@@ -146,10 +146,10 @@ func TestWorktreeSalvageFailsOnAnUnreadSessionList(t *testing.T) {
 // it as one event.
 func TestSessionProgressRecordsWhatItFound(t *testing.T) {
 	calls := lookStub(t, lookCity{
-		sessions: `{"sessions":[{"id":"lx-1","state":"active","agent_name":"tools/gc-toolkit.polecat-1","created_at":"2026-11-01T00:00:00Z","last_active":"` + agoStamp(10*time.Second) + `"}]}`,
-		hq:       `[{"id":"lx-1","title":"s","status":"open","issue_type":"session","metadata":{"pool_managed":"true","last_woke_at":"` + agoStamp(5*time.Hour) + `"}}]`,
-		rig:      `[{"id":"tk-1","title":"t","status":"in_progress","issue_type":"task","assignee":"lx-1","metadata":{"gc.session_id":"lx-1"}}]`,
-		writes:   `[{"actor":"lx-1","newest":"` + agoStamp(4*time.Hour) + `"}]`,
+		sessions: `{"sessions":[{"id":"hq-1","state":"active","agent_name":"tools/gc-toolkit.polecat-1","created_at":"2026-11-01T00:00:00Z","last_active":"` + agoStamp(10*time.Second) + `"}]}`,
+		hq:       `[{"id":"hq-1","title":"s","status":"open","issue_type":"session","metadata":{"pool_managed":"true","last_woke_at":"` + agoStamp(5*time.Hour) + `"}}]`,
+		rig:      `[{"id":"tk-1","title":"t","status":"in_progress","issue_type":"task","assignee":"hq-1","metadata":{"gc.session_id":"hq-1"}}]`,
+		writes:   `[{"actor":"hq-1","newest":"` + agoStamp(4*time.Hour) + `"}]`,
 	})
 	var out, errb bytes.Buffer
 	if code := Run([]string{"session", "progress"}, "", &out, &errb); code != 0 {
@@ -159,13 +159,13 @@ func TestSessionProgressRecordsWhatItFound(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &rec); err != nil || len(rec.Stalled) != 1 || rec.Stalled[0].Bead != "tk-1" || !rec.Stalled[0].Wrote {
 		t.Fatalf("stdout %q: %v", out.String(), err)
 	}
-	if !strings.HasSuffix(errb.String(), "lx-1 holding tk-1; recorded\n") {
+	if !strings.HasSuffix(errb.String(), "hq-1 holding tk-1; recorded\n") {
 		t.Errorf("stderr %q", errb.String())
 	}
 	got := calls()
 	for _, want := range []string{
 		"bd --db /city/rigs/tools/.beads list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --has-metadata-key gc.session_id\n",
-		"bd --db /city/.beads list --id lx-1 --include-ephemeral",
+		"bd --db /city/.beads list --id hq-1 --include-ephemeral",
 		"bd --db /city/.beads sql --json SELECT actor",
 		"bd --db /city/rigs/tools/.beads sql --json SELECT actor",
 		"event emit gc-toolkit.seat-progress.stalled --json --actor gctk --message ",

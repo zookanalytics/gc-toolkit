@@ -11,16 +11,16 @@ import (
 // LastWrites asks the store once for the newest write of every actor named,
 // over both write logs, and reads each row's time.
 func TestLastWritesReadsTheWriteLog(t *testing.T) {
-	log := blockedStub(t, "", "", `[{"actor":"lx-a","newest":"2026-11-16T23:21:19Z"},{"actor":"rig/gc-toolkit.polecat-2","newest":"2026-11-16T20:00:00.5Z"}]`)
-	got, err := (&Client{bin: "gc"}).LastWrites([]string{"rig/gc-toolkit.polecat-2", "lx-a", "lx-none", "lx-a"})
+	log := blockedStub(t, "", "", `[{"actor":"hq-a","newest":"2026-11-16T23:21:19Z"},{"actor":"rig/gc-toolkit.polecat-2","newest":"2026-11-16T20:00:00.5Z"}]`)
+	got, err := (&Client{bin: "gc"}).LastWrites([]string{"rig/gc-toolkit.polecat-2", "hq-a", "hq-none", "hq-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]time.Time{
-		"lx-a":                     time.Date(2026, 11, 16, 23, 21, 19, 0, time.UTC),
+		"hq-a":                     time.Date(2026, 11, 16, 23, 21, 19, 0, time.UTC),
 		"rig/gc-toolkit.polecat-2": time.Date(2026, 11, 16, 20, 0, 0, 5e8, time.UTC),
 	}
-	if len(got) != len(want) || !got["lx-a"].Equal(want["lx-a"]) || !got["rig/gc-toolkit.polecat-2"].Equal(want["rig/gc-toolkit.polecat-2"]) {
+	if len(got) != len(want) || !got["hq-a"].Equal(want["hq-a"]) || !got["rig/gc-toolkit.polecat-2"].Equal(want["rig/gc-toolkit.polecat-2"]) {
 		t.Errorf("read %v", got)
 	}
 	raw, _ := os.ReadFile(log)
@@ -28,7 +28,7 @@ func TestLastWritesReadsTheWriteLog(t *testing.T) {
 	if strings.Count(call, "\n") != 0 || !strings.HasPrefix(call, "bd sql --json SELECT actor") {
 		t.Fatalf("the store was asked %q", call)
 	}
-	for _, part := range []string{"FROM events WHERE actor IN ('lx-a','lx-none','rig/gc-toolkit.polecat-2')", "FROM wisp_events WHERE actor IN ('lx-a','lx-none','rig/gc-toolkit.polecat-2')"} {
+	for _, part := range []string{"FROM events WHERE actor IN ('hq-a','hq-none','rig/gc-toolkit.polecat-2')", "FROM wisp_events WHERE actor IN ('hq-a','hq-none','rig/gc-toolkit.polecat-2')"} {
 		if !strings.Contains(call, part) {
 			t.Errorf("the query lacks %q: %s", part, call)
 		}
@@ -53,7 +53,7 @@ func TestLastWritesOfNoActors(t *testing.T) {
 func TestLastWritesFailsClosed(t *testing.T) {
 	log := blockedStub(t, "", "", "[]")
 	var rerr *ReadError
-	if _, err := (&Client{bin: "gc"}).LastWrites([]string{"lx-a", "x' OR '1'='1"}); !errors.As(err, &rerr) {
+	if _, err := (&Client{bin: "gc"}).LastWrites([]string{"hq-a", "x' OR '1'='1"}); !errors.As(err, &rerr) {
 		t.Errorf("an actor with a quote answered %v", err)
 	}
 	if raw, _ := os.ReadFile(log); len(raw) != 0 {
@@ -63,12 +63,12 @@ func TestLastWritesFailsClosed(t *testing.T) {
 		{`{"error":"no such table: wisp_events"}`, "1"},
 		{`[]`, "1"},
 		{`{"rows":[]}`, "0"},
-		{`[{"actor":"lx-a","newest":"yesterday"}]`, "0"},
-		{`[{"actor":"lx-other","newest":"2026-11-16T23:21:19Z"}]`, "0"},
+		{`[{"actor":"hq-a","newest":"yesterday"}]`, "0"},
+		{`[{"actor":"hq-other","newest":"2026-11-16T23:21:19Z"}]`, "0"},
 	} {
 		blockedStub(t, "", "", c.answer)
 		t.Setenv("STUB_MARKS_RC", c.rc)
-		if got, err := (&Client{bin: "gc"}).LastWrites([]string{"lx-a"}); !errors.As(err, &rerr) {
+		if got, err := (&Client{bin: "gc"}).LastWrites([]string{"hq-a"}); !errors.As(err, &rerr) {
 			t.Errorf("%s (exit %s) answered %v, %v", c.answer, c.rc, got, err)
 		}
 	}
