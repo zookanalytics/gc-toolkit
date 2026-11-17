@@ -27,8 +27,9 @@
 #     that also holds another open bead with nothing else as the evidence, a claim,
 #     an unreadable bead, a disposition already naming other evidence, a review bead;
 #   * a bead at each of the pending record's exceptions stands down only once
-#     GitHub reads each PR its record names closed or merged, and the script's
-#     copy of those values is held to services/gctk/pr/record;
+#     its record names its PR and GitHub reads each PR the record names closed or
+#     merged, and the script's copy of those values is held to
+#     services/gctk/pr/record;
 #   * a gate that also holds another open bead, with the evidence named: the arm and
 #     the route go before the edge, passes after every write and mid-pass sling
 #     nothing, a stop at the edge converges on a re-run, and the gate stays open and
@@ -585,6 +586,18 @@ exception pull_request_reconcile_invalid '{"pr_url": "7"}'
 refused "an exception whose pr_url is no PR's URL" tk-w --key pull_request_reconcile_invalid --ruling "x"
 has "$OUT" "pr_url reads '7'" "an exception whose pr_url is no PR's URL: it names the key and its value"
 eq "$(gh_reads)" 0 "an exception whose pr_url is no PR's URL: GitHub is not asked"
+exception pull_request_reconcile_invalid
+patch 'map(if .id == "tk-w" then .metadata |= del(.pr_url) else . end)'
+refused "an exception whose record names no PR" tk-w --key pull_request_reconcile_invalid --ruling "x"
+has "$OUT" "neither pr_url nor existing_pr names its PR" "an exception whose record names no PR: it says so"
+eq "$(gh_reads)" 0 "an exception whose record names no PR: GitHub is not asked"
+exception pull_request_legacy_closed_unverified '{"pr_url": " ", "existing_pr": ""}'
+refused "an exception whose PR keys are empty" tk-w --key pull_request_legacy_closed_unverified --ruling "x"
+has "$OUT" "neither pr_url nor existing_pr names its PR" "an exception whose PR keys are empty: it says so"
+exception pull_request_reconcile_invalid
+patch 'map(if .id == "tk-w" then .metadata |= del(.pr_url) else . end)'
+refused "a dry run at an exception whose record names no PR" tk-w --key pull_request_reconcile_invalid --ruling "x" --dry-run
+hasnt "$OUT" "DRY RUN" "a dry run at an exception whose record names no PR: it reports no plan"
 exception pull_request_reconcile_invalid; gh_says "$PR7" OPEN
 refused "a dry run at an exception whose PR is open" tk-w --key pull_request_reconcile_invalid --ruling "x" --dry-run
 hasnt "$OUT" "DRY RUN" "a dry run at an exception whose PR is open: it reports no plan"

@@ -39,8 +39,8 @@
 # carry out:
 #   * an open PR, which the prs skill retires, because the PR has to close before
 #     an answer releases its merge;
-#   * a bead at one of the pending record's exceptions, until GitHub reads each
-#     PR its record names closed or merged;
+#   * a bead at one of the pending record's exceptions, until its record names
+#     its PR and GitHub reads each PR the record names closed or merged;
 #   * a gate under the key that also holds another open bead, with that gate as
 #     the only evidence. --successor names other evidence and lets this bead leave
 #     it, and an answer once this bead has closed releases the rest;
@@ -177,7 +177,9 @@ case " $RECORD_EXCEPTIONS " in
         *)
           refuse "$WORK is at $WORK_MR, and GitHub did not say whether its PR $pr is still open: gh pr view $pr --json state did not answer. Run this again once it does." ;;
       esac
-    done ;;
+    done
+    [ "$READ_PRS" != " " ] \
+      || refuse "$WORK is at $WORK_MR, and neither pr_url nor existing_pr names its PR, so GitHub cannot say whether that PR is still open. Set pr_url to the PR's URL, then run this again." ;;
 esac
 
 GATES=$(bd_human_gates "$WORK") || refuse "could not read the human gates of $WORK."
