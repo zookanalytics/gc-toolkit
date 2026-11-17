@@ -146,10 +146,20 @@ func TestMemoryDirTakesHooksOffWithNoSettingsFile(t *testing.T) {
 	}
 }
 
+// recordsBirth skips a test where dir's filesystem does not record when a
+// directory was made, since the ask then removes nothing.
+func recordsBirth(t *testing.T, dir string) {
+	t.Helper()
+	if _, ok := born(dir); !ok {
+		t.Skipf("the filesystem of %s does not record when a directory was made", dir)
+	}
+}
+
 // The directories the ask made are removed up to the first that holds
-// anything or predates the ask, and a directory the ask found stays.
+// anything, and a directory beside them stays.
 func TestMemoryDirRemovesWhatTheAskMade(t *testing.T) {
 	root := t.TempDir()
+	recordsBirth(t, root)
 	keep := filepath.Join(root, "projects", "other")
 	if err := os.MkdirAll(keep, 0o755); err != nil {
 		t.Fatal(err)
@@ -157,10 +167,6 @@ func TestMemoryDirRemovesWhatTheAskMade(t *testing.T) {
 	made := filepath.Join(root, "projects", "p", "memory")
 	c, _ := stub(t, `mkdir -p '`+made+`'
 echo '{"type":"system","subtype":"init","memory_paths":{"auto":"`+made+`/"}}'`)
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(filepath.Join(root, "projects"), old, old); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := c.MemoryDir(Ask{Dir: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
@@ -170,18 +176,39 @@ echo '{"type":"system","subtype":"init","memory_paths":{"auto":"`+made+`/"}}'`)
 	if _, err := os.Stat(keep); err != nil {
 		t.Errorf("a directory beside it went: %v", err)
 	}
+}
 
-	found := filepath.Join(root, "found", "memory")
-	if err := os.MkdirAll(found, 0o755); err != nil {
+// A directory made before the ask stays, though making and removing the
+// memory directory in it moved its modification time past the ask's start,
+// and so does an empty memory directory made before the ask.
+func TestRemoveMadeKeepsWhatPredatesTheAsk(t *testing.T) {
+	root := t.TempDir()
+	recordsBirth(t, root)
+	parent, found := filepath.Join(root, "projects", "p"), filepath.Join(root, "found", "memory")
+	for _, d := range []string{parent, found} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A filesystem's clock can tick as coarsely as 10ms, so wait out a tick
+	// before the directory the ask makes.
+	time.Sleep(20 * time.Millisecond)
+	made := filepath.Join(parent, "memory")
+	if err := os.Mkdir(made, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chtimes(found, old, old); err != nil {
-		t.Fatal(err)
+	began, _ := born(made)
+	if b, _ := born(parent); !b.Before(began) {
+		t.Fatalf("the parent was made at %s, not before the directory in it at %s", b, began)
 	}
-	c, _ = stub(t, `echo '{"type":"system","subtype":"init","memory_paths":{"auto":"`+found+`/"}}'`)
-	if _, err := c.MemoryDir(Ask{Dir: t.TempDir()}); err != nil {
-		t.Fatal(err)
+	removeMade(made, began)
+	if _, err := os.Stat(made); !os.IsNotExist(err) {
+		t.Errorf("the memory directory the ask made stayed: %v", err)
 	}
+	if _, err := os.Stat(parent); err != nil {
+		t.Errorf("the empty directory made before the ask went: %v", err)
+	}
+	removeMade(found, began)
 	if _, err := os.Stat(found); err != nil {
 		t.Errorf("an empty memory directory the ask found went: %v", err)
 	}
@@ -191,6 +218,7 @@ echo '{"type":"system","subtype":"init","memory_paths":{"auto":"`+made+`/"}}'`)
 // stays.
 func TestMemoryDirRemovesNoLink(t *testing.T) {
 	root := t.TempDir()
+	recordsBirth(t, root)
 	target := filepath.Join(root, "target")
 	if err := os.MkdirAll(filepath.Join(target, "p", "memory"), 0o755); err != nil {
 		t.Fatal(err)

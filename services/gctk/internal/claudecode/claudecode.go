@@ -165,7 +165,10 @@ func initRecord(r io.Reader) (Answer, bool) {
 }
 
 // removeMade removes, by real path from dir upward, each directory that is
-// empty and changed no earlier than began, and stops at the first that is not.
+// empty and was made no earlier than began, and stops at the first that is
+// not, or whose filesystem does not record when it was made. A directory's
+// modification time cannot tell, since making or removing one in it moves
+// that.
 func removeMade(dir string, began time.Time) {
 	real, err := filepath.EvalSymlinks(filepath.Clean(dir))
 	if err != nil {
@@ -173,7 +176,10 @@ func removeMade(dir string, began time.Time) {
 	}
 	for d := real; d != filepath.Dir(d); d = filepath.Dir(d) {
 		fi, err := os.Lstat(d)
-		if err != nil || !fi.IsDir() || fi.ModTime().Before(began) {
+		if err != nil || !fi.IsDir() {
+			return
+		}
+		if b, ok := born(d); !ok || b.Before(began) {
 			return
 		}
 		if entries, err := os.ReadDir(d); err != nil || len(entries) > 0 {
