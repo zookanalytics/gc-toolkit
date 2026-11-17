@@ -312,3 +312,31 @@ func TestAWithdrawalCarriedOutWhileARunIsAttachedWaitsOnTheRun(t *testing.T) {
 	d.wokeOnce(t, "tk-conv")
 	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
 }
+
+// A requeue whose read of what holds the bead fails keeps the marker and
+// records nothing else, as an act that does not complete records nothing, and
+// the next run reads the bead's holds again, wakes the refinery for the
+// conversation and clears the marker.
+func TestARequeueThatCannotReadWhatHoldsTheBeadLeavesTheWakeToTheNextRun(t *testing.T) {
+	d := newHanding(t)
+	d.conversation(t, "open", "human", "")
+	d.pr.Facts.HeadRefOid = other
+	d.refresh(t)
+	d.store.BlockedErr = errors.New("bd's blocked listing did not answer")
+	o := d.run(t)
+	is(t, o, pr.ActRetry)
+	says(t, o, "what holds the bead did not read", "bd's blocked listing did not answer")
+	if w := d.runWrites(); len(w) != 1 {
+		t.Fatalf("the run wrote %d times, want the requeue alone: %+v", len(w), w)
+	}
+	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "observed_pr_head_sha": other,
+		"pr_reconcile_pending": "true"})
+	d.wokeNone(t)
+
+	d.store.BlockedErr = nil
+	o = d.run(t)
+	is(t, o, pr.ActSettled)
+	says(t, o, "only conversation tk-conv holds the bead, so the refinery was woken and nudged")
+	d.wokeOnce(t, "tk-conv")
+	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
+}
