@@ -173,11 +173,19 @@ The hand-back has these parts:
   the why and the stakes, never the mechanics: no other bead ids, and no script
   or formula names.
 - **Decision**, when one is open: the recommendation first, so the operator
-  can accept it without reading further. Give options only when they are real:
-  one sentence each, each option saying what it does rather than what it
-  avoids, with its upside and its true downside. An option that accepts a
-  known defect names what the defect breaks and where. Never lean on a
-  reassurance such as `proven`, `safe` or `costs nothing`.
+  can accept it without reading further. State it as the course before any
+  reason for it: what would be built or changed, each change given as what it
+  is today and what it becomes. When the operator asked for the best solution,
+  that course is the whole decision. When the course changes during the
+  sitting, state the new one whole rather than as changes to the last. When
+  the sitting has several threads open, say whether the decision settles one
+  of them or the whole conversation, and what stays open after it. Offer an
+  option only when the operator could take it: it reaches what they asked
+  for, and it asks of them only a decision, never an agent's work such as
+  resolving a conflict or merging by hand. Give each option one sentence
+  saying what its end state ships and what it asks of the operator. An option
+  that accepts a known defect names what the defect breaks and where. Never
+  lean on a reassurance such as `proven`, `safe` or `costs nothing`.
 
 A message with detail above its hand-back opens the way the body does. Name
 things as the operator sees them on the board, the PR or the CLI. Pipeline

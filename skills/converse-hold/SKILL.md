@@ -122,6 +122,32 @@ Never edit a recommendation in place, because Accept sends whatever formula
 the subject names. The recommendation's gate is then answered like any gate
 the operator rules on.
 
+**On an open PR, say where each of its open review points lands.** Before you
+recommend a ruling on an open PR, list each point its reviews raised that is
+still open: a review comment of the operator's that the branch has not
+answered, and a finding of the city's review that its round put to a person or
+deferred to a later fix. The PR's conversation holds both, with the city's
+review comment saying how its round ruled each finding. `converse-prep` read
+it when the subject is the PR's anchor. Otherwise read it from the anchor with
+`"$CONV/converse-pr-conversation.sh" <the anchor>`. The PR's status names what
+still holds it, such as a question a person owes or a review thread that waits
+on the city's answer:
+
+```bash
+ANCHOR="<the open PR's anchor: the subject, or the bead its anchor_bead names>"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" pr status "$ANCHOR" --json
+```
+
+The recommendation says where each point lands. A point lands on the PR's
+branch, before approval, when the operator's review asked for it, when the PR's
+change caused it, or when the PR's stated purpose covers it. Sharing a file, a
+screen or a record entry with the PR does not make a point the PR's. A
+follow-up carries only a point outside that scope, or one the operator rules
+separable.
+
 Post the framing as a hand-back whose decision leads with your recommendation,
 and record it on the conversation first (the prompt's hand-back). When the
 recommendation sends work, the decision names the formula the work goes on,
