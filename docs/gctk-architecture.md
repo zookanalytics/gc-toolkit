@@ -460,7 +460,7 @@ and CI runs those tests on every PR.
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
-| runtime | Gas City | `gc` (sling, config, session, doctor, events and event emit, runtime), the supervisor API (runs, sessions), the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh`, and the seed audit's, `render-seed-audit.sh` and `seed-audit-reaudit.sh` | recorded responses |
+| runtime | Gas City | `gc` (sling, config, session, rig, agent, doctor, events and event emit, runtime), the supervisor API (runs, sessions), the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh`, and the seed audit's, `render-seed-audit.sh` and `seed-audit-reaudit.sh` | recorded responses |
 | host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start inside the sandbox a demo capture runs in | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
 
 The store's rules are the store's own. The store adapter asks the store whether

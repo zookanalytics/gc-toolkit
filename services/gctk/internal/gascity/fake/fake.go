@@ -1,7 +1,7 @@
 // Package fake is the runtime adapter's fake: it records each sling, script
-// call, doctor run and event a domain asks for and answers as its test says, so
-// a domain's rules about Gas City are tested in Go with no Gas City
-// (docs/gctk-architecture.md, "The adapters").
+// call, doctor run, event and list read a domain asks for and answers as its
+// test says, so a domain's rules about Gas City are tested in Go with no Gas
+// City (docs/gctk-architecture.md, "The adapters").
 package fake
 
 import (
