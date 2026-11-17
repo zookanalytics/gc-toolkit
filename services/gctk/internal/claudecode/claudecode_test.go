@@ -66,21 +66,34 @@ func TestMemoryDirFailsWithNoInitRecord(t *testing.T) {
 }
 
 // An ask that does not answer in time is stopped with SIGTERM, which lets
-// Claude Code finish writing its config file, not killed outright.
+// Claude Code finish writing its config file, not killed outright. A bound
+// that passes before the stub has set its trap shows nothing, as it can on a
+// loaded host, so the ask runs again with a longer one.
 func TestMemoryDirEndsAnAskThatDoesNotAnswer(t *testing.T) {
-	c, log := stub(t, `trap 'echo stopped >> "$(dirname "$0")/log"; exit 143' TERM
+	c, log := stub(t, `l="$(dirname "$0")/log"
+trap 'echo stopped >> "$l"; exit 143' TERM
+echo trapped >> "$l"
 while :; do sleep 0.05; done`)
-	c.timeout = 200 * time.Millisecond
-	start := time.Now()
-	_, err := c.MemoryDir(Ask{Dir: t.TempDir()})
-	if err == nil || !strings.Contains(err.Error(), "did not answer within") {
-		t.Fatalf("MemoryDir error = %v; want a timeout", err)
-	}
-	if time.Since(start) > 5*time.Second {
-		t.Errorf("the ask ran %s past its bound", time.Since(start))
-	}
-	if got := logged(t, log); !strings.Contains(got, "stopped\n") {
-		t.Errorf("the ask was not stopped with SIGTERM:\n%s", got)
+	for c.timeout = 200 * time.Millisecond; ; c.timeout *= 2 {
+		os.Remove(log)
+		start := time.Now()
+		_, err := c.MemoryDir(Ask{Dir: t.TempDir()})
+		if err == nil || !strings.Contains(err.Error(), "did not answer within") {
+			t.Fatalf("MemoryDir error = %v; want a timeout", err)
+		}
+		if over := time.Since(start) - c.timeout; over > 5*time.Second {
+			t.Errorf("the ask ran %s past its bound", over)
+		}
+		raw, _ := os.ReadFile(log)
+		got := string(raw)
+		switch {
+		case strings.Contains(got, "stopped\n"):
+			return
+		case strings.Contains(got, "trapped\n"):
+			t.Fatalf("the ask was not stopped with SIGTERM:\n%s", got)
+		case c.timeout >= 6400*time.Millisecond:
+			t.Fatalf("the stub had not set its trap when a bound of %s passed:\n%s", c.timeout, got)
+		}
 	}
 }
 
