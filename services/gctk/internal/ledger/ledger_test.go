@@ -130,6 +130,35 @@ func TestAFilingFoundFromABeadCarriesItsDiscoveredFromEdge(t *testing.T) {
 	}
 }
 
+// A bead a filing waits on is the new bead's own blocks edge onto it, in the
+// create's one --deps list after the beads it blocks, so the new bead lands
+// with its wait or not at all, and no update follows.
+func TestAFilingThatWaitsOnABeadCarriesTheWaitInItsCreate(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "w-1", Status: "open"})
+	s.Put(fake.Bead{ID: "src", Status: "closed"})
+	l := New(s)
+	f := l.File("ask", "task")
+	f.Blocks("b-1")
+	f.BlockedBy("w-1")
+	f.From("src")
+	id, err := l.Create(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"-t", "task", "--deps", "blocks:b-1,blocked-by:w-1,discovered-from:src"}; !slices.Equal(s.Creates()[0].Args, want) {
+		t.Fatalf("the create carried %q, want %q", s.Creates()[0].Args, want)
+	}
+	row, _ := s.Row(id)
+	if !slices.ContainsFunc(row.Edges, func(e gcbd.Edge) bool { return e.Type == gcbd.EdgeBlocks && e.ID == "w-1" }) {
+		t.Fatalf("the new bead's edges are %+v, without its blocks edge onto w-1", row.Edges)
+	}
+	if len(s.Writes()) != 0 {
+		t.Fatalf("a filing wrote an update: %+v", s.Writes())
+	}
+}
+
 // A filing a Set refused, or one that names no title, files nothing, and a
 // create the store failed says the bead may have been filed.
 func TestAFilingThatCannotLandFilesNothing(t *testing.T) {

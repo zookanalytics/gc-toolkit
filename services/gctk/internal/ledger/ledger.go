@@ -181,13 +181,13 @@ func (w *Write) args() []string {
 }
 
 // Filing is the filing of one new bead: its title, its type, its description,
-// every key it carries, the beads it blocks and the bead it was found from,
-// made in one create, so the bead lands with its keys and its edges or not at
-// all.
+// every key it carries, the beads it blocks, the beads it waits on and the bead
+// it was found from, made in one create, so the bead lands with its keys and
+// its edges or not at all.
 type Filing struct {
 	title, typ, description string
 	keys                    map[string]string
-	blocks                  []string
+	blocks, blockedBy       []string
 	from                    string
 	err                     error
 }
@@ -204,6 +204,12 @@ func (f *Filing) Description(text string) { f.description = text }
 // bead onto it, written in the create itself.
 func (f *Filing) Blocks(ids ...string) { f.blocks = append(f.blocks, ids...) }
 
+// BlockedBy makes the new bead wait on each bead named, by its own blocks edge
+// onto that bead, written in the create itself, so no read finds the new bead
+// without its wait. An edge onto a bead of another store holds nothing, so a
+// caller names only beads the store holds.
+func (f *Filing) BlockedBy(ids ...string) { f.blockedBy = append(f.blockedBy, ids...) }
+
 // From records the bead the new one was found from, by the new bead's own
 // discovered-from edge onto it, which is no wait and holds nothing.
 func (f *Filing) From(id string) { f.from = id }
@@ -217,8 +223,8 @@ func (f *Filing) fail(err error) {
 }
 
 // args is the create's arguments: the type, the description, the keys as one
-// JSON object, then the beads the new one blocks and the bead it was found
-// from, as one --deps list.
+// JSON object, then the beads the new one blocks, the beads it waits on and the
+// bead it was found from, as one --deps list.
 func (f *Filing) args() ([]string, error) {
 	args := []string{"-t", f.typ}
 	if f.description != "" {
@@ -231,9 +237,12 @@ func (f *Filing) args() ([]string, error) {
 		}
 		args = append(args, "--metadata", string(raw))
 	}
-	deps := make([]string, 0, len(f.blocks)+1)
+	deps := make([]string, 0, len(f.blocks)+len(f.blockedBy)+1)
 	for _, id := range f.blocks {
 		deps = append(deps, "blocks:"+id)
+	}
+	for _, id := range f.blockedBy {
+		deps = append(deps, "blocked-by:"+id)
 	}
 	if f.from != "" {
 		deps = append(deps, "discovered-from:"+f.from)

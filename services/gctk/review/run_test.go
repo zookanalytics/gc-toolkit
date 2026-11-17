@@ -739,6 +739,93 @@ func TestOneSourceAndReasonFiledTwice(t *testing.T) {
 	}
 }
 
+// An ask filed to wait on another bead carries the wait in the create that
+// files it, as its own blocks edge beside its edge onto the PR's bead, and no
+// write follows, so no read finds the ask without its wait.
+func TestAnAskThatWaitsLandsWithItsWaitInOneCreate(t *testing.T) {
+	w := newWorld(t)
+	w.store.Put(bead{ID: "tk-ruling", Status: "closed", IssueType: "task"})
+	w.store.Put(bead{ID: "tk-other", Status: "open", IssueType: "task"})
+	req := review.AskRequest{Bead: prBead, Reason: "Fix the cap.", Source: "tk-ruling", WaitingOn: []string{"tk-other", " tk-other "}}
+	id, filed, err := review.FileAsk(w.ledger(), req, nil)
+	if err != nil || !filed {
+		t.Fatalf("FileAsk = %q, %t, %v", id, filed, err)
+	}
+	creates := w.store.Creates()
+	if deps := "blocks:" + prBead + ",blocked-by:tk-other,discovered-from:tk-ruling"; len(creates) != 1 || !slices.Contains(creates[0].Args, deps) {
+		t.Fatalf("the store took the creates %+v; want one whose --deps are %s", creates, deps)
+	}
+	if writes := w.store.Writes(); len(writes) != 0 {
+		t.Fatalf("filing the ask wrote %+v after its create; want no write", writes)
+	}
+	asks, err := review.AsksOn(w.ledger(), prBead)
+	if err != nil || len(asks) != 1 || asks[0].ID != id || !slices.Equal(asks[0].WaitingOn, []string{"tk-other"}) {
+		t.Fatalf("AsksOn = %+v, %v; want the one ask, waiting on tk-other", asks, err)
+	}
+}
+
+// A wait on a bead the PR's store does not hold, as a bead in another rig's
+// store is, is refused by name with nothing filed, because an edge into
+// another store holds nothing.
+func TestAnAskThatWaitsOnABeadInAnotherStoreIsRefused(t *testing.T) {
+	w := newWorld(t)
+	w.store.Put(bead{ID: "tk-other", Status: "open", IssueType: "task"})
+	_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "Fix the cap.", WaitingOn: []string{"tk-other", "gf-other"}}, nil)
+	var refused *review.Refusal
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "gf-other") || strings.Contains(err.Error(), "tk-other") {
+		t.Fatalf("a wait on a bead the store does not hold: %v; want a refusal that names gf-other alone", err)
+	}
+	if n := len(w.store.Creates()); n != 0 {
+		t.Fatalf("the refused ask reached the store in %d creates", n)
+	}
+}
+
+// A re-run finds the ask of its source and reason and files nothing. One that
+// names a wait the ask it finds does not carry is refused, naming the ask and
+// that wait, so it never answers with an ask that a run can take first. One
+// that names the waits the ask carries, or none, finds it.
+func TestARerunNamingAWaitTheAskLacksIsRefused(t *testing.T) {
+	w := newWorld(t)
+	for _, id := range []string{"tk-ruling", "tk-later"} {
+		w.store.Put(bead{ID: id, Status: "closed", IssueType: "task"})
+	}
+	for _, id := range []string{"tk-other", "tk-third"} {
+		w.store.Put(bead{ID: id, Status: "open", IssueType: "task"})
+	}
+	bare := review.AskRequest{Bead: prBead, Reason: "Fix the cap.", Source: "tk-ruling"}
+	first, _, err := review.FileAsk(w.ledger(), bare, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting := bare
+	waiting.WaitingOn = []string{"tk-other"}
+	_, _, err = review.FileAsk(w.ledger(), waiting, nil)
+	var refused *review.Refusal
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), first) || !strings.Contains(err.Error(), "tk-other") {
+		t.Fatalf("a re-run waiting on tk-other, beside an ask that does not wait: %v; want a refusal naming %s and tk-other", err, first)
+	}
+
+	later := review.AskRequest{Bead: prBead, Reason: "Fix the cap.", Source: "tk-later", WaitingOn: []string{"tk-other"}}
+	second, _, err := review.FileAsk(w.ledger(), later, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, waits := range [][]string{{"tk-other"}, nil} {
+		later.WaitingOn = waits
+		if id, filed, err := review.FileAsk(w.ledger(), later, nil); err != nil || filed || id != second {
+			t.Fatalf("a re-run waiting on %v = %q, %t, %v; want %s found", waits, id, filed, err, second)
+		}
+	}
+	later.WaitingOn = []string{"tk-other", "tk-third"}
+	_, _, err = review.FileAsk(w.ledger(), later, nil)
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "tk-third") || strings.Contains(err.Error(), "tk-other") {
+		t.Fatalf("a re-run that adds tk-third: %v; want a refusal that names tk-third alone", err)
+	}
+	if n := len(w.store.Creates()); n != 2 {
+		t.Fatalf("the store took %d creates; want 2", n)
+	}
+}
+
 // A bead that owns no PR on the record gets no ask.
 func TestAnAskOnABeadWithNoPRIsRefused(t *testing.T) {
 	w := newWorld(t)
