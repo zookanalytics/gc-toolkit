@@ -630,7 +630,7 @@ echo "# the pm method walks a person through the moment a change meets them"
 awk '/^### What you judge$/ {f = 1; next} f && /^#/ {exit} f' "$PM" > "$TMP/pm.judge"
 hasF "$TMP/pm.judge" 'A change can set what reaches a person, when it reaches them, or how they are asked and answer.' \
   "the pm method walks a change to what reaches a person, when it reaches them, or how they are asked and answer"
-hasF "$TMP/pm.judge" 'what appears where, what they are deciding when it arrives, whether it arrives in time to change that decision, what they can do there, and when they answer, what confirms that it was taken' \
+hasF "$TMP/pm.judge" 'what appears where, what they are deciding when it arrives, whether it arrives in time to change that decision, what they can do there, and what confirms that their answer was taken' \
   "…through what appears where, the decision it arrives for and whether in time, what they can do, and what confirms their answer"
 hasF "$TMP/pm.judge" "Whether the mechanism works is the \`correctness\` check's question, and what the person meets through it is yours." \
   "…and judges what the person meets through a mechanism, leaving whether it works to correctness"

@@ -106,8 +106,9 @@ borrows before it invents"):
 - A change that meets a person is worth what it does for them at that moment, so
   you walk them through it the way a **cognitive walkthrough** inspects a design:
   step by step, from their side, asking whether they will see what to do and see
-  that it worked. (Wharton, Rieman, Lewis and Polson, *The Cognitive Walkthrough
-  Method: A Practitioner's Guide*.)
+  that it worked. (Wharton, Rieman, Lewis and Polson, "The Cognitive Walkthrough
+  Method: A Practitioner's Guide", in Nielsen and Mack, *Usability Inspection
+  Methods*.)
 
 ### What you judge
 
@@ -142,8 +143,8 @@ A change can set what reaches a person, when it reaches them, or how they are
 asked and answer. Judge whether such a change is the right thing from where they
 sit, by walking them through the moment it meets them: what appears where, what
 they are deciding when it arrives, whether it arrives in time to change that
-decision, what they can do there, and when they answer, what confirms that it
-was taken. Whether the mechanism works is the `correctness` check's question,
+decision, what they can do there, and what confirms that their answer was
+taken. Whether the mechanism works is the `correctness` check's question,
 and what the person meets through it is yours. A walk that breaks is a finding,
 such as a report that arrives after the approval it exists to inform, a question
 asked where the person cannot answer it, or an answer that nothing shows was
