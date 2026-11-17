@@ -428,6 +428,29 @@ func TestAnItemWithLinesUnderABlankLineIsAnEntry(t *testing.T) {
 	}
 }
 
+// A drop takes out a chain of collection notes that held only pointers on to
+// the note, however long, and the index's pointer into the chain.
+func TestADropTakesOutAChainOfCollectionNotes(t *testing.T) {
+	c := newCity(t)
+	m := c.rig("r", "tk")
+	write(t, filepath.Join(m, indexName), "- [A](hub-a.md) — the chain\n")
+	for hub, next := range map[string]string{"a": "hub-b.md", "b": "hub-c.md", "c": "hub-d.md", "d": "gone.md"} {
+		write(t, filepath.Join(m, "hub-"+hub+".md"), "- [Next]("+next+") — the next\n")
+	}
+	write(t, filepath.Join(m, "gone.md"), "Gone lesson.\n")
+	if a := c.apply(refOf(c.due(), "gone.md") + " drop"); len(a.Failed) > 0 {
+		t.Fatal(a.Failed)
+	}
+	for _, hub := range []string{"a", "b", "c", "d"} {
+		if exists(filepath.Join(m, "hub-"+hub+".md")) {
+			t.Errorf("hub-%s.md stays", hub)
+		}
+	}
+	if got := read(t, filepath.Join(m, indexName)); got != "" {
+		t.Errorf("the index reads %q; want its pointer into the chain gone", got)
+	}
+}
+
 // A drop is refused when the note changes after its text is kept, before it
 // goes, and the text kept for it is taken back.
 func TestANoteEditedWhileItIsRemovedStays(t *testing.T) {

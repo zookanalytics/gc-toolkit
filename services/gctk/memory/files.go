@@ -326,16 +326,16 @@ func pruneLinks(text string, gone map[string]bool) string {
 
 // prune takes the pointers to each note in gone out of the index and every
 // collection note, and removes, with its text kept, a collection note that this
-// leaves with no list item, whose own pointers then go in turn. gone gains the
-// collection notes it removes.
+// leaves with no list item, whose own pointers then go in turn, until a pass
+// removes no collection note. gone gains the collection notes it removes.
 func prune(state, dir string, gone map[string]bool) []string {
 	var failures []string
-	for range 3 {
+	for more := true; more; {
 		names, err := hubs(dir)
 		if err != nil {
 			return append(failures, fmt.Sprintf("cannot list %s, so the links to the notes removed were not taken out: %v", dir, err))
 		}
-		more := false
+		more = false
 		for _, name := range names {
 			file := filepath.Join(dir, name)
 			had := false
@@ -356,9 +356,6 @@ func prune(state, dir string, gone map[string]bool) []string {
 			case failed:
 				failures = append(failures, fmt.Sprintf("%s has no entries left and stays: %v", file, err))
 			}
-		}
-		if !more {
-			break
 		}
 	}
 	return failures
