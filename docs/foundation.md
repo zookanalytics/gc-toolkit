@@ -24,6 +24,8 @@ AI changed the cost of work. Agent iteration, parallel exploration, and self-cri
 
 **The pack borrows before it invents.** Most coordination problems aren't new, and many AI-era patterns are already published. gc-toolkit aggregates and cites; reinvention is the fallback when nothing fits.
 
+**Code does what needs no judgment.** Agent work is cheap, not free. Save it for judgment.
+
 ## Boundaries
 
 gc-toolkit uses Gas City as shipped. A pack is prose, config, thin glue and surfaces. Judgment lives in prompts, flow in formulas, mechanics in the platform, and visualization in surfaces. A surface is a visualization tailored to the pack, such as the helm board. These tests decide what belongs in the pack:

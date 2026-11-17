@@ -66,14 +66,16 @@ var (
 		"Why the work was sent back to the refinery: a head it has not validated, or a record left half "+
 			"written. A publication clears it.")
 	reconcileErrorKey = ledger.Declare("pr_reconcile_error", ledger.String,
-		"Why the landing order's last read could not decide, such as a lookup that failed or a merge commit "+
-			"not yet on the fetched target. The next run reads the record again, and a read that decides clears it.")
+		"Why the landing order's last read could not decide or finish, such as a lookup that failed, a merge "+
+			"commit not yet on the fetched target, or a wake of the refinery that did not land. The next run reads "+
+			"the record again, and a read that decides clears it.")
 	pendingKey = ledger.Declare("pr_reconcile_pending", ledger.String,
 		"true while a reconciliation of the record is still owed, the marker the landing order selects the "+
 			"records it reads by. The record's first write sets it, and the order clears it when the bead "+
-			"closes on a verified merge, goes back to the refinery, meets an exception or has been released "+
-			"from the refinery. A disposition's close clears it in the same write, through bead-rehome.sh, "+
-			"the one shell writer that spells it, because only that write closes the bead under the record lock.")
+			"closes on a verified merge, has its changed head handed to the refinery, meets an exception or has "+
+			"been released from the refinery. A disposition's close clears it in the same write, through "+
+			"bead-rehome.sh, the one shell writer that spells it, because only that write closes the bead under "+
+			"the record lock.")
 )
 
 // The reading faces of the record's keys whose value is another domain's whole

@@ -285,11 +285,14 @@ the `blocked` status in one write, so a refinery that dies between them leaves
 an open bead that names its PR, never a blocked bead with half a record. The
 landing order reads a record whose marker is `true` while its bead is open,
 blocked or closed, and clears the marker once the record owes no further run:
-the bead closed on a verified merge, went back to the refinery or was released
-from it, or met an exception whose human gate is filed. A record the order sends
-back to the refinery keeps its marker while a withdrawal is open on the bead, so
-the order still carries the withdrawal out there, and `gctk pr withdraw` marks
-such a record when it files one. A bead at any other status, such as one
+the bead closed on a verified merge, had its changed head handed to the
+refinery or was released from it, or met an exception whose human gate is
+filed. A record the order sends back to the refinery keeps its marker while a
+withdrawal is open on the bead or a review run is attached to it, so the order
+still carries the withdrawal out there and reads the run's end, and until the
+order has woken the refinery for a head that only conversations and asks hold
+([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
+`gctk pr withdraw` marks such a record when it files one. A bead at any other status, such as one
 claimed or deferred, keeps its marker, and no run reads it.
 The marker is never a review or approval fact. On an open or blocked bead whose
 marker is `true`, the record's `blocked_reason` waits on the order's next run,
