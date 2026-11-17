@@ -29,6 +29,14 @@
     "doc": "The review checks a bead's change is gated by, as a comma list (lifecycle/lifecycle.toml, [metadata.gates]). A composition names it when no pre-open gate resolves from it."
   },
   {
+    "name": "eng_bead",
+    "type": "string",
+    "readers": [
+      "memory"
+    ],
+    "doc": "The engineering bead a feedback pattern's structural remedy was filed as ([metadata.learning]), one of the pattern's follow-ups whose landing ends a memory note's wait on the pattern."
+  },
+  {
     "name": "epic_boundaries",
     "type": "string",
     "readers": [
@@ -501,6 +509,14 @@
     "doc": "The URL of the PR the record names, https://\u003chost\u003e/\u003cowner\u003e/\u003crepo\u003e/pull/\u003cnumber\u003e."
   },
   {
+    "name": "proposal_bead",
+    "type": "string",
+    "readers": [
+      "memory"
+    ],
+    "doc": "The prompt-update the distiller filed for a feedback pattern ([metadata.learning]), one of the pattern's follow-ups whose landing ends a memory note's wait on the pattern."
+  },
+  {
     "name": "rebase_hold",
     "type": "string",
     "readers": [
@@ -548,9 +564,10 @@
     "name": "task_kind",
     "type": "string",
     "readers": [
+      "memory",
       "review"
     ],
-    "doc": "A bead's role (lifecycle/lifecycle.toml). An ask carries none, so a bead that names a PR's branch and carries one, such as a rework child, is work of its own on the branch."
+    "doc": "A memory note that waits on a bead whose task_kind is feedback-pattern waits on the pattern's follow-ups. A bead's role (lifecycle/lifecycle.toml). An ask carries none, so a bead that names a PR's branch and carries one, such as a rework child, is work of its own on the branch."
   },
   {
     "name": "withdraw_head",

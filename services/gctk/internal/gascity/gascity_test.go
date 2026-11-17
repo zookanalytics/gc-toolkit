@@ -3,6 +3,7 @@ package gascity
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -334,5 +335,40 @@ exit 0
 		"session\nnudge\nrig/gone.refinery\n" + msg + "\n--\n"
 	if string(raw) != want {
 		t.Fatalf("gc ran with\n%s\nwant\n%s", raw, want)
+	}
+}
+
+// Rigs reads each rig the listing names with its checkout, prefix and whether
+// it is the HQ, and leaves out a row with no name or no checkout. The Claude
+// settings file sits under the city's root.
+func TestRigsAndTheClaudeSettingsFile(t *testing.T) {
+	dir := t.TempDir()
+	gc := filepath.Join(dir, "gc")
+	if err := os.WriteFile(gc, []byte(`#!/bin/sh
+[ "$1 $2 $3" = "rig list --json" ] || exit 2
+echo '{"rigs":[{"name":"town","path":"`+dir+`","prefix":"lx","hq":true},{"name":"r","path":"/r","prefix":"tk"},{"name":"","path":"/x"},{"name":"nopath"}]}'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &City{bin: gc}
+	rigs, err := c.Rigs()
+	want := []Rig{{Name: "town", Path: dir, Prefix: "lx", HQ: true}, {Name: "r", Path: "/r", Prefix: "tk"}}
+	if err != nil || !slices.Equal(rigs, want) {
+		t.Fatalf("Rigs = %+v, %v; want %+v", rigs, err, want)
+	}
+	if err := os.Mkdir(filepath.Join(dir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY_PATH", "")
+	t.Setenv("GC_CITY", "")
+	t.Setenv("GC_CITY_ROOT", "")
+	if got, err := c.ClaudeSettings(); err != nil || got != filepath.Join(dir, ".gc", "settings.json") {
+		t.Errorf("ClaudeSettings = %q, %v", got, err)
+	}
+	if err := os.WriteFile(gc, []byte("#!/bin/sh\necho down >&2; exit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Rigs(); err == nil || !strings.Contains(err.Error(), "exit 1: down") {
+		t.Errorf("a listing that failed answered %v", err)
 	}
 }

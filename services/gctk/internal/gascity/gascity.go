@@ -1,8 +1,9 @@
 // Package gascity is gctk's runtime adapter: Gas City as gctk reaches it apart
 // from its store, which internal/gcbd reaches (docs/gctk-architecture.md, "The
 // adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
-// when it names none, wakes and nudges a session, names the city's root, and
-// runs the pack's scripts that ask a person. A domain reaches them only through
+// when it names none, wakes and nudges a session, names the city's root, its
+// rigs and the settings file its Claude sessions start with, and runs the
+// pack's scripts that ask a person. A domain reaches them only through
 // Runtime. City is the city gctk runs in, and gascity/fake records what a domain
 // asked and answers as its test says, so a domain's rules are tested in Go with
 // no Gas City.
@@ -46,6 +47,18 @@ type Runtime interface {
 	Script(name string, args ...string) Result
 	// CityRoot is the city's root directory, the one that holds its .gc.
 	CityRoot() (string, error)
+	// Rigs is each rig `gc rig list --json` names, the city's HQ among them.
+	Rigs() ([]Rig, error)
+	// ClaudeSettings is the settings file Gas City starts each Claude session
+	// with, whether or not it is there.
+	ClaudeSettings() (string, error)
+}
+
+// Rig is one rig the city names: its name, its checkout, its bead prefix, and
+// whether it is the city's HQ, whose checkout is the city's root.
+type Rig struct {
+	Name, Path, Prefix string
+	HQ                 bool
 }
 
 // Sling is one `gc sling <target> <bead> --on <formula> --title <title>`,
@@ -404,6 +417,44 @@ func (c *City) CityRoot() (string, error) {
 		}
 	}
 	return "", errors.New("no city root: GC_CITY_PATH, GC_CITY and GC_CITY_ROOT name none, and gc rig list names no HQ rig holding .gc")
+}
+
+// Rigs reads `gc rig list --json`, leaving out a row that names no rig or no
+// checkout.
+func (c *City) Rigs() ([]Rig, error) {
+	r := run(c.dir, c.bin, "rig", "list", "--json")
+	if r.Code != 0 {
+		return nil, fmt.Errorf("gc rig list did not read: %s", r.why())
+	}
+	var list struct {
+		Rigs []struct {
+			Name   string `json:"name"`
+			Path   string `json:"path"`
+			Prefix string `json:"prefix"`
+			HQ     bool   `json:"hq"`
+		} `json:"rigs"`
+	}
+	if err := json.Unmarshal([]byte(r.Output), &list); err != nil {
+		return nil, fmt.Errorf("gc rig list's answer did not decode: %v", err)
+	}
+	out := make([]Rig, 0, len(list.Rigs))
+	for _, rig := range list.Rigs {
+		if rig.Name != "" && rig.Path != "" {
+			out = append(out, Rig{Name: rig.Name, Path: rig.Path, Prefix: rig.Prefix, HQ: rig.HQ})
+		}
+	}
+	return out, nil
+}
+
+// ClaudeSettings is <city root>/.gc/settings.json, which Gas City projects
+// before each Claude start and passes with --settings (ensureClaudeSettingsArgs
+// and settingsArgs in cmd/gc/cmd_start.go at gastownhall/gascity 5f7cd988a6).
+func (c *City) ClaudeSettings() (string, error) {
+	root, err := c.CityRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ".gc", "settings.json"), nil
 }
 
 func isDir(p string) bool {
