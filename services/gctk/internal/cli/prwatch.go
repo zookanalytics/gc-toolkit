@@ -103,14 +103,16 @@ differs writes no bead.
 The full read is the cheap signs gctk pr poll reads and the facts no sign
 shows: the PR's merge state, its review decision, whether it is in a merge
 queue and whether its base requires one, each review thread's resolution, the
-time each conversation comment, review and inline comment last changed, and
-the check runs at its last commit with whether the PR requires each. It reads
-no post's text, and reads a list past its first page on until it ends. It
-compares those facts with the PR part, the required check runs with the
-checks, and the review decision, the unresolved threads and the newest post
-time with the conversation. A merge state GitHub reads as UNKNOWN differs in
-nothing. So a review thread resolved or reopened, or an edit to a post that
-left the PR's updatedAt as it was, reaches the saved read within one pass.
+time each conversation comment, review and inline comment last changed, the
+reactions the city's account left on each inline comment, and the check runs
+at its last commit with whether the PR requires each. It reads no post's
+text, and reads a list past its first page on until it ends. It compares
+those facts with the PR part, the required check runs with the checks, and
+the review decision, the unresolved threads, the newest post time and the
+city's reactions with the conversation. A merge state GitHub reads as UNKNOWN
+differs in nothing. So a review thread resolved or reopened, the city's
+reaction that answers a thread with no reply, or an edit to a post that left
+the PR's updatedAt as it was, reaches the saved read within one pass.
 
 A PR whose read failed keeps its saved read and is read again at the next
 pass, as is a PR the 3 minutes left.

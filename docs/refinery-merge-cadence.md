@@ -916,12 +916,12 @@ A pass reads each owned PR with one aliased `pullRequest(number:)` field, at
 most 10 PRs a request: the cheap signs, the merge state, the review decision,
 both merge-queue flags, each review thread's resolution, the time each
 conversation comment, review and inline comment last changed, read through the
-review threads 10 a page, and the check runs at the PR's last commit, each with
-whether the PR requires it. It reads no post's text. A list past its first page
-is read on until it ends: the labels, the conversation comments, the reviews,
-the threads, a thread's comments and the check runs, these last at the commit
-the first page read. A request of up to 9 PRs costs 1 point and one of 10 costs
-2.
+review threads 10 a page, the reactions the city's account left on each inline
+comment, and the check runs at the PR's last commit, each with whether the PR
+requires it. It reads no post's text. A list past its first page is read on
+until it ends: the labels, the conversation comments, the reviews, the threads,
+a thread's comments and the check runs, these last at the commit the first page
+read. A request of up to 9 PRs costs 1 point and one of 10 costs 2.
 
 The net compares what it read with the saved read, and runs the one-PR update
 over each part that differs, and over each part whose signs moved:
@@ -930,7 +930,7 @@ over each part that differs, and over each part whose signs moved:
 |---|---|
 | the PR's state, draft flag, head, base, merge state or either merge-queue flag | the PR's own facts |
 | the commit the checks were read at, or a name or a result among the check runs the PR requires there | the PR's own facts with the required check runs at the head, in one request |
-| the review decision, the unresolved threads, or the newest post time, the latest time any post changed | the conversation |
+| the review decision, the unresolved threads, the newest post time, the latest time any post changed, or the city's reactions on the inline comments, which answer a thread with no reply | the conversation |
 
 A merge state GitHub reads as `UNKNOWN` differs in nothing, since GitHub reads
 an open PR's so until it has computed one, and a merged PR's for good. So a

@@ -115,11 +115,12 @@ type Approval struct {
 // time, the latest time any conversation comment, review or inline comment
 // changed, which the update reads with the posts.
 type ConversationSigns struct {
-	Comments   int    `json:"comments"`
-	Reviews    int    `json:"reviews"`
-	Dismissed  int    `json:"dismissed"`
-	UpdatedAt  string `json:"updated_at"`
-	NewestPost string `json:"newest_post"`
+	Comments        int      `json:"comments"`
+	Reviews         int      `json:"reviews"`
+	Dismissed       int      `json:"dismissed"`
+	UpdatedAt       string   `json:"updated_at"`
+	NewestPost      string   `json:"newest_post"`
+	ViewerReactions []string `json:"viewer_reactions,omitempty"`
 }
 
 // SavedLabels is the PR's labels, every one, sorted. They are their own signs.
@@ -234,7 +235,8 @@ func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 // base, merge state or either merge-queue flag differs; the checks when they
 // were read at another commit than f's, or the check runs the PR requires there
 // differ in a name or a result; and the conversation when the review decision,
-// the unresolved threads or the newest post time differs. A merge state f reads
+// the unresolved threads, the newest post time or the reactions the account the
+// read runs as left on the inline comments differ. A merge state f reads
 // as UNKNOWN differs in nothing, since GitHub reads an open PR's so until it
 // has computed one, and a merged PR's for good. A part saved does not hold is
 // moved's to read.
@@ -257,7 +259,8 @@ func differs(saved *SavedRead, f gh.Full) parts {
 			newest = later(newest, at)
 		}
 		p.conversation = s.ReviewDecision != f.ReviewDecision || s.Signs.NewestPost != newest ||
-			!slices.Equal(listed(s.Unresolved), listed(f.Unresolved))
+			!slices.Equal(listed(s.Unresolved), listed(f.Unresolved)) ||
+			!slices.Equal(listed(s.Signs.ViewerReactions), listed(f.ViewerReactions))
 	}
 	return p
 }

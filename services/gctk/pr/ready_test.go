@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,10 +70,15 @@ func (r *rule) IssueComments(_, _ string, cs []feedback.Comment) ([]int64, error
 	return r.comments(cs)
 }
 
+// Awaiting names each thread awaits marks, unless the city's THUMBS_UP is on
+// one of its comments, which answers it as gc_thread_awaits_answer reads it.
 func (r *rule) Awaiting(_, _ string, ts []feedback.Thread) ([]string, error) {
 	var out []string
 	for _, t := range ts {
-		if r.awaits[t.ID] {
+		handled := slices.ContainsFunc(t.Comments, func(c feedback.Comment) bool {
+			return slices.Contains(c.Reactions, "THUMBS_UP")
+		})
+		if r.awaits[t.ID] && !handled {
 			out = append(out, t.ID)
 		}
 	}

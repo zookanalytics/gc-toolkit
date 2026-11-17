@@ -80,8 +80,10 @@ var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
 		"conversation}; awaiting, the review threads waiting on the city's answer; unresolved, the unresolved "+
 		"threads; review_decision; and approvals, each review that approves and has not been dismissed, "+
 		"whoever gave it, as {id, author, commit, inline}, inline the newest inline comment it carries that is "+
-		"feedback, with the signs comments, reviews, dismissed, updated_at and newest_post, the latest time a "+
-		"post changed. labels: names, every label, which are their own signs. The update writes a part only "+
+		"feedback, with the signs comments, reviews, dismissed, updated_at, newest_post, the latest time a "+
+		"post changed, and viewer_reactions, each reaction the account the read runs as left on an inline "+
+		"comment, as the comment's id and the reaction, which the definition of feedback reads as an answer "+
+		"to the comment's thread, absent when there is none. labels: names, every label, which are their own signs. The update writes a part only "+
 		"when its read was sent after the saved part's: the whole part when it differs, and its read_at alone "+
 		"when it holds the same, so a read sent before it is never saved after it. A read that fails saves "+
 		"nothing. It holds no answer. The pr evaluator decides over it, for a display and for the landing "+

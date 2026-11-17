@@ -86,6 +86,27 @@ func TestTheNetSavesAThreadResolvedOrReopened(t *testing.T) {
 	}
 }
 
+// The city's THUMBS_UP on a thread's comment answers the thread, with no reply
+// owed, as on a point declined. It moves no time, no count and no resolution,
+// so only the net's read of the reactions the city's account left saves it,
+// and the thread leaves Awaiting.
+func TestTheNetSavesTheCitysReactionThatAnswersAThread(t *testing.T) {
+	d := newWatched(t)
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 400, Author: "operator", Body: "rename this",
+		CreatedAt: "2026-11-16T08:00:00Z", UpdatedAt: "2026-11-16T08:00:00Z"}}}}
+	d.rule.awaits["T1"] = true
+	updated(t, d.poll(t), "pr, checks, conversation, labels")
+	if got := d.saved(t, bead).Conversation.Awaiting; !slices.Equal(got, []string{"T1"}) {
+		t.Fatalf("the first pass saved the threads awaiting the city %v", got)
+	}
+	d.pr.Threads[0].Comments[0].ViewerReactions = []string{"THUMBS_UP"}
+	onlyTheNetSees(t, d, []string{"Login", "Conversation"}, "conversation")
+	c := d.saved(t, bead).Conversation
+	if len(c.Awaiting) != 0 || !slices.Equal(c.Signs.ViewerReactions, []string{"400 THUMBS_UP"}) {
+		t.Fatalf("the net saved the threads awaiting %v and the city's reactions %v", c.Awaiting, c.Signs.ViewerReactions)
+	}
+}
+
 // An edit to a post can leave the PR's updatedAt as it was, and moves no
 // count, so only the net's read of each post's time saves it. An edit that
 // takes out the mark saying a post is not for review turns it into feedback.

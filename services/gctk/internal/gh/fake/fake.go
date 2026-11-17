@@ -448,7 +448,7 @@ func (g *GitHub) FullRead(repo string, numbers []int) (map[int]gh.Full, map[int]
 		}
 		f := gh.Full{Signs: p.signs(), MergeStateStatus: p.Facts.MergeStateStatus, ReviewDecision: p.ReviewDecision,
 			InMergeQueue: p.Facts.InMergeQueue, MergeQueueEnabled: p.Facts.MergeQueueEnabled, Posts: []string{},
-			Unresolved: []string{}, ChecksAt: p.Facts.HeadRefOid, Checks: []gh.CheckRun{}}
+			Unresolved: []string{}, ViewerReactions: []string{}, ChecksAt: p.Facts.HeadRefOid, Checks: []gh.CheckRun{}}
 		for _, v := range p.Reviews {
 			f.Posts = append(f.Posts, v.UpdatedAt)
 		}
@@ -458,12 +458,16 @@ func (g *GitHub) FullRead(repo string, numbers []int) (map[int]gh.Full, map[int]
 			}
 			for _, c := range t.Comments {
 				f.Posts = append(f.Posts, c.UpdatedAt)
+				for _, r := range c.ViewerReactions {
+					f.ViewerReactions = append(f.ViewerReactions, strconv.FormatInt(c.ID, 10)+" "+r)
+				}
 			}
 		}
 		for _, c := range p.Comments {
 			f.Posts = append(f.Posts, c.UpdatedAt)
 		}
 		slices.Sort(f.Unresolved)
+		slices.Sort(f.ViewerReactions)
 		for _, s := range p.Suites[p.Facts.HeadRefOid] {
 			f.Checks = append(f.Checks, s.Runs...)
 		}

@@ -25,7 +25,11 @@ const FullReadBatch = 10
 // GitHub states them, the review decision empty where GitHub gives none. Posts
 // holds the time each conversation comment, review and inline comment last
 // changed, which an edit of its text moves. Unresolved holds the id of each
-// review thread that is not resolved, sorted. Checks holds the check runs among
+// review thread that is not resolved, sorted. ViewerReactions holds each
+// reaction the account the read runs as left on a review thread's comment, as
+// the comment's id and the reaction, such as "4591186925 THUMBS_UP", sorted: the
+// city's mark that it handled a point, which moves no time and no count.
+// Checks holds the check runs among
 // the check rollup's contexts at ChecksAt, the PR's last commit, each with
 // whether the PR requires it; the rollup's commit statuses are counted in the
 // signs and read no further.
@@ -37,6 +41,7 @@ type Full struct {
 	MergeQueueEnabled bool
 	Posts             []string
 	Unresolved        []string
+	ViewerReactions   []string
 	ChecksAt          string
 	Checks            []CheckRun
 }
@@ -53,8 +58,14 @@ const fullFragment = `fragment full on PullRequest{number state isDraft headRefO
   reviewThreads(first:10){pageInfo{hasNextPage endCursor} nodes{` + threadFields + `}}}`
 
 // threadFields are what the net reads of a review thread: its id, whether it
-// is resolved, and the time each comment on its first page last changed.
-const threadFields = `id isResolved comments(first:100){pageInfo{hasNextPage endCursor} nodes{updatedAt}}`
+// is resolved, and of each comment on its first page what threadPostFields
+// reads.
+const threadFields = `id isResolved comments(first:100){pageInfo{hasNextPage endCursor} nodes{` + threadPostFields + `}}`
+
+// threadPostFields are what the net reads of a review thread's comment: its
+// id, the time it last changed, and the reactions the account the read runs as
+// left on it.
+const threadPostFields = `fullDatabaseId updatedAt reactionGroups{content viewerHasReacted}`
 
 // fullField is PR n's field in the net's read: the full fragment, and the check
 // rollup at its last commit, with the contexts counted by state and the first
@@ -82,7 +93,7 @@ var (
 	threadsPageQuery  = laterPage("reviewThreads", 10, threadFields)
 	threadTimesQuery  = `query($id:ID!,$endCursor:String!){
   node(id:$id){... on PullRequestReviewThread{
-    comments(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{updatedAt}}}}}`
+    comments(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{` + threadPostFields + `}}}}}`
 	contextsPageQuery = `query($owner:String!,$name:String!,$number:Int!,$oid:GitObjectID!,$endCursor:String!){
   repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{
     statusCheckRollup{contexts(first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
@@ -116,9 +127,19 @@ type postTime struct {
 
 // threadState is a review thread as the net reads it.
 type threadState struct {
-	ID         string                `json:"id"`
-	IsResolved bool                  `json:"isResolved"`
-	Comments   *connection[postTime] `json:"comments"`
+	ID         string                  `json:"id"`
+	IsResolved bool                    `json:"isResolved"`
+	Comments   *connection[threadPost] `json:"comments"`
+}
+
+// threadPost is a review thread's comment as the net reads it.
+type threadPost struct {
+	ID             string `json:"fullDatabaseId"`
+	UpdatedAt      string `json:"updatedAt"`
+	ReactionGroups []struct {
+		Content          string `json:"content"`
+		ViewerHasReacted bool   `json:"viewerHasReacted"`
+	} `json:"reactionGroups"`
 }
 
 // contextNode is one of a check rollup's contexts: a check run, or a commit
@@ -154,7 +175,8 @@ func (c *Client) full(owner, name string, number int, n *fullNode) (Full, error)
 		return Full{}, fmt.Errorf("the full read of PR %d lacks a part GitHub always gives", number)
 	}
 	f := Full{Signs: signs, MergeStateStatus: n.MergeStateStatus, InMergeQueue: n.IsInMergeQueue,
-		MergeQueueEnabled: n.IsMergeQueueEnabled, Posts: []string{}, Unresolved: []string{}, Checks: []CheckRun{}}
+		MergeQueueEnabled: n.IsMergeQueueEnabled, Posts: []string{}, Unresolved: []string{}, ViewerReactions: []string{},
+		Checks: []CheckRun{}}
 	if n.ReviewDecision != nil {
 		f.ReviewDecision = *n.ReviewDecision
 	}
@@ -178,13 +200,21 @@ func (c *Client) full(owner, name string, number int, n *fullNode) (Full, error)
 		if !t.IsResolved {
 			f.Unresolved = append(f.Unresolved, t.ID)
 		}
-		posts, err := c.threadTimes(t)
+		posts, err := c.threadPosts(t)
 		if err != nil {
 			return Full{}, fmt.Errorf("review thread %s of PR %d: %w", t.ID, number, err)
 		}
-		f.Posts = append(f.Posts, posts...)
+		for _, p := range posts {
+			f.Posts = append(f.Posts, p.UpdatedAt)
+			reacted, err := viewerReactions(p)
+			if err != nil {
+				return Full{}, fmt.Errorf("review thread %s of PR %d: %w", t.ID, number, err)
+			}
+			f.ViewerReactions = append(f.ViewerReactions, reacted...)
+		}
 	}
 	slices.Sort(f.Unresolved)
+	slices.Sort(f.ViewerReactions)
 	commit := n.Commits.Nodes[0].Commit
 	f.ChecksAt = commit.Oid
 	if commit.Rollup == nil || commit.Rollup.Contexts == nil {
@@ -208,32 +238,42 @@ func (c *Client) full(owner, name string, number int, n *fullNode) (Full, error)
 	return f, nil
 }
 
-// threadTimes is the time each of review thread t's comments last changed, its
-// comments past the first page read on, by the thread's id, until they end.
-func (c *Client) threadTimes(t threadState) ([]string, error) {
+// threadPosts is each of review thread t's comments, those past the first page
+// read on, by the thread's id, until they end.
+func (c *Client) threadPosts(t threadState) ([]threadPost, error) {
 	if t.Comments == nil {
 		return nil, errors.New("the thread holds no comments")
 	}
 	if t.Comments.PageInfo.HasNextPage && t.ID == "" {
 		return nil, errors.New("a review thread with more comments than one page names no id")
 	}
-	comments, err := whole(c, t.Comments, threadTimesQuery, []string{"-f", "id=" + t.ID}, threadComments)
-	if err != nil {
-		return nil, err
-	}
+	return whole(c, t.Comments, threadTimesQuery, []string{"-f", "id=" + t.ID}, threadComments)
+}
+
+// viewerReactions is each reaction the account the read runs as left on p, as
+// Full.ViewerReactions names one. A comment that reacted and names no id fails
+// the read, since its reaction would match no other read's.
+func viewerReactions(p threadPost) ([]string, error) {
 	var out []string
-	for _, p := range comments {
-		out = append(out, p.UpdatedAt)
+	for _, g := range p.ReactionGroups {
+		if !g.ViewerHasReacted {
+			continue
+		}
+		id, err := databaseID(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, strconv.FormatInt(id, 10)+" "+g.Content)
 	}
 	return out, nil
 }
 
 // threadComments finds a review thread's comments in a page of
 // threadTimesQuery.
-func threadComments(data json.RawMessage) (*connection[postTime], error) {
+func threadComments(data json.RawMessage) (*connection[threadPost], error) {
 	var page struct {
 		Node *struct {
-			Comments *connection[postTime] `json:"comments"`
+			Comments *connection[threadPost] `json:"comments"`
 		} `json:"node"`
 	}
 	if err := json.Unmarshal(data, &page); err != nil {

@@ -136,6 +136,7 @@ What each kind of change moves, and how it was shown:
 | A merge or a close | the state | the field is the state; the watch: `updatedAt` moved at 2 of 2 changes of state or draft flag |
 | An edit to a post's text: a conversation comment, a review or an inline comment | `updatedAt`, mostly | an edit moves the post's own `updatedAt`; the PR's moved to a conversation comment's edit on #1497 and #1524, each made after the PR's last other change, and to a review's edit within a second on a public PR; on another, a review edited 3 seconds after the PR's last change left `updatedAt` unmoved 8 minutes later, so the net reads each post's time ([section 2](#2-the-net)) |
 | A thread resolved or reopened | none | tested on #1533: a thread reopened and then resolved moved no sign, no `updatedAt` and no ETag; the net reads it ([section 2](#2-the-net)) |
+| The city's reaction on an inline comment, which answers its thread with no reply, as on a point declined | none shown | on #1542, inline comment 4591186925 kept its `updatedAt` of 20:34:23Z when the city's THUMBS_UP landed at 20:53:46Z, and no count counts a reaction; whether the PR's `updatedAt` moved was not read then, so the net reads the reactions the city's account left on each inline comment ([section 2](#2-the-net)) |
 
 Whether a post is feedback is read from its text (`gc_not_for_review` and
 `gc_feedback` in assets/scripts/pr-post.sh). So an edit that takes out the mark
@@ -143,7 +144,8 @@ or the prefix saying a post is not for review turns it into feedback, and moves
 no count.
 
 Every kind no cheap sign is shown to catch goes to the net: a thread resolved
-or reopened, an edit to a post that left `updatedAt` as it was, a change of the
+or reopened, the city's reaction on an inline comment, an edit to a post that
+left `updatedAt` as it was, a change of the
 repository's rules that moves the review decision, a check's required flag or
 the merge state while no review or check moves, and two checks that trade
 states between passes so every count stays the same, which no change the watch
@@ -175,29 +177,34 @@ in one request.
 The net is its own order, `pr-compare`, every 10 minutes. It reads each owned
 PR's state, draft flag, head, base and the base's tip, merge state, review
 decision, merge-queue flags, every label, dismissed count, every review
-thread's resolution, the time each post last changed, and the required checks
-at the head through the rollup's contexts, each with
-`isRequired(pullRequestNumber: N)` at the PR's own number. A post's time is its
-`updatedAt`, read on each conversation comment, each review and each inline
-comment, the inline ones through the review threads, 10 threads a page. The net
-reads no post's text. GitHub counts a list nested in another once for each item
-that could hold it, so the inline comments of 100 threads a PR would cost a
-request of 10 PRs 10 points, where 10 threads a PR cost it 2. A request reads
-at most 10 PRs. On the 15 open PRs of the city's busiest repository the read
-took 2.0 to 3.0 seconds at 5 PRs for 1 point, and 2.8 to 3.5 at 10 and 3.5 to
-5.0 at 15 for 2 points, with no errors. A PR whose labels, comments, reviews,
+thread's resolution, the time each post last changed, the reactions the city's
+account left on each inline comment, and the required checks at the head
+through the rollup's contexts, each with `isRequired(pullRequestNumber: N)` at
+the PR's own number. A post's time is its `updatedAt`, read on each
+conversation comment, each review and each inline comment, the inline ones
+through the review threads, 10 threads a page. The net reads no post's text.
+GitHub counts a list nested in another once for each item that could hold it,
+so the inline comments of 100 threads a PR would cost a request of 10 PRs 10
+points, where 10 threads a PR cost it 2. A request reads at most 10 PRs. On the
+15 open PRs of the city's busiest repository the read took 2.0 to 3.0 seconds
+at 5 PRs for 1 point, and 2.8 to 3.5 at 10 and 3.5 to 5.0 at 15 for 2 points,
+with no errors. Each inline comment's reactions are GitHub's reaction groups
+with whether the reading account reacted, which is no paged list: with them a
+request of 9 of this repository's PRs still cost 1 point and one of 10 cost 2,
+and a read of 10 took 1.9 to 2.0 seconds. A PR whose labels, comments, reviews,
 threads, a thread's comments or checks pass the first page is paged until that
 connection ends, and a response that carries errors is a failed read for the
 PRs it names.
 
 The net compares what it read with each PR's saved read, and runs the one-PR
 update over every part of each PR that differs. The saved read holds what the
-net compares, the unresolved threads and the newest post time among it
-([section 3](#3-where-the-signs-are-kept)). When a PR's newest post time
-differs from the one saved, the update reads its conversation again, so an edit
-no cheap sign showed is saved within one pass of the net. A change no cheap
-sign shows goes unseen for at most the net's 10 minutes, plus up to 30 seconds
-before Gas City's next lane pass starts the run, plus the run itself.
+net compares, the unresolved threads, the newest post time and the city's
+reactions among it ([section 3](#3-where-the-signs-are-kept)). When a PR's
+newest post time differs from the one saved, the update reads its conversation
+again, so an edit no cheap sign showed is saved within one pass of the net. A
+change no cheap sign shows goes unseen for at most the net's 10 minutes, plus
+up to 30 seconds before Gas City's next lane pass starts the run, plus the run
+itself.
 
 The net also runs the search for labels on PRs no bead owns
 ([section 9](#9-labels)).
@@ -213,13 +220,18 @@ read with it, never later than its facts:
 |---|---|---|
 | The PR | URL, number, repository, head branch, base, head, state, draft flag, merge state and merge-queue flags | state, draft flag, head, base, the base's tip, `updatedAt` |
 | The checks | the required check runs and commit statuses at the head, with their results | head, the rollup's state, the contexts' total, the counts by state |
-| The conversation | the approvers and requesters, the newest feedback in each id space, the threads waiting on the city's answer, the unresolved threads, the review decision, and the provenance instant the definition of feedback was applied from | comment count, review count, dismissed count, `updatedAt`, the newest post time |
+| The conversation | the approvers and requesters, the newest feedback in each id space, the threads waiting on the city's answer, the unresolved threads, the review decision, and the provenance instant the definition of feedback was applied from | comment count, review count, dismissed count, `updatedAt`, the newest post time, the city's reactions |
 | The labels | the label names | the names themselves |
 
 The newest post time is the latest `updatedAt` among the PR's conversation
 comments, reviews and inline comments. The update's read of the conversation
-takes it with their text, and the net reads it to compare. The PR part and the
-conversation part each keep `updatedAt`, so a move of it reads both.
+takes it with their text, and the net reads it to compare. The city's reactions
+are each reaction the city's account left on an inline comment, by the
+comment's id, which the definition of feedback reads as an answer to the
+comment's thread (`gc_thread_awaits_answer` in assets/scripts/pr-post.sh): the
+update's read takes them with the threads, and the net reads them to compare.
+The PR part and the conversation part each keep `updatedAt`, so a move of it
+reads both.
 
 The one-PR update is the only writer of the saved read and its signs. It also
 writes Gas Town's `pr_state` and `pr_last_checked_at` on a record on the pending

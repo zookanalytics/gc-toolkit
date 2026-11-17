@@ -17,8 +17,9 @@ type fullLists struct {
 }
 
 // fullDefaults is a PR with one label, one conversation comment, one review, an
-// unresolved thread and a resolved one, and a required check run beside a
-// commit status, each list on one page.
+// unresolved thread whose comment the account the read runs as reacted to and a
+// resolved one, and a required check run beside a commit status, each list on
+// one page.
 var fullDefaults = fullLists{
 	labels:   `{"pageInfo":{"hasNextPage":false,"endCursor":"l"},"nodes":[{"name":"status: working"}]}`,
 	comments: `{"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[{"updatedAt":"2026-11-16T09:01:00Z"}]}`,
@@ -26,9 +27,10 @@ var fullDefaults = fullLists{
 		"nodes":[{"updatedAt":"2026-11-16T09:02:00Z"}]}`,
 	threads: `{"pageInfo":{"hasNextPage":false,"endCursor":"t"},"nodes":[
 		{"id":"T9","isResolved":false,"comments":{"pageInfo":{"hasNextPage":false,"endCursor":"x"},
-			"nodes":[{"updatedAt":"2026-11-16T09:03:00Z"}]}},
+			"nodes":[{"fullDatabaseId":"401","updatedAt":"2026-11-16T09:03:00Z","reactionGroups":[
+				{"content":"THUMBS_UP","viewerHasReacted":true},{"content":"HEART","viewerHasReacted":false}]}]}},
 		{"id":"T1","isResolved":true,"comments":{"pageInfo":{"hasNextPage":false,"endCursor":"x"},
-			"nodes":[{"updatedAt":"2026-11-16T08:00:00Z"}]}}]}`,
+			"nodes":[{"fullDatabaseId":"402","updatedAt":"2026-11-16T08:00:00Z","reactionGroups":[]}]}}]}`,
 	contexts: `{"totalCount":2,"checkRunCountsByState":[{"state":"SUCCESS","count":1}],
 		"statusContextCountsByState":[{"state":"PENDING","count":1}],
 		"pageInfo":{"hasNextPage":false,"endCursor":"k"},"nodes":[
@@ -63,7 +65,7 @@ func TestFullReadReadsEachPRsFactsAndNoPostsText(t *testing.T) {
 			Rollup: "PENDING", Contexts: 2, CheckRuns: map[string]int{"SUCCESS": 1}, Statuses: map[string]int{"PENDING": 1}},
 		MergeStateStatus: "BLOCKED", ReviewDecision: "APPROVED", MergeQueueEnabled: true,
 		Posts:      []string{"2026-11-16T09:01:00Z", "2026-11-16T09:02:00Z", "2026-11-16T09:03:00Z", "2026-11-16T08:00:00Z"},
-		Unresolved: []string{"T9"}, ChecksAt: "h7",
+		Unresolved: []string{"T9"}, ViewerReactions: []string{"401 THUMBS_UP"}, ChecksAt: "h7",
 		Checks: []gh.CheckRun{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS", Required: true}},
 	}
 	if !reflect.DeepEqual(read[7], want) {
@@ -79,7 +81,8 @@ func TestFullReadReadsEachPRsFactsAndNoPostsText(t *testing.T) {
 	for _, want := range []string{"api --hostname github.com graphql", "-f owner=acme", "-f name=widgets",
 		"isRequired(pullRequestNumber:7)", "isRequired(pullRequestNumber:9)", "reviewThreads(first:10)",
 		"mergeStateStatus", "reviewDecision", "isInMergeQueue", "isMergeQueueEnabled", "labels(first:100)",
-		"dismissed:reviews(states:[DISMISSED])", "checkRunCountsByState", "baseRef{target{oid}}"} {
+		"dismissed:reviews(states:[DISMISSED])", "checkRunCountsByState", "baseRef{target{oid}}",
+		"reactionGroups{content viewerHasReacted}"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("the request lacks %q", want)
 		}
@@ -130,7 +133,7 @@ func TestFullReadReadsEachListOnPastItsFirstPage(t *testing.T) {
 		reviews:  strings.Replace(fullDefaults.reviews, `"hasNextPage":false,"endCursor":"r"`, `"hasNextPage":true,"endCursor":"R1"`, 1),
 		threads: `{"pageInfo":{"hasNextPage":true,"endCursor":"T1"},"nodes":[
 			{"id":"T9","isResolved":false,"comments":{"pageInfo":{"hasNextPage":true,"endCursor":"N1"},
-				"nodes":[{"updatedAt":"2026-11-16T09:03:00Z"}]}}]}`,
+				"nodes":[{"fullDatabaseId":"401","updatedAt":"2026-11-16T09:03:00Z","reactionGroups":[]}]}}]}`,
 		contexts: strings.Replace(fullDefaults.contexts, `"hasNextPage":false,"endCursor":"k"`, `"hasNextPage":true,"endCursor":"K1"`, 1),
 	}
 	c, r := client(
@@ -138,8 +141,10 @@ func TestFullReadReadsEachListOnPastItsFirstPage(t *testing.T) {
 		[2]string{"endCursor=C1", page("repository.pullRequest.comments", `{"updatedAt":"2026-11-16T10:01:00Z"}`)},
 		[2]string{"endCursor=R1", page("repository.pullRequest.reviews", `{"updatedAt":"2026-11-16T10:02:00Z"}`)},
 		[2]string{"endCursor=T1", page("repository.pullRequest.reviewThreads", `{"id":"T2","isResolved":false,
-			"comments":{"pageInfo":{"hasNextPage":false,"endCursor":"z"},"nodes":[{"updatedAt":"2026-11-16T10:03:00Z"}]}}`)},
-		[2]string{"endCursor=N1", page("node.comments", `{"updatedAt":"2026-11-16T10:04:00Z"}`)},
+			"comments":{"pageInfo":{"hasNextPage":false,"endCursor":"z"},"nodes":[{"fullDatabaseId":"403",
+			"updatedAt":"2026-11-16T10:03:00Z","reactionGroups":[{"content":"EYES","viewerHasReacted":true}]}]}}`)},
+		[2]string{"endCursor=N1", page("node.comments", `{"fullDatabaseId":"404","updatedAt":"2026-11-16T10:04:00Z",
+			"reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":true}]}`)},
 		[2]string{"endCursor=K1", page("repository.object.statusCheckRollup.contexts",
 			`{"__typename":"CheckRun","name":"lint","status":"IN_PROGRESS","conclusion":null,"isRequired":false}`)},
 		[2]string{"p7:", `{"data":{"repository":{"p7":` + fullNode(7, more) + `}}}`})
@@ -159,6 +164,9 @@ func TestFullReadReadsEachListOnPastItsFirstPage(t *testing.T) {
 	if want := []string{"T2", "T9"}; !slices.Equal(f.Unresolved, want) {
 		t.Errorf("unresolved %v, want %v", f.Unresolved, want)
 	}
+	if want := []string{"403 EYES", "404 THUMBS_UP"}; !slices.Equal(f.ViewerReactions, want) {
+		t.Errorf("the account's reactions %v, want %v", f.ViewerReactions, want)
+	}
 	if want := []gh.CheckRun{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS", Required: true},
 		{Name: "lint", Status: "IN_PROGRESS"}}; !reflect.DeepEqual(f.Checks, want) {
 		t.Errorf("checks %+v, want %+v", f.Checks, want)
@@ -170,8 +178,8 @@ func TestFullReadReadsEachListOnPastItsFirstPage(t *testing.T) {
 		"endCursor=L1": {"labels(first:100,after:$endCursor)", "-F number=7"},
 		"endCursor=C1": {"comments(first:100,after:$endCursor)", "nodes{updatedAt}"},
 		"endCursor=R1": {"reviews(first:100,after:$endCursor)", "nodes{updatedAt}"},
-		"endCursor=T1": {"reviewThreads(first:10,after:$endCursor)", "isResolved"},
-		"endCursor=N1": {"node(id:$id)", "-f id=T9"},
+		"endCursor=T1": {"reviewThreads(first:10,after:$endCursor)", "isResolved", "viewerHasReacted"},
+		"endCursor=N1": {"node(id:$id)", "-f id=T9", "reactionGroups{content viewerHasReacted}"},
 		"endCursor=K1": {"object(oid:$oid)", "-f oid=h7", "-F number=7", "isRequired(pullRequestNumber:$number)"},
 	} {
 		var args string

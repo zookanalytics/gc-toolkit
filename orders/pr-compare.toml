@@ -2,15 +2,17 @@
 # minutes, and read and save each one that differs from the read saved on its
 # bead (specs/tk-1tfzr71.149/design.md, sections 2, 6 and 7). It catches the
 # changes no cheap sign shows, which orders/pr-poll.toml cannot see: a review
-# thread resolved or reopened, an edit to a post that left the PR's updatedAt
-# as it was, a check the PR comes to require or stops requiring, and a review
+# thread resolved or reopened, the city's reaction that answers a thread with
+# no reply, an edit to a post that left the PR's updatedAt as it was, a check
+# the PR comes to require or stops requiring, and a review
 # decision, merge state or merge-queue flag that a change of the repository's
 # rules moves.
 # What it reads: for each PR the store's live beads own, the cheap question's
 # signs, its merge state, review decision and merge-queue flags, each review
 # thread's resolution, the time each conversation comment, review and inline
-# comment last changed, and the check runs at its last commit with whether the
-# PR requires each, in one request for each 10 PRs in a repository, with each
+# comment last changed, the reactions the city's account left on each inline
+# comment, and the check runs at its last commit with whether the PR requires
+# each, in one request for each 10 PRs in a repository, with each
 # list read on past its first page. It reads no post's text. For each part of a
 # PR that differs, or whose signs moved, it runs the one-PR update, `gctk pr
 # refresh`, the one writer of pr_github_read, so a pass in which nothing

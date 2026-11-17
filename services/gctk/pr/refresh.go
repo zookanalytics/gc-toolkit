@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -302,7 +303,7 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 		}
 		conv.ReadAt = at
 		conv.Signs = ConversationSigns{Comments: s.Comments, Reviews: s.Reviews, Dismissed: s.Dismissed,
-			UpdatedAt: s.UpdatedAt, NewestPost: conv.Signs.NewestPost}
+			UpdatedAt: s.UpdatedAt, NewestPost: conv.Signs.NewestPost, ViewerReactions: conv.Signs.ViewerReactions}
 		fresh.Conversation = conv
 	}
 	if due.labels {
@@ -313,7 +314,9 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 
 // savedConversation is what the rule reads of a PR's conversation c, by the
 // definition of feedback applied from since as the account self acts as, with
-// the newest time any post changed as its post time.
+// the newest time any post changed as its post time and the reactions the
+// account the read runs as left on the review threads' comments, which the
+// rule reads and which move no time, as signs the net compares.
 func savedConversation(rule Feedback, self, since string, c *gh.Conversation) (*SavedConversation, error) {
 	f, err := feedbackOf(rule, self, since, c.Reviews, c.Threads, c.Comments)
 	if err != nil {
@@ -324,7 +327,7 @@ func savedConversation(rule Feedback, self, since string, c *gh.Conversation) (*
 		return nil, err
 	}
 	approvers, requesters := approval(c.Reviews)
-	var unresolved []string
+	var unresolved, reacted []string
 	newest := ""
 	for _, v := range c.Reviews {
 		newest = later(newest, v.UpdatedAt)
@@ -335,15 +338,20 @@ func savedConversation(rule Feedback, self, since string, c *gh.Conversation) (*
 		}
 		for _, cm := range t.Comments {
 			newest = later(newest, cm.UpdatedAt)
+			for _, r := range cm.ViewerReactions {
+				reacted = append(reacted, strconv.FormatInt(cm.ID, 10)+" "+r)
+			}
 		}
 	}
+	sort.Strings(reacted)
 	for _, cm := range c.Comments {
 		newest = later(newest, cm.UpdatedAt)
 	}
 	sort.Strings(unresolved)
 	return &SavedConversation{Since: since, Approvers: listed(approvers), Requesters: listed(requesters),
 		Feedback: f.newest(), Awaiting: listed(waiting), Unresolved: listed(unresolved), ReviewDecision: c.ReviewDecision,
-		Approvals: approvals(c.Reviews, c.Threads, f.inline), Signs: ConversationSigns{NewestPost: newest}}, nil
+		Approvals: approvals(c.Reviews, c.Threads, f.inline), Signs: ConversationSigns{NewestPost: newest,
+			ViewerReactions: reacted}}, nil
 }
 
 // later is the later of two of GitHub's times, a when b does not read as one.
