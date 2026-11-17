@@ -93,7 +93,8 @@ func TestThePRWatchOverAStoreThatOwnsNoPR(t *testing.T) {
 		t.Fatalf("poll exit %d, stdout %q, stderr %q", code, out, errs)
 	}
 	out, errs, code = landingCmd(t, store, "git@github.com:acme/widgets.git", "pr", "compare", "--db", t.TempDir())
-	if code != 0 || strings.TrimSpace(out) != "Compared 0 PRs in 0 repositories: 0 updated, 0 failed, 0 left for the next pass." {
+	if code != 0 || strings.TrimSpace(out) != "Compared 0 PRs in 0 repositories: 0 updated, 0 failed, 0 left for the next pass.\n"+
+		"Searched github.com/acme/widgets for the city's labels in 1 page: 0 PRs no live bead owns found, 0 cleared." {
 		t.Fatalf("compare exit %d, stdout %q, stderr %q", code, out, errs)
 	}
 	url := "https://github.com/acme/widgets/pull/9"

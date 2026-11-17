@@ -20,13 +20,26 @@ import (
 
 const validated = "1111111111111111111111111111111111111111"
 
+// ghSearchStub answers the net's search for the city's labels with a page that
+// holds no PR, and refuses every other call, so no command these tests run
+// reaches GitHub.
+const ghSearchStub = `#!/bin/sh
+case "$*" in
+  *"search(type:ISSUE"*) echo '{"data":{"search":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}' ;;
+  *) echo "gh stub: no answer for: $*" >&2; exit 1 ;;
+esac
+`
+
 // landingCmd runs gctk with args over store, in a clone whose origin is origin,
-// or a clone with no origin when origin is empty.
+// or a clone with no origin when origin is empty, with gh's only answer the
+// search ghSearchStub gives.
 func landingCmd(t *testing.T, store, origin string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(storeStub), 0o755); err != nil {
-		t.Fatal(err)
+	for name, stub := range map[string]string{"gc": storeStub, "gh": ghSearchStub} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(stub), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("STUB_STORE", store)

@@ -28,24 +28,30 @@ import (
 
 // Watch is GitHub as the PR watch reads it: the cheap question and the net's
 // full read over many PRs, a PR's own facts with or without the checks at its
-// head, its conversation, and the login the city's account acts as.
+// head, its conversation, the login the city's account acts as, and a page of
+// the search for the PRs that carry any of a set of labels.
 type Watch interface {
 	Signs(repo string, numbers []int) (map[int]gh.Signs, map[int]error)
 	FullRead(repo string, numbers []int) (map[int]gh.Full, map[int]error)
 	PullRequestPart(repo string, number int, checks bool) (*gh.PRPart, error)
 	Conversation(repo string, number int) (*gh.Conversation, error)
 	Login() (string, error)
+	Labeled(repo string, names []string, after string) (gh.LabeledPage, error)
 }
 
 // Watcher is what the PR watch reads and writes through. Dir is the store's
 // .beads directory, where the record lock lives, and Wait bounds how long an
 // update waits for it. Feedback loads the definition of feedback, once a run
-// first needs it.
+// first needs it. Labels is the PRs' labels, which the net clears off a PR no
+// live bead owns in the repository Origin's URL names, the rig clone's origin;
+// with Labels nil the net clears none.
 type Watcher struct {
 	Ledger   *ledger.Ledger
 	Dir      string
 	GitHub   func(host string) Watch
 	Feedback func() (Feedback, error)
+	Labels   Labels
+	Origin   func() (string, error)
 	Now      func() time.Time
 	Wait     time.Duration
 }
@@ -104,15 +110,18 @@ func (u *watchRun) feedback() (Feedback, error) {
 	return u.rule, nil
 }
 
-// owners lists the live beads that own a PR, by the PR's URL. A bead owns a PR
-// when it names it as its own and is no other bead's child: an anchor names it
-// in pr_url beside a merge_result, and a bead the refinery sent back to the
-// pool names it in existing_pr. A bead whose anchor_bead names another bead is
-// that bead's child, such as a rework child, and owns nothing.
-func (w Watcher) owners() (map[string][]owned, error) {
+// owners lists the live beads that own a PR, by the PR's URL (ownersIn).
+func (w Watcher) owners() (map[string][]owned, error) { return ownersIn(w.Ledger) }
+
+// ownersIn lists the live beads that own a PR, by the PR's URL, read through l.
+// A bead owns a PR when it names it as its own and is no other bead's child: an
+// anchor names it in pr_url beside a merge_result, and a bead the refinery sent
+// back to the pool names it in existing_pr. A bead whose anchor_bead names
+// another bead is that bead's child, such as a rework child, and owns nothing.
+func ownersIn(l *ledger.Ledger) (map[string][]owned, error) {
 	byID := map[string]*ledger.Record{}
 	for _, sel := range record.NamingPR() {
-		rows, err := w.Ledger.Find(sel)
+		rows, err := l.Find(sel)
 		if err != nil {
 			return nil, err
 		}
@@ -400,12 +409,16 @@ type PassOptions struct {
 
 // PassReport is what a pass did: the PRs it asked about, the repositories they
 // are in, each update it ran, each PR that failed with its error, and each PR
-// its window left for the next pass.
+// its window left for the next pass. A pass of the net also says what its
+// search for the city's labels found, and each PR no live bead owns whose
+// labels it cleared.
 type PassReport struct {
 	Asked, Repositories int
 	Updates             []Refreshed
 	Failed              map[string]error
 	Late                []string
+	Search              *Search
+	Cleared             []string
 }
 
 // sighting is what a pass saw of one PR: the signs it hands the update, and the
@@ -425,7 +438,7 @@ type asker func(hub Watch, repo string, owners []owned) (map[int]sighting, map[i
 // over the parts they make stale, starting none past o.Window. A PR whose signs
 // did not read keeps its saved read, and the pass reports it failed.
 func (w Watcher) Poll(o PassOptions) (PassReport, error) {
-	return w.pass(o, func(hub Watch, repo string, owners []owned) (map[int]sighting, map[int]error) {
+	report, _, err := w.pass(o, w.clock(), func(hub Watch, repo string, owners []owned) (map[int]sighting, map[int]error) {
 		signs, errs := hub.Signs(repo, prNumbers(owners))
 		read, failed := map[int]sighting{}, map[int]error{}
 		for _, ow := range owners {
@@ -441,6 +454,7 @@ func (w Watcher) Poll(o PassOptions) (PassReport, error) {
 		}
 		return read, failed
 	})
+	return report, err
 }
 
 // Compare is one pass of the net over the PRs the store's live beads own: it
@@ -450,9 +464,12 @@ func (w Watcher) Poll(o PassOptions) (PassReport, error) {
 // moved (moved), starting none past o.Window. So a change no cheap sign shows,
 // such as a review thread resolved or an edit to a post that left the PR's
 // updatedAt as it was, reaches the saved read within one pass. A PR whose read
-// failed keeps its saved read, and the pass reports it failed.
+// failed keeps its saved read, and the pass reports it failed. With Labels set,
+// the pass then searches the rig's repository for the city's labels on PRs no
+// live bead owns, and clears them (clearStrays).
 func (w Watcher) Compare(o PassOptions) (PassReport, error) {
-	return w.pass(o, func(hub Watch, repo string, owners []owned) (map[int]sighting, map[int]error) {
+	start := w.clock()
+	report, all, err := w.pass(o, start, func(hub Watch, repo string, owners []owned) (map[int]sighting, map[int]error) {
 		full, errs := hub.FullRead(repo, prNumbers(owners))
 		read, failed := map[int]sighting{}, map[int]error{}
 		for _, ow := range owners {
@@ -469,6 +486,20 @@ func (w Watcher) Compare(o PassOptions) (PassReport, error) {
 		}
 		return read, failed
 	})
+	if err != nil || w.Labels == nil {
+		return report, err
+	}
+	w.clearStrays(o, start, all, &report)
+	return report, nil
+}
+
+// clock is the time a pass's window is read by: Now, or the system's clock
+// when Now is nil.
+func (w Watcher) clock() time.Time {
+	if w.Now == nil {
+		return time.Now()
+	}
+	return w.Now()
 }
 
 // prNumbers are the numbers of the PRs owners own.
@@ -480,23 +511,20 @@ func prNumbers(owners []owned) []int {
 	return out
 }
 
-// pass is one pass of the watch over the PRs the store's live beads own: ask
-// reads every owned PR in a repository, and the pass runs the one-PR update
-// over the parts of each PR the read found stale, starting none past o.Window.
-// A PR that did not read keeps its saved read, and the pass reports it failed,
-// as it does a PR owned by more than one bead and an update that did not save.
-// A PR the window left is read at the next pass, since nothing saved it. It
-// returns an error when the store's listing did not read.
-func (w Watcher) pass(o PassOptions, ask asker) (PassReport, error) {
-	now := w.Now
-	if now == nil {
-		now = time.Now
-	}
-	start := now()
+// pass is one pass of the watch over the PRs the store's live beads own, which
+// started at start: ask reads every owned PR in a repository, and the pass runs
+// the one-PR update over the parts of each PR the read found stale, starting
+// none past o.Window. A PR that did not read keeps its saved read, and the pass
+// reports it failed, as it does a PR owned by more than one bead and an update
+// that did not save. A PR the window left is read at the next pass, since
+// nothing saved it. It returns the owners it listed, and an error when the
+// store's listing did not read.
+func (w Watcher) pass(o PassOptions, start time.Time, ask asker) (PassReport, map[string][]owned, error) {
+	now := w.clock
 	report := PassReport{Failed: map[string]error{}}
 	all, err := w.owners()
 	if err != nil {
-		return report, err
+		return report, nil, err
 	}
 	type repoKey struct{ host, repo string }
 	byRepo := map[repoKey][]owned{}
@@ -544,5 +572,5 @@ func (w Watcher) pass(o PassOptions, ask asker) (PassReport, error) {
 			report.Updates = append(report.Updates, done)
 		}
 	}
-	return report, nil
+	return report, all, nil
 }

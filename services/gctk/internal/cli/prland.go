@@ -147,6 +147,18 @@ review-run-failed instead, naming both runs and how each ended.
 The run saves none of what it reads of GitHub: the one-PR update is the one
 writer of pr_github_read, pr_state and pr_last_checked_at.
 
+It keeps each PR's status: and held: labels equal to what the store derives,
+for every PR the store's live beads own, on the pending record or not. For
+each owned PR whose bead holds a read of it, it compares the labels of the
+writer's that the read saved with the ones the store derives, as gctk pr
+status derives them: the PR's status and held values while it is open, and
+none once it merged or closed. Where they differ, it has the labels' one
+writer, pr-status-label.sh, write them, reconcile on an open PR and clear on
+one that merged or closed, passing every label the read saved as the ones the
+PR shows. A label write takes its place among the acts in the shuffled order,
+under the same 45 and 30 seconds, and writes nothing on the bead, so one that
+does not land leaves the difference for the next run, which writes it again.
+
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the act fetched it, once the lock is free and inside the
 run's 45 seconds, in a clone that carries one (render-seed-audit.sh). The
@@ -159,14 +171,16 @@ It acts only on a bead it reads under the lock as carrying the marker and,
 unless the bead is closed, still assigned to the refinery --refinery names,
 with each write guarded on the status and assignee it read. A bead a release
 took from the refinery has its marker cleared and its PR named in a note, and
-nothing else written. Each record's outcome prints on a line of its own, as
-<bead> <action>: <detail>.
+nothing else written. Each outcome prints on a line of its own, as
+<bead> <action>: <detail>, where a label write's action is labeled.
 
-exit: 0 every record was decided, and every act the run started completed
+exit: 0 every record and every PR's labels were decided, and every act the
+        run started completed
       1 usage
-      2 the listing did not answer, or a record could not be decided or its
-        act did not complete: a store read or write failed, a call GitHub
-        refused or did not answer, a fetch failed, or the act was stopped`
+      2 the listing did not answer, or a record or a PR's labels could not be
+        decided or its act did not complete: a store read or write failed, a
+        call GitHub refused or did not answer, a fetch failed, the labels'
+        writer did not exit 0, or the act was stopped`
 
 func newPRRecordCmd(stdout, stderr io.Writer) *cobra.Command {
 	var url, head, target, refinery, db string
@@ -278,8 +292,9 @@ func prReconcile(refinery, db string, stdout, stderr io.Writer) int {
 // the working directory, the pack's definition of feedback, loaded in that
 // clone, and the runtime adapter for human gates, for the city's mark, which
 // `pr-post.sh mark` prints, for a review run's pour, which runs in the clone,
-// so gc resolves the rig's store there, for the refinery's wake, and, where
-// the clone carries one, for the seed audit, whose scripts run in the clone.
+// so gc resolves the rig's store there, for the refinery's wake, for the
+// labels' writer, and, where the clone carries one, for the seed audit, whose
+// scripts run in the clone.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -319,6 +334,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		Runs:     runs{rt: rt.In(dir)},
 		Audit:    audit,
 		Wake:     wakes{rt: rt},
+		Labels:   prLabels{rt: rt},
 		Wait:     recordLockWait,
 	}, nil
 }

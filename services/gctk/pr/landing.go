@@ -99,11 +99,13 @@ type Waker interface {
 // dismissal's message carries, from the writer that owns it. Runs pours a PR's
 // review run. Audit is the rig's seed audit, nil for a rig whose repository
 // carries none. Wake gives the refinery a turn for a changed head that only
-// conversations and asks hold. Wait bounds how long a writer waits for the
-// lock, and Yield is how long a run lets the lock stand free between two acts,
-// so a writer waiting for it takes it. Shuffle orders the acts a run takes, at
-// random when nil. Now is the clock a write's stamp and a run's window read,
-// the system's when nil.
+// conversations and asks hold. Labels keeps the labels of each PR the store's
+// live beads own equal to the ones the store derives, and a run writes none
+// when it is nil. Wait bounds how long a writer waits for the lock, and Yield
+// is how long a run lets the lock stand free between two acts, so a writer
+// waiting for it takes it. Shuffle orders the acts a run takes, at random when
+// nil. Now is the clock a write's stamp and a run's window read, the system's
+// when nil.
 type Landing struct {
 	Ledger   *ledger.Ledger
 	Dir      string
@@ -116,6 +118,7 @@ type Landing struct {
 	Runs     Runs
 	Audit    Audit
 	Wake     Waker
+	Labels   Labels
 	Now      func() time.Time
 	Wait     time.Duration
 	Yield    time.Duration
@@ -233,10 +236,14 @@ const (
 	// ActExcepted: an exception, filed as a human gate, keeps the bead blocked.
 	ActExcepted = "excepted"
 	// ActRetry: the record's act did not complete, or the run could not decide
-	// it: a call GitHub refused or did not answer, a fetch, a read or a filing
-	// that failed, or an act stopped at its bound. Nothing records it, the
-	// difference stays on the bead, and the next run acts on it again.
+	// it: a call GitHub refused or did not answer, a fetch, a read, a filing or
+	// a label write that failed, or an act stopped at its bound. Nothing records
+	// it, the difference stays on the bead, and the next run acts on it again.
 	ActRetry = "retry"
+	// ActLabeled: the status: and held: labels the PR shows differ from the
+	// ones the store derives, and the run had the labels' writer write them:
+	// the derived labels on an open PR, and none on one that merged or closed.
+	ActLabeled = "labeled"
 	// ActReleased: a release took the bead from the refinery, and the run cleared
 	// the marker and named the PR in a note.
 	ActReleased = "released"
@@ -272,16 +279,19 @@ type Options struct {
 // a ledger pass that lists the beads that carry the marker, closed ones too,
 // and every live bead, and decides each record that carries the marker from
 // the store and the read saved on its bead. A record that owes no act reports
-// what it waits on. The records that owe an act are taken in a shuffled order,
-// so a record whose act is slow or keeps failing holds no other back, and none
-// is started past o.Window. Each act reads its record again under the record
-// lock, decides again from that read, and acts within o.Stop, its writes
-// guarded on the status and assignee it read there. A record that lands on the
-// rig's default branch has the branch's seed audit checked once the lock is
-// released, inside the window, and its outcome says what the check found. It
-// reports each record's outcome to report as it goes, and returns an error when
-// the listing did not answer, or when a record could not be decided or its act
-// did not complete.
+// what it waits on. With Labels set, each PR the live beads own whose saved
+// labels differ from the ones the store derives owes a label write too
+// (labelPlans). The records and the PRs that owe an act are taken in a
+// shuffled order, so one whose act is slow or keeps failing holds no other
+// back, and none is started past o.Window. Each record's act reads its record
+// again under the record lock, decides again from that read, and acts within
+// o.Stop, its writes guarded on the status and assignee it read there. A label
+// write takes no lock and writes nothing on the bead, and stops at o.Stop too.
+// A record that lands on the rig's default branch has the branch's seed audit
+// checked once the lock is released, inside the window, and its outcome says
+// what the check found. It reports each outcome to report as it goes, and
+// returns an error when the listing did not answer, or when a record or a PR's
+// labels could not be decided or its act did not complete.
 func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	u := &run{Landing: l}
 	start := u.clock()
@@ -297,8 +307,12 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 		report(out)
 	}
 	var acts []string
+	writes := map[string]labelWrite{}
 	for _, p := range plans {
-		if p.act == nil {
+		switch {
+		case p.write != nil:
+			writes[p.id] = *p.write
+		case p.act == nil:
 			tally(p.out)
 			continue
 		}
@@ -312,10 +326,22 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	for i, id := range acts {
 		if o.Window > 0 && u.clock().Sub(start) > o.Window {
 			for _, left := range acts[i:] {
+				if w, ok := writes[left]; ok {
+					report(RunOutcome{Bead: w.bead, Action: ActLeft, Detail: fmt.Sprintf(
+						"the run started no act past its %s, so the next run compares the labels of %s", o.Window, w.url)})
+					continue
+				}
 				report(RunOutcome{Bead: left, Action: ActLeft,
 					Detail: fmt.Sprintf("the run started no act past its %s, so the next run acts on the record", o.Window)})
 			}
 			break
+		}
+		if w, ok := writes[id]; ok {
+			tally(u.writeLabels(w, o.Stop))
+			if l.Yield > 0 && i < len(acts)-1 {
+				time.Sleep(l.Yield)
+			}
+			continue
 		}
 		u.landed = nil
 		out := u.one(id, o.Stop)
@@ -328,7 +354,7 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 		}
 	}
 	if failed > 0 {
-		return fmt.Errorf("%d of the records' acts did not complete", failed)
+		return fmt.Errorf("%d of the run's acts did not complete", failed)
 	}
 	return nil
 }
@@ -530,10 +556,13 @@ type carriedOut struct {
 type act func(ctx context.Context, c carriedOut) RunOutcome
 
 // plan is what a record owes: an act, or none, with the outcome that says why.
+// A PR whose labels owe a write is planned under its URL, and write holds the
+// write.
 type plan struct {
-	id  string
-	out RunOutcome
-	act act
+	id    string
+	out   RunOutcome
+	act   act
+	write *labelWrite
 }
 
 func none(s state, action, detail string) plan {
@@ -543,19 +572,20 @@ func none(s state, action, detail string) plan {
 func doing(a act) plan { return plan{act: a} }
 
 // plan reads the store once, through a pass that lists the beads that carry
-// the marker, closed ones too, and then, when there is one, every live bead,
-// so each question the decisions ask answers from those rows. It decides each
-// marked record that is open, blocked or closed, and a record it could not
-// decide owes an act, whose read under the lock decides it. A record that does
-// not read as a record is not one the run can act on. The plans are in id
-// order.
+// the marker, closed ones too, and then, when there is one or the run keeps
+// the PRs' labels, every live bead, so each question the decisions ask answers
+// from those rows. It decides each marked record that is open, blocked or
+// closed, and a record it could not decide owes an act, whose read under the
+// lock decides it. A record that does not read as a record is not one the run
+// can act on. With Labels set, the label writes the owned PRs owe follow
+// (labelPlans). The plans are in id order.
 func (u *run) plan() ([]plan, error) {
 	pass := u.Ledger.Pass()
 	rows, err := pass.Find(record.Marked())
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
+	if len(rows) == 0 && u.Labels == nil {
 		return nil, nil
 	}
 	if _, err := pass.Find(ledger.Every()); err != nil {
@@ -584,6 +614,13 @@ func (u *run) plan() ([]plan, error) {
 			p.act = func(context.Context, carriedOut) RunOutcome { return p.out }
 		}
 		out = append(out, p)
+	}
+	if u.Labels != nil {
+		writes, err := u.labelPlans(pass)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, writes...)
 	}
 	slices.SortFunc(out, func(a, b plan) int { return strings.Compare(a.id, b.id) })
 	return out, nil
