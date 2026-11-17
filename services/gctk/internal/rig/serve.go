@@ -481,8 +481,9 @@ func leaderArgv(dir string) ([]string, error) {
 // mapping holds the copy's port, a start moves a copy it ran to another port,
 // and fails, leaving the copy where it runs, for a copy it found. A start
 // reports a copy once it is up, and stops a copy of its command that is not up
-// within the wait, whether it ran the copy or found it. A start holds the checkout's lock throughout, so one that finds another
-// start or a stop of the checkout under way waits for it to end first.
+// within the wait, whether it ran the copy or found it. A start holds the
+// checkout's lock throughout, so one that finds another start or a stop of the
+// checkout under way waits for it to end first.
 func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 	failed := func(reason, detail string) Report {
 		return Report{State: CopyFailed, Reason: reason, Checkout: checkout, Detail: detail}

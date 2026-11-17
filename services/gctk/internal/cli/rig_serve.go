@@ -91,9 +91,12 @@ exit 2 is a usage error.
 --lead runs a copy's leader over its record. A start runs it in a session of
 its own, and nothing else calls it.`
 
-// rigServeDefaultWait bounds a start's wait for its copy to be up, long enough
-// for a serve command that compiles first.
-const rigServeDefaultWait = 3 * time.Minute
+// rigServeDefaultWait bounds a start's wait for its copy to be up. It is the
+// capture engine's own bound for a start command that builds an iOS app, boots
+// a device and prints the app's URL (IOS_READY_TIMEOUT_MS in sprintshow's
+// src/server.ts, at b4d0b82), so the pack stops no command the engine would
+// wait for, and it is longer than a serve command that compiles first needs.
+const rigServeDefaultWait = 10 * time.Minute
 
 type rigServeOpts struct {
 	command   string

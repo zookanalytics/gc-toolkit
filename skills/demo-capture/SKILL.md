@@ -128,8 +128,9 @@ reports it. So the command:
   inside the capture's, which still holds the build. An Xcode build passes
   `-IDEPackageSupportDisableManifestSandbox=YES` for Swift packages and
   `'OTHER_SWIFT_FLAGS=$(inherited) -disable-sandbox'` for Swift macros;
-- runs until it is stopped, and then ends within a minute, removing what it
-  made outside the checkout, such as its simulator device;
+- is up within ten minutes, as long as a start waits before it stops the copy,
+  then runs until it is stopped, and ends within a minute of that, removing
+  what it made outside the checkout, such as its simulator device;
 - runs a program the repository keeps, so a run starts the app of the commit
   it runs from, as a rig's test command runs the tests of its commit. The rig
   declares one command for all its branches, so it names an entry point every
