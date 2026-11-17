@@ -134,9 +134,9 @@
 # Callers: converse dispositions, operator re-homes, pr-facts.sh (a PR closed
 # with a pre-recorded disposition, and that branch's parked rework children),
 # the landing order, gctk pr reconcile (a PR on the pending record closed under
-# a pre-recorded disposition), stand-down.sh (a person's ruling that work a human gate holds will not go
-# on), scaffolding-sweep.sh (a finding a disposed PR leaves unanswered, closed
-# onto the bug that carries it).
+# a pre-recorded disposition), stand-down.sh (a person's ruling that work a
+# human gate holds will not go on), scaffolding-sweep.sh (a finding a disposed
+# PR leaves unanswered, closed onto the bug that carries it).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
@@ -252,12 +252,12 @@ live blocker and every open child: then nothing is resolved or closed.
 Exit: 0 disposed (or already recorded) · 1 --check refused · 2 a store does not
 resolve · 3 the origin or successor does not exist · 4 the origin is not as the
 caller judged it (--if-status, --if-assignee, --if-ruled), or a write did not
-land: the origin changed since it was judged, or a waiter's edge onto the canonical or the
-origin's own edge did not write or read back, or a write after the close did not
-land, which leaves the close standing · 5 the close is held or refused, a
-waiter that cannot wait on the canonical included · 6 the origin already names
-another successor, read before any write or beside this run's own edge · 7 the
-evidence refuses the close · 64 usage
+land: the origin changed since it was judged, or a waiter's edge onto the
+canonical or the origin's own edge did not write or read back, or a write after
+the close did not land, which leaves the close standing · 5 the close is held
+or refused, a waiter that cannot wait on the canonical included · 6 the origin
+already names another successor, read before any write or beside this run's
+own edge · 7 the evidence refuses the close · 64 usage
 U
     exit "${1:-1}"
 }
