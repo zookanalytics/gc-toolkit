@@ -223,7 +223,7 @@ func memorySettle(in *memory.Intake, stdout, stderr io.Writer) int {
 	for _, l := range s.Said {
 		fmt.Fprintln(stdout, l)
 	}
-	fmt.Fprintf(stdout, "waits ended: %s removed with a fix landed, their text kept; %s due again with no fix landed\n",
+	fmt.Fprintf(stdout, "waits ended: %s removed with a fix landed, each one's text kept; %s due again with no fix landed\n",
 		units(s.Left), units(s.Due))
 	for _, l := range s.Failed {
 		fmt.Fprintln(stderr, "gctk memory settle: "+l)

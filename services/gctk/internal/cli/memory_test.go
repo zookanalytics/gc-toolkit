@@ -146,7 +146,7 @@ func TestMemorySettleSaysWhatItEnded(t *testing.T) {
 	code, out, errs := runMemory("settle")
 	if code != 0 || errs != "" || !strings.Contains(out, "r: "+mem+", 2 notes and 0 entries\n") ||
 		!strings.Contains(out, "town: no memory directory at ") ||
-		!strings.Contains(out, "waits ended: 0 units removed with a fix landed, their text kept; 0 units due again with no fix landed\n") {
+		!strings.Contains(out, "waits ended: 0 units removed with a fix landed, each one's text kept; 0 units due again with no fix landed\n") {
 		t.Errorf("settle = %d, %q, %q", code, out, errs)
 	}
 	claude.Dirs[rt.Root] = ""
