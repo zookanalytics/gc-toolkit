@@ -40,8 +40,9 @@ BLOCK="$(awk '
 
 # gc: `bd list` logs its argv and answers $FAKE_CHILDREN, or fails with
 # $FAKE_LIST_RC and prints nothing, the way a failed listing does. human-gate.sh
-# and gc-helm.sh record their verb in the ordered log and their argv where the
-# assertions read it, and exit with a code the case controls.
+# and gc-helm.sh record their verb in the ordered log and each argument in
+# brackets where the assertions read them, so an assertion sees where each
+# argument ends, and exit with a code the case controls.
 mkdir -p "$TMP/bin" "$TMP/pack"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
@@ -57,7 +58,7 @@ for v in human-gate:GATE gc-helm:CONVERSE; do
   name="${v%%:*}"; verb="${v#*:}"
   { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"
     printf 'printf %s >> "$FAKE_LOG"\n' "'$verb\\n'"
-    printf 'printf %s "$*" >> "$FAKE_ARGS/%s"\n' "'%s\\n'" "$name"
+    printf 'printf %s "$@" >> "$FAKE_ARGS/%s"\n' "'[%s]'" "$name"
     printf 'exit "${FAKE_%s_RC:-0}"\n' "$verb"; } > "$TMP/pack/$name.sh"
 done
 chmod +x "$TMP/bin/gc" "$TMP/pack/"*.sh
@@ -91,7 +92,7 @@ for PRELUDE in '' 'set -e' 'set -euo pipefail'; do
 
   # No open child: the gate holds the bead until the operator answers.
   eq "$(run "$PRELUDE")" "0|GATE;" "$L: a bead with no open child is asked through a human gate"
-  eq "$(args human-gate)" "--subject tk-sub --key validate-close --message $ASK_TEXT" \
+  eq "$(args human-gate)" "[--subject][tk-sub][--key][validate-close][--message][$ASK_TEXT]" \
      "$L: the gate blocks the subject under validate-close, and its message is the closer's ask, whole and unchanged"
   hasnt "$(args human-gate)" "--quiet-window" "$L: the ask is an event of this run, so it declares no quiet window"
   eq "$(args gc-helm)" "" "$L: no conversation is opened beside the gate"
@@ -104,7 +105,7 @@ for PRELUDE in '' 'set -e' 'set -euo pipefail'; do
   # conversation on the bead, which holds nothing.
   eq "$(run "$PRELUDE" FAKE_CHILDREN="$OPEN_CHILD")" "0|CONVERSE;" \
      "$L: a bead with an open child is asked through a conversation"
-  eq "$(args gc-helm)" "open tk-sub --reason $STAKE --body $ASK_TEXT" \
+  eq "$(args gc-helm)" "[open][tk-sub][--reason][$STAKE][--body][$ASK_TEXT]" \
      "$L: the conversation is opened on the subject, titled with the ask's first line and briefed with the whole ask"
   eq "$(args human-gate)" "" "$L: no gate is filed on the parent"
 
