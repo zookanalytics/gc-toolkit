@@ -668,6 +668,13 @@ func (c *Client) Update(id string, args ...string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), err
 }
 
+// AddEdge runs one `gc bd dep add <id> <target> --type=<typ>`, returning its
+// combined output.
+func (c *Client) AddEdge(id, target, typ string) (string, error) {
+	out, err := c.command("bd", "dep", "add", id, target, "--type="+typ).CombinedOutput()
+	return strings.TrimRight(string(out), "\n"), err
+}
+
 // Create makes one `gc bd create --title <title> --json` with args, and
 // returns the id its reply names. A create that exits non-zero, or exits 0
 // with a reply that names no bead, returns an error that says why, and may
