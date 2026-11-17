@@ -16,8 +16,9 @@
 #
 # `gc` is stubbed over a file-per-bead ledger under each fake rig; a direct `bd`
 # is the regression the stub fails on. run-lib.stub.sh answers the runs the
-# ledger's roots and convoys make by run-lib.sh's own rule. No live city, Dolt,
-# or network.
+# ledger's roots and convoys make by run-lib.sh's own rule, and run-lib.sh
+# itself reads them through the stubbed gc where a case checks the store a read
+# names. No live city, Dolt, or network.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -488,7 +489,8 @@ printf '{"id":"tk-nul","title":"nul","status":"open","issue_type":"task","notes"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # Only the surface bead-context.sh touches: rig list; bd show, with the bead's
-# dependents on --include-dependents; bd list --parent (children); bd dep list
+# dependents on --include-dependents; bd list --parent (children); bd list
+# --has-metadata-key (the roots run-lib.sh's map reads); bd dep list
 # --direction=up --type tracks (reverse trackers). Every call is logged so the
 # test can prove which store was asked, not just what came back.
 set -u
@@ -570,11 +572,12 @@ case "${1:-} ${2:-}" in
 esac
 [ "${1:-}" = bd ] || { echo "gc: unsupported ($*)" >&2; exit 1; }
 shift
-DB=""; SUB=""; SUB2=""; ID=""; IDS=(); LIST_IDS=""; GATES=""; PARENT=""; DIRECTION="down"; TYPE=""; STATUS=""; ALL=""; WITH_DEPENDENTS=""
+DB=""; SUB=""; SUB2=""; ID=""; IDS=(); LIST_IDS=""; GATES=""; PARENT=""; HASKEY=""; DIRECTION="down"; TYPE=""; STATUS=""; ALL=""; WITH_DEPENDENTS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --db)          DB="$2"; shift 2 ;;
     --parent)      PARENT="$2"; shift 2 ;;
+    --has-metadata-key) HASKEY="$2"; shift 2 ;;
     --all)         ALL=1; shift ;;
     --id)          LIST_IDS="$2"; shift 2 ;;
     --include-gates) GATES=1; shift ;;
@@ -632,6 +635,24 @@ if [ "$SUB" = list ] && [ -n "$PARENT" ]; then
     for f in $(grep -laF "\"$PARENT\"" "$d"/*.json 2>/dev/null); do
       row=$(cat "$f")
       printf '%s' "$row" | jq -e --arg p "$PARENT" '.parent == $p' >/dev/null 2>&1 || continue
+      st=$(printf '%s' "$row" | jq -r '.status // ""')
+      if [ -z "$ALL" ]; then case ",$STATUS," in *",$st,"*) ;; *) continue ;; esac; fi
+      [ "$first" = 1 ] || printf ','; first=0
+      printf '%s' "$row" | listrow
+    done
+  done
+  printf ']\n'; exit 0
+fi
+
+if [ "$SUB" = list ] && [ -n "$HASKEY" ]; then
+  # Rows whose metadata carries $HASKEY, in the status scope of the children's
+  # listing above.
+  if [ -z "$ALL" ] && [ -z "$STATUS" ]; then STATUS="open,in_progress,blocked,deferred,hooked"; fi
+  preface; printf '['; first=1
+  for d in $(stores); do
+    for f in $(grep -laF "\"$HASKEY\"" "$d"/*.json 2>/dev/null); do
+      row=$(cat "$f")
+      printf '%s' "$row" | jq -e --arg k "$HASKEY" '(.metadata // {}) | has($k)' >/dev/null 2>&1 || continue
       st=$(printf '%s' "$row" | jq -r '.status // ""')
       if [ -z "$ALL" ]; then case ",$STATUS," in *",$st,"*) ;; *) continue ;; esac; fi
       [ "$first" = 1 ] || printf ','; first=0
@@ -989,6 +1010,20 @@ eq "$(jr '.horizon.children | "\(.open) \(.advancing) \(.stuck)"')" "2 1 1" \
   "the epic-health snapshot counts the child a live run works as advancing"
 eq "$(kid tk-r-work)" "advancing - -" "  ... that child"
 eq "$(kid tk-r-ended)" "stuck tk-r-ended unrouted" "  ... and its sibling whose run ended as unrouted"
+
+# run-lib.sh's own map, read through the walk's reader over the fake gc: a
+# store's runs come from the --db its rows were read from.
+MAPREAD='list --has-metadata-key gc.input_convoy_id'
+: > "$FAKE_GC_LOG"
+GC_RUN_LIB="$HERE/run-lib.sh" run tk-r-sub --frontier --json
+eq "$(blkr tk-r-work) | $(blkr tk-r-ended)" "advancing - - | stuck tk-r-ended unrouted" \
+  "run-lib.sh's own map tells the bead a live run works from one whose run ended"
+eq "$(grep -cF -- "--db $R_TK/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "$MAPREAD" "$FAKE_GC_LOG")" "1 1" \
+  "  ... reading it once, from the store the rows were read from"
+: > "$FAKE_GC_LOG"
+GC_RUN_LIB="$HERE/run-lib.sh" run tk-r-two --frontier --json
+eq "$(grep -cF -- "--db $R_TK/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "--db $R_OR/.beads $MAPREAD" "$FAKE_GC_LOG")" "1 1" \
+  "  ... and, with orphans in two stores, each store's runs from that store"
 
 # --- C. Horizon (opt-in) ----------------------------------------------------
 JQF='has("horizon")'                 runj tk-epic;            eq "$JQ" false "horizon is absent by default (opt-in)"
