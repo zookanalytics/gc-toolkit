@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -42,8 +43,33 @@ func (r *rigReads) read(_ context.Context, rig rigboard.Rig) (rigboard.Document,
 	return rigboard.Document{Rig: rig.Name, Rows: map[string]rigboard.Row{"tk-1": {ID: "tk-1", Signal: "Not scheduled"}}}, nil
 }
 
+// rigAPI answers the reads of the line saying when GitHub was last asked
+// about gc-toolkit's pull requests: its pr-poll order every 2 minutes, and one
+// pass that exited 0 at passAt. A fail fails every read.
+type rigAPI struct {
+	passAt time.Time
+	fail   error
+}
+
+func (a rigAPI) JSON(_ context.Context, out any, path string, _ url.Values) (bool, error) {
+	if a.fail != nil {
+		return false, a.fail
+	}
+	switch path {
+	case "/orders/history":
+		return true, json.Unmarshal([]byte(`{"entries":[{"created_at":"`+a.passAt.Format(time.RFC3339)+`","labels":["exec"]}]}`), out)
+	case "/order/pr-poll:rig:gc-toolkit":
+		return true, json.Unmarshal([]byte(`{"interval":"2m","enabled":true}`), out)
+	}
+	return false, nil
+}
+
+// rigNow is the instant the rig server's clock reads.
+var rigNow = time.Date(2026, 11, 16, 17, 0, 0, 0, time.UTC)
+
 func newRigServer(reads *rigReads) *Server {
-	s := New(newFake(), time.Minute, WithRigBoard(rigGC{}, time.Minute))
+	s := New(newFake(), time.Minute, WithRigBoard(rigGC{}, rigAPI{passAt: rigNow.Add(-time.Minute)}, time.Minute))
+	s.now = func() time.Time { return rigNow }
 	s.rigBoard.read = reads.read
 	return s
 }
@@ -73,6 +99,10 @@ func TestRigBoardRoutes(t *testing.T) {
 	if resp.Board.Rig != "gc-toolkit" || resp.ReadAt == "" || resp.Board.Rows["tk-1"].Signal != "Not scheduled" {
 		t.Errorf("document = %+v", resp)
 	}
+	want := rigboard.Asked{State: rigboard.AskedStateAsked, At: rigNow.Add(-time.Minute).Format(time.RFC3339)}
+	if resp.Asked != want || resp.ReadAt != rigNow.Format(time.RFC3339) {
+		t.Errorf("read at %s, asked %+v; want read at %s, asked %+v", resp.ReadAt, resp.Asked, rigNow.Format(time.RFC3339), want)
+	}
 
 	if rr := get(t, s, "/helm/rigs/nowhere"); rr.Code != http.StatusNotFound {
 		t.Errorf("an unknown rig = %d, want 404", rr.Code)
@@ -97,8 +127,7 @@ func TestRigBoardCaches(t *testing.T) {
 	if reads.reads != 2 {
 		t.Fatalf("a read after a write gathered %d times in all, want twice", reads.reads)
 	}
-	now := time.Now()
-	s.now = func() time.Time { return now.Add(2 * time.Minute) }
+	s.now = func() time.Time { return rigNow.Add(2 * time.Minute) }
 	get(t, s, "/helm/rigs/gc-toolkit")
 	if reads.reads != 3 {
 		t.Fatalf("a read past the time to live gathered %d times in all, want three", reads.reads)
@@ -115,6 +144,22 @@ func TestRigBoardSaysAFailedRead(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), `"board"`) {
 		t.Errorf("a failed read carried a document: %s", rr.Body.String())
+	}
+}
+
+// TestRigBoardServesTheDocumentWhenTheLineFails holds a failed read of when
+// GitHub was last asked to the line alone: the document is served, and the
+// line says why it could not be read.
+func TestRigBoardServesTheDocumentWhenTheLineFails(t *testing.T) {
+	s := newRigServer(&rigReads{})
+	s.rigBoard.api = rigAPI{fail: errors.New("GET /orders/history: status 503: cache not live")}
+	rr := get(t, s, "/helm/rigs/gc-toolkit")
+	var resp rigboard.Response
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &resp) != nil || resp.Board.Rig != "gc-toolkit" {
+		t.Fatalf("GET /helm/rigs/gc-toolkit = %d %s, want the document", rr.Code, rr.Body.String())
+	}
+	if resp.Asked.State != rigboard.AskedStateUnread || !strings.Contains(resp.Asked.Error, "cache not live") {
+		t.Errorf("asked = %+v, want unread naming the failure", resp.Asked)
 	}
 }
 

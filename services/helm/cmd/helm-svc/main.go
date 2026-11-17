@@ -22,7 +22,8 @@
 // either the in-process beads library or the supervisor's loopback HTTP API,
 // both Gas City interfaces, never raw Dolt — and serves a ranked board ported
 // from assets/scripts/gc-helm.sh. See selectSource for which backend runs when.
-// The rig board reads each rig's store through the gc command
+// The rig board reads each rig's store through the gc command, and when GitHub
+// was last asked about the rig's pull requests through the supervisor's API
 // (internal/rigboard).
 package main
 
@@ -125,7 +126,7 @@ func serve() {
 		server.WithSPA(spaHandler()),
 		server.WithActuator(selectActuator(cityPath)),
 		server.WithCityPath(cityPath),
-		server.WithRigBoard(source.NewGC(cityPath), server.RigBoardTTL),
+		server.WithRigBoard(source.NewGC(cityPath), source.NewSupervisorAPI(), server.RigBoardTTL),
 	)
 
 	// The supervisor removes any stale socket before spawning us, so we own
