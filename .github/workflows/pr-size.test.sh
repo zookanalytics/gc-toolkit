@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # pr-size.test.sh — pr-size.sh keeps one comment current with a pull request's
-# size, measured with the merge base's tool and plan, and pr-size.yml runs as
-# the default branch carries it, from the tip of the pull request's base branch,
-# and again when the pull request changes that branch.
+# size, measured with the merge base's tool and plan, and with the suite's time
+# below it, writing only while the head it measured is the pull request's head.
+# pr-size.yml runs as the default branch carries it, from the tip of the pull
+# request's base branch, again when the pull request changes that branch, and
+# again when one of its tests runs ends.
 #
 # The cases build a repository whose base commit carries tools/measure.sh and a
 # deletion plan, and whose head adds lines to a file the plan retires while it
 # edits the tool and empties the plan. pr-size.sh runs there against a stub gh
-# that serves each case's comments and records every call. It posts through the
-# real assets/scripts/pr-post.sh, and the city's own feedback definition reads
-# what it posted. It sources test-harness.sh for the assertions only, because
-# harness_init would stub git out.
+# that serves each case's comments, the pull request's head and the tests runs,
+# and records every call. It posts through the real assets/scripts/pr-post.sh,
+# and the city's own feedback definition reads what it posted. What the suite's
+# time section says is suite-time.test.sh's to pin. It sources test-harness.sh
+# for the assertions only, because harness_init would stub git out.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,28 +41,33 @@ git config --file "$GIT_CONFIG_GLOBAL" init.defaultBranch main
 commit() { git add -A && git commit -q -m "$1"; }
 
 # The stub gh: each call's arguments, NUL-separated, in a file of its own. The
-# comments read gets the case's pages, a write echoes what gh would, and
-# GH_FAIL fails every call.
+# comments read gets the case's pages, the pull request's read gets GH_PR_HEAD
+# as its head, a tests run list gets GH_RUNS or no run, a run gets no jobs and
+# no artifacts, and a write echoes what gh would. GH_FAIL fails every call
+# whose words hold it, and all fails every call.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 n=$(( $(cat "$GH_LOG/count" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$GH_LOG/count"
 printf '%s\0' "$@" > "$GH_LOG/call.$n"
-[ -z "${GH_FAIL:-}" ] || exit 1
+case "${GH_FAIL:-}" in '') ;; all) exit 1 ;; *) case "$*" in *"$GH_FAIL"*) exit 1 ;; esac ;; esac
 case "$1 $2" in
   "api --paginate") cat "$GH_COMMENTS" ;;
+  "api repos/o/r/pulls/7") printf '{"head":{"sha":"%s"}}' "$GH_PR_HEAD" ;;
+  "api repos/o/r/actions/workflows/"*) if [ -n "${GH_RUNS:-}" ]; then printf '%s' "$GH_RUNS"; else echo '{"workflow_runs":[]}'; fi ;;
+  "api repos/o/r/actions/runs/"*) case "$2" in */jobs*) echo '{"jobs":[]}' ;; *) echo '{"artifacts":[]}' ;; esac ;;
   "pr comment") echo "https://github.com/o/r/pull/7#issuecomment-99" ;;
   *) echo '{}' ;;
 esac
 EOF
 chmod +x "$BIN/gh"
 
-# run <comments file> <head> [<repo dir>]: pr-size.sh for PR 7, leaving its exit
-# code in RC and its output in OUT.
+# run <comments file> <head> [<repo dir>]: pr-size.sh for PR 7, whose head is
+# GH_PR_HEAD or else <head>, leaving its exit code in RC and its output in OUT.
 run() {
   GH_LOG="$TMP/log.$RANDOM$RANDOM"; mkdir -p "$GH_LOG"
-  OUT=$(cd "${3:-$REPO}" && PATH="$BIN:$PATH" GH_LOG="$GH_LOG" GH_COMMENTS="$1" \
+  OUT=$(cd "${3:-$REPO}" && PATH="$BIN:$PATH" GH_LOG="$GH_LOG" GH_COMMENTS="$1" GH_PR_HEAD="${GH_PR_HEAD:-$2}" \
     "$SUT" --repo github.com/o/r --pr 7 --base "$BASE" --head "$2" 2>&1)
   RC=$?
 }
@@ -69,6 +77,9 @@ calls() {
   local i=1
   while [ -f "$GH_LOG/call.$i" ]; do tr '\000\n' ' |' < "$GH_LOG/call.$i"; echo; i=$((i + 1)); done
 }
+# The calls on the pull request and its comments, which are every call but the
+# reads of the suite's time, each without the --hostname a read carries.
+ccalls() { calls | grep -v ' repos/o/r/actions/' | sed -e 's/ *$//' -e 's/ --hostname github\.com$//'; }
 # The body the one write posted: --body's value, or a body= field's.
 posted() {
   local i=1 a prev
@@ -107,6 +118,7 @@ HEAD_SHA=$(git rev-parse HEAD)
 # names its tip by the remote-tracking ref the checkout fetched.
 git checkout -q --detach "$FORK"
 printf '1\n2\n3\n4\n5\n' > assets/scripts/later.sh
+printf 'true\n' > assets/scripts/later.test.sh
 printf 'printf "TIP\\n"\n' > tools/measure.sh
 commit "the base moves on"
 git update-ref refs/remotes/origin/main HEAD
@@ -118,8 +130,9 @@ NONE=$(page '[]' none.json)
 echo "# a pull request with no size comment gets one"
 run "$NONE" "$HEAD_SHA"
 eq "$RC" 0 "it exits 0"
-eq "$(calls | cut -d' ' -f1-3)" "api --paginate repos/o/r/issues/7/comments
-pr comment 7" "it reads the comments, then posts once through pr-post.sh's comment"
+eq "$(ccalls | cut -d' ' -f1-3)" "api repos/o/r/pulls/7
+api --paginate repos/o/r/issues/7/comments
+pr comment 7" "it reads the pull request's head and the comments, then posts once through pr-post.sh's comment"
 BODY=$(posted)
 eq "$(printf '%s\n' "$BODY" | sed -n '1,3p')" "<!-- gc-toolkit:pr-size -->
 <!-- gc:no-review -->
@@ -132,33 +145,58 @@ has "$BODY" '`assets/scripts/retiring.sh` gains 2 lines, and tk-retire retires i
 hasnt "$BODY" HACKED "…and the head's edited tool never runs"
 hasnt "$BODY" TIP "…nor the tool the base's tip carries"
 has "$BODY" "Measured at head \`$SHORT\`." "…and it names the head it measured"
+eq "$(printf '%s\n' "$BODY" | grep -n -e '^Measured at head' -e '^## Suite time$' | cut -d: -f2-)" "Measured at head \`$SHORT\`.
+## Suite time" "…with the suite's time below the size"
+has "$BODY" "No tests run has tested head \`$SHORT\`, so the suite's time is not shown." \
+  "…which is suite-time.sh's section for the head"
+has "$(calls)" "api repos/o/r/actions/workflows/tests.yml/runs?head_sha=$HEAD_SHA&event=pull_request" \
+  "…read for the head it measured"
 eq "$(feedback "$BODY")" false "the city does not read the post as feedback"
 eq "$(feedback "$(printf '%s\n' "$BODY" | grep -v 'gc:no-review')")" true \
   "…which the no-review mark decides: without it the bot's post is feedback"
 
 echo "# the bot's size comment is rewritten in place, and a person's never"
 PAGES=$(page '[{"id":11,"user":{"login":"alice"},"body":"<!-- gc-toolkit:pr-size -->\nquoting the mark"}][{"id":22,"user":{"login":"github-actions[bot]"},"body":"<!-- gc-toolkit:pr-size -->\n<!-- gc:no-review -->\n## Size\n\nan earlier head"}]' pages.json)
-run "$PAGES" "$HEAD_SHA"
+GH_RUNS='{"workflow_runs":[{"id":900,"status":"completed","conclusion":"success","html_url":"u"}]}' run "$PAGES" "$HEAD_SHA"
 eq "$RC" 0 "it exits 0"
-eq "$(calls | sed -n '2p' | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/22" \
+eq "$(ccalls | tail -n 1 | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/22" \
   "it rewrites the bot's comment from the second page of comments through pr-post.sh's edit"
-eq "$(calls | wc -l | tr -d ' ')" 2 "…and posts nothing new"
+eq "$(ccalls | wc -l | tr -d ' ')" 3 "…and posts nothing new"
 has "$(posted)" "$WANT" "…with the size at this head"
+has "$(posted)" "The change adds and removes no test file." \
+  "…and the suite's time reads the change from the merge base, so a test file the base added later is not taken for one the change removes"
 
 echo "# a size that cannot be measured says so where a comment stands, and posts nothing new"
 run "$PAGES" 0123456789abcdef0123456789abcdef01234567
 eq "$RC" 1 "an unreadable head exits 1"
-eq "$(calls | sed -n '2p' | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/22" "it rewrites the bot's comment"
+eq "$(ccalls | tail -n 1 | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/22" "it rewrites the bot's comment"
 has "$(posted)" 'The size at head `0123456789ab` could not be measured.' "…to say the size at this head could not be measured"
+has "$(posted)" 'The suite'"'"'s time at head `0123456789ab` could not be read.' "…and that its suite time could not be read"
 run "$NONE" 0123456789abcdef0123456789abcdef01234567
 eq "$RC" 1 "with no comment to rewrite it exits 1"
-eq "$(calls | wc -l | tr -d ' ')" 1 "…and posts nothing"
+eq "$(ccalls | wc -l | tr -d ' ')" 2 "…and posts nothing"
 has "$OUT" "the size of PR#7 at head 0123456789ab could not be measured" "…and its log says so"
 
-echo "# comments that cannot be read get no post"
-GH_FAIL=1 run "$NONE" "$HEAD_SHA"
-eq "$RC" 1 "it exits 1"
-eq "$(calls | wc -l | tr -d ' ')" 1 "…after the one read"
+echo "# a suite time that cannot be read is said, and changes no exit"
+GH_FAIL=/actions/ run "$NONE" "$HEAD_SHA"
+eq "$RC" 0 "it exits 0"
+eq "$(ccalls | tail -n 1 | cut -d' ' -f1-2)" "pr comment" "…and posts"
+has "$(posted)" "$WANT" "…the size"
+has "$(posted)" "The suite's time at head \`$SHORT\` could not be read." "…and says the suite's time could not be read"
+
+echo "# a run for a head the pull request has moved past writes nothing"
+GH_PR_HEAD=fedcba9876543210fedcba9876543210fedcba98 run "$PAGES" "$HEAD_SHA"
+eq "$RC" 0 "it exits 0"
+eq "$(ccalls)" "api repos/o/r/pulls/7" "…after reading the pull request's head, and reads and writes no comment"
+has "$OUT" "PR#7's head is now fedcba987654, so nothing is written for head $SHORT" "…and its log says why"
+
+echo "# a pull request or comments that cannot be read get no post"
+GH_FAIL=all run "$NONE" "$HEAD_SHA"
+eq "$RC" 1 "a pull request whose head cannot be read exits 1"
+eq "$(ccalls)" "api repos/o/r/pulls/7" "…after that one read"
+GH_FAIL=issues/7/comments run "$NONE" "$HEAD_SHA"
+eq "$RC" 1 "comments that cannot be read exit 1"
+eq "$(ccalls | wc -l | tr -d ' ')" 2 "…after that read, with no write"
 
 echo "# a merge base that carries no tool has no size to show"
 OLD="$TMP/old"; mkdir -p "$OLD/tools"; cd "$OLD" && git init -q
@@ -168,8 +206,9 @@ cp "$TOOL" tools/measure.sh && printf 'b\n' >> a.sh && commit "the head adds the
 OHEAD=$(git rev-parse HEAD)
 BASE=$OBASE run "$NONE" "$OHEAD" "$OLD"
 eq "$RC" 0 "it exits 0"
-eq "$(calls | cut -d' ' -f1-3)" "api --paginate repos/o/r/issues/7/comments" \
-  "…and only reads the comments, so a pull request with none gets none"
+eq "$(ccalls | cut -d' ' -f1-3)" "api repos/o/r/pulls/7
+api --paginate repos/o/r/issues/7/comments" \
+  "…and only reads the pull request and its comments, so a pull request with none gets none"
 has "$OUT" "carries no tools/measure.sh, so it has no size to show" "…and its log says why"
 
 echo "# a size comment says so when the head moves to a merge base that carries no tool"
@@ -180,9 +219,9 @@ OTIP=$(git rev-parse HEAD)
 EARLIER=$(page "$(jq -n --arg b "$BODY" '[{id: 22, user: {login: "github-actions[bot]"}, body: $b}]')" earlier.json)
 BASE=$OTIP run "$EARLIER" "$OHEAD" "$OLD"
 eq "$RC" 0 "it exits 0"
-eq "$(calls | sed -n '2p' | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/22" \
+eq "$(ccalls | tail -n 1 | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/22" \
   "it rewrites the comment the first case posted"
-eq "$(calls | wc -l | tr -d ' ')" 2 "…and posts nothing new"
+eq "$(ccalls | wc -l | tr -d ' ')" 3 "…and posts nothing new"
 GONE=$(posted)
 eq "$(printf '%s\n' "$GONE" | sed -n '1,3p')" "<!-- gc-toolkit:pr-size -->
 <!-- gc:no-review -->
@@ -219,7 +258,7 @@ has "$(posted)" "$INTO_MAIN" "into main, the comment carries the size from main'
 INTO=$(page "$(jq -n --arg b "$(posted)" '[{id: 33, user: {login: "github-actions[bot]"}, body: $b}]')" into.json)
 BASE=refs/remotes/origin/integration run "$INTO" "$RHEAD" "$RT"
 eq "$RC" 0 "retargeted to the integration branch, it exits 0"
-eq "$(calls | sed -n '2p' | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/33" \
+eq "$(ccalls | tail -n 1 | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/33" \
   "…rewriting the comment the run into main posted"
 has "$(posted)" "$INTO_INT" "…with the size from the integration branch's merge base"
 
@@ -230,21 +269,30 @@ run "$NONE" ""; eq "$RC" 2 "a missing --head is a usage error"
 echo "# pr-size.yml runs as the default branch carries it"
 ON=$(awk '/^on:/ { on = 1; next } on && /^[^[:space:]#]/ { on = 0 } on' "$WF")
 has "$ON" "pull_request_target:" "it runs on pull_request_target, which takes the job from the default branch"
-eq "$(printf '%s\n' "$ON" | grep -cE '^  (pull_request|push):')" 0 \
-  "…and on no event that runs the pull request's own copy of it"
+eq "$(printf '%s\n' "$ON" | grep -vE '^[[:space:]]*#' | grep -E '^  [a-z_]+:' | tr '\n' ' ')" "  pull_request_target:   workflow_run: " \
+  "…and on workflow_run, which does too, and on no event that runs the pull request's own copy of it"
 eq "$(grep -cE '^[[:space:]]*ref:' "$WF")" 0 "its checkout takes no ref, so it checks out the default branch and never the head"
 CODE=$(grep -vE '^[[:space:]]*#' "$WF")
-has "$CODE" 'BASE_REF: ${{ github.event.pull_request.base.ref }}' "it names the branch the pull request merges into"
+has "$CODE" 'BASE_REF: ${{ github.event.pull_request.base.ref || github.event.workflow_run.pull_requests[0].base.ref }}' \
+  "it names the branch the pull request merges into, from either event"
 has "$CODE" '--base "refs/remotes/origin/$BASE_REF"' "…and measures from that branch's tip"
-hasnt "$CODE" GITHUB_SHA "…not from GITHUB_SHA, the default branch's tip under this event"
+hasnt "$CODE" GITHUB_SHA "…not from GITHUB_SHA, the default branch's tip under both events"
+has "$CODE" 'HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}' \
+  "the head is the pull request's, or the head the ended tests run tested"
+
+echo "# pr-size.yml runs again when a tests run of a pull request ends"
+has "$ON" "  workflow_run:
+    workflows: [tests]
+    types: [completed]" "it runs when the tests workflow completes"
+has "$CODE" "  actions: read" "…and may read a run's jobs and artifacts"
 
 echo "# pr-size.yml measures again when a pull request changes its base branch"
 has "$ON" "types: [opened, synchronize, reopened, edited]" \
   "it runs on edited, which is how GitHub reports a change of the base branch"
-eq "$(grep -E '^    if:' "$WF")" "    if: github.event.action != 'edited' || github.event.changes.base" \
-  "…and the job runs for an edit only when the edit changes the base branch"
-eq "$(grep -E '^  group:' "$WF")" "  group: pr-size-\${{ github.event.pull_request.number }}\${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}" \
-  "…while any other edit takes a concurrency group of its own, so it cancels no run that measures"
+eq "$(grep -E '^    if:' "$WF")" "    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] || github.event_name == 'pull_request_target' && (github.event.action != 'edited' || github.event.changes.base)" \
+  "…and the job runs for an edit only when the edit changes the base branch, and for a tests run only when a pull request started it"
+eq "$(grep -E '^  group:' "$WF")" "  group: pr-size-\${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}\${{ github.event_name == 'workflow_run' && '-tests' || github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}" \
+  "…while any other edit takes a concurrency group of its own, so it cancels no run that measures, and so does a tests run's end"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

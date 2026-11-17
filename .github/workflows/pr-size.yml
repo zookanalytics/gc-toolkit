@@ -3,19 +3,23 @@ name: pr-size
 # Shows each pull request its size change, as rule 3 of
 # docs/built-once-target.md asks of every gc-toolkit pull request: the net
 # runtime and test lines from the merge base to the head, by subsystem, and the
-# lines the change adds to files the deletion plan retires. pr-size.sh measures
-# it with tools/measure.sh --pr and keeps one comment on the pull request
-# current, rewriting it in place on each push and each change of the branch the
-# pull request merges into. This is gc-toolkit's own check, not pack content
-# another rig runs, so no other rig gets a size line.
+# lines the change adds to files the deletion plan retires. Below the size it
+# shows what the change does to the suite's time, from the tests run at the
+# head. pr-size.sh measures the size with tools/measure.sh --pr, reads the time
+# with suite-time.sh, and keeps one comment on the pull request current,
+# rewriting it in place on each push, each change of the branch the pull
+# request merges into, and each end of one of its tests runs. This is
+# gc-toolkit's own check, not pack content another rig runs, so no other rig
+# gets a size line.
 #
-# pull_request_target runs this file as the repository's default branch carries
-# it, never as the pull request has it, and pr-size.sh runs the tool and reads
-# the deletion plan as the merge base has them, so a change cannot edit the job,
-# the tool or the plan to hide what it adds. The checkout is the default branch,
-# so the attributes git counts lines with are that branch's too. The head is
-# read only as git objects, and nothing from it runs, which is what makes the
-# write token this event carries safe to hold.
+# pull_request_target and workflow_run both run this file as the repository's
+# default branch carries it, never as the pull request has it, and pr-size.sh
+# runs the tool and reads the deletion plan as the merge base has them, so a
+# change cannot edit the job, the tool or the plan to hide what it adds. The
+# checkout is the default branch, so the attributes git counts lines with are
+# that branch's too. The head is read only as git objects, and the suite's
+# seconds only as data from the run's artifact. Nothing from either runs, which
+# is what makes the write token these events carry safe to hold.
 
 on:
   pull_request_target:
@@ -24,26 +28,37 @@ on:
     # request merges into as edited, and that change moves the merge base the
     # size is counted from.
     types: [opened, synchronize, reopened, edited]
+  # A tests run ends long after the push that started it, and its end runs
+  # this again with the time it took.
+  workflow_run:
+    workflows: [tests]
+    types: [completed]
 
 # A newer run that measures cancels the one before it. An edit of the title or
 # body measures nothing, and the city rewrites a pull request's body as its
 # summary moves, so such an edit takes a group of its own and cancels no run
-# that measures.
+# that measures. The end of a tests run takes a group of its own for its pull
+# request, because a push cancels the tests run before it, and the end of that
+# cancelled run must not cancel the run that measures the push.
 concurrency:
-  group: pr-size-${{ github.event.pull_request.number }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
+  group: pr-size-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}${{ github.event_name == 'workflow_run' && '-tests' || github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 # GitHub lists the issue-comment endpoints, which a pull request's comments
-# use, under both the issues and the pull-requests permissions.
+# use, under both the issues and the pull-requests permissions. A run's jobs
+# and artifacts take actions: read.
 permissions:
   contents: read
+  actions: read
   issues: write
   pull-requests: write
 
 jobs:
   size:
-    # An edit runs the job only when it changes the base branch.
-    if: github.event.action != 'edited' || github.event.changes.base
+    # An edit runs the job only when it changes the base branch, and the end of
+    # a tests run only when a pull request started that run, which GitHub names
+    # in the run's pull_requests.
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] || github.event_name == 'pull_request_target' && (github.event.action != 'edited' || github.event.changes.base)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -54,15 +69,15 @@ jobs:
           fetch-depth: 0
 
       # The base is the tip of the branch the pull request merges into, as the
-      # checkout fetched it. Under this event GITHUB_SHA is the default
+      # checkout fetched it. Under both events GITHUB_SHA is the default
       # branch's tip, which is not the base of a pull request into another
-      # branch.
+      # branch. The end of a tests run names the head that run tested.
       - name: Post the pull request's size
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.workflow_run.pull_requests[0].base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
         run: >-
           bash .github/workflows/pr-size.sh
           --repo "${GITHUB_SERVER_URL#https://}/$GITHUB_REPOSITORY"
