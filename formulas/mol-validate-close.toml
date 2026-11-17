@@ -162,7 +162,14 @@ REASON
 **2b. ASK THE OPERATOR — any doubt.** The premise does not hold, there is real
 work, or the call is the operator's. Leave the bead OPEN and ask; do not close
 it. Record why on the bead's notes so the operator lands on the disagreement,
-on the lines between the quoted here-document's delimiters as in 2a.
+then write the ask itself, each on the lines between its quoted here-document's
+delimiters as in 2a. The ask's first line states the stake, what the operator
+decides and why it matters, in at most 140 characters, because it is the ask's
+title, the line the board shows for it. The lines after it give each option the
+operator could take, saying what its end state ships and what it asks of them,
+with ids only as references. When the ask says what proposed the close, it says
+it as the brief you read does: a first reaction, a store-only exit or a wait on
+another bead's landing.
 The ask is a human gate on the bead under the key `validate-close`, which holds
 the bead until the operator answers. On a bead with an open child the ask is a
 conversation on the bead instead, because a gate on the parent would pause the
@@ -175,20 +182,24 @@ gc bd update "$WORK_BEAD_ID" --append-notes "$(printf 'Did not close (%s): %s' "
 <why the no-work conclusion did not hold, or why this is the operator/refinery to close>
 WHY
 )")"
+ASK=$(cat <<'ASK'
+<the stake: what the operator decides and why it matters, in at most 140 characters>
+<each option the operator could take: what its end state ships and what it asks of them>
+ASK
+)
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/gc-helm.sh" ] || SCRIPTS=""
-: "${SCRIPTS:?human-gate.sh and gc-helm.sh not found in the pack}"
 # >>> validate-close-ask
-ASK="A first reaction proposed closing $WORK_BEAD_ID; validation did not confirm it. Read the subject's notes, then close, redirect, or route the work."
+: "${SCRIPTS:?human-gate.sh and gc-helm.sh not found in the pack}" "${ASK:?the ask is empty: write it between the ASK delimiters above}"
 # An open child is any child that is not closed or pinned, a gate or a wisp
 # among them. One read answers it, and a read that fails files the gate, the
 # ordinary ask, in a strict shell too.
 CHILDREN=$(gc bd list --parent "$WORK_BEAD_ID" --include-gates --include-infra --include-templates --json --limit 1 2>/dev/null | tr -d '[:cntrl:]') || CHILDREN=""
 if printf '%s' "$CHILDREN" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-  "$SCRIPTS/gc-helm.sh" open "$WORK_BEAD_ID" --reason "proposed close did not validate: accept or redirect" --body "$ASK" >/dev/null \
+  # The ask's first line titles the conversation, as it titles the gate.
+  "$SCRIPTS/gc-helm.sh" open "$WORK_BEAD_ID" --reason "${ASK%%[[:cntrl:]]*}" --body "$ASK" >/dev/null \
     || { echo "no conversation was opened on $WORK_BEAD_ID — stop, address what gc-helm.sh reported, and re-run this block" >&2; exit 1; }
 else
-  "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key validate-close --message "Proposed close of $WORK_BEAD_ID did not validate: accept or redirect.
-$ASK" >/dev/null \
+  "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key validate-close --message "$ASK" >/dev/null \
     || { echo "human-gate.sh filed no gate on $WORK_BEAD_ID — stop, address what it reported, and re-run this block" >&2; exit 1; }
 fi
 # <<< validate-close-ask
