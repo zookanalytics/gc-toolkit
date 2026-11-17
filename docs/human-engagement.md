@@ -267,7 +267,9 @@ the conversation is open and lets it go once the conversation closes.
   own, which holds the merge. The landing order pours the PR's review runs, and
   the refinery's find-work takes the PR's bead at a new head, as each would with
   no conversation, whether the conversation waits in the operator's queue or a
-  sitting holds it.
+  sitting holds it. Gas City gives the refinery no turn for a bead the
+  conversation holds, so the landing order wakes and nudges the refinery for the
+  new head ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 - **Every close frees the merge.** The sign-off, a dismiss, the premise
   re-check's moot or benign close and a close by hand each end the hold with
   the close itself, and nothing writes a release. A close that does not land

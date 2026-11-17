@@ -18,8 +18,9 @@ import (
 // sections 4 and 6). The refinery publishes a PR's pending record with Record,
 // and the landing order's runs read each record with Reconcile: they request
 // the merge of a PR the evaluator finds ready, close the bead once the merge
-// commit is on the target, send a changed head back to the refinery, and keep
-// the exceptions blocked behind a human gate. Each check of an open PR saves
+// commit is on the target, send a changed head back to the refinery and see that
+// the refinery hears of it, and keep the exceptions blocked behind a human
+// gate. Each check of an open PR saves
 // GitHub's side of it on the bead, whole, in the write that records the check
 // (specs/tk-1tfzr71.134/design.md, section 3), and nothing the run acts on
 // reads that saved read back. Both take the store's record
@@ -76,14 +77,23 @@ type Gates interface {
 	File(subject, key, message string) error
 }
 
+// Waker wakes a session and nudges it with a message, so a session that is
+// asleep starts and one that is up gets a turn, as a polecat's hand-off to the
+// refinery does (work-submit.sh). An error says which of the two did not land.
+type Waker interface {
+	Wake(session, message string) error
+}
+
 // Landing is what the record's verbs act through. Dir is the store's .beads
 // directory, where the record lock lives, and Refinery the assignee of a bead
-// the refinery holds. Feedback loads the definition of feedback, once a run
-// first needs it. Mark reads the city's mark, which a dismissal's message
-// carries, from the writer that owns it. Runs pours a PR's review run. Audit is
-// the rig's seed audit, nil for a rig whose repository carries none. Wait
-// bounds how long a writer waits for the lock, and Yield is how long a run lets
-// the lock stand free between two records, so a writer waiting for it takes it.
+// the refinery holds, which is also the session Wake wakes. Feedback loads the
+// definition of feedback, once a run first needs it. Mark reads the city's
+// mark, which a dismissal's message carries, from the writer that owns it. Runs
+// pours a PR's review run. Audit is the rig's seed audit, nil for a rig whose
+// repository carries none. Wake gives the refinery a turn for a changed head
+// that only conversations and asks hold. Wait bounds how long a writer waits
+// for the lock, and Yield is how long a run lets the lock stand free between
+// two records, so a writer waiting for it takes it.
 type Landing struct {
 	Ledger   *ledger.Ledger
 	Dir      string
@@ -95,6 +105,7 @@ type Landing struct {
 	Gates    Gates
 	Runs     Runs
 	Audit    Audit
+	Wake     Waker
 	Now      func() time.Time
 	Wait     time.Duration
 	Yield    time.Duration
@@ -535,21 +546,23 @@ func (u *run) closed(s state) RunOutcome {
 			"the work goes back to the refinery or stands down.", s.id, pr, s.id))
 }
 
-// open handles an open bead the refinery holds. A changed head already waits on
-// the refinery, and its marker clears, unless a withdrawal is open on it, which
-// holds it from the refinery until the run carries it out. A whole record whose
-// second write landed moves to blocked and is read on. Anything else is a
-// record a dead writer left half written, which goes back to the refinery for
-// its full validation.
+// open handles an open bead the refinery holds. A changed head is held from
+// the refinery while a withdrawal is open on the bead, which the run carries
+// out, or while a review run is attached to it, whose end a later run reads,
+// and the marker stays until then. Once neither holds it, the run hands it to
+// the refinery (handOver). A whole record whose second write landed moves to
+// blocked and is read on. Anything else is a record a dead writer left half
+// written, which goes back to the refinery for its full validation.
 func (u *run) open(s state) RunOutcome {
 	switch {
 	case s.rec.Result == record.HeadChanged && withdrawing(s):
 		return u.requeued(s)
-	case s.rec.Result == record.HeadChanged:
+	case s.rec.Result == record.HeadChanged && len(s.runs) > 0:
 		w := u.Ledger.Write(s.id)
-		record.Settle(w)
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActSettled,
-			Detail: "its changed head already waits on the refinery's validation: the marker is cleared"})
+		record.Waiting(w, s.now)
+		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActChecked, Detail: onRuns(s)})
+	case s.rec.Result == record.HeadChanged:
+		return u.handOver(s, ActSettled, "its changed head waits on the refinery's validation")
 	case s.rec.Result == record.Pending && len(recordGaps(s.rec, s.branch)) == 0:
 		w := u.Ledger.Write(s.id)
 		record.Block(w)
@@ -573,11 +586,11 @@ func withdrawing(s state) bool {
 
 // requeued handles a changed head the run sent back to the refinery while a
 // withdrawal is open on it. It reads the PR by its number and carries the
-// withdrawal out while the PR is open, keeping the marker until none is open,
-// so the bead goes to the refinery once nothing the order owes holds it, and a
-// check that keeps the marker saves GitHub's side as read after the carry. A PR
-// that closed or merged meanwhile is the record's exception, as on a pending
-// record.
+// withdrawal out while the PR is open, keeping the marker while a withdrawal is
+// open or a review run is attached, so the bead goes to the refinery once
+// nothing the order owes holds it (handOver), and a check that keeps the marker
+// saves GitHub's side as read after the carry. A PR that closed or merged
+// meanwhile is the record's exception, as on a pending record.
 func (u *run) requeued(s state) RunOutcome {
 	r := s.rec
 	retry := func(state, why string) RunOutcome {
@@ -603,22 +616,22 @@ func (u *run) requeued(s state) RunOutcome {
 	switch p.State {
 	case "OPEN":
 		note, held := u.carry(s, host, hub, p)
-		if held {
+		if held || len(s.runs) > 0 {
 			gr, out, ok := u.observeAlone(s, host, hub, p, retry)
 			if !ok {
 				out.Detail = withNote(out.Detail, note)
 				return out
 			}
+			detail := "its changed head waits on the refinery, behind the withdrawal: " + note
+			if !held {
+				detail = onRuns(s) + ": " + note
+			}
 			w := u.Ledger.Write(s.id)
 			record.Checked(w, "open", s.now)
 			githubReadKey.Set(w, gr)
-			return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActChecked,
-				Detail: "its changed head waits on the refinery, behind the withdrawal: " + note})
+			return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActChecked, Detail: detail})
 		}
-		w := u.Ledger.Write(s.id)
-		record.Settle(w)
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActSettled,
-			Detail: "its changed head waits on the refinery's validation, and the marker is cleared: " + note})
+		return u.handOver(s, ActSettled, "its changed head waits on the refinery's validation: "+note)
 	case "CLOSED":
 		return u.except(s, record.ClosedUnmerged, "closed_unmerged", "Pull request "+r.URL+" closed without merging.",
 			fmt.Sprintf("Pull request %s closed without merging while a withdrawal of its approvals was open, so %s stays "+
@@ -697,10 +710,33 @@ func (u *run) blocked(s state) RunOutcome {
 				return out
 			}
 			reason := fmt.Sprintf("PR head changed after refinery validation (%s -> %s); quality gates must run again", r.Head, p.HeadRefOid)
+			detail := withNote(reason, note)
+			if !held && len(s.runs) > 0 {
+				detail = withNote(reason+"; "+onRuns(s), note)
+			}
+			// The requeue keeps the marker while a withdrawal or an attached run
+			// holds the changed head, and for the hand-over that wakes the
+			// refinery once the requeue lands, or that reads what holds the bead
+			// again when this read fails.
+			watched := held || len(s.runs) > 0
+			var holds []hold
+			var unread error
+			if !watched {
+				holds, unread = u.mergeHolds(s)
+			}
+			keep := watched || unread != nil || len(holds) > 0
 			w := u.Ledger.Write(s.id)
-			record.Requeue(w, r.URL, p.HeadRefOid, reason, s.now, held)
+			record.Requeue(w, r.URL, p.HeadRefOid, reason, s.now, keep)
 			githubReadKey.Set(w, gr)
-			return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: withNote(reason, note)})
+			done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: detail})
+			if done.Action != ActRequeued || !keep || watched {
+				return done
+			}
+			s.status = "open"
+			if unread != nil {
+				return u.handOverLater(s, detail, "what holds the bead did not read, so the next run reads it again: "+unread.Error())
+			}
+			return u.wakeAndSettle(s, holds, ActRequeued, detail)
 		}
 		return u.decide(s, host, hub, p, retry, note)
 	case "CLOSED":

@@ -1,10 +1,11 @@
 // Package gascity is gctk's runtime adapter: Gas City as gctk reaches it apart
 // from its store, which internal/gcbd reaches (docs/gctk-architecture.md, "The
 // adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
-// when it names none, names the city's root, and runs the pack's scripts that
-// ask a person. A domain reaches them only through Runtime. City is the city
-// gctk runs in, and gascity/fake records what a domain asked and answers as its
-// test says, so a domain's rules are tested in Go with no Gas City.
+// when it names none, wakes and nudges a session, names the city's root, and
+// runs the pack's scripts that ask a person. A domain reaches them only through
+// Runtime. City is the city gctk runs in, and gascity/fake records what a domain
+// asked and answers as its test says, so a domain's rules are tested in Go with
+// no Gas City.
 package gascity
 
 import (
@@ -35,6 +36,11 @@ type Runtime interface {
 	// does not read or no agent in the config answers to s.Target. It reads
 	// s.Rig, s.Target and s.Bead.
 	DefaultFormula(s Sling) (string, error)
+	// Wake runs one `gc session wake <session>` and returns what it answered.
+	Wake(session string) Result
+	// Nudge runs one `gc session nudge <session> <message>` and returns what it
+	// answered.
+	Nudge(session, message string) Result
 	// Script runs one of the pack's scripts, by its file name in the pack's
 	// scripts directory, and returns what it answered.
 	Script(name string, args ...string) Result
@@ -340,6 +346,24 @@ func (c *City) readAgents() ([]agent, error) {
 		out = append(out, ag)
 	}
 	return out, nil
+}
+
+// Wake runs the wake in gctk's own process group, and Gas City's reconciler
+// starts the session on its next tick when it has a reason to run, such as a
+// configured agent (gc session wake in docs/reference/cli.md, at
+// gastownhall/gascity 192fa2d394). Its standard input reads nothing.
+func (c *City) Wake(session string) Result {
+	return run(c.dir, c.bin, "session", "wake", session)
+}
+
+// Nudge runs the nudge in gctk's own process group, with gc's default
+// delivery, wait-idle: the message arrives as a prompt at the session's next
+// idle boundary, and a session that is asleep, or not yet at a boundary, gets
+// it queued (gc session nudge in docs/reference/cli.md, and gc nudge in
+// cmd/gc/cmd_nudge.go, at gastownhall/gascity 192fa2d394). Its standard input
+// reads nothing.
+func (c *City) Nudge(session, message string) Result {
+	return run(c.dir, c.bin, "session", "nudge", session, message)
 }
 
 // Script runs the script from the directory GCTK_SCRIPTS_DIR names, which the
