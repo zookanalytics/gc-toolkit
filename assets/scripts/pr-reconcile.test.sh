@@ -11,8 +11,9 @@
 #   (b) a roster that does not read runs nothing, exit 2, because a run that
 #       cannot name the refinery would read every marked bead as released;
 #   (c) a rig whose roster names no refinery runs nothing and exits 0;
-#   (d) the order is a rig-scoped cooldown exec order that runs this script,
-#       with a timeout above the run's four-minute budget.
+#   (d) the order is a rig-scoped exec order on a one-minute cooldown that runs
+#       this script, with a timeout above the run's 45 seconds of starting
+#       acts and an act's 30-second stop.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,9 +48,9 @@ export GCTK_BIN="$TMP/gctk" GCTK_LOG="$TMP/gctk.log" GC_RIG=alpha
 run() { rm -f "$GCTK_LOG"; OUT=$("$TMP/scripts/pr-reconcile.sh" "$@" 2>&1); RC=$?; }
 
 echo "# (a) the run acts for the rig's refinery"
-run --count 5
+run --db /rig/.beads
 eq "$RC" 0 "the run exits as gctk does"
-eq "$(sed -n 1p "$GCTK_LOG" 2>/dev/null)" "pr reconcile --refinery alpha/gc-toolkit.refinery --count 5" \
+eq "$(sed -n 1p "$GCTK_LOG" 2>/dev/null)" "pr reconcile --refinery alpha/gc-toolkit.refinery --db /rig/.beads" \
    "gctk pr reconcile runs for the refinery the roster names, with the order's flags"
 eq "$(sed -n 2p "$GCTK_LOG" 2>/dev/null)" "scripts=$TMP/scripts" "the run is handed the scripts directory"
 
@@ -68,12 +69,15 @@ echo "# (d) the order"
 ORDER="$ROOT/orders/pr-reconcile.toml"
 field() { sed -n "s/^$1 = \"\\(.*\\)\"$/\\1/p" "$ORDER"; }
 eq "$(field trigger)" cooldown "the order runs on a cooldown"
+eq "$(field interval)" 1m "the order runs every minute"
 eq "$(field scope)" rig "the order is rig-scoped"
 eq "$(field exec)" '$PACK_DIR/assets/scripts/pr-reconcile.sh' "the order runs this script"
-eq "$(field timeout)" 300s "the order's timeout is 300 seconds"
-BUDGET=$(sed -n 's/^[[:space:]]*defaultRunBudget = \([0-9]*\) \* time.Minute$/\1/p' "$ROOT/services/gctk/internal/cli/prland.go")
-[ -n "$BUDGET" ] && [ $((BUDGET * 60)) -lt 300 ] && ok "the run's budget, ${BUDGET}m, ends inside the timeout" \
-  || bad "the run's budget '${BUDGET}' does not read, or does not end inside the 300-second timeout"
+eq "$(field timeout)" 120s "the order's timeout is 120 seconds"
+bound() { sed -n "s/^[[:space:]]*$1 *= \([0-9]*\) \* time.Second$/\1/p" "$ROOT/services/gctk/internal/cli/prland.go"; }
+WINDOW=$(bound actWindow); STOP=$(bound actStop)
+[ -n "$WINDOW" ] && [ -n "$STOP" ] && [ $((WINDOW + STOP + 5)) -lt 120 ] \
+  && ok "the run's ${WINDOW}s window, an act's ${STOP}s stop and a fetch's 5s grace end inside the timeout" \
+  || bad "the run's window '${WINDOW}' or an act's stop '${STOP}' does not read, or does not end inside the 120-second timeout"
 if grep -q '^trigger = "webhook"\|^on = ' "$ORDER"; then bad "no webhook fires the order"; else ok "no webhook fires the order"; fi
 
 echo

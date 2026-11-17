@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -23,30 +24,28 @@ import (
 // `gctk pr record <bead>` and `gctk pr reconcile` are the two writers of Gas
 // Town's pending-through-merge record (specs/tk-1tfzr71.66/design.md, sections
 // 4 and 6): the refinery publishes a PR's record, and the landing order's runs
-// read it on a cooldown (orders/pr-reconcile.toml). Each command builds the pr
+// act on it every minute (orders/pr-reconcile.toml). Each command builds the pr
 // domain's Landing over the adapters and prints what it did.
 
-// recordLockWait is how long either verb waits for the store's record lock. A
-// run of the landing order holds it for one record at a time, and its order's
-// time limit ends any run, which frees the lock, sooner than this.
+// recordLockWait is how long a verb other than a run waits for the store's
+// record lock. A run of the landing order holds it for one act at a time, each
+// stopped at actStop, and its order's time limit ends any run, which frees the
+// lock, sooner than this.
 const recordLockWait = 5 * time.Minute
 
-// runYield is how long a run leaves the lock free between two records, so a
+// runYield is how long a run leaves the lock free between two acts, so a
 // publication waiting for it takes it there.
 const runYield = 200 * time.Millisecond
 
-// The run's bounds: how many records a run reads, and how long it starts new
-// ones. A record whose PR is open at the validated head costs about seven
-// seconds, measured on 2026-11-12: five for the PR's read and the evaluator's
-// six GitHub reads, and two for the store's reads and the write. Twenty of them
-// fit inside the order's 300-second time limit with room for GitHub answering
-// at half that speed, and the budget starts none in the last minute. A run
-// takes its records in a shuffled order, so over 50 open records each run reads
-// a given record with a chance of two in five, once in two and a half runs on
-// average.
+// The run's bounds (specs/tk-1tfzr71.149/design.md, section 5): no act starts
+// more than actWindow into a run, and each act is stopped at actStop, with
+// whatever GitHub call or fetch it is making, and waits for the record lock no
+// longer. A run decides from the store and reads no record's PR to decide, so
+// it takes every record that owes an act, in a shuffled order, and a slow act
+// holds the next one back by actStop at most.
 const (
-	defaultRunCount  = 20
-	defaultRunBudget = 4 * time.Minute
+	actWindow = 45 * time.Second
+	actStop   = 30 * time.Second
 )
 
 const prRecordLong = `Records the pull request a bead owns as pending until its merge is verified,
@@ -70,43 +69,57 @@ exit: 0 recorded
       3 refused: the bead is closed or not the refinery's, so nothing was
         written, or it moved between the two writes, so only the marker landed`
 
-const prReconcileLong = `One run of the landing order over the store's pending records. It takes up to
---count of the beads that carry the marker pr_reconcile_pending, in a shuffled
-order, and reads each record under the store's record lock,
-from its read of the record to its last write of it, waiting while another
-writer of the record holds it. It reads each PR from GitHub by its number:
+const prReconcileLong = `One run of the landing order over the store's pending records, the beads that
+carry the marker pr_reconcile_pending. It reads the store once and decides
+each record from the store and the read the one-PR update (gctk pr refresh)
+saved on its bead, reading no GitHub to decide:
 
   - open at the head the refinery validated: a draft whose review result
     passed at that head and target, with no review run attached and no ask a
     run can take open, is marked ready, without waiting for CI; otherwise the
-    evaluator decides whether it is ready, and a ready one is merged with its
-    head pinned, or added to its base's merge queue with it where the base
-    requires one; one that is not ready is owed a review run when no review
-    result passed at that head and target, or an ask that nothing holds is open
-    on the bead (gctk review ask), and the run pours it below; the next run
-    reads it again either way
+    evaluator decides over the saved read whether it is ready, and a ready one
+    is merged on the merge's own read of GitHub, made in its act and decided
+    again, with the head that read judged pinned, or added to its base's merge
+    queue with it where the base requires one; one that is not ready is owed
+    a review run when no review result passed at that head and target, or an
+    ask that nothing holds is open on the bead (gctk review ask), and the run
+    pours it below
   - open at another head: back to the refinery, open, as
-    pull_request_head_changed
+    pull_request_head_changed, unless the head the refinery validated
+    descends from the saved one in the clone's history, which says the read
+    was made before the refinery recorded its head, so nothing is sent back
+    until the PR watch reads the PR again
   - merged at the validated head, with the merge commit on the freshly fetched
     target: mr_merged, and the bead closes
   - closed unmerged, merged at another head, or no longer the PR the record
     names: an exception, kept blocked behind a human gate keyed by its value
-  - a lookup or a fetch that failed, or a merge commit not yet on the target:
-    recorded in pr_reconcile_error, and read again by the next run
+  - no read of the PR saved on the bead: nothing, until the PR watch saves one
+
+The records that owe an act are taken in a shuffled order. No act starts more
+than 45 seconds into the run, and each act is stopped at 30 seconds, with
+whatever GitHub call or fetch it is making: a fetch gets a SIGTERM to git's
+process group, so git removes the lock files it holds in the clone, and a kill
+only if it still runs 5 seconds later. Each act takes the store's record lock,
+waiting no longer than its 30 seconds while another writer holds it, reads
+its record again under it, decides again from that read, and writes guarded on
+the status and assignee it read there. An act that did not complete, such as a
+request GitHub refused or did not answer, a fetch that failed, a merge commit
+not yet on the target or an act that was stopped, records nothing: its
+difference stays on the bead, and the next run acts on it.
 
 Before any of these, while the PR is open, it carries out each open
-withdrawal filed on the bead (gctk pr withdraw): it waits while an approval it
-would dismiss carries an inline comment the intake has not routed, dismisses
-each approval that stands on a commit that does not contain the withdrawal's
-head, which GitHub's compare of the two reads as neither identical nor ahead,
-or which GitHub refuses to compare, with the withdrawal's reason and the
-city's mark, reads the reviews again and closes the withdrawal once none
-stands. When GitHub refuses a dismissal, it
-files a human gate on the bead keyed approval-withdraw-refused. A compare or a
-dismissal GitHub does not answer leaves the withdrawal for the next run, and
-the record keeps its marker while a withdrawal is open, its changed head sent
-back to the refinery included, since the withdrawal holds the bead from the
-refinery until it is carried out.
+withdrawal filed on the bead (gctk pr withdraw), from the approvals the saved
+read holds: it waits while an approval it would dismiss carries an inline
+comment the intake has not routed, dismisses each approval that stands on a
+commit that does not contain the withdrawal's head in the clone's history,
+with the withdrawal's reason and the city's mark, and closes the withdrawal
+once GitHub has dismissed each, or once none stands. A commit the clone does
+not hold contains no head. When GitHub refuses a dismissal, it files a human
+gate on the bead keyed approval-withdraw-refused. A dismissal GitHub does not
+answer leaves the withdrawal for the next run, and the record keeps its marker
+while a withdrawal is open, its changed head sent back to the refinery
+included, since the withdrawal holds the bead from the refinery until it is
+carried out.
 
 The review run is mol-pr-review, poured with gc formula cook --attach onto the
 bead under the record lock, with the record's PR bead, head, target and branch
@@ -122,29 +135,29 @@ ended without one, counting only runs that ended after the bead's last
 review-run-failed gate closed, it files a human gate on the bead keyed
 review-run-failed instead, naming both runs and how each ended.
 
-The run saves none of what it reads of GitHub: the one-PR update (gctk pr
-refresh) is the one writer of pr_github_read, pr_state and
-pr_last_checked_at. A check that leaves the record standing writes nothing
-but the removal of an error an earlier run recorded. The merge acts on the
-run's own read, never on the saved one.
+The run saves none of what it reads of GitHub: the one-PR update is the one
+writer of pr_github_read, pr_state and pr_last_checked_at.
 
 A PR that lands on the rig's default branch has that branch's seed audit
-checked at its tip as the run fetched it, once the lock is free, in a clone
-that carries one (render-seed-audit.sh). The pages that no longer render as
-committed go to seed-audit-reaudit.sh, which slings the branch's one re-render,
-and the landing's line says what the check found. The check holds nothing, and
-one that does not run is asked for again at a later landing.
+checked at its tip as the act fetched it, once the lock is free and inside the
+run's 45 seconds, in a clone that carries one (render-seed-audit.sh). The
+pages that no longer render as committed go to seed-audit-reaudit.sh, which
+slings the branch's one re-render, and the landing's line says what the check
+found. The check holds nothing, and one that does not run is asked for again
+at a later landing.
 
 It acts only on a bead it reads under the lock as carrying the marker and,
 unless the bead is closed, still assigned to the refinery --refinery names,
 with each write guarded on the status and assignee it read. A bead a release
 took from the refinery has its marker cleared and its PR named in a note, and
-nothing else written. It starts no record past --budget. Each record's outcome
-prints on a line of its own, as <bead> <action>: <detail>.
+nothing else written. Each record's outcome prints on a line of its own, as
+<bead> <action>: <detail>.
 
-exit: 0 every record read was handled
+exit: 0 every record was decided, and every act the run started completed
       1 usage
-      2 the listing or the lock did not answer, or a record's write failed`
+      2 the listing did not answer, or a record could not be decided or its
+        act did not complete: a store read or write failed, a call GitHub
+        refused or did not answer, a fetch failed, or the act was stopped`
 
 func newPRRecordCmd(stdout, stderr io.Writer) *cobra.Command {
 	var url, head, target, refinery, db string
@@ -210,8 +223,6 @@ func prRecord(bead string, p record.Publication, refinery, db string, stdout, st
 
 func newPRReconcileCmd(stdout, stderr io.Writer) *cobra.Command {
 	var refinery, db string
-	count := defaultRunCount
-	budget := defaultRunBudget
 	cmd := &cobra.Command{
 		Use:         "reconcile --refinery <address>",
 		Short:       "one run of the landing order over the store's pending records",
@@ -222,20 +233,15 @@ func newPRReconcileCmd(stdout, stderr io.Writer) *cobra.Command {
 			if refinery == "" {
 				return errors.New("--refinery names the refinery's assignee")
 			}
-			if count < 1 {
-				return fmt.Errorf("--count %d reads no record", count)
-			}
-			return exit(prReconcile(refinery, db, count, budget, stdout, stderr))
+			return exit(prReconcile(refinery, db, stdout, stderr))
 		},
 	}
 	cmd.Flags().StringVar(&refinery, "refinery", "", "the refinery's assignee, the only one a run acts for")
 	cmd.Flags().StringVar(&db, "db", "", "the store's .beads directory, else the store gc resolves here")
-	cmd.Flags().IntVar(&count, "count", count, "the most records one run reads")
-	cmd.Flags().DurationVar(&budget, "budget", budget, "how long the run starts new records")
 	return cmd
 }
 
-func prReconcile(refinery, db string, count int, budget time.Duration, stdout, stderr io.Writer) int {
+func prReconcile(refinery, db string, stdout, stderr io.Writer) int {
 	l, err := landing(db, refinery)
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk pr reconcile: %v\n", err)
@@ -243,7 +249,7 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 	}
 	l.Yield = runYield
 	read := 0
-	err = l.Reconcile(pr.Options{Count: count, Deadline: time.Now().Add(budget)}, func(o pr.RunOutcome) {
+	err = l.Reconcile(pr.Options{Window: actWindow, Stop: actStop}, func(o pr.RunOutcome) {
 		read++
 		fmt.Fprintf(stdout, "%s %s: %s\n", o.Bead, o.Action, o.Detail)
 	})
@@ -290,7 +296,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		Ledger:   l,
 		Dir:      db,
 		Refinery: refinery,
-		Hub:      func(host string) pr.Hub { return gh.New(host) },
+		Hub:      func(ctx context.Context, host string) pr.Hub { return gh.New(host).Within(ctx) },
 		Feedback: func() (pr.Feedback, error) {
 			rule, err := feedbackIn(dir)
 			if err != nil {
@@ -317,14 +323,29 @@ func cityMark(rt gascity.Runtime) (string, error) {
 	return strings.TrimSpace(res.Output), nil
 }
 
-// checkout is the rig's clone through the git adapter.
+// checkout is the rig's clone through the git adapter. A fetch that a SIGTERM
+// or SIGINT to this process stopped, once the signal reached git's group, ends
+// this process with the status that signal gives, as gitIn does, since the
+// order runner or a terminal asked it to stop.
 type checkout struct{ dir string }
 
 func (c checkout) OriginURL() (string, error)             { return git.OriginURL(c.dir) }
-func (c checkout) FetchBranch(branch string) error        { return git.FetchBranch(c.dir, branch) }
 func (c checkout) Reaches(commit, b string) (bool, error) { return git.Reaches(c.dir, commit, b) }
 func (c checkout) DefaultBranch() (string, error)         { return git.DefaultBranch(c.dir) }
 func (c checkout) Tip(branch string) (string, error)      { return git.Tip(c.dir, branch) }
+
+func (c checkout) Contains(commit, ancestor string) (bool, error) {
+	return git.Contains(c.dir, commit, ancestor)
+}
+
+func (c checkout) FetchBranch(ctx context.Context, branch string) error {
+	err := git.FetchBranch(ctx, c.dir, branch)
+	var stopped *git.Interrupted
+	if errors.As(err, &stopped) {
+		exitProcess(128 + int(stopped.Signal))
+	}
+	return err
+}
 
 // carriesSeedAudit reports whether the clone at dir is a pack that carries a
 // rendered seed audit, generated/seed-audit/INDEX.md beside its pack.toml. A

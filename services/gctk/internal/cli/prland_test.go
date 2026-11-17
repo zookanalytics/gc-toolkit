@@ -50,10 +50,13 @@ func TestPRReconcileWithNoPendingRecordSaysSo(t *testing.T) {
 	}
 }
 
+// A run decides every record from the beads, so it takes no count of records
+// and no budget: its bounds are its own.
 func TestPRReconcileUsage(t *testing.T) {
 	for _, args := range [][]string{
 		{"pr", "reconcile"},
-		{"pr", "reconcile", "--refinery", "rig/refinery", "--count", "0"},
+		{"pr", "reconcile", "--refinery", "rig/refinery", "--count", "5"},
+		{"pr", "reconcile", "--refinery", "rig/refinery", "--budget", "4m"},
 		{"pr", "reconcile", "--refinery", "rig/refinery", "extra"},
 	} {
 		if _, _, code := landingCmd(t, `[]`, "git@github.com:acme/widgets.git", args...); code != 1 {

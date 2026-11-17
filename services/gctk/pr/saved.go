@@ -28,11 +28,13 @@ type SavedRead struct {
 	Labels       *SavedLabels       `json:"labels,omitempty"`
 }
 
-// SavedPR is the PR's own facts: its identity, head branch and base, its head,
-// state, draft flag and merge state, and whether it is in a merge queue and
-// whether its base requires one.
+// SavedPR is the PR's own facts: its node id, which a request to GitHub names
+// it by, its identity, head branch and base, its head, state, draft flag and
+// merge state, whether it is in a merge queue and whether its base requires
+// one, and, once it merged, its merge commit and when it merged.
 type SavedPR struct {
 	ReadAt            string  `json:"read_at"`
+	ID                string  `json:"id"`
 	URL               string  `json:"url"`
 	Number            int     `json:"number"`
 	Repository        string  `json:"repository"`
@@ -44,6 +46,8 @@ type SavedPR struct {
 	MergeState        string  `json:"merge_state"`
 	InMergeQueue      bool    `json:"in_merge_queue"`
 	MergeQueueEnabled bool    `json:"merge_queue_enabled"`
+	MergeCommit       string  `json:"merge_commit"`
+	MergedAt          string  `json:"merged_at"`
 	Signs             PRSigns `json:"signs"`
 }
 
@@ -80,7 +84,8 @@ type CheckSigns struct {
 // definition of feedback applied from Since: the accounts whose approval or
 // request for changes stands, the newest feedback in each id space, the review
 // threads waiting on the city's answer, the unresolved threads and GitHub's
-// review decision.
+// review decision. Approvals is each approval that stands, which an approval's
+// withdrawal reads.
 type SavedConversation struct {
 	ReadAt         string            `json:"read_at"`
 	Since          string            `json:"since"`
@@ -90,7 +95,19 @@ type SavedConversation struct {
 	Awaiting       []string          `json:"awaiting"`
 	Unresolved     []string          `json:"unresolved"`
 	ReviewDecision string            `json:"review_decision"`
+	Approvals      []Approval        `json:"approvals"`
 	Signs          ConversationSigns `json:"signs"`
+}
+
+// Approval is one review that approves the PR and has not been dismissed,
+// whoever gave it: its id, its author, the commit it was given on, "" when
+// GitHub names none, and Inline, the newest inline comment it carries that is
+// feedback by the definition, 0 for none, which a dismissal would retire.
+type Approval struct {
+	ID     int64  `json:"id"`
+	Author string `json:"author"`
+	Commit string `json:"commit"`
+	Inline int64  `json:"inline"`
 }
 
 // ConversationSigns are the signs kept with the conversation: the comment, review
