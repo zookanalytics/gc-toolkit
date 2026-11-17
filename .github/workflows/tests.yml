@@ -4,7 +4,8 @@ name: tests
 # pushes to main, so the suite gates changes without loading the polecat
 # self-review or the pool host, and a regression that lands is still caught.
 # The suite runs twice, on Linux (test) and on macOS (test-macos). The go job
-# vets and tests the two Go modules, services/gctk and services/helm. The city's
+# vets and tests the two Go modules, services/gctk and services/helm, and the
+# macOS job also runs gctk's tests that start the host's tools. The city's
 # host is macOS, where sed, grep, awk, date, stat, find and the rest of the
 # userland are the BSD tools, so a GNU-only construct that passes on Linux
 # fails the macOS job the way it fails on the host.
@@ -125,10 +126,10 @@ jobs:
 
       # This job tests the BSD userland only while the runner resolves the
       # tools the host does. Without a tomllib python3, the suites that read
-      # TOML skip and still pass, and without tmux one case does the same. A
-      # GNU tool ahead of /usr/bin on PATH lets a GNU-only construct pass, and a
-      # jq older than 1.8 rejects programs the host's jq compiles. Any such
-      # drift fails this step by name instead.
+      # TOML skip and still pass, and without tmux or lsof a case does the
+      # same. A GNU tool ahead of /usr/bin on PATH lets a GNU-only construct
+      # pass, and a jq older than 1.8 rejects programs the host's jq compiles.
+      # Any such drift fails this step by name instead.
       - name: Check the runner resolves the host's tools
         run: |
           sw_vers
@@ -139,7 +140,7 @@ jobs:
           python3 -c 'import sys, tomllib; print(sys.executable, sys.version.split()[0], "has tomllib")' \
             || { echo "::error::python3 ($(command -v python3)) has no tomllib"; fail=1; }
           bash .github/workflows/check-jq.sh || fail=1
-          for t in go git timeout flock tmux; do
+          for t in go git timeout flock tmux lsof; do
             p="$(command -v "$t")" || { echo "::error::$t is not on PATH"; fail=1; continue; }
             echo "$t: $p"
           done
@@ -151,6 +152,12 @@ jobs:
             esac
           done
           exit "$fail"
+
+      # Each package here signals process groups, or runs ps, lsof or git,
+      # where the host's answers can differ from Linux's.
+      - name: Test the gctk packages that start the host's tools
+        working-directory: services/gctk
+        run: go test ./internal/host ./internal/git ./internal/gcbd ./internal/rig
 
       # Every core, as in test. Half of this runner's three cores is one job,
       # and the suite's runs, one after another, take longer than
