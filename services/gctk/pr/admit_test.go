@@ -667,15 +667,15 @@ func TestARunThatEndedBeforeItsEdgeLandedCountsTowardTheGate(t *testing.T) {
 	is(t, d.once(t), pr.ActRetry)
 	d.end(t, "tk-run1", "canceled", "2026-11-17T09:00:01Z")
 	ofRead(t, d.land, head)
-	is(t, d.once(t), pr.ActRetry)
-	if d.runs.count() != 1 {
-		t.Fatalf("a pass whose edge onto an ended run did not land poured %d runs, want the one", d.runs.count())
-	}
-	ofRead(t, d.land, head)
-	d.store.EdgeErr = nil
 	o := d.once(t)
+	is(t, o, pr.ActRetry)
+	if d.runs.count() != 1 || !strings.Contains(o.Detail, "tk-run1") {
+		t.Fatalf("a pass whose edge onto an ended run did not land poured %d runs, want the one (%s)", d.runs.count(), o.Detail)
+	}
+	d.store.EdgeErr = nil
+	o = d.once(t)
 	is(t, o, pr.ActPoured)
-	if !edged(t, d, "tk-run1") || !edged(t, d, "tk-run2") || !strings.Contains(o.Detail, "tk-run1 ended with no edge") {
+	if !edged(t, d, "tk-run1") || !edged(t, d, "tk-run2") || !strings.Contains(o.Detail, "tk-run1 had no edge") {
 		t.Fatalf("the pass attached the ended run %v and the run it poured %v (%s)", edged(t, d, "tk-run1"), edged(t, d, "tk-run2"), o.Detail)
 	}
 	d.end(t, "tk-run2", "canceled", "2026-11-17T09:00:02Z")
@@ -695,6 +695,53 @@ func TestARunThatEndedBeforeItsEdgeLandedCountsTowardTheGate(t *testing.T) {
 	if !gated(e, "review-run-failed") || e.runs.count() != 0 || !edged(t, e, "tk-lost1") || !edged(t, e, "tk-lost2") {
 		t.Fatalf("two ended runs with no edge filed %v, poured %d runs and were attached %v, %v (%s)", e.gates.list(),
 			e.runs.count(), edged(t, e, "tk-lost1"), edged(t, e, "tk-lost2"), o.Detail)
+	}
+}
+
+// A run whose edge did not land holds the bead as an attached run does from the
+// first decision of the run that attaches it. A changed head waits for it with
+// the marker kept, and does not go to the refinery. A result the run recorded
+// at the head before its root ended neither marks a draft ready nor has a ready
+// PR's merge requested. A retired PR's close waits for it.
+func TestARunWhoseEdgeDidNotLandHoldsTheBeadFromTheNextRunsFirstDecision(t *testing.T) {
+	interrupted := func(t *testing.T) *admitting {
+		t.Helper()
+		d := newAdmit(t)
+		d.store.EdgeErr = errors.New("bd: dep add: database is locked")
+		is(t, d.once(t), pr.ActRetry)
+		d.store.EdgeErr = nil
+		return d
+	}
+
+	d := interrupted(t)
+	d.pr.Facts.HeadRefOid = later
+	o := d.once(t)
+	is(t, o, pr.ActRequeued)
+	if b := d.row(t); !edged(t, d, "tk-run1") || b.Metadata["pr_reconcile_pending"] != "true" || !strings.Contains(o.Detail, "tk-run1") {
+		t.Fatalf("a changed head with the run live got edge %v and marker %q (%s)", edged(t, d, "tk-run1"), b.Metadata["pr_reconcile_pending"], o.Detail)
+	}
+
+	for _, draft := range []bool{true, false} {
+		e := interrupted(t)
+		e.edit(t, func(b *fake.Bead) {
+			b.Metadata["review_results"] = `[{"head":"` + head + `","target":"main","passed":true,"run":"tk-run1"}]`
+		})
+		e.pr.Facts.IsDraft = draft
+		o := e.once(t)
+		is(t, o, pr.ActChecked)
+		if !edged(t, e, "tk-run1") || len(asks(e.github)) != 0 {
+			t.Fatalf("a result passed with the run live, the PR a draft %v, got edge %v and asked %v (%s)", draft, edged(t, e, "tk-run1"), asks(e.github), o.Detail)
+		}
+	}
+
+	f, r := retired(t)
+	g := &admitting{land: f}
+	g.stray("tk-lost", "false")
+	f.pr.Facts.State = "CLOSED"
+	o = f.once(t)
+	is(t, o, pr.ActChecked)
+	if !edged(t, g, "tk-lost") || len(r.asked()) != 0 || !strings.Contains(o.Detail, "waits for the review run tk-lost") {
+		t.Fatalf("a retired PR with the run live got edge %v and asked the writer %v (%s)", edged(t, g, "tk-lost"), r.asked(), o.Detail)
 	}
 }
 

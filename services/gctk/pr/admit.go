@@ -33,11 +33,12 @@ import (
 // the bead's priority, then the bead its blocks edge onto the root. A run whose
 // pr_bead var names the bead and that no edge of the bead names, live or ended,
 // as a pour that stopped before its edge landed leaves it, gets that edge from
-// the next run before that run counts how the bead's runs ended, and while it is
-// live the next run pours no other. A run that ended without a result is poured
-// again. When the last two runs at the validated head both ended without one,
-// counting only runs that ended after the bead's last review-run-failed gate
-// closed, the run asks a person through a gate under that key instead.
+// the next run before that run decides anything of the record (attach), so it
+// holds the bead as any attached run does and counts toward how the bead's runs
+// ended. A run that ended without a result is poured again. When the last two
+// runs at the validated head both ended without one, counting only runs that
+// ended after the bead's last review-run-failed gate closed, the run asks a
+// person through a gate under that key instead.
 
 // Runs pours a review run: the formula, as a workflow of its own, with its
 // vars.
@@ -111,27 +112,6 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 		}
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(detail, note)}), true
 	}
-	strays, err := u.unattached(s)
-	if err != nil {
-		return checked("no review run is poured, because the runs poured for the bead did not read; the next run reads them: " + err.Error())
-	}
-	var live, ended []string
-	for _, r := range strays {
-		if err := u.Ledger.AddBlocker(s.id, r.ID); err != nil {
-			return retry(fmt.Sprintf("review run %s was poured for the bead with no edge onto it, and the edge did not land; the next run attaches it: %v", r.ID, err))
-		}
-		if r.Status() != "closed" {
-			live = append(live, r.ID)
-			continue
-		}
-		s.blockers, ended = append(s.blockers, r), append(ended, r.ID)
-	}
-	if len(ended) > 0 {
-		note = withNote(fmt.Sprintf("review run %s ended with no edge of the bead onto it, and has that edge now", strings.Join(ended, ", ")), note)
-	}
-	if len(live) > 0 {
-		return checked(fmt.Sprintf("review run %s was poured for the bead with no edge onto it, and the bead waits on it now: %s", strings.Join(live, ", "), why))
-	}
 	failed, err := u.failedRuns(s)
 	if err != nil {
 		return checked("no review run is poured, because how its earlier runs ended did not read; the next run reads it: " + err.Error())
@@ -192,6 +172,34 @@ func (u *run) unattached(s state) ([]*ledger.Record, error) {
 	}
 	slices.SortFunc(out, func(a, b *ledger.Record) int { return strings.Compare(a.ID, b.ID) })
 	return out, nil
+}
+
+// attach gives the bead s read its blocks edge onto each of strays, the runs
+// unattached found, before the run decides anything a run attached to the bead
+// holds: a changed head's hand-over, a draft's ready mark, a merge request, a
+// retired PR's close and a pour. Each run it attaches joins s's blockers, and a
+// live one its runs, as a read of the bead after the edge finds them. It
+// returns its account of the runs it attached, for the outcome. An edge that
+// does not land writes the retry, the next run attaches the run, and ok is
+// false.
+func (u *run) attach(s *state, strays []*ledger.Record) (note string, out RunOutcome, ok bool) {
+	var ids []string
+	for _, r := range strays {
+		if err := u.Ledger.AddBlocker(s.id, r.ID); err != nil {
+			why := fmt.Sprintf("review run %s was poured for the bead with no edge onto it, and the edge did not land; the next run attaches it: %v", r.ID, err)
+			w := u.Ledger.Write(s.id)
+			record.Retry(w, "", why, s.now)
+			return "", u.commit(*s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: why}), false
+		}
+		s.blockers, ids = append(s.blockers, r), append(ids, r.ID)
+		if r.Status() != "closed" {
+			s.runs = append(s.runs, r.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return "", RunOutcome{}, true
+	}
+	return fmt.Sprintf("review run %s had no edge of the bead onto it, and has that edge now", strings.Join(ids, ", ")), RunOutcome{}, true
 }
 
 // runOutside files the gate that asks a person about the run at root, which the

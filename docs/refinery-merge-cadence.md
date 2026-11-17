@@ -897,8 +897,8 @@ address names (`<rig>/<binding>refinery`): `review_target`
 bead's priority, then attaches the run to the bead by the bead's `blocks` edge
 onto its root. A run whose `gc.var.pr_bead` names the bead and that no edge of
 the bead names, live or ended, as a pour that stopped before its edge landed
-leaves it, gets that edge from the next run before that run counts the runs that
-ended, and a live one is attached in place of a pour. A pour whose root the
+leaves it, gets that edge from the next run before that run decides anything of
+the record, so it holds the bead as an attached run does. A pour whose root the
 bead's store does not hold files a human gate on the bead keyed
 `review-run-outside-store`. It pours none while a run is attached to the bead,
 while another open bead names the PR's branch, such as a rework child, or while

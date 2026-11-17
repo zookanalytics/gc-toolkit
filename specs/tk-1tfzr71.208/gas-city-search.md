@@ -60,9 +60,9 @@ priority in one `bd update`, then writes the bead's `blocks` edge onto the root
 with `bd dep add`. A pour that stops after the cook leaves a root that no edge
 of the bead names, which can end before the next run reads it. The next run
 finds it by its `gc.var.pr_bead`, live or closed, and writes the edge before it
-counts the runs that ended without a result, and a live one takes the place of
-a pour. A root the bead's store does not hold gets
-no edge, since bd adds an edge onto an id outside its own prefix that holds
+decides anything of the record, so the run holds the bead as an attached run
+does. A root the bead's store does not hold gets no edge, since bd adds an edge
+onto an id outside its own prefix that holds
 nothing, and the order files a human gate on the bead, which keeps it from
 pouring another. That root is what a city that serves graph beads from a store
 of its own makes, where `gc formula cook --attach` of a graph.v2 formula

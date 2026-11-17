@@ -137,9 +137,9 @@ review_target <rig>/<binding>polecat-codex, repair_target
 <rig>/<binding>polecat and binding_prefix <binding>. The pour gives each bead
 it created the bead's priority, then attaches the run to the bead by the bead's
 blocks edge onto its root. A run whose pr_bead var names the bead and that no
-edge of the bead names, live or ended, gets that edge before the runs that ended
-are counted, and a live one is attached in place of a pour. A pour whose root
-the bead's store does not hold files a human gate on the bead keyed
+edge of the bead names, live or ended, gets that edge before the run decides
+anything of the record, so it holds the bead as an attached run does. A pour
+whose root the bead's store does not hold files a human gate on the bead keyed
 review-run-outside-store. No run is poured while one is attached to the bead,
 while another open bead names the PR's branch, such as a rework child, or while
 a human gate holds the bead. A conversation on the PR holds only its merge, so
