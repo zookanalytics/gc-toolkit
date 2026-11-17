@@ -25,10 +25,9 @@ var _ cityboard.Log = (*EventLog)(nil)
 
 // NewEventLog finds the supervisor and the city the way NewSupervisorSource
 // does. Its client sets no time limit of its own, so the caller's context
-// bounds each read: a read of an event recorded long ago scans the log's
-// archives, which took 8.7 s on this city's log on 2026-11-17
-// (fetchEventPageAscending in internal/api/huma_handlers_events.go at
-// gastownhall/gascity 5f7cd988a6).
+// bounds each read: a read that finds no recent match scans the log's
+// archives, which takes seconds on a long log (fetchEventPageAscending in
+// internal/api/huma_handlers_events.go at gastownhall/gascity 5f7cd988a6).
 func NewEventLog() *EventLog {
 	return &EventLog{baseURL: discoverBaseURL(), city: discoverCity(), client: &http.Client{}}
 }
