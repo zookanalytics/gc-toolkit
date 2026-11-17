@@ -1212,6 +1212,66 @@ for sh_ in $shells; do
         bad "($sh_) converse-iterate-document: a scaffold the store refuses is not reported as written" "exit $rc"
     fi
 done
+echo "── a sitting's work order quotes the operator apart from its own proposal ──"
+# A work order a sitting sends, a task's description or a rework's brief, quotes
+# the operator's words apart from the sitting's own, and a part that changes
+# what they asked for goes to them before the work is sent.
+tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-order"
+tr -s '[:space:]' ' ' <"$CONTINUE" >"$TMP/continue-order"
+tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-order"
+have "the settle skill holds the work to what the operator asked for" \
+    'The work reaches no further than what the operator asked for.' "$TMP/settle-order"
+have "…in a task's description, in this rig's store or another's, and in a rework's brief" \
+    'Its order is the description of a task you file, in this rig'"'"'s store or another'"'"'s, or the brief of a rework the sign-off files' "$TMP/settle-order"
+have "…which quotes their words" \
+    '`Stated by the operator:` their words that ask for the work, and any other words of theirs it rests on, quoted, with where they said them.' "$TMP/settle-order"
+have "…apart from each part the sitting wrote" \
+    '`Proposed by this sitting:` each part you wrote that they did not state' "$TMP/settle-order"
+have "…and puts a part that changes their ask to them before the work is sent" \
+    'Before you send the work, put to the operator, as your proposal in a hand-back'"'"'s decision, each proposed part that removes something, narrows or widens what they asked for, or gives another rig a capability.' "$TMP/settle-order"
+have "…as it does the whole work when none of their words asks for it" \
+    'When none of their words asks for the work, as when they agree with a direction while they are still asking questions, put the whole work to them the same way.' "$TMP/settle-order"
+have "…and moves to the stated side only what they approve" \
+    'A part they approve moves to the stated side, quoting their approval, and a part they decline stays out of the order.' "$TMP/settle-order"
+have "a rework's ruling line names the brief written on the PR's anchor" \
+    '--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"' "$SETTLE"
+have "the continue skill writes a turn's work order the settle skill's way, before anything files it" \
+    'Write the order of work or a rework that a turn'"'"'s ruling sends as `converse-settle` gives it (Send the work), before you or the answer files it' "$TMP/continue-order"
+have "the prompt has a sitting put a part that changes the operator's ask to them before the work is sent" \
+    'Work you send reaches no further than what the operator asked for, so a part of it that removes something, narrows or widens their ask, or gives another rig a capability is your proposal, which you put to them before the work is sent' "$TMP/prompt-order"
+fenced_block "$SETTLE" 'gc sling <rig>/<pool> "$WORK"' | fill_block >"$CH/order-block"
+fenced_block "$SETTLE" '--append-notes "$BRIEF"' | fill_block >"$CH/brief-block"
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    rc=$(run_chain "$run" "$CH/order-block")
+    if [ "$rc" -eq 0 ] && grep -qF -- 'gc bd create x -t task -d x Stated by the operator: x Proposed by this sitting: x --json' "$CH/log"; then
+        ok "($sh_) converse-settle: the task a sitting files carries both parts in its description"
+    else
+        bad "($sh_) converse-settle: the task a sitting files carries both parts in its description" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+    rc=$(run_chain "$run" "$CH/brief-block")
+    if [ "$rc" -eq 0 ] && head -n 1 "$CH/notes" | grep -qE '^## Rework brief \([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\)$' \
+        && grep -qxF 'Stated by the operator: x' "$CH/notes" \
+        && grep -qxF 'Proposed by this sitting: x' "$CH/notes"; then
+        ok "($sh_) converse-settle: a rework's brief lands headed by when it was written, in both parts"
+    else
+        bad "($sh_) converse-settle: a rework's brief lands headed by when it was written, in both parts" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    sed 's/^Stated by the operator: x$/Stated by the operator: "the `echo ran` and $HOME stay as written"/' "$CH/brief-block" >"$CH/literal-brief"
+    rc=$(run_chain "$run" "$CH/literal-brief")
+    if [ "$rc" -eq 0 ] && grep -qxF 'Stated by the operator: "the `echo ran` and $HOME stay as written"' "$CH/notes"; then
+        ok "($sh_) converse-settle: what the brief quotes stays as written"
+    else
+        bad "($sh_) converse-settle: what the brief quotes stays as written" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    rc=$(run_chain "$run" "$CH/brief-block" 1)
+    if [ "$rc" -ne 0 ] && [ ! -s "$CH/notes" ]; then
+        ok "($sh_) converse-settle: a brief the store refuses is not reported as written"
+    else
+        bad "($sh_) converse-settle: a brief the store refuses is not reported as written" "exit $rc"
+    fi
+done
 echo "── a sitting makes a change the operator rules it make through Work's writers ──"
 # A sitting's change is held on its conversation and goes through the writers a
 # polecat's work goes through, under --held-by, so the step table loads the edit

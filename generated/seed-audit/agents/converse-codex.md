@@ -94,7 +94,10 @@ that action.
    skills give: record the outcome, answer the gates the ruling settles, send
    the work it needs, rework or retire a PR, and close a subject that needs no
    work. You close a subject only on a ruling the operator agrees to in this
-   sitting.
+   sitting. Work you send reaches no further than what the operator asked for,
+   so a part of it that removes something, narrows or widens their ask, or
+   gives another rig a capability is your proposal, which you put to them
+   before the work is sent (`converse-settle`).
 4. **End or stay?** When the ruling sends work, agree with the operator whether
    the sitting ends at its hand-off or stays until that work returns, and say
    when the stay would come back, in the operator's terms. A return after the

@@ -61,13 +61,35 @@ sign-off arms the subject's validating closer (Sign off, below). The `work`
 skill says which bead carries the work and how to choose its formula. When the
 sitting ends at the hand-off for new work that opens its own PR, write what was
 agreed into the create's description in full, because the brief is then all
-the work carries of the discussion. In the block below, the sling runs only
-once the create has returned the bead's id. The comment then records the
-dispatch as one of the visit's actions, which the comment on the subject's PR
-lists:
+the work carries of the discussion.
+
+The work reaches no further than what the operator asked for. Its order is the
+description of a task you file, in this rig's store or another's, or the brief
+of a rework the sign-off files (below), and it keeps their words apart from
+yours, as the note on an epic the ruling files does:
+
+- `Stated by the operator:` their words that ask for the work, and any other
+  words of theirs it rests on, quoted, with where they said them.
+- `Proposed by this sitting:` each part you wrote that they did not state, such
+  as an approach or a name, or `none`.
+
+Before you send the work, put to the operator, as your proposal in a
+hand-back's decision, each proposed part that removes something, narrows or
+widens what they asked for, or gives another rig a capability. When none of
+their words asks for the work, as when they agree with a direction while they
+are still asking questions, put the whole work to them the same way. Keep the
+conversation open until they rule (`converse-continue`). A part they approve
+moves to the stated side, quoting their approval, and a part they decline stays
+out of the order.
+
+In the block below, the sling runs only once the create has returned the
+bead's id. The comment then records the dispatch as one of the visit's actions,
+which the comment on the subject's PR lists:
 
 ```bash
-WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -er '.id') \
+WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>
+Stated by the operator: <their words that ask for the work, quoted, with where they said them>
+Proposed by this sitting: <each part you wrote that they did not state, or none>" --json | jq -er '.id') \
   && gc sling <rig>/<pool> "$WORK" --on <formula> \
   && gc bd comment "$CONVERSATION" "Sent work: <what it will do, in plain words>"
 ```
@@ -94,6 +116,30 @@ lands, in one plain sentence that names no other rig or its beads.
   ```bash
   gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
   ```
+
+**A rework's order is its ruling line**, which the sign-off hands the rework
+as the ruling to carry out (`--rework`, below). A line that quotes the
+operator's words and adds nothing of yours is the whole order. When the rework
+needs more than their words, write the order in the notes of the PR's anchor,
+the bead that carries its `merge_result`. A scaffold is such an order already,
+because the operator ruled each of its lines (`converse-iterate-document`):
+
+```bash
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  && BRIEF="## Rework brief ($NOW)
+$(cat <<'BLOCK'
+Stated by the operator: <their words that ask for the change, quoted, with where they said them>
+Proposed by this sitting: <each part you wrote that they did not state, or none>
+BLOCK
+)" \
+  && gc bd update <anchor> --append-notes "$BRIEF" \
+  && echo "the brief is written, headed ## Rework brief ($NOW)"
+```
+
+No closing line means the store refused the brief: send no rework. Otherwise
+the ruling line names the brief, as `converse-iterate-document`'s line names
+its scaffold:
+`--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"`.
 
 **A follow-up that cannot start until another bead lands is armed** (the
 `waits` skill). Never send it now, and never leave it for someone to send
