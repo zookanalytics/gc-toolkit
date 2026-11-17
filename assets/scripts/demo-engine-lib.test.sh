@@ -53,13 +53,15 @@
 #               refused, and zsh and bash 3.2 open the same three ports
 #   (LOCAL-APP) a --base-url on this host captures when every process that
 #               listens on its port works in a worktree of a rig whose
-#               app_reads_city setting is "false", and the sandbox opens that
+#               app_reads_city setting is "false", or when gctk rig serve
+#               reports a copy's app at that port, and the sandbox opens that
 #               port and no other. Each other case stops the capture and says
 #               why: a rig set to "true", any other value, a read that fails,
-#               the rig that holds the capture's own scripts, a listener in no
-#               rig's worktree, a listener lsof names no directory for, no
-#               listener, no lsof, a port a city variable names, and a URL
-#               whose port is out of range
+#               the rig that holds the capture's own scripts, a port the
+#               checkout's copy does not hold, the port of a copy whose app is
+#               on a simulator, a listener in no rig's worktree, a listener lsof
+#               names no directory for, no listener, no lsof, a port a city
+#               variable names, and a URL whose port is out of range
 #   (ISOLATION) on a host with sandbox-exec, a terminal capture whose command
 #               reads the city's files, its stores, gc's home and a service on
 #               its loopback, and lists the city's variables, reaches none of
@@ -276,13 +278,16 @@ ENGINE
 chmod +x "$ENGINE_STUB"
 
 # gctk answers `rig serve --check` with a copy running on $COPY_PORT, and with
-# no copy when COPY_PORT is unset, logging each call and where it ran.
+# no copy when COPY_PORT is unset, logging each call and where it ran. The
+# copy's app is where gctk reports a copy that answers on its port, at its
+# loopback URL, or at $COPY_APP_URL, the URL a serve command printed.
 GCTK_STUB="$TMPD/gctk"
 cat >"$GCTK_STUB" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${CALLLOG:?}"
 if [ "$*" = "rig serve --check" ] && [ -n "${COPY_PORT:-}" ]; then
-  printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$COPY_PORT"
+  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s","address":""}\n' \
+    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}"
   exit 0
 fi
 printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"
@@ -690,6 +695,9 @@ for cap in video screenshot; do
   eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 1 "($cap) and no other loopback port"
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5999 LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
   local_refused "$cap" "a port the checkout's copy does not hold" "for which city.toml sets app_reads_city = \"true\""
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 COPY_APP_URL="$IOS_APP" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  local_refused "$cap" "the port of a copy whose app is on a simulator, where another server listens" "process 4243, which listens on port 5181, works in a worktree of $RIGB, for which city.toml sets app_reads_city = \"true\""
+  hasnt "is a copy that gctk rig serve runs" "$(err)" "($cap) it takes that server for no copy"
 
   echo "# ($cap) LOCAL-APP: any value but \"false\", and a read that fails, counts as \"true\""
   for v in yes True ''; do

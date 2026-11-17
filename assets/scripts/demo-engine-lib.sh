@@ -600,11 +600,15 @@ _demo_engine_local_no() {
 # _demo_engine_copy_port <port> <pids>: true when a copy that gctk rig serve
 # runs holds the port, as gctk rig serve --check answers in the checkout one of
 # the processes listening there works in, with _DEMO_ENGINE_COPY set to that
-# checkout. The check reports a copy as running only while every process that
-# listens on its port at an address loopback reaches is in the copy's own
-# process group, whose serve command runs inside this sandbox.
+# checkout. That holds only for a copy that is up by its port, whose report
+# names its app at a loopback URL on its own port: the check reports one so
+# only while every process that listens on that port at an address loopback
+# reaches is in the copy's own process group, whose serve command runs inside
+# this sandbox. A copy whose serve command printed its app's URL, such as an
+# iOS app's, is up whatever listens on its port, so its report names that URL,
+# and a server on its port is judged as any other.
 _demo_engine_copy_port() {
-  local port="$1" gctk pid dir top rep
+  local port="$1" gctk pid dir top rep app
   gctk="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
   [ -x "$gctk" ] || return 1
   while IFS= read -r pid; do
@@ -613,7 +617,8 @@ _demo_engine_copy_port() {
     [ -n "$dir" ] || continue
     top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || continue
     rep=$(cd "$top" && "$gctk" rig serve --check 2>/dev/null)
-    if printf '%s' "$rep" | jq -e --argjson p "$port" '.state == "running" and .port == $p' >/dev/null 2>&1; then
+    app=$(printf '%s' "$rep" | jq -r --argjson p "$port" 'select(.state == "running" and .port == $p) | .app_url // empty' 2>/dev/null)
+    if [ -n "$app" ] && _demo_engine_loopback "$app" && [ "$(_demo_engine_url_port "$app")" = "$port" ]; then
       _DEMO_ENGINE_COPY=$top
       return 0
     fi
