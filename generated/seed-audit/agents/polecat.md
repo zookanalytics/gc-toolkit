@@ -97,12 +97,15 @@ worktree, pushed branch, refinery handoff), a review bead carries
   and your elaboration of a ruling each name their real source, and a
   decision you record before the operator rules on it says it is proposed.
 
-<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator) adopted:2026-10-31 -->
-- A command, flag, key or name that the operator or a reviewer sketches in
-  passing shows what they want, not the shape it must take. Derive the
-  shape from the conventions of the surface it joins, starting with the
-  commands and names already beside it, and say where the result departs
-  from the sketch.
+<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator), pr:#1394:comment:4482935072 (operator feedback), bead:tk-v0itc10 (operator), bead:tk-lfi5zph (operator) adopted:2026-10-31 updated:2026-11-17 -->
+- The operator's guidance, and a reviewer's, gives the direction they
+  want, not words or a shape to copy unless they offer it as exact text,
+  and a lean or belief they state is an idea to test, not a premise.
+  Build on the conventions of the surface it joins, starting with the
+  commands and names already beside it, check what would tell against
+  their lean before you build on it, push back where you disagree, even
+  with an earlier ruling, and say where your recommendation departs from
+  what they said.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by polecat and polecat-codex (via the
@@ -154,6 +157,14 @@ worktree, pushed branch, refinery handoff), a review bead carries
   than the thing, or the meaning another system in use gives the same
   word. When the thing does not share that meaning, choose a word for what
   it is, and leave a general name to the thing built to fill it.
+
+<!-- rule:tk-v32d2u src:pr:#1384:comment:4470390219, pr:#1384:comment:4470363445, pr:#1386:comment:4470476725, pr:#1386:comment:4470429133, pr:#1386:comment:4470452596, pr:#1400:comment:4476283616, pr:#1400:comment:4476263949 (operator feedback) adopted:2026-11-17 -->
+- Write each fact where it applies, and where a reader elsewhere needs
+  it, name the file or symbol that owns it instead of retelling it, such
+  as another script's cases, the callers a test lists or why a tool is
+  installed. A comment says what the code beside it cannot say for
+  itself, and a fact is stated a second time only where a reader with
+  just that name to follow would miss something they need.
 
 
 ## Execute immediately

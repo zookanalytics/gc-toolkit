@@ -29,8 +29,9 @@
 # under a renamed import. It pins that the converse steps and the mechanik give
 # the exact command for each act they name while the skills explain the act
 # once, with one fragment pointing both prompts at the skills. It pins how the
-# prompt's hand-back definition has a framing name its subject, and that the
-# hold skill points at it. It pins that the
+# prompt's hand-back definition has a framing name its subject and state its
+# decision, and that the hold skill points at it and has a ruling on an open
+# PR say where each of the PR's open review points lands. It pins that the
 # dispatch fragment the keeper composes arms through gctk's verb by the gctk-bin
 # block and calls gc-bd-watch.sh the work skill's way, and that the mechanik's
 # prompt calls
@@ -681,10 +682,45 @@ have "a message with detail opens the way the body does" \
     'A message with detail above its hand-back opens the way the body does' "$PROMPT_JOINED"
 have "the message keeps pipeline vocabulary out or says what it means" \
     'Pipeline vocabulary (moot, twin, fold, retract, park) and names learned from code stay out, or say what they mean' "$PROMPT_JOINED"
-have "an option says what it does rather than what it avoids" \
-    'saying what it does rather than what it avoids' "$PROMPT_JOINED"
+# A decision leads with the course as the changes it makes, and offers only
+# options the operator could take, each by what it ships and what it asks of
+# them. The operator profile every sitting renders says what an option's cost
+# is, so the prompt uses its terms and leaves the sentence to the profile.
+have "the decision states the course as what would be built or changed, before any reason for it" \
+    'State it as the course before any reason for it: what would be built or changed, each change given as what it is today and what it becomes.' "$PROMPT_JOINED"
+have "…and that course is the whole decision when the operator asked for the best solution" \
+    'When the operator asked for the best solution, that course is the whole decision.' "$PROMPT_JOINED"
+have "…states a course that changed again whole" \
+    'When the course changes during the sitting, state the new one whole rather than as changes to the last.' "$PROMPT_JOINED"
+have "…and says, among several threads, what it settles and what stays open" \
+    'say whether the decision settles one of them or the whole conversation, and what stays open after it.' "$PROMPT_JOINED"
+have "an option is one the operator could take, asking them only for a decision" \
+    'Offer an option only when the operator could take it: it reaches what they asked for, and it asks of them only a decision, never an agent'"'"'s work such as resolving a conflict or merging by hand.' "$PROMPT_JOINED"
+have "…and says what its end state ships and what it asks of the operator" \
+    'Give each option one sentence saying what its end state ships and what it asks of the operator.' "$PROMPT_JOINED"
+lacks "…in place of an upside and a downside" 'true downside' "$PROMPT_JOINED" \
+    "an option is stated by what its end state ships and what it asks of the operator"
+lacks "…and leaves the operator profile's sentence on an option's cost to the profile" \
+    "An option's cost is" "$PROMPT_JOINED" \
+    "the operator profile, which every sitting renders, states what an option's cost is"
 have "an option that accepts a known defect names what it breaks" \
     'names what the defect breaks and where' "$PROMPT_JOINED"
+# A ruling on an open PR lands what the PR's own review asked for on its branch
+# before approval, so the hold lists the points still open, with the reads that
+# show them, and says where each lands.
+HOLD_JOINED="$TMP/hold-squeezed"
+tr -s '[:space:]' ' ' <"$HOLD" >"$HOLD_JOINED"
+have "the hold has a ruling on an open PR say where each open review point lands" \
+    'On an open PR, say where each of its open review points lands.' "$HOLD_JOINED"
+have "…reads the PR's conversation from its anchor when the subject is not the anchor" \
+    '`"$CONV/converse-pr-conversation.sh" <the anchor>`' "$HOLD_JOINED"
+have "…and reads what still holds the PR" '"$GCTK" pr status "$ANCHOR" --json' "$HOLD"
+have "…lands a point on the PR's branch before approval when its review asked for it, its change caused it or its purpose covers it" \
+    'A point lands on the PR'"'"'s branch, before approval, when the operator'"'"'s review asked for it, when the PR'"'"'s change caused it, or when the PR'"'"'s stated purpose covers it.' "$HOLD_JOINED"
+have "…counts sharing a file, a screen or a record entry as no scope" \
+    'Sharing a file, a screen or a record entry with the PR does not make a point the PR'"'"'s.' "$HOLD_JOINED"
+have "…and leaves a follow-up only a point outside that scope, or one the operator rules separable" \
+    'A follow-up carries only a point outside that scope, or one the operator rules separable.' "$HOLD_JOINED"
 lacks "the hold skill points at the shape and keeps no copy of its order" 'detail and evidence' \
     "$SKILLS/converse-hold/SKILL.md" "the prompt's definition is the one place a framing's order is stated"
 have "the work skill reads the formulas a rig has now" 'gc formula list --rig <rig>' "$WORK_SKILL"
