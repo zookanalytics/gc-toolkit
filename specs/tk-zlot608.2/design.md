@@ -327,8 +327,8 @@ characters would merge directories: with each `/` and `.` as `-`, `/x/a.b`,
 
 A note is due when the list does not hold it at its current hash, or holds the
 date it is next due and that date has come, so the list and those names are
-all the next run needs of the last. The run keeps no copy of the directory and no findings
-record. The town repository ignores `.gc/`, and no session loads it.
+all the next run needs of the last. The run keeps no copy of the directory and
+no findings record. The town repository ignores `.gc/`, and no session loads it.
 
 Other writers and other runs:
 
@@ -499,8 +499,8 @@ The learning loop measures 2.4k runtime lines and 1.9k test lines in
 estimate of 2.0k and 1.5k that has no memory intake. The unit below adds the
 formula's new step and the clauses the other steps gain, the skill's memory
 section and the prompt fragment to that subsystem. Its Go, `gctk memory` and
-the Claude Code adapter, counts in gctk's row: about 2.3k lines with comments
-and help, and 1.7k test lines, where the evaluation on tk-zlot608.7 estimated
+the Claude Code adapter, counts in gctk's row: about 2.7k lines with comments
+and help, and 2.3k test lines, where the evaluation on tk-zlot608.7 estimated
 0.85k and 1.2k. It updates the page's feedback paragraph to name the memory
 step.
 
