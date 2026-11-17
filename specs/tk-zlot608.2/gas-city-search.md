@@ -50,6 +50,9 @@ changed since the script read it.
 
 ## Find a memory directory
 
+The build asks Claude Code where each place keeps memory instead of applying the
+rules below ([specs/tk-zlot608.8/gas-city-search.md](../tk-zlot608.8/gas-city-search.md#find-a-memory-directory)).
+
 **Partly covered: Claude Code's storage-location rules and Gas City's settings
 file.** The memory page ("Storage location") gives the directory as
 `~/.claude/projects/<project>/memory/`, where `<project>` "is derived from the
