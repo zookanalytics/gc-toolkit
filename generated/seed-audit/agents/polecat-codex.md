@@ -155,6 +155,14 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   word. When the thing does not share that meaning, choose a word for what
   it is, and leave a general name to the thing built to fill it.
 
+<!-- rule:tk-v32d2u src:pr:#1384:comment:4470390219, pr:#1384:comment:4470363445, pr:#1386:comment:4470476725, pr:#1386:comment:4470429133, pr:#1386:comment:4470452596, pr:#1400:comment:4476283616, pr:#1400:comment:4476263949 (operator feedback) adopted:2026-11-17 -->
+- Write each fact where it applies, and where a reader elsewhere needs
+  it, name the file or symbol that owns it instead of retelling it, such
+  as another script's cases, the callers a test lists or why a tool is
+  installed. A comment says what the code beside it cannot say for
+  itself, and a fact is stated a second time only where a reader with
+  just that name to follow would miss something they need.
+
 
 ## Execute immediately
 
