@@ -288,6 +288,32 @@ func TestARemovalKilledAtAnyStepKeepsTheText(t *testing.T) {
 	}
 }
 
+// A link names the note its destination names in the directory. A destination
+// in angle brackets keeps its spaces, a title after a destination is not part
+// of it, a percent escape is decoded unless the destination does not decode,
+// and a link elsewhere names none.
+func TestTarget(t *testing.T) {
+	for seg, want := range map[string]string{
+		"[Lesson](<my lesson.md>)":            "my lesson.md",
+		`[Lesson](<my lesson.md> "A title")`:  "my lesson.md",
+		"[Lesson](<my lesson.md#part>) — l":   "my lesson.md",
+		`[A](a.md "A title")`:                 "a.md",
+		"[[my lesson|Lesson]]":                "my lesson.md",
+		"[[a](a.md) — a bracket, then a link": "a.md",
+		"[Lesson](my%20lesson.md)":            "my lesson.md",
+		"[Lesson](<my%20lesson.md>)":          "my lesson.md",
+		"[Whole](100%.md)":                    "100%.md",
+		"[Out](a%2Fb.md)":                     "",
+		"[Out](../a.md)":                      "",
+		"[Web](https://x/a.md)":               "",
+		"[Text](notes.txt)":                   "",
+	} {
+		if got := target(seg); got != want {
+			t.Errorf("target(%q) = %q; want %q", seg, got, want)
+		}
+	}
+}
+
 // A note that changed since the scan stays and keeps no text.
 func TestRemoveNoteRefusesTextItWasNotGiven(t *testing.T) {
 	dir, state := t.TempDir(), t.TempDir()

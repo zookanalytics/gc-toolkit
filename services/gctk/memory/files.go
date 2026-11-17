@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -361,24 +362,29 @@ func prune(state, dir string, gone map[string]bool) []string {
 	return failures
 }
 
-// target is the note a link names in its directory, "" for a link elsewhere.
+// target is the note a link names in its directory, "" for a link elsewhere. A
+// link's destination in angle brackets can hold spaces, and one without them
+// ends at the first space, where the link's title begins. A percent escape in
+// a destination stands for the character it escapes, and a destination that
+// does not decode is read as written.
 func target(seg string) string {
 	var t string
-	if strings.HasPrefix(seg, "[[") {
-		t = seg[2:strings.Index(seg, "]]")]
-		t, _, _ = strings.Cut(t, "|")
+	if w := wikiLink.FindString(seg); w != "" {
+		t, _, _ = strings.Cut(w[2:len(w)-2], "|")
 		t, _, _ = strings.Cut(t, "#")
 		if !strings.HasSuffix(t, ".md") {
 			t += ".md"
 		}
-	} else {
-		open := strings.Index(seg, "](")
-		t = seg[open+2:]
-		t = t[:strings.Index(t, ")")]
-		t = strings.TrimSuffix(strings.TrimPrefix(t, "<"), ">")
-		t, _, _ = strings.Cut(t, "#")
-		if i := strings.IndexAny(t, " \t"); i >= 0 {
+	} else if m := mdLink.FindString(seg); m != "" {
+		t = m[strings.Index(m, "](")+2 : len(m)-1]
+		if strings.HasPrefix(t, "<") {
+			t, _, _ = strings.Cut(t[1:], ">")
+		} else if i := strings.IndexAny(t, " \t"); i >= 0 {
 			t = t[:i]
+		}
+		t, _, _ = strings.Cut(t, "#")
+		if u, err := url.PathUnescape(t); err == nil {
+			t = u
 		}
 	}
 	if t == "" || strings.ContainsAny(t, "/:") || !strings.HasSuffix(t, ".md") {

@@ -451,6 +451,24 @@ func TestADropTakesOutAChainOfCollectionNotes(t *testing.T) {
 	}
 }
 
+// A pointer whose destination is in angle brackets, or escapes its spaces,
+// names a note whose name holds spaces, and goes with that note.
+func TestADropTakesOutAPointerToANameWithSpaces(t *testing.T) {
+	c := newCity(t)
+	m := c.rig("r", "tk")
+	write(t, filepath.Join(m, indexName), "- [Lesson](<my lesson.md>) — the lesson\n"+
+		"- [Titled](<my lesson.md> \"A title\") — again\n- [Escaped](my%20lesson.md) — again\n"+
+		"- [Other](other.md) — another\n")
+	write(t, filepath.Join(m, "my lesson.md"), "My lesson.\n")
+	write(t, filepath.Join(m, "other.md"), "Other lesson.\n")
+	if a := c.apply(refOf(c.due(), "my lesson.md") + " drop"); len(a.Failed) > 0 || exists(filepath.Join(m, "my lesson.md")) {
+		t.Fatalf("failed %q; want the note gone", a.Failed)
+	}
+	if got := read(t, filepath.Join(m, indexName)); got != "- [Other](other.md) — another\n" {
+		t.Errorf("the index reads %q; want only the pointer to the other note", got)
+	}
+}
+
 // A drop is refused when the note changes after its text is kept, before it
 // goes, and the text kept for it is taken back.
 func TestANoteEditedWhileItIsRemovedStays(t *testing.T) {
