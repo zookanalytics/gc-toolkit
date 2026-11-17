@@ -1,23 +1,42 @@
 #!/usr/bin/env bash
-# pr-dispose — record a deliberate PR-close disposition on the OPEN anchor, then
-# close the PR, so the refinery's pr-facts.sh consummates the terminal close
-# through bead-rehome.sh instead of filing a rework-or-close human gate that
-# re-asks a decision already made.
+# pr-dispose — record a deliberate PR-close disposition on the open anchor, then
+# close the PR, so the PR's closer consummates the terminal close through
+# bead-rehome.sh instead of filing a human gate that re-asks a decision already
+# made. The closer is the refinery's pr-facts.sh for an anchor at
+# merge_result=pull_request, and the landing order (gctk pr reconcile) for one
+# on Gas Town's pending record, pull_request_pending or
+# pull_request_head_changed.
 #
 # It stamps three metadata keys naming the intended bead-rehome invocation —
 # gc.pr_close_disposition_kind, gc.pr_close_disposition_successor, and an
 # optional gc.pr_close_disposition_successor_store — in one update whose exit
 # decides, and closes the PR with an explaining comment (unless --no-close-pr,
 # for an operator who will close it in the UI). It does NOT close the anchor:
-# that terminal close is pr-facts's, the single consummation point, which
+# that terminal close is the closer's, the single consummation point, which
 # closes it with the edge that names its successor (the terminal state
-# doctor/check-closed-implies-landed accepts) and retires any rework-or-close
-# human gate an earlier pass filed.
+# doctor/check-closed-implies-landed accepts) once the PR reads closed. On the
+# pending record the landing order also requests no merge of a PR whose anchor
+# carries the keys.
 #
-# The anchor must be OPEN and carrying merge_result=pull_request — the state
-# pr-facts enumerates. An anchor already disposed (its duplicates or supersedes
-# edge names a successor) is a no-op; an anchor past that state (abandoned,
-# merged) is refused, with bead-rehome.sh named as the direct verb for it.
+# The read of the anchor and the stamp hold the store's record lock, a flock on
+# pr-record.lock in the .beads directory of the store that holds the anchor
+# (bead-store.sh --db), which the landing order holds for each record from its
+# read of the record to its last write of it. So the stamp lands before a run
+# reads the anchor, and that run requests no merge, or after the run's last
+# write, and never between a run's read of the anchor and its merge request.
+# The lock is taken before the anchor is read and released once the stamp has
+# landed, before the PR is read or closed. Every gc call made while it is held
+# runs with its descriptor closed, so no process a store read leaves running
+# holds the lock. It waits up to $PR_RECORD_LOCK_WAIT_SECS (300) for the lock,
+# and a lock that does not come writes nothing. --dry-run takes no lock.
+#
+# The anchor must own an open PR that a closer reads: OPEN at
+# merge_result=pull_request, the state pr-facts enumerates, or not closed on the
+# pending record, which the landing order reads while the refinery holds the
+# anchor. An anchor already disposed (its duplicates or supersedes edge names a
+# successor) is a no-op; an anchor past that state (abandoned, merged, an
+# exception of the pending record) is refused, with bead-rehome.sh named as the
+# direct verb for it.
 #
 #   pr-dispose.sh --anchor <bead-id> --successor <bead-id> \
 #                 --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
@@ -34,13 +53,17 @@
 # operator close-outs — the PR side of the bead-rehome disposition doctrine
 # (docs/state-machine.md "Disposition").
 # The current store must be the anchor's rig (GC_RIG, or run in its checkout).
-# Exit: 0 stamped (PR closed) or already disposed · 1 error · 2 usage.
+# Exit: 0 stamped (PR closed) or already disposed · 1 error, a record lock that
+# did not come within the wait among them · 2 usage.
 set -uo pipefail
 
 PROG="pr-dispose"
 # The single writer of the city's PR posts: the closing comment goes through it
 # so it carries the city's mark and is never read back as feedback.
 PR_POST="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/pr-post.sh"
+# The one resolver of a bead's store, which names the store whose record lock
+# the stamp takes.
+BEAD_STORE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/bead-store.sh"
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -70,11 +93,15 @@ usage: pr-dispose.sh --anchor <bead-id> --successor <bead-id>
                      [--successor-store rig:<name>] [--note "<one sentence>"]
                      [--pr <num>] [--no-close-pr] [--dry-run]
 
-Records a deliberate supersede/not-planned PR-close disposition on the OPEN
-anchor and closes the PR; the refinery's pr-facts.sh then closes the anchor
-through bead-rehome.sh instead of filing a rework-or-close human gate.
+Records a deliberate supersede/not-planned PR-close disposition on the open
+anchor and closes the PR; the PR's closer then closes the anchor through
+bead-rehome.sh instead of filing a human gate: pr-facts.sh at
+merge_result=pull_request, the landing order on the pending record. The read
+of the anchor and the stamp hold the store's record lock, waiting up to
+$PR_RECORD_LOCK_WAIT_SECS (300) while the landing order holds it.
 
-  --anchor          the open work bead the PR gates (merge_result=pull_request)
+  --anchor          the open work bead the PR gates (merge_result=pull_request,
+                    pull_request_pending or pull_request_head_changed)
   --successor       the carrier of the work, or (not-needed) the evidence
   --kind            the bead-rehome kind the disposition maps to
   --successor-store rig:<name>, only when the successor's id prefix is ambiguous
@@ -104,8 +131,8 @@ done
 [ -n "$ANCHOR" ]    || { warn "--anchor is required";    usage; exit 2; }
 [ -n "$SUCCESSOR" ] || { warn "--successor is required"; usage; exit 2; }
 [ -n "$KIND" ]      || { warn "--kind is required";      usage; exit 2; }
-# The kind is a closed set, the same one bead-rehome enforces: pr-facts hands it
-# straight to bead-rehome, so a kind refused there must be refused here.
+# The kind is a closed set, the same one bead-rehome enforces: the closer hands
+# it straight to bead-rehome, so a kind refused there must be refused here.
 case "$KIND" in
   re-homed|folded|fixed-upstream|duplicate|not-needed) ;;
   *) die "--kind must be one of re-homed|folded|fixed-upstream|duplicate|not-needed (got '$KIND')" 2 ;;
@@ -114,15 +141,33 @@ esac
 command -v gc >/dev/null 2>&1 || die "gc is required" 1
 command -v jq >/dev/null 2>&1 || die "jq is required" 1
 
+# The store's record lock (the header's rule), taken on fd 9 before the anchor
+# is read and held through the stamp.
+RECORD_LOCK_WAIT="${PR_RECORD_LOCK_WAIT_SECS:-300}"
+case "$RECORD_LOCK_WAIT" in ''|*[!0-9]*) RECORD_LOCK_WAIT=300 ;; esac
+take_record_lock() {
+  local db lock
+  db=$("$BEAD_STORE" --db "$ANCHOR" 2>/dev/null) && [ -n "$db" ] \
+    || die "the store that holds $ANCHOR did not resolve ('bead-store.sh --db $ANCHOR' says why), so its record lock cannot be taken; nothing written" 1
+  lock="$db/pr-record.lock"
+  command -v flock >/dev/null 2>&1 \
+    || die "flock is not on PATH, so the store's record lock ($lock) cannot be taken; nothing written" 1
+  exec 9>>"$lock" \
+    || die "the store's record lock ($lock) does not open; nothing written" 1
+  flock -w "$RECORD_LOCK_WAIT" 9 \
+    || die "another writer of a PR's pending record held the store's record lock ($lock) for ${RECORD_LOCK_WAIT}s; nothing written. Re-run this disposition" 1
+}
+[ "$DRY" -eq 1 ] || take_record_lock
+
 # Read the anchor from the current store.
-AJSON=$(gc bd show "$ANCHOR" --json 2>/dev/null | scrub)
+AJSON=$(gc bd show "$ANCHOR" --json 2>/dev/null 9>&- | scrub)
 printf '%s' "$AJSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
   || die "could not read anchor $ANCHOR from the current store; set GC_RIG to its rig, or run in that rig's checkout" 1
 A_STATUS=$(printf '%s' "$AJSON" | jq -r '.[0].status // ""')
 A_MR=$(printf '%s' "$AJSON" | jq -r '(.[0].metadata.merge_result // "") | tostring')
 # The disposition is read off the anchor's list row, which carries an edge onto
 # a successor in another rig's store as well.
-A_PRIOR=$(bd_disposed_to "$ANCHOR" || true)
+A_PRIOR=$(bd_disposed_to "$ANCHOR" 9>&- || true)
 [ -n "$PRNUM" ] || PRNUM=$(printf '%s' "$AJSON" | jq -r '(.[0].metadata.pr_number // "") | tostring')
 
 # Already disposed: bead-rehome already recorded its successor. Nothing to add.
@@ -130,11 +175,18 @@ if [ -n "$A_PRIOR" ]; then
   echo "$PROG: $ANCHOR already names $A_PRIOR as its successor — already disposed, nothing to do"
   exit 0
 fi
-# The marker only means something on the state pr-facts enumerates: an OPEN
-# pull_request anchor. Past that, pr-facts will not see it, so refuse and name
-# the direct verb rather than stamp a marker nothing consummates.
-if [ "$A_STATUS" != "open" ] || [ "$A_MR" != "pull_request" ]; then
-  die "$ANCHOR is status='$A_STATUS' merge_result='${A_MR:-unset}', not an OPEN pull_request anchor pr-facts can consummate. Dispose an anchor past that state directly: bead-rehome.sh --origin $ANCHOR --successor $SUCCESSOR --kind $KIND" 1
+# The marker only means something on a state its closer reads: an OPEN
+# pull_request anchor, which pr-facts enumerates, or an anchor on the pending
+# record that is not closed, which the landing order reads. Past that, neither
+# will see it, so refuse and name the direct verb rather than stamp a marker
+# nothing consummates.
+CLOSER=""
+case "$A_MR" in
+  pull_request) [ "$A_STATUS" != open ] || CLOSER="pr-facts" ;;
+  pull_request_pending|pull_request_head_changed) [ "$A_STATUS" = closed ] || CLOSER="the landing order" ;;
+esac
+if [ -z "$CLOSER" ]; then
+  die "$ANCHOR is status='$A_STATUS' merge_result='${A_MR:-unset}', not an anchor whose open PR a closer consummates: OPEN at pull_request, or not closed at pull_request_pending or pull_request_head_changed. Dispose an anchor past that state directly: bead-rehome.sh --origin $ANCHOR --successor $SUCCESSOR --kind $KIND" 1
 fi
 # The PR repository AND number both come from the anchor's own pr_url. A bare
 # PR number names a different pull request per repository per host, and this
@@ -156,7 +208,7 @@ PRNUM="$URL_NUM"
 # Best-effort: confirm the successor resolves. bead-rehome is the authority at
 # consummation (it searches every store), so an unresolved successor here only
 # warns — a false refusal on a cross-store successor would be worse.
-if ! gc bd show "$SUCCESSOR" --json 2>/dev/null | scrub | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+if ! gc bd show "$SUCCESSOR" --json 2>/dev/null 9>&- | scrub | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
   warn "could not confirm successor $SUCCESSOR in the current store; bead-rehome validates it at dispose time (pass --successor-store rig:<name> if its prefix is ambiguous)"
 fi
 
@@ -173,7 +225,7 @@ fi
 # decides whether it landed, so a refused stamp closes nothing.
 SET_ARGS=(--set-metadata "gc.pr_close_disposition_kind=$KIND" \
           --set-metadata "gc.pr_close_disposition_successor=$SUCCESSOR")
-# The store is part of the marker pr-facts hands to bead-rehome: an ambiguous
+# The store is part of the marker the closer hands to bead-rehome: an ambiguous
 # successor needs it to resolve in the right store. Stamp it when given; when
 # omitted, UNSET it, so an omitted store cannot silently inherit a stale value a
 # prior disposition attempt left and consummate in the wrong store. Both edits
@@ -183,39 +235,41 @@ if [ -n "$STORE" ]; then
 else
   SET_ARGS+=(--unset-metadata "gc.pr_close_disposition_successor_store")
 fi
-gc bd update "$ANCHOR" "${SET_ARGS[@]}" >/dev/null 2>&1 \
+gc bd update "$ANCHOR" "${SET_ARGS[@]}" >/dev/null 2>&1 9>&- \
   || die "the store refused the disposition marker on $ANCHOR; NOT closing the PR, since a close now would abandon the anchor as an unknown close. Re-run once the store accepts the write" 1
+# The stamp has landed, so the record lock goes free before GitHub is read.
+exec 9>&-
 echo "$PROG: $ANCHOR — recorded PR-close disposition ($KIND -> $SUCCESSOR${STORE:+ in $STORE})"
 
-# Close the PR unless the caller closes it themselves. pr-facts consummates the
-# terminal close on its next pass however the PR reaches CLOSED.
+# Close the PR unless the caller closes it themselves. The closer consummates
+# the terminal close once it reads the PR closed, however it reached CLOSED.
 if [ "$NO_CLOSE" -eq 1 ]; then
-  echo "$PROG: --no-close-pr: leaving PR#$PRNUM for you to close; pr-facts auto-disposes $ANCHOR once it is CLOSED"
+  echo "$PROG: --no-close-pr: leaving PR#$PRNUM for you to close; $CLOSER disposes $ANCHOR once it reads the PR closed"
   exit 0
 fi
 command -v gh >/dev/null 2>&1 \
-  || die "the marker is recorded but gh is not available, so PR#$PRNUM was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+  || die "the marker is recorded but gh is not available, so PR#$PRNUM was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
 
 # Read the live PR once, pinned to the anchor's own repository (PR_REPO_Q from
 # its pr_url, resolved above), and certify identity before any close. Keep gh's
 # exit status — an unreadable state (gh failed, or empty output) must NOT be
 # mistaken for a closed PR. Reading it as closed would leave the marker recorded
-# while the PR may still be OPEN, a false success: pr-facts never sees a CLOSED
-# PR to consummate the disposition. pipefail (set above) makes the pipe carry
+# while the PR may still be OPEN, a false success: the closer never sees a
+# CLOSED PR to consummate the disposition. pipefail (set above) makes the pipe carry
 # gh's non-zero status when gh fails.
 PR_JSON=$(gh pr view "$PRNUM" --repo "$PR_REPO_Q" --json state,url,comments 2>/dev/null | scrub); rc=$?
 if [ "$rc" -ne 0 ] || [ -z "$PR_JSON" ]; then
-  die "the marker is recorded but PR#$PRNUM state could not be read from $PR_REPO_Q (gh pr view failed); the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+  die "the marker is recorded but PR#$PRNUM state could not be read from $PR_REPO_Q (gh pr view failed); the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
 fi
 # Certify the PR gh returned is the one the anchor records: #NUM resolves within
 # PR_REPO_Q, but a transferred or renamed repo redirects, so a bare number can
 # still land on a different PR. Compare the live url to the anchor's pr_url.
 LIVE_URL=$(canon_pr_url "$(printf '%s' "$PR_JSON" | jq -r '.url // ""')")
 if [ -z "$LIVE_URL" ] || [ "$(canon_pr_url "$PR_URL")" != "$LIVE_URL" ]; then
-  die "PR#$PRNUM in $PR_REPO_Q resolves to '${LIVE_URL:-<none>}', not the anchor's pr_url '$PR_URL'; refusing to close — after a repo transfer or redirect a bare number can name a different PR. Close it by hand if this is expected, and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+  die "PR#$PRNUM in $PR_REPO_Q resolves to '${LIVE_URL:-<none>}', not the anchor's pr_url '$PR_URL'; refusing to close — after a repo transfer or redirect a bare number can name a different PR. Close it by hand if this is expected, and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
 fi
 PR_STATE=$(printf '%s' "$PR_JSON" | jq -r '.state // ""')
-[ -n "$PR_STATE" ] || die "the marker is recorded but PR#$PRNUM returned no state from $PR_REPO_Q; the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+[ -n "$PR_STATE" ] || die "the marker is recorded but PR#$PRNUM returned no state from $PR_REPO_Q; the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
 # Idempotent: never reopen or re-close a PR already closed.
 if [ "$PR_STATE" = "OPEN" ]; then
   CLEAD="Closing as $KIND: disposition recorded on anchor $ANCHOR "
@@ -236,14 +290,16 @@ if [ "$PR_STATE" = "OPEN" ]; then
     echo "$PROG: PR#$PRNUM already carries this disposition's closing comment; closing it without posting another"
   else
     "$PR_POST" comment --repo "$PR_REPO_Q" --pr "$PRNUM" --body "$CMT" >/dev/null 2>&1 \
-      || die "the marker is recorded but the closing comment could not be posted on PR#$PRNUM, so the PR was NOT closed and is still OPEN; close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+      || die "the marker is recorded but the closing comment could not be posted on PR#$PRNUM, so the PR was NOT closed and is still OPEN; close it by hand (or re-run once gh works), and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
   fi
   if gh pr close "$PRNUM" --repo "$PR_REPO_Q" >/dev/null 2>&1; then
-    echo "$PROG: closed PR#$PRNUM as $KIND; pr-facts auto-disposes $ANCHOR on its next pass"
+    echo "$PROG: closed PR#$PRNUM as $KIND; $CLOSER disposes $ANCHOR once it next reads the PR"
   else
-    die "the marker is recorded but 'gh pr close $PRNUM' failed and the PR is still OPEN; close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+    die "the marker is recorded but 'gh pr close $PRNUM' failed and the PR is still OPEN; close it by hand (or re-run once gh works), and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
   fi
+elif [ "$PR_STATE" = "MERGED" ]; then
+  echo "$PROG: PR#$PRNUM is already MERGED; the marker is recorded, and $CLOSER records the merge once it next reads the PR"
 else
-  echo "$PROG: PR#$PRNUM is already $PR_STATE; the marker is recorded, and pr-facts auto-disposes $ANCHOR on its next pass"
+  echo "$PROG: PR#$PRNUM is already $PR_STATE; the marker is recorded, and $CLOSER disposes $ANCHOR once it next reads the PR"
 fi
 exit 0

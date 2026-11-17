@@ -33,6 +33,21 @@ var (
 		ledger.Alias("work_outcome"))
 )
 
+// The disposition a ruling records on the bead that owns a PR before it closes
+// the PR, which the landing order closes the bead under once the PR has closed.
+// pr-dispose.sh writes each key and bead-rehome.sh reads them as a ruling
+// already made (lifecycle/lifecycle.toml, [metadata.pr_close_disposition]).
+var (
+	dispositionKindKey = ledger.ReadOnly("gc.pr_close_disposition_kind", ledger.String,
+		"The kind of close a ruling recorded for a bead whose PR will not land: re-homed, folded, "+
+			"fixed-upstream, duplicate or not-needed, the kinds bead-rehome.sh closes a bead under.")
+	dispositionSuccessorKey = ledger.ReadOnly("gc.pr_close_disposition_successor", ledger.String,
+		"The bead a recorded disposition closes its bead onto: the bead that carries the work now, or under "+
+			"not-needed the evidence that ruled the work out, such as the conversation of the sitting that ruled.")
+	dispositionStoreKey = ledger.ReadOnly("gc.pr_close_disposition_successor_store", ledger.String,
+		"The store of a recorded disposition's successor, rig:<name>, when its id prefix alone does not place it.")
+)
+
 // The withdrawal of a PR's approvals, which this domain owns: gctk pr withdraw
 // files it, and the landing order carries it out.
 var withdrawHeadKey = ledger.Declare("withdraw_head", ledger.String,
