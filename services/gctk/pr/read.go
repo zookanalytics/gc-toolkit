@@ -82,7 +82,8 @@ var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
 		"whoever gave it, as {id, author, commit, inline}, inline the newest inline comment it carries that is "+
 		"feedback, with the signs comments, reviews, dismissed, updated_at and newest_post, the latest time a "+
 		"post changed. labels: names, every label, which are their own signs. The update writes a part only "+
-		"when its read was sent after the saved part's and differs from it, and a read that fails saves "+
+		"when its read was sent after the saved part's: the whole part when it differs, and its read_at alone "+
+		"when it holds the same, so a read sent before it is never saved after it. A read that fails saves "+
 		"nothing. It holds no answer. The pr evaluator decides over it, for a display and for the landing "+
 		"order, which acts from it and reads GitHub only for a merge, as current only while it holds the pr, "+
 		"checks and conversation parts, the checks at the PR's head, names the record's repository and "+
