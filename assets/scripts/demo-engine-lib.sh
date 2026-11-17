@@ -73,11 +73,12 @@
 #     sandbox opens, which the run picks;
 #   - --base-url names this host, whose servers run outside the sandbox, unless
 #     a copy that `gctk rig serve` runs holds its port, as `gctk rig serve
-#     --check` answers in the checkout a process listening there works in, or
-#     each process listening on its port works in a worktree of a rig whose
-#     app_reads_city is "false". No variable that points at the city may name
-#     the port. A rig's checkout, which holds its store, and the city's own
-#     repository never count as such a worktree.
+#     --check` answers in the checkout a process listening there works in by
+#     naming the copy's app at a loopback URL on that port, or each process
+#     listening on its port works in a worktree of a rig whose app_reads_city
+#     is "false". No variable that points at the city may name the port. A
+#     rig's checkout, which holds its store, and the city's own repository
+#     never count as such a worktree.
 # A host without sandbox-exec runs no capture at all.
 #
 # app_reads_city is a formula var that mol-rig-demo declares with the default
