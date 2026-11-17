@@ -1641,7 +1641,11 @@ after it. The landing order reads such an anchor's record whatever its own
 read too. Once the PR reads CLOSED and no review run is attached to the anchor,
 it closes the asks and the approval withdrawals still open on the anchor, which
 nothing takes once the PR is closed, and then, with the record lock free, runs
-`bead-rehome.sh` as the refinery the anchor is assigned to. A close
+`bead-rehome.sh` as the refinery the anchor is assigned to. It names the status
+and assignee it read the anchor under and the ruling it read there, so
+`bead-rehome.sh` closes the anchor only while its own read under the lock
+still finds them, and a release or a second ruling that lands once the lock is
+free leaves the anchor to the next run, which reads it again. A close
 `bead-rehome.sh` holds, such as one the ruling's open conversation holds, is
 tried again by the next run, with no gate filed. A changed head the refinery is
 already validating can reach the refinery's publication before that close, and

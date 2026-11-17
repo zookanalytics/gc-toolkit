@@ -115,9 +115,12 @@ review run, marks nothing ready, carries out no withdrawal and saves no GitHub
 read. Once the PR has closed and no review run is attached, the run closes the
 withdrawals and asks still open on the bead, and the bead closes onto the
 ruling's successor through bead-rehome.sh, run as the refinery once the record
-lock is free. A close the script holds for now, such as one the ruling's open
-conversation holds, is tried again by the next run. A retired PR that merged
-all the same lands as any other.
+lock is free. The script closes it only while it still has the status and
+assignee the run read under the lock and still records the ruling the run read,
+so a release or a second ruling that lands once the lock is free leaves the
+bead to the next run, which reads it again. A close the script holds for now,
+such as one the ruling's open conversation holds, is tried again by the next
+run. A retired PR that merged all the same lands as any other.
 
 The review run is mol-pr-review, poured with gc formula cook --attach onto the
 bead under the record lock, with the record's PR bead, head, target and branch
@@ -430,17 +433,23 @@ func (r runs) Pour(formula, bead string, vars map[string]string) (string, error)
 // dispositions closes a bead whose PR a ruling retired through the runtime
 // adapter, which runs the pack's bead-rehome.sh from the scripts directory
 // GCTK_SCRIPTS_DIR names, as the refinery the bead is assigned to, since the
-// script closes an assigned bead only as its assignee. The script's exit 4 (a
-// write did not land, as when the bead moved since its read) and exit 5 (the
-// close is held, as by an open wait) are a close held for now. Any other
-// failure, or a script that did not run, is an error carrying why.
+// script closes an assigned bead only as its assignee. It names the run's
+// judgment of the bead, so the script closes it only while the bead still has
+// the status and assignee the run read under the record lock and still records
+// the ruling the run read there. The script's exit 4 (the bead is not as the
+// run judged it, or a write did not land, as when the bead moved since the
+// script's own read) and exit 5 (the close is held, as by an open wait) are a
+// close held for now. Any other failure, or a script that did not run, is an
+// error carrying why.
 type dispositions struct{ rt gascity.Runtime }
 
-func (d dispositions) Close(bead string, x pr.Disposition, note string) error {
-	args := []string{"--origin", bead, "--successor", x.Successor, "--kind", x.Kind, "--note", note}
-	if x.Store != "" {
-		args = append(args, "--successor-store", x.Store)
+func (d dispositions) Close(x pr.Disposal) error {
+	r := x.Disposition
+	args := []string{"--origin", x.Bead, "--successor", r.Successor, "--kind", r.Kind, "--note", x.Note}
+	if r.Store != "" {
+		args = append(args, "--successor-store", r.Store)
 	}
+	args = append(args, "--if-status", x.Status, "--if-assignee", x.Assignee, "--if-ruled")
 	res := d.rt.Script("bead-rehome.sh", args...)
 	switch {
 	case res.Err == nil && res.Code == 0:

@@ -25,37 +25,58 @@ import (
 const conversation = "tk-conv"
 
 // rehome is the disposition writer as a test sets it. It records each close it
-// is asked for, holds one while held says why, fails one while err is set, and
-// otherwise closes the bead and clears the marker, as bead-rehome.sh's close
-// does.
+// is asked for, holds one while held says why, fails one while err is set,
+// holds one whose bead no longer has the status, the assignee or the ruling the
+// run judged, as bead-rehome.sh's --if-status, --if-assignee and --if-ruled
+// do, and otherwise closes the bead and clears the marker, as bead-rehome.sh's
+// close does.
 type rehome struct {
 	mu    sync.Mutex
 	store *fake.Store
 	calls []string
 	notes []string
+	got   []pr.Disposal
 	held  string
 	err   error
 }
 
-func (r *rehome) Close(b string, d pr.Disposition, note string) error {
+func (r *rehome) Close(x pr.Disposal) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.calls = append(r.calls, strings.TrimSpace(fmt.Sprintf("%s %s %s %s", b, d.Kind, d.Successor, d.Store)))
-	r.notes = append(r.notes, note)
+	d := x.Disposition
+	r.calls = append(r.calls, strings.TrimSpace(fmt.Sprintf("%s %s %s %s", x.Bead, d.Kind, d.Successor, d.Store)))
+	r.notes = append(r.notes, x.Note)
+	r.got = append(r.got, x)
 	switch {
 	case r.err != nil:
 		return r.err
 	case r.held != "":
 		return &pr.HeldClose{Why: r.held}
 	}
-	row, ok := r.store.Row(b)
+	row, ok := r.store.Row(x.Bead)
 	if !ok {
 		return errors.New("no such bead")
+	}
+	if row.Status != x.Status || row.Assignee != x.Assignee {
+		return &pr.HeldClose{Why: fmt.Sprintf("%s is %s under %q now, not %s under %q as the run judged it",
+			x.Bead, row.Status, row.Assignee, x.Status, x.Assignee)}
+	}
+	m := row.Metadata
+	if now := (pr.Disposition{Kind: m["gc.pr_close_disposition_kind"], Successor: m["gc.pr_close_disposition_successor"],
+		Store: m["gc.pr_close_disposition_successor_store"]}); now != d {
+		return &pr.HeldClose{Why: fmt.Sprintf("%s records the ruling %s onto %s now, not the %s onto %s the run read",
+			x.Bead, now.Kind, now.Successor, d.Kind, d.Successor)}
 	}
 	row.Status = "closed"
 	delete(row.Metadata, "pr_reconcile_pending")
 	r.store.Put(row)
 	return nil
+}
+
+func (r *rehome) disposals() []pr.Disposal {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.got)
 }
 
 func (r *rehome) asked() []string {
@@ -148,7 +169,7 @@ func TestTheDispositionWriterRunsWithTheRecordLockFree(t *testing.T) {
 // closeFunc is a disposition writer that runs a function.
 type closeFunc func() error
 
-func (f closeFunc) Close(string, pr.Disposition, string) error { return f() }
+func (f closeFunc) Close(pr.Disposal) error { return f() }
 
 // A close the writer holds for now, as the ruling's open conversation holds it,
 // leaves the bead blocked with its marker, and the next run tries it again.
@@ -186,6 +207,105 @@ func TestADispositionWriterThatDidNotAnswerFailsTheRun(t *testing.T) {
 	is(t, out[0], pr.ActFailed)
 	if !strings.Contains(out[0].Detail, "does not exist") {
 		t.Fatalf("the failure says %q", out[0].Detail)
+	}
+}
+
+// The writer is handed the run's judgment of the bead under the record lock:
+// the status and assignee it read there, and the ruling it read.
+func TestTheDispositionWriterIsHandedTheRunsJudgment(t *testing.T) {
+	d, r := retired(t)
+	d.pr.Facts.State = "CLOSED"
+	is(t, d.once(t), pr.ActDisposed)
+	want := pr.Disposal{Bead: bead, Status: "blocked", Assignee: refinery,
+		Disposition: pr.Disposition{Kind: "not-needed", Successor: conversation},
+		Note:        "PR #7 closed under the disposition a ruling recorded before the close"}
+	if got := r.disposals(); len(got) != 1 || got[0] != want {
+		t.Fatalf("the writer was handed %+v, want %+v", got, want)
+	}
+}
+
+// gap is the disposition writer with another writer's change landing on the
+// bead just before its first close, as a release or a second ruling can land
+// once the run has freed the record lock and before the writer takes it.
+type gap struct {
+	*rehome
+	change func()
+	once   sync.Once
+}
+
+func (g *gap) Close(x pr.Disposal) error {
+	g.once.Do(g.change)
+	return g.rehome.Close(x)
+}
+
+// A release that lands once the run has made its last write of the record, as
+// hand-back.sh's or refinery-requeue.sh's can, since neither takes the record
+// lock, holds the close: the writer is held to what the run judged, not to a
+// read made after the release. The release lands at the first read of the
+// store after that write, or in the writer when no read comes first, and the
+// next run reads the bead as released: it clears the marker and closes nothing.
+func TestABeadReleasedOnceTheRunFreesTheLockIsLeftWhereTheReleaseLeftIt(t *testing.T) {
+	d, r := retired(t)
+	d.pr.Facts.State = "CLOSED"
+	var written, released bool
+	release := func() {
+		if !released {
+			released = true
+			d.edit(t, func(b *fake.Bead) { b.Status, b.Assignee = "open", "" })
+		}
+	}
+	d.store.BeforeUpdate = func(_ string, args []string) error {
+		written = written || slices.Contains(args, "pr_state=closed")
+		return nil
+	}
+	d.store.OnFind = func(gcbd.Query) {
+		if written {
+			release()
+		}
+	}
+	d.l.Dispositions = &gap{rehome: r, change: release}
+	o := d.once(t)
+	is(t, o, pr.ActRetry)
+	if !strings.Contains(o.Detail, "not blocked under \""+refinery+"\" as the run judged it") {
+		t.Fatalf("the held close says %q", o.Detail)
+	}
+	if b := d.row(t); b.Status != "open" || b.Assignee != "" {
+		t.Fatalf("the released bead is %s under %q", b.Status, b.Assignee)
+	}
+	is(t, d.once(t), pr.ActReleased)
+	b := d.row(t)
+	if b.Status != "open" || len(r.asked()) != 1 {
+		t.Fatalf("the next run left the bead %s and asked the writer %v", b.Status, r.asked())
+	}
+	meta(t, b, map[string]string{"pr_reconcile_pending": ""})
+}
+
+// A second ruling that lands once the run has freed the lock, as pr-dispose.sh
+// records it under the lock, holds the close of the first, and the next run
+// carries out the second.
+func TestARulingRecordedOnceTheRunFreesTheLockIsCarriedOutByTheNextRun(t *testing.T) {
+	d, r := retired(t)
+	d.pr.Facts.State = "CLOSED"
+	d.l.Dispositions = &gap{rehome: r, change: func() {
+		d.edit(t, func(b *fake.Bead) {
+			b.Metadata["gc.pr_close_disposition_kind"] = "re-homed"
+			b.Metadata["gc.pr_close_disposition_successor"] = "tk-carrier"
+		})
+	}}
+	o := d.once(t)
+	is(t, o, pr.ActRetry)
+	if !strings.Contains(o.Detail, "records the ruling re-homed onto tk-carrier now") {
+		t.Fatalf("the held close says %q", o.Detail)
+	}
+	if b := d.row(t); b.Status != "blocked" {
+		t.Fatalf("the held close left the bead %s", b.Status)
+	}
+	is(t, d.once(t), pr.ActDisposed)
+	if want := []string{bead + " not-needed " + conversation, bead + " re-homed tk-carrier"}; !slices.Equal(r.asked(), want) {
+		t.Fatalf("the writer was asked %v, want %v", r.asked(), want)
+	}
+	if b := d.row(t); b.Status != "closed" {
+		t.Fatalf("the second ruling's close left the bead %s", b.Status)
 	}
 }
 

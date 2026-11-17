@@ -170,9 +170,9 @@ func TestLandingFilesItsGatesThroughTheRuntime(t *testing.T) {
 
 // The landing order closes a bead whose PR a ruling retired through the
 // runtime adapter: the pack's bead-rehome.sh, from GCTK_SCRIPTS_DIR, gets the
-// bead, the disposition and the note, and runs as the refinery the bead is
-// assigned to. Its exits 4 and 5 are a close held for now, and any other
-// failure is an error carrying the script's own words.
+// bead, the disposition, the note and the run's judgment of the bead, and runs
+// as the refinery the bead is assigned to. Its exits 4 and 5 are a close held
+// for now, and any other failure is an error carrying the script's own words.
 func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing.T) {
 	scripts := t.TempDir()
 	log := filepath.Join(scripts, "calls")
@@ -187,25 +187,26 @@ func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := pr.Disposition{Kind: "not-needed", Successor: "tk-conv", Store: "rig:rig"}
-	if err := l.Dispositions.Close("tk-1", d, "PR #7 closed"); err != nil {
+	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "rig/gc-toolkit.refinery", Note: "PR #7 closed",
+		Disposition: pr.Disposition{Kind: "not-needed", Successor: "tk-conv", Store: "rig:rig"}}
+	if err := l.Dispositions.Close(x); err != nil {
 		t.Fatal(err)
 	}
 	want := "actor=rig/gc-toolkit.refinery\n--origin\ntk-1\n--successor\ntk-conv\n--kind\nnot-needed\n--note\nPR #7 closed\n" +
-		"--successor-store\nrig:rig\n"
+		"--successor-store\nrig:rig\n--if-status\nblocked\n--if-assignee\nrig/gc-toolkit.refinery\n--if-ruled\n"
 	if raw, _ := os.ReadFile(log); string(raw) != want {
 		t.Fatalf("bead-rehome.sh got %q, want %q", raw, want)
 	}
 	for _, code := range []string{"4", "5"} {
 		t.Setenv("STUB_EXIT", code)
 		var held *pr.HeldClose
-		if err := l.Dispositions.Close("tk-1", d, "n"); !errors.As(err, &held) || !strings.Contains(held.Why, "held by tk-conv") {
+		if err := l.Dispositions.Close(x); !errors.As(err, &held) || !strings.Contains(held.Why, "held by tk-conv") {
 			t.Fatalf("exit %s read as %v", code, err)
 		}
 	}
 	t.Setenv("STUB_EXIT", "3")
 	var held *pr.HeldClose
-	if err := l.Dispositions.Close("tk-1", d, "n"); err == nil || errors.As(err, &held) || !strings.Contains(err.Error(), "exit 3") {
+	if err := l.Dispositions.Close(x); err == nil || errors.As(err, &held) || !strings.Contains(err.Error(), "exit 3") {
 		t.Fatalf("exit 3 read as %v", err)
 	}
 }

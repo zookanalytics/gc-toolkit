@@ -24,7 +24,8 @@ import (
 // the PR (pr-dispose.sh). A run requests no merge of a PR whose bead carries
 // it, and once the PR has closed the bead goes to the disposition writer,
 // bead-rehome.sh, which closes it onto the successor the ruling named, with
-// the lock free. Each check of an open PR saves
+// the lock free, while the bead still has the status and assignee the run
+// judged and still records that ruling. Each check of an open PR saves
 // GitHub's side of it on the bead, whole, in the write that records the check
 // (specs/tk-1tfzr71.134/design.md, section 3), and nothing the run acts on
 // reads that saved read back. Both take the store's record
@@ -83,14 +84,25 @@ type Gates interface {
 
 // Dispositions is the writer of a close that is not a landing, bead-rehome.sh,
 // as the landing order reaches it for a bead whose PR a ruling retired. Close
-// closes the bead onto the successor the ruling named, under its kind, with
-// note beside the close, acting as the refinery the bead is assigned to. The
-// writer takes the store's record lock itself, from its read of the bead to its
-// close, so the order calls it with the lock free. A close the writer holds for
-// now, because a wait on the bead is still open or the bead moved since its
-// read, is a *HeldClose.
+// closes the bead x names onto the successor its ruling named, under its kind,
+// with its note beside the close, acting as the refinery the bead is assigned
+// to. The writer takes the store's record lock itself, from its read of the
+// bead to its close, so the order calls it with the lock free, and it closes
+// the bead only while the bead still has the status and assignee the run
+// judged it under and still records the ruling the run read. A close the writer
+// holds for now, because a wait on the bead is still open or the bead moved
+// since the run judged it or since the writer read it, is a *HeldClose.
 type Dispositions interface {
-	Close(bead string, d Disposition, note string) error
+	Close(x Disposal) error
+}
+
+// Disposal is the close a run owes a bead whose PR closed under a ruling's
+// disposition, which it hands to the disposition writer once the record lock
+// is free: the bead, the status and assignee the run judged it under with the
+// lock held, the disposition it read there, and the note the close carries.
+type Disposal struct {
+	Bead, Status, Assignee, Note string
+	Disposition                  Disposition
 }
 
 // Disposition is the close a ruling recorded on the bead that owns a PR before
@@ -108,7 +120,8 @@ func (d Disposition) ruling() string {
 
 // HeldClose is a disposition's close the writer holds for now, saying why: a
 // wait still open on the bead, such as the conversation of the sitting that
-// ruled, or a move since the writer read the bead. The next run tries again.
+// ruled, or a move since the run judged the bead or the writer read it, such as
+// a release or a second ruling. The next run reads the bead again.
 type HeldClose struct{ Why string }
 
 func (e *HeldClose) Error() string { return e.Why }
@@ -440,7 +453,7 @@ type run struct {
 	mark     string
 	logins   map[string]string
 	landed   *landedMerge
-	disposal *disposal
+	disposal *Disposal
 	audited  map[string]string
 }
 
@@ -448,14 +461,6 @@ type run struct {
 // the branch it merged into.
 type landedMerge struct {
 	bead, number, target string
-}
-
-// disposal is a bead whose PR closed under a ruling's disposition, which the
-// run hands to the disposition writer: the bead, the disposition, and the note
-// the close carries.
-type disposal struct {
-	bead, note string
-	d          Disposition
 }
 
 // rule is the definition of feedback, loaded the first time a record needs it.
@@ -879,8 +884,9 @@ func (u *run) disposed(s state, d Disposition) RunOutcome {
 // the run closes the withdrawals and the asks still open on the bead, which
 // nothing carries out or takes once the PR is closed, records the check, and
 // owes the bead's own close to the disposition writer, which Reconcile hands it
-// once the lock is free. A close of a withdrawal or an ask that does not land
-// leaves the bead to the next run.
+// once the lock is free, with the status and assignee the run judged it under.
+// A close of a withdrawal or an ask that does not land leaves the bead to the
+// next run.
 func (u *run) retire(s state, d Disposition, number int, ruling string, retry func(string, string) RunOutcome) RunOutcome {
 	checked := func(detail string) RunOutcome {
 		w := u.Ledger.Write(s.id)
@@ -923,8 +929,8 @@ func (u *run) retire(s state, d Disposition, number int, ruling string, retry fu
 	}
 	out := checked(detail + "; the bead goes to the disposition writer")
 	if out.Action == ActChecked {
-		u.disposal = &disposal{bead: s.id, d: d,
-			note: fmt.Sprintf("PR #%d closed under the disposition a ruling recorded before the close", number)}
+		u.disposal = &Disposal{Bead: s.id, Status: s.status, Assignee: s.assignee, Disposition: d,
+			Note: fmt.Sprintf("PR #%d closed under the disposition a ruling recorded before the close", number)}
 	}
 	return out
 }
@@ -945,22 +951,23 @@ func (u *run) moot(id, status, assignee, note string) error {
 // dispose hands the close of a bead whose PR closed under a ruling's
 // disposition to the disposition writer, with the record lock free, and says
 // what became of it: out, what the run recorded of the bead under the lock,
-// with the writer's answer after it. A close the writer holds for now is the
-// next run's to try again.
-func (u *run) dispose(x disposal, out RunOutcome) RunOutcome {
+// with the writer's answer after it. A close the writer holds for now, such as
+// the close of a bead released or ruled again since the run judged it, is the
+// next run's, which reads the bead again under the lock.
+func (u *run) dispose(x Disposal, out RunOutcome) RunOutcome {
 	if u.Dispositions == nil {
-		return RunOutcome{Bead: x.bead, Action: ActFailed, Detail: out.Detail + ", but no disposition writer is set"}
+		return RunOutcome{Bead: x.Bead, Action: ActFailed, Detail: out.Detail + ", but no disposition writer is set"}
 	}
-	err := u.Dispositions.Close(x.bead, x.d, x.note)
+	err := u.Dispositions.Close(x)
 	var held *HeldClose
 	switch {
 	case err == nil:
-		return RunOutcome{Bead: x.bead, Action: ActDisposed, Detail: out.Detail + ", which closed it"}
+		return RunOutcome{Bead: x.Bead, Action: ActDisposed, Detail: out.Detail + ", which closed it"}
 	case errors.As(err, &held):
-		return RunOutcome{Bead: x.bead, Action: ActRetry,
-			Detail: out.Detail + ", which holds its close for now, and the next run tries again: " + held.Why}
+		return RunOutcome{Bead: x.Bead, Action: ActRetry,
+			Detail: out.Detail + ", which holds its close for now, and the next run reads it again: " + held.Why}
 	}
-	return RunOutcome{Bead: x.bead, Action: ActFailed, Detail: out.Detail + ", which did not answer: " + err.Error()}
+	return RunOutcome{Bead: x.Bead, Action: ActFailed, Detail: out.Detail + ", which did not answer: " + err.Error()}
 }
 
 // observeAlone reads GitHub's side of the PR the run read a moment before, at
