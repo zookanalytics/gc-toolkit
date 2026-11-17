@@ -58,7 +58,8 @@ whose streak is 2 or more. A run that did not complete measured nothing: it
 records why, carries the previous run's lists unchanged, streaks and
 first_failed included, and exits 1, so Gas City records order.failed as well.
 A check that a completed run did not measure is listed as not measured and
-keeps the streak and first_failed it had. So neither kind of run adds to a
+keeps the streak and first_failed it had, with the accepted file's entry when
+that entry accepts the failure at this run. So neither kind of run adds to a
 streak or ends one. A check measured ok, or one doctor no longer reports,
 leaves the lists, and its next failure starts a streak of 1.
 

@@ -193,6 +193,33 @@ func TestAnUnmeasuredCheckKeepsItsStreak(t *testing.T) {
 	}
 }
 
+// A check a run did not measure carries the accepted file's entry when the
+// entry accepts the failure it carries at that run, judged as a failing check
+// is, so a reader can tell a failure the operator accepted from one it shows.
+// One that carries no failure, or one whose entry's bound has run out, carries
+// none.
+func TestAnUnmeasuredCheckCarriesTheEntryThatAcceptsItsFailure(t *testing.T) {
+	c := newCity()
+	acc := entries(t)
+	c.runAt(t, t0, acc, warn("hold-label-routed-to"), warn("dolt-compact-state"), warn("orphan-sessions"))
+	out := c.runAt(t, t0.Add(time.Hour), acc, timedOut("hold-label-routed-to"), timedOut("dolt-compact-state"), timedOut("orphan-sessions"), timedOut("controller"))
+	got := map[string]string{}
+	for _, u := range out.Record.NotMeasured {
+		got[u.Name] = "none"
+		if u.Entry != nil {
+			got[u.Name] = u.Entry.Reason + "/" + u.Entry.For
+		}
+	}
+	want := map[string]string{"hold-label-routed-to": "a Gas City bug/", "dolt-compact-state": "the compactor's retry/3h", "orphan-sessions": "none", "controller": "none"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("at 1h the unmeasured entries are %v, want %v", got, want)
+	}
+	out = c.runAt(t, t0.Add(3*time.Hour), acc, gascity.DoctorResult{Name: "dolt-compact-state", Status: "warning", Message: "not checked: store not running"})
+	if u := out.Record.NotMeasured[0]; u.Entry != nil || u.Streak != 1 || u.FirstFailed == nil || !u.FirstFailed.Equal(t0) {
+		t.Fatalf("at 3h, past its entry's bound, the unmeasured check carries %+v", u)
+	}
+}
+
 // A run that did not complete measured nothing: it records why, carries the
 // previous run's lists and the time they were measured unchanged, and fails,
 // and the next completed run counts the streak as if it had not happened.
@@ -424,7 +451,7 @@ func TestThePayloadsKeys(t *testing.T) {
 	rec := Record{
 		Started: t0, Finished: t0, Completed: false, Why: "w", Measured: &first,
 		Failing:        []Check{{Name: "a"}},
-		NotMeasured:    []Unmeasured{{Name: "b", Why: "timed_out", FirstFailed: &first, Streak: 1}},
+		NotMeasured:    []Unmeasured{{Name: "b", Why: "timed_out", FirstFailed: &first, Streak: 1, Entry: &Entry{Reason: "r", Ruling: "u", For: "3h"}}},
 		Accepted:       []Accepted{{Check: Check{Name: "c"}, Entry: Entry{Reason: "r", Ruling: "u", For: "3h"}}},
 		Monitors:       []Monitor{{Order: "reaper", LastGood: &first}},
 		MonitorsUnread: "m",
@@ -451,7 +478,8 @@ func TestThePayloadsKeys(t *testing.T) {
 	}{
 		{shape, []string{"accepted", "completed", "failing", "finished", "measured", "monitors", "monitors_unread", "not_measured", "started", "why"}},
 		{shape["failing"].([]any)[0], []string{"first_failed", "message", "name", "severity", "status", "streak"}},
-		{shape["not_measured"].([]any)[0], []string{"first_failed", "name", "streak", "why"}},
+		{shape["not_measured"].([]any)[0], []string{"entry", "first_failed", "name", "streak", "why"}},
+		{shape["not_measured"].([]any)[0].(map[string]any)["entry"], []string{"for", "reason", "ruling"}},
 		{shape["accepted"].([]any)[0], []string{"entry", "first_failed", "message", "name", "severity", "status", "streak"}},
 		{shape["accepted"].([]any)[0].(map[string]any)["entry"], []string{"for", "reason", "ruling"}},
 		{shape["monitors"].([]any)[0], []string{"last_good", "order"}},

@@ -106,12 +106,15 @@ type Check struct {
 // Unmeasured is a result the run did not measure, and why: timed_out for a
 // check doctor abandoned at its per-check timeout, or the message of the
 // stand-in doctor's store gate reported in its place. A check that was failing
-// keeps the time it first failed and its streak.
+// keeps the time it first failed and its streak, and Entry is the accepted
+// file's entry when it accepts that failure at this run, so a reader can tell
+// a failure the operator accepted from one it shows.
 type Unmeasured struct {
 	Name        string     `json:"name"`
 	Why         string     `json:"why"`
 	FirstFailed *time.Time `json:"first_failed,omitempty"`
 	Streak      int        `json:"streak,omitempty"`
+	Entry       *Entry     `json:"entry,omitempty"`
 }
 
 // Accepted is a failing result the accepted file accepts, with its entry.
@@ -273,15 +276,24 @@ func histories(prev *Record) map[string]history {
 }
 
 // measure lists what a completed run found. A result doctor abandoned, or one
-// its store gate stood in for, is not measured and keeps its history. Any
-// other result that is not ok is failing: it carries its history and adds one
-// to its streak, or starts one at this run. An ok result, and a check doctor
-// no longer reports, are listed nowhere.
+// its store gate stood in for, is not measured and keeps its history, with the
+// entry that accepts the failure it carries. Any other result that is not ok
+// is failing: it carries its history and adds one to its streak, or starts one
+// at this run. An ok result, and a check doctor no longer reports, are listed
+// nowhere.
 func measure(rec *Record, results []gascity.DoctorResult, prev *Record, accepted []Entry) {
 	had := histories(prev)
 	byName := map[string]Entry{}
 	for _, e := range accepted {
 		byName[e.Check] = e
+	}
+	// acceptance is the entry that accepts a check that first failed at first,
+	// judged at this run, nil when none does.
+	acceptance := func(name string, first time.Time) *Entry {
+		if e, ok := byName[name]; ok && e.Accepts(first, rec.Started) {
+			return &e
+		}
+		return nil
 	}
 	rec.Failing, rec.NotMeasured, rec.Accepted = []Check{}, []Unmeasured{}, []Accepted{}
 	seen := map[string]bool{}
@@ -292,18 +304,24 @@ func measure(rec *Record, results []gascity.DoctorResult, prev *Record, accepted
 		seen[res.Name] = true
 		h, failed := had[res.Name]
 		switch {
-		case res.TimedOut:
-			rec.NotMeasured = append(rec.NotMeasured, unmeasured(res.Name, "timed_out", h, failed))
-		case strings.HasPrefix(res.Message, notChecked):
-			rec.NotMeasured = append(rec.NotMeasured, unmeasured(res.Name, clip(res.Message), h, failed))
+		case res.TimedOut || strings.HasPrefix(res.Message, notChecked):
+			why := "timed_out"
+			if !res.TimedOut {
+				why = clip(res.Message)
+			}
+			u := unmeasured(res.Name, why, h, failed)
+			if failed {
+				u.Entry = acceptance(res.Name, h.first)
+			}
+			rec.NotMeasured = append(rec.NotMeasured, u)
 		case res.Status == "ok":
 		default:
 			c := Check{Name: res.Name, Status: res.Status, Severity: res.Severity, Message: clip(res.Message), FirstFailed: rec.Started, Streak: 1}
 			if failed {
 				c.FirstFailed, c.Streak = h.first, h.streak+1
 			}
-			if e, ok := byName[res.Name]; ok && e.Accepts(c.FirstFailed, rec.Started) {
-				rec.Accepted = append(rec.Accepted, Accepted{Check: c, Entry: e})
+			if e := acceptance(res.Name, c.FirstFailed); e != nil {
+				rec.Accepted = append(rec.Accepted, Accepted{Check: c, Entry: *e})
 			} else {
 				rec.Failing = append(rec.Failing, c)
 			}
