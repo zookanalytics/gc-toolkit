@@ -770,10 +770,10 @@ func TestAnAskThatWaitsLandsWithItsWaitInOneCreate(t *testing.T) {
 func TestAnAskThatWaitsOnABeadInAnotherStoreIsRefused(t *testing.T) {
 	w := newWorld(t)
 	w.store.Put(bead{ID: "tk-other", Status: "open", IssueType: "task"})
-	_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "Fix the cap.", WaitingOn: []string{"tk-other", "gf-other"}}, nil)
+	_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "Fix the cap.", WaitingOn: []string{"tk-other", "rb-other"}}, nil)
 	var refused *review.Refusal
-	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "gf-other") || strings.Contains(err.Error(), "tk-other") {
-		t.Fatalf("a wait on a bead the store does not hold: %v; want a refusal that names gf-other alone", err)
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "rb-other") || strings.Contains(err.Error(), "tk-other") {
+		t.Fatalf("a wait on a bead the store does not hold: %v; want a refusal that names rb-other alone", err)
 	}
 	if n := len(w.store.Creates()); n != 0 {
 		t.Fatalf("the refused ask reached the store in %d creates", n)
