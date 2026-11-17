@@ -18,7 +18,7 @@ import (
 // sections 4 and 5), each case one of section 12's for its unit, on the
 // landing order's world: a bead on the pending record whose PR the evaluator
 // reads ready, and the branch's commits older, then head, then later, each
-// descending from the one before.
+// descending from the one before in the clone's history.
 
 const (
 	older    = "0000000000000000000000000000000000000001"
@@ -33,8 +33,8 @@ func newCycle(t *testing.T) *land {
 	d := newLand(t)
 	d.l.Mark = func() (string, error) { return cityMark, nil }
 	d.store.CloseTime = "2026-11-12T09:00:00Z"
-	d.github.Descends[head] = []string{older}
-	d.github.Descends[later] = []string{head, older}
+	d.co.descends[head] = []string{older}
+	d.co.descends[later] = []string{head, older}
 	return d
 }
 
@@ -170,6 +170,7 @@ func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) 
 		t.Fatalf("asked %v, the PR a draft %v", got, d.pr.Facts.IsDraft)
 	}
 	savesNothingOfGitHub(t, d)
+	readsNoGitHub(t, d)
 	o := d.once(t)
 	is(t, o, pr.ActChecked)
 	if !strings.Contains(o.Detail, "check-pending") {
@@ -418,23 +419,23 @@ func TestAWithdrawalWaitsWhileAnApprovalItWouldDismissCarriesUnroutedComments(t 
 }
 
 // A withdrawal holds the PR until no approval that stands was given on a commit
-// without its head: a dismissal GitHub did not answer and a compare GitHub did
-// not answer each leave the withdrawal open for the next run, and the PR waits
-// on it.
+// without its head: a dismissal GitHub did not answer and a read of the clone's
+// history that did not answer each leave the withdrawal open for the next run,
+// and the PR waits on it.
 func TestAWithdrawalHoldsThePRUntilNoApprovalWithoutItsHeadStands(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Reviews = []gh.Review{approved(100, "operator", older), approved(101, "reviewer", head)}
 	id := d.withdraw(t, head)
-	d.github.Fail["Compare"] = errors.New("gh: gh: Bad Gateway (HTTP 502)")
+	d.co.containsErr = errors.New("git merge-base: fatal: bad object")
 	o := d.once(t)
-	is(t, o, pr.ActChecked)
+	is(t, o, pr.ActRetry)
 	if !strings.Contains(o.Detail, "wait") || status(t, d, id) != "open" {
-		t.Fatalf("an unanswered compare read %s, the withdrawal %s", o.Detail, status(t, d, id))
+		t.Fatalf("an unanswered read of the history read %s, the withdrawal %s", o.Detail, status(t, d, id))
 	}
-	delete(d.github.Fail, "Compare")
+	d.co.containsErr = nil
 	d.github.Fail["DismissReview"] = errors.New("gh: error connecting to api.github.com")
 	o = d.once(t)
-	is(t, o, pr.ActChecked)
+	is(t, o, pr.ActRetry)
 	if status(t, d, id) != "open" || len(d.gates.list()) != 0 {
 		t.Fatalf("an unanswered dismissal left the withdrawal %s, with gates %v", status(t, d, id), d.gates.list())
 	}
@@ -447,18 +448,52 @@ func TestAWithdrawalHoldsThePRUntilNoApprovalWithoutItsHeadStands(t *testing.T) 
 	is(t, d.once(t), pr.ActRequested)
 }
 
-// A compare GitHub refuses, as for a commit it no longer holds, does not show
-// that the approved commit contains the head, so the approval is dismissed and
-// the withdrawal closes, where waiting would hold the PR on every run with no
-// one asked. An approval of the head itself stands, since it needs no compare.
-func TestAnApprovalWhoseCompareGitHubRefusesIsDismissed(t *testing.T) {
+// A commit the clone does not hold once the act has fetched the PR's branch, as
+// one a force-push left behind, is not shown to contain the head, so the
+// approval of it is dismissed and the withdrawal closes, where waiting would
+// hold the PR on every run with no one asked. An approval of the head itself
+// stands, since its commit is the head.
+func TestAnApprovalOfACommitTheCloneDoesNotHoldIsDismissed(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Reviews = []gh.Review{approved(100, "former", rewrite), approved(101, "reviewer", head)}
-	d.github.Fail["Compare"] = errors.New("gh: gh: Not Found (HTTP 404)")
 	id := d.withdraw(t, head)
 	d.once(t)
 	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed", "approved"}) {
-		t.Fatalf("a refused compare left the withdrawal %s with reviews %v", status(t, d, id), states(d.pr))
+		t.Fatalf("a commit the clone does not hold left the withdrawal %s with reviews %v", status(t, d, id), states(d.pr))
+	}
+	if !slices.Equal(d.co.branches, []string{branch}) {
+		t.Fatalf("the act fetched %v before it dismissed, not the PR's branch %s", d.co.branches, branch)
+	}
+}
+
+// An approval of a commit the clone has not fetched yet, such as one a person
+// pushed onto the PR's branch, is judged once the act has fetched the branch,
+// and stands when that commit contains the head. A fetch that fails dismisses
+// nothing, and the next run acts again.
+func TestAnApprovalOfAPushTheCloneHasNotFetchedIsJudgedOnceTheBranchIsFetched(t *testing.T) {
+	d := newCycle(t)
+	pushed := "5555555555555555555555555555555555555555"
+	d.pr.Reviews = []gh.Review{approved(100, "operator", older), approved(101, "operator", pushed)}
+	id := d.withdraw(t, head)
+	d.co.fetchErr = errors.New("git fetch: could not read from remote repository")
+	o := d.once(t)
+	is(t, o, pr.ActRetry)
+	if !strings.Contains(o.Detail, "did not fetch") || status(t, d, id) != "open" ||
+		slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "DismissReview" }) {
+		t.Fatalf("a branch that did not fetch read %s, the withdrawal %s, with asks %v", o.Detail, status(t, d, id), asks(d.github))
+	}
+	d.co.fetchErr = nil
+	d.co.onFetch = func() {
+		d.co.mu.Lock()
+		defer d.co.mu.Unlock()
+		d.co.descends[pushed] = []string{head, older}
+	}
+	d.once(t)
+	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed", "approved"}) {
+		t.Fatalf("once the branch fetched, the withdrawal is %s with reviews %v", status(t, d, id), states(d.pr))
+	}
+	if !slices.Equal(d.co.branches, []string{branch, branch}) {
+		t.Fatalf("the acts fetched %v, not the PR's branch %s once each", d.co.branches, branch)
 	}
 }
 

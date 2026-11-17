@@ -15,15 +15,16 @@ package gh
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Runner runs gh with args and returns its stdout. A failure carries gh's own
@@ -32,25 +33,60 @@ import (
 type Runner func(args ...string) ([]byte, error)
 
 // Client reads GitHub through gh, as the account gh is logged in as on host.
+// A call it makes through the gh on PATH stops when ctx ends.
 type Client struct {
 	host string
 	run  Runner
+	ctx  context.Context
 }
 
 // New returns a client for host, such as github.com, that runs the gh on PATH.
-func New(host string) *Client { return &Client{host: host, run: gh} }
+func New(host string) *Client { return &Client{host: host} }
 
 // NewWithRunner returns a client for host that runs gh through run, so the
 // adapter's own tests serve recorded answers.
 func NewWithRunner(host string, run Runner) *Client { return &Client{host: host, run: run} }
 
-// gh runs the gh on PATH.
-func gh(args ...string) ([]byte, error) {
-	cmd := exec.Command("gh", args...)
+// Within returns a client for c's host whose every call stops when ctx ends:
+// the gh it is running is killed, and the call returns an error that wraps the
+// one that ended ctx. GitHub may still take a request whose call was stopped,
+// as it may one whose answer was lost. A client NewWithRunner made runs its
+// runner as it is.
+func (c *Client) Within(ctx context.Context) *Client {
+	d := *c
+	d.ctx = ctx
+	return &d
+}
+
+// call runs gh with args: through the client's runner when it has one, else
+// the gh on PATH, stopped when the client's context ends.
+func (c *Client) call(args ...string) ([]byte, error) {
+	if c.run != nil {
+		return c.run(args...)
+	}
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return gh(ctx, args...)
+}
+
+// ghStopGrace bounds how long a stopped gh, or a child of it that holds its
+// output, keeps a call waiting after the kill.
+const ghStopGrace = 2 * time.Second
+
+// gh runs the gh on PATH, killed when ctx ends. gh holds no lock that a kill
+// leaves behind.
+func gh(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.WaitDelay = ghStopGrace
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return out, fmt.Errorf("gh: the call was stopped: %w", ctx.Err())
+		}
 		var ee *exec.ExitError
 		if msg := strings.TrimSpace(stderr.String()); errors.As(err, &ee) && msg != "" {
 			return out, fmt.Errorf("gh: %s", msg)
@@ -287,42 +323,6 @@ func (c *Client) stage(query, id string) error {
 	return c.graphql(query, []string{"-f", "id=" + id}, false, func(json.RawMessage) error { return nil })
 }
 
-// The statuses of a compare, how its head stands against its base.
-var compareStatuses = []string{"identical", "ahead", "behind", "diverged"}
-
-// commitID is a full commit id, as GitHub names a commit.
-var commitID = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
-
-// Compare reads how commit head stands against commit base in repo, by
-// GitHub's compare of the two (GET repos/<repo>/compare/<base>...<head>):
-// identical, ahead when head descends from base, behind when head is an
-// ancestor of base, or diverged. base and head are full commit ids. An answer
-// that names no status of those is an error, as is one GitHub did not give.
-func (c *Client) Compare(repo, base, head string) (string, error) {
-	if _, err := prVars(repo, 1); err != nil {
-		return "", err
-	}
-	if !commitID.MatchString(base) || !commitID.MatchString(head) {
-		return "", fmt.Errorf("github: a compare of %q with %q names no two full commit ids", head, base)
-	}
-	// One commit a page is enough: the status is the answer, and the commits
-	// between the two are not read.
-	raw, err := c.run("api", "--hostname", c.host, fmt.Sprintf("repos/%s/compare/%s...%s?per_page=1", repo, base, head))
-	if err != nil {
-		return "", err
-	}
-	var out struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("github: the compare of %s with %s did not decode: %w", head, base, err)
-	}
-	if !slices.Contains(compareStatuses, out.Status) {
-		return "", fmt.Errorf("github: the compare of %s with %s named the status %q", head, base, out.Status)
-	}
-	return out.Status, nil
-}
-
 // DismissReview dismisses review id of PR number in repo with message, through
 // GitHub's review dismissal (PUT repos/<repo>/pulls/<n>/reviews/<id>/dismissals).
 // An error is a dismissal GitHub refused, or one whose answer did not arrive,
@@ -337,7 +337,7 @@ func (c *Client) DismissReview(repo string, number int, id int64, message string
 	if strings.TrimSpace(message) == "" {
 		return errors.New("github: a dismissal needs a message")
 	}
-	_, err := c.run("api", "--hostname", c.host, "-X", "PUT",
+	_, err := c.call("api", "--hostname", c.host, "-X", "PUT",
 		fmt.Sprintf("repos/%s/pulls/%d/reviews/%d/dismissals", repo, number, id), "-f", "message="+message)
 	return err
 }
@@ -651,7 +651,7 @@ func (c *Client) IssueComments(repo string, number int) ([]IssueComment, error) 
 
 // Login reads the login of the account gh acts as on the host.
 func (c *Client) Login() (string, error) {
-	raw, err := c.run("api", "--hostname", c.host, "user")
+	raw, err := c.call("api", "--hostname", c.host, "user")
 	if err != nil {
 		return "", err
 	}
@@ -719,7 +719,7 @@ func (c *Client) graphql(query string, vars []string, paginate bool, take func(j
 	}
 	args = append(args, "-f", "query="+query)
 	args = append(args, vars...)
-	raw, err := c.run(args...)
+	raw, err := c.call(args...)
 	if err != nil {
 		return err
 	}

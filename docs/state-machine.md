@@ -235,7 +235,8 @@ and keeps no other state beside the record. `services/gctk/pr/record`
 declares its keys and values. No machine checks its writers: the refinery
 publishes a PR's record through `gctk pr record`, in its `mr` step and when it
 sends a PR on the record back to the PR's review run (`refinery-requeue.sh`),
-the landing order writes each later step through `gctk pr reconcile`
+the landing order writes each later step through `gctk pr reconcile`, acting
+from the bead and the read the PR watch saved on it
 ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)),
 and `gctk pr withdraw` sets the record's marker when it files a withdrawal on a
 record that carries none. The record's `pr_state` and `pr_last_checked_at` are
@@ -276,10 +277,11 @@ stateDiagram-v2
 
 The `blocked` values after `mr_merged`'s row are the exceptions. Each keeps
 the bead open behind a human gate keyed by its value, so none releases the work
-that waits on the bead. A lookup that fails, a merge commit not yet on the
-fetched target, or a close the store failed for a reason of its own is recorded
-in `pr_reconcile_error` and read again by the next run, and it never closes the
-bead. `merged`, the machine's value, is
+that waits on the bead. An act of the landing order that does not complete,
+such as a request GitHub refused or did not answer, a fetch that failed, a
+merge commit not yet on the fetched target, or a close the store failed for a
+reason of its own, records nothing: its difference stays on the bead, the next
+run acts on it, and it never closes the bead. `merged`, the machine's value, is
 the record of a `direct` landing on either path, and the doctor's landing
 checks (I2 and I5) read it and `mr_merged` alike as landed.
 
@@ -1169,7 +1171,8 @@ sequenceDiagram
   participant G as GitHub
   participant L as ledger
   participant R as refinery (mol-refinery-patrol)
-  participant O as landing order (5m)
+  participant W as PR watch (2m)
+  participant O as landing order (1m)
   P->>G: push polecat/BEAD under the lease on the commit it read
   P->>G: git ls-remote — verify HEAD == remote
   Note over P: push refused or unverified ⇒ abort, keep the bead
@@ -1179,8 +1182,12 @@ sequenceDiagram
   R->>G: prep — merge the target in, run the rig's gate
   R->>G: mr — edit the PR's title and body, push the head under the lease,<br/>or push and open it as a draft
   R->>L: gctk pr record — pull_request_pending, blocked, assigned to the refinery
-  O->>G: read the PR by its number; the evaluator decides it is ready
-  O->>G: mergePullRequest, pinned to the validated head (expectedHeadOid)
+  W->>G: ask whether the PR moved; read what moved
+  W->>L: gctk pr refresh — save GitHub's side of the PR on the bead
+  O->>L: decide from the bead and its saved read: the evaluator finds it ready
+  O->>G: the merge's own read of the PR; the evaluator decides again
+  O->>G: mergePullRequest, pinned to the head that read judged (expectedHeadOid)
+  W->>L: gctk pr refresh — save the PR merged, with its merge commit
   O->>L: mr_merged + close, once the merge commit is on the fetched target
 ```
 

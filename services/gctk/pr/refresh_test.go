@@ -499,11 +499,11 @@ func TestTheSavedReadsFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string][]string{
-		"pr": {"base", "draft", "head", "head_branch", "in_merge_queue", "merge_queue_enabled", "merge_state",
-			"number", "read_at", "repository", "signs", "state", "url"},
+		"pr": {"base", "draft", "head", "head_branch", "id", "in_merge_queue", "merge_commit", "merge_queue_enabled",
+			"merge_state", "merged_at", "number", "read_at", "repository", "signs", "state", "url"},
 		"checks": {"head", "read_at", "runs", "signs"},
-		"conversation": {"approvers", "awaiting", "feedback", "read_at", "requesters", "review_decision", "signs",
-			"since", "unresolved"},
+		"conversation": {"approvals", "approvers", "awaiting", "feedback", "read_at", "requesters", "review_decision",
+			"signs", "since", "unresolved"},
 		"labels": {"names", "read_at"},
 	}
 	signs := map[string][]string{
@@ -535,6 +535,51 @@ func TestTheSavedReadsFields(t *testing.T) {
 	var unresolved []string
 	if err := json.Unmarshal(parts["conversation"]["unresolved"], &unresolved); err != nil || unresolved == nil {
 		t.Errorf("unresolved encodes as %s, want a list", parts["conversation"]["unresolved"])
+	}
+	var approvals []pr.Approval
+	if err := json.Unmarshal(parts["conversation"]["approvals"], &approvals); err != nil || approvals == nil {
+		t.Errorf("approvals encodes as %s, want a list", parts["conversation"]["approvals"])
+	}
+}
+
+// The PR part keeps the node id a request names the PR by, and once it merged,
+// its merge commit and when it merged, which the landing order lands it from.
+func TestThePRPartKeepsWhatTheLandingOrderActsOn(t *testing.T) {
+	d := newWatched(t)
+	d.pr.Facts.ID = "PR_7"
+	d.pr.Facts.State, d.pr.Facts.MergeCommit, d.pr.Facts.MergedAt = "MERGED", strings.Repeat("e", 40), "2026-11-16T09:00:00Z"
+	d.poll(t)
+	p := d.saved(t, bead).PR
+	if p.ID != "PR_7" || p.MergeCommit != strings.Repeat("e", 40) || p.MergedAt != "2026-11-16T09:00:00Z" {
+		t.Fatalf("the PR part keeps id %q, merge commit %q, merged at %q", p.ID, p.MergeCommit, p.MergedAt)
+	}
+}
+
+// The conversation keeps each approval that stands, whoever gave it, with the
+// commit it was given on and the newest inline comment it carries that is
+// feedback, which a withdrawal's dismissal would retire. A dismissed review, a
+// request for changes and a comment are no approval, and an inline comment the
+// definition reads as no feedback is not kept.
+func TestTheConversationKeepsEachStandingApproval(t *testing.T) {
+	d := newWatched(t)
+	review := func(id int64, state, login, commit string) gh.Review {
+		return gh.Review{ID: id, State: state, Author: login, AuthorCanPush: login != "visitor", Commit: commit,
+			SubmittedAt: "2026-11-16T08:00:00Z"}
+	}
+	d.pr.Reviews = []gh.Review{review(102, "APPROVED", "visitor", other), review(100, "APPROVED", "operator", head),
+		review(101, "DISMISSED", "operator", other), review(103, "CHANGES_REQUESTED", "reviewer", head),
+		review(104, "COMMENTED", "reviewer", head)}
+	carriedBy := func(id, review int64) gh.Comment {
+		return gh.Comment{ID: id, Author: "operator", Body: "look", CreatedAt: "2026-11-16T08:00:00Z",
+			Review: &gh.CommentReview{ID: review, State: "APPROVED", SubmittedAt: "2026-11-16T08:00:00Z"}}
+	}
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{carriedBy(300, 100), carriedBy(302, 100), carriedBy(301, 102)}}}
+	d.rule.notFeedback[302] = true
+	d.poll(t)
+	got := d.saved(t, bead).Conversation.Approvals
+	want := []pr.Approval{{ID: 100, Author: "operator", Commit: head, Inline: 300}, {ID: 102, Author: "visitor", Commit: other, Inline: 301}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("the conversation keeps approvals %+v, want %+v", got, want)
 	}
 }
 

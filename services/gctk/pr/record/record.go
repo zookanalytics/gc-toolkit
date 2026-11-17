@@ -87,7 +87,6 @@ type Record struct {
 	MergedSHA, MergedAt      string
 	ExistingPR               string
 	BlockedReason, Rejection string
-	Error                    string
 	Marked                   bool
 }
 
@@ -106,7 +105,7 @@ func Read(r *ledger.Record) (Record, error) {
 		Head: get(prHeadKey), Observed: get(observedHeadKey), State: get(prStateKey), CheckedAt: get(checkedAtKey),
 		Target: get(mergedTargetKey), MergedSHA: get(mergedSHAKey), MergedAt: get(mergedAtKey),
 		ExistingPR: get(existingPRKey), BlockedReason: get(blockedReasonKey), Rejection: get(rejectionReasonKey),
-		Error: get(reconcileErrorKey), Marked: get(pendingKey) == "true",
+		Marked: get(pendingKey) == "true",
 	}
 	return rec, err
 }
@@ -162,8 +161,8 @@ func Publish(w *ledger.Write, p Publication) {
 	prRepoKey.Set(w, p.Repo)
 	mergedTargetKey.Set(w, p.Target)
 	blockedReasonKey.Set(w, "Awaiting verified merge of "+p.URL)
-	for _, k := range []ledger.Key[string]{rejectionReasonKey, reconcileErrorKey, mergedSHAKey, mergedAtKey,
-		existingPRKey, observedHeadKey} {
+	for _, k := range []ledger.Key[string]{rejectionReasonKey, mergedSHAKey, mergedAtKey, existingPRKey,
+		observedHeadKey} {
 		k.Clear(w)
 	}
 }
@@ -171,13 +170,6 @@ func Publish(w *ledger.Write, p Publication) {
 // Block finishes a publication whose second write landed and whose bead is
 // still open: the bead moves to blocked.
 func Block(w *ledger.Write) { w.Status("blocked") }
-
-// Checked clears the error an earlier read recorded, once a read leaves the
-// record standing.
-func Checked(w *ledger.Write) { reconcileErrorKey.Clear(w) }
-
-// Retry records why a read could not decide, which the next run reads again.
-func Retry(w *ledger.Write, reason string) { reconcileErrorKey.Set(w, reason) }
 
 // Requeue sends a PR open at a head the refinery has not validated back to the
 // refinery: the bead open, merge_result head changed, the head found, and why,
@@ -191,9 +183,7 @@ func Requeue(w *ledger.Write, prURL, observed, reason string, held bool) {
 	existingPRKey.Set(w, prURL)
 	observedHeadKey.Set(w, observed)
 	rejectionReasonKey.Set(w, reason)
-	for _, k := range []ledger.Key[string]{blockedReasonKey, reconcileErrorKey} {
-		k.Clear(w)
-	}
+	blockedReasonKey.Clear(w)
 	if !held {
 		pendingKey.Clear(w)
 	}
@@ -208,7 +198,7 @@ func Mark(w *ledger.Write) { pendingKey.Set(w, "true") }
 // the refinery's validation, as Gas Town's recovery of an interrupted requeue
 // does.
 func Settle(w *ledger.Write) {
-	for _, k := range []ledger.Key[string]{pendingKey, blockedReasonKey, reconcileErrorKey} {
+	for _, k := range []ledger.Key[string]{pendingKey, blockedReasonKey} {
 		k.Clear(w)
 	}
 }
@@ -222,7 +212,7 @@ func Revalidate(w *ledger.Write, reason string) {
 	mergeResultKey.Set(w, Incomplete)
 	rejectionReasonKey.Set(w, reason)
 	for _, k := range []ledger.Key[string]{prURLKey, prNumberKey, prHeadKey, prRepoKey, mergedSHAKey,
-		mergedTargetKey, mergedAtKey, observedHeadKey, blockedReasonKey, reconcileErrorKey, pendingKey} {
+		mergedTargetKey, mergedAtKey, observedHeadKey, blockedReasonKey, pendingKey} {
 		k.Clear(w)
 	}
 }
@@ -262,7 +252,7 @@ func Land(w *ledger.Write, l Landing, note string) {
 	mergedSHAKey.Set(w, l.MergedSHA)
 	mergedTargetKey.Set(w, l.Target)
 	mergedAtKey.Set(w, l.MergedAt)
-	for _, k := range []ledger.Key[string]{rejectionReasonKey, reconcileErrorKey, blockedReasonKey, pendingKey} {
+	for _, k := range []ledger.Key[string]{rejectionReasonKey, blockedReasonKey, pendingKey} {
 		k.Clear(w)
 	}
 	w.Note(note)

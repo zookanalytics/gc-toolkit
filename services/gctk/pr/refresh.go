@@ -264,10 +264,10 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 				signs = o.saved.PR.Signs
 			}
 		}
-		fresh.PR = &SavedPR{ReadAt: at, URL: p.URL, Number: p.Number, Repository: p.Repository,
+		fresh.PR = &SavedPR{ReadAt: at, ID: p.ID, URL: p.URL, Number: p.Number, Repository: p.Repository,
 			HeadBranch: p.HeadRefName, Base: p.BaseRefName, Head: p.HeadRefOid, State: p.State, Draft: p.IsDraft,
 			MergeState: p.MergeStateStatus, InMergeQueue: p.InMergeQueue, MergeQueueEnabled: p.MergeQueueEnabled,
-			Signs: signs}
+			MergeCommit: p.MergeCommit, MergedAt: p.MergedAt, Signs: signs}
 		if due.checks {
 			fresh.Checks = &SavedChecks{ReadAt: at, Head: p.ChecksAt, Runs: requiredRuns(p.Suites), Signs: checkSigns(s)}
 		}
@@ -305,7 +305,7 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 // definition of feedback applied from since as the account self acts as, with
 // the newest time any post changed as its post time.
 func savedConversation(rule Feedback, self, since string, c *gh.Conversation) (*SavedConversation, error) {
-	fresh, err := newestFeedback(rule, self, since, c.Reviews, c.Threads, c.Comments)
+	f, err := feedbackOf(rule, self, since, c.Reviews, c.Threads, c.Comments)
 	if err != nil {
 		return nil, err
 	}
@@ -332,8 +332,8 @@ func savedConversation(rule Feedback, self, since string, c *gh.Conversation) (*
 	}
 	sort.Strings(unresolved)
 	return &SavedConversation{Since: since, Approvers: listed(approvers), Requesters: listed(requesters),
-		Feedback: fresh, Awaiting: listed(waiting), Unresolved: listed(unresolved), ReviewDecision: c.ReviewDecision,
-		Signs: ConversationSigns{NewestPost: newest}}, nil
+		Feedback: f.newest(), Awaiting: listed(waiting), Unresolved: listed(unresolved), ReviewDecision: c.ReviewDecision,
+		Approvals: approvals(c.Reviews, c.Threads, f.inline), Signs: ConversationSigns{NewestPost: newest}}, nil
 }
 
 // later is the later of two of GitHub's times, a when b does not read as one.

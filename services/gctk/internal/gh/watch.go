@@ -241,7 +241,7 @@ func aliasedRead[T any](c *Client, owner, name, what string, batch []int, field 
 			}
 		}
 	}
-	raw, runErr := c.run("api", "--hostname", c.host, "graphql", "-f", "query="+q.String(),
+	raw, runErr := c.call("api", "--hostname", c.host, "graphql", "-f", "query="+q.String(),
 		"-f", "owner="+owner, "-f", "name="+name)
 	var page struct {
 		Data *struct {

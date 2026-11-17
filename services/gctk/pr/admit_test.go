@@ -168,13 +168,15 @@ func TestAHeadValidatedWithNoResultGetsOneRunUnderOverlappingPasses(t *testing.T
 	}
 
 	e := newAdmit(t)
+	e.refresh(t)
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := e.l.Reconcile(pr.Options{Count: 10}, func(pr.RunOutcome) {}); err != nil {
-				t.Errorf("Reconcile: %v", err)
+			var said []pr.RunOutcome
+			if err := e.l.Reconcile(pr.Options{}, func(o pr.RunOutcome) { said = append(said, o) }); err != nil {
+				t.Errorf("Reconcile: %v (%+v)", err, said)
 			}
 		}()
 	}

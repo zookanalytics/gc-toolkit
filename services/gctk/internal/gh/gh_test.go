@@ -185,44 +185,6 @@ func TestAReviewNamesTheCommitItWasGivenOn(t *testing.T) {
 		t.Fatalf("the read %q does not ask each review's commit", args)
 	}
 }
-
-// A compare asks GitHub how one commit stands against another, one commit a
-// page, and answers with GitHub's status, which names whether the head
-// descends from the base.
-func TestACompareAnswersHowAHeadStandsAgainstItsBase(t *testing.T) {
-	const base, headID = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
-	for _, status := range []string{"identical", "ahead", "behind", "diverged"} {
-		c, r := client([2]string{"compare/" + base + "..." + headID, `{"status":"` + status + `","ahead_by":1,"files":[]}`})
-		got, err := c.Compare("acme/widgets", base, headID)
-		if err != nil || got != status {
-			t.Fatalf("a compare answered %q read as %q, %v", status, got, err)
-		}
-		args := strings.Join(r.calls[0].args, " ")
-		if want := "api --hostname github.com repos/acme/widgets/compare/" + base + "..." + headID + "?per_page=1"; args != want {
-			t.Fatalf("the compare asked %q, want %q", args, want)
-		}
-	}
-	c, _ := client([2]string{"compare/", `{"status":"unknown"}`})
-	if _, err := c.Compare("acme/widgets", base, headID); err == nil {
-		t.Fatal("a compare that named no status GitHub gives read as an answer")
-	}
-	c, _ = client([2]string{"compare/", "ERR:gh: gh: Not Found (HTTP 404)"})
-	if _, err := c.Compare("acme/widgets", base, headID); err == nil {
-		t.Fatal("a compare GitHub did not answer read as an answer")
-	}
-	c, r := client()
-	for _, pair := range [][2]string{{"", headID}, {base, "abc"}, {base, base + "/../x"}} {
-		if _, err := c.Compare("acme/widgets", pair[0], pair[1]); err == nil {
-			t.Fatalf("a compare of %q with %q ran", pair[1], pair[0])
-		}
-	}
-	if len(r.calls) != 0 {
-		t.Fatalf("a compare of no two commit ids asked GitHub: %+v", r.calls)
-	}
-}
-
-// A dismissal names the review on its PR and carries its message, as GitHub's
-// review dismissal takes it.
 func TestADismissalNamesTheReviewAndCarriesItsMessage(t *testing.T) {
 	c, r := client([2]string{"/dismissals", `{"id":100,"state":"DISMISSED"}`})
 	if err := c.DismissReview("acme/widgets", 7, 100, "The change needs another look.\n\n<!-- gc:city -->"); err != nil {

@@ -17,8 +17,9 @@ import (
 // makes live, and which the read the one-PR update saves on the bead holds in
 // its parts (saved.go). decide is the rule over the two, and reads nothing.
 // Ready composes the bead's side, observe and decide for the merge, and
-// FromStore composes the bead's side, the saved read and decide for a display,
-// so the two list the same conditions in the same order.
+// FromStore composes the bead's side, the saved read and decide for a display
+// and for the landing order's decision to merge, so the two list the same
+// conditions in the same order.
 
 // GitHubRead is GitHub's side of a PR at one head, reduced to what the rule
 // reads: when it was read, the provenance instant the definition of feedback
@@ -68,30 +69,35 @@ type NewestFeedback struct {
 var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
 	"GitHub's side of a PR as the one-PR update (gctk pr refresh) last read and saved it, one JSON object on "+
 		"the bead that owns the PR, in four parts, each with read_at, the instant its read was sent, and "+
-		"signs, the cheap signs read no later than its facts. pr: the PR's url, number, repository, "+
-		"head_branch and base, its head, state, draft, merge_state, in_merge_queue and merge_queue_enabled, "+
-		"with the signs state, draft, head, base, base_tip and updated_at. checks: head and runs, the "+
-		"required check runs at that head as {name, status, conclusion}, with the signs head, rollup, "+
-		"contexts, check_runs and statuses, the last two counts by state. conversation: since, the "+
-		"provenance instant the definition of feedback was applied from; approvers and requesters, the "+
-		"accounts that can push whose approval or request for changes stands; feedback, the newest feedback "+
-		"id in each id space as {review, inline, conversation}; awaiting, the review threads waiting on the "+
-		"city's answer; unresolved, the unresolved threads; and review_decision, with the signs comments, "+
-		"reviews, dismissed, updated_at and newest_post, the latest time a post changed. labels: names, every "+
-		"label, which are their own signs. The update writes a part only when its read was sent after the "+
-		"saved part's and differs from it, and a read that fails saves nothing. It holds no answer. The pr "+
-		"evaluator decides over it for a display, as current only while it holds the pr, checks and "+
-		"conversation parts, the checks at the PR's head, names the record's repository and number, its head "+
-		"is the head the store holds (observed_pr_head_sha on a changed head, pr_head_sha otherwise) and its "+
-		"since is the bead's pr_provenance_since. Absent or not current, GitHub's side of the PR reads as "+
-		"unread.",
+		"signs, the cheap signs read no later than its facts. pr: the PR's id, the node id a request to GitHub "+
+		"names it by, its url, number, repository, head_branch and base, its head, state, draft, merge_state, "+
+		"in_merge_queue and merge_queue_enabled, and merge_commit and merged_at once it merged, with the signs "+
+		"state, draft, head, base, base_tip and updated_at. checks: head and runs, the required check runs at "+
+		"that head as {name, status, conclusion}, with the signs head, rollup, contexts, check_runs and "+
+		"statuses, the last two counts by state. conversation: since, the provenance instant the definition "+
+		"of feedback was applied from; approvers and requesters, the accounts that can push whose approval or "+
+		"request for changes stands; feedback, the newest feedback id in each id space as {review, inline, "+
+		"conversation}; awaiting, the review threads waiting on the city's answer; unresolved, the unresolved "+
+		"threads; review_decision; and approvals, each review that approves and has not been dismissed, "+
+		"whoever gave it, as {id, author, commit, inline}, inline the newest inline comment it carries that is "+
+		"feedback, with the signs comments, reviews, dismissed, updated_at and newest_post, the latest time a "+
+		"post changed. labels: names, every label, which are their own signs. The update writes a part only "+
+		"when its read was sent after the saved part's and differs from it, and a read that fails saves "+
+		"nothing. It holds no answer. The pr evaluator decides over it, for a display and for the landing "+
+		"order, which acts from it and reads GitHub only for a merge, as current only while it holds the pr, "+
+		"checks and conversation parts, the checks at the PR's head, names the record's repository and "+
+		"number, its head is the head the store holds (observed_pr_head_sha on a changed head, pr_head_sha "+
+		"otherwise) and its since is the bead's pr_provenance_since. Absent or not current, GitHub's side of "+
+		"the PR reads as unread.",
 	ledger.Warrant("saved-github-read"))
 
 // FromStore answers what Ready answers for the bead's PR, over the read the
 // one-PR update saved on the bead in place of a live one: it reads the bead's
 // side through l and decides. It reads no GitHub and loads no definition of
-// feedback, so it is a display's question. A read of the store that fails, or
-// a saved read that does not decode, returns its error and no answer.
+// feedback, so it is a display's question, and the landing order's, which
+// merges only once the merge's own read through Ready answers the same. A read
+// of the store that fails, or a saved read that does not decode, returns its
+// error and no answer.
 func FromStore(l *ledger.Ledger, bead string) (Answer, error) {
 	b, r, err := readSide(l.Pass(), bead)
 	if err != nil {

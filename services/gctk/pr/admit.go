@@ -1,13 +1,13 @@
 package pr
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
@@ -45,13 +45,12 @@ type Runs interface {
 // one head ended without a result.
 const runFailedKey = "review-run-failed"
 
-// admit pours the review run the record s read is owed, or files the gate
-// that asks a person once two runs at its head ended without a result, and
-// says what it did. It returns false when the bead is owed no run, so the
+// admit decides the review run the record s read is owed: the pour, or the
+// gate that asks a person once two runs at its head ended without a result,
+// or why none is poured. It returns false when the bead is owed no run, so the
 // caller reports the evaluator's answer. ans is the evaluator's answer at the
-// validated head, asks the asks on the bead, and note what the run did with
-// the record's withdrawals.
-func (u *run) admit(s state, p *gh.PullRequest, ans Answer, asks []review.Ask, note string) (RunOutcome, bool) {
+// validated head, over the saved read, and asks the asks on the bead.
+func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 	var takeable []string
 	for _, a := range asks {
 		if a.Takeable() {
@@ -60,15 +59,13 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, asks []review.Ask, n
 	}
 	unreviewed := slices.ContainsFunc(ans.Conditions, func(c Condition) bool { return c.Kind == KindReview })
 	if !unreviewed && len(takeable) == 0 {
-		return RunOutcome{}, false
+		return plan{}, false
 	}
 	why := fmt.Sprintf("no review result passed at %s into %s", s.rec.Head, s.rec.Target)
 	if !unreviewed {
 		why = "ask " + strings.Join(takeable, ", ") + " is open, and nothing holds it"
 	}
-	checked := func(detail string) (RunOutcome, bool) {
-		return u.stands(s, RunOutcome{Bead: s.id, Action: ActChecked, Detail: withNote(detail, note)}), true
-	}
+	checked := func(detail string) (plan, bool) { return none(s, ActChecked, detail), true }
 	if len(s.runs) > 0 {
 		return checked("review run " + strings.Join(s.runs, ", ") + " is attached, and the bead waits on it: " + why)
 	}
@@ -87,7 +84,7 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, asks []review.Ask, n
 		return checked("no review run is poured, because how its earlier runs ended did not read; the next run reads it: " + err.Error())
 	}
 	if len(failed) == 2 {
-		return u.runFailed(s, p, failed, note), true
+		return doing(func(_ context.Context, c carriedOut) RunOutcome { return u.runFailed(s, failed, c.note) }), true
 	}
 	vars, err := reviewVars(u.Refinery)
 	if err != nil {
@@ -97,15 +94,15 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, asks []review.Ask, n
 	if u.Runs == nil {
 		return checked("no review run is poured, because nothing pours one here: " + why)
 	}
-	root, err := u.Runs.Pour(reviewFormula, s.id, vars)
-	if err != nil {
-		w := u.Ledger.Write(s.id)
-		detail := fmt.Sprintf("the review run at %s did not pour, and the next run pours it: %v", s.rec.Head, err)
-		record.Retry(w, detail)
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(detail, note)}), true
-	}
-	return u.stands(s, RunOutcome{Bead: s.id, Action: ActPoured, Detail: withNote(fmt.Sprintf(
-		"review run %s poured at %s into %s, attached to the bead: %s", root, s.rec.Head, s.rec.Target, why), note)}), true
+	return doing(func(_ context.Context, c carriedOut) RunOutcome {
+		root, err := u.Runs.Pour(reviewFormula, s.id, vars)
+		if err != nil {
+			return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(fmt.Sprintf(
+				"the review run at %s did not pour, and the next run pours it: %v", s.rec.Head, err), c.note)}
+		}
+		return RunOutcome{Bead: s.id, Action: ActPoured, Detail: withNote(fmt.Sprintf(
+			"review run %s poured at %s into %s, attached to the bead: %s", root, s.rec.Head, s.rec.Target, why), c.note)}
+	}), true
 }
 
 // heldBy names the open human gate on the bead s read, which keeps the order
@@ -132,7 +129,7 @@ func isHumanGate(b *ledger.Record) bool {
 // name its branch, each of them work of its own on the branch, such as a
 // rework child.
 func (u *run) writers(s state) ([]string, error) {
-	rows, err := u.Ledger.Find(record.OnBranch(s.branch))
+	rows, err := s.reads.Find(record.OnBranch(s.branch))
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +201,7 @@ func (u *run) failedRuns(s state) ([]review.Ending, error) {
 	})
 	var out []review.Ending
 	for _, c := range closed[len(closed)-2:] {
-		e, err := review.Ended(u.Ledger, c.id)
+		e, err := review.Ended(s.reads, c.id)
 		if err != nil {
 			return nil, err
 		}
@@ -229,7 +226,7 @@ func closedTime(b *ledger.Record) (time.Time, error) {
 // validated head that ended without a result. The gate holds the bead, so no
 // run is poured until a person clears it, and then the next run of the order
 // pours one more.
-func (u *run) runFailed(s state, p *gh.PullRequest, failed []review.Ending, note string) RunOutcome {
+func (u *run) runFailed(s state, failed []review.Ending, note string) RunOutcome {
 	var parts []string
 	for _, e := range failed {
 		parts = append(parts, fmt.Sprintf("%s, where %s", e.Root, e.How))
@@ -237,16 +234,14 @@ func (u *run) runFailed(s state, p *gh.PullRequest, failed []review.Ending, note
 	message := fmt.Sprintf("The last two review runs of %s at its validated head %s into %s both ended without a result: %s. "+
 		"The landing order pours a run that ends without a result again once, so this is the city's machinery failing at "+
 		"this head, not a ruling the PR (%s) waits on. Look at the two runs and fix what stopped them, then clear this "+
-		"gate, and the landing order pours one more run.", s.id, s.rec.Head, s.rec.Target, strings.Join(parts, "; and "), p.URL)
+		"gate, and the landing order pours one more run.", s.id, s.rec.Head, s.rec.Target, strings.Join(parts, "; and "), s.rec.URL)
 	if err := u.Gates.File(s.id, runFailedKey, message); err != nil {
-		w := u.Ledger.Write(s.id)
-		why := fmt.Sprintf("%s: the human gate did not file; the next run files it: %v", runFailedKey, err)
-		record.Retry(w, why)
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(why, note)})
+		return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(
+			fmt.Sprintf("%s: the human gate did not file; the next run files it: %v", runFailedKey, err), note)}
 	}
-	return u.stands(s, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: withNote(fmt.Sprintf(
+	return RunOutcome{Bead: s.id, Action: ActExcepted, Detail: withNote(fmt.Sprintf(
 		"%s: review runs %s and %s ended without a result at %s, so a person is asked before another run", runFailedKey,
-		failed[0].Root, failed[1].Root, s.rec.Head), note)})
+		failed[0].Root, failed[1].Root, s.rec.Head), note)}
 }
 
 // reviewVars are the vars a review run is poured with beyond the record's:

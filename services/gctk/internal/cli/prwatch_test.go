@@ -45,6 +45,44 @@ func TestThePRWatchOrdersHoldAPass(t *testing.T) {
 	}
 }
 
+// fetchStopGrace is how long git.FetchBranch gives a fetch it stopped before it
+// kills git.
+const fetchStopGrace = 5 * time.Second
+
+// The landing order's order runs every minute and gives a run room for its
+// window of starting acts, the last act's stop with its fetch's grace, and the
+// listing before them, and runs the script that execs gctk's own verb.
+func TestTheLandingOrderHoldsARun(t *testing.T) {
+	raw, err := os.ReadFile("../../../../orders/pr-reconcile.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^timeout = "([0-9]+s)"$`).FindSubmatch(raw)
+	if m == nil {
+		t.Fatal("orders/pr-reconcile.toml names no timeout in seconds")
+	}
+	timeout, err := time.ParseDuration(string(m[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actWindow+actStop+fetchStopGrace+30*time.Second > timeout {
+		t.Errorf("the run's window %s, an act's stop %s and a fetch's grace %s leave the listing under 30s of the order's timeout %s",
+			actWindow, actStop, fetchStopGrace, timeout)
+	}
+	if actWindow != 45*time.Second || actStop != 30*time.Second {
+		t.Errorf("the run starts acts for %s and stops each at %s, not the 45s and 30s its order's header gives", actWindow, actStop)
+	}
+	for _, want := range []string{`interval = "1m"`, `scope = "rig"`, `trigger = "cooldown"`,
+		`exec = "$PACK_DIR/assets/scripts/pr-reconcile.sh"`} {
+		if !regexp.MustCompile(regexp.QuoteMeta(want)).Match(raw) {
+			t.Errorf("orders/pr-reconcile.toml does not carry %s", want)
+		}
+	}
+	if regexp.MustCompile(`--count`).Match(raw[regexp.MustCompile(`(?m)^\[order\]`).FindIndex(raw)[0]:]) {
+		t.Errorf("orders/pr-reconcile.toml bounds a run by a count of records")
+	}
+}
+
 // A store whose beads own no PR gives a pass nothing to ask GitHub, and a
 // refresh of a PR no bead owns saves nothing; each exits 0. The store stub has
 // no answer for an update, and no gh is asked.

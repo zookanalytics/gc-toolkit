@@ -5,13 +5,17 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // objectID is a full git object name, SHA-1 or SHA-256.
@@ -191,14 +195,128 @@ func ValidBranch(name string) bool {
 	return exec.Command("git", "check-ref-format", "refs/heads/"+name).Run() == nil
 }
 
+// fetchStopGrace is how long a fetch that was stopped has to exit before git is
+// killed outright. A variable so a test can shorten it.
+var fetchStopGrace = 5 * time.Second
+
+// Interrupted is a fetch that a SIGTERM or SIGINT to this process stopped. The
+// signal went on to git's process group, and the caller ends this process with
+// the status that signal gives, 128 plus its number.
+type Interrupted struct{ Signal syscall.Signal }
+
+func (e *Interrupted) Error() string { return fmt.Sprintf("git fetch: stopped by %s", e.Signal) }
+
 // FetchBranch fetches branch from origin into refs/remotes/origin/<branch> in
 // the clone dir sits in, forced, so the ref names the tip origin holds now.
-func FetchBranch(dir, branch string) error {
+// GIT_TERMINAL_PROMPT=0 makes a remote that asks for credentials fail the fetch
+// instead of waiting on a terminal nobody is at.
+//
+// It stops when ctx ends. git leads a process group of its own, and the stop is
+// a SIGTERM to that group. A fetch holds lock files in the clone, such as
+// refs/remotes/origin/<branch>.lock, which git removes on SIGTERM and cannot on
+// SIGKILL, and a lock left behind fails every later fetch of the branch there
+// until a person deletes it. The ssh that carries the fetch is git's child, so
+// the group is what reaches both. A git still running fetchStopGrace after the
+// stop is killed outright. A stopped fetch returns an error that wraps the one
+// that ended ctx.
+//
+// Its own group puts git out of reach of a signal sent to this process's group,
+// which is how an order runner stops a run that outlives its timeout. So a
+// SIGTERM or SIGINT that reaches this process during the fetch goes on to git's
+// group, and the fetch returns *Interrupted once git has exited. A signal this
+// process inherited as ignored stays ignored.
+func FetchBranch(ctx context.Context, dir, branch string) error {
 	if !ValidBranch(branch) {
 		return fmt.Errorf("git fetch: %q is not a branch name", branch)
 	}
-	_, err := Output(dir, "fetch", "--no-tags", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch)
-	return err
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--no-tags", "origin",
+		"+refs/heads/"+branch+":refs/remotes/origin/"+branch)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
+	cmd.WaitDelay = fetchStopGrace
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	stop := make(chan os.Signal, 1)
+	for _, s := range []os.Signal{syscall.SIGTERM, syscall.SIGINT} {
+		if !signal.Ignored(s) {
+			signal.Notify(stop, s)
+		}
+	}
+	defer signal.Stop(stop)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("git fetch: %w", err)
+	}
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	var err error
+	var got os.Signal
+	select {
+	case err = <-waited:
+	case got = <-stop:
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		select {
+		case err = <-waited:
+		case <-time.After(fetchStopGrace):
+			_ = cmd.Process.Kill()
+			err = <-waited
+		}
+	}
+	// A signal that arrived as git finished is still this process's to take.
+	if got == nil {
+		select {
+		case got = <-stop:
+		default:
+		}
+	}
+	if sig, ok := got.(syscall.Signal); ok {
+		return &Interrupted{Signal: sig}
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("git fetch: origin/%s was stopped: %w", branch, ctx.Err())
+		}
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("git fetch: %s", msg)
+		}
+		return fmt.Errorf("git fetch: %w", err)
+	}
+	return nil
+}
+
+// Contains reports whether commit contains ancestor: commit is ancestor, or
+// descends from it, in the history the clone dir sits in stores. It reads that
+// history as Reaches does, with replace refs and the grafts file ignored. A
+// commit the clone does not hold contains nothing, and an ancestor it does not
+// hold is in no history it holds, so neither contains the other. An error is a
+// read that did not answer.
+func Contains(dir, commit, ancestor string) (bool, error) {
+	if !IsObjectID(commit) || !IsObjectID(ancestor) {
+		return false, fmt.Errorf("git merge-base: %q or %q is not a full object name", commit, ancestor)
+	}
+	if commit == ancestor {
+		return true, nil
+	}
+	cmd := exec.Command("git", "--no-replace-objects", "-C", dir, "merge-base", "--is-ancestor", ancestor, commit)
+	cmd.Env = append(os.Environ(), "GIT_GRAFT_FILE="+os.DevNull)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &ee) && ee.ExitCode() == 1:
+		return false, nil
+	case errors.As(err, &ee) && (strings.Contains(stderr.String(), "Not a valid commit name "+commit) ||
+		strings.Contains(stderr.String(), "Not a valid commit name "+ancestor)):
+		return false, nil
+	}
+	if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		return false, fmt.Errorf("git merge-base: %s", msg)
+	}
+	return false, fmt.Errorf("git merge-base: %w", err)
 }
 
 // Reaches reports whether commit is reachable from origin's branch as the clone
