@@ -281,9 +281,13 @@ that waits on the bead. An act of the landing order that does not complete,
 such as a request GitHub refused or did not answer, a fetch that failed, a
 merge commit not yet on the fetched target, or a close the store failed for a
 reason of its own, records nothing: its difference stays on the bead, the next
-run acts on it, and it never closes the bead. `merged`, the machine's value, is
-the record of a `direct` landing on either path, and the doctor's landing
-checks (I2 and I5) read it and `mr_merged` alike as landed.
+run acts on it, and it never closes the bead. Its runs also keep the PR's
+`status:` and `held:` labels equal to what the store derives through every
+value, an exception's among them, and take them off once the PR merged or
+closed, and a label write that does not land records nothing either
+([The status label](#the-status-label-github-projection)). `merged`, the
+machine's value, is the record of a `direct` landing on either path, and the
+doctor's landing checks (I2 and I5) read it and `mr_merged` alike as landed.
 
 `pr_reconcile_pending` is the marker that a reconciliation is still owed. The
 publication writes it first, with the PR the refinery may reuse
@@ -953,12 +957,19 @@ value, with every other label under either prefix taken off. A `held:` label
 comes off on the first derivation after its condition clears.
 
 The labels come off when the PR merges or closes, where GitHub's own Merged or
-Closed state takes over. `pr-facts.sh` takes them off in the full pass that
-records an out-of-band merge or a close. `gctk merge` takes them off for a merge
-it made, or one whose record it recovered. Each takes them off before the write
+Closed state takes over. The landing order takes them off a PR a live bead owns
+once the PR watch saves the PR merged or closed, and the net takes them off a
+PR no live bead owns, such as one whose bead closed. Neither records a clear
+that does not land: the landing order's next run, or the net's next search,
+finds the labels still on the PR and clears them again
+([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
+
+On the old path, `pr-facts.sh` takes them off in the full pass that records an
+out-of-band merge or a close, and `gctk merge` takes them off for a merge it
+made, or one whose record it recovered. Each takes them off before the write
 that records the merge or the close, because that write closes the anchor or
-moves it out of `pull_request`, and no pass enumerates it as an open PR again.
-A clear that does not land is recorded on the anchor as
+moves it out of `pull_request`, and no pass of theirs enumerates it as an open
+PR again. A clear of theirs that does not land is recorded on the anchor as
 `status_label_clear_owed=<pr number>`: `gctk merge` carries the key in its
 record, and `pr-facts.sh` writes it before its record, leaving the anchor open
 for the next pass when that write does not land either. Every full pass of
@@ -966,7 +977,7 @@ for the next pass when that write does not land either. Every full pass of
 clear, and unsets the key once it lands. The retry clears only the PR the
 anchor's `pr_url` names, so a write that records the key on an anchor with no
 `pr_url` records the live PR's url beside it, the one its writer validated
-against origin.
+against origin. The key retires with its two writers.
 
 An open human gate holds the anchor through its `blocks` edge onto it, read by
 `bd_human_gates` in `assets/scripts/bd-lib.sh`: the bead's `blocks` edges, kept
@@ -1003,8 +1014,15 @@ and, unless it is approved, reads `working` until `pr-open.sh` records
 and the flip itself. A draft anyone else made, or one re-drafted after the city
 readied it, reads like any other PR.
 `assets/scripts/pr-status-label.sh` is the single writer of both families, and
-every call that derives one writes the other. `pr-open.sh` sets the labels when
-it opens a PR and when it records a draft ready, whether it flipped the draft or
+every call that derives one writes the other. The landing order keeps them by
+comparison for every PR the rig's live beads own, on the pending record or on
+the old path: each run compares the labels of the writer's that the PR watch
+saved on the PR's bead with the ones the store derives, and has the writer
+write them only where they differ, `reconcile` on an open PR and `clear` on one
+that merged or closed. A change on the store's side reaches the labels at its
+next run, and a label a person changes on GitHub once the PR watch has saved
+it. Other callers derive them as they act. `pr-open.sh` sets the labels when it
+opens a PR and when it records a draft ready, whether it flipped the draft or
 found it already ready, and `signoff.sh` re-derives them on each of the city's
 own verdicts. A human's review moves them in the merge cadence's posture and
 feedback arms, in the pass that records the review. The posture arm re-derives
@@ -1021,14 +1039,13 @@ first the PRs that left the open list, owe a merge-in, or changed on GitHub
 since its last visit, then rotates through the rest until its deadline, and a
 PR it does not reach waits for a later pass.
 
-Nothing re-derives the labels when a human gate or a blocker is filed or cleared,
-and such a change does not put its anchor first in that walk. The labels follow it on the
-next full pass that reaches the anchor: within one reconcile pass while the walk
-reaches every open PR, and after more passes when the deadline stops it short.
-The labels likewise read the machine verdict and the thread count the last merge
-pass recorded, so they follow a new verdict, or a thread answered or resolved, on
-the next pass that derives them after the merge pass's visit. Every write is
-pinned to the origin, and a label is not an approval.
+A human gate or a blocker filed or cleared reaches the labels at the landing
+order's next run, which compares every owned PR's labels with what the store
+derives, whether or not the walk reaches the anchor first. The labels likewise
+read the machine verdict and the thread count the last merge pass recorded, so
+they follow a new verdict, or a thread answered or resolved, at the landing
+order's first run after the merge pass's visit. Every write is pinned to the
+origin, and a label is not an approval.
 
 ## The machine axis
 

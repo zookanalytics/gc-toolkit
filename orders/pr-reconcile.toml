@@ -18,6 +18,13 @@
 # audit, where the rig's clone carries one, and hands the pages stale there to
 # seed-audit-reaudit.sh, which slings the branch's one re-render. No PR waits
 # on the check or on the re-render.
+# Each run also keeps the status: and held: labels of every PR the rig's live
+# beads own, on the pending record or not, equal to what the store derives
+# (specs/tk-1tfzr71.149/design.md, section 9): it compares the labels the
+# one-PR update saved on the PR's bead with the ones gctk pr status derives,
+# none once the PR merged or closed, and has pr-status-label.sh write them only
+# where they differ. A label write is an act like the others, and one that does
+# not land records nothing, so the next run writes it again.
 #
 # Exec, not a formula: a run reads records and writes guarded updates, with no
 # judgment for an LLM. Rig-scoped, each run against its own rig's store, with
@@ -53,7 +60,7 @@
 # test asserts the bounds sit below it. Tune from city.toml
 # [[orders.overrides]].
 [order]
-description = "Landing order: act from the beads on each PR the refinery recorded as pending, merge a ready one on its own read with its head pinned, and close its bead once the merge commit is on the target"
+description = "Landing order: act from the beads on each PR the refinery recorded as pending, merge a ready one on its own read with its head pinned, close its bead once the merge commit is on the target, and keep each owned PR's labels equal to what the store derives"
 trigger = "cooldown"
 interval = "1m"
 timeout = "120s"

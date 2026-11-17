@@ -11,20 +11,34 @@
 # the city has not answered or a review thread the merge waits on (review), or a
 # blocker no automated actor will clear (blocked). Each is a label of its own, so more than
 # one can stand, and a PR nothing holds carries none. Any held value reads
-# needs-attention. pr-facts.sh's full pass recomputes both for each open PR its
-# paced walk reaches, from the anchor's posture, holds, human gates, blockers,
-# the merge cadence's verdict and its count of review threads waiting on the
-# city's answer, draft stage and live work. Both come off once the PR merges or closes, where
-# GitHub's own Merged or Closed state takes over: pr-facts.sh clears them when it
-# records a merge or a close, and gctk merge when it merges, each before its
-# record. A clear that does not land is recorded on the anchor as
-# status_label_clear_owed, and pr-facts.sh's full pass retries it. They are
+# needs-attention. Both come off once the PR merges or closes, where GitHub's own
+# Merged or Closed state takes over. They are
 # workflow state, never an approval, and never assert a PR may merge:
 # machine-readiness rides pr.machine and the draft flag. The values themselves —
 # what each projects from, and their precedence — are decided by one Go package,
 # services/gctk/prstatus, reached through `gctk pr status` and exported so
 # the helm board derives the same per-bead state, so a bead's PR labels and its
 # board liveness cannot disagree.
+#
+# Its callers:
+#   - gctk pr reconcile, the landing order, every minute for each PR the rig's
+#     live beads own: it compares the labels the PR watch saved on the PR's bead
+#     with the derivation, and calls reconcile on an open PR, or clear on one
+#     that merged or closed, only where they differ, passing the saved labels as
+#     --current-labels.
+#   - gctk pr compare, the net, which calls clear on each PR its search finds
+#     carrying a label of these families that no live bead owns.
+#   - pr-facts.sh, which calls reconcile for each open PR its full pass's paced
+#     walk reaches, after a posture value it changes and after it routes a
+#     feedback batch, and clear when it records a merge or a close.
+#   - gctk merge, which calls clear when it merges.
+#   - pr-open.sh, which calls reconcile at its create, its adoption and its
+#     draft-to-ready arm.
+#   - signoff.sh, which calls reconcile after a verdict.
+# A clear pr-facts.sh or gctk merge makes that does not land is recorded on the
+# anchor as status_label_clear_owed, and pr-facts.sh's full pass retries it. A
+# write the landing order or the net makes that does not land records nothing,
+# and their next run finds the same difference.
 #
 # Every GitHub write is pinned to a repository the caller resolved (--repo), the
 # same origin-pinning pr-open.sh and pr-facts.sh already apply; gh-origin-guard.sh

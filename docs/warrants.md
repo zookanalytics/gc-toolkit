@@ -435,10 +435,13 @@ no warrant.
     marker of its own: the `gastown` pack's `pr_reconcile_pending` key, and
     the `oversight-rig` pack's `delivered` label.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37 and
-  `gastownhall/gascity-packs` main 5bf643ca55bd.
+- **Verified.** 2026-11-17, at `gastownhall/gascity` main bc6bc2871220 and
+  `gastownhall/gascity-packs` main 0f07496d2fa4.
 - **Retires when.** Gas City ships a retry that a pack can hand a failed write
-  to an outside service, such as an outbox that a later pass drains.
+  to an outside service, such as an outbox that a later pass drains, or its two
+  writers retire, since the landing order and the net make the clears it
+  retries by comparing the labels a PR shows with the ones the store derives,
+  and record nothing.
 
 ## Saved GitHub read
 
@@ -456,8 +459,10 @@ no warrant.
   `services/helm/internal/rigboard/gather.go`, the landing order, which decides
   each record from it (`savedPR`, `decideBlocked` and `decideAtHead` in
   `services/gctk/pr/landing.go`, through `Reconcile` for `gctk pr reconcile`,
-  from `orders/pr-reconcile.toml`) and carries out a withdrawal from its
-  approvals (`judge` in `services/gctk/pr/withdraw.go`), and the PR watch
+  from `orders/pr-reconcile.toml`), carries out a withdrawal from its
+  approvals (`judge` in `services/gctk/pr/withdraw.go`) and compares each
+  owned PR's saved labels with the ones the store derives (`labelPlans` in
+  `services/gctk/pr/labels.go`), and the PR watch
   itself, which compares a PR's signs with the ones each part keeps (`moved` in
   `services/gctk/pr/saved.go`) and the net's full read with each part's facts
   (`differs` there).
@@ -507,7 +512,7 @@ no warrant.
     and the search for the parts, their signs and their one writer is
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
     read at `gastownhall/gascity` main 9a4b1e718.
-- **Verified.** 2026-11-17, at `gastownhall/gascity` main 09518c191d1a,
+- **Verified.** 2026-11-17, at `gastownhall/gascity` main bc6bc2871220,
   `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
   8cdfa796a8f5.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull

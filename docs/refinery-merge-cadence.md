@@ -851,7 +851,8 @@ a rig-scoped cooldown exec order with a 180-second timeout, which runs
 `gctk pr poll --db "$GC_RIG_ROOT/.beads"`. `orders/pr-compare.toml`, the net,
 reads each of those PRs in full every 10 minutes and saves each one that
 differs from the read saved on its bead, which catches the changes no cheap
-sign shows (the net, below).
+sign shows, and clears the city's labels off the PRs no live bead owns (the
+net, below).
 
 A PR is owned when a live bead names it as its own and is no other bead's
 child: an anchor names it in `pr_url` beside a `merge_result`, and a bead the
@@ -936,6 +937,21 @@ A pass in which nothing differs writes no bead. The net starts no update more
 than 3 minutes in, and a PR whose read failed keeps its saved read and fails
 the pass, as in the cheap question's pass.
 
+**The labels on PRs no bead owns.** The landing order keeps the labels of the
+PRs the beads own ([The landing order](#the-landing-order)), and nothing holds
+a PR no live bead owns for it, such as one whose bead closed. So each pass of
+the net searches the rig's own repository, the one its clone's origin names,
+for the PRs that carry a `status:` or `held:` label the labels' writer names:
+`search(type: ISSUE)` over `repo:<owner>/<name> is:pr label:"status:
+working",...`, 100 PRs a page for 1 point. It reads on a page at a time until
+it has found 20 PRs that no live bead owns or the results end, so a page that
+holds only owned PRs hides none behind it, and has the writer,
+`pr-status-label.sh clear`, take the city's labels off each, starting none past
+its 3 minutes. The writer reads each PR's labels itself first. A clear that
+does not land fails the pass, and the next pass's search finds the PR again.
+The net searches no other repository, since a PR there is owned by the beads
+of that repository's rig.
+
 **Reading what a pass did.** A pass in which nothing moved writes no bead and
 costs 1 point for each 50 owned PRs, and Gas City still writes its run record.
 Each update prints a line, `<bead> <url> <action>: <detail>`, where the action
@@ -947,10 +963,13 @@ saved, and 2 otherwise. Gas City labels the pass's run record by that exit,
 (`GET /v0/city/{city}/orders/history`) lists each record with its labels. The
 board reads there when GitHub was last asked. `gc order history pr-poll` lists
 the passes without their exits. A pass of the net prints the same lines, its
-window being 3 minutes and its last line counting the PRs it compared. It exits
-0 when every owned PR was read and every update saved, and 2 otherwise, and Gas
-City labels its run record the same way. `gc order history pr-compare` lists
-its passes.
+window being 3 minutes and its last line but one counting the PRs it compared.
+Each PR whose labels it cleared prints `<url> cleared`, and its last line says
+what the search found: the pages it read, the PRs no live bead owns it found,
+and how many it cleared. It exits 0 when every owned PR was read, every update
+saved, the search read and every clear landed, and 2 otherwise, and Gas City
+labels its run record the same way. `gc order history pr-compare` lists its
+passes.
 
 ## The landing order
 
@@ -961,8 +980,9 @@ in the rig's checkout, where it fetches the target.
 `assets/scripts/pr-reconcile.sh` names the rig's refinery from the roster and
 execs `gctk pr reconcile --refinery <it>`. A roster that does not read runs
 nothing and exits 2 for the next tick, and a rig whose roster names no refinery
-has no record to read. The order acts only on pending records, so on a rig
-still on the old path it finds none.
+has no record to read. Its records are the pending ones, so on a rig still on
+the old path it finds none, and keeps only the labels of the PRs the rig's
+beads own ([The labels](#the-landing-order), below).
 
 A run acts from the beads. It lists the beads that carry the marker
 `pr_reconcile_pending`, and every live bead, in one pass over the store, and
@@ -1075,6 +1095,29 @@ refinery, and each write is guarded on the status and assignee it read. A bead
 that a release took from the refinery has its marker cleared and its PR named
 in a note, and nothing else written.
 
+**The labels.** A run keeps each PR's `status:` and `held:` labels equal to
+what the store derives, for every PR the rig's live beads own, on the pending
+record or on the old path
+([state-machine.md](state-machine.md#the-status-label-github-projection)). For
+each owned PR whose bead holds the PR watch's read of it, it compares the labels
+of the writer's that the read saved with the ones the store derives, as `gctk
+pr status` derives them over the run's own listing: the PR's status and held
+values while it is open, and none once it merged or closed. Where they differ,
+it has the labels' one writer, `pr-status-label.sh`, write them, `reconcile` on
+an open PR and `clear` on one that merged or closed, handing it every label the
+read saved as the ones the PR shows, so the writer reads the PR's labels itself
+only when it shows none. A label write is an act among the others: it takes its
+place in the shuffled order, starts inside the 45 seconds, stops at 30, takes
+no lock and writes nothing on the bead. A write that does not land records
+nothing, so the next run finds the same difference and writes it again. A PR
+whose bead holds no read of it, or a read of another PR, owes no write until
+the PR watch saves one, and a PR more than one live bead owns owes none. So a
+change on the store's side, such as a gate a person files or clears, reaches
+the labels at the next run, and a label a person changes on GitHub is put back
+once the PR watch saves it. A PR the run lands has its labels cleared in the
+same run, and once its bead closes, the net clears any the run did not
+([The PR watch](#the-pr-watch)).
+
 **The seed audit after a landing.** In a rig whose clone carries
 `generated/seed-audit`, a run that closes a bead on a merge into the rig's
 default branch, the branch `origin/HEAD` names, then checks that branch's seed
@@ -1096,13 +1139,14 @@ not read, the render does not complete, the writer dispatches nothing, or the
 run has used its 45 seconds, the next landing on the branch checks again. The
 landing's line says what the check found.
 
-**Reading what a run did.** Each record's outcome prints on a line of its own,
+**Reading what a run did.** Each outcome prints on a line of its own,
 `<bead> <action>: <detail>`, where `readied` names a draft the run marked ready,
-`poured` a review run it attached, `retry` an act that did not complete and
-`left` an act the run's 45 seconds left for the next run. A run exits 0 when
-every record was decided and every act the run started completed, and 2 when
-the listing did not answer, or a record could not be decided or its act did not
-complete. Gas City labels the run's record by that exit, `exec` or
+`poured` a review run it attached, `labeled` a PR whose labels it had written,
+`retry` an act that did not complete and `left` an act the run's 45 seconds
+left for the next run. A run exits 0 when every record and every PR's labels
+were decided and every act the run started completed, and 2 when the listing
+did not answer, or a record or a PR's labels could not be decided or its act
+did not complete. Gas City labels the run's record by that exit, `exec` or
 `exec-failed`. `gc order history pr-reconcile` lists the runs and each run's
 record bead without the exit, and `gc bd show <bead>` shows a record's labels.
 

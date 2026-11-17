@@ -78,8 +78,10 @@ flowchart LR
   ORD -->|landing order: one run per head| RUN
   ORD -->|landing order: ready, merge request| PR
   ORD -->|landing order: record, then close| LEDGER
+  ORD -->|landing order: labels that differ from the store's| PR
   ORD -.->|PR watch: asks what moved, and reads each PR in full| PR
   ORD -->|PR watch: GitHub read of a PR that moved| LEDGER
+  ORD -->|PR watch's net: clears labels no bead owns| PR
   CAD -->|reads + writes| LEDGER
   CAD -->|labels| PR
   BR --> PR
@@ -521,10 +523,6 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
-- **The landing order writes no label.** It acts from the beads and reads
-  GitHub only for a merge, but it writes no label, so a PR on the pending
-  record keeps its last label once it merges, closes or meets an exception. The
-  PR watch's label unit (tk-1tfzr71.173) retires it.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
