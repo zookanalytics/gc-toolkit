@@ -45,8 +45,9 @@ var (
 		"The head the landing order found on a PR open at a head the refinery has not validated. The next "+
 			"publication clears it.")
 	prStateKey = ledger.Declare("pr_state", ledger.String,
-		"The PR's state as the landing order last read it: open, merged, or the state a read that could not "+
-			"decide or an exception left, such as lookup_failed, merge_unreachable or closed_unmerged.")
+		"The PR's state as the landing order last read it: open, merged, closed for a PR a ruling retired "+
+			"whose bead waits on its close, or the state a read that could not decide or an exception left, "+
+			"such as lookup_failed, merge_unreachable or closed_unmerged.")
 	checkedAtKey = ledger.Declare("pr_last_checked_at", ledger.String,
 		"When the record was last written or read, RFC 3339 UTC to the second. The landing order reads the "+
 			"records it checked least recently first.")
