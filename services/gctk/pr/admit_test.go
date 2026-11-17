@@ -748,27 +748,33 @@ func TestARunWhoseEdgeDidNotLandHoldsTheBeadFromTheNextRunsFirstDecision(t *test
 // A run whose root the bead's store does not hold is one the bead cannot wait
 // on and no later run can find, so the order asks a person through a gate
 // keyed review-run-outside-store, and pours no other while the gate holds the
-// bead. A gate that does not file leaves the bead to the next run, which pours
-// once more and files it.
+// bead. A gate that does not file leaves the run recorded on the bead, and the
+// next run files the gate for that run in place of a pour.
 func TestARunPouredOutsideTheBeadsStoreGetsTheGate(t *testing.T) {
 	d := newAdmit(t)
 	d.runs.elsewhere = true
 	d.gates.err = errors.New("human-gate: could not read the bead's gates")
 	is(t, d.once(t), pr.ActRetry)
 	ofRead(t, d.land, head)
+	if got := d.row(t).Metadata["review_run_outside_store"]; got != "tk-run1" {
+		t.Fatalf("a gate that did not file left the run recorded as %q, want tk-run1", got)
+	}
 	d.gates.err = nil
 	o := d.once(t)
 	is(t, o, pr.ActExcepted)
 	ofRead(t, d.land, head)
-	if !gated(d, "review-run-outside-store") {
-		t.Fatalf("a run outside the bead's store filed %v (%s)", d.gates.list(), o.Detail)
+	if !gated(d, "review-run-outside-store") || d.runs.count() != 1 {
+		t.Fatalf("the next run filed %v and poured %d runs, want the gate and the one run (%s)", d.gates.list(), d.runs.count(), o.Detail)
 	}
-	if msg := d.gates.messages[len(d.gates.messages)-1]; !strings.Contains(msg, "tk-run2") || !strings.Contains(msg, head) {
-		t.Fatalf("the gate's message names neither the run nor the head: %s", msg)
+	if msg := d.gates.messages[len(d.gates.messages)-1]; !strings.Contains(msg, "tk-run1") {
+		t.Fatalf("the gate's message does not name the run: %s", msg)
+	}
+	if got, kept := d.row(t).Metadata["review_run_outside_store"]; kept {
+		t.Fatalf("the gate filed and the bead still records the run %q", got)
 	}
 	d.gate(t, "tk-g1", "review-run-outside-store")
 	is(t, d.once(t), pr.ActChecked)
-	if d.runs.count() != 2 {
+	if d.runs.count() != 1 {
 		t.Fatalf("the order poured a run while the gate held the bead: %d runs", d.runs.count())
 	}
 }

@@ -553,6 +553,12 @@
     "doc": "The review loop's results on the bead that owns a PR, a JSON array of {head, target, passed, run}, one for each head and target a run judged, run naming the root of the run that recorded it, which the loop's check writes through gctk review passed --record under the store's record lock, replacing the entry for the same head and target. The pr evaluator counts only a result for the PR's live head and target, and reads none while the key is absent. The landing order counts a closed run as one that recorded its result only while the entry for its last head names it."
   },
   {
+    "name": "review_run_outside_store",
+    "type": "string",
+    "owner": "pr",
+    "doc": "The root of a review run the landing order poured for the bead, whose store does not hold the root, set while the human gate keyed review-run-outside-store that asks a person about the run has not filed. While it is set, the order files that gate for the run in place of a pour, and it clears once the gate files."
+  },
+  {
     "name": "rig_check.lint",
     "type": "json",
     "owner": "internal/rig",

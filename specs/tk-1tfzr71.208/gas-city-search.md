@@ -62,8 +62,30 @@ of the bead names, which can end before the next run reads it. The next run
 finds it by its `gc.var.pr_bead`, live or closed, and writes the edge before it
 decides anything of the record, so the run holds the bead as an attached run
 does. A root the bead's store does not hold gets no edge, since bd adds an edge
-onto an id outside its own prefix that holds
-nothing, and the order files a human gate on the bead, which keeps it from
-pouring another. That root is what a city that serves graph beads from a store
-of its own makes, where `gc formula cook --attach` of a graph.v2 formula
-refuses instead (the help of `gc formula cook`).
+onto an id outside its own prefix that holds nothing, and the order files a
+human gate on the bead, which keeps it from pouring another. That root is what
+a city that serves graph beads from a store of its own makes, where
+`gc formula cook --attach` of a graph.v2 formula refuses instead (the help of
+`gc formula cook`).
+
+## The run whose gate did not file
+
+A pour whose root the bead's store does not hold leaves a run that no later run
+can find, so until its gate files, something on the bead must name it, or the
+next run pours another. What was searched for that record:
+
+- **The bead's `blocks` edge onto the root.** The bead's store takes it, and it
+  never clears: bd passes a target outside its own prefix through as an external
+  ref, and every Ready implementation reads such a row as a blocker that never
+  clears (the comment on the `--attach` arm of `newFormulaCookCmd` in
+  `cmd/gc/cmd_formula.go`). The bead would never read ready.
+- **A refusal before the pour.** `gc storage status` reports which binding
+  serves the graph class, but it is an operator report in prose and declares no
+  JSON output (`newStorageStatusCmd` in `cmd/gc/cmd_storage.go`), so the order
+  cannot read the city's layout from it before it cooks.
+- **The human gate.** Its filing is the write that failed.
+
+None covers it, so the order composes bd's own metadata: the retry that records
+the gate's failure writes the root on the bead as `review_run_outside_store` in
+the same update, the next run files the gate for that root in place of a pour,
+and the write that records the filed gate clears it.

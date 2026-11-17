@@ -56,6 +56,14 @@ var withdrawHeadKey = ledger.Declare("withdraw_head", ledger.String,
 		"contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is "+
 		"filed, and never cleared.")
 
+// A review run the landing order poured whose root the bead's store does not
+// hold, which this domain owns: the order records it while the gate that asks
+// a person about the run has not filed.
+var outsideRunKey = ledger.Declare("review_run_outside_store", ledger.String,
+	"The root of a review run the landing order poured for the bead, whose store does not hold the root, set "+
+		"while the human gate keyed review-run-outside-store that asks a person about the run has not filed. While "+
+		"it is set, the order files that gate for the run in place of a pour, and it clears once the gate files.")
+
 // The runtime's stamps on a workflow root, which tell the landing order that a
 // review run is attached to the bead that owns a PR: a live root of the review
 // formula that a blocks edge of the bead names.

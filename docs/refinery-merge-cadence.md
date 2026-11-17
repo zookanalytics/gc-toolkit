@@ -900,10 +900,12 @@ the bead names, live or ended, as a pour that stopped before its edge landed
 leaves it, gets that edge from the next run before that run decides anything of
 the record, so it holds the bead as an attached run does. A pour whose root the
 bead's store does not hold files a human gate on the bead keyed
-`review-run-outside-store`. It pours none while a run is attached to the bead,
-while another open bead names the PR's branch, such as a rework child, or while
-a human gate holds it. A conversation on the PR holds its merge and nothing
-else, so runs are poured while one is open, and the evaluator's wait holds the
+`review-run-outside-store`. While that gate does not file, the bead records the
+run as `review_run_outside_store`, and each run files the gate for it in place
+of a pour. It pours none while a run is attached to the bead, while another
+open bead names the PR's branch, such as a rework child, or while a human gate
+holds it. A conversation on the PR holds its merge and nothing else, so runs
+are poured while one is open, and the evaluator's wait holds the
 merge until it closes. A run that ended without a result is poured again. When
 the last two runs at the validated head both ended without one, counting only
 runs that ended after the bead's last `review-run-failed` gate closed, it files

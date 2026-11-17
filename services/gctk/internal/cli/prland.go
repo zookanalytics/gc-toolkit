@@ -140,14 +140,16 @@ blocks edge onto its root. A run whose pr_bead var names the bead and that no
 edge of the bead names, live or ended, gets that edge before the run decides
 anything of the record, so it holds the bead as an attached run does. A pour
 whose root the bead's store does not hold files a human gate on the bead keyed
-review-run-outside-store. No run is poured while one is attached to the bead,
-while another open bead names the PR's branch, such as a rework child, or while
-a human gate holds the bead. A conversation on the PR holds only its merge, so
-runs are poured while it is open, and the merge waits until it closes. A run
-that ended without a result is poured again. When the last two runs at the
-validated head both ended without one, counting only runs that ended after the
-bead's last review-run-failed gate closed, it files a human gate on the bead
-keyed review-run-failed instead, naming both runs and how each ended.
+review-run-outside-store. While that gate does not file, the bead records the
+run as review_run_outside_store, and each run files the gate for it in place of
+a pour. No run is poured while one is attached to the bead, while another open
+bead names the PR's branch, such as a rework child, or while a human gate holds
+the bead. A conversation on the PR holds only its merge, so runs are poured
+while it is open, and the merge waits until it closes. A run that ended without
+a result is poured again. When the last two runs at the validated head both
+ended without one, counting only runs that ended after the bead's last
+review-run-failed gate closed, it files a human gate on the bead keyed
+review-run-failed instead, naming both runs and how each ended.
 
 Each check of an open PR no ruling retired, at the validated head or at
 another, reads GitHub's side of it whole and saves that read on the bead as

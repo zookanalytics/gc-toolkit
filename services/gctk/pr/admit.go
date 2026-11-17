@@ -94,6 +94,13 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 	if len(s.runs) > 0 {
 		return checked("review run " + strings.Join(s.runs, ", ") + " is attached, and the bead waits on it: " + why)
 	}
+	outside, _, err := outsideRunKey.Get(s.row)
+	if err != nil {
+		return checked("no review run is poured, because the run the bead records outside its store did not read; the next run reads it: " + err.Error())
+	}
+	if root := strings.TrimSpace(outside); root != "" {
+		return u.runOutside(s, root, gr, note), true
+	}
 	if by := heldBy(s); by != "" {
 		return checked("no review run is poured while " + by + ": " + why)
 	}
@@ -205,30 +212,30 @@ func (u *run) attach(s *state, strays []*ledger.Record) (note string, out RunOut
 // runOutside files the gate that asks a person about the run at root, which the
 // order poured and whose root the bead's store does not hold, so the bead
 // cannot wait on it and no later run can see it. The gate holds the bead, so no
-// other run is poured until a person clears it. Each write carries gr, the
-// GitHub read the check made, when it made one.
+// other run is poured until a person clears it. A gate that does not file
+// leaves the run recorded on the bead (outsideRunKey), and the next run files
+// the gate for it in place of a pour. Each write carries gr, the GitHub read
+// the check made, when it made one.
 func (u *run) runOutside(s state, root string, gr *GitHubRead, note string) RunOutcome {
-	message := fmt.Sprintf("Review run %s was poured for %s at its validated head %s into %s, and %s's store does not "+
-		"hold the run's root, so the bead cannot wait on the run and the landing order cannot see it. The landing order "+
-		"pours no other run while this gate is open. Cancel the run, and clear this gate once the city pours a review "+
-		"run into %s's store, since a run poured before then lands where this one did.", root, s.id, s.rec.Head,
-		s.rec.Target, s.id, s.id)
+	message := fmt.Sprintf("Review run %s was poured for %s into %s, and %s's store does not hold the run's root, so "+
+		"the bead cannot wait on the run and the landing order cannot see it. The landing order pours no other run "+
+		"while this gate is open. Cancel the run, and clear this gate once the city pours a review run into %s's "+
+		"store, since a run poured before then lands where this one did.", root, s.id, s.rec.Target, s.id, s.id)
 	w := u.Ledger.Write(s.id)
-	if err := u.Gates.File(s.id, runOutsideKey, message); err != nil {
-		why := fmt.Sprintf("%s: review run %s's root is not in the bead's store, and the human gate did not file; the next run files it: %v", runOutsideKey, root, err)
-		record.Retry(w, "open", why, s.now)
-		if gr != nil {
-			githubReadKey.Set(w, gr)
-		}
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(why, note)})
-	}
-	record.Checked(w, "open", s.now)
 	if gr != nil {
 		githubReadKey.Set(w, gr)
 	}
+	if err := u.Gates.File(s.id, runOutsideKey, message); err != nil {
+		why := fmt.Sprintf("%s: review run %s's root is not in the bead's store, and the human gate did not file; the next run files it in place of a pour: %v", runOutsideKey, root, err)
+		record.Retry(w, "open", why, s.now)
+		outsideRunKey.Set(w, root)
+		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(why, note)})
+	}
+	record.Checked(w, "open", s.now)
+	outsideRunKey.Clear(w)
 	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: withNote(fmt.Sprintf(
-		"%s: review run %s poured at %s, and the bead's store does not hold its root, so a person is asked before another run",
-		runOutsideKey, root, s.rec.Head), note)})
+		"%s: review run %s was poured, and the bead's store does not hold its root, so a person is asked before another run",
+		runOutsideKey, root), note)})
 }
 
 // heldBy names the open human gate on the bead s read, which keeps the order
