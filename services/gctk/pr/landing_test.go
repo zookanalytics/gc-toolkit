@@ -672,12 +672,20 @@ func TestABranchResetToAnAncestorOfTheValidatedHeadIsRequeued(t *testing.T) {
 }
 
 // While the saved read is at a head the validated one descends from, a fetch
-// of the PR's branch or a read of its tip that fails sends nothing back, and
-// the next run decides again.
+// of the PR's branch that fails sends nothing back, and neither does a read of
+// its tip or of whether that tip contains the validated head that fails. The
+// next run decides again.
 func TestAFailedReadOfTheBranchSendsNothingBack(t *testing.T) {
 	for name, fail := range map[string]func(*checkout){
 		"fetch": func(c *checkout) { c.fetchErr = errors.New("git fetch: the remote hung up") },
 		"tip":   func(c *checkout) { c.tipErr = errors.New("origin/" + branch + " names no commit in the clone") },
+		"contains": func(c *checkout) {
+			c.onFetch = func() {
+				c.mu.Lock()
+				defer c.mu.Unlock()
+				c.containsErr = errors.New("git merge-base: fatal: bad object")
+			}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := newLand(t)
@@ -694,7 +702,7 @@ func TestAFailedReadOfTheBranchSendsNothingBack(t *testing.T) {
 			if ws := d.runWrites(); len(ws) != 0 {
 				t.Fatalf("a failed read of the branch wrote %+v", ws)
 			}
-			d.co.fetchErr, d.co.tipErr = nil, nil
+			d.co.fetchErr, d.co.tipErr, d.co.containsErr, d.co.onFetch = nil, nil, nil, nil
 			is(t, d.run(t), pr.ActRequeued)
 		})
 	}
