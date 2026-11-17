@@ -161,6 +161,33 @@ func TestReadFoldsNeedsAboutParkedWork(t *testing.T) {
 	}
 }
 
+// TestReadGathersADecisionsHandBack reads, through the read itself, the
+// hand-backs on the conversations about a decision: one on a conversation
+// whose sitting ended at its hand-off, so it has closed, and an older one on a
+// conversation a sitting holds. The decision's row carries the newer, and its
+// question reads the open conversation's state.
+func TestReadGathersADecisionsHandBack(t *testing.T) {
+	rows := []json.RawMessage{
+		json.RawMessage(`{"id":"tk-d","title":"keep the old flag?","status":"open","priority":1,"issue_type":"decision","created_at":"2026-01-01"}`),
+		json.RawMessage(`{"id":"tk-c1","title":"talk it over","status":"closed","priority":2,"issue_type":"task","assignee":"gc-toolkit/gc-toolkit.tk-c1","metadata":{"gc.handback":"tk-d — ruled\nkeep it","gc.handback_at":"2026-01-03T00:00:00Z"},"dependencies":[{"issue_id":"tk-c1","depends_on_id":"tk-d","type":"tracks"}],"created_at":"2026-01-02"}`),
+		json.RawMessage(`{"id":"tk-c2","title":"talk it over again","status":"in_progress","priority":2,"issue_type":"task","assignee":"gc-toolkit/gc-toolkit.tk-c2","metadata":{"gc.handback":"tk-d — still open","gc.handback_at":"2026-01-02T12:00:00Z"},"dependencies":[{"issue_id":"tk-c2","depends_on_id":"tk-d","type":"tracks"}],"created_at":"2026-01-02"}`),
+	}
+	doc, err := Read(context.Background(), stubStore(t, rows))
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	r := doc.Rows["tk-d"]
+	if r.Handback == nil || *r.Handback != (Handback{Conversation: "tk-c1", At: "2026-01-03T00:00:00Z", Text: "tk-d — ruled\nkeep it"}) {
+		t.Errorf("tk-d's hand-back = %+v, want the closed conversation's", r.Handback)
+	}
+	if r.Signal != "In conversation" || r.Conversation != "tk-c2" {
+		t.Errorf("tk-d reads %q with conversation %q, want In conversation with tk-c2", r.Signal, r.Conversation)
+	}
+	if _, listed := doc.Rows["tk-c1"]; listed {
+		t.Error("the closed conversation has a row, want it read for its hand-back alone")
+	}
+}
+
 // TestReadThatRunsOutStopsItsStoreCalls reads through a gc that does what
 // `gc bd` does when the store hangs: it starts a child that holds the call's
 // output, as gc runs bd, and waits on it. Read returns the deadline's error
