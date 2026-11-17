@@ -403,8 +403,9 @@ func TestTheNetClearsTheLabelsOfPRsNoLiveBeadOwns(t *testing.T) {
 	}
 }
 
-// A pass clears at most StrayClears PRs, and the next pass's search finds the
-// rest, as it finds a PR whose clear did not land.
+// A pass clears at most StrayClears PRs, and reads no page past the one where
+// it found them, and the next pass's search finds the rest, as it finds a PR
+// whose clear did not land.
 func TestTheNetClearsAtMostTwentyAPass(t *testing.T) {
 	d := newLabeled(t, []string{"status: merging"})
 	var many []int
@@ -412,10 +413,14 @@ func TestTheNetClearsAtMostTwentyAPass(t *testing.T) {
 		many = append(many, n)
 	}
 	d.strays([]string{"status: needs-review"}, many...)
+	d.github.LabeledPage = 10
 	d.lw.fail = 1
 	rep := d.compare(t)
 	if len(rep.Cleared) != pr.StrayClears-1 || len(rep.Failed) != 1 || rep.Search.Found != pr.StrayClears {
 		t.Fatalf("the first pass found %d, cleared %d and failed %v", rep.Search.Found, len(rep.Cleared), rep.Failed)
+	}
+	if got := d.github.Searched(); rep.Search.Pages != 2 || len(got) != 2 {
+		t.Fatalf("the first pass read %d pages, from %q, want the two that hold its twenty", rep.Search.Pages, got)
 	}
 	failed := slices.Collect(maps.Keys(rep.Failed))[0]
 	if !strings.Contains(rep.Failed[failed].Error(), "no live bead owns it") {
@@ -443,5 +448,22 @@ func TestASearchThatFailsClearsNothing(t *testing.T) {
 	d.w.Origin = func() (string, error) { return "", errors.New("no origin") }
 	if rep := d.compare(t); rep.Search.Err == nil || len(rep.Cleared) != 0 {
 		t.Fatalf("an unread origin reported %+v and cleared %q", rep.Search, rep.Cleared)
+	}
+}
+
+// The net starts no clear past its window, and the PRs it leaves are found by
+// the next pass's search.
+func TestTheNetStartsNoClearPastItsWindow(t *testing.T) {
+	d := newLabeled(t, []string{"status: merging"})
+	d.strays([]string{"status: working"}, 3, 2)
+	rep, err := d.w.Compare(pr.PassOptions{Window: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(rep.Late, urls(3, 2)) || len(rep.Cleared) != 0 || len(d.lw.made()) != 0 {
+		t.Fatalf("a pass past its window left %q, cleared %q and wrote %q", rep.Late, rep.Cleared, d.lw.made())
+	}
+	if rep = d.compare(t); !slices.Equal(rep.Cleared, urls(3, 2)) {
+		t.Fatalf("the next pass cleared %q", rep.Cleared)
 	}
 }
