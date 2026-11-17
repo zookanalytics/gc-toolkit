@@ -37,13 +37,14 @@ type PR struct {
 // GitHub is an in-memory GitHub. Self is the login the reads run as. Fail
 // fails a read or a request by its method's name, such as "Reviews", with its
 // error. SignsFail fails the cheap question for the PRs it numbers, each with
-// its error, and FullFail the net's read. OnRead, when set, runs as a read of a PR starts, so a test can change
-// GitHub or another writer's state while a read is in flight. OnMerge, when
-// set, answers a merge request or an enqueue in place of the default, which
-// refuses a request whose head is not the PR's and otherwise merges the PR, or
-// adds it to the queue. OnDismiss, when set, answers a dismissal in place of
-// the default, which dismisses the review. Descends names, for each commit,
-// the commits it descends from, which a compare reads.
+// its error, and FullFail the net's read. OnRead, when set, runs as a read of
+// a PR starts, so a test can change GitHub or another writer's state while a
+// read is in flight. OnMerge, when set, answers a merge request or an enqueue
+// in place of the default, which refuses a request whose head is not the PR's
+// and otherwise merges the PR, or adds it to the queue. OnDismiss, when set,
+// answers a dismissal in place of the default, which dismisses the review.
+// Descends names, for each commit, the commits it descends from, which a
+// compare reads.
 type GitHub struct {
 	Self      string
 	PRs       map[string]*PR

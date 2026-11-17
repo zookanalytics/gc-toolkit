@@ -459,12 +459,12 @@ no warrant.
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
   of reading GitHub, and against which a pass of the PR watch tells whether the
-  PR moved or differs from it. The facts are the PR's state, draft flag, head and merge state, the
-  required checks at that head, the standing approvals and requests for
-  changes, the newest feedback in each comment space, the review threads
-  waiting on the city's answer and those unresolved, and the PR's labels, in
-  four parts that each keep the instant their read was sent and the cheap signs
-  read with it.
+  PR moved or differs from it. The facts are the PR's state, draft flag, head
+  and merge state, the required checks at that head, the standing approvals
+  and requests for changes, the newest feedback in each comment space, the
+  review threads waiting on the city's answer and those unresolved, and the
+  PR's labels, in four parts that each keep the instant their read was sent and
+  the cheap signs read with it.
 - **Evidence.**
   - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor lists each
     open PR's number, title, URL, author, draft flag, merge state, base and head
