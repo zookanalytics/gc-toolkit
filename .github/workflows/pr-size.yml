@@ -68,17 +68,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The base is the tip of the branch the pull request merges into, as the
+      # pr-size.sh reads the pull request's head and the branch it merges into
+      # from the pull request, and measures from that branch's tip as the
       # checkout fetched it. Under both events GITHUB_SHA is the default
       # branch's tip, which is not the base of a pull request into another
-      # branch. The end of a tests run names the head that run tested.
+      # branch.
       - name: Post the pull request's size
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.workflow_run.pull_requests[0].base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
         run: >-
           bash .github/workflows/pr-size.sh
-          --repo "${GITHUB_SERVER_URL#https://}/$GITHUB_REPOSITORY"
-          --pr "$PR_NUMBER" --base "refs/remotes/origin/$BASE_REF" --head "$HEAD_SHA"
+          --repo "${GITHUB_SERVER_URL#https://}/$GITHUB_REPOSITORY" --pr "$PR_NUMBER"

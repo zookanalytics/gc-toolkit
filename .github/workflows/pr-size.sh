@@ -21,17 +21,22 @@
 # is rewritten to say so, and none is posted where there was none. A suite time
 # that cannot be read is said in the comment and changes no exit.
 #
-# A run writes only while the pull request's head is still --head, so a run
-# that ends after a newer push never puts the older head's comment back.
+# A run measures the pull request as it stands when the run starts. It reads
+# the head and the branch the pull request merges into from the pull request
+# itself, never from the event that started the run, because pr-size.yml's
+# runs need not start in the order of their events. It writes only while both
+# are still as it read them, since a push or a change of that branch starts a
+# run of its own.
 #
-# Usage: pr-size.sh --repo <host/owner/name> --pr <n> --base <commit> --head <commit>
-#   --base is the tip of the branch the pull request merges into. It runs from
-#   inside a checkout that holds --base, and fetches --head from origin when
-#   the checkout lacks it.
+# Usage: pr-size.sh --repo <host/owner/name> --pr <n>
+#   It runs from inside a checkout that holds the branch the pull request
+#   merges into as refs/remotes/origin/<branch>, and fetches the head from
+#   origin when the checkout lacks it.
 #
 # Exit: 0 the comment is current, the merge base has no size to show, or the
-# head has moved on; 1 the size could not be measured, or the pull request or
-# its comments could not be read or written; 2 usage.
+# pull request moved while the run measured it; 1 the size could not be
+# measured, or the pull request or its comments could not be read or written;
+# 2 usage.
 set -uo pipefail
 
 PROG=pr-size
@@ -41,26 +46,36 @@ AUTHOR='github-actions[bot]'
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PR_POST="$(cd "$HERE/../.." && pwd)/assets/scripts/pr-post.sh"
 
-usage() { echo "usage: $PROG --repo <host/owner/name> --pr <n> --base <commit> --head <commit>" >&2; exit 2; }
-REPO_Q="" PR="" BASE="" HEAD=""
+usage() { echo "usage: $PROG --repo <host/owner/name> --pr <n>" >&2; exit 2; }
+REPO_Q="" PR=""
 while [ $# -gt 0 ]; do
   [ $# -ge 2 ] || usage
   case "$1" in
     --repo) REPO_Q=$2 ;;
     --pr) PR=$2 ;;
-    --base) BASE=$2 ;;
-    --head) HEAD=$2 ;;
     *) usage ;;
   esac
   shift 2
 done
 case "$PR" in ''|*[!0-9]*) usage ;; esac
 case "$REPO_Q" in */*/*) ;; *) usage ;; esac
-[ -n "$BASE" ] && [ -n "$HEAD" ] || usage
 HOST=${REPO_Q%%/*} REPO=${REPO_Q#*/}
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/pr-size.XXXXXX") || exit 1
 trap 'rm -rf "$TMP"' EXIT
+
+# pr_now: the pull request's head and the branch it merges into, with a space
+# between, since a branch name holds no space. It fails when the read fails or
+# lacks either.
+pr_now() {
+  local now
+  now=$(gh api "repos/$REPO/pulls/$PR" --hostname "$HOST" | jq -r '"\(.head.sha // "") \(.base.ref // "")"') || return 1
+  case "$now" in ' '*|*' ') return 1 ;; esac
+  printf '%s' "$now"
+}
+NOW=$(pr_now) || { echo "$PROG: could not read PR#$PR's head and base, so nothing is posted" >&2; exit 1; }
+HEAD=${NOW% *} BRANCH=${NOW#* }
+BASE=refs/remotes/origin/$BRANCH
 
 # A fork's head is on no branch the checkout fetched.
 git cat-file -e "$HEAD^{commit}" 2>/dev/null \
@@ -101,12 +116,10 @@ SHORT=$(git rev-parse --short=12 "$HEAD" 2>/dev/null) || SHORT=${HEAD:0:12}
   fi
 } > "$TMP/body"
 
-# The head this run measured must still be the pull request's (see above).
-FULL=$(git rev-parse --verify -q "$HEAD^{commit}") || FULL=$HEAD
-NOW=$(gh api "repos/$REPO/pulls/$PR" --hostname "$HOST" | jq -r '.head.sha // empty') && [ -n "$NOW" ] \
-  || { echo "$PROG: could not read PR#$PR's head, so nothing is posted" >&2; exit 1; }
-if [ "$NOW" != "$FULL" ]; then
-  echo "$PROG: PR#$PR's head is now ${NOW:0:12}, so nothing is written for head $SHORT"
+# The pull request must still be as this run read it (see above).
+AGAIN=$(pr_now) || { echo "$PROG: could not read PR#$PR's head and base again, so nothing is posted" >&2; exit 1; }
+if [ "$AGAIN" != "$NOW" ]; then
+  echo "$PROG: PR#$PR is now head ${AGAIN:0:12} into ${AGAIN#* }, so nothing is written for head $SHORT into $BRANCH"
   exit 0
 fi
 

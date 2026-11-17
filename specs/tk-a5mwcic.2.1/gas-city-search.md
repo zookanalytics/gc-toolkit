@@ -71,9 +71,8 @@ The same section warns that "Running untrusted code on the `workflow_run`
 trigger may lead to security vulnerabilities". pr-size.yml runs only the
 default branch's scripts, and reads the artifact as data: suite-time.sh keeps
 only lines of the runner's shape and runs nothing from them. The trigger also
-names the run's pull request (`workflow_run.pull_requests[]`) and the head it
-tested (`workflow_run.head_sha`), which pr-size.sh takes as `--pr` and
-`--head`.
+names the run's pull request (`workflow_run.pull_requests[]`), which pr-size.sh
+takes as `--pr`.
 
 ## Read the head's run, its jobs and main's latest runs
 
