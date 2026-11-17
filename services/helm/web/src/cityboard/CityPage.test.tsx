@@ -2,13 +2,13 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import golden from '../../../internal/cityboard/testdata/city.json';
 import { Page } from '../rigboard/Board';
-import type { Check, Doctor, Response as CityResponse } from './document.gen';
+import type { Check, Document, Doctor, Response as CityResponse } from './document.gen';
 
 // The page runs here on the document the city's read builds from a live
 // city's newest doctor run (internal/cityboard/testdata/city.json), so a
 // change to the read that the page does not follow fails here.
 
-const live = golden as unknown as CityResponse;
+const live: CityResponse = { read_at: '2026-11-17T00:42:00Z', city: golden as unknown as Document };
 
 let calls: string[];
 /** The answers the city's read gives, in turn; the last one repeats. */

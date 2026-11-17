@@ -210,9 +210,9 @@ func TestRead(t *testing.T) {
 // hours and twenty minutes after it started, so the page marks it late.
 var readAt = time.Date(2026, 11, 17, 0, 42, 0, 0, time.UTC)
 
-// The page built from a live city's newest doctor run, the fixture
+// The document built from a live city's newest doctor run, the fixture
 // testdata/doctor.ran.json, is the golden testdata/city.json, which the web
-// page's tests and helm-fixture read. -update writes it again.
+// page's tests read and helm-fixture serves. -update writes it again.
 func TestTheLiveRunsPage(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "doctor.ran.json"))
 	if err != nil {
@@ -235,7 +235,7 @@ func TestTheLiveRunsPage(t *testing.T) {
 	if first := d.Failing[0].Name; first != "gc-toolkit:check-pour-text-current" {
 		t.Errorf("the first failing check is %s, want the first error by name", first)
 	}
-	got, err := json.MarshalIndent(Response{ReadAt: readAt.Format(time.RFC3339), City: doc}, "", "  ")
+	got, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
