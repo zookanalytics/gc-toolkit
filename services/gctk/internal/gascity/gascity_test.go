@@ -328,3 +328,36 @@ esac
 		t.Fatalf("the cook ran %q, want %q", first, want)
 	}
 }
+
+// A wake and a nudge name the session, and a nudge passes its message as one
+// argument, whatever spaces and quotes it holds. A command that exits non-zero
+// answers with its exit and its last line.
+func TestAWakeAndANudgeNameTheSessionAndPassTheMessageWhole(t *testing.T) {
+	dir := t.TempDir()
+	gc := filepath.Join(dir, "gc")
+	if err := os.WriteFile(gc, []byte(`#!/bin/sh
+for a in "$@"; do printf '%s\n' "$a"; done >> "$(dirname "$0")/log"
+echo -- >> "$(dirname "$0")/log"
+[ "$3" = rig/gone.refinery ] && { echo "gc session $2: session not found" >&2; exit 1; }
+exit 0
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &City{bin: gc}
+	msg := "PR head changed on tk-1: run 'gc prime' to check merge queue and begin processing."
+	if r := c.Wake("rig/gc-toolkit.refinery"); r.Failure() != "" {
+		t.Fatalf("the wake answered %+v", r)
+	}
+	if r := c.Nudge("rig/gc-toolkit.refinery", msg); r.Failure() != "" {
+		t.Fatalf("the nudge answered %+v", r)
+	}
+	if f := c.Nudge("rig/gone.refinery", msg).Failure(); f != "exit 1: gc session nudge: session not found" {
+		t.Fatalf("a nudge gc refused failed with %q", f)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "log"))
+	want := "session\nwake\nrig/gc-toolkit.refinery\n--\nsession\nnudge\nrig/gc-toolkit.refinery\n" + msg + "\n--\n" +
+		"session\nnudge\nrig/gone.refinery\n" + msg + "\n--\n"
+	if string(raw) != want {
+		t.Fatalf("gc ran with\n%s\nwant\n%s", raw, want)
+	}
+}

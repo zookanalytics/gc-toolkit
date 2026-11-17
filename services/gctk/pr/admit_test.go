@@ -363,20 +363,22 @@ func TestAGateOrAnotherWriterKeepsTheRunOffTheBranch(t *testing.T) {
 	}
 }
 
-// conversation files conversation tk-conv on the PR, with status and assignee
-// as given, and the bead's blocks edge onto it, the edge that holds the PR's
-// merge, which the blocked listing holds the bead on. wait is the status of
-// the work a stay leaves the conversation waiting on, and "" files none.
+// conversation files conversation tk-conv on the PR, a task that tracks the
+// bead, with status and assignee as given, and the bead's blocks edge onto it,
+// the edge that holds the PR's merge, which the blocked listing holds the bead
+// on. wait is the status of the work a stay leaves the conversation waiting
+// on, and "" files none.
 func (d *admitting) conversation(t *testing.T, status, assignee, wait string) {
 	t.Helper()
-	c := fake.Bead{ID: "tk-conv", Title: "Converse about the PR", Status: status, IssueType: "task", Assignee: assignee}
+	c := fake.Bead{ID: "tk-conv", Title: "Converse about the PR", Status: status, IssueType: "task", Assignee: assignee,
+		Edges: []gcbd.Edge{{Type: "tracks", ID: bead, Title: "the work", Status: "blocked"}}}
 	if wait != "" {
 		w := fake.Bead{ID: "tk-work", Title: "The work the ruling sent", Status: wait, IssueType: "task"}
 		if wait == "closed" {
 			w.ClosedAt = "2026-11-12T09:30:00Z"
 		}
 		d.store.Put(w)
-		c.Edges = []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "tk-work", Title: w.Title, Status: wait, IssueType: "task", ClosedAt: w.ClosedAt}}
+		c.Edges = append(c.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: "tk-work", Title: w.Title, Status: wait, IssueType: "task", ClosedAt: w.ClosedAt})
 		if wait != "closed" {
 			d.store.List("tk-conv", "tk-work")
 		}

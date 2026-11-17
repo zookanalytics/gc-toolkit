@@ -107,6 +107,14 @@ the record keeps its marker while a withdrawal is open, its changed head sent
 back to the refinery included, since the withdrawal holds the bead from the
 refinery until it is carried out.
 
+A changed head goes to the refinery once no withdrawal is open on the bead and
+no review run is attached to it, and the record keeps its marker until then,
+so a later run reads the run's end. Gas City gives the refinery a turn for the
+bead only once nothing holds it, so when only conversations and asks hold it,
+the run wakes the refinery and nudges it (gc session wake, then gc session
+nudge) before it clears the marker. A wake that does not land keeps the
+marker, and the next run wakes the refinery again.
+
 A PR a ruling retired is read apart from these: its bead carries the
 disposition pr-dispose.sh records before it closes the PR, under the record
 lock, so a run reads the disposition or has made its last write of the record
@@ -282,8 +290,8 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 // the working directory, the pack's definition of feedback, loaded in that
 // clone, and the runtime adapter for human gates, for the city's mark, which
 // `pr-post.sh mark` prints, for a review run's pour, which runs in the clone,
-// so gc resolves the rig's store there, and, where the clone carries one, for
-// the seed audit, whose scripts run in the clone.
+// so gc resolves the rig's store there, for the refinery's wake, and, where
+// the clone carries one, for the seed audit, whose scripts run in the clone.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -323,8 +331,30 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		Runs:         runs{rt: rt.In(dir)},
 		Dispositions: dispositions{rt: rt.As(refinery)},
 		Audit:        audit,
+		Wake:         wakes{rt: rt},
 		Wait:         recordLockWait,
 	}, nil
+}
+
+// wakes wakes a session and then nudges it through the runtime adapter, the two
+// calls a polecat's hand-off to the refinery makes (work-submit.sh). It makes
+// the nudge whether or not the wake landed, since a session that is up gets
+// its turn from the nudge alone, and an error names each call that did not
+// exit 0.
+type wakes struct{ rt gascity.Runtime }
+
+func (w wakes) Wake(session, message string) error {
+	var failed []string
+	if f := w.rt.Wake(session).Failure(); f != "" {
+		failed = append(failed, "gc session wake "+session+": "+f)
+	}
+	if f := w.rt.Nudge(session, message).Failure(); f != "" {
+		failed = append(failed, "gc session nudge "+session+": "+f)
+	}
+	if len(failed) > 0 {
+		return errors.New(strings.Join(failed, "; "))
+	}
+	return nil
 }
 
 // cityMark reads the city's mark from the writer of the city's posts, which
