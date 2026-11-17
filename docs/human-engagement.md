@@ -323,8 +323,9 @@ these steps:
    the gate, names any closed bead the gate was about, and starts nothing, and
    the operator clears the gate.
 2. **It reads the bead's conversations:** the open tasks that track the bead
-   in the conversation shape, with the session list saying which of their
-   sittings are live.
+   in the conversation shape, and then the sessions, read from Gas City's
+   store as the list of conversations reads them (*Returning to a
+   conversation*, below), saying which of their sittings are live.
 3. **A concern opens a fresh conversation.** A `--reason`, `--template` or
    `--skill`, or the operator's choice of a new conversation when engage asks,
    files a new task whose description is that concern, even when the bead has
@@ -345,13 +346,14 @@ these steps:
    unattached, and the session whose alias the task is bound to is never
    closed. A spawn the runtime refuses because a session holds the alias spawns
    nothing. A task bound to that alias is that session's, since the session's
-   claim runs as its alias, even while the session list does not show the
-   session: a sitting another engage started seconds before can be missing
-   from a list the supervisor answers from its read cache. Engage attaches the
-   operator to that session as to a live sitting, and finds it by its alias
-   until the list names it. A task bound to no such alias is waited on for the
-   bind of the engage that holds the alias, and the session is named as left
-   over only when no bind comes within the bind wait.
+   claim runs as its alias, and engage attaches the operator to that session
+   as to a live sitting, which the store's session list names from its create
+   on. The wait for its start reads the list the supervisor answers from its
+   read cache, which can be missing a sitting another engage started seconds
+   before, and waits on a sitting that list does not show yet. A task bound to
+   no such alias is waited on for the bind of the engage that holds the alias,
+   and the session is named as left over only when no bind comes within the
+   bind wait.
 6. **It binds the task to the session's alias** with
    `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
    <alias>`, where the holder and the status are the ones engage read, or the
@@ -703,7 +705,14 @@ operator's queue, starting while its sitting's session has not started,
 preparing until the sitting records its first hand-back after its session was
 created (`gc.handback_at`, which `gc-helm handback` stamps on each framing),
 ready once it has, and ended when its sitting's session has closed while the
-conversation stays open. Each row says whether a terminal is attached to the
+conversation stays open. The list reads the sessions after the conversations,
+from Gas City's store (`GC_NO_API=1 gc session list --json`) rather than the
+supervisor's read cache, which can be missing a sitting until its
+next re-scan. The store lists a sitting from the create that
+spawned it until its session closes, and engage spawns a sitting
+before it binds the conversation to it, so a conversation whose row
+shows the bind finds its sitting and reads starting from the moment
+the bind lands. Each row says whether a terminal is attached to the
 sitting. `gc-helm attach` opens the conversation form on that list, those no
 terminal is attached to first, by readiness and then newest first, and reads it
 again every ten seconds while it is on screen. What is picked is a
