@@ -1038,10 +1038,11 @@ nudges it, with `gc session wake` and `gc session nudge` as a polecat's
 hand-off does, before the write that clears the marker. That is the run that
 requeues the head when no withdrawal or run holds it, and otherwise the first
 run after the review run or the withdrawal ends, since each run decides every
-record from the beads. A wake that does not land records nothing, as an act
-that does not complete records nothing: the marker stays, and the next run
-wakes the refinery again. The search for a Gas City primitive that covers the
-wake is
+record from the beads. A run that comes to the act more than 45 seconds in does
+not start it, and leaves the wake to a later run. A wake that does not land
+records nothing, as an act that does not complete records nothing: the marker
+stays, and the next run wakes the refinery again. The search for a Gas City
+primitive that covers the wake is
 [specs/tk-1tfzr71.165/gas-city-search.md](../specs/tk-1tfzr71.165/gas-city-search.md).
 
 A merge request binds only the head the evaluator judged on the merge's own
