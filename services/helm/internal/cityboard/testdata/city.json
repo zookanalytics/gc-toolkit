@@ -1,0 +1,180 @@
+{
+  "read_at": "2026-11-17T00:42:00Z",
+  "city": {
+    "doctor": {
+      "ran": true,
+      "started": "2026-11-16T22:21:54Z",
+      "finished": "2026-11-16T22:24:24Z",
+      "late": true,
+      "completed": true,
+      "measured": "2026-11-16T22:21:54Z",
+      "count": 15,
+      "failing": [
+        {
+          "name": "gc-toolkit:check-pour-text-current",
+          "status": "error",
+          "severity": "blocking",
+          "message": "3 place(s) where the executed pack or a running molecule's text is not current (I9)",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "gc-toolkit:check-recycle-capable",
+          "status": "error",
+          "severity": "blocking",
+          "message": "cycle-recycle cannot fire: 3 finding(s)",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "agent-sessions",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "120 agent(s) without sessions",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "agent-token-telemetry",
+          "status": "warning",
+          "severity": "advisory",
+          "message": "11 of 13 awake session(s) have recorded no token samples in the last 1h0m0s (1 awake session(s) invoke no model and are not measured)",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "codex-hooks-drift",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "12 managed Codex hook file(s) need upgrade",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "config-semantics",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "42 config semantic warning(s)",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "dolt-noms-size",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "dolt noms directory for hq is 3.66 GB (largest of 7 databases) — approaching threshold",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "gc-toolkit:check-blocked-work-armed",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "blocked work with no dispatch path — it will strand when its blocker closes: 54 finding(s)",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "gc-toolkit:check-wait-is-an-edge",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "waits a live bead records that hold nothing (I1): 44 finding(s) across 7 store(s) — reported as a warning while the conversion backlog stands (lifecycle/lifecycle.toml hold_severity)",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "nudge-unconfirmed",
+          "status": "warning",
+          "severity": "advisory",
+          "message": "9087 session(s) have an unconfirmed nudge delivery",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "order-dispatch-floor",
+          "status": "warning",
+          "severity": "advisory",
+          "message": "31 order(s) set to fire more often than the 9m30s dispatch floor (73 orders in the ring, 4 dispatched per 30s pass)",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "orphan-sessions",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "18 orphaned session(s)",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "pool-idle-routed-work",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "4 pool(s) have unclaimed routed work while an instance sits idle",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "session-model",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "1 session model finding(s)",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        },
+        {
+          "name": "worktree-disk-size",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "1 rig(s) approaching worktree size limit (largest: \"rig-a\" at 10.1 GB)",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2
+        }
+      ],
+      "not_measured": [],
+      "accepted": [
+        {
+          "name": "hold-label-routed-to",
+          "status": "warning",
+          "severity": "blocking",
+          "message": "495 bead(s) carry a hold:\u003cvalue\u003e label without matching gc.routed_to",
+          "first_failed": "2026-11-16T22:18:18Z",
+          "streak": 2,
+          "accepted": {
+            "reason": "It warns on every bead that carries a hold:\u003cvalue\u003e label and no gc.routed_to naming that value, and the pack holds work for placement with hold:mayor, which names no agent. Gas City's issue 6069 (gastownhall/gascity) reports the check as a bug, because a hold label is no route.",
+            "ruling": "The operator's approval of the design for the patrols' move onto orders, PR #1537."
+          }
+        }
+      ],
+      "monitors": [
+        {
+          "order": "doctor-run"
+        },
+        {
+          "order": "spawn-storm-detect",
+          "last_good": "2026-11-16T22:23:16Z"
+        },
+        {
+          "order": "orphan-sweep",
+          "last_good": "2026-11-16T22:23:19Z"
+        },
+        {
+          "order": "reaper",
+          "last_good": "2026-11-16T22:20:17Z"
+        },
+        {
+          "order": "mol-dog-doctor",
+          "last_good": "2026-11-16T22:22:15Z"
+        },
+        {
+          "order": "mol-dog-backup",
+          "last_good": "2026-11-16T22:16:13Z"
+        },
+        {
+          "order": "dolt-health",
+          "last_good": "2026-11-16T22:21:46Z"
+        }
+      ]
+    }
+  }
+}
