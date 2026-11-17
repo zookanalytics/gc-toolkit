@@ -63,10 +63,10 @@ exit
 ### The check, before you read S
 
 Your first act is the check your step's instructions give:
-`tools/gc-proactive.sh sling <S> --check --run <root>`. It asks the refusals the
-sling asked, writes nothing, and passes over your own run and over a
-first-reaction gate whose message names your run. Exit 0: react. Exit 3, 4, 5 or
-6 is a refusal: S is reacted to, spoken for, decided, or not a reaction's kind.
+`gctk reaction check <S> --run <root>`. It asks the refusals the sling asked,
+writes nothing, and passes over your own run and over a first-reaction gate
+whose message names your run. Exit 0: react. Exit 3, 4, 5 or 6 is a refusal: S
+is reacted to, spoken for, decided, or not a reaction's kind.
 End the reaction with the decline your step gives, passing the refusal the check
 printed as its reason. The decline cancels your run with no gate and drains this
 session. Any other exit decided nothing, so run the check again once the store

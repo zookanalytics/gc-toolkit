@@ -119,7 +119,13 @@ export GC_HELM_AGENTS_DIR="$TMP/agents"
 
 cat > "$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
-# The stub reads each store's rows from $STATE/<prefix>.json.
+# The stub reads each store's rows from $STATE/<prefix>.json. A read gctk
+# makes, which carries HOLDS_STUB_READ, is the seam's to answer, from the store
+# HOLDS_STORE names.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  exec "$HOLDS_SEAM" answer "$@"
+fi
 printf '%s\n' "$*" | tr '\n' ' ' >> "$CALLS"; printf '\n' >> "$CALLS"
 # The first call after a new subject's create keeps what open had printed on
 # stdout by then, when the case names the file its stdout goes to.
@@ -556,10 +562,13 @@ has "$ERR" "gc-helm open tk-newsubj --reason" "(NEWSUBJ-PART) …with the re-run
 eq "$(subj_assignee)" "human" "(NEWSUBJ-PART) …and the subject stays assigned to human, so no first reaction takes it up while it owes its conversation"
 # A reaction's own first act, the real check, run on the subject as the store
 # holds it: once with no conversation yet, and once open has handed it over.
+# The check is gctk's, built from this checkout and run over the gc-toolkit
+# store through holds-store.stub.sh.
+GCTK_REACTION="$("$HERE/holds-store.stub.sh" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no reaction can check its subject"; exit 1; }
 reaction_check() {
-  mkdir -p "$TMP/fx"; jq 'map({(.id): del(.id)}) | add' "$STATE/tk.json" > "$TMP/fx/beads.json"
   set +e
-  CHECK_OUT="$(GC_PROACTIVE_FIXTURE="$TMP/fx" GC_RIG=gc-toolkit bash "$HERE/../../tools/gc-proactive.sh" sling tk-newsubj --check --run tk-root 2>&1)"; CHECK_RC=$?
+  CHECK_OUT="$(HOLDS_STORE="$STATE/tk.json" HOLDS_SEAM="$HERE/holds-store.stub.sh" GC_RIG=gc-toolkit GC_NO_API=1 \
+    "$GCTK_REACTION" reaction check tk-newsubj --run tk-root 2>&1)"; CHECK_RC=$?
   set -e
 }
 reaction_check

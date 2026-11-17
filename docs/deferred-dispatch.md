@@ -100,19 +100,19 @@ that is plainly work and carries neither a route nor `gc.dispatch_when_ready`
 is silent manual-follow-up debt — the exact miss
 `doctor/check-blocked-work-armed` reports.
 
-An arm is a dispatch path, as a route is. Both are defined once, in
-`assets/scripts/dispatch-path.sh`, and each reader that asks whether a bead's
-dispatch is already decided sources that file: the proactive scan and sling,
+An arm is a dispatch path, as a route is. Both are defined once for the
+scripts, in `assets/scripts/dispatch-path.sh`, and each script that asks whether
+a bead's dispatch is already decided sources that file:
 `doctor/check-blocked-work-armed`, `doctor/check-step-terminal` and
-`assets/scripts/stand-down.sh`. So an arm also keeps the bead out of the
-proactive scan. `tools/gc-proactive.sh scan` looks for raw input to react to,
-and it drops a bead that has a dispatch path.
-Otherwise a sweep that ran between a blocker closing and the deferred-dispatch
-order's next pass would sling a first reaction at a bead the arm is about to
-dispatch.
-`gc-helm.sh react` and `operator-intake.sh` skip the scan and name a bead to
-`tools/gc-proactive.sh sling` directly, so the sling refuses a bead that has a
-dispatch path too, and a reaction they ask for cannot race the arm either.
+`assets/scripts/stand-down.sh`. The first reaction asks the same of the arm's
+record in gctk. So an arm also keeps the bead out of the proactive sweep.
+`gctk reaction sweep` looks for raw input to react to, and it drops a bead that
+has a dispatch path. Otherwise a sweep that ran between a blocker closing and
+the deferred-dispatch order's next pass would sling a first reaction at a bead
+the arm is about to dispatch. `gc-helm.sh react`, which `operator-intake.sh`
+calls, and `patrol-finding.sh` skip the sweep and name a bead to
+`gctk reaction sling` directly, so the sling refuses a bead that has a dispatch
+path too, and a reaction they ask for cannot race the arm either.
 
 To see what is owed in a rig's store, and to take an arm back:
 

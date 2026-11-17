@@ -18,12 +18,12 @@
 #   the ≤140-codepoint length gate
 #   the retired board verb refuses and names helm-svc board
 #   the rig-enumeration helper leaving no trap installed on its caller
-#   the react verb: an already-reacted sling skip (exit 3) re-raised as react's
-#     own no-op code (5), distinct from a dispatch (0) and a real failure (4),
-#     a live-workflow sling skip (exit 4) re-raised as react's code (6), a
-#     dispatch-path sling skip (exit 5) re-raised as react's code (7), and a
-#     standing-record or feedback-pattern skip (exit 6) re-raised as react's
-#     code (8)
+#   the react verb, one call of gctk reaction sling: an already-reacted sling
+#     skip (exit 3) re-raised as react's own no-op code (5), distinct from a
+#     dispatch (0) and a real failure (4), a live-workflow sling skip (exit 4)
+#     re-raised as react's code (6), a dispatch-path sling skip (exit 5)
+#     re-raised as react's code (7), and a standing-record or feedback-pattern
+#     skip (exit 6) re-raised as react's code (8)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -2017,22 +2017,25 @@ eq "$(find "$ENUMTMP" -name 'gctk-rig-map.*' | wc -l | tr -d ' ')" "0" \
 
 echo ""
 echo "── react: an already-reacted skip is a distinct exit, not a silent dispatch ──"
-# react is a thin wrapper over tools/gc-proactive.sh `sling`. That tool exits
-# RC_ALREADY_REACTED (3) when it refuses a bead a first reaction already runs
-# on, or an open conversation tracks — a no-op that dispatched nothing. react must re-raise that as
-# its OWN no-op code (5), distinct from a dispatch (0) and a real failure (4),
-# so an intake caller (operator-intake.sh) files its own conversation instead of
-# waiting for a reaction that never ran. Drive the REAL react over a fake sling whose exit
-# code is the one thing under test (rig resolution uses the gc `rig list` stub).
-cat > "$TMP/bin/gc-proactive.sh" <<'PRO'
+# react is one call of `gctk reaction sling`, which exits 3 when it refuses a
+# bead a first reaction already runs on, or an open conversation tracks — a
+# no-op that dispatched nothing. react must re-raise that as its OWN no-op code
+# (5), distinct from a dispatch (0) and a real failure (4), so an intake caller
+# (operator-intake.sh) files its own conversation instead of waiting for a
+# reaction that never ran. Drive the REAL react over a fake gctk whose exit code
+# is the one thing under test (rig resolution uses the gc `rig list` stub).
+cat > "$TMP/bin/gctk-react" <<'PRO'
 #!/usr/bin/env bash
+printf '%s GC_RIG=%s\n' "$*" "${GC_RIG:-}" >> "$REACT_CALLS"
 exit "${FAKE_SLING_RC:-0}"
 PRO
-chmod +x "$TMP/bin/gc-proactive.sh"
-export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
+chmod +x "$TMP/bin/gctk-react"
+SAVED_GCTK_BIN="$GCTK_BIN"; export GCTK_BIN="$TMP/bin/gctk-react" REACT_CALLS="$TMP/react-calls"
+: > "$REACT_CALLS"
 
 rrc=0; FAKE_SLING_RC=3 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr" || rrc=$?
 eq "$rrc" "5" "(REACT) an already-reacted skip (sling exit 3) becomes react exit 5"
+eq "$(cat "$REACT_CALLS")" "reaction sling tk-react1 GC_RIG=gc-toolkit" "(REACT) …from one call of gctk reaction sling, under the subject's rig"
 grep -q "a first reaction already runs on tk-react1, or an open conversation tracks it" "$TMP/rerr" \
   && ok "(REACT) …and names the no-op cause" \
   || bad "(REACT) react no-op message missing: $(cat "$TMP/rerr")"
@@ -2088,7 +2091,13 @@ grep -q "tk-react1 is a standing record or a feedback pattern" "$TMP/rerr5" \
 grep -q "already runs on\|live workflow\|routed or armed\|failed" "$TMP/rerr5" \
   && bad "(REACT) a kind skip must not read as another skip or as a failure" \
   || ok "(REACT) …and is neither of the other skips nor a failure"
-unset GC_PROACTIVE_TOOL FAKE_SLING_RC
+rrc=0; sh "$SCRIPT" react tk-react1 --nudge >/dev/null 2>&1 || rrc=$?
+eq "$rrc" "2" "(REACT) --nudge, which no caller passed, is no flag of react's"
+rrc=0; GCTK_BIN="$TMP/bin/no-such-gctk" sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr6" || rrc=$?
+eq "$rrc" "4" "(REACT) with no gctk binary to run, react fails (exit 4)"
+grep -q "there is no gctk binary to sling a first reaction with" "$TMP/rerr6" \
+  && ok "(REACT) …saying so" || bad "(REACT) react's missing-binary message missing: $(cat "$TMP/rerr6")"
+export GCTK_BIN="$SAVED_GCTK_BIN"; unset FAKE_SLING_RC REACT_CALLS
 
 echo ""
 echo "gc-helm takeaway + react (release run end, waiting-on edges, length gate, react no-op exit): $PASS passed, $FAIL failed"

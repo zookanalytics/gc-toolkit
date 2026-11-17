@@ -10,7 +10,7 @@
 # calls. Two paths: PREFERRED slings a first reaction (a framing card; a
 # reaction that puts the topic to the operator files a human gate, which reaches
 # the operator on the board); FALLBACK files a conversation in the operator's
-# queue directly — taken on --no-react, whenever `gc-proactive.sh deliverable`
+# queue directly — taken on --no-react, whenever `gctk reaction deliverable`
 # answers no (divert-on-no is the contract — a reaction routed into a downed
 # pool waits invisibly; today's tool always says yes), and when a first
 # reaction already runs on the subject or an open conversation tracks it
@@ -34,7 +34,11 @@ scrub() { tr -d '\000-\037'; }
 PROG="operator-intake"
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
-PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
+# Whether the subject's rig's proactive pool can take a first reaction is
+# `gctk reaction deliverable`'s answer, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # The one definition of whether a rig carries converse, shared with gc-helm.sh's
 # engage so this intake and that spawn read the capability the same way. Exposes
 # rig_carries_converse / converse_roster.
@@ -228,7 +232,7 @@ require_reaction_agent() {
 # reconciler launches its triage like anywhere else, and a rig row's running
 # cannot tell an idle rig from one whose pool is dead (city-liveness.sh). A
 # reaction pool that cannot run at all, because it is unregistered, suspended
-# or capped at zero slots, is `gc-proactive.sh deliverable`'s no: the path
+# or capped at zero slots, is `gctk reaction deliverable`'s no: the path
 # choice below diverts on it to a direct conversation and prints the reason.
 note_if_report_waits() {
     if [ "$(rig_suspended "$1")" = "true" ]; then
@@ -377,19 +381,19 @@ if [ -z "$ORIGIN_NOW" ]; then
 fi
 
 # ── Path selection: can a slung first reaction actually be picked up? ─
-# Delegated to gc-proactive.sh deliverable so this caller cannot drift from
-# the clamps (the tool + agents/proactive/agent.toml).
+# Delegated to gctk reaction deliverable so this caller cannot drift from
+# the pool's rule (the reaction domain + agents/proactive/agent.toml).
 REACT=""; REACT_WHY=""
 if [ -n "$NO_REACT" ]; then
     REACT_WHY="--no-react: filing the conversation directly"
-elif [ ! -x "$PROACTIVE_TOOL" ]; then
-    REACT_WHY="no: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)"
+elif [ ! -x "$GCTK" ]; then
+    REACT_WHY="no: cannot find gctk (looked at $GCTK)"
 else
     # Ask under the SUBJECT's rig (the pool and its clamps are rig-scoped;
     # helm-svc has no GC_RIG of its own). Set for this ONE command,
     # not exported: later gc calls resolve their own scope.
-    REACT_WHY="$(GC_RIG="${RIG_NAME:-}" "$PROACTIVE_TOOL" deliverable 2>/dev/null)" && REACT=1
-    [ -n "$REACT_WHY" ] || REACT_WHY="no: gc-proactive.sh deliverable gave no answer"
+    REACT_WHY="$(GC_RIG="${RIG_NAME:-}" "$GCTK" reaction deliverable 2>/dev/null)" && REACT=1
+    [ -n "$REACT_WHY" ] || REACT_WHY="no: gctk reaction deliverable gave no answer"
 fi
 
 # ── Open the conversation ────────────────────────────────────────────

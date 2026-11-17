@@ -49,7 +49,7 @@ scripts, orders, doctor checks and hooks, its services,
 directories include `skills/`, `formulas/`, `agents/`, `template-fragments/`,
 `assets/scripts/`, `orders/`, `doctor/`, `overlays/` and `services/`, and a
 file outside them is pack content when pack content runs it, as pack scripts
-run `tools/gc-proactive.sh`. A skill's description and a formula's step prose
+run `tools/gc-bd-universe.sh`. A skill's description and a formula's step prose
 are pack content as much as a script is. `review-checks.toml` is both the
 pack's check index and gc-toolkit's own, so a row changed there changes that
 check for every rig.

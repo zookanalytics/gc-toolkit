@@ -693,11 +693,6 @@ why a reader must know it, and the work that retires it.
   scripts themselves.** They retire whole with the old merge path
   (tk-1tfzr71.70, [the register](#the-re-implementation-register)), so they get
   no layering work.
-- **The first reaction's check, sling, sweep and pool answer still run from
-  shell.** `tools/gc-proactive.sh` holds those `reaction` verbs, and every
-  caller of them names the script. It decodes bead rows in jq, outside the
-  adapters. The move's second unit (tk-ssm8qns.25) ports them, and this entry
-  goes with it.
 - **Shell still reads and clears the recommendation `reaction` owns.**
   `gc.recommended_formula` is declared in `reaction`, whose `recommend` exit is
   its one setter, but `gc-helm.sh accept` and
