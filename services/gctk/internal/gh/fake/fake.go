@@ -9,6 +9,7 @@ package fake
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -37,7 +38,8 @@ type PR struct {
 // GitHub is an in-memory GitHub. Self is the login the reads run as. Fail
 // fails a read or a request by its method's name, such as "Reviews", with its
 // error. SignsFail fails the cheap question for the PRs it numbers, each with
-// its error, and FullFail the net's read. OnRead, when set, runs as a read of
+// its error, and FullFail the net's read. LabeledPage sets the size of a page
+// of the search for labeled PRs. OnRead, when set, runs as a read of
 // a PR starts, so a test can change GitHub or another writer's state while a
 // read is in flight. OnMerge, when set, answers a merge request or an enqueue
 // in place of the default, which refuses a request whose head is not the PR's
@@ -52,12 +54,68 @@ type GitHub struct {
 	OnDismiss func(p *PR, review int64) error
 	SignsFail map[int]error
 	FullFail  map[int]error
+	// LabeledPage is how many PRs a page of the search holds,
+	// gh.LabeledBatch when it is 0.
+	LabeledPage int
 
-	mu    sync.Mutex
-	reads []string
-	asks  []Ask
-	signs [][]int
-	full  [][]int
+	mu       sync.Mutex
+	reads    []string
+	asks     []Ask
+	signs    [][]int
+	full     [][]int
+	searched []string
+}
+
+// Searched returns the cursor each page of the search for labeled PRs started
+// from, in order, "" for a first page.
+func (g *GitHub) Searched() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.searched)
+}
+
+// Labeled answers a page of the search for the PRs in repo that carry any of
+// the labels named, newest first: LabeledPage of them from the cursor after,
+// which the page before gave as the position it ended at. It records one read,
+// "Labeled", for each page.
+func (g *GitHub) Labeled(repo string, names []string, after string) (gh.LabeledPage, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reads = append(g.reads, "Labeled")
+	g.searched = append(g.searched, after)
+	if err := g.Fail["Labeled"]; err != nil {
+		return gh.LabeledPage{}, err
+	}
+	var found []*PR
+	for _, p := range g.PRs {
+		if strings.EqualFold(p.Facts.Repository, repo) && slices.ContainsFunc(p.Labels, func(l string) bool {
+			return slices.Contains(names, l)
+		}) {
+			found = append(found, p)
+		}
+	}
+	slices.SortFunc(found, func(a, b *PR) int { return b.Facts.Number - a.Facts.Number })
+	from := 0
+	if after != "" {
+		n, err := strconv.Atoi(strings.TrimPrefix(after, "cursor:"))
+		if err != nil || !strings.HasPrefix(after, "cursor:") || n < 0 || n > len(found) {
+			return gh.LabeledPage{}, fmt.Errorf("github: %q is no cursor of the search", after)
+		}
+		from = n
+	}
+	size := g.LabeledPage
+	if size <= 0 {
+		size = gh.LabeledBatch
+	}
+	var page gh.LabeledPage
+	end := min(from+size, len(found))
+	for _, p := range found[from:end] {
+		page.PRs = append(page.PRs, gh.LabeledPR{Number: p.Facts.Number, State: p.Facts.State})
+	}
+	if end < len(found) {
+		page.Next = "cursor:" + strconv.Itoa(end)
+	}
+	return page, nil
 }
 
 // SignsAsked returns the PRs each cheap question asked about, in order.
