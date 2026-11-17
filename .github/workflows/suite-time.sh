@@ -304,7 +304,7 @@ if [ ! -s "$TMP/pr.$REF" ]; then
   notes+=("No file's move on $REF is shown, because the run at this head recorded no seconds for $REF.")
 elif [ ! -s "$TMP/main.$REF" ]; then
   notes+=("No file's move on $REF is shown, because no recent run on main recorded seconds for $REF.")
-elif ! printf '%s\n' "$LISTS" | grep -q '^M'; then
+elif ! grep -q '^M' <<<"$LISTS"; then
   notes+=("No file's time on $REF moved by more than 10% and at least 2 seconds.")
 fi
 [ "${#notes[@]}" -eq 0 ] || printf '\n%s\n' "${notes[*]}"
