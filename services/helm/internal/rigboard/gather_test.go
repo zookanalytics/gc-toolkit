@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -185,6 +186,58 @@ func TestReadGathersADecisionsHandBack(t *testing.T) {
 	}
 	if _, listed := doc.Rows["tk-c1"]; listed {
 		t.Error("the closed conversation has a row, want it read for its hand-back alone")
+	}
+}
+
+// TestReadListsHandBacksOnlyWhileADecisionIsOpen holds the read's list of
+// hand-backs, which reads every one the store holds, to the rigs that can show
+// one: only an open decision's Details opens with a hand-back, so a read with
+// no open decision makes no call for them, and a read with one makes one.
+func TestReadListsHandBacksOnlyWhileADecisionIsOpen(t *testing.T) {
+	conversation := json.RawMessage(`{"id":"tk-c1","title":"talk it over","status":"closed","priority":2,"issue_type":"task","assignee":"gc-toolkit/gc-toolkit.tk-c1","metadata":{"gc.handback":"tk-d — ruled\nkeep it","gc.handback_at":"2026-01-03T00:00:00Z"},"dependencies":[{"issue_id":"tk-c1","depends_on_id":"tk-d","type":"tracks"}],"created_at":"2026-01-02"}`)
+	for _, c := range []struct {
+		status string
+		lists  int
+	}{
+		{"closed", 0},
+		{"open", 1},
+	} {
+		t.Run("a decision "+c.status, func(t *testing.T) {
+			decision := json.RawMessage(`{"id":"tk-d","title":"keep the old flag?","status":"` + c.status + `","priority":1,"issue_type":"decision","created_at":"2026-01-01"}`)
+			rig := stubStore(t, []json.RawMessage{decision, conversation})
+			stub, err := exec.LookPath("gc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			calls := filepath.Join(dir, "calls")
+			logged := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GC_CALLS\"\nexec \"$STUB_GC\" \"$@\"\n"
+			if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(logged), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("GC_CALLS", calls)
+			t.Setenv("STUB_GC", stub)
+			if _, err := Read(context.Background(), rig); err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			raw, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lists := 0
+			for _, line := range strings.Split(string(raw), "\n") {
+				f := strings.Fields(line)
+				for i := 0; i+1 < len(f); i++ {
+					if f[i] == "--has-metadata-key" && f[i+1] == "gc.handback" {
+						lists++
+					}
+				}
+			}
+			if lists != c.lists {
+				t.Errorf("the read listed the store's hand-backs %d times, want %d", lists, c.lists)
+			}
+		})
 	}
 }
 
