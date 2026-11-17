@@ -82,10 +82,12 @@
 # it the clip is silent and captioned. A missing key never fails the capture.
 # The last line says whether the clip is narrated or silent.
 #
-# $SPRINTSHOW_BIN, when set and executable, overrides engine resolution and is
-# invoked in its place, inside the same sandbox — the seam the hermetic test
-# drives with a stub engine, and an escape hatch for a caller that has already
-# resolved the engine.
+# $DEMO_ENGINE_BIN, demo-engine-lib.sh's engine override, names an executable
+# that runs in the engine's place, inside the same sandbox, with nothing
+# resolved. It is the seam the hermetic test drives with a stub engine, and an
+# escape hatch for a caller that has already resolved the engine. mol-rig-demo
+# asks a script's surface through the same library, so one override names the
+# engine that answers and the engine that captures.
 #
 # Exit: 0 captured and every step's proof held (output exists and is non-empty),
 # 3 captured but at least one step failed its proof, 2 bad arguments, such as
@@ -167,11 +169,9 @@ mkdir -p "$OUT_DIR" || { echo "$PROG: cannot create output directory '$OUT_DIR'"
 # demo-engine-lib.sh finds the engine, provisions its browser and runs its CLI
 # in its sandbox. What only a clip needs stays here: ffmpeg to assemble it,
 # which is a host ffmpeg when there is one and otherwise a checkout's
-# ffmpeg-static binary, fetched on first use. $SPRINTSHOW_BIN overrides the
-# engine, and runs in the same sandbox.
-if [ -n "${SPRINTSHOW_BIN:-}" ] && [ -x "${SPRINTSHOW_BIN}" ]; then
-  DEMO_ENGINE_BIN="$SPRINTSHOW_BIN"
-else
+# ffmpeg-static binary, fetched on first use. An engine $DEMO_ENGINE_BIN names
+# runs as it is, in the same sandbox.
+if [ -z "${DEMO_ENGINE_BIN:-}" ]; then
   demo_engine_resolve || exit 1
   if [ -n "$DEMO_ENGINE_DIR" ]; then
     command -v ffmpeg >/dev/null 2>&1 || [ -x "$DEMO_ENGINE_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$DEMO_ENGINE_DIR" && npm run provision:ffmpeg ) >&2 || { echo "$PROG: could not provision ffmpeg (no host ffmpeg and ffmpeg-static fetch failed)" >&2; exit 1; }

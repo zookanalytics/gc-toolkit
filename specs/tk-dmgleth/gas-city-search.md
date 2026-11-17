@@ -93,7 +93,14 @@ and the pack composes it.
 - The ask runs through `demo_engine_cli`, the one place that runs the engine's
   CLI inside the capture's sandbox, so it takes the same engine and the same
   sandbox as the capture that follows.
+- An executable run in the engine's place has one name, the library's
+  `DEMO_ENGINE_BIN`. `rig-demo-capture.sh` had a second, `SPRINTSHOW_BIN`, which
+  it copied into the library's before each capture, so a pour that set only
+  that one asked the default engine for the surface and captured with the
+  other (review tk-w4i1vzo). The capture now reads the library's name, and
+  nothing in the city set the other.
 - The answer is read as the command's contract states it: one JSON object on
   stdout, its `surface` a string. Anything else names no surface.
 - The change adds no command, flag, metadata key, bead kind or state. It moves
-  a fact the pack copied back to the tool that owns it, and removes two checks.
+  a fact the pack copied back to the tool that owns it, and removes two checks
+  and the capture's second name for the engine override.

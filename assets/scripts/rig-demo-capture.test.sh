@@ -2,7 +2,7 @@
 # rig-demo-capture.test.sh — hermetic coverage of the rig-demo capture core.
 # The script resolves a capture engine, provisions what the capture needs, lints
 # a script, drives the capture, and checks the produced file. Most cases drive
-# the engine through the script's own $SPRINTSHOW_BIN override seam with a stub.
+# the engine through demo-engine-lib.sh's $DEMO_ENGINE_BIN override with a stub.
 # The ffmpeg cases instead put stub node, npx, npm and gc on PATH, so the engine
 # resolves as written. demo-engine-lib.sh finds the engine and provisions its
 # browser, and demo-engine-lib.test.sh checks that through this script. Every
@@ -30,7 +30,7 @@ trap 'rm -rf "$TMPD" "$ETMP"' EXIT
 
 # Only the coreutils the script actually calls; env -i keeps everything else off
 # PATH, so a path that should resolve the real engine instead finds nothing —
-# which is why every happy case either sets $SPRINTSHOW_BIN or puts the
+# which is why every happy case either sets $DEMO_ENGINE_BIN or puts the
 # resolution stubs on PATH.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
 for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat env readlink awk; do
@@ -43,7 +43,7 @@ SCRIPT="$TMPD/demo.md"; printf '# Demo: fixture\n\n**Start:** `/`\n' >"$SCRIPT"
 SERVE_DIR="$TMPD/app"; mkdir -p "$SERVE_DIR"; printf '<!doctype html><title>x</title>\n' >"$SERVE_DIR/index.html"
 OUT="$TMPD/out.mp4"
 
-# Stub engine, driven through $SPRINTSHOW_BIN. `lint` exits $LINT_RC. `run` logs
+# Stub engine, driven through $DEMO_ENGINE_BIN. `lint` exits $LINT_RC. `run` logs
 # its argv to $RUNLOG, finds the -o path, and (unless told otherwise) writes
 # bytes there; $RUN_RC fails the run, $RUN_NOFILE leaves no file, $RUN_EMPTY
 # leaves an empty one — the three ways a capture can "succeed" yet deliver nothing.
@@ -193,7 +193,7 @@ run() {
     shift
   done
   : >"$RUNLOG"; : >"$SANDBOX_LOG"; : >"$COPY_STATE"; rm -f "$OUT"
-  ( cd "$TMPD" && env -i PATH="${RUN_PATH-$SBX}:$FARM" RUNLOG="$RUNLOG" SPRINTSHOW_BIN="$STUB" SANDBOX_LOG="$SANDBOX_LOG" \
+  ( cd "$TMPD" && env -i PATH="${RUN_PATH-$SBX}:$FARM" RUNLOG="$RUNLOG" DEMO_ENGINE_BIN="$STUB" SANDBOX_LOG="$SANDBOX_LOG" \
       LINT_RC="$lint_rc" RUN_RC="$run_rc" RUN_NOFILE="$nofile" RUN_EMPTY="$empty" \
       RUN_REPORT="$report" RUN_FAILED="$failed" RUN_LATE_RC="$late_rc" \
       GCTK_BIN="$SBX/gctk" COPY_STATE="$COPY_STATE" COPY_RUNNING="$copy_running" COPY_FOUND="$copy_found" COPY_FAIL="$copy_fail" COPY_OTHER="$copy_other" \
@@ -411,7 +411,7 @@ out="$(run -- --script "$TMPD/nope.md" --output "$OUT" --serve-dir "$SERVE_DIR")
 ok "missing script file exits 1" "[ '$rc' = 1 ]"
 has "does not exist" "$out" "it says the script is missing"
 
-# ffmpeg, driven without $SPRINTSHOW_BIN. A clip is assembled with ffmpeg, so a
+# ffmpeg, driven without $DEMO_ENGINE_BIN. A clip is assembled with ffmpeg, so a
 # checkout fetches its ffmpeg-static binary when the host has none. Stubs on
 # PATH stand in for node, npx, npm and gc, and a host ffmpeg is on PATH only for
 # a case that names HOST_FFMPEG=1. jq is the real one, because the library reads
@@ -463,7 +463,7 @@ chmod +x "$RBIN"/node "$HOSTBIN"/ffmpeg "$RBIN"/gc "$RBIN"/npm "$RBIN"/npx
 ENGINE="$(cd "$ETMP" && pwd)/sprintshow"; mkdir -p "$ENGINE/node_modules"
 printf '{"name":"@zookanalytics/sprintshow"}\n' >"$ENGINE/package.json"
 CALLLOG="$TMPD/calls.log"
-# resolve_run [VAR=VAL ...] -- <sut args...>; the stubs above, never $SPRINTSHOW_BIN.
+# resolve_run [VAR=VAL ...] -- <sut args...>; the stubs above, never $DEMO_ENGINE_BIN.
 # Stderr joins stdout, unless STDERR_FILE=<path> keeps it apart in that file.
 resolve_run() {
   local envs=() path="$RBIN:$SBX:$FARM" errf=""

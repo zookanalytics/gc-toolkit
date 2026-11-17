@@ -29,9 +29,11 @@
 # and workspace scripts, against a fixture city, a stub engine, a stub
 # sandbox-exec that keeps the profile it was handed, and a stub gctk that runs a
 # copy's serve command through the library's sandbox, as gctk rig serve does.
-# The stub engine types a terminal script's run lines into one bash that starts
-# in --cwd, as the engine's own terminal does, so a case shows where a script's
-# commands run.
+# Only DEMO_ENGINE_BIN, the library's engine override, names the stub engine,
+# so the surface question and the capture each reach it only through the
+# library. The stub engine types a terminal script's run lines into one bash
+# that starts in --cwd, as the engine's own terminal does, so a case shows where
+# a script's commands run.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -209,12 +211,14 @@ printf '# Demo: the report\n\n**Terminal:**\n\n## Steps\n\n1. **It prints the re
 
 # The stubs these cases add. The engine lints clean and writes the clip it is
 # told to; sandbox-exec keeps the profile and runs the engine; node says no
-# server answers on a port and picks a free one. The engine reads no line of a
-# script: FAKE_SURFACE names the surface its parser gives the script, page when
-# it is empty. Its surface command answers with it, or answers as an engine with
-# no such command does when FAKE_NO_SURFACE_CMD is set, and its run refuses a
-# script that is not a terminal script when no app is named, as the engine's
-# does.
+# server answers on a port and picks a free one; npx records its call and fails,
+# as on a host that cannot fetch the published engine, so a case that resolves
+# an engine in place of the one DEMO_ENGINE_BIN names fails. The engine reads no
+# line of a script: FAKE_SURFACE names the surface its parser gives the script,
+# page when it is empty. Its surface command answers with it, or answers as an
+# engine with no such command does when FAKE_NO_SURFACE_CMD is set, and its run
+# refuses a script that is not a terminal script when no app is named, as the
+# engine's does.
 { printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/engine" <<'ENGINE'
 case "${1:-}" in
   surface) printf '%s\n' "$*" >> "$FAKE_DIR/surface.argv"
@@ -243,6 +247,10 @@ SBX
 [ $# -ge 3 ] || printf '50123'
 exit 0
 NODE
+{ printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/npx" <<'NPX'
+printf '%s\n' "$*" >> "$FAKE_DIR/npx.argv"
+exit 1
+NPX
 # gctk, at the city's build path, stands in for gctk rig serve: a start runs the
 # serve command through the library's sandbox, which GCTK_SCRIPTS_DIR names, as
 # the copy's leader does, keeps that profile, and reports the copy on 50200 as
@@ -274,7 +282,7 @@ case "$*" in
   *) exit 1 ;;
 esac
 LSOF
-chmod +x "$TMP/bin/engine" "$TMP/bin/sandbox-exec" "$TMP/bin/node" "$CITY/.gc/services/gctk/bin/gctk" "$TMP/bin/lsof"
+chmod +x "$TMP/bin/engine" "$TMP/bin/sandbox-exec" "$TMP/bin/node" "$TMP/bin/npx" "$CITY/.gc/services/gctk/bin/gctk" "$TMP/bin/lsof"
 # gc adds the rig list the sandbox denies by, and the rig's formula vars, whose
 # ui_serve_command is FAKE_UI_SERVE, unset when that is empty.
 { printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/gc" <<'GC'
@@ -292,12 +300,12 @@ GC
 # pour <strict|plain> <serve_dir> <serve_cmd> <base_url> [rig path] prints
 # "<rc>|<ordered verb log>", with no workspace left by an earlier case.
 pour() {
-  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/decline.argv"; : > "$TMP/gctk.argv"; : > "$TMP/formula.argv"; : > "$TMP/surface.argv"
+  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/decline.argv"; : > "$TMP/gctk.argv"; : > "$TMP/formula.argv"; : > "$TMP/surface.argv"; : > "$TMP/npx.argv"
   rm -f "$TMP/profile" "$TMP/copy-profile" "$TMP/copy-dir" "$TMP/terminal.out"
   REVIEW_WORKSPACE_DIR="$WS" "$HERE/review-workspace.sh" remove --review-bead tk-req >/dev/null
   local rc=0
   ( cd "$TMP/cwd" && env -i PATH="$PATH" HOME="$TMP/home" TMPDIR="$TMP" GC_CITY_PATH="$CITY" GIT_CEILING_DIRECTORIES="$TMP" \
-      REVIEW_WORKSPACE_DIR="$WS" SPRINTSHOW_BIN="$TMP/bin/engine" DEMO_ENGINE_BIN="$TMP/bin/engine" STUB_PACK="$TMP/pack" \
+      REVIEW_WORKSPACE_DIR="$WS" DEMO_ENGINE_BIN="$TMP/bin/engine" STUB_PACK="$TMP/pack" \
       FAKE_LOG="$TMP/log" FAKE_DIR="$TMP" FAKE_RIG="$RIG" FAKE_DECLINE_RC=0 FAKE_UI_SERVE="${FAKE_UI_SERVE-}" \
       FAKE_SURFACE="${FAKE_SURFACE-}" FAKE_NO_SURFACE_CMD="${FAKE_NO_SURFACE_CMD-}" \
       REQUEST_BEAD=tk-req SCRIPT_PATH="${POUR_SCRIPT:-$TMP/cwd/walkthrough.md}" OUT="$OUT" \
@@ -310,7 +318,7 @@ pour() {
 echo "# the sandbox refuses the rig's own checkout, which is why the app needs a worktree"
 RC=0
 ( cd "$TMP/cwd" && env -i PATH="$PATH" HOME="$TMP/home" TMPDIR="$TMP" GC_CITY_PATH="$CITY" FAKE_RIG="$RIG" FAKE_DIR="$TMP" \
-    SPRINTSHOW_BIN="$TMP/bin/engine" \
+    DEMO_ENGINE_BIN="$TMP/bin/engine" \
     "$HERE/rig-demo-capture.sh" --script "$TMP/cwd/walkthrough.md" --output "$OUT" --serve-dir "$RIG/site" ) > "$TMP/out" 2>&1 || RC=$?
 eq "$RC" 1 "a capture that serves from the rig's checkout exits 1"
 has "$(cat "$TMP/out")" "$RIG holds $RIG" "and names the checkout"
@@ -354,6 +362,7 @@ for MODE in strict plain; do
   echo "# $MODE shell: a page script's pour that names no app target takes the rig's ui_serve_command, served from the worktree"
   eq "$(FAKE_UI_SERVE='npm run dev -- --port $PORT' pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the capture passes the sandbox, and the clip is recorded"
   has "$(cat "$TMP/surface.argv")" "surface $TMP/cwd/walkthrough.md" "$MODE: the engine's surface command names the script's surface"
+  eq "$(cat "$TMP/npx.argv")" "" "$MODE: and neither the question nor the capture resolves an engine of its own"
   has "$(cat "$TMP/formula.argv")" "formula show mol-rig-demo --rig demo-rig --json" "$MODE: gc reads the declared command for the rig being demoed"
   has "$(cat "$TMP/gctk.argv")" 'rig serve --command npm run dev -- --port $PORT (in '"$WT)" "$MODE: gctk rig serve runs it as written in the worktree, \$PORT left for the copy"
   has "$(cat "$TMP/engine.argv")" "--base-url http://127.0.0.1:50200/" "$MODE: the engine records the copy"

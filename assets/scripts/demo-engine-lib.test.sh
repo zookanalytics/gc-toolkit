@@ -521,6 +521,13 @@ kind_run "$SCRIPT" SS_RIG="$ENGINE" DEMO_ENGINE_DIR="$ENGINE"
 eq "$RC" 0 "(surface) an engine already chosen names the surface"
 hasnt "provision:browser" "$(calls)" "(surface) and is not resolved again"
 has "node [$ENGINE/src/cli.ts] [surface] [$SCRIPT]" "$(calls)" "(surface) but asked as it was chosen"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" DEMO_ENGINE_BIN="$ENGINE_STUB" SURFACE_ANSWER='{"surface":"terminal"}'
+eq "$RC" 0 "(surface) the engine DEMO_ENGINE_BIN names is asked for the surface"
+eq "$(kind_out)" "terminal" "(surface) and its answer is printed"
+has "engine surface $SCRIPT" "$(calls)" "(surface) it is asked directly"
+has "(allow file-read-data (subpath \"$SCRIPT\"))" "$(profile)" "(surface) inside the sandbox"
+hasnt "provision:browser" "$(calls)" "(surface) and nothing is resolved, though the city has a checkout"
+hasnt "[$ENGINE/src/cli.ts]" "$(calls)" "(surface) whose CLI never runs"
 
 echo "# SURFACE: an engine that names no surface prints nothing and exits 1, naming the surface command"
 kind_run "$SCRIPT" SS_RIG="$ENGINE" ENGINE_NO_SURFACE=1
