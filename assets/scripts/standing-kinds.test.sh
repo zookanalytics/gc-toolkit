@@ -7,7 +7,9 @@
 #             empty, absent, near-miss or ordinary task_kind
 #   (READERS) every reader of the standing kinds sources this file and applies
 #             $STANDING_KINDS_JQ
-#   (NO-COPY) no other file in the pack carries a standing-kinds list of its own
+#   (NO-COPY) no other file in the pack carries a standing-kinds list of its own,
+#             but the Go copy standing-kinds.sh names, which its own test holds
+#             to this definition
 # A reader with a private list drifts silently: it keeps excluding the kinds it
 # copied and misses every kind added later. The behavioral half lives beside
 # each reader (liveness-recheck.test.sh, liveness-sweep-precheck.test.sh,
