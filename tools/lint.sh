@@ -133,17 +133,30 @@ is_shell_file() {
   return 1
 }
 
-# The listing is checked before it is read, as gofmt's is below: a git ls-files
-# that failed would yield an empty list, which reads like a tree with no shell
-# in it and skips the check.
-if ! tracked_listing="$(git -c core.quotePath=false ls-files)"; then
+# The shell lint keeps its files in a directory of its own, which every exit
+# removes: the tracked listing, and the output of each runner call.
+if ! shell_tmp="$(mktemp -d "${TMPDIR:-/tmp}/lint-shell.XXXXXX")"; then
+  echo "$PROG: cannot make a directory for the shell lint's files" >&2
+  exit 2
+fi
+trap 'rm -rf "$shell_tmp"' EXIT
+
+# The listing is written to a file and read back from it, and both steps are
+# checked. A listing that failed, or one that could not be read, would yield
+# an empty list, which reads like a tree with no shell in it and skips the
+# check. A `<<<` here-string would hide the failed read (docs/review-correctness.md,
+# Loop input).
+if ! git -c core.quotePath=false ls-files >"$shell_tmp/listing"; then
   echo "$PROG: cannot enumerate tracked files under $ROOT" >&2
   exit 2
 fi
 shell_files=()
 while IFS= read -r f; do
-  [ -n "$f" ] && is_shell_file "$f" && shell_files+=("$f")
-done <<<"$tracked_listing"
+  if [ -n "$f" ] && is_shell_file "$f"; then shell_files+=("$f"); fi
+done <"$shell_tmp/listing" || {
+  echo "$PROG: cannot read the listing of tracked files" >&2
+  exit 2
+}
 
 # cores — the host's core count, as tools/run-tests.sh reads it: the first that
 # nproc, getconf or sysctl reports, since stock macOS has no nproc. A count no
@@ -166,16 +179,11 @@ else
   # interleave with another's.
   calls="$(cores)"
   [ "$calls" -le "${#shell_files[@]}" ] || calls=${#shell_files[@]}
-  if ! shell_out="$(mktemp -d "${TMPDIR:-/tmp}/lint-shell.XXXXXX")"; then
-    echo "$PROG: cannot make a directory for the shell lint's output" >&2
-    exit 2
-  fi
-  trap 'rm -rf "$shell_out"' EXIT
   pids=()
   for ((c = 0; c < calls; c++)); do
     share=()
     for ((i = c; i < ${#shell_files[@]}; i += calls)); do share+=("${shell_files[i]}"); done
-    "$SHELLCHECK_RUN" "${share[@]}" >"$shell_out/$c.out" 2>"$shell_out/$c.err" &
+    "$SHELLCHECK_RUN" "${share[@]}" >"$shell_tmp/$c.out" 2>"$shell_tmp/$c.err" &
     pids+=("$!")
   done
   # The summary names the first failing call's exit. An exit 3 says the runner
@@ -186,14 +194,14 @@ else
     rc=0; wait "${pids[c]}" || rc=$?
     [ "$rc" -ne 0 ] || continue
     if [ "$rc" -eq 3 ]; then
-      if [ "$no_runner" -eq 0 ] && [ -s "$shell_out/$c.err" ]; then
-        printf '%s\n' "$(<"$shell_out/$c.err")" >&2
+      if [ "$no_runner" -eq 0 ] && [ -s "$shell_tmp/$c.err" ]; then
+        printf '%s\n' "$(<"$shell_tmp/$c.err")" >&2
       fi
       no_runner=1
       continue
     fi
-    [ ! -s "$shell_out/$c.out" ] || printf '%s\n' "$(<"$shell_out/$c.out")"
-    [ ! -s "$shell_out/$c.err" ] || printf '%s\n' "$(<"$shell_out/$c.err")" >&2
+    [ ! -s "$shell_tmp/$c.out" ] || printf '%s\n' "$(<"$shell_tmp/$c.out")"
+    [ ! -s "$shell_tmp/$c.err" ] || printf '%s\n' "$(<"$shell_tmp/$c.err")" >&2
     [ "$shell_rc" -ne 0 ] || shell_rc=$rc
   done
   if [ "$no_runner" -eq 1 ]; then

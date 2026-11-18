@@ -4,8 +4,10 @@
 #
 # The defects it guards against: a linter that could not run reads as a clean
 # pass (fail-closed violated), shell or step-text findings get swallowed into 0,
-# a tracked shell file goes unlinted because no change names it, one call's
-# shell findings are lost among the calls the tree is split across, a go module
+# a tracked shell file goes unlinted because no change names it, a listing of
+# the tracked files that could not be written or read back reads as a tree with
+# no shell in it, one call's shell findings are lost among the calls the tree is
+# split across, a go module
 # is silently skipped, a Go file gofmt would rewrite passes, or go vet on macOS
 # is not pointed at the icu4c headers services/helm's cgo needs, or a warrant
 # list that could not run reads as nothing touched, or one that ran fails the
@@ -344,14 +346,65 @@ grep -q 'cannot enumerate tracked files under' "$TMP/err" \
   || bad "tracked listing fails: error is silent about the listing"
 rm -f "$STUB/git"; ln -s "$REAL_GIT" "$STUB/git"
 
-# --- No directory for the calls' output -> structural error (exit 2). --------
+# --- The listing cannot be written -> structural error (exit 2). -------------
+# The shell lint reads its listing back from a file, so a write that failed
+# must stop it. Read from a here-string, a listing past 64 KiB is backed by a
+# temp file bash writes, and when that write failed the loop read nothing,
+# which skipped the shell lint and passed. A thousand more tracked files take
+# the listing past 64 KiB, and the run refuses every file write: SIGXFSZ
+# ignored and a file size limit of 0. Its output comes back through a pipe,
+# which the limit leaves alone.
+make_wrapper 0; make_go 0
+pads=()
+for ((i = 0; i < 1000; i++)); do pads+=("pad-$(printf '%064d' "$i").txt"); done
+( cd "$REPO" && for p in "${pads[@]}"; do : > "$p"; done )
+git -C "$REPO" add -- "${pads[@]}"
+if out="$( ( cd "$REPO" && trap '' XFSZ && ulimit -f 0 \
+       && PATH="$STUB" STUB_HOST_OS="$HOST_OS" STUB_ICU_PREFIX="$ICU_PREFIX" \
+          STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
+          CGO_CPPFLAGS="$CGO_CPPFLAGS_IN" CGO_LDFLAGS="$CGO_LDFLAGS_IN" \
+          "$BASH_BIN" "$SUT" subject.sh ) 2>&1 )"; then rc=0; else rc=$?; fi
+printf '%s\n' "$out" > "$TMP/out"
+[ "$rc" -eq 2 ] && ok "listing not written: structural error (exit 2)" \
+  || bad "listing not written: expected 2, got $rc: $(cat "$TMP/out")"
+grep -q 'cannot enumerate tracked files under' "$TMP/out" \
+  && ok "listing not written: error names the failed listing" \
+  || bad "listing not written: error is silent about the listing: $(cat "$TMP/out")"
+grep -q 'no tracked shell files' "$TMP/out" \
+  && bad "listing not written: read as a tree with no shell in it" \
+  || ok "listing not written: not read as a tree with no shell in it"
+eq "$(ls -A "$LINT_TMP")" "" "listing not written: the run leaves nothing in TMPDIR"
+git -C "$REPO" rm -q --cached -- "${pads[@]}"
+( cd "$REPO" && rm -f -- "${pads[@]}" )
+
+# --- The listing cannot be read back -> structural error (exit 2). -----------
+# The git wrapper writes the listing and then removes the file it wrote, so the
+# loop that reads it back finds nothing to open.
+make_wrapper 0; make_go 0
+rm -f "$STUB/git"
+cat > "$STUB/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" ls-files ") "$REAL_GIT" "\$@"; rc=\$?; rm -f "\$TMPDIR"/lint-shell.*/listing; exit \$rc ;;
+esac
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$STUB/git"
+run_sut subject.sh
+[ "$rc" -eq 2 ] && ok "listing not read back: structural error (exit 2)" || bad "listing not read back: expected 2, got $rc"
+grep -q 'cannot read the listing of tracked files' "$TMP/err" \
+  && ok "listing not read back: error names the failed read" \
+  || bad "listing not read back: error is silent about the read: $(cat "$TMP/out" "$TMP/err")"
+rm -f "$STUB/git"; ln -s "$REAL_GIT" "$STUB/git"
+
+# --- No directory for the shell lint's files -> structural error (exit 2). ---
 rm -f "$STUB/mktemp"
 printf '#!/bin/sh\nexit 1\n' > "$STUB/mktemp"; chmod +x "$STUB/mktemp"
 run_sut subject.sh
-[ "$rc" -eq 2 ] && ok "no output directory: structural error (exit 2)" || bad "no output directory: expected 2, got $rc"
-grep -q "cannot make a directory for the shell lint's output" "$TMP/err" \
-  && ok "no output directory: error names it" \
-  || bad "no output directory: error is silent about it"
+[ "$rc" -eq 2 ] && ok "no directory for its files: structural error (exit 2)" || bad "no directory for its files: expected 2, got $rc"
+grep -q "cannot make a directory for the shell lint's files" "$TMP/err" \
+  && ok "no directory for its files: error names it" \
+  || bad "no directory for its files: error is silent about it"
 rm -f "$STUB/mktemp"; ln -s "$(command -v mktemp)" "$STUB/mktemp"
 
 # --- Gofmt: a tracked Go file, judged by a stub gofmt. -----------------------
