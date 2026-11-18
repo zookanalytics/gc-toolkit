@@ -263,8 +263,21 @@ hasF "$METHOD" 'a false one blocks as a false summary does' "…blocks a false t
 hasF "$METHOD" 'one that is true but merely weak is a P2' "…and grades a title that is only weak a P2"
 ARCH_SKILL="$ROOT/skills/review-arch/SKILL.md"
 hasF "$ARCH_SKILL" 'A `docs/architecture.md` at the reviewed commit is a precondition of approval' "the arch skill approves no commit without docs/architecture.md"
-hasF "$ARCH_SKILL" 'a passable account of the architecture the change covers' "…whose change adds one covering the architecture it covers"
+hasF "$ARCH_SKILL" 'and the document is never the change'"'"'s to add, so no change'"'"'s fate decides the document'"'"'s' \
+  "…and never asks the change it reviews to add one"
+notF "$ARCH_SKILL" 'asks the change to add the document' "…so no finding puts the document in the change it reviews"
+hasF "$ARCH_SKILL" 'the document lands ahead of the change, in a PR of its own titled exactly `docs: add the architecture document`' \
+  "…sends the document ahead, in a PR of its own under one title, so a second change waits on the same PR"
+hasF "$ARCH_SKILL" 'the branch only predates it, and the finding asks the change to bring its branch current' \
+  "…and asks a branch that predates the target's document to come current, sending nothing ahead"
+hasF "$ARCH_SKILL" 'a passable account of the architecture the change covers' "…whose PR holds a passable account of the architecture the change covers"
 hasF "$ARCH_SKILL" '`docs/architecture.md: incomplete`' "…and files the rest of the architecture as one follow-up under one token"
+RULING_SKILL="$ROOT/skills/review-ruling/SKILL.md"
+for v in $(grep -oE 'review-run\.sh" [a-z]+' "$RULING_SKILL" | awk '{print $2}' | sort -u); do
+  if grep -q "^cmd_$v() {" "$ROOT/assets/scripts/review-run.sh"; then ok "the ruling bar's review-run.sh $v is a verb the script has"
+  else bad "the ruling bar's review-run.sh $v is a verb the script has"; fi
+done
+hasF "$RULING_SKILL" 'and the ask in the ruling'"'"'s `waits`' "the ruling bar names, in a finding sent ahead, the ask its PR waits on"
 hasF "$ARCH_SKILL" 'File it the same way, and do not hold the change for it.' "…files a gap the change does not touch without holding the change for it"
 hasF "$ARCH_SKILL" 'A gap in the architecture the change does touch is no reason to pass the change' "…and passes no change on a gap in the architecture it touches"
 notF "$ARCH_SKILL" 'not a reason to pass or fail the change' "…so no missing reference lets a change through unjudged"

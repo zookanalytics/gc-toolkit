@@ -9,10 +9,10 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 You rule every finding a lane raised at the head the round judged and every ask
 the round can take, and you make the round's fixes. The step that rules is the
 step that fixes, so a ruling is what you change: a point ruled must-fix gets a
-commit, and a point ruled declined, deferred, answered or put to a person gets
-no change at all. Each point is ruled by the rule its source carries, below,
-and each ruling carries its reason, which the head's comment shows the operator
-as that point's answer.
+commit, and a point ruled declined, deferred, sent ahead, answered or put to a
+person gets no change at all. Each point is ruled by the rule its source
+carries, below, and each ruling carries its reason, which the head's comment
+shows the operator as that point's answer.
 
 The method for a lane's own check is not yours to apply again. A lane already
 judged its finding by its method. You decide what the round does about it.
@@ -27,8 +27,9 @@ capture it made. A finding of a check the pack ships no method for is ruled by
 the purpose its row in the check index states.
 
 - **A blocking finding** is must-fix, unless the lane's own rule shows it does
-  not hold. Then it is declined, and the reason names what in the evidence
-  shows it.
+  not hold, or lands its fix ahead of the PR. One that does not hold is
+  declined, and the reason names what in the evidence shows it. One whose fix
+  lands ahead is sent ahead, as A fix that lands ahead of the PR says.
 - **A finding that rule does not block** is ruled as the rule says. On the
   correctness method's scale, a P2 of a lane that requested changes is must-fix
   when its fix is low-risk and net-positive and declined when it is risky or
@@ -47,13 +48,14 @@ For each must-fix point, find the other sites in the change that share its
 cause, and fix them in the same round. Name them in the ruling's reason, so the
 next lane need not raise each one in turn.
 
-An ask to bring the branch current, such as a conflict with the target, is
-answered by merging the PR's target into the run's worktree. When git needs your
-help with that merge, its message carries the account the next round's triage
-reads beside `git show --remerge-diff`: commit it with `git commit -F <file>`,
-the file holding git's first line, then one paragraph for each file you resolved
-by hand, naming what collided, what you kept or wrote and why, and what a
-reviewer should check.
+A point that asks to bring the branch current, such as a conflict with the
+target, or a lane's finding that the target carries what the branch predates,
+is answered by merging the PR's target into the run's worktree. When git needs
+your help with that merge, its message carries the account the next round's
+triage reads beside `git show --remerge-diff`: commit it with
+`git commit -F <file>`, the file holding git's first line, then one paragraph
+for each file you resolved by hand, naming what collided, what you kept or
+wrote and why, and what a reviewer should check.
 
 ## A fix outside the reviewed diff
 
@@ -62,6 +64,27 @@ does not touch, goes to a bead of its own: `review-run.sh defer` files it
 waiting on the PR's bead, armed to start once the PR lands, with the PR's
 target as its own. Rule the point deferred, and name the bead in the reason.
 The PR stays the change the operator reviewed.
+
+## A fix that lands ahead of the PR
+
+A finding whose lane's rule lands its fix ahead of the change, in a PR of its
+own that the change waits for, is ruled ahead, as the architecture document the
+arch method finds missing is. The round makes no commit for it. Write a file
+holding what the finding asks that PR to hold, and for which change, and send
+it ahead:
+
+```bash
+"$(gc <binding> scripts-dir)/review-run.sh" ahead --title "<the title the lane's rule gives the fix>" --file "<that file>" --check "<the lane's check>"
+```
+
+The call files the fix with the PR's target and sends it to the repair pool at
+once, or finds the open bead of that title that another PR sent ahead and adds
+this PR's case to its notes. It then files an ask on the PR's bead that waits
+on the fix and sends the check back, and prints the fix and the ask. The ask
+holds the PR's merge. Once the fix lands, the next run takes the ask, and the
+check judges the PR's head again. Name the fix and the ask in the reason, and
+the ask in the ruling's `waits`. A shadow run files nothing, so it rules the
+point ahead with no `waits`.
 
 ## A person's comment
 
@@ -100,11 +123,11 @@ the answer.
 ## A decline stands
 
 No round changes code for a point a round of this run declined, deferred,
-answered or put to a person. A decline is overruled only by a ruling recorded
-where the round reads it: an ask that carries the operator's ruling, which you
-rule must-fix as a point of its own. A flag in a commit message or a reason is
-no such ruling, and the round's output check refuses a fix for an ask an
-earlier round of the run declined.
+sent ahead, answered or put to a person. A decline is overruled only by a
+ruling recorded where the round reads it: an ask that carries the operator's
+ruling, which you rule must-fix as a point of its own. A flag in a commit
+message or a reason is no such ruling, and the round's output check refuses a
+fix for an ask an earlier round of the run declined.
 
 An ask stays open until the run records its result, so it is ruled again at
 each head: answered once the head carries its fix, or once its check ran there.

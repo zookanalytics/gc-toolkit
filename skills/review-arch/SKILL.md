@@ -29,14 +29,24 @@ makes this check mandatory.
 
 A `docs/architecture.md` at the reviewed commit is a precondition of approval,
 because without one the review has no architecture to hold the change to. A
-commit without one earns `request-changes`, with a finding that asks the change
-to add the document with a passable account of the architecture the change
-covers. Passable means enough that a later review of a change to that
-architecture can hold the change to it: the standard's sufficiency test holds
-for the part the change covers. The document meets the standard from
-its first commit: it frames the whole repository and opens on its big picture,
-and the part the change covers is filled in. The rest of the repo's
-architecture is not this change's to write. File it as a follow-up under the
+commit without one earns `request-changes`, and the document is never the
+change's to add, so no change's fate decides the document's. When the commit's
+target already carries the document, the branch only predates it, and the
+finding asks the change to bring its branch current. The target carries it when
+`git cat-file -e origin/<review_base>:docs/architecture.md` exits 0 in
+`<worktree>`, or when the same call does for the path that the target's
+`docs/review-arch.md` names for its architecture. Otherwise the document lands
+ahead of the change, in a PR of its own titled exactly
+`docs: add the architecture document`, so that a second change waits on the
+same PR, and the change waits for it. That PR also carries the rig's guidance
+that points this check at the document, when the document lives somewhere
+else. The finding says what that PR must hold: a passable account of the
+architecture the change covers. Passable means enough that a later review of a
+change to that architecture can hold the change to it: the standard's
+sufficiency test holds for the part the change covers. The document meets the
+standard from its first commit: it frames the whole repository and opens on its
+big picture, and the part the change covers is filled in. The rest of the
+repo's architecture is not that PR's to write. File it as a follow-up under the
 token `docs/architecture.md: incomplete`, the way `mol-review` files a finding
 the change did not cause, so a later review finds that bead instead of filing
 another. Its body names the standard, `gc-toolkit.architecture-document`, for
@@ -156,9 +166,15 @@ approve is a precondition of approval, and a change that has not met it earns
   standard. Send it back with the part of the standard the line fails.
 - The document fails the sufficiency test within the change's reach. Send it
   back with what a reader cannot do from it.
+- The reviewed commit has no architecture document. When its target carries
+  one, send it back to bring its branch current. Otherwise send the document
+  ahead of the change, as What it reads says, with what that PR must hold. The
+  round sends it ahead rather than fixing it in this PR
+  (`gc-toolkit.review-ruling`: A fix that lands ahead of the PR).
 
-The architecture-doc update lands in the reviewed PR, from its author, never from
-the review.
+The architecture-doc update for a move the change makes lands in the reviewed
+PR, from its author, never from the review. The first document lands ahead of
+the change, in a PR of its own.
 
 ## The verdict
 
