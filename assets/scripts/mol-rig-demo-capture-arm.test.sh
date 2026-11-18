@@ -22,15 +22,18 @@
 # A capture's sandbox refuses a rig's own checkout, so the app runs from a
 # detached worktree of it, which the step's rig-demo-app-root region makes. A
 # pour names at most one app target, which the rig-demo-app-target region
-# counts, and a page script whose pour names none takes the command the rig
+# counts. With none, the region asks the engine's surface command which surface
+# the script drives, and a page or iOS app script takes the command the rig
 # declares as its ui_serve_command, which a stub gc answers. The last cases run
 # those two regions and the capture block with the real capture, sandbox library
 # and workspace scripts, against a fixture city, a stub engine, a stub
 # sandbox-exec that keeps the profile it was handed, and a stub gctk that runs a
 # copy's serve command through the library's sandbox, as gctk rig serve does.
-# The stub engine types a terminal script's run lines into one bash that starts
-# in --cwd, as the engine's own terminal does, so a case shows where a script's
-# commands run.
+# Only DEMO_ENGINE_BIN, the library's engine override, names the stub engine,
+# so the surface question and the capture each reach it only through the
+# library. The stub engine types a terminal script's run lines into one bash
+# that starts in --cwd, as the engine's own terminal does, so a case shows where
+# a script's commands run.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -208,11 +211,27 @@ printf '# Demo: the report\n\n**Terminal:**\n\n## Steps\n\n1. **It prints the re
 
 # The stubs these cases add. The engine lints clean and writes the clip it is
 # told to; sandbox-exec keeps the profile and runs the engine; node says no
-# server answers on a port and picks a free one.
+# server answers on a port and picks a free one; npx records its call and fails,
+# as on a host that cannot fetch the published engine, so a case that resolves
+# an engine in place of the one DEMO_ENGINE_BIN names fails. The engine reads no
+# line of a script: FAKE_SURFACE names the surface its parser gives the script,
+# page when it is empty. Its surface command answers with it, or answers as an
+# engine with no such command does when FAKE_NO_SURFACE_CMD is set, and its run
+# refuses a script that is not a terminal script when no app is named, as the
+# engine's does.
 { printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/engine" <<'ENGINE'
 case "${1:-}" in
+  surface) printf '%s\n' "$*" >> "$FAKE_DIR/surface.argv"
+       if [ -n "${FAKE_NO_SURFACE_CMD:-}" ]; then
+         printf 'unknown command: surface\n\n' >&2; printf 'Usage:\n  sprintshow run <demo.md> [options]\n'; exit 1
+       fi
+       printf '{"surface":"%s"}\n' "${FAKE_SURFACE:-page}" ;;
   lint) exit 0 ;;
   run) printf '%s\n' "$*" >> "$FAKE_DIR/engine.argv"
+       case "${FAKE_SURFACE:-page}:$*" in
+         terminal:*|*" --serve-dir "*|*" --base-url "*) ;;
+         *) printf '\n✖ no server: pass --base-url <url>, --serve "<command>", or --serve-dir <dir>\n' >&2; exit 1 ;;
+       esac
        o=""; c=""; p=""; for a in "$@"; do [ "$p" = "-o" ] && o="$a"; [ "$p" = "--cwd" ] && c="$a"; p="$a"; done
        sed -n 's/^[[:space:]]*`run \(.*\)`[[:space:]]*$/\1/p' "$2" | ( cd "${c:-.}" && bash ) > "$FAKE_DIR/terminal.out" 2>&1
        printf 'clip' > "$o" ;;
@@ -228,6 +247,10 @@ SBX
 [ $# -ge 3 ] || printf '%s' "${FAKE_PORTS:-50123}"
 exit 0
 NODE
+{ printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/npx" <<'NPX'
+printf '%s\n' "$*" >> "$FAKE_DIR/npx.argv"
+exit 1
+NPX
 # gctk, at the city's build path, stands in for gctk rig serve: a start runs the
 # serve command through the library's sandbox, which GCTK_SCRIPTS_DIR names, as
 # the copy's leader does, keeps that profile, and reports the copy on 50200 as
@@ -260,7 +283,7 @@ case "$*" in
   *) exit 1 ;;
 esac
 LSOF
-chmod +x "$TMP/bin/engine" "$TMP/bin/sandbox-exec" "$TMP/bin/node" "$CITY/.gc/services/gctk/bin/gctk" "$TMP/bin/lsof"
+chmod +x "$TMP/bin/engine" "$TMP/bin/sandbox-exec" "$TMP/bin/node" "$TMP/bin/npx" "$CITY/.gc/services/gctk/bin/gctk" "$TMP/bin/lsof"
 # gc adds the rig list the sandbox denies by, and the rig's formula vars, whose
 # ui_serve_command is FAKE_UI_SERVE, unset when that is empty.
 { printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/gc" <<'GC'
@@ -278,13 +301,14 @@ GC
 # pour <strict|plain> <serve_dir> <serve_cmd> <base_url> [rig path] prints
 # "<rc>|<ordered verb log>", with no workspace left by an earlier case.
 pour() {
-  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/decline.argv"; : > "$TMP/gctk.argv"; : > "$TMP/formula.argv"
+  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/decline.argv"; : > "$TMP/gctk.argv"; : > "$TMP/formula.argv"; : > "$TMP/surface.argv"; : > "$TMP/npx.argv"
   rm -f "$TMP/profile" "$TMP/copy-profile" "$TMP/copy-dir" "$TMP/terminal.out"
   REVIEW_WORKSPACE_DIR="$WS" "$HERE/review-workspace.sh" remove --review-bead tk-req >/dev/null
   local rc=0
   ( cd "$TMP/cwd" && env -i PATH="$PATH" HOME="$TMP/home" TMPDIR="$TMP" GC_CITY_PATH="$CITY" GIT_CEILING_DIRECTORIES="$TMP" \
-      REVIEW_WORKSPACE_DIR="$WS" SPRINTSHOW_BIN="$TMP/bin/engine" STUB_PACK="$TMP/pack" \
+      REVIEW_WORKSPACE_DIR="$WS" DEMO_ENGINE_BIN="$TMP/bin/engine" STUB_PACK="$TMP/pack" \
       FAKE_LOG="$TMP/log" FAKE_DIR="$TMP" FAKE_RIG="$RIG" FAKE_DECLINE_RC=0 FAKE_UI_SERVE="${FAKE_UI_SERVE-}" \
+      FAKE_SURFACE="${FAKE_SURFACE-}" FAKE_NO_SURFACE_CMD="${FAKE_NO_SURFACE_CMD-}" \
       FAKE_APP_URL="${FAKE_APP_URL-}" FAKE_PORTS="${FAKE_PORTS-}" \
       REQUEST_BEAD=tk-req SCRIPT_PATH="${POUR_SCRIPT:-$TMP/cwd/walkthrough.md}" OUT="$OUT" \
       SERVE_DIR="$2" SERVE_CMD="$3" BASE_URL="$4" RIG_PATH="${5-$RIG}" \
@@ -296,7 +320,7 @@ pour() {
 echo "# the sandbox refuses the rig's own checkout, which is why the app needs a worktree"
 RC=0
 ( cd "$TMP/cwd" && env -i PATH="$PATH" HOME="$TMP/home" TMPDIR="$TMP" GC_CITY_PATH="$CITY" FAKE_RIG="$RIG" FAKE_DIR="$TMP" \
-    SPRINTSHOW_BIN="$TMP/bin/engine" \
+    DEMO_ENGINE_BIN="$TMP/bin/engine" \
     "$HERE/rig-demo-capture.sh" --script "$TMP/cwd/walkthrough.md" --output "$OUT" --serve-dir "$RIG/site" ) > "$TMP/out" 2>&1 || RC=$?
 eq "$RC" 1 "a capture that serves from the rig's checkout exits 1"
 has "$(cat "$TMP/out")" "$RIG holds $RIG" "and names the checkout"
@@ -315,6 +339,7 @@ for MODE in strict plain; do
   esac
   has "$(cat "$TMP/gctk.argv")" "rig serve --stop (in $WT)" "$MODE: and the capture stops the copy"
   eq "$(cat "$TMP/formula.argv")" "" "$MODE: a pour that names its app reads no var of the rig's"
+  eq "$(cat "$TMP/surface.argv")" "" "$MODE: and asks the engine nothing about the script's surface"
 
   echo "# $MODE shell: a relative serve_dir resolves against that worktree"
   eq "$(pour "$MODE" "site" "" "")" "0|UPDATE;" "$MODE: the capture passes the sandbox"
@@ -338,28 +363,49 @@ for MODE in strict plain; do
 
   echo "# $MODE shell: a page script's pour that names no app target takes the rig's ui_serve_command, served from the worktree"
   eq "$(FAKE_UI_SERVE='npm run dev -- --port $PORT' pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the capture passes the sandbox, and the clip is recorded"
+  has "$(cat "$TMP/surface.argv")" "surface $TMP/cwd/walkthrough.md" "$MODE: the engine's surface command names the script's surface"
+  eq "$(cat "$TMP/npx.argv")" "" "$MODE: and neither the question nor the capture resolves an engine of its own"
   has "$(cat "$TMP/formula.argv")" "formula show mol-rig-demo --rig demo-rig --json" "$MODE: gc reads the declared command for the rig being demoed"
   has "$(cat "$TMP/gctk.argv")" 'rig serve --command npm run dev -- --port $PORT (in '"$WT)" "$MODE: gctk rig serve runs it as written in the worktree, \$PORT left for the copy"
   has "$(cat "$TMP/engine.argv")" "--base-url http://127.0.0.1:50200/" "$MODE: the engine records the copy"
   eq "$(git -C "$WT" rev-parse HEAD)" "$RIG_HEAD" "$MODE: which is at the rig's HEAD"
   eq "$(cat "$TMP/decline.argv")" "" "$MODE: and nothing declines"
 
-  echo "# $MODE shell: a pour that names no app takes the rig's ui_serve_command, and records an iOS app at the URL its copy's command printed"
+  echo "# $MODE shell: an iOS app script's pour that names no app target takes the rig's ui_serve_command too, and records the app at the URL its copy's command printed"
   IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
-  eq "$(FAKE_UI_SERVE='make start-ios' FAKE_APP_URL="$IOS_APP" FAKE_PORTS="$(printf '50301\n50302\n50303')" pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the capture passes the sandbox, and the clip is recorded"
-  has "$(cat "$TMP/gctk.argv")" "rig serve --command make start-ios (in $WT)" "$MODE: gctk rig serve runs the rig's command in the worktree"
+  eq "$(FAKE_SURFACE=ios FAKE_UI_SERVE='make start-ios' FAKE_APP_URL="$IOS_APP" FAKE_PORTS="$(printf '50301\n50302\n50303')" pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the capture passes the sandbox, and the clip is recorded"
+  has "$(cat "$TMP/formula.argv")" "formula show mol-rig-demo --rig demo-rig --json" "$MODE: gc reads the declared command for it"
+  has "$(cat "$TMP/gctk.argv")" "rig serve --command make start-ios (in $WT)" "$MODE: gctk rig serve runs it in the worktree"
   has "$(cat "$TMP/engine.argv")" "--base-url $IOS_APP --port 50301,50302,50303" "$MODE: the engine records the app the command brought up, with a port for each of its servers"
   eq "$(cat "$TMP/decline.argv")" "" "$MODE: and nothing declines"
 
   echo "# $MODE shell: a page script's pour on a rig that declares no ui_serve_command declines with the capture's gate"
   eq "$(FAKE_UI_SERVE="" pour "$MODE" "" "" "")" "1|UPDATE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"
-  has "$(cat "$TMP/out")" "exactly one of --serve-dir / --serve / --base-url (got 0)" "$MODE: the capture refuses a page script with no app"
+  has "$(cat "$TMP/out")" "no server: pass --base-url" "$MODE: the engine refuses a page script with no app"
+  has "$(cat "$TMP/engine.argv")" "run $TMP/cwd/walkthrough.md" "$MODE: once the capture hands it the script"
   has "$(cat "$TMP/decline.argv")" "--subject tk-req --key rig-demo-capture-failed" "$MODE: the gate blocks the request bead under the capture key"
-  has "$(cat "$TMP/decline.argv")" "neither the pour nor the rig's ui_serve_command named the app a page script drives" "$MODE: and says nothing named the app"
-  eq "$(cat "$TMP/engine.argv")" "" "$MODE: the engine never runs"
+  has "$(cat "$TMP/decline.argv")" "A script that drives an app is given none when neither the pour nor the rig's ui_serve_command names one" "$MODE: and says nothing named the app"
+
+  echo "# $MODE shell: an engine with no surface command names no surface, so a pour that names no app target takes no app"
+  eq "$(FAKE_NO_SURFACE_CMD=1 FAKE_UI_SERVE='npm run dev' pour "$MODE" "" "" "")" "1|UPDATE;DECLINE;" "$MODE: a page script is then refused by the engine, and the step declines and exits 1"
+  has "$(cat "$TMP/out")" "has no surface command, so it cannot name the surface '$TMP/cwd/walkthrough.md' drives" "$MODE: the step's output names the missing command"
+  has "$(cat "$TMP/out")" "no server: pass --base-url" "$MODE: and the engine's refusal"
+  has "$(cat "$TMP/decline.argv")" "the engine's surface command (sprintshow surface) names no surface for it" "$MODE: the gate names the surface command as a cause"
+  eq "$(cat "$TMP/formula.argv")" "" "$MODE: no var of the rig's is read"
+  case "$(cat "$TMP/gctk.argv")" in
+    *"rig serve --command"*) bad "$MODE: and no copy is started" "$(cat "$TMP/gctk.argv")" ;;
+    *) ok "$MODE: and no copy is started" ;;
+  esac
+  eq "$(FAKE_NO_SURFACE_CMD=1 FAKE_SURFACE=terminal POUR_SCRIPT="$TMP/cwd/terminal.md" FAKE_UI_SERVE='npm run dev' pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: a terminal script, which takes no app, is captured"
+  has "$(cat "$TMP/engine.argv")" "--cwd $WT" "$MODE: with its shell in the worktree"
+
+  echo "# $MODE shell: a surface the engine names that the pack does not drive takes no app"
+  eq "$(FAKE_SURFACE=watch FAKE_UI_SERVE='npm run dev' pour "$MODE" "" "" "")" "1|UPDATE;DECLINE;" "$MODE: the engine refuses the script with no app, and the step declines and exits 1"
+  eq "$(cat "$TMP/formula.argv")" "" "$MODE: no var of the rig's is read for it"
 
   echo "# $MODE shell: a terminal script's pour names no app, and its shell starts in the worktree, though the rig declares a command"
-  eq "$(POUR_SCRIPT="$TMP/cwd/terminal.md" FAKE_UI_SERVE="npm run dev" pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the terminal capture passes the sandbox, and the clip is recorded"
+  eq "$(FAKE_SURFACE=terminal POUR_SCRIPT="$TMP/cwd/terminal.md" FAKE_UI_SERVE="npm run dev" pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the terminal capture passes the sandbox, and the clip is recorded"
+  has "$(cat "$TMP/surface.argv")" "surface $TMP/cwd/terminal.md" "$MODE: the engine's surface command names it a terminal script"
   has "$(cat "$TMP/engine.argv")" "--cwd $WT" "$MODE: its shell starts in the worktree"
   case "$(cat "$TMP/engine.argv")" in
     *--serve*|*--base-url*|*--port*) bad "$MODE: and the engine is given no app" "$(cat "$TMP/engine.argv")" ;;
@@ -372,10 +418,10 @@ for MODE in strict plain; do
   esac
 
   echo "# $MODE shell: a terminal script whose commands run below the root changes into their directory in its first step"
-  eq "$(POUR_SCRIPT="$TMP/cwd/subdir.md" pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the terminal capture passes the sandbox, and the clip is recorded"
+  eq "$(FAKE_SURFACE=terminal POUR_SCRIPT="$TMP/cwd/subdir.md" pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the terminal capture passes the sandbox, and the clip is recorded"
   has "$(cat "$TMP/engine.argv")" "--cwd $WT" "$MODE: its shell starts at the worktree's root"
   eq "$(cat "$TMP/terminal.out" 2>/dev/null)" "report from tools" "$MODE: and its commands run in tools/, from the rig's HEAD"
-  POUR_SCRIPT="$TMP/cwd/subdir-no-cd.md" pour "$MODE" "" "" "" >/dev/null
+  FAKE_SURFACE=terminal POUR_SCRIPT="$TMP/cwd/subdir-no-cd.md" pour "$MODE" "" "" "" >/dev/null
   has "$(cat "$TMP/terminal.out" 2>/dev/null)" "report.sh" "$MODE: the same commands with no first step run from the root, where no report is found"
   case "$(cat "$TMP/terminal.out" 2>/dev/null)" in
     *"report from tools"*) bad "$MODE: and print no report" "$(cat "$TMP/terminal.out")" ;;
