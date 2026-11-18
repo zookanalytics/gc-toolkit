@@ -354,26 +354,28 @@ operator can see which kept commits required rework and how each was
 classified. The full audit lives in `metadata.conflict_resolutions` on
 the rebase bead.
 
-**Landing the rebase is the refinery's job, not the keeper's.** The
-polecat pushes the rebased history as a `rebase/<bead>` branch — it does
-*not* fast-forward `main` itself. From there the rig refinery (the same
-merge queue that lands ordinary work) takes over: it runs a fresh full
-preflight (the rig's `make check`) on the rebased branch, force-leases it
-onto `main` (`git push --force-with-lease=main:<anchor>`, so a concurrent
-move of `main` aborts the push instead of clobbering it), closes the
-rebase bead with `merge_result=force_lease`, and mails the keeper. The
-keeper hand-lands nothing; it just watches for the close, or for a
-handback if the refinery's preflight fails. (Behaviour change verified
-2026-06-05 — earlier the keeper landed the rebase by hand after the
-polecat pushed.)
+**The operator lands the rebase, and no agent force-pushes `main`.** The
+polecat pushes the rebased history as a `rebase/<bead>` branch and does not
+move `main` itself. Its last step files a human gate on the rebase bead,
+assigned to the operator, which carries the range-diff to review and the push
+to run, `git push --force-with-lease=main:<pre-rebase tip> origin
+rebase/<bead>:main`, so a concurrent move of `main` refuses the push instead of
+being overwritten. Clearing the gate runs `mol-upstream-gc-rebase-finish`,
+whose landing check closes the bead with Gas City's work record of a landing
+(`gc.work_outcome=shipped` and the landed commit) once `main` is the rebased
+tip, asks again while `main` is still at the pre-rebase tip, and hands the bead
+back to the keeper when `main` moved after the rebase.
+`packs/gascity-keeper/assets/scripts/rebase-landing.sh` holds the gate and the
+check.
 
-**The one manual step left is the local rig-checkout sync.** Landing moves
-`origin/main`, but the rig's working checkout does not follow
-automatically. The refinery skips this sync and reports it whenever the
-checkout looks dirty or divergent — and that report is *often a false
-positive*, typically an untracked build wrapper sitting in the checkout
-rather than real divergence. Before running any `git reset --hard
-origin/main`, confirm there is genuine ahead/behind divergence (e.g.
+**The rig checkout follows only when that discards nothing.** Landing moves
+`origin/main`, but the rig's working checkout does not follow by itself. The
+landing check resets it to the new `main` when it is on `main`, clean, and
+still at the pre-rebase tip, and otherwise leaves it and records why in
+`metadata.rig_update_result`, which the keeper's mail carries. That report is
+*often a false positive*, typically an untracked build wrapper sitting in the
+checkout rather than real divergence. Before running any `git reset --hard
+origin/main` by hand, confirm there is genuine ahead/behind divergence (e.g.
 `git status -sb` and `git rev-list --left-right --count
 origin/main...HEAD`), and preserve any local `.beads/config.yaml` tuning
 that may not exist on the landed `origin/main`.

@@ -168,7 +168,7 @@ source = "rigs/gc-toolkit/packs/gascity-keeper"
 ```
 
 The complete wiring snippet — including the `[[rigs.patches]]`
-fragment-injection blocks for refinery and polecat — lives in the sub-pack
+fragment-injection block for the polecat — lives in the sub-pack
 itself: [`packs/gascity-keeper/pack.toml`](../packs/gascity-keeper/pack.toml).
 The sub-pack ships its own `[[named_session]]` (`scope = "rig"`), so the
 keeper is spawnable without an extra block; it resolves to

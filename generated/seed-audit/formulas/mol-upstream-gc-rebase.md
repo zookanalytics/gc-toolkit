@@ -1,21 +1,20 @@
 Formula: mol-upstream-gc-rebase
 Description: Rebase the gascity rig's `origin/main` onto `upstream/main`, drop already-
 landed-or-supplanted local commits, run the quality gate, install, push the
-working branch (`rebase/{{issue}}`) to origin, and hand off to refinery for
-the force-push to `{{upstream_branch}}`.
+working branch (`rebase/{{issue}}`) to origin, and ask the operator to land it
+on `{{upstream_branch}}`.
 
 Extends `mol-polecat-base` for the standard lifecycle entry points but uses
 its own gating steps in place of implement / self-review — the work is a
 controlled rebase with a verdict-keeping survey, not a feature.
 
-**Force-push ownership:** the terminal force-push onto `{{upstream_branch}}`
-is performed by the rig-scoped refinery via the sub-pack's
-`refinery-rebase-handling` overlay, never by this polecat. The polecat pushes
-only its own ref `refs/heads/rebase/{{issue}}` and reassigns the bead to
-refinery; the overlay detects rebase beads (via `metadata.molecule_id`, with
-`metadata.backup_ref` as fallback), preflights, performs the leased
-force-push, and closes the bead. "Polecats never force-push to main" stays
-absolute; the legitimate rebase tail lives in one auditable place.
+**The operator lands the rebase:** no agent force-pushes `{{upstream_branch}}`.
+The polecat pushes only its own ref `refs/heads/rebase/{{issue}}`, and its last
+step files a human gate on the bead, assigned to the operator, that carries the
+range-diff to review and the force-push to run, its lease pinned to
+`metadata.pre_rebase_tip`. Clearing the gate runs
+`mol-upstream-gc-rebase-finish`, which checks what the push did and closes the
+bead or hands it back to the keeper. `rebase-landing.sh` holds both halves.
 
 ## Conflict handling: one fresh iteration per conflict (check loop)
 
@@ -110,5 +109,5 @@ Steps (13):
   ├── mol-upstream-gc-rebase.rebase: Rebase onto upstream, one conflict per iteration, until the gate is green [needs: mol-upstream-gc-rebase.survey, mol-upstream-gc-rebase.rebase.iteration.1]
   ├── mol-upstream-gc-rebase.install: Rebuild and install gc from the rebased state [needs: mol-upstream-gc-rebase.rebase]
   ├── mol-upstream-gc-rebase.push: Push the rebased branch to origin (polecat-owned ref, no force on main) [needs: mol-upstream-gc-rebase.install]
-  ├── mol-upstream-gc-rebase.notify-and-handoff: Mail the completion summary, append to bead notes, hand off to refinery [needs: mol-upstream-gc-rebase.push]
+  ├── mol-upstream-gc-rebase.notify-and-handoff: Mail the completion summary, append to bead notes, ask the operator to land the rebase [needs: mol-upstream-gc-rebase.push]
   └── mol-upstream-gc-rebase.workflow-finalize: Finalize workflow [needs: mol-upstream-gc-rebase.notify-and-handoff]

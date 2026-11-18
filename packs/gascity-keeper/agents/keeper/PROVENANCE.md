@@ -43,9 +43,9 @@ artifacts when engaged, drains on idle.
 
 Originally shipped under `rigs/gc-toolkit/agents/gascity-keeper/` with the
 "extract to a sub-pack if the mol family grows past 3-4 mols" rider. The
-family now carries four mols (`mol-upstream-gc-{rebase,rebase-rework,
-pr-prep,sync}`) plus the rebase doctrine and refinery overlay, so the
-extraction landed under `rigs/gc-toolkit/packs/gascity-keeper/`. The
+family grew past it, to the `mol-upstream-gc-*` mols plus the rebase
+doctrine, so the extraction landed under
+`rigs/gc-toolkit/packs/gascity-keeper/`. The
 sibling `formulas/`, `template-fragments/`, and `patches/` directories
 hold the rest of the bundle.
 

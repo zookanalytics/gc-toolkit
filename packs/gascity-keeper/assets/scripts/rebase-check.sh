@@ -5,8 +5,8 @@
 # the rebase is finished AND the post-rebase quality gate is green on exactly
 # the tree that is checked out right now. Every other state, including any
 # internal error in this script, exits non-zero so the loop spawns the next
-# iteration. Fail-closed is deliberate: a false pass force-pushes an unverified
-# history onto the fork's main branch.
+# iteration. Fail-closed is deliberate: a false pass asks the operator to
+# force-push an unverified history onto the fork's main branch.
 #
 # ## Why this VERIFIES the gate instead of running it
 #
