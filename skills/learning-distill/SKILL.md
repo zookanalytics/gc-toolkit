@@ -147,7 +147,7 @@ target file, the budget, and what the adoption costs to keep.
 | `convention` | `template-fragments/learned-conventions-<role>.template.md` | `fragment_bullet_cap` bullets | every turn of that role |
 | `profile` | `template-fragments/operator-profile.template.md` | `profile_entry_cap` entries | every turn of every role that renders it |
 | `work-quality` | `template-fragments/work-quality-base.template.md` + one `work-quality-<class>` | `work_quality_entry_cap` entries per fragment | every turn of every role that renders it |
-| `review-rubric` | `skills/review-correctness/SKILL.md`, "What to check" | one dimension per amendment | every correctness review |
+| `review-rubric` | `skills/review-correctness/SKILL.md`, "What to check" | one dimension per amendment, inside the method's word budget | every correctness review |
 | `exemplar` | `template-fragments/learning-exemplars.template.md` | `exemplar_cap` entries | every correctness review |
 
 Choose by what the learning *is*:
@@ -173,7 +173,13 @@ Choose by what the learning *is*:
   over `convention` for anything a reader could catch: one rubric dimension
   reaches every agent's version of the mistake through the reviewer, where a
   bullet only reaches the one role whose fragment renders it. An amendment
-  is one dimension sharpened or added, never a checklist bolted on.
+  is one dimension sharpened or added, never a checklist bolted on. Word it as
+  the rule a reviewer of any repository would apply, never as one pull
+  request's case. The method has a word budget, which
+  `assets/scripts/review-methods.test.sh` holds it to, so an amendment that
+  would pass the budget replaces text instead of adding to it. A defect class
+  particular to one repository is not an amendment: it goes in that
+  repository's `docs/review-correctness.md`, through an engineering bead.
 - **`convention`** when the behavior must be carried *into* the turn by one
   role and no reviewer sees the moment it goes wrong — a claiming rule, a
   handoff, the choice to ask a person.
