@@ -4,9 +4,10 @@
 # Validation did not confirm a close brief, whether a first reaction's, a
 # store-only exit's or a held bead's, so the step asks the operator in the
 # closer's own words: the ask's first line states the stake and titles the ask,
-# and the lines after it give each option and what it costs. The block files
-# the ask whole and adds nothing to it, so it names no proposer the closer did
-# not write. The ask is a human gate on the subject under the key
+# and the lines after it give the one course the closer recommends, what
+# accepting it ships and what it asks of the operator. The block files the ask
+# whole and adds nothing to it, so it names no proposer the closer did not
+# write. The ask is a human gate on the subject under the key
 # validate-close, which holds the bead until the operator answers. A bead with
 # an open child is asked through a conversation instead, because a gate on the
 # parent would pause the child's work, the very work the doubt is about. A
@@ -64,12 +65,12 @@ done
 chmod +x "$TMP/bin/gc" "$TMP/pack/"*.sh
 mkdir -p "$TMP/args"
 
-# A closer's ask: the stake on its first line, then the options. It holds a %, a
-# $, a backtick and quotes, which a format string or an expansion would change.
-STAKE="tk-dep's fix landed, yet 23% of retries still time out: send the work, or close it and accept that?"
+# A closer's ask: the stake on its first line, then the one course it
+# recommends. It holds a %, a $, a backtick and quotes, which a format string or
+# an expansion would change.
+STAKE="tk-dep's fix landed, yet 23% of retries still time out: send a polecat to fix the retry path?"
 ASK_TEXT="$STAKE
-1. Send the work: a polecat fixes the retry path in \`retry.sh\`, and it asks only your yes.
-2. Close it: nothing ships, and \"\$TIMEOUT\" stays at 30s."
+Send the work: a polecat fixes the retry path in \`retry.sh\` and keeps \"\$TIMEOUT\" at 30s, and it asks only your yes."
 
 # run [shell-prelude] [VAR=value...] -> "<rc>|<ordered verb log>". The step's
 # lines above the block set WORK_BEAD_ID, ASK and SCRIPTS, so the run sets them

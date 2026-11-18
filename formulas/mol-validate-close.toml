@@ -165,11 +165,11 @@ it. Record why on the bead's notes so the operator lands on the disagreement,
 then write the ask itself, each on the lines between its quoted here-document's
 delimiters as in 2a. The ask's first line states the stake, what the operator
 decides and why it matters, in at most 140 characters, because it is the ask's
-title, the line the board shows for it. The lines after it give each option the
-operator could take, saying what its end state ships and what it asks of them,
-with ids only as references. When the ask says what proposed the close, it says
-it as the brief you read does: a first reaction, a store-only exit or a wait on
-another bead's landing.
+title, the line the board shows for it. The lines after it give the one course
+you recommend, what accepting it ships and what it asks of the operator, and
+nothing else, with ids only as references. When the ask says what proposed the
+close, it says it as the brief you read does: a first reaction, a store-only
+exit or a wait on another bead's landing.
 The ask is a human gate on the bead under the key `validate-close`, which holds
 the bead until the operator answers. On a bead with an open child the ask is a
 conversation on the bead instead, because a gate on the parent would pause the
@@ -184,7 +184,7 @@ WHY
 )")"
 ASK=$(cat <<'ASK'
 <the stake: what the operator decides and why it matters, in at most 140 characters>
-<each option the operator could take: what its end state ships and what it asks of them>
+<the one course you recommend: what accepting it ships and what it asks of the operator>
 ASK
 )
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/gc-helm.sh" ] || SCRIPTS=""

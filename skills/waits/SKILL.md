@@ -139,9 +139,11 @@ same gate:
   the gate is the ruling to proceed. A ruling not to proceed is a stand-down
   (below).
 
-Write what is owed so the person can answer it in about a minute: the plain
-stake and what each option costs, with ids only as references. In a sitting,
-the hold step files the gate a wait for the operator's answer needs.
+Write what is owed so the person can answer it in about a minute: the stake
+first, as the gate's title, then the one course you recommend, what accepting
+it ships and what it asks of them, and nothing else, with ids only as
+references. In a sitting, the hold step files the gate a wait for the
+operator's answer needs.
 
 ## Ask the operator for a conversation
 
