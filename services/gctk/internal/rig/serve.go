@@ -48,7 +48,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -910,7 +909,7 @@ func Lead(h host.Host, dir string) int {
 		Dir:     checkout,
 		Env:     []string{"PORT=" + strconv.Itoa(port)},
 		Out:     logf,
-		Stdout:  io.MultiWriter(logf, &appURLReader{rec: rec, log: logf}),
+		Stdout:  readURL(rec, logf),
 		Relay:   true,
 		Sandbox: &host.Sandbox{Lib: filepath.Join(rec.read("scripts"), SandboxLib), Port: port, Prog: "gctk rig serve"},
 	})

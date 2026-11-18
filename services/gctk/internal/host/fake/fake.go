@@ -75,6 +75,7 @@ type Process struct {
 	spec    host.Spec
 	out     io.Writer
 	stdout  io.Writer
+	closed  bool
 	file    *os.File
 	notify  map[os.Signal][]chan<- os.Signal
 	ignored map[os.Signal]bool
@@ -170,10 +171,37 @@ func (w output) Write(b []byte) (int, error) {
 	switch {
 	case w.p.ended:
 		return 0, syscall.EPIPE
+	case w.stdout && w.p.closed:
+		return 0, syscall.EBADF
 	case to == nil:
 		return len(b), nil
 	}
 	return to.Write(b)
+}
+
+// CloseStdout closes the process's standard output, as a program that closes
+// its descriptor 1 and runs on does: a later write to Stdout fails. With
+// Relay, Spec's Stdout is told the stream has ended when it is a host.Ender,
+// as the relay tells it. Spec's Stdout unset, the standard output shares Out
+// with the standard error, whose stream goes on.
+func (p *Process) CloseStdout() {
+	m := p.m
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if p.closed || p.ended {
+		return
+	}
+	p.closed = true
+	if p.spec.Relay && p.stdout != nil {
+		ends(p.stdout)
+	}
+}
+
+// ends tells w its stream has ended, when w is a host.Ender.
+func ends(w io.Writer) {
+	if e, ok := w.(host.Ender); ok {
+		e.End()
+	}
 }
 
 // Listen has the process listen on the loopback port until it ends.
@@ -426,6 +454,10 @@ func (m *Machine) end(q *Process, status int) {
 	q.ended, q.status = true, status
 	close(q.done)
 	if q.spec.Relay {
+		if q.stdout != nil && !q.closed {
+			ends(q.stdout)
+		}
+		ends(q.out)
 		close(q.relayed)
 	}
 	if q.file != nil {

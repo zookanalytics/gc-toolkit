@@ -81,7 +81,8 @@ type Spec struct {
 	// Relay has the process write into pipes that this process copies into
 	// Out and Stdout, so the process needs no access to where they lead, and
 	// dies at its next write once this process is gone. Child.Relayed says
-	// when the copy is done.
+	// when the copy is done. Out or Stdout that is an Ender is told when the
+	// stream copied into it ends.
 	Relay bool
 	// Session starts the process in a session of its own, so it leads a
 	// process group of its own, which outlives this process. Without it the
@@ -90,6 +91,14 @@ type Spec struct {
 	// Sandbox, when set, runs the process inside the sandbox a demo capture
 	// runs in, from Dir, which it needs.
 	Sandbox *Sandbox
+}
+
+// An Ender is a writer that takes the end of the stream written into it: a
+// relay calls End once the whole stream is copied in, whether the process
+// ended or closed that stream and runs on, so the writer can act on text that
+// no line end closed.
+type Ender interface {
+	End()
 }
 
 // Sandbox is the sandbox the pack's demo capture runs a command in, which
@@ -143,7 +152,9 @@ func (local) Notify(c chan<- os.Signal, sig ...os.Signal) { signal.Notify(c, sig
 func (local) Ignore(sig ...os.Signal) { signal.Ignore(sig...) }
 
 // sandboxed sources the file it is given first and runs the rest, the port,
-// the directory and the command, through demo_engine_sandboxed.
+// the directory and the command, through demo_engine_sandboxed, which the
+// command replaces, so no shell of the wrapper holds a stream the relay copies
+// once the command closes it.
 const sandboxed = `. "$1" || exit 126; shift; demo_engine_sandboxed "$@"`
 
 func (local) Start(s Spec) (Child, error) {
@@ -228,6 +239,9 @@ func (local) Start(s Spec) (Child, error) {
 			defer wg.Done()
 			_, _ = io.Copy(r.to, r.r)
 			r.r.Close()
+			if e, ok := r.to.(Ender); ok {
+				e.End()
+			}
 		}()
 	}
 	go func() {

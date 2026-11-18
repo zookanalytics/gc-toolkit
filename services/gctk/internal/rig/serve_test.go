@@ -31,8 +31,10 @@ import (
 //   - a serve command, by its text: "fail" says "cannot serve" and exits 3,
 //     "hang" runs and never listens, "missing" names no program, "app" prints
 //     its app's URL on its standard output, in two writes, and never listens,
-//     "app-on-stderr" prints it on its standard error only, and any other
-//     listens on its sandbox's port until it ends;
+//     "app-cr" prints it with a carriage return alone after it, "app-at-eof"
+//     prints it with no line end and closes its standard output, each running
+//     on without listening, "app-on-stderr" prints it on its standard error
+//     only, and any other listens on its sandbox's port until it ends;
 //   - a publish command, any other `bash -c`, by its mode, "publish <mode>":
 //     ok stays running; again-once refuses its first run as Tailscale does
 //     while another client changes the serve config; taken-first refuses the
@@ -124,6 +126,19 @@ func (f *serveFixture) serveProgram(command string) fake.Program {
 			fmt.Fprintln(p.Out(), "booting a device")
 			fmt.Fprint(p.Stdout(), "App ready: ios-simulator://"+strings.ToLower(testUDID)+"/com.exam")
 			fmt.Fprint(p.Stdout(), "ple.Board.\n")
+			<-p.Done()
+			return 0
+		}
+	case "app-cr":
+		return func(p *fake.Process) int {
+			fmt.Fprint(p.Stdout(), "booting\rios-simulator://"+testUDID+"/com.example.Board\r")
+			<-p.Done()
+			return 0
+		}
+	case "app-at-eof":
+		return func(p *fake.Process) int {
+			fmt.Fprint(p.Stdout(), "booting\r\nios-simulator://"+testUDID+"/com.example.Board")
+			p.CloseStdout()
 			<-p.Done()
 			return 0
 		}
@@ -1156,6 +1171,26 @@ func TestServeACopyIsUpOnceItsCommandPrintsItsAppsURL(t *testing.T) {
 		}
 		f.copies.Stop(f.repo)
 	})
+}
+
+// The serve command's standard output is read in the engine's lines: one
+// ends at a carriage return as at a line feed, and the text the output ends
+// on is its last line, so a command that prints its URL so and runs on is up.
+func TestServeReadsTheAppsURLInTheEnginesLines(t *testing.T) {
+	for _, command := range []string{"app-cr", "app-at-eof"} {
+		t.Run(command, func(t *testing.T) {
+			serveTest(t, func(t *testing.T, f *serveFixture) {
+				o := f.opts(command)
+				o.Wait = 2 * time.Second
+				r := f.copies.Serve(f.repo, o)
+				mustRun(t, r)
+				if want := "ios-simulator://" + testUDID + "/com.example.Board"; r.AppURL != want {
+					t.Errorf("app_url %q, want %q", r.AppURL, want)
+				}
+				f.copies.Stop(f.repo)
+			})
+		})
+	}
 }
 
 func TestServeReadsTheAppsURLOnlyFromTheStandardOutput(t *testing.T) {

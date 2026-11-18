@@ -118,9 +118,10 @@
 #                        working directory, with <port> the one loopback port
 #                        it may reach and <dir> what it reads and writes, as a
 #                        capture's --cwd. `gctk rig serve` runs a copy's serve
-#                        command through it. Returns the command's exit status,
-#                        or 1, having said why on stderr, when the run is
-#                        refused.
+#                        command through it. The shell becomes the command, so
+#                        its exit status is the command's and nothing after the
+#                        call runs. Returns 1, having said why on stderr, when
+#                        the run is refused.
 #   demo_engine_copy <dir> <command>
 #                        Serves an app a command serves as a copy that `gctk
 #                        rig serve` runs from the checkout <dir> sits in, with
@@ -770,22 +771,34 @@ demo_engine_sandboxed() {
   [ "$port" -le 65535 ] || { _demo_engine_say "'$port' is not a port from 1 to 65535"; return 1; }
   [ -d "$dir" ] || { _demo_engine_say "'$dir' is not a directory"; return 1; }
   _demo_engine_city || return 1
-  _demo_engine_sandbox_run "$port" "$(pwd -P)
-$dir" "" "$@"
+  _demo_engine_sandbox "$port" "$(pwd -P)
+$dir" "" || return 1
+  # The shell becomes the command, so its output ends once the command closes
+  # it, the end gctk rig serve reads an app's URL up to.
+  exec "${_DEMO_ENGINE_SANDBOX[@]}" "$@"
 }
 
-# _demo_engine_sandbox_run <ports> <dirs> <files> <command...>: after
-# _demo_engine_city, runs the command inside the sandbox, in the caller's
-# working directory, with the ports given, one per line, the only loopback
-# ports it may reach. Each of <dirs>, one per line, is read and written as
-# _demo_engine_reach widens it, each of <files> is read, and the engine
-# checkout, when one was chosen, is read. Returns the command's exit status, or
-# 1, having said why, when the run is refused.
+# _demo_engine_sandbox_run <ports> <dirs> <files> <command...>: runs the
+# command inside the sandbox _demo_engine_sandbox composes for the rest.
+# Returns the command's exit status, or 1, having said why, when the run is
+# refused.
 _demo_engine_sandbox_run() {
+  _demo_engine_sandbox "$1" "$2" "$3" || return 1
+  shift 3
+  "${_DEMO_ENGINE_SANDBOX[@]}" "$@"
+}
+
+# _demo_engine_sandbox <ports> <dirs> <files>: after _demo_engine_city, sets
+# _DEMO_ENGINE_SANDBOX to the words that, with a command after them, run that
+# command inside the sandbox, in the caller's working directory, with the
+# ports given, one per line, the only loopback ports it may reach. Each of <dirs>, one per line, is read and
+# written as _demo_engine_reach widens it, each of <files> is read, and the
+# engine checkout, when one was chosen, is read. Returns 1, having said why,
+# when the run is refused.
+_demo_engine_sandbox() {
   local NL='
 ' open="$1" cand="$2" files="$3" places rw="" ro="" p d reach kind engine="" profile v
   local -a unsets
-  shift 3
 
   # The city's directories, and each directory the run reads and writes, as
   # _demo_engine_reach widens it.
@@ -862,7 +875,7 @@ EOF
   while IFS= read -r v; do
     [ -z "$v" ] || unsets+=(-u "$v")
   done < <(env | sed -n -E 's/^((GC|GT|BEADS|BD|DOLT)_[A-Za-z0-9_]*|TMUX|TMUX_PANE)=.*/\1/p')
-  env ${unsets[@]+"${unsets[@]}"} sandbox-exec -p "$profile" "$@"
+  _DEMO_ENGINE_SANDBOX=(env ${unsets[@]+"${unsets[@]}"} sandbox-exec -p "$profile")
 }
 
 # The gctk binary that runs a copy: $GCTK_BIN, else the city's build.

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -377,6 +378,83 @@ func TestStartGivesStdoutTheStandardOutputAloneRelayedOrNot(t *testing.T) {
 			t.Errorf("relay %v, no Out %v: Stdout got %q and Out %q, want the standard output and the standard error apart", k.relay, k.noOut, out.String(), errs.String())
 		}
 		c.Wait()
+	}
+}
+
+// ending is a writer that takes the end of its stream (Ender): it keeps what
+// was written into it, and closes ended at End.
+type ending struct {
+	mu    sync.Mutex
+	got   bytes.Buffer
+	ended chan struct{}
+}
+
+func newEnding() *ending { return &ending{ended: make(chan struct{})} }
+
+func (e *ending) Write(b []byte) (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.got.Write(b)
+}
+
+func (e *ending) End() { close(e.ended) }
+
+func (e *ending) String() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.got.String()
+}
+
+// A relay tells each writer that is an Ender when its own stream ends, once
+// all of the stream is in it: Stdout as soon as the process closes its
+// standard output and runs on, and Out once the process has ended.
+func TestARelayTellsAnEnderWhenItsStreamEnds(t *testing.T) {
+	h := Local()
+	out, errs := newEnding(), newEnding()
+	c, err := h.Start(Spec{
+		Argv:    []string{"bash", "-c", `printf 'one\ntwo'; exec 1>&-; echo err >&2; exec sleep 60`},
+		Out:     errs,
+		Stdout:  out,
+		Relay:   true,
+		Session: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := c.Pid()
+	t.Cleanup(func() { _ = h.SignalGroup(pid, syscall.SIGKILL); c.Wait() })
+	select {
+	case <-out.ended:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the standard output's end never reached Stdout")
+	}
+	if got := out.String(); got != "one\ntwo" {
+		t.Errorf("Stdout held %q at its end, want the whole standard output", got)
+	}
+	if _, ok := h.Proc(pid); !ok {
+		t.Fatal("the process had ended, so this shows nothing of a stream that ends before its process")
+	}
+	select {
+	case <-errs.ended:
+		t.Fatal("Out was told its stream ended while the process still holds its standard error")
+	default:
+	}
+	if err := h.SignalGroup(pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	c.Wait()
+	select {
+	case <-c.Relayed():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the relay did not finish once the process ended")
+	}
+	select {
+	case <-errs.ended:
+	default:
+		t.Fatal("the relay finished without telling Out its stream ended")
+	}
+	if got := errs.String(); got != "err\n" {
+		t.Errorf("Out held %q, want the standard error", got)
 	}
 }
 

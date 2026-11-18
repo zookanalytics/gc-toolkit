@@ -771,6 +771,24 @@ has '(deny network-outbound (remote ip "localhost:*"))' "$(profile)" "(sandboxed
 has "(allow file-read-data file-write* (subpath \"$RWT\"))" "$(profile)" "(sandboxed) the directory is read and written, as its rig worktree"
 has "(deny file-read-data file-write* (subpath \"$RIGA\"))" "$(profile)" "(sandboxed) and the rig's checkout stays denied"
 eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$SANDBOX_ENV")" 0 "(sandboxed) the command runs with none of the variables that point at the city"
+# No shell of the library's holds the command's output open, so a command that
+# closes its standard output and runs on ends that output for its reader. The
+# reader is cat on a process substitution, which ends with the output, where a
+# command substitution would wait for the command too. The farm holds no sleep,
+# so the command names the host's.
+PIDF="$TMPD/sandboxed.pid"; rm -f "$PIDF"
+START=$SECONDS
+GOT=$(cat < <( cd "$RWT" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+    SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" PACK_SCRIPTS="$HERE" PIDF="$PIDF" \
+    "${CITY_ENV[@]}" bash "$TMPD/sandboxed.sh" 5197 "$RWT" \
+    bash -c 'echo $$ >"$PIDF"; printf closed; exec 1>&-; exec /bin/sleep 30' 2>"$ERRF" ))
+TOOK=$((SECONDS - START))
+RAN_ON=ended
+[ -s "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null && RAN_ON=running
+[ ! -s "$PIDF" ] || kill "$(cat "$PIDF")" 2>/dev/null
+eq "$GOT" "closed" "(sandboxed) a command that closes its standard output gives its reader all of it"
+eq "$RAN_ON" running "(sandboxed) and runs on once the output has ended"
+eq "$([ "$TOOK" -lt 20 ] && echo "while it runs" || echo "after ${TOOK}s")" "while it runs" "(sandboxed) and that output ends while the command runs on"
 sandboxed "${CITY_ENV[@]}" -- 0 "$RWT" true
 eq "$RC" 1 "(sandboxed) a port that is no port is refused"
 sandboxed "${CITY_ENV[@]}" -- 5197 "$TMPD/nowhere" true
