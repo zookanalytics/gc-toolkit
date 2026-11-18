@@ -395,19 +395,22 @@ It prints one JSON line: `address` is the address to give the operator, and
 safe to run again, after a restart too. It reports the copy that runs, or starts
 one, and publishes again a copy that has lost its address.
 `( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --check )`
-says whether the copy runs, answers on its port and still has its address. A
-copy that runs and does not answer, such as one whose start was cut off while
-its serve command built, reads as `"state":"not-answering"`: run the start
-again, which waits for it to answer and stops it when it does not. The copy runs
-what its serve command built when it started, so an edit the command does not
-reload shows only once you stop the copy and start it again, which gives it a
-new port and address to give the operator.
+says whether the copy runs, is up and still has its address. A copy that runs
+and is not up, such as one whose start was cut off while its serve command
+built, reads as `"state":"not-answering"`: run the start again, which waits for
+it to be up and stops it when it is not. The copy runs what its serve command
+built when it started, so an edit the command does not reload shows only once
+you stop the copy and start it again, which gives it a new port and address to
+give the operator.
 
-Where `address` is empty, `detail` says why. A copy whose publish command ended
-gets its address back when you run the start again. A start that fails says why
-in `reason` and `detail`. One that fails `address-taken` found the copy on a
-port another mapping already publishes, and left it running there, so stop the
-copy and start it again, which runs it on another port. Where the city sets no
+Where `address` is empty, `detail` says why. A copy whose command brought its
+app up on a simulator, such as an iOS app, never has one, because the app runs
+on this host's simulator and not on the copy's port, so stop it as below. A copy
+whose publish command ended gets its address back when you run the start again.
+A start that fails says why in `reason` and `detail`. One that fails
+`address-taken` found the copy on a port another mapping already publishes, and
+left it running there, so stop the copy and start it again, which runs it on
+another port. Where the city sets no
 publisher, or a second start still prints no address, the city can give no
 address and the operator cannot open the copy, so stop it with
 `( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )`.
