@@ -225,27 +225,28 @@ shift 2
 exec "$@"
 SBX
 { printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/node" <<'NODE'
-[ $# -ge 3 ] || printf '50123'
+[ $# -ge 3 ] || printf '%s' "${FAKE_PORTS:-50123}"
 exit 0
 NODE
 # gctk, at the city's build path, stands in for gctk rig serve: a start runs the
 # serve command through the library's sandbox, which GCTK_SCRIPTS_DIR names, as
 # the copy's leader does, keeps that profile, and reports the copy on 50200 as
-# one it started, which --check then reports from the copy's checkout. lsof
+# one it started, its app at FAKE_APP_URL, or at the copy's loopback URL when
+# that is empty, which --check then reports from the copy's checkout. lsof
 # names the copy's process as the one listening there, working in that checkout.
 mkdir -p "$CITY/.gc/services/gctk/bin"
 { printf '%s\n' "$SHEBANG"; cat; } > "$CITY/.gc/services/gctk/bin/gctk" <<'GCTK'
 printf '%s (in %s)\n' "$*" "$(pwd)" >> "$FAKE_DIR/gctk.argv"
 case "$*" in
   "rig serve --check")
-    if [ "$(cat "$FAKE_DIR/copy-dir" 2>/dev/null)" = "$(pwd)" ]; then printf '{"state":"running","port":50200}\n'; exit 0; fi
+    if [ "$(cat "$FAKE_DIR/copy-dir" 2>/dev/null)" = "$(pwd)" ]; then printf '{"state":"running","port":50200,"app_url":"%s"}\n' "${FAKE_APP_URL:-http://127.0.0.1:50200/}"; exit 0; fi
     printf '{"state":"none"}\n'; exit 3 ;;
   "rig serve --command "*)
     ( . "$GCTK_SCRIPTS_DIR/demo-engine-lib.sh" && demo_engine_sandboxed 50200 "$(pwd)" true ) \
       || { printf '{"state":"failed","reason":"serve-exited"}\n'; exit 1; }
     cp "$FAKE_DIR/profile" "$FAKE_DIR/copy-profile"
     pwd > "$FAKE_DIR/copy-dir"
-    printf '{"state":"running","port":50200,"started":true}\n' ;;
+    printf '{"state":"running","port":50200,"app_url":"%s","started":true}\n' "${FAKE_APP_URL:-http://127.0.0.1:50200/}" ;;
   "rig serve --stop") rm -f "$FAKE_DIR/copy-dir"; printf '{"state":"stopped"}\n' ;;
 esac
 exit 0
@@ -284,6 +285,7 @@ pour() {
   ( cd "$TMP/cwd" && env -i PATH="$PATH" HOME="$TMP/home" TMPDIR="$TMP" GC_CITY_PATH="$CITY" GIT_CEILING_DIRECTORIES="$TMP" \
       REVIEW_WORKSPACE_DIR="$WS" SPRINTSHOW_BIN="$TMP/bin/engine" STUB_PACK="$TMP/pack" \
       FAKE_LOG="$TMP/log" FAKE_DIR="$TMP" FAKE_RIG="$RIG" FAKE_DECLINE_RC=0 FAKE_UI_SERVE="${FAKE_UI_SERVE-}" \
+      FAKE_APP_URL="${FAKE_APP_URL-}" FAKE_PORTS="${FAKE_PORTS-}" \
       REQUEST_BEAD=tk-req SCRIPT_PATH="${POUR_SCRIPT:-$TMP/cwd/walkthrough.md}" OUT="$OUT" \
       SERVE_DIR="$2" SERVE_CMD="$3" BASE_URL="$4" RIG_PATH="${5-$RIG}" \
       SCRIPTS="$HERE" \
@@ -340,6 +342,13 @@ for MODE in strict plain; do
   has "$(cat "$TMP/gctk.argv")" 'rig serve --command npm run dev -- --port $PORT (in '"$WT)" "$MODE: gctk rig serve runs it as written in the worktree, \$PORT left for the copy"
   has "$(cat "$TMP/engine.argv")" "--base-url http://127.0.0.1:50200/" "$MODE: the engine records the copy"
   eq "$(git -C "$WT" rev-parse HEAD)" "$RIG_HEAD" "$MODE: which is at the rig's HEAD"
+  eq "$(cat "$TMP/decline.argv")" "" "$MODE: and nothing declines"
+
+  echo "# $MODE shell: a pour that names no app takes the rig's ui_serve_command, and records an iOS app at the URL its copy's command printed"
+  IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+  eq "$(FAKE_UI_SERVE='make start-ios' FAKE_APP_URL="$IOS_APP" FAKE_PORTS="$(printf '50301\n50302\n50303')" pour "$MODE" "" "" "")" "0|UPDATE;" "$MODE: the capture passes the sandbox, and the clip is recorded"
+  has "$(cat "$TMP/gctk.argv")" "rig serve --command make start-ios (in $WT)" "$MODE: gctk rig serve runs the rig's command in the worktree"
+  has "$(cat "$TMP/engine.argv")" "--base-url $IOS_APP --port 50301,50302,50303" "$MODE: the engine records the app the command brought up, with a port for each of its servers"
   eq "$(cat "$TMP/decline.argv")" "" "$MODE: and nothing declines"
 
   echo "# $MODE shell: a page script's pour on a rig that declares no ui_serve_command declines with the capture's gate"

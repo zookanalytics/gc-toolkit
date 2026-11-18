@@ -70,7 +70,7 @@ description = "Command that serves the rig's app (e.g. 'npm run dev'). The captu
 default = ""
 
 [vars.base_url]
-description = "URL of a deployed preview, or of the rig's app that a worktree of the rig serves on this host, driven as-is. A capture refuses any other server on this host, and the rig's app too when city.toml sets the rig's app_reads_city to \"true\". At most one of serve_dir / serve_cmd / base_url; with none, a page script takes the rig's ui_serve_command."
+description = "URL of a deployed preview, of the rig's app that a worktree of the rig serves on this host, or of an iOS app on a simulator, ios-simulator://<device UDID>/<bundle id>, driven as-is. A capture refuses any other server on this host, and the rig's app too when city.toml sets the rig's app_reads_city to \"true\". At most one of serve_dir / serve_cmd / base_url; with none, a page script takes the rig's ui_serve_command."
 default = ""
 
 [vars.serve_port]
