@@ -1614,8 +1614,9 @@ and what Gas City's own dashboard shows of it.
   page as checks, so the page holds no rule for it.
 
 The page leads with the count of the failing checks it shows, which reaches zero
-when no check has failed two runs in a row. With no run in the log, or none that
-measured the checks, it shows no count and says why.
+when no check has failed two runs in a row. The words beside the count say so,
+and name how many accepted checks and checks not measured it leaves out. With no
+run in the log, or none that measured the checks, it shows no count and says why.
 
 **How it is cached.** The document is cached whole for five minutes
 (`server.CityPageTTL`), with one read at a time, since the newest run changes

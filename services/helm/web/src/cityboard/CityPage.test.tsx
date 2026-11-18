@@ -88,7 +88,7 @@ describe('the city page', () => {
     await loaded();
     expect(calls).toEqual(['helm/city']);
     expect(document.title).toBe('helm · city');
-    expect(leadOf()).toBe('15checks are failing.');
+    expect(leadOf()).toBe('15checks have failed two runs in a row, not counting 1 accepted.');
     expect(sections()).toEqual(['Failing15', 'Accepted1', 'Monitor orders7']);
   });
 
@@ -166,7 +166,7 @@ describe('a check the run did not measure', () => {
     cityReads = [() => json(withDoctor({ count: 1, failing: [shown], not_measured: [accepted, fine] }))];
     render(<Page />);
     await loaded();
-    expect(leadOf()).toBe('1check is failing.');
+    expect(leadOf()).toBe('1check has failed two runs in a row, not counting 1 accepted and 2 not measured.');
     const [row] = rowsUnder('Failing');
     expect(titleOf(row)).toBe('worktree-disk-size');
     expect(text(row.querySelector('.tag'))).toBe('not measured');
@@ -191,7 +191,7 @@ describe('a lead that reaches zero, or has nothing to count', () => {
     cityReads = [() => json(withDoctor({ count: 0, failing: [] }))];
     render(<Page />);
     await loaded();
-    expect(leadOf()).toBe('0No check has failed two runs in a row.');
+    expect(leadOf()).toBe('0No check has failed two runs in a row, not counting 1 accepted.');
     expect(sections()).toEqual(['Accepted1', 'Monitor orders7']);
   });
 
@@ -257,7 +257,7 @@ describe('a read that fails', () => {
     });
     const alert = await screen.findByRole('alert');
     expect(text(alert)).toContain('the supervisor did not answer');
-    expect(leadOf()).toBe('15checks are failing.');
+    expect(leadOf()).toBe('15checks have failed two runs in a row, not counting 1 accepted.');
   });
 });
 

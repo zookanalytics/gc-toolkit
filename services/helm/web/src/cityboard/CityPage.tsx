@@ -119,9 +119,7 @@ function DoctorView({ doctor: d }: { doctor: Doctor }) {
           <span className="lead-count" style={{ color: d.count > 0 ? AMBER : GREEN }}>
             {d.count}
           </span>
-          <span className="lead-text">
-            {d.count === 0 ? 'No check has failed two runs in a row.' : `${d.count === 1 ? 'check is' : 'checks are'} failing.`}
-          </span>
+          <span className="lead-text">{leadText(d)}</span>
         </div>
       ) : (
         <Note>No doctor run has measured the checks yet, so nothing here says which checks fail.</Note>
@@ -166,6 +164,18 @@ function DoctorView({ doctor: d }: { doctor: Doctor }) {
       )}
     </>
   );
+}
+
+/** The words after the lead's count. The count is of the checks two runs in a
+ *  row found failing, so at every count the words say so, and name the accepted
+ *  checks and the checks not measured, which it leaves out. */
+function leadText(d: Doctor): string {
+  const failed = d.count === 0 ? 'No check has' : d.count === 1 ? 'check has' : 'checks have';
+  const left = [
+    d.accepted.length > 0 ? `${d.accepted.length} accepted` : '',
+    d.not_measured.length > 0 ? `${d.not_measured.length} not measured` : '',
+  ].filter((s) => s !== '');
+  return `${failed} failed two runs in a row${left.length > 0 ? `, not counting ${left.join(' and ')}` : ''}.`;
 }
 
 /** When doctor last ran, whether that is late, and whether the run completed. */
