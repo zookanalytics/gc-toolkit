@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import golden from '../../../internal/cityboard/testdata/city.json';
+import firstRun from '../../../internal/cityboard/testdata/first-run.json';
 import { Page } from '../rigboard/Board';
 import { when } from './CityPage';
 import type { Check, Document, Doctor, Response as CityResponse } from './document.gen';
@@ -186,12 +187,22 @@ describe('a check the run did not measure', () => {
 });
 
 describe('a lead that reaches zero, or has nothing to count', () => {
-  it('leads with zero when no check is failing', async () => {
+  it('leads with zero when no check has failed two runs in a row', async () => {
     cityReads = [() => json(withDoctor({ count: 0, failing: [] }))];
     render(<Page />);
     await loaded();
-    expect(leadOf()).toBe('0No check is failing.');
+    expect(leadOf()).toBe('0No check has failed two runs in a row.');
     expect(sections()).toEqual(['Accepted1', 'Monitor orders7']);
+  });
+
+  it('says what its zero counts when the run’s only failure is its first', async () => {
+    // internal/cityboard/testdata/first-run.json: the document the city's read
+    // builds from a run whose one failing check failed for the first time.
+    cityReads = [() => json({ read_at: live.read_at, city: firstRun as unknown as Document })];
+    render(<Page />);
+    await loaded();
+    expect(leadOf()).toBe('0No check has failed two runs in a row.');
+    expect(sections()).toEqual(['Monitor orders0']);
   });
 
   it('shows no count when the log holds no doctor run', async () => {

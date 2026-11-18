@@ -120,7 +120,7 @@ function DoctorView({ doctor: d }: { doctor: Doctor }) {
             {d.count}
           </span>
           <span className="lead-text">
-            {d.count === 0 ? 'No check is failing.' : `${d.count === 1 ? 'check is' : 'checks are'} failing.`}
+            {d.count === 0 ? 'No check has failed two runs in a row.' : `${d.count === 1 ? 'check is' : 'checks are'} failing.`}
           </span>
         </div>
       ) : (

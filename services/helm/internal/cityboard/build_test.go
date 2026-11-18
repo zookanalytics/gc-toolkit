@@ -235,12 +235,34 @@ func TestTheLiveRunsPage(t *testing.T) {
 	if first := d.Failing[0].Name; first != "gc-toolkit:check-pour-text-current" {
 		t.Errorf("the first failing check is %s, want the first error by name", first)
 	}
+	matchesGolden(t, doc, "city.json", "TestTheLiveRunsPage")
+}
+
+// A run whose only failure is its first shows no check, so the page's lead
+// counts zero while a check is failing. Its document is the golden
+// testdata/first-run.json, which the web page's tests read, so the words the
+// page leads with for that zero are tested on what the read builds. -update
+// writes it again.
+func TestAFirstFailureLeadsWithZero(t *testing.T) {
+	rec := run(t0)
+	rec.Failing = []doctor.Check{check("controller", "error", 1)}
+	doc := Build(rec, t0.Add(time.Minute))
+	if d := doc.Doctor; d.Count != 0 || len(d.Failing)+len(d.NotMeasured)+len(d.Accepted) != 0 {
+		t.Fatalf("a run whose only failure is its first gives count %d and %+v", d.Count, d)
+	}
+	matchesGolden(t, doc, "first-run.json", "TestAFirstFailureLeadsWithZero")
+}
+
+// matchesGolden fails the test unless doc is the golden testdata/<name>, which
+// -update writes again, as the test named test does.
+func matchesGolden(t *testing.T, doc Document, name, test string) {
+	t.Helper()
 	got, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got = append(got, '\n')
-	golden := filepath.Join("testdata", "city.json")
+	golden := filepath.Join("testdata", name)
 	if *update {
 		if err := os.WriteFile(golden, got, 0o644); err != nil {
 			t.Fatal(err)
@@ -249,9 +271,9 @@ func TestTheLiveRunsPage(t *testing.T) {
 	}
 	want, err := os.ReadFile(golden)
 	if err != nil {
-		t.Fatalf("%v; go test ./internal/cityboard -run TestTheLiveRunsPage -update writes it", err)
+		t.Fatalf("%v; go test ./internal/cityboard -run %s -update writes it", err, test)
 	}
 	if !bytes.Equal(got, want) {
-		t.Fatalf("%s is stale: go test ./internal/cityboard -run TestTheLiveRunsPage -update writes it again", golden)
+		t.Fatalf("%s is stale: go test ./internal/cityboard -run %s -update writes it again", golden, test)
 	}
 }

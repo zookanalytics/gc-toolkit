@@ -40,7 +40,7 @@ type Doctor struct {
 	Why       string `json:"why,omitempty"`
 	Measured  string `json:"measured,omitempty"`
 	// Count is how many checks the page shows failing, the number it leads with.
-	// It reaches zero when none is failing.
+	// It reaches zero when no check has failed two runs in a row.
 	Count int `json:"count"`
 	// Failing is each check the page shows failing: one that two runs in a row
 	// measured failing and the operator has not accepted, and one such check

@@ -467,7 +467,7 @@ newest match first. It shows:
 - each monitor order's last good run.
 
 The page leads with the count of failing checks it shows, which reaches zero
-when none is failing.
+when no check has failed two runs in a row.
 
 **A check that clears on its own stays off the board.** A failure the next run
 no longer finds was in one run only, and the page never shows it. A check that

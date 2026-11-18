@@ -51,7 +51,7 @@ export interface Doctor {
   measured?: string;
   /**
    * Count is how many checks the page shows failing, the number it leads with.
-   * It reaches zero when none is failing.
+   * It reaches zero when no check has failed two runs in a row.
    */
   count: number /* int */;
   /**
