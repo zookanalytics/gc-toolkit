@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tests.test.sh — guards the draft CI-cost gate in tests.yml, the jq check
-# each job runs before the suite, the Go checks' commands, and the names of
-# the checks main's ruleset requires.
+# each job runs before the suite, the seconds each job that runs the suite
+# keeps, the Go checks' commands, and the names of the checks main's ruleset
+# requires.
 #
 # A draft pull request must not run the *.test.sh suite, so a change still
 # taking follow-up commits does not spend Actions minutes on every push. A push
@@ -14,6 +15,13 @@
 # Every job that runs the suite runs check-jq.sh before it, so a job whose
 # runner resolves a jq older than 1.8 fails by name instead of running the
 # suite on it.
+#
+# Every job that runs the suite keeps each run's seconds for the size comment's
+# section on the suite's time: it writes them with --seconds, shows them in its
+# job summary and uploads them as suite-times-<job> unless the run was
+# cancelled, in steps whose failure fails no check, and suite-time.sh, which
+# reads them back, names the same jobs. A job that kept none, or kept them under
+# another name, would show no time.
 #
 # The Go checks, go on Linux and go-macos on macOS, each run `go vet ./... &&
 # go test ./...` in both Go modules, so every Go test runs on both platforms.
@@ -102,6 +110,35 @@ done < <(jq_check_lines)
 [ "$suite_jobs" -gt 0 ] \
     || note "found no job that runs run-tests.sh in tests.yml, so the jq check checked no job"
 
+# The lines of a job that are not comments.
+job_lines() {
+    awk -v j="$1" '
+        /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
+        in_jobs && /^[^[:space:]#]/ { in_jobs = 0 }
+        !in_jobs { next }
+        /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { job = $1; sub(/:$/, "", job); next }
+        job == j && !/^[[:space:]]*#/' "$WF"
+}
+suite_names=""
+while IFS=$'\t' read -r j check suite; do
+    [ "$suite" -gt 0 ] || continue
+    suite_names="$suite_names $j"
+    lines="$(job_lines "$j")"
+    for want in 'tools/run-tests.sh -j "$(getconf _NPROCESSORS_ONLN)" --seconds "$RUNNER_TEMP/suite-times.tsv"' \
+        'run: bash .github/workflows/suite-time.sh summary "$RUNNER_TEMP/suite-times.tsv" >> "$GITHUB_STEP_SUMMARY"' \
+        'name: suite-times-${{ github.job }}' 'path: ${{ runner.temp }}/suite-times.tsv'; do
+        grep -Fq -- "$want" <<<"$lines" || note "job '$j' must keep each run's seconds: it lacks '$want'"
+    done
+    [ "$(grep -cF 'if: ${{ !cancelled() }}' <<<"$lines")" -ge 2 ] \
+        || note "job '$j' must show and upload the seconds unless the run was cancelled, so a failed suite keeps them too"
+    [ "$(grep -cF 'continue-on-error: true' <<<"$lines")" -ge 2 ] \
+        || note "job '$j' must let the steps that keep the seconds fail without failing the check"
+done < <(jq_check_lines)
+listed="$(sed -n 's/^SUITES=(\(.*\))$/\1/p' "$HERE/suite-time.sh" | tr ' ' '\n' | sort | paste -sd' ' -)"
+ran="$(tr ' ' '\n' <<<"$suite_names" | grep -v '^$' | sort | paste -sd' ' -)"
+[ "$listed" = "$ran" ] \
+    || note "suite-time.sh's SUITES ($listed) must name the jobs that run the suite ($ran)"
+
 for r in test test-macos go; do
     grep -qx -- "$r" <<<"$jobs" \
         || note "a job with the id '$r' must exist; main's ruleset requires the check named $r"
@@ -135,7 +172,7 @@ for j in go go-macos; do
             || note "job '$j' must run 'go vet ./... && go test ./...' in $m, so every Go test runs on both platforms"
     done
 done
-listed="$(awk -F'\t' '{
+package_lists="$(awk -F'\t' '{
     s = $3
     while (match(s, /go test[^;&|]*/)) {
         seg = substr(s, RSTART + 7, RLENGTH - 7); s = substr(s, RSTART + RLENGTH)
@@ -143,8 +180,8 @@ listed="$(awk -F'\t' '{
         for (i = 1; i <= n; i++) if (w[i] ~ /^\.\// && w[i] != "./...") { print $1; break }
     }
 }' <<<"$steps" | sort -u | paste -sd, -)"
-[ -z "$listed" ] \
-    || note "job(s) $listed run go test on a list of packages; a Go check runs go test ./... over its module"
+[ -z "$package_lists" ] \
+    || note "job(s) $package_lists run go test on a list of packages; a Go check runs go test ./... over its module"
 
 if [ "$fail" -ne 0 ]; then
     echo "tests.test.sh: FAILED" >&2

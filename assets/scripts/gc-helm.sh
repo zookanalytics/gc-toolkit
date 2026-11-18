@@ -257,7 +257,11 @@ lifts the bead's hold:mayor in the release's write, because sending a held bead
 on is a placement, and Gas City serves no bead a hold label holds, assigned or
 not. Both are refused on an anchor whose merge_result is pre_open_gate or
 pull_request, since the merge cadence drives it and work on its branch goes to
-a child. --assign is refused
+a child. --release itself is refused, with nothing written, on a bead whose PR
+waits on the pending record (pull_request_pending or
+pull_request_head_changed): the landing order works that bead while it is
+assigned to nobody, so a release would not stop it, and the refusal names what
+does, a human gate on the bead or the PR's retirement. --assign is refused
 beside --route and on a closed anchor, and without --waiting-on also on a bead
 blocked by anything but a human gate; with --waiting-on the named waits gate
 the hand-off, since the agent's hook offers the bead only once bd reports it
@@ -1487,6 +1491,19 @@ cmd_takeaway() {
     fi
     # <<< takeaway-release-closed-anchor
 
+    # A bead whose PR waits on the pending record is assigned to nobody while
+    # the landing order works it, so a release, which reopens and unassigns it,
+    # leaves the order working it. A human gate on the bead holds its merge and
+    # its next review run, and the PR's retirement closes the PR and then the
+    # bead, so the refusal names those two. Refused before anything is written.
+    if [ -n "$release_park" ]; then
+        case "$anchor_mr" in
+            pull_request_pending|pull_request_head_changed)
+                echo "$PROG: takeaway: --release on $bead, whose PR waits on the pending record ($anchor_mr). The landing order works that bead while it is assigned to nobody, so a release would not stop it. To hold the PR for a person, file a human gate on $bead: $SCRIPT_DIR/human-gate.sh --subject $bead --key <key> --message '<what the person decides>'. To end the PR, retire it: $SCRIPT_DIR/pr-dispose.sh --anchor $bead --successor <bead> --kind <kind> --note '<why>', or --retire on a sitting's sign-off. Re-run without --release to land the headline alone. Nothing was written." >&2
+                exit 2 ;;
+        esac
+    fi
+
     # An anchor in a detached state rests unrouted and unassigned while the merge
     # cadence drives it (lifecycle.toml detached_states), and work on its branch
     # goes to a child (the prs skill). A route or an assignee would offer the
@@ -1558,9 +1575,11 @@ cmd_takeaway() {
     # workspace-setup, before the wait implements, pushes or hands off, so
     # equality proves the wait MEANS to ride this branch, not that its work is
     # on it. The proof its work landed is a post-push state: the wait is closed
-    # (merged), or its assignee is the refinery (the handoff submit-and-exit
-    # writes only after it verifies the push). Absent the proof — a wait still
-    # open under a pool, or a probe that will not read — the edge stands, so
+    # (merged), its assignee is the refinery (the handoff submit-and-exit
+    # writes only after it verifies the push), or its PR waits on the pending
+    # record, which only the refinery's publication of the pushed head writes.
+    # Absent the proof — a wait still open under a pool, or a probe that will
+    # not read — the edge stands, so
     # <bead> cannot merge past work that has not landed. Only a landed rider is
     # dropped; if EVERY named wait is one, the sitting is settled with respect to
     # all of them, so no_wait is set and the headline stamps gc.takeaway_settled
@@ -1593,10 +1612,12 @@ cmd_takeaway() {
             _wbranch=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then ((.[0].metadata // {}).branch // "") else "" end' 2>/dev/null)
             _wstatus=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)
             _wassignee=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then (.[0].assignee // "") else "" end' 2>/dev/null)
+            _wmr=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then ((.[0].metadata // {}).merge_result // "") else "" end' 2>/dev/null)
             _rider=""
             if [ -n "$subj_branch" ] && [ "$_wbranch" = "$subj_branch" ]; then
                 case "$_wstatus" in closed) _rider=1 ;; esac
                 case "$_wassignee" in refinery|*.refinery|*/refinery) _rider=1 ;; esac
+                case "$_wmr" in pull_request_pending|pull_request_head_changed) _rider=1 ;; esac
             fi
             if [ -n "$_rider" ]; then
                 skipped_riders="$skipped_riders $_w"
