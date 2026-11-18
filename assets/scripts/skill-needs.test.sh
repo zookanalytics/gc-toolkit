@@ -1212,33 +1212,37 @@ for sh_ in $shells; do
         bad "($sh_) converse-iterate-document: a scaffold the store refuses is not reported as written" "exit $rc"
     fi
 done
-echo "── a sitting's work order quotes the operator apart from its own proposal ──"
-# A work order a sitting sends, a task's description or a rework's brief, quotes
-# the operator's words apart from the sitting's own, and a part that changes
-# what they asked for goes to them before the work is sent.
+echo "── a sitting's work order holds to the course the operator agreed to ──"
+# A work order a sitting sends, a task's description or a rework's brief, is the
+# course the operator agreed to, which names each place it goes past or against
+# what they said, and it keeps their words and the sitting's own parts apart.
 tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-order"
 tr -s '[:space:]' ' ' <"$CONTINUE" >"$TMP/continue-order"
 tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-order"
-have "the settle skill holds the work to what the operator asked for" \
-    'The work reaches no further than what the operator asked for.' "$TMP/settle-order"
+have "the settle skill holds the work to the course the operator agreed to" \
+    'The work is the course the operator agreed to, as you last put it to them whole.' "$TMP/settle-order"
+have "…takes their remarks as direction, and owes them the sitting's own view" \
+    'Their remarks are direction to think with, and you owe them your own view, so the course can go past or against what they said.' "$TMP/settle-order"
+have "…names each place the course departs from what they said, a removal, a change of reach or another rig's capability first" \
+    'It names each place it does as its concrete result, in a short line they can answer, such as "Ctrl+R is removed", and first each such place that removes something, narrows or widens what they asked for, or gives another rig a capability.' "$TMP/settle-order"
+have "…sends the work on their go, which agreement while they are still asking is not" \
+    'The work goes once they say go, and agreement with a direction while they are still asking questions is not a go.' "$TMP/settle-order"
+have "…and puts a part of those kinds that the course did not name back to them first" \
+    'A part of those kinds that the course did not name goes back to them in a hand-back'"'"'s decision that restates the course' "$TMP/settle-order"
+have "a rework's ruling line is its whole order only when it carries the agreed course whole" \
+    'A line that carries the course they agreed to whole and adds nothing of yours is the whole order' "$TMP/settle-order"
 have "…in a task's description, in this rig's store or another's, and in a rework's brief" \
     'Its order is the description of a task you file, in this rig'"'"'s store or another'"'"'s, or the brief of a rework the sign-off files' "$TMP/settle-order"
 have "…which quotes their words" \
     '`Stated by the operator:` their words that ask for the work, and any other words of theirs it rests on, quoted, with where they said them.' "$TMP/settle-order"
 have "…apart from each part the sitting wrote" \
     '`Proposed by this sitting:` each part you wrote that they did not state' "$TMP/settle-order"
-have "…and puts a part that changes their ask to them before the work is sent" \
-    'Before you send the work, put to the operator, as your proposal in a hand-back'"'"'s decision, each proposed part that removes something, narrows or widens what they asked for, or gives another rig a capability.' "$TMP/settle-order"
-have "…as it does the whole work when none of their words asks for it" \
-    'When none of their words asks for the work, as when they agree with a direction while they are still asking questions, put the whole work to them the same way.' "$TMP/settle-order"
-have "…and moves to the stated side only what they approve" \
-    'A part they approve moves to the stated side, quoting their approval, and a part they decline stays out of the order.' "$TMP/settle-order"
 have "a rework's ruling line names the brief written on the PR's anchor" \
     '--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"' "$SETTLE"
 have "the continue skill writes a turn's work order the settle skill's way, before anything files it" \
     'Write the order of work or a rework that a turn'"'"'s ruling sends as `converse-settle` gives it (Send the work), before you or the answer files it' "$TMP/continue-order"
-have "the prompt has a sitting put a part that changes the operator's ask to them before the work is sent" \
-    'Work you send reaches no further than what the operator asked for, so a part of it that removes something, narrows or widens their ask, or gives another rig a capability is your proposal, which you put to them before the work is sent' "$TMP/prompt-order"
+have "the prompt holds the work a sitting sends to the course the operator agreed to, naming where it departs from what they said" \
+    'Work you send is the course the operator agreed to, as you last put it to them whole. Their remarks are direction to think with, and you owe them your own view, so the course names each place it goes past or against what they said, first those that remove something, narrow or widen their ask, or give another rig a capability. The work goes once they say go' "$TMP/prompt-order"
 fenced_block "$SETTLE" 'gc sling <rig>/<pool> "$WORK"' | fill_block >"$CH/order-block"
 fenced_block "$SETTLE" '--append-notes "$BRIEF"' | fill_block >"$CH/brief-block"
 for sh_ in $shells; do

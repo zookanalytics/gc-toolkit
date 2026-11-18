@@ -63,24 +63,25 @@ sitting ends at the hand-off for new work that opens its own PR, write what was
 agreed into the create's description in full, because the brief is then all
 the work carries of the discussion.
 
-The work reaches no further than what the operator asked for. Its order is the
-description of a task you file, in this rig's store or another's, or the brief
-of a rework the sign-off files (below), and it keeps their words apart from
-yours, as the note on an epic the ruling files does:
+The work is the course the operator agreed to, as you last put it to them
+whole. Their remarks are direction to think with, and you owe them your own
+view, so the course can go past or against what they said. It names each place
+it does as its concrete result, in a short line they can answer, such as
+"Ctrl+R is removed", and first each such place that removes something, narrows
+or widens what they asked for, or gives another rig a capability. The work
+goes once they say go, and agreement with a direction while they are still
+asking questions is not a go. A part of those kinds that the course did not
+name goes back to them in a hand-back's decision that restates the course, and
+the conversation stays open until they rule (`converse-continue`).
+
+Its order is the description of a task you file, in this rig's store or
+another's, or the brief of a rework the sign-off files (below), and it keeps
+their words apart from yours, as the note on an epic the ruling files does:
 
 - `Stated by the operator:` their words that ask for the work, and any other
   words of theirs it rests on, quoted, with where they said them.
 - `Proposed by this sitting:` each part you wrote that they did not state, such
   as an approach or a name, or `none`.
-
-Before you send the work, put to the operator, as your proposal in a
-hand-back's decision, each proposed part that removes something, narrows or
-widens what they asked for, or gives another rig a capability. When none of
-their words asks for the work, as when they agree with a direction while they
-are still asking questions, put the whole work to them the same way. Keep the
-conversation open until they rule (`converse-continue`). A part they approve
-moves to the stated side, quoting their approval, and a part they decline stays
-out of the order.
 
 In the block below, the sling runs only once the create has returned the
 bead's id. The comment then records the dispatch as one of the visit's actions,
@@ -118,10 +119,11 @@ lands, in one plain sentence that names no other rig or its beads.
   ```
 
 **A rework's order is its ruling line**, which the sign-off hands the rework
-as the ruling to carry out (`--rework`, below). A line that quotes the
-operator's words and adds nothing of yours is the whole order. When the rework
-needs more than their words, write the order in the notes of the PR's anchor,
-the bead that carries its `merge_result`. A scaffold is such an order already,
+as the ruling to carry out (`--rework`, below). A line that carries the course
+they agreed to whole and adds nothing of yours is the whole order, as when they
+stated the course themselves, naming the act and what it does. When the course
+needs more than one line, write the order in the notes of the PR's anchor, the
+bead that carries its `merge_result`. A scaffold is such an order already,
 because the operator ruled each of its lines (`converse-iterate-document`):
 
 ```bash
