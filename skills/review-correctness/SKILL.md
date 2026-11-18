@@ -219,6 +219,31 @@ it, spelled as the list spells it, or `Fresh-eyes sweep` for a defect the
 sweep below found. A defect a hunting angle found names that angle. Each
 finding also names its severity, the grade below.
 
+### A failure partway through the change's own steps
+
+A failure partway through the change's own steps is a trigger of its own kind:
+the change's process stopping between two of its writes, a write failing after
+an earlier write of the same act landed, or the code that handles such a
+failure failing in turn, as a retry of a retry or the error path of an error
+path does. A failed read or write that the code takes as an answer, such as an
+unreadable record read as an absent one or an error reported as success, is
+not this kind: the code goes on from a wrong answer, and What blocks grades it
+as it grades any other trigger.
+
+A finding of this kind names its cause: the act that takes more than one
+write, or the platform primitive that does the act whole and that the change
+steps around. Its fix is the shape in which the failure cannot happen or
+cannot last: the act as one write, that primitive, or a pass that, from what it
+reads anyway, compares what is there with what should be, so that its usual
+path finishes the act. Code whose only job is to find, remember or repair a
+half-done act is not that fix, and the finding does not ask for it, as the base
+standard's rule against one more guard for each newly found bypass says
+(`references/work-quality-base.template.md`). A search that every pass runs for
+a half-done act, a key that records a failed write and a retry around the
+repair are such code. The finding's failure scenario says what must stop or
+fail and where, then what one occurrence costs and what would show that one
+happened.
+
 ### The fresh-eyes sweep
 
 When the hunt is done and its candidates are deduped, one fresh pass looks
@@ -249,7 +274,9 @@ misses:
   interrupt, the error path of an error path, an empty or unexpected input, a
   caller the change did not have in mind. An interface the diff calls in a way
   that is easy to get wrong, or adds in a shape that invites the wrong call, is
-  one too.
+  one too. A hazard there that starts from one of the change's own acts left
+  half done is a failure partway through the change's own steps, and its
+  section above says what its finding asks for.
 
 Where your provider offers subagents, hand the sweep to a finder of its own
 (below). Where it offers none, sweep yourself in a separate pass: read the
@@ -359,6 +386,17 @@ reachable trigger whose wrong output is a durable wrong record, or a fail-open
 where fail-closed was intended, is P1 however rare the trigger. When you can't
 tell whether something is reachable, say what you checked and grade on what
 you know.
+
+A failure partway through the change's own steps is graded on how its trigger
+arises and what one occurrence costs, not by the rule above for a rare
+trigger. When its trigger needs a fault, such as a stop, a crash or a transient
+error, to land partway through one act, it blocks only when one occurrence is
+unsafe or cannot be undone, as when it loses or overwrites data, lands or
+merges work past a check, or writes a false record that nothing would show.
+When one occurrence costs only work done again, such as a step run twice or one
+more run than a limit allows, or leaves a half-done act that a later pass or a
+person can put right, it is a P2. A write that fails every time for some input
+or setting needs no fault, so the rule above grades it.
 
 On prose, a finding blocks when its failure scenario is one of these:
 

@@ -49,6 +49,17 @@
 #     on a reachable case, and a failure that depends on how work the text
 #     leaves open is built is a P2 at most. A diff no suite touches has nothing
 #     to run, and the Verification line says so.
+#   - A failure partway through the change's own steps is a kind of its own in
+#     the correctness method, and a failed read or write taken as an answer is
+#     not of it. Its finding names the act that takes more than one write and
+#     asks for the shape in which the failure cannot happen or cannot last,
+#     never code that only repairs a half-done act, and cites the base
+#     standard's rule, which the base fragment still holds. What blocks grades
+#     it on what one occurrence costs, and the rule for a rare trigger keeps
+#     grading every other trigger. The ruling bar's section of the same name
+#     fixes it only by that shape, leaves repair code to a person's ruling,
+#     puts a blocking one no shape can fix to a person, records the gap of one
+#     it does not fix, and does not fix a gap in a round's own fix again.
 #   - Neither review formula names a check's judgment: no test or suite, no
 #     P0, P1 or P2 grade, no Verification line, and neither the correctness
 #     method's What to check list nor any dimension of it. The correctness
@@ -447,6 +458,53 @@ hasF "$TMP/evidence" 'Run nothing, and the Verification line says so, with how y
   "…which the Verification line says, with how the reviewer found it"
 hasF "$TMP/verdict.correctness" 'or that no suite touches the diff, and how you found it>' \
   "…in the form the verdict section's Verification line offers"
+
+echo "# a failure partway through the change's own steps takes the shape that cannot fail, is graded on what one occurrence costs, and is not fixed again"
+awk '/^### A failure partway through the change.s own steps$/ {f = 1; next} f && /^#/ {exit} f' "$METHOD" > "$TMP/partway"
+hasF "$TMP/partway" "A failure partway through the change's own steps is a trigger of its own kind: the change's process stopping between two of its writes, a write failing after an earlier write of the same act landed, or the code that handles such a failure failing in turn" \
+  "the correctness method says what a failure partway through the change's own steps is"
+hasF "$TMP/partway" 'is not this kind: the code goes on from a wrong answer, and What blocks grades it as it grades any other trigger.' \
+  "…and that a failed read or write the code takes as an answer is not one"
+hasF "$TMP/partway" 'A finding of this kind names its cause: the act that takes more than one write, or the platform primitive that does the act whole and that the change steps around.' \
+  "…whose finding names the act that takes more than one write, or the primitive it steps around"
+hasF "$TMP/partway" 'Its fix is the shape in which the failure cannot happen or cannot last' "…and asks for the shape in which the failure cannot happen or cannot last"
+hasF "$TMP/partway" 'Code whose only job is to find, remember or repair a half-done act is not that fix, and the finding does not ask for it' \
+  "…never for code that only repairs a half-done act"
+hasF "$TMP/partway" "as the base standard's rule against one more guard for each newly found bypass says (\`references/work-quality-base.template.md\`)" \
+  "…as the base standard's rule says"
+hasF "$REFS/work-quality-base.template.md" 'one more guard for each newly found bypass' "…which the base fragment still holds"
+hasF "$TMP/partway" "The finding's failure scenario says what must stop or fail and where, then what one occurrence costs and what would show that one happened." \
+  "…and whose failure scenario says how it arises, what one occurrence costs and what would show one"
+hasF "$METHOD" "A hazard there that starts from one of the change's own acts left half done is a failure partway through the change's own steps" \
+  "…which the sweep's second-tier footguns point to"
+hasF "$TMP/blocks" 'a reachable trigger whose wrong output is a durable wrong record, or a fail-open where fail-closed was intended, is P1 however rare the trigger.' \
+  "what blocks grades a rare trigger whose wrong output is a durable wrong record, or a fail-open, P1"
+hasF "$TMP/blocks" "A failure partway through the change's own steps is graded on how its trigger arises and what one occurrence costs, not by the rule above for a rare trigger." \
+  "…and a failure partway through the change's own steps on how its trigger arises and what one occurrence costs"
+hasF "$TMP/blocks" 'it blocks only when one occurrence is unsafe or cannot be undone, as when it loses or overwrites data, lands or merges work past a check, or writes a false record that nothing would show.' \
+  "…blocking only when one occurrence is unsafe or cannot be undone"
+hasF "$TMP/blocks" 'When one occurrence costs only work done again, such as a step run twice or one more run than a limit allows, or leaves a half-done act that a later pass or a person can put right, it is a P2.' \
+  "…and a P2 when one occurrence costs only work done again or a half-done act that can be put right"
+hasF "$TMP/blocks" 'A write that fails every time for some input or setting needs no fault, so the rule above grades it.' \
+  "…while a write that fails every time stays under the rule for any other trigger"
+RULING="$ROOT/skills/review-ruling/SKILL.md"
+PARTWAY="A failure partway through the change's own steps"
+eq "$(grep -cxF "### $PARTWAY" "$METHOD")" 1 "the correctness method has one section named for the kind"
+eq "$(grep -cxF "## $PARTWAY" "$RULING")" 1 "…and the ruling bar one of the same name, which points to it by that name"
+awk '/^## A failure partway through the change.s own steps$/ {f = 1; next} f && /^## / {exit} f' "$RULING" > "$TMP/ruling.partway"
+hasF "$TMP/ruling.partway" "**Its fix is that shape.** Make it when the point's rule makes the point must-fix." \
+  "…which fixes a point of this kind only by that shape"
+hasF "$TMP/ruling.partway" "Code whose only job is to find, remember or repair the change's own half-done act is written only on a person's ruling" \
+  "…leaves code that repairs a half-done act to a person's ruling"
+hasF "$TMP/ruling.partway" 'A blocking one is put to a person (A question only a person can answer, below)' \
+  "…puts a blocking point no such shape can fix to a person"
+hasF "$TMP/ruling.partway" 'A non-blocking one is declined.' "…and declines a non-blocking one"
+hasF "$TMP/ruling.partway" 'Its reason says where the gap is, what one occurrence costs and what would show that one happened.' \
+  "…recording the gap of a point it does not fix"
+hasF "$TMP/ruling.partway" "**A gap in a round's own fix is not fixed again.** A point of this kind raised against code that an earlier round wrote as its fix is ruled as one no such shape can fix." \
+  "…and does not fix a gap in a round's own fix again"
+hasF "$RULING" "A comment that raises a failure partway through the change's own steps is fixed only as that section above says." \
+  "…which a person's comment of this kind follows too"
 
 echo "# a demo shows a reviewer what the change does, concisely, and the demo method posts only what such a demo needs"
 DEMO="$ROOT/skills/review-demo/SKILL.md"

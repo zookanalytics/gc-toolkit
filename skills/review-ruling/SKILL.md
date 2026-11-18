@@ -36,6 +36,33 @@ the purpose its row in the check index states.
 - **Every finding is ruled**, so a finding you do not act on is still answered
   where the PR shows its lane's verdict.
 
+## A failure partway through the change's own steps
+
+The correctness method's section of that name says what such a failure is, and
+the fix it takes: the shape in which the failure cannot happen or cannot last.
+A point of this kind, a lane's finding or a person's comment, is ruled by its
+own rule as any point is, and these decide what the head carries for it:
+
+- **Its fix is that shape.** Make it when the point's rule makes the point
+  must-fix. When the shape reaches outside the reviewed diff, a blocking point
+  is deferred, as any such fix is.
+- **Code that repairs the act is a person's call.** Code whose only job is to
+  find, remember or repair the change's own half-done act is written only on a
+  person's ruling, such as an ask that carries one or the answer to a question
+  put to them.
+- **A point no such shape can fix gets no code.** A blocking one is put to a
+  person (A question only a person can answer, below), because keeping the gap
+  or building its repair is theirs to decide. A non-blocking one is declined.
+- **A point that holds and gets no fix records its gap.** Its reason says where
+  the gap is, what one occurrence costs and what would show that one happened.
+- **A gap in a round's own fix is not fixed again.** A point of this kind raised
+  against code that an earlier round wrote as its fix is ruled as one no such
+  shape can fix.
+  `git log --format='%h %s' origin/<the PR's target>..HEAD -- <the locus's file>`
+  lists the branch's commits to that file. A round's fix commit names in its
+  message the point it fixed, and `git show <commit>` shows whether it wrote the
+  code the locus names.
+
 ## Each fix is a commit of its own
 
 Fix each point you rule must-fix with a commit of its own in the run's
@@ -70,7 +97,8 @@ correctness method gives a reviewer's finding, in its What blocks, and apply
 that scale's rule for the grade: a P0 or a P1 is fixed; a P2 is fixed when its
 fix is low-risk and net-positive and declined when it is risky or marginal;
 and a nit, a preference that no grade covers, is answered and not fixed. The
-reason names the grade.
+reason names the grade. A comment that raises a failure partway through the
+change's own steps is fixed only as that section above says.
 
 A batch of a person's comments reaches the run as one ask, and each comment in
 it is a human finding naming that ask as its fix unit, which the round's read
