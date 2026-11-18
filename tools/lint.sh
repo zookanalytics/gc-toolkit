@@ -9,11 +9,12 @@
 #   SHELL — shellcheck, through assets/scripts/shellcheck-run.sh, the one
 #   fail-closed runner (host shellcheck at warning severity; exit 3 when none is
 #   on PATH), over every tracked shell file, whatever files lint.sh is given.
-#   Whole-tree for the reason gofmt is: the tree is shellcheck-clean, so a
-#   finding cannot wait in a file no change names until an unrelated merge edits
-#   that file and fails on a line it did not write. The files are split across
-#   one runner call per core, so the run lasts about as long as the call that
-#   holds the slowest files.
+#   Whole-tree for the reason gofmt is: the tree is shellcheck-clean, so checking
+#   every file on every merge is zero-noise. It also keeps a finding from waiting
+#   in a file no change names until an unrelated merge edits that file and fails
+#   on a line it did not write. The files are split across one runner call per
+#   core, so the run lasts about as long as the call that holds the slowest
+#   files.
 #
 #   STEP TEXT — tools/lint-step-text.sh over the files passed on argv, which
 #   checks the formulas among them for a procedure the change adds to step text
@@ -160,7 +161,7 @@ if [ "${#shell_files[@]}" -eq 0 ]; then
   summary+=("shell: no tracked shell files — skipped")
 else
   # The files are dealt in turn across one runner call per core, and the calls
-  # run at once. Each call's output waits in a file until every call has ended,
+  # run at once. Each call's output waits in a file until that call has ended,
   # and only a failing call's is printed, so the findings of one call never
   # interleave with another's.
   calls="$(cores)"
