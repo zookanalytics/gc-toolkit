@@ -608,16 +608,27 @@ func (u *run) one(id string) (RunOutcome, error) {
 	if err == nil {
 		s.runs, err = runsIn(rows)
 	}
+	var strays []*ledger.Record
+	if err == nil {
+		strays, err = u.unattached(s)
+	}
 	if err != nil {
 		return RunOutcome{Bead: id, Action: ActFailed, Detail: "what holds the bead did not read: " + err.Error()}, nil
 	}
+	note, out, ok := u.attach(&s, strays)
+	if !ok {
+		return out, nil
+	}
 	switch {
 	case ruled && record.OnRecord(rec.Result):
-		return u.disposed(s, d), nil
+		out = u.disposed(s, d)
 	case s.status == "open":
-		return u.open(s), nil
+		out = u.open(s)
+	default:
+		out = u.blocked(s)
 	}
-	return u.blocked(s), nil
+	out.Detail = withNote(out.Detail, note)
+	return out, nil
 }
 
 // commit makes w, guarded on what the run read, and names the outcome: done

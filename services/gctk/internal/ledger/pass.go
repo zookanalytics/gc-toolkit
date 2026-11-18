@@ -54,6 +54,8 @@ func (p *pass) Rows(ids []string) ([]gcbd.Bead, error) {
 
 func (p *pass) Update(id string, args ...string) (string, error) { return "", errPassWrite }
 
+func (p *pass) AddEdge(id, target, typ string) (string, error) { return "", errPassWrite }
+
 func (p *pass) Create(title string, args ...string) (string, error) { return "", errPassWrite }
 
 // Ready reads the store's ready set afresh each time it is asked: readiness is

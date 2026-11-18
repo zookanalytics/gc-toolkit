@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -73,9 +74,9 @@ type Store struct {
 	lastWriteReads [][]string
 
 	// RowsErr, BlockedErr, FindErr, ReadyErr and LastWritesErr fail the
-	// matching read when set, UpdateErr fails every write and CreateErr every
-	// create.
-	RowsErr, BlockedErr, FindErr, ReadyErr, LastWritesErr, UpdateErr, CreateErr error
+	// matching read when set, UpdateErr fails every update, EdgeErr every edge
+	// added and CreateErr every create.
+	RowsErr, BlockedErr, FindErr, ReadyErr, LastWritesErr, UpdateErr, EdgeErr, CreateErr error
 
 	// OnFind, when set, runs before each find the store takes, outside the
 	// store's lock, and fails nothing. A test lands another actor's write in it.
@@ -325,10 +326,12 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 }
 
 // Update applies one update's --set-metadata, --unset-metadata, --status,
-// --assignee, --append-notes and --title to the row, and records it. A bead the
-// store does not hold refuses the write, as bd does. --if-status and
-// --if-assignee are bd's guards: an update whose guard no longer holds writes
-// nothing and fails with an error that is gcbd.ErrGuard.
+// --assignee, --append-notes, --title and --priority to the row, and records
+// it. An argument that is no flag names another bead the update writes the same
+// way, as bd's update takes each bead it writes, and each is recorded as a write
+// of its own. A bead the store does not hold refuses the write, as bd does.
+// --if-status and --if-assignee are bd's guards: an update whose guard no
+// longer holds writes nothing and fails with an error that is gcbd.ErrGuard.
 func (s *Store) Update(id string, args ...string) (string, error) {
 	if s.BeforeUpdate != nil {
 		if err := s.BeforeUpdate(id, slices.Clone(args)); err != nil {
@@ -340,9 +343,62 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 	if s.UpdateErr != nil {
 		return "", s.UpdateErr
 	}
+	ids, flags := []string{id}, []string(nil)
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case !strings.HasPrefix(a, "-"):
+			ids = append(ids, a)
+		case strings.Contains(a, "=") || i+1 == len(args):
+			flags = append(flags, a)
+		default:
+			flags = append(flags, a, args[i+1])
+			i++
+		}
+	}
+	rows := map[string]Bead{}
+	for _, id := range ids {
+		b, err := s.update(id, flags)
+		if err != nil {
+			return "", err
+		}
+		rows[id] = b
+	}
+	for _, id := range ids {
+		s.rows[id] = rows[id]
+		s.writes = append(s.writes, Write{ID: id, Args: slices.Clone(flags)})
+	}
+	return "", nil
+}
+
+// AddEdge adds an edge of type typ from id onto target to id's row, with
+// target's title and status when the store holds it. A bead id the store does
+// not hold refuses the edge. An edge onto a target the store does not hold is
+// added all the same, as bd adds one onto an id outside its own prefix.
+func (s *Store) AddEdge(id, target, typ string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.EdgeErr != nil {
+		return "", s.EdgeErr
+	}
 	b, ok := s.rows[id]
 	if !ok {
 		return "", fmt.Errorf("fake store: no bead %s", id)
+	}
+	e := gcbd.Edge{Type: typ, ID: target}
+	if far, held := s.rows[target]; held {
+		e.Title, e.Status = far.Title, far.Status
+	}
+	b.Edges = append(slices.Clone(b.Edges), e)
+	s.rows[id] = b
+	return "", nil
+}
+
+// update is the row id has once the update's flags apply to it, or the error
+// that refuses the update. It writes nothing.
+func (s *Store) update(id string, args []string) (Bead, error) {
+	b, ok := s.rows[id]
+	if !ok {
+		return Bead{}, fmt.Errorf("fake store: no bead %s", id)
 	}
 	b.Metadata = maps.Clone(b.Metadata)
 	if b.Metadata == nil {
@@ -352,7 +408,7 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 		name, value, inline := strings.Cut(args[i], "=")
 		if !inline {
 			if i+1 >= len(args) {
-				return "", fmt.Errorf("fake store: %s needs a value", name)
+				return Bead{}, fmt.Errorf("fake store: %s needs a value", name)
 			}
 			i++
 			value = args[i]
@@ -361,7 +417,7 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 		case "--set-metadata":
 			k, v, ok := strings.Cut(value, "=")
 			if !ok {
-				return "", fmt.Errorf("fake store: --set-metadata %q is not key=value", value)
+				return Bead{}, fmt.Errorf("fake store: --set-metadata %q is not key=value", value)
 			}
 			b.Metadata[k] = v
 		case "--unset-metadata":
@@ -380,26 +436,30 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 			b.Notes += value
 		case "--title":
 			b.Title = value
+		case "--priority":
+			p, err := strconv.Atoi(strings.TrimPrefix(strings.ToUpper(value), "P"))
+			if err != nil || p < 0 || p > 4 {
+				return Bead{}, fmt.Errorf("fake store: --priority %q is not 0-4 or P0-P4", value)
+			}
+			b.Priority = p
 		case "--if-status":
 			if cur := s.rows[id].Status; cur != value {
-				return "", fmt.Errorf("fake store: %s is %s, not %s: %w", id, cur, value, gcbd.ErrGuard)
+				return Bead{}, fmt.Errorf("fake store: %s is %s, not %s: %w", id, cur, value, gcbd.ErrGuard)
 			}
 		case "--if-assignee":
 			if cur := s.rows[id].Assignee; cur != value {
-				return "", fmt.Errorf("fake store: %s is assigned %q, not %q: %w", id, cur, value, gcbd.ErrGuard)
+				return Bead{}, fmt.Errorf("fake store: %s is assigned %q, not %q: %w", id, cur, value, gcbd.ErrGuard)
 			}
 		default:
-			return "", fmt.Errorf("fake store: update takes no %s", name)
+			return Bead{}, fmt.Errorf("fake store: update takes no %s", name)
 		}
 	}
 	if s.WorkRecordGate && closesStatus(args) && workRecordGated(s.rows[id]) {
 		if why := workRecordRefusal(b.Metadata); why != "" {
-			return "", fmt.Errorf("fake store: work-record gate (enforced): close of %s: %s", id, why)
+			return Bead{}, fmt.Errorf("fake store: work-record gate (enforced): close of %s: %s", id, why)
 		}
 	}
-	s.rows[id] = b
-	s.writes = append(s.writes, Write{ID: id, Args: slices.Clone(args)})
-	return "", nil
+	return b, nil
 }
 
 // closesStatus reports whether an update's arguments move the bead to closed.

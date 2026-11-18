@@ -30,6 +30,9 @@ type Store interface {
 	// Update makes one `gc bd update` of id with args, returning its output.
 	// An error is a write that did not land.
 	Update(id string, args ...string) (string, error)
+	// AddEdge makes one `gc bd dep add` of an edge of type typ from id onto
+	// target, returning its output. An error is a write that did not land.
+	AddEdge(id, target, typ string) (string, error)
 	// Create makes one `gc bd create` titled title with args, and returns the
 	// new bead's id. An error may still have filed the bead: bd answers a
 	// create whose commit result it lost with the same reply and exit as a
