@@ -1053,6 +1053,21 @@ eq "$(kid tk-r-twin) | $(kid hq-pmid)" "stuck tk-r-twin unrouted | stuck tk-r-lo
 eq "$(grep -cF -- "--db $HQ/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "--db $R_TK/.beads $MAPREAD" "$FAKE_GC_LOG")" "1 1" \
   "  ... once each, each from its own store"
 
+# A roster that does not read places no store. A read by id still finds its
+# rows, since gc routes an id to the store that owns it, but a read of runs
+# names no bead, so gc would answer it from the caller's own store.
+: > "$FAKE_GC_LOG"
+FAKE_RIGS="$TMP/no-roster.json" GC_RUN_LIB="$HERE/run-lib.sh" run hq-pin --horizon --json
+eq "$(kid tk-r-twin) | $(kid hq-pmid)" "stuck tk-r-twin unknown | stuck tk-r-lone unknown" \
+  "with no roster, the city store's idle tk-r-twin and the orphan read unknown, never judged by another store's runs"
+eq "$(grep -cF -- "$MAPREAD" "$FAKE_GC_LOG")" 0 "  ... and no store's runs are read"
+: > "$FAKE_GC_LOG"
+FAKE_RIGS="$TMP/no-roster.json" GC_RUN_LIB="$HERE/run-lib.sh" run hq-pin --db "$HQ/.beads" --horizon --json
+eq "$(kid tk-r-twin) | $(kid hq-pmid)" "stuck tk-r-twin unrouted | stuck tk-r-lone unknown" \
+  "  ... while --db places the subject's store, whose runs read, and leaves unknown only the orphan whose store it cannot place"
+eq "$(grep -cF -- "--db $HQ/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "$MAPREAD" "$FAKE_GC_LOG")" "1 1" \
+  "  ... reading the runs of the store --db names alone"
+
 # --- C. Horizon (opt-in) ----------------------------------------------------
 JQF='has("horizon")'                 runj tk-epic;            eq "$JQ" false "horizon is absent by default (opt-in)"
 : > "$FAKE_GC_LOG"; run tk-epic --horizon --json

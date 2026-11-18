@@ -244,7 +244,7 @@ reasons:
 | `unread` | is an anchor whose machine axis, or whose PR posture at that axis's head, is not recorded |
 | `capped` | is armed, but its dispatch hit the sling-failure cap and went to a person |
 | `cycle` | waits, through its blockers, on itself |
-| `unknown` | could not be read, lives in a store no rig carries, or is open with no route, no arm and no assignee in a store whose runs could not be read |
+| `unknown` | could not be read, lives in a store no rig carries, or is open with no route, no arm and no assignee and was read from a store the walk could not place or whose runs could not be read |
 | `budget` | lies past where the walk stopped reading |
 
 So an armed bead takes its blockers' verdict, and a routed bead behind an orphan
@@ -256,7 +256,11 @@ moving state except in progress.
 A pour leaves the bead its run works open, unassigned and unrouted, so its row
 alone cannot say a run holds it. The walk asks the bead's store which beads its
 live runs work, through the map verb of `assets/scripts/run-lib.sh`, the pack's
-one reader of that link. A run is live until its root closes. Its input convoy
+one reader of that link. It asks only a store it has placed, the one `--db` or
+`--store` names or a bead's prefix binds. A read of runs names no bead, so gc
+would answer an unpinned one from the caller's own store, whichever store the
+bead came from. Such a bead read from a store the walk could not place reads
+`unknown`. A run is live until its root closes. Its input convoy
 is no sign of one, because a run that finished or was cancelled leaves the
 convoy open for as long as the bead is open. The runs name the bead a run works
 and none of its steps, so an inline step, which carries no route of its own,

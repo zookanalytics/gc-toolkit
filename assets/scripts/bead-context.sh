@@ -214,12 +214,11 @@ bd_rows() {
   local ids; ids=$(IFS=,; printf '%s' "$*")
   bd_json "$db" list --id "$ids" --all --brief --include-gates --include-infra --include-templates --include-ephemeral --limit 0
 }
-# The reader run-lib.sh reads one store's runs through: the store RUNS_DB names,
-# or the ambient one when it names none, as bd_json reads.
+# The reader run-lib.sh reads one store's runs through, the store RUNS_DB names.
+# A read of runs names no bead, so gc answers an unpinned one from the caller's
+# own store, not the store a bead's id routes to.
 RUNS_DB=""
-runs_bd() {
-  if [ -n "$RUNS_DB" ]; then bounded gc bd --db "$RUNS_DB" "$@"; else bounded gc bd "$@"; fi
-}
+runs_bd() { bounded gc bd --db "$RUNS_DB" "$@"; }
 
 # ── The advance classifier ──────────────────────────────────────────────────
 # jq defs, prepended to every program that classifies, so the frontier and the
@@ -267,8 +266,9 @@ runs_bd() {
 #                axis's head, is not recorded, or a PR on the pending record
 #                with no posture recorded.
 #              capped: an armed dispatch that hit its sling-failure cap.
-#              unknown: open with no route, arm or assignee in a store whose
-#                runs did not read, so whether a live run works it is not known.
+#              unknown: open with no route, arm or assignee, read from a store
+#                the walk could not place or whose runs did not read, so whether
+#                a live run works it is not known.
 #              unrouted: open with no route, arm, assignee or live run, so
 #                nothing picks it up.
 #
@@ -585,9 +585,11 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
   # verdict: any walked bead, and the subject only while a walked bead waits on
   # it. Each such row, on whatever level it was read, is looked up in its own
   # store's runs alone: it joins .runs as live when they name it as the bead a
-  # live run works, and as unread when they did not read.
-  declare -A RUNS_READ=()  # "@<store>" -> ok | failed
-  declare -A LIVE_IN=()    # "@<store>" -> the beads its live runs work, a line each, framed by newlines
+  # live run works, and as unread when they did not read. A row whose store the
+  # walk could not place, where db_for_prefix gave none, has no store to read
+  # runs from, so it joins as unread.
+  declare -A RUNS_READ=()  # store -> ok | failed
+  declare -A LIVE_IN=()    # store -> the beads its live runs work, a line each, framed by newlines
   runs_unrouted() {
     local ids id k got beads live=() unread=() live_json='[]' unread_json='[]' merged
     ids=$(printf '%s' "$WALK" | jq -r --argjson cap "$ARM_CAP" "$ADV$WALK_JQ"'
@@ -597,9 +599,10 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
       | select((.value | adv_own($cap; $runs)).why == "unrouted") | .key' 2>/dev/null) || return 0
     while IFS= read -r id; do
       [ -n "$id" ] || continue
-      k="@${STORE_OF[$id]-}"
+      k="${STORE_OF[$id]-}"
+      [ -n "$k" ] || { unread+=("$id"); continue; }
       if [ -z "${RUNS_READ[$k]+set}" ]; then
-        RUNS_DB="${STORE_OF[$id]-}"
+        RUNS_DB="$k"
         if got=$(run_lib map runs_bd) && [ -n "$got" ] \
           && beads=$(printf '%s' "$got" | jq -r '.[]? | objects | select(.live == true)
                | (.bead // "") | tostring | select(. != "")' 2>/dev/null); then
