@@ -121,9 +121,10 @@
 #                        installers write to stderr too, so the caller's stdout
 #                        carries only its own report. Returns 1, having said why
 #                        on stderr, when the host has no sandbox, Node is
-#                        missing or below the floor, the sandbox would refuse a
-#                        run from the working directory, an install fails, or
-#                        the published package has no npx to run it.
+#                        missing or below the floor, a run from the working
+#                        directory keeps the sandbox and the sandbox would
+#                        refuse that directory, an install fails, or the
+#                        published package has no npx to run it.
 #   demo_engine_find     The lookup alone: sets DEMO_ENGINE_DIR the same way,
 #                        installs nothing, and returns 0.
 #   demo_engine_cli      Runs the CLI of the engine demo_engine_resolve chose,
@@ -271,9 +272,12 @@ demo_engine_resolve() {
   _demo_engine_node_ok || return 1
   demo_engine_find
   # Whether a capture may run from here at all, decided before anything is
-  # installed. demo_engine_cli decides it again for every directory a run names.
+  # installed, as demo_engine_cli judges a run that names no checkout: a run
+  # that keeps the sandbox is refused a directory the sandbox would refuse, and
+  # a run with no sandbox is not. demo_engine_cli decides it again for each
+  # directory a run reads and writes.
   _demo_engine_city || return 1
-  _demo_engine_reach "$(pwd -P)" >/dev/null || return 1
+  ! _demo_engine_keeps_sandbox "$(pwd -P)" || _demo_engine_reach "$(pwd -P)" >/dev/null || return 1
   if [ -n "$DEMO_ENGINE_DIR" ]; then
     if _demo_engine_deps_missing "$DEMO_ENGINE_DIR" && ! ( cd "$DEMO_ENGINE_DIR" && npm install ) >&2; then
       _demo_engine_say "'npm install' failed in the sprintshow rig checkout"

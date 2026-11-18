@@ -40,9 +40,11 @@
 #   (NO-SANDBOX) a host without sandbox-exec stops the capture before anything
 #               is installed
 #   (CITY)      a known city whose rig map does not read, a working directory
-#               that holds the city's directory, and one inside it in no rig's
-#               worktree each stop the capture; a rig worktree inside the city
-#               is allowed, with its git directories
+#               that holds the city's directory, one inside it in no rig's
+#               worktree, and the own checkout of a rig that keeps the sandbox
+#               each stop the capture, the checkout before anything is
+#               installed; a rig worktree inside the city is allowed, with its
+#               git directories
 #   (PORTS)     a --serve-dir with no --port gets a free one; a port a server
 #               already answers on, and a --base-url on this host where nothing
 #               of this user's listens, stop the capture
@@ -66,7 +68,8 @@
 #               out of range
 #   (PLAIN)     a capture that captures only from rigs whose app_reads_city is
 #               "false", through its --cwd, its --serve-dir, its copy or the
-#               working directory, and a command demo_engine_sandboxed runs from
+#               working directory, one from such a rig's own checkout with the
+#               engine resolved, and a command demo_engine_sandboxed runs from
 #               such a rig's worktree, run with no sandbox-exec and without the
 #               variables that point at the city, and say so; one that captures
 #               from a rig set to "true", the rig that holds the library, the
@@ -724,11 +727,21 @@ for cap in video screenshot; do
   eq "$RC" 1 "($cap) a working directory in the city's, in no rig worktree, exits 1"
   has "$CITY/.gc/notes lies in $CITY" "$(err)" "($cap) it says the directory lies in the city's"
   not_captured "$cap"
-  capture "$cap" FROM="$RIGA" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
-  eq "$RC" 1 "($cap) a rig's own checkout, which holds its store, exits 1"
+  capture "$cap" FROM="$RIGA" SS_RIG="$ENGINE" "${CITY_ENV[@]}" RIG_VARS='{"alpha":{"app_reads_city":"true"}}'
+  eq "$RC" 1 "($cap) the own checkout of a rig set to \"true\", which holds its store, exits 1"
   has "$RIGA holds " "$(err)" "($cap) it names the checkout"
   has "capture from a rig worktree" "$(err)" "($cap) and says where a capture can run instead"
+  eq "$(calls | grep -c -v '^gc ')" 0 "($cap) and nothing is installed, and nothing runs, before the refusal"
   not_captured "$cap"
+  echo "# ($cap) PLAIN: the own checkout of a rig whose app_reads_city is \"false\" captures what lies in that rig, with the engine the capture resolves"
+  capture "$cap" FROM="$RIGA" SS_RIG="$ENGINE" "${CITY_ENV[@]}" -- --serve-dir "$RIGA"
+  eq "$RC" 0 "($cap) a capture of that checkout, from that checkout, exits 0"
+  has "npm run provision:browser (in $ENGINE)" "$(calls)" "($cap) the engine is resolved and its browser provisioned"
+  no_sandbox "$cap" "a capture from that checkout" "$RIGA"
+  capture "$cap" FROM="$RIGA" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
+  eq "$RC" 1 "($cap) the same checkout capturing a directory in no rig, which keeps the sandbox, exits 1"
+  has "$RIGA holds " "$(err)" "($cap) the sandbox still refuses the checkout"
+  not_run "$cap"
   capture "$cap" FROM="$RWT" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
   eq "$RC" 0 "($cap) a rig worktree in the city's directory captures"
   has "(allow file-read-data file-write* (subpath \"$RWT\"))" "$(profile)" "($cap) the worktree is allowed"
