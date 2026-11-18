@@ -130,16 +130,23 @@ bead to the next run, which reads it again. A close the script holds for now,
 such as one the ruling's open conversation holds, is tried again by the next
 run. A retired PR that merged all the same lands as any other.
 
-The review run is mol-pr-review, poured with gc formula cook --attach onto the
-bead under the record lock, with the record's PR bead, head, target and branch
-as its vars, and the pools and binding the refinery's address names
-(<rig>/<binding>refinery): review_target <rig>/<binding>polecat-codex,
-repair_target <rig>/<binding>polecat and binding_prefix <binding>. No run is
-poured while one is attached to the bead, while another open bead names the
-PR's branch, such as a rework child, or while a human gate holds the bead. A
-conversation on the PR holds only its merge, so runs are poured while it is
-open, and the merge waits until it closes. A run that ended without a result
-is poured again. When the last two runs at the validated head both
+The review run is mol-pr-review, poured with gc formula cook under the record
+lock, with the record's PR bead, head, target and branch as its vars, and the
+pools and binding the refinery's address names (<rig>/<binding>refinery):
+review_target <rig>/<binding>polecat-codex, repair_target
+<rig>/<binding>polecat and binding_prefix <binding>. The pour gives each bead
+it created the bead's priority, then attaches the run to the bead by the bead's
+blocks edge onto its root. A run whose pr_bead var names the bead and that no
+edge of the bead names, live or ended, gets that edge before the run decides
+anything of the record, so it holds the bead as an attached run does. A pour
+whose root the bead's store does not hold files a human gate on the bead keyed
+review-run-outside-store. While that gate does not file, the bead records the
+run as review_run_outside_store, and each run files the gate for it in place of
+a pour. No run is poured while one is attached to the bead, while another open
+bead names the PR's branch, such as a rework child, or while a human gate holds
+the bead. A conversation on the PR holds only its merge, so runs are poured
+while it is open, and the merge waits until it closes. A run that ended without
+a result is poured again. When the last two runs at the validated head both
 ended without one, counting only runs that ended after the bead's last
 review-run-failed gate closed, it files a human gate on the bead keyed
 review-run-failed instead, naming both runs and how each ended.
@@ -449,15 +456,15 @@ func (a seedAudit) Reaudit(branch, seenBy string, pages []string) (string, error
 // not exit 0, or that named no root, is an error carrying why.
 type runs struct{ rt gascity.Runtime }
 
-func (r runs) Pour(formula, bead string, vars map[string]string) (string, error) {
-	res := r.rt.Cook(gascity.Cook{Formula: formula, Bead: bead, Vars: vars})
+func (r runs) Pour(formula string, vars map[string]string) (pr.Poured, error) {
+	res := r.rt.Cook(gascity.Cook{Formula: formula, Vars: vars})
 	if f := res.Failure(); f != "" {
-		return "", fmt.Errorf("gc formula cook %s --attach %s: %s", formula, bead, f)
+		return pr.Poured{}, fmt.Errorf("gc formula cook %s: %s", formula, f)
 	}
 	if res.Root == "" {
-		return "", fmt.Errorf("gc formula cook %s --attach %s named no root: %s", formula, bead, res.Tail())
+		return pr.Poured{}, fmt.Errorf("gc formula cook %s named no root: %s", formula, res.Tail())
 	}
-	return res.Root, nil
+	return pr.Poured{Root: res.Root, Beads: res.Beads}, nil
 }
 
 // dispositions closes a bead whose PR a ruling retired through the runtime

@@ -28,7 +28,7 @@ import (
 type Runtime interface {
 	// Sling runs one `gc sling` and returns what it answered.
 	Sling(s Sling) SlingResult
-	// Cook runs one `gc formula cook --attach` and returns what it answered.
+	// Cook runs one `gc formula cook` and returns what it answered.
 	Cook(c Cook) CookResult
 	// DefaultFormula is the formula sling s pours when it names none: the
 	// default sling formula the city's config gives the agent s.Target
@@ -76,19 +76,21 @@ type Result struct {
 	Err    error
 }
 
-// Cook is one `gc formula cook <formula> --attach <bead> --var <k>=<v>...`: the
-// formula poured as a sub-workflow of its own, which the bead gains a blocks
-// edge onto, with each var passed as cook passes only its --var flags.
+// Cook is one `gc formula cook <formula> --var <k>=<v>...`: the formula poured
+// as a workflow of its own, with each var passed as cook passes only its --var
+// flags.
 type Cook struct {
-	Formula, Bead string
-	Vars          map[string]string
+	Formula string
+	Vars    map[string]string
 }
 
-// CookResult is a cook's Result, with the root of the workflow it attached,
-// read from its --json line, "" when the cook did not answer with one.
+// CookResult is a cook's Result, with the root of the workflow it poured and
+// every bead the pour created, the root among them, read from its --json line,
+// empty when the cook did not answer with one.
 type CookResult struct {
 	Result
-	Root string
+	Root  string
+	Beads []string
 }
 
 // SlingResult is a sling's Result. Live is the workflows gc sling named when it
@@ -162,37 +164,44 @@ func (c *City) Sling(s Sling) SlingResult {
 }
 
 // Cook runs the cook in gctk's own process group, its vars in their names'
-// order, and reads the root from the JSON line it prints, the summary whose
-// root_id names the workflow it attached (formulaCookJSONResult in
-// cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). Its standard input
-// reads nothing.
+// order, and reads the JSON line it prints, the summary whose root_id names the
+// workflow's root and whose id_mapping names each bead the pour created
+// (formulaCookJSONResult in cmd/gc/cmd_formula.go at gastownhall/gascity
+// 08fa618049). It names no bead to attach, because gc hook --claim retires a
+// graph.v2 workflow whose attached bead an agent outside the workflow holds
+// (workflowInputMembersSettled in cmd/gc/cmd_hook_claim.go there). Its standard
+// input reads nothing.
 func (c *City) Cook(k Cook) CookResult {
-	args := []string{"formula", "cook", k.Formula, "--attach", k.Bead, "--json"}
+	args := []string{"formula", "cook", k.Formula, "--json"}
 	for _, name := range slices.Sorted(maps.Keys(k.Vars)) {
 		args = append(args, "--var", name+"="+k.Vars[name])
 	}
 	r := c.run(c.bin, args...)
 	out := CookResult{Result: r}
 	if r.Code == 0 {
-		out.Root = cookedRoot(r.Output)
+		out.Root, out.Beads = cooked(r.Output)
 	}
 	return out
 }
 
-// cookedRoot is the root_id of the last JSON line in output that names one,
-// "" when none does.
-func cookedRoot(output string) string {
-	root := ""
+// cooked is the root_id of the last JSON line in output that names one, and the
+// beads that line's id_mapping names with the root, in id order, "" and none
+// when no line names one.
+func cooked(output string) (string, []string) {
+	root, beads := "", []string(nil)
 	sc := bufio.NewScanner(strings.NewReader(output))
 	for sc.Scan() {
 		var line struct {
-			RootID string `json:"root_id"`
+			RootID    string            `json:"root_id"`
+			IDMapping map[string]string `json:"id_mapping"`
 		}
 		if json.Unmarshal([]byte(strings.TrimSpace(sc.Text())), &line) == nil && line.RootID != "" {
 			root = line.RootID
+			beads = append(slices.Collect(maps.Values(line.IDMapping)), root)
 		}
 	}
-	return root
+	slices.Sort(beads)
+	return root, slices.Compact(beads)
 }
 
 // conflictLine opens the line gc sling prints for each source bead whose live
