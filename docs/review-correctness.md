@@ -31,9 +31,9 @@ declares.
 - The polecat's self-review runs `lint_command`, which is
   `tools/lint-learned.sh` and then `tools/lint.sh` over the files the branch
   changes. It runs the suites `tools/run-tests.sh --affected origin/main`
-  selects, by the rules in that script's header, and stamps the head that
-  passed on its work bead as `self_review_passed_sha`. When the anchor's stamp
-  names the reviewed commit, the method runs no suite.
+  selects, by the rules in that script's header, through `gctk rig`, which
+  records the result at the commit it ran at. When that record at the reviewed
+  commit is a pass, the method runs no suite.
 - The refinery runs the same `lint_command` at merge, and no tests.
 - CI runs the whole `*.test.sh` suite on Linux and on macOS
   (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
