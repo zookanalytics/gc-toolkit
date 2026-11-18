@@ -503,7 +503,7 @@ hasF "$TMP/ruling.partway" 'Its reason says where the gap is, what one occurrenc
   "…recording the gap of a point it does not fix"
 hasF "$TMP/ruling.partway" "**A gap in a round's own fix is not fixed again.** A point of this kind raised against code that an earlier round wrote as its fix is ruled as one no such shape can fix." \
   "…and does not fix a gap in a round's own fix again"
-hasF "$RULING" "A comment that raises a failure partway through the change's own steps is fixed only as that section above says." \
+hasF "$RULING" "A comment that raises a failure partway through the change's own steps is fixed only as the section of that name above says." \
   "…which a person's comment of this kind follows too"
 
 echo "# a demo shows a reviewer what the change does, concisely, and the demo method posts only what such a demo needs"

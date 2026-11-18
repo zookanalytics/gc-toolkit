@@ -58,10 +58,10 @@ own rule as any point is, and these decide what the head carries for it:
 - **A gap in a round's own fix is not fixed again.** A point of this kind raised
   against code that an earlier round wrote as its fix is ruled as one no such
   shape can fix.
-  `git log --format='%h %s' origin/<the PR's target>..HEAD -- <the locus's file>`
-  lists the branch's commits to that file. A round's fix commit names in its
-  message the point it fixed, and `git show <commit>` shows whether it wrote the
-  code the locus names.
+  `git log --format='%h %B' origin/<the PR's target>..HEAD -- <the locus's file>`
+  lists the branch's commits to that file with their messages. A round's fix
+  commit names in its message the point it fixed, and `git show <commit>` shows
+  whether it wrote the code the locus names.
 
 ## Each fix is a commit of its own
 
@@ -98,7 +98,7 @@ that scale's rule for the grade: a P0 or a P1 is fixed; a P2 is fixed when its
 fix is low-risk and net-positive and declined when it is risky or marginal;
 and a nit, a preference that no grade covers, is answered and not fixed. The
 reason names the grade. A comment that raises a failure partway through the
-change's own steps is fixed only as that section above says.
+change's own steps is fixed only as the section of that name above says.
 
 A batch of a person's comments reaches the run as one ask, and each comment in
 it is a human finding naming that ask as its fix unit, which the round's read
