@@ -31,6 +31,9 @@ someone would want to read it after the bead closes, it is a file.
 
 A repository's architecture document is a central doc with a standard of its
 own: load `gc-toolkit.architecture-document` before you write or change one.
+A design that changes the architecture, such as moving a responsibility from
+one part to another, updates that document together with the design, not in
+later work, so load that skill before you write the design.
 
 Unsure? Ask which claim the document makes. *What is true* is central;
 *what was considered while doing this bead* is local. The gc-toolkit
