@@ -59,6 +59,9 @@ func TestNewestFailsLoudly(t *testing.T) {
 		{"a refusal", http.StatusNotFound, `{"type":"urn:gascity:error:city-not-found","title":"City Not Found","status":404,"detail":"not_found: city not found or not running: town"}`, "answered HTTP 404: not_found: city not found or not running: town"},
 		{"a proxy's page", http.StatusBadGateway, `<html>bad gateway</html>`, "answered HTTP 502"},
 		{"no list", http.StatusOK, `<html>hello</html>`, "answered no event list"},
+		{"null", http.StatusOK, `null`, "answered no event list"},
+		{"an object with no items", http.StatusOK, `{}`, "answered no event list"},
+		{"null items", http.StatusOK, `{"items":null,"total":0}`, "answered no event list"},
 	} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(tc.status)

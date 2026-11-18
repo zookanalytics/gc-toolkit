@@ -35,7 +35,9 @@ func NewEventLog() *EventLog {
 // Newest is the newest event of type typ in the city's log, nil when the log
 // holds none. The route answers the newest match first and limit=1 asks for it
 // alone (humaHandleEventList there). The read names no since, so it finds the
-// newest event however long ago it was recorded.
+// newest event however long ago it was recorded. The route's answer always
+// holds an items list, an empty one when no event matches, so an answer with
+// none is a failed read, never an empty log.
 func (l *EventLog) Newest(ctx context.Context, typ string) (*cityboard.Event, error) {
 	if l.city == "" {
 		return nil, errors.New("no city to read the event log of: GC_HELM_CITY, GC_SERVICE_URL_PREFIX, GC_CITY_PATH and GC_CITY name none")
@@ -59,15 +61,18 @@ func (l *EventLog) Newest(ctx context.Context, typ string) (*cityboard.Event, er
 		return nil, fmt.Errorf("the supervisor's event log answered HTTP %d%s", resp.StatusCode, problemDetail(body))
 	}
 	var env struct {
-		Items []cityboard.Event `json:"items"`
+		Items *[]cityboard.Event `json:"items"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
 		return nil, fmt.Errorf("the supervisor's event log answered no event list: %w", err)
 	}
-	if len(env.Items) == 0 {
+	if env.Items == nil {
+		return nil, errors.New("the supervisor's event log answered no event list: the answer holds no items")
+	}
+	if len(*env.Items) == 0 {
 		return nil, nil
 	}
-	return &env.Items[0], nil
+	return &(*env.Items)[0], nil
 }
 
 // maxEventAnswer bounds the answer Newest reads. One event is a few kilobytes,
