@@ -105,7 +105,7 @@ only a conflict the loop can't decide (`conflict_questions`) or an exhausted
 loop (`aborted_at=rebase-loop-exhausted`) comes back to you. A finished rebase
 ends at a human gate on the bead, assigned to the operator, that carries the
 range-diff to review and the force-push to run. Clearing it runs the landing
-check, which closes the bead once main is the rebased tip.
+check, which closes the bead once main holds the rebased tip.
 
 ### "check drift" / "is gastown stale?"
 
@@ -191,10 +191,10 @@ Notes on the modes:
   convention. Moved AND diverged → something else landed; raise it with the
   operator before clearing anything. Trust origin/main vs `pre_rebase_tip`
   over ad-hoc metadata like `resolved_at_tip`.
-- **`race-loss`**: once the landing gate cleared, origin/main was neither the
-  rebased tip nor the pre-rebase tip. It moved after the rebase, so the
-  operator's leased push was refused or something else was pushed, and the
-  notes name the three commits. Options: re-pour atop the new origin/main, drop
+- **`race-loss`**: once the landing gate cleared, origin/main was not the
+  pre-rebase tip, and the rebased tip had not landed on it. It moved after the
+  rebase, so the operator's leased push was refused or something else was
+  pushed, and the notes name the three commits. Options: re-pour atop the new origin/main, drop
   if superseded, or take it by hand. Never auto-retry the landing.
 - **`rebase-loop-exhausted`**: the loop burned `max_attempts` without a green
   gate; install/push never ran; the `<wf>.rebase` control bead closed

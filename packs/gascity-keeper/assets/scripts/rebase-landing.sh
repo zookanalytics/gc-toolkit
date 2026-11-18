@@ -20,15 +20,20 @@
 # the push, whose lease is pinned to pre_rebase_tip resolved to a SHA, so git
 # refuses a push onto a main that moved after the rebase.
 #
-# finish fetches origin in the rig checkout and compares origin/<target> with
+# finish fetches origin in the rig checkout and reads origin/<target> against
 # <branch>, the local branch the gate's push sends:
-#   - the same commit: the rebase landed. The rig checkout is reset to it only
-#     when it is on <target>, clean, still at the pre-rebase tip, and holds no
-#     file git does not track where the landed tree puts one, and is otherwise
-#     left alone with the reason in rig_update_result. The bead
+#   - the push landed: origin/<target> is <branch>'s tip or holds it in its
+#     history, since commits can land on top of it before the check runs. A
+#     rebase that kept its commits as they were and dropped only the last ones
+#     leaves its tip inside the pre-rebase history, which holds it before any
+#     push, so there the tip has landed only once origin/<target> no longer
+#     holds the pre-rebase tip. The rig checkout is reset to origin/<target>
+#     only when it is on <target>, clean, still at the pre-rebase tip, and
+#     holds no file git does not track where the landed tree puts one, and is
+#     otherwise left alone with the reason in rig_update_result. The bead
 #     closes with Gas City's work record of a landing (gc.work_outcome=shipped,
-#     gc.work_commit, gc.work_branch) and rig_update_result in the same write,
-#     and the keeper is mailed what landed.
+#     gc.work_commit the rebased tip, gc.work_branch) and rig_update_result in
+#     the same write, and the keeper is mailed what landed.
 #   - origin/<target> still at the pre-rebase tip: the push has not run, so the
 #     operator is asked again, as ask asks.
 #   - any other commit: main moved after the rebase, so the lease refused the
@@ -36,6 +41,7 @@
 #     requested the rebase, else the rig's own keeper: assigned to it, with
 #     aborted_at=race-loss and the three commits in its notes, and the keeper is
 #     mailed with --notify, which requests its turn.
+# A history read git cannot answer stops the check before anything is written.
 #
 # gc-toolkit's scripts are read from the pack this sub-pack sits in, as
 # rebase-check.sh reads run-lib.sh: the city imports this sub-pack from inside
@@ -121,6 +127,19 @@ now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # commit_of <rev> — the full sha of a commit in the rig checkout, or nothing.
 commit_of() { git -C "$RIG_ROOT" rev-parse --verify --quiet "$1^{commit}" 2>/dev/null; }
 
+# holds <commit> <ancestor> — whether <ancestor> is <commit> or in its history.
+# git answers 0 or 1, and any other exit stops the script, so a history git
+# could not read is never taken for either answer.
+holds() {
+  git -C "$RIG_ROOT" merge-base --is-ancestor "$2" "$1" 2>/dev/null
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+  esac
+  echo "$PROG: git could not tell whether $(short "$1") holds $(short "$2") in $RIG_ROOT; nothing was checked" >&2
+  exit 1
+}
+
 need_facts() { # <what reads them> <names...>
   local who=$1 name missing=""
   shift
@@ -167,7 +186,7 @@ Review it, each fork commit beside its rebased form:
 Land it:
   $push
 
-Then clear this gate. $ISSUE waits on it, and clearing it runs the landing check, which closes $ISSUE once $TARGET is the rebased tip and brings the rig checkout's $TARGET along when that is safe.
+Then clear this gate. $ISSUE waits on it, and clearing it runs the landing check, which closes $ISSUE once $TARGET holds the rebased tip and brings the rig checkout's $TARGET along when that is safe.
 
 A refused push means $TARGET moved after the rebase. Clear this gate anyway: the landing check then hands $ISSUE back to the keeper, to redo the rebase or drop it.
 
@@ -183,7 +202,7 @@ To drop the rebase instead, do not clear this gate: run $drop."
   echo "$PROG: $ISSUE waits on gate $gate, assigned to $OPERATOR, for the push; clearing it runs $FINISH_FORMULA"
 }
 
-# sync_rig — bring the rig checkout's <target> to the landed commit when that
+# sync_rig — bring the rig checkout's <target> to origin/<target> when that
 # discards nothing, into RIG_SYNC. A checkout with any change git status lists,
 # or whose status cannot be read, is left for the operator, and so is a HEAD
 # other than the pre-rebase tip, which can hold commits that were never pushed.
@@ -220,26 +239,28 @@ sync_rig() {
 }
 
 landed() {
+  local since=""
+  [ "$MAIN" = "$TIP" ] || since=" origin/$TARGET has moved on to $MAIN since."
   sync_rig
   # Gas City's close gate reads the work record on the write that closes a task
-  # bead, and finds the commit on origin/<target> in the rig checkout, which the
-  # fetch above brought current.
-  gc bd update "$ISSUE" --set-metadata gc.work_outcome=shipped --set-metadata gc.work_commit="$MAIN" \
+  # bead, and finds the commit in origin/<target>'s history in the rig checkout,
+  # which the fetch above brought current.
+  gc bd update "$ISSUE" --set-metadata gc.work_outcome=shipped --set-metadata gc.work_commit="$TIP" \
     --set-metadata gc.work_branch="$TARGET" --set-metadata rig_update_result="$RIG_SYNC" \
-    --status=closed --append-notes "Landed ($(now)): origin/$TARGET is $MAIN, the tip of $BRANCH, force-pushed by the operator with a lease on the pre-rebase tip $PRE. Rig checkout: $RIG_SYNC." \
+    --status=closed --append-notes "Landed ($(now)): origin/$TARGET holds $TIP, the tip of $BRANCH, force-pushed by the operator with a lease on the pre-rebase tip $PRE.$since Rig checkout: $RIG_SYNC." \
     </dev/null >/dev/null 2>&1 \
-    || { echo "$PROG: $ISSUE landed at $MAIN, but the store refused its landing record and close; rig checkout: $RIG_SYNC" >&2; exit 1; }
+    || { echo "$PROG: $ISSUE landed at $TIP, but the store refused its landing record and close; rig checkout: $RIG_SYNC" >&2; exit 1; }
   # The close and its notes are the record, so a mail that fails changes nothing.
   gc mail send "$KEEPER" -s "gascity rebase $ISSUE landed" \
-    -m "origin/$TARGET is $MAIN, the tip of $BRANCH, pushed by the operator. Rig checkout: $RIG_SYNC. $ISSUE is closed." \
+    -m "origin/$TARGET holds $TIP, the tip of $BRANCH, pushed by the operator.$since Rig checkout: $RIG_SYNC. $ISSUE is closed." \
     </dev/null >/dev/null 2>&1 \
     || echo "$PROG: the mail to $KEEPER about the landing of $ISSUE failed; the close and its notes are the record" >&2
-  echo "$PROG: $ISSUE landed at $(short "$MAIN") and is closed; rig checkout: $RIG_SYNC"
+  echo "$PROG: $ISSUE landed at $(short "$TIP") and is closed; rig checkout: $RIG_SYNC"
 }
 
 race_loss() {
   gc bd update "$ISSUE" --status=open --assignee="$KEEPER" --set-metadata aborted_at=race-loss \
-    --append-notes "Not landed ($(now)): once the landing gate cleared, origin/$TARGET was $MAIN, which is neither the tip of $BRANCH ($TIP) nor the pre-rebase tip ($PRE). $TARGET moved after the rebase, so the leased push was refused or something else was pushed, and $BRANCH is no longer landable as it is.
+    --append-notes "Not landed ($(now)): once the landing gate cleared, origin/$TARGET was $MAIN, which is not the pre-rebase tip ($PRE), and the tip of $BRANCH ($TIP) had not landed on it. $TARGET moved after the rebase, so the leased push was refused or something else was pushed, and $BRANCH is no longer landable as it is.
 Backup ref (pre-rebase tip): ${BACKUP:-none}
 Options: re-pour the rebase atop the new origin/$TARGET, drop it if what landed supersedes it, or take it by hand." \
     </dev/null >/dev/null 2>&1 \
@@ -247,7 +268,7 @@ Options: re-pour the rebase atop the new origin/$TARGET, drop it if what landed 
   # The assignment and aborted_at are what the keeper's sweep reads, so a mail
   # that fails changes nothing.
   gc mail send "$KEEPER" --notify -s "gascity rebase $ISSUE: $TARGET moved before it landed" \
-    -m "origin/$TARGET is $(short "$MAIN"), not the rebased tip of $BRANCH, so the rebase did not land. $ISSUE is assigned to you, and its notes say why." \
+    -m "origin/$TARGET moved to $(short "$MAIN") before the rebased tip of $BRANCH landed on it, so the rebase did not land. $ISSUE is assigned to you, and its notes say why." \
     </dev/null >/dev/null 2>&1 \
     || echo "$PROG: the mail to $KEEPER about $ISSUE failed; its assignment and aborted_at=race-loss are the record" >&2
   echo "$PROG: origin/$TARGET moved to $(short "$MAIN") before $ISSUE landed; it is assigned to $KEEPER"
@@ -280,6 +301,8 @@ case "$VERB" in
     elif [ "$MAIN" = "$PRE" ]; then
       need_facts finish rebase_onto_sha
       ask_operator "Asked again: when the last landing gate cleared, origin/$TARGET was still at the pre-rebase tip, so the push had not run."
+    elif holds "$MAIN" "$TIP" && { ! holds "$PRE" "$TIP" || ! holds "$MAIN" "$PRE"; }; then
+      landed
     else
       race_loss
     fi

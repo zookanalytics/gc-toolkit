@@ -6,10 +6,11 @@
 # suite runs the range-diff, the push and the stand-down exactly as the message
 # writes them, against real repositories it builds under a directory whose name
 # holds a space, and then lets finish read the result.
-# Every outcome of finish is pinned: a landing closes the bead in one write and
-# moves the rig checkout only when that discards nothing, an unrun push asks
-# again, and a main that moved goes back to the keeper without a close. A
-# refused read or write writes nothing after it and exits 1.
+# Every outcome of finish is pinned: a landing closes the bead in one write,
+# whether or not main moved on from it before the check, and moves the rig
+# checkout only when that discards nothing, an unrun push asks again, and a main
+# that moved before the push goes back to the keeper without a close. A refused
+# read or write writes nothing after it and exits 1.
 #
 # The script runs from a copy laid out as the pack lays it out, beside stubs of
 # the gc-toolkit scripts it calls (rig-root.sh, human-gate.sh, await-ruling.sh)
@@ -85,9 +86,12 @@ PATH="$TMP/bin:$PATH"
 KEEPER="gascity/gascity-keeper.keeper"
 BRANCH="rebase/gc-iss"
 
-# repos — origin, a clone that is the rig checkout on main at the pre-rebase tip
-# PRE, the new upstream tip ONTO, and the rebased branch at NEW, which the
-# rebase run pushed. PRE and NEW both descend from the old upstream commit.
+# repos [dropped] — origin, a clone that is the rig checkout on main at the
+# pre-rebase tip PRE, the upstream tip ONTO, and the rebased branch at NEW,
+# which the rebase run pushed. PRE and NEW both descend from the old upstream
+# commit. With dropped, upstream has not moved and the rebase kept the first of
+# two fork commits as it was and dropped the second, so NEW is inside PRE's
+# history.
 repos() {
   rm -rf "$TMP/origin.git" "$TMP/rig" "$TMP/other"
   git init -q --bare "$TMP/origin.git"
@@ -98,18 +102,33 @@ repos() {
   ( cd "$TMP/rig" || exit 1
     echo base > base.txt && git add base.txt && git commit -q -m "old upstream"
     git branch upstream
-    echo fork > fork.txt && git add fork.txt && git commit -q -m "fork commit"
-    git checkout -q upstream
-    echo up > up.txt && git add up.txt && git commit -q -m "new upstream"
-    git checkout -q -b "$BRANCH"
-    echo fork > fork.txt && git add fork.txt && git commit -q -m "fork commit, rebased"
-    git checkout -q main
+    if [ "${1:-}" = dropped ]; then
+      echo kept > kept.txt && git add kept.txt && git commit -q -m "fork commit, kept"
+      git branch "$BRANCH"
+      echo dropped > dropped.txt && git add dropped.txt && git commit -q -m "fork commit, dropped"
+    else
+      echo fork > fork.txt && git add fork.txt && git commit -q -m "fork commit"
+      git checkout -q upstream
+      echo up > up.txt && git add up.txt && git commit -q -m "new upstream"
+      git checkout -q -b "$BRANCH"
+      echo fork > fork.txt && git add fork.txt && git commit -q -m "fork commit, rebased"
+      git checkout -q main
+    fi
     git push -q origin main "$BRANCH"
   ) || { echo "could not build the repositories" >&2; exit 1; }
   PRE=$(git -C "$TMP/rig" rev-parse main)
   ONTO=$(git -C "$TMP/rig" rev-parse upstream)
   NEW=$(git -C "$TMP/rig" rev-parse "$BRANCH")
   export STUB_RIG="$TMP/rig"
+}
+
+# land_other <name> — someone else lands an ordinary commit on origin's main.
+land_other() {
+  rm -rf "$TMP/other"
+  if ! { git clone -q "$TMP/origin.git" "$TMP/other" \
+      && ( cd "$TMP/other" && echo "$1" > "$1.txt" && git add "$1.txt" && git commit -q -m "$1" && git push -q origin main ); }; then
+    echo "could not land $1 on origin's main" >&2; exit 1
+  fi
 }
 
 # bead <status> [<key=value>...] — the rebase bead the stub serves, with the
@@ -168,8 +187,7 @@ if eval "$RANGE" >"$TMP/range.out" 2>&1 && grep -q 'fork commit' "$TMP/range.out
 else
   bad "(ask) the range-diff runs as written: $(cat "$TMP/range.out")"
 fi
-git clone -q "$TMP/origin.git" "$TMP/other"
-( cd "$TMP/other" && echo late > late.txt && git add late.txt && git commit -q -m late && git push -q origin main )
+land_other late
 if eval "$PUSH" >/dev/null 2>&1; then
   bad "(ask) the push is refused once main moved after the rebase"
 else
@@ -237,6 +255,48 @@ has "$MAIL" "mail send $KEEPER -s gascity rebase gc-iss landed" "(landed) the ke
 has "$MAIL" "Rig checkout: reset:" "(landed) …with what the rig checkout did"
 hasnt "$MAIL" "--notify" "(landed) …without asking for its turn"
 eq "$(calls human-gate)$(calls await-ruling)" "" "(landed) nothing is asked again"
+
+echo "── finish: the push landed, and main moved on before the check ──"
+repos; reset_case; bead open; operator_push; land_other after
+AFTER=$(git --git-dir="$TMP/origin.git" rev-parse main)
+run finish --bead gc-iss
+eq "$RC" 0 "(landed-under) exits 0"
+UPD=$(calls 'bd update gc-iss')
+has "$UPD" "--set-metadata gc.work_outcome=shipped --set-metadata gc.work_commit=$NEW --set-metadata gc.work_branch=main --set-metadata rig_update_result=reset: ${PRE:0:12} -> ${AFTER:0:12} (worktree prune ran) --status=closed" \
+  "(landed-under) a main that holds the rebased tip closes the bead with that tip as the landed commit"
+has "$UPD" "origin/main has moved on to $AFTER since." "(landed-under) …its note naming where main moved on to"
+hasnt "$UPD" "aborted_at" "(landed-under) …and no race loss"
+eq "$(git -C "$TMP/rig" rev-parse HEAD)" "$AFTER" "(landed-under) the rig checkout follows origin/main"
+has "$(calls 'mail send')" "mail send $KEEPER -s gascity rebase gc-iss landed" "(landed-under) the keeper is told it landed"
+
+echo "── finish: a rebase that dropped only its last commit, whose tip main already held ──"
+repos dropped; reset_case; bead open; land_other late
+run finish --bead gc-iss
+eq "$RC" 0 "(dropped-race) exits 0"
+UPD=$(calls 'bd update gc-iss')
+has "$UPD" "--set-metadata aborted_at=race-loss" "(dropped-race) a main that moved on from the pre-rebase tip holds the rebased tip without the push, so the bead goes back to the keeper"
+hasnt "$UPD" "status=closed" "(dropped-race) …and is not closed"
+
+repos dropped; reset_case; bead open; operator_push; land_other after
+AFTER=$(git --git-dir="$TMP/origin.git" rev-parse main)
+run finish --bead gc-iss
+eq "$RC" 0 "(dropped-landed) exits 0"
+UPD=$(calls 'bd update gc-iss')
+has "$UPD" "--set-metadata gc.work_commit=$NEW --set-metadata gc.work_branch=main --set-metadata rig_update_result=reset: ${PRE:0:12} -> ${AFTER:0:12} (worktree prune ran) --status=closed" \
+  "(dropped-landed) once the push took main off the pre-rebase tip, the rebased tip has landed"
+
+echo "── finish: a history git cannot read ──"
+# Without the root commit's object, git cannot read whether the pre-rebase
+# history holds the rebased tip, since that walk reaches the root, while
+# rev-parse of the three tips and a fetch with nothing new still work.
+repos; reset_case; bead open; operator_push; land_other after
+git -C "$TMP/rig" fetch -q origin
+ROOT_COMMIT=$(git -C "$TMP/rig" rev-list --max-parents=0 "$PRE")
+mv "$TMP/rig/.git/objects/${ROOT_COMMIT:0:2}/${ROOT_COMMIT:2}" "$TMP/root-object"
+run finish --bead gc-iss
+eq "$RC" 1 "(history) a history read git cannot answer exits 1"
+has "$ERR" "git could not tell whether" "(history) …and says so"
+eq "$(calls 'bd update')$(calls 'mail send')$(calls human-gate)" "" "(history) …and writes nothing"
 
 echo "── finish: the rig checkout follows only when that discards nothing ──"
 repos; reset_case; bead open; operator_push; echo wip > "$TMP/rig/wip.txt"
@@ -321,14 +381,13 @@ eq "$(git -C "$TMP/rig" rev-parse HEAD)" "$PRE" "(unpushed) the rig checkout is 
 # --- finish: main moved ------------------------------------------------------
 echo "── finish: main moved after the rebase ──"
 repos; reset_case; bead open
-git clone -q "$TMP/origin.git" "$TMP/other"
-( cd "$TMP/other" && echo late > late.txt && git add late.txt && git commit -q -m late && git push -q origin main )
+land_other late
 MOVED=$(git --git-dir="$TMP/origin.git" rev-parse main)
 run finish --bead gc-iss
 eq "$RC" 0 "(race) exits 0"
 UPD=$(calls 'bd update gc-iss')
 has "$UPD" "bd update gc-iss --status=open --assignee=$KEEPER --set-metadata aborted_at=race-loss --append-notes Not landed (" "(race) the bead goes back to the keeper that requested the rebase"
-has "$UPD" "origin/main was $MOVED, which is neither the tip of $BRANCH ($NEW) nor the pre-rebase tip ($PRE)" "(race) …its notes naming the three commits"
+has "$UPD" "origin/main was $MOVED, which is not the pre-rebase tip ($PRE), and the tip of $BRANCH ($NEW) had not landed on it" "(race) …its notes naming the three commits"
 hasnt "$UPD" "gc.work_outcome" "(race) …with no landing recorded"
 hasnt "$UPD" "status=closed" "(race) …and not closed"
 has "$(calls 'mail send')" "mail send $KEEPER --notify -s gascity rebase gc-iss: main moved before it landed" "(race) the keeper is mailed and given its turn"
@@ -336,8 +395,7 @@ eq "$(calls human-gate)" "" "(race) no gate is filed"
 eq "$(git -C "$TMP/rig" rev-parse HEAD)" "$PRE" "(race) the rig checkout is untouched"
 
 repos; reset_case; bead open requesting_keeper=
-git clone -q "$TMP/origin.git" "$TMP/other"
-( cd "$TMP/other" && echo late > late.txt && git add late.txt && git commit -q -m late && git push -q origin main )
+land_other late
 run finish --bead gc-iss
 has "$(calls 'bd update gc-iss')" "--assignee=gascity/gascity-keeper.keeper" "(race-nokeeper) a bead that names no keeper goes to the rig's own"
 

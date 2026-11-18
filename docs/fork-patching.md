@@ -362,9 +362,10 @@ to run, `git push --force-with-lease=main:<pre-rebase tip> origin
 rebase/<bead>:main`, so a concurrent move of `main` refuses the push instead of
 being overwritten. Clearing the gate runs `mol-upstream-gc-rebase-finish`,
 whose landing check closes the bead with Gas City's work record of a landing
-(`gc.work_outcome=shipped` and the landed commit) once `main` is the rebased
+(`gc.work_outcome=shipped` and the landed commit) once `main` holds the rebased
 tip, asks again while `main` is still at the pre-rebase tip, and hands the bead
-back to the keeper when `main` moved after the rebase.
+back to the keeper when `main` moved after the rebase and the rebased tip did
+not land on it.
 `packs/gascity-keeper/assets/scripts/rebase-landing.sh` holds the gate and the
 check.
 
