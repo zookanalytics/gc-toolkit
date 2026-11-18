@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm"
 	armrecord "github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
@@ -28,7 +29,9 @@ import (
 // whose lane asks for the same fix waits on the same bead, and that PR's case
 // joins the bead's notes. A call that runs again for the same PR finds first the
 // fix its open ask waits on, closed or not, so a fix that landed before the call
-// ran again is not filed and sent a second time. A found fix that a label holds from every pool, such
+// ran again is not filed and sent a second time. Each call holds the store's
+// record lock from its first read of the fix to the fix's filing, so two review
+// runs that ask for one fix at once file it once. A found fix that a label holds from every pool, such
 // as the hold:mayor of work that waits for the operator's placement, is sent
 // nowhere, because gc sling reads no hold, and the ask waits on it while the
 // hold stands.
@@ -55,12 +58,14 @@ type Ahead struct {
 // SendAhead files the fix req names ahead of the PR the bead owns, or finds the
 // open bead of its title, sends it to req.Pool on req.Formula unless it is on
 // its way already or a label holds it, and files the ask on the bead that waits
-// on it. It refuses what FileAsk refuses, and a request that sends no check
-// back, before anything is filed. A read that fails returns its error. A write
+// on it. It finds or files the fix under the record lock of the store whose
+// .beads directory is dir, waiting up to wait for it. It refuses what FileAsk
+// refuses, and a request that sends no check back, before anything is filed. A
+// read that fails, and a lock not taken, return their error. A write
 // that fails returns its error with what landed before it, which the next call
 // finds: the fix through the open ask that waits on it or by its title, and the
 // ask by its reason.
-func SendAhead(l *ledger.Ledger, rt gascity.Runtime, req AheadRequest, index func(at string) (Index, error)) (Ahead, error) {
+func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runtime, req AheadRequest, index func(at string) (Index, error)) (Ahead, error) {
 	var out Ahead
 	title, desc := strings.TrimSpace(req.Title), strings.TrimSpace(req.Description)
 	if title == "" || desc == "" || strings.TrimSpace(req.Pool) == "" || strings.TrimSpace(req.Formula) == "" {
@@ -81,38 +86,9 @@ func SendAhead(l *ledger.Ledger, rt gascity.Runtime, req AheadRequest, index fun
 	if rec.URL != "" {
 		pr += " " + rec.URL
 	}
-	mark := "Ahead of " + owner.ID + "'s PR"
-	fix, err := sentFix(l, owner, title)
+	fix, err := fixFor(l, dir, wait, owner, rec, title, desc, pr, &out)
 	if err != nil {
 		return out, err
-	}
-	if fix == nil {
-		if fix, err = openTitled(l, title, owner.ID); err != nil {
-			return out, err
-		}
-	}
-	if fix == nil {
-		f := l.File(title, "task")
-		f.Description(desc + "\n\nAhead of " + pr + ": its review run waits for this to land.")
-		f.Priority(owner.Priority())
-		if rec.Target != "" {
-			record.NameTarget(f, rec.Target)
-		}
-		f.From(owner.ID)
-		id, err := l.Create(f)
-		if err != nil {
-			return out, fmt.Errorf("the fix did not file, and the next call finds one that landed: %w", err)
-		}
-		out.Fix, out.FixFiled = id, true
-	} else {
-		out.Fix, out.Held = fix.ID, arm.HoldLabel(fix)
-		if !strings.Contains(fix.Description()+"\n"+fix.Notes(), mark) {
-			w := l.Write(fix.ID)
-			w.Note("Ahead of " + pr + " as well: its review run waits for this to land.\n\n" + desc)
-			if err := l.Commit(w); err != nil {
-				return out, fmt.Errorf("%s carries the fix, and %s's case did not join its notes: %w", fix.ID, owner.ID, err)
-			}
-		}
 	}
 	if out.FixFiled || (out.Held == "" && unsent(fix)) {
 		res := rt.Sling(gascity.Sling{Target: req.Pool, Bead: out.Fix, Formula: req.Formula})
@@ -134,6 +110,53 @@ func SendAhead(l *ledger.Ledger, rt gascity.Runtime, req AheadRequest, index fun
 		return out, fmt.Errorf("%s carries the fix, and the ask that holds the PR for it did not file: %w", out.Fix, err)
 	}
 	return out, nil
+}
+
+// fixFor finds or files the fix SendAhead sends, holding the store's record
+// lock from its first read of the fix to the fix's create, so two review runs
+// that ask for one fix at once file it once: the fix an open ask on the PR
+// waits on, else the open bead of its title, whose notes take the PR's case,
+// else a new bead. It fills in out's fix, and returns the found fix's record,
+// nil for a fix it filed.
+func fixFor(l *ledger.Ledger, dir string, wait time.Duration, owner *ledger.Record, rec record.Record, title, desc, pr string, out *Ahead) (*ledger.Record, error) {
+	release, err := record.Lock(dir, wait)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	fix, err := sentFix(l, owner, title)
+	if err != nil {
+		return nil, err
+	}
+	if fix == nil {
+		if fix, err = openTitled(l, title, owner.ID); err != nil {
+			return nil, err
+		}
+	}
+	if fix == nil {
+		f := l.File(title, "task")
+		f.Description(desc + "\n\nAhead of " + pr + ": its review run waits for this to land.")
+		f.Priority(owner.Priority())
+		if rec.Target != "" {
+			record.NameTarget(f, rec.Target)
+		}
+		f.From(owner.ID)
+		id, err := l.Create(f)
+		if err != nil {
+			return nil, fmt.Errorf("the fix did not file, and the next call finds one that landed: %w", err)
+		}
+		out.Fix, out.FixFiled = id, true
+		return nil, nil
+	}
+	out.Fix, out.Held = fix.ID, arm.HoldLabel(fix)
+	if mark := "Ahead of " + owner.ID + "'s PR"; !strings.Contains(fix.Description()+"\n"+fix.Notes(), mark) {
+		w := l.Write(fix.ID)
+		w.Note("Ahead of " + pr + " as well: its review run waits for this to land.\n\n" + desc)
+		if err := l.Commit(w); err != nil {
+			return nil, fmt.Errorf("%s carries the fix, and %s's case did not join its notes: %w", fix.ID, owner.ID, err)
+		}
+	}
+	return fix, nil
 }
 
 // sentFix is the fix titled title that an open ask on owner's PR waits on,

@@ -5,10 +5,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	gcfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
@@ -54,7 +56,7 @@ func TestAFixAheadOfAPRIsFiledSentAndWaitedOn(t *testing.T) {
 	pr.Metadata["pr_url"] = "https://github.com/o/r/pull/7"
 	w.store.Put(pr)
 	rt := routes(w)
-	got, err := review.SendAhead(w.ledger(), rt, aheadReq(prBead), archIndex(t))
+	got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +90,7 @@ func TestAFixAheadOfAPRIsFiledSentAndWaitedOn(t *testing.T) {
 		t.Fatalf("AsksOn = %+v, %v; want the one ask", asks, err)
 	}
 
-	again, err := review.SendAhead(w.ledger(), rt, aheadReq(prBead), archIndex(t))
+	again, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
 	if err != nil || again.FixFiled || again.Sent || again.AskFiled || again.Fix != got.Fix || again.Ask != got.Ask {
 		t.Fatalf("a second call = %+v, %v; want the fix and the ask found, and nothing slung", again, err)
 	}
@@ -103,16 +105,72 @@ func TestAFixAheadOfAPRIsFiledSentAndWaitedOn(t *testing.T) {
 func TestACallAfterItsFixLandedFindsThatFix(t *testing.T) {
 	w := newWorld(t)
 	rt := routes(w)
-	first, err := review.SendAhead(w.ledger(), rt, aheadReq(prBead), archIndex(t))
+	first, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	row, _ := w.store.Row(first.Fix)
 	row.Status, row.ClosedAt = "closed", "2026-11-18T20:00:00Z"
 	w.store.Put(row)
-	again, err := review.SendAhead(w.ledger(), rt, aheadReq(prBead), archIndex(t))
+	again, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
 	if err != nil || again.Fix != first.Fix || again.FixFiled || again.Sent || again.Ask != first.Ask || again.AskFiled {
 		t.Fatalf("the call after the fix landed = %+v, %v; want the landed fix and its ask found, and nothing filed or slung", again, err)
+	}
+	if n := len(rt.Slings()); n != 1 {
+		t.Fatalf("the fix was slung %d times; want once", n)
+	}
+}
+
+// pausing is a store whose reads of the fix's title each say on entered that
+// they have read, and return what they read once release closes.
+type pausing struct {
+	gcbd.Store
+	entered, release chan struct{}
+}
+
+func (s *pausing) Find(q gcbd.Query) ([]gcbd.Bead, error) {
+	rows, err := s.Store.Find(q)
+	if q.TitleContains == aheadTitle {
+		s.entered <- struct{}{}
+		<-s.release
+	}
+	return rows, err
+}
+
+// Two PRs whose review runs ask for one fix at once share it: the store's
+// record lock keeps the second call from reading the fix's title until the
+// first has filed the fix, so the second finds that fix and files none.
+func TestTwoPRsAskingForOneFixAtOnceShareIt(t *testing.T) {
+	w := newWorld(t)
+	w.store.Put(bead{ID: "tk-pr2", Status: "blocked", IssueType: "task", Metadata: map[string]string{
+		"merge_result": "pull_request_pending", "branch": "polecat/tk-pr2", "pr_head_sha": h1, "merged_target": target,
+	}})
+	store := &pausing{Store: w.store, entered: make(chan struct{}, 2), release: make(chan struct{})}
+	dir, rt := t.TempDir(), routes(w)
+	type sent struct {
+		got review.Ahead
+		err error
+	}
+	done := make(chan sent, 2)
+	send := func(bead string) {
+		got, err := review.SendAhead(ledger.New(store), dir, 10*time.Second, rt, aheadReq(bead), archIndex(t))
+		done <- sent{got, err}
+	}
+	go send(prBead)
+	<-store.entered
+	go send("tk-pr2")
+	// Without the lock the second call reads the title while the first waits.
+	select {
+	case <-store.entered:
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(store.release)
+	a, b := <-done, <-done
+	if a.err != nil || b.err != nil {
+		t.Fatalf("the two calls returned %v and %v", a.err, b.err)
+	}
+	if a.got.Fix != b.got.Fix || a.got.FixFiled == b.got.FixFiled || a.got.Ask == b.got.Ask {
+		t.Fatalf("the two calls = %+v and %+v; want one fix, filed by one of them, and an ask for each PR", a.got, b.got)
 	}
 	if n := len(rt.Slings()); n != 1 {
 		t.Fatalf("the fix was slung %d times; want once", n)
@@ -125,7 +183,7 @@ func TestACallAfterItsFixLandedFindsThatFix(t *testing.T) {
 func TestASecondPRWaitsOnTheSameFix(t *testing.T) {
 	w := newWorld(t)
 	rt := routes(w)
-	first, err := review.SendAhead(w.ledger(), rt, aheadReq(prBead), archIndex(t))
+	first, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +192,7 @@ func TestASecondPRWaitsOnTheSameFix(t *testing.T) {
 	}})
 	second := aheadReq("tk-pr2")
 	second.Description = "Cover the sessions the change moves."
-	got, err := review.SendAhead(w.ledger(), rt, second, archIndex(t))
+	got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, second, archIndex(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +204,7 @@ func TestASecondPRWaitsOnTheSameFix(t *testing.T) {
 		t.Fatalf("the fix's notes read %q; want the second PR's case", fixRow.Notes)
 	}
 	writes := len(w.store.Writes())
-	if _, err := review.SendAhead(w.ledger(), rt, second, archIndex(t)); err != nil {
+	if _, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, second, archIndex(t)); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(w.store.Writes()); n != writes {
@@ -164,12 +222,12 @@ func TestAFixWhoseSlingFailedIsSentByTheNextCall(t *testing.T) {
 	rt := &gcfake.Runtime{OnSling: func(gascity.Sling) gascity.SlingResult {
 		return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: "no such pool"}}
 	}}
-	got, err := review.SendAhead(w.ledger(), rt, aheadReq(prBead), archIndex(t))
+	got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
 	if err == nil || !strings.Contains(err.Error(), "no such pool") || !got.FixFiled || got.Sent || got.Ask != "" {
 		t.Fatalf("SendAhead = %+v, %v; want the fix filed, the sling's failure, and no ask", got, err)
 	}
 	retry := routes(w)
-	again, err := review.SendAhead(w.ledger(), retry, aheadReq(prBead), archIndex(t))
+	again, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, retry, aheadReq(prBead), archIndex(t))
 	if err != nil || again.Fix != got.Fix || again.FixFiled || !again.Sent || !again.AskFiled {
 		t.Fatalf("the next call = %+v, %v; want the fix found and slung, and the ask filed", again, err)
 	}
@@ -179,7 +237,7 @@ func TestAFixWhoseSlingFailedIsSentByTheNextCall(t *testing.T) {
 	row, _ := w.store.Row(got.Fix)
 	delete(row.Metadata, "gc.routed_to")
 	w.store.Put(row)
-	if third, err := review.SendAhead(w.ledger(), live, aheadReq(prBead), archIndex(t)); err != nil || third.Sent {
+	if third, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, live, aheadReq(prBead), archIndex(t)); err != nil || third.Sent {
 		t.Fatalf("a call whose sling finds a live workflow on the fix = %+v, %v; want it standing, sent already", third, err)
 	}
 }
@@ -191,7 +249,7 @@ func TestAFoundFixThatALabelHoldsIsSentNowhere(t *testing.T) {
 	w := newWorld(t)
 	w.store.Put(bead{ID: "tk-held", Title: aheadTitle, Status: "open", IssueType: "task", Labels: []string{"Hold:Mayor "}})
 	rt := routes(w)
-	got, err := review.SendAhead(w.ledger(), rt, aheadReq(prBead), archIndex(t))
+	got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +292,7 @@ func TestAFixAheadIsRefusedBeforeAnythingIsFiled(t *testing.T) {
 		w := newWorld(t)
 		c.setup(w)
 		rt := &gcfake.Runtime{}
-		_, err := review.SendAhead(w.ledger(), rt, c.req(), archIndex(t))
+		_, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, c.req(), archIndex(t))
 		var refused *review.Refusal
 		if !errors.As(err, &refused) || len(w.store.Creates()) != 0 || len(rt.Slings()) != 0 {
 			t.Errorf("%s: %v; want it refused with nothing filed or slung", c.name, err)

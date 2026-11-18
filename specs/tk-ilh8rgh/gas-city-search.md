@@ -74,7 +74,13 @@ document missing.
   on, else the open fix of its title, or files it, slings it, and files the ask
   in one create with its wait. These are bd's create and
   `gc sling`, and the same create again, run as one call, so it adds no noun
-  ([review-arch.md](../../docs/review-arch.md), check 2).
+  ([review-arch.md](../../docs/review-arch.md), check 2). It finds or files the
+  fix under the store's record lock, the flock `pr/record` takes for the PR
+  record's writers, so two review runs that ask for one fix at once file it
+  once. bd's own create-if-absent, `bd create --id` with an id made from the
+  title (bd 1.3.4), does not cover this: it would give that id to the title's
+  first fix for good, so a later request for the same work, made after that
+  fix landed, would find the landed bead instead of filing a new one.
 - The ruling `ahead` and the key `waits` in the round's output.
 - review-run.sh's `ahead` verb, which puts the command behind the script's
   step-ownership and shadow checks, as its `withdraw` verb does for

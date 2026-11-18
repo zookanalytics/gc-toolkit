@@ -626,19 +626,24 @@ func newReviewAheadCmd(stdout, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
+// aheadLockWait is how long gctk review ahead waits for the store's record lock
+// while another writer holds it.
+const aheadLockWait = time.Minute
+
 func reviewAhead(req review.AheadRequest, db string, rt gascity.Runtime, stdout, stderr io.Writer) int {
-	_, l, err := storeOf(db, req.Bead)
+	dir, l, err := storeOf(db, req.Bead)
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk review ahead: %v; nothing filed\n", err)
 		return 2
 	}
-	return aheadIn(l, rt, req, headIndex, stdout, stderr)
+	return aheadIn(l, dir, rt, req, headIndex, stdout, stderr)
 }
 
-// aheadIn files the fix req names ahead of its PR in the store l reads, and the
-// ask that holds the PR for it, and prints what stands.
-func aheadIn(l *ledger.Ledger, rt gascity.Runtime, req review.AheadRequest, index func(string) (review.Index, error), stdout, stderr io.Writer) int {
-	got, err := review.SendAhead(l, rt, req, index)
+// aheadIn files the fix req names ahead of its PR in the store l reads, whose
+// .beads directory is dir, and the ask that holds the PR for it, and prints what
+// stands.
+func aheadIn(l *ledger.Ledger, dir string, rt gascity.Runtime, req review.AheadRequest, index func(string) (review.Index, error), stdout, stderr io.Writer) int {
+	got, err := review.SendAhead(l, dir, aheadLockWait, rt, req, index)
 	var refused *review.Refusal
 	if errors.As(err, &refused) {
 		fmt.Fprintf(stderr, "gctk review ahead: %v\n", err)

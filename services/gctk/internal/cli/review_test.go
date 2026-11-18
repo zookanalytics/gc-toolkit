@@ -213,7 +213,7 @@ func TestReviewAheadPrintsWhatStands(t *testing.T) {
 		Pool: "rig/gc-toolkit.polecat", Formula: "mol-polecat-work", Checks: []string{"arch"}}
 	ahead := func(s *fake.Store, rt gascity.Runtime) (int, string, string) {
 		var out, errb bytes.Buffer
-		code := aheadIn(ledger.New(s), rt, req, index, &out, &errb)
+		code := aheadIn(ledger.New(s), t.TempDir(), rt, req, index, &out, &errb)
 		return code, out.String(), errb.String()
 	}
 
