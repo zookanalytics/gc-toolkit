@@ -7,14 +7,16 @@ description: Use when you are the mol-feedback-distiller judging pending feedbac
 
 The method for judging feedback observations. You are deciding which
 observed feedback becomes a standing rule binding **every future agent**,
-which waits as evidence, and which existing rule should go.
+which becomes a fix in the code an agent runs at the moment it needs the
+lesson, which waits as evidence, and which existing rule should go.
 
 **Reason in writing.** Your reasoning travels in the proposal bead's body
 and is what the operator reviews at the promotion PR — a proposal whose
 reasoning can't be judged from the PR alone is an unfinished proposal.
 
-**You never edit prompts, fragments, or skills.** You file proposal
-beads; a reviewed PR does the editing. This holds even for this file.
+**You never edit prompts, fragments, skills or other code.** You file
+beads for the changes; a reviewed PR does the editing. This holds even for
+this file.
 
 ## The five judgments, in order
 
@@ -67,16 +69,25 @@ independent corrections a week apart. Whatever you decide, **state the
 evidence you weighed** — a judgment you didn't write down can't be
 audited or challenged.
 
-### 3. Pick the carrier, then adjudicate against what exists
+### 3. Decide where the lesson goes, then adjudicate against what exists
 
-Two decisions, in that order. **Which carrier** the learning belongs in is
-[the carrier table below](#carriers--the-five-shapes-a-promotion-can-take);
-different shapes of learning need different carriers, and a prose bullet is
-one of five, not the default.
+Two decisions, in that order. **Where the lesson goes** turns on the moment
+it was needed: where the agent that went wrong was, such as the step it held,
+the skill it had loaded, the command it ran or the review it was making. A
+lesson one moment needs, even a moment every run reaches, is a fix in the code
+that moment loads, such as its formula step, a skill, a command's output or a
+review's method, put where [Fixes in code](#fixes-in-code) says. A lesson the
+agent can need at any turn, before it could think to load anything, goes in a
+carrier, and so does a lesson for the correctness review, which the
+`review-rubric` and `exemplar` carriers reach.
+[The carrier table below](#carriers--the-five-shapes-a-promotion-can-take)
+picks the carrier. Different shapes of learning need different carriers, and a
+prose bullet is one of five, not the default.
 
-Then adjudicate the edit within that carrier. The three promotion gates decide
-whether it may be adopted at all. Read the target surface's current entries
-and the pattern-bead set, then pick exactly one:
+Then adjudicate the edit against what exists. A fix starts from the file that
+already owns the rule, as Fixes in code says. Within a carrier, the three
+promotion gates decide whether it may be adopted at all. Read the target
+surface's current entries and the pattern-bead set, then pick exactly one:
 
 - **ADD** — genuinely new; no existing bullet covers it.
 - **UPDATE** — an existing bullet sharpened or widened. One edit, never
@@ -127,12 +138,14 @@ kinds of defect it let through, the reasoning it skipped, the evidence it did
 not ask for. Cluster the members by the miss they show, each cluster on a
 pattern bead of its own, and stamp each member onto its cluster. A proposal
 from the set rests on a cluster, never on one member, and lands as one of two
-things: a `review-rubric` amendment, or a change to the correctness method
-itself (`skills/review-correctness/SKILL.md`), filed as an engineering bead
-held for placement (`-l hold:mayor` on its create, as the distiller formula's
-file-and-dispatch step files it). It is never one tactical rule per
-observation. Judgment 2 weighs a cluster's recurrence by its distinct
-`obs.provenance`, as it does any pattern's.
+things: a `review-rubric` amendment, or a change to the method of the review
+that let the miss through, such as the correctness method itself
+(`skills/review-correctness/SKILL.md`). The method change is a
+[fix in code](#fixes-in-code), filed as an engineering bead held for placement
+(`-l hold:mayor` on its create, as the distiller formula's file-and-dispatch
+step files it). It is never one tactical rule per observation. Judgment 2
+weighs a cluster's recurrence by its distinct `obs.provenance`, as it does any
+pattern's.
 
 A member that states universal intent (`obs.directive=standing`) is also a
 standing directive, and judgment 1 applies to it as to any other.
@@ -296,9 +309,10 @@ bullet is the right fix and promotes (subject to gate 1).
 
 This is the promotion-time twin of the retirement pass's **hardenable?**
 question: skip the prose and file the mechanism now. File **one
-engineering work bead** describing the mechanical fix, routed to the pool
-like any other work, and record on the pattern bead that the remedy is
-structural. Do **not** file a `prompt-update` bead.
+engineering work bead** for the mechanism, written and put where
+[Fixes in code](#fixes-in-code) says and held for placement like any new
+work, and record on the pattern bead that the remedy is structural. Do
+**not** file a `prompt-update` bead.
 
 **The exhortation half has one out.** A remedy that reads as an exhortation
 only because the right behavior resists compression — the agent knows the
@@ -333,11 +347,12 @@ part that was never in doubt and falls silent on the part the failure turned
 on, so it reads as guidance and changes nothing.
 
 When the lever is wrong, **hold rather than file the static bullet** and route
-to where the call is made: a decision-point mechanism (an engineering bead, a
-gate), a `review-rubric` dimension a reader applies to the diff, or the
-author's own discrimination in the moment. This is why clearing gate 1 on an
-endorsed direction is not enough — the operator can be right that a behavior
-matters while a static entry remains unable to act on it.
+to where the call is made: a decision-point mechanism (an engineering bead
+as [Fixes in code](#fixes-in-code) says, a gate), a `review-rubric`
+dimension a reader applies to the diff, or the author's own discrimination in
+the moment. This is why clearing gate 1 on an endorsed direction is not
+enough — the operator can be right that a behavior matters while a static
+entry remains unable to act on it.
 
 *Worked example.* A candidate of the form "choose the right X for the
 situation" states the outcome (the right X) but leaves the choosing — the
@@ -345,6 +360,72 @@ whole difficulty — to the judgment that already erred, so it passes gate 2 as
 a concrete-sounding behavior yet acts on nothing. The lever that acts is a
 reviewer applying a `review-rubric` dimension to the choice, or the author's
 discrimination in the moment, not a paid bullet that restates the goal.
+
+## Fixes in code
+
+A fix in code changes what an agent runs at the moment it needs a lesson:
+anything in the pack's repository, such as a skill or its description, a
+formula step, a script, gctk, a review method or a doc, and code another rig or
+project owns. It reaches the agent where the lesson applies and costs only the
+turns that load that code. Judgment 3 sends a lesson here when one moment
+needs it, and Gate 2's mechanism, Gate 3's decision-point mechanism and a
+review method change from the outside-review set are fixes too. The promotion
+gates guard the paid carriers and not a fix, which waits for the operator
+before anyone builds it.
+
+**Choose where it goes.**
+
+1. **Find the moment.** The evidence names what the agent was doing when it
+   went wrong. Read the formula step, skill or command it was running there,
+   and list what that moment loads.
+2. **Find the file that owns the rule.** Search the pack, and the code the
+   moment runs, for the rule's terms, and read the skills the moment's own
+   skills point to. A review finding often names the owner, since a reviewer
+   cites the standard it rules from.
+3. **When a file owns the rule, make that file reach the moment.** A skill the
+   moment already loads points to the owner where the moment needs it, or the
+   owner's description names the moment, so the agent loads the owner there.
+   The step's own text names the owner only when the moment loads no skill
+   that could carry the pointer. Never copy the rule: a copy reaches one
+   moment and drifts from the standard its reviewers hold work to.
+4. **When no file owns the rule, write it where the moment reads.** The step's
+   own text takes a rule only that step needs, and a skill the step names takes
+   one that other moments need too.
+5. **When an agent that intends the right thing would still fail there**, the
+   fix is a mechanism at the moment, such as a refusal, a check, a lint or a
+   gate, as Gate 2 asks.
+
+**Code this rig does not own** goes through `gc-toolkit.external-issue`, which
+sends the fix to the rig of the city that owns the code, through
+`gc-toolkit.work`, or records it as an upstream finding for the operator. The
+pattern waits on the bead filed for the fix. When that bead is in another
+rig's store, an edge would hold nothing, so the pattern waits as
+`gc-toolkit.waits` says for a blocker there.
+
+**What the bead says.** Before you file, look for an open bead or PR that
+already carries the fix: add the evidence to its notes and make the pattern
+wait on it. Otherwise file one engineering bead per fix, with the hold and the
+edge the distiller formula's file-and-dispatch step gives it, and state in its
+body:
+
+- **Failure**: what went wrong, with each event's provenance.
+- **Moment**: where the agent was, and what that moment loads.
+- **Owner**: the file that owns the rule, or where you searched and found
+  none. The owner is never out of scope, since the fix may belong in it.
+- **Done when**: what the agent does at the moment once the fix lands, and
+  how to check it.
+
+The bead names where the fix goes and leaves the words to its builder, who
+writes them under the standards that file's authors follow and may move the
+fix somewhere better it finds, saying why.
+
+*Worked example.* Agents keep retrying a command after it refuses them, though
+the skill they load for that work says what a refusal means. The moment is the
+refusal, when the agent reads the command's output and not the skill. So the
+fix is in the command, whose refusal names the next step or the skill that
+gives it. A bullet would cost every turn of every role, and a copy of the
+skill's rule in each step that runs the command would give the rule more homes
+to drift apart.
 
 ## Retirement questions — every run, for every adopted rule
 
