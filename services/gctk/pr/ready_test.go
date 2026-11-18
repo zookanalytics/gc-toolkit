@@ -115,8 +115,10 @@ func ready() *world {
 	}
 	g := ghfake.New(self)
 	g.Put(p)
+	s := fake.New()
+	s.IDPrefix = "tk"
 	return &world{
-		store: fake.New(), github: g, pr: p,
+		store: s, github: g, pr: p,
 		rule: &rule{notFeedback: map[int64]bool{}, awaits: map[string]bool{}},
 		md: map[string]string{
 			"merge_result": "pull_request_pending", "pr_url": prURL, "pr_number": "7", "pr_repo": repo,

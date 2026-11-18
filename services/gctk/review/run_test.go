@@ -63,6 +63,7 @@ func (f *filed) File(subject, key, message string) error {
 func newWorld(t *testing.T) *world {
 	t.Helper()
 	s := fake.New()
+	s.IDPrefix = "tk"
 	s.Put(bead{ID: prBead, Status: "blocked", IssueType: "task", Metadata: map[string]string{
 		"merge_result": "pull_request_pending", "branch": branch, "pr_head_sha": h1, "merged_target": target,
 	}, Edges: []gcbd.Edge{{ID: root, Type: gcbd.EdgeBlocks}}})
@@ -788,6 +789,29 @@ func TestAnAskThatWaitsOnABeadItsEdgeWouldNotHoldIsRefused(t *testing.T) {
 				t.Fatalf("the refused ask reached the store in %d creates", n)
 			}
 		})
+	}
+}
+
+// A store can hold a bead of another id prefix than the one it gives a bead it
+// files, which bd allows under --force or allowed_prefixes. An ask on such a
+// PR's bead is refused with nothing filed, with or without a wait of the
+// bead's prefix, since bd keeps both the ask's edge onto the bead and its wait
+// as edges into another rig's store.
+func TestAnAskOnABeadOfAnotherPrefixThanItsStoreIsRefused(t *testing.T) {
+	w := newWorld(t)
+	pr, _ := w.store.Row(prBead)
+	pr.ID = "rb-pr"
+	w.store.Put(pr)
+	w.store.Put(bead{ID: "rb-other", Status: "open", IssueType: "task"})
+	for _, waits := range [][]string{nil, {"rb-other"}} {
+		_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: "rb-pr", Reason: "Fix the cap.", WaitingOn: waits}, nil)
+		var refused *review.Refusal
+		if !errors.As(err, &refused) || !strings.Contains(err.Error(), "gives the ask the id prefix tk") {
+			t.Fatalf("an ask on rb-pr in a store of prefix tk, waiting on %v: %v; want a refusal naming the prefix tk", waits, err)
+		}
+	}
+	if n := len(w.store.Creates()); n != 0 {
+		t.Fatalf("the refused asks reached the store in %d creates", n)
 	}
 }
 

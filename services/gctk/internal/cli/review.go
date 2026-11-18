@@ -479,12 +479,12 @@ closes.
 Before it files, it finds an ask on the bead of the same source and reason,
 open or closed, and files nothing when one stands, so a filer that runs again
 after its ask closed files nothing. It refuses a bead that owns no PR on the
-record, a check the index does not declare, a --waiting-on bead whose edge
-would hold nothing, and an ask it finds that does not wait on every
---waiting-on bead. An edge holds nothing onto a bead the bead's own store does
-not hold, and onto one of another id prefix than the bead's, which bd keeps as
-an edge into another store even when this store holds it. It prints <ask>
-filed, or <ask> found.
+record, or that does not carry the id prefix its store gives the ask, a check
+the index does not declare, a --waiting-on bead whose edge would hold nothing,
+and an ask it finds that does not wait on every --waiting-on bead. An edge
+holds nothing onto a bead the bead's own store does not hold, and between two
+beads of different id prefixes, which bd keeps as an edge into another store
+even when this store holds both. It prints <ask> filed, or <ask> found.
 
 exit: 0 the ask stands: filed, or found
       1 usage

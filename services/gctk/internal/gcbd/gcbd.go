@@ -284,6 +284,20 @@ func (c *Client) Where() (path, prefix string, err error) {
 	return where.Path, where.Prefix, nil
 }
 
+// Prefix is the id prefix the store gives a bead it files, the issue prefix
+// `gc bd where --json` names for the store the client reads. A read that fails
+// or names no prefix returns a *ReadError.
+func (c *Client) Prefix() (string, error) {
+	_, prefix, err := c.Where()
+	if err != nil {
+		return "", err
+	}
+	if prefix == "" {
+		return "", &ReadError{Reason: "gc bd where named no prefix for the store"}
+	}
+	return prefix, nil
+}
+
 // listedRig is one rig `gc rig list --json` names, the city among them: its
 // name, its bead prefix, and the path its .beads directory sits under.
 type listedRig struct {

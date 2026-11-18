@@ -182,7 +182,10 @@ func (e *Refusal) Error() string { return "nothing filed on " + e.Bead + ": " + 
 //
 // It refuses a bead that owns no PR on the record, and a check req sends back
 // that the check index does not declare at the head the refinery validated,
-// which index reads. It refuses a wait whose edge would hold nothing, on a bead
+// which index reads. It refuses a bead that does not carry the id prefix its
+// store gives the ask, since bd keeps an edge between beads of two prefixes as
+// one into another rig's store, which holds nothing, and a bd store can hold a
+// bead of another prefix. It refuses a wait whose edge would hold nothing, on a bead
 // of another id prefix than the bead's or on one the bead's own store does not
 // hold (waitsIn). It refuses to return an ask it finds that does not wait on
 // every bead req names, because a run can take that ask before they close, or
@@ -222,6 +225,15 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 				checks = append(checks, c.Name)
 			}
 		}
+	}
+	prefix, err := l.Prefix()
+	if err != nil {
+		return "", false, err
+	}
+	if idPrefix(prefix+"-") != idPrefix(owner.ID) {
+		return "", false, &Refusal{Bead: req.Bead, Why: fmt.Sprintf(
+			"its store gives the ask the id prefix %s, and bd keeps an edge between beads of two prefixes as one into another rig's store, which holds nothing, so neither the ask's edge onto it nor a wait would hold",
+			prefix)}
 	}
 	waits, err := waitsIn(l, owner.ID, req)
 	if err != nil {
@@ -275,8 +287,8 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 // order named, and it refuses each one whose edge would hold nothing. bd keeps
 // an edge between beads of two id prefixes as an edge into another repository,
 // which holds nothing even when this store holds the far bead
-// (IsExternalDepTarget), and the ask holds the bead that owns the PR only by
-// sharing its prefix, so a wait of another prefix than owner's is refused. So
+// (IsExternalDepTarget), and owner carries the prefix its store gives the ask,
+// as FileAsk checks first, so a wait of another prefix than owner's is refused. So
 // is one that the ledger's store, the store of the bead that owns the PR, does
 // not hold.
 func waitsIn(l *ledger.Ledger, owner string, req AskRequest) ([]string, error) {

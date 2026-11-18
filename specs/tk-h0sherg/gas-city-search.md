@@ -36,8 +36,9 @@ tier and on a ready frontier, so a create's `--deps` reaches bd as written.
 **Not covered on every transport, and a store holding the bead does not cover
 it.** bd decides whether an edge is local by the id prefixes of its two beads,
 not by whether the store holds the far bead. gctk refuses, with nothing filed,
-a wait on a bead of another prefix than the PR's bead, and then a wait on a
-bead of that prefix that the PR's store does not hold.
+an ask on a PR's bead of another prefix than the one its store gives the ask, a
+wait on a bead of another prefix than the PR's bead, and then a wait on a bead
+of that prefix that the PR's store does not hold.
 
 - bd classifies an edge by prefix. `IsExternalDepTarget` in
   `internal/storage/issueops/dependencies.go` reads an edge whose two ids carry
@@ -61,10 +62,14 @@ bead of that prefix that the PR's store does not hold.
   `backend/conformance/lifecycle_create_contract.go` creates one and reads it
   back. An edge from the ask onto such a bead is still an edge between two
   prefixes, so finding the bead in the store does not make the wait hold.
-- The ask takes its store's prefix, and its own edge onto the PR's bead holds
-  only when the two share a prefix. A wait holds the ask only when it carries
-  the PR bead's prefix too, which is the rule the `waits` skill gives every
-  wait edge.
+- The ask takes its store's prefix, the issue prefix bd's create mints an id
+  from (`ReadConfigPrefix` in `internal/storage/issueops/helpers.go`, read by
+  `assignCreateIssueIDInTx` in `internal/storage/issueops/create.go`), which
+  `bd where --json` names (`cmd/bd/where.go`). Its own edge onto the PR's bead
+  holds only when the two share a prefix, and the store can hold a PR's bead
+  of another prefix, as above. A wait holds the ask only when it carries the
+  PR bead's prefix too, which is the rule the `waits` skill gives every wait
+  edge.
 - For a bead of the PR bead's prefix, bd's create paths differ. The direct path
   resolves each `--deps` target in its store (`resolveDepSpecTargets` in
   `cmd/bd/create_deps.go`), and an unknown target fails the create. The
@@ -78,8 +83,10 @@ bead of that prefix that the PR's store does not hold.
 So a wait on a bead of another prefix files with an edge that holds nothing on
 either path, whether or not the store holds that bead, and the ask reads clear
 and the race stays with no sign. Gas City's `gc bd` adds no check, as above.
-gctk's check compares the prefixes, then reads each waited bead in the PR's
-store before the create, and it is the same on every transport.
+gctk's check reads the prefix the PR's store gives the ask through `gc bd
+where`, and compares it and each wait's prefix with the PR bead's, then reads
+each waited bead in the PR's store before the create, and it is the same on
+every transport.
 
 ## Report an ask a re-run finds that does not wait
 

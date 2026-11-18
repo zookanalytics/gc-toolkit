@@ -93,7 +93,8 @@ Add `--check <check>` for each check the point sends back, and
 before the run takes the point, such as the anchor of a PR it must land after.
 Exit 0 prints `<ask> filed`, or `<ask> found` for an ask of the same source and
 reason, open or closed. Exit 3 refuses an anchor that owns no PR on the pending
-record, which takes the rework or the supplement here instead, a check the
+record, which takes the rework or the supplement here instead, one that does
+not carry the id prefix its store gives the ask, a check the
 index does not declare, a `--waiting-on` bead of another id prefix or one the
 anchor's store does not hold, and a call that finds an ask of the same source
 and reason that does not wait on every `--waiting-on` bead. Exit 2 is a read

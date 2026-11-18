@@ -29,6 +29,9 @@ type Store interface {
 	// create whose commit result it lost with the same reply and exit as a
 	// refusal, so the caller finds the bead before it files again.
 	Create(title string, args ...string) (string, error)
+	// Prefix reads the id prefix the store gives a bead it files. A read that
+	// fails or names none returns a *ReadError.
+	Prefix() (string, error)
 }
 
 var _ Store = (*Client)(nil)

@@ -82,6 +82,9 @@ func (p *pass) Blocked() (*gcbd.BlockedSet, error) {
 	return p.blocked, nil
 }
 
+// Prefix asks the store, since no row the pass keeps answers it.
+func (p *pass) Prefix() (string, error) { return p.store.Prefix() }
+
 // Find answers q from the rows the pass holds, once it has read what those
 // rows cannot answer.
 func (p *pass) Find(q gcbd.Query) ([]gcbd.Bead, error) {

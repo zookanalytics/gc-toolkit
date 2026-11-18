@@ -70,8 +70,9 @@ func TestInKeepsAStoreTheCallNames(t *testing.T) {
 	}
 }
 
-// routeStub puts a `gc` on PATH that answers `bd where` from $STUB_WHERE and
-// `rig list` from $STUB_RIGS, each at its own exit code, and logs every call.
+// routeStub puts a `gc` on PATH that answers `bd where`, pinned to a store or
+// not, from $STUB_WHERE and `rig list` from $STUB_RIGS, each at its own exit
+// code, and logs every call.
 func routeStub(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -79,7 +80,7 @@ func routeStub(t *testing.T) string {
 	stub := `#!/bin/sh
 printf '%s\n' "$*" >> "$STUB_LOG"
 case "$*" in
-"bd where --json") printf '%s\n' "$STUB_WHERE"; exit "${STUB_WHERE_RC:-0}" ;;
+"bd where --json"|"bd --db "*" where --json") printf '%s\n' "$STUB_WHERE"; exit "${STUB_WHERE_RC:-0}" ;;
 "rig list --json") printf '%s\n' "$STUB_RIGS"; exit "${STUB_RIGS_RC:-0}" ;;
 esac
 echo "stub gc: no answer for $*" >&2
@@ -112,6 +113,25 @@ func TestWhereNamesTheResolvedStore(t *testing.T) {
 		if _, _, err := c.Where(); !errors.As(err, &re) {
 			t.Errorf("Where() on %s = %v; want a *ReadError", tc.reply, err)
 		}
+	}
+}
+
+// Prefix is the prefix bd where names for the store the client reads, pinned
+// there, and a reply that names none fails the read.
+func TestPrefixNamesTheStoresPrefix(t *testing.T) {
+	log := routeStub(t)
+	c := (&Client{bin: "gc"}).In("/rig/.beads")
+	t.Setenv("STUB_WHERE", `{"path":"/rig/.beads","prefix":"tk"}`)
+	if p, err := c.Prefix(); err != nil || p != "tk" {
+		t.Errorf("Prefix() = %q, %v; want tk", p, err)
+	}
+	if got := findCalls(t, log); !slices.Equal(got, []string{"bd --db /rig/.beads where --json"}) {
+		t.Errorf("calls = %q, want one bd where pinned to the store", got)
+	}
+	t.Setenv("STUB_WHERE", `{"path":"/rig/.beads"}`)
+	var re *ReadError
+	if _, err := c.Prefix(); !errors.As(err, &re) {
+		t.Errorf("Prefix() on a reply that names no prefix = %v; want a *ReadError", err)
 	}
 }
 

@@ -197,6 +197,10 @@ func (l *Ledger) File(title, issueType string) *Filing {
 	return &Filing{title: title, typ: issueType, keys: map[string]string{}}
 }
 
+// Prefix is the id prefix the store gives a bead it files, the new bead's
+// prefix that BlockedBy names.
+func (l *Ledger) Prefix() (string, error) { return l.store.Prefix() }
+
 // Description gives the new bead its description.
 func (f *Filing) Description(text string) { f.description = text }
 
