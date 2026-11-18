@@ -242,12 +242,17 @@ func TestListenersAreTheProcessesLoopbackReachesOnThePort(t *testing.T) {
 	if pids, err := h.Listeners(port); err != nil || !slices.Equal(pids, []int{os.Getpid()}) {
 		t.Errorf("Listeners(%d) = %v, %v; want this process alone", port, pids, err)
 	}
-	free, err := h.FreePort()
+	frees, err := h.FreePorts(3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pids, err := h.Listeners(free); err != nil || len(pids) != 0 || h.Answers(free) {
-		t.Errorf("a free port: Listeners %v, %v, answers %v; want none, no error, and no answer", pids, err, h.Answers(free))
+	if len(frees) != 3 || frees[0] == frees[1] || frees[1] == frees[2] || frees[0] == frees[2] {
+		t.Errorf("FreePorts(3) = %v, want three ports, each different", frees)
+	}
+	for _, free := range frees {
+		if pids, err := h.Listeners(free); err != nil || len(pids) != 0 || h.Answers(free) {
+			t.Errorf("a free port: Listeners %v, %v, answers %v; want none, no error, and no answer", pids, err, h.Answers(free))
+		}
 	}
 
 	// A listener on an address loopback does not reach is left out.
@@ -289,10 +294,11 @@ func outsideAddress() net.IP {
 }
 
 // sandboxStub stands in for demo-engine-lib.sh. Its demo_engine_sandboxed
-// logs its port, its directory, PROG and its working directory, then runs the
-// command in the directory, as the real one does inside the sandbox.
+// logs its ports, its directory, PROG, its working directory and the socket
+// directory it is given, then runs the command in the directory, as the real
+// one does inside the sandbox.
 const sandboxStub = `demo_engine_sandboxed() {
-  printf '%s|%s|%s|%s\n' "$1" "$2" "$PROG" "$(pwd -P)" > "$SANDBOX_LOG"
+  printf '%s|%s|%s|%s|%s\n' "$1" "$2" "$PROG" "$(pwd -P)" "${DEMO_ENGINE_SOCKET_DIR-unset}" > "$SANDBOX_LOG"
   local dir=$2
   shift 2
   cd "$dir" && exec "$@"
@@ -332,8 +338,27 @@ func TestStartInTheSandboxRunsTheCommandThroughTheLibraryFromItsDirectory(t *tes
 		t.Errorf("relayed %q, want %q: the command's output and errors, through the relay", got, want)
 	}
 	b, _ := os.ReadFile(log)
-	if got, want := strings.TrimSpace(string(b)), "4242|"+work+"|gctk host test|"+work; got != want {
-		t.Errorf("the sandbox got %q, want %q: the port, the directory and the name its messages start with, from the directory", got, want)
+	if got, want := strings.TrimSpace(string(b)), "4242|"+work+"|gctk host test|"+work+"|"; got != want {
+		t.Errorf("the sandbox got %q, want %q: the port, the directory and the name its messages start with, from the directory, and no socket directory", got, want)
+	}
+
+	// A sandbox with ports beyond its own and a socket directory passes the
+	// ports in one argument, its own first, and the directory by name, which
+	// overrides one the caller's environment names.
+	t.Setenv("DEMO_ENGINE_SOCKET_DIR", "/the/callers")
+	c, err = h.Start(Spec{
+		Argv:    []string{"true"},
+		Dir:     work,
+		Env:     []string{"SANDBOX_LOG=" + log},
+		Sandbox: &Sandbox{Lib: lib, Port: 4242, Extra: []int{4243, 4250}, Sockets: dir, Prog: "gctk host test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Wait()
+	b, _ = os.ReadFile(log)
+	if got, want := strings.TrimSpace(string(b)), "4242,4243,4250|"+work+"|gctk host test|"+work+"|"+dir; got != want {
+		t.Errorf("the sandbox got %q, want %q: every port, its own first, and the socket directory", got, want)
 	}
 
 	if c, err := h.Start(Spec{Argv: []string{"true"}, Dir: work, Sandbox: &Sandbox{Lib: filepath.Join(dir, "none.sh"), Port: 4242}}); err != nil {

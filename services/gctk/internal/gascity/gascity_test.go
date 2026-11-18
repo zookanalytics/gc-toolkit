@@ -366,3 +366,63 @@ exit 0
 		t.Fatalf("gc ran with\n%s\nwant\n%s", raw, want)
 	}
 }
+
+// The rig map and a rig's formula var are read from gc's --json answers on its
+// standard output, whatever gc says on its standard error. A raw control byte
+// in the map's strings is dropped rather than failing the read. A var is the
+// rig's own value when city.toml sets one, the formula's default when it sets
+// none, and undeclared when the formula lists no such var. An answer gc marks
+// not ok fails with gc's own message.
+func TestRigsAndAFormulaVarReadGcsAnswers(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	stub := `#!/bin/sh
+printf '%s\n' "$*" >> '` + log + `'
+echo "warning: a note gc prints first" >&2
+case "$1 $2" in
+  "rig list") printf '{"ok":true,"rigs":[{"name":"hq","path":"/city","hq":true},{"name":"rig-a","path":"/city/rigs/a\001b","prefix":"ra"}]}\n' ;;
+  "formula show")
+    case "$5" in
+      rig-a) printf '{"ok":true,"vars":[{"name":"ui_serve_extra_ports","default":"0","rig_default":"2"},{"name":"ui_serve_command","default":"","rig_default":null}]}\n' ;;
+      rig-b) printf '{"ok":true,"vars":[{"name":"ui_serve_extra_ports","default":"0","rig_default":null}]}\n' ;;
+      *) printf '{"schema_version":"1","ok":false,"error":{"code":"command_failed","message":"rig \\"%s\\" is not registered in any city","exit_code":1}}\n' "$5"; exit 1 ;;
+    esac ;;
+  *) exit 9 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &City{bin: filepath.Join(dir, "gc")}
+	rigs, err := c.Rigs()
+	if want := []Rig{{Name: "hq", Path: "/city", HQ: true}, {Name: "rig-a", Path: "/city/rigs/ab"}}; err != nil || !slices.Equal(rigs, want) {
+		t.Errorf("Rigs = %v, %v; want %v", rigs, err, want)
+	}
+	for _, tc := range []struct {
+		rig, name, value string
+		declared         bool
+		says             string
+	}{
+		{"rig-a", "ui_serve_extra_ports", "2", true, ""},
+		{"rig-a", "ui_serve_command", "", true, ""},
+		{"rig-b", "ui_serve_extra_ports", "0", true, ""},
+		{"rig-a", "no_such_var", "", false, ""},
+		{"rig-x", "ui_serve_extra_ports", "", false, `rig "rig-x" is not registered in any city`},
+	} {
+		v, declared, err := c.FormulaVar("mol-rig-demo", tc.rig, tc.name)
+		switch {
+		case tc.says == "" && (err != nil || v != tc.value || declared != tc.declared):
+			t.Errorf("FormulaVar(%s, %s) = %q, %v, %v; want %q, %v", tc.rig, tc.name, v, declared, err, tc.value, tc.declared)
+		case tc.says != "" && (err == nil || !strings.Contains(err.Error(), tc.says)):
+			t.Errorf("FormulaVar(%s, %s) = %q, %v, %v; want an error saying %q", tc.rig, tc.name, v, declared, err, tc.says)
+		}
+	}
+	raw, _ := os.ReadFile(log)
+	if !strings.Contains(string(raw), "formula show mol-rig-demo --rig rig-a --json\n") || !strings.HasPrefix(string(raw), "rig list --json\n") {
+		t.Errorf("gc was asked %q", raw)
+	}
+	c = &City{bin: filepath.Join(dir, "none")}
+	if _, err := c.Rigs(); err == nil || !strings.Contains(err.Error(), "gc rig list did not read") {
+		t.Errorf("a gc that does not run: Rigs error %v", err)
+	}
+}

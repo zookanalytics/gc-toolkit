@@ -15,12 +15,17 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/rig"
 )
 
-// rigGCStub answers the gc call a publish makes. `bd update` keeps the one
-// --set-metadata pair it is given, or fails with STUB_UPDATE_RC. Every call is
-// logged, one argv per line, and any other call fails.
+// rigGCStub answers the gc calls a publish and a copy's start make. `bd
+// update` keeps the one --set-metadata pair it is given, or fails with
+// STUB_UPDATE_RC. `rig list` names the rigs STUB_RIGS holds, as JSON, and none
+// when it is unset, and `formula show` gives each rig STUB_EXTRA_PORTS, as
+// JSON, for ui_serve_extra_ports, null when it is unset. Every call is logged,
+// one argv per line, and any other call fails.
 const rigGCStub = `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_GC_LOG"
 case "$1 $2" in
+  "rig list") printf '{"ok":true,"rigs":%s}\n' "${STUB_RIGS:-[]}" ;;
+  "formula show") printf '{"ok":true,"vars":[{"name":"ui_serve_extra_ports","default":"0","rig_default":%s}]}\n' "${STUB_EXTRA_PORTS:-null}" ;;
   "bd update")
     if [ "${STUB_UPDATE_RC:-0}" != 0 ]; then echo "update refused" >&2; exit "$STUB_UPDATE_RC"; fi
     id=$3; shift 3

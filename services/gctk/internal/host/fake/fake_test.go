@@ -141,19 +141,20 @@ func TestFakeSignalsActAsTheirDispositionsSay(t *testing.T) {
 	})
 }
 
-// A port answers while a process listens on it, and FreePort passes over it.
+// A port answers while a process listens on it, and FreePorts passes over it.
 func TestFakePortsAnswerWhileTheirListenerRuns(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		m := machine(t, map[string]Program{"block": blocks})
 		me := m.Caller()
-		port, err := me.FreePort()
+		ports, err := me.FreePorts(1)
 		if err != nil {
 			t.Fatal(err)
 		}
+		port := ports[0]
 		c, _ := me.Start(host.Spec{Argv: []string{"block"}})
 		process(m, c.Pid()).Listen(port + 1)
-		if next, _ := me.FreePort(); next != port+2 {
-			t.Errorf("FreePort = %d, want %d, past the port a process listens on", next, port+2)
+		if next, _ := me.FreePorts(2); !slices.Equal(next, []int{port + 2, port + 3}) {
+			t.Errorf("FreePorts(2) = %v, want %v, past the port a process listens on and each a port of its own", next, []int{port + 2, port + 3})
 		}
 		if pids, _ := me.Listeners(port + 1); !me.Answers(port+1) || !slices.Equal(pids, []int{c.Pid()}) {
 			t.Errorf("a listened port answers %v, listeners %v", me.Answers(port+1), pids)
@@ -163,8 +164,8 @@ func TestFakePortsAnswerWhileTheirListenerRuns(t *testing.T) {
 			t.Errorf("an ended listener's port answers %v, listeners %v", me.Answers(port+1), pids)
 		}
 		m.FreePortErr = errors.New("none")
-		if _, err := me.FreePort(); err == nil {
-			t.Error("FreePortErr did not fail FreePort")
+		if _, err := me.FreePorts(1); err == nil {
+			t.Error("FreePortErr did not fail FreePorts")
 		}
 	})
 }

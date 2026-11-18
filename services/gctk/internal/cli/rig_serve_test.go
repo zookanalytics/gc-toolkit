@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -91,6 +92,38 @@ func TestRigServeCheckAndStopWithNoCopyRunning(t *testing.T) {
 	if rep := rigServeReport(t, out); code != 0 || rep["state"] != "none" {
 		t.Errorf("--stop with no copy: exit %d, state %v, want 0 and none", code, rep["state"])
 	}
+}
+
+// A start reads the ports the city gives the rig whose clone holds the
+// checkout beyond the copy's own, and a number that is not one a copy takes
+// fails the start before any copy runs. A checkout of no rig reads none.
+func TestRigServeStartReadsTheRigsExtraPorts(t *testing.T) {
+	f := newRigFixture(t)
+	t.Setenv("STUB_RIGS", `[{"name":"rig-a","path":"`+f.repo+`"}]`)
+	for _, v := range []string{`"two"`, `"-1"`, `"8080"`} {
+		t.Setenv("STUB_EXTRA_PORTS", v)
+		code, out, errb := f.call("serve", "--command", "exec sleep 60")
+		rep := rigServeReport(t, out)
+		if detail, _ := rep["detail"].(string); code != 1 || rep["state"] != "failed" || rep["reason"] != "bad-extra-ports" ||
+			!strings.Contains(detail, "rig rig-a ui_serve_extra_ports = "+v) {
+			t.Errorf("a start the city gives %s: exit %d, %v %v (%v), want 1, failed and bad-extra-ports naming the value\n%s", v, code, rep["state"], rep["reason"], rep["detail"], errb)
+		}
+	}
+	if log := readGCLog(t, f); !strings.Contains(log, "formula show mol-rig-demo --rig rig-a --json") {
+		t.Errorf("the start did not read the rig's var from mol-rig-demo: gc was asked %q", log)
+	}
+	t.Setenv("STUB_RIGS", `[{"name":"rig-a","path":"/no/such/rig"}]`)
+	t.Setenv("GCTK_SCRIPTS_DIR", "")
+	code, out, _ := f.call("serve", "--command", "exec sleep 60")
+	if rep := rigServeReport(t, out); code != 1 || rep["reason"] != "no-sandbox" {
+		t.Errorf("a start from a checkout of no rig: exit %d, %v, want it past the ports and failed for its sandbox, no-sandbox", code, rep["reason"])
+	}
+}
+
+func readGCLog(t *testing.T, f *rigFixture) string {
+	t.Helper()
+	b, _ := os.ReadFile(f.gcLog)
+	return string(b)
 }
 
 func TestRigServeStartNeedsTheSandboxsScriptsDirectory(t *testing.T) {

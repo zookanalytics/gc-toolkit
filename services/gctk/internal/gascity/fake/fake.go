@@ -1,7 +1,7 @@
 // Package fake is the runtime adapter's fake: it records each sling, cook,
-// session wake, nudge and script call a domain makes and answers as its test
-// says, so a domain's rules about Gas City are tested in Go with no Gas City
-// (docs/gctk-architecture.md, "The adapters").
+// session wake, nudge, script call and formula var read a domain makes and
+// answers as its test says, so a domain's rules about Gas City are tested in Go
+// with no Gas City (docs/gctk-architecture.md, "The adapters").
 package fake
 
 import (
@@ -30,6 +30,14 @@ type Runtime struct {
 	// Root is the city's root, and RootErr fails the read of it.
 	Root    string
 	RootErr error
+	// RigList is the city's rig map, and RigsErr fails the read of it.
+	RigList []gascity.Rig
+	RigsErr error
+	// Vars is the value the city gives each rig for each var, keyed by
+	// formula, rig and var, a var the formula declares; VarsErr fails every
+	// read of one.
+	Vars    map[[3]string]string
+	VarsErr error
 	// OnSling answers a sling, and nil answers exit 0. OnScript answers a script
 	// call, and nil answers exit 0. OnCook answers a cook, and nil answers exit 0
 	// with a root of its own, the one bead it poured. OnWake answers a session's
@@ -40,13 +48,14 @@ type Runtime struct {
 	OnWake   func(session string) gascity.Result
 	OnNudge  func(Nudge) gascity.Result
 
-	mu      sync.Mutex
-	slings  []gascity.Sling
-	asks    []gascity.Sling
-	scripts []Call
-	cooks   []gascity.Cook
-	wakes   []string
-	nudges  []Nudge
+	mu       sync.Mutex
+	slings   []gascity.Sling
+	asks     []gascity.Sling
+	scripts  []Call
+	cooks    []gascity.Cook
+	wakes    []string
+	nudges   []Nudge
+	varsRead [][3]string
 }
 
 // Nudge is one nudge: the session nudged and the message.
@@ -169,6 +178,34 @@ func (r *Runtime) CityRoot() (string, error) {
 		return "", r.RootErr
 	}
 	return r.Root, nil
+}
+
+// Rigs answers RigList.
+func (r *Runtime) Rigs() ([]gascity.Rig, error) {
+	if r.RigsErr != nil {
+		return nil, r.RigsErr
+	}
+	return slices.Clone(r.RigList), nil
+}
+
+// FormulaVar records the read and answers it from Vars.
+func (r *Runtime) FormulaVar(formula, rig, name string) (string, bool, error) {
+	r.mu.Lock()
+	r.varsRead = append(r.varsRead, [3]string{formula, rig, name})
+	r.mu.Unlock()
+	if r.VarsErr != nil {
+		return "", false, r.VarsErr
+	}
+	v, ok := r.Vars[[3]string{formula, rig, name}]
+	return v, ok, nil
+}
+
+// VarsRead returns every formula var read the domain made, each as its
+// formula, rig and var, in order.
+func (r *Runtime) VarsRead() [][3]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.varsRead)
 }
 
 // Slings returns every sling the domain made, in order.

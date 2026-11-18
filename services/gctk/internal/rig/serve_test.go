@@ -34,7 +34,9 @@ import (
 //     "app-cr" prints it with a carriage return alone after it, "app-at-eof"
 //     prints it with no line end and closes its standard output, each running
 //     on without listening, "app-on-stderr" prints it on its standard error
-//     only, and any other listens on its sandbox's port until it ends;
+//     only, "all-but-last" listens on its sandbox's port and on each of its
+//     other ports but the last, and any other listens on its sandbox's port
+//     and on each of its other ports until it ends;
 //   - a publish command, any other `bash -c`, by its mode, "publish <mode>":
 //     ok stays running; again-once refuses its first run as Tailscale does
 //     while another client changes the serve config; taken-first refuses the
@@ -48,9 +50,11 @@ type serveFixture struct {
 	repo    string
 	repo2   string
 	scripts string
-	m       *fake.Machine
-	me      *fake.Process
-	copies  *Copies
+	// tmp holds each copy's temporary directory.
+	tmp    string
+	m      *fake.Machine
+	me     *fake.Process
+	copies *Copies
 
 	mu        sync.Mutex
 	served    []string
@@ -80,6 +84,13 @@ func newServeFixture(t *testing.T) *serveFixture {
 	if err := os.WriteFile(filepath.Join(f.scripts, SandboxLib), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	f.tmp = filepath.Join(dir, "tmp")
+	if err := os.Mkdir(f.tmp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := CopyTempRoot
+	CopyTempRoot = f.tmp
+	t.Cleanup(func() { CopyTempRoot = root })
 	f.me = f.m.Caller()
 	f.m.Programs = f.program
 	f.copies = NewCopies(filepath.Join(dir, "common"), f.me)
@@ -152,6 +163,11 @@ func (f *serveFixture) serveProgram(command string) fake.Program {
 	return func(p *fake.Process) int {
 		s := p.Spec()
 		p.Listen(s.Sandbox.Port)
+		for i, port := range s.Sandbox.Extra {
+			if command != "all-but-last" || i < len(s.Sandbox.Extra)-1 {
+				p.Listen(port)
+			}
+		}
 		f.mu.Lock()
 		f.served = append(f.served, fmt.Sprintf("%s %d", s.Dir, s.Sandbox.Port))
 		f.mu.Unlock()
@@ -222,6 +238,33 @@ func (f *serveFixture) publishing(mode, pattern string) ServeOpts {
 }
 
 func (f *serveFixture) rec(checkout string) copyRec { return f.copies.rec(checkout) }
+
+// tmpOf is the temporary directory a serve command was given: its TMPDIR,
+// which its sandbox names as the one directory under which it may connect to
+// a Unix socket, and which the leader made under CopyTempRoot.
+func (f *serveFixture) tmpOf(t *testing.T, s host.Spec) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(f.tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := ""
+	for _, kv := range s.Env {
+		if v, ok := strings.CutPrefix(kv, "TMPDIR="); ok {
+			tmp = v
+		}
+	}
+	if tmp == "" || s.Sandbox == nil || s.Sandbox.Sockets != tmp || filepath.Dir(tmp) != root || !strings.HasPrefix(filepath.Base(tmp), "gctk-") {
+		t.Fatalf("the serve command's TMPDIR is %q and its sandbox's socket directory %q, want one directory, gctk-*, under %s", tmp, s.Sandbox.Sockets, root)
+	}
+	return tmp
+}
+
+// freePort is a loopback port nothing on the fixture's machine listens on.
+func (f *serveFixture) freePort() int {
+	ports, _ := f.me.FreePorts(1)
+	return ports[0]
+}
 
 // copiesOn returns the fixture's copies' directory as another gctk process
 // sees it, one whose calls run on h.
@@ -419,11 +462,21 @@ func TestServeRunsTheCommandInTheSandboxFromTheCheckoutOnAPortOfItsOwn(t *testin
 			t.Fatalf("%d serve commands started, want 1", len(serves))
 		}
 		s := serves[0].Spec
-		want := host.Sandbox{Lib: filepath.Join(f.scripts, SandboxLib), Port: r.Port, Prog: "gctk rig serve"}
-		if *s.Sandbox != want || s.Dir != f.repo || !slices.Equal(s.Argv, []string{"bash", "-c", "serve"}) ||
+		b := *s.Sandbox
+		if b.Lib != filepath.Join(f.scripts, SandboxLib) || b.Port != r.Port || len(b.Extra) != 0 || b.Prog != "gctk rig serve" ||
+			s.Dir != f.repo || !slices.Equal(s.Argv, []string{"bash", "-c", "serve"}) ||
 			!slices.Contains(s.Env, "PORT="+strconv.Itoa(r.Port)) || !s.Relay {
-			t.Errorf("the serve command started as %+v in sandbox %+v, want bash -c serve from %s, PORT=%d, relayed, in %+v",
-				s, *s.Sandbox, f.repo, r.Port, want)
+			t.Errorf("the serve command started as %+v in sandbox %+v, want bash -c serve from %s, PORT=%d, relayed, in the sandbox %s defines with port %d and no other",
+				s, b, f.repo, r.Port, SandboxLib, r.Port)
+		}
+		if len(r.ExtraPorts) != 0 {
+			t.Errorf("a copy given no ports beyond its own reports %v", r.ExtraPorts)
+		}
+		// Its temporary directory is its TMPDIR and the one directory under which
+		// it may connect to a Unix socket, and it goes with the copy.
+		tmp := f.tmpOf(t, s)
+		if st, err := os.Stat(tmp); err != nil || !st.IsDir() {
+			t.Errorf("the copy's temporary directory %s is not there while it runs: %v", tmp, err)
 		}
 		if log := readFile(r.Log); !strings.Contains(log, "serving on "+strconv.Itoa(r.Port)) {
 			t.Errorf("the serve command's output is not in the log %s: %q", r.Log, log)
@@ -498,6 +551,9 @@ func TestServeRunsTheCommandInTheSandboxFromTheCheckoutOnAPortOfItsOwn(t *testin
 		}
 		if !f.me.GroupGone(leader) {
 			t.Errorf("members of the copy's group are left: %v", f.me.Members(leader))
+		}
+		if _, err := os.Stat(tmp); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("the stopped copy's temporary directory %s is still there: %v", tmp, err)
 		}
 		if f.me.Answers(r.Port) {
 			t.Error("the stopped copy's port still answers")
@@ -955,7 +1011,7 @@ func TestServeACheckDuringAStartReadsACopyWithNoLeaderAsNotAnswering(t *testing.
 // holds the lock.
 func TestServeChecksShareTheLockAndAStopWaitsThemOut(t *testing.T) {
 	serveTest(t, func(t *testing.T, f *serveFixture) {
-		port, _ := f.me.FreePort()
+		port := f.freePort()
 		f.claim(t, f.repo, map[string]string{"command": "serve", "port": strconv.Itoa(port),
 			"pid": strconv.Itoa(f.me.Pid()), "start_id": "the start of a leader that ended"})
 		// A start's lock leaves its file once the checkout has a record.
@@ -1498,7 +1554,7 @@ func TestServeAStartThatFindsACopyNotAnsweringStopsItAfterItsOwnWait(t *testing.
 	serveTest(t, func(t *testing.T, f *serveFixture) {
 		// A start cut off after its leader ran: the record is claimed and the
 		// leader started, and nothing waits for the copy to answer.
-		port, _ := f.me.FreePort()
+		port := f.freePort()
 		rec := f.claim(t, f.repo, map[string]string{"command": "hang", "port": strconv.Itoa(port)})
 		if reason, detail := rec.startLeader(); reason != "" {
 			t.Fatalf("%s: %s", reason, detail)
@@ -1554,7 +1610,7 @@ func TestServeACopyHoldsItsPortOnlyWhileEachListenerIsItsOwn(t *testing.T) {
 		if ok, _ := rec.owned(r.Port, f.me.Pid()); ok {
 			t.Error("a listener outside the group counts as the group's")
 		}
-		free, _ := f.me.FreePort()
+		free := f.freePort()
 		if ok, why := rec.owned(free, leader); ok || !strings.Contains(why, "nothing listens") {
 			t.Errorf("a port nothing listens on: owned %v, %q", ok, why)
 		}
@@ -1567,7 +1623,7 @@ func TestServeACopyHoldsItsPortOnlyWhileEachListenerIsItsOwn(t *testing.T) {
 // that process, and a start runs a copy in the record's place.
 func TestServeARecordWhosePidWasReusedIsACopyThatDied(t *testing.T) {
 	serveTest(t, func(t *testing.T, f *serveFixture) {
-		port, _ := f.me.FreePort()
+		port := f.freePort()
 		f.claim(t, f.repo, map[string]string{"command": "serve", "port": strconv.Itoa(port),
 			"pid": strconv.Itoa(f.me.Pid()), "start_id": "the start of a leader that ended"})
 		if c := f.copies.Check(f.repo); c.State != CopyDied {
@@ -1586,6 +1642,105 @@ func TestServeARecordWhosePidWasReusedIsACopyThatDied(t *testing.T) {
 		}
 		if !f.running(f.me.Pid()) {
 			t.Error("a call signalled the process that took the dead leader's pid")
+		}
+	})
+}
+
+// A copy given ports beyond its own gets each as $PORT_1, $PORT_2 and on, in
+// its sandbox beside its own port, and is up once its own processes listen on
+// every one of them. Its report, a check's included, names them.
+func TestServeGivesACopyItsExtraPortsAndCountsItUpOnceItHoldsEach(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		o := f.opts("serve")
+		o.ExtraPorts = 2
+		r := f.copies.Serve(f.repo, o)
+		mustRun(t, r)
+		if len(r.ExtraPorts) != 2 || slices.Contains(r.ExtraPorts, r.Port) || r.ExtraPorts[0] == r.ExtraPorts[1] {
+			t.Fatalf("the copy on %d reports the ports %v beyond its own, want two more, each a port of its own", r.Port, r.ExtraPorts)
+		}
+		s := f.starts("serve")[0].Spec
+		if !slices.Equal(s.Sandbox.Extra, r.ExtraPorts) {
+			t.Errorf("the sandbox opens %v beyond the copy's port, want %v", s.Sandbox.Extra, r.ExtraPorts)
+		}
+		for i, p := range r.ExtraPorts {
+			if kv := fmt.Sprintf("PORT_%d=%d", i+1, p); !slices.Contains(s.Env, kv) {
+				t.Errorf("the serve command's environment %q lacks %s", s.Env, kv)
+			}
+			if !f.me.Answers(p) {
+				t.Errorf("port %d answers nothing", p)
+			}
+		}
+		if c := f.copies.Check(f.repo); c.State != CopyRunning || !slices.Equal(c.ExtraPorts, r.ExtraPorts) {
+			t.Errorf("check = %s with %v beyond its port, want running with %v", c.State, c.ExtraPorts, r.ExtraPorts)
+		}
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := fmt.Sprintf(`"extra_ports":[%d,%d]`, r.ExtraPorts[0], r.ExtraPorts[1]); !strings.Contains(string(raw), want) {
+			t.Errorf("the report %s does not carry %s", raw, want)
+		}
+		f.copies.Stop(f.repo)
+		for _, p := range r.ExtraPorts {
+			if f.me.Answers(p) {
+				t.Errorf("port %d still answers once the copy stopped", p)
+			}
+		}
+	})
+}
+
+// A copy is not up while one of its ports beyond its own has no listener, or
+// one outside the copy's group, so a start stops a copy that leaves one
+// unheld, and a check reads a copy whose port another process took as not
+// answering.
+func TestServeACopyIsNotUpUntilItHoldsEachPortBeyondItsOwn(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		o := f.opts("all-but-last")
+		o.ExtraPorts = 2
+		r := f.copies.Serve(f.repo, o)
+		if r.State != CopyFailed || r.Reason != "not-answering" || !strings.Contains(r.Detail, "nothing listens on port") ||
+			!strings.Contains(r.Detail, "one of the ports the copy was given beyond its own") {
+			t.Errorf("a copy that leaves its last port unheld: %s %s (%s), want failed not-answering, naming the port", r.State, r.Reason, r.Detail)
+		}
+		o = f.opts("serve")
+		o.ExtraPorts = 1
+		r = f.copies.Serve(f.repo2, o)
+		mustRun(t, r)
+		other, err := f.me.Start(host.Spec{Argv: []string{"listen", strconv.Itoa(r.ExtraPorts[0])}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		why := fmt.Sprintf("process %d, which listens on port %d, is not one of the copy's, one of the ports the copy was given beyond its own", other.Pid(), r.ExtraPorts[0])
+		if c := f.copies.Check(f.repo2); c.State != CopyNotAnswering || !strings.Contains(c.Detail, why) {
+			t.Errorf("check with another process on the copy's extra port = %s (%s), want not-answering: %s", c.State, c.Detail, why)
+		}
+		_ = f.me.Signal(other.Pid(), syscall.SIGTERM)
+		f.copies.Stop(f.repo2)
+	})
+}
+
+// A copy's temporary directory goes when its serve command ends on its own, as
+// it goes at a stop, and a leader that cannot make one ends the copy before the
+// serve command runs, saying why in its log.
+func TestServeACopysTemporaryDirectoryGoesWithIt(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		r := f.copies.Serve(f.repo, f.opts("fail"))
+		if r.State != CopyFailed || r.Reason != "serve-exited" {
+			t.Fatalf("a serve command that exits: %s %s, want failed serve-exited", r.State, r.Reason)
+		}
+		f.tmpOf(t, f.starts("serve")[0].Spec)
+		if left, _ := os.ReadDir(f.tmp); len(left) != 0 {
+			t.Errorf("the copy's temporary directory is left under %s once its serve command ended: %v", f.tmp, left)
+		}
+		CopyTempRoot = filepath.Join(f.dir, "missing")
+		r = f.copies.Serve(f.repo, f.opts("serve"))
+		if r.State != CopyFailed || r.Reason != "serve-exited" || r.ExitCode == nil || *r.ExitCode != 1 ||
+			!strings.Contains(r.Tail, "the copy's temporary directory could not be made under "+CopyTempRoot) {
+			t.Errorf("a leader with no temporary directory: %s %s, exit %v, tail %q; want failed serve-exited, exit 1, and why", r.State, r.Reason, r.ExitCode, r.Tail)
+		}
+		if n := len(f.starts("serve")); n != 1 {
+			t.Errorf("%d serve commands started, want only the first copy's", n)
 		}
 	})
 }

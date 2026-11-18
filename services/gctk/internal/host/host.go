@@ -51,8 +51,9 @@ type Host interface {
 	// GroupGone reports whether no running process is left in the group pgid.
 	GroupGone(pgid int) bool
 
-	// FreePort picks a loopback port that nothing listens on.
-	FreePort() (int, error)
+	// FreePorts picks n loopback ports that nothing listens on, each
+	// different from the others.
+	FreePorts(n int) ([]int, error)
 	// Answers reports whether something accepts a connection on the loopback
 	// port.
 	Answers(port int) bool
@@ -104,14 +105,20 @@ type Ender interface {
 
 // Sandbox is the sandbox the pack's demo capture runs a command in, which
 // demo_engine_sandboxed in Lib composes: the process reads and writes its
-// working directory, reaches no loopback port but Port, signals no process
-// outside the sandbox, and gets none of the variables that point a command at
-// the city.
+// working directory, reaches no loopback port but Port and Extra, connects to
+// no Unix socket outside Sockets, signals no process outside the sandbox, and
+// gets none of the variables that point a command at the city.
 type Sandbox struct {
 	// Lib is the file that defines it, the pack's demo-engine-lib.sh.
 	Lib string
-	// Port is the one loopback port the process may reach.
-	Port int
+	// Port is the process's own loopback port, and Extra the others it may
+	// reach.
+	Port  int
+	Extra []int
+	// Sockets, when set, is the directory under which the process may connect
+	// to a Unix socket, which demo_engine_sandboxed reads from
+	// DEMO_ENGINE_SOCKET_DIR.
+	Sockets string
 	// Prog is the name the sandbox's messages start with.
 	Prog string
 }
@@ -152,11 +159,21 @@ func (local) Notify(c chan<- os.Signal, sig ...os.Signal) { signal.Notify(c, sig
 
 func (local) Ignore(sig ...os.Signal) { signal.Ignore(sig...) }
 
-// sandboxed sources the file it is given first and runs the rest, the port,
+// sandboxed sources the file it is given first and runs the rest, the ports,
 // the directory and the command, through demo_engine_sandboxed, which the
 // command replaces, so no shell of the wrapper holds a stream the relay copies
 // once the command closes it.
 const sandboxed = `. "$1" || exit 126; shift; demo_engine_sandboxed "$@"`
+
+// ports is the sandbox's loopback ports as demo_engine_sandboxed takes them,
+// its own first, joined by commas.
+func (b Sandbox) ports() string {
+	ps := []string{strconv.Itoa(b.Port)}
+	for _, p := range b.Extra {
+		ps = append(ps, strconv.Itoa(p))
+	}
+	return strings.Join(ps, ",")
+}
 
 func (local) Start(s Spec) (Child, error) {
 	if len(s.Argv) == 0 {
@@ -167,8 +184,8 @@ func (local) Start(s Spec) (Child, error) {
 		if s.Dir == "" {
 			return nil, errors.New("a sandboxed process needs a directory to run in")
 		}
-		argv = append([]string{"bash", "-c", sandboxed, b.Prog, b.Lib, strconv.Itoa(b.Port), s.Dir}, argv...)
-		env = append(slices.Clone(env), "PROG="+b.Prog)
+		argv = append([]string{"bash", "-c", sandboxed, b.Prog, b.Lib, b.ports(), s.Dir}, argv...)
+		env = append(slices.Clone(env), "PROG="+b.Prog, "DEMO_ENGINE_SOCKET_DIR="+b.Sockets)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = s.Dir
@@ -379,13 +396,25 @@ func (h local) GroupGone(pgid int) bool {
 	return errors.Is(err, syscall.EPERM) && len(h.Members(pgid)) == 0
 }
 
-func (local) FreePort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
+// FreePorts holds a listener on each port it picks until it has picked them
+// all, so the system names a different port each time.
+func (local) FreePorts(n int) ([]int, error) {
+	held := make([]net.Listener, 0, n)
+	defer func() {
+		for _, l := range held {
+			l.Close()
+		}
+	}()
+	ports := make([]int, 0, n)
+	for range n {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+		held = append(held, l)
+		ports = append(ports, l.Addr().(*net.TCPAddr).Port)
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
+	return ports, nil
 }
 
 func (local) Answers(port int) bool {

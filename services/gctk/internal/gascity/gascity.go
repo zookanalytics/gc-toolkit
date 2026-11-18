@@ -1,7 +1,8 @@
 // Package gascity is gctk's runtime adapter: Gas City as gctk reaches it apart
 // from its store, which internal/gcbd reaches (docs/gctk-architecture.md, "The
 // adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
-// when it names none, wakes and nudges a session, names the city's root, and
+// when it names none, wakes and nudges a session, names the city's root, lists
+// its rig map, reads the value the city gives a rig for a formula's var, and
 // runs the pack's scripts that ask a person. A domain reaches them only through
 // Runtime. City is the city gctk runs in, and gascity/fake records what a domain
 // asked and answers as its test says, so a domain's rules are tested in Go with
@@ -46,6 +47,21 @@ type Runtime interface {
 	Script(name string, args ...string) Result
 	// CityRoot is the city's root directory, the one that holds its .gc.
 	CityRoot() (string, error)
+	// Rigs lists the rigs the city's rig map names.
+	Rigs() ([]Rig, error)
+	// FormulaVar is the value the city gives a rig for one of a formula's vars:
+	// the rig's own, which city.toml sets among its [rigs.formula_vars], else
+	// the formula's default. declared is false when the formula declares no
+	// such var.
+	FormulaVar(formula, rig, name string) (value string, declared bool, err error)
+}
+
+// Rig is one rig the city's rig map names: its name, the path of its checkout,
+// and whether it is the city's HQ rig, the city's own repository.
+type Rig struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	HQ   bool   `json:"hq"`
 }
 
 // Sling is one `gc sling <target> <bead> --on <formula> --title <title>`,
@@ -403,25 +419,74 @@ func (c *City) CityRoot() (string, error) {
 			return p, nil
 		}
 	}
-	r := c.run(c.bin, "rig", "list", "--json")
-	if r.Code != 0 {
-		return "", fmt.Errorf("no city root: GC_CITY_PATH, GC_CITY and GC_CITY_ROOT name none, and gc rig list did not read: %s", r.why())
+	rigs, err := c.Rigs()
+	if err != nil {
+		return "", fmt.Errorf("no city root: GC_CITY_PATH, GC_CITY and GC_CITY_ROOT name none, and %v", err)
 	}
-	var list struct {
-		Rigs []struct {
-			Path string `json:"path"`
-			HQ   bool   `json:"hq"`
-		} `json:"rigs"`
-	}
-	if err := json.Unmarshal([]byte(r.Output), &list); err != nil {
-		return "", fmt.Errorf("no city root: gc rig list's answer did not decode: %v", err)
-	}
-	for _, rig := range list.Rigs {
+	for _, rig := range rigs {
 		if rig.HQ && rig.Path != "" && isDir(filepath.Join(rig.Path, ".gc")) {
 			return rig.Path, nil
 		}
 	}
 	return "", errors.New("no city root: GC_CITY_PATH, GC_CITY and GC_CITY_ROOT name none, and gc rig list names no HQ rig holding .gc")
+}
+
+// Rigs reads the rig map from `gc rig list --json`. A raw control byte
+// inside one of its strings makes the whole answer fail to decode, so each is
+// dropped first, as rig-map.sh drops them for jq.
+func (c *City) Rigs() ([]Rig, error) {
+	out, r := c.answer(c.bin, "rig", "list", "--json")
+	if r.Code != 0 {
+		return nil, fmt.Errorf("gc rig list did not read: %s", r.why())
+	}
+	var list struct {
+		Rigs []Rig `json:"rigs"`
+	}
+	scrubbed := strings.Map(func(c rune) rune {
+		if c < 0x20 {
+			return -1
+		}
+		return c
+	}, out)
+	if err := json.Unmarshal([]byte(scrubbed), &list); err != nil {
+		return nil, fmt.Errorf("gc rig list's answer did not decode: %v", err)
+	}
+	return list.Rigs, nil
+}
+
+// FormulaVar reads the var from `gc formula show <formula> --rig <rig>
+// --json`, which lists each var the formula declares with its default and the
+// rig's own value, null when city.toml sets none.
+func (c *City) FormulaVar(formula, rig, name string) (string, bool, error) {
+	out, r := c.answer(c.bin, "formula", "show", formula, "--rig", rig, "--json")
+	var shown struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Vars []struct {
+			Name       string  `json:"name"`
+			Default    string  `json:"default"`
+			RigDefault *string `json:"rig_default"`
+		} `json:"vars"`
+	}
+	if err := json.Unmarshal([]byte(out), &shown); err != nil || !shown.OK {
+		why := r.why()
+		if shown.Error.Message != "" {
+			why = shown.Error.Message
+		}
+		return "", false, fmt.Errorf("gc formula show %s --rig %s did not read: %s", formula, rig, why)
+	}
+	for _, v := range shown.Vars {
+		if v.Name != name {
+			continue
+		}
+		if v.RigDefault != nil {
+			return *v.RigDefault, true, nil
+		}
+		return v.Default, true, nil
+	}
+	return "", false, nil
 }
 
 func isDir(p string) bool {
@@ -433,22 +498,37 @@ func isDir(p string) bool {
 // directory when it names none, as the city's actor when it names one, its
 // standard input reading nothing, and returns its exit code and its output.
 func (c *City) run(bin string, args ...string) Result {
+	var out bytes.Buffer
+	return c.runInto(&out, &out, bin, args...)
+}
+
+// answer runs bin as run does, and returns its standard output apart, where a
+// command prints its --json answer. The Result's Output is its standard error.
+func (c *City) answer(bin string, args ...string) (string, Result) {
+	var stdout, stderr bytes.Buffer
+	r := c.runInto(&stdout, &stderr, bin, args...)
+	return stdout.String(), r
+}
+
+// runInto runs bin with its standard output in stdout and its standard error
+// in stderr, which may be one buffer, and returns its exit code and its
+// standard error as its Output.
+func (c *City) runInto(stdout, stderr *bytes.Buffer, bin string, args ...string) Result {
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = c.dir
 	if c.actor != "" {
 		cmd.Env = append(os.Environ(), "BEADS_ACTOR="+c.actor)
 	}
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err := cmd.Run()
 	var ee *exec.ExitError
 	switch {
 	case err == nil:
-		return Result{Code: 0, Output: out.String()}
+		return Result{Code: 0, Output: stderr.String()}
 	case errors.As(err, &ee):
-		return Result{Code: ee.ExitCode(), Output: out.String()}
+		return Result{Code: ee.ExitCode(), Output: stderr.String()}
 	default:
-		return Result{Code: -1, Output: out.String(), Err: err}
+		return Result{Code: -1, Output: stderr.String(), Err: err}
 	}
 }
 

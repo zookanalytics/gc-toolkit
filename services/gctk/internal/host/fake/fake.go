@@ -36,7 +36,7 @@ type Machine struct {
 	// describes, or nil when s names none, which Start refuses as exec refuses
 	// a program it cannot find. Set it before the first start.
 	Programs func(s host.Spec) Program
-	// FreePortErr, when set, fails FreePort.
+	// FreePortErr, when set, fails FreePorts.
 	FreePortErr error
 
 	mu      sync.Mutex
@@ -382,21 +382,23 @@ func (p *Process) GroupGone(pgid int) bool {
 	return len(p.m.members(pgid)) == 0
 }
 
-// FreePort picks the next port above the last it picked that nothing listens
-// on.
-func (p *Process) FreePort() (int, error) {
+// FreePorts picks, n times, the next port above the last it picked that
+// nothing listens on.
+func (p *Process) FreePorts(n int) ([]int, error) {
 	m := p.m
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.FreePortErr != nil {
-		return 0, m.FreePortErr
+		return nil, m.FreePortErr
 	}
-	for {
+	ports := make([]int, 0, n)
+	for len(ports) < n {
 		m.port++
 		if len(m.listens[m.port]) == 0 {
-			return m.port, nil
+			ports = append(ports, m.port)
 		}
 	}
+	return ports, nil
 }
 
 func (p *Process) Answers(port int) bool {

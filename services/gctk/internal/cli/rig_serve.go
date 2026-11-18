@@ -11,17 +11,20 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/host"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/rig"
 )
 
 // `gctk rig serve` runs a copy of the rig's UI. Like the checks, it runs the
-// command its caller passes and reads no formula var: a caller reads the rig's
-// ui_serve_command, and the city's ui_publish_command and ui_address_pattern,
-// and passes them.
+// command its caller passes: a caller reads the rig's ui_serve_command, and the
+// city's ui_publish_command and ui_address_pattern, and passes them. The one
+// formula var a start reads itself is the rig's ui_serve_extra_ports, the
+// loopback ports the city grants the rig's copy beyond its own, so no caller
+// widens what a copy reaches.
 
-const rigServeLong = `Runs a copy of the rig's UI from the checkout the current directory sits in:
+var rigServeLong = fmt.Sprintf(`Runs a copy of the rig's UI from the checkout the current directory sits in:
 the command --command passes, with bash at the checkout's top, on a free
 loopback port it is given as $PORT, inside the sandbox a demo capture runs in.
 The copy is up once it answers on that port as its own, or once the command
@@ -29,6 +32,16 @@ prints the URL of the app it brought up on a line of its standard output, as
 ios-simulator://<device UDID>/<bundle id> names an iOS app on a simulator. A
 demo capture points its engine at the copy's app_url, and a sitting gives the
 operator the copy's address, so both reach the UI through one path.
+
+An app that runs as several local processes, such as a web server and the
+database server it starts beside it, listens on more loopback ports than $PORT.
+The city gives a rig how many as ui_serve_extra_ports, among the rig's
+[rigs.formula_vars] in city.toml, which a start reads for the rig whose clone
+holds the checkout. The start picks that many more free loopback ports and
+gives them to the command as $PORT_1, $PORT_2 and on, and the copy is up only
+once its own processes listen on each of them as well. A number that is not one
+from 0 to %d fails the start with reason bad-extra-ports. The command's TMPDIR is
+a directory of the copy's own, which goes with the copy.
 
 A checkout has at most one copy. A start for a checkout whose copy runs starts
 no other: it reports that copy once it is up, so a start is safe to repeat. A
@@ -55,17 +68,18 @@ waits for it to end, and acts on the copy it left. A check waits for neither.
 
 The sandbox is the one demo-engine-lib.sh defines, in the pack's scripts
 directory, which GCTK_SCRIPTS_DIR names. The serve command cannot read the
-city's directories, reach a loopback port but its own, or signal a process
-outside the sandbox, and it runs with none of the variables that point a
-command at the city. The publish command runs outside it. A copy ends when it is
+city's directories, reach a loopback port but the copy's own, connect to a Unix
+socket outside its TMPDIR, or signal a process outside the sandbox, and it runs
+with none of the variables that point a command at the city. The publish command runs outside it. A copy ends when it is
 stopped, when its serve command ends, or once the session that started it has
 ended, through Gas City's orphan sweep, which reads the session's values from
 the copy's leader.
 
 It prints one JSON line on stdout: the state, the checkout, the copy's port,
 app_url, where a running copy's app is, which is the URL the command printed or
-else the copy's loopback URL, its address, empty when it has none, its log, the
-serve command's exit status once it has ended, and, in reason and detail, why. A
+else the copy's loopback URL, extra_ports, its ports beyond its own, its
+address, empty when it has none, its log, the serve command's exit status once
+it has ended, and, in reason and detail, why. A
 start that found no copy running and ran one also prints "started": true, so its
 caller knows the copy is its own to stop. A start that found the copy running
 prints no started key. rig's own lines, and the last lines of the log of a copy
@@ -89,7 +103,7 @@ that failed or ended, go to stderr.
 exit 2 is a usage error.
 
 --lead runs a copy's leader over its record. A start runs it in a session of
-its own, and nothing else calls it.`
+its own, and nothing else calls it.`, rig.MaxExtraPorts)
 
 // rigServeDefaultWait bounds a start's wait for its copy to be up. It is the
 // capture engine's own bound for a start command that builds an iOS app, boots
@@ -180,7 +194,7 @@ func rigServe(o rigServeOpts, stdout, stderr io.Writer) int {
 		rep, code = rig.Report{State: rig.CopyFailed, Reason: "no-checkout",
 			Detail: fmt.Sprintf("the current directory is in no git checkout, whose top names the copy (%v)", err)}, 1
 	} else {
-		rep, code = rigServeIn(co, o)
+		rep, code = rigServeIn(co, o, gascity.New(), say)
 	}
 	raw, err := json.Marshal(rep)
 	if err != nil {
@@ -198,8 +212,10 @@ func rigServe(o rigServeOpts, stdout, stderr io.Writer) int {
 }
 
 // rigServeIn runs the start, check or stop for the checkout co, and returns
-// its report and the exit code.
-func rigServeIn(co *git.Checkout, o rigServeOpts) (rig.Report, int) {
+// its report and the exit code. A start reads the ports the city gives the
+// rig's copy beyond its own from rt, and says why it reads none when the city
+// did not answer.
+func rigServeIn(co *git.Checkout, o rigServeOpts, rt gascity.Runtime, say func(string, ...any)) (rig.Report, int) {
 	top := co.Top
 	if real, err := filepath.EvalSymlinks(top); err == nil {
 		top = real
@@ -222,8 +238,16 @@ func rigServeIn(co *git.Checkout, o rigServeOpts) (rig.Report, int) {
 		}
 		return rep, 0
 	}
+	extra, note, err := rig.ExtraPorts(rt, co.Common)
+	if err != nil {
+		return rig.Report{State: rig.CopyFailed, Reason: "bad-extra-ports", Checkout: top, Detail: err.Error()}, 1
+	}
+	if note != "" {
+		say("%s", note)
+	}
 	rep := copies.Serve(top, rig.ServeOpts{
 		Command:        o.command,
+		ExtraPorts:     extra,
 		Publish:        o.given("publish-command"),
 		PublishCommand: o.publish,
 		AddressPattern: o.pattern,
