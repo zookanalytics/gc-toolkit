@@ -70,14 +70,14 @@ type Rig struct {
 // Agents reads the city's roster, bounded by RosterWait. A read that fails,
 // runs out of time or answers with no list of agents is an error.
 func (c *City) Agents() ([]Agent, error) {
-	r := c.runBounded(RosterWait, c.bin, "agent", "list", "--json")
-	if r.Code != 0 {
-		return nil, fmt.Errorf("gc agent list did not read the city's roster: %s", r.why())
+	out, err := c.readBounded(RosterWait, c.bin, "agent", "list", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("gc agent list did not read the city's roster: %v", err)
 	}
 	var list struct {
 		Agents *[]Agent `json:"agents"`
 	}
-	if err := json.Unmarshal([]byte(r.Output), &list); err != nil {
+	if err := json.Unmarshal(out, &list); err != nil {
 		return nil, fmt.Errorf("gc agent list's answer did not decode: %v", err)
 	}
 	if list.Agents == nil {
@@ -95,16 +95,16 @@ func (c *City) NamedSessions() ([]NamedSession, error) {
 }
 
 func (c *City) readNamed() ([]NamedSession, error) {
-	r := c.runBounded(RosterWait, c.bin, "config", "show", "--json")
-	if r.Code != 0 {
-		return nil, fmt.Errorf("gc config show did not read the city's config: %s", r.why())
+	out, err := c.readBounded(RosterWait, c.bin, "config", "show", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("gc config show did not read the city's config: %v", err)
 	}
 	var shown struct {
 		Config struct {
 			NamedSessions *[]NamedSession `json:"NamedSessions"`
 		} `json:"config"`
 	}
-	if err := json.Unmarshal([]byte(r.Output), &shown); err != nil {
+	if err := json.Unmarshal(out, &shown); err != nil {
 		return nil, fmt.Errorf("gc config show's answer did not decode: %v", err)
 	}
 	if shown.Config.NamedSessions == nil {
@@ -128,14 +128,14 @@ func (c *City) readRigs() ([]Rig, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := c.runBounded(limit, c.bin, "rig", "list", "--json")
-	if r.Code != 0 {
-		return nil, fmt.Errorf("gc rig list did not read the city's rigs: %s", r.why())
+	out, err := c.readBounded(limit, c.bin, "rig", "list", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("gc rig list did not read the city's rigs: %v", err)
 	}
 	var list struct {
 		Rigs *[]Rig `json:"rigs"`
 	}
-	if err := json.Unmarshal([]byte(r.Output), &list); err != nil {
+	if err := json.Unmarshal(out, &list); err != nil {
 		return nil, fmt.Errorf("gc rig list's answer did not decode: %v", err)
 	}
 	if list.Rigs == nil {
@@ -163,9 +163,14 @@ func (c *City) ShowFormula(name string) Result {
 	return c.run(c.bin, "formula", "show", name)
 }
 
-// runBounded is run with a time limit: once limit passes, the command's whole
-// process group is killed and the result says it did not answer in time.
-func (c *City) runBounded(limit time.Duration, bin string, args ...string) Result {
+// readBounded runs one of gc's reads with a time limit and returns what it
+// printed on standard output, the answer to decode. gc prints a config warning
+// on standard error and still exits 0 with its whole answer (doAgentList hands
+// its stderr to the config load's warnings, in cmd/gc/cmd_agent.go at
+// gastownhall/gascity 191c6b5b8b), so standard error is read only to say why a
+// read that exits non-zero failed. Once limit passes, the command's whole
+// process group is killed and the read says it did not answer in time.
+func (c *City) readBounded(limit time.Duration, bin string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
@@ -176,18 +181,18 @@ func (c *City) runBounded(limit time.Duration, bin string, args ...string) Resul
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 2 * time.Second
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
 	var ee *exec.ExitError
 	switch {
 	case ctx.Err() != nil:
-		return Result{Code: -1, Output: out.String(), Err: fmt.Errorf("%s did not answer within %s", bin+" "+args[0]+" "+args[1], limit)}
+		return nil, fmt.Errorf("%s did not answer within %s", bin+" "+args[0]+" "+args[1], limit)
 	case err == nil:
-		return Result{Code: 0, Output: out.String()}
+		return stdout.Bytes(), nil
 	case errors.As(err, &ee):
-		return Result{Code: ee.ExitCode(), Output: out.String()}
+		return nil, errors.New(Result{Code: ee.ExitCode(), Output: stdout.String() + "\n" + stderr.String()}.why())
 	default:
-		return Result{Code: -1, Output: out.String(), Err: err}
+		return nil, err
 	}
 }

@@ -171,9 +171,10 @@ func TestReactionVerbsFailClosedWithNoRigOrDeadline(t *testing.T) {
 // real adapters: a gc on PATH that logs each call and answers the rig list, the
 // roster, the config, a sling, and the store's reads of the subject tk-sub, an
 // open task nobody has decided on whose title carries a raw control byte. Its
-// blocked set is blocked, and its sling exits STUB_SLING_RC printing
-// STUB_SLING_OUT. The pack's scripts are stubs that log and exit 0. It returns
-// the log's path and the rig's store.
+// blocked set is blocked, its roster read prints STUB_WARN on standard error
+// when it is set, and its sling exits STUB_SLING_RC printing STUB_SLING_OUT.
+// The pack's scripts are stubs that log and exit 0. It returns the log's path
+// and the rig's store.
 func stubCity(t *testing.T, blocked []byte) (log, store string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -194,7 +195,7 @@ func stubCity(t *testing.T, blocked []byte) (log, store string) {
 echo "$*" >> "$STUB_LOG"
 case "$1" in
   rig) printf '{"rigs":[{"name":"town","prefix":"hq","path":"%s","hq":true},{"name":"gc-toolkit","prefix":"tk","path":"%s"}]}' "$STUB_TOWN" "$STUB_RIG"; exit 0 ;;
-  agent) printf '%s' "$STUB_AGENTS"; exit 0 ;;
+  agent) [ -n "$STUB_WARN" ] && echo "$STUB_WARN" >&2; printf '%s' "$STUB_AGENTS"; exit 0 ;;
   config) printf '{"config":{"NamedSessions":[],"Agents":[]}}'; exit 0 ;;
   sling) printf '%s\n' "${STUB_SLING_OUT:-Slung}"; exit "${STUB_SLING_RC:-0}" ;;
   bd) shift ;;
@@ -227,6 +228,7 @@ esac
 	t.Setenv("STUB_RIG", rig)
 	t.Setenv("STUB_TOWN", town)
 	t.Setenv("STUB_AGENTS", `{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.proactive","name":"proactive","dir":"gc-toolkit","scope":"rig","pool":{"max":2}},{"qualified_name":"gc-toolkit/gc-toolkit.polecat","name":"polecat","dir":"gc-toolkit","scope":"rig","pool":{"max":2}}]}`)
+	t.Setenv("STUB_WARN", "")
 	t.Setenv("STUB_SLING_RC", "0")
 	t.Setenv("STUB_SLING_OUT", "")
 	t.Setenv("GC_RIG", "gc-toolkit")
@@ -373,9 +375,9 @@ func TestReactionSlingPassesGcSlingsRefusalThrough(t *testing.T) {
 	}
 }
 
-// The pool's answer is the roster's: yes for the rig's registered proactive
-// pool, and no for one the roster does not register, each saying why on
-// stdout.
+// The pool's answer is the roster's, whatever warning gc prints on stderr beside
+// it: yes for the rig's registered proactive pool, and no for one the roster
+// does not register or shows suspended, each saying why on stdout.
 func TestReactionDeliverableAnswersTheRigsPool(t *testing.T) {
 	stubCity(t, []byte("[]"))
 	var out, errb bytes.Buffer
@@ -386,5 +388,11 @@ func TestReactionDeliverableAnswersTheRigsPool(t *testing.T) {
 	out.Reset()
 	if code := Run([]string{"reaction", "deliverable"}, "test", &out, &errb); code != 1 || !strings.HasPrefix(out.String(), "no: no agent is registered at gc-toolkit/gc-toolkit.proactive") {
 		t.Errorf("an absent pool: exit %d, %q", code, out.String())
+	}
+	t.Setenv("STUB_AGENTS", `{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.proactive","suspended":true,"pool":{"max":2}}]}`)
+	t.Setenv("STUB_WARN", "city.toml: [agents] is a deprecated compatibility alias for [agent_defaults]; rewrite the table name to [agent_defaults]")
+	out.Reset()
+	if code := Run([]string{"reaction", "deliverable"}, "test", &out, &errb); code != 1 || !strings.HasPrefix(out.String(), "no: the pool at gc-toolkit/gc-toolkit.proactive is suspended") {
+		t.Errorf("a suspended pool gc warned beside: exit %d, %q", code, out.String())
 	}
 }

@@ -8,9 +8,10 @@ import (
 	"time"
 )
 
-// stubCity is a city whose gc logs each call's arguments as one line, answers
-// with the file the call's first two words name under replies (agent-list,
-// config-show, rig-list), and exits STUB_EXIT.
+// rosterCity is a city whose gc logs each call's arguments as one line, prints
+// STUB_WARN on standard error when it is set, answers with the file the call's
+// first two words name under replies (agent-list, config-show, rig-list), and
+// exits STUB_EXIT.
 func rosterCity(t *testing.T, replies map[string]string) (*City, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -20,11 +21,12 @@ func rosterCity(t *testing.T, replies map[string]string) (*City, string) {
 			t.Fatal(err)
 		}
 	}
-	stub := "#!/bin/sh\necho \"$*\" >> '" + log + "'\nf='" + dir + "'/\"$1-$2\"\n[ -f \"$f\" ] && cat \"$f\"\nexit \"${STUB_EXIT:-0}\"\n"
+	stub := "#!/bin/sh\necho \"$*\" >> '" + log + "'\n[ -n \"$STUB_WARN\" ] && echo \"$STUB_WARN\" >&2\nf='" + dir + "'/\"$1-$2\"\n[ -f \"$f\" ] && cat \"$f\"\nexit \"${STUB_EXIT:-0}\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("STUB_EXIT", "0")
+	t.Setenv("STUB_WARN", "")
 	return &City{bin: filepath.Join(dir, "gc")}, log
 }
 
@@ -73,12 +75,39 @@ func TestABoundedReadEndsAtItsLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	r := (&City{dir: dir}).runBounded(200*time.Millisecond, bin, "agent", "list")
-	if r.Code != -1 || r.Err == nil || !strings.Contains(r.Err.Error(), "did not answer within") {
-		t.Fatalf("a read past its limit answered %+v", r)
+	out, err := (&City{dir: dir}).readBounded(200*time.Millisecond, bin, "agent", "list")
+	if err == nil || !strings.Contains(err.Error(), "did not answer within") {
+		t.Fatalf("a read past its limit answered %q, %v", out, err)
 	}
 	if took := time.Since(start); took > 10*time.Second {
 		t.Fatalf("the read ended %s after it started", took)
+	}
+}
+
+// gc prints a config warning on standard error and still exits 0 with its whole
+// answer, so each read decodes standard output alone, and a read that exits
+// non-zero says why from the last line gc printed on standard error.
+func TestAReadDecodesItsAnswerPastAWarning(t *testing.T) {
+	c, _ := rosterCity(t, map[string]string{
+		"agent-list":  `{"agents":[{"qualified_name":"rig/gc-toolkit.proactive","suspended":true}]}`,
+		"config-show": `{"config":{"NamedSessions":[{"Template":"refinery","Dir":"rig"}]}}`,
+		"rig-list":    `{"rigs":[{"name":"rig","path":"/town/rigs/rig","prefix":"tk"}]}`,
+	})
+	t.Setenv("STUB_WARN", "city.toml: [agents] is a deprecated compatibility alias for [agent_defaults]; rewrite the table name to [agent_defaults]")
+	if agents, err := c.Agents(); err != nil || len(agents) != 1 || !agents[0].Suspended {
+		t.Errorf("a roster gc warned beside read as %+v, %v", agents, err)
+	}
+	if named, err := c.NamedSessions(); err != nil || len(named) != 1 || named[0].Template != "refinery" {
+		t.Errorf("the named sessions gc warned beside read as %+v, %v", named, err)
+	}
+	if rigs, err := c.Rigs(); err != nil || len(rigs) != 1 || rigs[0].Prefix != "tk" {
+		t.Errorf("a rig list gc warned beside read as %+v, %v", rigs, err)
+	}
+	c, _ = rosterCity(t, map[string]string{"agent-list": `{"agents":[]}`})
+	t.Setenv("STUB_EXIT", "1")
+	t.Setenv("STUB_WARN", "gc agent list: loading suspension state: permission denied")
+	if a, err := c.Agents(); err == nil || !strings.HasSuffix(err.Error(), "exit 1: gc agent list: loading suspension state: permission denied") {
+		t.Errorf("a roster read that exited 1 read as %+v, %v", a, err)
 	}
 }
 
