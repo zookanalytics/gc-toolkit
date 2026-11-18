@@ -51,14 +51,14 @@
 # that point a command at the city: GC_*, GT_*, BEADS_*, BD_*, DOLT_*, TMUX and
 # TMUX_PANE.
 #
-# Inside the city's directories the run reads and writes only what the engine's
-# own arguments name: its working directory, the output's directory, --cwd,
-# --serve-dir, a captures directory, and the script and the music it reads.
-# Each directory is widened to the rig worktree that holds it, with that
-# worktree's git directories, so git runs there. The run also reads the engine
-# checkout, except the dot-directories where a rig keeps its store and its
-# agents' state, and no rig's or city's store is readable whatever else is.
-# The run is refused before the engine starts when:
+# Inside the city's directories a run in the sandbox reads and writes only what
+# the engine's own arguments name: its working directory, the output's
+# directory, --cwd, --serve-dir, a captures directory, and the script and the
+# music it reads. Each directory is widened to the rig worktree that holds it,
+# with that worktree's git directories, so git runs there. Such a run also
+# reads the engine checkout, except the dot-directories where a rig keeps its
+# store and its agents' state, and no rig's or city's store is readable
+# whatever else is. The run is refused before the engine starts when:
 #   - a directory it would read and write holds one of the city's directories,
 #     or lies inside one in no rig's worktree;
 #   - gc's home holds a city registry that `gc cities` does not read, because
