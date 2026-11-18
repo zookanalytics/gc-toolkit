@@ -46,15 +46,22 @@
 #   (PORTS)     a --serve-dir with no --port gets a free one; a port a server
 #               already answers on, and a --base-url on this host where nothing
 #               of this user's listens, stop the capture
+#   (IOS)       a --base-url that names an iOS app on a simulator provisions
+#               Appium through the engine first, and opens three free ports,
+#               no other, which the engine gets as --port; its screenshot takes
+#               no --scale; a call that also names a --serve-dir or a --port is
+#               refused, and zsh and bash 3.2 open the same three ports
 #   (LOCAL-APP) a --base-url on this host captures when every process that
 #               listens on its port works in a worktree of a rig whose
-#               app_reads_city setting is "false", and the sandbox opens that
+#               app_reads_city setting is "false", or when gctk rig serve
+#               reports a copy's app at that port, and the sandbox opens that
 #               port and no other. Each other case stops the capture and says
 #               why: a rig set to "true", any other value, a read that fails,
-#               the rig that holds the capture's own scripts, a listener in no
-#               rig's worktree, a listener lsof names no directory for, no
-#               listener, no lsof, a port a city variable names, and a URL
-#               whose port is out of range
+#               the rig that holds the capture's own scripts, a port the
+#               checkout's copy does not hold, the port of a copy whose app is
+#               on a simulator, a listener in no rig's worktree, a listener lsof
+#               names no directory for, no listener, no lsof, a port a city
+#               variable names, and a URL whose port is out of range
 #   (ISOLATION) on a host with sandbox-exec, a terminal capture whose command
 #               reads the city's files, its stores, gc's home and a service on
 #               its loopback, and lists the city's variables, reaches none of
@@ -271,13 +278,16 @@ ENGINE
 chmod +x "$ENGINE_STUB"
 
 # gctk answers `rig serve --check` with a copy running on $COPY_PORT, and with
-# no copy when COPY_PORT is unset, logging each call and where it ran.
+# no copy when COPY_PORT is unset, logging each call and where it ran. The
+# copy's app is where gctk reports a copy that answers on its port, at its
+# loopback URL, or at $COPY_APP_URL, the URL a serve command printed.
 GCTK_STUB="$TMPD/gctk"
 cat >"$GCTK_STUB" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${CALLLOG:?}"
 if [ "$*" = "rig serve --check" ] && [ -n "${COPY_PORT:-}" ]; then
-  printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$COPY_PORT"
+  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s","address":""}\n' \
+    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}"
   exit 0
 fi
 printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"
@@ -618,6 +628,28 @@ for cap in video screenshot; do
   capture "$cap" SS_RIG="$ENGINE" -- --base-url https://preview.example.com
   eq "$RC" 0 "($cap) a deployed preview captures"
   hasnt "(allow network-outbound (remote ip" "$(profile)" "($cap) and opens no loopback port"
+
+  echo "# ($cap) IOS: an iOS app on a simulator gets three free ports, opened in the sandbox and handed to the engine, once Appium is provisioned"
+  IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+  capture "$cap" SS_RIG="$ENGINE" FREE_PORT="$(printf '50301\n50302\n50303')" -- --base-url "$IOS_APP"
+  eq "$RC" 0 "($cap) an iOS app captures"
+  for p in 50301 50302 50303; do
+    has "(allow network-outbound (remote ip \"localhost:$p\"))" "$(profile)" "($cap) the sandbox opens port $p"
+  done
+  eq "$(profile | grep -c 'allow network-outbound (remote ip')" 3 "($cap) and no other loopback port"
+  has "[--base-url] [$IOS_APP]" "$(calls)" "($cap) the engine drives the app the URL names"
+  has "[--port] [50301,50302,50303]" "$(calls)" "($cap) and gets the three ports as --port"
+  P=$(line_of "npm run provision:appium (in $ENGINE)"); E=$(line_of "$(local_call "$cap")")
+  ok "($cap) the engine checkout provisions Appium before the capture runs (lines $P, $E)" "[ '$P' -gt 0 ] && [ '$E' -gt '$P' ]"
+  [ "$cap" != screenshot ] || hasnt "[--scale]" "$(calls)" "(screenshot) an iOS app's PNG is the device's own, with no --scale"
+  capture "$cap" FREE_PORT="$(printf '50301\n50302\n50303')" -- --base-url "$IOS_APP"
+  eq "$RC" 0 "($cap) an iOS app captures on the published engine"
+  P=$(line_of "npx --yes @zookanalytics/sprintshow provision appium"); E=$(line_of "$(published_call "$cap")")
+  ok "($cap) which provisions Appium first (lines $P, $E)" "[ '$P' -gt 0 ] && [ '$E' -gt '$P' ]"
+  capture "$cap" SS_RIG="$ENGINE" FREE_PORT="$(printf '50301\n50302')" -- --base-url "$IOS_APP"
+  eq "$RC" 1 "($cap) an iOS app with fewer than three free ports exits 1"
+  has "could not find three free ports" "$(err)" "($cap) it says so"
+  not_run "$cap"
 done
 
 # local_refused <cap> <case> <wanted reason>: the capture just run was refused
@@ -663,6 +695,9 @@ for cap in video screenshot; do
   eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 1 "($cap) and no other loopback port"
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5999 LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
   local_refused "$cap" "a port the checkout's copy does not hold" "for which city.toml sets app_reads_city = \"true\""
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 COPY_APP_URL="$IOS_APP" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  local_refused "$cap" "the port of a copy whose app is on a simulator, where another server listens" "process 4243, which listens on port 5181, works in a worktree of $RIGB, for which city.toml sets app_reads_city = \"true\""
+  hasnt "is a copy that gctk rig serve runs" "$(err)" "($cap) it takes that server for no copy"
 
   echo "# ($cap) LOCAL-APP: any value but \"false\", and a read that fails, counts as \"true\""
   for v in yes True ''; do
@@ -736,6 +771,24 @@ has '(deny network-outbound (remote ip "localhost:*"))' "$(profile)" "(sandboxed
 has "(allow file-read-data file-write* (subpath \"$RWT\"))" "$(profile)" "(sandboxed) the directory is read and written, as its rig worktree"
 has "(deny file-read-data file-write* (subpath \"$RIGA\"))" "$(profile)" "(sandboxed) and the rig's checkout stays denied"
 eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$SANDBOX_ENV")" 0 "(sandboxed) the command runs with none of the variables that point at the city"
+# No shell of the library's holds the command's output open, so a command that
+# closes its standard output and runs on ends that output for its reader. The
+# reader is cat on a process substitution, which ends with the output, where a
+# command substitution would wait for the command too. The farm holds no sleep,
+# so the command names the host's.
+PIDF="$TMPD/sandboxed.pid"; rm -f "$PIDF"
+START=$SECONDS
+GOT=$(cat < <( cd "$RWT" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+    SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" PACK_SCRIPTS="$HERE" PIDF="$PIDF" \
+    "${CITY_ENV[@]}" bash "$TMPD/sandboxed.sh" 5197 "$RWT" \
+    bash -c 'echo $$ >"$PIDF"; printf closed; exec 1>&-; exec /bin/sleep 30' 2>"$ERRF" ))
+TOOK=$((SECONDS - START))
+RAN_ON=ended
+[ -s "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null && RAN_ON=running
+[ ! -s "$PIDF" ] || kill "$(cat "$PIDF")" 2>/dev/null
+eq "$GOT" "closed" "(sandboxed) a command that closes its standard output gives its reader all of it"
+eq "$RAN_ON" running "(sandboxed) and runs on once the output has ended"
+eq "$([ "$TOOK" -lt 20 ] && echo "while it runs" || echo "after ${TOOK}s")" "while it runs" "(sandboxed) and that output ends while the command runs on"
 sandboxed "${CITY_ENV[@]}" -- 0 "$RWT" true
 eq "$RC" 1 "(sandboxed) a port that is no port is refused"
 sandboxed "${CITY_ENV[@]}" -- 5197 "$TMPD/nowhere" true
@@ -1080,6 +1133,23 @@ shell_run bash "$TMPD/skill-engine-serve.sh"
 eq "$RC" 1 "(shells) an engine call that names --serve exits 1"
 has "the engine's --serve would start a server whose port the sandbox cannot vouch for; serve the app as a copy with gctk rig serve" "$(err)" "(shells) it says why, and what serves the app instead"
 hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
+IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP -o clip.mp4#" >"$TMPD/skill-ios.sh"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP --port 4723,8100,9100 -o clip.mp4#" >"$TMPD/skill-ios-port.sh"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP --serve-dir app -o clip.mp4#" >"$TMPD/skill-ios-two.sh"
+THREE="$(printf '50301\n50302\n50303')"
+shell_run bash "$TMPD/skill-ios.sh" FREE_PORT="$THREE"
+eq "$RC" 0 "(shells) this suite's bash runs an engine call on an iOS app"
+has "[--base-url] [$IOS_APP] [-o] [clip.mp4] [--port] [50301,50302,50303]" "$(calls)" "(shells) and the engine gets the three ports"
+IOS_CALLS="$(calls)"; IOS_PROFILE="$(profile)"
+shell_run bash "$TMPD/skill-ios-port.sh" FREE_PORT="$THREE"
+eq "$RC" 1 "(shells) an engine call on an iOS app that names --port exits 1"
+has "an iOS app run takes no --port" "$(err)" "(shells) it says the capture picks those ports"
+hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
+shell_run bash "$TMPD/skill-ios-two.sh" FREE_PORT="$THREE"
+eq "$RC" 1 "(shells) an engine call that names an iOS app and a --serve-dir exits 1"
+has "--base-url $IOS_APP and --serve-dir each name an app to capture" "$(err)" "(shells) it says the call names two apps"
+hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
 for sh in /bin/zsh /bin/bash; do
   if [ ! -x "$sh" ]; then echo "# SHELLS: $sh SKIPPED (not on this host)"; continue; fi
   shell_run "$sh" "$TMPD/skill-resolve.sh"
@@ -1097,16 +1167,21 @@ for sh in /bin/zsh /bin/bash; do
   shell_run "$sh" "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4243 $BWT"
   eq "$RC" 1 "(shells) $sh refuses the same call when a worktree of a rig set to \"true\" serves the port"
   has "for which city.toml sets app_reads_city = \"true\"" "$(err)" "(shells) $sh names why"
+  shell_run "$sh" "$TMPD/skill-ios.sh" FREE_PORT="$THREE"
+  eq "$RC" 0 "(shells) $sh runs the engine call on an iOS app"
+  eq "$(calls)" "$IOS_CALLS" "(shells) $sh hands it the same arguments"
+  eq "$(profile)" "$IOS_PROFILE" "(shells) $sh opens the same three ports"
 done
 
 echo "# NO-COPY: no other script, and no skill's example code, finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
 # One grep finds the files that name a step anywhere; only those are read again
-# without their comment lines, so a script that names a step in prose passes.
-# A skill is read again as its fenced code blocks alone, so its prose can name
-# a step too. The steps are the browser install, by either installer, the rig
-# lookup's select, however a copy spaces them, the Node version read, and the
-# path of the engine's CLI in a checkout.
-STEPS='provision:browser|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"|node[[:space:]]+--version|src/cli\.ts'
+# without their comment lines, so a script that names a step in prose passes. A
+# skill is read again as its fenced code blocks alone, so its prose can name a
+# step too. The steps are the browser install, by either installer, Appium's, by
+# either form of the engine's provision command, the rig lookup's select,
+# however a copy spaces them, the Node version read, and the path of the
+# engine's CLI in a checkout.
+STEPS='provision:browser|provision:appium|provision[[:space:]]+appium|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"|node[[:space:]]+--version|src/cli\.ts'
 COPIES=""
 while IFS= read -r f; do
   case "$f" in ""|"$LIB"|*.test.sh) continue ;; esac
