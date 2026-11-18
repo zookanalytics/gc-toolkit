@@ -89,10 +89,7 @@ func newAdmit(t *testing.T) *admitting {
 	t.Helper()
 	d := newCycle(t)
 	d.l.Refinery = boundRefinery
-	d.edit(t, func(b *fake.Bead) {
-		b.Assignee = boundRefinery
-		delete(b.Metadata, "review_results")
-	})
+	d.edit(t, func(b *fake.Bead) { delete(b.Metadata, "review_results") })
 	p := &pours{store: d.store}
 	d.l.Runs = p
 	d.l.Ledger = ledger.New(listing{d.store})
@@ -563,7 +560,6 @@ func TestAnAskAnOpenBeadHoldsWaitsAndThePassAfterItsHolderClosesPoursOne(t *test
 func TestARefineryAddressWithNoBindingPoursNothing(t *testing.T) {
 	d := newAdmit(t)
 	d.l.Refinery = refinery
-	d.edit(t, func(b *fake.Bead) { b.Assignee = refinery })
 	o := d.once(t)
 	is(t, o, pr.ActChecked)
 	if d.runs.count() != 0 || !strings.Contains(o.Detail, "rig/refinery") {
