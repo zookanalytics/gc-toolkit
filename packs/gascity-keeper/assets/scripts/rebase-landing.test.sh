@@ -234,6 +234,16 @@ eq "$RC" 0 "(dirty) exits 0"
 has "$(calls 'bd update gc-iss')" "rig_update_result=skipped: branch=main dirty=1 (operator must sync) --status=closed" "(dirty) an untracked file leaves the checkout alone, said why, and still closes"
 eq "$(git -C "$TMP/rig" rev-parse HEAD)" "$PRE" "(dirty) …and HEAD stays put"
 
+# An invalid status.showUntrackedFiles fails git status with no output, and
+# leaves rev-parse and reset --hard working.
+repos; reset_case; bead open; operator_push; echo wip > "$TMP/rig/fork.txt"
+git -C "$TMP/rig" config status.showUntrackedFiles bogus
+run finish --bead gc-iss
+eq "$RC" 0 "(unreadable) exits 0"
+has "$(calls 'bd update gc-iss')" "rig_update_result=error: git status failed in $TMP/rig (operator must sync) --status=closed" "(unreadable) a status git cannot read leaves the checkout alone, said why, and still closes"
+eq "$(cat "$TMP/rig/fork.txt")" wip "(unreadable) …and keeps the tracked edit"
+eq "$(git -C "$TMP/rig" rev-parse HEAD)" "$PRE" "(unreadable) …and HEAD stays put"
+
 repos; reset_case; bead open; operator_push; git -C "$TMP/rig" checkout -q -b feature
 run finish --bead gc-iss
 has "$(calls 'bd update gc-iss')" "rig_update_result=skipped: branch=feature dirty=0 (operator must sync)" "(branch) a checkout on another branch is left alone"

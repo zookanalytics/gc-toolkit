@@ -180,13 +180,17 @@ To drop the rebase instead, do not clear this gate: run $KIT/stand-down.sh $ISSU
 
 # sync_rig — bring the rig checkout's <target> to the landed commit when that
 # discards nothing, into RIG_SYNC. git reset --hard rewrites tracked files and
-# deletes untracked ones in its way, so any change at all, or a HEAD other than
-# the pre-rebase tip, which can hold commits that were never pushed, is left for
-# the operator.
+# deletes untracked ones in its way, so a checkout with any change at all, or
+# whose status cannot be read, is left for the operator, and so is a HEAD other
+# than the pre-rebase tip, which can hold commits that were never pushed.
 sync_rig() {
-  local branch dirty head
+  local branch changes dirty=0 head
   branch=$(git -C "$RIG_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null) || branch=""
-  dirty=$(git -C "$RIG_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+  if ! changes=$(git -C "$RIG_ROOT" status --porcelain 2>/dev/null); then
+    RIG_SYNC="error: git status failed in $RIG_ROOT (operator must sync)"
+    return 0
+  fi
+  [ -z "$changes" ] || dirty=$(printf '%s\n' "$changes" | wc -l | tr -d ' ')
   head=$(commit_of HEAD) || head=""
   if [ "$branch" != "$TARGET" ] || [ "$dirty" != 0 ]; then
     RIG_SYNC="skipped: branch=${branch:-unknown} dirty=$dirty (operator must sync)"
