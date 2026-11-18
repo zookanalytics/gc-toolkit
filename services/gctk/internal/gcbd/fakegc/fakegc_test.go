@@ -153,6 +153,35 @@ func TestOneDependencyPerPair(t *testing.T) {
 	}
 }
 
+func TestDepListReadsDownWhenItNamesNoDirection(t *testing.T) {
+	f := newFixture(t, `[{"id":"a"},{"id":"b"},{"id":"c"}]`, "b|blocks|a\nc|tracks|b\n")
+	edges := `[{"issue_id":"a","depends_on_id":"b","type":"blocks"},{"issue_id":"c","depends_on_id":"b","type":"tracks"}]` + "\n"
+	for _, args := range [][]string{{"a", "c", "--json"}, {"a", "c", "--direction=down", "--json"}} {
+		if r := f.gc(append([]string{"bd", "dep", "list"}, args...)...); r.status != 0 || r.out != edges {
+			t.Errorf("dep list %v: %+v", args, r)
+		}
+	}
+	if r := f.gc("bd", "dep", "list", "a", "--json"); r.status != 0 || r.out != `[{"id":"b","dependency_type":"blocks"}]`+"\n" {
+		t.Errorf("dep list a: %+v", r)
+	}
+}
+
+func TestCloseFailRefusesAnUpdateThatClosesInEitherSpelling(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
+	fail := []string{"STUB_CLOSE_FAIL=a"}
+	for _, args := range [][]string{{"--status=closed"}, {"--status", "closed"}} {
+		if r := f.run(fail, append([]string{"bd", "update", "a"}, args...)...); r.status != 1 || !strings.Contains(r.err, "simulated close refusal") {
+			t.Errorf("update a %v: %+v", args, r)
+		}
+	}
+	if r := f.run(fail, "bd", "update", "a", "--status", "in_progress"); r.status != 0 {
+		t.Errorf("an update to another status: %+v", r)
+	}
+	if got := f.file("beads.json"); got != `[{"id":"a","status":"in_progress"}]`+"\n" {
+		t.Errorf("store = %s", got)
+	}
+}
+
 func TestCreateRefusesAMissingDependency(t *testing.T) {
 	f := newFixture(t, `[{"id":"a"},{"id":"p"}]`, "")
 	r := f.gc("bd", "create", "x", "--deps", "a,blocks:nope")

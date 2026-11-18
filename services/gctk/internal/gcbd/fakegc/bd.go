@@ -492,9 +492,6 @@ func (c *Call) update(s, d string, args []string) error {
 	if listed(c.getenv("STUB_UPDATE_FAIL"), id) {
 		return c.fail(1, "gc: simulated update refusal for "+id)
 	}
-	if listed(c.getenv("STUB_CLOSE_FAIL"), id) && padded(args, "--status=closed") {
-		return c.fail(1, "gc: simulated close refusal for "+id)
-	}
 	var sets, unsets []string
 	var note, asg, newstatus, desc, prio, parent string
 	noteSet, asgSet, descSet := false, false, false
@@ -539,6 +536,9 @@ func (c *Call) update(s, d string, args []string) error {
 		case a == "--parent":
 			parent = value(&i)
 		}
+	}
+	if listed(c.getenv("STUB_CLOSE_FAIL"), id) && newstatus == "closed" {
+		return c.fail(1, "gc: simulated close refusal for "+id)
 	}
 	release, err := lockDir(s)
 	if err != nil {

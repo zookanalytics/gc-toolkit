@@ -68,7 +68,7 @@
 //     STUB_GATE_RESOLVE_FAIL and STUB_GATE_RESOLVE_NOOP name ids, blank
 //     separated. A write naming one is refused, or for NOOP reports success
 //     and writes nothing. STUB_CLOSE_FAIL refuses a close, and an update only
-//     when it carries --status=closed.
+//     when it sets the status closed.
 //   - STUB_DROP_KEYS, "<id>:<key>,<key> ...", lands a write to that id without
 //     the keys it names, as a write that reported success and half-landed.
 //     The keys are metadata keys or the fields status, assignee, priority,

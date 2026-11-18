@@ -146,6 +146,7 @@ func contractCases() []contractCase {
 			{args: []string{"dep", "list", "{a}", "--direction=down", "--json"}, answer: "rows"},
 			{args: []string{"dep", "list", "{a}", "--direction=up", "--json"}, answer: "rows"},
 			{args: []string{"dep", "list", "{a}", "{c}", "--direction=down", "--json"}, answer: "edges"},
+			{args: []string{"dep", "list", "{a}", "{c}", "--json"}, answer: "edges"},
 			{args: []string{"dep", "list", "ct-nope", "--json"}, answer: "json"},
 		}},
 		{name: "a batch of edges with a refused pair writes none of them", beads: []string{"a", "b", "c"}, state: []string{"a", "c"}, steps: []step{

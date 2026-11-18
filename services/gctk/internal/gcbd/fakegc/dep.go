@@ -136,6 +136,11 @@ func (c *Call) depList(s, d string, args []string) error {
 			typ = strings.TrimPrefix(a, "--type=")
 		}
 	}
+	// bd reads down when the call names no direction, so many ids read with
+	// none answer raw edge records too.
+	if dir == "" {
+		dir = "down"
+	}
 	rows, err := readRows(s)
 	if err != nil {
 		return err
