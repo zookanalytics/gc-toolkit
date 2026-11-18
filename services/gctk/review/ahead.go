@@ -25,16 +25,18 @@ import (
 // iteration. Once the fix closes, the landing order pours a run that takes the
 // ask, and the checks it sends back judge the PR again.
 //
-// The fix is found by its title among the store's open beads, so a second PR
-// whose lane asks for the same fix waits on the same bead, and that PR's case
-// joins the bead's notes. A call that runs again for the same PR finds first the
-// fix its open ask waits on, closed or not, so a fix that landed before the call
-// ran again is not filed and sent a second time. Each call holds the store's
-// record lock from its first read of the fix to the fix's filing, so two review
-// runs that ask for one fix at once file it once. A found fix that a label holds from every pool, such
-// as the hold:mayor of work that waits for the operator's placement, is sent
-// nowhere, because gc sling reads no hold, and the ask waits on it while the
-// hold stands.
+// The fix is found by its title and its target among the store's open beads,
+// so a second PR into the same branch whose lane asks for the same fix waits on
+// the same bead, and that PR's case joins the bead's notes. A fix lands only on
+// its target, so a PR into another branch gets a fix of its own. A call that
+// runs again for the same PR finds first the fix of that title and target that
+// its open ask waits on, closed or not, so a fix that landed before the call ran
+// again is not filed and sent a second time. Each call holds the store's record
+// lock from its first read of the fix to the fix's filing, so two review runs
+// that ask for one fix at once file it once. A found fix that a label holds from
+// every pool, such as the hold:mayor of work that waits for the operator's
+// placement, is sent nowhere, because gc sling reads no hold, and the ask waits
+// on it while the hold stands.
 
 // AheadRequest is a fix to file ahead of the PR the bead owns: its title, what
 // it must hold, the pool and the formula it is sent on, and the checks the ask
@@ -56,15 +58,15 @@ type Ahead struct {
 }
 
 // SendAhead files the fix req names ahead of the PR the bead owns, or finds the
-// open bead of its title, sends it to req.Pool on req.Formula unless it is on
-// its way already or a label holds it, and files the ask on the bead that waits
-// on it. It finds or files the fix under the record lock of the store whose
-// .beads directory is dir, waiting up to wait for it. It refuses what FileAsk
-// refuses, and a request that sends no check back, before anything is filed. A
-// read that fails, and a lock not taken, return their error. A write
-// that fails returns its error with what landed before it, which the next call
-// finds: the fix through the open ask that waits on it or by its title, and the
-// ask by its reason.
+// open bead of its title that lands on the PR's target, sends it to req.Pool on
+// req.Formula unless it is on its way already or a label holds it, and files
+// the ask on the bead that waits on it. It finds or files the fix under the
+// record lock of the store whose .beads directory is dir, waiting up to wait
+// for it. It refuses what FileAsk refuses, and a request that sends no check
+// back, before anything is filed. A read that fails, and a lock not taken,
+// return their error. A write that fails returns its error with what landed
+// before it, which the next call finds: the fix through the open ask that waits
+// on it or by its title and target, and the ask by its reason.
 func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runtime, req AheadRequest, index func(at string) (Index, error)) (Ahead, error) {
 	var out Ahead
 	title, desc := strings.TrimSpace(req.Title), strings.TrimSpace(req.Description)
@@ -114,22 +116,22 @@ func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runt
 
 // fixFor finds or files the fix SendAhead sends, holding the store's record
 // lock from its first read of the fix to the fix's create, so two review runs
-// that ask for one fix at once file it once: the fix an open ask on the PR
-// waits on, else the open bead of its title, whose notes take the PR's case,
-// else a new bead. It fills in out's fix, and returns the found fix's record,
-// nil for a fix it filed.
+// that ask for one fix at once file it once: the fix of its title and the PR's
+// target that an open ask on the PR waits on, else the open bead of that title
+// and target, whose notes take the PR's case, else a new bead. It fills in out's
+// fix, and returns the found fix's record, nil for a fix it filed.
 func fixFor(l *ledger.Ledger, dir string, wait time.Duration, owner *ledger.Record, rec record.Record, title, desc, pr string, out *Ahead) (*ledger.Record, error) {
 	release, err := record.Lock(dir, wait)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	fix, err := sentFix(l, owner, title)
+	fix, err := sentFix(l, owner, title, rec.Target)
 	if err != nil {
 		return nil, err
 	}
 	if fix == nil {
-		if fix, err = openTitled(l, title, owner.ID); err != nil {
+		if fix, err = openFix(l, title, rec.Target, owner.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -159,12 +161,12 @@ func fixFor(l *ledger.Ledger, dir string, wait time.Duration, owner *ledger.Reco
 	return fix, nil
 }
 
-// sentFix is the fix titled title that an open ask on owner's PR waits on,
-// closed or not, the one of lowest id when several are, and nil when no open ask
-// waits on one. The ask waits on its fix by its own blocks edge, so the ask
-// still names the fix after the fix has closed, where openTitled sees only open
-// beads.
-func sentFix(l *ledger.Ledger, owner *ledger.Record, title string) (*ledger.Record, error) {
+// sentFix is the fix of title that lands on target and that an open ask on
+// owner's PR waits on, closed or not, the one of lowest id when several are, and
+// nil when no open ask waits on one. The ask waits on its fix by its own blocks
+// edge, so the ask still names the fix after the fix has closed, where openFix
+// sees only open beads.
+func sentFix(l *ledger.Ledger, owner *ledger.Record, title, target string) (*ledger.Record, error) {
 	asks, err := asksOf(l, owner)
 	if err != nil {
 		return nil, err
@@ -203,7 +205,7 @@ func sentFix(l *ledger.Ledger, owner *ledger.Record, title string) (*ledger.Reco
 	}
 	var found *ledger.Record
 	for _, r := range fixes {
-		if strings.TrimSpace(r.Title()) != title {
+		if !fixOf(r, title, target) {
 			continue
 		}
 		if found == nil || r.ID < found.ID {
@@ -213,16 +215,16 @@ func sentFix(l *ledger.Ledger, owner *ledger.Record, title string) (*ledger.Reco
 	return found, nil
 }
 
-// openTitled is the open bead titled title, other than the bead not, the one
-// of lowest id when several are, and nil when none is.
-func openTitled(l *ledger.Ledger, title, not string) (*ledger.Record, error) {
+// openFix is the open bead of title that lands on target, other than the bead
+// not, the one of lowest id when several are, and nil when none is.
+func openFix(l *ledger.Ledger, title, target, not string) (*ledger.Record, error) {
 	rows, err := l.Find(ledger.Titled(title))
 	if err != nil {
 		return nil, err
 	}
 	var found *ledger.Record
 	for _, r := range rows {
-		if strings.TrimSpace(r.Title()) != title || r.Status() == "closed" || r.ID == not {
+		if !fixOf(r, title, target) || r.Status() == "closed" || r.ID == not {
 			continue
 		}
 		if found == nil || r.ID < found.ID {
@@ -232,9 +234,16 @@ func openTitled(l *ledger.Ledger, title, not string) (*ledger.Record, error) {
 	return found, nil
 }
 
-// unsent reports whether r, a fix found by its title, is on no way to a pool:
-// open, assigned to nobody, routed nowhere, armed for nothing, and naming no
-// branch its work is on.
+// fixOf reports whether r is the fix of title that lands on target. A fix lands
+// only on its target, so one on another branch leaves the PR's target without
+// what the PR waits for.
+func fixOf(r *ledger.Record, title, target string) bool {
+	return strings.TrimSpace(r.Title()) == title && view(record.LandsOn, r) == target
+}
+
+// unsent reports whether r, a found fix, is on no way to a pool: open,
+// assigned to nobody, routed nowhere, armed for nothing, and naming no branch
+// its work is on.
 func unsent(r *ledger.Record) bool {
 	return r != nil && r.Status() == "open" && r.Assignee() == "" && str(routedKey, r) == "" &&
 		str(executionRoutedKey, r) == "" && !armrecord.Present(r) && view(record.Branch, r) == ""

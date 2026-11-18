@@ -267,7 +267,7 @@ hasF "$ARCH_SKILL" 'and the document is never the change'"'"'s to add, so no cha
   "…and never asks the change it reviews to add one"
 notF "$ARCH_SKILL" 'asks the change to add the document' "…so no finding puts the document in the change it reviews"
 hasF "$ARCH_SKILL" 'the document lands ahead of the change, in a PR of its own titled exactly `docs: add the architecture document`' \
-  "…sends the document ahead, in a PR of its own under one title, so a second change waits on the same PR"
+  "…sends the document ahead, in a PR of its own under one title, so a second change into the same branch waits on the same PR"
 hasF "$ARCH_SKILL" 'the branch only predates it, and the finding asks the change to bring its branch current' \
   "…and asks a branch that predates the target's document to come current, sending nothing ahead"
 hasF "$ARCH_SKILL" 'a passable account of the architecture the change covers' "…whose PR holds a passable account of the architecture the change covers"

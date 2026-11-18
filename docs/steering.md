@@ -59,9 +59,9 @@ A bead may be routed or armed to a work pool only when one of these holds:
   ([design.md](../specs/tk-1tfzr71.66/design.md#what-the-operator-approves));
 - it is the architecture document a review run sends ahead of the PR it
   reviews, which that PR waits on: the bead `gctk review ahead` files, or finds
-  open by its title, and slings to the run's repair pool unless a label holds
-  it. The route stands on the operator's ruling that a missing document opens
-  as its own PR while the change waits for it
+  open by its title and target, and slings to the run's repair pool unless a
+  label holds it. The route stands on the operator's ruling that a missing
+  document opens as its own PR while the change waits for it
   ([ruling.md](../specs/tk-ilh8rgh/ruling.md)).
 
 Every other bead waits for placement. A bead held this way is open and

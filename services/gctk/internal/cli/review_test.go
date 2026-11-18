@@ -246,7 +246,8 @@ func TestReviewAheadPrintsWhatStands(t *testing.T) {
 
 	s = fake.New()
 	s.Put(pr)
-	s.Put(fake.Bead{ID: "tk-held", Title: req.Title, Status: "open", IssueType: "task", Labels: []string{"hold:mayor"}})
+	s.Put(fake.Bead{ID: "tk-held", Title: req.Title, Status: "open", IssueType: "task", Labels: []string{"hold:mayor"},
+		Metadata: map[string]string{"target": "main"}})
 	code, out, errOut = ahead(s, &gcfake.Runtime{})
 	if code != 0 || out != "tk-held found, held by its hold:mayor label, so it is sent nowhere\nfk-1 filed, waiting on tk-held\n" {
 		t.Fatalf("a call that finds the fix held = %d, %q, %q", code, out, errOut)

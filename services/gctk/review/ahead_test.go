@@ -215,6 +215,61 @@ func TestASecondPRWaitsOnTheSameFix(t *testing.T) {
 	}
 }
 
+// A fix lands only on its target, so a PR into another branch that needs the
+// same fix gets one of its own, on its own target, and the open fix of the
+// other branch takes no note of its case.
+func TestAPRIntoAnotherBranchGetsAFixOfItsOwn(t *testing.T) {
+	w := newWorld(t)
+	rt := routes(w)
+	first, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.store.Put(bead{ID: "tk-pr2", Status: "blocked", IssueType: "task", Metadata: map[string]string{
+		"merge_result": "pull_request_pending", "branch": "polecat/tk-pr2", "pr_head_sha": h1, "merged_target": "integration/tk-x",
+	}})
+	got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq("tk-pr2"), archIndex(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixRow, _ := w.store.Row(got.Fix)
+	if got.Fix == first.Fix || !got.FixFiled || !got.Sent || !got.AskFiled || fixRow.Metadata["target"] != "integration/tk-x" {
+		t.Fatalf("the PR into another branch = %+v, its fix reading %+v; want a fix of its own on its target, filed and slung", got, fixRow)
+	}
+	firstRow, _ := w.store.Row(first.Fix)
+	if strings.Contains(firstRow.Notes, "tk-pr2") {
+		t.Fatalf("the other branch's fix took the PR's case: %q", firstRow.Notes)
+	}
+}
+
+// The fix an open ask on the PR waits on stands for the PR's fix only while it
+// lands on the PR's target, so a landed fix of another branch, which an ask
+// filed while the PR's record named that branch waits on, is not taken for it:
+// the call files a fix on the PR's target and an ask that waits on that one.
+func TestALandedFixOfAnotherBranchIsNotThePRs(t *testing.T) {
+	w := newWorld(t)
+	rt := routes(w)
+	first, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, _ := w.store.Row(first.Fix)
+	row.Status, row.ClosedAt = "closed", "2026-11-18T20:00:00Z"
+	w.store.Put(row)
+	pr, _ := w.store.Row(prBead)
+	pr.Metadata["merged_target"] = "integration/tk-x"
+	w.store.Put(pr)
+	got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixRow, _ := w.store.Row(got.Fix)
+	if got.Fix == first.Fix || !got.FixFiled || !got.Sent || got.Ask == first.Ask || !got.AskFiled ||
+		fixRow.Metadata["target"] != "integration/tk-x" {
+		t.Fatalf("the call = %+v, its fix reading %+v; want a fix on the PR's target and an ask that waits on it", got, fixRow)
+	}
+}
+
 // A sling that does not land leaves the fix filed and no ask, and the next call
 // finds the fix on no way to a pool, slings it and files the ask.
 func TestAFixWhoseSlingFailedIsSentByTheNextCall(t *testing.T) {
@@ -247,7 +302,8 @@ func TestAFixWhoseSlingFailedIsSentByTheNextCall(t *testing.T) {
 // no hold, and the ask waits on it while the hold stands.
 func TestAFoundFixThatALabelHoldsIsSentNowhere(t *testing.T) {
 	w := newWorld(t)
-	w.store.Put(bead{ID: "tk-held", Title: aheadTitle, Status: "open", IssueType: "task", Labels: []string{"Hold:Mayor "}})
+	w.store.Put(bead{ID: "tk-held", Title: aheadTitle, Status: "open", IssueType: "task", Labels: []string{"Hold:Mayor "},
+		Metadata: map[string]string{"target": target}})
 	rt := routes(w)
 	got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
 	if err != nil {

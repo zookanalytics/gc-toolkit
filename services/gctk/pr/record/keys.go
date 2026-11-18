@@ -88,13 +88,15 @@ var (
 
 // The reading faces of the record's keys whose value is another domain's whole
 // question: whether a bead carries a merge_result or a rejection_reason, which
-// puts it in flight, and the PR a listing names on each bead.
+// puts it in flight, the PR a listing names on each bead, the branch a bead's
+// work is on, and LandsOn, the branch its work lands on, which NameTarget names.
 var (
 	Result    = mergeResultKey.View()
 	PRURL     = prURLKey.View()
 	PRNumber  = prNumberKey.View()
 	Rejection = rejectionReasonKey.View()
 	Branch    = branchKey.View()
+	LandsOn   = targetKey.View()
 )
 
 // OnBranch selects the beads whose branch is branch: the ones whose work the

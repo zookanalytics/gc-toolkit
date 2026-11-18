@@ -37,20 +37,20 @@ finding asks the change to bring its branch current. The target carries it when
 `<worktree>`, or when the same call does for the path that the target's
 `docs/review-arch.md` names for its architecture. Otherwise the document lands
 ahead of the change, in a PR of its own titled exactly
-`docs: add the architecture document`, so that a second change waits on the
-same PR, and the change waits for it. That PR also carries the rig's guidance
-that points this check at the document, when the document lives somewhere
-else. The finding says what that PR must hold: a passable account of the
-architecture the change covers. Passable means enough that a later review of a
-change to that architecture can hold the change to it: the standard's
-sufficiency test holds for the part the change covers. The document meets the
-standard from its first commit: it frames the whole repository and opens on its
-big picture, and the part the change covers is filled in. The rest of the
-repo's architecture is not that PR's to write. File it as a follow-up under the
-token `docs/architecture.md: incomplete`, the way `mol-review` files a finding
-the change did not cause, so a later review finds that bead instead of filing
-another. Its body names the standard, `gc-toolkit.architecture-document`, for
-whoever writes the rest.
+`docs: add the architecture document`, so that a second change into the same
+branch waits on the same PR, and the change waits for it. That PR also carries
+the rig's guidance that points this check at the document, when the document
+lives somewhere else. The finding says what that PR must hold: a passable
+account of the architecture the change covers. Passable means enough that a
+later review of a change to that architecture can hold the change to it: the
+standard's sufficiency test holds for the part the change covers. The document
+meets the standard from its first commit: it frames the whole repository and
+opens on its big picture, and the part the change covers is filled in. The rest
+of the repo's architecture is not that PR's to write. File it as a follow-up
+under the token `docs/architecture.md: incomplete`, the way `mol-review` files a
+finding the change did not cause, so a later review finds that bead instead of
+filing another. Its body names the standard, `gc-toolkit.architecture-document`,
+for whoever writes the rest.
 
 A gap in the architecture docs that the change does not touch, a reference
 missing or wrong for another part of the architecture, is an issue the change

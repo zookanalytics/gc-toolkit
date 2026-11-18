@@ -32,13 +32,14 @@ target's sling_query", with `--on <formula>` for the formula it is poured on
 (`docs/reference/cli.md`, "gc sling"). Nothing holds the fix, so it is slung at
 once rather than armed for deferred dispatch.
 
-A fix found by its title can carry one of Gas City's hold labels: `hold:mayor`
-and `hold:external` (`DispatchHoldLabels`) or `human` (`HumanLabel`), in
-`internal/beadmeta/hold_labels.go`. A pool's serve rule leaves out a bead that
-carries one (`internal/config/workquery.go`), but the sling reads none of them:
-no code under `internal/sling`, and none in `cmd/gc/cmd_sling.go`, names a hold
-label. So the verb asks the arm domain's `HoldLabel`, which reads those labels
-as Gas City compares them, and slings no fix that one holds.
+A fix found by its title and target can carry one of Gas City's hold labels:
+`hold:mayor` and `hold:external` (`DispatchHoldLabels`) or `human`
+(`HumanLabel`), in `internal/beadmeta/hold_labels.go`. A pool's serve rule
+leaves out a bead that carries one (`internal/config/workquery.go`), but the
+sling reads none of them: no code under `internal/sling`, and none in
+`cmd/gc/cmd_sling.go`, names a hold label. So the verb asks the arm domain's
+`HoldLabel`, which reads those labels as Gas City compares them, and slings no
+fix that one holds.
 
 ## Judge the PR again once the fix lands
 
@@ -70,9 +71,11 @@ document missing.
 
 ## What the change adds, and what it does not
 
-- `gctk review ahead`, which finds the fix an open ask on the PR already waits
-  on, else the open fix of its title, or files it, slings it, and files the ask
-  in one create with its wait. These are bd's create and
+- `gctk review ahead`, which finds the fix of its title and the PR's target
+  that an open ask on the PR already waits on, else the open fix of that title
+  and target, or files it, slings it, and files the ask in one create with its
+  wait. A fix lands only on its target, so a PR into another branch gets a fix
+  of its own. These are bd's create and
   `gc sling`, and the same create again, run as one call, so it adds no noun
   ([review-arch.md](../../docs/review-arch.md), check 2). It finds or files the
   fix under the store's record lock, the flock `pr/record` takes for the PR
