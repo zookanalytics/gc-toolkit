@@ -117,7 +117,7 @@ no warrant.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main 8e7d91b583 and
+- **Verified.** 2026-11-18, at `gastownhall/gascity` main 5b7728de34 and
   `gastownhall/gascity-packs` main 0f07496d2fa.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
@@ -488,9 +488,9 @@ no warrant.
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
-- **Verified.** 2026-11-17, at `gastownhall/gascity` main f715d7b92d47,
+- **Verified.** 2026-11-18, at `gastownhall/gascity` main 5b7728de34,
   `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
-  126b30aad7f5.
+  a6b7cd769437.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
   request's reviews, the required checks at its head and its review threads,
   where a reader of the PR's own bead finds them, for example once its PR
@@ -595,7 +595,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-16, at `gastownhall/gascity` main 192fa2d39407, with
+- **Verified.** 2026-11-18, at `gastownhall/gascity` main 5b7728de34, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 0f07496d2fa4.
 - **Retires when.** Gas City dismisses a pull request's approvals given before

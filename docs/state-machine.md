@@ -258,8 +258,8 @@ stateDiagram-v2
 | Value | Status, assignee | Meaning |
 |---|---|---|
 | no record | — | The bead has not landed and owns no PR on the record. A bead the landing order sends back to the refinery keeps its record, and one the refinery sends back to the pool keeps the PR it may reuse as `existing_pr`, so absence never means "rejected": `rejection_reason` says that. |
-| `pull_request_pending` | `blocked`, the refinery | The PR is open at the head the refinery validated, and the bead waits on its merge. The record names the PR (`pr_url`, `pr_number`, `pr_repo`), the validated head (`pr_head_sha`), `pr_state=open`, the intended target (`merged_target`), `blocked_reason` and when the landing order last read it (`pr_last_checked_at`). |
-| `pull_request_head_changed` | open, the refinery | The PR is open at a head the refinery has not validated, such as after a person's push. The bead keeps `pr_head_sha` and records `existing_pr`, the head found (`observed_pr_head_sha`) and why (`rejection_reason`), and the refinery validates the new head and records it pending again, on the same PR. |
+| `pull_request_pending` | `blocked`, nobody | The PR is open at the head the refinery validated, and the bead waits on its merge. The record names the PR (`pr_url`, `pr_number`, `pr_repo`), the validated head (`pr_head_sha`), `pr_state=open`, the intended target (`merged_target`), `blocked_reason` and when the landing order last read it (`pr_last_checked_at`). |
+| `pull_request_head_changed` | open, nobody until the head is handed over, then the refinery | The PR is open at a head the refinery has not validated, such as after a person's push or a review run's fix. The bead keeps `pr_head_sha` and records `existing_pr`, the head found (`observed_pr_head_sha`) and why (`rejection_reason`). The landing order assigns the bead to the refinery once no withdrawal and no review run holds the head, and the refinery validates the new head and records it pending again, on the same PR. |
 | `mr_merged` | closed | The PR merged the validated head, and the merge commit is on the freshly fetched target. The record names `merged_sha`, `merged_target`, `pr_state=merged` and `pr_merged_at`. |
 | `pull_request_record_incomplete` | open, the refinery | A writer that died between the publication's two writes left the record half written, so the bead goes back to the refinery to be validated again, keeping the PR it may reuse. |
 | `pull_request_closed_unmerged` | `blocked` | The PR closed without merging. |
@@ -281,16 +281,17 @@ checks (I2 and I5) read it and `mr_merged` alike as landed.
 `pr_reconcile_pending` is the marker that a reconciliation is still owed. The
 publication writes it first, with the PR the refinery may reuse
 (`existing_pr`), while the bead is still open, and then the whole record with
-the `blocked` status in one write, so a refinery that dies between them leaves
-an open bead that names its PR, never a blocked bead with half a record. The
+the `blocked` status and the bead assigned to nobody in one write, so a
+refinery that dies between them leaves an open bead that names its PR, never a
+blocked bead with half a record. The
 landing order reads a record whose marker is `true` while its bead is open,
 blocked or closed, and clears the marker once the record owes no further run:
 the bead closed on a verified merge, had its changed head handed to the
-refinery or was released from it, or met an exception whose human gate is
-filed. A record the order sends back to the refinery keeps its marker while a
-withdrawal is open on the bead or a review run is attached to it, so the order
-still carries the withdrawal out there and reads the run's end, and until the
-order has woken the refinery for a head that only conversations and asks hold
+refinery, or met an exception whose human gate is filed. A changed head keeps
+its marker, and its bead stays assigned to nobody, while a withdrawal is open
+on the bead or a review run is attached to it, so the order still carries the
+withdrawal out there and reads the run's end, and until the order has woken
+the refinery for a head that only conversations and asks hold
 ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 `gctk pr withdraw` marks such a record when it files one. A bead at any other status, such as one
 claimed or deferred, keeps its marker, and no run reads it.
@@ -302,9 +303,23 @@ marker clears, a reason still on the bead holds, and the bead owes its wait
 edge. Every writer of the record takes the store's
 record lock, and `bead-rehome.sh`'s close takes it too and clears any marker it
 finds. Each write is guarded on the status and assignee the writer read, so a
-bead that a close or a release reached first gets no record, and a run leaves a
-bead that a release took from the refinery as the release left it, with its PR
-named in a note.
+bead that a close or an assignment reached first gets no record.
+
+A bead's assignee says who works it now, Gas City's meaning
+([the search](../specs/tk-1tfzr71.209/gas-city-search.md)): the refinery from
+the polecat's hand-off until its publication, and again from the landing
+order's hand-over of a changed head until it publishes that head, and nobody
+while the PR waits. The publication's second write assigns the bead to nobody,
+and so no review run is ever attached to a bead the refinery is assigned,
+which Gas City's claim would read as handed off. A bead on the record assigned
+to anyone else is that assignee's while they work it: the landing order writes
+nothing to it and requests no merge, the PR's status names who holds it, and
+the order works it again once the assignee is gone. A blocked, pending bead the
+refinery is still assigned is one no publication leaves, and the order assigns
+it to nobody in one write. A writer that takes a PR off the record says so in
+its own write: the refinery's send-back to the pool clears the marker in the
+write that reopens the bead, `gc-helm.sh takeaway --release` refuses a bead on
+the record, and a ruling retires the PR.
 
 ## Checks
 
@@ -1176,7 +1191,7 @@ sequenceDiagram
   R->>L: find-work — nothing holds the bead, no other open bead works its branch
   R->>G: prep — merge the target in, run the rig's gate
   R->>G: mr — edit the PR's title and body, push the head under the lease,<br/>or push and open it as a draft
-  R->>L: gctk pr record — pull_request_pending, blocked, assigned to the refinery
+  R->>L: gctk pr record — pull_request_pending, blocked, assigned to nobody
   O->>G: read the PR by its number; the evaluator decides it is ready
   O->>G: mergePullRequest, pinned to the validated head (expectedHeadOid)
   O->>L: mr_merged + close, once the merge commit is on the fetched target
@@ -1237,7 +1252,8 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   graduation's anchor, is never poured, because a run poured onto a convoy works
   on the beads it tracks, so it comes back as a rework child instead: a task on
   the same branch that carries the reason and blocks the bead, which stays
-  assigned to the refinery. A child whose settle or sling fails is armed,
+  assigned to the refinery, since the refinery still works it: the child's
+  hand-back publishes on it. A child whose settle or sling fails is armed,
   and the deferred-dispatch order sends it on. A child a run filed and never
   sent on, as when the run ends before its sling, holds the bead until the
   refinery's next patrol sends it on (`refinery-lib.sh`), which comes once
@@ -1640,15 +1656,16 @@ carries the marker. `pr-dispose.sh` reads the anchor and stamps the marker under
 the store's record lock, which a run holds from its read of a record to its
 last write of it, so a merge a run requests comes before the marker, never
 after it. The landing order reads such an anchor's record whatever its own
-`pr_reconcile_pending`, so a changed head it had sent back to the refinery is
-read too. Once the PR reads CLOSED and no review run is attached to the anchor,
-it closes the asks and the approval withdrawals still open on the anchor, which
-nothing takes once the PR is closed, and then, with the record lock free, runs
-`bead-rehome.sh` as the refinery the anchor is assigned to. It names the status
-and assignee it read the anchor under and the ruling it read there, so
-`bead-rehome.sh` closes the anchor only while its own read under the lock
-still finds them, and a release or a second ruling that lands once the lock is
-free leaves the anchor to the next run, which reads it again. A close
+`pr_reconcile_pending`, so a changed head it had handed to the refinery is read
+too, while the anchor is assigned to nobody or to the refinery. Once the PR
+reads CLOSED and no review run is attached to the anchor, it closes the asks and
+the approval withdrawals still open on the anchor, which nothing takes once the
+PR is closed, and then, with the record lock free, runs `bead-rehome.sh` as the
+refinery. It names the status and assignee it read the anchor under and the
+ruling it read there, so `bead-rehome.sh` closes the anchor only while its own
+read under the lock still finds them, and an assignment or a second ruling that
+lands once the lock is free leaves the anchor to the next run, which reads it
+again. A close
 `bead-rehome.sh` holds, such as one the ruling's open conversation holds, is
 tried again by the next run, with no gate filed. A changed head the refinery is
 already validating can reach the refinery's publication before that close, and
