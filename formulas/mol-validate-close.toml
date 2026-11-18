@@ -167,9 +167,10 @@ delimiters as in 2a. The ask's first line states the stake, what the operator
 decides and why it matters, in at most 140 characters, because it is the ask's
 title, the line the board shows for it. The lines after it give the one course
 you recommend, what accepting it ships and what it asks of the operator, and
-nothing else, with ids only as references. When the ask says what proposed the
-close, it says it as the brief you read does: a first reaction, a store-only
-exit or a wait on another bead's landing.
+nothing else, with ids only as references. When no one course stands out, they
+say so in its place, and the ask is for a conversation. When the ask says what
+proposed the close, it says it as the brief you read does: a first reaction, a
+store-only exit or a wait on another bead's landing.
 The ask is a human gate on the bead under the key `validate-close`, which holds
 the bead until the operator answers. On a bead with an open child the ask is a
 conversation on the bead instead, because a gate on the parent would pause the
@@ -199,11 +200,18 @@ if printf '%s' "$CHILDREN" | jq -e 'type == "array" and length > 0' >/dev/null 2
   "$SCRIPTS/gc-helm.sh" open "$WORK_BEAD_ID" --reason "${ASK%%[[:cntrl:]]*}" --body "$ASK" >/dev/null \
     || { echo "no conversation was opened on $WORK_BEAD_ID — stop, address what gc-helm.sh reported, and re-run this block" >&2; exit 1; }
 else
-  "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key validate-close --message "$ASK" >/dev/null \
+  # The gate's id prints, for the conversation an ask with no clear course
+  # opens on it.
+  "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key validate-close --message "$ASK" \
     || { echo "human-gate.sh filed no gate on $WORK_BEAD_ID — stop, address what it reported, and re-run this block" >&2; exit 1; }
 fi
 # <<< validate-close-ask
 ```
+When the ask is for a conversation and the block filed the gate, open the
+conversation on the gate whose id the block printed. It replies to the gate, so
+the sitting's answer resolves the gate:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/gc-helm.sh" open <the gate's id>`.
+A bead with an open child already has its conversation from the block.
 
 **3. Close THIS step bead, then drain.** Run this after 2a or 2b completed. This
 is the terminal graph step, so it still closes its own step bead — that is how a

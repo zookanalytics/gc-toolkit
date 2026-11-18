@@ -8,13 +8,15 @@
 # accepting it ships and what it asks of the operator. The block files the ask
 # whole and adds nothing to it, so it names no proposer the closer did not
 # write. The ask is a human gate on the subject under the key
-# validate-close, which holds the bead until the operator answers. A bead with
-# an open child is asked through a conversation instead, because a gate on the
-# parent would pause the child's work, the very work the doubt is about. A
-# children read that fails or does not parse files the gate, the ordinary ask,
-# and an empty ask files nothing. The block is extracted verbatim from the
-# formula and run against a fake `gc` and stub scripts, in the shells an agent
-# may run it in. No live city, Dolt or network.
+# validate-close, which holds the bead until the operator answers, and the block
+# prints the gate's id, on which the closer opens the conversation an ask with
+# no clear course is for. A bead with an open child is asked through a
+# conversation instead, because a gate on the parent would pause the child's
+# work, the very work the doubt is about. A children read that fails or does
+# not parse files the gate, the ordinary ask, and an empty ask files nothing.
+# The block is extracted verbatim from the formula and run against a fake `gc`
+# and stub scripts, in the shells an agent may run it in. No live city, Dolt or
+# network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,7 +45,8 @@ BLOCK="$(awk '
 # $FAKE_LIST_RC and prints nothing, the way a failed listing does. human-gate.sh
 # and gc-helm.sh record their verb in the ordered log and each argument in
 # brackets where the assertions read them, so an assertion sees where each
-# argument ends, and exit with a code the case controls.
+# argument ends, and exit with a code the case controls. human-gate.sh prints
+# the gate's id when it exits 0, as the real one does.
 mkdir -p "$TMP/bin" "$TMP/pack"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
@@ -60,6 +63,9 @@ for v in human-gate:GATE gc-helm:CONVERSE; do
   { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"
     printf 'printf %s >> "$FAKE_LOG"\n' "'$verb\\n'"
     printf 'printf %s "$@" >> "$FAKE_ARGS/%s"\n' "'[%s]'" "$name"
+    if [ "$name" = human-gate ]; then
+      printf '%s\n' '[ "${FAKE_GATE_RC:-0}" != 0 ] || echo tk-gate'
+    fi
     printf 'exit "${FAKE_%s_RC:-0}"\n' "$verb"; } > "$TMP/pack/$name.sh"
 done
 chmod +x "$TMP/bin/gc" "$TMP/pack/"*.sh
@@ -97,6 +103,8 @@ for PRELUDE in '' 'set -e' 'set -euo pipefail'; do
      "$L: the gate blocks the subject under validate-close, and its message is the closer's ask, whole and unchanged"
   hasnt "$(args human-gate)" "--quiet-window" "$L: the ask is an event of this run, so it declares no quiet window"
   eq "$(args gc-helm)" "" "$L: no conversation is opened beside the gate"
+  eq "$(cat "$TMP/out")" "tk-gate" \
+     "$L: the block prints the gate's id, on which an ask with no clear course opens its conversation"
   has "$(args list)" "--parent tk-sub" "$L: the children are read under the subject"
   has "$(args list)" "--include-gates --include-infra --include-templates" \
      "$L: the read counts a gate, an infra bead and a template among the children"
@@ -109,6 +117,7 @@ for PRELUDE in '' 'set -e' 'set -euo pipefail'; do
   eq "$(args gc-helm)" "[open][tk-sub][--reason][$STAKE][--body][$ASK_TEXT]" \
      "$L: the conversation is opened on the subject, titled with the ask's first line and briefed with the whole ask"
   eq "$(args human-gate)" "" "$L: no gate is filed on the parent"
+  eq "$(cat "$TMP/out")" "" "$L: and the block prints no gate id"
 
   # A raw control byte in a child's row is stripped before the parse, so the
   # child still counts.
