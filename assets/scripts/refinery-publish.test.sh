@@ -73,7 +73,7 @@ eq "$(tip polecat/a)" "$HEAD_A" "the prepared head is on origin's branch"
 has "$(logged gh)" "pr create --repo zook/rig --base main --head polecat/a --draft --title feat: a (a)" "the PR opens as a draft with the composed title"
 eq "$(meta a merge_result)" "pull_request_pending" "the bead records its PR as pending"
 eq "$(meta a pr_head_sha)" "$HEAD_A" "…at the head the refinery validated"
-eq "$(bstatus a)" "blocked" "…and is blocked on it"
+eq "$(bstatus a) $(bassignee a)" "blocked " "…and is blocked on it, assigned to nobody, since the refinery's work on it ends"
 hasnt "$(logged gh)" "pr edit" "a new PR needs no edit"
 hasnt "$(logged gctk)" "pr draft" "a PR that opens as a draft needs no return to draft"
 
@@ -316,7 +316,7 @@ HEAD_RB=$(git -C "$HOME_DIR/worktrees/rb" rev-parse HEAD)
 run --bead rb
 eq "$RC" 0 "the hand-back exits 0"
 has "$(logged gctk)" "pr record cv --pr https://github.com/zook/rig/pull/70" "the convoy's record is written"
-eq "$(bstatus cv) $(meta cv merge_result) $(bassignee cv)" "blocked pull_request_pending $GC_AGENT" "…and the convoy waits on its PR's merge, the refinery's"
+eq "$(bstatus cv) $(meta cv merge_result) $(bassignee cv)" "blocked pull_request_pending " "…and the convoy waits on its PR's merge, assigned to nobody"
 eq "$(tip integration/cv)" "$HEAD_RB" "the head is on the convoy's branch"
 eq "$(bstatus rb)" "closed" "the child closes"
 hasnt "$(logged scripts)" "human-gate" "no gate is filed"

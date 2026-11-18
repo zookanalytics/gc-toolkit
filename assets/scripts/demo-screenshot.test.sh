@@ -114,17 +114,20 @@ SBX
 # one and says it started it, or reports the one that runs, or one that another
 # caller started as this start ran when COPY_FOUND is set, or fails as a copy
 # whose serve command ended when COPY_FAIL is set, or as a checkout whose copy
-# runs another command when COPY_OTHER is set, and --stop ends it. lsof names the
-# copy's process as the one listening on its port, working in the checkout it
-# was started from. Each logs to $CALLLOG.
+# runs another command when COPY_OTHER is set, and --stop ends it. A running
+# copy's app_url is COPY_APP, its loopback URL when that is empty, and none when
+# it is "-". lsof names the copy's process as the one listening on its port,
+# working in the checkout it was started from. Each logs to $CALLLOG.
 cat >"$BIN/gctk" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s (in %s) GCTK_SCRIPTS_DIR=%s\n' "$*" "$(pwd)" "${GCTK_SCRIPTS_DIR:-}" >>"${CALLLOG:?}"
 port=${COPY_PORT:-50200}
+app=${COPY_APP:-http://127.0.0.1:$port/}
+app_url=",\"app_url\":\"$app\""; [ "$app" != - ] || app_url=""
 case "$*" in
   "rig serve --check")
     if [ -n "${COPY_RUNNING:-}" ] || [ -s "${COPY_STATE:?}" ]; then
-      printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$port"; exit 0
+      printf '{"state":"running","checkout":"%s","port":%s%s,"address":""}\n' "$(pwd)" "$port" "$app_url"; exit 0
     fi
     printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"; exit 3 ;;
   "rig serve --command "*)
@@ -136,10 +139,10 @@ case "$*" in
     fi
     if [ -n "${COPY_RUNNING:-}" ] || [ -n "${COPY_FOUND:-}" ]; then
       [ -n "${COPY_RUNNING:-}" ] || pwd >"$COPY_STATE"
-      printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$port"; exit 0
+      printf '{"state":"running","checkout":"%s","port":%s%s,"address":""}\n' "$(pwd)" "$port" "$app_url"; exit 0
     fi
     pwd >"$COPY_STATE"
-    printf '{"state":"running","checkout":"%s","port":%s,"address":"","started":true}\n' "$(pwd)" "$port"; exit 0 ;;
+    printf '{"state":"running","checkout":"%s","port":%s%s,"address":"","started":true}\n' "$(pwd)" "$port" "$app_url"; exit 0 ;;
   "rig serve --stop") : >"$COPY_STATE"; printf '{"state":"stopped","checkout":"%s"}\n' "$(pwd)"; exit 0 ;;
 esac
 exit 2
@@ -426,6 +429,18 @@ out="$(run COPY_FAIL=1 -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$
 eq "$rc" 1 "a copy that does not start exits 1"
 has "the app's copy did not start: serve-exited" "$out" "it says why"
 hasnt "[screenshot]" "$(calls)" "and nothing is captured"
+out="$(run COPY_APP=- -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a copy whose report names no app_url exits 1"
+has "gctk rig serve reported no app_url" "$out" "it says the report does not say where the app is"
+hasnt "[screenshot]" "$(calls)" "and nothing is captured"
+echo "# page: an iOS app's copy, whose command printed the app's URL, is captured there through three ports, at the device's own scale"
+IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+out="$(run COPY_APP="$IOS_APP" FREE_PORT="$(printf '50301\n50302\n50303')" -- page --script "$SCRIPT" --serve 'node serve.mjs' --cwd "$SITE" --output "$OUT")"; rc=$?
+eq "$rc" 0 "an iOS app's copy captures"
+has "[--base-url] [$IOS_APP]" "$(calls)" "the engine captures the app at the URL its command printed"
+has "[--port] [50301,50302,50303]" "$(calls)" "with a port for each of its servers"
+hasnt "[--scale]" "$(calls)" "and the device's own screenshot, with no --scale"
+has "rig serve --stop" "$(calls)" "and the capture stops the copy its start ran"
 for target in "--serve npm" "--base-url http://localhost:3000"; do
   # shellcheck disable=SC2086 # the target is a flag and its value
   out="$(run -- page --script "$SCRIPT" $target --port 5175 --output "$OUT")"; rc=$?

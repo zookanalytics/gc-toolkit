@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -79,17 +80,18 @@ func open(c *gcbd.Client, db string, ids ...string) (*Ledger, error) {
 var ErrGuard = gcbd.ErrGuard
 
 // Write is one act on one bead: every key it sets or clears, the title it gives
-// the bead, the status it moves the bead to, the note it appends and the guard
-// it lands under, made in one update.
+// the bead, the status it moves the bead to, the agent it assigns the bead to,
+// the note it appends and the guard it lands under, made in one update.
 type Write struct {
-	id     string
-	title  string
-	sets   []string // key=value, in the order set
-	unsets []string
-	status string
-	note   string
-	guard  *guard
-	err    error
+	id       string
+	title    string
+	sets     []string // key=value, in the order set
+	unsets   []string
+	status   string
+	assignee *string
+	note     string
+	guard    *guard
+	err      error
 }
 
 // guard is the status and assignee a write lands under.
@@ -125,6 +127,12 @@ func (w *Write) Title(title string) { w.title = title }
 // the bead.
 func (w *Write) Status(status string) { w.status = status }
 
+// Assignee assigns the bead to assignee in the same write, "" for nobody. Gas
+// City reads an assignee as the delivery of the bead to that session as its
+// work, so an act that hands the bead to an agent assigns it, and an act that
+// ends the agent's work assigns it to nobody.
+func (w *Write) Assignee(assignee string) { w.assignee = &assignee }
+
 // Note appends text to the bead's notes in the same write, so the act and its
 // record land together or not at all. A later Note replaces an earlier one.
 func (w *Write) Note(text string) { w.note = text }
@@ -155,8 +163,8 @@ func (w *Write) WorkRecord(outcome, commit, branch string) {
 // is ErrGuard.
 func (w *Write) Guard(status, assignee string) { w.guard = &guard{status: status, assignee: assignee} }
 
-// args is the update's arguments: the guard, the status, the title, every set,
-// every removal, then the note.
+// args is the update's arguments: the guard, the status, the assignee, the
+// title, every set, every removal, then the note.
 func (w *Write) args() []string {
 	var args []string
 	if w.guard != nil {
@@ -164,6 +172,9 @@ func (w *Write) args() []string {
 	}
 	if w.status != "" {
 		args = append(args, "--status="+w.status)
+	}
+	if w.assignee != nil {
+		args = append(args, "--assignee="+*w.assignee)
 	}
 	if w.title != "" {
 		args = append(args, "--title", w.title)
@@ -267,6 +278,48 @@ func (l *Ledger) Create(f *Filing) (string, error) {
 	return id, nil
 }
 
+// ErrNotHeld is the error of an edge AddBlocker refused because the store does
+// not hold the bead it would wait on.
+var ErrNotHeld = errors.New("the store does not hold the bead")
+
+// AddBlocker makes blocker hold the bead id, by a blocks edge from id onto it,
+// once a read finds blocker in the store, since bd adds an edge onto an id
+// outside its own prefix, which holds nothing. It refuses with an error that is
+// ErrNotHeld when the store does not hold blocker. A read that fails returns
+// its *ReadError, and an edge write that exits non-zero has failed.
+func (l *Ledger) AddBlocker(id, blocker string) error {
+	rows, err := l.Find(ByID(blocker).WithClosed())
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return fmt.Errorf("ledger: no edge from %s onto %s: %w", id, blocker, ErrNotHeld)
+	}
+	if out, err := l.store.AddEdge(id, blocker, EdgeBlocks); err != nil {
+		if out = strings.TrimSpace(out); out != "" {
+			return fmt.Errorf("ledger: the edge from %s onto %s did not land (%w): %s", id, blocker, err, out)
+		}
+		return fmt.Errorf("ledger: the edge from %s onto %s did not land: %w", id, blocker, err)
+	}
+	return nil
+}
+
+// Prioritize gives each bead named priority p in one update, which bd makes
+// bead by bead. An update that exits non-zero failed for one of them at least,
+// and may have written the others.
+func (l *Ledger) Prioritize(p int, ids ...string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if out, err := l.store.Update(ids[0], append(slices.Clone(ids[1:]), "--priority="+strconv.Itoa(p))...); err != nil {
+		if out = strings.TrimSpace(out); out != "" {
+			return fmt.Errorf("ledger: the priority of %s did not land (%w): %s", strings.Join(ids, ", "), err, out)
+		}
+		return fmt.Errorf("ledger: the priority of %s did not land: %w", strings.Join(ids, ", "), err)
+	}
+	return nil
+}
+
 // Commit makes w as one update, whose exit decides whether it landed. A write a
 // Set refused, a write that changes nothing and an update that exits non-zero
 // all fail, and nothing reads the write back. A write its guard refused fails
@@ -275,7 +328,7 @@ func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
-	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.title == "" && w.note == "" {
+	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}
 	if out, err := l.store.Update(w.id, w.args()...); err != nil {

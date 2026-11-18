@@ -471,7 +471,7 @@ round-trip on paste:
 ORIGIN_URL=$(git remote get-url {{origin_remote}})
 # Owner segment from git@github.com:owner/repo(.git) or https://github.com/owner/repo(.git)
 FORK_OWNER=$(printf '%s' "$ORIGIN_URL" | \
-  sed -E 's#^git@github.com:([^/]+)/.*#\\1#; t; s#^https?://github.com/([^/]+)/.*#\\1#')
+  sed -E -e 's#^git@github.com:([^/]+)/.*#\\1#' -e 's#^https?://github.com/([^/]+)/.*#\\1#')
 BRANCH=$(git branch --show-current)
 PR_TITLE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.suggested_pr_title')
 PR_BODY=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.suggested_pr_body')
