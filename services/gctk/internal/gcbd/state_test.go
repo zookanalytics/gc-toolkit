@@ -57,19 +57,19 @@ func TestASetStateIsOneWriteWithItsReason(t *testing.T) {
 }
 
 // An edge write names its store, the two beads and the edge's type, and one bd
-// refuses is a write that did not land.
+// refuses is a write that did not land, with what bd said.
 func TestAnEdgeWriteIsOneDepAdd(t *testing.T) {
 	log := stubWriter(t)
-	if err := New().In("/rig/.beads").AddEdge("tk-1", "tk-2", EdgeBlocks); err != nil {
-		t.Fatal(err)
+	if out, err := New().In("/rig/.beads").AddEdge("tk-1", "tk-2", EdgeBlocks); err != nil {
+		t.Fatalf("the edge write = %v: %s", err, out)
 	}
-	if got, want := ranArgs(t, log), "bd --db /rig/.beads dep add tk-1 tk-2 --type blocks"; got != want {
+	if got, want := ranArgs(t, log), "bd --db /rig/.beads dep add tk-1 tk-2 --type=blocks"; got != want {
 		t.Fatalf("the edge write ran %q, want %q", got, want)
 	}
 	t.Setenv("STUB_ERR", `dependency already exists with type "discovered-from"`)
 	t.Setenv("STUB_EXIT", "1")
-	if err := New().AddEdge("tk-1", "tk-2", EdgeBlocks); err == nil || !strings.Contains(err.Error(), "discovered-from") {
-		t.Fatalf("a refused edge read as %v", err)
+	if out, err := New().AddEdge("tk-1", "tk-2", EdgeBlocks); err == nil || !strings.Contains(out, "discovered-from") {
+		t.Fatalf("a refused edge read as %v: %s", err, out)
 	}
 }
 

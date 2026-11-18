@@ -32,8 +32,8 @@ type Runtime struct {
 	RootErr error
 	// OnSling answers a sling, and nil answers exit 0. OnScript answers a script
 	// call, and nil answers exit 0. OnCook answers a cook, and nil answers exit 0
-	// with a root of its own. OnWake answers a session's wake and OnNudge its
-	// nudge, and nil answers exit 0.
+	// with a root of its own, the one bead it poured. OnWake answers a session's
+	// wake and OnNudge its nudge, and nil answers exit 0.
 	OnSling  func(gascity.Sling) gascity.SlingResult
 	OnScript func(Call) gascity.Result
 	OnCook   func(gascity.Cook) gascity.CookResult
@@ -88,7 +88,8 @@ func (r *Runtime) Cook(c gascity.Cook) gascity.CookResult {
 	if on != nil {
 		return on(c)
 	}
-	return gascity.CookResult{Root: fmt.Sprintf("cooked-%d", n)}
+	root := fmt.Sprintf("cooked-%d", n)
+	return gascity.CookResult{Root: root, Beads: []string{root}}
 }
 
 // Cooks returns each cook taken, in order.

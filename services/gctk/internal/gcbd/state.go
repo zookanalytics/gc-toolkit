@@ -18,14 +18,6 @@ func (c *Client) SetState(id, dimension, value, reason string) error {
 	return c.write(args...)
 }
 
-// AddEdge gives bead id an edge of type typ onto far through `gc bd dep add
-// <id> <far> --type <typ>`. bd keeps one edge type per pair of beads, so it
-// refuses an edge onto a bead id already has an edge of another type onto. An
-// error is a write that did not land.
-func (c *Client) AddEdge(id, far, typ string) error {
-	return c.write("bd", "dep", "add", id, far, "--type", typ)
-}
-
 // write runs one write and says, when it exits non-zero, what it printed.
 func (c *Client) write(args ...string) error {
 	var stderr bytes.Buffer

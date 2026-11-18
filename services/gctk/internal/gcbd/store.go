@@ -32,12 +32,12 @@ type Store interface {
 	// SetState sets one state dimension of id to value, with reason, as one
 	// `gc bd set-state`. An error is a write that did not land.
 	SetState(id, dimension, value, reason string) error
-	// AddEdge gives id an edge of type typ onto far, as one `gc bd dep add`.
-	// An error is a write that did not land.
-	AddEdge(id, far, typ string) error
 	// Update makes one `gc bd update` of id with args, returning its output.
 	// An error is a write that did not land.
 	Update(id string, args ...string) (string, error)
+	// AddEdge makes one `gc bd dep add` of an edge of type typ from id onto
+	// target, returning its output. An error is a write that did not land.
+	AddEdge(id, target, typ string) (string, error)
 	// Create makes one `gc bd create` titled title with args, and returns the
 	// new bead's id. An error may still have filed the bead: bd answers a
 	// create whose commit result it lost with the same reply and exit as a
