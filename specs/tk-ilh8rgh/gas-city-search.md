@@ -70,8 +70,9 @@ document missing.
 
 ## What the change adds, and what it does not
 
-- `gctk review ahead`, which finds the open fix by its title or files it, slings
-  it, and files the ask in one create with its wait. These are bd's create and
+- `gctk review ahead`, which finds the fix an open ask on the PR already waits
+  on, else the open fix of its title, or files it, slings it, and files the ask
+  in one create with its wait. These are bd's create and
   `gc sling`, and the same create again, run as one call, so it adds no noun
   ([review-arch.md](../../docs/review-arch.md), check 2).
 - The ruling `ahead` and the key `waits` in the round's output.

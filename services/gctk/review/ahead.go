@@ -3,6 +3,7 @@ package review
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm"
@@ -25,7 +26,9 @@ import (
 //
 // The fix is found by its title among the store's open beads, so a second PR
 // whose lane asks for the same fix waits on the same bead, and that PR's case
-// joins the bead's notes. A found fix that a label holds from every pool, such
+// joins the bead's notes. A call that runs again for the same PR finds first the
+// fix its open ask waits on, closed or not, so a fix that landed before the call
+// ran again is not filed and sent a second time. A found fix that a label holds from every pool, such
 // as the hold:mayor of work that waits for the operator's placement, is sent
 // nowhere, because gc sling reads no hold, and the ask waits on it while the
 // hold stands.
@@ -55,7 +58,8 @@ type Ahead struct {
 // on it. It refuses what FileAsk refuses, and a request that sends no check
 // back, before anything is filed. A read that fails returns its error. A write
 // that fails returns its error with what landed before it, which the next call
-// finds: the fix by its title, and the ask by its reason.
+// finds: the fix through the open ask that waits on it or by its title, and the
+// ask by its reason.
 func SendAhead(l *ledger.Ledger, rt gascity.Runtime, req AheadRequest, index func(at string) (Index, error)) (Ahead, error) {
 	var out Ahead
 	title, desc := strings.TrimSpace(req.Title), strings.TrimSpace(req.Description)
@@ -78,9 +82,14 @@ func SendAhead(l *ledger.Ledger, rt gascity.Runtime, req AheadRequest, index fun
 		pr += " " + rec.URL
 	}
 	mark := "Ahead of " + owner.ID + "'s PR"
-	fix, err := openTitled(l, title, owner.ID)
+	fix, err := sentFix(l, owner, title)
 	if err != nil {
 		return out, err
+	}
+	if fix == nil {
+		if fix, err = openTitled(l, title, owner.ID); err != nil {
+			return out, err
+		}
 	}
 	if fix == nil {
 		f := l.File(title, "task")
@@ -125,6 +134,60 @@ func SendAhead(l *ledger.Ledger, rt gascity.Runtime, req AheadRequest, index fun
 		return out, fmt.Errorf("%s carries the fix, and the ask that holds the PR for it did not file: %w", out.Fix, err)
 	}
 	return out, nil
+}
+
+// sentFix is the fix titled title that an open ask on owner's PR waits on,
+// closed or not, the one of lowest id when several are, and nil when no open ask
+// waits on one. The ask waits on its fix by its own blocks edge, so the ask
+// still names the fix after the fix has closed, where openTitled sees only open
+// beads.
+func sentFix(l *ledger.Ledger, owner *ledger.Record, title string) (*ledger.Record, error) {
+	asks, err := asksOf(l, owner)
+	if err != nil {
+		return nil, err
+	}
+	var open []string
+	for _, a := range asks {
+		if a.Open() {
+			open = append(open, a.ID)
+		}
+	}
+	if len(open) == 0 {
+		return nil, nil
+	}
+	rows, err := l.Find(ledger.ByID(open...))
+	if err != nil {
+		return nil, err
+	}
+	var waited []string
+	for _, r := range rows {
+		edges, err := r.Edges()
+		if err != nil {
+			return nil, &ledger.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}
+		}
+		for _, e := range edges {
+			if e.Type == ledger.EdgeBlocks && e.ID != owner.ID && !slices.Contains(waited, e.ID) {
+				waited = append(waited, e.ID)
+			}
+		}
+	}
+	if len(waited) == 0 {
+		return nil, nil
+	}
+	fixes, err := l.Find(ledger.ByID(waited...).WithClosed())
+	if err != nil {
+		return nil, err
+	}
+	var found *ledger.Record
+	for _, r := range fixes {
+		if strings.TrimSpace(r.Title()) != title {
+			continue
+		}
+		if found == nil || r.ID < found.ID {
+			found = r
+		}
+	}
+	return found, nil
 }
 
 // openTitled is the open bead titled title, other than the bead not, the one

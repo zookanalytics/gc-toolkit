@@ -97,6 +97,28 @@ func TestAFixAheadOfAPRIsFiledSentAndWaitedOn(t *testing.T) {
 	}
 }
 
+// A call that runs again after the fix it filed has landed, as a rule-and-repair
+// step does when its first call's answer was lost, finds that fix through the
+// ask that still waits on it, and files and sends nothing new.
+func TestACallAfterItsFixLandedFindsThatFix(t *testing.T) {
+	w := newWorld(t)
+	rt := routes(w)
+	first, err := review.SendAhead(w.ledger(), rt, aheadReq(prBead), archIndex(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, _ := w.store.Row(first.Fix)
+	row.Status, row.ClosedAt = "closed", "2026-11-18T20:00:00Z"
+	w.store.Put(row)
+	again, err := review.SendAhead(w.ledger(), rt, aheadReq(prBead), archIndex(t))
+	if err != nil || again.Fix != first.Fix || again.FixFiled || again.Sent || again.Ask != first.Ask || again.AskFiled {
+		t.Fatalf("the call after the fix landed = %+v, %v; want the landed fix and its ask found, and nothing filed or slung", again, err)
+	}
+	if n := len(rt.Slings()); n != 1 {
+		t.Fatalf("the fix was slung %d times; want once", n)
+	}
+}
+
 // A second PR that needs the same fix waits on the open bead of its title: its
 // case joins the fix's notes once, a fix on its way is not slung again, and the
 // ask is the second PR's own.
