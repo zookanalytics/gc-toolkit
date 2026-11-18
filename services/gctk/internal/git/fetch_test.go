@@ -65,11 +65,15 @@ func shortGrace(t *testing.T, grace time.Duration) {
 
 // holdsALock is a fetch whose SIGTERM handler records the signal and removes a
 // lock file in dir, as git's handler removes the locks it holds, and which then
-// takes the lock and runs on.
+// takes the lock and runs on in a child that holds its stderr, as git's ssh
+// does. It writes git.ready in dir once that child runs, so a test that waits
+// for git.ready signals a group that holds every process the fetch starts: a
+// child forked after a signal to its group never gets it, and one that held
+// stderr would keep the fetch waiting on its pipe.
 func holdsALock(dir string) (trap, script string) {
-	lock, term := filepath.Join(dir, "main.lock"), filepath.Join(dir, "git.term")
+	lock, term, ready := filepath.Join(dir, "main.lock"), filepath.Join(dir, "git.term"), filepath.Join(dir, "git.ready")
 	return "trap 'touch \"" + term + "\"; rm -f \"" + lock + "\"; exit 143' TERM",
-		"touch '" + lock + "'\nsleep 30 &\nwait $!\n"
+		"touch '" + lock + "'\nsleep 30 &\ntouch '" + ready + "'\nwait $!\n"
 }
 
 // fetchBound is the bound the tests stop a fetch at, long enough for a loaded
@@ -136,8 +140,8 @@ func TestAStopSignalReachesGitsGroupAndEndsTheFetch(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { done <- FetchBranch(context.Background(), dir, "main") }()
-	if !appears(filepath.Join(dir, "git.pid"), 5*time.Second) {
-		t.Fatal("the fake git never started")
+	if !appears(filepath.Join(marks, "git.ready"), 5*time.Second) {
+		t.Fatal("the fake git never started its fetch")
 	}
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		t.Fatal(err)
