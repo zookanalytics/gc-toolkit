@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# tests.test.sh — guards the draft CI-cost gate in tests.yml, the jq check
+# tests.test.sh — guards the draft CI-cost gate in tests.yml, the concurrency
+# group that keeps a draft's run from cancelling a run that tests, the jq check
 # each job runs before the suite, the seconds each job that runs the suite
-# keeps, and the name of the check main's ruleset requires.
+# keeps, and the jobs whose checks main's ruleset requires.
 #
 # A draft pull request must not run the *.test.sh suite, so a change still
 # taking follow-up commits does not spend Actions minutes on every push. A push
@@ -22,9 +23,19 @@
 # reads them back, names the same jobs. A job that kept none, or kept them under
 # another name, would show no time.
 #
-# Main's ruleset requires the check named test. A job's check takes the job's
-# id unless the job sets name: or a matrix, and either one renames it, so every
-# merge would wait on a check that never reports.
+# A draft's run, whose jobs all skip, never takes the concurrency group of its
+# own head, where it could cancel the run that marking the pull request ready
+# started at that head. The city's merge counts neither a skipped nor a
+# cancelled result, so it would wait for a re-run. tests.yml's comment above the
+# group gives each run's group. The group line is pinned whole, so a change to
+# it changes this suite too.
+#
+# Main's ruleset requires the checks named test, test-macos and go. A job's
+# check takes the job's id unless the job sets name: or a matrix, and either one
+# renames it, so every merge would wait on a check that never reports. Each of
+# those jobs has the draft gate as its whole if:, since a condition of its own
+# that skipped it at a ready head would leave that head only a skipped result,
+# which holds the merge.
 
 set -uo pipefail
 
@@ -133,11 +144,29 @@ ran="$(tr ' ' '\n' <<<"$suite_names" | grep -v '^$' | sort | paste -sd' ' -)"
 [ "$listed" = "$ran" ] \
     || note "suite-time.sh's SUITES ($listed) must name the jobs that run the suite ($ran)"
 
-grep -qx test <<<"$jobs" \
-    || note "a job with the id 'test' must exist; main's ruleset requires the check named test"
-renames="$(awk -F'\t' '$1 == "test" && ($2 == "name" || $2 == "strategy") { print $2 }' <<<"$keys" | paste -sd, -)"
-[ -z "$renames" ] \
-    || note "the test job must not set $renames; it renames the check main's ruleset requires"
+# The workflow's own concurrency group, the one line at a two-space indent. A
+# job's group would sit deeper, under the job.
+group_line="$(grep -E '^  group:' "$WF" || true)"
+want_group="  group: tests-\${{ github.ref }}\${{ github.event_name == 'pull_request' && format('-{0}', github.event.pull_request.draft && (github.event.before || github.run_id) || github.event.pull_request.head.sha) || '' }}"
+[ "$group_line" = "$want_group" ] \
+    || note "the concurrency group must give a run that tests a pull request its head's group and a draft push's run the group of the head its push replaced, so a draft's run never cancels the run at its own head; found '${group_line#"  "}'"
+grep -Eq '^  cancel-in-progress: true$' "$WF" \
+    || note "the concurrency group must cancel the run in progress, or a draft push leaves the run at the head it replaced going"
+
+# The checks main's ruleset requires, by job id, as
+# `gh api repos/<owner>/<repo>/rules/branches/main` lists them.
+REQUIRED="test test-macos go"
+DRAFT_GATE="github.event_name != 'pull_request' || github.event.pull_request.draft == false"
+for j in $REQUIRED; do
+    grep -qx -- "$j" <<<"$jobs" \
+        || { note "a job with the id '$j' must exist; main's ruleset requires the check named $j"; continue; }
+    renames="$(awk -F'\t' -v j="$j" '$1 == j && ($2 == "name" || $2 == "strategy") { print $2 }' <<<"$keys" | paste -sd, -)"
+    [ -z "$renames" ] \
+        || note "the $j job must not set $renames; it renames the check main's ruleset requires"
+    gate="$(awk -F'\t' -v j="$j" '$1 == j && $2 == "if" { print $3 }' <<<"$keys")"
+    [ "$gate" = "$DRAFT_GATE" ] \
+        || note "the $j job's if: must be the draft gate alone ('$DRAFT_GATE'), since a condition of its own that skips it at a ready head holds the merge; found '$gate'"
+done
 
 if [ "$fail" -ne 0 ]; then
     echo "tests.test.sh: FAILED" >&2

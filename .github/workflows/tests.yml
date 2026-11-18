@@ -22,6 +22,9 @@ name: tests
 # image lacks.
 # Main's ruleset names the checks that gate a merge by job id, so renaming a
 # job, or giving it a name: or a matrix, changes the check a merge waits on.
+# A job the ruleset requires skips only a draft. The city's merge counts no
+# skipped result (services/gctk/pr/rules.go), so a job that a condition of its
+# own skipped at a ready head would hold that pull request's merge.
 # Each job that runs the suite keeps each run's seconds, in its job summary and
 # as the artifact suite-times-<job>, whether the suite passed or failed.
 # pr-size.yml reads them when this workflow completes, for the size comment's
@@ -38,9 +41,21 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Only the latest commit on a ref needs a result; cancel superseded runs.
+# A push to main and a run by hand take their ref's group. A run that tests a
+# pull request takes the group of the head it tests. A draft's run tests
+# nothing, since its jobs skip, so a draft push's run takes the group of the head
+# its push replaced, and ends any run still testing that head. It never takes
+# the group of its own head. GitHub takes a group's runs in the order each
+# starts waiting, not the order of their events, so in that group it could
+# cancel the run that marking the pull request ready started, and the city's
+# merge, which counts no cancelled result, would wait for a re-run. A draft
+# opened or reopened replaced no head and takes a group of its own. Two runs
+# that test different heads share no group, so a push onto a ready pull request
+# leaves the run at the head it replaced to finish. Each of the city's writers
+# onto an open pull request's branch returns it to draft before it pushes
+# (services/gctk/pr/draft.go).
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.ref }}${{ github.event_name == 'pull_request' && format('-{0}', github.event.pull_request.draft && (github.event.before || github.run_id) || github.event.pull_request.head.sha) || '' }}
   cancel-in-progress: true
 
 permissions:
