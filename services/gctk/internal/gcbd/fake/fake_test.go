@@ -121,3 +121,48 @@ func TestFakeFindAnswersAsTheListingDoes(t *testing.T) {
 		t.Errorf("Find of a lost bead = %v, %v; want its row, since a list is one query", rows, err)
 	}
 }
+
+// An update that names further beads writes each of them as it writes the
+// first, and writes none when one is a bead the store does not hold. An edge is
+// added to the bead's row with the far bead's fields when the store holds it,
+// and onto a far bead it does not hold all the same.
+func TestFakeUpdateWritesEachBeadNamedAndAddsAnEdge(t *testing.T) {
+	s := New()
+	s.Put(Bead{ID: "b-1", Status: "open", Priority: 2})
+	s.Put(Bead{ID: "b-2", Title: "two", Status: "open", Priority: 2})
+	if _, err := s.Update("b-1", "b-2", "--priority=0", "--append-notes", "ranked"); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"b-1", "b-2"} {
+		if b, _ := s.Row(id); b.Priority != 0 || b.Notes != "ranked" {
+			t.Errorf("%s = %+v", id, b)
+		}
+	}
+	if w := s.Writes(); len(w) != 2 || w[1].ID != "b-2" || !slices.Equal(w[1].Args, []string{"--priority=0", "--append-notes", "ranked"}) {
+		t.Errorf("writes = %+v", w)
+	}
+	if _, err := s.Update("b-1", "b-missing", "--priority=1"); err == nil {
+		t.Error("an update naming a bead the store does not hold landed")
+	}
+	if b, _ := s.Row("b-1"); b.Priority != 0 {
+		t.Errorf("a refused update wrote b-1: %+v", b)
+	}
+	if _, err := s.AddEdge("b-1", "b-2", gcbd.EdgeBlocks); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddEdge("b-1", "zz-9", gcbd.EdgeBlocks); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := s.Row("b-1")
+	want := []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "b-2", Title: "two", Status: "open"}, {Type: gcbd.EdgeBlocks, ID: "zz-9"}}
+	if !slices.Equal(b.Edges, want) {
+		t.Errorf("edges = %+v, want %+v", b.Edges, want)
+	}
+	if _, err := s.AddEdge("b-missing", "b-2", gcbd.EdgeBlocks); err == nil {
+		t.Error("an edge from a bead the store does not hold landed")
+	}
+	s.EdgeErr = errors.New("down")
+	if _, err := s.AddEdge("b-1", "b-2", gcbd.EdgeBlocks); err == nil {
+		t.Error("EdgeErr did not fail the edge")
+	}
+}
