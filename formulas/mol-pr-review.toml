@@ -197,8 +197,9 @@ not read: run it again.
 **5. Write the output** to `output.json` in the repair's part of the workspace:
 `review` reading `repair`, the `head` the round judged, `rulings` with one
 `{"check", "finding"}` or `{"ask"}` each with its `ruling`, its `reason`, the
-`commit` of a must-fix and the `gate` of a question, and `pushed`, the head the
-push printed, when it pushed. Then check and write it:
+`commit` of a must-fix, the `gate` of a question and the `waits` of a finding
+sent ahead, and `pushed`, the head the push printed, when it pushed. Then check
+and write it:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it again.
 

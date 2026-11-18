@@ -163,7 +163,10 @@ performer; the full transition table with writers is
    branch with them can push while a run works it. Work that needs the branch
    changed, such as
    a person's comment or a conflict with the target, is filed as an ask, and a
-   run takes it. Each city writer returns the PR to draft before it pushes.
+   run takes it. A fix that a check's method keeps off the branch, such as a
+   missing architecture document, lands ahead in a PR of its own. An ask that
+   waits on it holds the PR, and once it lands, a run takes the ask and judges
+   the PR again. Each city writer returns the PR to draft before it pushes.
    The landing order marks the PR ready once a run has passed at the head the
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that

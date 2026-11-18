@@ -397,11 +397,13 @@ bead by its own edge, names the branch, and may name checks in
 source and reason first, open or closed, so a re-run files nothing. The
 refinery's requeue of a PR on the record, `pr-facts.sh`'s conflict, red-check
 and feedback arms, a sitting's send-back, and a must-fix point a sitting or the
-mechanik puts on another open PR each file one. A run takes an ask only while
-`gctk bead holds` reads it clear, so an ask that waits on other work starts no
-round and spends no attempt, and holds the PR by its own edge until a run takes
-it. The loop's check closes each ask the run answered as it records the result,
-with the runtime's work record.
+mechanik puts on another open PR each file one. So does a round that sends a
+fix ahead of the PR, in a PR of its own (`gctk review ahead`): its ask waits on
+the fix by its own edge, written in its create, and sends the lane's check
+back. A run takes an ask only while `gctk bead holds` reads it clear, so an ask
+that waits on other work starts no round and spends no attempt, and holds the
+PR by its own edge until a run takes it. The loop's check closes each ask the
+run answered as it records the result, with the runtime's work record.
 
 **What the run reads of the check index and of `check_set`.** The index is the
 pack's `review-checks.toml` with the rows of the rig's own laid over it, which

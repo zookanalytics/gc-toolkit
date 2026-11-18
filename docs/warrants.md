@@ -605,11 +605,14 @@ no warrant.
 ## Asks
 
 - **Covers.** The `review_checks` key, declared in
-  `services/gctk/review/keys.go`, on the task an ask is. Its writer: `FileAsk`
+  `services/gctk/review/keys.go`, on the task an ask is. Its writers: `FileAsk`
   in `services/gctk/review/ask.go`, which the `ask` verb of
-  `services/gctk/internal/cli/review.go` runs. Its readers, which know an ask
-  by its shape: `isAsk`, `IsAsk`, `AsksOn` and `AsksIn` in the same file,
-  `writers` in `services/gctk/pr/admit.go`, which leaves an ask out of a
+  `services/gctk/internal/cli/review.go` runs, and `SendAhead` in
+  `services/gctk/review/ahead.go`, which the `ahead` verb of the same command
+  file runs for the ask that holds a PR for a fix sent ahead of it. Its
+  readers, which know an ask by its shape: `isAsk`, `IsAsk`, `AsksOn` and
+  `AsksIn` in `services/gctk/review/ask.go`, `writers` in
+  `services/gctk/pr/admit.go`, which leaves an ask out of a
   branch's other writers, and `refinery_ask` in
   `assets/scripts/refinery-lib.sh`, which applies the same rule to the beads
   the refinery reads. Its close: `Record` in
@@ -622,9 +625,11 @@ no warrant.
 - **Evidence.**
   - In `gastownhall/gascity`, the one request the PR monitor files on a pull
     request is its repair bead, which it routes and hands a workflow as it
-    files it (`ensureGitHubPRRepairBead` and `attachGitHubPRRepairWorkflow` in
-    `cmd/gc/cmd_github.go`, with `gc.routed_to` set in
-    `githubPRRepairMetadata`), so a pool works it as a writer of its own.
+    files it (`ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go`, which calls
+    `attachGitHubPRRepairWorkflow`, the variable
+    `defaultAttachGitHubPRRepairWorkflow` fills, with `gc.routed_to` set
+    through `beadmeta.RoutedToMetadataKey` in `githubPRRepairMetadata`), so a
+    pool works it as a writer of its own.
   - In `gastownhall/gascity-packs`, a change a branch needs goes to a pool as
     well. Gas Town's refinery reopens a rejected work bead with its
     `rejection_reason` and routes it to the polecat pool
@@ -635,8 +640,10 @@ no warrant.
   - A search of both repositories finds no record on a bead of the checks a
     later review must run.
   - The rest of an ask is native: a task bead, a blocks edge onto the PR's
-    bead filed in the same create, the `branch` key the record declares, a
-    discovered-from edge to the bead it came from, and no route or assignee.
+    bead filed in the same create, and for an ask that waits on other work its
+    own blocks edge onto that work in the same create, the `branch` key the
+    record declares, a discovered-from edge to the bead it came from, and no
+    route or assignee.
     Gas City's sling stamps `gc.execution_routed_to` on a work bead whose
     workflow it started, clears its `gc.routed_to` and `gc.run_target`, and
     leaves the bead unassigned while the workflow's steps are claimed
@@ -645,9 +652,9 @@ no warrant.
     and never the role key `task_kind` that a rework child carries. The search
     is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main 294079d53f57, with
-  the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
-  main 0f07496d2fa4.
+- **Verified.** 2026-11-18, at `gastownhall/gascity` main 03f6fe825cf0, with
+  the `gastown` pack it bundles at 66897e7132c9 (`examples/gastown/packs.lock`),
+  and `gastownhall/gascity-packs` main 8ed128846fc5.
 - **Retires when.** Gas City files a request for a pull request's branch that
   the run already attached to the PR's bead works, with no pool to claim it,
   such as a PR monitor that hands its repair to that run. The ask then moves
