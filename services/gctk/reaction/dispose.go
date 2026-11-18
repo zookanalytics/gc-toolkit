@@ -281,7 +281,7 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 			if err != nil {
 				return out, fmt.Errorf("could not read %s's parent (%v), so intake cannot decide; nothing was written", d.Bead, err)
 			}
-			anchor, _, _ := anchorKey.Get(subject)
+			anchor := raw(anchorKey, subject)
 			switch {
 			case len(parents) > 0:
 				admit, admitWhy = "member", "a member of "+parents[0]
@@ -429,7 +429,7 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	// A recommendation already on the subject is cleared before the act, so
 	// the subject never offers a superseded Accept, and no recommendation is
 	// older than the newest first-reaction gate.
-	if have, _, _ := recommendedFormulaKey.Get(subject); have != "" {
+	if raw(recommendedFormulaKey, subject) != "" {
 		if err := r.setRecommendation(d.Bead, ""); err != nil {
 			return out, fmt.Errorf("the store refused the clear of the earlier recommendation on %s (%v). Nothing else was written. An exit must not leave a superseded Accept executable, so it stops here; clear the cause and re-run this command", d.Bead, err)
 		}

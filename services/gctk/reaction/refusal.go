@@ -85,11 +85,15 @@ var standingKinds = []string{"triage-subject"}
 const feedbackPattern = "feedback-pattern"
 
 // raw is k's stored text on r, empty when r does not carry it, compared as the
-// scripts compared a key, `(.metadata[k] // "")`, untrimmed. A String key's
-// stored text always decodes.
+// scripts compared a key, `(.metadata[k] // "")`, untrimmed. bd stores a value
+// spelled false as JSON false, which jq's `//` reads as no value and the
+// ledger reads as the text false, so raw reads that text as no value too. A
+// String key's stored text always decodes.
 func raw(k stringKey, r *ledger.Record) string {
-	v, _, _ := k.Get(r)
-	return v
+	if v, _, _ := k.Get(r); v != "false" {
+		return v
+	}
+	return ""
 }
 
 // Check is the first act of the reaction whose run is run: whether bead takes

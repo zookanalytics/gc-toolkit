@@ -210,7 +210,7 @@ case "$1" in
   blocked) cat "$STUB_DIR/blocked.json" ;;
   sql) printf '[]' ;;
   where) printf '{"path":"%s/.beads","prefix":"tk"}' "$STUB_RIG" ;;
-  update) ;;
+  update|set-state) ;;
   *) echo "unexpected call: gc bd $*" >&2; exit 1 ;;
 esac
 `
@@ -394,5 +394,95 @@ func TestReactionDeliverableAnswersTheRigsPool(t *testing.T) {
 	out.Reset()
 	if code := Run([]string{"reaction", "deliverable"}, "test", &out, &errb); code != 1 || !strings.HasPrefix(out.String(), "no: the pool at gc-toolkit/gc-toolkit.proactive is suspended") {
 		t.Errorf("a suspended pool gc warned beside: exit %d, %q", code, out.String())
+	}
+}
+
+// withMetadata makes the stub city's subject carry metadata, a JSON object as
+// bd prints it, each value typed as bd stores it, and empties the log.
+func withMetadata(t *testing.T, log, metadata string) {
+	t.Helper()
+	subject := `[{"id":"tk-sub","title":"the subject","status":"open","issue_type":"task","priority":2,"description":"a raw input bead","metadata":` + metadata + `}]`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(log), "subject.json"), []byte(subject), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(log, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Intake reads a subject's anchor as the scripts read it. bd stores an anchor
+// spelled false as JSON false, and a false or null anchor names no bead, so a
+// subject with no parent that carries one is held for placement instead of
+// reaching the pool. An anchor that names a bead admits the subject to the
+// pool as PR-finishing work.
+func TestReactionDisposeReadsAFalseAnchorAsNone(t *testing.T) {
+	log, _ := stubCity(t, []byte("[]"))
+	for anchor, admitted := range map[string]bool{`false`: false, `null`: false, `"tk-anchor"`: true} {
+		withMetadata(t, log, `{"anchor_bead":`+anchor+`}`)
+		var out, errb bytes.Buffer
+		if code := Run([]string{"reaction", "dispose", "tk-sub", "--disposition", "actionable", "--reason", "ordinary work", "--takeaway", "ordinary work"}, "test", &out, &errb); code != 0 {
+			t.Errorf("an anchor of %s: the dispose exited %d: %s", anchor, code, errb.String())
+			continue
+		}
+		routed := slices.ContainsFunc(calls(t, log, "script gc-helm.sh takeaway"), func(l string) bool {
+			return strings.Contains(l, " --route gc-toolkit/gc-toolkit.polecat --no-wait")
+		})
+		held := slices.ContainsFunc(calls(t, log, "bd "), func(l string) bool { return strings.Contains(l, " set-state tk-sub hold=mayor ") })
+		if routed != admitted || held == admitted {
+			t.Errorf("an anchor of %s was routed %t and held %t, want routed %t: %v", anchor, routed, held, admitted, calls(t, log, ""))
+		}
+	}
+}
+
+// The check reads a subject's route as the scripts read it: a route bd stored
+// as JSON false names no pool queue, so the subject takes the reaction, and a
+// route that names one is a dispatch path, which refuses it.
+func TestReactionCheckReadsAFalseRouteAsNone(t *testing.T) {
+	log, _ := stubCity(t, []byte("[]"))
+	withMetadata(t, log, `{"gc.routed_to":false}`)
+	var out, errb bytes.Buffer
+	if code := Run([]string{"reaction", "check", "tk-sub", "--run", "tk-root"}, "test", &out, &errb); code != 0 || !strings.Contains(out.String(), "tk-sub takes this first reaction") {
+		t.Errorf("a route of false: exit %d, %q %q", code, out.String(), errb.String())
+	}
+	withMetadata(t, log, `{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}`)
+	out.Reset()
+	errb.Reset()
+	if code := Run([]string{"reaction", "check", "tk-sub", "--run", "tk-root"}, "test", &out, &errb); code != reaction.Decided || !strings.Contains(errb.String(), "it already has a dispatch path (gc.routed_to=gc-toolkit/gc-toolkit.polecat)") {
+		t.Errorf("a route to a pool: exit %d, %q", code, errb.String())
+	}
+}
+
+// The sweep reads the keys that set a bead apart from raw input as the scripts
+// read them, `(.metadata[k] // "")`, over values bd stored typed: false and null
+// hold no value, so a ready bead whose keys hold only those is a candidate, and
+// any other value, true and a number among them, passes the bead over.
+func TestReactionSweepReadsTypedKeysAsTheScriptsDo(t *testing.T) {
+	log, store := stubCity(t, []byte("[]"))
+	keys := []string{"gc.routed_to", "gc.step_ref", "gc.step_id", "gc.root_bead_id", "gc.takeaway", "gc.takeaway_by",
+		"branch", "merge_result", "work_dir", "pr_url", "pr_number", "check_name", "anchor_bead"}
+	listed := func(metadata string) bool {
+		t.Helper()
+		withMetadata(t, log, metadata)
+		var out, errb bytes.Buffer
+		if code := Run([]string{"reaction", "sweep", "--dry-run", "--db", store}, "test", &out, &errb); code != 0 {
+			t.Fatalf("the dry run over %s exited %d: %s", metadata, code, errb.String())
+		}
+		return strings.Contains(out.String(), `"id":"tk-sub"`)
+	}
+	for _, unset := range []string{"false", "null"} {
+		fields := make([]string, len(keys))
+		for i, k := range keys {
+			fields[i] = strconv.Quote(k) + ":" + unset
+		}
+		if !listed("{" + strings.Join(fields, ",") + "}") {
+			t.Errorf("a bead whose keys all hold %s was passed over", unset)
+		}
+	}
+	for _, k := range keys {
+		for _, set := range []string{"true", "0"} {
+			if listed("{" + strconv.Quote(k) + ":" + set + "}") {
+				t.Errorf("a bead whose %s holds %s was listed", k, set)
+			}
+		}
 	}
 }
