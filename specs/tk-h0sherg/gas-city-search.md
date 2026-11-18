@@ -1,6 +1,6 @@
 ---
 name: Gas City search for an ask that waits (tk-h0sherg)
-description: The primitives searched in bd and Gas City for filing a review ask that waits on another bead from its first write, with what each covers and why gctk still checks the waited bead's store itself. Read it when building or reviewing `gctk review ask --waiting-on` or the sign-off's `--rework-waiting-on`, as AGENTS.md asks of a change that adds a flag.
+description: The primitives searched in bd and Gas City for filing a review ask that waits on another bead from its first write, with what each covers and why gctk still checks the waited bead's id prefix and store itself. Read it when building or reviewing `gctk review ask --waiting-on` or the sign-off's `--rework-waiting-on`, as AGENTS.md asks of a change that adds a flag.
 ---
 
 # Gas City search for an ask that waits
@@ -31,33 +31,55 @@ bd main, and the cycle check still stands there.
 the arguments after `gc bd` to bd unchanged, except on a `list` of the wisps
 tier and on a ready frontier, so a create's `--deps` reaches bd as written.
 
-## Refuse a wait on another store's bead
+## Refuse a wait whose edge would hold nothing
 
-**Not covered on every transport.** gctk reads each waited bead in the store
-that holds the PR's bead, and refuses one that store does not hold, with
-nothing filed.
+**Not covered on every transport, and a store holding the bead does not cover
+it.** bd decides whether an edge is local by the id prefixes of its two beads,
+not by whether the store holds the far bead. gctk refuses, with nothing filed,
+a wait on a bead of another prefix than the PR's bead, and then a wait on a
+bead of that prefix that the PR's store does not hold.
 
-- bd's direct create path resolves each `--deps` target in its store
-  (`resolveDepSpecTargets` in `cmd/bd/create.go`), and an unknown target
-  fails the create.
-- Its proxied-server path (`runCreateProxiedServer` in
-  `cmd/bd/create_proxied_server.go`) parses the specs and resolves none. The
-  insert stores an edge onto an id whose prefix names another repository as an
-  external target (`IsExternalDepTarget` in
-  `internal/storage/issueops/dependencies.go`), in the one target column with
-  no foreign key into the store's issues. bd's blocked rule joins the waited
-  bead through `depends_on_issue_id` (`directly_blocked` in
-  `internal/storage/schema/migrations/0046_add_is_blocked.up.sql`), so such an
-  edge never holds the bead.
-- A probe on the city's bd over a proxied scratch store showed both halves:
-  `bd create --deps blocks:<pr>,blocked-by:zz-nope` filed the bead with an
-  edge onto `zz-nope`, and `bd blocked` left the bead out. A missing target
-  with the store's own prefix was refused.
+- bd classifies an edge by prefix. `IsExternalDepTarget` in
+  `internal/storage/issueops/dependencies.go` reads an edge whose two ids carry
+  different prefixes (`ExtractPrefix` in `internal/types/id_generator.go`) as
+  an edge onto another repository's bead, and it reads no row to decide. The
+  create's insert (`PersistDependenciesWithOptionsResult` in
+  `internal/storage/issueops/create.go`, through `ClassifyDepTarget`) stores
+  such an edge in `depends_on_external`, the one target column with no foreign
+  key into the store's issues. bd's blocked rule joins the waited bead through
+  `depends_on_issue_id` (`directly_blocked` in
+  `internal/storage/schema/migrations/0046_add_is_blocked.up.sql`), and bd
+  marks a bead blocked only by an edge onto an issue or a wisp
+  (`markDirectBlockingDependencySourceInTx` in
+  `internal/storage/issueops/dependencies.go`), so such an edge never holds the
+  bead.
+- A store can hold a bead of another prefix. A create at an explicit id outside
+  the store's prefix lands under bd's `--force` (`ForceIDPrefix`), or when the
+  store's `allowed_prefixes` names that prefix (`ValidateIssueIDPrefix` in
+  `internal/storage/issueops/create.go`), and the conformance case
+  `RunLifecycleCreateRefusesAForeignIDPrefix` in
+  `backend/conformance/lifecycle_create_contract.go` creates one and reads it
+  back. An edge from the ask onto such a bead is still an edge between two
+  prefixes, so finding the bead in the store does not make the wait hold.
+- The ask takes its store's prefix, and its own edge onto the PR's bead holds
+  only when the two share a prefix. A wait holds the ask only when it carries
+  the PR bead's prefix too, which is the rule the `waits` skill gives every
+  wait edge.
+- For a bead of the PR bead's prefix, bd's create paths differ. The direct path
+  resolves each `--deps` target in its store (`resolveDepSpecTargets` in
+  `cmd/bd/create_deps.go`), and an unknown target fails the create. The
+  proxied-server path (`runCreateProxiedServer` in
+  `cmd/bd/create_proxied_server.go`) parses the specs and resolves none.
+- A probe on the city's bd over a proxied scratch store showed an edge between
+  two prefixes filing: `bd create --deps blocks:<pr>,blocked-by:zz-nope` filed
+  the bead with an edge onto `zz-nope`, and `bd blocked` left the bead out. A
+  missing target with the store's own prefix was refused.
 
-So whether bd refuses such a wait depends on the store's transport, and where
-it does not, the ask reads clear and the race stays with no sign. Gas City's
-`gc bd` adds no check, as above. The ledger read gctk makes before the create
-is the check, and it is the same on every transport.
+So a wait on a bead of another prefix files with an edge that holds nothing on
+either path, whether or not the store holds that bead, and the ask reads clear
+and the race stays with no sign. Gas City's `gc bd` adds no check, as above.
+gctk's check compares the prefixes, then reads each waited bead in the PR's
+store before the create, and it is the same on every transport.
 
 ## Report an ask a re-run finds that does not wait
 

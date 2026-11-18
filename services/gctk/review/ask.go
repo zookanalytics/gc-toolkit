@@ -182,12 +182,13 @@ func (e *Refusal) Error() string { return "nothing filed on " + e.Bead + ": " + 
 //
 // It refuses a bead that owns no PR on the record, and a check req sends back
 // that the check index does not declare at the head the refinery validated,
-// which index reads. It refuses a wait on a bead that the bead's own store does
-// not hold, because an edge into another store holds nothing. It refuses to
-// return an ask it finds that does not wait on every bead req names, because a
-// run can take that ask before they close, or already has. A refusal files
-// nothing. A read that fails returns its error with nothing filed, and a create
-// that fails may still have filed the ask, which the next call finds.
+// which index reads. It refuses a wait whose edge would hold nothing, on a bead
+// of another id prefix than the bead's or on one the bead's own store does not
+// hold (waitsIn). It refuses to return an ask it finds that does not wait on
+// every bead req names, because a run can take that ask before they close, or
+// already has. A refusal files nothing. A read that fails returns its error
+// with nothing filed, and a create that fails may still have filed the ask,
+// which the next call finds.
 func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, error)) (id string, filed bool, err error) {
 	owner, err := one(l, req.Bead)
 	if err != nil {
@@ -222,7 +223,7 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 			}
 		}
 	}
-	waits, err := waitsIn(l, req)
+	waits, err := waitsIn(l, owner.ID, req)
 	if err != nil {
 		return "", false, err
 	}
@@ -271,10 +272,14 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 }
 
 // waitsIn is each bead req names for the ask to wait on, once each and in the
-// order named. It refuses one that the ledger's store, the store of the bead
-// that owns the PR, does not hold, because an edge into another store holds
-// nothing.
-func waitsIn(l *ledger.Ledger, req AskRequest) ([]string, error) {
+// order named, and it refuses each one whose edge would hold nothing. bd keeps
+// an edge between beads of two id prefixes as an edge into another repository,
+// which holds nothing even when this store holds the far bead
+// (IsExternalDepTarget), and the ask holds the bead that owns the PR only by
+// sharing its prefix, so a wait of another prefix than owner's is refused. So
+// is one that the ledger's store, the store of the bead that owns the PR, does
+// not hold.
+func waitsIn(l *ledger.Ledger, owner string, req AskRequest) ([]string, error) {
 	var waits []string
 	for _, w := range req.WaitingOn {
 		if w = strings.TrimSpace(w); w != "" && !slices.Contains(waits, w) {
@@ -283,6 +288,17 @@ func waitsIn(l *ledger.Ledger, req AskRequest) ([]string, error) {
 	}
 	if len(waits) == 0 {
 		return nil, nil
+	}
+	var foreign []string
+	for _, w := range waits {
+		if idPrefix(w) != idPrefix(owner) {
+			foreign = append(foreign, w)
+		}
+	}
+	if len(foreign) > 0 {
+		return nil, &Refusal{Bead: req.Bead, Why: fmt.Sprintf(
+			"%s does not carry the id prefix of %s, and bd keeps an edge between beads of two prefixes as one into another rig's store, which holds nothing even when this store holds the bead",
+			strings.Join(foreign, " or "), owner)}
 	}
 	rows, err := l.Find(ledger.ByID(waits...).WithClosed())
 	if err != nil {
@@ -296,10 +312,20 @@ func waitsIn(l *ledger.Ledger, req AskRequest) ([]string, error) {
 	}
 	if len(missing) > 0 {
 		return nil, &Refusal{Bead: req.Bead, Why: fmt.Sprintf(
-			"its store holds no bead %s for the ask to wait on, and a wait on a bead in another store holds nothing",
-			strings.Join(missing, " or "))}
+			"its store holds no bead %s for the ask to wait on", strings.Join(missing, " or "))}
 	}
 	return waits, nil
+}
+
+// idPrefix is a bead id's prefix, the text before its first "-", or "" for an
+// id with none. Two ids share one exactly when bd's ExtractPrefix gives them
+// one.
+func idPrefix(id string) string {
+	p, _, ok := strings.Cut(id, "-")
+	if !ok {
+		return ""
+	}
+	return p
 }
 
 // askTitle is an ask's title: its reason's first line, cut to fit a listing.

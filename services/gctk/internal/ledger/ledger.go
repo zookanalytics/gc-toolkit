@@ -206,8 +206,9 @@ func (f *Filing) Blocks(ids ...string) { f.blocks = append(f.blocks, ids...) }
 
 // BlockedBy makes the new bead wait on each bead named, by its own blocks edge
 // onto that bead, written in the create itself, so no read finds the new bead
-// without its wait. An edge onto a bead of another store holds nothing, so a
-// caller names only beads the store holds.
+// without its wait. bd keeps an edge onto a bead of another id prefix as one
+// into another store, which holds nothing even when this store holds that bead,
+// so a caller names only beads of the new bead's prefix that the store holds.
 func (f *Filing) BlockedBy(ids ...string) { f.blockedBy = append(f.blockedBy, ids...) }
 
 // From records the bead the new one was found from, by the new bead's own

@@ -58,7 +58,8 @@
 #   check index: an ask carries it, so it applies only to a PR on the pending
 #   record, and the old path refuses it.
 #   --waiting-on names a bead the ruling's ask waits on, once per bead, such as
-#   the anchor of another PR that must land first, in the anchor's own store.
+#   the anchor of another PR that must land first, carrying the anchor's id
+#   prefix.
 #   It applies only to a PR on the pending record, and the old path, whose
 #   rework child is sent the moment it is filed, refuses it.
 # Output: rework-child.sh's result line, "<child> <route> <filed|adopted|in-flight>",

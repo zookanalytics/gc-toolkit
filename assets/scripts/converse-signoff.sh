@@ -229,8 +229,8 @@
 #     first. It is the rework's wait, where --waiting-on is the subject's. On
 #     Gas Town's pending record the ask carries it as its own blocks edge from
 #     the create that files it (gctk review ask --waiting-on), so no run takes
-#     the ask before that bead closes. The bead must be in the PR's own store,
-#     and the old path, whose rework child is sent the moment it is filed,
+#     the ask before that bead closes. The bead must carry the PR's id prefix
+#     and be in its store, and the old path, whose rework child is sent the moment it is filed,
 #     refuses it; either refusal files nothing.
 #   --pr-anchor <bead> names the PR --rework or --retire acts on when the
 #     ruling reaches more than one, which it requires; every other one the

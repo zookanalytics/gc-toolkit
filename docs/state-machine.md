@@ -378,9 +378,10 @@ source and reason first, open or closed, so a re-run files nothing. An ask
 that must wait for other work, as a sitting's send-back that waits for another
 PR does, carries its own `blocks` edge onto each bead it waits on from the
 create that files it (`--waiting-on`), so no pass reads it clear before it
-waits. Each such bead is in the PR bead's own store, since an edge into
-another store holds nothing, and a re-run that names a wait the ask it finds
-lacks is refused. The refinery's requeue of a PR on the record,
+waits. Each such bead carries the PR bead's id prefix and is held by its
+store, since bd keeps an edge between beads of two prefixes as one into
+another store, which holds nothing even when this store holds the bead, and a
+re-run that names a wait the ask it finds lacks is refused. The refinery's requeue of a PR on the record,
 `pr-facts.sh`'s conflict, red-check and feedback arms, a sitting's send-back,
 and a must-fix point a sitting or the mechanik puts on another open PR each
 file one. A run takes an ask only while

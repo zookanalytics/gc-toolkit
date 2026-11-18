@@ -322,8 +322,9 @@ holds, and any PR that a gate the ruling answers releases. Pass one of these:
   bead has closed. Give the wait in the sign-off, never as an edge written
   after it, because the landing order can start the run in between. The
   sign-off's `--waiting-on` is the subject's wait, which holds no ask. The
-  sign-off stops with nothing filed on the old path, and for a bead in another
-  store, whose edge would hold nothing. A re-run that names a wait the
+  sign-off stops with nothing filed on the old path, and for a bead of another
+  id prefix than the PR's anchor or one its store does not hold, whose edge
+  would hold nothing. A re-run that names a wait the
   ruling's ask was filed without stops and names that ask, since a run may
   already have taken it;
 - `--no-rework` when the PR stands as it is, as it does once you have pushed

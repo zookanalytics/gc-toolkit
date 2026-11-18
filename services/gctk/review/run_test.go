@@ -764,19 +764,30 @@ func TestAnAskThatWaitsLandsWithItsWaitInOneCreate(t *testing.T) {
 	}
 }
 
-// A wait on a bead the PR's store does not hold, as a bead in another rig's
-// store is, is refused by name with nothing filed, because an edge into
-// another store holds nothing.
-func TestAnAskThatWaitsOnABeadInAnotherStoreIsRefused(t *testing.T) {
-	w := newWorld(t)
-	w.store.Put(bead{ID: "tk-other", Status: "open", IssueType: "task"})
-	_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "Fix the cap.", WaitingOn: []string{"tk-other", "rb-other"}}, nil)
-	var refused *review.Refusal
-	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "rb-other") || strings.Contains(err.Error(), "tk-other") {
-		t.Fatalf("a wait on a bead the store does not hold: %v; want a refusal that names rb-other alone", err)
-	}
-	if n := len(w.store.Creates()); n != 0 {
-		t.Fatalf("the refused ask reached the store in %d creates", n)
+// A wait whose edge would hold nothing is refused by name with nothing filed.
+// bd keeps an edge between beads of two id prefixes as one into another rig's
+// store, so a bead of another prefix is refused whether another rig's store
+// holds it or the PR's store does. A bead of the PR bead's prefix is refused
+// when the store does not hold it.
+func TestAnAskThatWaitsOnABeadItsEdgeWouldNotHoldIsRefused(t *testing.T) {
+	for _, c := range []struct{ name, wait, why string }{
+		{"a bead in another rig's store", "rb-other", "does not carry the id prefix of " + prBead},
+		{"a bead of another prefix that the PR's store holds", "rb-held", "does not carry the id prefix of " + prBead},
+		{"a bead of the PR's prefix that the store does not hold", "tk-gone", "its store holds no bead"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.store.Put(bead{ID: "tk-other", Status: "open", IssueType: "task"})
+			w.store.Put(bead{ID: "rb-held", Status: "open", IssueType: "task"})
+			_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "Fix the cap.", WaitingOn: []string{"tk-other", c.wait}}, nil)
+			var refused *review.Refusal
+			if !errors.As(err, &refused) || !strings.Contains(err.Error(), c.wait) || !strings.Contains(err.Error(), c.why) || strings.Contains(err.Error(), "tk-other") {
+				t.Fatalf("a wait on %s: %v; want a refusal that names %s alone, saying %q", c.wait, err, c.wait, c.why)
+			}
+			if n := len(w.store.Creates()); n != 0 {
+				t.Fatalf("the refused ask reached the store in %d creates", n)
+			}
+		})
 	}
 }
 

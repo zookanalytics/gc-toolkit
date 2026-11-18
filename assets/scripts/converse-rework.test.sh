@@ -413,17 +413,18 @@ eq "$RC" "2" "an ask whose create did not answer exits 2"
 has "$OUT" "a re-run finds one that landed" "…saying a re-run finds the ask if it landed"
 # A ruling that must wait for other work passes each bead it waits on to the
 # writer, which files the ask with those waits in the one create, or refuses a
-# bead its store does not hold with nothing filed.
+# bead whose edge would hold nothing, such as one of another prefix, with
+# nothing filed.
 : > "$TMP_ASK_LOG"; : > "$STUB_GC_LOG"
 OUT=$(GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "rename the flag once #43 lands" --check arch --waiting-on anc-43 --waiting-on anc-44 2>&1); RC=$?
 eq "$RC $(created)" "0 0" "a ruling that waits on other work exits 0 once the ask stands, filing no rework child"
 eq "$(cat "$TMP_ASK_LOG")" "review ask anc-1 --reason operator ruling (conversation vis-1): rename the flag once #43 lands --source vis-1 --check arch --waiting-on anc-43 --waiting-on anc-44" "…the ask carries each bead the ruling waits on"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and nothing is slung"
 : > "$STUB_GC_LOG"
-OUT=$(STUB_ASK_RC=3 STUB_ASK_ERR="gctk review ask: nothing filed on anc-1: its store holds no bead rb-43 for the ask to wait on, and a wait on a bead in another store holds nothing" \
+OUT=$(STUB_ASK_RC=3 STUB_ASK_ERR="gctk review ask: nothing filed on anc-1: rb-43 does not carry the id prefix of anc-1, and bd keeps an edge between beads of two prefixes as one into another rig's store, which holds nothing even when this store holds the bead" \
   GCTK_BIN="$TMP/gctk-ask" "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "rename the flag once rb-43 lands" --waiting-on rb-43 2>&1); RC=$?
 eq "$RC $(created)" "2 0" "a wait on a bead in another store, which the writer refuses, exits 2 with nothing filed"
-has "$OUT" "holds no bead rb-43" "…naming the bead the ask could not wait on"
+has "$OUT" "rb-43 does not carry the id prefix of anc-1" "…naming the bead the ask could not wait on"
 eq "$(grep -c -E '^(bd update|bd dep|bd create|sling)' "$STUB_GC_LOG")" "0" "…with nothing written"
 OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" --waiting-on 2>&1); RC=$?
 eq "$RC" "2" "--waiting-on with no bead is refused"
