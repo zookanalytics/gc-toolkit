@@ -171,14 +171,16 @@
 #                        simulator, in the engine's scheme for one,
 #                        ios-simulator://, and 1 otherwise.
 #   demo_engine_script_kind <script>
-#                        Prints the surface a demo script drives, page or
-#                        terminal, by the engine's own rule: a terminal script
-#                        declares **Terminal:**, in any case, on a line above
-#                        its first ## heading, each line read without the
-#                        blanks around it (parseDemoScript in the engine's
-#                        src/demo-script.ts), and any other script drives a
-#                        page. Returns 1, having said why on stderr, when the
-#                        script does not read.
+#                        Prints the surface a demo script drives as the
+#                        engine's `surface` command names it, such as page,
+#                        terminal or ios, run through demo_engine_cli. Nothing
+#                        in the pack reads a script's lines for its surface.
+#                        When nothing chose an engine, it resolves one first,
+#                        as demo_engine_resolve does. Returns 1, having said why
+#                        on stderr, when the engine names no surface: the
+#                        script is missing or does not parse, the run is
+#                        refused, or the engine has no `surface` command, which
+#                        it then names.
 #
 # DEMO_ENGINE_PACKAGE names the package. DEMO_ENGINE_BIN, when set, names an
 # executable that demo_engine_cli runs in the engine's place, inside the sandbox
@@ -298,16 +300,30 @@ demo_engine_resolve() {
 # --- a demo script's surface -------------------------------------------------
 
 demo_engine_script_kind() {
-  local kind
-  kind=$(awk '
-    { l = $0; sub(/^[ \t]+/, "", l); sub(/[ \t\r]+$/, "", l) }
-    l ~ /^##[ \t]+[^ \t]/ { exit }
-    tolower(l) ~ /^\*\*terminal:\*\*/ { k = "terminal"; exit }
-    END { print (k == "" ? "page" : k) }' "$1" 2>/dev/null)
-  case "$kind" in
-    (page|terminal) printf '%s\n' "$kind" ;;
-    (*) _demo_engine_say "could not read the head lines of '$1', which say whether it drives a page or a terminal"; return 1 ;;
-  esac
+  local out rc surface engine
+  # demo_engine_resolve and demo_engine_find set DEMO_ENGINE_DIR, to empty for
+  # the published package, so an unset one means nothing chose an engine.
+  if [ -z "${DEMO_ENGINE_BIN:-}" ] && [ -z "${DEMO_ENGINE_DIR+set}" ]; then
+    demo_engine_resolve || return 1
+  fi
+  engine=${DEMO_ENGINE_BIN:-${DEMO_ENGINE_DIR:-the published $DEMO_ENGINE_PACKAGE}}
+  rc=0
+  out=$(demo_engine_cli surface "$1") || rc=$?
+  # The command prints one JSON object on stdout when it names a surface, and
+  # nothing when it refuses. An engine with no surface command prints its help
+  # there as it refuses.
+  if [ "$rc" -eq 0 ]; then
+    surface=$(printf '%s' "$out" | jq -r -s 'if length == 1 and (.[0] | type) == "object" then (.[0].surface | strings) else empty end' 2>/dev/null) || surface=""
+    case "$surface" in
+      (''|*[!A-Za-z0-9_-]*) _demo_engine_say "the SprintShow engine ($engine) answered 'sprintshow surface' for '$1' with no surface" ;;
+      (*) printf '%s\n' "$surface"; return 0 ;;
+    esac
+  elif [ -n "$out" ]; then
+    _demo_engine_say "the SprintShow engine ($engine) has no surface command, so it cannot name the surface '$1' drives; update it to a SprintShow whose 'sprintshow help' lists 'sprintshow surface'"
+  else
+    _demo_engine_say "the SprintShow engine ($engine) named no surface for '$1' ('sprintshow surface' exited $rc)"
+  fi
+  return 1
 }
 
 demo_engine_ios_app() {
