@@ -545,7 +545,8 @@ task_kind=prompt-update and no bullet-cap accounting. Dedup on the pattern
 bead's `eng_bead` first (skip while it or its PR is live).
 The pattern waits on it and records the outcome, so later runs neither
 re-judge toward prose nor file a duplicate. A bead in another store takes no
-edge (the rubric says how the pattern waits):
+edge, and an upstream finding takes neither command (the rubric's Fixes in
+code):
 ```bash
 gc bd dep add "$PATTERN" "$EBEAD" --type=blocks
 ```

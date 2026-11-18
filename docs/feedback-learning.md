@@ -10,8 +10,9 @@ operator cares about and responds to, so agents present better options
 and escalations over time. It works through one path. Feedback is
 recorded as observation beads; a distiller judges what the observations
 add up to; every resulting change to the pack lands as an operator-reviewed
-PR against this pack, and a fix in code another rig or project owns is filed
-with that owner. Nothing changes agent behavior until such a change merges.
+PR against this pack, a fix in code another rig owns is filed as that rig's
+work, and one in a project outside the city is recorded as an upstream finding
+for the operator. Nothing changes agent behavior until such a change merges.
 
 Hardened detectors (`tools/lint-learned.d/`) and doctor checks are **not
 the learning system**. They are ordinary pack hygiene — a well-architected
@@ -148,12 +149,12 @@ them onto pattern beads, and decides which clusters have earned a rule.
 A pattern bead (`task_kind=feedback-pattern`) is backlog work the distiller
 triages, the way a bug is, and nothing routes or assigns it. Every run leaves
 each pattern in one of three states: closed once resolved (its rule adopted,
-every follow-up it spawned closed, or dismissed as not a pattern), waiting on
-its follow-up through a `blocks` edge, or deferred with a date while it gathers
-evidence. A deferred pattern comes back to the distiller when its date passes,
-and a closed one reopens when its feedback recurs. `gc bd ready` lists a
-pattern only while it needs a decision, which the distiller makes on its next
-run.
+every follow-up it spawned closed, its fix recorded as an upstream finding, or
+dismissed as not a pattern), waiting on its follow-up through a `blocks` edge,
+or deferred with a date while it gathers evidence. A deferred pattern comes
+back to the distiller when its date passes, and a closed one reopens when its
+feedback recurs. `gc bd ready` lists a pattern only while it needs a decision,
+which the distiller makes on its next run.
 Each surviving proposal becomes one `prompt-update` bead carrying the
 exact rule text, the evidence list, and the reasoning. A proposal is new
 work, so the distiller files it held with Gas City's `hold:mayor` label and
@@ -169,11 +170,12 @@ files an engineering bead that states the failure, the moment, the file that
 owns the rule and what done looks like, leaving the words to whoever builds
 it. When a file already owns the rule, the fix makes that file reach the
 moment instead of copying the rule. An engineering bead, including one from
-Gate 2 below, waits for placement the same way, and a fix in code another
-rig or project owns goes to that owner. The rubric's Fixes in code section
-says how the distiller chooses where a fix goes. The distiller records and
-proposes — it never edits a prompt, fragment, skill or other code, and
-neither does any capturing agent.
+Gate 2 below, waits for placement the same way. A fix in code another rig
+owns is filed as that rig's work, and one in a project outside the city is
+recorded as an upstream finding for the operator, which no pattern waits on.
+The rubric's Fixes in code section says how the distiller chooses where a fix
+goes. The distiller records and proposes — it never edits a prompt, fragment,
+skill or other code, and neither does any capturing agent.
 
 ### Three gates on promotion into a paid carrier
 

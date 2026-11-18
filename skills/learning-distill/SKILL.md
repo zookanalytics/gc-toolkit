@@ -397,10 +397,15 @@ before anyone builds it.
 
 **Code this rig does not own** goes through `gc-toolkit.external-issue`, which
 sends the fix to the rig of the city that owns the code, through
-`gc-toolkit.work`, or records it as an upstream finding for the operator. The
-pattern waits on the bead filed for the fix. When that bead is in another
-rig's store, an edge would hold nothing, so the pattern waits as
-`gc-toolkit.waits` says for a blocker there.
+`gc-toolkit.work`, or records it as an upstream finding for the operator. A
+fix sent to another rig is in that rig's store, where an edge would hold
+nothing, so the pattern waits on it as `gc-toolkit.waits` says for a blocker
+there. An upstream finding is not a fix but a report, which the operator sends
+or declines when they choose to look. `gc-toolkit.external-issue` files it
+with no hold, and nothing waits on it. So the pattern takes no edge onto the
+finding and does not record it as its `eng_bead`, which names the city's own
+fix. It closes once the finding is recorded, with a close reason that names
+the finding, and reopens when its feedback comes back, as Pattern states says.
 
 **What the bead says.** Before you file, look for an open bead or PR that
 already carries the fix: add the evidence to its notes and make the pattern
@@ -467,11 +472,12 @@ of three states. The distiller formula gives the command for each.
 
 - **Closed once resolved.** Its rule is adopted and nothing it spawned is
   open; every follow-up it spawned has closed, whether or not a rule landed,
-  since a veto comes back as a `learning-rubric` observation of its own; or it
-  is dismissed as not a pattern, by a discard or by a hold whose window passed
-  with no recurrence among the observations judged and none left unjudged. The
-  close reason says which, so the recurrence bar below can tell an adopted rule
-  from a dismissal.
+  since a veto comes back as a `learning-rubric` observation of its own; its
+  fix is in a project outside the city and is recorded as an upstream finding;
+  or it is dismissed as not a pattern, by a discard or by a hold whose window
+  passed with no recurrence among the observations judged and none left
+  unjudged. The close reason says which, so the recurrence bar below can tell
+  an adopted rule from a dismissal.
 - **Waiting on its follow-up.** A promote, a retirement proposal or a
   route-to-engineering outcome waits on the bead filed for it, and a contest
   waits on its gate. Once the operator answers a contention gate, act on the
@@ -490,10 +496,10 @@ of three states. The distiller formula gives the command for each.
 A closed pattern takes new evidence and stays closed, unless that evidence
 crosses the recurrence bar, which reopens it:
 
-- it closed with no adopted rule, as a dismissal or with its follow-ups closed
-  and no `rule:<pattern-bead>` anchor on origin/main, and the evidence comes
-  from an `obs.provenance` event it had not seen. That is the recurrence its
-  close bet against;
+- it closed with no adopted rule, as a dismissal, with its fix recorded as an
+  upstream finding, or with its follow-ups closed and no `rule:<pattern-bead>`
+  anchor on origin/main, and the evidence comes from an `obs.provenance` event
+  it had not seen. That is the recurrence its close bet against;
 - the evidence contradicts its adopted rule (judgment 4), and the contention
   gate needs an open pattern to hold;
 - an observation is a standing directive or operator-endorsed, which judgment
