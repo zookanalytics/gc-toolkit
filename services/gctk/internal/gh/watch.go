@@ -119,7 +119,7 @@ func counts(l []stateCount) map[string]int {
 	return out
 }
 
-// signs is the node's signs with the labels on its first page.
+// signs is the node's signs but for its labels, which signsOf reads whole.
 func (n signsNode) signs() (Signs, error) {
 	if n.Reviews == nil || n.Dismissed == nil || n.Labels == nil || n.Commits == nil {
 		return Signs{}, fmt.Errorf("the signs of PR %d lack a part GitHub always gives", n.Number)
@@ -130,9 +130,6 @@ func (n signsNode) signs() (Signs, error) {
 		CheckRuns: map[string]int{}, Statuses: map[string]int{}}
 	if n.BaseRef != nil && n.BaseRef.Target != nil {
 		s.BaseTip = n.BaseRef.Target.Oid
-	}
-	for _, l := range n.Labels.Nodes {
-		s.Labels = append(s.Labels, l.Name)
 	}
 	for _, c := range n.Commits.Nodes {
 		if c.Commit == nil || c.Commit.Rollup == nil {
@@ -153,16 +150,11 @@ func (c *Client) signsOf(owner, name string, number int, n *signsNode) (Signs, e
 	if err != nil {
 		return Signs{}, err
 	}
-	if !n.Labels.PageInfo.HasNextPage {
-		slices.Sort(s.Labels)
-		return s, nil
-	}
-	more, err := pageOn(c, labelsQuery, pageVars(owner, name, number), n.Labels.PageInfo.EndCursor,
-		prList[labelNode]("labels"))
+	labels, err := whole(c, n.Labels, labelsQuery, pageVars(owner, name, number), prList[labelNode]("labels"))
 	if err != nil {
 		return Signs{}, fmt.Errorf("the labels of PR %d: %w", number, err)
 	}
-	for _, l := range more {
+	for _, l := range labels {
 		s.Labels = append(s.Labels, l.Name)
 	}
 	slices.Sort(s.Labels)

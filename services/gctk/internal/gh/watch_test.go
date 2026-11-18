@@ -135,6 +135,19 @@ func TestSignsReadsLabelsOnUntilTheyEnd(t *testing.T) {
 	}
 }
 
+func TestSignsRefusesAFirstLabelPageThatSaysMoreFollowAndNamesNoCursor(t *testing.T) {
+	node := strings.Replace(signsNode(7, `{"name":"status: merging"}`, true), `"endCursor":"c1"`, `"endCursor":""`, 1)
+	c, r := client([2]string{"p7:", `{"data":{"repository":{"p7":` + node + `,
+		"p8":` + signsNode(8, `{"name":"b"}`, false) + `}}}`})
+	read, failed := c.Signs("acme/widgets", []int{7, 8})
+	if failed[7] == nil || len(read) != 1 || read[8].Labels[0] != "b" {
+		t.Fatalf("a first page of PR 7's labels with no cursor read as %v, %v", read, failed)
+	}
+	if len(r.calls) != 1 {
+		t.Fatalf("%d requests, want the signs alone", len(r.calls))
+	}
+}
+
 const partPR = `"id":"PR_kw1","number":7,"url":"https://github.com/acme/widgets/pull/7","state":"OPEN","isDraft":false,
 	"headRefName":"polecat/tk-1","headRefOid":"abc","baseRefName":"main","mergeStateStatus":"BLOCKED",
 	"repository":{"nameWithOwner":"acme/widgets"},"mergedAt":null,"mergeCommit":null,
