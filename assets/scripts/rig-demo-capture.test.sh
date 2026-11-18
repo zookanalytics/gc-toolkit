@@ -96,8 +96,9 @@ STUB
 chmod +x "$STUB"
 
 # The sandbox and the port pick. sandbox-exec logs the command it runs to
-# $SANDBOX_LOG, then runs it. node answers the free-port pick with 50123 and
-# says no server answers on a port it is asked about.
+# $SANDBOX_LOG, then runs it. node answers the free-port pick with $FREE_PORT,
+# 50123 when it is empty, and says no server answers on a port it is asked
+# about.
 SBX="$TMPD/sandbox-bin"; mkdir -p "$SBX"
 cat >"$SBX/sandbox-exec" <<'SBXSTUB'
 #!/usr/bin/env bash
@@ -109,7 +110,7 @@ SBXSTUB
 cat >"$SBX/node" <<'NODE'
 #!/usr/bin/env bash
 if [ "${1:-}" = "-e" ] && [ $# -ge 3 ]; then exit 0; fi
-if [ "${1:-}" = "-e" ]; then printf 50123; exit 0; fi
+if [ "${1:-}" = "-e" ]; then printf '%s' "${FREE_PORT:-50123}"; exit 0; fi
 echo "node stub: unexpected call: $*" >&2; exit 97
 NODE
 # gctk stands in for gctk rig serve: --check answers with a copy running on
@@ -117,7 +118,8 @@ NODE
 # --command starts one and says it started it, or reports the one that runs, or
 # one that another caller started as this start ran when COPY_FOUND is set, or
 # fails as a copy that did not answer when COPY_FAIL is set, or as a checkout
-# whose copy runs another command when COPY_OTHER is set, and --stop ends it.
+# whose copy runs another command when COPY_OTHER is set, and --stop ends it. A
+# running copy's app_url is COPY_APP, or its loopback URL when that is empty.
 # lsof names the copy's process as the one listening on its port, working in the
 # checkout it was started from. Each logs to $RUNLOG. git and jq read the
 # checkout and the copy's report.
@@ -127,7 +129,7 @@ printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${RUNLOG:?}"
 case "$*" in
   "rig serve --check")
     if [ -n "${COPY_RUNNING:-}" ] || [ -s "${COPY_STATE:?}" ]; then
-      printf '{"state":"running","checkout":"%s","port":50200,"address":""}\n' "$(pwd)"; exit 0
+      printf '{"state":"running","checkout":"%s","port":50200,"app_url":"%s","address":""}\n' "$(pwd)" "${COPY_APP:-http://127.0.0.1:50200/}"; exit 0
     fi
     printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"; exit 3 ;;
   "rig serve --command "*)
@@ -139,10 +141,10 @@ case "$*" in
     fi
     if [ -n "${COPY_RUNNING:-}" ] || [ -n "${COPY_FOUND:-}" ]; then
       [ -n "${COPY_RUNNING:-}" ] || pwd >"$COPY_STATE"
-      printf '{"state":"running","checkout":"%s","port":50200,"address":""}\n' "$(pwd)"; exit 0
+      printf '{"state":"running","checkout":"%s","port":50200,"app_url":"%s","address":""}\n' "$(pwd)" "${COPY_APP:-http://127.0.0.1:50200/}"; exit 0
     fi
     pwd >"$COPY_STATE"
-    printf '{"state":"running","checkout":"%s","port":50200,"address":"","started":true}\n' "$(pwd)"; exit 0 ;;
+    printf '{"state":"running","checkout":"%s","port":50200,"app_url":"%s","address":"","started":true}\n' "$(pwd)" "${COPY_APP:-http://127.0.0.1:50200/}"; exit 0 ;;
   "rig serve --stop") : >"$COPY_STATE"; printf '{"state":"stopped","checkout":"%s"}\n' "$(pwd)"; exit 0 ;;
 esac
 exit 2
@@ -172,10 +174,12 @@ RUNLOG="$TMPD/run.log"
 # run [KEY=VAL ...] -- <sut args...>; per-call knobs, combined stdout+stderr.
 # $RUN_PATH replaces the sandbox directory on PATH for one call.
 run() {
-  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0 copy_running="" copy_found="" copy_fail="" copy_other="" surface=""
+  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0 copy_running="" copy_found="" copy_fail="" copy_other="" surface="" copy_app="" free_port=""
   while [ $# -gt 0 ]; do
     case "$1" in
       SURFACE=*) surface="${1#*=}" ;;
+      COPY_APP=*) copy_app="${1#*=}" ;;
+      FREE_PORT=*) free_port="${1#*=}" ;;
       COPY_RUNNING=*) copy_running="${1#*=}" ;;
       COPY_FOUND=*) copy_found="${1#*=}" ;;
       COPY_FAIL=*) copy_fail="${1#*=}" ;;
@@ -197,7 +201,7 @@ run() {
       LINT_RC="$lint_rc" RUN_RC="$run_rc" RUN_NOFILE="$nofile" RUN_EMPTY="$empty" \
       RUN_REPORT="$report" RUN_FAILED="$failed" RUN_LATE_RC="$late_rc" \
       GCTK_BIN="$SBX/gctk" COPY_STATE="$COPY_STATE" COPY_RUNNING="$copy_running" COPY_FOUND="$copy_found" COPY_FAIL="$copy_fail" COPY_OTHER="$copy_other" \
-      SURFACE="$surface" bash "$SUT" "$@" 2>&1 )
+      SURFACE="$surface" COPY_APP="$copy_app" FREE_PORT="$free_port" bash "$SUT" "$@" 2>&1 )
 }
 
 echo "# happy path: lint + capture + a non-empty file -> exit 0"
@@ -283,6 +287,19 @@ ok "nothing is captured" "[ ! -e '$OUT' ]"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --port 4321 --cwd "$SITE")"; rc=$?
 ok "--port with --serve exits 2" "[ '$rc' = 2 ]"
 has "--port names the --serve-dir server's port" "$out" "it says --port is the --serve-dir server's"
+
+echo "# an iOS app: a --serve copy whose command printed the app's URL, or the URL as --base-url, records the app there through three ports"
+IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+THREE="$(printf '50301\n50302\n50303')"
+out="$(run SURFACE=ios COPY_APP="$IOS_APP" FREE_PORT="$THREE" -- --script "$SCRIPT" --output "$OUT" --serve 'node serve.mjs' --cwd "$SITE")"; rc=$?
+ok "an iOS app's copy captures" "[ '$rc' = 0 ]"
+RL="$(cat "$RUNLOG")"
+has "gctk rig serve --command node serve.mjs (in $SITE)" "$RL" "it starts the copy as it does for any app"
+has "run $SCRIPT --mode walkthrough -o $OUT --base-url $IOS_APP --port 50301,50302,50303" "$RL" "the engine records the app at the URL its command printed, with a port for each of its servers"
+has "gctk rig serve --stop (in $SITE)" "$RL" "and the capture stops the copy its start ran"
+out="$(run SURFACE=ios FREE_PORT="$THREE" -- --script "$SCRIPT" --output "$OUT" --base-url "$IOS_APP")"; rc=$?
+ok "an iOS app named by its URL captures" "[ '$rc' = 0 ]"
+has "--base-url $IOS_APP --port 50301,50302,50303" "$(cat "$RUNLOG")" "with the same three ports"
 
 # A terminal script drives a shell in the engine's own terminal. The stub reads
 # no line of it, so each case names its surface with SURFACE=terminal.

@@ -670,6 +670,21 @@ grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
   && ok "(EDGERIDE) …and the all-rider sitting is stamped settled (I1: no held marker without an edge)" \
   || bad "(EDGERIDE) all-rider takeaway left unsettled — I1 would flag it: $(cat "$TMP/updates")"
 
+# (EDGERECORD) a same-branch rider whose PR waits on the pending record has its
+# work on the branch, since only the refinery's publication of its pushed head
+# writes that record, and the record leaves it assigned to nobody.
+: > "$TMP/deps"; : > "$TMP/updates"
+printf 'A-w-rec|polecat/A-ONBR\n' >> "$TMP/branches"
+printf 'A-w-rec|pull_request_pending\n' > "$TMP/merge"
+sh "$SCRIPT" takeaway A-ONBR "routed — the rider waits on its PR" --by converse \
+   --waiting-on A-w-rec >/dev/null 2>&1 || true
+eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" \
+  "(EDGERECORD) a same-branch rider on the pending record is landed — no edge"
+grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
+  && ok "(EDGERECORD) …and the all-rider sitting is stamped settled" \
+  || bad "(EDGERECORD) a rider on the record left the sitting unsettled: $(cat "$TMP/updates")"
+: > "$TMP/merge"
+
 # (EDGECLOSED) the other landing proof: a same-branch rider that has MERGED.
 : > "$TMP/deps"; : > "$TMP/updates"
 sh "$SCRIPT" takeaway A-ONBR "routed — the rider already merged" --by converse \
@@ -1507,6 +1522,24 @@ sh "$SCRIPT" takeaway A-DETPR "stopped" --release --no-wait >/dev/null 2>&1 || D
 eq "$DTRC" "0" "(DETACHED) --release alone on a detached anchor still lands"
 grep -qE '^bd update A-DETPR .*--status=open' "$TMP/updates" \
   && ok "(DETACHED) …with its park" || bad "(DETACHED) the park was lost: $(cat "$TMP/updates")"
+: > "$TMP/merge"
+
+# (RECORD) a bead whose PR waits on the pending record is assigned to nobody
+# while the landing order works it, so --release, which would leave the order
+# working it, is refused before anything is written, naming what does stop the
+# order: a human gate on the bead, or the PR's retirement.
+printf 'A-PEND|pull_request_pending\nA-HCHG|pull_request_head_changed\n' > "$TMP/merge"
+for rb in A-PEND A-HCHG; do
+  : > "$TMP/updates"; : > "$TMP/slings"; : > "$FAKE_CANCELS"
+  RCRC=0
+  sh "$SCRIPT" takeaway "$rb" "stopped" --release --no-wait >/dev/null 2>"$TMP/rcerr" || RCRC=$?
+  eq "$RCRC" "2" "(RECORD) --release on $rb, whose PR waits on the pending record, is refused"
+  eq "$(grep -c . "$TMP/updates" || true)|$(grep -c . "$TMP/slings" || true)|$(grep -c . "$FAKE_CANCELS" || true)" "0|0|0" \
+    "(RECORD) …before anything is written or cancelled"
+  { grep -q "human-gate.sh --subject $rb" "$TMP/rcerr" && grep -q "pr-dispose.sh --anchor $rb" "$TMP/rcerr"; } \
+    && ok "(RECORD) …naming a human gate on the bead and the PR's retirement" \
+    || bad "(RECORD) the refusal names neither (stderr: $(cat "$TMP/rcerr"))"
+done
 : > "$TMP/merge"
 
 # (NAMEDWAIT) a wait the call names is a claim on the bead as an edge is.

@@ -485,7 +485,10 @@ first. Either way the change is a decision on the record, not a drift.
   takes,** as the head a sitting pushes onto an open PR takes every step any
   head takes, and the sitting is not one of their checks.
 - **A copy of a rig's UI that a session runs from a change's tree serves
-  fixture data,** never the live city's.
+  fixture data,** never the live city's. The live city is kept out of reach of
+  the rig's start command that runs the copy, but not of an app the command
+  starts through the host's simulator service, such as an iOS app, so the
+  command keeps that app on fixture data.
 
 ## Debt
 

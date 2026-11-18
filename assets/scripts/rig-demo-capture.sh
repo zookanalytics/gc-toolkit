@@ -18,22 +18,23 @@
 # carries no browser MCP.
 #
 # A script drives the surface the engine's parser names for it. One that drives
-# an app, such as a page, needs that app: one app target, named with the flags
-# below. A terminal script drives a bash session in the engine's own terminal
-# and brings up no app, so it takes none, and its shell starts in --cwd. The
-# engine refuses a script given an app target its surface does not take, or
-# given none when it needs one, so this script never asks a script's surface.
-# Given two app targets the engine drives one and says nothing of the other, so
-# this script refuses two.
+# an app, such as a page or an iOS app on a simulator, needs that app: one app
+# target, named with the flags below. A terminal script drives a bash session
+# in the engine's own terminal and brings up no app, so it takes none, and its
+# shell starts in --cwd. The engine refuses a script given an app target its
+# surface does not take, or given none when it needs one, so this script never
+# asks a script's surface. Given two app targets the engine drives one and says
+# nothing of the other, so this script refuses two.
 #
 # The engine runs inside the sandbox demo-engine-lib.sh defines, where the live
 # city cannot be reached. A --serve command's app runs as a copy of the rig's UI
 # that `gctk rig serve` runs inside the same sandbox, and the engine records
-# the copy at its loopback port. So a copy, a terminal's commands or a page that
-# reads the city's stores or its API fails there, and the clip shows the app on
-# fixture data, or shows the failure, and never live state. The one server
-# outside the sandbox a clip can reach is a rig's app that --base-url names, as
-# below.
+# the copy's app where gctk rig serve reports it. So a copy, a terminal's
+# commands or a page that reads the city's stores or its API fails there, and
+# the clip shows the app on fixture data, or shows the failure, and never live
+# state. The servers outside the sandbox a clip can reach are a rig's app that
+# --base-url names, as below, and an iOS app on a simulator, which the system's
+# simulator service runs outside the sandbox, whoever started it.
 #
 # It FAILS CLOSED. A host with no sandbox, a capture the sandbox refuses, a
 # missing engine, a browser that cannot be installed, a script the linter
@@ -52,18 +53,21 @@
 #   --output     MP4 output path (required). Write outside the repo tree — a
 #                demo clip is an artifact, delivered to a PR, never committed.
 #   --serve-dir  serve a static directory with the engine's built-in server.
-#   --serve      serve the app with this command as a copy that `gctk rig
-#                serve` runs from the checkout --cwd names (default: here),
-#                with no address, on a free port of its own, which the command
-#                gets as $PORT. A checkout has one copy, so captures from one
-#                checkout run one after another. A copy of that checkout that
-#                already runs the command is the one recorded, and it keeps
-#                running, and one that runs another command is refused. One
-#                this capture starts ends with it.
+#   --serve      serve the app with this command as a copy that `gctk rig serve`
+#                runs from the checkout --cwd names (default: here), with no
+#                address, on a free port of its own, which the command gets as
+#                $PORT. The copy is up once it answers there, or once the
+#                command prints the URL of the app it brought up, such as an iOS
+#                app on a simulator. A checkout has one copy, so captures from
+#                one checkout run one after another. A copy of that checkout
+#                that already runs the command is the one recorded, and it keeps
+#                running, and one that runs another command is refused. One this
+#                capture starts ends with it.
 #   --base-url   drive a deployed preview, a copy that `gctk rig serve` runs,
-#                or an app that a worktree of a rig serves on this host. Any
-#                other server on this host is refused, as is the app of a rig
-#                that city.toml sets to app_reads_city = "true".
+#                an app that a worktree of a rig serves on this host, or an iOS
+#                app on a simulator, as ios-simulator://<device UDID>/<bundle
+#                id>. Any other server on this host is refused, as is the app of
+#                a rig that city.toml sets to app_reads_city = "true".
 #                A script that drives an app takes one of --serve-dir /
 #                --serve / --base-url; it is how this rig's app is reached. A
 #                terminal script takes none of the three.
@@ -190,8 +194,7 @@ fi
 
 # --- capture --------------------------------------------------------------
 # A --serve command's app runs as a copy, inside the sandbox, and the engine
-# records the copy at its loopback port, which the sandbox opens because gctk
-# rig serve answers that the copy holds it.
+# records the copy's app where gctk rig serve reports it.
 trap 'demo_engine_copy_stop' EXIT
 if [ -n "$SERVE_CMD" ]; then
   demo_engine_copy "${SERVE_CWD:-$(pwd)}" "$SERVE_CMD" || exit 1
