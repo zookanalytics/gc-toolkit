@@ -79,7 +79,7 @@ flowchart LR
   ORD -->|landing order: ready, merge request| PR
   ORD -->|landing order: record, then close| LEDGER
   ORD -->|landing order: labels that differ from the store's| PR
-  ORD -.->|PR watch: asks what moved, and reads each PR in full| PR
+  ORD -.->|PR watch: reads each PR the city owns| PR
   ORD -->|PR watch: GitHub read of a PR that moved| LEDGER
   ORD -->|PR watch's net: clears labels no bead owns| PR
   CAD -->|reads + writes| LEDGER
@@ -173,11 +173,11 @@ performer; the full transition table with writers is
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
    head.
-8. **Merge.** The landing order acts from the beads every minute. It has
-   GitHub merge each PR on the pending record at the head the refinery
-   validated, once the evaluator reads the PR ready over the read the PR watch
-   saved and again over the merge's own read of GitHub, and closes the bead once
-   the merge commit is on the target
+8. **Merge.** The landing order acts from the beads. It has GitHub merge each
+   PR on the pending record at the head the refinery validated, once the
+   evaluator reads the PR ready over the read the PR watch saved and again over
+   the merge's own read of GitHub, and closes the bead once the merge commit is
+   on the target
    ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 9. **Close propagates.** `closed` is the one signal waiting parties key on
    ([lifecycle-composition.md](lifecycle-composition.md)). A landing closes a
