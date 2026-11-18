@@ -526,11 +526,16 @@ Every change follows these rules.
    the merge base to the head: the net runtime and test lines, by subsystem. It
    names separately the lines the change adds to code the plan retires, and the
    bead that retires each. It carries no budget, no prediction and no stored
-   history. The PR's CI test run time can sit beside it as information.
-   `tools/measure.sh --pr` computes it, and gc-toolkit's CI
-   ([pr-size.yml](../.github/workflows/pr-size.yml)) posts it on each PR as one
-   comment that it rewrites on each push and each change of the PR's base
-   branch.
+   history. Below it the same comment shows what the PR does to the suite's
+   time, as information that fails no check and holds no merge: each test
+   check's summed test-seconds beside main's latest completed run, each test
+   job's time beside its `timeout-minutes`, and the test files the PR adds,
+   removes or moves by more than the spread between runs
+   ([suite-time.sh](../.github/workflows/suite-time.sh)).
+   `tools/measure.sh --pr` computes the size, and gc-toolkit's CI
+   ([pr-size.yml](../.github/workflows/pr-size.yml)) posts both on each PR as
+   one comment that it rewrites on each push, each change of the PR's base
+   branch and each end of the PR's tests run.
 
 ## Keeping it true
 
