@@ -50,28 +50,31 @@ const (
 const prRecordLong = `Records the pull request a bead owns as pending until its merge is verified,
 in Gas Town's two writes: first the marker pr_reconcile_pending and the PR the
 refinery may reuse, then the whole record with the bead blocked and assigned
-to the refinery, merge_result=pull_request_pending, the PR's URL, number and
-repository, the head the refinery validated and the target.
+to nobody, since the refinery's work on it ends there,
+merge_result=pull_request_pending, the PR's URL, number and repository, the
+head the refinery validated and the target.
 
 It takes the store's record lock across both writes, so no run of the landing
 order reads the record between them, and it reads the bead under the lock
 first. It writes only on a bead that is not closed and is assigned to the
 refinery --refinery names, each write guarded on the status and the assignee
-it read, so it writes nothing on a bead that a close or a release reached
-first. The PR must be in the rig's own repository, the one the origin of the
+it read, so it writes nothing on a bead that a close or another assignment
+reached first. The PR must be in the rig's own repository, the one the origin of the
 clone it runs in names ($GC_RIG_ROOT, else the working directory).
 
 exit: 0 recorded
       1 usage, or a PR outside the rig's own repository
       2 a read, the lock or a write did not answer, so no record landed; the
         message says whether the marker had
-      3 refused: the bead is closed or not the refinery's, so nothing was
-        written, or it moved between the two writes, so only the marker landed`
+      3 refused: the bead is closed or not assigned to the refinery, so
+        nothing was written, or it moved between the two writes, so only the
+        marker landed`
 
 const prReconcileLong = `One run of the landing order over the store's pending records. It takes up to
 --count of the beads that carry the marker pr_reconcile_pending, and of the
-refinery's beads on the record that carry a ruling's disposition, the least
-recently checked first, and reads each record under the store's record lock,
+beads on the record that carry a ruling's disposition and are assigned to
+nobody or to the refinery, the least recently checked first, and reads each
+record under the store's record lock,
 from its read of the record to its last write of it, waiting while another
 writer of the record holds it. It reads each PR from GitHub by its number:
 
@@ -84,8 +87,9 @@ writer of the record holds it. It reads each PR from GitHub by its number:
     result passed at that head and target, or an ask that nothing holds is open
     on the bead (gctk review ask), and the run pours it below; the next run
     reads it again either way
-  - open at another head: back to the refinery, open, as
-    pull_request_head_changed
+  - open at another head: open, as pull_request_head_changed, and handed to
+    the refinery in the write that assigns it the bead, unless something
+    the order owes holds the head (below)
   - merged at the validated head, with the merge commit on the freshly fetched
     target: mr_merged, and the bead closes
   - closed unmerged, merged at another head, or no longer the PR the record
@@ -108,12 +112,14 @@ back to the refinery included, since the withdrawal holds the bead from the
 refinery until it is carried out.
 
 A changed head goes to the refinery once no withdrawal is open on the bead and
-no review run is attached to it, and the record keeps its marker until then,
-so a later run reads the run's end. Gas City gives the refinery a turn for the
-bead only once nothing holds it, so when only conversations and asks hold it,
-the run wakes the refinery and nudges it (gc session wake, then gc session
-nudge) before it clears the marker. A wake that does not land keeps the
-marker, and the next run wakes the refinery again.
+no review run is attached to it, in the write that assigns the bead to the
+refinery and clears the marker. Until then the bead stays assigned to nobody
+and keeps its marker, so a later run reads the run's end, and no run attached
+to the bead is ever one whose input bead the refinery is assigned. Gas City
+gives the refinery a turn for the bead only once nothing holds it, so when
+only conversations and asks hold it, the run wakes the refinery and nudges it
+(gc session wake, then gc session nudge) before that write. A wake that does
+not land keeps the marker, and the next run wakes the refinery again.
 
 A PR a ruling retired is read apart from these: its bead carries the
 disposition pr-dispose.sh records before it closes the PR, under the record
@@ -169,10 +175,13 @@ one that does not run is asked for again at a later landing.
 
 It acts only on a bead it reads under the lock as carrying the marker, or as
 an open or blocked bead on the record that carries a ruling's disposition,
-with or without the marker, and, unless the bead is closed, still assigned to
-the refinery --refinery names, with each write guarded on the status and
-assignee it read. A bead a release took from the refinery has its marker
-cleared and its PR named in a note, and nothing else written. It starts no
+with or without the marker, with each write guarded on the status and
+assignee it read. A bead's assignee says who works it now: nobody while its
+PR waits, and the refinery --refinery names while it validates a head. A bead
+assigned to anyone else is theirs: the run writes nothing to it, requests no
+merge and pours no review run, and works it again once the assignee is gone.
+A bead blocked on a pending record that the refinery is still assigned is
+assigned to nobody in one write, and the next run works it. It starts no
 record past --budget. Each record's outcome prints on a line of its own, as
 <bead> <action>: <detail>.
 
@@ -469,8 +478,9 @@ func (r runs) Pour(formula string, vars map[string]string) (pr.Poured, error) {
 
 // dispositions closes a bead whose PR a ruling retired through the runtime
 // adapter, which runs the pack's bead-rehome.sh from the scripts directory
-// GCTK_SCRIPTS_DIR names, as the refinery the bead is assigned to, since the
-// script closes an assigned bead only as its assignee. It names the run's
+// GCTK_SCRIPTS_DIR names, as the refinery, since the script closes an assigned
+// bead only as its assignee, and the refinery is the one agent the order
+// works an assigned bead for. It names the run's
 // judgment of the bead, so the script closes it only while the bead still has
 // the status and assignee the run read under the record lock and still records
 // the ruling the run read there. The script's exit 4 (the bead is not as the

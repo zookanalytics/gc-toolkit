@@ -23,10 +23,11 @@ import (
 // (specs/tk-1tfzr71.66/design.md, section 6).
 const (
 	// Pending: the PR is open at the head the refinery validated, and the bead
-	// waits on its merge, blocked and assigned to the refinery.
+	// waits on its merge, blocked and assigned to nobody.
 	Pending = "pull_request_pending"
 	// HeadChanged: the PR is open at a head the refinery has not validated. The
-	// bead is open and assigned to the refinery, which validates the new head.
+	// bead is open, and the landing order assigns it to the refinery, which
+	// validates the new head, once nothing the order owes holds the head.
 	HeadChanged = "pull_request_head_changed"
 	// Merged: the PR merged the validated head, and the merge commit is on the
 	// target. The bead is closed.
@@ -135,11 +136,13 @@ type Publication struct {
 }
 
 // Publish is the publication's second write, the whole record in one write: the
-// bead blocked, merge_result pending, the PR's identity, the validated head and
-// the target, with the marker set again in case a recovery cleared it between
-// the two writes, and the evidence of an earlier round cleared.
+// bead blocked and assigned to nobody, since the refinery's work on it ends
+// here, merge_result pending, the PR's identity, the validated head and the
+// target, with the marker set again in case a recovery cleared it between the
+// two writes, and the evidence of an earlier round cleared.
 func Publish(w *ledger.Write, p Publication, now string) {
 	w.Status("blocked")
+	w.Assignee("")
 	pendingKey.Set(w, "true")
 	mergeResultKey.Set(w, Pending)
 	prURLKey.Set(w, p.URL)
@@ -157,8 +160,11 @@ func Publish(w *ledger.Write, p Publication, now string) {
 }
 
 // Block finishes a publication whose second write landed and whose bead is
-// still open: the bead moves to blocked.
-func Block(w *ledger.Write) { w.Status("blocked") }
+// still open: the bead moves to blocked and to nobody, as Publish leaves it.
+func Block(w *ledger.Write) {
+	w.Status("blocked")
+	w.Assignee("")
+}
 
 // Checked records a read of the PR that leaves the record standing: the PR's
 // state and when it was read, with any earlier error cleared.
@@ -179,14 +185,16 @@ func Retry(w *ledger.Write, state, reason, now string) {
 	reconcileErrorKey.Set(w, reason)
 }
 
-// Requeue sends a PR open at a head the refinery has not validated back to the
-// refinery: the bead open, merge_result head changed, the head found, and why,
-// keeping the validated head. The marker goes, as in Gas Town's requeue
-// (requeue_changed_open_head), unless kept: the landing order keeps it while a
-// withdrawal still open on the bead or a review run attached to it holds the
-// head from the refinery, and until it has woken a refinery that nothing else
-// tells of the head, and then clears it (Settle).
-func Requeue(w *ledger.Write, prURL, observed, reason, now string, keep bool) {
+// Requeue records a PR open at a head the refinery has not validated: the bead
+// open, merge_result head changed, the head found, and why, keeping the
+// validated head. With to naming the refinery, the same write hands the head to
+// it: the bead assigned to the refinery and the marker gone, as in Gas Town's
+// requeue (requeue_changed_open_head). With to empty, the bead stays assigned
+// to nobody and keeps its marker: the landing order keeps it while a withdrawal
+// still open on the bead or a review run attached to it holds the head from the
+// refinery, and until it has woken a refinery that nothing else tells of the
+// head, and then hands the head over (Settle).
+func Requeue(w *ledger.Write, prURL, observed, reason, now, to string) {
 	w.Status("open")
 	mergeResultKey.Set(w, HeadChanged)
 	existingPRKey.Set(w, prURL)
@@ -197,7 +205,8 @@ func Requeue(w *ledger.Write, prURL, observed, reason, now string, keep bool) {
 	for _, k := range []ledger.Key[string]{blockedReasonKey, reconcileErrorKey} {
 		k.Clear(w)
 	}
-	if !keep {
+	if to != "" {
+		w.Assignee(to)
 		pendingKey.Clear(w)
 	}
 }
@@ -215,21 +224,23 @@ func Waiting(w *ledger.Write, now string) {
 	reconcileErrorKey.Clear(w)
 }
 
-// Settle clears the marker of an open bead whose changed head the landing order
-// has handed to the refinery, the write Gas Town's recovery of an interrupted
-// requeue makes.
-func Settle(w *ledger.Write) {
+// Settle hands the changed head of an open bead to the refinery: the bead
+// assigned to it, and the marker cleared, the write Gas Town's recovery of an
+// interrupted requeue makes.
+func Settle(w *ledger.Write, refinery string) {
+	w.Assignee(refinery)
 	for _, k := range []ledger.Key[string]{pendingKey, blockedReasonKey, reconcileErrorKey} {
 		k.Clear(w)
 	}
 }
 
 // Revalidate sends a half-written record back to the refinery for its full
-// validation: merge_result incomplete, why, and the partial evidence and the
-// marker cleared, keeping the PR the refinery may reuse so it opens no second
-// one.
-func Revalidate(w *ledger.Write, reason, now string) {
+// validation: the bead assigned to the refinery, merge_result incomplete, why,
+// and the partial evidence and the marker cleared, keeping the PR the refinery
+// may reuse so it opens no second one.
+func Revalidate(w *ledger.Write, reason, now, refinery string) {
 	w.Status("open")
+	w.Assignee(refinery)
 	mergeResultKey.Set(w, Incomplete)
 	prStateKey.Set(w, "revalidation_required")
 	checkedAtKey.Set(w, now)
@@ -286,14 +297,9 @@ func Land(w *ledger.Write, l Landing, now, note string) {
 }
 
 // Unmark clears the marker and nothing else, on a bead whose record needs no
-// further run: one a release took from the refinery, which keeps its state, and
-// one closed on a verified merge. note, when given, names the PR on the bead.
-func Unmark(w *ledger.Write, note string) {
-	pendingKey.Clear(w)
-	if note != "" {
-		w.Note(note)
-	}
-}
+// further run: one whose exception's human gate has filed, and one closed on a
+// verified merge.
+func Unmark(w *ledger.Write) { pendingKey.Clear(w) }
 
 // Valid reports whether p names a PR the record can hold: a URL on a host,
 // whose repository and number it names, a head that is a full object name, and

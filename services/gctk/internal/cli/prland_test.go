@@ -214,9 +214,10 @@ func TestTheRefinerysWakeWakesThenNudgesThroughTheRuntime(t *testing.T) {
 
 // The landing order closes a bead whose PR a ruling retired through the
 // runtime adapter: the pack's bead-rehome.sh, from GCTK_SCRIPTS_DIR, gets the
-// bead, the disposition, the note and the run's judgment of the bead, and runs
-// as the refinery the bead is assigned to. Its exits 4 and 5 are a close held
-// for now, and any other failure is an error carrying the script's own words.
+// bead, the disposition, the note and the run's judgment of the bead, a waiting
+// bead's empty assignee among it, and runs as the refinery. Its exits 4 and 5
+// are a close held for now, and any other failure is an error carrying the
+// script's own words.
 func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing.T) {
 	scripts := t.TempDir()
 	log := filepath.Join(scripts, "calls")
@@ -231,13 +232,13 @@ func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "rig/gc-toolkit.refinery", Note: "PR #7 closed",
+	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "", Note: "PR #7 closed",
 		Disposition: pr.Disposition{Kind: "not-needed", Successor: "tk-conv", Store: "rig:rig"}}
 	if err := l.Dispositions.Close(x); err != nil {
 		t.Fatal(err)
 	}
 	want := "actor=rig/gc-toolkit.refinery\n--origin\ntk-1\n--successor\ntk-conv\n--kind\nnot-needed\n--note\nPR #7 closed\n" +
-		"--successor-store\nrig:rig\n--if-status\nblocked\n--if-assignee\nrig/gc-toolkit.refinery\n--if-ruled\n"
+		"--successor-store\nrig:rig\n--if-status\nblocked\n--if-assignee\n\n--if-ruled\n"
 	if raw, _ := os.ReadFile(log); string(raw) != want {
 		t.Fatalf("bead-rehome.sh got %q, want %q", raw, want)
 	}
