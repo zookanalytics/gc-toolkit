@@ -1270,31 +1270,23 @@ func (u *run) dispose(x Disposal, out RunOutcome) RunOutcome {
 }
 
 // decideHeadChanged decides a PR the saved read finds open at a head other than
-// the one the refinery validated. A saved head the validated one descends from
-// is a read made before the refinery pushed and recorded that head, or a
-// branch a person reset to that ancestor, so the act fetches the PR's branch
-// and reads its tip. A tip that contains the validated head says the push
-// landed and the read is older than it, which the PR watch reads again, since
-// the read is not current for the bead: nothing is sent back on it, and the
-// record's withdrawals are carried out alone. A tip that does not contain it
-// is a branch reset or rewritten off the validated head, which goes back as
-// any other head does, and a fetch or a read that does not answer sends
-// nothing back, so the next run decides again. Any other head goes back to the
-// refinery after the withdrawals (sendBack).
+// the one the refinery validated. The read can be older than the refinery's
+// record, since the refinery pushes a head before it records it and validates
+// whatever its preparation fetched, a branch a person rewrote included, so the
+// saved head need not be on the validated head's history. So the act fetches
+// the PR's branch and reads its tip before it sends anything back. A tip at the
+// saved head confirms the read, and the bead goes back to the refinery at it. A
+// tip that contains the validated head says the read is older than the record,
+// which the PR watch reads again, since the read is not current for the bead:
+// nothing is sent back on it, and the record's withdrawals are carried out
+// alone. Any other tip is a branch moved off the validated head since the read,
+// which goes back to the refinery at that tip. A fetch or a read that does not
+// answer sends nothing back, so the next run decides again. A bead goes back
+// after its withdrawals (sendBack).
 func (u *run) decideHeadChanged(s state, saved *SavedRead) plan {
 	r, seen := s.rec, saved.PR.Head
-	older, err := u.holds(r.Head, seen)
-	if err != nil {
-		return none(s, ActRetry, fmt.Sprintf("whether the validated head %s descends from %s, the head the saved read "+
-			"found, did not read, so nothing is sent back; the next run decides again: %v", r.Head, seen, err))
-	}
-	if !older {
-		return u.withCarry(s, saved, doing(func(ctx context.Context, c carriedOut) RunOutcome {
-			return u.sendBack(ctx, s, seen, "", c)
-		}))
-	}
 	return u.withCarry(s, saved, doing(func(ctx context.Context, c carriedOut) RunOutcome {
-		at := fmt.Sprintf("the saved read is at %s, a head the validated %s descends from", seen, r.Head)
+		at := fmt.Sprintf("the saved read is at %s, not at the validated %s", seen, r.Head)
 		retry := func(why string) RunOutcome {
 			return RunOutcome{Bead: s.id, Action: ActRetry,
 				Detail: withNote(at+", and "+why+", so nothing is sent back; the next run decides again", c.note)}
@@ -1306,12 +1298,15 @@ func (u *run) decideHeadChanged(s state, saved *SavedRead) plan {
 		if err != nil {
 			return retry("the branch's tip did not read: " + err.Error())
 		}
+		if tip == seen {
+			return u.sendBack(ctx, s, seen, fmt.Sprintf("origin/%s is at %s", s.branch, tip), c)
+		}
 		landed, err := u.holds(tip, r.Head)
 		if err != nil {
 			return retry(fmt.Sprintf("whether origin/%s at %s contains the validated head did not read: %v", s.branch, tip, err))
 		}
 		if !landed {
-			return u.sendBack(ctx, s, seen, fmt.Sprintf("origin/%s is at %s, which does not contain the validated head", s.branch, tip), c)
+			return u.sendBack(ctx, s, tip, fmt.Sprintf("origin/%s is at %s, which does not contain the validated head", s.branch, tip), c)
 		}
 		action := ActChecked
 		if c.failed {

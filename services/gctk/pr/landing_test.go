@@ -47,8 +47,10 @@ const (
 // when fetchErr is set, runs onFetch first when it is set, or blocks until its
 // context ends when fetchBlocks is set, the branches each fetch named, and the
 // commits on the target once a fetch has run. Its
-// default branch is def, main when that is empty, and its tip once a fetch has
-// run is tip, else the merge commit. defErr and tipErr fail their reads.
+// default branch is def, main when that is empty, and a branch's tip once a
+// fetch has run is tip, else, for the PR's branch, the head GitHub holds for the
+// PR, prHead, as a remote's branch is its PR's head, and the merge commit
+// otherwise. defErr and tipErr fail their reads.
 // descends names, for each commit, the commits it descends from, which
 // Contains reads, and containsErr fails it.
 type checkout struct {
@@ -61,6 +63,7 @@ type checkout struct {
 	branches    []string
 	reachable   map[string]bool
 	def, tip    string
+	prHead      func() string
 	defErr      error
 	tipErr      error
 	descends    map[string][]string
@@ -81,16 +84,18 @@ func (c *checkout) DefaultBranch() (string, error) {
 	return c.def, nil
 }
 
-func (c *checkout) Tip(branch string) (string, error) {
+func (c *checkout) Tip(name string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch {
 	case c.tipErr != nil:
 		return "", c.tipErr
 	case !c.fetched:
-		return "", errors.New("origin/" + branch + " was never fetched")
+		return "", errors.New("origin/" + name + " was never fetched")
 	case c.tip != "":
 		return c.tip, nil
+	case name == branch && c.prHead != nil:
+		return c.prHead(), nil
 	}
 	return merged, nil
 }
@@ -261,7 +266,8 @@ func newLand(t *testing.T) *land {
 	} {
 		w.md[k] = v
 	}
-	co := &checkout{origin: origin, reachable: map[string]bool{merged: true}, descends: map[string][]string{}}
+	co := &checkout{origin: origin, reachable: map[string]bool{merged: true}, descends: map[string][]string{},
+		prHead: func() string { return w.pr.Facts.HeadRefOid }}
 	g := &gates{}
 	d := &land{world: w, co: co, gates: g, clock: time.Date(2026, 11, 12, 8, 0, 0, 0, time.UTC)}
 	dir := t.TempDir()
@@ -644,6 +650,65 @@ func TestASavedReadOlderThanTheValidatedHeadSendsNothingBack(t *testing.T) {
 	}
 }
 
+// A person rewrites the PR's branch off the head the watch last read, and the
+// refinery's preparation fetches the rewritten head, validates it and records
+// it before the watch reads the PR again. The saved head is on no line of the
+// validated head's history, so only the branch tells the two apart: its tip is
+// the validated head, so nothing is sent back on the read, and once the watch
+// reads the PR again, the record stands at its head.
+func TestAValidatedRewrittenHeadIsNotSentBackOnTheReadFromBeforeIt(t *testing.T) {
+	d := newLand(t)
+	d.refresh(t)
+	d.edit(t, func(b *fake.Bead) { b.Status = "open" })
+	d.pr.Facts.HeadRefOid = rewrite
+	if err := d.l.Record(bead, record.Publication{URL: prURL, Number: 7, Repo: "acme/widgets", Head: rewrite,
+		Target: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	o := d.run(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "read before the refinery recorded its head") {
+		t.Fatalf("the read from before the rewrite's outcome says %q", o.Detail)
+	}
+	if ws := d.runWrites(); len(ws) != 0 {
+		t.Fatalf("a read from before the validated rewrite sent the head back: %+v", ws)
+	}
+	o = d.once(t)
+	if o.Action == pr.ActRequeued || d.row(t).Metadata["merge_result"] != record.Pending {
+		t.Fatalf("once the watch read the PR at the validated head, the run did %+v", o)
+	}
+}
+
+// A branch that moved since the watch's read to a tip off the validated head
+// goes back to the refinery at that tip, the head the branch holds, and not at
+// the older head the read saved.
+func TestABranchMovedOffTheValidatedHeadSinceTheReadIsRequeuedAtItsTip(t *testing.T) {
+	d := newLand(t)
+	d.refresh(t)
+	d.co.descends[other] = []string{head}
+	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_head_sha"] = other })
+	d.pr.Facts.HeadRefOid = rewrite
+	o := d.run(t)
+	is(t, o, pr.ActRequeued)
+	if !strings.Contains(o.Detail, "origin/"+branch+" is at "+rewrite) {
+		t.Fatalf("the requeue's outcome %q does not name the branch's tip", o.Detail)
+	}
+	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "observed_pr_head_sha": rewrite,
+		"pr_head_sha": other})
+}
+
+// A push onto the PR's branch after the refinery validated its head, which the
+// watch has read, goes back to the refinery at the pushed head, though that
+// head contains the validated one.
+func TestAPushOntoTheValidatedHeadIsRequeuedAtThePushedHead(t *testing.T) {
+	d := newLand(t)
+	d.co.descends[later] = []string{head}
+	d.pr.Facts.HeadRefOid = later
+	is(t, d.once(t), pr.ActRequeued)
+	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "observed_pr_head_sha": later,
+		"pr_head_sha": head})
+}
+
 // A person resets the PR's branch to a head the validated one descends from,
 // and the watch saves its read there. The act fetches the branch and finds a
 // tip that does not contain the validated head, so the bead goes back to the
@@ -671,10 +736,10 @@ func TestABranchResetToAnAncestorOfTheValidatedHeadIsRequeued(t *testing.T) {
 	readsNoGitHub(t, d)
 }
 
-// While the saved read is at a head the validated one descends from, a fetch
-// of the PR's branch that fails sends nothing back, and neither does a read of
-// its tip or of whether that tip contains the validated head that fails. The
-// next run decides again.
+// While the saved read is at another head than the validated one, a fetch of
+// the PR's branch that fails sends nothing back, and neither does a read of its
+// tip, or of whether a tip the saved read does not show contains the validated
+// head, that fails. The next run decides again.
 func TestAFailedReadOfTheBranchSendsNothingBack(t *testing.T) {
 	for name, fail := range map[string]func(*checkout){
 		"fetch": func(c *checkout) { c.fetchErr = errors.New("git fetch: the remote hung up") },
@@ -691,7 +756,7 @@ func TestAFailedReadOfTheBranchSendsNothingBack(t *testing.T) {
 			d := newLand(t)
 			d.refresh(t)
 			d.co.descends[other] = []string{head}
-			d.co.tip = head
+			d.co.tip = rewrite
 			fail(d.co)
 			d.edit(t, func(b *fake.Bead) { b.Metadata["pr_head_sha"] = other })
 			o := d.run(t)

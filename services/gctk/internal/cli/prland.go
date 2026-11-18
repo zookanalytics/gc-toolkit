@@ -88,12 +88,12 @@ on its bead, reading no GitHub to decide:
     ask that nothing holds is open on the bead (gctk review ask), and the run
     pours it below
   - open at another head: back to the refinery, open, as
-    pull_request_head_changed. When the head the refinery validated descends
-    from the saved one in the clone's history, the act fetches the PR's
-    branch first: a tip that contains the validated head says the read was
-    made before the refinery recorded its head, so nothing is sent back until
-    the PR watch reads the PR again, and a fetch or a read that fails sends
-    nothing back until the next run
+    pull_request_head_changed. The act fetches the PR's branch first. A tip
+    at the saved head goes back at it. A tip that contains the validated
+    head in the clone's history says the read was made before the refinery
+    recorded its head, so nothing is sent back until the PR watch reads the
+    PR again. Any other tip goes back as the head the branch holds, and a
+    fetch or a read that fails sends nothing back until the next run
   - merged at the validated head, with the merge commit on the freshly fetched
     target: mr_merged, and the bead closes
   - closed unmerged, merged at another head, or no longer the PR the record
