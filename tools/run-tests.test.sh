@@ -31,6 +31,10 @@
 #   - --retry N bounds the serial attempts;
 #   - the serial run's log, not the parallel one, is what the failure dump shows;
 #   - --retry rejects a non-integer;
+#   - --seconds FILE empties the file, then gets one line per run of the
+#     parallel wave, quiet or not, naming the run as its report line does with
+#     its whole seconds and its status, and no line for a serial re-run; a FILE
+#     that cannot be written, or a missing one, is a usage error;
 #   - every file commits and tags with signing off, under a git config that
 #     signs both with a signer that always fails, and a git config entry the
 #     caller exported still reaches it;
@@ -415,6 +419,26 @@ has "$OUT" "declares a malformed part name 'bad/name'" "…and named"
 run "$FIX/dupparts.test.sh"
 eq "$RC" 2 "a part declared twice is refused"
 has "$OUT" "declares part 'one' twice" "…and named"
+
+echo "── seconds: --seconds keeps one line per run of the parallel wave ──"
+printf '#!/usr/bin/env bash\nsleep 1\n' > "$FIX/nap.test.sh"
+SEC="$TMP/seconds.tsv"
+printf 'stale\n' > "$SEC"
+reset_state
+OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 4 -t 30 -q --seconds "$SEC" \
+  "$FIX/pass.test.sh" "$FIX/afail.test.sh" "$FIX/parts.test.sh" "$FIX/nap.test.sh" 2>&1)"; RC=$?
+eq "$RC" 1 "the run exits as it would without --seconds"
+eq "$(cut -f1,3 "$SEC" | sort | tr '\t\n' '| ')" \
+  "$FIX/afail.test.sh|FAIL[1] $FIX/nap.test.sh|PASS $FIX/parts.test.sh[one]|PASS $FIX/parts.test.sh[three]|PASS $FIX/parts.test.sh[two]|PASS $FIX/pass.test.sh|PASS " \
+  "each run of the wave has one line with its report name and status, under -q too, and the serial re-run adds none"
+eq "$(cut -f2 "$SEC" | grep -cvE '^[0-9]+$')" 0 "…and every line's seconds are a whole number"
+eq "$(awk -F'\t' '$1 ~ /nap/ { print ($2 >= 1) }' "$SEC")" 1 "…which is the run's wall time"
+run --seconds "$TMP/no-such-dir/seconds.tsv" "$FIX/pass.test.sh"
+eq "$RC" 2 "a --seconds file that cannot be written is a usage error"
+has "$OUT" "cannot write the --seconds file '$TMP/no-such-dir/seconds.tsv'" "…named"
+hasnt "$OUT" "1 passed" "…and nothing runs"
+run "$FIX/pass.test.sh" --seconds
+eq "$RC" 2 "--seconds with no file is a usage error"
 
 echo "── 8. --retry rejects a non-integer ──"
 run --retry abc "$FIX/pass.test.sh"
