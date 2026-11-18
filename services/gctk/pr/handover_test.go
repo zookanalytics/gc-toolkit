@@ -252,8 +252,9 @@ func TestWhatElseHoldsTheBeadDecidesTheWake(t *testing.T) {
 	})
 }
 
-// A wake that does not land keeps the marker and says why on the record, and
-// the next run wakes the refinery again and clears both.
+// A wake that does not land keeps the marker and says why on the record, on a
+// bead already assigned to the refinery, and the next run wakes the refinery
+// again and clears both.
 func TestAWakeThatDoesNotLandIsMadeAgainByTheNextRun(t *testing.T) {
 	d := newHanding(t)
 	d.conversation(t, "open", "human", "")
@@ -267,13 +268,70 @@ func TestAWakeThatDoesNotLandIsMadeAgainByTheNextRun(t *testing.T) {
 	if !strings.Contains(b.Metadata["pr_reconcile_error"], "the refinery's wake did not land") {
 		t.Fatalf("the record does not say the wake did not land: %q", b.Metadata["pr_reconcile_error"])
 	}
-	assignedTo(t, d.land, "")
+	assignedTo(t, d.land, boundRefinery)
 	d.wakes.fail(nil)
 	is(t, d.once(t), pr.ActSettled)
 	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>", "pr_reconcile_error": "<absent>"})
 	assignedTo(t, d.land, boundRefinery)
 	if got := d.wakes.woken(); len(got) != 2 {
 		t.Fatalf("the refinery was asked to wake %d times, want the failed wake and one more: %q", len(got), got)
+	}
+}
+
+// seeing is a refinery that takes its turn the moment it is woken, before the
+// run's next write: it keeps the bead's row as the store holds it then.
+type seeing struct {
+	d    *handing
+	rows []fake.Bead
+}
+
+func (s *seeing) Wake(string, string) error {
+	b, _ := s.d.store.Row(bead)
+	s.rows = append(s.rows, b)
+	return nil
+}
+
+// The refinery is woken only once the bead is assigned to it, so a refinery
+// that takes its turn the moment the wake reaches it, before the run's last
+// write, lists the bead at its find-work. The marker is still set then, so a
+// run that stops before its last write leaves the next run to wake the
+// refinery again. Both runs that wake it do so: the one that requeues the head
+// and the first one after a review run ends.
+func TestTheRefineryIsWokenOnlyOnceTheBeadIsAssignedToIt(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		action string
+		before func(t *testing.T, d *handing)
+	}{
+		{"in the run that requeues the head", pr.ActRequeued, func(_ *testing.T, d *handing) {
+			d.pr.Facts.HeadRefOid = other
+		}},
+		{"in the first run after a review run ends", pr.ActSettled, func(t *testing.T, d *handing) {
+			is(t, d.once(t), pr.ActPoured)
+			d.store.List(bead, "tk-run1", "tk-conv")
+			d.pr.Facts.HeadRefOid = other
+			is(t, d.once(t), pr.ActRequeued)
+			d.end(t, "tk-run1", "pass", "2026-11-12T09:30:00Z")
+			d.store.List(bead, "tk-conv")
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newHanding(t)
+			d.conversation(t, "open", "human", "")
+			woken := &seeing{d: d}
+			d.l.Wake = woken
+			c.before(t, d)
+			is(t, d.once(t), c.action)
+			if len(woken.rows) != 1 {
+				t.Fatalf("the refinery was woken %d times, want once", len(woken.rows))
+			}
+			if b := woken.rows[0]; b.Status != "open" || b.Assignee != boundRefinery || b.Metadata["pr_reconcile_pending"] != "true" {
+				t.Fatalf("the wake reached the refinery with the bead %s under %q and marker %q, want open under %s and marked",
+					b.Status, b.Assignee, b.Metadata["pr_reconcile_pending"], boundRefinery)
+			}
+			meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "<absent>"})
+			assignedTo(t, d.land, boundRefinery)
+		})
 	}
 }
 

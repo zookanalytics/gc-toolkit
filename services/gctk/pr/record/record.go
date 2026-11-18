@@ -192,8 +192,8 @@ func Retry(w *ledger.Write, state, reason, now string) {
 // requeue (requeue_changed_open_head). With to empty, the bead stays assigned
 // to nobody and keeps its marker: the landing order keeps it while a withdrawal
 // still open on the bead or a review run attached to it holds the head from the
-// refinery, and until it has woken a refinery that nothing else tells of the
-// head, and then hands the head over (Settle).
+// refinery, and until it has assigned the bead to a refinery that nothing else
+// tells of the head and woken it, and then hands the head over (Settle).
 func Requeue(w *ledger.Write, prURL, observed, reason, now, to string) {
 	w.Status("open")
 	mergeResultKey.Set(w, HeadChanged)

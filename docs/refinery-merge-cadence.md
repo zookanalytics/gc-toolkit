@@ -929,9 +929,11 @@ wakes it, and core's `cascade-nudge-on-blocker-close` order nudges it when the
 bead's last blocker closes. A conversation or an ask on the PR holds the bead
 too, and holds only its merge, so the refinery's find-work takes the bead past
 it, but while one is open Gas City gives the refinery no turn for the bead. So
-when only conversations and asks hold the bead, the run wakes the refinery and
-nudges it, with `gc session wake` and `gc session nudge` as a polecat's
-hand-off does, before the write that hands the head over. That is the run that
+when only conversations and asks hold the bead, the run hands the head over in
+two writes with the wake between them. It assigns the bead to the refinery,
+wakes the refinery and nudges it, with `gc session wake` and
+`gc session nudge` as a polecat's hand-off does, and only then clears the
+marker, so the find-work the wake starts lists the bead. That is the run that
 requeues the head when no withdrawal or run holds it, and otherwise the first
 run that reads the record after the review run or the withdrawal ends. The
 order starts a run every five minutes, but each run reads a bounded number of

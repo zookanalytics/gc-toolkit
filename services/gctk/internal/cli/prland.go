@@ -118,9 +118,10 @@ refinery and clears the marker. Until then the bead stays assigned to nobody
 and keeps its marker, so a later run reads the run's end, and no run attached
 to the bead is ever one whose input bead the refinery is assigned. Gas City
 gives the refinery a turn for the bead only once nothing holds it, so when
-only conversations and asks hold it, the run wakes the refinery and nudges it
-(gc session wake, then gc session nudge) before that write. A wake that does
-not land keeps the marker, and the next run wakes the refinery again.
+only conversations and asks hold it, the run assigns the bead to the
+refinery, wakes the refinery and nudges it (gc session wake, then gc session
+nudge), and only then clears the marker. A wake that does not land keeps the
+marker, and the next run wakes the refinery again.
 
 A PR a ruling retired is read apart from these: its bead carries the
 disposition pr-dispose.sh records before it closes the PR, under the record

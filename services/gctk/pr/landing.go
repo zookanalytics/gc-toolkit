@@ -883,9 +883,10 @@ func (u *run) blocked(s state) RunOutcome {
 			}
 			// The requeue keeps the marker, and the bead assigned to nobody,
 			// while a withdrawal or an attached run holds the changed head, and
-			// for the hand-over that wakes the refinery once the requeue lands,
-			// or that reads what holds the bead again when this read fails.
-			// Otherwise its own write hands the head to the refinery.
+			// for the hand-over that assigns the bead to the refinery and wakes
+			// it once the requeue lands, or that reads what holds the bead again
+			// when this read fails. Otherwise its own write hands the head to
+			// the refinery.
 			watched := held || len(s.runs) > 0
 			var holds []hold
 			var unread error

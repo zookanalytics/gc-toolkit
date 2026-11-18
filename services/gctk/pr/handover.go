@@ -30,16 +30,19 @@ import (
 // dependent's assignee only when no other blocker still holds it (its
 // still_held), both at gastownhall/gascity 192fa2d394. So while a merge hold is
 // open, neither gives the refinery a turn, and the run gives it one: when only
-// merge holds hold the bead, it wakes and nudges the refinery before the write
-// that hands the head over. A wake that does not land keeps the marker, so the
-// next run wakes the refinery again.
+// merge holds hold the bead, it assigns the bead to the refinery, then wakes
+// and nudges the refinery, and only then clears the marker. The find-work the
+// wake starts lists the beads the refinery is assigned, so the bead is among
+// them by then. A wake that does not land keeps the marker, so the next run
+// wakes the refinery again.
 
 // handOver hands a changed head that no open withdrawal and no attached review
 // run holds to the refinery, in the write that assigns the bead to it and
-// clears the marker, and when only merge holds hold the bead it wakes and
-// nudges the refinery first (mergeHolds). A read of what holds the bead that
-// fails keeps the marker and records why, for the next run to hand the head
-// over. action and detail are what the run did with the record before the
+// clears the marker. When only merge holds hold the bead (mergeHolds), the
+// bead is assigned to the refinery and the refinery woken and nudged before
+// the marker clears (wakeAndSettle). A read of what holds the bead that fails
+// keeps the marker and records why, for the next run to hand the head over.
+// action and detail are what the run did with the record before the
 // hand-over, which its outcome reports.
 func (u *run) handOver(s state, action, detail string) RunOutcome {
 	holds, err := u.mergeHolds(s)
@@ -49,12 +52,27 @@ func (u *run) handOver(s state, action, detail string) RunOutcome {
 	return u.wakeAndSettle(s, holds, action, detail)
 }
 
-// wakeAndSettle wakes and nudges the refinery when the merge holds holds alone
-// hold the bead s read, then hands its changed head to the refinery (Settle). A
-// wake that does not land keeps the marker and records why, so the next run
-// wakes the refinery again.
+// wakeAndSettle hands the changed head of the bead s read to the refinery
+// (Settle). When the merge holds holds alone hold the bead, it first assigns
+// the bead to the refinery with the marker kept, then wakes and nudges the
+// refinery, so the bead is the refinery's when the wake reaches it. A wake that
+// does not land keeps the marker and records why, so the next run wakes the
+// refinery again.
 func (u *run) wakeAndSettle(s state, holds []hold, action, detail string) RunOutcome {
 	if len(holds) > 0 {
+		if s.assignee != u.Refinery {
+			w := u.Ledger.Write(s.id)
+			w.Assignee(u.Refinery)
+			w.Guard(s.status, s.assignee)
+			switch err := u.Ledger.Commit(w); {
+			case errors.Is(err, ledger.ErrGuard):
+				return RunOutcome{Bead: s.id, Action: ActMoved,
+					Detail: detail + "; the bead moved before it was assigned to the refinery, so the next run reads it as it stands"}
+			case err != nil:
+				return RunOutcome{Bead: s.id, Action: ActFailed, Detail: detail + "; the bead's assignment to the refinery did not land: " + err.Error()}
+			}
+			s.assignee = u.Refinery
+		}
 		if err := u.wakeRefinery(s, holds); err != nil {
 			return u.handOverLater(s, detail, fmt.Sprintf("only %s %s the bead, and the refinery's wake did not land, "+
 				"so the next run wakes it: %v", holdNames(holds), holdVerb(holds), err))
