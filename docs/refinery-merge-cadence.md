@@ -889,31 +889,28 @@ changed head stays assigned to nobody and keeps its marker while one is open,
 and the order still reads it.
 
 **The review run.** A run pours a PR's review run, `mol-pr-review`, with
-`gc formula cook` under the record lock, and names no bead to the cook:
-`gc hook --claim` retires a run attached with `--attach` to a bead the refinery
-holds, at its first claim ([the
-search](../specs/tk-1tfzr71.208/gas-city-search.md)). Its vars are the record's
-PR bead, head, target and branch, and the pools and the binding the refinery's
-address names (`<rig>/<binding>refinery`): `review_target`
+`gc formula cook --attach` onto the bead under the record lock. Its vars are the
+record's PR bead, head, target and branch, and the pools and the binding the
+refinery's address names (`<rig>/<binding>refinery`): `review_target`
 `<rig>/<binding>polecat-codex`, `repair_target` `<rig>/<binding>polecat` and
-`binding_prefix` `<binding>`. The run gives each bead the cook created the
-bead's priority, then attaches the run to the bead by the bead's `blocks` edge
-onto its root. A run whose `gc.var.pr_bead` names the bead and that no edge of
-the bead names, live or ended, as a pour that stopped before its edge landed
-leaves it, gets that edge from the next run before that run decides anything of
-the record, so it holds the bead as an attached run does. A pour whose root the
-bead's store does not hold files a human gate on the bead keyed
-`review-run-outside-store`. While that gate does not file, the bead records the
-run as `review_run_outside_store`, and each run files the gate for it in place
-of a pour. It pours none while a run is attached to the bead, while another
-open bead names the PR's branch, such as a rework child, or while a human gate
-holds it. A conversation on the PR holds its merge and nothing else, so runs
-are poured while one is open, and the evaluator's wait holds the
-merge until it closes. A run that ended without a result is poured again. When
-the last two runs at the validated head both ended without one, counting only
-runs that ended after the bead's last `review-run-failed` gate closed, it files
-a human gate keyed `review-run-failed` instead, naming both runs and how each
-ended ([state-machine.md](state-machine.md#checks)).
+`binding_prefix` `<binding>`. It pours none while a run is attached to the bead,
+while another open bead names the PR's branch, such as a rework child, or while
+a human gate holds it. A conversation on the PR holds its merge and nothing
+else, so runs are poured while one is open, and the evaluator's wait holds the
+merge until it closes. A run that ended without a result is poured again.
+When the last two runs at the validated head both ended without one, counting
+only runs that ended after the bead's last `review-run-failed` gate closed, it
+files a human gate keyed `review-run-failed` instead, naming both runs and how
+each ended ([state-machine.md](state-machine.md#checks)).
+
+**A pour cut short.** Gas City's attach makes two writes, the review run and
+then the bead's `blocks` edge onto its root (`wireFormulaCookGraphV2AttachRoot`,
+gascity `cmd/gc/cmd_formula.go`). A pour that stops between them leaves a
+review run that no edge of the bead names, so the next run of the order finds
+none attached and pours a second at that head. That costs one more review of
+the head, because a review run pushes only under a lease on the head its round
+judged, and Gas City's claim retires the first once the refinery is assigned
+the bead. The fix belongs upstream, in Gas City's attach onto a bead.
 
 **How the refinery hears of a changed head.** A changed head is the refinery's
 to take once no withdrawal is open on the bead and no review run is attached to
@@ -976,13 +973,11 @@ nobody while its PR waits, and the refinery while it validates a head the PR
 moved to. A bead assigned to anyone else is that assignee's while they work
 it. A run does not take it, and a run that reads it assigned after taking it
 writes nothing to it, requests no merge and pours no review run. The PR's
-status names who holds it, and a later run works it once the assignee is
-gone. A blocked, pending bead the refinery is still assigned is one no
-publication of the record leaves, so the run assigns it to nobody in one write
-and the next run works it. What takes a PR off the record is a write that says
-so: the refinery's send-back to the pool clears the marker in the write that
-reopens the bead, and a ruling retires the PR. A human gate on the bead holds
-its merge and its next review run.
+status names who holds it, and a later run works it once the assignee is gone.
+What takes a PR off the record is a write that says so: the refinery's send-back
+to the pool clears the marker in the write that reopens the bead, and a ruling
+retires the PR. A human gate on the bead holds its merge and its next review
+run.
 
 **The seed audit after a landing.** In a rig whose clone carries
 `generated/seed-audit`, a run that closes a bead on a merge into the rig's
