@@ -18,12 +18,13 @@ import (
 // branch, such as the architecture document the arch method finds missing. It
 // lands in a PR of its own, and the PR waits for it. The round files it as a
 // task bead of its own, which takes the PR's target and the priority of the
-// PR's bead and goes to the repair pool at once. It then files an ask on the
-// PR's bead that waits on the fix by the ask's own edge and sends the lane's
-// checks back. The ask holds the PR's merge from the moment it is filed, and
-// while the fix is open it counts for nothing, so it pours no run and fails no
-// iteration. Once the fix closes, the landing order pours a run that takes the
-// ask, and the checks it sends back judge the PR again.
+// PR's bead. It then files an ask on the PR's bead that waits on the fix by the
+// ask's own edge and sends the lane's checks back, and only then sends the fix
+// to the repair pool, so no fix the call sends can land before the ask that
+// waits on it stands. The ask holds the PR's merge from the moment it is filed,
+// and while the fix is open it counts for nothing, so it pours no run and fails
+// no iteration. Once the fix closes, the landing order pours a run that takes
+// the ask, and the checks it sends back judge the PR again.
 //
 // The fix is found by its title and its target among the store's open beads,
 // so a second PR into the same branch whose lane asks for the same fix waits on
@@ -31,12 +32,14 @@ import (
 // its target, so a PR into another branch gets a fix of its own. A call that
 // runs again for the same PR finds first the fix of that title and target that
 // its open ask waits on, closed or not, so a fix that landed before the call ran
-// again is not filed and sent a second time. Each call holds the store's record
-// lock from its first read of the fix to the fix's filing, so two review runs
-// that ask for one fix at once file it once. A found fix that a label holds from
-// every pool, such as the hold:mayor of work that waits for the operator's
-// placement, is sent nowhere, because gc sling reads no hold, and the ask waits
-// on it while the hold stands.
+// again is not filed and sent a second time. A fix another PR's run sent can
+// still land before this PR's ask on it files, when that create fails, and the
+// call that runs again then files the fix anew. Each call holds the store's
+// record lock from its first read of the fix to the fix's filing, so two review
+// runs that ask for one fix at once file it once. A found fix that a label
+// holds from every pool, such as the hold:mayor of work that waits for the
+// operator's placement, is sent nowhere, because gc sling reads no hold, and
+// the ask waits on it while the hold stands.
 
 // AheadRequest is a fix to file ahead of the PR the bead owns: its title, what
 // it must hold, the pool and the formula it is sent on, and the checks the ask
@@ -58,15 +61,16 @@ type Ahead struct {
 }
 
 // SendAhead files the fix req names ahead of the PR the bead owns, or finds the
-// open bead of its title that lands on the PR's target, sends it to req.Pool on
-// req.Formula unless it is on its way already or a label holds it, and files
-// the ask on the bead that waits on it. It finds or files the fix under the
-// record lock of the store whose .beads directory is dir, waiting up to wait
-// for it. It refuses what FileAsk refuses, and a request that sends no check
-// back, before anything is filed. A read that fails, and a lock not taken,
-// return their error. A write that fails returns its error with what landed
-// before it, which the next call finds: the fix through the open ask that waits
-// on it or by its title and target, and the ask by its reason.
+// open bead of its title that lands on the PR's target, files the ask on the
+// bead that waits on it, and then sends it to req.Pool on req.Formula unless it
+// is on its way already or a label holds it. It finds or files the fix under
+// the record lock of the store whose .beads directory is dir, waiting up to
+// wait for it. It refuses what FileAsk refuses, and a request that sends no
+// check back, before anything is filed. A read that fails, and a lock not
+// taken, return their error. A write that fails returns its error with what
+// landed before it, which the next call finds: the fix through the open ask
+// that waits on it, or by its title and target while it is open, and the ask
+// by its reason.
 func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runtime, req AheadRequest, index func(at string) (Index, error)) (Ahead, error) {
 	var out Ahead
 	title, desc := strings.TrimSpace(req.Title), strings.TrimSpace(req.Description)
@@ -92,6 +96,11 @@ func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runt
 	if err != nil {
 		return out, err
 	}
+	reason := fmt.Sprintf("Run %s again once %s lands ahead of this PR: %s", strings.Join(checks, ", "), out.Fix, title)
+	out.Ask, out.AskFiled, err = fileAsk(l, owner, branch, reason, "", checks, []string{out.Fix})
+	if err != nil {
+		return out, fmt.Errorf("%s carries the fix, and the ask that holds the PR for it did not file: %w", out.Fix, err)
+	}
 	if out.FixFiled || (out.Held == "" && unsent(fix)) {
 		res := rt.Sling(gascity.Sling{Target: req.Pool, Bead: out.Fix, Formula: req.Formula})
 		switch {
@@ -105,11 +114,6 @@ func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runt
 			}
 			return out, fmt.Errorf("%s carries the fix, and its sling to %s did not land, so the next call sends it: %s", out.Fix, req.Pool, why)
 		}
-	}
-	reason := fmt.Sprintf("Run %s again once %s lands ahead of this PR: %s", strings.Join(checks, ", "), out.Fix, title)
-	out.Ask, out.AskFiled, err = fileAsk(l, owner, branch, reason, "", checks, []string{out.Fix})
-	if err != nil {
-		return out, fmt.Errorf("%s carries the fix, and the ask that holds the PR for it did not file: %w", out.Fix, err)
 	}
 	return out, nil
 }

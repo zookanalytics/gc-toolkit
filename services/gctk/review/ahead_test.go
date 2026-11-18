@@ -270,21 +270,22 @@ func TestALandedFixOfAnotherBranchIsNotThePRs(t *testing.T) {
 	}
 }
 
-// A sling that does not land leaves the fix filed and no ask, and the next call
-// finds the fix on no way to a pool, slings it and files the ask.
+// A sling that does not land leaves the fix and the ask that waits on it filed,
+// and the next call finds the fix through that ask, on no way to a pool, slings
+// it and finds the ask.
 func TestAFixWhoseSlingFailedIsSentByTheNextCall(t *testing.T) {
 	w := newWorld(t)
 	rt := &gcfake.Runtime{OnSling: func(gascity.Sling) gascity.SlingResult {
 		return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: "no such pool"}}
 	}}
 	got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
-	if err == nil || !strings.Contains(err.Error(), "no such pool") || !got.FixFiled || got.Sent || got.Ask != "" {
-		t.Fatalf("SendAhead = %+v, %v; want the fix filed, the sling's failure, and no ask", got, err)
+	if err == nil || !strings.Contains(err.Error(), "no such pool") || !got.FixFiled || got.Sent || !got.AskFiled {
+		t.Fatalf("SendAhead = %+v, %v; want the fix and its ask filed, and the sling's failure", got, err)
 	}
 	retry := routes(w)
 	again, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, retry, aheadReq(prBead), archIndex(t))
-	if err != nil || again.Fix != got.Fix || again.FixFiled || !again.Sent || !again.AskFiled {
-		t.Fatalf("the next call = %+v, %v; want the fix found and slung, and the ask filed", again, err)
+	if err != nil || again.Fix != got.Fix || again.FixFiled || !again.Sent || again.Ask != got.Ask || again.AskFiled {
+		t.Fatalf("the next call = %+v, %v; want the fix found and slung, and the ask found", again, err)
 	}
 	live := &gcfake.Runtime{OnSling: func(gascity.Sling) gascity.SlingResult {
 		return gascity.SlingResult{Result: gascity.Result{Code: 3}, Live: []string{"tk-wf"}}
@@ -294,6 +295,41 @@ func TestAFixWhoseSlingFailedIsSentByTheNextCall(t *testing.T) {
 	w.store.Put(row)
 	if third, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, live, aheadReq(prBead), archIndex(t)); err != nil || third.Sent {
 		t.Fatalf("a call whose sling finds a live workflow on the fix = %+v, %v; want it standing, sent already", third, err)
+	}
+}
+
+// refusing is a store that lets left creates land and refuses each one after
+// them, as a store can refuse an ask's create after the fix's create landed.
+type refusing struct {
+	gcbd.Store
+	left int
+}
+
+func (s *refusing) Create(title string, args ...string) (string, error) {
+	if s.left == 0 {
+		return "", errors.New("the store refused the create")
+	}
+	s.left--
+	return s.Store.Create(title, args...)
+}
+
+// The ask is filed before the fix is sent, so an ask that does not file leaves
+// the fix sent nowhere, and nothing works the fix before an ask waits on it.
+// The next call finds the fix by its title, files the ask and then sends the
+// fix.
+func TestAFixIsSentOnlyAfterItsAskStands(t *testing.T) {
+	w := newWorld(t)
+	rt := routes(w)
+	got, err := review.SendAhead(ledger.New(&refusing{Store: w.store, left: 1}), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+	if err == nil || !got.FixFiled || got.Sent || got.Ask != "" || len(rt.Slings()) != 0 {
+		t.Fatalf("SendAhead = %+v, %v, slings %+v; want the fix filed, the ask's failure, and nothing slung", got, err, rt.Slings())
+	}
+	again, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+	if err != nil || again.Fix != got.Fix || again.FixFiled || !again.Sent || !again.AskFiled {
+		t.Fatalf("the next call = %+v, %v; want the fix found and slung, and the ask filed", again, err)
+	}
+	if n := len(rt.Slings()); n != 1 {
+		t.Fatalf("the fix was slung %d times; want once", n)
 	}
 }
 

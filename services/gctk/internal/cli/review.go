@@ -567,11 +567,12 @@ is on no way to a pool is slung too, unless a label holds it from every pool,
 such as the hold:mayor of work that waits for the operator's placement: it is
 then sent nowhere, and the ask waits on it while the hold stands.
 
-It then files an ask on the bead that owns the PR, to run each --check again
-once the fix lands. The ask waits on the fix by its own blocks edge, written in
-its create, and holds the PR's merge from the moment it is filed. While the fix
-is open the ask counts for nothing, so no review run is poured for it, and once
-the fix closes the landing order pours a run that takes it.
+Before it slings the fix, it files an ask on the bead that owns the PR, to run
+each --check again once the fix lands, so no fix it sends can land before the
+ask that waits on it stands. The ask waits on the fix by its own blocks edge,
+written in its create, and holds the PR's merge from the moment it is filed.
+While the fix is open the ask counts for nothing, so no review run is poured for
+it, and once the fix closes the landing order pours a run that takes it.
 
 It refuses a bead that owns no PR on the record and a check the index does not
 declare, each before anything is filed. It prints the fix, filed or found, and

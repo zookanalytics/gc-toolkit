@@ -200,8 +200,8 @@ func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 
 // A fix ahead of a PR prints the fix and the ask that holds the PR for it: both
 // filed, the fix slung, at the first call; both found, the fix on its way, at
-// the next; the fix filed and the sling's failure, exit 2, when the sling does
-// not land; and exit 3 with nothing filed for a bead with no PR on the record.
+// the next; both filed and the sling's failure, exit 2, when the sling does not
+// land; and exit 3 with nothing filed for a bead with no PR on the record.
 // Each usage error is exit 1.
 func TestReviewAheadPrintsWhatStands(t *testing.T) {
 	pr := fake.Bead{ID: "tk-pr", Status: "blocked", IssueType: "task", Metadata: map[string]string{
@@ -240,7 +240,7 @@ func TestReviewAheadPrintsWhatStands(t *testing.T) {
 		return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: "no such pool"}}
 	}}
 	code, out, errOut = ahead(s, failing)
-	if code != 2 || out != "fk-1 filed\n" || !strings.Contains(errOut, "no such pool") {
+	if code != 2 || out != "fk-1 filed\nfk-2 filed, waiting on fk-1\n" || !strings.Contains(errOut, "no such pool") {
 		t.Fatalf("a call whose sling fails = %d, %q, %q", code, out, errOut)
 	}
 

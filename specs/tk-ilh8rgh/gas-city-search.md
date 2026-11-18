@@ -73,10 +73,11 @@ document missing.
 
 - `gctk review ahead`, which finds the fix of its title and the PR's target
   that an open ask on the PR already waits on, else the open fix of that title
-  and target, or files it, slings it, and files the ask in one create with its
-  wait. A fix lands only on its target, so a PR into another branch gets a fix
-  of its own. These are bd's create and
-  `gc sling`, and the same create again, run as one call, so it adds no noun
+  and target, or files it, then files the ask in one create with its wait, and
+  only then slings the fix, so no fix it sends can land before the ask that
+  waits on it stands. A fix lands only on its target, so a PR into another
+  branch gets a fix of its own. These are bd's create, the same create again and
+  `gc sling`, run as one call, so it adds no noun
   ([review-arch.md](../../docs/review-arch.md), check 2). It finds or files the
   fix under the store's record lock, the flock `pr/record` takes for the PR
   record's writers, so two review runs that ask for one fix at once file it

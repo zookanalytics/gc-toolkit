@@ -77,14 +77,14 @@ it ahead:
 "$(gc <binding> scripts-dir)/review-run.sh" ahead --title "<the title the lane's rule gives the fix>" --file "<that file>" --check "<the lane's check>"
 ```
 
-The call files the fix with the PR's target and sends it to the repair pool at
-once, or finds the open bead of that title and target that another PR sent
-ahead and adds this PR's case to its notes. It then files an ask on the PR's
-bead that waits on the fix and sends the check back, and prints the fix and the
-ask. The ask holds the PR's merge. Once the fix lands, the next run takes the
-ask, and the check judges the PR's head again. Name the fix and the ask in the
-reason, and the ask in the ruling's `waits`. A shadow run files nothing, so it
-rules the point ahead with no `waits`.
+The call files the fix with the PR's target, or finds the open bead of that
+title and target that another PR sent ahead and adds this PR's case to its
+notes. It then files an ask on the PR's bead that waits on the fix and sends
+the check back, sends a fix it filed to the repair pool at once, and prints the
+fix and the ask. The ask holds the PR's merge. Once the fix lands, the next run
+takes the ask, and the check judges the PR's head again. Name the fix and the
+ask in the reason, and the ask in the ruling's `waits`. A shadow run files
+nothing, so it rules the point ahead with no `waits`.
 
 ## A person's comment
 
