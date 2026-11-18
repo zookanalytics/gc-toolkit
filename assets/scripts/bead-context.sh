@@ -578,15 +578,18 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
     [ -n "$id" ] && STORE_OF[$id]="$DB"
   done < <(printf '%s' "$WALK" | jq -r '.rows | keys[]' 2>/dev/null)
 
-  # A row that reads unrouted may be the bead a live run works, which only its
-  # store's runs tell. A store's runs (the map verb of run-lib.sh) are read
+  # A row that reads unrouted may be the bead a live run works, which only the
+  # runs of the store it was read from tell, since another store can hold a
+  # bead of the same id. A store's runs (the map verb of run-lib.sh) are read
   # once, and only once the store holds such a row whose state reaches a
   # verdict: any walked bead, and the subject only while a walked bead waits on
-  # it. The bead a live run works joins .runs as live, and a row in a store
-  # whose runs did not read joins it as unread.
+  # it. Each such row, on whatever level it was read, is looked up in its own
+  # store's runs alone: it joins .runs as live when they name it as the bead a
+  # live run works, and as unread when they did not read.
   declare -A RUNS_READ=()  # "@<store>" -> ok | failed
+  declare -A LIVE_IN=()    # "@<store>" -> the beads its live runs work, a line each, framed by newlines
   runs_unrouted() {
-    local ids id k got maps=() unread=() unread_json='[]' merged
+    local ids id k got beads live=() unread=() live_json='[]' unread_json='[]' merged
     ids=$(printf '%s' "$WALK" | jq -r --argjson cap "$ARM_CAP" "$ADV$WALK_JQ"'
       .subject as $s | .rows as $rows | (.runs // {}) as $runs
       | any($rows[] | walk_open($rows)[]; . == $s) as $awaited
@@ -597,19 +600,23 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
       k="@${STORE_OF[$id]-}"
       if [ -z "${RUNS_READ[$k]+set}" ]; then
         RUNS_DB="${STORE_OF[$id]-}"
-        if got=$(run_lib map runs_bd) && [ -n "$got" ]; then RUNS_READ[$k]=ok; maps+=("$got")
+        if got=$(run_lib map runs_bd) && [ -n "$got" ] \
+          && beads=$(printf '%s' "$got" | jq -r '.[]? | objects | select(.live == true)
+               | (.bead // "") | tostring | select(. != "")' 2>/dev/null); then
+          RUNS_READ[$k]=ok; LIVE_IN[$k]=$'\n'"$beads"$'\n'
         else RUNS_READ[$k]=failed; fi
       fi
-      [ "${RUNS_READ[$k]}" = ok ] || unread+=("$id")
+      if [ "${RUNS_READ[$k]}" != ok ]; then unread+=("$id")
+      else case "${LIVE_IN[$k]}" in *$'\n'"$id"$'\n'*) live+=("$id") ;; esac
+      fi
     done <<< "$ids"
-    [ "${#maps[@]}" -gt 0 ] || [ "${#unread[@]}" -gt 0 ] || return 0
+    [ "${#live[@]}" -gt 0 ] || [ "${#unread[@]}" -gt 0 ] || return 0
+    [ "${#live[@]}" -eq 0 ] || live_json=$(printf '%s\n' "${live[@]}" | jq -R . | jq -sc .)
     [ "${#unread[@]}" -eq 0 ] || unread_json=$(printf '%s\n' "${unread[@]}" | jq -R . | jq -sc .)
-    merged=$({ printf '%s\n' "$WALK"; [ "${#maps[@]}" -eq 0 ] || printf '%s\n' "${maps[@]}"; } \
-      | jq -sc --argjson unread "$unread_json" '
-        .[0] + {runs: ((.[0].runs // {})
-          + ([.[1:][] | .[]? | objects | select(.live == true and ((.bead // "") | tostring) != "")
-              | {key: (.bead | tostring), value: "live"}] | from_entries)
-          + ([$unread[] | {key: ., value: "unread"}] | from_entries))}' 2>/dev/null)
+    merged=$(printf '%s' "$WALK" | jq -c --argjson live "$live_json" --argjson unread "$unread_json" '
+      .runs = ((.runs // {})
+        + ([$live[] | {key: ., value: "live"}] | from_entries)
+        + ([$unread[] | {key: ., value: "unread"}] | from_entries))' 2>/dev/null)
     [ -n "$merged" ] && WALK="$merged"
   }
 

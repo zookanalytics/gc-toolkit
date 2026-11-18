@@ -414,6 +414,25 @@ bead "$R_TK" tk-r-impl <<'J'
  "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"},
  "dependencies":[{"id":"tk-r-design","dependency_type":"blocks","status":"open","title":"a design in its run"}]}
 J
+# Two stores holding a bead of one id. A live run works gc-toolkit's tk-r-twin,
+# which tk-r-tsub waits on. The city store's tk-r-twin is an idle child of
+# hq-pin, beside a routed child waiting on an orphan in gc-toolkit's store, so
+# the runs of both stores are read.
+blk "$R_TK" tk-r-twin open "$POURED"
+pour "$R_TK" tk-r-twin tk-r-troot in_progress
+blk "$R_TK" tk-r-tsub open '{}' tk-r-twin
+blk "$R_TK" tk-r-lone open '{}'
+bead "$HQ" hq-pin <<'J'
+{"id":"hq-pin","title":"an epic in the city store","status":"open","issue_type":"epic","metadata":{}}
+J
+bead "$HQ" tk-r-twin <<'J'
+{"id":"tk-r-twin","title":"an idle bead of that id","status":"open","issue_type":"task","parent":"hq-pin","metadata":{}}
+J
+bead "$HQ" hq-pmid <<'J'
+{"id":"hq-pmid","title":"a routed bead over the orphan","status":"open","issue_type":"task","parent":"hq-pin",
+ "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},
+ "dependencies":[{"id":"tk-r-lone","dependency_type":"blocks","title":"tk-r-lone"}]}
+J
 
 # tk-epic: the horizon fixture. Its direct children (found by the reverse
 # parent-child listing, never its own edges) cover every advance state: an open
@@ -1024,6 +1043,15 @@ eq "$(grep -cF -- "--db $R_TK/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "$M
 GC_RUN_LIB="$HERE/run-lib.sh" run tk-r-two --frontier --json
 eq "$(grep -cF -- "--db $R_TK/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "--db $R_OR/.beads $MAPREAD" "$FAKE_GC_LOG")" "1 1" \
   "  ... and, with orphans in two stores, each store's runs from that store"
+
+GC_RUN_LIB="$HERE/run-lib.sh" run tk-r-tsub --frontier --json
+eq "$(blkr tk-r-twin)" "advancing - -" "a live run in gc-toolkit's store works its tk-r-twin"
+: > "$FAKE_GC_LOG"
+GC_RUN_LIB="$HERE/run-lib.sh" run hq-pin --db "$HQ/.beads" --horizon --json
+eq "$(kid tk-r-twin) | $(kid hq-pmid)" "stuck tk-r-twin unrouted | stuck tk-r-lone unrouted" \
+  "  ... and leaves the city store's idle tk-r-twin unrouted, though gc-toolkit's runs were read in the same walk"
+eq "$(grep -cF -- "--db $HQ/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "--db $R_TK/.beads $MAPREAD" "$FAKE_GC_LOG")" "1 1" \
+  "  ... once each, each from its own store"
 
 # --- C. Horizon (opt-in) ----------------------------------------------------
 JQF='has("horizon")'                 runj tk-epic;            eq "$JQ" false "horizon is absent by default (opt-in)"
