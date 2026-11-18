@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -17,6 +18,12 @@ import (
 // such as operator-intake.sh's choice of path, so a read that hangs ends as one
 // that did not answer.
 const RosterWait = 15 * time.Second
+
+// RigListWait bounds each read of the city's rig list when GC_RIG_LIST_TIMEOUT
+// sets none. rig-map.sh bounds its read by the same variable and default, which
+// cut off a gc that never answers and so sit far above what the listing takes
+// on a loaded host (docs/bead-store-resolution.md, "Reading the rig map").
+const RigListWait = 120 * time.Second
 
 // Agent is one agent the city's roster names (`gc agent list --json`): the name
 // a route or an assignee matches it by, its own name, the rig directory it
@@ -106,15 +113,22 @@ func (c *City) readNamed() ([]NamedSession, error) {
 	return *shown.Config.NamedSessions, nil
 }
 
-// Rigs reads the rigs `gc rig list --json` names, once per process. A read that
-// fails or answers with no list of rigs is an error.
+// Rigs reads the rigs `gc rig list --json` names, once per process, bounded by
+// GC_RIG_LIST_TIMEOUT's whole seconds, or by RigListWait when it is unset or
+// empty. A read that fails, runs out of time or answers with no list of rigs is
+// an error, and so is a GC_RIG_LIST_TIMEOUT that is not a whole number of
+// seconds above 0, which rig-map.sh refuses too.
 func (c *City) Rigs() ([]Rig, error) {
 	c.rigsOnce.Do(func() { c.rigs, c.rigsErr = c.readRigs() })
 	return c.rigs, c.rigsErr
 }
 
 func (c *City) readRigs() ([]Rig, error) {
-	r := c.run(c.bin, "rig", "list", "--json")
+	limit, err := rigListWait()
+	if err != nil {
+		return nil, err
+	}
+	r := c.runBounded(limit, c.bin, "rig", "list", "--json")
 	if r.Code != 0 {
 		return nil, fmt.Errorf("gc rig list did not read the city's rigs: %s", r.why())
 	}
@@ -128,6 +142,19 @@ func (c *City) readRigs() ([]Rig, error) {
 		return nil, errors.New("gc rig list answered with no list of rigs")
 	}
 	return *list.Rigs, nil
+}
+
+// rigListWait is the bound Rigs reads the list under.
+func rigListWait() (time.Duration, error) {
+	v := os.Getenv("GC_RIG_LIST_TIMEOUT")
+	if v == "" {
+		return RigListWait, nil
+	}
+	n, err := strconv.ParseUint(v, 10, 32)
+	if err != nil || n == 0 {
+		return 0, fmt.Errorf("gc rig list was not run: GC_RIG_LIST_TIMEOUT=%q is not a whole number of seconds above 0", v)
+	}
+	return time.Duration(n) * time.Second, nil
 }
 
 // ShowFormula runs one `gc formula show <name>`, which exits 0 only for a

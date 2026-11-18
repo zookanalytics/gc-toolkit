@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
@@ -73,6 +75,34 @@ func TestReactionDisposeFindsTheSubjectsStoreByItsPrefix(t *testing.T) {
 	}
 	if got := subjectStore(rt, "zz-sub"); got != "" {
 		t.Errorf("a prefix no rig owns named the store %q", got)
+	}
+	rt.RigsErr = errors.New("gc rig list did not answer within 1s")
+	if got := subjectStore(rt, "tk-sub"); got != "" {
+		t.Errorf("a rig list that did not read named the store %q", got)
+	}
+}
+
+// A check whose rig list never answers ends once the list's bound passes and
+// decides nothing, as a check does when the store does not answer.
+func TestReactionCheckEndsWhenTheRigListNeverAnswers(t *testing.T) {
+	bin := t.TempDir()
+	stub := "#!/bin/sh\ncase \"$1 $2\" in \"rig list\") exec sleep 60 ;; esac\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GC_RIG_LIST_TIMEOUT", "1")
+	t.Setenv("GC_RIG", "gc-toolkit")
+	start := time.Now()
+	var out, errb bytes.Buffer
+	if code := Run([]string{"reaction", "check", "tk-sub", "--run", "tk-root"}, "test", &out, &errb); code != 1 {
+		t.Errorf("the check exited %d, want 1: %s", code, errb.String())
+	}
+	if took := time.Since(start); took > 20*time.Second {
+		t.Fatalf("the check ended %s after it started", took)
+	}
+	if !strings.Contains(errb.String(), "decides nothing") {
+		t.Errorf("the check said %q", errb.String())
 	}
 }
 

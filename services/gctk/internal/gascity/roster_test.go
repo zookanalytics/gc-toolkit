@@ -138,6 +138,47 @@ func TestTheNamedSessionsAndTheRigsAreReadOnce(t *testing.T) {
 	}
 }
 
+// A rig list that never answers ends at the bound GC_RIG_LIST_TIMEOUT sets and
+// reads as a list that did not answer. Unset or empty, the bound is RigListWait,
+// and a value that is not a whole number of seconds above 0 is refused before gc
+// is asked.
+func TestARigListThatNeverAnswersEndsAtItsBound(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "gc")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 60 &\nwait\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_RIG_LIST_TIMEOUT", "1")
+	start := time.Now()
+	if rigs, err := (&City{bin: bin}).Rigs(); err == nil || !strings.Contains(err.Error(), "did not answer within 1s") {
+		t.Fatalf("a rig list that never answers read as %+v, %v", rigs, err)
+	}
+	if took := time.Since(start); took > 20*time.Second {
+		t.Fatalf("the read ended %s after it started", took)
+	}
+
+	for v, want := range map[string]time.Duration{"": RigListWait, "45": 45 * time.Second, "007": 7 * time.Second} {
+		t.Setenv("GC_RIG_LIST_TIMEOUT", v)
+		if got, err := rigListWait(); err != nil || got != want {
+			t.Errorf("GC_RIG_LIST_TIMEOUT=%q bounds the read by %s, %v, want %s", v, got, err, want)
+		}
+	}
+	os.Unsetenv("GC_RIG_LIST_TIMEOUT")
+	if got, err := rigListWait(); err != nil || got != RigListWait {
+		t.Errorf("an unset GC_RIG_LIST_TIMEOUT bounds the read by %s, %v, want %s", got, err, RigListWait)
+	}
+	for _, v := range []string{"0", "-5", "+5", " 5", "1.5", "5s", "ten", "99999999999"} {
+		c, log := rosterCity(t, map[string]string{"rig-list": `{"rigs":[]}`})
+		t.Setenv("GC_RIG_LIST_TIMEOUT", v)
+		if rigs, err := c.Rigs(); err == nil || !strings.Contains(err.Error(), "GC_RIG_LIST_TIMEOUT") {
+			t.Errorf("GC_RIG_LIST_TIMEOUT=%q read the rigs as %+v, %v", v, rigs, err)
+		}
+		if raw, _ := os.ReadFile(log); len(raw) != 0 {
+			t.Errorf("GC_RIG_LIST_TIMEOUT=%q still asked gc %q", v, raw)
+		}
+	}
+}
+
 // A sling with no formula routes the bead to the target's own name and files
 // no convoy, a sling with no title passes none, and a nudge and a formula's
 // show each run as one call.
