@@ -145,29 +145,33 @@ resolve_rig() {
 # ask_operator [<line>] — the landing gate and the arm behind it. A line given
 # opens the message's body, after the title.
 ask_operator() {
-  local pre onto message gate
+  local pre onto message gate range push drop
   pre=$(commit_of "$PRE_TIP") \
     || { echo "$PROG: pre_rebase_tip $PRE_TIP is no commit in $RIG_ROOT; nothing was written" >&2; exit 1; }
   onto=$(commit_of "$ONTO_TIP") \
     || { echo "$PROG: rebase_onto_sha $ONTO_TIP is no commit in $RIG_ROOT; nothing was written" >&2; exit 1; }
   commit_of "refs/heads/$BRANCH" >/dev/null \
     || { echo "$PROG: $RIG_ROOT has no branch $BRANCH for the operator to push; nothing was written" >&2; exit 1; }
+  # The operator runs these as written, so each argument is quoted for a shell.
+  range=$(printf 'git -C %q range-diff %q %q %q' "$RIG_ROOT" "$onto" "$pre" "$BRANCH")
+  push=$(printf 'git -C %q push %q origin %q' "$RIG_ROOT" "--force-with-lease=$TARGET:$pre" "$BRANCH:$TARGET")
+  drop=$(printf "%q %q --key %q --ruling '<why>'" "$KIT/stand-down.sh" "$ISSUE" "$KEY")
   message="Land gascity rebase $ISSUE: review its range-diff, then force-push $BRANCH onto $TARGET
 ${1:+$1
 
 }$ISSUE rebased the fork's $TARGET onto upstream at $(short "$onto"), passed its checks, and pushed the result to origin as $BRANCH.
 
 Review it, each fork commit beside its rebased form:
-  git -C $RIG_ROOT range-diff $onto $pre $BRANCH
+  $range
 
 Land it:
-  git -C $RIG_ROOT push --force-with-lease=$TARGET:$pre origin $BRANCH:$TARGET
+  $push
 
 Then clear this gate. $ISSUE waits on it, and clearing it runs the landing check, which closes $ISSUE once $TARGET is the rebased tip and brings the rig checkout's $TARGET along when that is safe.
 
 A refused push means $TARGET moved after the rebase. Clear this gate anyway: the landing check then hands $ISSUE back to the keeper, to redo the rebase or drop it.
 
-To drop the rebase instead, do not clear this gate: run $KIT/stand-down.sh $ISSUE --key $KEY --ruling '<why>'."
+To drop the rebase instead, do not clear this gate: run $drop."
   gate=$("$KIT/human-gate.sh" --subject "$ISSUE" --key "$KEY" --message "$message" | tail -n 1) && [ -n "$gate" ] \
     || { echo "$PROG: human-gate.sh filed no landing gate on $ISSUE" >&2; exit 1; }
   # The push is the operator's alone, so the gate is assigned to them (the

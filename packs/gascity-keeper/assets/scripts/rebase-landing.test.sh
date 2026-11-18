@@ -3,8 +3,9 @@
 # finished gascity rebase and checks what their push did once they answer.
 #
 # The gate's message is the only place the operator reads the push, so the
-# suite runs the range-diff and the push exactly as the message writes them,
-# against real repositories it builds, and then lets finish read the result.
+# suite runs the range-diff, the push and the stand-down exactly as the message
+# writes them, against real repositories it builds under a directory whose name
+# holds a space, and then lets finish read the result.
 # Every outcome of finish is pinned: a landing closes the bead in one write and
 # moves the rig checkout only when that discards nothing, an unrun push asks
 # again, and a main that moved goes back to the keeper without a close. A
@@ -18,7 +19,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KIT_SRC="$(cd "$HERE/../../../../assets/scripts" && pwd)"
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-rebase-landing-test.XXXXXX")"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk rebase-landing-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 TMP="$(cd "$TMP" && pwd -P)"
 
@@ -74,7 +75,11 @@ printf 'await-ruling %s\n' "$*" >> "$LOG"
 [ -f "$STATE/await_fail" ] && exit 1
 exit 0
 SH
-chmod +x "$TMP/bin/gc" "$KIT/rig-root.sh" "$KIT/human-gate.sh" "$KIT/await-ruling.sh" "$SCRIPT"
+cat > "$KIT/stand-down.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'stand-down %s\n' "$*" >> "$LOG"
+SH
+chmod +x "$TMP/bin/gc" "$KIT/rig-root.sh" "$KIT/human-gate.sh" "$KIT/await-ruling.sh" "$KIT/stand-down.sh" "$SCRIPT"
 PATH="$TMP/bin:$PATH"
 
 KEEPER="gascity/gascity-keeper.keeper"
@@ -139,10 +144,10 @@ has "$(calls 'convoy status')" "convoy status gc-convoy1 --json" "(ask) the bead
 has "$(calls human-gate)" "human-gate --subject gc-iss --key rebase-landing --message Land gascity rebase gc-iss: review its range-diff, then force-push $BRANCH onto main" \
   "(ask) one gate on the bead under rebase-landing, its first line the title"
 MSG=$(cat "$STATE/gate-message")
-has "$MSG" "  git -C $TMP/rig range-diff $ONTO $PRE $BRANCH" "(ask) the review is a range-diff of the fork's commits against their rebased forms, by full sha"
-has "$MSG" "  git -C $TMP/rig push --force-with-lease=main:$PRE origin $BRANCH:main" "(ask) the push's lease is pinned to the pre-rebase tip, by full sha"
+has "$MSG" "  git -C $(printf %q "$TMP/rig") range-diff $ONTO $PRE $BRANCH" "(ask) the review is a range-diff of the fork's commits against their rebased forms, by full sha"
+has "$MSG" "  git -C $(printf %q "$TMP/rig") push --force-with-lease=main:$PRE origin $BRANCH:main" "(ask) the push's lease is pinned to the pre-rebase tip, by full sha"
 has "$MSG" "A refused push means main moved after the rebase. Clear this gate anyway" "(ask) the message says what a refused push means and what follows"
-has "$MSG" "$KIT/stand-down.sh gc-iss --key rebase-landing --ruling" "(ask) the message names the stand-down for a rebase the operator drops"
+has "$MSG" "$(printf %q "$KIT/stand-down.sh") gc-iss --key rebase-landing --ruling" "(ask) the message names the stand-down for a rebase the operator drops"
 hasnt "$MSG" "Asked again" "(ask) a first ask says nothing of an earlier gate"
 has "$(calls 'bd update gc-gate1')" "bd update gc-gate1 --assignee human" "(ask) the gate is assigned to the operator, whose push it is"
 has "$(calls await-ruling)" "await-ruling gc-iss --key rebase-landing --formula mol-upstream-gc-rebase-finish" "(ask) the bead is armed to run the landing check once the gate clears"
@@ -152,6 +157,12 @@ hasnt "$(calls 'bd update gc-iss')" "bd update" "(ask) the bead itself is not wr
 # The commands run as the message writes them.
 RANGE=$(printf '%s\n' "$MSG" | sed -n 's/^  \(git -C .* range-diff .*\)$/\1/p')
 PUSH=$(printf '%s\n' "$MSG" | sed -n 's/^  \(git -C .* push .*\)$/\1/p')
+DROP=$(printf '%s\n' "$MSG" | sed -n "s/^To drop the rebase instead, .*: run \(.* --ruling '<why>'\)\.\$/\1/p")
+if eval "$DROP" 2>"$TMP/drop.err"; then
+  eq "$(calls stand-down)" "stand-down gc-iss --key rebase-landing --ruling <why>" "(ask) the stand-down runs as written"
+else
+  bad "(ask) the stand-down runs as written: $(cat "$TMP/drop.err")"
+fi
 if eval "$RANGE" >"$TMP/range.out" 2>&1 && grep -q 'fork commit' "$TMP/range.out"; then
   ok "(ask) the range-diff runs as written and shows the fork commit"
 else
