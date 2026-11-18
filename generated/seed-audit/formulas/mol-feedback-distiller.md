@@ -33,8 +33,9 @@ counts them and the judge reads each one by the rubric's memory section
 beside the observations. file-and-dispatch applies each note's decision.
 `gctk memory` keeps each memory directory's list.
 
-Read-only plus bead-filing: this formula never edits a fragment, prompt, or
-skill — only an operator-merged PR changes agent behavior.
+Bead-filing, plus the memory intake's writes through `gctk memory`: this
+formula never edits a fragment, prompt, or skill — only an operator-merged PR
+changes agent behavior.
 
 Every step closes its own bead through `assets/scripts/claim-close.sh --step
 <step-id>` (resolved into `$SC` at the top of each shell block).

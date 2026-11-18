@@ -175,9 +175,12 @@ What each noun owns:
 - **`memory`:** each memory directory's list, the units the judge kept with the
   bead each waits on or the day it is next due, and the text of each unit it
   removed, under the pack's state directory and keyed by the SHA-256 of the
-  directory's real path. It writes no bead: it reads the distiller's
+  directory's real path. It owns no key on a bead: it reads the distiller's
   `task_kind`, `proposal_bead` and `eng_bead` read-only, and a landing through
-  the pr record's reading face.
+  the pr record's reading face. Its one bead write is the patrol finding
+  `memory-intake.places`, for the places Claude Code names no memory directory
+  for, which it files and clears through the runtime adapter's
+  `patrol-finding.sh`.
 - **`dolt` and `session`:** nothing. A session's title is Gas City's record and
   the agent's own terminal.
 

@@ -34,8 +34,8 @@ one rule for whether a bead is blocked by
 
 ## The boundary
 
-Four parties, one data plane. Lifecycle transitions, dispositions, routes,
-waits, review verdicts and review results are all written on beads.
+Four parties, one data plane. Work's lifecycle transitions, dispositions,
+routes and waits, review verdicts and review results are all written on beads.
 
 ```mermaid
 flowchart LR
@@ -123,6 +123,14 @@ are recorded and where the records live.
   run that replaces that record needs a judgment of its own.
   `--publish-bead` copies a record onto a bead's `rig_check.<check>` key for
   whoever reads that bead. The record, not the copy, answers `gctk rig`.
+
+The memory intake's lists differ too, because a list is the one record of what
+an agent memory note waits on. A list holds the notes of one memory directory
+that the feedback distiller's judge kept, with the bead each waits on or the
+day it comes due again, and beside it the intake keeps the text of each note it
+removed. `gctk memory` is their one writer, and it reads the beads a note waits
+on without writing them
+([feedback-learning.md](feedback-learning.md#the-memory-intake)).
 
 ## How work moves
 
