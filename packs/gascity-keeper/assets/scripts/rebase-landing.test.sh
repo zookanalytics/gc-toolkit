@@ -239,7 +239,9 @@ eq "${MSG%%$'\n\n'To drop the rebase instead, *}" "$(cat "$STATE/gate-message")"
   "(ask) the write that assigns the gate gives it the message it was filed with, then the drop"
 has "$MSG" "  git -C $(printf %q "$TMP/rig") range-diff $ONTO $PRE $BRANCH" "(ask) the review is a range-diff of the fork's commits against their rebased forms, by full sha"
 has "$MSG" "  git -C $(printf %q "$TMP/rig") push --force-with-lease=main:$PRE origin $BRANCH:main" "(ask) the push's lease is pinned to the pre-rebase tip, by full sha"
-has "$MSG" "A refused push means main moved after the rebase. Clear this gate anyway" "(ask) the message says what a refused push means and what follows"
+has "$MSG" "A push git rejects as stale info means main moved after the rebase. Clear this gate anyway" "(ask) the message says what the lease's refusal means and what follows"
+has "$MSG" "A push refused for another reason, such as missing credentials, a network failure or branch protection, leaves main where it was. Fix the cause and push again" \
+  "(ask) …and what any other refusal leaves"
 has "$MSG" "run gc bd update gc-gate1 --if-status open --assignee ''; $(printf %q "$KIT/stand-down.sh") gc-iss --key rebase-landing --ruling '<why>', which takes this gate back from you" \
   "(ask) the drop takes the gate, by its id, back from the operator before the stand-down"
 hasnt "$MSG" "Asked again" "(ask) a first ask says nothing of an earlier gate"
@@ -282,10 +284,10 @@ else
   bad "(ask) the range-diff runs as written: $(cat "$TMP/range.out")"
 fi
 land_other late
-if eval "$PUSH" >/dev/null 2>&1; then
+if eval "$PUSH" >"$TMP/push.out" 2>&1; then
   bad "(ask) the push is refused once main moved after the rebase"
 else
-  ok "(ask) the push is refused once main moved after the rebase"
+  has "$(cat "$TMP/push.out")" "(stale info)" "(ask) the push is refused once main moved after the rebase, as the stale info the message names"
 fi
 git -C "$TMP/other" push -q --force origin "$PRE:main"
 if eval "$PUSH" >/dev/null 2>&1 && [ "$(git --git-dir="$TMP/origin.git" rev-parse main)" = "$NEW" ]; then

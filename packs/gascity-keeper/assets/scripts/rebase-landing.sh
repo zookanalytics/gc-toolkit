@@ -189,7 +189,7 @@ Land it:
 
 Then clear this gate. $ISSUE waits on it, and clearing it runs the landing check, which closes $ISSUE once $TARGET holds the rebased tip and brings the rig checkout's $TARGET along when that is safe.
 
-A refused push means $TARGET moved after the rebase. Clear this gate anyway: the landing check then hands $ISSUE back to the keeper, to redo the rebase or drop it."
+A push git rejects as stale info means $TARGET moved after the rebase. Clear this gate anyway: the landing check then hands $ISSUE back to the keeper, to redo the rebase or drop it. A push refused for another reason, such as missing credentials, a network failure or branch protection, leaves $TARGET where it was. Fix the cause and push again: a landing check that finds $TARGET still at the pre-rebase tip asks again."
   gate=$("$KIT/human-gate.sh" --subject "$ISSUE" --key "$KEY" --message "$message" | tail -n 1) && [ -n "$gate" ] \
     || { echo "$PROG: human-gate.sh filed no landing gate on $ISSUE" >&2; exit 1; }
   # The push is the operator's alone, so the gate is assigned to them (the
