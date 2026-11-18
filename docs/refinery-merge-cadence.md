@@ -871,9 +871,10 @@ not read keeps the signs saved on its bead, the next pass asks again, and the
 pass exits 2.
 
 **The one-PR update.** For each PR whose signs differ from the ones saved on its
-bead, or whose bead holds no read or one not current for it, the pass runs the
-one-PR update, `gctk pr refresh`, starting none more than 90 seconds in. The
-update reads only what moved:
+bead, or whose bead holds no read, one not current for it, or a withdrawal
+filed after its conversation was read, the pass runs the one-PR update,
+`gctk pr refresh`, starting none more than 90 seconds in. The update reads only
+what moved:
 
 | What moved | What it reads |
 |---|---|
@@ -883,6 +884,7 @@ update reads only what moved:
 | the head, or the checks' rollup, total or counts | the PR's own facts with the required check runs at the head, in one request |
 | the comment, review or dismissed count | the conversation, in one request, and the PR's own facts, whose merge state reviews move |
 | nothing, but the bead holds no read or one not current for it | everything |
+| nothing, but a withdrawal open on the bead was filed after its conversation was read | the conversation, since the landing order carries a withdrawal out only from a conversation read after its filing, and a filing moves no sign |
 
 It saves what it read on the bead as `pr_github_read`, in four parts: the PR,
 its checks, its conversation and its labels. Each part keeps the instant its
@@ -924,7 +926,8 @@ a thread's comments and the check runs, these last at the commit the first page
 read. A request of up to 9 PRs costs 1 point and one of 10 costs 2.
 
 The net compares what it read with the saved read, and runs the one-PR update
-over each part that differs, and over each part whose signs moved:
+over each part that differs, and over each part the cheap question's table
+names:
 
 | What differs | What the update reads |
 |---|---|
@@ -1027,8 +1030,10 @@ through the PR watch, and a record that owes no act gets no write.
 **Withdrawals come first.** While the PR is open, a run first carries out each
 open withdrawal on the bead, which a review run's triage files when it rules a
 head material (`gctk pr withdraw`), from the approvals the saved read holds. It
-waits while an approval it would dismiss carries an inline comment the intake
-has not routed. It dismisses each approval that stands on a commit that does
+waits until the saved conversation was read after the withdrawal was filed,
+since a read sent before can lack an approval given since, and the PR watch
+reads it again for the withdrawal. It waits while an approval it would dismiss
+carries an inline comment the intake has not routed. It dismisses each approval that stands on a commit that does
 not contain the withdrawal's head in the history the rig's clone holds, with
 the withdrawal's reason and the city's mark, and closes the withdrawal once
 GitHub has dismissed each, or once none stands. Before it dismisses any, it

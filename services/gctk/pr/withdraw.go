@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -174,10 +175,12 @@ func withdrawTitle(number, head string) string {
 }
 
 // withdrawal is a withdrawal filed on a bead: its own bead, the head it names,
-// the reason its dismissals give, and whether it is still open.
+// the reason its dismissals give, when it was filed, and whether it is still
+// open.
 type withdrawal struct {
 	id, head, reason string
 	status, assignee string
+	created          string
 	open             bool
 }
 
@@ -227,7 +230,7 @@ func withdrawalsIn(rows []*ledger.Record) ([]withdrawal, error) {
 			continue
 		}
 		all = append(all, dated{withdrawal{id: b.ID, head: strings.TrimSpace(h), reason: strings.TrimSpace(b.Description()),
-			status: b.Status(), assignee: b.Assignee(), open: b.Status() != "closed"}, b.CreatedAt()})
+			status: b.Status(), assignee: b.Assignee(), created: b.CreatedAt(), open: b.Status() != "closed"}, b.CreatedAt()})
 	}
 	slices.SortStableFunc(all, func(a, b dated) int {
 		if c := strings.Compare(a.created, b.created); c != 0 {
@@ -292,6 +295,23 @@ func conversationFor(s state, saved *SavedRead) (*SavedConversation, string) {
 	}
 }
 
+// readAfterFiling reports whether a read sent at readAt was sent after a bead
+// created at filed was filed. bd's listing gives a bead's creation time to the
+// second, so a read sent within that second may precede the filing, and only
+// one sent from the next second on follows it. A read instant that does not read as one
+// follows nothing, and a creation time that does not read is an error.
+func readAfterFiling(readAt, filed string) (bool, error) {
+	f, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(filed))
+	if err != nil {
+		return false, fmt.Errorf("its creation time %q does not read as a time", filed)
+	}
+	r, err := time.Parse(time.RFC3339Nano, readAt)
+	if err != nil {
+		return false, nil
+	}
+	return !r.Before(f.Add(time.Second)), nil
+}
+
 // judge decides withdrawal w from the approvals conv saved, past the ones
 // gone, which this act dismissed for an earlier withdrawal. An approval stands
 // on a commit that does not contain the head unless its commit is the head, or
@@ -302,8 +322,18 @@ func conversationFor(s state, saved *SavedRead) (*SavedConversation, string) {
 // toward a dismissal: otherwise a commit no one holds would keep the withdrawal
 // waiting on every run, with no one asked. An approval of the head, or of any
 // later head of the branch, contains it, since every push onto a PR's branch on
-// the record is a fast-forward.
+// the record is a fast-forward. w waits for a conversation read sent after it
+// was filed, which the PR watch makes (owned.due): a read sent before can lack
+// an approval given since, which a close would leave standing.
 func (u *run) judge(s state, conv *SavedConversation, w withdrawal, gone map[int64]bool) verdict {
+	switch after, err := readAfterFiling(conv.ReadAt, w.created); {
+	case err != nil:
+		return verdict{wait: "whether the saved conversation was read after the withdrawal was filed did not read: " +
+			err.Error(), failed: true}
+	case !after:
+		return verdict{wait: fmt.Sprintf("the saved conversation was read at %s, before the withdrawal was filed at %s, "+
+			"so it can lack an approval given since, and the PR watch reads it again", conv.ReadAt, w.created)}
+	}
 	var targets []Approval
 	for _, a := range conv.Approvals {
 		if gone[a.ID] {

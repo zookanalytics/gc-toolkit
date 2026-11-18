@@ -122,8 +122,10 @@ difference stays on the bead, and the next run acts on it.
 
 Before any of these, while the PR is open, it carries out each open
 withdrawal filed on the bead (gctk pr withdraw), from the approvals the saved
-read holds: it waits while an approval it would dismiss carries an inline
-comment the intake has not routed, dismisses each approval that stands on a
+read holds: it waits until the saved conversation was read after the
+withdrawal was filed, which the PR watch reads again for it, and while an
+approval it would dismiss carries an inline comment the intake has not
+routed, dismisses each approval that stands on a
 commit that does not contain the withdrawal's head in the clone's history,
 with the withdrawal's reason and the city's mark, and closes the withdrawal
 once GitHub has dismissed each, or once none stands. Before it dismisses any,
