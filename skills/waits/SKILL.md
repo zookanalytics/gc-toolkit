@@ -139,9 +139,14 @@ same gate:
   the gate is the ruling to proceed. A ruling not to proceed is a stand-down
   (below).
 
-Write what is owed so the person can answer it in about a minute: the plain
-stake and what each option costs, with ids only as references. In a sitting,
-the hold step files the gate a wait for the operator's answer needs.
+Write what is owed so the person can answer it in about a minute: the stake
+first, as the gate's title, then the one course you recommend, what accepting
+it ships and what it asks of them, and nothing else, with ids only as
+references. When no one course stands out, say so in its place, and the
+question is for a conversation: once the gate is filed,
+`"$(gc <binding> scripts-dir)/gc-helm.sh" open <gate>` opens one on it, which
+replies to the gate, so the sitting's answer resolves it. In a sitting, the
+hold step files the gate a wait for the operator's answer needs.
 
 ## Ask the operator for a conversation
 
