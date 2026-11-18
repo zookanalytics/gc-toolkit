@@ -76,11 +76,14 @@ the conversation stays open until they rule (`converse-continue`).
 
 Its order is the description of a task you file, in this rig's store or
 another's, or the brief of a rework the sign-off files (below), and it keeps
-their words apart from yours, as the note on an epic the ruling files does:
+the course apart from their words and from what is yours alone:
 
-- `Stated by the operator:` their words that ask for the work, and any other
-  words of theirs it rests on, quoted, with where they said them.
-- `Proposed by this sitting:` each part you wrote that they did not state, such
+- `Agreed with the operator:` the course, copied as you last put it to them or
+  quoted as they stated it, and not summed up again, with where and in what
+  words they agreed.
+- `Their words, as direction:` the words of theirs the course rests on, quoted,
+  with where they said them, or `none`.
+- `This sitting's own:` each part of the order the course does not state, such
   as an approach or a name, or `none`.
 
 In the block below, the sling runs only once the create has returned the
@@ -89,8 +92,9 @@ which the comment on the subject's PR lists:
 
 ```bash
 WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>
-Stated by the operator: <their words that ask for the work, quoted, with where they said them>
-Proposed by this sitting: <each part you wrote that they did not state, or none>" --json | jq -er '.id') \
+Agreed with the operator: <the course, copied or quoted, with where and in what words they agreed>
+Their words, as direction: <the words of theirs the course rests on, quoted, with where they said them, or none>
+This sitting's own: <each part of the order the course does not state, or none>" --json | jq -er '.id') \
   && gc sling <rig>/<pool> "$WORK" --on <formula> \
   && gc bd comment "$CONVERSATION" "Sent work: <what it will do, in plain words>"
 ```
@@ -130,8 +134,9 @@ because the operator ruled each of its lines (`converse-iterate-document`):
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
   && BRIEF="## Rework brief ($NOW)
 $(cat <<'BLOCK'
-Stated by the operator: <their words that ask for the change, quoted, with where they said them>
-Proposed by this sitting: <each part you wrote that they did not state, or none>
+Agreed with the operator: <the course, copied or quoted, with where and in what words they agreed>
+Their words, as direction: <the words of theirs the course rests on, quoted, with where they said them, or none>
+This sitting's own: <each part of the order the course does not state, or none>
 BLOCK
 )" \
   && gc bd update <anchor> --append-notes "$BRIEF" \

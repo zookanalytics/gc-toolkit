@@ -1233,14 +1233,16 @@ have "a rework's ruling line is its whole order only when it carries the agreed 
     'A line that carries the course they agreed to whole and adds nothing of yours is the whole order' "$TMP/settle-order"
 have "…in a task's description, in this rig's store or another's, and in a rework's brief" \
     'Its order is the description of a task you file, in this rig'"'"'s store or another'"'"'s, or the brief of a rework the sign-off files' "$TMP/settle-order"
-have "…which quotes their words" \
-    '`Stated by the operator:` their words that ask for the work, and any other words of theirs it rests on, quoted, with where they said them.' "$TMP/settle-order"
-have "…apart from each part the sitting wrote" \
-    '`Proposed by this sitting:` each part you wrote that they did not state' "$TMP/settle-order"
+have "…which copies the course they agreed to, with where they agreed" \
+    '`Agreed with the operator:` the course, copied as you last put it to them or quoted as they stated it, and not summed up again, with where and in what words they agreed.' "$TMP/settle-order"
+have "…apart from the words of theirs it rests on, quoted as direction" \
+    '`Their words, as direction:` the words of theirs the course rests on, quoted, with where they said them, or `none`.' "$TMP/settle-order"
+have "…and from each part that is the sitting's own" \
+    '`This sitting'"'"'s own:` each part of the order the course does not state' "$TMP/settle-order"
 have "a rework's ruling line names the brief written on the PR's anchor" \
     '--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"' "$SETTLE"
 have "the continue skill writes a turn's work order the settle skill's way, before anything files it" \
-    'Write the order of work or a rework that a turn'"'"'s ruling sends as `converse-settle` gives it (Send the work), before you or the answer files it' "$TMP/continue-order"
+    'Write the order of work or a rework that a turn'"'"'s ruling sends as `converse-settle` gives it (Send the work), before you or the answer files it, because a removal, a change of scope or another rig'"'"'s capability that the agreed course did not name goes back to the operator first.' "$TMP/continue-order"
 have "the prompt holds the work a sitting sends to the course the operator agreed to, naming where it departs from what they said" \
     'Work you send is the course the operator agreed to, as you last put it to them whole. Their remarks are direction to think with, and you owe them your own view, so the course names each place it goes past or against what they said, first those that remove something, narrow or widen their ask, or give another rig a capability. The work goes once they say go' "$TMP/prompt-order"
 fenced_block "$SETTLE" 'gc sling <rig>/<pool> "$WORK"' | fill_block >"$CH/order-block"
@@ -1249,22 +1251,23 @@ for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
     rc=$(run_chain "$run" "$CH/order-block")
-    if [ "$rc" -eq 0 ] && grep -qF -- 'gc bd create x -t task -d x Stated by the operator: x Proposed by this sitting: x --json' "$CH/log"; then
-        ok "($sh_) converse-settle: the task a sitting files carries both parts in its description"
+    if [ "$rc" -eq 0 ] && grep -qF -- 'gc bd create x -t task -d x Agreed with the operator: x Their words, as direction: x This sitting'"'"'s own: x --json' "$CH/log"; then
+        ok "($sh_) converse-settle: the task a sitting files carries the agreed course, their words and its own parts in its description"
     else
-        bad "($sh_) converse-settle: the task a sitting files carries both parts in its description" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+        bad "($sh_) converse-settle: the task a sitting files carries the agreed course, their words and its own parts in its description" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
     rc=$(run_chain "$run" "$CH/brief-block")
     if [ "$rc" -eq 0 ] && head -n 1 "$CH/notes" | grep -qE '^## Rework brief \([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\)$' \
-        && grep -qxF 'Stated by the operator: x' "$CH/notes" \
-        && grep -qxF 'Proposed by this sitting: x' "$CH/notes"; then
-        ok "($sh_) converse-settle: a rework's brief lands headed by when it was written, in both parts"
+        && grep -qxF 'Agreed with the operator: x' "$CH/notes" \
+        && grep -qxF 'Their words, as direction: x' "$CH/notes" \
+        && grep -qxF 'This sitting'"'"'s own: x' "$CH/notes"; then
+        ok "($sh_) converse-settle: a rework's brief lands headed by when it was written, in its three parts"
     else
-        bad "($sh_) converse-settle: a rework's brief lands headed by when it was written, in both parts" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+        bad "($sh_) converse-settle: a rework's brief lands headed by when it was written, in its three parts" "exit $rc, notes: $(head -c 400 "$CH/notes")"
     fi
-    sed 's/^Stated by the operator: x$/Stated by the operator: "the `echo ran` and $HOME stay as written"/' "$CH/brief-block" >"$CH/literal-brief"
+    sed 's/^Their words, as direction: x$/Their words, as direction: "the `echo ran` and $HOME stay as written"/' "$CH/brief-block" >"$CH/literal-brief"
     rc=$(run_chain "$run" "$CH/literal-brief")
-    if [ "$rc" -eq 0 ] && grep -qxF 'Stated by the operator: "the `echo ran` and $HOME stay as written"' "$CH/notes"; then
+    if [ "$rc" -eq 0 ] && grep -qxF 'Their words, as direction: "the `echo ran` and $HOME stay as written"' "$CH/notes"; then
         ok "($sh_) converse-settle: what the brief quotes stays as written"
     else
         bad "($sh_) converse-settle: what the brief quotes stays as written" "exit $rc, notes: $(head -c 400 "$CH/notes")"
