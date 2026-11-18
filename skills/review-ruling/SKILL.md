@@ -29,6 +29,14 @@ the purpose its row in the check index states.
 - **A blocking finding** is must-fix, unless the lane's own rule shows it does
   not hold. Then it is declined, and the reason names what in the evidence
   shows it.
+- **A fix is the simplest change that removes the cause.** A design in which
+  the failure cannot happen comes before code that detects the failure and
+  repairs it. Weigh what one occurrence costs and how likely it is, as the
+  finding's failure scenario states them, against the code the fix adds for
+  every later change to carry. When the only fix in reach is heavier than the
+  failure warrants, build nothing: put a blocking finding to a person (A
+  question only a person can answer, below), and decline one that does not
+  block.
 - **A finding that rule does not block** is ruled as the rule says. On the
   correctness method's scale, a P2 of a lane that requested changes is must-fix
   when its fix is low-risk and net-positive and declined when it is risky or
