@@ -1430,8 +1430,8 @@ no question to abandon. An earlier sitting on the same conversation may have
 held and been cut short, leaving its hold's headline on the subject, waiting
 on the gates this close resolves. So the close reads the subject first. A
 headline that still waits, on a subject no open blocker holds any more, is
-replaced with the reading, settled. The conversation closes only once those
-writes have exited 0.
+replaced with the reading in one short sentence, settled. The conversation
+closes only once those writes have exited 0.
 
 *A restart is not an ending.* A wake that reaches a session mid-hold gets its
 conversation back from `gc hook --claim` as an existing assignment. Draining
