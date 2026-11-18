@@ -23,8 +23,9 @@ import (
 // bead's assignee says who works it now (Gas City's delivery of work to a
 // session): the refinery while it validates a head, and nobody while the PR
 // waits. A run works a bead assigned to nobody or to the refinery, and leaves
-// one assigned to anyone else to that assignee. A ruling that retires a PR records its disposition on the bead under
-// the record lock and then closes the PR (pr-dispose.sh). A run requests no
+// one assigned to anyone else to that assignee. A ruling that retires a PR
+// records its disposition on the bead under the record lock and then closes
+// the PR (pr-dispose.sh). A run requests no
 // merge of a PR whose bead carries it, and once the PR has closed the bead goes
 // to the disposition writer, bead-rehome.sh, which closes it onto the successor
 // the ruling named, with the lock free, while the bead still has the status and
@@ -35,9 +36,10 @@ import (
 // lock, Record across both of its writes and a run for one record at a time,
 // and every write they make carries bd's guards on the status and the assignee
 // read under the lock, so neither writes over a bead that a close or an
-// assignment reached first. A run that lands a PR on the rig's default branch then checks
-// that branch's seed audit with the lock free, and asks for the branch's
-// re-render when the audit is stale, holding no PR for it (the design's call 1).
+// assignment reached first. A run that lands a PR on the rig's default branch
+// then checks that branch's seed audit with the lock free, and asks for the
+// branch's re-render when the audit is stale, holding no PR for it (the
+// design's call 1).
 
 // Hub is GitHub as the landing order and the draft cycle reach it: the
 // evaluator's reads, a merge request or an enqueue pinned to the head it
@@ -191,8 +193,9 @@ func (e *Refusal) Error() string {
 // may reuse, then the whole record with the bead blocked and assigned to
 // nobody. It reads the bead under the lock first, and writes only on a bead that
 // is not closed and is assigned to the refinery, each write guarded on the
-// status and assignee it read. A bead it refuses returns a *Refusal. The PR must be in the rig's own
-// repository, which Record checks before it takes the lock.
+// status and assignee it read. A bead it refuses returns a *Refusal. The PR
+// must be in the rig's own repository, which Record checks before it takes the
+// lock.
 func (l Landing) Record(bead string, p record.Publication) error {
 	if err := p.Valid(); err != nil {
 		return err

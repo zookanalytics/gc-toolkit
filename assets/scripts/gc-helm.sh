@@ -1577,8 +1577,9 @@ cmd_takeaway() {
     # on it. The proof its work landed is a post-push state: the wait is closed
     # (merged), its assignee is the refinery (the handoff submit-and-exit
     # writes only after it verifies the push), or its PR waits on the pending
-    # record, which only the refinery's publication of the pushed head writes. Absent the proof — a wait still
-    # open under a pool, or a probe that will not read — the edge stands, so
+    # record, which only the refinery's publication of the pushed head writes.
+    # Absent the proof — a wait still open under a pool, or a probe that will
+    # not read — the edge stands, so
     # <bead> cannot merge past work that has not landed. Only a landed rider is
     # dropped; if EVERY named wait is one, the sitting is settled with respect to
     # all of them, so no_wait is set and the headline stamps gc.takeaway_settled

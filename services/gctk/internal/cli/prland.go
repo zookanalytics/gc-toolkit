@@ -59,8 +59,8 @@ order reads the record between them, and it reads the bead under the lock
 first. It writes only on a bead that is not closed and is assigned to the
 refinery --refinery names, each write guarded on the status and the assignee
 it read, so it writes nothing on a bead that a close or another assignment
-reached first. The PR must be in the rig's own repository, the one the origin of the
-clone it runs in names ($GC_RIG_ROOT, else the working directory).
+reached first. The PR must be in the rig's own repository, the one the origin
+of the clone it runs in names ($GC_RIG_ROOT, else the working directory).
 
 exit: 0 recorded
       1 usage, or a PR outside the rig's own repository

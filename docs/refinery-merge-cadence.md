@@ -858,9 +858,9 @@ still on the old path it finds none.
 Each run takes up to 20 beads that carry the marker `pr_reconcile_pending`, or
 that carry a ruling's disposition on the record and are assigned to nobody or
 to the refinery, the least recently checked first (`pr_last_checked_at`), and
-starts none after four minutes (its `--count` and `--budget`). It reads each PR from GitHub by its
-number, never from a list of open PRs, because a PR missing from that list can
-have closed without merging.
+starts none after four minutes (its `--count` and `--budget`). It reads each
+PR from GitHub by its number, never from a list of open PRs, because a PR
+missing from that list can have closed without merging.
 
 | The PR | The run |
 |---|---|

@@ -37,10 +37,10 @@ import (
 // handOver hands a changed head that no open withdrawal and no attached review
 // run holds to the refinery, in the write that assigns the bead to it and
 // clears the marker, and when only merge holds hold the bead it wakes and
-// nudges the refinery first (mergeHolds). A read of what holds the bead that fails keeps the marker and
-// records why, for the next run to hand the head over. action and detail are
-// what the run did with the record before the hand-over, which its outcome
-// reports.
+// nudges the refinery first (mergeHolds). A read of what holds the bead that
+// fails keeps the marker and records why, for the next run to hand the head
+// over. action and detail are what the run did with the record before the
+// hand-over, which its outcome reports.
 func (u *run) handOver(s state, action, detail string) RunOutcome {
 	holds, err := u.mergeHolds(s)
 	if err != nil {
