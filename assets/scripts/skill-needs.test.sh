@@ -684,10 +684,11 @@ have "the message keeps pipeline vocabulary out or says what it means" \
     'Pipeline vocabulary (moot, twin, fold, retract, park) and names learned from code stay out, or say what they mean' "$PROMPT_JOINED"
 # A decision leads with the course as the changes it makes. An option is
 # another way to reach what the operator wants, leaving things as they are is
-# one only when it has a case of its own, and each says what it ships and what
-# it asks of them. The operator profile every sitting renders says what an
-# option's cost is, so the prompt uses its terms and leaves the sentence to the
-# profile.
+# one only when it has a case the operator has not already weighed, any course
+# that leaves a known problem in place says what it breaks, and each option
+# says what it ships and what it asks of them. The operator profile every
+# sitting renders says what an option's cost is, so the prompt uses its terms
+# and leaves the sentence to the profile.
 have "the decision states the course as what would be built or changed, before any reason for it" \
     'State it as the course before any reason for it: what would be built or changed, each change given as what it is today and what it becomes.' "$PROMPT_JOINED"
 have "…and that course is the whole decision when the operator asked for the best solution" \
@@ -696,14 +697,15 @@ have "…states a course that changed again whole" \
     'When the course changes during the sitting, state the new one whole rather than as changes to the last.' "$PROMPT_JOINED"
 have "…and says, among several threads, what it settles and what stays open" \
     'say whether the decision settles one of them or the whole conversation, and what stays open after it.' "$PROMPT_JOINED"
-have "an option is another way to reach what the operator wants, where the choice takes their judgment" \
-    'An option is another way to reach what the operator wants, offered when choosing between it and your recommendation takes their judgment, such as which cost to accept.' "$PROMPT_JOINED"
-have "…and with no such way, the recommendation stands alone" \
-    'The operator can always turn a recommendation down, so when no other way needs their judgment, offer the recommendation alone.' "$PROMPT_JOINED"
-have "…leaving things as they are is an option only with a case of its own" \
-    'Leaving things as they are is one of these ways only when it has a case of its own, such as a problem too small to be worth the change, or a change whose side effects are worth avoiding.' "$PROMPT_JOINED"
-have "…which it makes, saying what the problem it leaves in place breaks and where" \
-    'That option makes its case and says what the problem it leaves in place breaks, and where.' "$PROMPT_JOINED"
+have "an option is another way to reach what the operator wants, where the choice turns on their judgment" \
+    'An option is another way to reach what the operator wants, offered when the choice between it and your recommendation turns on their judgment, such as which of two costs to accept.' "$PROMPT_JOINED"
+have "…and with no such choice, the recommendation stands alone" \
+    'The operator can always turn a recommendation down, so when no choice turns on their judgment, offer the recommendation alone.' "$PROMPT_JOINED"
+have "…leaving things as they are is an option only with a case the operator has not already weighed" \
+    'Leaving things as they are is one of these ways only when it has a case the operator has not already weighed, such as a problem too small to be worth the change, or a change that could break something beyond the problem it fixes.' "$PROMPT_JOINED"
+have "…which that option makes" 'That option makes its case.' "$PROMPT_JOINED"
+have "any course that leaves a known problem in place, the recommendation included, says what it breaks and where" \
+    'Any course that leaves a known problem in place, your recommendation included, says what that problem breaks, and where.' "$PROMPT_JOINED"
 have "…and each option asks only a decision and says what it ships and what it asks" \
     'Each option asks of the operator only a decision, never an agent'"'"'s work such as resolving a conflict or merging by hand, and says in one sentence what it ships and what it asks.' "$PROMPT_JOINED"
 lacks "…in place of a rule on wording an option that accepts a known defect" \

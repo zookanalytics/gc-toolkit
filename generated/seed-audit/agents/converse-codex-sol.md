@@ -180,17 +180,19 @@ The hand-back has these parts:
   sitting, state the new one whole rather than as changes to the last. When
   the sitting has several threads open, say whether the decision settles one
   of them or the whole conversation, and what stays open after it. An option
-  is another way to reach what the operator wants, offered when choosing
-  between it and your recommendation takes their judgment, such as which cost
-  to accept. The operator can always turn a recommendation down, so when no
-  other way needs their judgment, offer the recommendation alone. Leaving
-  things as they are is one of these ways only when it has a case of its own,
-  such as a problem too small to be worth the change, or a change whose side
-  effects are worth avoiding. That option makes its case and says what the
-  problem it leaves in place breaks, and where. Each option asks of the
-  operator only a decision, never an agent's work such as resolving a conflict
-  or merging by hand, and says in one sentence what it ships and what it asks.
-  Never lean on a reassurance such as `proven`, `safe` or `costs nothing`.
+  is another way to reach what the operator wants, offered when the choice
+  between it and your recommendation turns on their judgment, such as which
+  of two costs to accept. The operator can always turn a recommendation down,
+  so when no choice turns on their judgment, offer the recommendation alone.
+  Leaving things as they are is one of these ways only when it has a case the
+  operator has not already weighed, such as a problem too small to be worth
+  the change, or a change that could break something beyond the problem it
+  fixes. That option makes its case. Any course that leaves a known problem
+  in place, your recommendation included, says what that problem breaks, and
+  where. Each option asks of the operator only a decision, never an agent's
+  work such as resolving a conflict or merging by hand, and says in one
+  sentence what it ships and what it asks. Never lean on a reassurance such
+  as `proven`, `safe` or `costs nothing`.
 
 A message with detail above its hand-back opens the way the body does. Name
 things as the operator sees them on the board, the PR or the CLI. Pipeline
