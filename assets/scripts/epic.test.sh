@@ -186,6 +186,7 @@ for f in --hypothesis --handle --boundaries; do
 done
 pin skills/work/SKILL.md 'A rough sentence that sets the general direction is enough.' "...and says a rough sentence that sets the general direction is enough"
 pin skills/work/SKILL.md 'When the operator has stated none, write one yourself and file at once, without asking first' "...which the filer writes itself when the operator has stated none, and files at once"
+pin skills/work/SKILL.md 'Write each field from the outcome the epic seeks, even when you file the epic from inside a design for its work' "...and writes each field from the outcome the epic seeks, not from a design for its work"
 pin skills/work/SKILL.md 'quote each field you wrote and call it your proposal' "...and quotes each field it wrote as its proposal where it reports the filing"
 pin skills/work/SKILL.md 'Proposed by <you>: <each field you wrote>. Stated by the operator:' "...and says on the epic whose words each field is"
 pin skills/work/SKILL.md '"Epics are mortal"' "...and says an area that is only ever improvable is not an epic"
@@ -193,6 +194,7 @@ for k in epic_hypothesis epic_handle epic_boundaries epic_closure_condition epic
     pin skills/converse-epic-review/SKILL.md "--set-metadata $k=" "the review records $k in its key"
 done
 pin skills/converse-epic-review/SKILL.md 'Judge the contract as it reads, whoever wrote it and whatever a past ruling said' "...judges the contract as it reads at every review"
+pin skills/converse-epic-review/SKILL.md 'Would it still read true if a different design landed?' "...and tests each field against the outcome the epic seeks"
 pin skills/converse-epic-review/SKILL.md 'Could it still come out wrong once the work lands?' "...and tests its signal"
 pin skills/converse-epic-review/SKILL.md 'Quote each change you propose, as your proposal' "...and its framing quotes each change it proposes"
 pin skills/converse-settle/SKILL.md '`converse-epic-review` skill'"'"'s writes record it' "the settle step sends a review of an epic to the review's writes"

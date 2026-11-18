@@ -98,21 +98,22 @@ func FromStore(l *ledger.Ledger, bead string) (Answer, error) {
 }
 
 // side is the bead's side of a read: what the store holds about the bead. The
-// store's conditions are its holds set by hand, its own waits and the beads
-// anchored to it. missing is what its record lacks to name its PR, and host and
-// number name the PR once it lacks nothing.
+// store's conditions are its holds set by hand, its assignee, its own waits and
+// the beads anchored to it. missing is what its record lacks to name its PR,
+// and host and number name the PR once it lacks nothing.
 type side struct {
-	bead    string
-	rec     record.Record
-	branch  string
-	holds   []string
-	rc      receipts
-	since   string
-	results []review.Result
-	missing []string
-	waits   []Condition
-	host    string
-	number  int
+	bead     string
+	rec      record.Record
+	branch   string
+	holds    []string
+	assignee string
+	rc       receipts
+	since    string
+	results  []review.Result
+	missing  []string
+	waits    []Condition
+	host     string
+	number   int
 }
 
 // readSide reads the bead's side through l, a pass, and returns the bead's row
@@ -139,7 +140,8 @@ func readSide(l *ledger.Ledger, bead string) (side, *ledger.Record, error) {
 		err = serr
 	}
 	b := side{bead: bead, rec: rec, branch: read(record.Branch),
-		holds: []string{read(mergeHoldKey), read(rebaseHoldKey)},
+		holds:    []string{read(mergeHoldKey), read(rebaseHoldKey)},
+		assignee: strings.TrimSpace(r.Assignee()),
 		rc: receipts{
 			review: mark(read(reviewWatermarkKey)), comment: mark(read(commentWatermarkKey)),
 			issueComment:   mark(read(issueCommentWatermarkKey)),
@@ -305,6 +307,10 @@ func decide(b side, read *GitHubRead) Answer {
 			store = append(store, Condition{Kind: KindHold,
 				Detail: fmt.Sprintf("a %s is set on the bead (%s)", name, b.holds[i])})
 		}
+	}
+	if b.assignee != "" {
+		store = append(store, Condition{Kind: KindAssigned, Value: b.assignee,
+			Detail: fmt.Sprintf("the bead is assigned to %s, who works it now", b.assignee)})
 	}
 	store = append(store, b.waits...)
 	if len(b.missing) > 0 {

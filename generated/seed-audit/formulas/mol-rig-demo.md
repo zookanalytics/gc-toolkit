@@ -48,7 +48,7 @@ Required vars:
 
 Optional vars:
   {{app_reads_city}}: "true" for a rig whose app reads the city, such as a rig that develops code for a city. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a demo capture then refuses the rig's servers. Any value but "false" counts as "true". demo-engine-lib.sh reads it, and this formula's steps do not use it. (default=false)
-  {{base_url}}: URL of a deployed preview, or of the rig's app that a worktree of the rig serves on this host, driven as-is. A capture refuses any other server on this host, and the rig's app too when city.toml sets the rig's app_reads_city to "true". At most one of serve_dir / serve_cmd / base_url; with none, a page script takes the rig's ui_serve_command. (default=)
+  {{base_url}}: URL of a deployed preview, of the rig's app that a worktree of the rig serves on this host, or of an iOS app on a simulator, ios-simulator://<device UDID>/<bundle id>, driven as-is. A capture refuses any other server on this host, and the rig's app too when city.toml sets the rig's app_reads_city to "true". At most one of serve_dir / serve_cmd / base_url; with none, a page script takes the rig's ui_serve_command. (default=)
   {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
   {{capture_mode}}: walkthrough (default, one continuous recorded take) or proof (one checked screenshot per step). (default=walkthrough)
   {{deliver_pr}}: PR number or URL to deliver the clip to, when no deliver_subject names one. Optional. (default=)

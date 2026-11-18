@@ -70,7 +70,7 @@ description = "Command that serves the rig's app (e.g. 'npm run dev'). The captu
 default = ""
 
 [vars.base_url]
-description = "URL of a deployed preview, or of the rig's app that a worktree of the rig serves on this host, driven as-is. A capture refuses any other server on this host, and the rig's app too when city.toml sets the rig's app_reads_city to \"true\". At most one of serve_dir / serve_cmd / base_url; with none, a page script takes the rig's ui_serve_command."
+description = "URL of a deployed preview, of the rig's app that a worktree of the rig serves on this host, or of an iOS app on a simulator, ios-simulator://<device UDID>/<bundle id>, driven as-is. A capture refuses any other server on this host, and the rig's app too when city.toml sets the rig's app_reads_city to \"true\". At most one of serve_dir / serve_cmd / base_url; with none, a page script takes the rig's ui_serve_command."
 default = ""
 
 [vars.serve_port]
@@ -200,10 +200,13 @@ SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/rig
 `base_url` names how the rig's app is reached. Count the three raw pour vars and
 fail closed when more than one is set: selecting one by precedence captures a
 convincing video of the wrong app target instead of refusing the ambiguous pour.
-A page script whose pour sets none takes the command the rig declares as its
-`ui_serve_command`, which gc reads for the `rig_name` rig, and a terminal script
-takes no app. The app being demoed is the `rig_name` rig's, and a capture's
-sandbox refuses that rig's own checkout, which holds its store. So the app runs
+With none set, the capture engine's `surface` command names the surface the
+script drives. A page or iOS app script takes the command the rig declares as
+its `ui_serve_command`, which gc reads for the `rig_name` rig. A terminal script
+takes no app. Neither does a script whose surface the command does not name,
+and the engine then refuses it if it needs an app. The app being demoed is the
+`rig_name` rig's, and a capture's sandbox refuses that rig's own checkout,
+which holds its store. So the app runs
 from a detached worktree of the checkout at its HEAD, in a workspace the hourly
 reap removes once this bead closes, and a relative `serve_dir` resolves against
 that worktree:
@@ -211,12 +214,15 @@ that worktree:
 RIG_PATH=$(gc rig list --json | tr -d '\\000-\\037' | jq -r --arg r "{{rig_name}}" '.rigs[]? | objects | select(.name == $r) | .path // empty' | head -n1)
 SERVE_DIR="{{serve_dir}}" SERVE_CMD="{{serve_cmd}}" BASE_URL="{{base_url}}"
 # >>> rig-demo-app-target
-# One character for each app target the pour sets. With none, a page script
-# takes the command the rig declares as its ui_serve_command, and a terminal
-# script brings up no app. More than one is a malformed pour.
+# One character for each app target the pour sets. With none, a script whose
+# surface the engine names as page or ios takes the command the rig declares as
+# its ui_serve_command, and any other takes no app. More than one is a
+# malformed pour.
 TARGETS="${SERVE_DIR:+x}${SERVE_CMD:+x}${BASE_URL:+x}"
 case "$TARGETS" in
-  "") [ "$(. "$SCRIPTS/demo-engine-lib.sh"; demo_engine_script_kind "$SCRIPT_PATH")" != page ] || SERVE_CMD=$(gc formula show mol-rig-demo --rig "{{rig_name}}" --json | jq -r '[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty') || SERVE_CMD="" ;;
+  "") case "$(. "$SCRIPTS/demo-engine-lib.sh"; demo_engine_script_kind "$SCRIPT_PATH")" in
+        page|ios) SERVE_CMD=$(gc formula show mol-rig-demo --rig "{{rig_name}}" --json | jq -r '[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty') || SERVE_CMD="" ;;
+      esac ;;
   x) ;;
   *) gc bd update "$REQUEST_BEAD" --append-notes "rig-demo: malformed pour; ${#TARGETS} of serve_dir/serve_cmd/base_url set, and at most one names the app."
      "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step mol-rig-demo.capture --reason "malformed pour: ${#TARGETS} of serve_dir/serve_cmd/base_url set, and at most one names the app" --subject "$REQUEST_BEAD" --key rig-demo-ambiguous-app-target --message "mol-rig-demo on $REQUEST_BEAD got ${#TARGETS} of serve_dir / serve_cmd / base_url (serve_dir='$SERVE_DIR' serve_cmd='$SERVE_CMD' base_url='$BASE_URL'), and at most one names how the rig's app is reached. Its run is cancelled; nothing was captured. Re-pour with one app target, or with none to take the rig's ui_serve_command."
@@ -257,7 +263,7 @@ fi
 CAPTURE_RC=0
 "$SCRIPTS/rig-demo-capture.sh" "$@" || CAPTURE_RC=$?
 if [ "$CAPTURE_RC" -ne 0 ]; then
-  WHY="the engine or the app produced no MP4, neither the pour nor the rig's ui_serve_command named the app a page script drives, or no worktree of {{rig_name}} could be made for the app to run from; a human must check the app target, the rig's ui_serve_command, that gc rig list names the rig, and the demo toolchain (doctor/check-demo-toolchain)"
+  WHY="the engine or the app produced no MP4, the engine refused the app target it was given, or no worktree of {{rig_name}} could be made for the app to run from. A script that drives an app is given none when neither the pour nor the rig's ui_serve_command names one, or when the engine's surface command (sprintshow surface) names no surface for it. A human must check the app target, the rig's ui_serve_command, that the engine has a surface command, that gc rig list names the rig, and the demo toolchain (doctor/check-demo-toolchain)"
   [ "$CAPTURE_RC" -eq 3 ] && WHY="the clip at $OUT recorded at least one step failing its proof; a human must judge from it whether the app or the script is wrong"
   gc bd update "$REQUEST_BEAD" --append-notes "rig-demo: capture failed for {{rig_name}} from $SCRIPT_PATH: $WHY."
   "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step mol-rig-demo.capture --reason "capture of {{rig_name}} failed: $WHY" --subject "$REQUEST_BEAD" --key rig-demo-capture-failed --message "mol-rig-demo could not capture a clean clip of {{rig_name}} from $SCRIPT_PATH (serve_dir='$SERVE_DIR' serve_cmd='$SERVE_CMD' base_url='$BASE_URL'): $WHY. Its run is cancelled; re-pour it once the cause is fixed."
