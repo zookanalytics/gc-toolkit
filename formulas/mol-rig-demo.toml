@@ -205,11 +205,11 @@ script drives. A page or iOS app script takes the command the rig declares as
 its `ui_serve_command`, which gc reads for the `rig_name` rig. A terminal script
 takes no app. Neither does a script whose surface the command does not name,
 and the engine then refuses it if it needs an app. The app being demoed is the
-`rig_name` rig's, and a capture's sandbox refuses that rig's own checkout,
-which holds its store. So the app runs
-from a detached worktree of the checkout at its HEAD, in a workspace the hourly
-reap removes once this bead closes, and a relative `serve_dir` resolves against
-that worktree:
+`rig_name` rig's, as committed at its HEAD. The sandbox of a rig whose app
+reads the city also refuses that rig's own checkout, which holds its store. So
+the app runs from a detached worktree of the checkout at its HEAD, in a
+workspace the hourly reap removes once this bead closes, and a relative
+`serve_dir` resolves against that worktree:
 ```bash
 RIG_PATH=$(gc rig list --json | tr -d '\\000-\\037' | jq -r --arg r "{{rig_name}}" '.rigs[]? | objects | select(.name == $r) | .path // empty' | head -n1)
 SERVE_DIR="{{serve_dir}}" SERVE_CMD="{{serve_cmd}}" BASE_URL="{{base_url}}"
