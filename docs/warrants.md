@@ -352,8 +352,8 @@ no warrant.
     in Gas City handles a refusal inside the closes Gas City makes itself, such
     as the autoclose sweep's retry of a convoy, wisp or molecule autoclose
     (`cmd/gc/autoclose_sweep.go` 21-22).
-- **Verified.** 2026-11-13, at `gastownhall/gascity-packs` main 1f6d8e41c,
-  `gastownhall/beads` main 526c1c877 and `gastownhall/gascity` main cb9105579.
+- **Verified.** 2026-11-17, at `gastownhall/gascity-packs` main 0f07496d2,
+  `gastownhall/beads` main 8cdfa796a and `gastownhall/gascity` main 6cf1cccd6.
 - **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
   make. The exception then moves onto what Gas Town records.
 
