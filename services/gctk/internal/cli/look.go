@@ -17,7 +17,8 @@ line to standard error.
 exit: 0 every read answered, and the event was recorded when the look found
         something
       1 a read failed or the event was not recorded
-      2 usage`
+      2 usage
+      128+N stopped by signal N`
 
 // reportLook prints a look's record on standard output, when it composed one,
 // a summary line on standard error, saying whether the event was recorded,

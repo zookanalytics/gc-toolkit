@@ -81,7 +81,8 @@ the event carries it, and a summary line to standard error.
 exit: 0 doctor completed, and the monitors' runs were read and the event
         recorded
       1 doctor did not complete, a read failed, or the event was not recorded
-      2 usage`
+      2 usage
+      128+N stopped by signal N`
 
 func newDoctorRunCmd(stdout, stderr io.Writer) *cobra.Command {
 	var accepted string

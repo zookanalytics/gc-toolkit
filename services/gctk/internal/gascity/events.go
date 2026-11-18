@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -23,6 +24,10 @@ var ErrDeadline = errors.New("ended at its deadline")
 // has exited or been ended, so a descendant that keeps its output open cannot
 // hold the caller.
 const pipeWait = 5 * time.Second
+
+// exitProcess ends this process. A variable so a test can watch the exit a
+// relayed signal makes instead of taking it.
+var exitProcess = os.Exit
 
 // Bounded is what a command run under a deadline answered: its exit code, and
 // its standard output and standard error apart, since a command whose output is
@@ -179,8 +184,32 @@ func (c *City) Emit(ctx context.Context, e Emit) error {
 // in a process group the command leads, its standard input reading nothing.
 // When ctx ends first it kills that whole group, so the processes the command
 // started end with it, and answers ErrDeadline.
+//
+// Its own group also puts the command out of reach of a signal sent to this
+// process's group, which is how a terminal delivers Ctrl-C. So a SIGTERM or
+// SIGINT that reaches this process during the call kills the command's group
+// too, and this process then exits with the status that signal gives, writing
+// nothing more. A signal this process inherited as ignored stays ignored.
 func (c *City) runBounded(ctx context.Context, bin string, args ...string) Bounded {
-	cmd := exec.CommandContext(ctx, bin, args...)
+	stop := make(chan os.Signal, 1)
+	for _, s := range []os.Signal{syscall.SIGTERM, syscall.SIGINT} {
+		if !signal.Ignored(s) {
+			signal.Notify(stop, s)
+		}
+	}
+	run, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var got os.Signal
+	relayed := make(chan struct{})
+	go func() {
+		defer close(relayed)
+		select {
+		case got = <-stop:
+			cancel()
+		case <-run.Done():
+		}
+	}()
+	cmd := exec.CommandContext(run, bin, args...)
 	cmd.Dir = c.dir
 	if c.actor != "" {
 		cmd.Env = append(os.Environ(), "BEADS_ACTOR="+c.actor)
@@ -198,6 +227,21 @@ func (c *City) runBounded(ctx context.Context, bin string, args ...string) Bound
 	}
 	cmd.WaitDelay = pipeWait
 	err := cmd.Run()
+	cancel()
+	<-relayed
+	// A signal that arrived as the command finished is still this process's to
+	// take.
+	signal.Stop(stop)
+	if got == nil {
+		select {
+		case got = <-stop:
+		default:
+		}
+	}
+	if got != nil {
+		exitProcess(128 + int(got.(syscall.Signal)))
+		return Bounded{Code: -1, Err: fmt.Errorf("this process was sent %v", got)}
+	}
 	out := Bounded{Stdout: stdout.String(), Stderr: stderr.String()}
 	var ee *exec.ExitError
 	switch {
