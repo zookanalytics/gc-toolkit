@@ -25,6 +25,9 @@ name: tests
 # image lacks.
 # Main's ruleset names the checks that gate a merge by job id, so renaming a
 # job, or giving it a name: or a matrix, changes the check a merge waits on.
+# A job the ruleset requires skips only a draft. The city's merge counts no
+# skipped result (services/gctk/pr/rules.go), so a job that a condition of its
+# own skipped at a ready head would hold that pull request's merge.
 # Each job that runs the suite keeps each run's seconds, in its job summary and
 # as the artifact suite-times-<job>, whether the suite passed or failed.
 # pr-size.yml reads them when this workflow completes, for the size comment's
@@ -41,11 +44,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Only the latest commit on a ref needs a result; cancel superseded runs.
-concurrency:
-  group: tests-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
@@ -55,6 +53,14 @@ jobs:
     # dispatch carry no pull_request context, so the event-name guard runs
     # them anyway.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # Each job, not the workflow, holds a concurrency group. A job that a draft
+    # skips never starts, so it cancels nothing, and a draft's run cannot cancel
+    # the run that marking the pull request ready started. Jobs of one run that
+    # shared a group would cancel each other, so each group names its job by
+    # the id written in, since github.job is null outside a job's steps.
+    concurrency:
+      group: ${{ github.workflow }}-test-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -116,6 +122,10 @@ jobs:
   test-macos:
     # The same draft gate as test.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # A concurrency group of its own, as test's comment says.
+    concurrency:
+      group: ${{ github.workflow }}-test-macos-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: macos-latest
     # The same suite takes the macOS runner more than twice as long as
     # ubuntu's, so its limit is higher.
@@ -196,6 +206,10 @@ jobs:
   go:
     # The same draft gate as test.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # A concurrency group of its own, as test's comment says.
+    concurrency:
+      group: ${{ github.workflow }}-go-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -225,6 +239,10 @@ jobs:
   go-macos:
     # The same draft gate as test.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # A concurrency group of its own, as test's comment says.
+    concurrency:
+      group: ${{ github.workflow }}-go-macos-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
