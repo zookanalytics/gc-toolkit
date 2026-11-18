@@ -280,14 +280,15 @@ chmod +x "$ENGINE_STUB"
 # gctk answers `rig serve --check` with a copy running on $COPY_PORT, and with
 # no copy when COPY_PORT is unset, logging each call and where it ran. The
 # copy's app is where gctk reports a copy that answers on its port, at its
-# loopback URL, or at $COPY_APP_URL, the URL a serve command printed.
+# loopback URL, or at $COPY_APP_URL, the URL a serve command printed. Its ports
+# beyond its own are $COPY_EXTRA, as JSON, and none when that is unset.
 GCTK_STUB="$TMPD/gctk"
 cat >"$GCTK_STUB" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${CALLLOG:?}"
 if [ "$*" = "rig serve --check" ] && [ -n "${COPY_PORT:-}" ]; then
-  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s","address":""}\n' \
-    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}"
+  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s"%s,"address":""}\n' \
+    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}" "${COPY_EXTRA:+,\"extra_ports\":$COPY_EXTRA}"
   exit 0
 fi
 printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"
@@ -693,6 +694,14 @@ for cap in video screenshot; do
   has "gctk rig serve --check (in $BWT)" "$(calls)" "($cap) it asks gctk in the checkout the listener works in"
   has "(allow network-outbound (remote ip \"localhost:5181\"))" "$(profile)" "($cap) the sandbox opens the copy's port"
   eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 1 "($cap) and no other loopback port"
+  echo "# ($cap) LOCAL-APP: a capture of a copy given ports beyond its own reaches those its check names, and no others"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 COPY_EXTRA='[5301,5302,"5303",70000,0]' LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  eq "$RC" 0 "($cap) a copy with ports beyond its own captures"
+  for p in 5181 5301 5302; do
+    has "(allow network-outbound (remote ip \"localhost:$p\"))" "$(profile)" "($cap) the sandbox opens port $p"
+  done
+  eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 3 "($cap) and none the check names that is no port"
+  has "so the capture reaches port 5181 and the copy's ports beyond it, 5301, 5302, on which its own processes listen, and no other loopback port" "$(err)" "($cap) it names each port it opens"
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5999 LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
   local_refused "$cap" "a port the checkout's copy does not hold" "for which city.toml sets app_reads_city = \"true\""
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 COPY_APP_URL="$IOS_APP" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
@@ -791,6 +800,32 @@ eq "$RAN_ON" running "(sandboxed) and runs on once the output has ended"
 eq "$([ "$TOOK" -lt 20 ] && echo "while it runs" || echo "after ${TOOK}s")" "while it runs" "(sandboxed) and that output ends while the command runs on"
 sandboxed "${CITY_ENV[@]}" -- 0 "$RWT" true
 eq "$RC" 1 "(sandboxed) a port that is no port is refused"
+for ports in '5197,x' '5197,' ',5197' '5197,99999'; do
+  sandboxed "${CITY_ENV[@]}" -- "$ports" "$RWT" true
+  eq "$RC" 1 "(sandboxed) '$ports', which holds no port, is refused"
+done
+has "is not a port from 1 to 65535, or several joined by commas" "$(err)" "(sandboxed) and it says what the ports must be"
+
+echo "# SANDBOXED: several ports, and a socket directory, are opened, and nothing else is"
+SOCKD="$TMPD/sockets"; mkdir -p "$SOCKD"; SOCKD_CANON=$(cd "$SOCKD" && pwd -P)
+sandboxed "${CITY_ENV[@]}" DEMO_ENGINE_SOCKET_DIR="$SOCKD" -- 5197,5198,5199 "$RWT" bash -c 'echo ran'
+eq "$RC" 0 "(sandboxed) a command with three ports and a socket directory runs"
+for p in 5197 5198 5199; do
+  has "(allow network-outbound (remote ip \"localhost:$p\"))" "$(profile)" "(sandboxed) the profile opens port $p"
+done
+eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 3 "(sandboxed) and no other loopback port"
+has "(allow network-outbound (remote unix-socket (subpath \"$SOCKD_CANON\")))" "$(profile)" "(sandboxed) it allows a Unix socket under the socket directory"
+eq "$(grep -c 'allow network-outbound (remote unix-socket' "$SANDBOX_PROFILE")" 2 "(sandboxed) and under no other, but the system resolver's"
+S=$(profile_line "(subpath \"$SOCKD_CANON\")))"); R=$(profile_line "path-literal \"/private/var/run/mDNSResponder\""); L=$(profile_line "(deny network-outbound (remote ip \"localhost:*\"))")
+eq "$([ "$R" -lt "$S" ] && [ "$S" -lt "$L" ] && echo ordered || echo "resolver $R, sockets $S, loopback $L")" ordered "(sandboxed) after the resolver's allow and before the loopback rules"
+has "(allow file-read-data file-write* (subpath \"$SOCKD_CANON\"))" "$(profile)" "(sandboxed) and it reads and writes the socket directory"
+sandboxed "${CITY_ENV[@]}" -- 5197 "$RWT" true
+hasnt "unix-socket (subpath" "$(profile)" "(sandboxed) with no socket directory named, no socket is allowed but the resolver's"
+sandboxed "${CITY_ENV[@]}" DEMO_ENGINE_SOCKET_DIR="$TMPD/no-such-dir" -- 5197 "$RWT" true
+eq "$RC" 1 "(sandboxed) a socket directory that does not exist is refused"
+has "which DEMO_ENGINE_SOCKET_DIR names, is not a directory" "$(err)" "(sandboxed) and it says so"
+sandboxed "${CITY_ENV[@]}" DEMO_ENGINE_SOCKET_DIR="$CITY" -- 5197 "$RWT" true
+eq "$RC" 1 "(sandboxed) a socket directory in the city's is refused"
 sandboxed "${CITY_ENV[@]}" -- 5197 "$TMPD/nowhere" true
 eq "$RC" 1 "(sandboxed) a directory that does not exist is refused"
 sandboxed "${CITY_ENV[@]}" -- 5197 "$TMPD" true
@@ -916,6 +951,50 @@ JS
     outside=$("$REAL_NODE" "$KNOCK" "$port" "$APIPORT" "$API_SOCK" 2>&1)
     has "other reached" "$outside" "(ISOLATION) outside the sandbox the loopback service answers"
     has "socket reached" "$outside" "(ISOLATION) and so does the Unix socket"
+
+    # A copy's serve command, run as gctk rig serve runs it, reaches each port
+    # it is given and a Unix socket its own processes open under its socket
+    # directory, and no other loopback service or Unix socket. This also runs
+    # on several sets of free ports, for the reason above.
+    COPYKNOCK="$TMPD/copyknock.js"
+    cat >"$COPYKNOCK" <<'JS'
+const net = require("net");
+const path = require("path");
+const [ports, sockdir, other, sock] = process.argv.slice(2);
+const knock = (to) => new Promise((done) => {
+  const s = net.connect(to);
+  s.setTimeout(3000, () => { s.destroy(); done("timeout"); });
+  s.once("connect", () => { s.destroy(); done("reached"); });
+  s.once("error", (e) => done(e.code));
+});
+const listen = (...at) => new Promise((done) => net.createServer((c) => c.end()).listen(...at, done));
+(async () => {
+  const own = ports.split(",").map(Number);
+  for (const p of own) await listen(p, "127.0.0.1");
+  const mine = path.join(sockdir, ".tmpab12cd", ".executor.sock");
+  require("fs").mkdirSync(path.dirname(mine));
+  await listen(mine);
+  for (const p of own) console.log("port", p, await knock({ host: "127.0.0.1", port: p }));
+  console.log("own-socket", await knock({ path: mine }));
+  console.log("city-port", await knock({ host: "127.0.0.1", port: Number(other) }));
+  console.log("city-socket", await knock({ path: sock }));
+  process.exit(0);
+})();
+JS
+    for _ in 1 2 3 4 5 6 7 8; do
+      ports=$("$REAL_NODE" -e 'const net = require("net"); const all = [0, 1, 2].map(() => net.createServer()); let left = 3; all.forEach((s) => s.listen(0, "127.0.0.1", () => { if (--left === 0) { process.stdout.write(all.map((x) => x.address().port).join(",")); all.forEach((x) => x.close()); } }));')
+      SOCKD=$(mktemp -d /tmp/demo-engine-lib-copy.XXXXXX)
+      inside=$( cd "$RWT" && env -i PATH="$REALSBX:$BIN:$FARM" HOME="$TMPD" TMPDIR="$SOCKD" CALLLOG="$CALLLOG" PACK_SCRIPTS="$HERE" \
+          DEMO_ENGINE_SOCKET_DIR="$SOCKD" "${CITY_ENV[@]}" \
+          bash "$TMPD/sandboxed.sh" "$ports" "$RWT" "$REAL_NODE" "$COPYKNOCK" "$ports" "$SOCKD" "$APIPORT" "$API_SOCK" 2>&1 )
+      for p in $(printf '%s' "$ports" | tr ',' ' '); do
+        has "port $p reached" "$inside" "(ISOLATION) a copy given ports $ports reaches its server on port $p"
+      done
+      has "own-socket reached" "$inside" "(ISOLATION) and the Unix socket it opened under its socket directory"
+      hasnt "city-port reached" "$inside" "(ISOLATION) and no other loopback service"
+      hasnt "city-socket reached" "$inside" "(ISOLATION) and no other Unix socket"
+      rm -rf "$SOCKD"
+    done
 
     # A rig's app, served on this host from a worktree of a rig whose
     # app_reads_city is "false", answers a page capture's --base-url, which

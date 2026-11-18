@@ -56,13 +56,15 @@
 #   --serve      serve the app with this command as a copy that `gctk rig serve`
 #                runs from the checkout --cwd names (default: here), with no
 #                address, on a free port of its own, which the command gets as
-#                $PORT. The copy is up once it answers there, or once the
-#                command prints the URL of the app it brought up, such as an iOS
-#                app on a simulator. A checkout has one copy, so captures from
-#                one checkout run one after another. A copy of that checkout
-#                that already runs the command is the one recorded, and it keeps
-#                running, and one that runs another command is refused. One this
-#                capture starts ends with it.
+#                $PORT, with the ports beyond it the city gives the rig as
+#                $PORT_1 and on. The copy is up once it answers there, or once
+#                the command prints the URL of the app it brought up, such as an
+#                iOS app on a simulator, and its own processes listen on each of
+#                its other ports, which the clip reaches too. A checkout has one
+#                copy, so captures from one checkout run one after another. A
+#                copy of that checkout that already runs the command is the one
+#                recorded, and it keeps running, and one that runs another
+#                command is refused. One this capture starts ends with it.
 #   --base-url   drive a deployed preview, a copy that `gctk rig serve` runs,
 #                an app that a worktree of a rig serves on this host, or an iOS
 #                app on a simulator, as ios-simulator://<device UDID>/<bundle

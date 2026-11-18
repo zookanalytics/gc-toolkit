@@ -43,6 +43,11 @@
 #     --base-url names an iOS app on a simulator, ios-simulator://<device
 #     UDID>/<bundle id>, has three: free ports picked before it starts, which
 #     the engine is given as --port for the servers it drives the app through.
+#     A copy whose rig the city gives more ports, as ui_serve_extra_ports, has
+#     those too, free ports `gctk rig serve` picks before it starts, and so
+#     does a capture of the copy, once the copy's own processes listen on each.
+#     A copy's processes may also connect to a Unix socket in the copy's own
+#     temporary directory, its TMPDIR, which `gctk rig serve` makes for it.
 #   - signals to any process outside the sandbox.
 # The CLI also runs without the environment variables that point a command at
 # the city: GC_*, GT_*, BEADS_*, BD_*, DOLT_*, TMUX and TMUX_PANE.
@@ -78,7 +83,9 @@
 #     listening on its port works in a worktree of a rig whose app_reads_city
 #     is "false". No variable that points at the city may name the port. A
 #     rig's checkout, which holds its store, and the city's own repository
-#     never count as such a worktree.
+#     never count as such a worktree. A capture of a copy also reaches the
+#     ports beyond its own that the same answer names, on each of which the
+#     copy's own processes listen.
 # A host without sandbox-exec runs no capture at all.
 #
 # app_reads_city is a formula var that mol-rig-demo declares with the default
@@ -113,15 +120,18 @@
 #                        installs, through the engine's own provision command,
 #                        the Appium the engine drives the app with. Returns 1,
 #                        having said why on stderr, when the run is refused.
-#   demo_engine_sandboxed <port> <dir> <command...>
+#   demo_engine_sandboxed <ports> <dir> <command...>
 #                        Runs the command inside the sandbox, in the caller's
-#                        working directory, with <port> the one loopback port
-#                        it may reach and <dir> what it reads and writes, as a
-#                        capture's --cwd. `gctk rig serve` runs a copy's serve
-#                        command through it. The shell becomes the command, so
-#                        its exit status is the command's and nothing after the
-#                        call runs. Returns 1, having said why on stderr, when
-#                        the run is refused.
+#                        working directory, with <ports>, one port or several
+#                        joined by commas, the loopback ports it may reach,
+#                        and <dir> what it reads and writes, as a capture's
+#                        --cwd. When DEMO_ENGINE_SOCKET_DIR names a directory,
+#                        the command also reads and writes it, and may connect
+#                        to a Unix socket under it. `gctk rig serve` runs a
+#                        copy's serve command through it. The shell becomes the
+#                        command, so its exit status is the command's and
+#                        nothing after the call runs. Returns 1, having said why
+#                        on stderr, when the run is refused.
 #   demo_engine_copy <dir> <command>
 #                        Serves an app a command serves as a copy that `gctk
 #                        rig serve` runs from the checkout <dir> sits in, with
@@ -602,15 +612,18 @@ _demo_engine_local_no() {
 # _demo_engine_copy_port <port> <pids>: true when a copy that gctk rig serve
 # runs holds the port, as gctk rig serve --check answers in the checkout one of
 # the processes listening there works in, with _DEMO_ENGINE_COPY set to that
-# checkout. That holds only for a copy that is up by its port, whose report
-# names its app at a loopback URL on its own port: the check reports one so
-# only while every process that listens on that port at an address loopback
-# reaches is in the copy's own process group, whose serve command runs inside
-# this sandbox. A copy whose serve command printed its app's URL, such as an
-# iOS app's, is up whatever listens on its port, so its report names that URL,
-# and a server on its port is judged as any other.
+# checkout and _DEMO_ENGINE_COPY_EXTRA to the ports beyond its own that the
+# answer names, one per line. That holds only for a copy that is up by its
+# port, whose report names its app at a loopback URL on its own port: the check
+# reports one so only while every process that listens on that port, or on one
+# of its ports beyond it, at an address loopback reaches is in the copy's own
+# process group, whose serve command runs inside this sandbox. A copy whose
+# serve command printed its app's URL, such as an iOS app's, is up whatever
+# listens on its port, so its report names that URL, and a server on its port
+# is judged as any other.
 _demo_engine_copy_port() {
   local port="$1" gctk pid dir top rep app
+  _DEMO_ENGINE_COPY_EXTRA=""
   gctk="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
   [ -x "$gctk" ] || return 1
   while IFS= read -r pid; do
@@ -622,6 +635,7 @@ _demo_engine_copy_port() {
     app=$(printf '%s' "$rep" | jq -r --argjson p "$port" 'select(.state == "running" and .port == $p) | .app_url // empty' 2>/dev/null)
     if [ -n "$app" ] && _demo_engine_loopback "$app" && [ "$(_demo_engine_url_port "$app")" = "$port" ]; then
       _DEMO_ENGINE_COPY=$top
+      _DEMO_ENGINE_COPY_EXTRA=$(printf '%s' "$rep" | jq -r '(.extra_ports // [])[] | select(type == "number" and . == floor and . > 0 and . < 65536) | tostring' 2>/dev/null)
       return 0
     fi
   done <<EOF
@@ -653,8 +667,13 @@ _demo_engine_local_port() {
   pids=$(lsof -nP -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null)
   [ -n "$pids" ] || { _demo_engine_local_no "$url" "no process of yours listens on port $port, so nothing shows whose server answers there"; return 1; }
   if _demo_engine_copy_port "$port" "$pids"; then
-    _demo_engine_say "--base-url $url is a copy that gctk rig serve runs from $_DEMO_ENGINE_COPY inside the sandbox, so the capture reaches port $port and no other loopback port"
+    if [ -n "$_DEMO_ENGINE_COPY_EXTRA" ]; then
+      _demo_engine_say "--base-url $url is a copy that gctk rig serve runs from $_DEMO_ENGINE_COPY inside the sandbox, so the capture reaches port $port and the copy's ports beyond it, $(printf '%s' "$_DEMO_ENGINE_COPY_EXTRA" | tr '\n' ',' | sed 's/,/, /g'), on which its own processes listen, and no other loopback port"
+    else
+      _demo_engine_say "--base-url $url is a copy that gctk rig serve runs from $_DEMO_ENGINE_COPY inside the sandbox, so the capture reaches port $port and no other loopback port"
+    fi
     printf '%s\n' "$port"
+    [ -z "$_DEMO_ENGINE_COPY_EXTRA" ] || printf '%s\n' "$_DEMO_ENGINE_COPY_EXTRA"
     return 0
   fi
   while IFS= read -r pid; do
@@ -761,18 +780,29 @@ demo_engine_cli() {
 }
 
 demo_engine_sandboxed() {
-  local port="${1:-}" dir="${2:-}"
-  [ $# -ge 3 ] || { _demo_engine_say "demo_engine_sandboxed needs a port, a directory and a command"; return 1; }
+  local ports="${1:-}" dir="${2:-}" sockets="${DEMO_ENGINE_SOCKET_DIR:-}" open="" bad="" p NL='
+'
+  [ $# -ge 3 ] || { _demo_engine_say "demo_engine_sandboxed needs its ports, a directory and a command"; return 1; }
   shift 2
   _demo_engine_sandbox_ok || return 1
-  case "$port" in
-    ''|*[!0-9]*|0*|??????*) _demo_engine_say "'$port' is not a port from 1 to 65535"; return 1 ;;
+  case "$ports" in
+    ''|,*|*,|*,,*) bad=1 ;;
   esac
-  [ "$port" -le 65535 ] || { _demo_engine_say "'$port' is not a port from 1 to 65535"; return 1; }
+  while [ -z "$bad" ] && IFS= read -r p; do
+    case "$p" in
+      *[!0-9]*|0*|??????*) bad=1 ;;
+      *) [ "$p" -le 65535 ] || bad=1 ;;
+    esac
+    [ -n "$bad" ] || open="$open$NL$p"
+  done <<PORTS
+$(printf '%s\n' "$ports" | tr ',' '\n')
+PORTS
+  [ -z "$bad" ] || { _demo_engine_say "'$ports' is not a port from 1 to 65535, or several joined by commas"; return 1; }
   [ -d "$dir" ] || { _demo_engine_say "'$dir' is not a directory"; return 1; }
+  [ -z "$sockets" ] || [ -d "$sockets" ] || { _demo_engine_say "'$sockets', which DEMO_ENGINE_SOCKET_DIR names, is not a directory"; return 1; }
   _demo_engine_city || return 1
-  _demo_engine_sandbox "$port" "$(pwd -P)
-$dir" "" || return 1
+  _demo_engine_sandbox "$open" "$(pwd -P)
+$dir${sockets:+$NL$sockets}" "" "$sockets" || return 1
   # The shell becomes the command, so its output ends once the command closes
   # it, the end gctk rig serve reads an app's URL up to.
   exec "${_DEMO_ENGINE_SANDBOX[@]}" "$@"
@@ -788,17 +818,20 @@ _demo_engine_sandbox_run() {
   "${_DEMO_ENGINE_SANDBOX[@]}" "$@"
 }
 
-# _demo_engine_sandbox <ports> <dirs> <files>: after _demo_engine_city, sets
-# _DEMO_ENGINE_SANDBOX to the words that, with a command after them, run that
-# command inside the sandbox, in the caller's working directory, with the
-# ports given, one per line, the only loopback ports it may reach. Each of <dirs>, one per line, is read and
-# written as _demo_engine_reach widens it, each of <files> is read, and the
-# engine checkout, when one was chosen, is read. Returns 1, having said why,
-# when the run is refused.
+# _demo_engine_sandbox <ports> <dirs> <files> [<sockets>]: after
+# _demo_engine_city, sets _DEMO_ENGINE_SANDBOX to the words that, with a
+# command after them, run that command inside the sandbox, in the caller's
+# working directory, with the ports given, one per line, the only loopback
+# ports it may reach. Each of <dirs>, one per line, is read and written as
+# _demo_engine_reach widens it, each of <files> is read, and the engine
+# checkout, when one was chosen, is read. <sockets>, when given, is the one
+# directory under which the command may connect to a Unix socket but the
+# system resolver's. Returns 1, having said why, when the run is refused.
 _demo_engine_sandbox() {
   local NL='
-' open="$1" cand="$2" files="$3" places rw="" ro="" p d reach kind engine="" profile v
+' open="$1" cand="$2" files="$3" sockets="" places rw="" ro="" p d reach kind engine="" profile v
   local -a unsets
+  [ -z "${4:-}" ] || sockets=$(_demo_engine_canon "$4")
 
   # The city's directories, and each directory the run reads and writes, as
   # _demo_engine_reach widens it.
@@ -833,6 +866,7 @@ $places
 $rw
 $ro
 ${engine:-}
+$sockets
 EOF
 
   profile="(version 1)$NL(allow default)"
@@ -863,6 +897,7 @@ EOF
   # deny on Unix sockets takes that allow back for most ports, over IPv4 and IPv6.
   profile="$profile$NL(deny network-outbound (remote unix-socket))"
   profile="$profile$NL(allow network-outbound (remote unix-socket (path-literal \"/private/var/run/mDNSResponder\")))"
+  [ -z "$sockets" ] || profile="$profile$NL(allow network-outbound (remote unix-socket (subpath \"$sockets\")))"
   profile="$profile$NL(deny network-outbound (remote ip \"localhost:*\"))"
   while IFS= read -r p; do
     [ -z "$p" ] || profile="$profile$NL(allow network-outbound (remote ip \"localhost:$p\"))"
