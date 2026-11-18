@@ -145,13 +145,16 @@ trap 'rm -rf "$shell_tmp"' EXIT
 # checked. A listing that failed, or one that could not be read, would yield
 # an empty list, which reads like a tree with no shell in it and skips the
 # check. A `<<<` here-string would hide the failed read (docs/review-correctness.md,
-# Loop input).
-if ! git -c core.quotePath=false ls-files >"$shell_tmp/listing"; then
+# Loop input). The listing ends each path with a NUL and names it as it is:
+# git's default listing quotes a path that holds a double quote, a backslash or
+# a control character, and no file is found under the quoted name, so the file
+# would drop out of the lint unchecked.
+if ! git ls-files -z >"$shell_tmp/listing"; then
   echo "$PROG: cannot enumerate tracked files under $ROOT" >&2
   exit 2
 fi
 shell_files=()
-while IFS= read -r f; do
+while IFS= read -r -d '' f; do
   if [ -n "$f" ] && is_shell_file "$f"; then shell_files+=("$f"); fi
 done <"$shell_tmp/listing" || {
   echo "$PROG: cannot read the listing of tracked files" >&2

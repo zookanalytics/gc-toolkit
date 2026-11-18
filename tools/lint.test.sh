@@ -4,7 +4,8 @@
 #
 # The defects it guards against: a linter that could not run reads as a clean
 # pass (fail-closed violated), shell or step-text findings get swallowed into 0,
-# a tracked shell file goes unlinted because no change names it, a listing of
+# a tracked shell file goes unlinted because no change names it or because git
+# quotes its path, a listing of
 # the tracked files that could not be written or read back reads as a tree with
 # no shell in it, one call's shell findings are lost among the calls the tree is
 # split across, a go module
@@ -252,6 +253,31 @@ grep -q 'shell: 2 file(s) clean' "$TMP/out" \
   && ok "non-shell shebang: not counted as a shell file" \
   || bad "non-shell shebang: counted: $(cat "$TMP/out")"
 
+# --- K: a tracked shell file whose path git quotes is still linted. ----------
+# git's default listing quotes a path that holds a double quote, a backslash or
+# a control character, and no file is found under the quoted name, so the file
+# dropped out of the lint. The stub wrapper logs each file it is handed on a
+# line of its own, and the file leaves the tree once the case has run.
+QUOTED=$'odd"na\\me\tx.sh'
+printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/$QUOTED"
+git -C "$REPO" add -- "$QUOTED"
+cat > "$WRAP" <<EOF
+#!/bin/sh
+printf '%s\n' "\$@" >> "$TMP/wrapper-files.log"
+exit 0
+EOF
+chmod +x "$WRAP"
+make_go 0; : > "$TMP/wrapper-files.log"
+run_sut
+[ "$rc" -eq 0 ] && ok "quoted path: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "quoted path: expected 0, got $rc"; }
+grep -qxF -- "$QUOTED" "$TMP/wrapper-files.log" \
+  && ok "quoted path: shellcheck-run.sh received the file under its own name" \
+  || bad "quoted path: dropped, shellcheck-run.sh got: $(cat "$TMP/wrapper-files.log")"
+grep -q 'shell: 3 file(s) clean' "$TMP/out" \
+  && ok "quoted path: counted with the tracked shell files" \
+  || bad "quoted path: not counted: $(cat "$TMP/out")"
+git -C "$REPO" rm -q --cached -- "$QUOTED"; rm -f "$REPO/$QUOTED"
+
 # --- The calls the shell lint splits the tree across. ------------------------
 # Three more tracked shell files make five. The stub wrapper logs each call's
 # files on a line of its own.
@@ -327,14 +353,14 @@ eq "$(ls -A "$LINT_TMP")" "" "the shell lint's runs, passed or failed, leave not
 # --- The tracked-file listing fails -> structural error (exit 2). ------------
 # An empty list from a failed git ls-files reads like a tree with no shell in
 # it, which skips the shell lint and passes. The git wrapper refuses only that
-# listing, the one that names no path, and hands every other git call on.
+# listing, the whole tree's, and hands every other git call on.
 make_wrapper 0; make_go 0
 REAL_GIT="$(command -v git)"
 rm -f "$STUB/git"
 cat > "$STUB/git" <<EOF
 #!/bin/sh
 case " \$* " in
-  *" ls-files ") echo "stub-git: ls-files refused" >&2; exit 128 ;;
+  *" ls-files -z ") echo "stub-git: ls-files refused" >&2; exit 128 ;;
 esac
 exec "$REAL_GIT" "\$@"
 EOF
@@ -385,7 +411,7 @@ rm -f "$STUB/git"
 cat > "$STUB/git" <<EOF
 #!/bin/sh
 case " \$* " in
-  *" ls-files ") "$REAL_GIT" "\$@"; rc=\$?; rm -f "\$TMPDIR"/lint-shell.*/listing; exit \$rc ;;
+  *" ls-files -z ") "$REAL_GIT" "\$@"; rc=\$?; rm -f "\$TMPDIR"/lint-shell.*/listing; exit \$rc ;;
 esac
 exec "$REAL_GIT" "\$@"
 EOF
