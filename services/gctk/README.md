@@ -125,14 +125,20 @@ records the design and its measured cost.
 command its caller passes, with bash at the checkout's top, on a free loopback
 port it is given as `$PORT`, inside the sandbox that
 `assets/scripts/demo-engine-lib.sh` defines for a demo capture, which
-`GCTK_SCRIPTS_DIR` names. The copy is up once it answers on that port, or once
-the command prints the URL of the app it brought up, such as an iOS app on a
-simulator, and the report's `app_url` says where its app is. A demo capture's
-`--serve` starts one with no address and points the engine at its `app_url`. The
-`converse-edit` skill starts one with the city's publish command and address
-pattern for the operator. Each caller reads the rig's `ui_serve_command`, and
-the city's `ui_publish_command` and `ui_address_pattern`, from the rig's formula
-vars and passes them. A copy is a process group led by a detached gctk,
+`GCTK_SCRIPTS_DIR` names. An app that runs as several local processes also gets
+as many more free loopback ports as the city gives the rig as
+`ui_serve_extra_ports`, which a start reads itself for the rig whose clone holds
+the checkout, as `$PORT_1` and on. The command's `$TMPDIR` is a directory of the
+copy's own, where its processes may connect to the Unix sockets they open. The
+copy is up once it answers on its port, or once the command prints the URL of
+the app it brought up, such as an iOS app on a simulator, and its own processes
+listen on each of its other ports. The report's `app_url` says where its app is,
+and `extra_ports` names its other ports. A demo capture's `--serve` starts one
+with no address and points the engine at its `app_url`. The `converse-edit`
+skill starts one with the city's publish command and address pattern for the
+operator. Each caller reads the rig's `ui_serve_command`, and the city's
+`ui_publish_command` and `ui_address_pattern`, from the rig's formula vars and
+passes them. A copy is a process group led by a detached gctk,
 `rig serve --lead`, which ends the group when the serve command ends, and Gas
 City's orphan sweep ends it once the session that started it has ended. Starts and
 stops of one checkout take turns under a lock beside the copy's record, so two
@@ -142,7 +148,7 @@ beside the check records:
 
 | Path under the git common directory | What it holds |
 |---|---|
-| `gc-rig-serve/<hash of the checkout's path>/` | a copy's port, its commands, its app's URL once its serve command prints one, its leader's pid and start, and its logs |
+| `gc-rig-serve/<hash of the checkout's path>/` | a copy's port and its other ports, its commands, its app's URL once its serve command prints one, its leader's pid and start, and its logs |
 | `gc-rig-serve/<hash of the checkout's path>.lock` | the file a start or a stop of that checkout's copy holds an flock on while it runs, which the kernel releases if the call dies |
 
 `gctk rig serve --help` states the flags, the states a call reports and the

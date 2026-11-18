@@ -23,8 +23,10 @@ city has one and the published npm package otherwise. It holds Node to the
 engine's floor of 22.18, installs a checkout's dependencies on first use, and
 provisions the browser. It runs the engine inside a sandbox from which the
 live city cannot be reached, so a server the capture starts and a page it loads
-read none of the city's stores, configuration or API; the library's header says
-what the sandbox denies and what it refuses. Source it from the pack gc loaded
+read none of the city's stores, configuration or API.
+[The sandbox's page](../../docs/demo-capture-sandbox.md) says what it guarantees
+and what it lets through, and the library's header says what it denies and what
+it refuses. Source it from the pack gc loaded
 and resolve the engine once. A video also needs ffmpeg, which the library
 leaves to the capture that assembles one:
 
@@ -111,7 +113,18 @@ own as `$PORT`. It is up once it answers there, or once the command prints the
 URL of the app it brought up on a line of its standard output, in the engine's
 form, as `ios-simulator://<device UDID>/<bundle id>` names an iOS app it
 launched on a simulator. A capture hands the engine the app where the copy
-reports it. So the command:
+reports it.
+
+An app that runs as several local processes, such as a web server and the
+database server it starts beside it, gets a loopback port for each of its other
+servers. The city gives the rig how many as `ui_serve_extra_ports`, beside
+`ui_serve_command` among its `[rigs.formula_vars]` in `city.toml`, and the copy
+gets them as `$PORT_1`, `$PORT_2` and on, free ports `gctk rig serve` picks
+before the command starts. Inside the sandbox the app's processes reach one
+another on those ports and on `$PORT`, and on no other loopback port, and a
+capture's browser reaches each of them too. The copy's `$TMPDIR` is a directory
+of its own, which goes with the copy, and the app's processes may connect to
+the Unix sockets they open under it, and to no other. So the command:
 
 - changes into the app's directory and installs what it needs, because a
   capture's worktree holds only what the rig commits;
@@ -119,7 +132,13 @@ reports it. So the command:
   its command line, such as `cd web && npm ci && npm run dev -- --port $PORT`,
   or prints its app's URL once the app is ready, with its other output on its
   standard error;
-- hard-codes no port, because each run gets a port of its own;
+- starts each of its app's other servers on one of `$PORT_1` and on, and tells
+  each part of the app where the others listen, such as the database server's
+  URL the web server and the page connect to. It listens on every one of them,
+  because the copy is up only once each has a listener of the app's own;
+- hard-codes no port, because each run gets ports of its own;
+- keeps a Unix socket its processes connect to under `$TMPDIR`, the one place
+  the sandbox lets them connect to one;
 - serves the app on fixture data, because the sandbox keeps the live city out
   of reach. An iOS app runs on a simulator, which the system's simulator
   service starts outside the sandbox, so the command gives it fixture data
@@ -217,8 +236,9 @@ and its shell starts in `--cwd`. `mol-rig-demo`, the `demo` check and
 they capture from, so one script runs alike on all three. A script whose
 commands run in a directory below the root, which the rig's guide names,
 changes into it in its first step, as `run cd <dir>`. A `--serve` command runs
-as a copy on a free port of its own, which it gets as `$PORT`, as a screenshot's
-command does.
+as a copy on a free port of its own, which it gets as `$PORT`, with the ports
+beyond it the city gives the rig as `$PORT_1` and on, as a screenshot's command
+does.
 
 `mol-rig-demo` runs that call as a pool workflow against any rig. It turns the
 scenario into a script (a ready one, or one written from a bead with
