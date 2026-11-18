@@ -513,10 +513,10 @@ marks read (tk-ssm8qns.6).
 The adapter's own tests drive it through a stub `gc` on `PATH`, so they pin the
 questions it asks. A marked bead that the stub listing leaves out gets a read
 error, and a bead with a `waits-for` edge of its own gets the `waits-for` error
-whether the stub listing names it or not. Its acceptance test runs the bd the
-city runs against a scratch store, so it pins the answer that bd gives for each
-kind of wait, each gate included, and the beads it marks blocked. The domains'
-tests run on the fake.
+whether the stub listing names it or not. Its acceptance tests run the bd the
+city runs against a scratch store, so they pin the answer that bd gives for
+each kind of wait, each gate included, the beads it marks blocked, and the
+prefix its create mints an id from. The domains' tests run on the fake.
 
 The host adapter's own tests start real processes, so they pin what its fake
 stands in for: a group that ends whole, a start that leads a session of its own

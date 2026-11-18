@@ -62,14 +62,34 @@ of that prefix that the PR's store does not hold.
   `backend/conformance/lifecycle_create_contract.go` creates one and reads it
   back. An edge from the ask onto such a bead is still an edge between two
   prefixes, so finding the bead in the store does not make the wait hold.
-- The ask takes its store's prefix, the issue prefix bd's create mints an id
-  from (`ReadConfigPrefix` in `internal/storage/issueops/helpers.go`, read by
-  `assignCreateIssueIDInTx` in `internal/storage/issueops/create.go`), which
-  `bd where --json` names (`cmd/bd/where.go`). Its own edge onto the PR's bead
-  holds only when the two share a prefix, and the store can hold a PR's bead
-  of another prefix, as above. A wait holds the ask only when it carries the
-  PR bead's prefix too, which is the rule the `waits` skill gives every wait
-  edge.
+- The ask takes the prefix bd's create mints an id from: the `issue_prefix`
+  row of the store's config table, less a trailing dash. The direct path reads
+  it with `ReadConfigPrefix` (`internal/storage/issueops/helpers.go`), through
+  `NewBatchContext`, for `assignCreateIssueIDInTx`
+  (`internal/storage/issueops/create.go`). The proxied-server path reads the
+  same row in `resolveTopLevelPrefix` (`internal/storage/domain/issue.go`).
+  Neither takes the prefix from config.yaml, and `ReadConfigPrefix` fails on a
+  store without the row, saying an `issue-prefix` in config.yaml does not
+  satisfy it. The
+  ask's own edge onto the PR's bead holds only when the two share a prefix,
+  and the store can hold a PR's bead of another prefix, as above. A wait holds
+  the ask only when it carries the PR bead's prefix too, which is the rule the
+  `waits` skill gives every wait edge.
+- `bd config get issue_prefix --json` reads that row on both paths
+  (`configGetCmd` and `openWorkspaceConfig` in `cmd/bd/config.go`, then
+  `GetSetting` in `internal/workapi/storeworkspaceconfig/workspaceconfig.go` or
+  `internal/storage/uow/workspace_config.go`). `issue_prefix` is not a key bd
+  reads from config.yaml alone (`IsYamlOnlyKey` in
+  `internal/config/yaml_config.go`). `bd where --json` is not that read.
+  `cmd/bd/where.go` names config.yaml's `issue-prefix` or `issue_prefix` ahead
+  of the row, and on a server or proxied-server store it never reads the row
+  (`shouldReadWherePrefixFromStore`). A probe on the city's bd over a proxied
+  scratch store of prefix `pb` showed both. `bd where` named no prefix until
+  config.yaml named `rb`, and then named `rb`, while `bd config get
+  issue_prefix` named `pb` and `bd create` minted `pb-83k`. The store
+  acceptance case `TestStoreAcceptanceTheCreatesPrefix`
+  (`services/gctk/internal/gcbd/acceptance_test.go`) builds the same store and
+  holds gctk's read to `pb`.
 - For a bead of the PR bead's prefix, bd's create paths differ. The direct path
   resolves each `--deps` target in its store (`resolveDepSpecTargets` in
   `cmd/bd/create_deps.go`), and an unknown target fails the create. The
@@ -83,10 +103,11 @@ of that prefix that the PR's store does not hold.
 So a wait on a bead of another prefix files with an edge that holds nothing on
 either path, whether or not the store holds that bead, and the ask reads clear
 and the race stays with no sign. Gas City's `gc bd` adds no check, as above.
-gctk's check reads the prefix the PR's store gives the ask through `gc bd
-where`, and compares it and each wait's prefix with the PR bead's, then reads
-each waited bead in the PR's store before the create, and it is the same on
-every transport.
+gctk's check reads the prefix the PR's store gives the ask with `gc bd config
+get issue_prefix`, pinned to that store, and files nothing when the read fails
+or names no prefix. It compares that prefix and each wait's with the PR bead's,
+then reads each waited bead in the PR's store before the create, and it is the
+same on every transport.
 
 ## Report an ask a re-run finds that does not wait
 
