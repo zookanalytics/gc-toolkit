@@ -1256,6 +1256,14 @@ for sh_ in $shells; do
     else
         bad "($sh_) converse-settle: the task a sitting files carries the agreed course, their words and its own parts in its description" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
+    sed 's/^Their words, as direction: x$/Their words, as direction: "the `echo ran` and $HOME stay as written"/' "$CH/order-block" >"$CH/literal-order"
+    rc=$(run_chain "$run" "$CH/literal-order")
+    if [ "$rc" -eq 0 ] && grep -qF -- 'Their words, as direction: "the `echo ran` and $HOME stay as written" This sitting'"'"'s own: x --json' "$CH/log" \
+        && grep -qxF -- 'gc sling x/x tk-new --on x' "$CH/log"; then
+        ok "($sh_) converse-settle: what the task's description quotes stays as written, and the task is sent"
+    else
+        bad "($sh_) converse-settle: what the task's description quotes stays as written, and the task is sent" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
     rc=$(run_chain "$run" "$CH/brief-block")
     if [ "$rc" -eq 0 ] && head -n 1 "$CH/notes" | grep -qE '^## Rework brief \([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\)$' \
         && grep -qxF 'Agreed with the operator: x' "$CH/notes" \

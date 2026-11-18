@@ -86,15 +86,20 @@ the course apart from their words and from what is yours alone:
 - `This sitting's own:` each part of the order the course does not state, such
   as an approach or a name, or `none`.
 
-In the block below, the sling runs only once the create has returned the
-bead's id. The comment then records the dispatch as one of the visit's actions,
-which the comment on the subject's PR lists:
+In the block below, the description goes through a quoted heredoc, so what it
+quotes stays as written, and the sling runs only once the create has returned
+the bead's id. The comment then records the dispatch as one of the visit's
+actions, which the comment on the subject's PR lists:
 
 ```bash
-WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>
+DESC=$(cat <<'BLOCK'
+<what needs doing, why, and what done looks like>
 Agreed with the operator: <the course, copied or quoted, with where and in what words they agreed>
 Their words, as direction: <the words of theirs the course rests on, quoted, with where they said them, or none>
-This sitting's own: <each part of the order the course does not state, or none>" --json | jq -er '.id') \
+This sitting's own: <each part of the order the course does not state, or none>
+BLOCK
+) \
+  && WORK=$(gc bd create "<title>" -t task -d "$DESC" --json | jq -er '.id') \
   && gc sling <rig>/<pool> "$WORK" --on <formula> \
   && gc bd comment "$CONVERSATION" "Sent work: <what it will do, in plain words>"
 ```
