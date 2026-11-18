@@ -160,11 +160,9 @@ design that would have served them. Whether the mechanism works is the
 A walk that breaks is a finding, such as something that reaches the person
 after the point where it could have helped them, something asked of them that
 they cannot give where they are asked, or nothing that tells them it worked. A
-break the change did not cause is filed as the specialist stance says, and is
-no finding against the change. A limit the PR discloses is still a finding when
-it defeats the purpose the feature is named for, because disclosing it hands
-the operator the product judgment this check exists to make. The verdict body
-adds a line for each walk:
+limit the PR discloses is still a finding when it defeats the purpose the
+feature is named for, because disclosing it hands the operator the product
+judgment this check exists to make. The verdict body adds a line for each walk:
 `Walk: <the person, what they were doing, and what you found there>`.
 
 The questions are the lens, not a checklist to exhaust. A change that plainly

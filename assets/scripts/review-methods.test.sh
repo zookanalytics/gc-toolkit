@@ -69,8 +69,7 @@
 #     walks them through the change as designed and as built, across the whole
 #     of what they are doing. Its words fit a person who is neither asked nor
 #     answers. What the person meets through a mechanism is the pm check's, a
-#     break the change did not cause is filed and not found against it, a limit
-#     the PR discloses is still a finding when it defeats the feature's
+#     limit the PR discloses is still a finding when it defeats the feature's
 #     purpose, a walk that breaks blocks, the verdict body records each walk,
 #     and the method's questions stay a lens.
 #   - This repo's own docs/review-triage.md, read the way a review reads it at
@@ -644,8 +643,6 @@ hasF "$TMP/pm.judge" 'Walk what was designed and then what was built' "…as des
 notF "$TMP/pm.judge" 'what confirms that their answer was taken' "…in words that fit a person who is neither asked nor answers"
 hasF "$TMP/pm.judge" "Whether the mechanism works is the \`correctness\` check's question, and what the person meets through it is yours." \
   "…and judges what the person meets through a mechanism, leaving whether it works to correctness"
-hasF "$TMP/pm.judge" 'A break the change did not cause is filed as the specialist stance says, and is no finding against the change.' \
-  "…files a break the change did not cause instead of finding it against the change"
 hasF "$TMP/pm.judge" 'A limit the PR discloses is still a finding when it defeats the purpose the feature is named for' \
   "…so a disclosed limit that defeats the feature's purpose is still a finding"
 hasF "$TMP/pm.judge" '`Walk: <the person, what they were doing, and what you found there>`' "…and the verdict body records each walk"
