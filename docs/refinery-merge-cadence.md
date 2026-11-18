@@ -903,14 +903,15 @@ only runs that ended after the bead's last `review-run-failed` gate closed, it
 files a human gate keyed `review-run-failed` instead, naming both runs and how
 each ended ([state-machine.md](state-machine.md#checks)).
 
-**A pour cut short.** Gas City's attach makes two writes, the review run and
-then the bead's `blocks` edge onto its root (`wireFormulaCookGraphV2AttachRoot`,
-gascity `cmd/gc/cmd_formula.go`). A pour that stops between them leaves a
-review run that no edge of the bead names, so the next run of the order finds
-none attached and pours a second at that head. That costs one more review of
-the head, because a review run pushes only under a lease on the head its round
-judged, and Gas City's claim retires the first once the refinery is assigned
-the bead. The fix belongs upstream, in Gas City's attach onto a bead.
+**A pour cut short.** Gas City's attach writes the review run, and then the
+bead's `blocks` edge onto its root in a write of its own
+(`wireFormulaCookGraphV2AttachRoot`, gascity `cmd/gc/cmd_formula.go`). A pour
+that stops between the two leaves a review run that no edge of the bead names,
+so the next run of the order finds none attached and pours a second at that
+head. That costs one more review of the head, because a review run pushes only
+under a lease on the head its round judged, and Gas City's claim retires the
+first once the refinery is assigned the bead. The fix belongs upstream, in Gas
+City's attach onto a bead.
 
 **How the refinery hears of a changed head.** A changed head is the refinery's
 to take once no withdrawal is open on the bead and no review run is attached to
