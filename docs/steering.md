@@ -56,7 +56,13 @@ A bead may be routed or armed to a work pool only when one of these holds:
   standing ([refinery-merge-cadence.md](refinery-merge-cadence.md)), or once
   the landing order finds files stale there after a landing, the re-render
   after landing the operator approved in the merge design's call 1
-  ([design.md](../specs/tk-1tfzr71.66/design.md#what-the-operator-approves)).
+  ([design.md](../specs/tk-1tfzr71.66/design.md#what-the-operator-approves));
+- it is the architecture document a review run sends ahead of the PR it
+  reviews, which that PR waits on: the bead `gctk review ahead` files, or finds
+  open by its title, and slings to the run's repair pool unless a label holds
+  it. The route stands on the operator's ruling that a missing document opens
+  as its own PR while the change waits for it
+  ([ruling.md](../specs/tk-ilh8rgh/ruling.md)).
 
 Every other bead waits for placement. A bead held this way is open and
 unassigned, carries Gas City's `hold:mayor` label, and has no route and no arm.
