@@ -3,9 +3,10 @@
 # finished gascity rebase and checks what their push did once they answer.
 #
 # The gate's message is the only place the operator reads the push, so the
-# suite runs the range-diff, the push and the stand-down exactly as the message
-# writes them, against real repositories it builds under a directory whose name
-# holds a space, and then lets finish read the result.
+# suite runs the range-diff, the push and the drop exactly as the message writes
+# them, under a directory whose name holds a space: the first two against real
+# repositories it builds, which finish then reads, and the drop against the
+# real stand-down.sh.
 # Every outcome of finish is pinned: a landing closes the bead in one write,
 # whether or not main moved on from it before the check, and moves the rig
 # checkout only when that discards nothing, an unrun push asks again, and a main
@@ -15,7 +16,9 @@
 # The script runs from a copy laid out as the pack lays it out, beside stubs of
 # the gc-toolkit scripts it calls (rig-root.sh, human-gate.sh, await-ruling.sh)
 # and the real bd-lib.sh, under a stub gc that serves the bead and logs each
-# call. No live city, store or network.
+# call. The drop runs the real stand-down.sh and the scripts it runs over a stub
+# gc of its own, which keeps the bead and its gate in a JSON store. No live
+# city, store or network.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,16 +46,86 @@ STATE="$TMP/state"; LOG="$TMP/calls.log"
 export STATE LOG
 
 # The stub gc logs every call on one line, serves the bead and the convoy from
-# the state directory, and refuses an update of a bead named in update_fail.
+# the state directory, refuses an update of a bead named in update_fail, and
+# keeps the description an update writes in description.<id>.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 printf '%s\n' "$*" | tr '\n' ' ' >> "$LOG"; echo >> "$LOG"
 case "$1 $2" in
   "convoy status") cat "$STATE/convoy.json" ;;
   "bd show") cat "$STATE/show.json" ;;
-  "bd update") grep -qx "$3" "$STATE/update_fail" 2>/dev/null && exit 1 ;;
+  "bd update")
+    id=$3
+    grep -qx "$id" "$STATE/update_fail" 2>/dev/null && exit 1
+    while [ $# -gt 0 ]; do
+      [ "$1" = --description ] && printf '%s' "$2" > "$STATE/description.$id"
+      shift
+    done ;;
 esac
 exit 0
+GC
+# The drop's stub gc serves the reads the stand-down makes, and the assignee
+# write, from store.json: beads in the shapes bd prints, each carrying its
+# blocks edges in _deps. The write keeps bd's --if-status guard: a bead in
+# another status is not written, and the exit is 13. It answers nothing else.
+mkdir -p "$TMP/store-bin" "$STATE/store-rig/.beads"
+cat > "$TMP/store-bin/gc" <<'GC'
+#!/usr/bin/env bash
+S="$STATE/store.json"
+printf '%s\n' "$*" >> "$STATE/store.log"
+case "${1:-}" in
+  rig) printf '{"rigs":[{"name":"gascity","path":"%s","prefix":"gc"}]}\n' "$STATE/store-rig"; exit 0 ;;
+  bd) shift ;;
+  *) echo "store stub: unsupported $*" >&2; exit 2 ;;
+esac
+[ "${1:-}" = --db ] && shift 2
+verb=${1:-}; shift
+case "$verb" in
+  show)
+    jq -c --arg id "$1" '. as $s | [ .[] | select(.id == $id) | . as $b
+      | .dependencies = [ ($b._deps // [])[] as $e | $s[] | select(.id == $e.id)
+          | {id, dependency_type: $e.dependency_type, issue_type, status} ]
+      | del(._deps) ]' "$S" ;;
+  list)
+    ids=""; parent=""
+    while [ $# -gt 0 ]; do
+      case "$1" in --id) ids=$2; shift ;; --parent) parent=$2; shift ;; esac
+      shift
+    done
+    jq -c --arg ids "$ids" --arg p "$parent" '[ .[]
+      | select($ids == "" or (.id as $i | $ids | split(",") | index($i)))
+      | select($p == "" or (.parent // "") == $p) | . as $b
+      | .dependencies = [ ($b._deps // [])[] | {issue_id: $b.id, depends_on_id: .id, type: .dependency_type} ]
+      | del(._deps) ]' "$S" ;;
+  dep)
+    [ "${1:-}" = list ] || { echo "store stub: unsupported dep $*" >&2; exit 2; }
+    case " $* " in
+      *" --direction=up "*)
+        jq -c --arg id "$2" '[ .[] | . as $b | ($b._deps // [])[] | select(.id == $id)
+          | ($b | del(._deps)) + {dependency_type} ]' "$S" ;;
+      *)
+        jq -c --arg id "$2" '. as $s | [ .[] | select(.id == $id) | (._deps // [])[] as $e
+          | $s[] | select(.id == $e.id) | del(._deps) + {dependency_type: $e.dependency_type} ]' "$S" ;;
+    esac ;;
+  update)
+    id=$1; who="-"; if_status="-"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --assignee) who=$2; shift ;;
+        --assignee=*) who=${1#--assignee=} ;;
+        --if-status) if_status=$2; shift ;;
+        --if-status=*) if_status=${1#--if-status=} ;;
+      esac
+      shift
+    done
+    [ "$who" != "-" ] || { echo "store stub: an update of $id that sets no assignee" >&2; exit 2; }
+    if [ "$if_status" != "-" ] && [ "$(jq -r --arg id "$id" '.[] | select(.id == $id) | .status' "$S")" != "$if_status" ]; then
+      echo "Error: precondition failed for $id" >&2; exit 13
+    fi
+    jq -c --arg id "$id" --arg who "$who" 'map(if .id == $id then .assignee = $who else . end)' "$S" > "$S.n" \
+      && mv "$S.n" "$S" ;;
+  *) echo "store stub: unsupported bd $verb" >&2; exit 2 ;;
+esac
 GC
 cat > "$KIT/rig-root.sh" <<'SH'
 #!/usr/bin/env bash
@@ -76,11 +149,10 @@ printf 'await-ruling %s\n' "$*" >> "$LOG"
 [ -f "$STATE/await_fail" ] && exit 1
 exit 0
 SH
-cat > "$KIT/stand-down.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'stand-down %s\n' "$*" >> "$LOG"
-SH
-chmod +x "$TMP/bin/gc" "$KIT/rig-root.sh" "$KIT/human-gate.sh" "$KIT/await-ruling.sh" "$KIT/stand-down.sh" "$SCRIPT"
+for f in stand-down.sh work-outcome.sh bead-rehome.sh bead-store.sh rig-map.sh finalize-gate.sh; do
+  cp "$KIT_SRC/$f" "$KIT/$f"
+done
+chmod +x "$TMP/bin/gc" "$TMP/store-bin/gc" "$KIT/rig-root.sh" "$KIT/human-gate.sh" "$KIT/await-ruling.sh" "$SCRIPT"
 PATH="$TMP/bin:$PATH"
 
 KEEPER="gascity/gascity-keeper.keeper"
@@ -146,7 +218,7 @@ bead() {
 
 reset_case() {
   : > "$LOG"
-  rm -f "$STATE/update_fail" "$STATE/gate_fail" "$STATE/await_fail" "$STATE/gate-message"
+  rm -f "$STATE/update_fail" "$STATE/gate_fail" "$STATE/await_fail" "$STATE/gate-message" "$STATE"/description.*
   printf '{"children":[{"id":"gc-iss"}]}' > "$STATE/convoy.json"
 }
 
@@ -162,13 +234,16 @@ eq "$RC" 0 "(ask) exits 0 once the gate asks and the arm landed"
 has "$(calls 'convoy status')" "convoy status gc-convoy1 --json" "(ask) the bead is the one the input convoy tracks"
 has "$(calls human-gate)" "human-gate --subject gc-iss --key rebase-landing --message Land gascity rebase gc-iss: review its range-diff, then force-push $BRANCH onto main" \
   "(ask) one gate on the bead under rebase-landing, its first line the title"
-MSG=$(cat "$STATE/gate-message")
+MSG=$(cat "$STATE/description.gc-gate1" 2>/dev/null)
+eq "${MSG%%$'\n\n'To drop the rebase instead, *}" "$(cat "$STATE/gate-message")" \
+  "(ask) the write that assigns the gate gives it the message it was filed with, then the drop"
 has "$MSG" "  git -C $(printf %q "$TMP/rig") range-diff $ONTO $PRE $BRANCH" "(ask) the review is a range-diff of the fork's commits against their rebased forms, by full sha"
 has "$MSG" "  git -C $(printf %q "$TMP/rig") push --force-with-lease=main:$PRE origin $BRANCH:main" "(ask) the push's lease is pinned to the pre-rebase tip, by full sha"
 has "$MSG" "A refused push means main moved after the rebase. Clear this gate anyway" "(ask) the message says what a refused push means and what follows"
-has "$MSG" "$(printf %q "$KIT/stand-down.sh") gc-iss --key rebase-landing --ruling" "(ask) the message names the stand-down for a rebase the operator drops"
+has "$MSG" "run gc bd update gc-gate1 --if-status open --assignee ''; $(printf %q "$KIT/stand-down.sh") gc-iss --key rebase-landing --ruling '<why>', which takes this gate back from you" \
+  "(ask) the drop takes the gate, by its id, back from the operator before the stand-down"
 hasnt "$MSG" "Asked again" "(ask) a first ask says nothing of an earlier gate"
-has "$(calls 'bd update gc-gate1')" "bd update gc-gate1 --assignee human" "(ask) the gate is assigned to the operator, whose push it is"
+has "$(calls 'bd update gc-gate1')" "bd update gc-gate1 --assignee human --description Land gascity rebase gc-iss" "(ask) the gate is assigned to the operator, whose push it is"
 has "$(calls await-ruling)" "await-ruling gc-iss --key rebase-landing --formula mol-upstream-gc-rebase-finish" "(ask) the bead is armed to run the landing check once the gate clears"
 has "$OUT" "gc-iss waits on gate gc-gate1" "(ask) the summary names the gate"
 hasnt "$(calls 'bd update gc-iss')" "bd update" "(ask) the bead itself is not written"
@@ -176,11 +251,30 @@ hasnt "$(calls 'bd update gc-iss')" "bd update" "(ask) the bead itself is not wr
 # The commands run as the message writes them.
 RANGE=$(printf '%s\n' "$MSG" | sed -n 's/^  \(git -C .* range-diff .*\)$/\1/p')
 PUSH=$(printf '%s\n' "$MSG" | sed -n 's/^  \(git -C .* push .*\)$/\1/p')
-DROP=$(printf '%s\n' "$MSG" | sed -n "s/^To drop the rebase instead, .*: run \(.* --ruling '<why>'\)\.\$/\1/p")
-if eval "$DROP" 2>"$TMP/drop.err"; then
-  eq "$(calls stand-down)" "stand-down gc-iss --key rebase-landing --ruling <why>" "(ask) the stand-down runs as written"
+DROP=$(printf '%s\n' "$MSG" | sed -n "s/^To drop the rebase instead, do not clear this gate: run \(.* --ruling '<why>'\), which .*\$/\1/p")
+# The drop runs over a store holding the bead and its gate as ask leaves them,
+# the gate assigned to the operator, and as a dry run, which makes every read
+# the stand-down makes before its first write.
+jq -n '[{id: "gc-iss", status: "open", assignee: "", issue_type: "task", title: "rebase", notes: "",
+         metadata: {"gc.dispatch_when_ready": "gascity/gc-toolkit.polecat"},
+         _deps: [{id: "gc-gate1", dependency_type: "blocks"}]},
+        {id: "gc-gate1", status: "open", assignee: "human", issue_type: "gate", await_type: "human",
+         await_id: "rebase-landing", title: "Land gascity rebase gc-iss", notes: "", metadata: {}}]' > "$STATE/store.json"
+if DROP_OUT=$(unset "${!GC_@}" "${!BEADS_@}"; PATH="$TMP/store-bin:$PATH"; eval "$DROP --dry-run" 2>&1); then
+  has "$DROP_OUT" "DRY RUN: gc-iss would lose its arm and its run, each open gate under rebase-landing would resolve with \"ruled: <why>\", and gc-iss would close as not needed" \
+    "(ask) the drop runs as written, through the real stand-down.sh, which would disarm the bead, answer the gate and close the bead"
 else
-  bad "(ask) the stand-down runs as written: $(cat "$TMP/drop.err")"
+  bad "(ask) the drop runs as written, through the real stand-down.sh: $DROP_OUT"
+fi
+eq "$(jq -r '.[] | select(.id == "gc-gate1") | .assignee' "$STATE/store.json")" "" "(ask) …having taken the gate back from the operator"
+# Run again once its stand-down answered the gate, the drop's take-back writes
+# nothing to the closed gate, and the stand-down still runs.
+jq 'map(if .id == "gc-gate1" then .status = "closed" | .close_reason = "ruled: <why>" else . end)' "$STATE/store.json" > "$STATE/store.n" \
+  && mv "$STATE/store.n" "$STATE/store.json"
+if DROP_OUT=$(unset "${!GC_@}" "${!BEADS_@}"; PATH="$TMP/store-bin:$PATH"; eval "$DROP --dry-run" 2>&1); then
+  has "$DROP_OUT" "DRY RUN: gc-iss would lose its arm and its run" "(ask) a drop run again after the gate was answered still reaches the stand-down"
+else
+  bad "(ask) a drop run again after the gate was answered still reaches the stand-down: $DROP_OUT"
 fi
 if eval "$RANGE" >"$TMP/range.out" 2>&1 && grep -q 'fork commit' "$TMP/range.out"; then
   ok "(ask) the range-diff runs as written and shows the fork commit"
