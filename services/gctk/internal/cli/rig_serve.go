@@ -24,29 +24,34 @@ import (
 const rigServeLong = `Runs a copy of the rig's UI from the checkout the current directory sits in:
 the command --command passes, with bash at the checkout's top, on a free
 loopback port it is given as $PORT, inside the sandbox a demo capture runs in.
-A demo capture points its engine at the copy's port, and a sitting gives the
+The copy is up once it answers on that port as its own, or once the command
+prints the URL of the app it brought up on a line of its standard output, as
+ios-simulator://<device UDID>/<bundle id> names an iOS app on a simulator. A
+demo capture points its engine at the copy's app_url, and a sitting gives the
 operator the copy's address, so both reach the UI through one path.
 
 A checkout has at most one copy. A start for a checkout whose copy runs starts
-no other: it reports that copy once it answers on its port, so a start is safe
-to repeat. A start whose command differs from the one that copy runs fails with
-reason other-command and leaves the copy running. --publish-command and --address-pattern ask for an address: the
-publish command publishes the copy's port, as $PORT, for exactly as long as it
-runs, and the address is the pattern with the port for each $PORT or ${PORT}.
-Either one empty means no address can be given. A copy started without them has
-no address, and a start with them publishes a running copy whose publish
-command ended. A start with them while the copy's publish command runs, with
-another publish command or address pattern, an empty one included, fails with
-reason other-publisher and leaves the copy and its publish command running.
-When another mapping already publishes the copy's port, a start moves a copy it
-ran to another port, and fails with reason address-taken for a copy it found,
-which keeps running on its port for whoever uses it. A start that cannot stop a
-copy, because its process group survives SIGTERM and SIGKILL, fails with reason
+no other: it reports that copy once it is up, so a start is safe to repeat. A
+start whose command differs from the one that copy runs fails with reason
+other-command and leaves the copy running. --publish-command and
+--address-pattern ask for an address: the publish command publishes the copy's
+port, as $PORT, for exactly as long as it runs, and the address is the pattern
+with the port for each $PORT or ${PORT}. Either one empty means no address can
+be given. A copy started without them has no address, and neither has a copy
+whose command printed its app's URL, since an address publishes only the copy's
+port. A start with them publishes a running copy whose publish command ended. A
+start with them while the copy's publish command runs, with another publish
+command or address pattern, an empty one included, fails with reason
+other-publisher and leaves the copy and its publish command running. When
+another mapping already publishes the copy's port, a start moves a copy it ran
+to another port, and fails with reason address-taken for a copy it found, which
+keeps running on its port for whoever uses it. A start that cannot stop a copy,
+because its process group survives SIGTERM and SIGKILL, fails with reason
 not-stopped and keeps the copy's record, so --check reports it and --stop ends
 it. --check reports the copy's state and starts nothing. --stop ends the copy's
-whole process group. Starts and stops of one checkout take turns: one that
-finds another under way waits for it to end, and acts on the copy it left. A
-check waits for neither.
+whole process group, which has a minute after SIGTERM to end before SIGKILL.
+Starts and stops of one checkout take turns: one that finds another under way
+waits for it to end, and acts on the copy it left. A check waits for neither.
 
 The sandbox is the one demo-engine-lib.sh defines, in the pack's scripts
 directory, which GCTK_SCRIPTS_DIR names. The serve command cannot read the
@@ -57,21 +62,21 @@ stopped, when its serve command ends, or once the session that started it has
 ended, through Gas City's orphan sweep, which reads the session's values from
 the copy's leader.
 
-It prints one JSON line on stdout: the state, the checkout, the copy's port, its
-address, empty when it has none, its log, the serve command's exit status once
-it has ended, and, in reason and detail, why. A start that found no copy
-running and ran one also prints "started": true, so its caller knows the copy
-is its own to stop. A start that found the copy running prints no started key.
-rig's own lines, and the last lines of the log of a copy that failed or ended,
-go to stderr.
+It prints one JSON line on stdout: the state, the checkout, the copy's port,
+app_url, where a running copy's app is, which is the URL the command printed or
+else the copy's loopback URL, its address, empty when it has none, its log, the
+serve command's exit status once it has ended, and, in reason and detail, why. A
+start that found no copy running and ran one also prints "started": true, so its
+caller knows the copy is its own to stop. A start that found the copy running
+prints no started key. rig's own lines, and the last lines of the log of a copy
+that failed or ended, go to stderr.
 
   state          exit  meaning
-  running        0     the copy runs and answers on its port as its own
-  not-answering  1     --check: the copy runs and does not answer on its port
-                       as its own, or a start or a stop of the checkout is
-                       under way and the copy's leader is not running; a
-                       start waits for the copy to answer, and stops it when
-                       it does not
+  running        0     the copy runs and is up
+  not-answering  1     --check: the copy runs and is not up, or a start or a
+                       stop of the checkout is under way and the copy's
+                       leader is not running; a start waits for the copy to
+                       be up, and stops it when it is not
   died           1     --check: the copy's leader has ended
   none           3     --check: no copy of the checkout runs
   none, stopped  0     --stop: no copy runs, or its process group has ended
@@ -86,9 +91,12 @@ exit 2 is a usage error.
 --lead runs a copy's leader over its record. A start runs it in a session of
 its own, and nothing else calls it.`
 
-// rigServeDefaultWait bounds a start's wait for its copy to answer, long enough
-// for a serve command that compiles first.
-const rigServeDefaultWait = 3 * time.Minute
+// rigServeDefaultWait bounds a start's wait for its copy to be up. It is the
+// capture engine's own bound for a start command that builds an iOS app, boots
+// a device and prints the app's URL (IOS_READY_TIMEOUT_MS in sprintshow's
+// src/server.ts, at b4d0b82), so the pack stops no command the engine would
+// wait for, and it is longer than a serve command that compiles first needs.
+const rigServeDefaultWait = 10 * time.Minute
 
 type rigServeOpts struct {
 	command   string
@@ -114,7 +122,7 @@ func newRigServeCmd(stdout, stderr io.Writer) *cobra.Command {
 	f.StringVar(&o.command, "command", "", "the serve `command` to run, with the copy's port as $PORT")
 	f.StringVar(&o.publish, "publish-command", "", "the `command` that publishes the copy's port, $PORT, while it runs")
 	f.StringVar(&o.pattern, "address-pattern", "", "the `address` the publish command gives, with $PORT where the port goes")
-	f.DurationVar(&o.timeout, "timeout", rigServeDefaultWait, "how long a start waits for the copy to answer before it stops it")
+	f.DurationVar(&o.timeout, "timeout", rigServeDefaultWait, "how long a start waits for the copy to be up before it stops it")
 	f.BoolVar(&o.check, "check", false, "report the copy's state and start nothing")
 	f.BoolVar(&o.stop, "stop", false, "end the copy's process group")
 	f.StringVar(&o.lead, "lead", "", "run a copy's leader over its `record`; a start runs it")

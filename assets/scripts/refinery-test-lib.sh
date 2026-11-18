@@ -16,7 +16,8 @@
 #     gc.dispatch_when_ready, or writes nothing when $STUB_ARM_RC is set to a
 #     non-zero exit, which it exits. The fake
 #     `gctk pr record` keeps the real one's guard: it writes nothing on a bead
-#     that is closed or assigned to anyone but the refinery, and exits 3. The
+#     that is closed or assigned to anyone but the refinery, and exits 3, and
+#     it leaves a bead it records blocked and assigned to nobody. The
 #     fake `gctk pr draft` logs its call and exits $STUB_DRAFT_RC, 0 when unset.
 #     The fake `gctk review ask` files an ask on the bead's branch, with the
 #     bead's blocks edge onto it, or finds one of the same reason, and exits
@@ -421,7 +422,7 @@ riding: $riders}"
       exit 3
     fi
     jq --arg id "$bead" --arg u "$url" --arg h "$head" --arg t "$target" \
-      'map(if .id == $id then .status = "blocked" | .metadata += {merge_result: "pull_request_pending", pr_url: $u, pr_head_sha: $h, merged_target: $t, pr_reconcile_pending: "true", existing_pr: $u} else . end)' \
+      'map(if .id == $id then .status = "blocked" | .assignee = "" | .metadata += {merge_result: "pull_request_pending", pr_url: $u, pr_head_sha: $h, merged_target: $t, pr_reconcile_pending: "true", existing_pr: $u} else . end)' \
       "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE" ;;
   rig\ *)
     check="$2"; shift 2; cmd=""
