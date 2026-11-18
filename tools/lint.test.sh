@@ -4,8 +4,8 @@
 #
 # The defects it guards against: a linter that could not run reads as a clean
 # pass (fail-closed violated), shell or step-text findings get swallowed into 0,
-# a tracked shell file goes unlinted because no change names it or because git
-# quotes its path, a listing of
+# a tracked shell file goes unlinted because no change names it, because git
+# quotes its path or because its name reads as an option, a listing of
 # the tracked files that could not be written or read back reads as a tree with
 # no shell in it, one call's shell findings are lost among the calls the tree is
 # split across, a go module
@@ -270,7 +270,7 @@ chmod +x "$WRAP"
 make_go 0; : > "$TMP/wrapper-files.log"
 run_sut
 [ "$rc" -eq 0 ] && ok "quoted path: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "quoted path: expected 0, got $rc"; }
-grep -qxF -- "$QUOTED" "$TMP/wrapper-files.log" \
+grep -qxF -- "./$QUOTED" "$TMP/wrapper-files.log" \
   && ok "quoted path: shellcheck-run.sh received the file under its own name" \
   || bad "quoted path: dropped, shellcheck-run.sh got: $(cat "$TMP/wrapper-files.log")"
 grep -q 'shell: 3 file(s) clean' "$TMP/out" \
@@ -278,13 +278,47 @@ grep -q 'shell: 3 file(s) clean' "$TMP/out" \
   || bad "quoted path: not counted: $(cat "$TMP/out")"
 git -C "$REPO" rm -q --cached -- "$QUOTED"; rm -f "$REPO/$QUOTED"
 
+# --- K2: a tracked shell file named like an option is still linted. ---------
+# A file named --help is listed first, and handed on by its bare name it
+# reached the runner as its help option, which exits 0 before shellcheck runs.
+# The real runner stands in for the stub here, copied rather than linked
+# because later cases write their stub over it. Under it a stub shellcheck logs
+# each argument on a line of its own and reports a finding. The runner's
+# `env bash` shebang needs a bash on the stub PATH while the case runs.
+cp "$HERE/../assets/scripts/shellcheck-run.sh" "$WRAP"; chmod +x "$WRAP"
+ln -s "$BASH_BIN" "$STUB/bash"
+cat > "$STUB/shellcheck" <<EOF
+#!/bin/sh
+printf '%s\n' "\$@" >> "$TMP/shellcheck-args.log"
+echo "stub shellcheck finding"
+exit 1
+EOF
+chmod +x "$STUB/shellcheck"
+printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/--help"
+git -C "$REPO" add -- --help
+make_go 0; : > "$TMP/shellcheck-args.log"
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "option-like name: the finding fails the lint, exit 1" \
+  || { cat "$TMP/out" "$TMP/err"; bad "option-like name: expected 1, got $rc"; }
+grep -qxF -- ./--help "$TMP/shellcheck-args.log" \
+  && ok "option-like name: shellcheck received it as a path" \
+  || bad "option-like name: shellcheck got: $(cat "$TMP/shellcheck-args.log")"
+grep -qxF -- ./subject.sh "$TMP/shellcheck-args.log" \
+  && ok "option-like name: the files beside it are linted too" \
+  || bad "option-like name: subject.sh never reached shellcheck"
+grep -q 'shell: FAIL — shellcheck findings (shellcheck-run.sh exit 1)' "$TMP/out" \
+  && ok "option-like name: the summary names the findings" \
+  || bad "option-like name: no findings line: $(cat "$TMP/out")"
+git -C "$REPO" rm -q --cached -- --help; rm -f -- "$REPO/--help"
+rm -f "$STUB/bash" "$STUB/shellcheck"
+
 # --- The calls the shell lint splits the tree across. ------------------------
 # Three more tracked shell files make five. The stub wrapper logs each call's
 # files on a line of its own.
 for n in 1 2 3; do printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/s$n.sh"; done
 git -C "$REPO" add s1.sh s2.sh s3.sh
 git -C "$REPO" commit -qm 'add three shell files'
-SHELL_SET="$(printf '%s\n' hook-noext s1.sh s2.sh s3.sh subject.sh | sort | tr '\n' ' ')"
+SHELL_SET="$(printf './%s\n' hook-noext s1.sh s2.sh s3.sh subject.sh | sort | tr '\n' ' ')"
 called_files() {  # every logged call's files, sorted, a duplicate kept
   sed 's/^stub-shellcheck-run ran: //' "$TMP/wrapper.log" | tr ' ' '\n' | grep . | sort | tr '\n' ' '
 }
@@ -313,7 +347,7 @@ cat > "$WRAP" <<EOF
 #!/bin/sh
 echo "stub-shellcheck-run ran: \$*" >> "$TMP/wrapper.log"
 case " \$* " in
-  *" s2.sh "*) echo "stub finding in s2.sh"; echo "stub note on stderr" >&2; exit 1 ;;
+  *" ./s2.sh "*) echo "stub finding in s2.sh"; echo "stub note on stderr" >&2; exit 1 ;;
 esac
 echo "stub clean call"
 exit 0

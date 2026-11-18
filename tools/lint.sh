@@ -154,8 +154,11 @@ if ! git ls-files -z >"$shell_tmp/listing"; then
   exit 2
 fi
 shell_files=()
+# Each file is kept as ./<path>. A bare name that begins with a dash, such as
+# --help, would reach the runner and shellcheck as an option, and the runner's
+# help option exits 0 without linting anything.
 while IFS= read -r -d '' f; do
-  if [ -n "$f" ] && is_shell_file "$f"; then shell_files+=("$f"); fi
+  if [ -n "$f" ] && is_shell_file "$f"; then shell_files+=("./$f"); fi
 done <"$shell_tmp/listing" || {
   echo "$PROG: cannot read the listing of tracked files" >&2
   exit 2
