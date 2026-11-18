@@ -56,6 +56,11 @@ said, and write the change you propose for each gap:
 
 - a missing field: the handle, the hypothesis and the boundaries first, then
   the closure condition and the indicators;
+- a field that states a design for the epic's work instead of the outcome the
+  epic seeks. Would it still read true if a different design landed? The
+  hypothesis says for whom and what changes, each closure check tests that
+  change, and no field names a mechanism of a design, such as its judge, its
+  schedule, the limits it sets or the records it keeps;
 - the hypothesis's signal. Could it still come out wrong once the work lands?
   A count the work moves by itself, such as lines removed or members closed,
   cannot, so it is a leading indicator and not the signal. The signal must also

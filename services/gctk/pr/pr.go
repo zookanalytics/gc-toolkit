@@ -81,6 +81,9 @@ const (
 	KindReview Kind = "review"
 	// KindHold: a merge or rebase hold set by hand.
 	KindHold Kind = "hold"
+	// KindAssigned: the bead is assigned to someone, who works it now, such as
+	// the refinery validating a head. Value names the assignee.
+	KindAssigned Kind = "assigned"
 	// KindWait: a wait of the bead's own, such as work on the PR's branch, a
 	// human gate or a conversation's gate. ID names the bead waited on.
 	KindWait Kind = "wait"

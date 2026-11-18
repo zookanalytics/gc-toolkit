@@ -83,24 +83,35 @@ scan() {
       if (line == "") { tail = ""; next }
       joined = (tail == "") ? line : tail " " line
       before = (tail == "") ? 0 : length(tail) + 1
-      if (found(joined, POSS, before, "poss") || found(joined, QUOTED, before, "") \
-          || found(joined, NAMED, before, "") || found(joined, HYPHENATED, before, "named") \
-          || found(joined, OF, before, ""))
+      if (found(joined, "poss", before) || found(joined, "quoted", before) \
+          || found(joined, "named", before) || found(joined, "hyphenated", before) \
+          || found(joined, "of", before))
         printf "%s:%d: %s\n", FILENAME, FNR, $0
       tail = (length(line) > 60) ? substr(line, length(line) - 59) : line
     }
-    # found s re before kind — whether re matches s in a stretch that reaches past
-    # the first <before> characters, which the previous line already had judged.
-    # A possessive that is a contraction (it is, that is) names no text, and a
-    # hyphenated name before a comma or colon counts only when it is a name above.
-    function found(s, re, before, kind,    off) {
+    # found s kind before — whether the pattern of that kind matches s in a
+    # stretch that reaches past the first <before> characters, which the previous
+    # line already had judged. A possessive that is a contraction (it is, that is)
+    # names no text, and a hyphenated name before a comma or colon counts only
+    # when it is a name above.
+    function found(s, kind, before,    off) {
       off = 0
-      while (match(s, re)) {
+      while (at(s, kind)) {
         if (off + RSTART + RLENGTH - 1 > before && admitted(substr(s, RSTART, RLENGTH), kind)) return 1
         off += RSTART + RLENGTH - 1
         s = substr(s, RSTART + RLENGTH)
       }
       return 0
+    }
+    # at s kind — match s against the pattern of that kind. Each pattern has a
+    # match call of its own, because gawk compiles the pattern of a call again
+    # each time the call is handed a different one.
+    function at(s, kind) {
+      if (kind == "poss") return match(s, POSS)
+      if (kind == "quoted") return match(s, QUOTED)
+      if (kind == "named") return match(s, NAMED)
+      if (kind == "hyphenated") return match(s, HYPHENATED)
+      return match(s, OF)
     }
     function admitted(m, kind,    w) {
       if (kind == "poss") {
@@ -108,7 +119,7 @@ scan() {
         sub(/(\047s|\047|\342\200\231s)[[:space:]].*$/, "", w)
         return w !~ /^(it|that|there|what|here|let|who|he|she)$/
       }
-      if (kind == "named") {
+      if (kind == "hyphenated") {
         w = m
         sub(/^[^a-z0-9_.]/, "", w)
         sub(/[,:][[:space:]].*$/, "", w)

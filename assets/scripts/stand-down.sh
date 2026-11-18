@@ -39,6 +39,8 @@
 # carry out:
 #   * an open PR, which the prs skill retires, because the PR has to close before
 #     an answer releases its merge;
+#   * a bead at one of the pending record's exceptions, until its record names
+#     its PR and GitHub reads each PR the record names closed or merged;
 #   * a gate under the key that also holds another open bead, with that gate as
 #     the only evidence. --successor names other evidence and lets this bead leave
 #     it, and an answer once this bead has closed releases the rest;
@@ -149,6 +151,35 @@ case "$WORK_MR" in
   # closer, pr-facts or the landing order, carries out once the PR reads closed.
   pull_request|pull_request_pending|pull_request_head_changed)
     refuse "$WORK owns an open PR ($WORK_MR), which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off." ;;
+esac
+
+# The record stops following a bead's PR at an exception, and its pr_state then
+# holds the exception's word, so only GitHub says whether that PR is still open.
+# record.Exception, in services/gctk/pr/record, names these values, and
+# stand-down.test.sh holds this copy to it.
+RECORD_EXCEPTIONS="pull_request_reconcile_invalid pull_request_closed_unmerged pull_request_merged_unvalidated_head pull_request_merge_evidence_contradiction pull_request_legacy_closed_unverified pull_request_merged_close_refused"
+PR_URL_RE='^https://[^/]+/[^/]+/[^/]+/pull/[0-9]+$'
+case " $RECORD_EXCEPTIONS " in
+  *" ${WORK_MR:-none} "*)
+    READ_PRS=" "
+    for pr_key in pr_url existing_pr; do
+      pr=$(row_meta "$WORK_JSON" "$pr_key" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+      [ -n "$pr" ] || continue
+      case "$READ_PRS" in *" $pr "*) continue ;; esac
+      READ_PRS="$READ_PRS$pr "
+      [[ $pr =~ $PR_URL_RE ]] \
+        || refuse "$WORK is at $WORK_MR, and its $pr_key reads '$pr', which is not a PR's URL, so GitHub cannot say whether that PR is still open. Correct $pr_key, then run this again."
+      PR_STATE=$(gh pr view "$pr" --json state -q .state </dev/null 2>/dev/null) || PR_STATE=""
+      case "$PR_STATE" in
+        CLOSED|MERGED) ;;
+        OPEN)
+          refuse "$WORK is at $WORK_MR, and its PR $pr is still open, which a stand-down would leave open behind the closed bead. Close it first, then run this again: gh pr close $pr. At an exception, closing the PR by hand files no gate." ;;
+        *)
+          refuse "$WORK is at $WORK_MR, and GitHub did not say whether its PR $pr is still open: gh pr view $pr --json state did not answer. Run this again once it does." ;;
+      esac
+    done
+    [ "$READ_PRS" != " " ] \
+      || refuse "$WORK is at $WORK_MR, and neither pr_url nor existing_pr names its PR, so GitHub cannot say whether that PR is still open. Set pr_url to the PR's URL, then run this again." ;;
 esac
 
 GATES=$(bd_human_gates "$WORK") || refuse "could not read the human gates of $WORK."
