@@ -16,8 +16,9 @@ import (
 // routes change no doctor run, so a write leaves it cached.
 
 // CityPageTTL is how long the city's document is served before the next read
-// reads the event log again. The newest doctor run changes once an hour, so
-// the page shows a new run within five minutes of its record.
+// reads the event log again. The newest doctor run changes once an hour. An
+// open page shows a new run at most this long plus its read interval
+// (CITY_REFRESH_MS in web/src/cityboard/CityPage.tsx) after its record.
 const CityPageTTL = 5 * time.Minute
 
 // cityPage is the city page's read and its cache.

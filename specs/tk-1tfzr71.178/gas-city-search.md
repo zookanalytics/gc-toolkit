@@ -59,10 +59,12 @@ Nothing upstream caches a composed answer for a caller, as the rig board's
 search found ([specs/tk-yhquh93.2/gas-city-search.md](../tk-yhquh93.2/gas-city-search.md#the-cache)).
 The city's document uses the cache the helm service keeps for its rig board
 (`internal/server/rigboard.go`): a time to live, here five minutes, and one read
-of a key at a time. The newest doctor run changes once an hour, so the page
-shows a new run within five minutes of its record, and while reads succeed the
-service reads the log at most twelve times an hour however many pages are
-open. A failed read is not cached, so the next request reads again.
+of a key at a time. The newest doctor run changes once an hour. An open page
+shows a new run within seven and a half minutes of its record, because a
+document read just before the record is served for five minutes and the page
+reads every two and a half. While reads succeed, the service reads the log at
+most twelve times an hour however many pages are open. A failed read is not
+cached, so the next request reads again.
 
 ## The fixture's flag
 
