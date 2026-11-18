@@ -13,9 +13,9 @@ answers gc's command line the way bd and gc do.
 ## Scope
 
 **Mandate.** How a gc-toolkit test is written: where a behavior's test lives,
-what a test at a script's command line covers, the fake that stands in for each
-outside system and what holds that fake to the real one, and how a test reads
-the state it asserts on.
+what a test at a script's command line covers, what stands in for each outside
+system and what holds it to the real one, and how a test reads the state it
+asserts on.
 
 **Boundaries.** How tests are run in parallel, their parts and their time
 limits are [tools/run-tests.sh](../tools/run-tests.sh)'s header. What a CI
@@ -59,13 +59,13 @@ suite.
 
 ## The fakes
 
-Each outside system has one fake:
+What stands in for each outside system in a test:
 
-| Outside system | Its fake | What holds the fake to the real system |
+| Outside system | What stands in for it | What holds it to the real system |
 |---|---|---|
 | The bead store, and the other gc verbs a script calls | The compiled fake gc, [services/gctk/internal/gcbd/fakegc](../services/gctk/internal/gcbd/fakegc/doc.go), on PATH as `gc` | Its contract test, which runs the same calls against the fake and a scratch store of the bd the city runs |
 | GitHub | The recorded responses the harness's gh stub serves | Nothing yet |
-| git | Real git in a scratch repository | git itself |
+| git | Real git in a scratch repository, and in a suite on the shared harness, the harness's git stub | git itself, and nothing yet for the stub |
 | The host's processes | gctk's host adapter fake, in Go | The host adapter's own tests, which start real processes |
 | Time | The bubble clock of `testing/synctest`, in Go | Go's testing package |
 
@@ -103,11 +103,14 @@ When a script needs a gc behavior the fake lacks, add it to the fake with a Go
 test beside it, and a contract case when bd has a rule for it, rather than a
 stub of the suite's own.
 
-## No jq in test code
+## No jq in new test code
 
-Test files and fakes start no jq. The fake answers in Go, and a shell test reads
-the state it asserts on through the harness's readers, which ask the fake. jq
-stays in the shipped scripts until their logic moves into gctk.
+New test code starts no jq. The fake gc answers in Go, and a shell test reads
+the state it asserts on through the harness's readers, which ask the fake. Test
+code that already starts jq, such as the harness's gh stub and many suites,
+keeps it until that code is rewritten, and a suite that moves onto the fake
+stops starting jq of its own. jq stays in the shipped scripts until their logic
+moves into gctk.
 
 ## The contract test
 
