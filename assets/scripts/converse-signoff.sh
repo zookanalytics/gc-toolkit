@@ -231,7 +231,10 @@
 #     the create that files it (gctk review ask --waiting-on), so no run takes
 #     the ask before that bead closes. The bead must carry the PR's id prefix
 #     and be in its store, and the old path, whose rework child is sent the moment it is filed,
-#     refuses it; either refusal files nothing.
+#     refuses it; either refusal files nothing. A re-run whose earlier attempt
+#     filed the rework stops, with nothing written, while the PR is open,
+#     unless that rework waits on each bead it names, since a run can take it,
+#     or may have, before that work lands.
 #   --pr-anchor <bead> names the PR --rework or --retire acts on when the
 #     ruling reaches more than one, which it requires; every other one the
 #     ruling reaches stands. A conversation owns one live rework child, so a
@@ -788,6 +791,23 @@ case "$PR_ANSWER" in
         printf '%s' "$CHROW" | jq -e --arg c "$CONVERSATION" "$REWORK_OF_JQ"'rework_of($c)' >/dev/null 2>&1 \
           || stopped "$RECORDED_CHILD, which the record on conversation $CONVERSATION names as this ruling's rework on $PR_TARGET, does not read as this conversation's rework; nothing was written"
         [ "$(printf '%s' "$CHROW" | jq -r '(.status // "") | ascii_downcase')" = closed ] && CHILD_CLOSED=yes
+        # The rework an earlier attempt filed stands for a re-run on an open PR
+        # only when it waits on each bead --rework-waiting-on names, by its own
+        # blocks edge, since a run can take it, or may have, before that work
+        # lands.
+        LACKS=""
+        if [ -z "$TARGET_CLOSED" ]; then
+          for ((i = 1; i < ${#REWORK_WAITS[@]}; i += 2)); do
+            printf '%s' "$CHROW" | jq -e --arg w "${REWORK_WAITS[$i]}" 'any((.dependencies // [])[]?;
+                ((.id // .depends_on_id // "") == $w) and ((.dependency_type // .type // "") == "blocks"))' >/dev/null 2>&1 \
+              || LACKS="${LACKS:+$LACKS or }${REWORK_WAITS[$i]}"
+          done
+        fi
+        if [ -n "$LACKS" ] && [ -n "$CHILD_CLOSED" ]; then
+          stopped "$RECORDED_CHILD, the rework an earlier attempt of this ruling filed on $PR_TARGET, closed without waiting on $LACKS, so a run may have worked it before that work landed; nothing was written. Re-run without --rework-waiting-on to sign off on the rework as it ran, or raise it in the thread if it must run again once that work lands"
+        elif [ -n "$LACKS" ]; then
+          stopped "$RECORDED_CHILD, the rework an earlier attempt of this ruling filed on $PR_TARGET, is open and does not wait on $LACKS, so a run can take it before that work lands; nothing was written. Re-run without --rework-waiting-on to send the rework without that wait, or raise it in the thread"
+        fi
       fi
     fi ;;
   no-rework)

@@ -546,9 +546,11 @@ _child="${REWORK_CHILD:-tk-child}"
 _a=""; _r=""; _p=""; for x in "$@"; do [ "$_p" = "--anchor" ] && _a="$x"; [ "$_p" = "--ruling-bead" ] && _r="$x"; _p="$x"; done
 if [ -n "${REWORK_ASK:-}" ]; then
   # On the pending record the writer files an ask instead: a task naming the
-  # conversation as its source through a discovered-from edge.
-  [ -f "$STORE/b/$_child.json" ] || jq -n --arg id "$_child" --arg a "$_a" --arg r "$_r" '{id:$id, title:"Review ask: the ruling", issue_type:"task",
-      status:"open", assignee:"", metadata:{branch:"polecat/anc"}, deps:[{type:"discovered-from", on:$r}]}' > "$STORE/b/$_child.json"
+  # conversation as its source through a discovered-from edge, and waiting on
+  # each --waiting-on bead by its own blocks edge.
+  _w='[]'; _p=""; for x in "$@"; do [ "$_p" = "--waiting-on" ] && _w=$(jq -c --arg w "$x" '. + [{type:"blocks", on:$w}]' <<< "$_w"); _p="$x"; done
+  [ -f "$STORE/b/$_child.json" ] || jq -n --arg id "$_child" --arg a "$_a" --arg r "$_r" --argjson w "$_w" '{id:$id, title:"Review ask: the ruling", issue_type:"task",
+      status:"open", assignee:"", metadata:{branch:"polecat/anc"}, deps:([{type:"discovered-from", on:$r}] + $w)}' > "$STORE/b/$_child.json"
   echo "$_child ask filed"
   exit 0
 fi
@@ -2193,6 +2195,27 @@ hasnt "$TAKEAWAY" "tk-pr2" "(REWORK-WAITS) …and without the bead the rework wa
 open_pr; bead tk-pr2
 run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "fix the retry" --no-rework --rework-waiting-on tk-pr2 --no-wait
 eq "$RC $(writes)" "2 0" "(REWORK-WAITS-NEEDS-REWORK) --rework-waiting-on without --rework is refused, with nothing written"
+# An attempt that filed the ask and stopped before its headline leaves a re-run
+# the ask, open, or closed once a run has worked it. A re-run that names a wait
+# the ask does not carry stops with nothing written, and one whose ask carries
+# it signs off.
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+: > "$CALLS"
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+eq "$RC $(writes)" "1 0" "(REWORK-WAITS-RERUN) a re-run naming a wait the open ask of its earlier attempt lacks stops, with nothing written"
+has "$OUT" "tk-ask, the rework an earlier attempt of this ruling filed on tk-anc, is open and does not wait on tk-pr2" "(REWORK-WAITS-RERUN) …naming the ask and the wait it lacks"
+setf tk-ask status closed; : > "$CALLS"
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+eq "$RC $(writes)" "1 0" "(REWORK-WAITS-RERUN) …and so does one whose ask has closed"
+has "$OUT" "tk-ask, the rework an earlier attempt of this ruling filed on tk-anc, closed without waiting on tk-pr2" "(REWORK-WAITS-RERUN) …saying a run may have worked it before that work landed"
+eq "$(field tk-conv status) $(merge_held tk-anc)" "in_progress held" "(REWORK-WAITS-RERUN) …leaving the conversation open and the merge held"
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+setf tk-ask status closed
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+eq "$RC $(field tk-conv status)" "0 closed" "(REWORK-WAITS-RERUN) …while a re-run whose ask waited on that bead signs off"
+has "$OUT" "tk-ask, the rework an earlier attempt of this ruling filed on tk-anc, has closed, so the rework has nothing left to do" "(REWORK-WAITS-RERUN) …taking the ask that ran as the ruling's rework"
 # A ruling that reaches two open PRs reworks the one its --pr-anchor names. The
 # return leaves that --pr-anchor out with the --rework, since --no-rework takes
 # none and leaves both PRs standing.
