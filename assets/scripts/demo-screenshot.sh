@@ -36,16 +36,20 @@
 # the engine serves that page from a directory and captures the surface's
 # element, with a one-step script whose proof is that the surface is drawn.
 #
-# Every kind captures inside the sandbox demo-engine-lib.sh runs the engine in,
-# where the live city cannot be reached. A --serve command's app runs as a copy
-# of the rig's UI that `gctk rig serve` runs inside the same sandbox, and the
-# engine captures the copy's app where gctk rig serve reports it. A command, a
-# copy or a page that reads the city's stores or its API fails there, so a
-# capture shows the reviewed commit on fixture data, or shows the failure, and
-# never live state. The servers outside the sandbox a page capture can reach
-# are a rig's app that --base-url names, as below, and an iOS app on a
-# simulator, which the system's simulator service runs outside the sandbox,
-# whoever started it. An iOS app's PNG is the device's own screenshot.
+# A --serve command's app runs as a copy of the rig's UI that `gctk rig serve`
+# runs, and the engine captures the copy's app where gctk rig serve reports it.
+# A capture of a rig whose app reads the city runs the engine and the copy
+# inside the sandbox demo-engine-lib.sh defines, where the live city cannot be
+# reached. A command, a copy or a page that reads the city's stores or its API
+# fails there, so such a capture shows the reviewed commit on fixture data, or
+# shows the failure, and never live state. The servers outside the sandbox a
+# page capture can reach are a rig's app that --base-url names, as below, and
+# an iOS app on a simulator, which the system's simulator service runs outside
+# the sandbox, whoever started it. A capture of any other rig runs as an
+# ordinary process. A markdown capture serves the page it draws from a
+# directory no rig holds, so it keeps the sandbox. docs/demo-capture-sandbox.md
+# says which rigs get the sandbox and what a capture of each can reach. An iOS
+# app's PNG is the device's own screenshot.
 # --text and markdown draw a file they are given, as it is, so what they show
 # is what was written to that file.
 #
@@ -287,8 +291,8 @@ fi
 # --- what the engine captures --------------------------------------------
 case "$KIND" in
   page)
-    # A --serve command's app runs as a copy, inside the sandbox, and the engine
-    # captures the copy's app where gctk rig serve reports it.
+    # A --serve command's app runs as a copy, and the engine captures the copy's
+    # app where gctk rig serve reports it.
     if [ -n "$SERVE_CMD" ]; then
       demo_engine_copy "${CWD:-$(pwd)}" "$SERVE_CMD" || exit 1
       BASE_URL=$DEMO_ENGINE_COPY_URL

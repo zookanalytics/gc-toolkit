@@ -66,7 +66,7 @@ description = "Static directory the engine serves with its built-in file server.
 default = ""
 
 [vars.serve_cmd]
-description = "Command that serves the rig's app (e.g. 'npm run dev'). The capture runs it as a copy that `gctk rig serve` runs inside the capture's sandbox, with a free port of its own as $PORT, from a detached worktree of the rig_name checkout at its HEAD, which holds only what the rig commits, so it installs what it needs. At most one of serve_dir / serve_cmd / base_url; with none, a page script takes the rig's ui_serve_command."
+description = "Command that serves the rig's app (e.g. 'npm run dev'). The capture runs it as a copy that `gctk rig serve` runs, inside the capture's sandbox when the rig's app_reads_city is \"true\", with a free port of its own as $PORT, from a detached worktree of the rig_name checkout at its HEAD, which holds only what the rig commits, so it installs what it needs. At most one of serve_dir / serve_cmd / base_url; with none, a page script takes the rig's ui_serve_command."
 default = ""
 
 [vars.base_url]
@@ -94,7 +94,7 @@ description = "PR number or URL to deliver the clip to, when no deliver_subject 
 default = ""
 
 [vars.app_reads_city]
-description = "\"true\" for a rig whose app reads the city, such as a rig that develops code for a city. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a demo capture then refuses the rig's servers. Any value but \"false\" counts as \"true\". demo-engine-lib.sh reads it, and this formula's steps do not use it."
+description = "\"true\" for a rig whose app reads the city, such as a rig that develops code for a city. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a demo capture of the rig and a copy of its app then run inside the capture's sandbox, which refuses the rig's servers on this host. A capture of a rig set to \"false\" runs as an ordinary process. Any value but \"false\" counts as \"true\". demo-engine-lib.sh reads it, and this formula's steps do not use it."
 default = "false"
 
 [vars.ui_serve_command]
