@@ -57,8 +57,9 @@
 #   - The pm method says when triage adds it, in words that name no rig: a
 #     diff that changes what the rig's product does for the people it serves,
 #     or what it promises them, and always a diff that changes the product
-#     goals page. An edit that changes neither what the product does nor what
-#     it promises, and tests, do not warrant it. When a rig keeps no product
+#     goals page. A design or a spec that proposes such a change counts as the
+#     change. An edit that changes neither what the product does nor what it
+#     promises, and tests, do not warrant it. When a rig keeps no product
 #     goals, a pm review judges the change against its anchor alone and asks
 #     the change for no page. It files one request for the page under one
 #     token, and its duplicate probe counts a request that has closed. The
@@ -619,6 +620,8 @@ hasF "$TMP/pm.triage" "Triage adds \`pm\` when the diff changes what the rig's p
   "triage adds pm for a change to what the rig's product does for the people it serves"
 hasF "$TMP/pm.triage" 'including a fix that changes how the product behaves for them' "…a fix that changes how it behaves for them included"
 hasF "$TMP/pm.triage" 'A diff that adds or changes that page makes this check mandatory.' "…and always for a change to the product goals page"
+hasF "$TMP/pm.triage" 'A design counts as the change it proposes. A diff that adds or changes a design or a spec proposing any of these gets this check at the design, before anything is built on it.' \
+  "…and for a design or a spec that proposes such a change, at the design"
 hasF "$TMP/pm.triage" 'An edit that changes neither what the product does for the people it serves nor what it promises them, such as a refactor, a typo fixed or a link mended, needs no product review.' \
   "…but not for an edit that changes neither what the product does for them nor what it promises them"
 hasF "$TMP/pm.triage" 'neither do tests and the fixtures they use' "…or for tests and their fixtures"

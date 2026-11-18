@@ -76,6 +76,10 @@ people it serves, or what it promises them:
 - the product goals, `docs/product-goals.md`. A diff that adds or changes that
   page makes this check mandatory.
 
+A design counts as the change it proposes. A diff that adds or changes a design
+or a spec proposing any of these gets this check at the design, before anything
+is built on it.
+
 An edit that changes neither what the product does for the people it serves
 nor what it promises them, such as a refactor, a typo fixed or a link mended,
 needs no product review. Neither does internal plumbing those people never meet,
