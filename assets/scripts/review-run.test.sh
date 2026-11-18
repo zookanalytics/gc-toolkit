@@ -20,7 +20,10 @@
 # when there is nothing to answer, and nothing in a shadow run; a deferred fix
 # filed with its wait on the PR's bead in its create, and armed, found rather
 # than filed again, armed then when the call that filed it did not arm it, and
-# left as it stands when it is armed, closed or routed; a
+# left as it stands when it is armed, closed or routed; a fix sent ahead
+# of the PR through gctk on the run's repair pool, sending its check back,
+# filing nothing with no pool, nothing in a shadow run and nothing from
+# another step, and run again when what it wrote did not all land; a
 # question put to a gate; a person's batch, whose human findings the round's
 # read lists and the finding verb rules through finding.sh, a deferral's
 # follow-up taking the PR's target; triage's read at a head that already
@@ -109,6 +112,7 @@ case "$1 $2" in
     "bead holds") if [ -n "${STUB_HOLDS:-}" ]; then printf '%s\n' "$STUB_HOLDS"
                   else printf '{"id":"%s","status":"blocked","arm":null}\n' "$3"; fi ;;
     "bead arm") exit "${STUB_RC_ARM:-0}" ;;
+    "review ahead") exit "${STUB_RC_AHEAD:-0}" ;;
 esac
 exit 0
 STUB
@@ -350,6 +354,30 @@ STUB_LIST='[{"id":"tk-other","title":"Move the parser","status":"open","dependen
 eq "$RC/$OUT" "0/tk-new" "a bead of the same title that does not wait on the PR's bead is not taken for the fix"
 STUB_RC_BD_LIST=1 run defer --title "Move the parser" --file "$TMP/defer.md"
 eq "$RC/$(called 'bd create')" "2/0" "a lookup that does not answer files nothing"
+
+# --- ahead -----------------------------------------------------------------------
+facts review-loop.iteration.1.rule-and-repair repair 1
+echo "The document, covering the orders the change moves." > "$TMP/ahead.md"
+run ahead --title "docs: add the architecture document" --file "$TMP/ahead.md" --check arch
+eq "$RC" 0 "a fix that lands ahead of the PR is sent"
+has "$(cat "$LOG")" "gctk review ahead tk-pr --title docs: add the architecture document --file $TMP/ahead.md --pool rig/gc-toolkit.polecat --on mol-polecat-work --check arch" \
+    "through gctk, to the run's repair pool, with the ask sending the check back"
+STUB_NO_POOL=1 run ahead --title t --file "$TMP/ahead.md" --check arch
+eq "$RC/$(called 'review ahead')" "1/0" "a run that names no repair pool files nothing"
+STUB_RC_AHEAD=2 run ahead --title t --file "$TMP/ahead.md" --check arch
+eq "$RC" 1 "a call whose writes did not all land is run again"
+STUB_RC_AHEAD=3 run ahead --title t --file "$TMP/ahead.md" --check arch
+eq "$RC" 3 "a fix gctk refuses is refused"
+run ahead --title t --file "$TMP/ahead.md"
+eq "$RC/$(called 'review ahead')" "64/0" "a fix ahead names the check it sends back"
+facts review-loop.iteration.1.rule-and-repair repair 1 true
+run ahead --title t --file "$TMP/ahead.md" --check arch
+eq "$RC/$(called 'review ahead')" "0/0" "a shadow run sends nothing ahead"
+has "$OUT" "shadow run: wrote nothing: bead: t, ahead of tk-pr" "and says what it would have filed"
+facts review-loop.iteration.1.triage triage 1
+run ahead --title t --file "$TMP/ahead.md" --check arch
+eq "$RC/$(called 'review ahead')" "3/0" "triage cannot send a fix ahead"
+facts review-loop.iteration.1.rule-and-repair repair 1
 
 # --- question --------------------------------------------------------------------
 run question --key c1-scope --message "Is the cap the operator's to set?"

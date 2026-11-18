@@ -49,6 +49,10 @@
 #   review-run.sh defer --title <text> --file <path>   [rule-and-repair]
 #       file a fix outside the reviewed diff as a bead of its own, waiting on the
 #       PR's bead and armed to start once it lands, its target the PR's
+#   review-run.sh ahead --title <text> --file <path> --check <check>   [rule-and-repair]
+#       send a fix that lands ahead of the PR, in a PR of its own, to the run's
+#       repair pool, and hold the PR for it by an ask that sends the check back
+#       once it lands (gctk review ahead)
 #   review-run.sh question --key <slug> --message <text>   [rule-and-repair]
 #       put a question only a person can answer to a human gate on the PR's bead
 #   review-run.sh finding --finding <id> --ruling <ruling> --reason <text> [--gate <gate>]   [rule-and-repair]
@@ -424,6 +428,23 @@ cmd_defer() {
     echo "$id"
 }
 
+cmd_ahead() {
+    [ -n "$TITLE" ] && [ -n "$FILE" ] && [ -n "$CHECK" ] || usage
+    load; owns rule-and-repair
+    [ -s "$FILE" ] || die 64 "--file $FILE holds no description"
+    if [ "$SHADOW" = true ]; then would "bead: $TITLE, ahead of $PR_BEAD, which an ask on it waits for, sending $CHECK back"; return 0; fi
+    local pool rc
+    pool=$(gc bd show "$RUN" --json 2>/dev/null | jq -r '.[0].metadata["gc.var.repair_target"] // empty')
+    [ -n "$pool" ] || die 1 "the run names no repair pool to send a fix ahead to, so nothing is filed"
+    "$gctk" review ahead "$PR_BEAD" --title "$TITLE" --file "$FILE" --pool "$pool" --on mol-polecat-work --check "$CHECK"; rc=$?
+    case "$rc" in
+        0) ;;
+        3) die 3 "nothing was filed ahead of $PR_BEAD" ;;
+        1) die 64 "gctk review ahead refused the call" ;;
+        *) die 1 "what landed ahead of $PR_BEAD is found when this runs again" ;;
+    esac
+}
+
 cmd_question() {
     [ -n "$KEY" ] && [ -n "$MESSAGE" ] || usage
     case "$KEY" in *[!a-z0-9-]*) die 64 "--key takes a slug of a-z, 0-9 and -, got '$KEY'" ;; esac
@@ -481,6 +502,6 @@ cmd_deliver() {
 }
 
 case "$VERB" in
-    triage|lane|repair|output|withdraw|push|post|defer|question|finding|deliver) "cmd_$VERB" ;;
+    triage|lane|repair|output|withdraw|push|post|defer|ahead|question|finding|deliver) "cmd_$VERB" ;;
     *) usage ;;
 esac
