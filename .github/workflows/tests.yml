@@ -3,10 +3,10 @@ name: tests
 # Runs the pack's *.test.sh suite off-host on pull requests to main and on
 # pushes to main, so the suite gates changes without loading the polecat
 # self-review or the pool host, and a regression that lands is still caught.
-# The suite runs twice, on Linux (test) and on macOS (test-macos). The Go
-# checks vet and test every package of the two Go modules, services/gctk and
-# services/helm, with the same commands on Linux (go) and on macOS (go-macos),
-# each beside its platform's suite check. The city's host is macOS, where sed,
+# The suite runs twice, on Linux (test) and on macOS (test-macos). The
+# repository is one Go module, and the Go checks vet and test every package of
+# it from the root, with the same commands on Linux (go) and on macOS
+# (go-macos), each beside its platform's suite check. The city's host is macOS, where sed,
 # grep, awk, date, stat, find and the rest of the userland are the BSD tools,
 # and ps, lsof, flock and process groups are the host's, so a construct that
 # passes on Linux and fails under the host's tools fails a macOS check the way
@@ -73,7 +73,7 @@ jobs:
       # modules, cobra and what it needs, so the job keeps no module cache.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: services/gctk/go.mod
+          go-version-file: go.mod
           cache: false
 
       # The host resolves Homebrew's jq first on PATH, and it is 1.8.2. This
@@ -136,7 +136,7 @@ jobs:
       # The same gctk toolchain as test.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: services/gctk/go.mod
+          go-version-file: go.mod
           cache: false
 
       # The image's only bash is /bin/bash 3.2. run-tests.sh needs bash 5, and
@@ -215,12 +215,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The same toolchain as test. services/helm's go.mod names the same
-      # version, and helm reaches gctk through a replace onto the sibling
-      # directory, so one checkout builds both.
+      # The same toolchain as test.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: services/gctk/go.mod
+          go-version-file: go.mod
           cache: false
 
       # helm reaches ICU through Dolt's go-icu-regex, a cgo package that
@@ -228,12 +226,7 @@ jobs:
       - name: Install ICU's headers for helm's cgo
         run: sudo apt-get update -q && sudo apt-get install -y -q libicu-dev
 
-      - name: Vet and test services/gctk
-        working-directory: services/gctk
-        run: go vet ./... && go test ./...
-
-      - name: Vet and test services/helm
-        working-directory: services/helm
+      - name: Vet and test every package
         run: go vet ./... && go test ./...
 
   go-macos:
@@ -251,7 +244,7 @@ jobs:
       # The same toolchain as go.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: services/gctk/go.mod
+          go-version-file: go.mod
           cache: false
 
       # macOS ships no flock(1), which the pr package's lock test runs against
@@ -279,16 +272,11 @@ jobs:
           done
           exit "$fail"
 
-      - name: Vet and test services/gctk
-        working-directory: services/gctk
-        run: go vet ./... && go test ./...
-
       # Homebrew keeps icu4c off the default search path, so the compile takes
-      # its include and lib paths from icu4c-cgo.sh.
-      - name: Vet and test services/helm
-        working-directory: services/helm
+      # its include and lib paths for helm's cgo from icu4c-cgo.sh.
+      - name: Vet and test every package
         run: |
-          . ../../assets/scripts/icu4c-cgo.sh
+          . assets/scripts/icu4c-cgo.sh
           icu4c_cgo_flags go-macos
           export CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS"
           go vet ./... && go test ./...
