@@ -8,12 +8,12 @@
 #
 #   SHELL — shellcheck, through assets/scripts/shellcheck-run.sh, the one
 #   fail-closed runner (host shellcheck at warning severity; exit 3 when none is
-#   on PATH). Scoped to the shell files passed on argv, so the refinery feeds it
-#   the merge's changed files — `lint.sh $(git diff --name-only origin/main...HEAD)`
-#   — and the gate judges what a change touches. Whole-tree is deliberately NOT
-#   the gate scope: main carries pre-existing warning-level findings, so a gate
-#   that failed on an untouched file would block every unrelated merge. Scan the
-#   whole tree by hand by passing the files: `lint.sh $(git ls-files '*.sh')`.
+#   on PATH), over every tracked shell file, whatever files lint.sh is given.
+#   Whole-tree for the reason gofmt is: the tree is shellcheck-clean, so a
+#   finding cannot wait in a file no change names until an unrelated merge edits
+#   that file and fails on a line it did not write. The files are split across
+#   one runner call per core, so the run lasts about as long as the call that
+#   holds the slowest files.
 #
 #   STEP TEXT — tools/lint-step-text.sh over the files passed on argv, which
 #   checks the formulas among them for a procedure the change adds to step text
@@ -49,11 +49,11 @@
 # enforces.
 #
 # Usage: lint.sh [FILE ...]
-#   FILE ...  files to lint; the shell scripts among them — a .sh suffix or a
-#             shell shebang (sh, bash, dash, ksh) — are shellchecked, the
-#             formulas among them have their step text checked, and the rest
-#             drop out. With no shell file or formula given neither is linted,
-#             and go vet, gofmt and the warrant list still run.
+#   FILE ...  the files a change names; the formulas among them have their step
+#             text checked, and the rest drop out. With no formula given step
+#             text is not linted. The shell lint, go vet and gofmt cover the
+#             tracked tree and the warrant list reads the branch, whatever files
+#             are given.
 #
 # Exit: 0 everything clean; 1 a finding or a linter that could not run; 2 a usage
 #       or repository-enumeration error (lint.sh itself could not operate).
@@ -101,7 +101,7 @@ fi
 fail=0
 summary=()
 
-# ── Shell: shellcheck over the given shell files ─────────────────────────────
+# ── Shell: shellcheck over every tracked shell file ──────────────────────────
 # A file is shell if its path ends in .sh, or its shebang names one of the
 # shells the linter handles (sh, bash, dash, ksh, including the `env <shell>`
 # form). The suffix alone misses the repo's extensionless scripts —
@@ -132,24 +132,77 @@ is_shell_file() {
   return 1
 }
 
+# The listing is checked before it is read, as gofmt's is below: a git ls-files
+# that failed would yield an empty list, which reads like a tree with no shell
+# in it and skips the check.
+if ! tracked_listing="$(git -c core.quotePath=false ls-files)"; then
+  echo "$PROG: cannot enumerate tracked files under $ROOT" >&2
+  exit 2
+fi
 shell_files=()
-for f in "$@"; do
-  is_shell_file "$f" && shell_files+=("$f")
-done
+while IFS= read -r f; do
+  [ -n "$f" ] && is_shell_file "$f" && shell_files+=("$f")
+done <<<"$tracked_listing"
+
+# cores — the host's core count, as tools/run-tests.sh reads it: the first that
+# nproc, getconf or sysctl reports, since stock macOS has no nproc. A count no
+# tool reports leaves one.
+cores() {
+  local n
+  n="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null)"
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  n=$(( 10#$n ))
+  [ "$n" -ge 1 ] || n=1
+  printf '%s\n' "$n"
+}
 
 if [ "${#shell_files[@]}" -eq 0 ]; then
-  summary+=("shell: no shell files given — skipped")
+  summary+=("shell: no tracked shell files — skipped")
 else
-  if "$SHELLCHECK_RUN" "${shell_files[@]}"; then
-    summary+=("shell: ${#shell_files[@]} file(s) clean")
-  else
-    rc=$?
-    fail=1
+  # The files are dealt in turn across one runner call per core, and the calls
+  # run at once. Each call's output waits in a file until every call has ended,
+  # and only a failing call's is printed, so the findings of one call never
+  # interleave with another's.
+  calls="$(cores)"
+  [ "$calls" -le "${#shell_files[@]}" ] || calls=${#shell_files[@]}
+  if ! shell_out="$(mktemp -d "${TMPDIR:-/tmp}/lint-shell.XXXXXX")"; then
+    echo "$PROG: cannot make a directory for the shell lint's output" >&2
+    exit 2
+  fi
+  trap 'rm -rf "$shell_out"' EXIT
+  pids=()
+  for ((c = 0; c < calls; c++)); do
+    share=()
+    for ((i = c; i < ${#shell_files[@]}; i += calls)); do share+=("${shell_files[i]}"); done
+    "$SHELLCHECK_RUN" "${share[@]}" >"$shell_out/$c.out" 2>"$shell_out/$c.err" &
+    pids+=("$!")
+  done
+  # The summary names the first failing call's exit. An exit 3 says the runner
+  # found no shellcheck on PATH, which every call shares, so its message prints
+  # once.
+  shell_rc=0; no_runner=0
+  for ((c = 0; c < calls; c++)); do
+    rc=0; wait "${pids[c]}" || rc=$?
+    [ "$rc" -ne 0 ] || continue
     if [ "$rc" -eq 3 ]; then
-      summary+=("shell: FAIL — shellcheck could not run (none on PATH); fail-closed, treated as a finding")
-    else
-      summary+=("shell: FAIL — shellcheck findings (shellcheck-run.sh exit $rc)")
+      if [ "$no_runner" -eq 0 ] && [ -s "$shell_out/$c.err" ]; then
+        printf '%s\n' "$(<"$shell_out/$c.err")" >&2
+      fi
+      no_runner=1
+      continue
     fi
+    [ ! -s "$shell_out/$c.out" ] || printf '%s\n' "$(<"$shell_out/$c.out")"
+    [ ! -s "$shell_out/$c.err" ] || printf '%s\n' "$(<"$shell_out/$c.err")" >&2
+    [ "$shell_rc" -ne 0 ] || shell_rc=$rc
+  done
+  if [ "$no_runner" -eq 1 ]; then
+    fail=1
+    summary+=("shell: FAIL — shellcheck could not run (none on PATH); fail-closed, treated as a finding")
+  elif [ "$shell_rc" -ne 0 ]; then
+    fail=1
+    summary+=("shell: FAIL — shellcheck findings (shellcheck-run.sh exit $shell_rc)")
+  else
+    summary+=("shell: ${#shell_files[@]} file(s) clean")
   fi
 fi
 
