@@ -562,7 +562,10 @@ its target, the priority of the bead that owns the PR and a discovered-from
 edge onto that bead, slung to --pool on the formula --on names. An open bead
 of that title stands for the fix instead, and the case --file holds joins its
 notes, so a second PR that needs the same fix waits on the same bead. A found
-bead that is on no way to a pool is slung too.
+bead that is on no way to a pool is slung too, unless a label holds it from
+every pool, such as the hold:mayor of work that waits for the operator's
+placement: it is then sent nowhere, and the ask waits on it while the hold
+stands.
 
 It then files an ask on the bead that owns the PR, to run each --check again
 once the fix lands. The ask waits on the fix by its own blocks edge, written in
@@ -649,6 +652,8 @@ func aheadIn(l *ledger.Ledger, rt gascity.Runtime, req review.AheadRequest, inde
 		switch {
 		case got.Sent:
 			fmt.Fprintf(stdout, "%s %s, slung to %s on %s\n", got.Fix, how, req.Pool, req.Formula)
+		case got.Held != "":
+			fmt.Fprintf(stdout, "%s %s, held by its %s label, so it is sent nowhere\n", got.Fix, how, got.Held)
 		case err == nil:
 			fmt.Fprintf(stdout, "%s %s, on its way already\n", got.Fix, how)
 		default:

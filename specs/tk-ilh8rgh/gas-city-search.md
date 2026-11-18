@@ -32,6 +32,14 @@ target's sling_query", with `--on <formula>` for the formula it is poured on
 (`docs/reference/cli.md`, "gc sling"). Nothing holds the fix, so it is slung at
 once rather than armed for deferred dispatch.
 
+A fix found by its title can carry one of Gas City's hold labels: `hold:mayor`
+and `hold:external` (`DispatchHoldLabels`) or `human` (`HumanLabel`), in
+`internal/beadmeta/hold_labels.go`. A pool's serve rule leaves out a bead that
+carries one (`internal/config/workquery.go`), but the sling reads none of them:
+no code under `internal/sling`, and none in `cmd/gc/cmd_sling.go`, names a hold
+label. So the verb asks the arm domain's `HoldLabel`, which reads those labels
+as Gas City compares them, and slings no fix that one holds.
+
 ## Judge the PR again once the fix lands
 
 **Not covered by Gas City.** Its event for a closed blocker is core's

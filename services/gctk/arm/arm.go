@@ -257,7 +257,7 @@ func (a *Arms) read(id string) (*ledger.Record, error) {
 
 // holdsNow says what holds an armed bead now, as the start reads it.
 func holdsNow(r *ledger.Record, h waits.Holds) string {
-	if l := holdLabel(r.Labels()); l != "" {
+	if l := HoldLabel(r); l != "" {
 		return fmt.Sprintf("Its %s label holds it, so the start sends it once that label is lifted and nothing else holds it.", l)
 	}
 	if as := r.Assignee(); as != "" {
@@ -272,12 +272,12 @@ func holdsNow(r *ledger.Record, h waits.Holds) string {
 	return fmt.Sprintf("%s holds it, so the start sends it once nothing holds it.", describeWaits(h.Waits))
 }
 
-// holdLabel is the label on a bead that holds it from any pool: Gas City's
-// human label, compared as bd's ready read compares it, or one of its dispatch
-// holds, hold:mayor and hold:external, compared trimmed and in any case, as
-// its hook's HasDispatchHold compares them. It is empty when none does.
-func holdLabel(labels []string) string {
-	for _, l := range labels {
+// HoldLabel is the label on r that holds it from any pool: Gas City's human
+// label, compared as bd's ready read compares it, or one of its dispatch holds,
+// hold:mayor and hold:external, compared trimmed and in any case, as its hook's
+// HasDispatchHold compares them. It is empty when none does.
+func HoldLabel(r *ledger.Record) string {
+	for _, l := range r.Labels() {
 		if l == humanLabel {
 			return l
 		}

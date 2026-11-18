@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/arm"
 	armrecord "github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -24,7 +25,10 @@ import (
 //
 // The fix is found by its title among the store's open beads, so a second PR
 // whose lane asks for the same fix waits on the same bead, and that PR's case
-// joins the bead's notes.
+// joins the bead's notes. A found fix that a label holds from every pool, such
+// as the hold:mayor of work that waits for the operator's placement, is sent
+// nowhere, because gc sling reads no hold, and the ask waits on it while the
+// hold stands.
 
 // AheadRequest is a fix to file ahead of the PR the bead owns: its title, what
 // it must hold, the pool and the formula it is sent on, and the checks the ask
@@ -36,20 +40,22 @@ type AheadRequest struct {
 }
 
 // Ahead is what SendAhead did: the fix and the ask that waits on it, whether
-// each was filed or found, and whether this call sent the fix to the pool.
+// each was filed or found, whether this call sent the fix to the pool, and the
+// label that holds a found fix from every pool, "" when none does.
 type Ahead struct {
 	Fix, Ask           string
 	FixFiled, AskFiled bool
 	Sent               bool
+	Held               string
 }
 
 // SendAhead files the fix req names ahead of the PR the bead owns, or finds the
 // open bead of its title, sends it to req.Pool on req.Formula unless it is on
-// its way already, and files the ask on the bead that waits on it. It refuses
-// what FileAsk refuses, and a request that sends no check back, before anything
-// is filed. A read that fails returns its error. A write that fails returns its
-// error with what landed before it, which the next call finds: the fix by its
-// title, and the ask by its reason.
+// its way already or a label holds it, and files the ask on the bead that waits
+// on it. It refuses what FileAsk refuses, and a request that sends no check
+// back, before anything is filed. A read that fails returns its error. A write
+// that fails returns its error with what landed before it, which the next call
+// finds: the fix by its title, and the ask by its reason.
 func SendAhead(l *ledger.Ledger, rt gascity.Runtime, req AheadRequest, index func(at string) (Index, error)) (Ahead, error) {
 	var out Ahead
 	title, desc := strings.TrimSpace(req.Title), strings.TrimSpace(req.Description)
@@ -90,7 +96,7 @@ func SendAhead(l *ledger.Ledger, rt gascity.Runtime, req AheadRequest, index fun
 		}
 		out.Fix, out.FixFiled = id, true
 	} else {
-		out.Fix = fix.ID
+		out.Fix, out.Held = fix.ID, arm.HoldLabel(fix)
 		if !strings.Contains(fix.Description()+"\n"+fix.Notes(), mark) {
 			w := l.Write(fix.ID)
 			w.Note("Ahead of " + pr + " as well: its review run waits for this to land.\n\n" + desc)
@@ -99,7 +105,7 @@ func SendAhead(l *ledger.Ledger, rt gascity.Runtime, req AheadRequest, index fun
 			}
 		}
 	}
-	if out.FixFiled || unsent(fix) {
+	if out.FixFiled || (out.Held == "" && unsent(fix)) {
 		res := rt.Sling(gascity.Sling{Target: req.Pool, Bead: out.Fix, Formula: req.Formula})
 		switch {
 		case res.Code == 0 && res.Err == nil:

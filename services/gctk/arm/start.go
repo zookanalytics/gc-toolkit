@@ -250,7 +250,7 @@ func (a *Arms) judge(r *ledger.Record, arm *record.Arm, h waits.Holds, holdsErr,
 	case r.IssueType() == "epic":
 		return Act{Action: ActHold, Case: "epic", Why: "it is an epic, which no pool serves: its members are its work"}, true
 	}
-	if l := holdLabel(r.Labels()); l != "" {
+	if l := HoldLabel(r); l != "" {
 		return Act{Action: ActHold, Case: "label", Why: fmt.Sprintf("its %s label holds it, and no pool serves it while it carries one", l)}, true
 	}
 	if holdsErr != nil {

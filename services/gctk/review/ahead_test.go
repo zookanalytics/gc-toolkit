@@ -162,6 +162,29 @@ func TestAFixWhoseSlingFailedIsSentByTheNextCall(t *testing.T) {
 	}
 }
 
+// A found fix that a label holds from every pool, as hold:mayor holds work that
+// waits for the operator's placement, is sent nowhere, because gc sling reads
+// no hold, and the ask waits on it while the hold stands.
+func TestAFoundFixThatALabelHoldsIsSentNowhere(t *testing.T) {
+	w := newWorld(t)
+	w.store.Put(bead{ID: "tk-held", Title: aheadTitle, Status: "open", IssueType: "task", Labels: []string{"Hold:Mayor "}})
+	rt := routes(w)
+	got, err := review.SendAhead(w.ledger(), rt, aheadReq(prBead), archIndex(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Fix != "tk-held" || got.FixFiled || got.Sent || got.Held != "Hold:Mayor" || !got.AskFiled {
+		t.Fatalf("SendAhead = %+v; want the held fix found and sent nowhere, and the ask filed", got)
+	}
+	if n := len(rt.Slings()); n != 0 {
+		t.Fatalf("the held fix was slung %d times; want none", n)
+	}
+	askRow, _ := w.store.Row(got.Ask)
+	if !slices.ContainsFunc(askRow.Edges, func(e gcbd.Edge) bool { return e.Type == gcbd.EdgeBlocks && e.ID == "tk-held" }) {
+		t.Fatalf("the ask's edges are %+v, without its wait on the held fix", askRow.Edges)
+	}
+}
+
 // What FileAsk refuses, and a fix that sends no check back, file nothing and
 // sling nothing.
 func TestAFixAheadIsRefusedBeforeAnythingIsFiled(t *testing.T) {
