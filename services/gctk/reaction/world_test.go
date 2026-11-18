@@ -167,11 +167,12 @@ func (w *world) add(line string) {
 	w.log = append(w.log, line)
 }
 
-// script answers gc-helm.sh and human-gate.sh. human-gate.sh files a gate under
-// its key that blocks its subject, its message's first line as its title and
-// the whole message as its description, and prints its id, or finds the open
-// gate under the key and prints that; --retract closes the open gates under
-// the key.
+// script answers gc-helm.sh and human-gate.sh. gc-helm.sh takeaway's release
+// makes its subject ready as its waits land (released). human-gate.sh files a
+// gate under its key that blocks its subject, its message's first line as its
+// title and the whole message as its description, and prints its id, or finds
+// the open gate under the key and prints that; --retract closes the open gates
+// under the key.
 func (w *world) script(c rtfake.Call) gascity.Result {
 	switch c.Name {
 	case "gc-helm.sh":
@@ -179,6 +180,7 @@ func (w *world) script(c rtfake.Call) gascity.Result {
 		if w.helmFails {
 			return gascity.Result{Code: 4, Output: "gc-helm: could not update 'tk-sub': the store refused it"}
 		}
+		w.released(c.Args)
 		return gascity.Result{}
 	case "human-gate.sh":
 		w.add("GATE " + strings.Join(c.Args, " "))
@@ -207,6 +209,29 @@ func (w *world) script(c rtfake.Call) gascity.Result {
 		return gascity.Result{Output: "human-gate: a note on stderr\n" + open + "\n"}
 	}
 	return gascity.Result{Code: 127, Err: fmt.Errorf("no script %s", c.Name)}
+}
+
+// released makes the subject of a takeaway release ready when every bead the
+// release waits on has closed, as bd's ready set reads the subject once those
+// wait edges land. A subject waitingWorld starts unready so reads ready only
+// after its release.
+func (w *world) released(args []string) {
+	if len(args) < 2 || args[0] != "takeaway" || !slices.Contains(args, "--release") {
+		return
+	}
+	waits := 0
+	for i, a := range args {
+		if a != "--waiting-on" || i+1 == len(args) {
+			continue
+		}
+		if b, ok := w.store.Row(args[i+1]); !ok || !strings.EqualFold(b.Status, "closed") {
+			return
+		}
+		waits++
+	}
+	if waits > 0 {
+		w.store.MakeReady(args[1])
+	}
 }
 
 func (w *world) openGate(subject, key string) string {

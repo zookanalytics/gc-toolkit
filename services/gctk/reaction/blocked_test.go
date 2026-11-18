@@ -261,10 +261,22 @@ func TestBlockedArmsItsDispatchLast(t *testing.T) {
 	}
 }
 
+// blockerClosed is a world in which bd does not report the subject ready and
+// its blocker tk-blk1 has closed, so the subject reads ready once a release's
+// wait on tk-blk1 lands, and not before.
+func blockerClosed(t *testing.T) *world {
+	w := waitingWorld(t)
+	b, _ := w.store.Row("tk-blk1")
+	b.Status = "closed"
+	w.store.Put(b)
+	return w
+}
+
 // A blocked bead handed to a named agent is held on its wait and handed over
 // in the agent's form after the release: the mechanik's route, the refinery's
 // assignee written beside the wait. The agent is nudged only when bd reports
-// the bead ready, since a blocker that closes later nudges it then.
+// the bead ready once the hand-off lands, as it does when the blocker closed
+// already, since a blocker that closes later nudges it then.
 func TestBlockedHandsTheBeadToItsAgent(t *testing.T) {
 	w := waitingWorld(t)
 	code, out, err := w.dispose("tk-sub", "--disposition", "blocked", "--reason", "the comment can change only once the order lands",
@@ -284,14 +296,14 @@ func TestBlockedHandsTheBeadToItsAgent(t *testing.T) {
 	w.before("HELM takeaway", "SLING ", "(BLKHANDOFF) after the release writes the wait")
 	w.hasnt("NUDGE", "(BLKHANDOFF) no nudge while the bead waits")
 
-	w = newWorld(t)
+	w = blockerClosed(t)
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "the comment waited on an order that has landed",
 		"--takeaway", "held: city.toml comment waits on the order", "--waiting-on", "tk-blk1", "--then-assign", "gc-toolkit.mechanik", "--run", root)
 	wantCode(t, code, 0, err, "(BLKREADY) a blocked exit whose blocker closed already")
 	w.has("NUDGE gc-toolkit.mechanik tk-sub is routed to you and ready", "(BLKREADY) the mechanik is nudged")
 	w.before("SLING ", "NUDGE ", "(BLKREADY) once the bead is routed to it")
 
-	w = newWorld(t)
+	w = blockerClosed(t)
 	w.nudgeFails = true
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1", "--then-assign", "gc-toolkit.mechanik", "--run", root)
 	wantCode(t, code, 4, err, "(HANDOFFFAIL) a --then-assign whose nudge did not reach the agent")
@@ -322,7 +334,7 @@ func TestBlockedHandsTheBeadToItsAgent(t *testing.T) {
 	w.hasnt("SLING", "(BLKREFINERY) routing nothing")
 	w.hasnt("NUDGE", "(BLKREFINERY) no nudge while the bead waits")
 
-	w = newWorld(t)
+	w = blockerClosed(t)
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "the hand-off waited on a unit that has landed",
 		"--takeaway", "held: bring-current waits on the unit", "--waiting-on", "tk-blk1", "--then-assign", "gc-toolkit/gc-toolkit.refinery", "--run", root)
 	wantCode(t, code, 0, err, "(BLKREADY) the refinery's blocker closed already")
