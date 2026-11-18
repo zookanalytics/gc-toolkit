@@ -44,7 +44,7 @@ done
 # The whole namespace, not just the names above: a variable a future city release
 # adds must be gone too, or the leak returns one release later. The deliberate
 # exceptions are the pins harness_init sets itself, after the sweep, rather than
-# inheriting them: GC_NO_API pins the gctk read seam onto the stubbed gc the same
+# inheriting them: GC_NO_API pins the gctk read seam onto the fake gc the same
 # way GCTK_BIN is pinned, GC_QUEUE_PRIORITY_TOOL points the priority writer a
 # script under test reaches at a wrapper over the stub store, and GC_RUN_LIB
 # points a script that sources run-lib.sh at its stub, which answers from the
@@ -123,7 +123,7 @@ has "$out" "fails=1" "…as one counted failure"
 # The hermetic stub environment is still installed.
 case "$STUB_STORE" in "$TMP"/*) ok "STUB_STORE points into TMP" ;; *) bad "STUB_STORE not under TMP: $STUB_STORE" ;; esac
 case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin not on PATH" ;; esac
-[ -x "$TMP/bin/gc" ] && ok "stub gc installed" || bad "stub gc missing"
+[ -x "$TMP/bin/gc" ] && ok "the fake gc is installed" || bad "the fake gc is missing"
 
 # gctk pins a read to the store gc routes a bead to: it asks `bd where` first,
 # then names that store with bd's --db ahead of the verb. The stub names its
@@ -180,7 +180,7 @@ SUITE_PID=$!
 waited=0
 until [ -e "$FLOOR_OUT/ready" ] || [ "$waited" -ge 200 ]; do sleep 0.05; waited=$((waited + 1)); done
 [ -e "$FLOOR_OUT/ready" ] && ok "floor: the script under test starts beneath a live suite" || bad "floor: the script under test never started"
-eq "$(cat "$FLOOR_OUT/with-stub" 2>/dev/null)" "[]" "floor: while the suite runs, its stub answers"
+eq "$(cat "$FLOOR_OUT/with-stub" 2>/dev/null)" '{"error":"no issues found matching the provided IDs","schema_version":1}' "floor: while the suite runs, its fake gc answers"
 kill -TERM "$SUITE_PID"; wait "$SUITE_PID" 2>/dev/null
 if [ -d "$(cat "$FLOOR_OUT/suite-tmp")" ]; then bad "floor: the killed suite's EXIT trap left its TMP"; else ok "floor: the killed suite's EXIT trap removed its TMP, stubs and all"; fi
 : > "$FLOOR_OUT/go"
@@ -204,9 +204,9 @@ eq "$rc" "2" "harness_init with no test floor refuses to run"
 has "$out" "no test floor at tools/test-floor" "…and names the missing floor"
 hasnt "$out" "survived" "…before the suite goes on"
 
-# The gc bd create stub lands a create the way real bd does: --metadata (a JSON
+# The fake gc's create lands a create the way real bd does: --metadata (a JSON
 # value, its types kept), --status and --notes ride the one insert, and a
-# --metadata that is not JSON is refused with nothing created. A stub that
+# --metadata that is not JSON is refused with nothing created. A fake that
 # dropped the payload made a writer whose stamps ride the create look like one
 # that stamps in a second write, so no suite could see a payload land at birth.
 store '[]'
@@ -235,7 +235,7 @@ eq "$(jq -r '.[] | select(.id == "new-4") | .title' "$STUB_STORE")" "lost" "…w
 # spelling (probed against bd 1.3.1): blocks:<id> makes <id> depend on the new
 # bead; a bare id, depends-on:<id> and blocked-by:<id> make the new bead depend
 # on <id> through a blocks edge; any other <type>:<id> makes the new bead depend
-# on <id> with that type. The rows read back through the dep stub's own queries.
+# on <id> with that type. The rows read back through the fake's own dep queries.
 store '[{"id":"tk-anc","status":"open","assignee":"","title":"a","notes":"","metadata":{}},{"id":"tk-sub","status":"open","assignee":"","title":"s","notes":"","metadata":{}}]'
 : > "$STUB_DEPS"
 gc bd create "review" -t task --metadata '{"task_kind":"review"}' --deps "blocks:tk-anc" --json >/dev/null
@@ -256,7 +256,7 @@ STUB_DEP_FAIL="new-9" gc bd create "edgeless" -t task --deps "blocks:tk-anc" --j
 eq "$(bstatus new-9)|$(gc bd dep list tk-anc --direction=down -t blocks --json | jq -r '[.[].id] | sort | join(",")')" "open|new-3,new-8" \
   "STUB_DEP_FAIL naming the minted id lands the bead without its --deps edges"
 
-# The gc bd update stub lands every flag of one call in one pass over the store:
+# The fake gc's update lands every flag of one call in one pass over the store:
 # the sets in order (a later value for a key wins), the unsets, the assignee,
 # the status, the appended note and the description. A value that parses as a
 # JSON number, boolean or null is stored typed and anything else as raw text,
@@ -288,19 +288,23 @@ eq "$(jq 'length' "$STUB_STORE")" "2" "update: no bead is lost to a dropped fiel
 gc bd update tk-missing --status=closed >/dev/null
 eq "$(jq 'length' "$STUB_STORE")" "2" "update: an id the store does not hold changes nothing"
 
-# The gc bd list stub answers its --metadata-field filters in the same pass as
+# The fake gc's list answers its --metadata-field filters in the same pass as
 # the rest of the query: a row must match every field, a value is compared as
 # text (a stored number matches its spelling), and a field with no `=` matches
-# nothing a store would hold.
+# nothing a store would hold. A list that names no status leaves out closed
+# beads unless it asks for --all, as bd's does.
 store '[{"id":"l1","status":"open","title":"a","metadata":{"k":"v","n":1}},{"id":"l2","status":"open","title":"b","metadata":{"k":"v","n":2}},{"id":"l3","status":"closed","title":"c","metadata":{"k":"v","n":1}}]'
 ids() { jq -r 'map(.id) | join(",")'; }
-eq "$(gc bd list --metadata-field k=v --json | ids)" "l1,l2,l3" "list: one metadata field selects every row carrying it"
-eq "$(gc bd list --metadata-field k=v --metadata-field n=1 --json | ids)" "l1,l3" "list: two fields both have to match"
+eq "$(gc bd list --all --metadata-field k=v --json | ids)" "l1,l2,l3" "list: one metadata field selects every row carrying it"
+eq "$(gc bd list --all --metadata-field k=v --metadata-field n=1 --json | ids)" "l1,l3" "list: two fields both have to match"
+out=$(gc bd list --metadata-field k=v --json)
+has "$out" '"id":"l2"' "list: with no status, an open row is listed"
+hasnt "$out" '"id":"l3"' "…and a closed one is not"
 eq "$(gc bd list --status=open --metadata-field n=1 --json | ids)" "l1" "list: …and the status filter applies with them"
 eq "$(gc bd list --metadata-field=k=v --metadata-field n=3 --json | ids)" "" "list: a field no row matches selects nothing"
 eq "$(gc bd list --metadata-field k --json | ids)" "" "list: a field without = selects nothing"
 
-# The gc sling stub pours in one pass: the route key is retired and the
+# The fake gc's sling pours in one pass: the route key is retired and the
 # execution route stamped, unless STUB_DROP_KEYS drops the stamp.
 store '[{"id":"tk-s","status":"open","assignee":"","title":"s","notes":"","metadata":{"gc.routed_to":"pool"}}]'
 gc sling pool tk-s --on mol-x >/dev/null
@@ -333,7 +337,7 @@ eq "$rc|$(meta tk-d gc.routed_to)" "0|<absent>" "sling --no-formula: a dropped r
 # refuses a bead assigned to another actor unless --force is passed, an
 # unassigned bead or the actor's own closes plainly, and `bd update
 # --status=closed` never runs the check. A caller that drops its --force passes
-# against a stub that refuses nothing, so the refusal is pinned here, and so is
+# against a fake that refuses nothing, so the refusal is pinned here, and so is
 # the default: with the knob unset any actor closes, as every other suite expects.
 store '[{"id":"tk-held","status":"in_progress","assignee":"hq-sitting","title":"h","notes":"","metadata":{}},{"id":"tk-free","status":"open","assignee":"","title":"f","notes":"","metadata":{}},{"id":"tk-mine","status":"open","assignee":"rig/refinery","title":"m","notes":"","metadata":{}},{"id":"tk-upd","status":"in_progress","assignee":"hq-sitting","title":"u","notes":"","metadata":{}},{"id":"tk-off","status":"in_progress","assignee":"hq-sitting","title":"o","notes":"","metadata":{}}]'
 as_refinery() { STUB_ENFORCE_CLOSE_OWNER=1 BEADS_ACTOR=rig/refinery gc bd "$@" >/dev/null 2>&1; }
@@ -351,9 +355,9 @@ eq "$(bstatus tk-upd)" "closed" "update --status=closed never runs the close ver
 gc bd close tk-off --reason r >/dev/null 2>&1
 eq "$(bstatus tk-off)" "closed" "with the knob unset, a plain close lands whoever holds the bead"
 
-# The gc bd dep stub mirrors real bd's blocks orientation. Real `dep add
+# The fake gc's dep mirrors real bd's blocks orientation. Real `dep add
 # <blocked> <blocker> --type blocks` makes the SECOND operand the blocker — the
-# documented `dep add Y X` equals `dep X --blocks Y`. A stub that stored the add
+# documented `dep add Y X` equals `dep X --blocks Y`. A fake that stored the add
 # source-first lets a reversed dep-add read back as the intended edge and pass,
 # so the orientation is pinned here.
 store '[{"id":"tk-blk","status":"open","assignee":"","title":"b","notes":"","metadata":{}},{"id":"tk-kd","status":"open","assignee":"","title":"k","notes":"","metadata":{}}]'
@@ -468,10 +472,10 @@ gh api graphql -f query="$REACT_Q" -f id=NC-81 -f c=HEART -f c=$'a "quoted" = va
 eq "$(jq -c '.threads[0].comments.nodes[0].reactionGroups | map(.content)' "$GH_DIR/threads_81.json")" '["EYES","a \"quoted\" = value, ✅\nline two"]' \
   "gh graphql: a variable arrives whole, the last value given for its name, its trailing newline dropped"
 
-# The gc bd dep stub holds one edge per (issue, depends_on) pair, as real bd
+# The fake gc's dep holds one edge per (issue, depends_on) pair, as real bd
 # does. A second type on a taken pair is refused with exit 1 and writes nothing,
 # whichever form wrote either edge. The same type again is a no-op that exits 0,
-# and the reversed pair is a different pair. A stub that appends every edge
+# and the reversed pair is a different pair. A fake that appends every edge
 # accepts two edges on one pair, a state no real store can hold, so a writer
 # that needs both passes here and fails against bd; the rule is pinned here.
 : > "$STUB_DEPS"
@@ -496,10 +500,10 @@ eq "$(grep -c . "$STUB_DEPS")" "1" "...and leaves one edge on the pair"
 if gc bd dep add tk-blk tk-kd --type related; then ok "the reversed pair is a different pair: a related edge lands beside the blocks edge"; else bad "the reversed pair was refused as if it were the same pair"; fi
 has "$(cat "$STUB_DEPS")" "tk-blk|related|tk-kd" "...and is stored"
 
-# The gc bd update stub stores a --set-metadata value with real bd's typing. A
+# The fake gc's update stores a --set-metadata value with real bd's typing. A
 # value that parses as a JSON number, true, false or null is stored typed, so
 # `k=1` reads back as the number 1, and a jq compare of it against the string
-# "1" is false. Every other value is stored as its raw text. A stub that stored
+# "1" is false. Every other value is stored as its raw text. A fake that stored
 # only strings would pass a script whose jq compares a stamp to a string
 # literal, and the real store would fail it, so the typing is pinned value by
 # value. Numbers are pinned by type alone: jq versions print a number literal
@@ -532,7 +536,7 @@ eq "$(stored_json arr)"    '"[1]"'   "a JSON array is stored as its raw text"
 eq "$(stored_json obj)"    '"{}"'    "a JSON object is stored as its raw text"
 eq "$(stored_json empty)"  '""'      "an empty value is stored as the empty string"
 
-# The gc bd update stub replaces a description the way real bd does, under
+# The fake gc's update replaces a description the way real bd does, under
 # either spelling of the flag, and leaves the rest of the bead as it was.
 store '[{"id":"tk-desc","status":"open","assignee":"","title":"d","description":"first","notes":"n","metadata":{"k":"v"}}]'
 gc bd update tk-desc --description "second, with a space" >/dev/null
@@ -541,23 +545,22 @@ gc bd update tk-desc -d third >/dev/null
 eq "$(jq -r '.[0].description' "$STUB_STORE")" "third" "...and -d is the same flag"
 eq "$(jq -c '.[0] | [.notes, .metadata.k, .status]' "$STUB_STORE")" '["n","v","open"]' "...leaving notes, metadata and status alone"
 
-# The gc bd update stub lands a whole write in one jq, and the gc bd list stub
-# answers a query and all of its --metadata-field filters in one, however many
-# flags the call carries. Each counted call is read back, so a call that stopped
-# before its jq cannot pass the count.
+# The fake gc starts no jq for a write or a read, however many flags the call
+# carries, and neither do the harness's readers. Each counted call is read
+# back, so a call that answered nothing cannot pass the count.
 store '[{"id":"tk-one","status":"open","assignee":"a","title":"o","notes":"n","metadata":{"old":"x","gone":"y"}},
         {"id":"tk-two","status":"open","assignee":"","title":"t","notes":"","metadata":{"lane":"c","stage":"1"}}]'
-one=$(jq_runs gc bd update tk-one --set-metadata k1=1)
-many=$(jq_runs gc bd update tk-one --set-metadata k1=2 --set-metadata k2=b --set-metadata k1=3 \
-  --unset-metadata gone --unset-metadata k2 --assignee=bob --status=in_progress --append-notes more --description d)
-eq "$many" "$one" "update: a write with nine flags starts as many jq processes as one with a single key"
+eq "$(jq_runs gc bd update tk-one --set-metadata k1=2 --set-metadata k2=b --set-metadata k1=3 \
+  --unset-metadata gone --unset-metadata k2 --assignee=bob --status=in_progress --append-notes more --description d)" "0" \
+  "update: a write with nine flags starts no jq"
 eq "$(jq -c '.[] | select(.id == "tk-one") | [.metadata, .assignee, .status, .notes, .description]' "$STUB_STORE")" \
   '[{"old":"x","k1":3},"bob","in_progress","n\nmore","d"]' "update: …and every flag of that write lands"
-one=$(jq_runs gc bd list --json)
-many=$(jq_runs gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json)
-eq "$many" "$one" "list: a read with three --metadata-field filters starts as many jq processes as one with none"
+eq "$(jq_runs gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json)" "0" \
+  "list: a read with three --metadata-field filters starts no jq"
 eq "$(gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json | jq -r 'map(.id) | join(",")')" "tk-two" \
   "list: …and that read answers with the one bead every filter matches"
+eq "$(jq_runs meta tk-one k1)$(jq_runs bstatus tk-one)$(jq_runs bparents tk-one)" "000" "the readers start no jq"
+eq "$(meta tk-one k1)|$(bstatus tk-one)" "3|in_progress" "…and each reads what the write left"
 
 # part: tools/run-tests.sh runs a suite with parts once per part, exporting the
 # run's part and every declared one. Each probe runs in a subshell, so the
@@ -760,12 +763,11 @@ eq "$(gc bd kv get some.key --json | jq -r '.found'):$(gc bd kv get some.key2 --
 out=$(STUB_KV_FAIL=1 gc bd kv get some.key2 --json 2>/dev/null); rc=$?
 eq "$rc:$out" "1:" "STUB_KV_FAIL: a kv call fails with no answer"
 out=$(gc bd show tk-gone --json); rc=$?
-eq "$rc:$out" "0:[]" "show of an id the store does not hold answers [] by default"
-out=$(STUB_SHOW_NOT_FOUND_ERROR=1 gc bd show tk-gone --json); rc=$?
-eq "$rc:$(printf '%s' "$out" | jq -r '.error')" "1:no issues found matching the provided IDs" \
-  "STUB_SHOW_NOT_FOUND_ERROR: it answers bd's error object at exit 1"
-out=$(STUB_SHOW_NOT_FOUND_ERROR=1 gc bd show tk-a --json); rc=$?
-eq "$rc:$(printf '%s' "$out" | jq -r '.[0].id')" "0:tk-a" "…and a held id still answers its row"
+eq "$rc:$out" '1:{"error":"no issues found matching the provided IDs","schema_version":1}' \
+  "show of an id the store does not hold answers bd's error object at exit 1"
+out=$(gc bd show tk-gone tk-a --json); rc=$?
+eq "$rc" "0" "…and beside a held id, it answers at exit 0"
+has "$out" '"id":"tk-a"' "…with the held one's row"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
