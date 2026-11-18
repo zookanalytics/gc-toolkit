@@ -63,12 +63,15 @@
 #     the change for no page. It files one request for the page under one
 #     token, and its duplicate probe counts a request that has closed. The
 #     method defines that page without the foundation doc only this repo keeps.
-#   - The pm method walks a person through the moment a change meets them when
-#     the change sets what reaches them, when it reaches them, or how they are
-#     asked and answer. What the person meets through a mechanism is the pm
-#     check's, a limit the PR discloses is still a finding when it defeats the
-#     feature's purpose, a walk that breaks blocks, the verdict body records
-#     each walk, and the method's questions stay a lens.
+#   - The pm method judges whether a change is the right thing from the side of
+#     the people it affects, whom it names from the rig's product goals, and
+#     walks them through the change as designed and as built, across the whole
+#     of what they are doing. Its words fit a person who is neither asked nor
+#     answers. What the person meets through a mechanism is the pm check's, a
+#     break the change did not cause is filed and not found against it, a limit
+#     the PR discloses is still a finding when it defeats the feature's
+#     purpose, a walk that breaks blocks, the verdict body records each walk,
+#     and the method's questions stay a lens.
 #   - This repo's own docs/review-triage.md, read the way a review reads it at
 #     its commit, carries the changes that make pm mandatory and the edits that
 #     do not.
@@ -626,17 +629,23 @@ hasF "$TMP/pm.missing" '`docs/product-goals.md: missing`' "…files one request 
 hasF "$TMP/pm.missing" "Add \`--all\` to that duplicate probe's \`gc bd list\`" "…whose duplicate probe counts a request that has closed"
 notF "$PM" 'reading of `docs/foundation.md`' "the pm method defines the goals page without the foundation doc only this repo keeps"
 
-echo "# the pm method walks a person through the moment a change meets them"
+echo "# the pm method walks the people a change affects through it"
 awk '/^### What you judge$/ {f = 1; next} f && /^#/ {exit} f' "$PM" > "$TMP/pm.judge"
-hasF "$TMP/pm.judge" 'A change can set what reaches a person, when it reaches them, or how they are asked and answer.' \
-  "the pm method walks a change to what reaches a person, when it reaches them, or how they are asked and answer"
-hasF "$TMP/pm.judge" 'what appears where, what they are deciding when it arrives, whether it arrives in time to change that decision, what they can do there, and what confirms that their answer was taken' \
-  "…through what appears where, the decision it arrives for and whether in time, what they can do, and what confirms their answer"
+hasF "$TMP/pm.judge" "Judge the first question from the side of the people the change affects, not from the change's own account of itself." \
+  "the pm method judges whether a change is the right thing from the side of the people it affects"
+hasF "$TMP/pm.judge" 'They are among the people the product goals say the product serves: in one rig the operator, in another a customer, an administrator or whoever calls the tool.' \
+  "…whom it names from the rig's product goals, the operator in one rig and someone else in another"
+hasF "$TMP/pm.judge" 'across the whole of what they are doing and not only the part the diff touches' \
+  "…and walks them through the change across the whole of what they are doing"
+hasF "$TMP/pm.judge" 'Walk what was designed and then what was built' "…as designed and then as built"
+notF "$TMP/pm.judge" 'what confirms that their answer was taken' "…in words that fit a person who is neither asked nor answers"
 hasF "$TMP/pm.judge" "Whether the mechanism works is the \`correctness\` check's question, and what the person meets through it is yours." \
   "…and judges what the person meets through a mechanism, leaving whether it works to correctness"
+hasF "$TMP/pm.judge" 'A break the change did not cause is filed as the specialist stance says, and is no finding against the change.' \
+  "…files a break the change did not cause instead of finding it against the change"
 hasF "$TMP/pm.judge" 'A limit the PR discloses is still a finding when it defeats the purpose the feature is named for' \
   "…so a disclosed limit that defeats the feature's purpose is still a finding"
-hasF "$TMP/pm.judge" '`Walk: <the person and the moment, and what you found there>`' "…and the verdict body records each walk"
+hasF "$TMP/pm.judge" '`Walk: <the person, what they were doing, and what you found there>`' "…and the verdict body records each walk"
 hasF "$TMP/pm.judge" 'The questions are the lens, not a checklist to exhaust.' "…and its questions stay a lens, not a checklist"
 awk '/^## What blocks$/ {f = 1; next} f && /^#/ {exit} f' "$PM" > "$TMP/pm.blocks"
 hasF "$TMP/pm.blocks" 'or fails a person at the moment it meets them' "a change that fails a person at the moment it meets them blocks"

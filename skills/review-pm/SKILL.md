@@ -139,19 +139,29 @@ as it will reach the operator. One question carries the review; a second gates i
   presentation finding. That the summary mechanically accounts for the diff is
   `correctness`'s bar; yours is whether it lets the operator judge the value.
 
-A change can set what reaches a person, when it reaches them, or how they are
-asked and answer. Judge whether such a change is the right thing from where they
-sit, by walking them through the moment it meets them: what appears where, what
-they are deciding when it arrives, whether it arrives in time to change that
-decision, what they can do there, and what confirms that their answer was
-taken. Whether the mechanism works is the `correctness` check's question,
-and what the person meets through it is yours. A walk that breaks is a finding,
-such as a report that arrives after the approval it exists to inform, a question
-asked where the person cannot answer it, or an answer that nothing shows was
-taken. A limit the PR discloses is still a finding when it defeats the purpose
-the feature is named for, because disclosing it hands the operator the product
-judgment this check exists to make. The verdict body adds a line for each walk:
-`Walk: <the person and the moment, and what you found there>`.
+Judge the first question from the side of the people the change affects, not
+from the change's own account of itself. Name them first. They are among the
+people the product goals say the product serves: in one rig the operator, in
+another a customer, an administrator or whoever calls the tool. Say what the
+change is meant to give them: what they are trying to get done in this part of
+the product, and what they should find there once the change ships. Then walk
+them through the change as they will live it, across the whole of what they are
+doing and not only the part the diff touches: what they meet and when they meet
+it, what they can do with it there, how they can tell it worked, and where it
+leaves them. Where people reach the change by different routes, walk each route
+that differs. Walk what was designed and then what was built, because a design
+can fail them even when the diff follows it exactly, and a diff can fail a
+design that would have served them. Whether the mechanism works is the
+`correctness` check's question, and what the person meets through it is yours.
+A walk that breaks is a finding, such as something that reaches the person
+after the point where it could have helped them, something asked of them that
+they cannot give where they are asked, or nothing that tells them it worked. A
+break the change did not cause is filed as the specialist stance says, and is
+no finding against the change. A limit the PR discloses is still a finding when
+it defeats the purpose the feature is named for, because disclosing it hands
+the operator the product judgment this check exists to make. The verdict body
+adds a line for each walk:
+`Walk: <the person, what they were doing, and what you found there>`.
 
 The questions are the lens, not a checklist to exhaust. A change that plainly
 moves its stated problem and reads clearly to the operator passes without
