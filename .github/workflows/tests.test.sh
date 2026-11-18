@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # tests.test.sh — guards the draft CI-cost gate in tests.yml, the jq check
 # each job runs before the suite, the seconds each job that runs the suite
-# keeps, the Go checks' commands, and the names of the checks main's ruleset
-# requires.
+# keeps, the Go checks' commands, the tools go-macos checks before its tests,
+# and the names of the checks main's ruleset requires.
 #
 # A draft pull request must not run the *.test.sh suite, so a change still
 # taking follow-up commits does not spend Actions minutes on every push. A push
@@ -27,6 +27,13 @@
 # go test ./...` in both Go modules, so every Go test runs on both platforms.
 # No job runs go test on a list of packages, because a list keeps a check only
 # for the packages it names.
+#
+# go-macos's tool check names each tool whose absence makes a Go test skip
+# rather than fail: lsof (internal/host in gctk), flock (the pr package's lock
+# test) and bash and jq (the board's tests that answer from the stub store,
+# stubStore in services/helm/internal/rigboard and
+# TestPendingWaitsAreTheWaitsPackagesAnswer in services/helm/internal/source).
+# A runner without one then fails the step by name.
 #
 # Main's ruleset requires the checks named test, test-macos and go. A job's
 # check takes the job's id unless the job sets name: or a matrix, and either one
@@ -171,6 +178,11 @@ for j in go go-macos; do
         awk -F'\t' -v j="$j" -v m="$m" '$1 == j && $2 == m && index($3, "go vet ./... && go test ./...") { f = 1 } END { exit !f }' <<<"$steps" \
             || note "job '$j' must run 'go vet ./... && go test ./...' in $m, so every Go test runs on both platforms"
     done
+done
+tool_check="$(awk -F'\t' '$1 == "go-macos" && index($3, "command -v") { print $3 }' <<<"$steps")"
+for t in lsof flock bash jq; do
+    grep -Eq "for t in ([^;]* )?${t}[ ;]" <<<"$tool_check" \
+        || note "go-macos's tool check must name $t, or a Go test that needs it skips quietly on a runner without it"
 done
 package_lists="$(awk -F'\t' '{
     s = $3

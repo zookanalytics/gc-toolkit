@@ -248,12 +248,14 @@ jobs:
 
       # A Go test that starts a host tool skips when the tool is missing, so a
       # missing tool fails this step by name instead of a test skipping
-      # quietly.
+      # quietly: gctk's host adapter skips without lsof, the pr package's lock
+      # test without flock, and the board's tests that answer from the stub
+      # store without bash or jq.
       - name: Check the runner resolves the tools the Go tests start
         run: |
           sw_vers
           fail=0
-          for t in git flock lsof; do
+          for t in git flock lsof bash jq; do
             p="$(command -v "$t")" || { echo "::error::$t is not on PATH"; fail=1; continue; }
             echo "$t: $p"
           done
