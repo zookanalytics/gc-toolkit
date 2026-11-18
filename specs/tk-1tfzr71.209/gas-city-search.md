@@ -52,9 +52,10 @@ still its own. The field that answers must mean the same to all of them.
 No key, value, state or bead kind is added. The record's status values,
 `merge_result` values, marker and PR keys stay Gas Town's, and the bead's
 assignee carries Gas City's meaning: who works it now. Three readers gain
-words for that one field. The landing order's runs report `assigned` for a
-bead someone other than the refinery is assigned, which they leave to that
-assignee, and no longer report `released`. The evaluator names a bead's
+words for that one field. The landing order's runs leave a bead someone other
+than the refinery is assigned to that assignee: they do not take it, and they
+report `assigned` for one assigned after a run took it. They no longer report
+`released`. The evaluator names a bead's
 assignee in a condition of kind `assigned`, so `gctk pr status` and the board
 say who holds the bead. And a run reports `unassigned` when it assigns to
 nobody a bead the record published while publications still left the refinery

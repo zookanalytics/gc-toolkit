@@ -856,11 +856,14 @@ has no record to read. The order acts only on pending records, so on a rig
 still on the old path it finds none.
 
 Each run takes up to 20 beads that carry the marker `pr_reconcile_pending`, or
-that carry a ruling's disposition on the record and are assigned to nobody or
-to the refinery, the least recently checked first (`pr_last_checked_at`), and
-starts none after four minutes (its `--count` and `--budget`). It reads each
-PR from GitHub by its number, never from a list of open PRs, because a PR
-missing from that list can have closed without merging.
+that carry a ruling's disposition on the record, the least recently checked
+first (`pr_last_checked_at`), and starts none after four minutes (its
+`--count` and `--budget`). It takes an open or blocked bead only while it is
+assigned to nobody or to the refinery. A run writes nothing to a bead someone
+else works, so that bead's last check never moves, and if it were taken it
+would hold a place in every run. It reads each PR from GitHub by its number,
+never from a list of open PRs, because a PR missing from that list can have
+closed without merging.
 
 | The PR | The run |
 |---|---|
@@ -969,9 +972,10 @@ ruling's disposition, with or without the marker, and each write is guarded on
 the status and assignee it read. A bead's assignee says who works it now:
 nobody while its PR waits, and the refinery while it validates a head the PR
 moved to. A bead assigned to anyone else is that assignee's while they work
-it: the run writes nothing to it, requests no merge and pours no review run,
-the PR's status names who holds it, and a later run works it once the assignee
-is gone. A blocked, pending bead the refinery is still assigned is one no
+it. A run does not take it, and a run that reads it assigned after taking it
+writes nothing to it, requests no merge and pours no review run. The PR's
+status names who holds it, and a later run works it once the assignee is
+gone. A blocked, pending bead the refinery is still assigned is one no
 publication of the record leaves, so the run assigns it to nobody in one write
 and the next run works it. What takes a PR off the record is a write that says
 so: the refinery's send-back to the pool clears the marker in the write that

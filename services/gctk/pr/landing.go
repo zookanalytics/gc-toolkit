@@ -283,7 +283,9 @@ const (
 	ActRetry = "retry"
 	// ActAssigned: the bead is assigned to someone other than the refinery, who
 	// works it now, so the run wrote nothing to it, requested no merge and
-	// poured no review run. A later run works it once the assignee is gone.
+	// poured no review run. A run lists no such bead (due), so this one was
+	// assigned after the run listed it, and a later run works it once the
+	// assignee is gone.
 	ActAssigned = "assigned"
 	// ActUnassigned: the bead waits on its PR's merge, blocked and pending, and
 	// the refinery was still assigned it, so the run assigned it to nobody and
@@ -313,15 +315,16 @@ type Options struct {
 }
 
 // Reconcile is one run of the landing order. It lists the beads that carry the
-// marker, and the beads on the record that carry a ruling's disposition, takes
-// up to o.Count of them, the least recently checked first, and reads each under
-// the record lock, from its read of the record to its last write of it, waiting
-// while another writer holds the lock. A bead whose PR closed under a ruling's
-// disposition goes to the disposition writer once the lock is released. A
-// record that lands on the rig's default branch has the branch's seed audit
-// checked once the lock is released, and its outcome says what the check found.
-// It reports each record's outcome to report as it goes, and returns an error
-// when the listing or a lock did not answer, or when a record's outcome failed.
+// marker, and the beads on the record that carry a ruling's disposition, as due
+// says, takes up to o.Count of them, the least recently checked first, and
+// reads each under the record lock, from its read of the record to its last
+// write of it, waiting while another writer holds the lock. A bead whose PR
+// closed under a ruling's disposition goes to the disposition writer once the
+// lock is released. A record that lands on the rig's default branch has the
+// branch's seed audit checked once the lock is released, and its outcome says
+// what the check found. It reports each record's outcome to report as it goes,
+// and returns an error when the listing or a lock did not answer, or when a
+// record's outcome failed.
 func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	ids, err := l.due(o.Count)
 	if err != nil {
@@ -360,11 +363,14 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	return nil
 }
 
-// due lists the records a run reads: the beads carrying the marker set true,
-// open, blocked or closed, and the beads a run reads for a ruling's disposition
+// due lists the records a run reads: the beads carrying the marker set true
+// that are closed, or open or blocked and assigned to nobody or to the
+// refinery (mayWork), and the beads a run reads for a ruling's disposition
 // (disposing), marker or none, so a changed head the order settled is read
 // again until its PR closes. The least recently checked come first, up to
-// count.
+// count. An open or blocked bead assigned to anyone else is left out before
+// the count, since a run writes nothing to it: its last check never moves, so
+// it would keep its place at the front of every run.
 func (l Landing) due(count int) ([]string, error) {
 	rows, err := l.Ledger.Find(record.Marked())
 	if err != nil {
@@ -383,10 +389,16 @@ func (l Landing) due(count int) ([]string, error) {
 			continue
 		}
 		switch r.Status() {
-		case "open", "blocked", "closed":
-			all = append(all, due{r.ID, rec.CheckedAt})
-			listed[r.ID] = true
+		case "open", "blocked":
+			if !l.mayWork(r) {
+				continue
+			}
+		case "closed":
+		default:
+			continue
 		}
+		all = append(all, due{r.ID, rec.CheckedAt})
+		listed[r.ID] = true
 	}
 	for _, r := range ruled {
 		rec, err := record.Read(r)
@@ -416,7 +428,7 @@ func (l Landing) due(count int) ([]string, error) {
 // blocked, is assigned to nobody or to the refinery and carries a whole
 // disposition. rec is r's record.
 func (l Landing) disposing(r *ledger.Record, rec record.Record) bool {
-	if a := r.Assignee(); !record.OnRecord(rec.Result) || (a != "" && a != l.Refinery) {
+	if !record.OnRecord(rec.Result) || !l.mayWork(r) {
 		return false
 	}
 	if s := r.Status(); s != "open" && s != "blocked" {
@@ -424,6 +436,13 @@ func (l Landing) disposing(r *ledger.Record, rec record.Record) bool {
 	}
 	_, whole, err := dispositionOf(r)
 	return err == nil && whole
+}
+
+// mayWork reports whether r's assignee leaves it to a run: nobody, or the
+// refinery. Anyone else assigned r works it now.
+func (l Landing) mayWork(r *ledger.Record) bool {
+	a := r.Assignee()
+	return a == "" || a == l.Refinery
 }
 
 // dispositionOf reads the disposition a ruling recorded on r, and whether it
@@ -609,7 +628,7 @@ func (u *run) one(id string) (RunOutcome, error) {
 		return u.closed(s), nil
 	case s.status == "blocked" && rec.Result == record.Pending && s.assignee == u.Refinery:
 		return u.unassign(s), nil
-	case s.assignee != "" && s.assignee != u.Refinery:
+	case !u.mayWork(r):
 		return RunOutcome{Bead: id, Action: ActAssigned, Detail: fmt.Sprintf("assigned to %s, who works it now, so "+
 			"nothing is written, no merge is requested and no review run is poured; a later run works it once the "+
 			"assignee is gone", s.assignee)}, nil

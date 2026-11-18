@@ -72,11 +72,12 @@ exit: 0 recorded
 
 const prReconcileLong = `One run of the landing order over the store's pending records. It takes up to
 --count of the beads that carry the marker pr_reconcile_pending, and of the
-beads on the record that carry a ruling's disposition and are assigned to
-nobody or to the refinery, the least recently checked first, and reads each
-record under the store's record lock,
-from its read of the record to its last write of it, waiting while another
-writer of the record holds it. It reads each PR from GitHub by its number:
+beads on the record that carry a ruling's disposition, the least recently
+checked first, with an open or blocked bead taken only while it is assigned
+to nobody or to the refinery, and reads each record under the store's record
+lock, from its read of the record to its last write of it, waiting while
+another writer of the record holds it. It reads each PR from GitHub by its
+number:
 
   - open at the head the refinery validated: a draft whose review result
     passed at that head and target, with no review run attached and no ask a

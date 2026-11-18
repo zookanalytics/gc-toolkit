@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -1536,18 +1537,18 @@ func TestADispositionThatStartsBeforeAPublicationMarksTheBeadWaitsThenClearsTheM
 }
 
 // A bead on the record assigned to someone other than the refinery is that
-// assignee's while they work it: each run writes nothing to it, reads no
-// GitHub, requests no merge and pours no review run, and once the assignee is
-// gone the next run works it as a waiting bead.
+// assignee's while they work it: no run lists it, and a run that reads it
+// assigned after its listing names who holds it. Neither writes anything to
+// it, reads GitHub, requests a merge or pours a review run, and once the
+// assignee is gone the next run works it as a waiting bead.
 func TestABeadAssignedToAnotherIsLeftToItsAssignee(t *testing.T) {
 	const holder = "rig/gc-toolkit.polecat-1"
 	check := func(t *testing.T, d *land) {
 		t.Helper()
+		n, reads := len(d.store.Writes()), len(d.github.Reads())
 		for i := 0; i < 2; i++ {
-			o := d.once(t)
-			is(t, o, pr.ActAssigned)
-			if !strings.Contains(o.Detail, holder) {
-				t.Fatalf("the outcome %q does not name who holds the bead", o.Detail)
+			if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 {
+				t.Fatalf("a run took the held bead: %+v", out)
 			}
 		}
 		b := d.row(t)
@@ -1555,23 +1556,37 @@ func TestABeadAssignedToAnotherIsLeftToItsAssignee(t *testing.T) {
 			t.Fatalf("the held bead is %s under %q", b.Status, b.Assignee)
 		}
 		meta(t, b, map[string]string{"pr_reconcile_pending": "true", "merge_result": record.Pending})
-		if len(d.github.Asks()) != 0 {
-			t.Fatalf("a held bead's PR was asked to merge: %v", asks(d.github))
+		if len(d.store.Writes()) != n || len(d.github.Reads()) != reads || len(d.github.Asks()) != 0 {
+			t.Fatalf("the runs wrote %+v, read GitHub %v or asked for a merge %v", d.store.Writes()[n:],
+				d.github.Reads()[reads:], asks(d.github))
 		}
 		d.put("blocked", "")
 		is(t, d.once(t), pr.ActRequested)
 	}
-	t.Run("before a run reads it", func(t *testing.T) {
+	t.Run("before a run lists it", func(t *testing.T) {
 		d := newLand(t)
 		d.put("blocked", holder)
+		check(t, d)
+	})
+	t.Run("between a run's listing and its read", func(t *testing.T) {
+		d := newLand(t)
+		assigned := false
+		d.store.OnFind = func(q gcbd.Query) {
+			if !assigned && slices.Contains(q.IDs, bead) {
+				assigned = true
+				d.put("blocked", holder)
+			}
+		}
 		n := len(d.store.Writes())
-		for i := 0; i < 2; i++ {
-			is(t, d.once(t), pr.ActAssigned)
+		o := d.once(t)
+		is(t, o, pr.ActAssigned)
+		if !strings.Contains(o.Detail, holder) {
+			t.Fatalf("the outcome %q does not name who holds the bead", o.Detail)
 		}
 		if len(d.store.Writes()) != n || readsPR(d.github) {
-			t.Fatalf("the runs wrote %+v or read GitHub %v", d.store.Writes()[n:], d.github.Reads())
+			t.Fatalf("the run wrote %+v or read GitHub %v", d.store.Writes()[n:], d.github.Reads())
 		}
-		d.put("blocked", holder)
+		d.store.OnFind = nil
 		check(t, d)
 	})
 	t.Run("while a run reads GitHub", func(t *testing.T) {
@@ -1587,6 +1602,39 @@ func TestABeadAssignedToAnotherIsLeftToItsAssignee(t *testing.T) {
 		d.github.OnRead = nil
 		check(t, d)
 	})
+}
+
+// Beads on the record that agents other than the refinery are assigned take no
+// place in a run's count, however long ago their last check, since a run
+// writes nothing to them and so their last check never moves. Runs bounded
+// below their number each reach the waiting bead behind them, and leave the
+// held beads as they were.
+func TestBeadsAssignedToAnotherTakeNoPlaceInARunsCount(t *testing.T) {
+	const holder = "rig/gc-toolkit.polecat-1"
+	d := newLand(t)
+	var held []string
+	for i := range 3 {
+		id := fmt.Sprintf("tk-held%d", i)
+		md := maps.Clone(d.md)
+		md["pr_last_checked_at"] = "2026-11-01T00:00:00Z"
+		md["branch"] = "polecat/" + id
+		md["pr_url"] = fmt.Sprintf("https://github.com/%s/pull/%d", repo, 100+i)
+		md["pr_number"] = fmt.Sprint(100 + i)
+		d.store.Put(fake.Bead{ID: id, Title: "held work", Status: "blocked", Assignee: holder, Metadata: md})
+		held = append(held, id)
+	}
+	n := len(d.store.Writes())
+	for run := range 2 {
+		out := d.reconcile(t, pr.Options{Count: 2})
+		if len(out) != 1 || out[0].Bead != bead {
+			t.Fatalf("run %d took %+v, want the waiting bead alone", run+1, out)
+		}
+	}
+	for _, w := range d.store.Writes()[n:] {
+		if slices.Contains(held, w.ID) {
+			t.Fatalf("a run wrote to a held bead: %+v", w)
+		}
+	}
 }
 
 func TestASecondRunActsOnARecordOnlyOnceTheFirstHasWrittenIt(t *testing.T) {

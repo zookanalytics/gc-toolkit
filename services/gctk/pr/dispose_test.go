@@ -274,7 +274,9 @@ func TestABeadAssignedOnceTheRunFreesTheLockIsLeftToItsAssignee(t *testing.T) {
 		t.Fatalf("the assigned bead is %s under %q", b.Status, b.Assignee)
 	}
 	n := len(d.store.Writes())
-	is(t, d.once(t), pr.ActAssigned)
+	if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 {
+		t.Fatalf("the next run took the assigned bead: %+v", out)
+	}
 	b := d.row(t)
 	if b.Status != "open" || len(r.asked()) != 1 || len(d.store.Writes()) != n {
 		t.Fatalf("the next run left the bead %s, asked the writer %v and wrote %+v", b.Status, r.asked(), d.store.Writes()[n:])
