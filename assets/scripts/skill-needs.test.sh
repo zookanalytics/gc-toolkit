@@ -732,6 +732,11 @@ have "…counts sharing a file, a screen or a record entry as no scope" \
     'Sharing a file, a screen or a record entry with the PR does not make a point the PR'"'"'s.' "$HOLD_JOINED"
 have "…and leaves a follow-up only a point outside that scope, or one the operator rules separable" \
     'A follow-up carries only a point outside that scope, or one the operator rules separable.' "$HOLD_JOINED"
+# The close-out ends the sitting and offers no course, so its reason names the
+# sitting's topic and that it closed without a ruling.
+have "the close-out's reason names only the sitting's topic and that it closed without a ruling" \
+    'so its reason names only the sitting'"'"'s topic and that it closed without a ruling, and every course stays in the decision' "$HOLD_JOINED"
+have "…in the line the hold offers" 'dismiss --reason "<the sitting'"'"'s topic>: closed without a ruling"' "$HOLD"
 lacks "the hold skill points at the shape and keeps no copy of its order" 'detail and evidence' \
     "$SKILLS/converse-hold/SKILL.md" "the prompt's definition is the one place a framing's order is stated"
 have "the work skill reads the formulas a rig has now" 'gc formula list --rig <rig>' "$WORK_SKILL"
