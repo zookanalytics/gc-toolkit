@@ -32,6 +32,9 @@ name: tests
 # as the artifact suite-times-<job>, whether the suite passed or failed.
 # pr-size.yml reads them when this workflow completes, for the size comment's
 # section on the suite's time (suite-time.sh). They fail no check.
+# docs/review-correctness.md tells the correctness review what these jobs run,
+# when they run and which of them a merge waits on, so a change to any of those
+# changes that page as well.
 
 on:
   pull_request:

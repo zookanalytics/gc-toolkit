@@ -35,9 +35,18 @@ declares.
   passed on its work bead as `self_review_passed_sha`. When the anchor's stamp
   names the reviewed commit, the method runs no suite.
 - The refinery runs the same `lint_command` at merge, and no tests.
-- CI runs the whole `*.test.sh` suite on Linux and on macOS
-  (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
-  merge waits on the checks main's ruleset requires.
+- CI (`.github/workflows/tests.yml`) runs on a pull request to main once the
+  pull request is ready, and on a push to main. `test` and `test-macos` run the
+  whole `*.test.sh` suite on Linux and on macOS, and `go` and `go-macos` run
+  `go vet ./...` and `go test ./...` in `services/gctk` and in `services/helm`,
+  on Linux and on macOS. No CI job runs `lint_command` or an npm command. Every
+  merge waits on the checks main's ruleset requires, which are `test`,
+  `test-macos` and `go`, so a failure only `go-macos` shows holds no merge.
+- The self-review and the refinery run their gates on the city's host, which is
+  macOS, and CI runs on GitHub's runners. The correctness check reads green
+  before its pull request opens (its `phase` in `review-checks.toml` is
+  `pre-open`), so CI's jobs first run on a change after its first review, and
+  the review formula prints no CI result.
 
 ## Pack content every rig runs
 
@@ -132,8 +141,8 @@ defect only on a line some test executes.
   spellings, as `epoch_of` in `assets/scripts/gc-deacon-ledger.sh` does for
   `date` and `mtime_of` in `formulas/mol-deacon-patrol.toml` does for `stat`,
   or writes the one form both accept, such as `sed -i.bak … && rm -f ….bak` for
-  an in-place edit. CI's macOS job fails by name when one of those tools
-  resolves outside `/usr/bin` and `/bin`.
+  an in-place edit. CI's `test-macos` job fails by name when one of those
+  tools resolves outside `/usr/bin` and `/bin`.
 
 ## Shell blocks in formulas and skills
 
@@ -204,17 +213,25 @@ each file needing it carries as a copy.
 
 `tools/lint.sh` runs `go vet ./...` in each module and `gofmt -l` over every
 tracked Go file, at the self-review and at merge. Vet type-checks test files
-and runs none of them, and no gate runs `go test`. CI's whole suite drives gctk
-end to end, because each suite whose scripts reach `lifecycle.sh` or
-`merge.sh` builds gctk from the checkout (`harness_build_gctk` in
-`assets/scripts/test-harness.sh`). `merge.test.sh` and `lifecycle.test.sh`
-name none of gctk's `.go` files, so the affected subset leaves them out of a
-gctk change, and no suite it selects for a Go change builds the code that
-changed. No suite builds or runs helm-svc. So on a Go diff the review runs
-`go test ./...` in each module the diff touches, and for gctk the suites of the
-commands it changes. On the host helm compiles only with ICU's cgo flags, so
-its tests run with `CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags`
-in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
+and runs none of them, so neither the self-review nor the merge runs
+`go test`. CI's `go` and `go-macos` jobs run `go test ./...` in both modules,
+and only `go` holds a merge. CI's whole suite also drives gctk end to end,
+because each suite whose scripts reach `lifecycle.sh` or `merge.sh` builds gctk
+from the checkout (`harness_build_gctk` in `assets/scripts/test-harness.sh`).
+`merge.test.sh` and `lifecycle.test.sh` name none of gctk's `.go` files, so the
+affected subset leaves them out of a gctk change, and no suite it selects for a
+Go change builds the code that changed. No suite builds or runs helm-svc.
+
+No CI result reaches the review ([Where the gates run](#where-the-gates-run)),
+so on a Go diff the review runs `go test ./...` in each module the diff
+touches, and in `services/helm` whenever the diff touches `services/gctk`,
+whose packages helm builds through the `replace` in its `go.mod`. The host is
+macOS, where the city builds and runs gctk and helm-svc, so this run also finds
+a Go test that fails only there, which `go-macos` shows and no merge waits on.
+For a gctk change the review also runs the suites of the commands it changes.
+On the host helm compiles only with ICU's cgo flags, so its tests run with
+`CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags` in
+`assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
 
 - **Live at the next build, with no fallback.** The `gctk-build` and
   `helm-build` orders run `assets/scripts/gc-build.sh` every five minutes, so
@@ -272,8 +289,10 @@ in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
 No gate runs the web checks or lints TypeScript. `npm run typecheck`,
 `npm test` and `npm run build` run in no CI job, suite or gate command, and no
 suite the affected subset selects for a path under `services/helm/web` runs
-the app's code. The review runs them in `services/helm/web` after `npm ci`,
-then checks that `git status --porcelain -- dist` prints nothing.
+the app's code. CI's `go` and `go-macos` jobs run helm's Go tests, the ones
+that read the app's files among them. The review runs the npm commands in
+`services/helm/web` after `npm ci`, then checks that
+`git status --porcelain -- dist` prints nothing.
 
 - **The bundle is committed.** helm-svc embeds `dist/` (`web/embed.go`) and
   its builder never runs npm, so a change to the app's runtime code ships only
@@ -289,7 +308,8 @@ then checks that `git status --porcelain -- dist` prints nothing.
   `web/contract_parity_test.go` compares the two in both directions, and
   `src/contract.fixture.ts` fails `npm run build` when the committed wire
   sample stops matching the type. `go test ./web -run TestBoardFixture -update`
-  regenerates the sample. Neither check runs in a gate.
+  regenerates the sample. CI's go jobs run `web/contract_parity_test.go`, and
+  no gate runs `npm run build`.
 - **Writes carry `X-GC-Request`.** The supervisor proxies helm-svc and refuses
   a mutation without that header, with a 403 that never reaches helm-svc.
   Every write client takes `SVC_WRITE_HEADERS` from `src/svcWrite.ts`, and
