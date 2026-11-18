@@ -132,6 +132,7 @@ func summary(it *Iteration, shadow bool) string {
 	}
 	for _, k := range []struct{ ruling, word string }{
 		{RulingDeclined, "declined"}, {RulingDeferred, "deferred"}, {RulingAnswered, "answered"}, {RulingQuestion, "put to you"},
+		{RulingAhead, "sent ahead"},
 	} {
 		if c := count[k.ruling]; c > 0 {
 			did = append(did, fmt.Sprintf("%s %d", k.word, c))
@@ -192,7 +193,7 @@ func tally(ln Lane, rp *Repair) string {
 		count[r.Ruling]++
 	}
 	var out []string
-	for _, k := range []string{RulingMustFix, RulingDeclined, RulingDeferred, RulingAnswered, RulingQuestion, "unruled"} {
+	for _, k := range []string{RulingMustFix, RulingDeclined, RulingDeferred, RulingAnswered, RulingQuestion, RulingAhead, "unruled"} {
 		if count[k] > 0 {
 			out = append(out, fmt.Sprintf("%d %s", count[k], k))
 		}
@@ -227,6 +228,14 @@ func answer(r Ruling, ok bool, rp *Repair, shadow bool) string {
 			return "A question for you: " + reason
 		}
 		return fmt.Sprintf("Put to you through %s: %s", r.Gate, reason)
+	case RulingAhead:
+		switch {
+		case shadow:
+			return "Ahead of this PR, in work of its own, and a shadow run files nothing: " + reason
+		case r.Waits == "":
+			return "Ahead of this PR, in work of its own: " + reason
+		}
+		return fmt.Sprintf("Ahead of this PR, in work of its own, which this PR waits on through %s: %s", r.Waits, reason)
 	}
 	return fmt.Sprintf("Ruled %s: %s", r.Ruling, reason)
 }

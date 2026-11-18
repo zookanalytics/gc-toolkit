@@ -503,7 +503,7 @@ func (s *Store) Creates() []Create {
 }
 
 // Create files a bead titled title, open, as fk-<n> for the nth create, with
-// the create's -t, -d, --metadata, a JSON object of strings, and --deps, read
+// the create's -t, -p, -d, --metadata, a JSON object of strings, and --deps, read
 // as bd's --deps reads it: an entry blocks:<id> gives bead id a blocks edge
 // onto the new bead, a bare id, depends-on:<id> and blocked-by:<id> name a bead
 // the new one waits on by a blocks edge, and any other type, such as
@@ -531,6 +531,12 @@ func (s *Store) Create(title string, args ...string) (string, error) {
 		switch name {
 		case "-t", "--type":
 			b.IssueType = value
+		case "-p", "--priority":
+			p, err := strconv.Atoi(strings.TrimPrefix(strings.ToUpper(value), "P"))
+			if err != nil || p < 0 || p > 4 {
+				return "", fmt.Errorf("fake store: %s %q is not a priority from 0 to 4", name, value)
+			}
+			b.Priority = p
 		case "-d", "--description":
 			b.Description = value
 		case "--metadata":

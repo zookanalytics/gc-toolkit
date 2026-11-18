@@ -130,6 +130,35 @@ func TestAFilingFoundFromABeadCarriesItsDiscoveredFromEdge(t *testing.T) {
 	}
 }
 
+// A bead a filing waits on is the new bead's own blocks edge onto it, written in
+// the create after the beads it blocks, so the new bead is held from the moment
+// it exists, and its priority rides the same create.
+func TestAFilingThatWaitsOnABeadIsHeldFromItsCreate(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "first", Status: "open"})
+	l := New(s)
+	f := l.File("ask", "task")
+	f.Priority(1)
+	f.Blocks("b-1")
+	f.WaitsOn("first")
+	f.From("first")
+	id, err := l.Create(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"-t", "task", "--priority", "1", "--deps", "blocks:b-1,blocked-by:first,discovered-from:first"}; !slices.Equal(s.Creates()[0].Args, want) {
+		t.Fatalf("the create carried %q, want %q", s.Creates()[0].Args, want)
+	}
+	row, _ := s.Row(id)
+	if !slices.ContainsFunc(row.Edges, func(e gcbd.Edge) bool { return e.Type == gcbd.EdgeBlocks && e.ID == "first" }) {
+		t.Fatalf("the new bead's edges are %+v, without its own blocks edge onto first", row.Edges)
+	}
+	if row.Priority != 1 {
+		t.Fatalf("the new bead's priority is %d, want 1", row.Priority)
+	}
+}
+
 // A filing a Set refused, or one that names no title, files nothing, and a
 // create the store failed says the bead may have been filed.
 func TestAFilingThatCannotLandFilesNothing(t *testing.T) {

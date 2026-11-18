@@ -29,10 +29,11 @@ func newReviewCmd(stdout, stderr io.Writer) *cobra.Command {
 		"The review of a PR: which checks gate a change at a commit, with the rig's index laid over the pack's, "+
 			"and the rig's guidance for each; whether an iteration of a review run passed, which as the loop's "+
 			"check records the result of a run for the head and the target it judged; the asks a run works on the "+
-			"PR's branch; and, for a run's steps, what a step judges, the check of the output it writes and the "+
-			"head's comment its round posts.",
+			"PR's branch, and a fix that lands ahead of the PR in a PR of its own, which an ask holds the PR for; "+
+			"and, for a run's steps, what a step judges, the check of the output it writes and the head's comment "+
+			"its round posts.",
 		newReviewChecksCmd(stdout, stderr), newReviewGuidanceCmd(stdout, stderr),
-		newReviewPassedCmd(stdout, stderr), newReviewAskCmd(stdout, stderr),
+		newReviewPassedCmd(stdout, stderr), newReviewAskCmd(stdout, stderr), newReviewAheadCmd(stdout, stderr),
 		newReviewStepCmd(stdout, stderr), newReviewOutputCmd(stdout, stderr), newReviewCommentCmd(stdout, stderr))
 }
 
@@ -525,14 +526,7 @@ func reviewAsk(req review.AskRequest, db string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gctk review ask: %v; nothing filed\n", err)
 		return 2
 	}
-	index := func(at string) (review.Index, error) {
-		src, err := indexSources("")
-		if err != nil {
-			return review.Index{}, err
-		}
-		return review.ReadIndex(src, at)
-	}
-	id, filed, err := review.FileAsk(l, req, index)
+	id, filed, err := review.FileAsk(l, req, headIndex)
 	var refused *review.Refusal
 	switch {
 	case errors.As(err, &refused):
@@ -545,6 +539,132 @@ func reviewAsk(req review.AskRequest, db string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s filed\n", id)
 	default:
 		fmt.Fprintf(stdout, "%s found\n", id)
+	}
+	return 0
+}
+
+// headIndex is the check index at the commit at, the pack's rows with the
+// rig's at that commit laid over them, the index an ask's checks are named
+// from.
+func headIndex(at string) (review.Index, error) {
+	src, err := indexSources("")
+	if err != nil {
+		return review.Index{}, err
+	}
+	return review.ReadIndex(src, at)
+}
+
+const reviewAheadLong = `Files a fix that lands ahead of a PR: work a lane's rule keeps off the PR's
+branch, such as the architecture document the arch method finds missing, which
+lands in a PR of its own while the PR waits for it. The fix is a task bead
+titled --title, described by what --file holds, with the PR's merged_target as
+its target, the priority of the bead that owns the PR and a discovered-from
+edge onto that bead, slung to --pool on the formula --on names. An open bead
+of that title stands for the fix instead, and the case --file holds joins its
+notes, so a second PR that needs the same fix waits on the same bead. A found
+bead that is on no way to a pool is slung too.
+
+It then files an ask on the bead that owns the PR, to run each --check again
+once the fix lands. The ask waits on the fix by its own blocks edge, written in
+its create, and holds the PR's merge from the moment it is filed. While the fix
+is open the ask counts for nothing, so no review run is poured for it, and once
+the fix closes the landing order pours a run that takes it.
+
+It refuses a bead that owns no PR on the record and a check the index does not
+declare, each before anything is filed. It prints the fix, filed or found, and
+the ask, filed or found.
+
+exit: 0 the fix and its ask stand
+      1 usage
+      2 a read, a create or the sling did not answer, and the next call finds
+        what landed before it
+      3 refused, and nothing was filed`
+
+func newReviewAheadCmd(stdout, stderr io.Writer) *cobra.Command {
+	var db, title, file, pool, formula string
+	var checks []string
+	cmd := &cobra.Command{
+		Use:         "ahead <bead> --title <text> --file <path> --pool <rig>/<pool> --on <formula> --check <name>...",
+		Short:       "file a fix that lands ahead of a PR, and the ask that holds the PR for it",
+		Long:        reviewAheadLong,
+		Args:        cobra.ExactArgs(1),
+		Annotations: map[string]string{usageExitKey: "1"},
+		RunE: func(_ *cobra.Command, args []string) error {
+			bead := strings.TrimSpace(args[0])
+			switch {
+			case bead == "":
+				return errors.New("name the bead that owns the PR")
+			case strings.TrimSpace(title) == "":
+				return errors.New("--title names the fix")
+			case strings.TrimSpace(pool) == "" || strings.TrimSpace(formula) == "":
+				return errors.New("--pool and --on name the pool the fix is slung to and the formula it is poured on")
+			case len(checks) == 0:
+				return errors.New("--check names a check the ask sends back once the fix lands")
+			}
+			for _, c := range checks {
+				if !review.ValidName(c) {
+					return fmt.Errorf("--check %q is not a check's name ([A-Za-z0-9_-]+)", c)
+				}
+			}
+			raw, err := os.ReadFile(file)
+			if err != nil || strings.TrimSpace(string(raw)) == "" {
+				return fmt.Errorf("--file %q holds no description of the fix", file)
+			}
+			req := review.AheadRequest{Bead: bead, Title: title, Description: string(raw), Pool: pool, Formula: formula, Checks: checks}
+			return exit(reviewAhead(req, db, gascity.New(), stdout, stderr))
+		},
+	}
+	cmd.Flags().StringVar(&title, "title", "", "the fix's title, which an open bead that stands for it carries")
+	cmd.Flags().StringVar(&file, "file", "", "a file holding what the fix must hold, and for which change")
+	cmd.Flags().StringVar(&pool, "pool", "", "the pool the fix is slung to, as <rig>/<pool>")
+	cmd.Flags().StringVar(&formula, "on", "", "the formula the fix is poured on")
+	cmd.Flags().StringArrayVar(&checks, "check", nil, "a check the ask sends back once the fix lands, once per check")
+	cmd.Flags().StringVar(&db, "db", "", "the store's .beads directory, else the store gc routes the bead to")
+	return cmd
+}
+
+func reviewAhead(req review.AheadRequest, db string, rt gascity.Runtime, stdout, stderr io.Writer) int {
+	_, l, err := storeOf(db, req.Bead)
+	if err != nil {
+		fmt.Fprintf(stderr, "gctk review ahead: %v; nothing filed\n", err)
+		return 2
+	}
+	return aheadIn(l, rt, req, headIndex, stdout, stderr)
+}
+
+// aheadIn files the fix req names ahead of its PR in the store l reads, and the
+// ask that holds the PR for it, and prints what stands.
+func aheadIn(l *ledger.Ledger, rt gascity.Runtime, req review.AheadRequest, index func(string) (review.Index, error), stdout, stderr io.Writer) int {
+	got, err := review.SendAhead(l, rt, req, index)
+	var refused *review.Refusal
+	if errors.As(err, &refused) {
+		fmt.Fprintf(stderr, "gctk review ahead: %v\n", err)
+		return 3
+	}
+	if got.Fix != "" {
+		how := "found"
+		if got.FixFiled {
+			how = "filed"
+		}
+		switch {
+		case got.Sent:
+			fmt.Fprintf(stdout, "%s %s, slung to %s on %s\n", got.Fix, how, req.Pool, req.Formula)
+		case err == nil:
+			fmt.Fprintf(stdout, "%s %s, on its way already\n", got.Fix, how)
+		default:
+			fmt.Fprintf(stdout, "%s %s\n", got.Fix, how)
+		}
+	}
+	if got.Ask != "" {
+		how := "found"
+		if got.AskFiled {
+			how = "filed"
+		}
+		fmt.Fprintf(stdout, "%s %s, waiting on %s\n", got.Ask, how, got.Fix)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "gctk review ahead: %s: %v\n", req.Bead, err)
+		return 2
 	}
 	return 0
 }

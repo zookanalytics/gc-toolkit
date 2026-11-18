@@ -15,7 +15,10 @@ import (
 // lifecycle/lifecycle.toml's [metadata.merge_identity], until the merge
 // member's retirement removes them. So does branch, the merge identity's
 // source branch, which the work formula's workspace-setup writes, and which a
-// review ask names through NameBranch.
+// review ask names through NameBranch, and so does target, the branch the work
+// lands on, which work-submit.sh resolves, gc sling reads as the base a
+// worktree is cut from, and a fix a review run files ahead of a PR takes
+// through NameTarget.
 var (
 	branchKey = ledger.Declare("branch", ledger.String,
 		"The source branch a work bead's change is on, which the work formula's workspace-setup writes, and "+
@@ -23,6 +26,10 @@ var (
 			"evaluator and the landing order hold a PR whose head branch is not this one, a PR's composition "+
 			"finds the beads whose work the branch carries by it, and a review run takes only an ask that names "+
 			"the branch of its PR.")
+	targetKey = ledger.Declare("target", ledger.String,
+		"The branch a work bead's change lands on, which work-submit.sh resolves once and a caller can set "+
+			"first, and which gc sling takes as the base the work's worktree is cut from. A fix gctk review "+
+			"ahead files ahead of a PR takes the PR's merged_target.")
 	mergeResultKey = ledger.Declare("merge_result", ledger.String,
 		"Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads "+
 			Pending+", "+HeadChanged+", "+Merged+", "+Incomplete+" or one of the exceptions, "+Invalid+", "+
@@ -97,6 +104,10 @@ func OnBranch(branch string) ledger.Selection { return ledger.Matching(branchKey
 // NameBranch names, in a, the branch the bead's work is on, as an ask's filing
 // names the branch of the PR it asks a change of.
 func NameBranch(a ledger.Act, branch string) { branchKey.Set(a, branch) }
+
+// NameTarget names, in a, the branch the bead's work lands on, as the filing of
+// a fix ahead of a PR names the branch the PR merges into.
+func NameTarget(a ledger.Act, target string) { targetKey.Set(a, target) }
 
 // OnTarget selects the beads whose merged_target is branch: the ones whose PR
 // is to merge into it, and the ones whose work landed on it.

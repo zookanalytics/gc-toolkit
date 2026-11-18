@@ -56,9 +56,14 @@ const (
 	// RulingQuestion: only a person can answer it, so the round put it to one
 	// through a human gate on the bead, which the ruling names.
 	RulingQuestion = "question"
+	// RulingAhead: a lane's finding that holds, whose lane's rule lands its fix
+	// ahead of the PR in a PR of its own (SendAhead), so the round changes no
+	// code for it. The ruling names the ask on the bead that waits on the fix,
+	// which holds the PR's merge until a run takes it.
+	RulingAhead = "ahead"
 )
 
-var rulings = []string{RulingMustFix, RulingDeclined, RulingDeferred, RulingAnswered, RulingQuestion}
+var rulings = []string{RulingMustFix, RulingDeclined, RulingDeferred, RulingAnswered, RulingQuestion, RulingAhead}
 
 // Triage is what the triage step writes: the head it judged, the checks it
 // picked for that head, one lane bonded for each, and whether the change it
@@ -123,7 +128,8 @@ type Repair struct {
 
 // Ruling is how the round ruled one finding, named by its lane's check and its
 // id, or one ask, named by its bead: the ruling, its reason, the commit that
-// fixes a must-fix finding and the gate a question went to.
+// fixes a must-fix finding, the gate a question went to and the ask an ahead
+// ruling's PR waits on.
 type Ruling struct {
 	Check   string `json:"check,omitempty"`
 	Finding string `json:"finding,omitempty"`
@@ -132,6 +138,7 @@ type Ruling struct {
 	Reason  string `json:"reason,omitempty"`
 	Commit  string `json:"commit,omitempty"`
 	Gate    string `json:"gate,omitempty"`
+	Waits   string `json:"waits,omitempty"`
 }
 
 // Subject is what the ruling rules, as the account names it.

@@ -363,9 +363,11 @@ var (
 // checkRuling is why one ruling of iteration it's round does not stand: a
 // subject no lane raised and no ask the round can take, a ruling outside the
 // set, a must-fix with no fixing commit, a commit on a ruling that changes no
-// code, a question with no gate, and a fix for an ask an earlier round of the
-// run declined, which a later ruling of its own overrules only through an ask
-// that carries it.
+// code, a question with no gate, an ask sent ahead, a finding sent ahead that
+// names no open ask on the bead for the PR to wait on, an ask to wait on named
+// by any other ruling, and a fix for an ask an earlier round of the run
+// declined, which a later ruling of its own overrules only through an ask that
+// carries it.
 func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string, shadow bool) error {
 	switch {
 	case r.Ask != "" && (r.Check != "" || r.Finding != ""):
@@ -396,6 +398,16 @@ func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string
 		return refuse("%s is put to a person and names no gate", r.Subject())
 	case r.Ruling != RulingQuestion && r.Gate != "":
 		return refuse("%s is ruled %s and names the gate %s, which only a question goes to", r.Subject(), r.Ruling, r.Gate)
+	case r.Ruling == RulingAhead && r.Ask != "":
+		return refuse("%s is sent ahead, and only a lane's finding is sent ahead of the PR", r.Subject())
+	case r.Ruling == RulingAhead && shadow && r.Waits != "":
+		return refuse("a shadow run files nothing, and %s names the ask %s", r.Subject(), r.Waits)
+	case r.Ruling == RulingAhead && !shadow && strings.TrimSpace(r.Waits) == "":
+		return refuse("%s is sent ahead and names no ask the PR waits on for it", r.Subject())
+	case r.Ruling == RulingAhead && !shadow && !slices.ContainsFunc(asks, func(a Ask) bool { return a.ID == r.Waits && a.Open() }):
+		return refuse("%s is sent ahead to wait on %s, which is no open ask on the bead", r.Subject(), r.Waits)
+	case r.Ruling != RulingAhead && r.Waits != "":
+		return refuse("%s is ruled %s and names the ask %s to wait on, which only a finding sent ahead names", r.Subject(), r.Ruling, r.Waits)
 	case strings.TrimSpace(r.Reason) == "":
 		return refuse("%s is ruled %s with no reason", r.Subject(), r.Ruling)
 	}

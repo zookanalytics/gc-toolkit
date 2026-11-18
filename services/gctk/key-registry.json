@@ -577,6 +577,12 @@
     "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
   },
   {
+    "name": "target",
+    "type": "string",
+    "owner": "pr/record",
+    "doc": "The branch a work bead's change lands on, which work-submit.sh resolves once and a caller can set first, and which gc sling takes as the base the work's worktree is cut from. A fix gctk review ahead files ahead of a PR takes the PR's merged_target."
+  },
+  {
     "name": "task_kind",
     "type": "string",
     "readers": [

@@ -45,6 +45,9 @@ func (r *Record) Title() string { return r.row.Title }
 // Description is the bead's description, "" when the row carries none.
 func (r *Record) Description() string { return r.row.DescriptionString() }
 
+// Notes is the bead's notes, "" when the row carries none.
+func (r *Record) Notes() string { return r.row.NotesString() }
+
 // Priority is the bead's priority, 0 when the row carries none.
 func (r *Record) Priority() int { return r.row.PriorityInt() }
 

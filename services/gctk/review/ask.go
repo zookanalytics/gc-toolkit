@@ -155,10 +155,12 @@ func splitChecks(list string) []string {
 }
 
 // AskRequest is an ask to file on the bead that owns a PR: why, the bead it
-// came from when it came from one, and the checks it sends back.
+// came from when it came from one, the checks it sends back, and the beads it
+// waits on before a run can take it.
 type AskRequest struct {
 	Bead, Reason, Source string
 	Checks               []string
+	WaitsOn              []string
 }
 
 // Refusal is an ask filing the review domain refuses, with why. Nothing was
@@ -170,52 +172,47 @@ func (e *Refusal) Error() string { return "nothing filed on " + e.Bead + ": " + 
 // FileAsk files the ask req names and returns its id, with filed false when an
 // ask of the same source and reason already stands on the bead, open or
 // closed, which it returns instead, so a filer that runs again after its ask
-// closed files nothing. It refuses a bead that owns no PR on the record, and a
-// check index names no check req sends back: the index at the head the
-// refinery validated, which index reads. A read that fails returns its error
-// with nothing filed, and a create that fails may still have filed the ask,
-// which the next call finds.
+// closed files nothing. The ask waits on each bead req.WaitsOn names by its own
+// edge, written in its create, so no run can take it before those close. It
+// refuses a bead that owns no PR on the record, a check req sends back that the
+// index does not declare, the index at the head the refinery validated, which
+// index reads, and a bead to wait on that the store does not hold. A read that
+// fails returns its error with nothing filed, and a create that fails may still
+// have filed the ask, which the next call finds.
 func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, error)) (id string, filed bool, err error) {
-	owner, err := one(l, req.Bead)
+	owner, rec, branch, err := askable(l, req.Bead)
 	if err != nil {
 		return "", false, err
 	}
-	rec, err := record.Read(owner)
+	checks, err := askChecks(req.Bead, rec.Head, req.Checks, index)
 	if err != nil {
 		return "", false, err
 	}
-	branch := view(record.Branch, owner)
-	switch {
-	case owner.Status() == "closed":
-		return "", false, &Refusal{Bead: req.Bead, Why: "it is closed"}
-	case !record.OnRecord(rec.Result):
-		return "", false, &Refusal{Bead: req.Bead, Why: fmt.Sprintf("it owns no PR on the record (merge_result reads %q)", rec.Result)}
-	case branch == "":
-		return "", false, &Refusal{Bead: req.Bead, Why: "it names no branch for an ask to name"}
-	}
-	var checks []string
-	if len(req.Checks) > 0 {
-		ix, err := index(rec.Head)
+	if len(req.WaitsOn) > 0 {
+		held, err := l.Find(ledger.ByID(req.WaitsOn...).WithClosed())
 		if err != nil {
 			return "", false, err
 		}
-		for _, name := range req.Checks {
-			c, ok := ix.Lookup(name)
-			if !ok {
-				return "", false, &Refusal{Bead: req.Bead, Why: fmt.Sprintf("the check index at %s declares no check %q", rec.Head, name)}
-			}
-			if !slices.Contains(checks, c.Name) {
-				checks = append(checks, c.Name)
+		for _, w := range req.WaitsOn {
+			if !slices.ContainsFunc(held, func(r *ledger.Record) bool { return r.ID == w }) {
+				return "", false, &Refusal{Bead: req.Bead, Why: fmt.Sprintf("the store holds no bead %s for the ask to wait on", w)}
 			}
 		}
 	}
-	reason := strings.TrimSpace(req.Reason)
+	return fileAsk(l, owner, branch, req.Reason, req.Source, checks, req.WaitsOn)
+}
+
+// fileAsk files an ask on owner, whose PR's branch is branch, or finds the one
+// of the same reason and source, open or closed: its reason, its source, the
+// checks it sends back and the beads it waits on, all in one create.
+func fileAsk(l *ledger.Ledger, owner *ledger.Record, branch, reason, source string, checks, waits []string) (string, bool, error) {
+	reason = strings.TrimSpace(reason)
 	asks, err := asksOf(l, owner)
 	if err != nil {
 		return "", false, err
 	}
 	for _, a := range asks {
-		if a.Reason == reason && a.Source == req.Source {
+		if a.Reason == reason && a.Source == source {
 			return a.ID, false, nil
 		}
 	}
@@ -226,14 +223,64 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 		checksKey.Set(f, strings.Join(checks, ","))
 	}
 	f.Blocks(owner.ID)
-	if req.Source != "" {
-		f.From(req.Source)
+	f.WaitsOn(waits...)
+	if source != "" {
+		f.From(source)
 	}
-	id, err = l.Create(f)
+	id, err := l.Create(f)
 	if err != nil {
 		return "", false, err
 	}
 	return id, true, nil
+}
+
+// askable reads the bead that owns a PR for an ask to be filed on: the bead,
+// its record and the PR's branch. It refuses a closed bead, one that owns no PR
+// on the record, and one that names no branch, and a read that fails returns
+// its error.
+func askable(l *ledger.Ledger, bead string) (*ledger.Record, record.Record, string, error) {
+	owner, err := one(l, bead)
+	if err != nil {
+		return nil, record.Record{}, "", err
+	}
+	rec, err := record.Read(owner)
+	if err != nil {
+		return nil, record.Record{}, "", err
+	}
+	branch := view(record.Branch, owner)
+	switch {
+	case owner.Status() == "closed":
+		return nil, rec, "", &Refusal{Bead: bead, Why: "it is closed"}
+	case !record.OnRecord(rec.Result):
+		return nil, rec, "", &Refusal{Bead: bead, Why: fmt.Sprintf("it owns no PR on the record (merge_result reads %q)", rec.Result)}
+	case branch == "":
+		return nil, rec, "", &Refusal{Bead: bead, Why: "it names no branch for an ask to name"}
+	}
+	return owner, rec, branch, nil
+}
+
+// askChecks is each check names sends back, as the index at head names it,
+// once each. A check the index does not declare is refused, and an index that
+// does not read returns its error.
+func askChecks(bead, head string, names []string, index func(at string) (Index, error)) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	ix, err := index(head)
+	if err != nil {
+		return nil, err
+	}
+	var checks []string
+	for _, name := range names {
+		c, ok := ix.Lookup(name)
+		if !ok {
+			return nil, &Refusal{Bead: bead, Why: fmt.Sprintf("the check index at %s declares no check %q", head, name)}
+		}
+		if !slices.Contains(checks, c.Name) {
+			checks = append(checks, c.Name)
+		}
+	}
+	return checks, nil
 }
 
 // askTitle is an ask's title: its reason's first line, cut to fit a listing.

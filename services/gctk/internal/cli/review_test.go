@@ -14,6 +14,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
 func runGctk(t *testing.T, args ...string) (code int, stdout, stderr string) {
@@ -194,5 +195,77 @@ func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 	code, out, _ = checking(t, s, rt, 2)
 	if code != 1 || result(s) != "" || len(rt.Scripts()) != 0 || !strings.Contains(out, "shadow run, nothing filed") {
 		t.Fatalf("a shadow run's last attempt = exit %d, review_results %q, scripts %v: %s", code, result(s), scripts(rt), out)
+	}
+}
+
+// A fix ahead of a PR prints the fix and the ask that holds the PR for it: both
+// filed, the fix slung, at the first call; both found, the fix on its way, at
+// the next; the fix filed and the sling's failure, exit 2, when the sling does
+// not land; and exit 3 with nothing filed for a bead with no PR on the record.
+// Each usage error is exit 1.
+func TestReviewAheadPrintsWhatStands(t *testing.T) {
+	pr := fake.Bead{ID: "tk-pr", Status: "blocked", IssueType: "task", Metadata: map[string]string{
+		"merge_result": "pull_request_pending", "branch": "polecat/tk-pr", "pr_head_sha": "1111", "merged_target": "main"}}
+	index := func(string) (review.Index, error) {
+		return review.Index{Source: "idx", Checks: review.Parse("[checks.arch]\nphase = \"pre-open\"\n")}, nil
+	}
+	req := review.AheadRequest{Bead: "tk-pr", Title: "docs: add the architecture document", Description: "Cover the orders.",
+		Pool: "rig/gc-toolkit.polecat", Formula: "mol-polecat-work", Checks: []string{"arch"}}
+	ahead := func(s *fake.Store, rt gascity.Runtime) (int, string, string) {
+		var out, errb bytes.Buffer
+		code := aheadIn(ledger.New(s), rt, req, index, &out, &errb)
+		return code, out.String(), errb.String()
+	}
+
+	s := fake.New()
+	s.Put(pr)
+	rt := &gcfake.Runtime{OnSling: func(sl gascity.Sling) gascity.SlingResult {
+		row, _ := s.Row(sl.Bead)
+		row.Metadata["gc.routed_to"] = sl.Target
+		s.Put(row)
+		return gascity.SlingResult{}
+	}}
+	code, out, errOut := ahead(s, rt)
+	if code != 0 || out != "fk-1 filed, slung to rig/gc-toolkit.polecat on mol-polecat-work\nfk-2 filed, waiting on fk-1\n" {
+		t.Fatalf("the first call = %d, %q, %q", code, out, errOut)
+	}
+	code, out, errOut = ahead(s, rt)
+	if code != 0 || out != "fk-1 found, on its way already\nfk-2 found, waiting on fk-1\n" {
+		t.Fatalf("the next call = %d, %q, %q", code, out, errOut)
+	}
+
+	s = fake.New()
+	s.Put(pr)
+	failing := &gcfake.Runtime{OnSling: func(gascity.Sling) gascity.SlingResult {
+		return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: "no such pool"}}
+	}}
+	code, out, errOut = ahead(s, failing)
+	if code != 2 || out != "fk-1 filed\n" || !strings.Contains(errOut, "no such pool") {
+		t.Fatalf("a call whose sling fails = %d, %q, %q", code, out, errOut)
+	}
+
+	s = fake.New()
+	off := pr
+	off.Metadata = map[string]string{"merge_result": "mr_merged", "branch": "polecat/tk-pr"}
+	s.Put(off)
+	code, out, errOut = ahead(s, &gcfake.Runtime{})
+	if code != 3 || out != "" || len(s.Creates()) != 0 || !strings.Contains(errOut, "owns no PR on the record") {
+		t.Fatalf("a bead with no PR on the record = %d, %q, %q", code, out, errOut)
+	}
+
+	file := filepath.Join(t.TempDir(), "fix.md")
+	if err := os.WriteFile(file, []byte("Cover the orders.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"review", "ahead", "tk-pr", "--file", file, "--pool", "p", "--on", "f", "--check", "arch"},
+		{"review", "ahead", "tk-pr", "--title", "t", "--file", file, "--on", "f", "--check", "arch"},
+		{"review", "ahead", "tk-pr", "--title", "t", "--file", file, "--pool", "p", "--on", "f"},
+		{"review", "ahead", "tk-pr", "--title", "t", "--file", file, "--pool", "p", "--on", "f", "--check", "no such"},
+		{"review", "ahead", "tk-pr", "--title", "t", "--file", filepath.Join(t.TempDir(), "none"), "--pool", "p", "--on", "f", "--check", "arch"},
+	} {
+		if code, _, _ := runGctk(t, args...); code != 1 {
+			t.Errorf("gctk %q = exit %d; want the usage exit 1", args, code)
+		}
 	}
 }

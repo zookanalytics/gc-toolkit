@@ -146,8 +146,8 @@ func judge(run *Run, n int, asks []Ask) []string {
 }
 
 // ruled is why one ruling at head does not count as ruled, or as ruled and
-// passing: a ruling outside the set, a must-fix, and a question that names no
-// gate.
+// passing: a ruling outside the set, a must-fix, a question that names no
+// gate, and a finding sent ahead that names no ask the PR waits on for it.
 func ruled(r Ruling, head string) []string {
 	switch {
 	case r.Ask == "" && (r.Check == "" || r.Finding == ""):
@@ -158,6 +158,8 @@ func ruled(r Ruling, head string) []string {
 		return []string{fmt.Sprintf("%s was ruled must-fix at %s", r.Subject(), head)}
 	case r.Ruling == RulingQuestion && r.Gate == "":
 		return []string{fmt.Sprintf("%s was put to a person and names no gate", r.Subject())}
+	case r.Ruling == RulingAhead && r.Waits == "":
+		return []string{fmt.Sprintf("%s was sent ahead and names no ask the PR waits on for it", r.Subject())}
 	}
 	return nil
 }
