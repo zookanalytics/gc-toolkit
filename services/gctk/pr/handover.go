@@ -13,29 +13,37 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
-// The hand-over of a changed head (specs/tk-1tfzr71.165/gas-city-search.md). A
-// changed head goes back to the refinery in the record's requeue, and the
-// refinery takes it at its next find-work once nothing holds the bead but merge
-// holds: a conversation on the PR, or an ask on it, each of which holds the
-// PR's merge and not the refinery's take of the head (refinery-find-work.sh).
-// Gas City gives the refinery that turn only for a bead nothing holds: an open
-// bead is a session's demand only while the store reads it ready
+// The hand-over of a changed head (specs/tk-1tfzr71.165/gas-city-search.md,
+// specs/tk-1tfzr71.209/gas-city-search.md). A changed head goes to the
+// refinery in the write that assigns the bead to it and clears the marker,
+// once no open withdrawal and no attached review run holds the head: the
+// record's requeue when nothing else holds the bead either, or the settle
+// below. A bead a run is attached to stays assigned to nobody, since Gas City
+// retires a workflow at its next claim once its input bead is assigned to an
+// agent outside it (workflowInputMembersSettled). The refinery takes the bead
+// at its next find-work once nothing holds it but merge holds: a conversation
+// on the PR, or an ask on it, each of which holds the PR's merge and not the
+// refinery's take of the head (refinery-find-work.sh). Gas City gives the
+// refinery that turn only for a bead nothing holds: an open bead assigned to a
+// session is its demand only while the store reads it ready
 // (workBeadHasAwakeDemand), and core's cascade-nudge-on-blocker-close nudges a
 // dependent's assignee only when no other blocker still holds it (its
 // still_held), both at gastownhall/gascity 192fa2d394. So while a merge hold is
-// open, neither gives the refinery a turn, and the run gives it one: once no
-// open withdrawal and no attached review run holds the changed head, and only
-// merge holds hold the bead, it wakes and nudges the refinery before the write
-// that clears the marker. A wake that does not land keeps the marker, so the
-// next run wakes the refinery again.
+// open, neither gives the refinery a turn, and the run gives it one: when only
+// merge holds hold the bead, it assigns the bead to the refinery, then wakes
+// and nudges the refinery, and only then clears the marker. The find-work the
+// wake starts lists the beads the refinery is assigned, so the bead is among
+// them by then. A wake that does not land keeps the marker, so the next run
+// wakes the refinery again.
 
 // handOver hands a changed head that no open withdrawal and no attached review
-// run holds to the refinery, in the write that clears the marker, and when only
-// merge holds hold the bead it wakes and nudges the refinery first
-// (mergeHolds). A read of what holds the bead that fails keeps the marker and
-// records why, for the next run to hand the head over. action and detail are
-// what the run did with the record before the hand-over, which its outcome
-// reports.
+// run holds to the refinery, in the write that assigns the bead to it and
+// clears the marker. When only merge holds hold the bead (mergeHolds), the
+// bead is assigned to the refinery and the refinery woken and nudged before
+// the marker clears (wakeAndSettle). A read of what holds the bead that fails
+// keeps the marker and records why, for the next run to hand the head over.
+// action and detail are what the run did with the record before the
+// hand-over, which its outcome reports.
 func (u *run) handOver(s state, action, detail string) RunOutcome {
 	holds, err := u.mergeHolds(s)
 	if err != nil {
@@ -44,12 +52,27 @@ func (u *run) handOver(s state, action, detail string) RunOutcome {
 	return u.wakeAndSettle(s, holds, action, detail)
 }
 
-// wakeAndSettle wakes and nudges the refinery when the merge holds holds alone
-// hold the bead s read, then clears the marker of its changed head. A wake that
+// wakeAndSettle hands the changed head of the bead s read to the refinery
+// (Settle). When the merge holds holds alone hold the bead, it first assigns
+// the bead to the refinery with the marker kept, then wakes and nudges the
+// refinery, so the bead is the refinery's when the wake reaches it. A wake that
 // does not land keeps the marker and records why, so the next run wakes the
 // refinery again.
 func (u *run) wakeAndSettle(s state, holds []hold, action, detail string) RunOutcome {
 	if len(holds) > 0 {
+		if s.assignee != u.Refinery {
+			w := u.Ledger.Write(s.id)
+			w.Assignee(u.Refinery)
+			w.Guard(s.status, s.assignee)
+			switch err := u.Ledger.Commit(w); {
+			case errors.Is(err, ledger.ErrGuard):
+				return RunOutcome{Bead: s.id, Action: ActMoved,
+					Detail: detail + "; the bead moved before it was assigned to the refinery, so the next run reads it as it stands"}
+			case err != nil:
+				return RunOutcome{Bead: s.id, Action: ActFailed, Detail: detail + "; the bead's assignment to the refinery did not land: " + err.Error()}
+			}
+			s.assignee = u.Refinery
+		}
 		if err := u.wakeRefinery(s, holds); err != nil {
 			return u.handOverLater(s, detail, fmt.Sprintf("only %s %s the bead, and the refinery's wake did not land, "+
 				"so the next run wakes it: %v", holdNames(holds), holdVerb(holds), err))
@@ -57,16 +80,16 @@ func (u *run) wakeAndSettle(s state, holds []hold, action, detail string) RunOut
 		detail += fmt.Sprintf("; only %s %s the bead, so the refinery was woken and nudged", holdNames(holds), holdVerb(holds))
 	}
 	w := u.Ledger.Write(s.id)
-	record.Settle(w)
+	record.Settle(w, u.Refinery)
 	w.Guard(s.status, s.assignee)
 	switch err := u.Ledger.Commit(w); {
 	case err == nil:
-		return RunOutcome{Bead: s.id, Action: action, Detail: detail + "; the marker is cleared"}
+		return RunOutcome{Bead: s.id, Action: action, Detail: detail + "; the bead is assigned to the refinery and the marker is cleared"}
 	case errors.Is(err, ledger.ErrGuard):
 		return RunOutcome{Bead: s.id, Action: ActMoved,
-			Detail: detail + "; the bead moved before the marker cleared, so the next run reads it as it stands"}
+			Detail: detail + "; the bead moved before it was handed to the refinery, so the next run reads it as it stands"}
 	default:
-		return RunOutcome{Bead: s.id, Action: ActFailed, Detail: detail + "; the marker did not clear: " + err.Error()}
+		return RunOutcome{Bead: s.id, Action: ActFailed, Detail: detail + "; the hand-over to the refinery did not land: " + err.Error()}
 	}
 }
 

@@ -42,6 +42,9 @@ epic hypothesis, reusing [file-structure.md](file-structure.md)'s
 Mandate/Boundaries vocabulary so epics and docs read the same way; the handle is
 gc-toolkit's own, for operator legibility.
 
+The fields state what the epic seeks for the product, not how a design for its
+work gets there, so each still reads true whichever design lands.
+
 **Handle.** A short phrase, three to five words, that names the epic wherever it
 is surfaced — the Helm board, a brief, a cross-reference. It is the operator's
 context handle: a stable phrase that calls the whole epic to mind without

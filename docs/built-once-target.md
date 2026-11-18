@@ -191,16 +191,18 @@ yet. Each remaining difference names its reason and what ends it:
   which marks a requeued record), from a landing order rather than from the
   refinery's find-work, and its reconcile also decides readiness and requests
   the merge. Each writer takes the store's record lock, and each write is
-  guarded on the bead's status and assignee, so a bead that a
-  close or a release reached first gets no record, and a run leaves a bead a
-  release took as the release left it. Gas Town's one refinery session
-  reconciles once per find-work, writes the record unconditionally and assigns
-  the bead to the refinery at each check. No gastown release carries the
-  command, and an order holds no session while a PR waits on its approval or
-  its checks. This ends when the city takes a gastown release that carries the
-  command, refuses a bead a close or a release reached first and leaves a bead
-  a release took. The record and the close then become that command, and the
-  pack keeps the readiness check and the merge request.
+  guarded on the bead's status and assignee, so a bead that a close or another
+  assignment reached first gets no record. A bead's assignee says who works it
+  now, Gas City's meaning: nobody while its PR waits, and the refinery only
+  while it validates a head, so a run leaves a bead someone else is assigned to
+  that assignee. Gas Town's one refinery session reconciles once per
+  find-work, writes the record unconditionally and assigns the bead to the
+  refinery at each check. No gastown release carries the command, and an order
+  holds no session while a PR waits on its approval or its checks. This ends
+  when the city takes a gastown release that carries the command, refuses a
+  bead a close or another assignment reached first and leaves a bead to the
+  agent it is assigned to. The record and the close then become that command,
+  and the pack keeps the readiness check and the merge request.
 - **A refused close is an exception.** A verified merge whose close bd refuses,
   for an open child or a live blocker, is recorded as
   `pull_request_merged_close_refused`, with the merge's evidence, behind a human
@@ -228,18 +230,19 @@ yet. Each remaining difference names its reason and what ends it:
   has no integration efforts. This ends when the convoys member (tk-1tfzr71.23)
   moves efforts onto `gc convoy land`.
 - **One worker per branch.** While a review run is attached to the bead that
-  owns a PR, the run is the one worker on the PR's branch, and the refinery's
-  find-work skips the bead the run holds. Work that needs the branch changed,
-  such as a conflict with the target, a person's comment or a sitting's ruling
-  whose change the sitting does not make itself, is filed as an ask, which the
-  run takes. A sitting that edits the branch with the operator can push while a
-  run works it, and the lease keeps either push from overwriting the other. A
-  conflict on a branch whose rework child is still open goes to that child's
-  notes, on a rig not yet cut over and for a child a cutover left to finish,
-  until the old path's retirement (tk-1tfzr71.122). Gas Town has no review run
-  and no asks. Two workers on one branch would move it under each other, and
-  the lease refuses the second push until its worker merges the first. No end
-  is planned.
+  owns a PR, the run is the one worker on the PR's branch, and the bead stays
+  assigned to nobody until the run ends, so the refinery's find-work, which
+  lists the beads assigned to the refinery, does not take it. Work that needs
+  the branch changed, such as a conflict with the target, a person's comment or
+  a sitting's ruling whose change the sitting does not make itself, is filed as
+  an ask, which the run takes. A sitting that edits the branch with the
+  operator can push while a run works it, and the lease keeps either push from
+  overwriting the other. A conflict on a branch whose rework child is still
+  open goes to that child's notes, on a rig not yet cut over and for a child a
+  cutover left to finish, until the old path's retirement (tk-1tfzr71.122). Gas
+  Town has no review run and no asks. Two workers on one branch would move it
+  under each other, and the lease refuses the second push until its worker
+  merges the first. No end is planned.
 
 ### Human engagement
 
@@ -523,11 +526,16 @@ Every change follows these rules.
    the merge base to the head: the net runtime and test lines, by subsystem. It
    names separately the lines the change adds to code the plan retires, and the
    bead that retires each. It carries no budget, no prediction and no stored
-   history. The PR's CI test run time can sit beside it as information.
-   `tools/measure.sh --pr` computes it, and gc-toolkit's CI
-   ([pr-size.yml](../.github/workflows/pr-size.yml)) posts it on each PR as one
-   comment that it rewrites on each push and each change of the PR's base
-   branch.
+   history. Below it the same comment shows what the PR does to the suite's
+   time, as information that fails no check and holds no merge: each test
+   check's summed test-seconds beside main's latest completed run, each test
+   job's time beside its `timeout-minutes`, and the test files the PR adds,
+   removes or moves by more than the spread between runs
+   ([suite-time.sh](../.github/workflows/suite-time.sh)).
+   `tools/measure.sh --pr` computes the size, and gc-toolkit's CI
+   ([pr-size.yml](../.github/workflows/pr-size.yml)) posts both on each PR as
+   one comment that it rewrites on each push, each change of the PR's base
+   branch and each end of the PR's tests run.
 
 ## Keeping it true
 

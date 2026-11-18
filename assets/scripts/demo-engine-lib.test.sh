@@ -46,15 +46,22 @@
 #   (PORTS)     a --serve-dir with no --port gets a free one; a port a server
 #               already answers on, and a --base-url on this host where nothing
 #               of this user's listens, stop the capture
+#   (IOS)       a --base-url that names an iOS app on a simulator provisions
+#               Appium through the engine first, and opens three free ports,
+#               no other, which the engine gets as --port; its screenshot takes
+#               no --scale; a call that also names a --serve-dir or a --port is
+#               refused, and zsh and bash 3.2 open the same three ports
 #   (LOCAL-APP) a --base-url on this host captures when every process that
 #               listens on its port works in a worktree of a rig whose
-#               app_reads_city setting is "false", and the sandbox opens that
+#               app_reads_city setting is "false", or when gctk rig serve
+#               reports a copy's app at that port, and the sandbox opens that
 #               port and no other. Each other case stops the capture and says
 #               why: a rig set to "true", any other value, a read that fails,
-#               the rig that holds the capture's own scripts, a listener in no
-#               rig's worktree, a listener lsof names no directory for, no
-#               listener, no lsof, a port a city variable names, and a URL
-#               whose port is out of range
+#               the rig that holds the capture's own scripts, a port the
+#               checkout's copy does not hold, the port of a copy whose app is
+#               on a simulator, a listener in no rig's worktree, a listener lsof
+#               names no directory for, no listener, no lsof, a port a city
+#               variable names, and a URL whose port is out of range
 #   (ISOLATION) on a host with sandbox-exec, a terminal capture whose command
 #               reads the city's files, its stores, gc's home and a service on
 #               its loopback, and lists the city's variables, reaches none of
@@ -71,7 +78,14 @@
 #               the library in, the skill's resolve block runs, and an engine
 #               call hands the engine the arguments and the profile this suite's
 #               bash does and drops the variables that point at the city, for a
-#               server the engine starts and for a rig's app on this host
+#               server the engine starts and for a rig's app on this host, and
+#               the surface the engine names for a script is printed
+#   (SURFACE)   demo_engine_script_kind prints the surface the engine's surface
+#               command names, whatever the script's lines say, asking inside
+#               the sandbox, and resolves the engine first only when nothing
+#               chose one. An engine with no surface command, one that refuses,
+#               and an answer that names no surface each print nothing and exit
+#               1 with the reason, which names the command
 # What each capture adds to the policy is tested beside it, in
 # rig-demo-capture.test.sh and demo-screenshot.test.sh.
 #
@@ -249,7 +263,11 @@ NOLSOF="$TMPD/bin-nolsof"; mkdir -p "$NOLSOF"
 for s in jq node npx npm gc ffmpeg sandbox-exec; do ln -s "$BIN/$s" "$NOLSOF/$s"; done
 
 # The engine's CLI: help lists its commands, lint passes, run writes the clip
-# and the engine's closing report, and screenshot writes the PNG.
+# and the engine's closing report, and screenshot writes the PNG. surface
+# prints $SURFACE_ANSWER, {"surface":"page"} when it is empty, and reads no line
+# of the script. With SURFACE_REFUSE set it refuses as the engine refuses a
+# script that is missing, with nothing on stdout, and with ENGINE_NO_SURFACE set
+# it answers as an engine with no surface command does.
 ENGINE_STUB="$TMPD/engine"
 cat >"$ENGINE_STUB" <<'ENGINE'
 #!/usr/bin/env bash
@@ -258,6 +276,13 @@ o=""; prev=""
 for a in "$@"; do [ "$prev" = "-o" ] && o="$a"; prev="$a"; done
 case "${1:-}" in
   help) printf 'Usage:\n  sprintshow run <demo.md> [options]\n  sprintshow screenshot <demo.md> -o <file.png> [options]\n' ;;
+  surface)
+    if [ -n "${ENGINE_NO_SURFACE:-}" ]; then
+      printf 'unknown command: surface\n\n' >&2; printf 'Usage:\n  sprintshow run <demo.md> [options]\n'; exit 1
+    fi
+    if [ -n "${SURFACE_REFUSE:-}" ]; then printf '\n✖ demo script not found: %s\n' "${2:-}" >&2; exit 1; fi
+    ans=${SURFACE_ANSWER:-}; [ -n "$ans" ] || ans='{"surface":"page"}'
+    printf '%s\n' "$ans" ;;
   run)
     printf 'mp4-bytes\n' >"$o"
     printf '\n✅ silent demo → %s\n' "$o" ;;
@@ -271,13 +296,16 @@ ENGINE
 chmod +x "$ENGINE_STUB"
 
 # gctk answers `rig serve --check` with a copy running on $COPY_PORT, and with
-# no copy when COPY_PORT is unset, logging each call and where it ran.
+# no copy when COPY_PORT is unset, logging each call and where it ran. The
+# copy's app is where gctk reports a copy that answers on its port, at its
+# loopback URL, or at $COPY_APP_URL, the URL a serve command printed.
 GCTK_STUB="$TMPD/gctk"
 cat >"$GCTK_STUB" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${CALLLOG:?}"
 if [ "$*" = "rig serve --check" ] && [ -n "${COPY_PORT:-}" ]; then
-  printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$COPY_PORT"
+  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s","address":""}\n' \
+    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}"
   exit 0
 fi
 printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"
@@ -466,6 +494,72 @@ for cap in video screenshot; do
   not_captured "$cap"
 done
 
+# kind_run <script> [VAR=VAL ...]: source the library in a fresh bash, from
+# $WORK, against the stubs, and run demo_engine_script_kind on the script, with
+# stdout in $OUTF, stderr in $ERRF and the exit status in $RC.
+kind_run() {
+  local script="$1"; shift
+  : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV"
+  ( cd "$WORK" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+      ENGINE_STUB="$ENGINE_STUB" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" \
+      "$@" bash -c '. "$1" && demo_engine_script_kind "$2"' kind "$LIB" "$script" >"$OUTF" 2>"$ERRF" )
+  RC=$?
+}
+kind_out() { cat "$OUTF"; }
+TERMSCRIPT="$WORK/terminal.md"
+printf '# Demo: a report\n\n**Terminal:** 100x30\n\n## Steps\n\n1. **It prints**\n   `run true`\n' >"$TERMSCRIPT"
+
+echo "# SURFACE: demo_engine_script_kind prints the surface the engine's surface command names, asking inside the sandbox"
+kind_run "$SCRIPT" SS_RIG="$ENGINE"
+eq "$RC" 0 "(surface) the engine names a script's surface"
+eq "$(kind_out)" "page" "(surface) it prints the surface the engine names"
+has "engine = local sprintshow rig ($ENGINE)" "$(err)" "(surface) with no engine chosen, it resolves one first"
+P=$(line_of "provision:browser"); S=$(line_of "engine surface $SCRIPT")
+ok "(surface) the engine is resolved before it is asked (provision line $P, surface line $S)" "[ '$P' -gt 0 ] && [ '$S' -gt '$P' ]"
+has "node [$ENGINE/src/cli.ts] [surface] [$SCRIPT]" "$(calls)" "(surface) it asks the checkout's CLI"
+has "(allow file-read-data (subpath \"$SCRIPT\"))" "$(profile)" "(surface) inside the sandbox, which lets the engine read the script"
+kind_run "$TERMSCRIPT" SS_RIG="$ENGINE"
+eq "$(kind_out)" "page" "(surface) a script whose lines declare **Terminal:** is the surface the engine names, so no line of it is read"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" SURFACE_ANSWER='{"surface":"terminal"}'
+eq "$(kind_out)" "terminal" "(surface) and a script whose lines declare nothing is a terminal script when the engine names it one"
+kind_run "$SCRIPT" SURFACE_ANSWER='{"surface":"ios"}'
+eq "$RC" 0 "(surface) the published package names a script's surface"
+eq "$(kind_out)" "ios" "(surface) and a surface beyond page and terminal is printed as the engine names it"
+has "npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell" "$(calls)" "(surface) the published package is resolved first"
+has "npx --yes @zookanalytics/sprintshow surface $SCRIPT" "$(calls)" "(surface) then asked"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" DEMO_ENGINE_DIR="$ENGINE"
+eq "$RC" 0 "(surface) an engine already chosen names the surface"
+hasnt "provision:browser" "$(calls)" "(surface) and is not resolved again"
+has "node [$ENGINE/src/cli.ts] [surface] [$SCRIPT]" "$(calls)" "(surface) but asked as it was chosen"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" DEMO_ENGINE_BIN="$ENGINE_STUB" SURFACE_ANSWER='{"surface":"terminal"}'
+eq "$RC" 0 "(surface) the engine DEMO_ENGINE_BIN names is asked for the surface"
+eq "$(kind_out)" "terminal" "(surface) and its answer is printed"
+has "engine surface $SCRIPT" "$(calls)" "(surface) it is asked directly"
+has "(allow file-read-data (subpath \"$SCRIPT\"))" "$(profile)" "(surface) inside the sandbox"
+hasnt "provision:browser" "$(calls)" "(surface) and nothing is resolved, though the city has a checkout"
+hasnt "[$ENGINE/src/cli.ts]" "$(calls)" "(surface) whose CLI never runs"
+
+echo "# SURFACE: an engine that names no surface prints nothing and exits 1, naming the surface command"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" ENGINE_NO_SURFACE=1
+eq "$RC" 1 "(surface) an engine with no surface command exits 1"
+eq "$(kind_out)" "" "(surface) and prints nothing, its help included"
+has "the SprintShow engine ($ENGINE) has no surface command, so it cannot name the surface '$SCRIPT' drives; update it to a SprintShow whose 'sprintshow help' lists 'sprintshow surface'" "$(err)" "(surface) it names the missing command"
+kind_run "$WORK/missing.md" SS_RIG="$ENGINE" SURFACE_REFUSE=1
+eq "$RC" 1 "(surface) a script the engine refuses exits 1"
+eq "$(kind_out)" "" "(surface) and prints nothing"
+has "demo script not found: $WORK/missing.md" "$(err)" "(surface) the engine's reason reaches the caller"
+has "named no surface for '$WORK/missing.md' ('sprintshow surface' exited 1)" "$(err)" "(surface) with the command that named none"
+for ans in '{"surface":""}' '{"surface":42}' '{"surface":"two words"}' 'page' '{"surface":"page"}{"surface":"page"}' '{}'; do
+  kind_run "$SCRIPT" SS_RIG="$ENGINE" SURFACE_ANSWER="$ans"
+  eq "$RC" 1 "(surface) the answer $ans names no surface, so it exits 1"
+  eq "$(kind_out)" "" "(surface) and prints nothing for $ans"
+  has "answered 'sprintshow surface' for '$SCRIPT' with no surface" "$(err)" "(surface) it says the answer named none"
+done
+STUB_PATH="$NOSBX" kind_run "$SCRIPT" SS_RIG="$ENGINE"
+eq "$RC" 1 "(surface) a host with no sandbox names no surface"
+has "sandbox-exec not found" "$(err)" "(surface) it says why"
+hasnt "engine surface" "$(calls)" "(surface) and the engine is never asked"
+
 # A city for the sandbox's cases. gc's home lists it, and the environment names
 # it, one of its rigs and that rig's store. Its rig map lists that rig, a rig
 # whose checkout lies outside the city's directory, and the engine. Each place
@@ -618,6 +712,28 @@ for cap in video screenshot; do
   capture "$cap" SS_RIG="$ENGINE" -- --base-url https://preview.example.com
   eq "$RC" 0 "($cap) a deployed preview captures"
   hasnt "(allow network-outbound (remote ip" "$(profile)" "($cap) and opens no loopback port"
+
+  echo "# ($cap) IOS: an iOS app on a simulator gets three free ports, opened in the sandbox and handed to the engine, once Appium is provisioned"
+  IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+  capture "$cap" SS_RIG="$ENGINE" FREE_PORT="$(printf '50301\n50302\n50303')" -- --base-url "$IOS_APP"
+  eq "$RC" 0 "($cap) an iOS app captures"
+  for p in 50301 50302 50303; do
+    has "(allow network-outbound (remote ip \"localhost:$p\"))" "$(profile)" "($cap) the sandbox opens port $p"
+  done
+  eq "$(profile | grep -c 'allow network-outbound (remote ip')" 3 "($cap) and no other loopback port"
+  has "[--base-url] [$IOS_APP]" "$(calls)" "($cap) the engine drives the app the URL names"
+  has "[--port] [50301,50302,50303]" "$(calls)" "($cap) and gets the three ports as --port"
+  P=$(line_of "npm run provision:appium (in $ENGINE)"); E=$(line_of "$(local_call "$cap")")
+  ok "($cap) the engine checkout provisions Appium before the capture runs (lines $P, $E)" "[ '$P' -gt 0 ] && [ '$E' -gt '$P' ]"
+  [ "$cap" != screenshot ] || hasnt "[--scale]" "$(calls)" "(screenshot) an iOS app's PNG is the device's own, with no --scale"
+  capture "$cap" FREE_PORT="$(printf '50301\n50302\n50303')" -- --base-url "$IOS_APP"
+  eq "$RC" 0 "($cap) an iOS app captures on the published engine"
+  P=$(line_of "npx --yes @zookanalytics/sprintshow provision appium"); E=$(line_of "$(published_call "$cap")")
+  ok "($cap) which provisions Appium first (lines $P, $E)" "[ '$P' -gt 0 ] && [ '$E' -gt '$P' ]"
+  capture "$cap" SS_RIG="$ENGINE" FREE_PORT="$(printf '50301\n50302')" -- --base-url "$IOS_APP"
+  eq "$RC" 1 "($cap) an iOS app with fewer than three free ports exits 1"
+  has "could not find three free ports" "$(err)" "($cap) it says so"
+  not_run "$cap"
 done
 
 # local_refused <cap> <case> <wanted reason>: the capture just run was refused
@@ -663,6 +779,9 @@ for cap in video screenshot; do
   eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 1 "($cap) and no other loopback port"
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5999 LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
   local_refused "$cap" "a port the checkout's copy does not hold" "for which city.toml sets app_reads_city = \"true\""
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 COPY_APP_URL="$IOS_APP" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  local_refused "$cap" "the port of a copy whose app is on a simulator, where another server listens" "process 4243, which listens on port 5181, works in a worktree of $RIGB, for which city.toml sets app_reads_city = \"true\""
+  hasnt "is a copy that gctk rig serve runs" "$(err)" "($cap) it takes that server for no copy"
 
   echo "# ($cap) LOCAL-APP: any value but \"false\", and a read that fails, counts as \"true\""
   for v in yes True ''; do
@@ -736,6 +855,24 @@ has '(deny network-outbound (remote ip "localhost:*"))' "$(profile)" "(sandboxed
 has "(allow file-read-data file-write* (subpath \"$RWT\"))" "$(profile)" "(sandboxed) the directory is read and written, as its rig worktree"
 has "(deny file-read-data file-write* (subpath \"$RIGA\"))" "$(profile)" "(sandboxed) and the rig's checkout stays denied"
 eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$SANDBOX_ENV")" 0 "(sandboxed) the command runs with none of the variables that point at the city"
+# No shell of the library's holds the command's output open, so a command that
+# closes its standard output and runs on ends that output for its reader. The
+# reader is cat on a process substitution, which ends with the output, where a
+# command substitution would wait for the command too. The farm holds no sleep,
+# so the command names the host's.
+PIDF="$TMPD/sandboxed.pid"; rm -f "$PIDF"
+START=$SECONDS
+GOT=$(cat < <( cd "$RWT" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+    SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" PACK_SCRIPTS="$HERE" PIDF="$PIDF" \
+    "${CITY_ENV[@]}" bash "$TMPD/sandboxed.sh" 5197 "$RWT" \
+    bash -c 'echo $$ >"$PIDF"; printf closed; exec 1>&-; exec /bin/sleep 30' 2>"$ERRF" ))
+TOOK=$((SECONDS - START))
+RAN_ON=ended
+[ -s "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null && RAN_ON=running
+[ ! -s "$PIDF" ] || kill "$(cat "$PIDF")" 2>/dev/null
+eq "$GOT" "closed" "(sandboxed) a command that closes its standard output gives its reader all of it"
+eq "$RAN_ON" running "(sandboxed) and runs on once the output has ended"
+eq "$([ "$TOOK" -lt 20 ] && echo "while it runs" || echo "after ${TOOK}s")" "while it runs" "(sandboxed) and that output ends while the command runs on"
 sandboxed "${CITY_ENV[@]}" -- 0 "$RWT" true
 eq "$RC" 1 "(sandboxed) a port that is no port is refused"
 sandboxed "${CITY_ENV[@]}" -- 5197 "$TMPD/nowhere" true
@@ -1063,6 +1200,10 @@ shell_run() {
       "${CITY_ENV[@]}" "$@" "$sh" "$blk" >"$OUTF" 2>"$ERRF" )
   RC=$?
 }
+printf '. "%s" && demo_engine_script_kind demo.md\n' "$LIB" >"$TMPD/kind.sh"
+shell_run bash "$TMPD/kind.sh"
+eq "$RC" 0 "(shells) this suite's bash asks the engine for a script's surface"
+eq "$(cat "$OUTF")" "page" "(shells) and prints the surface it names"
 shell_run bash "$TMPD/skill-serve.sh"
 eq "$RC" 0 "(shells) this suite's bash runs the engine call"
 has "node [$ENGINE/src/cli.ts] [run] [demo.md] [--serve-dir] [app] [--port] [5199] [-o] [clip.mp4]" "$(calls)" "(shells) and the engine gets its arguments"
@@ -1080,11 +1221,31 @@ shell_run bash "$TMPD/skill-engine-serve.sh"
 eq "$RC" 1 "(shells) an engine call that names --serve exits 1"
 has "the engine's --serve would start a server whose port the sandbox cannot vouch for; serve the app as a copy with gctk rig serve" "$(err)" "(shells) it says why, and what serves the app instead"
 hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
+IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP -o clip.mp4#" >"$TMPD/skill-ios.sh"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP --port 4723,8100,9100 -o clip.mp4#" >"$TMPD/skill-ios-port.sh"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP --serve-dir app -o clip.mp4#" >"$TMPD/skill-ios-two.sh"
+THREE="$(printf '50301\n50302\n50303')"
+shell_run bash "$TMPD/skill-ios.sh" FREE_PORT="$THREE"
+eq "$RC" 0 "(shells) this suite's bash runs an engine call on an iOS app"
+has "[--base-url] [$IOS_APP] [-o] [clip.mp4] [--port] [50301,50302,50303]" "$(calls)" "(shells) and the engine gets the three ports"
+IOS_CALLS="$(calls)"; IOS_PROFILE="$(profile)"
+shell_run bash "$TMPD/skill-ios-port.sh" FREE_PORT="$THREE"
+eq "$RC" 1 "(shells) an engine call on an iOS app that names --port exits 1"
+has "an iOS app run takes no --port" "$(err)" "(shells) it says the capture picks those ports"
+hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
+shell_run bash "$TMPD/skill-ios-two.sh" FREE_PORT="$THREE"
+eq "$RC" 1 "(shells) an engine call that names an iOS app and a --serve-dir exits 1"
+has "--base-url $IOS_APP and --serve-dir each name an app to capture" "$(err)" "(shells) it says the call names two apps"
+hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
 for sh in /bin/zsh /bin/bash; do
   if [ ! -x "$sh" ]; then echo "# SHELLS: $sh SKIPPED (not on this host)"; continue; fi
   shell_run "$sh" "$TMPD/skill-resolve.sh"
   eq "$RC" 0 "(shells) $sh runs the resolve block"
   has "engine = local sprintshow rig ($ENGINE)" "$(err)" "(shells) $sh chooses the local engine"
+  shell_run "$sh" "$TMPD/kind.sh"
+  eq "$RC" 0 "(shells) $sh asks the engine for a script's surface"
+  eq "$(cat "$OUTF")" "page" "(shells) $sh prints the surface it names"
   shell_run "$sh" "$TMPD/skill-serve.sh"
   eq "$RC" 0 "(shells) $sh runs the engine call"
   eq "$(calls)" "$SERVE_CALLS" "(shells) $sh hands the engine the same arguments"
@@ -1097,16 +1258,21 @@ for sh in /bin/zsh /bin/bash; do
   shell_run "$sh" "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4243 $BWT"
   eq "$RC" 1 "(shells) $sh refuses the same call when a worktree of a rig set to \"true\" serves the port"
   has "for which city.toml sets app_reads_city = \"true\"" "$(err)" "(shells) $sh names why"
+  shell_run "$sh" "$TMPD/skill-ios.sh" FREE_PORT="$THREE"
+  eq "$RC" 0 "(shells) $sh runs the engine call on an iOS app"
+  eq "$(calls)" "$IOS_CALLS" "(shells) $sh hands it the same arguments"
+  eq "$(profile)" "$IOS_PROFILE" "(shells) $sh opens the same three ports"
 done
 
 echo "# NO-COPY: no other script, and no skill's example code, finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
 # One grep finds the files that name a step anywhere; only those are read again
-# without their comment lines, so a script that names a step in prose passes.
-# A skill is read again as its fenced code blocks alone, so its prose can name
-# a step too. The steps are the browser install, by either installer, the rig
-# lookup's select, however a copy spaces them, the Node version read, and the
-# path of the engine's CLI in a checkout.
-STEPS='provision:browser|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"|node[[:space:]]+--version|src/cli\.ts'
+# without their comment lines, so a script that names a step in prose passes. A
+# skill is read again as its fenced code blocks alone, so its prose can name a
+# step too. The steps are the browser install, by either installer, Appium's, by
+# either form of the engine's provision command, the rig lookup's select,
+# however a copy spaces them, the Node version read, and the path of the
+# engine's CLI in a checkout.
+STEPS='provision:browser|provision:appium|provision[[:space:]]+appium|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"|node[[:space:]]+--version|src/cli\.ts'
 COPIES=""
 while IFS= read -r f; do
   case "$f" in ""|"$LIB"|*.test.sh) continue ;; esac
