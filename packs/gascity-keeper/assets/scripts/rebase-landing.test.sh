@@ -235,7 +235,7 @@ has "$(calls 'bd update gc-iss')" "rig_update_result=skipped: branch=main dirty=
 eq "$(git -C "$TMP/rig" rev-parse HEAD)" "$PRE" "(dirty) …and HEAD stays put"
 
 # An invalid status.showUntrackedFiles fails git status with no output, and
-# leaves rev-parse and reset --hard working.
+# leaves rev-parse and checkout working.
 repos; reset_case; bead open; operator_push; echo wip > "$TMP/rig/fork.txt"
 git -C "$TMP/rig" config status.showUntrackedFiles bogus
 run finish --bead gc-iss
@@ -243,6 +243,38 @@ eq "$RC" 0 "(unreadable) exits 0"
 has "$(calls 'bd update gc-iss')" "rig_update_result=error: git status failed in $TMP/rig (operator must sync) --status=closed" "(unreadable) a status git cannot read leaves the checkout alone, said why, and still closes"
 eq "$(cat "$TMP/rig/fork.txt")" wip "(unreadable) …and keeps the tracked edit"
 eq "$(git -C "$TMP/rig" rev-parse HEAD)" "$PRE" "(unreadable) …and HEAD stays put"
+
+# git status lists neither an ignored file nor, under
+# status.showUntrackedFiles=no, an untracked one, and the landed tree adds
+# up.txt.
+repos; reset_case; bead open; operator_push
+echo up.txt >> "$TMP/rig/.git/info/exclude"; echo operator-ignored > "$TMP/rig/up.txt"
+run finish --bead gc-iss
+eq "$RC" 0 "(ignored) exits 0"
+UPD=$(calls 'bd update gc-iss')
+has "$UPD" "rig_update_result=skipped: git checkout of origin/main refused in $TMP/rig: " "(ignored) an ignored file where the landed tree puts one leaves the checkout alone…"
+has "$UPD" "up.txt (operator must sync) --status=closed" "(ignored) …names the file git named, and still closes"
+eq "$(cat "$TMP/rig/up.txt")" operator-ignored "(ignored) …and keeps the file"
+eq "$(git -C "$TMP/rig" rev-parse HEAD)" "$PRE" "(ignored) …and HEAD stays put"
+
+repos; reset_case; bead open; operator_push
+git -C "$TMP/rig" config status.showUntrackedFiles no; echo operator-work > "$TMP/rig/up.txt"
+run finish --bead gc-iss
+has "$(calls 'bd update gc-iss')" "rig_update_result=skipped: git checkout of origin/main refused in $TMP/rig: " "(hidden-untracked) an untracked file git status hides leaves the checkout alone"
+eq "$(cat "$TMP/rig/up.txt")" operator-work "(hidden-untracked) …and keeps the file"
+eq "$(git -C "$TMP/rig" rev-parse HEAD)" "$PRE" "(hidden-untracked) …and HEAD stays put"
+
+repos; reset_case; bead open; operator_push
+echo build.out >> "$TMP/rig/.git/info/exclude"; echo artifact > "$TMP/rig/build.out"
+run finish --bead gc-iss
+has "$(calls 'bd update gc-iss')" "rig_update_result=reset: ${PRE:0:12} -> ${NEW:0:12} (worktree prune ran)" "(ignored-aside) an ignored file the landed tree does not write leaves the move to go ahead…"
+eq "$(cat "$TMP/rig/build.out")" artifact "(ignored-aside) …and is kept"
+
+repos; reset_case; bead open; operator_push
+printf '#!/bin/sh\necho ran > hook-ran\nexit 1\n' > "$TMP/rig/.git/hooks/post-checkout"; chmod +x "$TMP/rig/.git/hooks/post-checkout"
+run finish --bead gc-iss
+has "$(calls 'bd update gc-iss')" "rig_update_result=reset: ${PRE:0:12} -> ${NEW:0:12} (worktree prune ran)" "(hooks) a failing post-checkout hook does not make the move read as refused…"
+if [ -e "$TMP/rig/hook-ran" ]; then bad "(hooks) …because the move runs no hook"; else ok "(hooks) …because the move runs no hook"; fi
 
 repos; reset_case; bead open; operator_push; git -C "$TMP/rig" checkout -q -b feature
 run finish --bead gc-iss

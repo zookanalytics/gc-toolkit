@@ -371,11 +371,13 @@ check.
 **The rig checkout follows only when that discards nothing.** Landing moves
 `origin/main`, but the rig's working checkout does not follow by itself. The
 landing check resets it to the new `main` when it is on `main`, clean, and
-still at the pre-rebase tip, and otherwise leaves it and records why in
-`metadata.rig_update_result`, which the keeper's mail carries. That report is
-*often a false positive*, typically an untracked build wrapper sitting in the
-checkout rather than real divergence. Before running any `git reset --hard
-origin/main` by hand, confirm there is genuine ahead/behind divergence (e.g.
+still at the pre-rebase tip, through a checkout that refuses to overwrite any
+file git does not track, an ignored one included. Otherwise it leaves the
+checkout and records why in `metadata.rig_update_result`, which the keeper's
+mail carries. That report is *often a false positive*, typically an untracked
+build wrapper sitting in the checkout rather than real divergence. Before
+syncing by hand with the same checkout, `git checkout --no-overwrite-ignore -B
+main origin/main`, confirm there is genuine ahead/behind divergence (e.g.
 `git status -sb` and `git rev-list --left-right --count
 origin/main...HEAD`), and preserve any local `.beads/config.yaml` tuning
 that may not exist on the landed `origin/main`.

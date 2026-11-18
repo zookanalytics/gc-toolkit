@@ -23,8 +23,9 @@
 # finish fetches origin in the rig checkout and compares origin/<target> with
 # <branch>, the local branch the gate's push sends:
 #   - the same commit: the rebase landed. The rig checkout is reset to it only
-#     when it is on <target>, clean, and still at the pre-rebase tip, and is
-#     otherwise left alone with the reason in rig_update_result. The bead
+#     when it is on <target>, clean, still at the pre-rebase tip, and holds no
+#     file git does not track where the landed tree puts one, and is otherwise
+#     left alone with the reason in rig_update_result. The bead
 #     closes with Gas City's work record of a landing (gc.work_outcome=shipped,
 #     gc.work_commit, gc.work_branch) and rig_update_result in the same write,
 #     and the keeper is mailed what landed.
@@ -179,12 +180,16 @@ To drop the rebase instead, do not clear this gate: run $KIT/stand-down.sh $ISSU
 }
 
 # sync_rig — bring the rig checkout's <target> to the landed commit when that
-# discards nothing, into RIG_SYNC. git reset --hard rewrites tracked files and
-# deletes untracked ones in its way, so a checkout with any change at all, or
-# whose status cannot be read, is left for the operator, and so is a HEAD other
-# than the pre-rebase tip, which can hold commits that were never pushed.
+# discards nothing, into RIG_SYNC. A checkout with any change git status lists,
+# or whose status cannot be read, is left for the operator, and so is a HEAD
+# other than the pre-rebase tip, which can hold commits that were never pushed.
+# git status lists no ignored file, and no untracked one under
+# status.showUntrackedFiles=no, so the move is a checkout that refuses to
+# overwrite any file git does not track, an ignored one included. It runs with
+# hooks off, so it changes only the tree and the branch, and a post-checkout
+# hook's exit cannot make a move that happened read as refused.
 sync_rig() {
-  local branch changes dirty=0 head
+  local branch changes dirty=0 head refusal
   branch=$(git -C "$RIG_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null) || branch=""
   if ! changes=$(git -C "$RIG_ROOT" status --porcelain 2>/dev/null); then
     RIG_SYNC="error: git status failed in $RIG_ROOT (operator must sync)"
@@ -198,8 +203,10 @@ sync_rig() {
     RIG_SYNC="current: already at $(short "$MAIN")"
   elif [ "$head" != "$PRE" ]; then
     RIG_SYNC="skipped: HEAD=$(short "$head") does not match pre_rebase_tip=$(short "$PRE") (operator must sync)"
-  elif ! git -C "$RIG_ROOT" reset --hard "$MAIN" >/dev/null 2>&1; then
-    RIG_SYNC="error: reset --hard origin/$TARGET failed in $RIG_ROOT (operator must sync)"
+  elif ! refusal=$(git -C "$RIG_ROOT" -c core.hooksPath=/dev/null checkout -q --no-overwrite-ignore -B "$TARGET" "$MAIN" 2>&1 >/dev/null); then
+    # git's error lines and the paths it names, on one line, without its advice.
+    refusal=$(printf '%s\n' "$refusal" | awk '/^(Please |Aborting$|hint:)/ || NF == 0 { next } { $1 = $1; printf "%s%s", (n++ ? " " : ""), $0 }')
+    RIG_SYNC="skipped: git checkout of origin/$TARGET refused in $RIG_ROOT: ${refusal:-git gave no reason} (operator must sync)"
   else
     # Only the records of worktrees whose directories are gone; a live worktree
     # finishes on its own base.
