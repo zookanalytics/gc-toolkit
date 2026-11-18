@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # tests.test.sh — guards the draft CI-cost gate in tests.yml, the concurrency
-# group that keeps a draft's run from cancelling a run that tests, the jq check
-# each job runs before the suite, the seconds each job that runs the suite
-# keeps, and the jobs whose checks main's ruleset requires.
+# group each job holds, the jq check each job runs before the suite, the
+# seconds each job that runs the suite keeps, and the jobs whose checks main's
+# ruleset requires.
 #
 # A draft pull request must not run the *.test.sh suite, so a change still
 # taking follow-up commits does not spend Actions minutes on every push. A push
@@ -23,12 +23,15 @@
 # reads them back, names the same jobs. A job that kept none, or kept them under
 # another name, would show no time.
 #
-# A draft's run, whose jobs all skip, never takes the concurrency group of its
-# own head, where it could cancel the run that marking the pull request ready
-# started at that head. The city's merge counts neither a skipped nor a
-# cancelled result, so it would wait for a re-run. tests.yml's comment above the
-# group gives each run's group. The group line is pinned whole, so a change to
-# it changes this suite too.
+# Each job holds a concurrency group of its own, named for the workflow, the
+# job and the ref, that cancels the run in progress, and the workflow holds
+# none. A job that a draft skips never starts, so a draft's run cancels no run,
+# such as the one that marking the pull request ready started, which the city's
+# merge would then wait to see run again. A group on the workflow would let a
+# draft's run cancel that run, a group without the ref would let one pull
+# request's run cancel another's, and jobs that shared a group would cancel
+# each other. The job's id is written into its group, since github.job is null
+# outside a job's steps and would leave the three jobs one group.
 #
 # Main's ruleset requires the checks named test, test-macos and go. A job's
 # check takes the job's id unless the job sets name: or a matrix, and either one
@@ -144,14 +147,36 @@ ran="$(tr ' ' '\n' <<<"$suite_names" | grep -v '^$' | sort | paste -sd' ' -)"
 [ "$listed" = "$ran" ] \
     || note "suite-time.sh's SUITES ($listed) must name the jobs that run the suite ($ran)"
 
-# The workflow's own concurrency group, the one line at a two-space indent. A
-# job's group would sit deeper, under the job.
-group_line="$(grep -E '^  group:' "$WF" || true)"
-want_group="  group: tests-\${{ github.ref }}\${{ github.event_name == 'pull_request' && format('-{0}', github.event.pull_request.draft && (github.event.before || github.run_id) || github.event.pull_request.head.sha) || '' }}"
-[ "$group_line" = "$want_group" ] \
-    || note "the concurrency group must give a run that tests a pull request its head's group and a draft push's run the group of the head its push replaced, so a draft's run never cancels the run at its own head; found '${group_line#"  "}'"
-grep -Eq '^  cancel-in-progress: true$' "$WF" \
-    || note "the concurrency group must cancel the run in progress, or a draft push leaves the run at the head it replaced going"
+! grep -Eq '^concurrency:' "$WF" \
+    || note "the workflow must hold no concurrency group, or a draft's run, whose jobs all skip, can cancel the run that marking the pull request ready started"
+
+# The concurrency keys each job sets, as one "<job>\t<key>\t<value>" line per
+# key under the job's concurrency:, which sits at a four-space indent and its
+# keys at six.
+job_concurrency() {
+    awk '
+        /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
+        in_jobs && /^[^[:space:]#]/ { in_jobs = 0 }
+        !in_jobs { next }
+        /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { job = $1; sub(/:$/, "", job); in_c = 0; next }
+        /^    concurrency:[[:space:]]*$/ { in_c = 1; next }
+        /^    [^[:space:]]/ { in_c = 0 }
+        in_c && /^      [A-Za-z0-9_-]+:/ {
+            key = $1; sub(/:$/, "", key)
+            val = $0; sub(/^      [A-Za-z0-9_-]+:[[:space:]]*/, "", val)
+            print job "\t" key "\t" val
+        }' "$WF"
+}
+concurrency_keys="$(job_concurrency)"
+for j in $jobs; do
+    want="\${{ github.workflow }}-$j-\${{ github.ref }}"
+    group="$(awk -F'\t' -v j="$j" '$1 == j && $2 == "group" { print $3 }' <<<"$concurrency_keys")"
+    [ "$group" = "$want" ] \
+        || note "job '$j' must hold the concurrency group '$want': its id written in, since github.job is null outside a job's steps and the jobs of one run that shared a group would cancel each other, and the ref, so one pull request's run does not cancel another's; found '$group'"
+    cancel="$(awk -F'\t' -v j="$j" '$1 == j && $2 == "cancel-in-progress" { print $3 }' <<<"$concurrency_keys")"
+    [ "$cancel" = "true" ] \
+        || note "job '$j''s concurrency group must cancel the run in progress, or a newer run of the job waits for the one testing the commit it replaced; found '$cancel'"
+done
 
 # The checks main's ruleset requires, by job id, as
 # `gh api repos/<owner>/<repo>/rules/branches/main` lists them.

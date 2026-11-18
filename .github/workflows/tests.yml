@@ -41,23 +41,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# A push to main and a run by hand take their ref's group. A run that tests a
-# pull request takes the group of the head it tests. A draft's run tests
-# nothing, since its jobs skip, so a draft push's run takes the group of the head
-# its push replaced, and ends any run still testing that head. It never takes
-# the group of its own head. GitHub takes a group's runs in the order each
-# starts waiting, not the order of their events, so in that group it could
-# cancel the run that marking the pull request ready started, and the city's
-# merge, which counts no cancelled result, would wait for a re-run. A draft
-# opened or reopened replaced no head and takes a group of its own. Two runs
-# that test different heads share no group, so a push onto a ready pull request
-# leaves the run at the head it replaced to finish. Each of the city's writers
-# onto an open pull request's branch returns it to draft before it pushes
-# (services/gctk/pr/draft.go).
-concurrency:
-  group: tests-${{ github.ref }}${{ github.event_name == 'pull_request' && format('-{0}', github.event.pull_request.draft && (github.event.before || github.run_id) || github.event.pull_request.head.sha) || '' }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
@@ -67,6 +50,14 @@ jobs:
     # dispatch carry no pull_request context, so the event-name guard runs
     # them anyway.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # Each job, not the workflow, holds a concurrency group. A job that a draft
+    # skips never starts, so it cancels nothing, and a draft's run cannot cancel
+    # the run that marking the pull request ready started. Jobs of one run that
+    # shared a group would cancel each other, so each group names its job by
+    # the id written in, since github.job is null outside a job's steps.
+    concurrency:
+      group: ${{ github.workflow }}-test-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -128,6 +119,10 @@ jobs:
   test-macos:
     # The same draft gate as test.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # A concurrency group of its own, as test's comment says.
+    concurrency:
+      group: ${{ github.workflow }}-test-macos-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: macos-latest
     # The same suite takes the macOS runner more than twice as long as
     # ubuntu's, so its limit is higher.
@@ -208,6 +203,10 @@ jobs:
   go:
     # The same draft gate as test.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # A concurrency group of its own, as test's comment says.
+    concurrency:
+      group: ${{ github.workflow }}-go-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
