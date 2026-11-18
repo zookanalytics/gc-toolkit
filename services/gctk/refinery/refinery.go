@@ -211,7 +211,10 @@ func (q *Queue) rig(ctx context.Context, rig gascity.Rig, refineries []string, n
 			continue
 		}
 		written, ok := parseTime(r.UpdatedAt())
-		if !ok || now.Sub(written) <= Bound {
+		if !ok {
+			return nil, fmt.Errorf("the last write of handoff %s, updated_at %q, does not read as a time", r.ID, r.UpdatedAt())
+		}
+		if now.Sub(written) <= Bound {
 			continue
 		}
 		past = append(past, handoff{id: r.ID, refinery: r.Assignee(), written: written})

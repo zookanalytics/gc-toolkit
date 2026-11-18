@@ -298,8 +298,9 @@ func TestAReadTheLookRestsOnFailsTheRun(t *testing.T) {
 	}
 }
 
-// A queue whose listing, or whose holds, does not read is left out and fails
-// the run, and a handoff found in another rig's queue is still recorded.
+// A queue whose listing, whose holds, or a handoff's last write does not read
+// is left out and fails the run, and a handoff found in another rig's queue is
+// still recorded.
 func TestAnUnreadQueueFailsTheRunAndKeepsWhatWasFound(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -311,6 +312,11 @@ func TestAnUnreadQueueFailsTheRunAndKeepsWhatWasFound(t *testing.T) {
 		{"the store", func(c *city, other *fake.Store) {
 			c.openErr["/city/rigs/other/.beads"] = &gcbd.ReadError{Reason: "no store"}
 		}, "no store"},
+		{"a handoff's last write", func(c *city, other *fake.Store) {
+			b, _ := other.Row("ot-stuck")
+			b.UpdatedAt = "yesterday"
+			other.Put(b)
+		}, `the last write of handoff ot-stuck, updated_at "yesterday", does not read as a time`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newCity()
