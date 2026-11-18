@@ -842,11 +842,11 @@ demo_engine_cli() {
     set -- npx --yes "$DEMO_ENGINE_PACKAGE"
   fi
 
-  # A run whose arguments name no checkout captures from the copy whose app its
-  # --base-url is, or else from its working directory. It keeps the sandbox
-  # unless each checkout it captures from is a rig's whose app_reads_city is
-  # "false".
-  if [ -z "$from" ] && [ -n "$base" ] && [ "$base" = "${DEMO_ENGINE_COPY_URL:-}" ]; then from=${_DEMO_ENGINE_COPY_DIR:-}; fi
+  # A run captures from the copy whose app its --base-url is as well as from the
+  # checkouts its arguments name, and from its working directory when it names
+  # none of those. It keeps the sandbox unless each checkout it captures from is
+  # a rig's whose app_reads_city is "false".
+  if [ -n "$base" ] && [ "$base" = "${DEMO_ENGINE_COPY_URL:-}" ] && [ -n "${_DEMO_ENGINE_COPY_DIR:-}" ]; then from="$from$NL$_DEMO_ENGINE_COPY_DIR"; fi
   [ -n "$from" ] || from=$(pwd -P)
   if _demo_engine_keeps_sandbox "$from"; then
     case "$kind" in

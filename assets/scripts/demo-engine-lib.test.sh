@@ -71,7 +71,9 @@
 #               variables that point at the city, and say so; one that captures
 #               from a rig set to "true", the rig that holds the library, the
 #               city's own repository, a directory in no rig's repository or a
-#               rig whose setting does not read keeps the sandbox
+#               rig whose setting does not read keeps the sandbox; and a call of
+#               the library's CLI whose --base-url is its copy's app captures
+#               from the copy's checkout whatever --cwd it names
 #   (ISOLATION) on a host with sandbox-exec, a terminal capture whose command
 #               reads the city's files, its stores, gc's home and a service on
 #               its loopback, and lists the city's variables, reaches none of
@@ -928,6 +930,39 @@ no_sandbox video "that capture" "$RIGA"
 SCRIPT="$TSCRIPT" capture video SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --cwd "$BWT"
 eq "$RC" 0 "(video) the same script starting in a worktree of a rig set to \"true\" captures"
 in_sandbox video "that capture"
+
+echo "# PLAIN: a call of the library's CLI whose --base-url is its copy's app captures from the copy's checkout, whatever --cwd it names"
+cat >"$TMPD/copy-cli.sh" <<'SH'
+. "$PACK_SCRIPTS/demo-engine-lib.sh" || exit 1
+demo_engine_copy "$1" "node serve.mjs" || exit 1
+shift
+demo_engine_cli run demo.md --base-url "$DEMO_ENGINE_COPY_URL" "$@"
+SH
+# copy_cli [VAR=VAL ...] -- <checkout> <argument...>: from $WORK, serve a copy
+# from the checkout through the library, then run the library's CLI on the
+# copy's app with the arguments, with the engine stub in the engine's place.
+copy_cli() {
+  local -a envs
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
+  shift
+  : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV" "$ENGINE_ENV"
+  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+      ENGINE_STUB="$ENGINE_STUB" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" ENGINE_ENV="$ENGINE_ENV" \
+      PACK_SCRIPTS="$HERE" DEMO_ENGINE_BIN="$ENGINE_STUB" GCTK_BIN="$GCTK_STUB" \
+      ${envs[@]+"${envs[@]}"} bash "$TMPD/copy-cli.sh" "$@" >"$OUTF" 2>"$ERRF" )
+  RC=$?
+}
+IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+COPY_IOS=(COPY_PORT=5194 COPY_APP_URL="$IOS_APP" FREE_PORT="$(printf '50301\n50302\n50303')")
+copy_cli "${LOCAL_ENV[@]}" "${COPY_IOS[@]}" -- "$BWT" --cwd "$RWT"
+eq "$RC" 0 "(copy) an iOS app a copy of a rig set to \"true\" brought up captures, given a --cwd in a worktree of a rig whose app_reads_city is \"false\""
+has "gctk rig serve --command node serve.mjs (in $BWT)" "$(calls)" "(copy) the copy runs from the worktree of the rig set to \"true\""
+has "engine run demo.md --base-url $IOS_APP --cwd $RWT" "$(calls)" "(copy) the engine drives the copy's app, with the --cwd it was given"
+in_sandbox copy "that capture"
+eq "$(profile | grep -c 'allow network-outbound (remote ip')" 3 "(copy) and opens the iOS run's three ports alone"
+copy_cli "${LOCAL_ENV[@]}" "${COPY_IOS[@]}" -- "$RWT" --cwd "$RWT"
+eq "$RC" 0 "(copy) the same call, with the copy in that worktree of the rig whose app_reads_city is \"false\", captures"
+no_sandbox copy "that capture" "$RIGA"
 
 echo "# SANDBOXED: demo_engine_sandboxed runs a command inside the capture's sandbox, with the one loopback port it names open, for a rig that keeps it"
 cat >"$TMPD/sandboxed.sh" <<'SH'
