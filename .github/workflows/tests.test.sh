@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tests.test.sh — guards the draft CI-cost gate in tests.yml, the concurrency
 # group each job holds, the jq check each job runs before the suite, the
-# seconds each job that runs the suite keeps, and the jobs whose checks main's
+# seconds each job that runs the suite keeps, the Go checks' commands, the
+# tools go-macos checks before its tests, and the jobs whose checks main's
 # ruleset requires.
 #
 # A draft pull request must not run the *.test.sh suite, so a change still
@@ -31,7 +32,19 @@
 # draft's run cancel that run, a group without the ref would let one pull
 # request's run cancel another's, and jobs that shared a group would cancel
 # each other. The job's id is written into its group, since github.job is null
-# outside a job's steps and would leave the three jobs one group.
+# outside a job's steps and would put every job in one group.
+#
+# The Go checks, go on Linux and go-macos on macOS, each run `go vet ./... &&
+# go test ./...` in both Go modules, so every Go test runs on both platforms.
+# No job runs go test on a list of packages, because a list keeps a check only
+# for the packages it names.
+#
+# go-macos's tool check names each tool whose absence makes a Go test skip
+# rather than fail: lsof (internal/host in gctk), flock (the pr package's lock
+# test) and bash and jq (the board's tests that answer from the stub store,
+# stubStore in services/helm/internal/rigboard and
+# TestPendingWaitsAreTheWaitsPackagesAnswer in services/helm/internal/source).
+# A runner without one then fails the step by name.
 #
 # Main's ruleset requires the checks named test, test-macos and go. A job's
 # check takes the job's id unless the job sets name: or a matrix, and either one
@@ -192,6 +205,47 @@ for j in $REQUIRED; do
     [ "$gate" = "$DRAFT_GATE" ] \
         || note "the $j job's if: must be the draft gate alone ('$DRAFT_GATE'), since a condition of its own that skips it at a ready head holds the merge; found '$gate'"
 done
+
+# Each step of each job, as one "<job>\t<working-directory>\t<run>" row, the
+# lines of a block run joined by spaces. tests.yml puts a step's dash at a
+# six-space indent, its keys at eight and a block run's lines at ten.
+step_rows() {
+    awk '
+        function flush() { if (job != "" && step) print job "\t" wd "\t" run; step = 0; wd = ""; run = ""; inrun = 0 }
+        /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
+        in_jobs && /^[^[:space:]#]/ { flush(); in_jobs = 0 }
+        !in_jobs { next }
+        /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { flush(); job = $1; sub(/:$/, "", job); next }
+        inrun && (/^          / || /^[[:space:]]*$/) { line = $0; sub(/^[[:space:]]+/, "", line); run = run " " line; next }
+        { inrun = 0 }
+        /^      - / { flush(); step = 1 }
+        /^        working-directory:/ { wd = $0; sub(/^ +working-directory:[[:space:]]*/, "", wd) }
+        /^        run:[[:space:]]*\|[[:space:]]*$/ { inrun = 1; next }
+        /^        run:/ { run = $0; sub(/^ +run:[[:space:]]*/, "", run) }
+        END { flush() }' "$WF"
+}
+steps="$(step_rows)"
+for j in go go-macos; do
+    for m in services/gctk services/helm; do
+        awk -F'\t' -v j="$j" -v m="$m" '$1 == j && $2 == m && index($3, "go vet ./... && go test ./...") { f = 1 } END { exit !f }' <<<"$steps" \
+            || note "job '$j' must run 'go vet ./... && go test ./...' in $m, so every Go test runs on both platforms"
+    done
+done
+tool_check="$(awk -F'\t' '$1 == "go-macos" && index($3, "command -v") { print $3 }' <<<"$steps")"
+for t in lsof flock bash jq; do
+    grep -Eq "for t in ([^;]* )?${t}[ ;]" <<<"$tool_check" \
+        || note "go-macos's tool check must name $t, or a Go test that needs it skips quietly on a runner without it"
+done
+package_lists="$(awk -F'\t' '{
+    s = $3
+    while (match(s, /go test[^;&|]*/)) {
+        seg = substr(s, RSTART + 7, RLENGTH - 7); s = substr(s, RSTART + RLENGTH)
+        n = split(seg, w, /[[:space:]]+/)
+        for (i = 1; i <= n; i++) if (w[i] ~ /^\.\// && w[i] != "./...") { print $1; break }
+    }
+}' <<<"$steps" | sort -u | paste -sd, -)"
+[ -z "$package_lists" ] \
+    || note "job(s) $package_lists run go test on a list of packages; a Go check runs go test ./... over its module"
 
 if [ "$fail" -ne 0 ]; then
     echo "tests.test.sh: FAILED" >&2
