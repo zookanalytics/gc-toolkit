@@ -91,9 +91,9 @@ rig's review guidance, so an edit to the guide counts once it is committed.
 
 A rig declares the command that starts its app as `ui_serve_command`, among its
 `[rigs.formula_vars]` in the town's `city.toml`, beside its check commands. A
-page capture of the rig's own app runs it, from `mol-rig-demo`, the `demo`
-check or [Demo a PR](#demo-a-pr), and so does a sitting's live copy of the
-rig's UI. Each reads it for the rig and passes it on, a capture as
+capture of the rig's own app runs it, from `mol-rig-demo`, the `demo` check or
+[Demo a PR](#demo-a-pr), and so does a sitting's live copy of the rig's UI. Each
+reads it for the rig and passes it on, a capture as
 `--serve "$SERVE" --cwd <worktree>`:
 
 ```bash
@@ -107,15 +107,30 @@ names its app as the guide's `## Bring the app up` says, with `--serve-dir` or
 The command runs as a copy that `gctk rig serve` runs, with bash at the top of
 the checkout it is started from, such as a worktree at the commit a capture
 shows, inside the capture's sandbox. The copy gets a free loopback port of its
-own as `$PORT`, and it is up once it answers there. So the command:
+own as `$PORT`. It is up once it answers there, or once the command prints the
+URL of the app it brought up on a line of its standard output, in the engine's
+form, as `ios-simulator://<device UDID>/<bundle id>` names an iOS app it
+launched on a simulator. A capture hands the engine the app where the copy
+reports it. So the command:
 
 - changes into the app's directory and installs what it needs, because a
   capture's worktree holds only what the rig commits;
 - serves on `$PORT`, so a dev server whose config pins a port takes `$PORT` on
-  its command line, such as `cd web && npm ci && npm run dev -- --port $PORT`;
+  its command line, such as `cd web && npm ci && npm run dev -- --port $PORT`,
+  or prints its app's URL once the app is ready, with its other output on its
+  standard error;
 - hard-codes no port, because each run gets a port of its own;
 - serves the app on fixture data, because the sandbox keeps the live city out
-  of reach;
+  of reach. An iOS app runs on a simulator, which the system's simulator
+  service starts outside the sandbox, so the command gives it fixture data
+  itself;
+- builds with its toolchain's own sandboxes turned off, because none can start
+  inside the capture's, which still holds the build. An Xcode build passes
+  `-IDEPackageSupportDisableManifestSandbox=YES` for Swift packages and
+  `'OTHER_SWIFT_FLAGS=$(inherited) -disable-sandbox'` for Swift macros;
+- is up within ten minutes, as long as a start waits before it stops the copy,
+  then runs until it is stopped, and ends within a minute of that, removing
+  what it made outside the checkout, such as its simulator device;
 - runs a program the repository keeps, so a run starts the app of the commit
   it runs from, as a rig's test command runs the tests of its commit. The rig
   declares one command for all its branches, so it names an entry point every
@@ -148,7 +163,7 @@ app target or a `--port` for it.
 
 An app a command serves, such as a dev server, runs as a copy that
 `gctk rig serve` runs from a checkout, inside the same sandbox, and the engine
-captures the copy at its loopback port. `rig-demo-capture.sh` and
+captures the copy's app where the copy reports it. `rig-demo-capture.sh` and
 `demo-screenshot.sh page` do that for `--serve "<command>" --cwd <checkout>`:
 they start the copy, capture it and stop it. The engine's own `--serve` is
 refused, because the sandbox cannot vouch for the server it would start.
@@ -158,6 +173,13 @@ a rig's own app running in a worktree of that rig, unless `city.toml` sets
 `app_reads_city = "true"` for the rig. Otherwise the capture refuses the URL and
 says why. Then serve the app as a copy or with `--serve-dir`, or capture a
 deployed preview.
+
+A script that declares `**Platform:** iOS` drives an iOS app on a simulator,
+named by its `ios-simulator://<device UDID>/<bundle id>` URL as `--base-url`,
+or brought up by a rig's start command. Its capture provisions the Appium the
+engine drives the app with, and opens three loopback ports, which the engine
+gets as `--port`, for the servers it drives the app through. The app itself
+runs outside the sandbox, where the system's simulator service starts it.
 
 Two capture modes come from one script:
 

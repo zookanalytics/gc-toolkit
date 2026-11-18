@@ -612,7 +612,7 @@ sitting() { # [<VAR=value>...] — work-setup.sh --held-by, from the sitting's h
 ended() { grep -cE '^(drain|gate|await|cancel)( |$)' "$CALLS" | tr -d ' '; }
 printf '[]' > "$RUNS"
 printf '%s' '[{"root":"root-9","convoy":"cv-9","bead":"tk-c","formula":"mol-polecat-work","live":true}]' > "$TMP/runs-c.json"
-for case in edge hook no-hook holder refinery run route target rejection; do
+for case in edge hook no-hook holder refinery pending head-changed run route target rejection; do
   envs=(); edit="."
   case "$case" in
     edge)     edit='.dependencies = []'; want="no blocks edge onto tk-conv" ;;
@@ -620,6 +620,9 @@ for case in edge hook no-hook holder refinery run route target rejection; do
     no-hook)  envs=(HOOK_CURRENT=); want="gc hook current names no bead, not tk-conv" ;;
     holder)   edit='.assignee = "sess-other"'; want="assigned to sess-other" ;;
     refinery) edit='.assignee = "gc-toolkit/gc-toolkit.refinery"'; want="assigned to gc-toolkit/gc-toolkit.refinery" ;;
+    pending)  edit='.metadata += {merge_result: "pull_request_pending"}'; want="its PR waits on the pending record (pull_request_pending)" ;;
+    head-changed) edit='.metadata += {merge_result: "pull_request_head_changed"}'
+              want="its PR waits on the pending record (pull_request_head_changed), which the landing order works and a sitting edits through gctk pr push --held-by" ;;
     run)      envs=("RUN_LIB_STUB_RUNS=$TMP/runs-c.json"); want="a run works it (root-9)" ;;
     route)    edit='.metadata["gc.routed_to"] = "gc-toolkit/gc-toolkit.polecat"'; want="routed to gc-toolkit/gc-toolkit.polecat" ;;
     target)   edit='.metadata = {}'; want="records no target" ;;

@@ -5,9 +5,11 @@ its own. What it ships as the pack, such as its skills, formulas, scripts, agent
 prompts and template fragments, runs in every rig
 ([architecture.md](docs/architecture.md#what-the-pack-supplies-and-what-a-rig-supplies)),
 so a rule that binds only work on this repository is never written there. The
-rule goes here when every session working on the repository needs it, and
-otherwise into the doc or the check that owns it. Every session that works in a
-gc-toolkit worktree loads this file.
+rule goes here only when a session can need it at any turn, before it could
+think to load anything, and otherwise into the doc or the check that owns it. A
+role's prompt and the fragments it composes meet the same bar: text one moment
+needs, even a moment every run reaches, goes in a formula step or a skill that
+step names. Every session that works in a gc-toolkit worktree loads this file.
 
 A docs page is a right place for such a rule, even though the polecats' standard
 keeps other guidance for an agent out of docs pages.
