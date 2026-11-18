@@ -516,6 +516,11 @@ answer it:
   ```
 
   Gas City's reaper removes the tree once the change closes.
+- **The refinery published it** (`its PR waits on the pending record`). The
+  change is the PR now, assigned to nobody while the landing order works it.
+  Remove your edge the same way, because it would hold the PR's merge until the
+  conversation closes, and tell the operator. A further edit is an edit of the
+  PR's branch (An open PR's branch).
 - **Someone else holds it**: it is assigned to another holder, a run works it,
   or it is routed to a pool. Remove your edge the same way, because it would
   hold their work until the conversation closes, and tell the operator who
@@ -648,4 +653,5 @@ child the pool runs. A polecat resumes your branch, because Work's setup takes
 the branch the change records. When the operator wants to react to a finding
 live, they engage the change. Once it heads an open PR on the pending record,
 you edit that PR's branch (An open PR's branch, above), and Work's writers
-refuse a change a polecat or the refinery holds.
+refuse a change a polecat or the refinery holds, and one whose PR waits on the
+pending record.

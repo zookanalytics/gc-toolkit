@@ -22,10 +22,12 @@ import (
 //
 //	GCTK_CITY_ACCEPTANCE=1 go test ./internal/gascity -run TestCityAcceptance -v
 
-// A review run poured for a bead an agent outside the run holds is handed out
-// at its first claim when Cook pours it and the bead gets its blocks edge onto
-// the root, while the same run poured with --attach onto the bead is retired
-// there, unclaimed.
+// A review run poured with --attach onto a bead assigned to nobody, as a PR's
+// bead is while it waits on the pending record, is handed out at its first
+// claim, while the same run poured with --attach onto a bead an agent outside
+// the run is assigned is retired there, unclaimed. A review run poured for that
+// assigned bead is handed out at its first claim when Cook pours it and the
+// bead gets its blocks edge onto the root.
 func TestCityAcceptance(t *testing.T) {
 	if os.Getenv("GCTK_CITY_ACCEPTANCE") != "1" {
 		t.Skip("the city acceptance test runs the city's gc on a scratch city; GCTK_CITY_ACCEPTANCE=1 runs it")
@@ -61,7 +63,7 @@ func TestCityAcceptance(t *testing.T) {
 	appendTo(t, filepath.Join(city, "pack.toml"), "\n[imports.gc-toolkit]\nsource = \""+pack+"\"\n")
 	appendTo(t, filepath.Join(city, "city.toml"), "\n[providers.codex]\nbase = \"builtin:codex\"\n\n"+
 		"[providers.gemini]\nbase = \"builtin:gemini\"\n\n[daemon]\nformula_v2 = true\n")
-	for _, pool := range []string{"reviewer", "repairer"} {
+	for _, pool := range []string{"reviewer", "repairer", "waiting-reviewer"} {
 		if err := os.MkdirAll(filepath.Join(city, "agents", pool), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -78,12 +80,31 @@ func TestCityAcceptance(t *testing.T) {
 	vars := map[string]string{"pr_bead": bead, "head": "0123456789abcdef0123456789abcdef01234567", "target": "main",
 		"branch": "polecat/" + bead, "review_target": "reviewer", "repair_target": "repairer", "binding_prefix": "gc-toolkit."}
 
-	// The control: the pour --attach makes is retired at its first claim.
-	args := []string{"formula", "cook", "mol-pr-review", "--attach", bead, "--json"}
-	for _, name := range slices.Sorted(maps.Keys(vars)) {
-		args = append(args, "--var", name+"="+vars[name])
+	attach := func(bead string, vars map[string]string) []string {
+		args := []string{"formula", "cook", "mol-pr-review", "--attach", bead, "--json"}
+		for _, name := range slices.Sorted(maps.Keys(vars)) {
+			args = append(args, "--var", name+"="+vars[name])
+		}
+		return args
 	}
-	attached, _ := cooked(gc(t, city, args...))
+
+	// The pour --attach makes onto a bead assigned to nobody is handed out at
+	// its first claim. Its steps go to a pool of their own, so no other case's
+	// claim takes them.
+	decode(t, gc(t, city, "bd", "create", "a waiting PR's bead", "--json"), &created)
+	waiting := created.ID
+	wvars := maps.Clone(vars)
+	wvars["pr_bead"], wvars["branch"], wvars["review_target"] = waiting, "polecat/"+waiting, "waiting-reviewer"
+	root, beads := cooked(gc(t, city, attach(waiting, wvars)...))
+	if said, c := claimAs(t, city, "waiting-reviewer"); c.Action != "work" || c.Root != root || !slices.Contains(beads, c.Bead) ||
+		status(t, city, root) == "closed" {
+		t.Fatalf("the run attached to a bead assigned to nobody was not handed out at its first claim: %+v, %s is %s: %s",
+			c, root, status(t, city, root), said)
+	}
+
+	// The control: the pour --attach makes onto a bead an agent outside the run
+	// is assigned is retired at its first claim.
+	attached, _ := cooked(gc(t, city, attach(bead, vars)...))
 	if said, c := claimAs(t, city, "reviewer"); c.Action != "drain" || !strings.Contains(said, "skipped") || status(t, city, attached) != "closed" {
 		t.Fatalf("the run poured with --attach was not retired at its first claim: %+v, %s is %s: %s", c, attached, status(t, city, attached), said)
 	}

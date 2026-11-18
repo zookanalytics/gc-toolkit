@@ -171,15 +171,21 @@ work_writing() { # <bead> <status> <assignee>
 # and the bead has a blocks edge onto it, which keeps every pool off the bead
 # while the conversation is open. A bead someone else holds or is queued to take
 # is refused whatever the hook and the edge say: one assigned to anyone, the
-# refinery included; one a live run works, which only run-lib.sh tells, since
-# Gas City leaves a bead under a run open, unassigned and unrouted; and one
-# whose gc.routed_to names the pool queue that serves it once bd reports it
+# refinery included; one whose PR waits on the pending record, assigned to
+# nobody while the landing order works it, which a sitting edits through
+# `gctk pr push --held-by`; one a live run works, which only run-lib.sh tells,
+# since Gas City leaves a bead under a run open, unassigned and unrouted; and
+# one whose gc.routed_to names the pool queue that serves it once bd reports it
 # ready (dispatch-path.sh). Every reason is named, the holder's first, so a bead
 # the refinery has is refused as the refinery's whether or not its edge stands.
 work_held_by_proof() {
   local why="" owner runs live route claimed
   owner=$(work_field .assignee)
   [ -z "$owner" ] || why="$why; it is assigned to $owner"
+  case "$(work_meta merge_result)" in
+    pull_request_pending|pull_request_head_changed)
+      why="$why; its PR waits on the pending record ($(work_meta merge_result)), which the landing order works and a sitting edits through gctk pr push --held-by" ;;
+  esac
   runs=$(run_lib runs work_bd "$WORK_ID") || work_outage "could not read the runs that work $WORK_ID"
   live=$(printf '%s' "$runs" | jq -r '[.[] | select(.live) | .root] | join(", ")')
   [ -z "$live" ] || why="$why; a run works it ($live)"

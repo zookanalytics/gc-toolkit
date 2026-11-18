@@ -8,7 +8,8 @@
 #     existing_pr kept; a live workflow on it is closed, and it is slung on
 #     mol-polecat-work;
 #   - a half-written record, the marker and existing_pr, goes back the same way,
-#     unassigned, so a run of the landing order that read it writes nothing;
+#     unassigned with its marker cleared in the same write, so a run of the
+#     landing order that read it writes nothing and no later run reads it;
 #   - a bead a park left blocked, or one the landing order sent back to be
 #     validated again, goes back with its merge_result and blocked_reason
 #     cleared, since the work gate refuses a bead that carries one, and keeps
@@ -93,7 +94,7 @@ has "$(logged gc)" "--if-assignee=rig-a/gc-toolkit.refinery --if-status=open --s
 has "$(logged gc)" "workflow delete-source a --apply" "a live workflow on it is closed"
 has "$(logged gc)" "sling --rig rig-a rig-a/gc-toolkit.polecat a --on mol-polecat-work" "it is slung on mol-polecat-work"
 
-echo "# a half-written record goes back the same way, unassigned"
+echo "# a half-written record goes back the same way, unassigned, with its marker cleared"
 fresh
 branch_with polecat/h h.txt >/dev/null
 work h polecat/h '{"pr_reconcile_pending":"true","existing_pr":"https://github.com/zook/rig/pull/52"}' in_progress
@@ -102,7 +103,9 @@ run --bead h --reason "lint fails"
 eq "$RC" 0 "the requeue exits 0"
 eq "$(bassignee h)" "" "the half-written bead is left unassigned"
 eq "$(bstatus h)" "open" "…and open"
+eq "$(meta h pr_reconcile_pending)" "<absent>" "…with its marker cleared, so the landing order reads no PR that waits on it"
 has "$(logged gc)" "--if-status=in_progress" "the write is guarded on the status read"
+has "$(logged gc)" "--unset-metadata pr_reconcile_pending" "…in the write that reopens it"
 eq "$(meta h existing_pr)" "https://github.com/zook/rig/pull/52" "it keeps the PR it may reuse"
 hasnt "$(logged gc)" "bd create" "no rework child is filed for it"
 
