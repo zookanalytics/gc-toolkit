@@ -1193,6 +1193,65 @@ func TestServeReadsTheAppsURLInTheEnginesLines(t *testing.T) {
 	}
 }
 
+// refusingLog is a serve log that refuses its second write and takes every
+// other.
+type refusingLog struct{ writes int }
+
+func (l *refusingLog) Write(b []byte) (int, error) {
+	l.writes++
+	if l.writes == 2 {
+		return 0, syscall.EIO
+	}
+	return len(b), nil
+}
+
+// The leader reads the standard output as far as the relay copies it into the
+// log. The copy stops at a write the log refuses, so the text before that
+// write is cut off, not the output's last line, and names no app though it
+// reads as a URL, whether the command then ends or closes its output and runs
+// on, and nothing written after it is read. The same text at the output's end
+// is its last line.
+func TestServeTakesNoAppsURLFromAnOutputCutOffByTheLog(t *testing.T) {
+	cut := "ios-simulator://" + testUDID + "/com.example"
+	for _, k := range []struct {
+		name   string
+		writes []string
+		close  bool
+		want   string
+	}{
+		{"at the output's end", []string{cut}, false, cut},
+		{"cut off as the command ends", []string{cut, ".Board\n", cut + ".Board\n"}, false, ""},
+		{"cut off as the command closes its output", []string{cut, ".Board\n"}, true, ""},
+	} {
+		t.Run(k.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				m := fake.New()
+				t.Cleanup(m.Halt)
+				m.Programs = func(host.Spec) fake.Program {
+					return func(p *fake.Process) int {
+						for _, w := range k.writes {
+							fmt.Fprint(p.Stdout(), w)
+						}
+						if k.close {
+							p.CloseStdout()
+							<-p.Done()
+						}
+						return 0
+					}
+				}
+				rec := copyRec{dir: t.TempDir()}
+				if _, err := m.Caller().Start(host.Spec{Argv: []string{"serve"}, Stdout: readURL(rec, &refusingLog{}), Relay: true}); err != nil {
+					t.Fatal(err)
+				}
+				synctest.Wait()
+				if got := rec.read("app_url"); got != k.want {
+					t.Errorf("app_url %q, want %q", got, k.want)
+				}
+			})
+		})
+	}
+}
+
 func TestServeReadsTheAppsURLOnlyFromTheStandardOutput(t *testing.T) {
 	serveTest(t, func(t *testing.T, f *serveFixture) {
 		o := f.opts("app-on-stderr")

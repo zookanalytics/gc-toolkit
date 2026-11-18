@@ -458,6 +458,45 @@ func TestARelayTellsAnEnderWhenItsStreamEnds(t *testing.T) {
 	}
 }
 
+// refusing is an ending that refuses every write, as a writer whose file fails
+// does.
+type refusing struct{ *ending }
+
+func (refusing) Write([]byte) (int, error) { return 0, syscall.EIO }
+
+// A relay whose copy of a stream stops at a write its writer refuses tells
+// that writer no end, because the stream did not end there, and still tells
+// the process's other stream when it ends.
+func TestARelayTellsAWriterThatRefusesAWriteNoEnd(t *testing.T) {
+	h := Local()
+	out, errs := refusing{newEnding()}, newEnding()
+	c, err := h.Start(Spec{
+		Argv:   []string{"bash", "-c", `printf one; echo err >&2`},
+		Out:    errs,
+		Stdout: out,
+		Relay:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Wait()
+	select {
+	case <-c.Relayed():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the relay did not finish once the process ended")
+	}
+	select {
+	case <-out.ended:
+		t.Error("Stdout was told its stream ended, though its copy stopped at the write it refused")
+	default:
+	}
+	select {
+	case <-errs.ended:
+	default:
+		t.Error("Out was not told its stream ended, though all of it was copied in")
+	}
+}
+
 // Group 1 and below would reach every process the caller may signal, or the
 // caller's own group, so no signal goes there.
 func TestSignalRefusesWhatNamesNoOneProcessOrGroup(t *testing.T) {

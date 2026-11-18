@@ -83,6 +83,9 @@ type Process struct {
 	status  int
 	done    chan struct{}
 	relayed chan struct{}
+	// outCut and stdoutCut are set once the writer of a relayed stream, Out's
+	// or Stdout's own, refused a write, where the relay's copy stops.
+	outCut, stdoutCut bool
 }
 
 var (
@@ -148,7 +151,10 @@ func (p *Process) Done() <-chan struct{} { return p.done }
 // Out is where the process's output goes, as Spec's Out names it: its
 // standard error, and its standard output too unless Spec's Stdout takes it. A
 // write once the process has ended fails, as a write to a pipe whose reader
-// has gone does.
+// has gone does. With Relay, a write its writer refuses ends the copy of that
+// stream, as it ends a relay's: a later write to the stream fails as one after
+// the process's end does, and a writer that is a host.Ender is not told the
+// stream ended.
 func (p *Process) Out() io.Writer { return output{p: p} }
 
 // Stdout is where the process's standard output goes: Spec's Stdout, or Out
@@ -164,19 +170,25 @@ func (w output) Write(b []byte) (int, error) {
 	m := w.p.m
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	to := w.p.out
+	to, cut := w.p.out, &w.p.outCut
 	if w.stdout && w.p.stdout != nil {
-		to = w.p.stdout
+		to, cut = w.p.stdout, &w.p.stdoutCut
 	}
 	switch {
 	case w.p.ended:
 		return 0, syscall.EPIPE
 	case w.stdout && w.p.closed:
 		return 0, syscall.EBADF
+	case *cut:
+		return 0, syscall.EPIPE
 	case to == nil:
 		return len(b), nil
 	}
-	return to.Write(b)
+	n, err := to.Write(b)
+	if err != nil && w.p.spec.Relay {
+		*cut = true
+	}
+	return n, err
 }
 
 // CloseStdout closes the process's standard output, as a program that closes
@@ -192,7 +204,7 @@ func (p *Process) CloseStdout() {
 		return
 	}
 	p.closed = true
-	if p.spec.Relay && p.stdout != nil {
+	if p.spec.Relay && p.stdout != nil && !p.stdoutCut {
 		ends(p.stdout)
 	}
 }
@@ -454,10 +466,12 @@ func (m *Machine) end(q *Process, status int) {
 	q.ended, q.status = true, status
 	close(q.done)
 	if q.spec.Relay {
-		if q.stdout != nil && !q.closed {
+		if q.stdout != nil && !q.closed && !q.stdoutCut {
 			ends(q.stdout)
 		}
-		ends(q.out)
+		if !q.outCut {
+			ends(q.out)
+		}
 		close(q.relayed)
 	}
 	if q.file != nil {

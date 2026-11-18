@@ -78,8 +78,8 @@ func (c urlCopy) End() { c.reader.End() }
 // records the first app's URL a line names. Its lines are the engine's (its
 // readline in sprintshow's src/server.ts, at b4d0b82): a line ends at a line
 // feed, a carriage return or the two together, and the text the output ends
-// on, once the relay says it has ended (End), is its last line. It never fails
-// a write, so the relay that feeds it copies the whole output.
+// on, once the relay says it has ended (End), is its last line. It takes every
+// write, so it never stops the relay's copy into the log.
 type appURLReader struct {
 	rec     copyRec
 	log     io.Writer

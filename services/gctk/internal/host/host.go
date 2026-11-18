@@ -96,7 +96,8 @@ type Spec struct {
 // An Ender is a writer that takes the end of the stream written into it: a
 // relay calls End once the whole stream is copied in, whether the process
 // ended or closed that stream and runs on, so the writer can act on text that
-// no line end closed.
+// no line end closed. A copy that stops at an error, such as a write the
+// writer refuses, calls no End, because the stream did not end there.
 type Ender interface {
 	End()
 }
@@ -237,9 +238,9 @@ func (local) Start(s Spec) (Child, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = io.Copy(r.to, r.r)
+			_, err := io.Copy(r.to, r.r)
 			r.r.Close()
-			if e, ok := r.to.(Ender); ok {
+			if e, ok := r.to.(Ender); ok && err == nil {
 				e.End()
 			}
 		}()
