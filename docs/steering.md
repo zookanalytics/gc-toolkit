@@ -77,9 +77,8 @@ runs its fix (`formulas/mol-deacon-patrol.toml`).
 
 Each writer that files or disposes new work follows the rule.
 
-- **The first reaction** (`assets/scripts/first-reaction-dispose.sh`). It still
-  reacts to every finding, because its card is the triage that backlog
-  refinement reads.
+- **The first reaction** (`gctk reaction dispose`). It still reacts to every
+  finding, because its card is the triage that backlog refinement reads.
   Its actionable exit routes a member, PR-finishing work or a confirmed
   emergency. It releases any other bead with no route, then holds it with
   `gc bd set-state <bead> hold=mayor --reason "<why it was held>"`. The blocked

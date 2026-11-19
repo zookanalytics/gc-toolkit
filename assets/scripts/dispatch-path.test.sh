@@ -18,8 +18,7 @@
 #             against both hold labels itself
 # A reader with a private test drifts silently: it keeps the keys or labels it
 # copied and misses every one added later. The behavioral half lives beside
-# each reader (tools/gc-proactive.test.sh,
-# doctor/check-blocked-work-armed/run.test.sh,
+# each reader (doctor/check-blocked-work-armed/run.test.sh,
 # doctor/check-step-terminal/run.test.sh,
 # doctor/check-armed-dispatch-owed/run.test.sh,
 # doctor/check-po-queue-only/run.test.sh, liveness-classify.test.sh,
@@ -127,7 +126,7 @@ asks() { # <reader> <predicate>
         && ok "(READERS) $1 asks $2" \
         || bad "(READERS) $1 asks $2"
 }
-for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.sh \
+for r in doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.sh \
          assets/scripts/gc-helm.sh; do
     sources "$r"; asks "$r" has_dispatch_path
 done
@@ -135,7 +134,7 @@ for r in assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck
          assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
     sources "$r"
 done
-for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh assets/scripts/liveness-classify.sh \
+for r in doctor/check-blocked-work-armed/run.sh assets/scripts/liveness-classify.sh \
          assets/scripts/liveness-recheck.sh assets/scripts/gc-helm.sh doctor/check-po-queue-only/run.sh; do
     asks "$r" has_dispatch_hold
 done

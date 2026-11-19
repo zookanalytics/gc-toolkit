@@ -102,10 +102,9 @@ set -u
 # doctor.toml names the same set.
 WORK_TYPES=" bug feature task chore spike story "
 
-# The standing kinds, from the one definition shared with the liveness sweep and
-# the proactive scan. Exposes $STANDING_KINDS_JQ. An unsourceable one warns:
-# without it a standing record would read as stranded work and draw the arm
-# remedy.
+# The standing kinds, from the one definition shared with the liveness sweep.
+# Exposes $STANDING_KINDS_JQ. An unsourceable one warns: without it a standing
+# record would read as stranded work and draw the arm remedy.
 # shellcheck source=../../assets/scripts/standing-kinds.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/standing-kinds.sh" || {
     echo "cannot determine whether blocked work carries a dispatch path"
@@ -113,7 +112,7 @@ WORK_TYPES=" bug feature task chore spike story "
     exit 1
 }
 # What counts as a dispatch path and a dispatch hold, from the one definition
-# shared with the proactive scan, check-step-terminal and gc-helm.sh.
+# shared with check-step-terminal and gc-helm.sh.
 # Exposes $DISPATCH_PATH_JQ. An unsourceable one warns: without it no bead can be
 # told to have a dispatch path or a hold.
 # shellcheck source=../../assets/scripts/dispatch-path.sh
