@@ -8,6 +8,8 @@ description: The design record for tk-1tfzr71.158, the design child of initiativ
 This is the design record for tk-1tfzr71.158, the design child of the
 initiative tk-1tfzr71.19. The operator sent its first version back for four
 changes in conversation tk-9l9pg0x on 2026-11-16, and this version makes them.
+On 2026-11-19 the operator ruled in conversation tk-5deozip that the city needs
+no orphan-work look and no act after it, and this version drops both.
 The pack was read at e01b53e94, the commit `integration/tk-1tfzr71.19` was cut
 from, and every pack line number is at that commit. Main has since moved to
 8b9c4caf3, and of the files this design retires it has changed only
@@ -34,16 +36,21 @@ kept the witness's loop, put each failing doctor check in the Product Owner's
 queue as a record, and added two pack doctor checks. Approving this version
 makes the changes below, and it adds no mayor.
 
-1. **The witness's three scripted jobs become orders.** Today the witness runs
-   them in its loop: saving a dead polecat's work, checking a pool seat that
-   prints but makes no progress, and checking the refinery's queue. Each
-   becomes an order that only reads and records an event when it finds
-   something, and a second order that acts on that event after reading each
-   item again: it pushes, closes, removes a worktree, or files the finding or
-   human gate (section 2). Cost: seven orders join the city's dispatch ring,
-   and an order that cannot read shows on the board only once it has failed
-   three runs in a row and two doctor runs have found that, where the loop
-   filed a finding at once.
+1. **Two of the witness's three scripted jobs become orders, and the third
+   retires.** Today the witness runs them in its loop: saving a dead polecat's
+   work, checking a pool seat that prints but makes no progress, and checking
+   the refinery's queue. The seat and queue checks each become an order that
+   only reads and records an event when it finds something, and a second order
+   that acts on that event after reading each item again: it files the finding
+   or human gate (section 2). Saving a dead polecat's work retires with nothing
+   in its place, as you ruled (conversation tk-5deozip): Gas City's controller
+   and core's orphan sweep release a dead session's claim, and the session that
+   next claims the work resumes in the worktree the bead records (section 3).
+   Cost: five orders join the city's dispatch ring, and an order that cannot
+   read shows on the board only once it has failed three runs in a row and two
+   doctor runs have found that, where the loop filed a finding at once.
+   Nothing reports an open bead assigned to a dead session that no pool
+   reclaims.
 2. **The witness runs only to read its mail.** Today its session is always on.
    It becomes an on-demand session, as the refinery and the Product Owner are,
    and every mail to it carries `--notify`, which asks Gas City to wake it. Its
@@ -87,8 +94,8 @@ makes the changes below, and it adds no mayor.
    one read (section 8). Cost: between the census's retirement and that row,
    nothing lists ready work that no queue holds.
 8. **The work lands twice, a week apart.** The first landing adds what only
-   reads or shows: the doctor order, the three orders that look and the
-   board's page. They run beside the witness's loop and the deacon for a week,
+   reads or shows: the doctor order, the two orders that look and the board's
+   page. They run beside the witness's loop and the deacon for a week,
    and a report compares what each found. The second landing adds the orders
    that act and retires the loop, the deacon and the census, and its summary
    carries that comparison (section 12). Cost: the old patrols run a week
@@ -115,8 +122,10 @@ at packs main 0f07496d2fa4.
 others run a script and decide nothing a script cannot, and the operator ruled
 that they run as orders (conversation tk-9l9pg0x, section 2), on the view they
 gave there: "Have deterministic code do deterministic work, although decisions
-still go to LLMs". So the
-witness keeps mail triage alone, which is what the initiative's contract keeps
+still go to LLMs". Of recover-orphaned-beads, only its branch 2b, the seat
+check, becomes orders: the operator later ruled that its recovery retires with
+nothing in its place (conversation tk-5deozip, section 3). So the witness keeps
+mail triage alone, which is what the initiative's contract keeps
 as prompt doctrine, and it needs no loop:
 
 - **Its mode.** The witness's named session moves from `mode = "always"` to
@@ -168,12 +177,10 @@ ends it, under visit tk-dbpz6t2's rule:
 
 | Difference | Reason | Ends when |
 |---|---|---|
-| It runs no patrol loop: mail wakes it, and its scripted steps run as orders that look and orders that act (section 2). | The operator's ruling in conversation tk-9l9pg0x: code does the work that needs no judgment. | Gas Town's witness runs its scripted steps outside its session. |
+| It runs no patrol loop: mail wakes it, and the scripted steps the city keeps run as orders that look and orders that act (section 2). | The operator's ruling in conversation tk-9l9pg0x: code does the work that needs no judgment. | Gas Town's witness runs its scripted steps outside its session. |
 | It files findings and human gates where Gas Town mails the mayor. | The ruling at tk-rl8gz4b.29's design, and this city runs no mayor. | An operator ruling gives escalation to a seat. |
-| Recovery returns nothing to the pool. Gas Town's reopens the bead with `gc workflow delete-source` and `reopen-source` (W:1019). | Gas City's controller and core's orphan sweep release a dead claim within minutes, and a second writer raced them (tk-8a6akou). | Gas Town's witness leaves the release to them, as the orphan sweep's header assumes. |
-| Salvage keeps `work_dir`, and clears it only with the worktree it names. | Our polecats resume from `work_dir`. | The work formula records Gas Town's `artifact_dir`. |
+| It does no orphan recovery. Gas Town's salvages a dead owner's worktree and reopens the bead with `gc workflow delete-source` and `reopen-source` (W:1019). | Gas City's controller and core's orphan sweep release a dead claim within minutes, which a second writer raced (tk-8a6akou), and the session that next claims the work resumes in the worktree the bead records, as the operator ruled (conversation tk-5deozip, section 3). | Gas Town's witness leaves recovery to them, as the orphan sweep's header assumes. |
 | A finding, not a warrant, names a pool seat that prints while its work stands still, judged by the seat's own writes. | The controller's work ladder recovers a quiet seat, and no dog serves a warrant here. | Gas City paces a busy pool seat by its progress. |
-| Salvage reads our anchors, PR states and conversations, and takes both pending-record values as an in-flight PR. | Our pipeline writes them. | The retirements of the old merge path (tk-1tfzr71.70) and the old review path (tk-1tfzr71.122) land. |
 | The refinery's queue check does not wake the refinery for a stale `pr_reconcile_pending` check (W:1080-1108). | The landing order runs the pending record with no refinery turn. | No end is planned. |
 
 The first version's rows for next-iteration's spacing, the nudge order and the
@@ -192,9 +199,10 @@ escalation (W:115, W:290, W:773, W:1041, W:1123) and files warrants for the dog
 
 ## 2. The patrol orders: one looks, another acts
 
-Each of the witness's three scripted jobs becomes two exec orders. An order
-that looks runs on a cooldown, reads, and writes nothing to any store. When it
-finds something, it records one event naming what it found, with
+The witness's two scripted jobs that stay, checking a pool seat and checking
+the refinery's queue, each become two exec orders. An order that looks runs on
+a cooldown, reads, and writes nothing to any store. When it finds something,
+it records one event naming what it found, with
 `gc event emit` ("Record a custom event to the city event log",
 `cmd/gc/cmd_event_emit.go`). An order that acts has `trigger = "event"` on that
 type, so it runs only after a look found something. Gas City tells an exec
@@ -207,14 +215,12 @@ decides both and a run without the flag writes nothing.
 
 | Order | Trigger | Runs | Budget | Reads | Writes |
 |---|---|---|---|---|---|
-| `orphan-work-detect` | every 15 minutes | `gctk worktree salvage` | 2 minutes | each rig's beads that name an owner, and `gc session list --json` | the event `gc-toolkit.orphan-work.found`, listing each bead whose owner no live session answers to |
-| `orphan-work-salvage` | that event | `gctk worktree salvage --act` | 15 minutes | the same beads, then each bead, its tree and its branch on origin just before acting | a push, a close of a bead whose branch landed, a tree's removal, a `work_dir` cleared, and the findings and gate of section 10 |
 | `seat-progress-detect` | every 30 minutes | `gctk session progress` | 2 minutes | each live pool seat's claim, whether its pane prints, and its writes to the stores | the event `gc-toolkit.seat-progress.stalled` |
 | `seat-progress-report` | that event | `gctk session progress --act` | 2 minutes | the same seats again | the finding `no-progress.<session>` |
 | `refinery-queue-detect` | every 30 minutes | `gctk refinery stuck` | 2 minutes | each rig's refinery address and the handoffs assigned to it | the event `gc-toolkit.refinery-queue.stuck` |
 | `refinery-queue-report` | that event | `gctk refinery stuck --act` | 2 minutes | the same handoffs again | the human gate `witness-refinery-queue` |
 
-The doctor order of section 5 is the seventh. The names follow gctk's rule for
+The doctor order of section 5 is the fifth. The names follow gctk's rule for
 naming a verb (`docs/gctk-architecture.md`), and each unit may derive a better
 word from the verbs and orders beside it and say so.
 
@@ -225,28 +231,22 @@ at most four cooldown, cron and event orders per 30-second pass
 order whose interval is shorter than that ring's worst case. When run on
 2026-11-16 at 18:21Z it reported "31 order(s) set to fire more often than the
 9m30s dispatch floor (73 orders in the ring, 4 dispatched per 30s pass)". The
-seven orders join the ring and `boot-health` and `witness-nudge` leave it,
-which puts the floor at 10 minutes, under each new cadence. An order per rig
-would add 37 to the ring, six for each of the six rigs and the doctor order.
+five orders join the ring and `boot-health` and `witness-nudge` leave it, which
+keeps the floor at 9m30s, under each new cadence. An order per rig would add 25
+to the ring, four for each of the six rigs and the doctor order.
 
 **The cadences and budgets.** A cooldown counts from a run's start, so each
 interval stays longer than its order's timeout, as core's own orders keep
-theirs. Salvage looks every 15 minutes because Gas City's orphan sweep releases
-a dead claim within five, and the seat and queue checks look every 30 minutes
-because they judge three hours of silence and a handoff's age. A look reads one
-list per rig and the session list once. The salvage act's 15 minutes cover a
-push per bead it saves. The witness's loop ran each of them once an hour.
+theirs. The seat and queue checks look every 30 minutes because they judge
+three hours of silence and a handoff's age. A look reads one list per rig and
+the session list once. The witness's loop ran each of them once an hour.
 
 **An event fires the act at least once.** Gas City's event orders keep a
 cursor, and one event can still fire twice, so "make an event order's action
 safe to repeat for the same bead" (`docs/tutorials/07-orders.md`, event).
-Every act here is: a push of a branch already on origin moves nothing, a
-closed bead refuses a second close, a removed tree is not found, and a finding
-or gate is filed once per open key. An event lost to the recorder's
-best-effort write is made up by the next look, which finds the same thing
-while it holds. A look that finds a bead the act refused, such as a tree git
-will not remove, records it again each run, and the act's refusal finding,
-open under one key, is its one record.
+Every act here is, because each files a finding or a gate once per open key.
+An event lost to the recorder's best-effort write is made up by the next look,
+which finds the same thing while it holds.
 
 **A look that cannot read fails its run.** Where the loop filed
 `witness-candidates-unreadable`, `witness-empty-liveness-map`,
@@ -265,27 +265,8 @@ its watchdog closes an open tracking bead two minutes old
 longer than that can overlap the next one. Each act is therefore safe to run
 twice at once: every write it makes is guarded or changes nothing the second
 time, except that two runs in the same instant can each file a finding (below).
-This area's incidents came from a script that judged liveness from
-state that moved under it. The witness released a step that a fresh session had
-taken under the dead one's alias (tk-8a6akou), and the scratch reaper deleted
-temp directories a live build still used (#1528). The salvage act's guards
-answer that:
-
-- It releases no claim, so no write of its can free a fresh owner's step.
-- It judges an owner dead by the session id and the alias together, from a
-  `gc session list --json` it reads just before each bead, and acts only while
-  no live session answers to either and the bead's assignee is that owner or
-  empty (section 3, the fresh read).
-- Its writes to a bead are bd's conditional updates (`--if-assignee`,
-  `--if-status`), which write nothing once a claim has moved the bead.
-- It removes a tree only through git with no `--force`, and only when the
-  tree is clean and its head is its branch's head on origin, so git refuses a
-  tree holding any change. It deletes no branch.
-- Its push takes the refinery's lease (`branch-push.sh`), so a push never
-  replaces a commit it did not read.
-
-The seat and queue acts only file a finding or a gate, under the key the
-look's reader derives. `patrol-finding.sh` and `human-gate.sh` file nothing
+The acts only file a finding or a gate, under the key the look's reader
+derives. `patrol-finding.sh` and `human-gate.sh` file nothing
 while one is open under that key, though two runs in the same instant can each
 file one, because bd keeps no idempotency at create.
 
@@ -311,12 +292,12 @@ where it goes:
 
 | Today (`formulas/mol-witness-patrol.toml`, `assets/scripts/orphan-dispose.sh`) | After |
 |---|---|
-| Part 1, the candidates: beads naming an owner (`gc.session_id`, then the assignee, then `gc.session_name`), less an in-flight PR, a human route, a conversation and a topology root (:185-278) | The salvage reader, which the look and the act share. A person's hold is read from the open human gate that blocks the bead, not from `gc.routed_to=human`, which the dispatch member cleared from every store. Both pending-record values stay an in-flight PR. |
-| Part 2, the liveness map and its fail safe (:354-481) | The salvage reader, from `gc session list --json`, which lists every session that has not closed. A map that does not load fails the run (section 2). |
+| Part 1, the candidates: beads naming an owner (`gc.session_id`, then the assignee, then `gc.session_name`), less an in-flight PR, a human route, a conversation and a topology root (:185-278) | Retires. Gas City's release takes back the dead claims it reaches, so no pack reader looks for one. Two of the step's rules stay with the refinery look's handoffs (section 2): both pending-record values mark work in a PR, since the look passes over a handoff that carries any `merge_result`, and a person's hold is read through `gctk bead holds` from the open human gate that blocks the bead, not from `gc.routed_to=human`, which the dispatch member cleared from every store. |
+| Part 2, the liveness map and its fail safe (:354-481) | Retires with Part 1. The seat-progress look reads the same default `gc session list --json`, which lists every session that has not closed, and a list that does not load fails its run (section 2). |
 | Part 2b, a live owner's seat (:483-499) | The seat-progress orders. |
-| Part 3, salvage through `branch-context.sh` (:501-627) | The salvage act. `branch-context.sh` retires: the act checks that the bead's `work_dir` shares the rig root's git common directory, as Gas Town's does, and refuses a salvage that does not. The push keeps the refinery's lease (`branch-push.sh`). |
-| Part 4, verify before reset (:629-657) | The salvage act, behind the fresh read below. A landed branch closes the bead and files `witness-orphan-work-landed`. An unknown verdict files the human gate `witness-branch-recovery-unknown`. An unmerged branch is left to Gas City's release. |
-| Part 5, the owning-store guard and the worktree's removal (:659-713) | The salvage act, behind the fresh read below, with Gas Town's checks before a removal: the tree is clean, its head is its branch's head on origin, and the removal takes no `--force` (W:956-1007). `work_dir` is cleared once the tree is gone, so the next claimer cuts a tree on the recorded branch. Gas Town's cleanup takes the same order: it removes the tree, keeps the bead as it is when git refuses (W:1001-1007), and unsets `work_dir` only after the removal (W:1009-1016). |
+| Part 3, salvage through `branch-context.sh` (:501-627) | Retires, with `branch-context.sh`. The session that next claims the work resumes in the worktree `work_dir` records (below). |
+| Part 4, verify before reset (:629-657) | Retires. An unmerged branch is left to Gas City's release, as the step left it. A bead the step would have closed or put to a person is one the week's report records (section 12). |
+| Part 5, the owning-store guard and the worktree's removal (:659-713) | Retires. The tree stays where `work_dir` records it, for the session that next claims the work. |
 | `orphan-dispose.sh` class `review` | Gas City's controller releases it to its review pool, or core's sweep resets it. |
 | class `workflow-root` | No write, as today. |
 | class `workflow-step` | The controller's release, which keeps the step's route, or core's sweep. A step claimed under a live alias stays with that alias. |
@@ -344,44 +325,26 @@ and reports an in-progress step whose holder is not running or names no
 session, once its claim is older than 30 minutes. Nothing reports a dead claim
 on a rig's other beads, such as an open bead assigned to a dead session and
 routed to no pool, which the controller does not release and the sweep, reading
-in-progress claims, does not reach. When each rig's store was read at
+in-progress claims, does not reach, a gap the ruling in conversation tk-5deozip
+accepts. When each rig's store was read at
 2026-11-16T06:57Z, 39 of their 1,154 open and in-progress beads named an
 assignee: one named `human`, and each of the others named a live session.
 Section 14 asks Gas City for a `session-model` that reads every store.
 
-**What salvage still reaches.** A graph.v2 run claims its steps, not its work
+**Why nothing salvages.** A graph.v2 run claims its steps, not its work
 bead, so a run's work bead names no owner, and a released step's next claimer
-enters the recorded worktree and carries on. Salvage reaches a work bead a dead
-session claimed directly, such as a rework child. Neither Gas City release
-clears the bead's `gc.session_id` or `gc.session_name`: the orphan sweep's
-`gc bd release-if-current` writes only the status and the assignee
-(`ReleaseIfCurrent`, `internal/beads/bdstore_conditional_release.go`), and the
-controller clears only the keys `SessionAffinityMetadataKeys` lists
-(`internal/beadmeta/keys.go`). So a released bead still names its dead owner
-until its next claim stamps a new one, and salvage reaches it while it waits in
-the pool. Gas Town's witness keeps only assigned beads, and its text leaves
-that case to a separate salvage scan (W:165-170).
-
-**The fresh read.** A claim can land between the look and the act, and while
-the act works, so the act closes a bead or removes its worktree only on what it
-reads just before it acts, as Gas Town's safety gate does (W:930-992): no live
-session answers to the bead's owner, and the bead's assignee is that owner or
-empty. It removes the worktree first, in the order Gas Town's cleanup and
-`work-submit.sh` take, and then clears `work_dir` in one write guarded by the
-assignee and status it read. When git refuses the removal, the tree and
-`work_dir` both stay, so the next claimer enters the recorded tree and the next
-look finds the bead again.
-
-Two cases leave `work_dir` naming a tree that is gone. In one, the act stops
-between the removal and the write. In the other, a claim lands between the
-fresh read and the removal, git removes the tree, and the guarded write then
-fails. That claimer loses no work: git removes only a clean tree, so a tracked
-or untracked change makes it refuse, and the act deletes no branch, so a commit
-the claimer made stays on the local branch. What a gone tree costs a claimer
-depends on the script its next step runs. `work-setup.sh` cuts a fresh tree in
-its place, and `work-enter.sh` stops on the missing path, so that run goes no
-further until the bead has a tree again. A later act that reaches the bead
-finds no tree at that path and clears `work_dir` in the same guarded write.
+enters the recorded worktree and carries on. A work bead a dead session claimed
+directly, such as a rework child, goes back to the pool when Gas City releases
+it, and its next claimer takes the worktree `work_dir` records while it is on
+disk (`work-setup.sh`) and enters it (`work-enter.sh`). So the work a dead
+session left is where its next session looks for it, and the salvage reader
+and act this design first planned are not built, as the operator ruled
+(conversation tk-5deozip). The ruling's reasons: the witness's recovery has
+stamped nothing since 2026-10-24, its orphan findings in this rig stopped on
+2026-10-03, and no bead was assigned to a dead session when every store was
+read on 2026-11-16, so the act would only tidy after dead sessions. The week's
+report records each case the witness's recovery acts on in its last week, and
+each becomes a bead that fixes it at its source (section 12).
 
 ## 4. The deacon
 
@@ -502,8 +465,8 @@ because the operator holds that interrupts do not belong where a person talks
 with an LLM (conversation tk-9l9pg0x).
 
 **Each monitor order's last good run.** The monitors are the orders whose job
-is to notice a problem: the four orders of sections 2 and 5 that look, Gas
-City's that mail the `human` mailbox, `spawn-storm-detect`, `orphan-sweep`,
+is to notice a problem: the orders of sections 2 and 5 that look, Gas City's
+that mail the `human` mailbox, `spawn-storm-detect`, `orphan-sweep`,
 `reaper`, `mol-dog-doctor` and `mol-dog-backup`, and the dolt pack's
 `dolt-health`, which reports only by failing its run. For each, the
 verb reads the newest `order.completed` event, which Gas City records when an
@@ -773,7 +736,7 @@ Dolt keys. Of the others:
 | `witness-crash-loop` | Retires with no native raise (section 3). |
 | `witness-partial-release` | Retires with the write it reported. |
 | `witness-candidates-unreadable`, `witness-empty-liveness-map`, `witness-refinery-queue-unreadable`, `witness-refinery-queue-unroutable` | The look's run fails, and Gas City's `order-outcome-healthy` reports three failures in a row on the city page (section 2). |
-| `witness-salvage-refused`, `witness-orphan-work-landed`, `witness-unplaceable-owner.<bead>`, and the gate `witness-branch-recovery-unknown` | Kept, filed by the salvage act. No native order reads a worktree. |
+| `witness-salvage-refused`, `witness-orphan-work-landed`, `witness-unplaceable-owner.<bead>`, and the gate `witness-branch-recovery-unknown` | Retire with the witness's orphan recovery, which nothing replaces (section 3). |
 | `no-progress.<session>` | Kept, filed by the seat-progress act. |
 | The gate `witness-refinery-queue` | Kept, filed by the refinery-queue act. |
 | HELP and NOTICE mail findings | Kept, filed by the witness. Mail triage is the witness's judgment. |
@@ -795,7 +758,7 @@ whose callers reach past the patrols.
 | Step today | After | Blocks and tests that go |
 |---|---|---|
 | check-inbox | The witness's prompt. A NOTICE becomes a finding through `gctk mail finding <mail> --key <key>`. | `notice-finding`, and `bug-file`, which becomes one `gc bd create ... --labels hold:mayor` in prose; `notice-finding.test.sh`, and the notice parts of `polecat-human-gate-wiring.test.sh` and `witness-human-gate-wiring.test.sh` |
-| recover-orphaned-beads | `orphan-work-detect` and `orphan-work-salvage` (section 2) | every block of the step; the `candidate-pipeline`, `host-bead-skip`, `downstream-court-skip`, `topology-root-skip`, `liveness-lookup`, `husk-guard`, `salvage-scope-gate`, `owning-store-guard`, `worktree-cleanup`, `recovery-stamp-gate` and `crash-loop-window` tests, about 2,300 lines |
+| recover-orphaned-beads | Retires, with nothing in its place (section 3). | every block of the step; the `candidate-pipeline`, `host-bead-skip`, `downstream-court-skip`, `topology-root-skip`, `liveness-lookup`, `husk-guard`, `salvage-scope-gate`, `owning-store-guard`, `worktree-cleanup`, `recovery-stamp-gate` and `crash-loop-window` tests, about 2,300 lines |
 | its branch 2b | `seat-progress-detect` and `seat-progress-report`, with `seat-progress.sh` moved into gctk | `no-progress-finding`; `witness-route.test.sh` |
 | check-refinery | `refinery-queue-detect` and `refinery-queue-report` | `refinery-stuck-handoff`; its test |
 | next-iteration | Retires. | `patrol-wisp-pour`; the witness cases of `patrol-wisp-reconcile.test.sh`, `patrol-pour-vars.test.sh` and `witness-nudge.test.sh` |
@@ -819,7 +782,7 @@ scratch pack with that line, and the binding's resolution stays tested.
 | No new continuation that waits on the model; the witness-nudge order goes with the loop it serves (tk-r4c0g67, tk-q4tvdyo, tk-afr00th) | The loop and the order both go (section 1). The deacon's hook goes (section 4). |
 | Worked is judged by a live run (tk-v6d9rka) | Section 8 |
 | No suspended-rig exception; a stale store's alarm is real except when the store is idle (tk-56m3hts, tk-cpfrmai, tk-veejeg2, tk-0m719df, tk-r358gzg, tk-qdunipz) | Section 7: the deacon's manifest-age judge that raised the idle stores' alarm retires, and `bd-backup-freshness` reads an idle store current. `mol-dog-doctor` keeps the manifest-age rule, so its advisory misreads an idle store until Gas City changes it (sections 6 and 14, ask 2). |
-| Import or copy, the `work_dir` layout, check-polecat-health, the side-by-side week (visit tk-dbpz6t2) | Sections 1, 2 and 12 |
+| Import or copy, the `work_dir` layout, check-polecat-health, the side-by-side week (visit tk-dbpz6t2) | Sections 1, 2, 3 and 12 |
 | Every waiting bead reachable by title (tk-ppqwgmo) | Section 8 |
 | dolt-compact-state's designed retry (first reaction to tk-fijsqig, tk-945d0wq) | Section 5 |
 | Read the default `gc session list --json`, not `--state all` (tk-1wfb7bd) | Section 3 |
@@ -827,7 +790,7 @@ scratch pack with that line, and the binding's resolution stays tested.
 | A placed bead whose run ended; `mayor/` mail in a copy (tk-rl8gz4b.30) | Sections 8 and 1 |
 | `dispatch-path.test.sh` drops the deleted readers (tk-rl8gz4b.32) | Section 12, unit 6 |
 | `hold:external` is its own wait (tk-rl8gz4b.32's self-review) | Section 8 |
-| One shared "is anything live behind this bead" (tk-8gradm4.7) | The census's copies retire, and the salvage reader is the one the look and the act share (sections 2 and 3). Its closer checks what remains. |
+| One shared "is anything live behind this bead" (tk-8gradm4.7) | The census's copies retire, and no reader in this design takes their place, since the salvage reader is not built (sections 3 and 8). Its closer checks what remains. |
 | A person's hold read from the open human gate (tk-1tfzr71.37) | Section 3 |
 | Run `gc doctor` where no restart reaches it, and every non-ok result reaches the operator (tk-1vdtaza, tk-9h0w9y5) | Section 5: one Go pass with no agent turn records every non-ok result in the run's event. |
 | No route restored from `gc.execution_routed_to`, and no route counted as an offer (dispatch design tk-1tfzr71.54) | Sections 3 and 8 |
@@ -853,8 +816,8 @@ order beside the step it replaces for a week, compare what each finds, and
 retire a step only when the order caught everything it did. A pack order cannot
 run in the city before the pack's main carries it, so the work lands twice.
 The first landing adds only what reads or shows, so it can run beside the old
-patrols with no second writer: the doctor order, the three orders that look
-and the city page. The second retires what they replace and adds the orders
+patrols with no second writer: the doctor order, the two orders that look and
+the city page. The second retires what they replace and adds the orders
 that act, once a week's comparison says the looks caught what the steps did.
 Gas City's own orders already run beside the patrols, so the comparison reads
 them from the stores and the event log as well.
@@ -872,7 +835,7 @@ that closes, because they edit the same pages and the plan.
 | Unit | What it does | Waits on |
 |---|---|---|
 | 1. The doctor order | `gctk doctor run`, `orders/doctor-run.toml`, the run's event and `doctor/accepted.toml` with its two entries (section 5); the keyed-problem-record warrant for the patrol finding (section 10). It adds the plan's rows for the whole files the second landing retires, beyond the twenty listed. Its PR shows a run's event against the live city beside the deacon's open doctor findings. | nothing |
-| 2. The looks | `gctk worktree salvage`, `gctk session progress` and `gctk refinery stuck` with their reads, and the three detect orders (section 2), which record events and write nothing else. Its PR shows each look's run against the live city beside the witness's last week of findings and acts. | unit 1 |
+| 2. The looks | `gctk session progress` and `gctk refinery stuck` with their reads, and the two detect orders (section 2), which record events and write nothing else. Its PR shows each look's run against the live city beside the witness's last week of findings and acts. | unit 1 |
 | 3. The city page | The board's city page: when doctor last ran, the failing checks it shows, the checks not measured, the accepted checks and each monitor's last good run (section 5), under the board's design rules of rows, one rendering per object and a lead that can reach zero. | unit 2 |
 
 A cutover bead armed on the first landing opens a seven-day timer gate, which
@@ -881,17 +844,18 @@ Gas City's gate sweep closes on its own.
 **The comparison.** A report task waits on the first landing and the timer
 gate. It reads the week from the stores and the event log: each look's events
 beside what the witness's step acted on and filed, each doctor run's event
-beside the deacon's doctor findings, and what Gas City's release and orphan
-sweep did with the same beads. It records the comparison on the second
-landing's bead. A case a look missed is filed as a bead that blocks the unit
-retiring its step.
+beside the deacon's doctor findings, each case the witness's orphan recovery
+acted on, and what Gas City's release and orphan sweep did with the same
+beads. It records the comparison on the second landing's bead. A case a look
+missed, and each case the orphan recovery acted on, is filed as a bead that
+blocks the unit retiring its step.
 
 **The second landing**, on an integration branch of its own, which the
 implementation child files with its landing bead and summary task:
 
 | Unit | What it does | Waits on |
 |---|---|---|
-| 4. The acts and the witness | `--act` for each of the three verbs, with its guards (section 2), and the three act orders; the witness on demand, its prompt and the senders' `--notify` (section 1); `formulas/mol-witness-patrol.toml`, `orders/witness-nudge.toml`, `witness-nudge.sh`, `orphan-dispose.sh`, `branch-context.sh` and `seat-progress.sh` go, with their tests and the step extraction tests (section 10); `pack-self-location.test.sh` takes its own root-only formula; the pages and skills that describe the witness's loop or its recovery follow, among them `docs/authority-map.md` and `docs/component-model.md`. | the comparison |
+| 4. The acts and the witness | `--act` for each of the two verbs, with its guards (section 2), and the two act orders; the witness on demand, its prompt and the senders' `--notify` (section 1); `formulas/mol-witness-patrol.toml`, `orders/witness-nudge.toml`, `witness-nudge.sh`, `orphan-dispose.sh`, `branch-context.sh` and `seat-progress.sh` go, with their tests and the step extraction tests (section 10); `pack-self-location.test.sh` takes its own root-only formula; the pages and skills that describe the witness's loop or its recovery follow, among them `docs/authority-map.md` and `docs/component-model.md`. | the comparison |
 | 5. The deacon retires | `agents/deacon/`, its named session and the pack's patch for it, `formulas/mol-deacon-patrol.toml`, `doctor-sweep.sh` and its test, boot health's three files, `gc-deacon-ledger.sh` and its test, the continue hook with its test and settings entry, `human-gate.sh`'s ledger append, `check-hq-marooned-work`'s ledger exemption, the deacon and boot health in `patrol-finding.sh`'s caller list and its reserved `doctor-*` keys, the deacon's tests and the pages that name them, among them `docs/pack-authoring.md`'s patrol startup section (tk-a89659h). The city page landed first, so the deacon's doctor step retires after the board shows doctor's results. | unit 4 |
 | 6. The census retires | the census's eight files and its order, `standing-kinds.sh` with its test and its readers' exclusions, the reader lists of `dispatch-path.test.sh` and `run-lib.test.sh`, `skills/converse-prep`'s re-check, the witness prompt's line about the sweep, and the pages and registry entries that name the census or the bucket kind. It brings the branch current with main first, so #1531's edit of `liveness-sweep.sh` arrives before the deletion. | unit 5 |
 

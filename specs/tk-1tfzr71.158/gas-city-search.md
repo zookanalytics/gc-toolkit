@@ -95,14 +95,14 @@ split a read from its act:
   (`docs/tutorials/07-orders.md`, condition), which suits no store read across
   every rig.
 
-**Gap.** Gas Town's salvage, on the keys our polecats write, pushed under the
-refinery's lease, read in one order and acted on in another. A cooldown order
-looks and records an event with `gc event emit`, and an event order acts after
-reading again. Each verb releases nothing. The `work_dir` clear that follows a
-removal is bd's conditional update, which writes nothing once the assignee or
-status it names has moved (`--if-assignee`, `--if-status`, beads v1.3.4
-`cmd/bd/update.go`). Overlapping runs need no lock of their own, because each
-act's writes are guarded or change nothing the second time.
+**Gap.** None for salvage. Gas City releases a dead session's claim, and the
+session that next claims the work resumes in the worktree its `work_dir`
+records (`work-setup.sh`, `work-enter.sh`), so the design builds no salvage, as
+the operator ruled in conversation tk-5deozip. For the seat and queue checks,
+a read in one order and its act in another: a cooldown order looks and records
+an event with `gc event emit`, and an event order acts after reading again.
+Each verb releases nothing. Overlapping runs need no lock of their own, because
+each act's writes are guarded or change nothing the second time.
 
 ## `gctk session progress`
 
