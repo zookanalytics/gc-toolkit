@@ -74,29 +74,21 @@ asking questions is not a go. A part of those kinds that the course did not
 name goes back to them in a hand-back's decision that restates the course, and
 the conversation stays open until they rule (`converse-continue`).
 
-Its order is the description of a task you file, in this rig's store or
-another's, or the brief of a rework the sign-off files (below), and it keeps
-the course apart from their words and from what is yours alone:
+Write the order in your own voice: what needs doing, why, and what done looks
+like, with each point the operator raised carried into it. Quote their words
+where their words carry the point, and never write your reading as their
+ruling.
 
-- `Agreed with the operator:` the course, copied as you last put it to them or
-  quoted as they stated it, and not summed up again, with where and in what
-  words they agreed.
-- `Their words, as direction:` the words of theirs the course rests on, quoted,
-  with where they said them, or `none`.
-- `This sitting's own:` each part of the order the course does not state, such
-  as an approach or a name, or `none`.
-
-In the block below, the description goes through a quoted heredoc, so what it
-quotes stays as written, and the sling runs only once the create has returned
-the bead's id. The comment then records the dispatch as one of the visit's
-actions, which the comment on the subject's PR lists:
+The order is the description of a task you file, in this rig's store or
+another's, or the brief of a rework the sign-off files (below). In the block
+below, the description goes through a quoted heredoc, so what it quotes stays
+as written, and the sling runs only once the create has returned the bead's id.
+The comment then records the dispatch as one of the visit's actions, which the
+comment on the subject's PR lists:
 
 ```bash
 DESC=$(cat <<'BLOCK'
-<what needs doing, why, and what done looks like>
-Agreed with the operator: <the course, copied or quoted, with where and in what words they agreed>
-Their words, as direction: <the words of theirs the course rests on, quoted, with where they said them, or none>
-This sitting's own: <each part of the order the course does not state, or none>
+<what needs doing, why, and what done looks like, with each point the operator raised>
 BLOCK
 ) \
   && WORK=$(gc bd create "<title>" -t task -d "$DESC" --json | jq -er '.id') \
@@ -128,20 +120,18 @@ lands, in one plain sentence that names no other rig or its beads.
   ```
 
 **A rework's order is its ruling line**, which the sign-off hands the rework
-as the ruling to carry out (`--rework`, below). A line that carries the course
-they agreed to whole and adds nothing of yours is the whole order, as when they
-stated the course themselves, naming the act and what it does. When the course
-needs more than one line, write the order in the notes of the PR's anchor, the
-bead that carries its `merge_result`. A scaffold is such an order already,
-because the operator ruled each of its lines (`converse-iterate-document`):
+as the operator's ruling (`--rework`, below), so the line carries their words
+or names a brief, never your reading. A line that quotes their words and adds
+nothing of yours is the whole order. When the rework needs more than their
+words, write the order in the notes of the PR's anchor, the bead that carries
+its `merge_result`. A scaffold is such an order already, because the operator
+ruled each of its lines (`converse-iterate-document`):
 
 ```bash
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
   && BRIEF="## Rework brief ($NOW)
 $(cat <<'BLOCK'
-Agreed with the operator: <the course, copied or quoted, with where and in what words they agreed>
-Their words, as direction: <the words of theirs the course rests on, quoted, with where they said them, or none>
-This sitting's own: <each part of the order the course does not state, or none>
+<what needs doing, why, and what done looks like, with each point the operator raised>
 BLOCK
 )" \
   && gc bd update <anchor> --append-notes "$BRIEF" \
