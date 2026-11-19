@@ -19,8 +19,7 @@
 # checkout: a range-diff that shows each fork commit beside its rebased form, and
 # the push, whose lease is pinned to pre_rebase_tip resolved to a SHA, so git
 # refuses a push onto a main that moved after the rebase. It also carries the
-# drop, for a rebase the operator will not land, which takes the gate back from
-# them and then runs stand-down.sh.
+# drop, for a rebase the operator will not land, which runs stand-down.sh.
 #
 # finish fetches origin in the rig checkout and reads origin/<target> against
 # <branch>, the local branch the gate's push sends:
@@ -176,6 +175,7 @@ ask_operator() {
   # The operator runs these as written, so each argument is quoted for a shell.
   range=$(printf 'git -C %q range-diff %q %q %q' "$RIG_ROOT" "$onto" "$pre" "$BRANCH")
   push=$(printf 'git -C %q push %q origin %q' "$RIG_ROOT" "--force-with-lease=$TARGET:$pre" "$BRANCH:$TARGET")
+  drop=$(printf "%q %q --key %q --ruling '<why>'" "$KIT/stand-down.sh" "$ISSUE" "$KEY")
   message="Land gascity rebase $ISSUE: review its range-diff, then force-push $BRANCH onto $TARGET
 ${1:+$1
 
@@ -189,23 +189,15 @@ Land it:
 
 Then clear this gate. $ISSUE waits on it, and clearing it runs the landing check, which closes $ISSUE once $TARGET holds the rebased tip and brings the rig checkout's $TARGET along when that is safe.
 
-A push git rejects as stale info means $TARGET moved after the rebase. Clear this gate anyway: the landing check then hands $ISSUE back to the keeper, to redo the rebase or drop it. A push refused for another reason, such as missing credentials, a network failure or branch protection, leaves $TARGET where it was. Fix the cause and push again: a landing check that finds $TARGET still at the pre-rebase tip asks again."
+A push git rejects as stale info means $TARGET moved after the rebase. Clear this gate anyway: the landing check then hands $ISSUE back to the keeper, to redo the rebase or drop it. A push refused for another reason, such as missing credentials, a network failure or branch protection, leaves $TARGET where it was. Fix the cause and push again: a landing check that finds $TARGET still at the pre-rebase tip asks again.
+
+To drop the rebase instead, do not clear this gate: run $drop, which stands the rebase down and answers this gate with your reason."
   gate=$("$KIT/human-gate.sh" --subject "$ISSUE" --key "$KEY" --message "$message" | tail -n 1) && [ -n "$gate" ] \
     || { echo "$PROG: human-gate.sh filed no landing gate on $ISSUE" >&2; exit 1; }
   # The push is the operator's alone, so the gate is assigned to them (the
-  # waits skill: an action only a named person performs). stand-down.sh leaves
-  # a gate a person is assigned to that person, so the drop takes the gate back
-  # from them first. It names the gate by its id, which the filing made, so the
-  # write that assigns the gate also gives it the whole message, the drop
-  # included. The take-back is guarded to an open gate, and the stand-down runs
-  # whatever the take-back answers, so a drop run again after its stand-down
-  # answered the gate still reaches the stand-down, which converges.
-  drop=$(printf "gc bd update %q --if-status open --assignee ''; %q %q --key %q --ruling '<why>'" "$gate" "$KIT/stand-down.sh" "$ISSUE" "$KEY")
-  message="$message
-
-To drop the rebase instead, do not clear this gate: run $drop, which takes this gate back from you and then stands the rebase down."
-  gc bd update "$gate" --assignee "$OPERATOR" --description "$message" </dev/null >/dev/null 2>&1 \
-    || { echo "$PROG: gate $gate asks for the landing of $ISSUE, but the store refused its assignment to $OPERATOR and the drop in its message" >&2; exit 1; }
+  # waits skill: an action only a named person performs).
+  gc bd update "$gate" --assignee "$OPERATOR" </dev/null >/dev/null 2>&1 \
+    || { echo "$PROG: gate $gate asks for the landing of $ISSUE, but the store refused its assignment to $OPERATOR" >&2; exit 1; }
   "$KIT/await-ruling.sh" "$ISSUE" --key "$KEY" --formula "$FINISH_FORMULA" >/dev/null \
     || { echo "$PROG: gate $gate asks for the landing of $ISSUE, but the arm behind it did not land" >&2; exit 1; }
   echo "$PROG: $ISSUE waits on gate $gate, assigned to $OPERATOR, for the push; clearing it runs $FINISH_FORMULA"

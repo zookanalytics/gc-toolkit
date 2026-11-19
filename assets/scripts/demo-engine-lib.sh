@@ -81,9 +81,18 @@
 #     listening on its port works in a worktree of a rig whose app_reads_city
 #     is "false". No variable that points at the city may name the port. A
 #     rig's checkout, which holds its store, and the city's own repository
-#     never count as such a worktree.
-# A run with no sandbox is refused in each of these cases but the first. A host
-# without sandbox-exec runs no capture at all.
+#     never count as such a worktree;
+#   - the run takes a copy that `gctk rig serve` runs, the one that holds its
+#     --base-url's port or the one whose app demo_engine_copy served, and a run
+#     that captures from that copy's checkout keeps the sandbox, while the
+#     copy's report does not say that its serve command runs inside it. A copy
+#     keeps the reach it started with, so such a copy either started while its
+#     rig's app_reads_city read "false", and can reach the live city, or a gctk
+#     from before that report started it, and nothing shows how it runs. The
+#     refusal stops no copy: one the capture started is demo_engine_copy_stop's
+#     to end.
+# A run with no sandbox is refused in each of these cases but the first and the
+# last. A host without sandbox-exec runs no capture at all.
 #
 # app_reads_city is a formula var that mol-rig-demo declares with the default
 # "false". A city sets it to "true" in city.toml for each rig whose app reads
@@ -105,11 +114,12 @@
 #     that copy's app, as an iOS app's is;
 #   - its --serve-dir and its --cwd;
 #   - its working directory, when it names none of those.
-# A copy's serve command captures from the copy's own checkout. A directory in
-# no rig's repository, or in the city's own, keeps the sandbox. A run with no
-# sandbox runs as an ordinary process, without the variables above, so it
-# reaches what the rig's own tests reach on this host, the live city included
-# when the rig's app or its demo script calls it.
+# A copy's serve command captures from the copy's own checkout, judged as the
+# command starts, and runs so until it stops. A directory in no rig's
+# repository, or in the city's own, keeps the sandbox. A run with no sandbox
+# runs as an ordinary process, without the variables above, so it reaches what
+# the rig's own tests reach on this host, the live city included when the rig's
+# app or its demo script calls it.
 #
 #   demo_engine_resolve  Checks that this host has the sandbox and checks Node
 #                        against the engine's floor, finds the engine, checks
@@ -143,11 +153,17 @@
 #                        and <dir> what it reads and writes, as a capture's
 #                        --cwd, or as an ordinary process when <dir> lies in the
 #                        repository of a rig whose app_reads_city is "false",
-#                        which it says on stderr. `gctk rig serve` runs a copy's
-#                        serve command through it. The shell becomes the
-#                        command, so its exit status is the command's and
-#                        nothing after the call runs. Returns 1, having said why
-#                        on stderr, when the run is refused.
+#                        which it says on stderr. When
+#                        DEMO_ENGINE_SANDBOX_RECORD names a file, it writes
+#                        there whether the command runs inside the sandbox,
+#                        true or false, before the command starts, and the
+#                        command runs without that variable. `gctk rig serve`
+#                        runs a copy's serve command through it, names a file
+#                        of the copy's record, and reports what it holds as the
+#                        copy's sandboxed. The shell becomes the command, so its
+#                        exit status is the command's and nothing after the call
+#                        runs. Returns 1, having said why on stderr, when the run
+#                        is refused or that file cannot be written.
 #   demo_engine_copy <dir> <command>
 #                        Serves an app a command serves as a copy that `gctk
 #                        rig serve` runs from the checkout <dir> sits in, with
@@ -161,9 +177,12 @@
 #                        run one after another. One that already runs the
 #                        command is the one captured, and it keeps running
 #                        after the capture, and one that runs another command
-#                        is refused. One this call's start reports it ran is
-#                        demo_engine_copy_stop's to end. Returns 1, having said
-#                        why on stderr, when no copy of the command runs.
+#                        is refused. When a capture from its checkout keeps
+#                        the sandbox, demo_engine_cli refuses one whose report
+#                        does not say that it runs inside it. One this call's
+#                        start reports it ran is demo_engine_copy_stop's to end.
+#                        Returns 1, having said why on stderr, when no copy of
+#                        the command runs.
 #   demo_engine_copy_stop
 #                        Ends the copy demo_engine_copy started, if it started
 #                        one.
@@ -642,18 +661,20 @@ _demo_engine_reads_city() {
 # _demo_engine_local_no <url> <reason>: says why a capture does not reach the
 # server a --base-url on this host names, and returns 1.
 _demo_engine_local_no() {
-  _demo_engine_say "--base-url $1 names a server on this host, which runs outside the capture's sandbox. A capture reaches one only when a copy that gctk rig serve runs holds its port, or a worktree of a rig whose $DEMO_ENGINE_READS_CITY_VAR is \"false\" serves it, and here $2. Serve the app as a copy with gctk rig serve, which runs it inside the sandbox, or with --serve-dir, or capture a deployed preview"
+  _demo_engine_say "--base-url $1 names a server on this host, which runs outside the capture's sandbox. A capture reaches one only when a copy that gctk rig serve runs holds its port, or a worktree of a rig whose $DEMO_ENGINE_READS_CITY_VAR is \"false\" serves it, and here $2. Serve the app as a copy with gctk rig serve, which runs it inside the sandbox for a rig that keeps it, or with --serve-dir, or capture a deployed preview"
   return 1
 }
 
 # _demo_engine_copy_port <port> <pids>: true when a copy that gctk rig serve
 # runs holds the port, as gctk rig serve --check answers in the checkout one of
 # the processes listening there works in, with _DEMO_ENGINE_COPY set to that
-# checkout. That holds only for a copy that is up by its port, whose report
-# names its app at a loopback URL on its own port: the check reports one so
-# only while every process that listens on that port at an address loopback
-# reaches is in the copy's own process group, whose serve command runs inside
-# this sandbox. A copy whose serve command printed its app's URL, such as an
+# checkout and _DEMO_ENGINE_COPY_SANDBOXED to the report's sandboxed: true when
+# the copy's serve command runs inside the sandbox, false when it runs as an
+# ordinary process, and null when the report does not say. That holds only for
+# a copy that is up by its port, whose report names its app at a loopback URL
+# on its own port: the check reports one so only while every process that
+# listens on that port at an address loopback reaches is in the copy's own
+# process group. A copy whose serve command printed its app's URL, such as an
 # iOS app's, is up whatever listens on its port, so its report names that URL,
 # and a server on its port is judged as any other.
 _demo_engine_copy_port() {
@@ -669,6 +690,7 @@ _demo_engine_copy_port() {
     app=$(printf '%s' "$rep" | jq -r --argjson p "$port" 'select(.state == "running" and .port == $p) | .app_url // empty' 2>/dev/null)
     if [ -n "$app" ] && _demo_engine_loopback "$app" && [ "$(_demo_engine_url_port "$app")" = "$port" ]; then
       _DEMO_ENGINE_COPY=$top
+      _DEMO_ENGINE_COPY_SANDBOXED=$(printf '%s' "$rep" | jq -r '.sandboxed' 2>/dev/null)
       return 0
     fi
   done <<EOF
@@ -681,15 +703,16 @@ EOF
 # file's header lets a capture reach the server a --base-url on this host names,
 # sets _DEMO_ENGINE_LOCAL_PORT to its port and _DEMO_ENGINE_LOCAL_FROM to the
 # checkouts a capture of it captures from, one per line. For a copy,
-# _DEMO_ENGINE_LOCAL_KIND reads copy and the checkout is the copy's. For a
-# server worktrees of rigs whose app_reads_city is "false" serve, it reads
-# served, the checkouts are the directories its listeners work in, and
-# _DEMO_ENGINE_LOCAL_RIG is the rig of the last of them. Returns 1, having said
-# why, otherwise.
+# _DEMO_ENGINE_LOCAL_KIND reads copy, the checkout is the copy's, and
+# _DEMO_ENGINE_LOCAL_SANDBOXED is what the copy's report says of the sandbox, as
+# _demo_engine_copy_port reads it. For a server worktrees of rigs whose
+# app_reads_city is "false" serve, it reads served, the checkouts are the
+# directories its listeners work in, and _DEMO_ENGINE_LOCAL_RIG is the rig of
+# the last of them. Returns 1, having said why, otherwise.
 _demo_engine_local_port() {
   local url="$1" port v val pids pid dir dirs="" checkout="" NL='
 '
-  _DEMO_ENGINE_LOCAL_PORT=""; _DEMO_ENGINE_LOCAL_FROM=""; _DEMO_ENGINE_LOCAL_KIND=""; _DEMO_ENGINE_LOCAL_RIG=""
+  _DEMO_ENGINE_LOCAL_PORT=""; _DEMO_ENGINE_LOCAL_FROM=""; _DEMO_ENGINE_LOCAL_KIND=""; _DEMO_ENGINE_LOCAL_RIG=""; _DEMO_ENGINE_LOCAL_SANDBOXED=""
   port=$(_demo_engine_url_port "$url") || { _demo_engine_local_no "$url" "the URL names no port from 1 to 65535"; return 1; }
   while IFS='=' read -r v val; do
     case "$v" in
@@ -708,6 +731,7 @@ _demo_engine_local_port() {
   [ -n "$pids" ] || { _demo_engine_local_no "$url" "no process of yours listens on port $port, so nothing shows whose server answers there"; return 1; }
   if _demo_engine_copy_port "$port" "$pids"; then
     _DEMO_ENGINE_LOCAL_PORT=$port; _DEMO_ENGINE_LOCAL_FROM=$_DEMO_ENGINE_COPY; _DEMO_ENGINE_LOCAL_KIND=copy
+    _DEMO_ENGINE_LOCAL_SANDBOXED=$_DEMO_ENGINE_COPY_SANDBOXED
     return 0
   fi
   while IFS= read -r pid; do
@@ -765,9 +789,38 @@ _demo_engine_plain_why() {
   printf '%s\n' "the repository of ${_DEMO_ENGINE_PLAIN_RIGS//"$NL"/ and }, whose $DEMO_ENGINE_READS_CITY_VAR is \"false\""
 }
 
+# _demo_engine_copy_refused <url> <checkout> <sandboxed>: after
+# _demo_engine_city, true, having said why, when a run may not take the copy
+# that gctk rig serve runs from the checkout, whose app the URL is: a run that
+# captures from the checkout keeps the sandbox, and the copy's report, whose
+# sandboxed it is given, does not say the copy's serve command runs inside it.
+# A copy runs as the setting read when it started, until it stops, so such a
+# copy either started while its rig's app_reads_city read "false", and can reach
+# the live city, or a gctk from before that report started it, and nothing shows
+# how it runs. It stops no copy: one the run found may serve another caller, and
+# one the capture started is demo_engine_copy_stop's to end.
+_demo_engine_copy_refused() {
+  local how where checkout
+  [ "$3" != true ] || return 1
+  _DEMO_ENGINE_READS_WHY=""
+  _demo_engine_keeps_sandbox "$2" || return 1
+  case "$3" in
+    false) how=" as an ordinary process, as its report says" ;;
+    *) how=", and its report does not say that it runs inside the sandbox" ;;
+  esac
+  checkout=$(_demo_engine_rig_of "$2")
+  if [ -n "$checkout" ] && [ -n "${_DEMO_ENGINE_READS_WHY:-}" ]; then
+    where="the repository of $checkout, $_DEMO_ENGINE_READS_WHY"
+  else
+    where="no rig's repository, or in the city's own"
+  fi
+  _demo_engine_say "--base-url $1 is the app of a copy that gctk rig serve runs from $2$how. A capture from $2 keeps the sandbox now, because it lies in $where, and a copy keeps the reach it started with, so the capture refuses the copy: gctk rig serve --stop, run from $2, ends it, and the next copy starts inside the sandbox"
+  return 0
+}
+
 demo_engine_cli() {
   local NL='
-' pos="" port="" open="" base="" serve_dir="" cand="" files="" from="" kind=""
+' pos="" port="" open="" base="" serve_dir="" cand="" files="" from="" kind="" served=""
   local -a args
   _demo_engine_sandbox_ok || return 1
   args=("$@")
@@ -850,11 +903,25 @@ demo_engine_cli() {
   # checkouts its arguments name, and from its working directory when it names
   # none of those. It keeps the sandbox unless each checkout it captures from is
   # a rig's whose app_reads_city is "false".
-  if [ -n "$base" ] && [ "$base" = "${DEMO_ENGINE_COPY_URL:-}" ] && [ -n "${_DEMO_ENGINE_COPY_DIR:-}" ]; then from="$from$NL$_DEMO_ENGINE_COPY_DIR"; fi
+  if [ -n "$base" ] && [ "$base" = "${DEMO_ENGINE_COPY_URL:-}" ] && [ -n "${_DEMO_ENGINE_COPY_DIR:-}" ]; then from="$from$NL$_DEMO_ENGINE_COPY_DIR"; served=1; fi
   [ -n "$from" ] || from=$(pwd -P)
   if _demo_engine_keeps_sandbox "$from"; then
+    # A copy keeps the reach it started with, so a run that keeps the sandbox
+    # takes its copy only as the copy's report says it runs: the copy that holds
+    # the --base-url's port, or else the copy whose app, such as an iOS app's,
+    # demo_engine_copy served.
+    if [ "$kind" = copy ]; then
+      if _demo_engine_copy_refused "$base" "$_DEMO_ENGINE_LOCAL_FROM" "${_DEMO_ENGINE_LOCAL_SANDBOXED:-}"; then return 1; fi
+    elif [ -z "$kind" ] && [ -n "$served" ]; then
+      if _demo_engine_copy_refused "$base" "$_DEMO_ENGINE_COPY_DIR" "${_DEMO_ENGINE_COPY_DIR_SANDBOXED:-}"; then return 1; fi
+    fi
     case "$kind" in
-      copy) _demo_engine_say "--base-url $base is a copy that gctk rig serve runs from $_DEMO_ENGINE_LOCAL_FROM inside the sandbox, so the capture reaches port $open and no other loopback port" ;;
+      copy)
+        if [ "${_DEMO_ENGINE_LOCAL_SANDBOXED:-}" = true ]; then
+          _demo_engine_say "--base-url $base is a copy that gctk rig serve runs from $_DEMO_ENGINE_LOCAL_FROM inside the sandbox, so the capture reaches port $open and no other loopback port"
+        else
+          _demo_engine_say "--base-url $base is a copy that gctk rig serve runs from $_DEMO_ENGINE_LOCAL_FROM, which lies in $(_demo_engine_plain_why), so the copy need not run inside the sandbox, and the capture reaches port $open and no other loopback port"
+        fi ;;
       served) _demo_engine_say "--base-url $base is served from a worktree of $_DEMO_ENGINE_LOCAL_RIG, whose $DEMO_ENGINE_READS_CITY_VAR is \"false\", so the capture reaches port $open and no other loopback port" ;;
     esac
     _demo_engine_sandbox_run "$open" "$cand" "$files" "$@" ${args[@]+"${args[@]}"}
@@ -870,7 +937,8 @@ demo_engine_cli() {
 }
 
 demo_engine_sandboxed() {
-  local port="${1:-}" dir="${2:-}"
+  local port="${1:-}" dir="${2:-}" record="${DEMO_ENGINE_SANDBOX_RECORD:-}"
+  unset DEMO_ENGINE_SANDBOX_RECORD
   [ $# -ge 3 ] || { _demo_engine_say "demo_engine_sandboxed needs a port, a directory and a command"; return 1; }
   shift 2
   _demo_engine_sandbox_ok || return 1
@@ -881,15 +949,29 @@ demo_engine_sandboxed() {
   [ -d "$dir" ] || { _demo_engine_say "'$dir' is not a directory"; return 1; }
   _demo_engine_city || return 1
   # The shell becomes the command, so its output ends once the command closes
-  # it, the end gctk rig serve reads an app's URL up to.
+  # it, the end gctk rig serve reads an app's URL up to. The record is written
+  # before the command starts, so a copy is never up before it says how it runs.
   if ! _demo_engine_keeps_sandbox "$dir"; then
     _demo_engine_say "the command runs as an ordinary process, with no sandbox, because $dir lies in $(_demo_engine_plain_why)"
+    _demo_engine_record_sandbox "$record" false || return 1
     _demo_engine_env
     exec "${_DEMO_ENGINE_ENV[@]}" "$@"
   fi
   _demo_engine_sandbox "$port" "$(pwd -P)
 $dir" "" || return 1
+  _demo_engine_record_sandbox "$record" true || return 1
   exec "${_DEMO_ENGINE_SANDBOX[@]}" "$@"
+}
+
+# _demo_engine_record_sandbox <file> <true|false>: writes to the file, when one
+# is named, whether the command demo_engine_sandboxed runs next runs inside the
+# sandbox, by a rename, so a reader never sees half of it. Returns 1, having
+# said why, when the file cannot be written.
+_demo_engine_record_sandbox() {
+  [ -n "$1" ] || return 0
+  { printf '%s\n' "$2" >"$1.tmp" && mv -f "$1.tmp" "$1"; } 2>/dev/null && return 0
+  _demo_engine_say "$1, where the command's record says whether it runs inside the sandbox, could not be written, so the command does not run"
+  return 1
 }
 
 # _demo_engine_env: sets _DEMO_ENGINE_ENV to the words that, with a command
@@ -1004,7 +1086,7 @@ _demo_engine_gctk() { printf '%s\n' "${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/
 
 demo_engine_copy() {
   local dir="${1:-}" command="${2:-}" gctk rep state
-  DEMO_ENGINE_COPY_URL=""; DEMO_ENGINE_COPY_STOP=""; _DEMO_ENGINE_COPY_DIR=""
+  DEMO_ENGINE_COPY_URL=""; DEMO_ENGINE_COPY_STOP=""; _DEMO_ENGINE_COPY_DIR=""; _DEMO_ENGINE_COPY_DIR_SANDBOXED=""
   gctk=$(_demo_engine_gctk)
   [ -x "$gctk" ] || { _demo_engine_say "no gctk binary at $gctk, which runs the copy a capture serves the app as; the gctk-build order publishes it, or set GCTK_BIN"; return 1; }
   [ -d "$dir" ] || { _demo_engine_say "'$dir' is not a directory to serve the app from"; return 1; }
@@ -1027,6 +1109,7 @@ demo_engine_copy() {
   DEMO_ENGINE_COPY_URL=$(printf '%s' "$rep" | jq -r '.app_url // empty' 2>/dev/null)
   [ -n "$DEMO_ENGINE_COPY_URL" ] || { _demo_engine_say "gctk rig serve reported no app_url, where the app's copy is"; return 1; }
   _DEMO_ENGINE_COPY_DIR=$dir
+  _DEMO_ENGINE_COPY_DIR_SANDBOXED=$(printf '%s' "$rep" | jq -r '.sandboxed' 2>/dev/null)
 }
 
 demo_engine_copy_stop() {
