@@ -923,8 +923,11 @@ the first once the refinery is assigned the bead. Gas City does not promise one
 run per bead here: each attach onto a bare bead makes an input convoy of its
 own, and "A caller that wants stable grouping or dedupe should create and
 target an explicit convoy" (gascity
-`engdocs/design/convoy-first-formulas-and-drain-v0.md`). The pack carries no
-code for this gap.
+`engdocs/design/convoy-first-formulas-and-drain-v0.md`). Measured on
+2026-11-19, the 49 attaches the order made on 2026-11-17 wrote the edge 6 to 21
+seconds after the run's root was created, about 10 on average, and none of the
+135 review runs poured from 2026-11-17 to 2026-11-19 lacks its edge. The pack
+carries no code for this gap, and nothing in it watches for such a run.
 
 **How the refinery hears of a changed head.** A changed head is the refinery's
 to take once no withdrawal is open on the bead and no review run is attached to
