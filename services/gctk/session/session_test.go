@@ -297,65 +297,21 @@ func TestAnUnrecordedEventFailsTheRun(t *testing.T) {
 	}
 }
 
-// A live session answers to each identity it carries, and to an identity whose
-// last path segment one of them shares when no session carries that identity
-// exactly. A dead session answers to none.
-func TestAnswers(t *testing.T) {
-	live, err := Read([]gascity.Session{
-		{ID: "hq-a", Name: "rig__polecat-hq-a", SessionName: "rig__polecat-hq-a", AgentName: "rig/gc-toolkit.polecat-1", State: "active"},
-		{ID: "hq-b", Alias: "rig/gc-toolkit.refinery", State: "asleep"},
-		{ID: "hq-c", Alias: "rig/gc-toolkit.tk-1", State: "closed"},
-		{ID: "hq-d", Alias: "other/gc-toolkit.tk-1", State: "active"},
-		{ID: "hq-e", Alias: "gc-toolkit.tk-2", State: "draining"},
-		{ID: "hq-f", Alias: "rig/gc-toolkit.tk-3", State: "failed-create"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		names []string
-		want  bool
-	}{
-		{[]string{"hq-a"}, true},
-		{[]string{"rig__polecat-hq-a"}, true},
-		{[]string{"rig/gc-toolkit.polecat-1"}, true},
-		{[]string{"rig/gc-toolkit.refinery"}, true},
-		{[]string{"rig/gc-toolkit.tk-1"}, false},
-		{[]string{"hq-c"}, false},
-		{[]string{"rig/gc-toolkit.tk-2"}, true},
-		{[]string{"rig/gc-toolkit.tk-3"}, false},
-		{[]string{"hq-gone"}, false},
-		{[]string{"hq-gone", "", "rig/gc-toolkit.refinery"}, true},
-		{nil, false},
-	} {
-		if got := live.Answers(tc.names...); got != tc.want {
-			t.Errorf("Answers(%q) = %v, want %v", tc.names, got, tc.want)
-		}
-	}
-	if _, err := Read(nil); !errors.Is(err, ErrNoSessions) {
-		t.Errorf("an empty list read as %v", err)
-	}
-}
-
-// A bead names its owner by the session that claimed it, its assignee and the
-// session's runtime name, each when it carries one.
+// A bead names its owner by the session that claimed it and its assignee, each
+// when it carries one.
 func TestOwnerOf(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "tk-1", Status: "open", Assignee: "rig/gc-toolkit.refinery",
-		Metadata: map[string]string{"gc.session_id": "hq-a", "gc.session_name": "rig__polecat-hq-a"}})
+		Metadata: map[string]string{"gc.session_id": "hq-a"}})
 	s.Put(fake.Bead{ID: "tk-2", Status: "open"})
 	recs, err := ledger.New(s).Find(ledger.ByID("tk-1", "tk-2"))
 	if err != nil || len(recs) != 2 {
 		t.Fatal(recs, err)
 	}
-	o, err := OwnerOf(recs[0])
-	if err != nil || o != (Owner{SessionID: "hq-a", Assignee: "rig/gc-toolkit.refinery", SessionName: "rig__polecat-hq-a"}) {
+	if o, err := OwnerOf(recs[0]); err != nil || o != (Owner{SessionID: "hq-a", Assignee: "rig/gc-toolkit.refinery"}) {
 		t.Fatalf("owner %+v, %v", o, err)
 	}
-	if !slices.Equal(o.Names(), []string{"hq-a", "rig/gc-toolkit.refinery", "rig__polecat-hq-a"}) {
-		t.Errorf("names %v", o.Names())
-	}
-	if o, err := OwnerOf(recs[1]); err != nil || len(o.Names()) != 0 {
+	if o, err := OwnerOf(recs[1]); err != nil || o != (Owner{}) {
 		t.Errorf("an unowned bead %+v, %v", o, err)
 	}
 }

@@ -11,7 +11,6 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/refinery"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/session"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/worktree"
 )
 
 // lookCity is the city the looks' stub gc answers for: an HQ at /city and the
@@ -73,73 +72,6 @@ esac
 }
 
 func agoStamp(d time.Duration) string { return time.Now().UTC().Add(-d).Format(time.RFC3339) }
-
-const liveSessions = `{"schema_version":"1","sessions":[{"id":"hq-ctl","alias":"control-dispatcher","state":"active","created_at":"2026-11-01T00:00:00Z","last_active":""}]}`
-
-// salvage finds a claim whose session no live session answers to, records it
-// as one event, prints the record and a summary, and exits 0.
-func TestWorktreeSalvageRecordsWhatItFound(t *testing.T) {
-	calls := lookStub(t, lookCity{
-		sessions: liveSessions,
-		hq:       "[]",
-		rig:      `[{"id":"tk-1","title":"t","status":"in_progress","issue_type":"task","assignee":"hq-dead","metadata":{"gc.session_id":"hq-dead","work_dir":"/wt/tk-1"}},{"id":"tk-2","title":"t","status":"in_progress","issue_type":"task","assignee":"control-dispatcher"}]`,
-	})
-	var out, errb bytes.Buffer
-	if code := Run([]string{"worktree", "salvage"}, "", &out, &errb); code != 0 {
-		t.Fatalf("exit %d, stderr %q", code, errb.String())
-	}
-	var rec worktree.Record
-	if err := json.Unmarshal(out.Bytes(), &rec); err != nil || len(rec.Found) != 1 || rec.Found[0].Bead != "tk-1" || rec.Found[0].WorkDir != "/wt/tk-1" {
-		t.Fatalf("stdout %q: %v", out.String(), err)
-	}
-	if got := errb.String(); got != "gctk worktree salvage: beads whose owner no live session answers to: tk-1; recorded\n" {
-		t.Errorf("stderr %q", got)
-	}
-	got := calls()
-	for _, want := range []string{
-		"session list --json\nrig list --json\n",
-		"bd --db /city/.beads list --json --limit 0 --status open,in_progress\n",
-		"bd --db /city/rigs/tools/.beads list --json --limit 0 --status open,in_progress\n",
-		"event emit gc-toolkit.orphan-work.found --json --actor gctk --message beads whose owner no live session answers to: tk-1 --payload {",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("gc was not called with %q:\n%s", want, got)
-		}
-	}
-}
-
-// A look that finds nothing prints its record, records nothing, and exits 0.
-func TestWorktreeSalvageWithNothingFound(t *testing.T) {
-	calls := lookStub(t, lookCity{sessions: liveSessions, hq: "[]", rig: "[]"})
-	var out, errb bytes.Buffer
-	if code := Run([]string{"worktree", "salvage"}, "", &out, &errb); code != 0 {
-		t.Fatalf("exit %d, stderr %q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), `"found":[]`) {
-		t.Errorf("stdout %q", out.String())
-	}
-	if got := errb.String(); got != "gctk worktree salvage: no bead names an owner that no live session answers to; nothing recorded\n" {
-		t.Errorf("stderr %q", got)
-	}
-	if strings.Contains(calls(), "event emit") {
-		t.Errorf("an event was recorded:\n%s", calls())
-	}
-}
-
-// A session list that does not read fails the run with no record.
-func TestWorktreeSalvageFailsOnAnUnreadSessionList(t *testing.T) {
-	calls := lookStub(t, lookCity{sessions: `not json`, hq: "[]", rig: "[]"})
-	var out, errb bytes.Buffer
-	if code := Run([]string{"worktree", "salvage"}, "", &out, &errb); code != 1 {
-		t.Fatalf("exit %d, stderr %q", code, errb.String())
-	}
-	if out.Len() != 0 || !strings.Contains(errb.String(), "gctk worktree salvage: the session list did not read, so no owner was judged") {
-		t.Errorf("stdout %q, stderr %q", out.String(), errb.String())
-	}
-	if strings.TrimSpace(calls()) != "session list --json" {
-		t.Errorf("gc was called:\n%s", calls())
-	}
-}
 
 // progress finds a busy pool seat with no write for three hours, reads its
 // session bead in the city's store and its writes in both stores, and records
@@ -224,5 +156,21 @@ func TestALookWhoseEventIsNotRecordedFails(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"bead":"tk-1"`) || !strings.Contains(errb.String(), "; not recorded\n") || !strings.Contains(errb.String(), "the look's event was not recorded") {
 		t.Errorf("stdout %q, stderr %q", out.String(), errb.String())
+	}
+}
+
+// A session list that does not read fails the run with no record, and nothing
+// else is read.
+func TestALookWhoseSessionListDoesNotReadFails(t *testing.T) {
+	calls := lookStub(t, lookCity{sessions: `not json`, hq: "[]", rig: "[]"})
+	var out, errb bytes.Buffer
+	if code := Run([]string{"session", "progress"}, "", &out, &errb); code != 1 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	if out.Len() != 0 || !strings.Contains(errb.String(), "gctk session progress: the session list did not read, so no seat was judged") {
+		t.Errorf("stdout %q, stderr %q", out.String(), errb.String())
+	}
+	if strings.TrimSpace(calls()) != "session list --json" {
+		t.Errorf("gc was called:\n%s", calls())
 	}
 }

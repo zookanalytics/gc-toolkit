@@ -7,8 +7,8 @@ import (
 )
 
 // A look is a verb an order runs to read the city and record one Gas City
-// event when it finds something: `worktree salvage`, `session progress` and
-// `refinery stuck`. Each prints the same way.
+// event when it finds something: `session progress` and `refinery stuck`. Each
+// prints the same way.
 
 // lookHelpEnd closes a look's help: where its record goes and its exits.
 const lookHelpEnd = `The record goes to standard output as the event carries it, and a summary

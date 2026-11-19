@@ -241,10 +241,9 @@
     "readers": [
       "pr",
       "review",
-      "waits",
-      "worktree"
+      "waits"
     ],
-    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root. A review run's loop is the bead of its run that reads ralph, the control bead of its checked step. The salvage reader leaves out a topology root, whose kind is workflow, scope or spec (WorkflowTopologyKinds in internal/beadmeta/kindsets.go at gastownhall/gascity c7eb6d2f43)."
+    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root. A review run's loop is the bead of its run that reads ralph, the control bead of its checked step."
   },
   {
     "name": "gc.outcome",
@@ -313,15 +312,7 @@
     "readers": [
       "session"
     ],
-    "doc": "The session that claimed a bead, written by Gas City's claim and left by its release (lifecycle/lifecycle.toml, [metadata.runtime_owned]). The session domain reads it as the first identity a bead names its owner by, and the seat-progress look as the seat a claim belongs to."
-  },
-  {
-    "name": "gc.session_name",
-    "type": "string",
-    "readers": [
-      "session"
-    ],
-    "doc": "The runtime name of the session that holds a bead, written by Gas City beside gc.session_id (lifecycle/lifecycle.toml, [metadata.runtime_owned]). The session domain reads it as an identity a bead names its owner by."
+    "doc": "The session that claimed a bead, written by Gas City's claim and left by its release (lifecycle/lifecycle.toml, [metadata.runtime_owned]). The session domain reads it as the session a bead names its owner by, and the seat-progress look as the seat a claim belongs to."
   },
   {
     "name": "gc.step_ref",
@@ -638,13 +629,5 @@
     "type": "string",
     "owner": "pr",
     "doc": "The head a withdrawal of a PR's approvals names, on the bead `gctk pr withdraw` files, which blocks the bead that owns the PR. The landing order dismisses each approval that stands on a commit that does not contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is filed, and never cleared."
-  },
-  {
-    "name": "work_dir",
-    "type": "string",
-    "readers": [
-      "worktree"
-    ],
-    "doc": "The worktree a work bead's work is in, which the work formula's workspace-setup writes. The salvage reader names it for each bead it finds, where the act salvages from."
   }
 ]

@@ -38,7 +38,6 @@ through `gc bd` and the supervisor's API.
 | `session title` | giving a session a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session title --help`, `internal/cli/session.go` |
 | `session progress` | the seat-progress-detect order's look: each busy pool seat whose claim it holds under the identity its writes carry, and that has written nothing to the claim's store or the city's for three hours since it last woke, recorded as one `gc-toolkit.seat-progress.stalled` event when it finds one | `gctk session progress --help`, `internal/cli/session_progress.go`, `session` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
-| `worktree salvage` | the orphan-work-detect order's look, through the salvage reader: each open or in-progress bead that names an owner no live session answers to, less work in a PR, a conversation, a topology root and a bead a person's human gate holds, recorded as one `gc-toolkit.orphan-work.found` event when it finds one; a session list that does not read judges nothing | `gctk worktree salvage --help`, `internal/cli/worktree.go`, `worktree`, `session` |
 
 Logic gctk does not hold runs as shell scripts. Among them are the rest of the
 merge cadence (`gate-ensure`, `pr-open`, `pr-facts`, `signoff`) and
