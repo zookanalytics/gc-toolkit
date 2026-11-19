@@ -1300,7 +1300,7 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 
 [metadata.proactive]
 # The proactive first-reaction surface. A first reaction is a run of
-# formulas/mol-first-reaction.toml that tools/gc-proactive.sh slings on its
+# formulas/mol-first-reaction.toml that gctk reaction sling slings on its
 # subject S. While it runs, the run is the record, and gc sling refuses a
 # second live run of the formula on S. Once it ends, the state its exit wrote,
 # and after that the gc.takeaway headline every exit writes, keep S out of the
@@ -1319,9 +1319,11 @@ keys = [
   "gc.first_reaction_at",
 ]
 # gc.recommended_formula — the execution mol a recommend exit names, which the
-#   operator can Accept from the subject's row on the board. first-reaction-dispose.sh sets
-#   it before the act of a recommend disposition and unsets a stale one on every
-#   other disposition, each write taking its exit. gc-helm.sh
+#   operator can Accept from the subject's row on the board. The reaction domain
+#   owns it (services/gctk/reaction, listed in services/gctk/key-registry.json),
+#   and it stays registered here while shell still clears it. gctk reaction
+#   dispose sets it once a recommend's gate is filed and unsets a stale one
+#   before any exit acts, each write taking its exit. gc-helm.sh
 #   `accept` unsets it in the write that records its dispatch, and
 #   converse-invalidate-recommendation.sh unsets it when a sitting judges the
 #   recommendation no longer valid. The board's Accept derivation
@@ -1368,7 +1370,7 @@ keys = [
 #   `engage --new-subject` wrote on the subject it filed, so that no scan
 #   reacted to a subject a sitting owned. Nothing writes or reads it: the
 #   subject's open conversation keeps a first reaction off it, because
-#   tools/gc-proactive.sh sling refuses a bead an open conversation tracks.
+#   gctk reaction sling refuses a bead an open conversation tracks.
 #   Registered so that residue on a pre-retirement bead reads as known, not as
 #   a stray.
 # gc.blocker_key — RETIRED. The dedup handle a blocked first reaction stamped
@@ -1529,7 +1531,7 @@ keys = [
 #   first-reaction exit. The rubric in agents/proactive/prompt.template.md has
 #   the reacting agent triage an operator capture on its merits like any other
 #   bead, and
-#   first-reaction-dispose.sh gates nothing on it. Absent is an ordinary bead.
+#   gctk reaction dispose gates nothing on it. Absent is an ordinary bead.
 #   Not cleared.
 # gc.outcome_reason — RETIRED. On a closed visit, the one-line sentence naming
 #   why it closed, stamped beside the gc.outcome word a reader groups by.

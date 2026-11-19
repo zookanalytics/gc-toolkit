@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/patrol-finding.sh — one durable bead per
 # distinct patrol finding, and a recurrence that lands on it instead of filing
-# another. Stubbed gc and gc-proactive.sh; no live city, Dolt, or network.
+# another. Stubbed gc and gctk's reaction verbs; no live city, Dolt, or network.
 #
 # The load-bearing case is RECURRENCE. A human gate dedups only while it is
 # open, and a person answers each one before the next patrol sweep runs, so a
@@ -188,32 +188,36 @@ esac
 STUB
 chmod +x "$BIN/gc"
 
-# ── gc-proactive.sh stub ─────────────────────────────────────────────
-# deliverable answers per STUB_DELIVERABLE_RC; sling logs and answers per
-# STUB_SLING_RC. Both land in their own log so a run that never reached the
-# reaction is distinguishable from one whose reaction failed.
-cat > "$BIN/gc-proactive.sh" <<'PRO'
-#!/usr/bin/env bash
-set -u
-printf '%s\n' "$*" >> "${STUB_PROACTIVE_LOG:?}"
-case "${1:-}" in
-  deliverable) exit "${STUB_DELIVERABLE_RC:-0}" ;;
-  sling) [ "${STUB_SLING_RC:-0}" = "0" ] || { echo "sling failed" >&2; exit "${STUB_SLING_RC}"; }; exit 0 ;;
-esac
-exit 0
-PRO
-chmod +x "$BIN/gc-proactive.sh"
-
 export PATH="$BIN:$PATH"
-export GC_PROACTIVE_TOOL="$BIN/gc-proactive.sh"
 export STUB_STORE="$TMP/beads.json" STUB_DEPS="$TMP/deps.txt"
 export STUB_GC_LOG="$TMP/gc.log" STUB_PROACTIVE_LOG="$TMP/pro.log"
 export STUB_SEQ="$TMP/seq"
 # What a held bead still waits on is the answer of gctk bead holds, built from
 # this checkout and run over the stub store.
 export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
-GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no held bead can be read"; exit 1; }
-export GCTK_BIN
+GCTK_BUILT="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no held bead can be read"; exit 1; }
+
+# ── gctk's reaction verbs, stubbed ───────────────────────────────────
+# reaction deliverable answers per STUB_DELIVERABLE_RC; reaction sling logs
+# and answers per STUB_SLING_RC. Both land in their own log so a run that never
+# reached the reaction is distinguishable from one whose reaction failed. Every
+# other verb is the build's.
+cat > "$BIN/gctk" <<GCTK
+#!/usr/bin/env bash
+set -u
+if [ "\${1:-}" = reaction ]; then
+  shift
+  printf '%s\\n' "\$*" >> "\${STUB_PROACTIVE_LOG:?}"
+  case "\${1:-}" in
+    deliverable) exit "\${STUB_DELIVERABLE_RC:-0}" ;;
+    sling) [ "\${STUB_SLING_RC:-0}" = "0" ] || { echo "sling failed" >&2; exit "\${STUB_SLING_RC}"; }; exit 0 ;;
+  esac
+  exit 0
+fi
+exec "$GCTK_BUILT" "\$@"
+GCTK
+chmod +x "$BIN/gctk"
+export GCTK_BIN="$BIN/gctk"
 
 reset() {
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_PROACTIVE_LOG"
@@ -357,7 +361,7 @@ eq "$RC" "0" "(pool down) the filing still succeeds"
 eq "$(beads)" "1" "(pool down) the bead is filed"
 eq "$(meta fnd-1 'gc.proactive')" "<absent>" "(pool down) no scan opt-in is stamped: the next sweep reads it as a ready bead"
 hasnt "$(cat "$STUB_PROACTIVE_LOG")" "sling" "(pool down) no sling into a pool that cannot claim it"
-has "$OUT" "waits for the next scan sweep" "(pool down) says how the reaction still happens"
+has "$OUT" "waits for the next sweep" "(pool down) says how the reaction still happens"
 
 reset
 export STUB_SLING_RC=1
