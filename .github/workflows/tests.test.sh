@@ -1,28 +1,30 @@
 #!/usr/bin/env bash
 # tests.test.sh — guards the draft CI-cost gate in tests.yml, the concurrency
-# group each job holds, the jq check each job runs before the suite, the
-# seconds each job that runs the suite keeps, the Go checks' commands, the
-# tools go-macos checks before its tests, and the jobs whose checks main's
-# ruleset requires.
+# group each job holds, the all-tests command each job runs, the jq check each
+# job runs before it, the seconds each job keeps, the tools test-macos checks
+# before its tests, and the jobs whose checks main's ruleset requires.
 #
-# A draft pull request must not run the *.test.sh suite, so a change still
-# taking follow-up commits does not spend Actions minutes on every push. A push
-# to main and a manual dispatch must always run it, and marking a draft ready
-# must run it. Those are the invariants the draft gate rests on, and every job
-# that runs the suite must hold them: a regression that drops any one spends
-# minutes on drafts or skips CI where it is required. The draft flag carries no
-# workflow state; this gate is only a CI-cost lever.
+# A draft pull request must not run the tests, so a change still taking
+# follow-up commits does not spend Actions minutes on every push. A push to
+# main and a manual dispatch must always run them, and marking a draft ready
+# must run them. Those are the invariants the draft gate rests on, and every
+# job must hold them: a regression that drops any one spends minutes on drafts
+# or skips CI where it is required. The draft flag carries no workflow state;
+# this gate is only a CI-cost lever.
 #
-# Every job that runs the suite runs check-jq.sh before it, so a job whose
-# runner resolves a jq older than 1.8 fails by name instead of running the
-# suite on it.
+# CI runs every test in the repository, so every job runs the all-tests
+# command, `make test`, which runs the Go tests, the board web app's checks and
+# every shell suite, with every core and the suite's seconds kept.
 #
-# Every job that runs the suite keeps each run's seconds for the size comment's
-# section on the suite's time: it writes them with --seconds, shows them in its
-# job summary and uploads them as suite-times-<job> unless the run was
-# cancelled, in steps whose failure fails no check, and suite-time.sh, which
-# reads them back, names the same jobs. A job that kept none, or kept them under
-# another name, would show no time.
+# Every job runs check-jq.sh before the tests, so a job whose runner resolves a
+# jq older than 1.8 fails by name instead of running the tests on it.
+#
+# Every job keeps each shell suite run's seconds for the size comment's section
+# on the suite's time: it writes them with --seconds, shows them in its job
+# summary and uploads them as suite-times-<job> unless the run was cancelled,
+# in steps whose failure fails no check, and suite-time.sh, which reads them
+# back, names the same jobs. A job that kept none, or kept them under another
+# name, would show no time.
 #
 # Each job holds a concurrency group of its own, named for the workflow, the
 # job and the ref, that cancels the run in progress, and the workflow holds
@@ -34,23 +36,27 @@
 # each other. The job's id is written into its group, since github.job is null
 # outside a job's steps and would put every job in one group.
 #
-# The Go checks, go on Linux and go-macos on macOS, each run `go vet ./... &&
-# go test ./...` from the repository root, which is one Go module, so every Go
-# test runs on both platforms. No job runs go test on a list of packages,
-# because a list keeps a check only for the packages it names.
+# No job runs go test on a list of packages, because a list keeps a check only
+# for the packages it names.
 #
-# go-macos's tool check names each tool whose absence makes a Go test skip
-# rather than fail: lsof (internal/host in gctk), flock (the pr package's lock
-# test) and bash and jq (the board's tests that answer from the stub store,
-# stubStore in services/helm/internal/rigboard and
-# TestPendingWaitsAreTheWaitsPackagesAnswer in services/helm/internal/source).
-# A runner without one then fails the step by name.
+# test-macos's tool check names each tool whose absence makes a test skip
+# rather than fail, so a runner without one fails the step by name: lsof
+# (internal/host in gctk, and suites' cases), flock (the pr package's lock
+# test, and the scripts that lock with it) and tmux (tmux-intake-prompt's
+# case), with bash 5 and jq 1.8 checked by version (the board's tests that
+# answer from the stub store, stubStore in services/helm/internal/rigboard and
+# TestPendingWaitsAreTheWaitsPackagesAnswer in services/helm/internal/source,
+# need both).
 #
-# Main's ruleset requires the checks named test, test-macos and go. A job's
-# check takes the job's id unless the job sets name: or a matrix, and either one
-# renames it, so every merge would wait on a check that never reports. Each of
-# those jobs has the draft gate as its whole if:, since a condition of its own
-# that skipped it at a ready head would leave that head only a skipped result,
+# Main's ruleset requires a check for every job here, by the job's id, and
+# REQUIRED below lists them as
+# `gh api repos/<owner>/<repo>/rules/branches/main` does. A job missing from
+# REQUIRED fails this suite, so a change that adds a job also says it is to be
+# required, and the operator's edit to the ruleset goes with it. A job's check
+# takes the job's id unless the job sets name: or a matrix, and either one
+# renames it, so every merge would wait on a check that never reports. Each job
+# has the draft gate as its whole if:, since a condition of its own that
+# skipped it at a ready head would leave that head only a skipped result,
 # which holds the merge.
 
 set -uo pipefail
@@ -102,8 +108,8 @@ for j in $jobs; do
 done
 
 # The first line outside a comment in each job that runs check-jq.sh, and the
-# first that runs the suite, as one "<job>\t<line>\t<line>" row per job, with 0
-# for a job that runs neither.
+# first that runs the tests, as one "<job>\t<line>\t<line>" row per job, with
+# 0 for a job that runs neither.
 jq_check_lines() {
     awk '
         function flush() { if (job != "") print job "\t" check "\t" suite; job = "" }
@@ -113,23 +119,26 @@ jq_check_lines() {
         /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { flush(); job = $1; sub(/:$/, "", job); check = 0; suite = 0; next }
         /^[[:space:]]*#/ { next }
         job != "" && check == 0 && /check-jq\.sh/ { check = NR }
-        job != "" && suite == 0 && /run-tests\.sh/ { suite = NR }
+        job != "" && suite == 0 && /make test / { suite = NR }
         END { flush() }' "$WF"
 }
 suite_jobs=0
 while IFS=$'\t' read -r j check suite; do
-    [ "$suite" -gt 0 ] || continue
+    if [ "$suite" -eq 0 ]; then
+        note "job '$j' must run the all-tests command, make test, since CI runs every test"
+        continue
+    fi
     suite_jobs=$((suite_jobs + 1))
     if [ "$check" -eq 0 ]; then
-        note "job '$j' must run check-jq.sh, or it runs the suite on whatever jq its runner resolves"
+        note "job '$j' must run check-jq.sh, or it runs the tests on whatever jq its runner resolves"
     elif [ "$check" -gt "$suite" ]; then
-        note "job '$j' must run check-jq.sh before the suite, not after it"
+        note "job '$j' must run check-jq.sh before the tests, not after them"
     fi
 done < <(jq_check_lines)
-# A job counts as running the suite when it names run-tests.sh, so with no such
-# job the check above has checked nothing.
+# A job counts as running the tests when it runs make test, so with no such job
+# the check above has checked nothing.
 [ "$suite_jobs" -gt 0 ] \
-    || note "found no job that runs run-tests.sh in tests.yml, so the jq check checked no job"
+    || note "found no job that runs make test in tests.yml, so the jq check checked no job"
 
 # The lines of a job that are not comments.
 job_lines() {
@@ -145,10 +154,10 @@ while IFS=$'\t' read -r j check suite; do
     [ "$suite" -gt 0 ] || continue
     suite_names="$suite_names $j"
     lines="$(job_lines "$j")"
-    for want in 'tools/run-tests.sh -j "$(getconf _NPROCESSORS_ONLN)" --seconds "$RUNNER_TEMP/suite-times.tsv"' \
+    for want in 'run: make test RUN_TESTS_FLAGS="-j $(getconf _NPROCESSORS_ONLN) --seconds $RUNNER_TEMP/suite-times.tsv"' \
         'run: bash .github/workflows/suite-time.sh summary "$RUNNER_TEMP/suite-times.tsv" >> "$GITHUB_STEP_SUMMARY"' \
         'name: suite-times-${{ github.job }}' 'path: ${{ runner.temp }}/suite-times.tsv'; do
-        grep -Fq -- "$want" <<<"$lines" || note "job '$j' must keep each run's seconds: it lacks '$want'"
+        grep -Fq -- "$want" <<<"$lines" || note "job '$j' must run every test on every core and keep each run's seconds: it lacks '$want'"
     done
     [ "$(grep -cF 'if: ${{ !cancelled() }}' <<<"$lines")" -ge 2 ] \
         || note "job '$j' must show and upload the seconds unless the run was cancelled, so a failed suite keeps them too"
@@ -192,9 +201,13 @@ for j in $jobs; do
 done
 
 # The checks main's ruleset requires, by job id, as
-# `gh api repos/<owner>/<repo>/rules/branches/main` lists them.
-REQUIRED="test test-macos go"
+# `gh api repos/<owner>/<repo>/rules/branches/main` lists them: every job here.
+REQUIRED="test test-macos"
 DRAFT_GATE="github.event_name != 'pull_request' || github.event.pull_request.draft == false"
+for j in $jobs; do
+    grep -qx -- "$j" <<<"$(tr ' ' '\n' <<<"$REQUIRED")" \
+        || note "job '$j' is missing from REQUIRED: every job in tests.yml is a check main's ruleset requires, so list it there and have the operator require it"
+done
 for j in $REQUIRED; do
     grep -qx -- "$j" <<<"$jobs" \
         || { note "a job with the id '$j' must exist; main's ruleset requires the check named $j"; continue; }
@@ -225,15 +238,15 @@ step_rows() {
         END { flush() }' "$WF"
 }
 steps="$(step_rows)"
-for j in go go-macos; do
-    awk -F'\t' -v j="$j" '$1 == j && $2 == "" && index($3, "go vet ./... && go test ./...") { f = 1 } END { exit !f }' <<<"$steps" \
-        || note "job '$j' must run 'go vet ./... && go test ./...' from the repository root, so every Go test runs on both platforms"
-done
-tool_check="$(awk -F'\t' '$1 == "go-macos" && index($3, "command -v") { print $3 }' <<<"$steps")"
-for t in lsof flock bash jq; do
+tool_check="$(awk -F'\t' '$1 == "test-macos" && index($3, "command -v") { print $3 }' <<<"$steps")"
+for t in lsof flock tmux; do
     grep -Eq "for t in ([^;]* )?${t}[ ;]" <<<"$tool_check" \
-        || note "go-macos's tool check must name $t, or a Go test that needs it skips quietly on a runner without it"
+        || note "test-macos's tool check must name $t, or a test that needs it skips quietly on a runner without it"
 done
+grep -Fq 'bash .github/workflows/check-jq.sh' <<<"$tool_check" \
+    || note "test-macos's tool check must run check-jq.sh, or a test that needs jq 1.8 skips or fails on an older one"
+{ grep -Fq 'BASH_VERSINFO[0]' <<<"$tool_check" && grep -Fq -- '-ge 5 ]' <<<"$tool_check"; } \
+    || note "test-macos's tool check must hold env bash to version 5, or a test that needs bash 5 runs under the image's bash 3.2"
 package_lists="$(awk -F'\t' '{
     s = $3
     while (match(s, /go test[^;&|]*/)) {
