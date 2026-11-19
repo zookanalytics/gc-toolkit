@@ -117,8 +117,8 @@ no warrant.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-18, at `gastownhall/gascity` main 5b7728de34 and
-  `gastownhall/gascity-packs` main 0f07496d2fa.
+- **Verified.** 2026-11-18, at `gastownhall/gascity` main f932d43b1c and
+  `gastownhall/gascity-packs` main 8ed128846fc.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
   is planned for the merge resume, since the refinery brings every branch current
@@ -739,7 +739,7 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-14, at `gastownhall/gascity` main 420b7bb65f, with
+- **Verified.** 2026-11-17, at `gastownhall/gascity` main f715d7b92d, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
@@ -786,8 +786,8 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-14, at `gastownhall/gascity` main cf33557276ef,
-  `gastownhall/beads` main 8cdfa796a8f5 and `gastownhall/gascity-packs` main
-  0f07496d2fa4.
+- **Verified.** 2026-11-19, at `gastownhall/gascity` main 7b5614ac70d1,
+  `gastownhall/beads` main 2549ece6e05e and `gastownhall/gascity-packs` main
+  b3e779f03aec.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.

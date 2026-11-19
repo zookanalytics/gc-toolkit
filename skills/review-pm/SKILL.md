@@ -76,6 +76,10 @@ people it serves, or what it promises them:
 - the product goals, `docs/product-goals.md`. A diff that adds or changes that
   page makes this check mandatory.
 
+A design counts as the change it proposes. A diff that adds or changes a design
+or a spec proposing any of these gets this check at the design, before anything
+is built on it.
+
 An edit that changes neither what the product does for the people it serves
 nor what it promises them, such as a refactor, a typo fixed or a link mended,
 needs no product review. Neither does internal plumbing those people never meet,
@@ -103,6 +107,12 @@ borrows before it invents"):
 - The operator reads the PR the way a customer reads a launch — **working
   backwards** from someone not in the room — so the presentation has to carry the
   value plainly enough to act on. (Amazon's working-backwards practice.)
+- A change that meets a person is worth what it does for them at that moment, so
+  you walk them through it the way a **cognitive walkthrough** inspects a design:
+  step by step, from their side, asking whether they will see what to do and see
+  that it worked. (Wharton, Rieman, Lewis and Polson, "The Cognitive Walkthrough
+  Method: A Practitioner's Guide", in Nielsen and Mack, *Usability Inspection
+  Methods*.)
 
 ### What you judge
 
@@ -133,6 +143,28 @@ as it will reach the operator. One question carries the review; a second gates i
   presentation finding. That the summary mechanically accounts for the diff is
   `correctness`'s bar; yours is whether it lets the operator judge the value.
 
+Judge the first question from the side of the people the change affects, not
+from the change's own account of itself. Name them first. They are among the
+people the product goals say the product serves: in one rig the operator, in
+another a customer, an administrator or whoever calls the tool. Say what the
+change is meant to give them: what they are trying to get done in this part of
+the product, and what they should find there once the change ships. Then walk
+them through the change as they will live it, across the whole of what they are
+doing and not only the part the diff touches: what they meet and when they meet
+it, what they can do with it there, how they can tell it worked, and where it
+leaves them. Where people reach the change by different routes, walk each route
+that differs. Walk what was designed and then what was built, because a design
+can fail them even when the diff follows it exactly, and a diff can fail a
+design that would have served them. Whether the mechanism works is the
+`correctness` check's question, and what the person meets through it is yours.
+A walk that breaks is a finding, such as something that reaches the person
+after the point where it could have helped them, something asked of them that
+they cannot give where they are asked, or nothing that tells them it worked. A
+limit the PR discloses is still a finding when it defeats the purpose the
+feature is named for, because disclosing it hands the operator the product
+judgment this check exists to make. The verdict body adds a line for each walk:
+`Walk: <the person, what they were doing, and what you found there>`.
+
 The questions are the lens, not a checklist to exhaust. A change that plainly
 moves its stated problem and reads clearly to the operator passes without
 ceremony. That is the common case.
@@ -154,10 +186,11 @@ meets the rig's standards.
 ## What blocks
 
 The change drifted from its stated problem, or does what was asked rather than
-what the people it serves need, or the operator cannot evaluate it from how it
-is presented. Each is a finding that makes the verdict request-changes. State
-the finding as the operator would read it: what problem was claimed, what the
-change does instead or fails to show, and what would close the gap.
+what the people it serves need, or fails a person at the moment it meets them,
+or the operator cannot evaluate it from how it is presented. Each is a finding
+that makes the verdict request-changes. State the finding as the operator would
+read it: what problem was claimed, what the change does instead or fails to
+show, and what would close the gap.
 
 ## The verdict
 

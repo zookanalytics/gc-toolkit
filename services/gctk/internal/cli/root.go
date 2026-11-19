@@ -98,6 +98,7 @@ form gctk <noun> <verb>, called by an agent, a hook or an order
 		newLifecycleCmd(stdout, stderr),
 		newMergeCmd(stdout, stderr),
 		newPRCmd(stdout, stderr),
+		newReactionCmd(stdout, stderr),
 		newReviewCmd(stdout, stderr),
 		newRigCmd(stdout, stderr),
 		newSessionCmd(stdout, stderr),

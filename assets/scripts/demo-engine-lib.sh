@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # demo-engine-lib.sh — the one definition of how a demo capture finds the
-# SprintShow engine, provisions the browser it launches, and runs its CLI in a
-# sandbox from which the live city cannot be reached. Sourced, never executed.
+# SprintShow engine, provisions the browser it launches, and runs its CLI, in a
+# sandbox from which the live city cannot be reached when the capture is of a
+# rig whose app reads the city. Sourced, never executed.
 #
 # The engine is the npm package @zookanalytics/sprintshow. A city that has the
 # engine's source as a rig uses that checkout: the rig `gc rig list` names
@@ -23,12 +24,14 @@
 # build to fetch and where to keep it. The installer skips a build that is
 # already installed, so a capture on a provisioned host downloads nothing.
 #
-# The CLI runs inside a macOS sandbox, through sandbox-exec, so the command a
-# capture types and the page it loads run where the live city cannot be
-# reached. So does a copy of a rig's UI that `gctk rig serve` runs for a
-# capture or a person, whose serve command runs inside the same sandbox through
-# demo_engine_sandboxed. A read of the city fails there, and a capture shows the
-# reviewed commit on fixture data or shows the failure, never live state. The
+# A capture of a rig whose app reads the city runs the CLI inside a macOS
+# sandbox, through sandbox-exec, so the command it types and the page it loads
+# run where the live city cannot be reached. So does a copy of such a rig's UI
+# that `gctk rig serve` runs for a capture or a person, whose serve command runs
+# inside the same sandbox through demo_engine_sandboxed. A read of the city
+# fails there, and the capture shows the reviewed commit on fixture data or
+# shows the failure, never live state. A capture or a copy of any other rig
+# runs as an ordinary process, as the last part of this header says. The
 # sandbox denies:
 #   - the contents of the city's directories: gc's home, each city `gc cities`
 #     lists there, the city, rig and store this session's environment names, and
@@ -44,33 +47,33 @@
 #     UDID>/<bundle id>, has three: free ports picked before it starts, which
 #     the engine is given as --port for the servers it drives the app through.
 #   - signals to any process outside the sandbox.
-# The CLI also runs without the environment variables that point a command at
-# the city: GC_*, GT_*, BEADS_*, BD_*, DOLT_*, TMUX and TMUX_PANE.
+# A run, in the sandbox or not, also starts without the environment variables
+# that point a command at the city: GC_*, GT_*, BEADS_*, BD_*, DOLT_*, TMUX and
+# TMUX_PANE.
 #
-# Inside the city's directories the run reads and writes only what the engine's
-# own arguments name: its working directory, the output's directory, --cwd,
-# --serve-dir, a captures directory, and the script and the music it reads.
-# Each directory is widened to the rig worktree that holds it, with that
-# worktree's git directories, so git runs there. The run also reads the engine
-# checkout, except the dot-directories where a rig keeps its store and its
-# agents' state, and no rig's or city's store is readable whatever else is.
-# The run is refused before the engine starts when:
+# Inside the city's directories a run in the sandbox reads and writes only what
+# the engine's own arguments name: its working directory, the output's
+# directory, --cwd, --serve-dir, a captures directory, and the script and the
+# music it reads. Each directory is widened to the rig worktree that holds it,
+# with that worktree's git directories, so git runs there. Such a run also
+# reads the engine checkout, except the dot-directories where a rig keeps its
+# store and its agents' state, and no rig's or city's store is readable
+# whatever else is. The run is refused before the engine starts when:
 #   - a directory it would read and write holds one of the city's directories,
 #     or lies inside one in no rig's worktree;
 #   - gc's home holds a city registry that `gc cities` does not read, because
 #     then the cities to deny are unknown;
 #   - a city is known and its rig map does not read, because then the rig
 #     checkouts to deny are unknown;
-#   - the engine is given --serve, which would start a server whose port the
-#     sandbox cannot vouch for. A capture serves an app with a command as a copy
-#     that `gctk rig serve` runs inside this sandbox, and points the engine at
-#     the copy with --base-url;
+#   - the engine is given --serve. A capture serves an app with a command as a
+#     copy that `gctk rig serve` runs, and points the engine at the copy with
+#     --base-url, so the engine never starts a server of its own, whose port a
+#     run in the sandbox could not vouch for;
 #   - a server already answers on the --serve-dir port, because the engine
-#     would capture that server, which runs outside the sandbox. A --serve-dir
-#     given no --port is given a free one, because the sandbox opens only a
-#     port it knows;
-#   - an iOS app run is given --port, because its ports are the ones the
-#     sandbox opens, which the run picks;
+#     would capture that server instead of the directory. A --serve-dir given
+#     no --port is given a free one, which a run in the sandbox opens;
+#   - an iOS app run is given --port, because the run picks its servers' ports,
+#     which a run in the sandbox opens;
 #   - --base-url names this host, whose servers run outside the sandbox, unless
 #     a copy that `gctk rig serve` runs holds its port, as `gctk rig serve
 #     --check` answers in the checkout a process listening there works in by
@@ -79,7 +82,8 @@
 #     is "false". No variable that points at the city may name the port. A
 #     rig's checkout, which holds its store, and the city's own repository
 #     never count as such a worktree.
-# A host without sandbox-exec runs no capture at all.
+# A run with no sandbox is refused in each of these cases but the first. A host
+# without sandbox-exec runs no capture at all.
 #
 # app_reads_city is a formula var that mol-rig-demo declares with the default
 # "false". A city sets it to "true" in city.toml for each rig whose app reads
@@ -91,6 +95,22 @@
 # fails. The rig that holds this library counts as "true" too, because the
 # pack's board and scripts read the city.
 #
+# The setting decides which runs get the sandbox. A run keeps it unless each
+# checkout it captures from lies in the repository of a rig whose
+# app_reads_city is "false". A run of the CLI captures from:
+#   - the checkout of the server a --base-url on this host names, which is a
+#     copy's own checkout, or the worktree each process listening there works
+#     in;
+#   - the checkout demo_engine_copy served an app from, when the --base-url is
+#     that copy's app, as an iOS app's is;
+#   - its --serve-dir and its --cwd;
+#   - its working directory, when it names none of those.
+# A copy's serve command captures from the copy's own checkout. A directory in
+# no rig's repository, or in the city's own, keeps the sandbox. A run with no
+# sandbox runs as an ordinary process, without the variables above, so it
+# reaches what the rig's own tests reach on this host, the live city included
+# when the rig's app or its demo script calls it.
+#
 #   demo_engine_resolve  Checks that this host has the sandbox and checks Node
 #                        against the engine's floor, finds the engine, checks
 #                        that a capture may run from the working directory, and
@@ -101,34 +121,42 @@
 #                        installers write to stderr too, so the caller's stdout
 #                        carries only its own report. Returns 1, having said why
 #                        on stderr, when the host has no sandbox, Node is
-#                        missing or below the floor, the sandbox would refuse a
-#                        run from the working directory, an install fails, or
-#                        the published package has no npx to run it.
+#                        missing or below the floor, a run from the working
+#                        directory keeps the sandbox and the sandbox would
+#                        refuse that directory, an install fails, or the
+#                        published package has no npx to run it.
 #   demo_engine_find     The lookup alone: sets DEMO_ENGINE_DIR the same way,
 #                        installs nothing, and returns 0.
 #   demo_engine_cli      Runs the CLI of the engine demo_engine_resolve chose,
-#                        inside the sandbox, with the arguments it is given, in
-#                        the caller's working directory, and returns the CLI's
-#                        exit status. For a run that drives an iOS app it first
+#                        with the arguments it is given, in the caller's working
+#                        directory, and returns the CLI's exit status. It runs
+#                        inside the sandbox unless the run captures only from
+#                        rigs whose app_reads_city is "false", and then says so
+#                        on stderr. For a run that drives an iOS app it first
 #                        installs, through the engine's own provision command,
 #                        the Appium the engine drives the app with. Returns 1,
 #                        having said why on stderr, when the run is refused.
 #   demo_engine_sandboxed <port> <dir> <command...>
-#                        Runs the command inside the sandbox, in the caller's
-#                        working directory, with <port> the one loopback port
-#                        it may reach and <dir> what it reads and writes, as a
-#                        capture's --cwd. `gctk rig serve` runs a copy's serve
-#                        command through it. The shell becomes the command, so
-#                        its exit status is the command's and nothing after the
-#                        call runs. Returns 1, having said why on stderr, when
-#                        the run is refused.
+#                        Runs the command as a run that captures from <dir>
+#                        runs, in the caller's working directory: inside the
+#                        sandbox, with <port> the one loopback port it may reach
+#                        and <dir> what it reads and writes, as a capture's
+#                        --cwd, or as an ordinary process when <dir> lies in the
+#                        repository of a rig whose app_reads_city is "false",
+#                        which it says on stderr. `gctk rig serve` runs a copy's
+#                        serve command through it. The shell becomes the
+#                        command, so its exit status is the command's and
+#                        nothing after the call runs. Returns 1, having said why
+#                        on stderr, when the run is refused.
 #   demo_engine_copy <dir> <command>
 #                        Serves an app a command serves as a copy that `gctk
 #                        rig serve` runs from the checkout <dir> sits in, with
 #                        no address, and sets DEMO_ENGINE_COPY_URL to where the
 #                        copy's app is, which a capture's --base-url gives the
 #                        engine: the copy's loopback URL, or the URL of the app
-#                        its command printed it brought up.
+#                        its command printed it brought up. A run of
+#                        demo_engine_cli whose --base-url is that URL captures
+#                        from <dir>.
 #                        A checkout has one copy, so captures from one checkout
 #                        run one after another. One that already runs the
 #                        command is the one captured, and it keeps running
@@ -144,18 +172,20 @@
 #                        simulator, in the engine's scheme for one,
 #                        ios-simulator://, and 1 otherwise.
 #   demo_engine_script_kind <script>
-#                        Prints the surface a demo script drives, page or
-#                        terminal, by the engine's own rule: a terminal script
-#                        declares **Terminal:**, in any case, on a line above
-#                        its first ## heading, each line read without the
-#                        blanks around it (parseDemoScript in the engine's
-#                        src/demo-script.ts), and any other script drives a
-#                        page. Returns 1, having said why on stderr, when the
-#                        script does not read.
+#                        Prints the surface a demo script drives as the
+#                        engine's `surface` command names it, such as page,
+#                        terminal or ios, run through demo_engine_cli. Nothing
+#                        in the pack reads a script's lines for its surface.
+#                        When nothing chose an engine, it resolves one first,
+#                        as demo_engine_resolve does. Returns 1, having said why
+#                        on stderr, when the engine names no surface: the
+#                        script is missing or does not parse, the run is
+#                        refused, or the engine has no `surface` command, which
+#                        it then names.
 #
 # DEMO_ENGINE_PACKAGE names the package. DEMO_ENGINE_BIN, when set, names an
-# executable that demo_engine_cli runs in the engine's place, in the same
-# sandbox. Messages start with the caller's $PROG.
+# executable that demo_engine_cli runs in the engine's place, inside the sandbox
+# or not, as it would run the engine. Messages start with the caller's $PROG.
 #
 # Each capture keeps what only it needs. rig-demo-capture.sh provisions ffmpeg
 # for a checkout and records a clip with the CLI's `run`; demo-screenshot.sh
@@ -242,9 +272,12 @@ demo_engine_resolve() {
   _demo_engine_node_ok || return 1
   demo_engine_find
   # Whether a capture may run from here at all, decided before anything is
-  # installed. demo_engine_cli decides it again for every directory a run names.
+  # installed, as demo_engine_cli judges a run that names no checkout: a run
+  # that keeps the sandbox is refused a directory the sandbox would refuse, and
+  # a run with no sandbox is not. demo_engine_cli decides it again for each
+  # directory a run reads and writes.
   _demo_engine_city || return 1
-  _demo_engine_reach "$(pwd -P)" >/dev/null || return 1
+  ! _demo_engine_keeps_sandbox "$(pwd -P)" || _demo_engine_reach "$(pwd -P)" >/dev/null || return 1
   if [ -n "$DEMO_ENGINE_DIR" ]; then
     if _demo_engine_deps_missing "$DEMO_ENGINE_DIR" && ! ( cd "$DEMO_ENGINE_DIR" && npm install ) >&2; then
       _demo_engine_say "'npm install' failed in the sprintshow rig checkout"
@@ -271,16 +304,30 @@ demo_engine_resolve() {
 # --- a demo script's surface -------------------------------------------------
 
 demo_engine_script_kind() {
-  local kind
-  kind=$(awk '
-    { l = $0; sub(/^[ \t]+/, "", l); sub(/[ \t\r]+$/, "", l) }
-    l ~ /^##[ \t]+[^ \t]/ { exit }
-    tolower(l) ~ /^\*\*terminal:\*\*/ { k = "terminal"; exit }
-    END { print (k == "" ? "page" : k) }' "$1" 2>/dev/null)
-  case "$kind" in
-    (page|terminal) printf '%s\n' "$kind" ;;
-    (*) _demo_engine_say "could not read the head lines of '$1', which say whether it drives a page or a terminal"; return 1 ;;
-  esac
+  local out rc surface engine
+  # demo_engine_resolve and demo_engine_find set DEMO_ENGINE_DIR, to empty for
+  # the published package, so an unset one means nothing chose an engine.
+  if [ -z "${DEMO_ENGINE_BIN:-}" ] && [ -z "${DEMO_ENGINE_DIR+set}" ]; then
+    demo_engine_resolve || return 1
+  fi
+  engine=${DEMO_ENGINE_BIN:-${DEMO_ENGINE_DIR:-the published $DEMO_ENGINE_PACKAGE}}
+  rc=0
+  out=$(demo_engine_cli surface "$1") || rc=$?
+  # The command prints one JSON object on stdout when it names a surface, and
+  # nothing when it refuses. An engine with no surface command prints its help
+  # there as it refuses.
+  if [ "$rc" -eq 0 ]; then
+    surface=$(printf '%s' "$out" | jq -r -s 'if length == 1 and (.[0] | type) == "object" then (.[0].surface | strings) else empty end' 2>/dev/null) || surface=""
+    case "$surface" in
+      (''|*[!A-Za-z0-9_-]*) _demo_engine_say "the SprintShow engine ($engine) answered 'sprintshow surface' for '$1' with no surface" ;;
+      (*) printf '%s\n' "$surface"; return 0 ;;
+    esac
+  elif [ -n "$out" ]; then
+    _demo_engine_say "the SprintShow engine ($engine) has no surface command, so it cannot name the surface '$1' drives; update it to a SprintShow whose 'sprintshow help' lists 'sprintshow surface'"
+  else
+    _demo_engine_say "the SprintShow engine ($engine) named no surface for '$1' ('sprintshow surface' exited $rc)"
+  fi
+  return 1
 }
 
 demo_engine_ios_app() {
@@ -630,12 +677,19 @@ EOF
   return 1
 }
 
-# _demo_engine_local_port <url>: after _demo_engine_city, prints the port of a
-# --base-url on this host when the rule in this file's header lets a capture
-# reach it. Returns 1, having said why, otherwise.
+# _demo_engine_local_port <url>: after _demo_engine_city, when the rule in this
+# file's header lets a capture reach the server a --base-url on this host names,
+# sets _DEMO_ENGINE_LOCAL_PORT to its port and _DEMO_ENGINE_LOCAL_FROM to the
+# checkouts a capture of it captures from, one per line. For a copy,
+# _DEMO_ENGINE_LOCAL_KIND reads copy and the checkout is the copy's. For a
+# server worktrees of rigs whose app_reads_city is "false" serve, it reads
+# served, the checkouts are the directories its listeners work in, and
+# _DEMO_ENGINE_LOCAL_RIG is the rig of the last of them. Returns 1, having said
+# why, otherwise.
 _demo_engine_local_port() {
-  local url="$1" port v val pids pid dir checkout="" NL='
+  local url="$1" port v val pids pid dir dirs="" checkout="" NL='
 '
+  _DEMO_ENGINE_LOCAL_PORT=""; _DEMO_ENGINE_LOCAL_FROM=""; _DEMO_ENGINE_LOCAL_KIND=""; _DEMO_ENGINE_LOCAL_RIG=""
   port=$(_demo_engine_url_port "$url") || { _demo_engine_local_no "$url" "the URL names no port from 1 to 65535"; return 1; }
   while IFS='=' read -r v val; do
     case "$v" in
@@ -653,8 +707,7 @@ _demo_engine_local_port() {
   pids=$(lsof -nP -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null)
   [ -n "$pids" ] || { _demo_engine_local_no "$url" "no process of yours listens on port $port, so nothing shows whose server answers there"; return 1; }
   if _demo_engine_copy_port "$port" "$pids"; then
-    _demo_engine_say "--base-url $url is a copy that gctk rig serve runs from $_DEMO_ENGINE_COPY inside the sandbox, so the capture reaches port $port and no other loopback port"
-    printf '%s\n' "$port"
+    _DEMO_ENGINE_LOCAL_PORT=$port; _DEMO_ENGINE_LOCAL_FROM=$_DEMO_ENGINE_COPY; _DEMO_ENGINE_LOCAL_KIND=copy
     return 0
   fi
   while IFS= read -r pid; do
@@ -671,33 +724,67 @@ _demo_engine_local_port() {
     if _demo_engine_reads_city "$checkout"; then
       _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in a worktree of $checkout, $_DEMO_ENGINE_READS_WHY"; return 1
     fi
+    dirs="$dirs$NL$dir"
   done <<EOF
 $pids
 EOF
-  _demo_engine_say "--base-url $url is served from a worktree of $checkout, whose $DEMO_ENGINE_READS_CITY_VAR is \"false\", so the capture reaches port $port and no other loopback port"
-  printf '%s\n' "$port"
+  _DEMO_ENGINE_LOCAL_PORT=$port; _DEMO_ENGINE_LOCAL_FROM=$dirs; _DEMO_ENGINE_LOCAL_KIND=served; _DEMO_ENGINE_LOCAL_RIG=$checkout
+}
+
+# _demo_engine_keeps_sandbox <dirs>: after _demo_engine_city, true when a run
+# that captures from the directories, one per line, keeps the sandbox: when one
+# of them lies in no rig's repository, in the city's own, or in the repository
+# of a rig whose app counts as reading the city by _demo_engine_reads_city.
+# False when each lies in the repository of a rig whose app_reads_city is
+# "false", with _DEMO_ENGINE_PLAIN_RIGS set to those rigs' checkouts, one per
+# line.
+_demo_engine_keeps_sandbox() {
+  local d checkout rigs="" NL='
+'
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    checkout=$(_demo_engine_rig_of "$d")
+    [ -n "$checkout" ] || return 0
+    case "$NL${_DEMO_ENGINE_HQ:-}$NL" in *"$NL$checkout$NL"*) return 0 ;; esac
+    _demo_engine_reads_city "$checkout" && return 0
+    case "$NL$rigs$NL" in *"$NL$checkout$NL"*) ;; *) rigs="$rigs${rigs:+$NL}$checkout" ;; esac
+  done <<EOF
+$1
+EOF
+  [ -n "$rigs" ] || return 0
+  _DEMO_ENGINE_PLAIN_RIGS=$rigs
+  return 1
+}
+
+# _demo_engine_plain_why: after _demo_engine_keeps_sandbox answered false, the
+# rigs whose app_reads_city is "false" that a run with no sandbox captures from,
+# as a message names them.
+_demo_engine_plain_why() {
+  local NL='
+'
+  printf '%s\n' "the repository of ${_DEMO_ENGINE_PLAIN_RIGS//"$NL"/ and }, whose $DEMO_ENGINE_READS_CITY_VAR is \"false\""
 }
 
 demo_engine_cli() {
   local NL='
-' pos="" port="" open="" base="" serve_dir="" cand="" files=""
+' pos="" port="" open="" base="" serve_dir="" cand="" files="" from="" kind=""
   local -a args
   _demo_engine_sandbox_ok || return 1
   args=("$@")
   [ $# -eq 0 ] || shift
 
-  # What the run reads and writes, and the server it starts, as the engine's own
-  # arguments name them.
+  # What the run reads and writes, the server it starts, and the checkouts it
+  # captures from, as the engine's own arguments name them.
   cand=$(pwd -P)
   while [ $# -gt 0 ]; do
     case "$1" in
       -o|--output) [ $# -lt 2 ] || cand="$cand$NL$(dirname -- "$2")"; shift ;;
-      --cwd)       [ $# -lt 2 ] || cand="$cand$NL$2"; shift ;;
-      --serve-dir) serve_dir=1; [ $# -lt 2 ] || cand="$cand$NL$2"; shift ;;
+      --cwd)       [ $# -lt 2 ] || { cand="$cand$NL$2"; from="$from$NL$2"; }; shift ;;
+      --serve-dir) serve_dir=1; [ $# -lt 2 ] || { cand="$cand$NL$2"; from="$from$NL$2"; }; shift ;;
       --music)     [ $# -lt 2 ] || files="$files$NL$2"; shift ;;
       --port)      port="${2:-}"; shift ;;
       --serve)
-        _demo_engine_say "the engine's --serve would start a server whose port the sandbox cannot vouch for; serve the app as a copy with gctk rig serve, which runs it inside the sandbox, and give the engine the copy's --base-url"
+        _demo_engine_say "the engine's --serve would start a server of its own; serve the app as a copy with gctk rig serve, and give the engine the copy's --base-url"
         return 1 ;;
       --base-url)  base="${2:-}"; shift ;;
       --mode|--selector|--scale) shift ;;
@@ -719,7 +806,7 @@ demo_engine_cli() {
       return 1
     fi
     if [ -n "$port" ]; then
-      _demo_engine_say "an iOS app run takes no --port: the capture picks its servers' ports, the ones the sandbox opens"
+      _demo_engine_say "an iOS app run takes no --port: the capture picks its servers' ports, which a run in the sandbox opens"
       return 1
     fi
     _demo_engine_provision_ios || return 1
@@ -730,7 +817,8 @@ demo_engine_cli() {
       _demo_engine_say "--base-url $base and --serve-dir each name an app to capture; give one"
       return 1
     fi
-    open=$(_demo_engine_local_port "$base") || return 1
+    _demo_engine_local_port "$base" || return 1
+    open=$_DEMO_ENGINE_LOCAL_PORT; from="$from$NL$_DEMO_ENGINE_LOCAL_FROM"; kind=$_DEMO_ENGINE_LOCAL_KIND
   fi
   if [ -n "$serve_dir" ]; then
     if [ -z "$port" ]; then
@@ -744,7 +832,7 @@ demo_engine_cli() {
       [ -n "$open" ] && [ "$open" -le 65535 ] \
         || { _demo_engine_say "--port '$port' is not a port from 1 to 65535"; return 1; }
       if _demo_engine_port_answers "$open"; then
-        _demo_engine_say "a server already answers on port $open, or nothing could tell, and the engine would capture that server, which runs outside the sandbox; give the capture a --port nothing listens on"
+        _demo_engine_say "a server already answers on port $open, or nothing could tell, and the engine would capture that server instead of the directory; give the capture a --port nothing listens on"
         return 1
       fi
     fi
@@ -757,7 +845,28 @@ demo_engine_cli() {
   else
     set -- npx --yes "$DEMO_ENGINE_PACKAGE"
   fi
-  _demo_engine_sandbox_run "$open" "$cand" "$files" "$@" ${args[@]+"${args[@]}"}
+
+  # A run captures from the copy whose app its --base-url is as well as from the
+  # checkouts its arguments name, and from its working directory when it names
+  # none of those. It keeps the sandbox unless each checkout it captures from is
+  # a rig's whose app_reads_city is "false".
+  if [ -n "$base" ] && [ "$base" = "${DEMO_ENGINE_COPY_URL:-}" ] && [ -n "${_DEMO_ENGINE_COPY_DIR:-}" ]; then from="$from$NL$_DEMO_ENGINE_COPY_DIR"; fi
+  [ -n "$from" ] || from=$(pwd -P)
+  if _demo_engine_keeps_sandbox "$from"; then
+    case "$kind" in
+      copy) _demo_engine_say "--base-url $base is a copy that gctk rig serve runs from $_DEMO_ENGINE_LOCAL_FROM inside the sandbox, so the capture reaches port $open and no other loopback port" ;;
+      served) _demo_engine_say "--base-url $base is served from a worktree of $_DEMO_ENGINE_LOCAL_RIG, whose $DEMO_ENGINE_READS_CITY_VAR is \"false\", so the capture reaches port $open and no other loopback port" ;;
+    esac
+    _demo_engine_sandbox_run "$open" "$cand" "$files" "$@" ${args[@]+"${args[@]}"}
+    return
+  fi
+  case "$kind" in
+    copy) _demo_engine_say "--base-url $base is a copy that gctk rig serve runs from $_DEMO_ENGINE_LOCAL_FROM" ;;
+    served) _demo_engine_say "--base-url $base is served from a worktree of $_DEMO_ENGINE_LOCAL_RIG, whose $DEMO_ENGINE_READS_CITY_VAR is \"false\"" ;;
+  esac
+  _demo_engine_say "the capture runs as an ordinary process, with no sandbox, because what it captures lies in $(_demo_engine_plain_why)"
+  _demo_engine_env
+  "${_DEMO_ENGINE_ENV[@]}" "$@" ${args[@]+"${args[@]}"}
 }
 
 demo_engine_sandboxed() {
@@ -771,11 +880,27 @@ demo_engine_sandboxed() {
   [ "$port" -le 65535 ] || { _demo_engine_say "'$port' is not a port from 1 to 65535"; return 1; }
   [ -d "$dir" ] || { _demo_engine_say "'$dir' is not a directory"; return 1; }
   _demo_engine_city || return 1
-  _demo_engine_sandbox "$port" "$(pwd -P)
-$dir" "" || return 1
   # The shell becomes the command, so its output ends once the command closes
   # it, the end gctk rig serve reads an app's URL up to.
+  if ! _demo_engine_keeps_sandbox "$dir"; then
+    _demo_engine_say "the command runs as an ordinary process, with no sandbox, because $dir lies in $(_demo_engine_plain_why)"
+    _demo_engine_env
+    exec "${_DEMO_ENGINE_ENV[@]}" "$@"
+  fi
+  _demo_engine_sandbox "$port" "$(pwd -P)
+$dir" "" || return 1
   exec "${_DEMO_ENGINE_SANDBOX[@]}" "$@"
+}
+
+# _demo_engine_env: sets _DEMO_ENGINE_ENV to the words that, with a command
+# after them, run that command without the environment variables that point a
+# command at the city.
+_demo_engine_env() {
+  local v
+  _DEMO_ENGINE_ENV=(env)
+  while IFS= read -r v; do
+    [ -z "$v" ] || _DEMO_ENGINE_ENV+=(-u "$v")
+  done < <(env | sed -n -E 's/^((GC|GT|BEADS|BD|DOLT)_[A-Za-z0-9_]*|TMUX|TMUX_PANE)=.*/\1/p')
 }
 
 # _demo_engine_sandbox_run <ports> <dirs> <files> <command...>: runs the
@@ -797,8 +922,7 @@ _demo_engine_sandbox_run() {
 # when the run is refused.
 _demo_engine_sandbox() {
   local NL='
-' open="$1" cand="$2" files="$3" places rw="" ro="" p d reach kind engine="" profile v
-  local -a unsets
+' open="$1" cand="$2" files="$3" places rw="" ro="" p d reach kind engine="" profile
 
   # The city's directories, and each directory the run reads and writes, as
   # _demo_engine_reach widens it.
@@ -871,11 +995,8 @@ $open
 EOF
   profile="$profile$NL(deny signal)$NL(allow signal (target same-sandbox))"
 
-  unsets=()
-  while IFS= read -r v; do
-    [ -z "$v" ] || unsets+=(-u "$v")
-  done < <(env | sed -n -E 's/^((GC|GT|BEADS|BD|DOLT)_[A-Za-z0-9_]*|TMUX|TMUX_PANE)=.*/\1/p')
-  _DEMO_ENGINE_SANDBOX=(env ${unsets[@]+"${unsets[@]}"} sandbox-exec -p "$profile")
+  _demo_engine_env
+  _DEMO_ENGINE_SANDBOX=("${_DEMO_ENGINE_ENV[@]}" sandbox-exec -p "$profile")
 }
 
 # The gctk binary that runs a copy: $GCTK_BIN, else the city's build.
@@ -883,11 +1004,11 @@ _demo_engine_gctk() { printf '%s\n' "${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/
 
 demo_engine_copy() {
   local dir="${1:-}" command="${2:-}" gctk rep state
-  DEMO_ENGINE_COPY_URL=""; DEMO_ENGINE_COPY_STOP=""
+  DEMO_ENGINE_COPY_URL=""; DEMO_ENGINE_COPY_STOP=""; _DEMO_ENGINE_COPY_DIR=""
   gctk=$(_demo_engine_gctk)
   [ -x "$gctk" ] || { _demo_engine_say "no gctk binary at $gctk, which runs the copy a capture serves the app as; the gctk-build order publishes it, or set GCTK_BIN"; return 1; }
   [ -d "$dir" ] || { _demo_engine_say "'$dir' is not a directory to serve the app from"; return 1; }
-  _demo_engine_say "serving the app from $dir as a copy (gctk rig serve), which runs inside the sandbox"
+  _demo_engine_say "serving the app from $dir as a copy (gctk rig serve)"
   rep=$(cd "$dir" && GCTK_SCRIPTS_DIR="$DEMO_ENGINE_LIB_DIR" "$gctk" rig serve --command "$command")
   state=$(printf '%s' "$rep" | jq -r '.state // empty' 2>/dev/null)
   if [ "$state" != running ]; then
@@ -903,9 +1024,9 @@ demo_engine_copy() {
   else
     _demo_engine_say "a copy (gctk rig serve) of this command already runs from $dir, so the capture takes it and leaves it running"
   fi
-  # shellcheck disable=SC2034 # the capture that sourced this file reads it
   DEMO_ENGINE_COPY_URL=$(printf '%s' "$rep" | jq -r '.app_url // empty' 2>/dev/null)
   [ -n "$DEMO_ENGINE_COPY_URL" ] || { _demo_engine_say "gctk rig serve reported no app_url, where the app's copy is"; return 1; }
+  _DEMO_ENGINE_COPY_DIR=$dir
 }
 
 demo_engine_copy_stop() {

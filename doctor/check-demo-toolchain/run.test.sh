@@ -234,7 +234,7 @@ stub_rest; rm -f "$STUBS/sandbox-exec"
 OUT="$(run_check "$HOME_KEY" sk-env-value)"; RC=$?
 eq "$RC" 1 "case14: a host without sandbox-exec exits Warning"
 has "$OUT" "incomplete — 1 item(s) to provision" "case14: the sandbox is the one item"
-has "$OUT" "sandbox-exec not found — every capture runs inside its sandbox, where the live city cannot be reached, so no capture runs on this host" "case14: it says no capture runs without it"
+has "$OUT" "sandbox-exec not found — a capture of a rig whose app reads the city runs inside its sandbox, where the live city cannot be reached, and the demo library runs no capture on a host without it" "case14: it says no capture runs without it"
 
 echo "check-demo-toolchain: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

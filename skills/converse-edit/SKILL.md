@@ -377,9 +377,11 @@ one commit.
 When the change is to a rig's UI, the operator reacts to a copy of it: a live
 page served from the tree on fixture data, at an address of its own that they
 open in their own browser. `gctk rig serve` runs the copy from the checkout you
-run it in, inside the sandbox a demo capture runs in, where the live city
-cannot be reached. Start one once the tree is set up, with the rig's serve
-command and the city's publisher, which the rig's formula vars carry:
+run it in, as a demo capture of the rig runs it: inside the capture's sandbox,
+where the live city cannot be reached, for a rig whose `app_reads_city` is not
+`"false"`, and as an ordinary process for any other rig. Start one once the
+tree is set up, with the rig's serve command and the city's publisher, which
+the rig's formula vars carry:
 
 ```bash
 VARS=$(gc formula show mol-rig-demo --rig "$GC_RIG" --json)

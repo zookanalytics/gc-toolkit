@@ -6,7 +6,7 @@ can accept, hold it on an edge, hand a confident no-op to a validating closer,
 or put a question to the operator as a human gate. A reaction never closes the
 bead, and code it produces takes the gated `mr` path only.
 
-`tools/gc-proactive.sh sling <bead>` slings this formula on the bead, once its
+`gctk reaction sling <bead>` slings this formula on the bead, once its
 refusals pass: `gc sling <rig>/gc-toolkit.proactive <bead> --on
 mol-first-reaction`. The run is the reaction's lease, Gas City's run cancel is
 its stop, and gc sling refuses a second live run on the bead, so a reaction

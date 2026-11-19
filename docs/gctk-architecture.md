@@ -116,7 +116,7 @@ bead.
 | `gctk epic create <title>` | agent | file an epic with its contract, each field in its own key | bd's create checks hold no issue type to a metadata key, so nothing native refuses an epic filed with no hypothesis, which [epics.md](epics.md) makes the one hard gate on an epic. The verb refuses such an epic, files the contract in the create itself, and, under an epic, files a Delivery, which carries no contract. |
 | `gctk epic unweighed [--rig <rig>]` | agent | each close and each latest shift of a rig's epics that no portfolio sync has weighed, oldest first | bd keeps only an epic's latest ruling in its keys, and its audit history keeps no ruling a read can rely on: the proxied store Gas City gives a new rig records each write with neither the row it found nor the fields it set ([the search](../specs/tk-h63alox/gas-city-search.md)). So the epic review stamps a shift's time in a key a later ruling leaves standing, the po's sync note marks each epic it weighs with the time the verb read the epics, which the verb prints first, and the verb answers each epic by its own mark, from one read of the rig's epics, leaving out each Delivery as the epic-close doctor reads one. A store that does not answer stops it, so a sync never weighs a list it could not read. Its caller is the po's portfolio sync. |
 | `gctk rig test`, `lint`, `typecheck`, `setup`, `build` | agent, hook | run a rig's check and record its result at the commit, or read that record | One consistent surface that simplifies an agent's logic, caches each result at its commit, and processes every check the same way. |
-| `gctk rig serve` | agent, hook | run a copy of the rig's UI from a checkout, with no address for a demo capture or at an address of its own for a person, report its state, or stop it | Gas City supervises a declared service under the supervisor's origin, one process per name, and runs no app instance from a worktree on a port of its own ([the search](../specs/tk-rymdhac/gas-city-search.md#a-copy-of-a-rigs-ui)). The verb serves both consumers on one path, inside the sandbox the pack's demo capture defines, and ends the copy's whole process group with the copy, at the caller's stop, or through Gas City's orphan sweep once the caller's session has ended. |
+| `gctk rig serve` | agent, hook | run a copy of the rig's UI from a checkout, with no address for a demo capture or at an address of its own for a person, report its state, or stop it | Gas City supervises a declared service under the supervisor's origin, one process per name, and runs no app instance from a worktree on a port of its own ([the search](../specs/tk-rymdhac/gas-city-search.md#a-copy-of-a-rigs-ui)). The verb serves both consumers on one path, running the copy as the pack's demo capture runs it, inside its sandbox for a rig whose app reads the city, and ends the copy's whole process group with the copy, at the caller's stop, or through Gas City's orphan sweep once the caller's session has ended. |
 | `gctk review checks` | hook, order | which checks gate a change at a commit, with the rig's index laid over the pack's | Gas City's formula check loop runs a check script and iterates, and holds no review checks. The check index and its rig overlay are the feature. The review formula's steps read it at the reviewed commit, a lane for its own row and triage for the whole index, and the merge cadence reads it for the lanes a change needs before it dispatches them or lands the change. The loop's shape is the review-lane member's design. |
 | `gctk review guidance <check>` | hook | the rig's guidance for a check at the reviewed commit, or the guidance a change edits | Part of the check index: a rig's guidance, read at the commit under review rather than the one checked out. |
 | `gctk review passed <run>` | hook | whether an iteration of a review run passed: the loop's pass-or-iterate check, and with `--record` the run's result for the head and target it judged, with the asks it answered closed, at the iteration that ends the loop | The check script that a review formula's check loop runs after each round. It holds the pass rule over the lanes, their findings and rulings and the asks open on the bead, which the loop itself cannot, and reads only the store, since a check runs with no `gh`. Gas City's PR review and its PR monitor keep their reports per head SHA and record no pass on the bead that owns a PR, and a formula has no script step, so the check records the result as it ends the loop ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#the-check-script-and-the-result-unit-1)). The result is the one the pr domain's evaluator counts, written under the store's record lock, and each ask closes with the work record Gas City's close reads. |
@@ -124,11 +124,16 @@ bead.
 | `gctk review step <bead>` | hook | what a review run's step judges: the iteration it runs in, the head that iteration judges and the change triage reads there, and for triage's read whether the run must stop | Gas City records a step's iteration (`gc.attempt`) and the vars a run was poured with, and says neither which head a later iteration of a check loop judges nor what changed since the last head that passed. The verb derives both from the steps' outputs and the results on the bead, and its `--stands` form stops a run whose vars do not name the bead's record, or whose PR is no longer at the head the iteration judges, with no result. |
 | `gctk review output <bead> --file <path>` | hook | check the output a run's step wrote, before the step writes it | Gas City keeps a step's `gc.output_json` as written, and reads it only for a fan-out's items, so a slip shows only once the pass rule reads the output as not written, which spends an attempt, or a fan-out cannot read a triage output's checks, which stops the run. The verb checks the output in the run's shape and against the run's facts, and carries the guidance-edit guard on a correctness approve. The write stays native. |
 | `gctk review comment <run>` | hook | the head's one comment: every lane's verdict there, its findings and how the round ruled each | Gas City's PR review posts one lane's report per head SHA and runs no loop ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#the-runs-formulas-unit-3)), and nothing renders a loop's lanes and rulings. The comment carries every lane's verdict at the head, approvals included, and each point's answer as what the head carries for it. The post goes through `pr-post.sh`, the city's one writer of posts. |
+| `gctk reaction check <bead> --run <root>` | hook | whether this run may still react to its subject | A subject's state can change between its reaction's sling and the claim of its step. Gas City retires a run whose subject closed or took an assignee before the claim and checks nothing else then, so the check, the reaction's first act, applies the sling's refusals again. |
+| `gctk reaction sling <bead>` | agent, hook | sling a first reaction on a bead nobody has decided on, through the rig's proactive pool | `gc sling` pours on a bead whatever already speaks for it, such as a hold label, a human gate, an assignee or a live run of another formula. The verb refuses a bead whose next move is someone's, and leaves a second live reaction to `gc sling`'s own refusal. |
+| `gctk reaction sweep [--dry-run]` | order, agent | sling a first reaction at each ready bead in the rig that nobody has decided on | Nothing in Gas City starts work on a bead nobody slung, and its work query offers only routed work, so the sweep runs on its order's cadence. Its dry run shows an agent what a sweep would take. |
+| `gctk reaction deliverable` | hook | whether this rig's proactive pool can take a reaction now | A slung reaction waits for a slot at no cost, but one routed to a pool the city's roster shows absent, suspended or capped at zero waits for nobody. A finding's filing and the operator's intake ask before they sling. |
+| `gctk reaction dispose <bead> --disposition <exit>` | agent | take one of a first reaction's exits on its subject: route it, recommend an action, hold it on its wait, hand it to a validating closer, or put it to the operator | One intent over the native writes each exit makes. It applies intake's rule ([steering.md](steering.md)). |
 | `gctk session title` | agent | give a session a title its record and its terminal show | `gc session rename` writes only the title on Gas City's record. An agent's terminal shows the name the agent's own `/rename` sets, typed into its input box, so the verb renames the session and has Gas City type `/rename <title>` into it through `gc session submit`, for Claude Code and Codex alike. |
 | `gctk seed render` | hook, order | render every agent's prompt and every formula's recipe into the audit under `generated/seed-audit/` | Gas City renders one prompt or recipe on demand and keeps no copy. The audit keeps them all in the tree, so a PR's diff shows what each agent will receive. It writes only the output it owns, which is what lets an order run it. |
 | `gctk seed check` | hook | whether the render is current | The pre-commit hook and a doctor check read it, so a stale audit is caught before it lands. |
 | `gctk dolt reclaim` | order | reclaim each store at or over the reclaim line | The reclaim line is a store's on-disk noms size of `GC_DOLT_RECLAIM_THRESHOLD_MIB`, 2048 MiB by default, the size at which Gas City's `dolt-noms-size` doctor check warns. The supervisor runs no Dolt GC, and scheduled compaction skips a store under its commit threshold ([warrants.md](warrants.md#dolt-reclaim)). |
-| `gctk version` | hook | the revision this binary was built from | The build stamps the module's subtree hash, so a doctor check can tell whether the deployed binary is the one the checkout builds. |
+| `gctk version` | hook | the revision this binary was built from | The build stamps one hash over gctk's inputs, services/gctk and the root go.mod and go.sum, so a doctor check can tell whether the deployed binary is the one the checkout builds. |
 | `gctk lifecycle`, `gctk merge` | hook | the old merge path's anchor state machine and merge rule | Debt, in [the re-implementation register](#the-re-implementation-register). |
 
 What each noun owns:
@@ -169,6 +174,11 @@ What each noun owns:
   config in the pack and the rig, and what a run judged is in its steps' outputs,
   which Gas City keeps on the run's beads, in the shape the review domain
   declares and checks.
+- **`reaction`:** the recommendation a first reaction's `recommend` exit leaves
+  for the operator's Accept, in `gc.recommended_formula`. A reaction itself is a
+  Gas City run of `mol-first-reaction`, and each record its exits leave has
+  another owner: the human gate and the hold label are Gas City's, the headline
+  is the takeaway's, and the arm is `bead`'s.
 - **`dolt` and `session`:** nothing. A session's title is Gas City's record and
   the agent's own terminal.
 
@@ -445,7 +455,7 @@ and CI runs those tests on every PR.
 | github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
 | runtime | Gas City | `gc` (sling, config, session, events, runtime), the supervisor API (runs, sessions), the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh`, the seed audit's, `render-seed-audit.sh` and `seed-audit-reaudit.sh`, and the disposition writer, `bead-rehome.sh`, run as the actor a close needs | recorded responses |
-| host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start inside the sandbox a demo capture runs in | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
+| host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start as a demo capture runs one, inside its sandbox for a rig whose app reads the city | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
 
 The store's rules are the store's own. The store adapter asks the store whether
 a bead is blocked or ready and returns its answer, and computes none itself.
@@ -518,7 +528,7 @@ tests run on the fake.
 The host adapter's own tests start real processes, so they pin what its fake
 stands in for: a group that ends whole, a start that leads a session of its own
 with its caller's environment, a port's listeners as `lsof` reads them, and a
-start inside the capture's sandbox. A domain's tests run on its fake inside a
+start through the library that runs it as a demo capture does. A domain's tests run on its fake inside a
 `testing/synctest` bubble, so a wait or a grace a rule sets passes on the
 bubble's clock, and no rule's test needs a tool on the machine.
 
@@ -665,13 +675,11 @@ why a reader must know it, and the work that retires it.
   `session title` runs `gc session rename` and `gc session submit`, and the
   rig domain runs a check's command itself.
   `epic create` and `session title` also read beads through the store adapter,
-  around the ledger. The runtime adapter (`internal/gascity`) holds only what
-  the arm's start and the landing order ask of Gas City, a sling, a human gate,
-  a review run's cook and a retired PR's close, and the
-  host adapter only what a copy of a rig's UI needs, so the tests of these
-  verbs stub `gc` on `PATH` or run real processes, and none of these verbs is
-  the model for a new one. tk-ssm8qns.16 puts them behind the ledger and the
-  adapters.
+  around the ledger. The runtime adapter's `Runtime` (`internal/gascity`)
+  holds no session rename or submit, and the host adapter only what a copy of
+  a rig's UI needs, so the tests of these verbs stub `gc` on `PATH` or run
+  real processes, and none of these verbs is the model for a new one.
+  tk-ssm8qns.16 puts them behind the ledger and the adapters.
 - **Readers outside the `bead` domain read the arm's keys.** The arm's record
   (`services/gctk/arm/record`) declares the arm's keys and is their one writer,
   but the scripts, doctor checks, skills and the helm board that read an arm
@@ -686,3 +694,12 @@ why a reader must know it, and the work that retires it.
   scripts themselves.** They retire whole with the old merge path
   (tk-1tfzr71.70, [the register](#the-re-implementation-register)), so they get
   no layering work.
+- **Shell still reads and clears the recommendation `reaction` owns.**
+  `gc.recommended_formula` is declared in `reaction`, whose `recommend` exit is
+  its one setter, but `gc-helm.sh accept` and
+  `converse-invalidate-recommendation.sh` clear it and `converse-signoff.sh`
+  reads it, each spelling the key, against rules 1 and 6, so the key stays
+  registered in `lifecycle/lifecycle.toml`. The board's own read of it is under
+  the board's entry above. tk-ssm8qns.23 moves those reads and clears onto the
+  domain, and the key's entry in `lifecycle/lifecycle.toml` goes with the last
+  of them.

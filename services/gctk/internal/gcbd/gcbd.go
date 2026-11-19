@@ -669,7 +669,8 @@ func (c *Client) Update(id string, args ...string) (string, error) {
 }
 
 // AddEdge runs one `gc bd dep add <id> <target> --type=<typ>`, returning its
-// combined output.
+// combined output. bd keeps one edge type per pair of beads, so it refuses an
+// edge onto a bead id already has an edge of another type onto.
 func (c *Client) AddEdge(id, target, typ string) (string, error) {
 	out, err := c.command("bd", "dep", "add", id, target, "--type="+typ).CombinedOutput()
 	return strings.TrimRight(string(out), "\n"), err
