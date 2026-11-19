@@ -292,17 +292,23 @@ else
   # A non-zero exit means gofmt could not read or parse a file. That fails the
   # check on its own, whatever gofmt lists.
   if unformatted="$(gofmt -l "${go_files[@]}")"; then rc=0; else rc=$?; fi
-  listed=0
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    listed=$((listed + 1))
+  # gofmt's list is split into its lines in memory, so no input that could
+  # fail stands between the list and the report (docs/review-correctness.md,
+  # Loop input). Globbing is off while it splits, so no name is expanded.
+  set -f
+  IFS=$'\n'
+  # shellcheck disable=SC2206  # the split on IFS, newlines alone, is the intent
+  listed=($unformatted)
+  IFS=$' \t\n'
+  set +f
+  for f in ${listed[@]+"${listed[@]}"}; do
     summary+=("gofmt: FAIL — $f is not gofmt-clean; gofmt -d $f shows the rewrite")
-  done <<<"$unformatted"
+  done
   if [ "$rc" -ne 0 ]; then
     fail=1
     summary+=("gofmt: FAIL — gofmt exit $rc; a Go file could not be read or parsed")
   fi
-  if [ "$listed" -gt 0 ]; then
+  if [ "${#listed[@]}" -gt 0 ]; then
     fail=1
   elif [ "$rc" -eq 0 ]; then
     summary+=("gofmt: ${#go_files[@]} Go file(s) clean")

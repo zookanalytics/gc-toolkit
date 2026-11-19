@@ -511,13 +511,39 @@ grep -q 'scratch.go' "$TMP/gofmt.log" \
   || ok "gofmt clean: an untracked Go file is out of scope"
 rm -f "$REPO/services/foo/scratch.go"
 
-# --- L: gofmt lists a file -> exit 1, and the report names it. ---------------
-make_wrapper 0; make_go 0; make_gofmt 0 services/foo/foo.go
+# --- L: gofmt lists files -> exit 1, and the report names each. --------------
+make_wrapper 0; make_go 0; make_gofmt 0 services/foo/foo.go services/foo/bar.go
 run_sut subject.sh
 [ "$rc" -eq 1 ] && ok "gofmt drift: exit 1" || bad "gofmt drift: expected 1, got $rc"
-grep -q 'services/foo/foo.go is not gofmt-clean' "$TMP/out" \
-  && ok "gofmt drift: report names the file" \
-  || bad "gofmt drift: report does not name services/foo/foo.go"
+for f in services/foo/foo.go services/foo/bar.go; do
+  grep -qF "$f is not gofmt-clean" "$TMP/out" \
+    && ok "gofmt drift: report names $f" \
+    || bad "gofmt drift: report does not name $f: $(cat "$TMP/out")"
+done
+
+# --- L2: a long gofmt list is reported whole, though no file can be written. -
+# Read from a here-string, a list past 64 KiB is backed by a temp file bash
+# writes, and when that write fails the loop reads nothing and the leg reports
+# the tree clean. The run refuses every file write past 1 KiB, with SIGXFSZ
+# ignored, which leaves room for the tracked listing, and the stub gofmt lists
+# 2000 files. Its output comes back through a pipe, which the limit leaves
+# alone.
+make_wrapper 0; make_go 0
+cat > "$STUB/gofmt" <<'EOF'
+#!/bin/sh
+i=0
+while [ "$i" -lt 2000 ]; do printf 'services/foo/%060d.go\n' "$i"; i=$((i + 1)); done
+EOF
+chmod +x "$STUB/gofmt"
+if out="$( ( cd "$REPO" && trap '' XFSZ && ulimit -f 1 \
+       && PATH="$STUB" STUB_HOST_OS="$HOST_OS" STUB_ICU_PREFIX="$ICU_PREFIX" \
+          STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
+          CGO_CPPFLAGS="$CGO_CPPFLAGS_IN" CGO_LDFLAGS="$CGO_LDFLAGS_IN" \
+          "$BASH_BIN" "$SUT" subject.sh ) 2>&1 )"; then rc=0; else rc=$?; fi
+printf '%s\n' "$out" > "$TMP/out"
+[ "$rc" -eq 1 ] && ok "long gofmt list: exit 1" \
+  || bad "long gofmt list: expected 1, got $rc: $(tail -5 "$TMP/out")"
+eq "$(grep -c 'is not gofmt-clean' "$TMP/out")" 2000 "long gofmt list: the report names every listed file"
 
 # --- M: gofmt cannot parse a file (exit 2, nothing listed) -> exit 1. --------
 # The listing is empty, so only the exit code shows a file went unchecked.
