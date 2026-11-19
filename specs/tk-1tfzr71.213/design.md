@@ -20,10 +20,10 @@ Today your web page reads each rig's board from gctk's shared readers (`GET
 log. An older board still runs beside them. `helm-svc board --json` and the
 `/helm` route serve its rows, which it derives from each store through an
 embedded copy of the beads library: about 9,000 lines of Go and 13,000 lines of
-tests that nothing outside the service reads. That library is why a fresh
+tests, whose rows no agent, script or skill reads. That library is why a fresh
 clone needs the ICU helper before it builds. `gc-helm.sh`, 6,357 lines of
 shell, carries fifteen verbs, and gctk itself shells out to two of them. The
-helm build order runs every five minutes and opens every store each time to
+helm build order runs every five minutes and opens a bead store each time to
 probe the library. Approving this design makes these changes.
 
 1. **`helm-svc board --json` prints the page's own document.** For each rig it
@@ -63,8 +63,9 @@ probe the library. Approving this design makes these changes.
    verbs' subject and sitting helpers (section 5). Each guard a verb keeps today
    moves with it, among them takeaway's compare-and-swap. Cost: the skills,
    prompts and scripts that call a moved verb change their call, and the
-   conversation verbs stay shell until tk-ssm8qns.15, which no queue holds yet,
-   runs. Your keys, your page's buttons and the terminal form work as before.
+   conversation verbs stay shell until tk-ssm8qns.15, which nothing has sent to
+   a pool yet, runs. Your keys, your page's buttons and the terminal form work
+   as before.
 5. **The takeaway stops being shown, and its fields stay until a bead of their
    own decides them.** No page shows a takeaway once the old board goes. The
    fields keep two jobs: the first reaction's scan reads one as the record that
@@ -104,22 +105,32 @@ and `helm/engage` (`web/src/rigboard/read.ts`, `web/src/open/client.ts`,
 `web/src/actuate/client.ts`).
 
 No skill, formula, prompt, order, script or workflow runs `helm-svc board` or
-fetches `/helm`. Outside `services/helm`, its name appears only in
-`gc-helm.sh`'s header, usage and two refusals, in `gc-helm.test.sh`'s NOBOARD
+fetches `/helm`. Outside `services/helm`, specs and docs, its name appears only
+in `gc-helm.sh`'s header, usage and two refusals, in `gc-helm.test.sh`'s NOBOARD
 case and in a comment of `tools/helm-surface-fixture.sh`.
 
 `helm-svc board --json` becomes a thin command over `rigboard.Read`, the reader
 behind `GET /helm/rigs/{rig}`. It prints `{read_at, rigs: [...]}` with each
 rig's `board` document, or one rig's with `--rig <name>`, and keeps
-`--timeout`. A rig whose read fails is named in the answer with its error.
+`--timeout`. A rig whose read fails is named in the answer with its error. The
+GitHub-intake effort tk-1tfzr71.149 (PR #1559, open at this reading) adds to
+each rig's answer when GitHub was last asked (`rigboard.ReadAsked`, through the
+supervisor's API). If it lands first, the command prints that beside each
+document, as the page's answer carries it.
 
 What retires with the tile board:
 
-- In `services/helm/internal/source`, everything but the `gc` command runner
-  the rig list uses (`NewGC` in `gccli.go`) and the event-log read the city
-  page uses (`events.go`): the library reader (`beads.go`, `facts.go`,
-  `startfail.go`), the supervisor backend (`supervisor.go`), the build-status
-  read (`packhealth.go`) and the session read in `gccli.go`.
+- In `services/helm/internal/source`, everything the page's reads do not use.
+  They use the `gc` command runner the rig list uses (`NewGC` in `gccli.go`),
+  the city the server resolves at start (`DiscoverCityPath`, which lives in
+  `beads.go` and moves beside the runner) and the event-log read the city page
+  uses (`events.go`). After tk-1tfzr71.149 they also use its supervisor API
+  client (`supervisorapi.go`), which finds the API as the supervisor backend
+  does (`discoverBaseURL` and `discoverCity` in `supervisor.go`), so those stay
+  too. The rest goes: the library reader (`beads.go`, `facts.go`,
+  `startfail.go`), the supervisor backend's bead reads (`supervisor.go`), the
+  build-status read (`packhealth.go`), the session read in `gccli.go` and the
+  `Source` seam (`source.go`).
 - `services/helm/internal/board`, whole.
 - In `internal/server`, the `/helm` route with its cache and gather, the bare
   `/` JSON answer, and the `POST /helm/accept` and `POST /helm/dismiss` routes,
@@ -130,7 +141,12 @@ What retires with the tile board:
   `web/src/contract.ts`, `contract.fixture.ts`, `board.fixture.json` and
   `web/contract_parity_test.go`. The deletion plan gives the parity test to
   tk-1tfzr71.25, but it reflects over `board.Board`, so it cannot outlive that
-  type. Its row in `tools/deletion-plan.tsv` moves to this member.
+  type. Unit 2 deletes it and removes its row, which names tk-1tfzr71.25, from
+  `tools/deletion-plan.tsv`.
+- Outside the service, `assets/scripts/lifecycle.test.sh` reads the machine
+  axis's values from `internal/board/derive.go` and holds them to
+  `lifecycle.toml`. The values `prstatus` reads (`prstatus.go`) are the copy
+  left, so unit 2 points that check at them.
 
 ## 2. What the replacement owes
 
@@ -140,7 +156,7 @@ board is that reader.
 | Need | At main | This design |
 |---|---|---|
 | Each live merge anchor's PR answer by the one rule over the saved GitHub read | `rigboard.Read` asks `Listing.PRAnswers` for every anchor on the pending record and renders it with `prstatus.Render`, `RenderHeld` and `RenderReasons` (`internal/rigboard/gather.go:206-266`) | Answered. An anchor on the old record reads `prstatus.Derive` until the old merge path's retirement (tk-1tfzr71.70), and one with no open PR is the old review path's (tk-1tfzr71.122). |
-| Each blocker's await type | `waits` reads it (`services/gctk/waits/waits.go:60`), and only a human gate or a person's blocker reads "Waiting on you" (`internal/rigboard/table.go:216-218`) | Answered: no timer or GitHub gate reads as yours. It reads "Held by a gate" under "Not moving", and whether such a gate reads as moving is the page's to decide (tk-yhquh93.7). |
+| Each blocker's await type | `waits` reads it (`services/gctk/waits/waits.go:60`), and only a human gate or a person's blocker reads "Waiting on you" (`holdingVerdict` and `gateHold` in `internal/rigboard/table.go`) | Answered: no timer or GitHub gate reads as yours. It reads "Held by a gate" under "Not moving", and whether such a gate reads as moving is the page's to decide (tk-yhquh93.7). |
 | A sitting for each open conversation | A conversation row carries its status and assignee and reads "In conversation" or "Conversation waits for you" (`table.go:136-146`). No session is read. | Goes. Nothing reads a sitting's session once the old board retires, and a conversation whose sitting died reads "In conversation". The implementation child notes that on tk-yhquh93. |
 | An epic's waits with each blocker's status, and a landed Delivery's close time | The rig board reads every wait from the store through `waits`, where the supervisor backend marked an epic's waits unread. No row carries a date. | The waits are answered. The close time goes: nothing on the page dates an ask. |
 | The row of ready beads no queue holds | Nothing builds it. The work queue's "Not scheduled" list is close but includes work with open waits and counts `hold:external` as unscheduled (`services/gctk/queue/queue.go:210-216, 323-344`). | Built in unit 3, below. |
@@ -198,8 +214,13 @@ What existed only for that goes in the same unit:
   `docs/review-demo.md` and `services/helm/README.md`.
 - `gc-build.sh`'s probe of helm, with its `probe-failed` latch and its
   `unreadable` status, since nothing is left to probe.
-- If tk-2astzmg's lint config has landed by then, its exclusion for
-  `services/helm/internal/source/beads.go` in `.golangci.yml`.
+- What open branches add or move, if they land first. tk-a5mwcic.3 (PR #1595)
+  moves the `go-macos` job's use of the helper into `tools/test.sh`.
+  tk-1fsgv13 (PR #1600) adds `govulncheck.yml`, which installs icu4c and uses
+  the helper. tk-2astzmg (PR #1601) adds `lint.yml`, which installs
+  `libicu-dev`, and the exclusion for `services/helm/internal/source/beads.go`
+  in `.golangci.yml`. `git grep -n -i -E 'icu4c|libicu|go-icu-regex'` at the
+  unit's head lists every use left.
 
 The unit proves the end state on a fresh clone of its head, with cgo on and
 no CGO flags set, as a fresh clone has them: `go build ./...`, `go vet ./...`
@@ -217,7 +238,7 @@ and `go test ./...` pass, and `go.mod` names neither
 | priority | the Product Owner's prompt, `converse-epic-review` | the callers run `queue-priority.sh move` | The verb finds the bead's store and runs that script, which finds the store itself (`resolve_db`). |
 | react | `operator-intake.sh` | the caller runs `gctk reaction sling` | The verb is that one call, with its exit codes renumbered. |
 | resolve, dismiss, handback | `operator-intake.sh`; `tmux-dismiss-sitting.sh` (your prefix+X) and `converse-hold`; the converse prompt | tk-ssm8qns.15 | resolve is the subject resolver open and engage use, and dismiss and handback share their sitting and comment helpers, so one port keeps one copy of each. |
-| open, engage, conversations, attach, po, mechanik | the page, the form, your keys, skills | tk-ssm8qns.15 | That bead already moves them, with the form's seam. |
+| open, engage, conversations, attach, po, mechanik | the page, the form, your keys, skills, and for open gctk's `arm start`, which asks a person through it | tk-ssm8qns.15 | That bead already moves them, with the form's seam. |
 | board | none | tk-1tfzr71.25 | The deletion plan gives the stub to that member. |
 
 gctk places each new command by the rules a domain move follows
@@ -229,6 +250,15 @@ replacement in the same unit that removes the verb. The carried constraints:
   `--if-assignee` set to what it read, so a close or a claim that lands after
   the read still stands. `gc-helm.test.sh`'s CAS, RACECLOSE, RACECLAIM, GONE,
   MINE and TOAGENT cases become Go tests that fail when a guard is removed.
+- Each moved verb's shell tests become Go tests in the unit that moves it, and
+  the shell goes in the same change: `gc-helm-park.test.sh`,
+  `gc-helm-place.test.sh`, `gc-helm-accept.test.sh`, the cases of
+  `gc-helm.test.sh` for the verbs that leave, and the takeaway and react checks
+  of the hand-run `tools/helm-surface-fixture.sh`. `lifecycle.test.sh` holds
+  two of `gc-helm.sh`'s copies to `lifecycle.toml`: the headline cap, which
+  takeaway and park share, and the detached states, which takeaway reads. In
+  gctk the verbs read both from the `lifecycle` package (`TakeawayMax` and
+  `DetachedStates`), as `gctk lifecycle` does, so those two checks go.
 - Each gctk command pins a store by `--db` or the store gctk's adapter routes
   the bead to, never by `BEADS_DIR`.
 - The first reaction's scan keeps reading `gc.takeaway` (decision 5).
@@ -238,16 +268,29 @@ replacement in the same unit that removes the verb. The carried constraints:
   `molecule_failed`, as unfinished, as deferred dispatch's start does.
 - The warrants whose Covers lines name a moved verb change with it: Priority
   following names the priority verb, and Accept's lock names accept's lock.
-- The `BEADS_DIR` pins of dismiss's explicit-id path and of `current_sitting`
-  travel with dismiss to tk-ssm8qns.15, whose note says to pin by `GC_RIG` or
-  `--db` and to read a subject in another rig from that rig's store.
+- The `BEADS_DIR` pins in the verbs tk-ssm8qns.15 moves travel with them:
+  open's, engage's, `conversations_pin`'s, `current_sitting`'s and dismiss's
+  explicit-id path. The note tk-ssm8qns.15 gets says to pin by `GC_RIG` or
+  `--db` and to read a subject in another rig from that rig's store. accept's
+  pin moves with accept in unit 4, under the rule above.
 
-The stale text the notes list changes in the unit that makes it false:
-`gccli.go`'s liveness comment and `services/helm/README.md`'s liveness
-paragraph with the old board (unit 2); the watch item in
-`docs/human-engagement.md`, the README's opening note, `skills/work`'s line
-about the board's Accept button, and `gc-helm.sh`'s header, usage and
-refusals, which then point at the web page, with the verbs (unit 4).
+Each unit changes every line its change makes false, in docs, skills, prompts,
+refusals and comments, and a `git grep` for the names it retires finds them.
+The stale text the notes list is among them. `gccli.go`'s liveness comment and
+`services/helm/README.md`'s liveness paragraph go with the old board (unit 2).
+The README's opening note, `skills/work`'s line about the board's Accept
+button, and `gc-helm.sh`'s header, usage and refusals, which then point at the
+web page, go with the verbs (unit 4). The watch item in
+`docs/human-engagement.md` changes with each unit that makes part of it false:
+its sentence on what `helm-svc board --json` prints in unit 1, its other board
+sentences in unit 2, and its verb sentence in unit 4. The largest of the rest
+are these. In unit 1, the README's section on the JSON read. In unit 2, its
+sections on the readability check, the data-access contract, the two backends,
+the build-status record and its PACK rows, the board contract and the Accept
+and Dismiss routes, and `docs/component-model.md`'s `helm-fixture` row. In unit
+4, `docs/steering.md`, `docs/authority-map.md`, `docs/install.md`'s line on the
+write verbs, and the refusals of `queue-priority.sh` and
+`doctor/check-po-queue-only` that tell a person to run a moved verb.
 
 ## 6. What the pack mints
 
@@ -276,9 +319,11 @@ route.
 
 The rig board's "Routed to you" ask (`askOf` in `internal/rigboard/table.go`)
 fires on the listing's person-blocker flag. Since the dispatch effort cleared
-the route, only a task assigned to `human` that does not read as a
-conversation reaches it. Unit 2 names the ask for that: "Assigned to you", with
-its test case renamed from "work routed to a person".
+the route, what reaches it is a task whose edges do not read as a conversation
+and whose assignee is `human`, or a sitting named for the task
+(`conversation.IsCandidate`). Unit 2 names the ask for the task assigned to
+you: "Assigned to you", with its test case renamed from "work routed to a
+person".
 
 ## 8. The build orders
 
@@ -308,14 +353,22 @@ The Gas City search, at upstream bfe7a19cc2:
   types in `internal/events/events.go` is a git event, and
   `reconcile-rig-checkouts.sh`, which moves this checkout, emits none.
 - A service (`internal/config/service.go`, `Service`) has a command and a
-  health path but no build step, no source watch and no version, and Gas City
-  restarts it only when its declaration changes
+  health path but no build step, no source watch and no version. Gas City
+  starts it again when its declaration or its published address changes, or
+  when it failed to start, and never because its source changed
   (`internal/workspacesvc/manager.go`).
+- Upstream's open issue gastownhall/gascity#6141 asks for a longer readiness
+  window for a service whose command builds itself first, the pattern a pack
+  uses to rebuild a binary its install wiped. That builds a service when it
+  starts. Nothing starts a running service again when its source moves, so it
+  does not cover the need.
 
 So no primitive rebuilds a service when its source changes. A condition order
-whose check reads the source revision is the closest composition, and a
-webhook on GitHub's push would track the remote ref, not the checkout the
-build reads.
+whose check reads the source revision is the closest composition. A webhook on
+GitHub's push would track the remote ref, not the checkout the build reads. An
+event order would need whatever moves the checkout to emit an event of its own
+(`gc event emit`), and a checkout moved any other way, such as by hand, would
+build nothing.
 
 For the verbs, each unit's search starts here: bd's `deferred` status with its
 `defer_until`, and its gates, for park, bd's guarded update for takeaway's
@@ -328,8 +381,12 @@ The page's contract tests and fixture captures stay: the rig board's
 `testdata`, `document.gen.ts` generated from `document.go`, and
 `Board.test.tsx`. The old contract's tests go with it (section 1).
 
-Before unit 2 lands, its implementer runs the old `helm-svc board --json --all`
-and the new `helm-svc board --json` back to back on the live city, lists every
+Before unit 2 lands, its implementer reads both answers back to back on the
+live city. The old rows come from the deployed binary, which is built from main
+until the integration branch lands:
+`"$GC_CITY_PATH/.gc/services/helm/bin/helm-svc" board --json --limit=0`, which
+prints every row owed to you with no cap. The new document comes from a build
+of the unit's head, running `helm-svc board --json`. The implementer lists every
 bead the old rows say is owed to you that the new document's "needs you" rows
 do not name, or the reverse, and says why for each in the unit's PR summary. A
 difference that the new reader gets wrong is fixed in the shared reader before
@@ -347,8 +404,8 @@ the city working.
 
 | Unit | What it does | Waits on |
 |---|---|---|
-| 1. The agents' read | `helm-svc board --json` over `rigboard.Read`, with `--rig` and `--timeout`; its tests | nothing |
-| 2. The old board retires | Everything section 1 lists; the beads requirement and the ICU helper with every use (section 4); "Assigned to you"; the two Debt entries; the warrants that name the old board's reads (Machine axis, Unanswered review threads); the deletion plan's row for the parity test; the comparison of section 9 | unit 1 |
+| 1. The agents' read | `helm-svc board --json` over `rigboard.Read`, with `--rig` and `--timeout`; its tests; the text section 5 gives it | nothing |
+| 2. The old board retires | Everything section 1 lists; the beads requirement and the ICU helper with every use (section 4); "Assigned to you"; the two Debt entries; the warrants that name the old board's reads (Machine axis, Unanswered review threads); the deletion plan's row for the parity test; `lifecycle.test.sh`'s machine-axis check; the text section 5 gives it; the comparison of section 9 | unit 1 |
 | 3. Ready work no queue holds | `queue`'s answer and the "Not scheduled" list over it (section 2), with tests for each item of the patrols design's section 8 list | unit 1 |
 | 4. The verbs | takeaway, park, place and accept as gctk commands; react's and priority's callers; the callers, tests, warrants and text of section 5 | nothing |
 | 5. The build orders | `gc-build.sh`'s owed-build mode and the two condition orders (section 8) | unit 2: until the library goes, its probe needs a run when the source has not moved |
@@ -365,10 +422,11 @@ callers together.
   waits on the units its row names through a `blocks` edge, armed to dispatch
   on `mol-polecat-work` when they close. The child builds no unit.
 - tk-ssm8qns.15 gets a note: resolve, dismiss and handback move with its
-  verbs, and dismiss's two `BEADS_DIR` pins become `GC_RIG` or `--db`, reading
-  a subject in another rig from that rig's store (section 5). Whichever of it
-  and unit 4 lands second removes the architecture page's Debt entry on
-  `gc-helm.sh`'s verbs. The bead stays unarmed, as its epic decides.
+  verbs, and each `BEADS_DIR` pin in the verbs it moves, dismiss's two among
+  them, becomes `GC_RIG` or `--db`, with a subject in another rig read from that
+  rig's store (section 5). Whichever of it and unit 4 lands second removes the
+  architecture page's Debt entry on `gc-helm.sh`'s verbs. The bead stays
+  unarmed, as its epic decides.
 - tk-ssm8qns.23 gets a note: accept's clear of `gc.recommended_formula` moves
   with unit 4, and the bead keeps the reads in `converse-signoff.sh` and
   `converse-invalidate-recommendation.sh`.
@@ -386,8 +444,15 @@ callers together.
   tk-7rquf68 and tk-vbn1adn in the old board alone, and tk-fgek12q, tk-35ob5gq,
   tk-y4820m2 and tk-ilobdri, which also name code that survives. tk-j8dzqmm
   already waits on this member.
-- Before filing, the child surveys the open branches against each unit's files
-  again, since they move.
+- Open branches at this reading that change the units' files: the GitHub-intake
+  effort (tk-1tfzr71.149, PR #1559) in the rig board, its server route and
+  `main.go`, with a new file in `internal/source` (section 1), for units 1 and
+  2; the lint (tk-2astzmg, PR #1601) in `board.go`, `internal/board/state.go`
+  and `supervisor.go`, and with the Go release pin (tk-1fsgv13, PR #1600) and
+  the make targets (tk-a5mwcic.3, PR #1595) in the ICU helper's uses (section
+  4), for unit 2; and the sitting's send-back (tk-h0sherg, PR #1563) in
+  `converse-signoff.sh`, which calls accept and takeaway, for unit 4. The child
+  surveys the open branches again before filing, since they move.
 
 How each note of the initiative is answered: the PR answer, the await types,
 the sittings, the epic waits and the Delivery dates in section 2; the ready
