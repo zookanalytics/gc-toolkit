@@ -13,8 +13,9 @@ searched, at `gastownhall/gascity` main 5f7cd988a6be (2026-11-17),
 `gastownhall/beads` main 8cdfa796a8f5 (2026-11-13), Claude Code 2.1.326, and
 Claude Code's documentation read on 2026-11-17. The design's own search,
 [specs/tk-zlot608.2/gas-city-search.md](../tk-zlot608.2/gas-city-search.md),
-holds the needs this build did not change: the schedule, a memory agents could
-write instead, and bd's dated defer and cross-project dependency.
+holds the needs this build did not change: the schedule, bd's memory plane as
+it ships, and bd's dated defer and cross-project dependency. The last section
+here weighs bd's Memory Beads proposal, read on 2026-11-19.
 
 ## Run the judging on a schedule
 
@@ -130,3 +131,29 @@ Claude and Codex sittings share, composes the memory fragment only when the key
 is `claude`, so no Codex sitting carries it. The operator ruled that the
 guidance lives in prompts (option A, conversation tk-f6pdi0y), in place of a
 block the intake would rewrite in each index.
+
+## A memory agents could write instead
+
+**Searched: bd's Memory Beads proposal** (`gastownhall/beads` issue #5877,
+open, at its Revision 4 of 2026-09-22, read on 2026-11-19). It would keep agent
+memory as beads, and so cover most of what this build keeps. With the city's
+Claude agents keeping their memory as beads in place of Claude Code's
+directory, the judge's decisions would sit on those beads and their links,
+which carry metadata (R17), and a reference could name the exact version the
+judge read (R18). Deleting a memory keeps its history (R5), so the kept text
+would retire with the list and the read of Claude Code's directories. The
+judging would not: bd leaves judging whether a memory is true, current or
+useful to tools outside it (R30), and a link never blocks readiness (R17), so
+the distiller would still judge each memory and decide when the work it waits
+on is done. The warrant's evidence reads the proposal requirement by
+requirement ([docs/warrants.md](../../docs/warrants.md#memory-note-waits)).
+
+It is a proposal with no implementation in bd. bd main at 3a274fbf8f76
+(2026-11-19) has no memory type in `internal/types/types.go`, and `bd remember`
+still keeps a key and a value (`rememberCmd` in `cmd/bd/memory.go`). The graph
+CLI specification read beside it (issue #6703) is a draft whose memory commands
+run only in a preview built from `versioned-beads/beads`. The build goes ahead
+now because the proposal has no date and the design's ruling that the intake is
+the memory agents write today stands ("yes use it as an intake", conversation
+tk-1amy8sd). When bd ships memory as a kind of bead with links to work, the
+warrant retires, and the move onto it is scheduled work.
