@@ -42,7 +42,7 @@ other way it names. You ruled rows 6a to 6c in conversation tk-fp92h81 on
 | 1c | Each check reads the store's whole blocked set, 2.8 MB, to learn what holds one bead | Ask bd for a blocked read of named beads, and change no code now | One ask, which you send or drop | Copy bd's blocked rule into gctk, which must then follow every change bd makes to it |
 | 2 | The recommend exit, the only setter of the key your Accept takes, unused since 2026-10-13 | Keep it, and leave its future to the board's easy-approvals epic | Nothing changes | Retire the exit with the key, Accept, a sitting's invalidation and the sign-off's accept |
 | 3a | The pool rule reads Gas City's "no cap", -1, as a pool that runs no sessions | Read only a cap of 0 that way | A route to an uncapped pool is no longer refused | Keep refusing routes to 49 of the city's 135 agents |
-| 3b | `gctk reaction deliverable` works out from the roster what `gc sling`'s dry run reports | Ask the dry run wherever a bead is in hand | Gas City's own preview of the sling, in place of gctk's copy of its rule | Keep gctk's copy of the rule, with 3a's fix |
+| 3b | `gctk reaction deliverable` works out from the roster what `gc sling`'s dry run reports | Ask the dry run wherever a bead is in hand | Gas City's own preview of the sling, in place of gctk's copy of its rule, with the dry run's time measured first and stated in the effort's summary | Keep gctk's copy of the rule, with 3a's fix |
 | 4 | How work reaches an interactive agent such as the mechanik | Design it as a bead under Steer work by epic, the epic that owns placement | A design bead there, and none of its design here | An epic of its own, or another home you name |
 | 5a | One exit code per kind of refusal, though no caller acts differently on them | Leave it to the parked reaction redesign, whose target 2 removes the codes | A note on that bead | Collapse the codes now, in the five places that read them |
 | 5b | "May this bead take a reaction" is asked at four points under two rules, and in one case the check and the sling disagree | Leave it to the same redesign, whose target 1 moves the question to the offer path | A note on that bead | Make the check apply the sling's rule exactly now |
@@ -278,8 +278,10 @@ today, as no evidence that the pool is gone. A dry run that does not answer
 keeps that rule, while a dry run's refusal is a no, and the unit tells the two
 apart by the reply. Each answer costs one `gc sling --dry-run` call, which loads
 the city's config as the roster read does. Its time is not measured here, since
-this design's measurements ran nothing that slings. The other way keeps gctk's
-rule, with 3a's fix.
+this design's measurements ran nothing that slings. Unit 2 times the call before
+it builds on it, and the effort's summary states the figure beside the roster
+read's 0.15 s, so you see the cost before the effort reaches main (section 7).
+The other way keeps gctk's rule, with 3a's fix.
 
 ## 4. How work reaches an interactive agent
 
@@ -616,6 +618,10 @@ other work lands" says, and tk-1tfzr71.24's notes carry 6b's problem.
 
 **Unit 2: the dry run (3b).**
 
+- First, the unit times one `gc sling --dry-run --json` call for a route the
+  dispose makes and one for a sweep's first candidate, and records the figures
+  on its bead. The effort's summary states them beside the 0.15 s of the roster
+  read the call replaces.
 - The runtime adapter gains `gc sling --dry-run --json`, decoded to a refusal,
   the four warnings, or a call that did not answer.
 - `deliverable` takes a bead, and operator-intake and patrol-finding pass theirs.
