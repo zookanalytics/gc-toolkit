@@ -177,6 +177,8 @@ internal/gascity/fake/  the runtime adapter's fake, which records each call and 
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, the store's listing, and its blocked set
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
+internal/gcbd/fakegc/  the compiled fake gc, which answers gc's command line from a store in
+                     files for the shell suites, and its contract test against the city's bd
 internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/gh/         the GitHub adapter: one `gh api` call per read, paged to its end
@@ -217,6 +219,7 @@ key-registry.json    every declared key, generated from the declarations
 cd services/gctk && go test ./...          # every package
 cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write key-registry.json again
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd ./arm -run TestStoreAcceptance -v   # the city's bd on a scratch store
+cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd/fakegc -run TestContract -v   # the fake gc against the city's bd
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
 bash assets/scripts/merge.test.sh          # merge through its bridge
 bash assets/scripts/epic.test.sh           # epic through its bridge
