@@ -156,6 +156,14 @@
 # under either prefix that is meant for one file, such as
 # GC_TMUX_TEST_WAIT_SECS, reaches it only then.
 #
+# A run with a file that sources the shared harness
+# (assets/scripts/test-harness.sh) builds the compiled fake gc from this tree
+# once, before the first file starts, and names it in RUN_TESTS_FAKE_GC, so
+# such a file copies that build instead of making its own. When the build
+# fails the runner says so and names none, and each such file then builds the
+# fake itself and fails with the compiler's message. The runner is the only
+# source of RUN_TESTS_FAKE_GC. A file run directly builds the fake itself.
+#
 # The runner needs bash 5.1 or later, both its own and the first on PATH, which
 # starts each file.
 #
@@ -548,6 +556,16 @@ unset "${!GC_@}" "${!BEADS_@}"
 
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")" || { echo "run-tests: mktemp failed" >&2; exit 2; }
 trap 'rm -rf "$LOGDIR"' EXIT
+
+# The fake gc a file that sources the shared harness runs (see the header).
+unset RUN_TESTS_FAKE_GC
+if [ -d "$ROOT/services/gctk/internal/gcbd/fakegc" ] && grep -q -F test-harness.sh -- "${TESTS[@]}" 2>/dev/null; then
+  if (cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$LOGDIR/fake-gc" ./internal/gcbd/fakegc) >"$LOGDIR/fake-gc.log" 2>&1; then
+    export RUN_TESTS_FAKE_GC="$LOGDIR/fake-gc"
+  else
+    echo "run-tests: the fake gc did not build, so each file that sources the shared harness builds its own: $(tail -3 "$LOGDIR/fake-gc.log" | tr '\n' ' ')" >&2
+  fi
+fi
 
 total="${#RUN_FILE[@]}"
 [ "$JOBS" -gt "$total" ] && JOBS="$total"

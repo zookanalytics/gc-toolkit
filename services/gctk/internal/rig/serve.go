@@ -1,8 +1,8 @@
 package rig
 
 // A copy of a rig's UI: the rig's serve command, run from a checkout on a
-// loopback port of its own, inside the sandbox the pack's demo capture runs
-// in, and published at an address of its own only when its caller asks. The
+// loopback port of its own, as the pack's demo capture runs it, and published
+// at an address of its own only when its caller asks. The
 // copy is up once it answers on its port, or once its serve command prints the
 // URL of the app it brought up, such as an iOS app on a simulator. A demo
 // capture points its engine at the copy's app, and a sitting gives the
@@ -16,12 +16,14 @@ package rig
 // after the grace, and it ends last, so a copy whose leader is gone has
 // nothing left running.
 //
-// The serve command runs inside the sandbox that demo-engine-lib.sh, in the
-// pack's scripts directory, defines for a capture: it cannot read the city's
-// directories, reach a loopback port but its own or a Unix socket, or signal a
-// process outside, and it runs with none of the variables that point a command
-// at the city. The publish command is the city's, and it runs outside the
-// sandbox, beside the leader.
+// The serve command runs through demo-engine-lib.sh, in the pack's scripts
+// directory, which runs it as a capture of the checkout's rig runs. For a rig
+// whose app reads the city that is inside the capture's sandbox, where it
+// cannot read the city's directories, reach a loopback port but its own or a
+// Unix socket, or signal a process outside. For any other rig it is an
+// ordinary process. Either way it runs with none of the variables that point a
+// command at the city. The publish command is the city's, and it runs outside
+// any sandbox, beside the leader.
 //
 // A copy ends when its caller stops it. It also ends once the session that
 // started it has ended, through Gas City's orphan sweep, which this composes
@@ -70,7 +72,7 @@ const (
 )
 
 // SandboxLib is the file in the pack's scripts directory that defines the
-// capture's sandbox, which a copy's serve command runs inside.
+// capture's sandbox, through which a copy's serve command runs.
 const SandboxLib = "demo-engine-lib.sh"
 
 // serveDirName is the copies' directory under the git common directory, beside
@@ -845,8 +847,8 @@ func (c *Copies) Stop(checkout string) Report {
 // --- the leader --------------------------------------------------------------
 
 // Lead runs the copy whose record is dir, on h, the host as the leader sees
-// it: the serve command, inside the sandbox, and the publish command each time
-// the leader gets SIGUSR1. It ends the copy's whole process group when the
+// it: the serve command, as the pack's demo capture runs one, and the publish
+// command each time the leader gets SIGUSR1. It ends the copy's whole process group when the
 // serve command ends or a signal ends the leader, and returns the code the
 // leader exits with. It sets its signals up before it records its pid, so a
 // signal start sends once it reads the pid reaches it.

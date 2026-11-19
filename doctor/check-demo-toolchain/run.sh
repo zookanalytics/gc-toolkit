@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # doctor/check-demo-toolchain — the demo:capture toolchain is resolvable.
 # Every capture needs sandbox-exec, the sandbox demo-engine-lib.sh runs the
-# engine in, where the live city cannot be reached. A narrated demo needs Node
+# engine in for a rig whose app reads the city, where the live city cannot be
+# reached, and the library runs no capture on a host without it. A narrated
+# demo needs Node
 # to run the SprintShow engine, ffmpeg to assemble, and OPENAI_API_KEY to voice
 # the steps at capture time. Delivering the clip
 # inline to its PR also needs gh >= 2.99.0 for 'gh pr comment --attach'. This
@@ -25,9 +27,9 @@ set -u
 warnings=(); notes=()
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 
-# --- sandbox-exec: the sandbox every capture runs in --------------------
+# --- sandbox-exec: the sandbox, without which no capture runs -----------
 command -v sandbox-exec >/dev/null 2>&1 \
-    || warnings+=("sandbox-exec not found — every capture runs inside its sandbox, where the live city cannot be reached, so no capture runs on this host. macOS ships it.")
+    || warnings+=("sandbox-exec not found — a capture of a rig whose app reads the city runs inside its sandbox, where the live city cannot be reached, and the demo library runs no capture on a host without it. macOS ships it.")
 
 # --- Node >= 22.18 (the engine's floor) ----------------------------------
 node_ok=""

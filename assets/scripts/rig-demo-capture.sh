@@ -26,15 +26,18 @@
 # asks a script's surface. Given two app targets the engine drives one and says
 # nothing of the other, so this script refuses two.
 #
-# The engine runs inside the sandbox demo-engine-lib.sh defines, where the live
-# city cannot be reached. A --serve command's app runs as a copy of the rig's UI
-# that `gctk rig serve` runs inside the same sandbox, and the engine records
-# the copy's app where gctk rig serve reports it. So a copy, a terminal's
-# commands or a page that reads the city's stores or its API fails there, and
-# the clip shows the app on fixture data, or shows the failure, and never live
-# state. The servers outside the sandbox a clip can reach are a rig's app that
-# --base-url names, as below, and an iOS app on a simulator, which the system's
-# simulator service runs outside the sandbox, whoever started it.
+# A --serve command's app runs as a copy of the rig's UI that `gctk rig serve`
+# runs, and the engine records the copy's app where gctk rig serve reports it.
+# For a rig whose app reads the city, the engine and the copy run inside the
+# sandbox demo-engine-lib.sh defines, where the live city cannot be reached. So
+# a copy, a terminal's commands or a page that reads the city's stores or its
+# API fails there, and the clip shows the app on fixture data, or shows the
+# failure, and never live state. The servers outside the sandbox such a clip
+# can reach are a rig's app that --base-url names, as below, and an iOS app on
+# a simulator, which the system's simulator service runs outside the sandbox,
+# whoever started it. For any other rig both run as ordinary processes.
+# docs/demo-capture-sandbox.md says which rigs get the sandbox and what a
+# capture of each can reach.
 #
 # It FAILS CLOSED. A host with no sandbox, a capture the sandbox refuses, a
 # missing engine, a browser that cannot be installed, a script the linter
@@ -87,11 +90,11 @@
 # The last line says whether the clip is narrated or silent.
 #
 # $DEMO_ENGINE_BIN, demo-engine-lib.sh's engine override, names an executable
-# that runs in the engine's place, inside the same sandbox, with nothing
-# resolved. It is the seam the hermetic test drives with a stub engine, and an
-# escape hatch for a caller that has already resolved the engine. mol-rig-demo
-# asks a script's surface through the same library, so one override names the
-# engine that answers and the engine that captures.
+# that runs in the engine's place, inside the sandbox or not as the engine
+# would, with nothing resolved. It is the seam the hermetic test drives with a
+# stub engine, and an escape hatch for a caller that has already resolved the
+# engine. mol-rig-demo asks a script's surface through the same library, so one
+# override names the engine that answers and the engine that captures.
 #
 # Exit: 0 captured and every step's proof held (output exists and is non-empty),
 # 3 captured but at least one step failed its proof, 2 bad arguments, such as
@@ -170,11 +173,11 @@ OUT_DIR=$(dirname "$OUTPUT")
 mkdir -p "$OUT_DIR" || { echo "$PROG: cannot create output directory '$OUT_DIR'" >&2; exit 1; }
 
 # --- the engine ------------------------------------------------------------
-# demo-engine-lib.sh finds the engine, provisions its browser and runs its CLI
-# in its sandbox. What only a clip needs stays here: ffmpeg to assemble it,
-# which is a host ffmpeg when there is one and otherwise a checkout's
-# ffmpeg-static binary, fetched on first use. An engine $DEMO_ENGINE_BIN names
-# runs as it is, in the same sandbox.
+# demo-engine-lib.sh finds the engine, provisions its browser and runs its CLI,
+# in its sandbox for a rig whose app reads the city. What only a clip needs
+# stays here: ffmpeg to assemble it, which is a host ffmpeg when there is one
+# and otherwise a checkout's ffmpeg-static binary, fetched on first use. An
+# engine $DEMO_ENGINE_BIN names runs as it is, as the engine would.
 if [ -z "${DEMO_ENGINE_BIN:-}" ]; then
   demo_engine_resolve || exit 1
   if [ -n "$DEMO_ENGINE_DIR" ]; then
@@ -193,8 +196,8 @@ if ! sprintshow lint "$SCRIPT"; then
 fi
 
 # --- capture --------------------------------------------------------------
-# A --serve command's app runs as a copy, inside the sandbox, and the engine
-# records the copy's app where gctk rig serve reports it.
+# A --serve command's app runs as a copy, and the engine records the copy's app
+# where gctk rig serve reports it.
 trap 'demo_engine_copy_stop' EXIT
 if [ -n "$SERVE_CMD" ]; then
   demo_engine_copy "${SERVE_CWD:-$(pwd)}" "$SERVE_CMD" || exit 1

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
@@ -31,10 +32,15 @@ type index struct {
 	kinds map[string]Kind
 	// rows is every row's id, open rows first.
 	rows []string
-	// subject and replies are each conversation's, off its own edges.
+	// subject is each open conversation's, off its own edges.
 	subject map[string]string
-	// answeredBy is the open conversation that answers each open human gate.
+	// answeredBy is the open conversation that answers each open human gate,
+	// the first that replies to it, and each open decision, the first that
+	// tracks it.
 	answeredBy map[string]string
+	// handback is each open decision's newest hand-back, recorded on a
+	// conversation that tracks it, open or closed.
+	handback map[string]Handback
 	// children are the rows whose parent-child edge names each bead.
 	children map[string][]string
 	// within is the epics and Deliveries each row sits under nearest
@@ -44,7 +50,8 @@ type index struct {
 
 func newIndex(g *gathered) *index {
 	ix := &index{g: g, beads: map[string]bead{}, kinds: map[string]Kind{}, subject: map[string]string{},
-		answeredBy: map[string]string{}, children: map[string][]string{}, within: map[string][]string{}}
+		answeredBy: map[string]string{}, handback: map[string]Handback{}, children: map[string][]string{},
+		within: map[string][]string{}}
 	for _, list := range [][]bead{g.open, g.closed} {
 		for _, b := range list {
 			if _, dup := ix.beads[b.ID]; dup || !ownRow(b) {
@@ -75,8 +82,36 @@ func newIndex(g *gathered) *index {
 				ix.answeredBy[r] = id
 			}
 		}
+		if ix.openDecision(subj) && ix.answeredBy[subj] == "" {
+			ix.answeredBy[subj] = id
+		}
+	}
+	for _, c := range g.handedBack {
+		if strings.TrimSpace(c.Handback) == "" || !conversation.IsCandidate(issueType(c), c.Assignee, c.ID) {
+			continue
+		}
+		subj, _, ok := conversation.Shape(conversationEdges(c))
+		if !ok || !ix.openDecision(subj) {
+			continue
+		}
+		if cur, held := ix.handback[subj]; held && !newerHandback(c, cur) {
+			continue
+		}
+		ix.handback[subj] = Handback{Conversation: c.ID, At: c.HandbackAt, Text: c.Handback}
 	}
 	return ix
+}
+
+// newerHandback reports whether c's hand-back was recorded after cur: at a
+// later time, or at the same time on a conversation whose id sorts after it, so
+// one store gives one answer. A time that does not read is older than any.
+func newerHandback(c bead, cur Handback) bool {
+	at, _ := time.Parse(time.RFC3339, c.HandbackAt)
+	was, _ := time.Parse(time.RFC3339, cur.At)
+	if !at.Equal(was) {
+		return at.After(was)
+	}
+	return c.ID > cur.Conversation
 }
 
 func conversationEdges(b bead) []conversation.Edge {
@@ -138,6 +173,11 @@ func openWork(live []bead) []string {
 func (ix *index) openHumanGate(id string) bool {
 	b, ok := ix.beads[id]
 	return ok && isOpen(b) && prstatus.IsHumanGate(b.IssueType, b.AwaitType)
+}
+
+func (ix *index) openDecision(id string) bool {
+	b, ok := ix.beads[id]
+	return ok && isOpen(b) && ix.kinds[id] == KindDecision
 }
 
 // containers are the epics and Deliveries a row sits under nearest. Its
@@ -223,6 +263,19 @@ func build(g *gathered) Document {
 		pos: map[string]int{}, after: map[string]bool{}, concern: map[string][]string{}, held: map[string][]string{},
 		counts: map[string]bool{}}
 
+	// Whether each conversation and decision waits on work of its own first,
+	// read before any ask, since a conversation's ask reads whether the
+	// decision it tracks stays.
+	stays := map[string]bool{}
+	for _, id := range ix.rows {
+		if k := ix.kinds[id]; k == KindConversation || k == KindDecision {
+			if h, ok := g.holds[id]; ok {
+				stays[id] = staying(ix.beads[id], h)
+			}
+		}
+	}
+	askingDecision := func(id string) bool { return ix.openDecision(id) && !stays[id] }
+
 	// Row 2 first: the table reads whether a row is an ask.
 	for _, id := range ix.rows {
 		// Work held for the Product Owner is no need, whatever it would ask
@@ -254,11 +307,7 @@ func build(g *gathered) Document {
 				}
 			}
 		}
-		stay := false
-		if h, ok := g.holds[id]; ok && k == KindConversation {
-			stay = staying(b, h)
-		}
-		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, factsOf(g, id), open, members, stay); a != nil {
+		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, askingDecision, factsOf(g, id), open, members, stays[id]); a != nil {
 			bt.asks[id] = a
 		}
 	}
@@ -359,6 +408,9 @@ func (bt *built) row(id string) Row {
 	if k == KindGate || k == KindDecision {
 		r.Conversation = ix.answeredBy[id]
 	}
+	if h, ok := ix.handback[id]; ok {
+		r.Handback = &h
+	}
 	for _, o := range ix.g.open {
 		if o.Anchor == id {
 			r.Anchored = append(r.Anchored, Ref{ID: o.ID, Title: o.Title})
@@ -408,14 +460,19 @@ func contractOf(b bead) *Contract {
 
 // askID is the ask a bead stands in: a conversation that answers a gate stands
 // in the gate's ask, the first of its replies when it answers more than one,
-// and any other ask stands in its own. It is empty for a bead that is no ask.
+// then one that answers the decision it tracks stands in the decision's ask
+// while the decision is one, and any other ask stands in its own. It is empty
+// for a bead that is no ask.
 func (bt *built) askID(id string) string {
 	if bt.ix.kinds[id] == KindConversation {
-		_, replies, _ := conversation.Shape(conversationEdges(bt.ix.beads[id]))
+		subject, replies, _ := conversation.Shape(conversationEdges(bt.ix.beads[id]))
 		for _, g := range replies {
 			if bt.ix.answeredBy[g] == id {
 				return g
 			}
+		}
+		if _, ok := bt.asks[subject]; ok && bt.ix.kinds[subject] == KindDecision && bt.ix.answeredBy[subject] == id {
+			return subject
 		}
 	}
 	if _, ok := bt.asks[id]; ok {
