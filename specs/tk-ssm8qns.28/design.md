@@ -36,8 +36,9 @@ moving:
   `services/gctk/pr/admit.go`).
 
 Approving this design moves all three into one owner in gctk. The board and
-bead-context.sh ask it, and prstatus asks its rules. Every live row of the
-board reads as it does now, and bead-context.sh reads each bead the way the
+bead-context.sh ask it, and prstatus asks its rules. The board changes for two
+kinds of bead, which [decision 2](#2-the-answers-words) names, and every other
+live row reads as it does now. bead-context.sh reads each bead the way the
 board does. It serves the belief that human attention is the budget
 ([foundation.md](../../docs/foundation.md#core-beliefs)): a bead reads as
 waiting on you only where it does, wherever you or an agent read it.
@@ -93,9 +94,12 @@ for it.
 
 **Cost:** bead-context.sh reads differently in the cases
 [listed below](#what-bead-contextsh-reads-differently). The board changes for
-one kind of bead, a bead that is no task and is assigned to `human`: the board
-reads it as queued, and the shared answer reads it as routed to you, and a pull
-request that waits on one reads as held by it. No store holds one.
+two kinds of bead. One is a bead that is no task and is assigned to `human`:
+the board reads it as queued, and the shared answer reads it as routed to you,
+and a pull request that waits on one reads as held by it. No store holds one.
+The other is a bead a live run works before the run's load-context step
+closes, which reads In flight in the Queued group, where the board reads it
+Not scheduled in the Not moving group today: the minutes after each pour.
 
 ### 3. tk-zk895uj and tk-hwam111
 
@@ -215,7 +219,6 @@ bead. The counts are of the city's stores on 2026-11-19.
 | is routed, armed or assigned work that carries `hold:mayor` or `hold:external` | advancing | stuck: `not-scheduled` | none |
 | is an old-path review, rework, validation or finding with no route, claim or live run | advancing, by its task kind | stuck: `not-scheduled` | two rework beads, in two rigs, carry no route or claim |
 | is armed and has met its sling-failure cap | stuck: capped | stuck on the human gate the armed start files to ask about it, or queued while the conversation it opens instead, for a bead with open children, waits for you | none |
-| is unrouted work a run has been poured for and has not taken past load-context | advancing | stuck: `not-scheduled`, until load-context closes | the minutes after each pour |
 | waits on work nobody routes, behind which a person's move waits | stuck on the work nobody routes | stuck on the person's move, which the board names first | not counted |
 | waits on a bead in another store | walks into that store | leaves it out, as `gctk bead holds` does | not counted |
 
@@ -225,15 +228,24 @@ Every other reading keeps its verdict and takes the shared word:
 `status`; `unrouted` becomes `not-scheduled`; and `unknown`, `budget` and
 `cycle` become `unread`.
 
-The board's one change is the `routed-to-you` clause for a bead assigned to
-`human` that is no task. The board reads such a bead as queued today, because
-`queue` counts any assignee as the city's, and `human` is the operator's queue
-by the pack's own rule (`conversation.IsAssignee`). The clause is part of the
-rule for a bead only a person clears, so every reader of that rule takes it: a
-pull request that waits on such a bead reads as held by it, in its status and
-on the board's row, as it is by a decision. No open bead in the city's seven
-stores is assigned to `human`, and the two closed ones are tasks, so no
-reading changes today.
+The board changes for two kinds of bead. The first is the `routed-to-you`
+clause for a bead assigned to `human` that is no task. The board reads such a
+bead as queued today, because `queue` counts any assignee as the city's, and
+`human` is the operator's queue by the pack's own rule
+(`conversation.IsAssignee`). The clause is part of the rule for a bead only a
+person clears, so every reader of that rule takes it: a pull request that
+waits on such a bead reads as held by it, in its status and on the board's
+row, as it is by a decision. No open bead in the city's seven stores is
+assigned to `human`, and the two closed ones are tasks, so no reading changes
+today.
+
+The second is the `in-flight` rule's clause for a bead a live run works. The
+board takes the in-flight test of `waits`, which counts a run only once it has
+passed load-context, so between a pour and the close of the run's
+load-context step it reads the poured bead, open, unrouted and unassigned, as
+Not scheduled. The shared answer reads that bead in flight from the run's
+start. bead-context.sh already reads it as advancing, so only the board's
+reading changes, for the minutes after each pour.
 
 ## Where the code goes
 
