@@ -60,13 +60,19 @@
 #   - This repo's own docs/review-triage.md, read the way a review reads it at
 #     its commit, carries the changes that make pm mandatory and the edits that
 #     do not.
-#   - The arch skill approves no commit without a docs/architecture.md, files a
-#     gap in architecture the change does not touch without holding the change,
-#     and passes no change on a gap in architecture it does touch. It files an
-#     aggravated pattern's rearchitecture through mol-review's probe under a
-#     token that names the pattern, after listing the patterns already filed
-#     from the file of its first instance, so one pattern keeps one bead and
-#     another that starts in the same file keeps its own. This repo's
+#   - The arch skill judges a commit with no architecture document against the
+#     one its target carries, and when the target has none either, against the
+#     code and docs, holding no change for the missing document and asking no
+#     change to add it. It files the document as work of its own under one
+#     token: a review run's lane raises it as a finding that does not block,
+#     and the round defers it after a listing that counts a closed task, so a
+#     repository is asked once. It files a gap in architecture the change does
+#     not touch without holding the change, and passes no change on a gap in
+#     architecture it does touch. It files an aggravated pattern's
+#     rearchitecture under a token that names the pattern, after listing the
+#     patterns already filed from the file of its first instance, so one
+#     pattern keeps one bead and another that starts in the same file keeps its
+#     own. This repo's
 #     own docs/review-arch.md and docs/review-triage.md, read the way a review
 #     reads them at its commit, carry the divergence lens and the changes that
 #     make arch mandatory, and the pack's arch skill carries none of that lens.
@@ -257,16 +263,25 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 hasF() { if flat "$1" | grep -qF -- "$2"; then ok "$3"; else bad "$3" "missing: $2"; fi; }
 notF() { if flat "$1" | grep -qF -- "$2"; then bad "$3" "unexpected: $2"; else ok "$3"; fi; }
 ARCH_SKILL="$ROOT/skills/review-arch/SKILL.md"
-hasF "$ARCH_SKILL" 'A `docs/architecture.md` at the reviewed commit is a precondition of approval' "the arch skill approves no commit without docs/architecture.md"
-hasF "$ARCH_SKILL" 'a passable account of the architecture the change covers' "…whose change adds one covering the architecture it covers"
-hasF "$ARCH_SKILL" '`docs/architecture.md: incomplete`' "…and files the rest of the architecture as one follow-up under one token"
+hasF "$ARCH_SKILL" 'When the reviewed commit carries no architecture document, read the one its target carries' "the arch skill judges a commit with no architecture document against the one its target carries"
+hasF "$ARCH_SKILL" 'A branch cut before its target gained the document is judged this way, and nothing is filed for it.' "…and files nothing for a branch cut before its target gained one"
+hasF "$ARCH_SKILL" 'judge the change against the code it touches and the docs the repository has' "…and, when the target has none either, judges the change against its code and docs, so a missing document lets no change through unjudged"
+hasF "$ARCH_SKILL" 'The missing document is no reason to pass or fail the change, and no finding asks the change to add it' "…holds no change for the missing document and asks no change to add it"
+hasF "$ARCH_SKILL" 'under the token `docs/architecture.md: missing`' "…and files the document as work of its own under one token"
+hasF "$ARCH_SKILL" 'the lane files nothing itself. Raise the issue as a finding graded `P2`, which does not block' "…which a review run's lane raises as a finding that does not block, filing nothing itself"
+hasF "$ARCH_SKILL" 'In a review run the round rules its finding deferred' "…and the round rules deferred"
+hasF "$ARCH_SKILL" 'files the issue with `review-run.sh defer`' "…filing it with review-run.sh defer"
+hasF "$ARCH_SKILL" 'For `docs/architecture.md: missing` the listing takes `--all`' "…after a listing that counts a closed task, so a repository is asked for its document once"
+hasF "$ARCH_SKILL" 'Drop `--type` from its duplicate probe' "…while under mol-review the duplicate probe counts a task a review run filed"
+notF "$ARCH_SKILL" 'A `docs/architecture.md` at the reviewed commit is a precondition of approval' "…and makes no document a precondition of approval"
+notF "$ARCH_SKILL" 'a passable account' "…asks no change for an account of the architecture it covers"
+notF "$ARCH_SKILL" '`docs/architecture.md: incomplete`' "…and files no follow-up for the rest of a document a change adds"
 hasF "$ARCH_SKILL" 'File it the same way, and do not hold the change for it.' "…files a gap the change does not touch without holding the change for it"
 hasF "$ARCH_SKILL" 'A gap in the architecture the change does touch is no reason to pass the change' "…and passes no change on a gap in the architecture it touches"
-notF "$ARCH_SKILL" 'not a reason to pass or fail the change' "…so no missing reference lets a change through unjudged"
 # An aggravated pattern's token and listing, read from the skill and built for
 # two patterns whose first instance is one file, one name beginning the other.
-# mol-review titles the bug "<what is wrong> (<token>)", and its probe and the
-# listing take each bug whose title holds the text in any case, as bd's
+# A filing titles its bead "<what is wrong> (<token>)", and the probes and the
+# listing take each bead whose title holds the text in any case, as bd's
 # --title-contains does.
 P_PATH="<the path of the pattern's first instance>"; P_NAME="<the pattern's name>"
 FORM=$(flat "$ARCH_SKILL" | grep -o "\`$P_PATH: aggravated[^\`]*\`" | head -n 1 | tr -d '`')
@@ -284,7 +299,7 @@ if [ -n "$LISTED" ] && holds "$T_ONE" "$LISTED" && holds "$T_TWO" "$LISTED"; the
 else bad "…lists the patterns already filed from that file" "listing '$LISTED'"; fi
 hasF "$ARCH_SKILL" 'When one of them is the pattern this change adds to, use the token at the end of its title.' \
   "…and takes a listed pattern's token when the change adds to it, so one pattern keeps one bead"
-notF "$ARCH_SKILL" 'bd create' "…and files every follow-up through mol-review's probe, never a create of its own"
+notF "$ARCH_SKILL" 'bd create' "…and files every follow-up through its review formula's own filing, never a create of its own"
 notF "$ARCH_SKILL" 'divergence lens' "the pack's arch skill, which every rig's arch review loads, carries none of gc-toolkit's lens"
 # This checkout's guidance, committed in a scratch repository and read back
 # through gctk review guidance at that commit, the read load-dispatch makes for a review.

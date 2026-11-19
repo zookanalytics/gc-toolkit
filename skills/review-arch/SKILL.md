@@ -27,20 +27,19 @@ says where it keeps its architecture when that is not where this method looks.
 A diff that adds or changes the architecture document, `docs/architecture.md`,
 makes this check mandatory.
 
-A `docs/architecture.md` at the reviewed commit is a precondition of approval,
-because without one the review has no architecture to hold the change to. A
-commit without one earns `request-changes`, with a finding that asks the change
-to add the document with a passable account of the architecture the change
-covers. Passable means enough that a later review of a change to that
-architecture can hold the change to it: the standard's sufficiency test holds
-for the part the change covers. The document meets the standard from
-its first commit: it frames the whole repository and opens on its big picture,
-and the part the change covers is filled in. The rest of the repo's
-architecture is not this change's to write. File it as a follow-up under the
-token `docs/architecture.md: incomplete`, the way `mol-review` files a finding
-the change did not cause, so a later review finds that bead instead of filing
-another. Its body names the standard, `gc-toolkit.architecture-document`, for
-whoever writes the rest.
+When the reviewed commit carries no architecture document, read the one its
+target carries, `git show origin/<review_base>:docs/architecture.md` in
+`<worktree>`, and judge the change against that. A branch cut before its target
+gained the document is judged this way, and nothing is filed for it. When the
+target carries none either, say so in your verdict and judge the change against
+the code it touches and the docs the repository has. The missing document is no
+reason to pass or fail the change, and no finding asks the change to add it,
+because a document written on a change's branch shares that change's fate. File
+the document as work of its own instead, as an issue the change did not cause,
+under the token `docs/architecture.md: missing`, so a later review finds that
+bead instead of filing another, whether it is open or closed. Its body asks for
+the repository's document and names the standard,
+`gc-toolkit.architecture-document`, for whoever writes it.
 
 A gap in the architecture docs that the change does not touch, a reference
 missing or wrong for another part of the architecture, is an issue the change
@@ -50,6 +49,21 @@ filed under the token `docs/architecture.md: off the standard`. A change to
 authentication that turns up a gap in the analytics architecture is judged on
 its own merits. A gap in the architecture the change does touch is no reason to
 pass the change, and the questions below judge it as they would anywhere else.
+
+### Filing an issue the change did not cause
+
+Each issue this method files instead of holding it against the change carries
+a token, so a later review finds its bead instead of filing another. How it is
+filed depends on the formula you run under:
+
+- **In a review run**, the lane files nothing itself. Raise the issue as a
+  finding graded `P2`, which does not block, with its token in the message.
+  The round files it, as What blocks says.
+- **Under `mol-review`**, file it the way that formula files a finding the
+  change did not cause. Drop `--type` from its duplicate probe's `gc bd list`,
+  so a task a review run filed counts too, and for
+  `docs/architecture.md: missing` add `--all`, so a task already closed counts
+  as well.
 
 ## What it judges
 
@@ -76,14 +90,11 @@ pass the change, and the questions below judge it as they would anywhere else.
    in the section that holds its subject, passes the admission test, has the
    entry shape, and keeps to what the document is. Then read the document
    whole and judge it by the standard's sufficiency test, as far as the change
-   reaches. A change that rewrites the document reaches all of it. A change
-   that adds the first document reaches the part the change covers. That
-   document still frames the whole repository and opens on its big picture,
-   and the rest of the architecture is the follow-up that What it reads files,
-   never a reason to hold the change. Any other change reaches each part it
-   adds, changes or moves, which a reader must still be able to place among
-   the others. A shortfall beyond that reach, such as quality goals the
-   document already lacked, is a gap the change does not touch.
+   reaches. A change that adds the document, or rewrites it, reaches all of
+   it. Any other change reaches each part it adds, changes or moves, which a
+   reader must still be able to place among the others. A shortfall beyond
+   that reach, such as quality goals the document already lacked, is a gap the
+   change does not touch.
 
 ### Citing the standard
 
@@ -98,8 +109,8 @@ asks for no diagram, section or length, and for no threshold or policy the
 system does not already hold.
 When the document leans on a spec for standing practice, such as how the system
 is set up, the finding asks the document to drop the link. Moving that practice
-into a living doc is a follow-up, filed the way `mol-review` files a finding the
-change did not cause, under the token `<the spec's path>: standing practice`.
+into a living doc is a follow-up, filed as an issue the change did not cause,
+under the token `<the spec's path>: standing practice`.
 
 When the diff adds or changes the architecture document, the verdict body adds
 a line naming the parts of the standard its lines and the document were held
@@ -115,8 +126,7 @@ stance names:
 - **Low impact, a simple refactor** — make it a finding to fix in this PR, and
   `request-changes` carries it.
 - **Needs a broad rearchitecture** — it belongs in its own PR, not bolted onto
-  this one. File it the way `mol-review` files a finding the change did not
-  cause, under the token
+  this one. File it as an issue the change did not cause, under the token
   `<the path of the pattern's first instance>: aggravated [<the pattern's name>]`.
   Its body names the pattern, how many instances now exist, and the
   rearchitecture that would resolve it. A later review that adds another
@@ -125,7 +135,7 @@ stance names:
   from that file:
 
   ```bash
-  gc bd list --type=bug --title-contains "<the path of the pattern's first instance>: aggravated ["
+  gc bd list --title-contains "<the path of the pattern's first instance>: aggravated ["
   ```
 
   When one of them is the pattern this change adds to, use the token at the end
@@ -160,14 +170,33 @@ approve is a precondition of approval, and a change that has not met it earns
 The architecture-doc update lands in the reviewed PR, from its author, never from
 the review.
 
+An issue the change did not cause blocks nothing, whatever the verdict. In a
+review run the round rules its finding deferred, as it rules a fix outside the
+reviewed diff. Before it files anything, it lists the beads that already carry
+the finding's token:
+
+```bash
+gc bd list --title-contains "<the finding's token>"
+```
+
+For `docs/architecture.md: missing` the listing takes `--all`, so a repository
+is asked for its document once. When a bead is listed, the ruling names it and
+the round files nothing. Otherwise the round files the issue with
+`review-run.sh defer`, under a title that ends in the token in parentheses, and
+the ruling names the bead the call prints. That bead waits on the PR, and
+nothing waits on the bead.
+
 ## The verdict
 
 - **Approve** when the change fits the architecture. Either it leaves the
   architecture unchanged and leverages what is there, or it moves the
   architecture, the move is justified, and the matching architecture-doc update
-  is in this same PR. Every line it adds to the architecture document, or
-  changes in it, meets the standard, and the document passes the sufficiency
-  test within the change's reach.
+  is in this same PR when there is a document to update. Every line it adds to
+  the architecture document, or changes in it, meets the standard, and the
+  document passes the sufficiency test within the change's reach.
 - **Request changes** in every other case, each of the shapes above a finding.
+
+An issue the change did not cause goes with either verdict and decides
+neither.
 
 The check adds nothing of its own to the verdict the formula records.
