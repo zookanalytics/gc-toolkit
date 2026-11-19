@@ -103,6 +103,10 @@ name = "po"
 overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]
+name = "postmaster"
+overlay_dir = "overlays/gh-origin-guard"
+
+[[patches.agent]]
 name = "proactive"
 overlay_dir = "overlays/gh-origin-guard"
 
@@ -124,6 +128,13 @@ mode = "always"
 [[named_session]]
 template = "po"
 scope = "rig"
+mode = "on_demand"
+
+# The city's postmaster runs the same way, opened by `gc-helm postmaster`
+# (agents/postmaster/agent.toml).
+[[named_session]]
+template = "postmaster"
+scope = "city"
 mode = "on_demand"
 
 [[named_session]]

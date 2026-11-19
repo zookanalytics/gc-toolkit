@@ -52,6 +52,7 @@ when one is named, and are not committed:
 - [`po`](agents/po.md)
 - [`polecat`](agents/polecat.md)
 - [`polecat-codex`](agents/polecat-codex.md)
+- [`postmaster`](agents/postmaster.md)
 - [`proactive`](agents/proactive.md)
 - [`refinery`](agents/refinery.md)
 - [`witness`](agents/witness.md)
@@ -127,6 +128,7 @@ runs to re-prime after compaction.
 | polecat **DIVERGES** | `gc-toolkit` | 2 | _none_ |
 |  | `gascity` | 2 | `rebase-conventions`, `polecat-patterns` |
 | polecat-codex | `gascity`, `gc-toolkit` | 1 | _none_ |
+| postmaster | `city` | 1 | _none_ |
 | proactive | `gascity`, `gc-toolkit` | 1 | _none_ |
 | refinery | `gascity`, `gc-toolkit` | 1 | _none_ |
 | witness | `gascity`, `gc-toolkit` | 1 | _none_ |
