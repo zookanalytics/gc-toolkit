@@ -28,10 +28,10 @@
 # run dirs whose pid is gone and day-old un-owned scratch.
 #
 # These run the REAL scripts — copied into a throwaway rig tree, because they
-# derive the repository root from their own path — with a stub toolchain on GC_GO_BIN,
-# a stub gc on GC_HELM_GC_BIN, stub uname and brew first on PATH, and
-# GC_HELM_GOTMP pointed at scratch under $TMPDIR. No live city, no network, no
-# real /var/tmp/gotmp. Covered:
+# derive the repository root from their own path — with a stub toolchain on
+# GC_GO_BIN, a stub gc on GC_HELM_GC_BIN, stub uname and brew first on PATH,
+# and GC_HELM_GOTMP pointed at scratch under $TMPDIR. No live city, no network,
+# no real /var/tmp/gotmp. Covered:
 #
 #   launcher (gc-helm-svc.sh)
 #   (EXEC)        an existing binary is exec'd, with its arguments

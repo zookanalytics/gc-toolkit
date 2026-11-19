@@ -35,7 +35,7 @@ var layerName = map[int]string{adapter: "adapter", theLedger: "ledger", domain: 
 
 // pkgLayer places every gctk package. An adapter names the outside
 // system it reaches, and the store adapter is the one the ledger reaches. A
-// package added to the module is placed here, or this test fails.
+// package added to gctk is placed here, or this test fails.
 var pkgLayer = map[string]struct {
 	layer   int
 	adapter string
