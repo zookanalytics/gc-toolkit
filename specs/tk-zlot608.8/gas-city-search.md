@@ -80,10 +80,13 @@ records the bead each note waits on, or the date it is next due.
 ## Read the beads a note waits on
 
 **Covered: the bd store, through gctk's ledger.** `gctk memory settle` reads
-each bead a note waits on with one `gc bd list --id ... --all` per store, and a
-pattern's follow-ups from the same listing: the beads its own `blocks` edges
-name, with its `proposal_bead` and `eng_bead`, which the distiller writes and
-the ledger declares read-only.
+the beads notes wait on with one read of each store through the ledger, a
+`gc bd list --id ... --all`. A pattern's follow-ups are the beads its own
+`blocks` edges name, with its `proposal_bead` and `eng_bead`, which the
+distiller writes and the ledger declares read-only. The settle reads the
+follow-ups it has not read yet with one more read for each pattern, and the
+landing bead of a merge into an integration branch with one more for each
+landing it has not read.
 
 ## Tell whether a fix has landed
 
