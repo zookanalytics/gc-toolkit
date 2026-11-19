@@ -33,9 +33,9 @@ declares.
   of the formulas among them and runs shellcheck, go vet and gofmt over the
   whole tracked tree. It runs the suites
   `tools/run-tests.sh --affected origin/main` selects, by the rules in that
-  script's header, and stamps the head that passed on its work bead as
-  `self_review_passed_sha`. When the anchor's stamp names the reviewed commit,
-  the method runs no suite.
+  script's header, through `gctk rig`, which records the result at the commit
+  it ran at. When that record at the reviewed commit is a pass, the method runs
+  no suite.
 - The refinery runs the same `lint_command` at merge, and no tests.
 - CI runs the whole `*.test.sh` suite on Linux and on macOS
   (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
