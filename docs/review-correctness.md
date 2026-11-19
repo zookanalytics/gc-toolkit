@@ -30,16 +30,17 @@ declares.
 
 - The polecat's self-review runs `lint_command`: `tools/lint-learned.sh` over
   the files the branch changes, then `tools/lint.sh`, which checks the step text
-  of the formulas among them and runs shellcheck, go vet and gofmt over the
+  of the formulas among them and runs shellcheck and golangci-lint over the
   whole tracked tree. It runs the suites
   `tools/run-tests.sh --affected origin/main` selects, by the rules in that
   script's header, through `gctk rig`, which records the result at the commit
   it ran at. When that record at the reviewed commit is a pass, the method runs
   no suite.
 - The refinery runs the same `lint_command` at merge, and no tests.
-- CI runs the whole `*.test.sh` suite on Linux and on macOS
-  (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
-  merge waits on the checks main's ruleset requires.
+- CI runs the whole `*.test.sh` suite and every Go test on Linux and on macOS
+  (`.github/workflows/tests.yml`), golangci-lint on Linux
+  (`.github/workflows/lint.yml`), and no web check. Every merge waits on the
+  checks main's ruleset requires.
 
 ## Pack content every rig runs
 
@@ -204,9 +205,11 @@ each file needing it carries as a copy.
 
 ## The Go services
 
-`tools/lint.sh` runs `go vet ./...` over the repository's one Go module and
-`gofmt -l` over every tracked Go file, at the self-review and at merge. Vet
-type-checks test files and runs none of them, and no gate runs `go test`. CI's
+`tools/lint.sh` runs golangci-lint over the repository's one Go module, at the
+self-review and at merge: go vet's analyzers, errcheck, ineffassign,
+staticcheck, unused and gofmt's check, as the root's `.golangci.yml` sets them,
+at the release `.golangci-lint-version` names. It type-checks test files and
+runs none of them, and no gate runs `go test`. CI's
 whole suite drives gctk end to end, because each suite whose scripts reach
 `lifecycle.sh` or `merge.sh` builds gctk from the checkout (`harness_build_gctk`
 in `assets/scripts/test-harness.sh`). `merge.test.sh` and `lifecycle.test.sh`
@@ -216,7 +219,7 @@ changed. No suite builds or runs helm-svc. So on a Go diff the review runs
 `go test ./...` from the repository root, and for gctk the suites of the
 commands it changes. On the host helm compiles only with ICU's cgo flags, so
 its tests run with `CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags`
-in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
+in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for the lint.
 
 - **Live at the next build, with no fallback.** The `gctk-build` and
   `helm-build` orders run `assets/scripts/gc-build.sh` every five minutes, so
