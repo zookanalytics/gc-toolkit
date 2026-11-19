@@ -649,13 +649,15 @@ question for each row it draws. The answer is in the board's words.
 - **The beads the rule names.** Its waits, the gate or the bead a person owes,
   or the question a conversation answers.
 - **How far the city carries it.** A bead advances when it is queued and every
-  bead it waits on advances, and an epic or a Delivery advances when every
-  open member does. Any other bead is stuck on the bead that stops it. That is
-  the bead its rule names when the rule is about another bead: the gate or the
-  bead a person owes, the gate that parks it, or the question a conversation
-  answers. A queued bead, an epic or a Delivery is stuck on what stops the
-  first of its waits or members that does not advance. Any other bead is stuck
-  on itself. A bead's frontier is `ready` when nothing holds it, as
+  bead it waits on advances, and an epic or a Delivery the `members` rule
+  places, one with open members that no earlier rule answers, advances when
+  every open member does. Any other bead is stuck on the bead that stops it.
+  That is the bead its rule names when the rule is about another bead: the
+  gate or the bead a person owes, the gate that parks it, or the question a
+  conversation answers. A queued bead is stuck on what stops the first of its
+  waits that does not advance, and such an epic or Delivery on what stops the
+  first of its open members that does not advance. Any other bead is stuck on
+  itself. A bead's frontier is `ready` when nothing holds it, as
   `bead holds` answers, and otherwise `advancing` or `stuck` by the beads it
   waits on.
 
