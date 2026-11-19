@@ -22,10 +22,14 @@ type Codec[T any] struct {
 	falseUnset bool
 }
 
-// String is the codec of a key stored as plain text, read as the pack's scripts
-// read a key, `(.metadata[k] // "")`: a stored JSON false holds no value, as a
-// null holds none, and a string "false" keeps its text. bd stores a value
-// spelled false, such as --set-metadata k=false writes, as JSON false.
+// String is the codec of a key that holds text, such as an id, a name or a
+// time, or a marker that is off until something sets it. Text has no false,
+// and a marker that holds false is off, as an unset one is. So a stored JSON
+// false holds no value, as a null holds none, and a string "false" keeps its
+// text. bd stores a value spelled false, such as --set-metadata k=false writes,
+// as JSON false. A key whose false differs from unset, such as a setting that
+// is on until someone turns it off, is declared with JSON[bool], which reads a
+// stored false as false.
 var String = Codec[string]{
 	Type:       "string",
 	Decode:     func(s string) (string, error) { return s, nil },
