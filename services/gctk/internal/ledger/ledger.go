@@ -361,19 +361,6 @@ func (l *Ledger) SetState(id, dimension, value, reason string) error {
 	return nil
 }
 
-// AddEdge gives bead id an edge of type typ onto far, as one `gc bd dep add`.
-// bd keeps one edge type per pair of beads, so an edge of another type id
-// already has onto far refuses it. The write's exit decides whether it landed.
-func (l *Ledger) AddEdge(id, far, typ string) error {
-	if out, err := l.store.AddEdge(id, far, typ); err != nil {
-		if out = strings.TrimSpace(out); out != "" {
-			return fmt.Errorf("ledger: the %s edge from %s onto %s did not land (%w): %s", typ, id, far, err, out)
-		}
-		return fmt.Errorf("ledger: the %s edge from %s onto %s did not land: %w", typ, id, far, err)
-	}
-	return nil
-}
-
 // ReadyIDs is the id of every bead the store reports ready. A read that fails
 // returns its *ReadError.
 func (l *Ledger) ReadyIDs() ([]string, error) { return l.store.ReadyIDs() }

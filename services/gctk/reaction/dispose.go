@@ -550,7 +550,7 @@ func (r *Reactions) closeExit(d *Dispose, waiting []string, out Disposed) (Dispo
 	}
 	if len(waiting) > 0 {
 		for _, h := range waiting {
-			if err := r.Ledger.AddEdge(d.Bead, h, ledger.EdgeBlocks); err != nil {
+			if err := r.Ledger.AddBlocker(d.Bead, h); err != nil {
 				return out, fmt.Errorf("could not hold %s on %s (%v), so the closer is not armed, since the deferred-dispatch order would sling it before %s closes. bd keeps one edge type per pair of beads, so an edge of another type %s already has onto %s refuses this one: remove it with gc bd dep remove %s %s%s. Clear the cause and re-run this command", d.Bead, h, err, h, d.Bead, h, d.Bead, h, r.dbFlag())
 			}
 		}
