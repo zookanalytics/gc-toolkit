@@ -255,7 +255,9 @@ const stopGrace = 2 * time.Second
 // whole group is killed. gc runs bd as a child that writes to the call's own
 // output, so a stop that killed gc alone would leave bd reading the store and
 // the call waiting on it. A call that has not started by then does not start.
-// The supervisor-API read is not a forked call and keeps its own timeout.
+// A SIGTERM or SIGINT this process is sent during a call kills the call's group
+// too, and then ends this process ([call]). The supervisor-API read is not a
+// forked call and keeps its own timeout.
 func (c *Client) WithContext(ctx context.Context) *Client {
 	p := *c
 	p.ctx = ctx
@@ -394,20 +396,22 @@ func (c *Client) Route(ids ...string) (string, error) {
 // command is the `gc` command for args, a `bd` call, with a pinned client's
 // store named ahead of the verb, where bd reads its global flags. A call that
 // names its own store keeps it. A client with a context runs the call in its
-// own process group and kills the group once the context is done
-// ([Client.WithContext]).
-func (c *Client) command(args ...string) *exec.Cmd {
+// own process group, under a context of the call's own that the client's
+// context or a stop this process is sent ends, and kills the group once that
+// context is done ([Client.WithContext]).
+func (c *Client) command(args ...string) *call {
 	if c.db != "" && len(args) > 0 && args[0] == "bd" && !slices.Contains(args, "--db") {
 		args = append([]string{"bd", "--db", c.db}, args[1:]...)
 	}
 	if c.ctx == nil {
-		return exec.Command(c.bin, args...)
+		return &call{Cmd: exec.Command(c.bin, args...)}
 	}
-	cmd := exec.CommandContext(c.ctx, c.bin, args...)
+	run, cancel := context.WithCancel(c.ctx)
+	cmd := exec.CommandContext(run, c.bin, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = stopGrace
-	return cmd
+	return &call{Cmd: cmd, run: run, cancel: cancel}
 }
 
 // stopped is why the client's context stopped its calls, and nil while the

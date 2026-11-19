@@ -101,55 +101,67 @@ func TestDoctorEndsItsGroupAtTheDeadline(t *testing.T) {
 	}
 }
 
-// gc doctor leads its own group, so the SIGTERM or the Ctrl-C that reaches this
-// process's group does not reach it. The call passes the signal on, ending the
-// processes gc doctor started, then exits with the status the signal gives.
+// A bounded command leads its own group, gc doctor's and a roster read's alike,
+// so the SIGTERM or the Ctrl-C that reaches this process's group does not reach
+// it. The call passes the signal on, ending the processes the command started,
+// then exits with the status the signal gives.
 func TestBoundedPassesAStopSignalOnToItsGroup(t *testing.T) {
-	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
-		t.Run(sig.String(), func(t *testing.T) {
-			pidFile := filepath.Join(t.TempDir(), "child")
-			c, _ := stubGC(t, "sleep 30 &\necho $! > '"+pidFile+"'\nwait\n")
-			exited := make(chan int, 1)
-			restore := exitProcess
-			exitProcess = func(code int) { exited <- code }
-			t.Cleanup(func() { exitProcess = restore })
-			// The test's own relay, so a call that does not take the signal fails
-			// this test rather than ending the test binary.
-			held := make(chan os.Signal, 1)
-			signal.Notify(held, sig)
-			t.Cleanup(func() { signal.Stop(held) })
+	for _, call := range []struct {
+		name string
+		run  func(c *City)
+	}{
+		{"gc doctor", func(c *City) { c.Doctor(context.Background()) }},
+		{"gc agent list", func(c *City) { _, _ = c.Agents() }},
+	} {
+		for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
+			t.Run(call.name+"/"+sig.String(), func(t *testing.T) {
+				pidFile := filepath.Join(t.TempDir(), "child")
+				c, _ := stubGC(t, "sleep 30 &\necho $! > '"+pidFile+"'\nwait\n")
+				exited := make(chan int, 1)
+				restore := exitProcess
+				exitProcess = func(code int) { exited <- code }
+				t.Cleanup(func() { exitProcess = restore })
+				// The test's own relay, so a call that does not take the signal
+				// fails this test rather than ending the test binary.
+				held := make(chan os.Signal, 1)
+				signal.Notify(held, sig)
+				t.Cleanup(func() { signal.Stop(held) })
 
-			done := make(chan DoctorRun, 1)
-			go func() { done <- c.Doctor(context.Background()) }()
-			pid := 0
-			for end := time.Now().Add(5 * time.Second); pid == 0; time.Sleep(20 * time.Millisecond) {
-				raw, _ := os.ReadFile(pidFile)
-				pid, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
-				if pid == 0 && time.Now().After(end) {
-					t.Fatal("the stub gc doctor never started its child")
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					call.run(c)
+				}()
+				pid := 0
+				for end := time.Now().Add(5 * time.Second); pid == 0; time.Sleep(20 * time.Millisecond) {
+					raw, _ := os.ReadFile(pidFile)
+					pid, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
+					if pid == 0 && time.Now().After(end) {
+						t.Fatalf("the stub %s never started its child", call.name)
+					}
 				}
-			}
-			if err := syscall.Kill(os.Getpid(), sig); err != nil {
-				t.Fatal(err)
-			}
-			select {
-			case code := <-exited:
-				if want := 128 + int(sig); code != want {
-					t.Errorf("a relayed %v exited %d, want %d", sig, code, want)
+				if err := syscall.Kill(os.Getpid(), sig); err != nil {
+					t.Fatal(err)
 				}
-			case <-time.After(10 * time.Second):
-				t.Fatalf("the call did not exit on the %v this process received", sig)
-			}
-			<-done
-			for end := time.Now().Add(3 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-				if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
-					break
+				select {
+				case code := <-exited:
+					if want := 128 + int(sig); code != want {
+						t.Errorf("a relayed %v exited %d, want %d", sig, code, want)
+					}
+				case <-time.After(10 * time.Second):
+					t.Fatalf("the call did not exit on the %v this process received", sig)
 				}
-				if time.Now().After(end) {
-					t.Fatalf("the process gc doctor started, %d, outlived the %v this process received", pid, sig)
+				<-done
+				for end := time.Now().Add(3 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+					if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+						break
+					}
+					if time.Now().After(end) {
+						t.Fatalf("the process %s started, %d, outlived the %v this process received", call.name, pid, sig)
+					}
 				}
-			}
-		})
+			})
+		}
 	}
 }
 
