@@ -1,12 +1,12 @@
 package cityboard
 
-// The document the city's read builds: what doctor's newest recorded run
-// found, and how many messages wait in the operator's mailbox, as the city page
-// shows them. Go decides which checks the page shows,
-// which of them count in its lead and in what order, and whether the run is
-// late, and the page lays them out. The page's TypeScript types are generated
-// from this file (web/src/cityboard/document.gen.ts), and
-// TestPageTypesAreCurrent fails when that file is stale.
+// The document the city's read builds: what doctor's newest recorded run found,
+// and how many messages wait in the operator's mailbox, as the city page shows
+// them. Go decides which checks the page shows, which of them count in its lead
+// and in what order, and whether the run is late, and the page lays them out.
+// The page's TypeScript types are generated from this file
+// (web/src/cityboard/document.gen.ts), and TestPageTypesAreCurrent fails when
+// that file is stale.
 
 // Response is what the city's route answers: the document, and the time its
 // read finished beside it.

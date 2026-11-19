@@ -211,23 +211,24 @@ the operator a second time.
 A bare gc-helm on a terminal opens engage's form on starting a conversation.
 The form's pages are tabs at its top: starting a conversation (Ctrl+N),
 returning to one (Ctrl+R), and People (Ctrl+P), which lists mechanik, the
-postmaster and each rig's Product Owner with the state of its session. A page's key goes to it
-from any page and field. ↑ from the subject reaches the tabs, and ←/→ move along
-them. Enter on a person leaves the form and then runs `gc-helm po --rig <name>`,
-`gc-helm mechanik` or `gc-helm postmaster`, so what the verb prints stays on the terminal and its
-exit status is the form's. A seat takes no question, because Gas City's attach
-carries no message, so the sitting's purpose is given in the sitting. Each rig
-has its own Product Owner, which works that rig's queue and epics, and none
-runs in the city's HQ; mechanik and the postmaster are each one for the city. Each verb is `gc session
-attach` on the seat's session, by the name `gc agent list` gives it:
-<rig>/<binding>.po for a rig's Product Owner, and <binding>.mechanik and
-<binding>.postmaster for the city's two, where <binding> is the name the city imports this pack under. It
+postmaster and each rig's Product Owner with the state of its session. A page's
+key goes to it from any page and field. ↑ from the subject reaches the tabs, and
+←/→ move along them. Enter on a person leaves the form and then runs
+`gc-helm po --rig <name>`, `gc-helm mechanik` or `gc-helm postmaster`, so what
+the verb prints stays on the terminal and its exit status is the form's. A seat
+takes no question, because Gas City's attach carries no message, so the
+sitting's purpose is given in the sitting. Each rig has its own Product Owner,
+which works that rig's queue and epics, and none runs in the city's HQ; mechanik
+and the postmaster are each one for the city. Each verb is `gc session attach`
+on the seat's session, by the name `gc agent list` gives it: <rig>/<binding>.po
+for a rig's Product Owner, and <binding>.mechanik and <binding>.postmaster for
+the city's two, where <binding> is the name the city imports this pack under. It
 joins a running session as it stands. For a seat that is not running, it asks
 the city's controller to start the session, waits for it to run and then
 attaches, and the controller's start gives the agent its prompt as its first
 message. The Product Owner and the postmaster start fresh, so a sitting of
-either that slept or ended comes back as a new sitting. A failed attach exits 4 once gc has said
-why.
+either that slept or ended comes back as a new sitting. A failed attach exits 4
+once gc has said why.
 
 dismiss ends the sitting. react slings a proactive first reaction on the bead
 through gctk reaction sling (its --reason is log-only operator intent). takeaway
@@ -6196,20 +6197,21 @@ cmd_attach() {
 # on-demand named session, which a sitting opens and a drain-ack ends.
 # Mechanik, the operator's standing conversation, is one named session for the
 # city, which the controller keeps running. The postmaster, which works through
-# the operator's mailbox with them, is one on-demand named session for the
-# city, which a sitting opens and a drain-ack ends, as a po's does. Each verb is Gas City's attach on
-# the seat's session, which owns the seat's start and the wait for it: it
-# attaches to a running session, and asks the city's controller to start one
-# that is not running, so the agent takes its prompt as its first message, then
-# attaches once the session runs (docs/gascity/human-engagement.md, "What an
-# attach does to a session that is not running").
+# the operator's mailbox with them, is one on-demand named session for the city,
+# which a sitting opens and a drain-ack ends, as a po's does. Each verb is Gas
+# City's attach on the seat's session, which owns the seat's start and the wait
+# for it: it attaches to a running session, and asks the city's controller to
+# start one that is not running, so the agent takes its prompt as its first
+# message, then attaches once the session runs
+# (docs/gascity/human-engagement.md, "What an attach does to a session that is
+# not running").
 #
 # Gas City names a seat's session as it names the agent that runs it, after
 # the binding the city imports the pack under, and a rig's po after its rig as
-# well: <binding>.mechanik, <binding>.postmaster and <rig>/<binding>.po. The binding is the city's to
-# choose, so the verbs and the People page take a seat's name from the city's
-# agent roster (SEAT_NAMES_JQ), and know a seat only by its template, the agent
-# pack.toml's [[named_session]] stanza names.
+# well: <binding>.mechanik, <binding>.postmaster and <rig>/<binding>.po. The
+# binding is the city's to choose, so the verbs and the People page take a
+# seat's name from the city's agent roster (SEAT_NAMES_JQ), and know a seat only
+# by its template, the agent pack.toml's [[named_session]] stanza names.
 PO_TEMPLATE="po"
 MECHANIK_TEMPLATE="mechanik"
 POSTMASTER_TEMPLATE="postmaster"

@@ -1641,10 +1641,10 @@ once an hour. The mailbox's count is cached apart, for a minute
 (`server.CityMailTTL`), so it is counted at most once a minute however many
 pages are open, and a count that did not read is kept for that minute too. The
 board's write routes change no doctor run and no mail, so a write leaves both
-cached. A failed read of the event log, or a newest event that holds no run's record, answers
-502 with the failure, and the page keeps the last good document and says the
-read failed. The page reads it every two and a half minutes, and whenever the
-tab is shown again.
+cached. A failed read of the event log, or a newest event that holds no run's
+record, answers 502 with the failure, and the page keeps the last good document
+and says the read failed. The page reads it every two and a half minutes, and
+whenever the tab is shown again.
 
 **Its types are generated.** `web/src/cityboard/document.gen.ts` comes from
 `internal/cityboard/document.go`, through tygo, and `TestPageTypesAreCurrent`

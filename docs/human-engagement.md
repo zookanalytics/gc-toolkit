@@ -220,8 +220,8 @@ suspended rig, and the page says why it cannot start and how to resume the rig. 
 while it is on screen. ↑/↓ pick a seat, a line says what Enter does for it, and
 Enter leaves the terminal and then runs the seat's command, `gc-helm mechanik`,
 `gc-helm postmaster` or `gc-helm po --rig <name>`, as the form runs a
-conversation's attach. So all
-the command prints stays on the terminal and its exit status is the form's.
+conversation's attach. So all the command prints stays on the terminal and its
+exit status is the form's.
 Each command attaches to the seat's session, starting it first when it is not
 running (*A po sitting*, below). Gas City's attach carries no message, so a
 seat takes no question, and the sitting's purpose is given in the sitting. The

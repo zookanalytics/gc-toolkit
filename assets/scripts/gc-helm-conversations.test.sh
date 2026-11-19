@@ -16,12 +16,11 @@
 #                 topic can be filed in, each with its prefix, whether it
 #                 carries converse and whether it is suspended
 #   (CITY-SEATS)  the seats the form's People page lists: mechanik, then the
-#                 postmaster, then the po
-#                 of each rig a new topic can go to, each with the open session
-#                 the session list holds under the name the agent roster gives
-#                 its session, or null, read from the one session list the
-#                 conversations were read from and the one roster the rigs'
-#                 converse was read from
+#                 postmaster, then the po of each rig a new topic can go to,
+#                 each with the open session the session list holds under the
+#                 name the agent roster gives its session, or null, read from
+#                 the one session list the conversations were read from and the
+#                 one roster the rigs' converse was read from
 #   (CITY-SEATS-KIT) under a city that imports the pack as kit, each seat's
 #                 session is the one under kit's name, and a session under
 #                 gc-toolkit's name is no seat's

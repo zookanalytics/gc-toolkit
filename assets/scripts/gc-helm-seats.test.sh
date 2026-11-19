@@ -89,8 +89,8 @@ RIGS
 
 # The city's agent roster, as `gc agent list --json` gives it: the pack imported
 # as gc-toolkit, with mechanik and the postmaster for the city and a po in each
-# rig, the HQ aside,
-# beside an agent of another name. The same city importing the pack as kit.
+# rig, the HQ aside, beside an agent of another name. The same city importing
+# the pack as kit.
 export ROSTER="$TMP/fixture/agents.json"
 cat > "$ROSTER" <<'AGENTS'
 {"city_name":"town","agents":[

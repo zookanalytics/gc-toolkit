@@ -1437,9 +1437,9 @@ func (m *Model) rigNamed(name string) (Rig, bool) {
 
 // seatWhere is what Enter on s opens and what the People page says of it, and
 // whether Enter opens it: mechanik, the postmaster, and a rig's po while its
-// rig is not suspended, since Gas City starts no session in a suspended rig. Gas City's
-// attach carries no message, so the line says the sitting's purpose is given in
-// the sitting.
+// rig is not suspended, since Gas City starts no session in a suspended rig.
+// Gas City's attach carries no message, so the line says the sitting's purpose
+// is given in the sitting.
 func (m *Model) seatWhere(s Seat) (string, standing) {
 	const how = ", which attaches to its session, starting it first when it is not running. The attach carries no message, so give the sitting its purpose once you are in it."
 	switch s.Name {

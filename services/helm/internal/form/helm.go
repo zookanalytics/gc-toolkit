@@ -380,9 +380,9 @@ func (s Script) AttachCommand(conversation, model string) *exec.Cmd {
 	return exec.Command("sh", args...)
 }
 
-// SeatCommand is the seat's verb: `po --rig <rig>` for a rig's po,
-// `mechanik` and `postmaster`. Each is Gas City's attach on the seat's session, which asks the
-// city's controller to start a seat that is not running and waits for it to
+// SeatCommand is the seat's verb: `po --rig <rig>` for a rig's po, `mechanik`
+// and `postmaster`. Each is Gas City's attach on the seat's session, which asks
+// the city's controller to start a seat that is not running and waits for it to
 // run before it attaches.
 func (s Script) SeatCommand(seat, rig string) *exec.Cmd {
 	args := []string{s.Path, seat}

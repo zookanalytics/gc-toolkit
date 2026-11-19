@@ -15,8 +15,8 @@ import (
 
 // peopleCity is rigCity with the seats `conversations` lists for it: mechanik
 // with a terminal attached, the postmaster asleep, gc-toolkit's po with no
-// session, harbor's asleep,
-// the suspended rig's, and the po of docs, a rig with no converse template.
+// session, harbor's asleep, the suspended rig's, and the po of docs, a rig with
+// no converse template.
 func peopleCity() City {
 	c := rigCity()
 	c.Seats = []Seat{
@@ -300,8 +300,8 @@ func cursorShows(m *Model, f field) bool {
 }
 
 // The People page lists mechanik, the postmaster and each rig's Product Owner
-// by its rig's name and prefix, each with its session's state as Gas City gives it, and
-// says what Enter opens for the seat picked.
+// by its rig's name and prefix, each with its session's state as Gas City gives
+// it, and says what Enter opens for the seat picked.
 func TestThePeoplePageListsTheSeatsWithTheirState(t *testing.T) {
 	f := &fakeHelm{city: peopleCity()}
 	m := newForm(t, f, Options{})
@@ -366,8 +366,8 @@ func TestARosterThatDidNotReadListsNoSeat(t *testing.T) {
 
 // Enter opens the seat picked by its own verb once the form has left the
 // terminal: mechanik by gc-helm mechanik, the postmaster by gc-helm postmaster
-// and a rig's Product Owner by gc-helm po --rig, whether or not the rig carries a converse template. Nothing is
-// looked up, saved or started.
+// and a rig's Product Owner by gc-helm po --rig, whether or not the rig carries
+// a converse template. Nothing is looked up, saved or started.
 func TestEnterOpensTheSeatPicked(t *testing.T) {
 	for _, c := range []struct {
 		downs int
