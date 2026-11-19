@@ -424,9 +424,12 @@ corrective feedback into standing behavior, so attention is never spent twice:
 2. **Distill.** The `feedback-distiller` order clusters observations into
    patterns and promotes recurring ones as ordinary PRs against the pack —
    prompt edits, lint rules under `tools/lint-learned.d/`, doc changes.
+   A fix in code another rig of the city owns is filed as that rig's work, and
+   one in a project outside the city is recorded as an upstream finding, whose
+   report only the operator sends ([outbound-sends.md](outbound-sends.md)).
 3. **Land.** Promotions ride the same work→review→merge pipeline as
-   everything else. A lesson is real when it is merged pack content, not when
-   it is remembered.
+   everything else. A lesson is real when its change is merged, in the pack or
+   in the repository that owns the code, not when it is remembered.
 
 Doctor is the same idea applied to structure: its checks assert invariants
 from [component-model.md](component-model.md) §3 against the live ledger and

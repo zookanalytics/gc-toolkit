@@ -10,11 +10,15 @@ the retirement pass over adopted rules is unconditional, every run. Judging
 uses the learning-distill rubric (D6: promotion is a reasoned judgment — a
 standing directive or operator-endorsed observation promotes at N=1, a
 diff-scoped nit waits for recurrence; counts and heat are inputs, never
-arithmetic). Output: at most a few change-unit `prompt-update` beads. Each
-waits for the operator's placement, then rides the pool worker -> refinery ->
+arithmetic). Output: at most a few change-unit beads, each a `prompt-update`
+proposal or a fix in code. Each prompt-update and engineering bead waits for
+the operator's placement, then rides the pool worker -> refinery ->
 operator-review pipeline (D3). Base rate: ZERO or ONE proposals per run; a
 chatty run is a smell.
 
+A lesson one moment needs is a fix in the code that moment loads, and the
+rubric's Fixes in code says where it goes, what its engineering bead says and
+how code another owner holds is filed.
 A proposal names a CARRIER before it names rule text: a conventions bullet,
 an operator-profile entry, a work-quality entry, a review-rubric dimension, or
 an exemplar pair.
