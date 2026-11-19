@@ -11,6 +11,7 @@ import type {
   DeliveryEntry,
   EpicEntry,
   Group,
+  Handback,
   KindCount,
   Need,
   NeedKind,
@@ -20,7 +21,7 @@ import type {
   Row,
   WorkQueue,
 } from './document.gen';
-import { Description } from './Description';
+import { Description, Formatted } from './Description';
 import { BeadId, Line, Show } from './Line';
 import {
   AMBER,
@@ -209,9 +210,10 @@ function refBits(refs: Ref[], prefix: string): ReactNode[] {
 
 // ── Details ───────────────────────────────────────────────────────────────
 
-/** Details, opened in place under its row and above its children: the bead's
- *  whole description, an epic's contract and last ruling, the pull request's
- *  facts with its link, what the bead waits on and what waits on it. */
+/** Details, opened in place under its row and above its children: a
+ *  decision's last hand-back, the bead's whole description, an epic's contract
+ *  and last ruling, the pull request's facts with its link, what the bead
+ *  waits on and what waits on it. */
 export function DetailsBlock({ row, depth }: { row: Row; depth: number }) {
   const v = useView();
   const fields: [string, ReactNode][] = [];
@@ -255,6 +257,7 @@ export function DetailsBlock({ row, depth }: { row: Row; depth: number }) {
 
   return (
     <div className="details-block" style={{ marginLeft: depth * STEP + 12 + 60 }}>
+      {row.handback !== undefined && <LastHandback handback={row.handback} />}
       <Description id={row.id} />
       {fields.map(([k, val]) => (
         <div key={k} className="field">
@@ -271,6 +274,24 @@ export function DetailsBlock({ row, depth }: { row: Row; depth: number }) {
         </button>
       </div>
     </div>
+  );
+}
+
+/** Where the last sitting on a decision left it: the hand-back it recorded,
+ *  when, and on which conversation, above the decision's own description. */
+function LastHandback({ handback }: { handback: Handback }) {
+  const at = handback.at !== undefined && handback.at !== '' ? `${handback.at} on ` : 'On ';
+  return (
+    <section className="handback" aria-label="Last hand-back">
+      <div className="field">
+        <span className="field-key">Last hand-back</span>
+        <span className="field-value">
+          {at}
+          <BeadId id={handback.conversation} />
+        </span>
+      </div>
+      <Formatted text={handback.text} />
+    </section>
   );
 }
 
