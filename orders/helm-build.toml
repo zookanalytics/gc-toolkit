@@ -1,4 +1,6 @@
-# helm-build — keep the served helm binary current with services/helm.
+# helm-build — keep the served helm binary current with its sources:
+# services/helm, services/gctk, whose packages it imports, and the root go.mod
+# and go.sum.
 # The service launcher only exec's a prebuilt binary (a build cannot fit the
 # 5s readiness probe), so the build runs here and build-and-restart is ONE
 # step. Staleness is `find -newer`, a recorded binary_rev other than the

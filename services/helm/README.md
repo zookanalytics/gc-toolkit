@@ -894,14 +894,15 @@ narrower, not wrong — and marks the gather partial.
 
 The service's `/helm` answer carries the record in the board's order: open
 first, longest-open first, then most recently closed. The rig board's page does
-not draw it; a conversation reaches the page as an ask on Needs you. One its
-sitting stays in, open under the sitting with a wait of its own holding it, is
-no ask until the work it sent closes: its row reads "Waits on" that work, in the
-Queued group. The pull request whose merge it holds is no ask either, because
-prstatus reads that PR `working` until the work closes, approved or not. Once
-the work closes, the conversation and its pull request are both asks again. One
-its sitting has claimed to hold stays an ask, whatever edge an earlier stay left
-on it.
+not draw it; a conversation reaches the page as an ask on Needs you, its own or
+that of the question it answers, a human gate it replies to or a decision it
+tracks. One its sitting stays in, open under the sitting with a wait of its own
+holding it, is no ask until the work it sent closes: its row reads "Waits on"
+that work, in the Queued group. The pull request whose merge it holds is no ask
+either, because prstatus reads that PR `working` until the work closes,
+approved or not. Once the work closes, the conversation and its pull request
+are both asks again. One its sitting has claimed to hold stays an ask, whatever
+edge an earlier stay left on it.
 
 `helm-svc board --json` prints the tiles alone. The record rides the service's
 envelope as `sittings`, because a second shape in the bare array would break
@@ -1068,7 +1069,7 @@ serves carries no PR phase and no held value, and reads its liveness as any othe
 bead does.
 
 **Costs of the library backend, paid at build time, not per request:** the
-module went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
+board went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
 `helm-svc` is ~161 MB, and the Go floor moved to 1.26.5. A cold build measured
 **2m29s** on 2026-08-22 (1.3 GB of build cache); a warm one ~12.5s. Those
 numbers are why the build does not run in the service start path — see
@@ -1156,7 +1157,7 @@ The build does **not** run in the service start path, and this is load-bearing.
 
 The supervisor gives a `proxy_process` **5 seconds** to answer its health probe
 (`proxyProcessReadyTimeout`, gascity `internal/workspacesvc/proxy_process.go`).
-A warm build of this module takes ~12.5s and a cold one 2m29s. A build started
+A warm build of helm-svc takes ~12.5s and a cold one 2m29s. A build started
 by the launcher therefore never finished inside the window — not on a slow day,
 ever — and `waitReady` then called `stopProcessGroup()`, killing the build along
 with the start. The next start began again and was killed at 5s again.
@@ -1265,12 +1266,12 @@ atomic rename:
 |---|---|
 | `component` | which binary this record describes |
 | `built_at` | when the binary now on disk was produced |
-| `source_rev` | the revision the last build tick saw in the sources — the tree hash of the component's own subtree at HEAD (`git rev-parse HEAD:./` from the module), so a merge touching nothing under it does not move it |
+| `source_rev` | the revision the last build tick saw in the sources — one hash over the component's inputs at HEAD: git's hash of the `git ls-tree HEAD` listing of the root go.mod and go.sum and the folders the binary compiles from (`services/helm` and `services/gctk` for helm, `services/gctk` for gctk), so a merge touching none of them does not move it |
 | `binary_rev` | the revision the binary now on disk was built from, in the same terms |
 | `last_build_rc` | exit status of the last build ATTEMPT; 0 for success |
 | `restart_pending` | a published binary nothing is running yet |
 | `checked_at` | when the build order last ran at all |
-| `behind_main` | how many commits `origin/<default>` carries under the component's source paths that the checkout's HEAD lacks — how far off-main the served code is. REPORT-ONLY: it bands the row, never triggers a rebuild |
+| `behind_main` | how many commits `origin/<default>` carries under the component's inputs that the checkout's HEAD lacks — how far off-main the served code is. REPORT-ONLY: it bands the row, never triggers a rebuild |
 
 `source_rev` and `binary_rev` diverge exactly when a build failed and the last
 good binary kept serving, which is the gap worth showing. A tick that finds the
@@ -1486,17 +1487,22 @@ such as a closed bead a wait names, read once. A closed epic among those
 members, such as a Delivery that landed while its epic stays open, gets the
 same read for its own closed members. A member is kept only when its own
 parent-child edge names the parent. Closed work beneath a bead that is not an
-epic is not read, since that would take one call per parent. Every reader is
-asked of the listing's rows, so one document never mixes two reads of a bead:
+epic is not read, since that would take one call per parent. While the rig has
+an open decision, one `gc bd list --has-metadata-key gc.handback --all` reads
+every bead that records a hand-back, the closed conversations of sittings that
+ended at their hand-off among them, for the newest a decision's Details opens
+with. It reads every hand-back the store holds, so its cost grows with the
+sittings the rig has had. Every reader is asked of the listing's rows, so one
+document never mixes two reads of a bead:
 
 | Reader | What the read takes from it |
 |---|---|
-| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), or a row of the store's ephemeral plane |
+| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), or a row of the store's ephemeral plane; every bead that records a hand-back (`Listing.HandedBack`) |
 | `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
-| `services/gctk/prstatus` (`Holding` over `Listing.Blockers`) | what a person owes on a bead through its `blocks` edges |
+| `services/gctk/prstatus` (`Holding` over `Listing.Blockers`, and `Stays`) | what a person owes on a bead through its `blocks` edges, and whether a conversation or a decision waits on work of its own first, which is no person's move until that work closes |
 | `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | each open pull request's facts, and where one on the old record stands and what holds it |
 | `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it: the evaluator's answer over the listing's rows and the GitHub read the landing order saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
-| `services/gctk/conversation` | what a conversation is, what it tracks and replies to |
+| `services/gctk/conversation` | what a conversation is, what it tracks and replies to, so a decision it tracks and a gate it replies to read its state |
 | `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows and waits' answers, and whether the city takes each piece as things stand |
 
 The listing reads the store's ephemeral plane and its templates because waits

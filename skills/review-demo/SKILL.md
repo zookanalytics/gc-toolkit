@@ -111,16 +111,21 @@ prints, where `<binding>` is the name in front of this skill's: `gc-toolkit` in
 that holds `<worktree>`, so the engine's working files stay out of the reviewed
 tree.
 
-Every capture runs inside a sandbox from which the live city cannot be reached
-(`demo-engine-lib.sh`). The engine, the command a terminal capture types, the
-server a capture starts and the page it loads can read none of the city's
-stores, configuration or API, and get none of the variables that point at it.
-A command or page that reads the city fails there. So a capture shows the
-reviewed commit on fixture data that stands in for live data: a fixture the
-rig's guidance names, or one the reviewed commit's own tests build. A visual
-that only live state could produce is no capture, and the verdict says so, as
-for any visual that cannot be produced here. The sandbox is macOS's
-`sandbox-exec`, and a host without it runs no capture;
+A capture of a rig whose app reads the city runs inside a sandbox from which
+the live city cannot be reached (`demo-engine-lib.sh`). The engine, the command
+a terminal capture types, the server a capture starts and the page it loads
+can read none of the city's stores, configuration or API, and get none of the
+variables that point at it. A command or page that reads the city fails there.
+A capture of any other rig runs as an ordinary process, with the reach the
+rig's own tests have, and still without those variables. The rig keeps the
+sandbox when `city.toml` sets its `app_reads_city` to anything but `"false"`,
+which `gc formula show mol-rig-demo --rig "${GC_RIG:-}" --json` shows, as
+`gc-toolkit.demo-capture` ("The rig's start command") says. Either way a
+capture shows the reviewed commit on fixture data that stands in for live data:
+a fixture the rig's guidance names, or one the reviewed commit's own tests
+build. A visual that only live state could produce is no capture, and the
+verdict says so, as for any visual that cannot be produced here. The sandbox is
+macOS's `sandbox-exec`, and a host without it runs no capture;
 `doctor/check-demo-toolchain` reports whether this one has it.
 
 Every modality reaches the PR the same way. `demo-deliver.sh --file <path>
@@ -147,8 +152,8 @@ reports whether the `gh` it needs is present.
   ```
 
   Give it as `--serve "$SERVE" --cwd <worktree>`. It runs as a copy that
-  `gctk rig serve` runs from the worktree, inside the capture's sandbox, on a
-  free port of its own that the command gets as `$PORT`. An empty `SERVE` is a
+  `gctk rig serve` runs from the worktree, inside the capture's sandbox when the
+  rig keeps it, on a free port of its own that the command gets as `$PORT`. An empty `SERVE` is a
   rig that declares no command, whose guidance names its app: give
   `--serve-dir <worktree>/<dir>` for a static build, or
   `--serve "<command>" --cwd <worktree>` for a command it names. When the rig's
@@ -218,9 +223,9 @@ reports whether the `gh` it needs is present.
   capture, and one that pages a long output in a terminal, such as `git log`,
   waits in its pager, so run it with the pager off (`git --no-pager log`). The
   capture is as tall as the session, so bound a long output with the command's
-  own limit. The command runs inside the sandbox, so one that reads or writes
-  the city fails, and the capture shows the failure; run it on fixture data, as
-  the rig's guidance says. `--text <file>` shows output captured earlier, which
+  own limit. Run the command on fixture data, as the rig's guidance says. For a
+  rig that keeps the sandbox it runs inside it, so one that reads or writes the
+  city fails, and the capture shows the failure. `--text <file>` shows output captured earlier, which
   the terminal prints with `cat`. For markdown, write the markdown the reviewed
   commit composes to the file. `--text` and markdown draw a file as it is, and
   the sandbox cannot see how the file was made, so write to it only what the

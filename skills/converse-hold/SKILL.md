@@ -167,10 +167,11 @@ merge:
 Then offer the close-out as the last line, the only thing below the hand-back.
 The close-out is the switch that ends the sitting, put where the operator
 already reads. Offering it is not a request to use it, and it does not stand in
-for the decision above it:
+for the decision above it, so its reason names only the sitting's topic and
+that it closed without a ruling, and every course stays in the decision:
 
 ```
-! <the resolved gc-helm.sh path> dismiss --reason "<this sitting's real reason>"
+! <the resolved gc-helm.sh path> dismiss --reason "<the sitting's topic>: closed without a ruling"
 ```
 
 Write the resolved path, not the variable, because the leading `!` runs the

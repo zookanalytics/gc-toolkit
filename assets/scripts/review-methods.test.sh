@@ -22,47 +22,41 @@
 #   - Every step that applies a check's method lets the method hand reading to
 #     subagents, each read-only in the review's workspace and never calling
 #     signoff.sh, while the agent holding the step writes every finding. No
-#     review formula or review skill forbids subagents, and the correctness
-#     method says when it hands an angle to a finder or a candidate to a
-#     verifier, that each gets the diff and the files it needs and none of the
-#     reviewer's conversation, and that its brief states the rules it runs
-#     under.
-#   - The correctness method sweeps once more when the hunt's candidates are
-#     deduped, looking only for defects no candidate names yet: moved code that
-#     dropped a guard, setup and teardown asymmetry in tests, config defaults
-#     that flipped, and second-tier footguns. A finder of its own sweeps where
-#     the provider offers subagents and the reviewer sweeps in a separate pass
-#     where it offers none, either way given the candidates so far. A defect
-#     the sweep adds names it as its category and is verified with the rest,
-#     and the trail records the sweep on a Swept: line above the Refuted: lines.
-#   - The correctness method checks each blocking candidate before the
-#     verdict, in a context that did not raise it: a verifier subagent where
-#     the provider offers one, a separate pass where it offers none. The check
-#     returns CONFIRMED, PLAUSIBLE or REFUTED, a refutation quotes the line
-#     that proves it, and a refuted candidate does not block, stays out of the
-#     finding set and keeps its refutation in the trail.
-#   - The correctness method grades prose under the same contract. A finding on
-#     prose names the text, the reader who acts on it and the wrong action or
-#     false belief that follows on the tree as merged, and its check reads the
-#     tree. It blocks when it is a claim the tree contradicts, an instruction
-#     that does the wrong thing as written, or a committed behavior that fails
-#     on a reachable case, and a failure that depends on how work the text
-#     leaves open is built is a P2 at most. A diff no suite touches has nothing
-#     to run, and the Verification line says so.
+#     review formula or review skill forbids subagents.
+#   - The trail the correctness method's verdict section shapes carries, after
+#     its Filed: line, a line for the sweep and a line for each refuted
+#     candidate: a Swept: line, then the Refuted: lines, above the
+#     Verification: line.
+#   - The correctness method's check of a blocking candidate returns
+#     CONFIRMED, PLAUSIBLE or REFUTED, and its verdict section names the
+#     refusal of a finding set that carries a refuted candidate.
+#   - The correctness method has a What blocks section, which review-ruling
+#     rules a finding by.
 #   - Neither review formula names a check's judgment: no test or suite, no
 #     P0, P1 or P2 grade, no Verification line, and neither the correctness
 #     method's What to check list nor any dimension of it. The correctness
 #     method is method alone: it carries no shell block and reads no record
 #     itself, because the review formula gathers what it reads.
+#   - The correctness method grows past METHOD_WORD_BUDGET words only in a
+#     change that raises it.
 #   - The pm method says when triage adds it, in words that name no rig: a
 #     diff that changes what the rig's product does for the people it serves,
 #     or what it promises them, and always a diff that changes the product
-#     goals page. An edit that changes neither what the product does nor what
-#     it promises, and tests, do not warrant it. When a rig keeps no product
+#     goals page. A design or a spec that proposes such a change counts as the
+#     change. An edit that changes neither what the product does nor what it
+#     promises, and tests, do not warrant it. When a rig keeps no product
 #     goals, a pm review judges the change against its anchor alone and asks
 #     the change for no page. It files one request for the page under one
 #     token, and its duplicate probe counts a request that has closed. The
 #     method defines that page without the foundation doc only this repo keeps.
+#   - The pm method judges whether a change is the right thing from the side of
+#     the people it affects, whom it names from the rig's product goals, and
+#     walks them through the change as designed and as built, across the whole
+#     of what they are doing. Its words fit a person who is neither asked nor
+#     answers. What the person meets through a mechanism is the pm check's, a
+#     limit the PR discloses is still a finding when it defeats the feature's
+#     purpose, a walk that breaks blocks, the verdict body records each walk,
+#     and the method's questions stay a lens.
 #   - This repo's own docs/review-triage.md, read the way a review reads it at
 #     its commit, carries the changes that make pm mandatory and the edits that
 #     do not.
@@ -135,6 +129,10 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-review-methods-test.XXXXXX")" || exit 1
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
+
+# The correctness method's size, rounded up, so the suite notices when the
+# method grows.
+METHOD_WORD_BUDGET=3100
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -258,9 +256,6 @@ echo "# the arch skill's rules on docs/architecture.md, and this repo's own arch
 flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 hasF() { if flat "$1" | grep -qF -- "$2"; then ok "$3"; else bad "$3" "missing: $2"; fi; }
 notF() { if flat "$1" | grep -qF -- "$2"; then bad "$3" "unexpected: $2"; else ok "$3"; fi; }
-hasF "$METHOD" 'a title whose type or words misname what the diff does' "the correctness method judges a PR title's type and words against its diff"
-hasF "$METHOD" 'a false one blocks as a false summary does' "…blocks a false title"
-hasF "$METHOD" 'one that is true but merely weak is a P2' "…and grades a title that is only weak a P2"
 ARCH_SKILL="$ROOT/skills/review-arch/SKILL.md"
 hasF "$ARCH_SKILL" 'A `docs/architecture.md` at the reviewed commit is a precondition of approval' "the arch skill approves no commit without docs/architecture.md"
 hasF "$ARCH_SKILL" 'a passable account of the architecture the change covers' "…whose change adds one covering the architecture it covers"
@@ -373,7 +368,7 @@ done
 eq "$(grep -cE '^ *```(bash|sh|zsh|shell) *$' "$METHOD" || true)" "0" "the correctness method carries no shell block"
 eq "$(grep -n -m1 -- '--check' "$METHOD" || true)" "" "the correctness method reads no record itself"
 
-echo "# no review text forbids subagents, and the correctness method says how it uses them"
+echo "# no review text forbids subagents"
 # The formulas a review pours and the skills it loads, read flat so a phrase
 # may wrap.
 for f in "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-signoff.toml" \
@@ -381,72 +376,30 @@ for f in "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-sign
   eq "$(flat "$f" | grep -Eio -- 'single honest pass|no subagents|no persona|no fan-out' | head -1)" "" \
     "${f#"$ROOT"/} forbids no subagents"
 done
-hasF "$METHOD" '### Finders and verifiers' "the correctness method says when it hands an angle to a finder or a candidate to a verifier"
-hasF "$METHOD" 'the diff and the files its angle or candidate runs through, never your whole context' \
-  "…and gives each the diff and the files it needs, never the reviewer's whole context"
-hasF "$METHOD" 'start it with none of your conversation' "…and none of the reviewer's conversation"
-hasF "$METHOD" 'Its brief states those rules, because a subagent can hold every tool you hold' \
-  "…and states the formula's rules for subagents in its brief"
 
-echo "# one fresh pass after the hunt looks only for the defects the hunt missed"
-hasF "$METHOD" '### The fresh-eyes sweep' "the correctness method sweeps once more after the hunt"
-hasF "$METHOD" 'When the hunt is done and its candidates are deduped, one fresh pass looks only for defects that no candidate names yet.' \
-  "…once the hunt's candidates are deduped, for defects no candidate names yet"
-for t in 'Moved code that dropped a guard' 'Setup and teardown asymmetry in tests' 'Config defaults that flipped' 'Second-tier footguns'; do
-  hasF "$METHOD" "- **$t** —" "…aimed at: $t"
-done
-hasF "$METHOD" 'Where your provider offers subagents, hand the sweep to a finder of its own' "…by a finder of its own where the provider offers subagents"
-hasF "$METHOD" 'Where it offers none, sweep yourself in a separate pass' "…and in a separate pass where it offers none"
-hasF "$METHOD" 'the sweep is given the candidates so far, each as its locus and failure scenario' "…either way given the candidates so far, each as its locus and failure scenario"
-hasF "$METHOD" "The sweep's finder gets the sweep's targets in place of an angle, and the candidates so far." \
-  "…which its finder's brief carries, with the targets in place of an angle"
-hasF "$METHOD" 'or `Fresh-eyes sweep` for a defect the sweep below found' "…a defect it adds names the sweep as its category"
-hasF "$TMP/verdict.correctness" '"category": "<the dimension of What to check that found it, or Fresh-eyes sweep>"' \
-  "…which the finding set's template offers beside the dimension"
-hasF "$METHOD" 'each P0 and P1 among them is verified with the rest' "…and is verified with the rest"
-hasF "$TMP/verdict.correctness" 'the trail carries a `Swept:` line that says how the sweep ran and what it added' \
-  "…and the trail the verdict section shapes records the sweep on a Swept: line"
+echo "# the trail the correctness method's verdict section shapes records the sweep, each refutation and the test evidence"
+hasF "$TMP/verdict.correctness" 'After `Filed:`, the trail carries a line that says how the sweep ran and what it added' \
+  "the trail the verdict section shapes records the sweep on a line after Filed:"
 eq "$(grep -oE '^(Swept|Refuted|Verification): ' "$TMP/verdict.correctness" | tr -d ' ' | paste -sd' ' -)" "Swept: Refuted: Verification:" \
   "…above the trail's Refuted: and Verification: lines"
 
-echo "# each blocking candidate is checked in a context that did not raise it, before the verdict"
-hasF "$METHOD" '### Verify each blocking candidate' "the correctness method verifies each blocking candidate"
-hasF "$METHOD" 'Before the verdict, check each candidate P0 and P1 in a context that did not raise it.' "…before the verdict, in a context that did not raise it"
-hasF "$METHOD" 'Where your provider offers subagents, hand each one to a verifier' "…by a verifier subagent where the provider offers one"
-hasF "$METHOD" 'Where it offers none, check each one yourself in a separate pass once the hunt and the sweep are done' "…and in a separate pass where it offers none, once the hunt and the sweep are done"
+echo "# the check of a blocking candidate returns one of three results, and a refuted candidate stays in the trail and out of the finding set"
 for r in CONFIRMED PLAUSIBLE REFUTED; do
-  hasF "$METHOD" "- **$r** —" "…which returns $r as one of its results"
+  hasF "$METHOD" "- **$r** —" "the check of a blocking candidate returns $r as one of its results"
 done
-hasF "$METHOD" 'the check quotes the line that proves it' "…a refutation quotes the line that proves it"
-hasF "$METHOD" 'A REFUTED candidate is dropped: it is not a finding, it does not block, and `findings.json` does not carry it.' \
-  "…a refuted candidate does not block, and the finding set does not carry it"
 awk '/^## The verdict$/ {f = 1; next} f && /^## / {exit} f' "$METHOD" > "$TMP/verdict.refuted"
-hasF "$TMP/verdict.refuted" 'a `Refuted:` line for each candidate its check refuted' "…and its refutation stays in the trail the verdict section shapes"
+hasF "$TMP/verdict.refuted" 'a line for each candidate its check refuted' "…and a refuted candidate's refutation stays in the trail the verdict section shapes"
 hasF "$TMP/verdict.refuted" 'an entry whose verification is REFUTED' "…and names signoff.sh's refusal of a set that carries one"
 
-echo "# prose is graded under the same contract, and a diff no suite touches has nothing to run"
-hasF "$METHOD" 'Prose is text that a person or an agent reads and acts on, such as a document, a spec, a prompt, a skill or a comment.' \
-  "the correctness method says what prose is"
-hasF "$METHOD" 'A finding on prose has a reader where code has an input, so its failure scenario names the text, the reader who acts on it, and the wrong action or false belief that follows on the tree as merged.' \
-  "…that a finding on prose names the text, its reader and the wrong action or belief on the tree as merged"
-hasF "$METHOD" 'On prose, the tree the text describes answers that question.' "…and that its check reads the tree the text describes"
+echo "# the correctness method has its What blocks section, which review-ruling rules a finding by"
 awk '/^## What blocks$/ {f = 1; next} f && /^## / {exit} f' "$METHOD" > "$TMP/blocks"
-hasF "$TMP/blocks" 'On prose, a finding blocks when its failure scenario is one of these:' "what blocks says which failures on prose block"
-for b in 'A claim about the tree that the tree as merged contradicts.' \
-  'An instruction that does the wrong thing when it is followed as written.' \
-  'A behavior the text commits to that fails on a reachable case.'; do
-  hasF "$TMP/blocks" "- $b" "…$b"
-done
-hasF "$TMP/blocks" 'A failure that depends on how work the text leaves open is later built does not block' \
-  "…and that a failure which depends on how open work is built does not"
-hasF "$TMP/blocks" 'It is a P2 at most, or a note in the trail for that work.' "…being a P2 at most, or a note for that work"
-awk '/^### Settle the test evidence$/ {f = 1; next} f && /^#/ {exit} f' "$METHOD" > "$TMP/evidence"
-hasF "$TMP/evidence" 'When the diff touches none, as when it changes only a document that no suite reads, there is nothing to run.' \
-  "the test evidence of a diff no suite touches is that there is nothing to run"
-hasF "$TMP/evidence" 'Run nothing, and the Verification line says so, with how you found that no suite touches the diff.' \
-  "…which the Verification line says, with how the reviewer found it"
-hasF "$TMP/verdict.correctness" 'or that no suite touches the diff, and how you found it>' \
-  "…in the form the verdict section's Verification line offers"
+[ -s "$TMP/blocks" ] && ok "the correctness method has a What blocks section" || bad "the correctness method has a What blocks section"
+
+echo "# the correctness method stays inside its word budget"
+WORDS=$(wc -w < "$METHOD" | tr -d ' ')
+[ "$WORDS" -le "$METHOD_WORD_BUDGET" ] && ok "the correctness method is inside its word budget ($WORDS of $METHOD_WORD_BUDGET words)" \
+  || bad "the correctness method is inside its word budget" \
+    "$WORDS words, over the budget of $METHOD_WORD_BUDGET: check that the method is still concise, and raise METHOD_WORD_BUDGET if it still needs the words"
 
 echo "# a demo shows a reviewer what the change does, concisely, and the demo method posts only what such a demo needs"
 DEMO="$ROOT/skills/review-demo/SKILL.md"
@@ -610,6 +563,8 @@ hasF "$TMP/pm.triage" "Triage adds \`pm\` when the diff changes what the rig's p
   "triage adds pm for a change to what the rig's product does for the people it serves"
 hasF "$TMP/pm.triage" 'including a fix that changes how the product behaves for them' "…a fix that changes how it behaves for them included"
 hasF "$TMP/pm.triage" 'A diff that adds or changes that page makes this check mandatory.' "…and always for a change to the product goals page"
+hasF "$TMP/pm.triage" 'A design counts as the change it proposes. A diff that adds or changes a design or a spec proposing any of these gets this check at the design, before anything is built on it.' \
+  "…and for a design or a spec that proposes such a change, at the design"
 hasF "$TMP/pm.triage" 'An edit that changes neither what the product does for the people it serves nor what it promises them, such as a refactor, a typo fixed or a link mended, needs no product review.' \
   "…but not for an edit that changes neither what the product does for them nor what it promises them"
 hasF "$TMP/pm.triage" 'neither do tests and the fixtures they use' "…or for tests and their fixtures"
@@ -619,6 +574,25 @@ hasF "$TMP/pm.missing" 'no finding asks the change to add it' "…asks the chang
 hasF "$TMP/pm.missing" '`docs/product-goals.md: missing`' "…files one request for the page under one token"
 hasF "$TMP/pm.missing" "Add \`--all\` to that duplicate probe's \`gc bd list\`" "…whose duplicate probe counts a request that has closed"
 notF "$PM" 'reading of `docs/foundation.md`' "the pm method defines the goals page without the foundation doc only this repo keeps"
+
+echo "# the pm method walks the people a change affects through it"
+awk '/^### What you judge$/ {f = 1; next} f && /^#/ {exit} f' "$PM" > "$TMP/pm.judge"
+hasF "$TMP/pm.judge" "Judge the first question from the side of the people the change affects, not from the change's own account of itself." \
+  "the pm method judges whether a change is the right thing from the side of the people it affects"
+hasF "$TMP/pm.judge" 'They are among the people the product goals say the product serves: in one rig the operator, in another a customer, an administrator or whoever calls the tool.' \
+  "…whom it names from the rig's product goals, the operator in one rig and someone else in another"
+hasF "$TMP/pm.judge" 'across the whole of what they are doing and not only the part the diff touches' \
+  "…and walks them through the change across the whole of what they are doing"
+hasF "$TMP/pm.judge" 'Walk what was designed and then what was built' "…as designed and then as built"
+notF "$TMP/pm.judge" 'what confirms that their answer was taken' "…in words that fit a person who is neither asked nor answers"
+hasF "$TMP/pm.judge" "Whether the mechanism works is the \`correctness\` check's question, and what the person meets through it is yours." \
+  "…and judges what the person meets through a mechanism, leaving whether it works to correctness"
+hasF "$TMP/pm.judge" 'A limit the PR discloses is still a finding when it defeats the purpose the feature is named for' \
+  "…so a disclosed limit that defeats the feature's purpose is still a finding"
+hasF "$TMP/pm.judge" '`Walk: <the person, what they were doing, and what you found there>`' "…and the verdict body records each walk"
+hasF "$TMP/pm.judge" 'The questions are the lens, not a checklist to exhaust.' "…and its questions stay a lens, not a checklist"
+awk '/^## What blocks$/ {f = 1; next} f && /^#/ {exit} f' "$PM" > "$TMP/pm.blocks"
+hasF "$TMP/pm.blocks" 'or fails a person at the moment it meets them' "a change that fails a person at the moment it meets them blocks"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

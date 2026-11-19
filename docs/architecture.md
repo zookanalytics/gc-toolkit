@@ -100,6 +100,13 @@ Everything else reads.
 Dependabot's or one from a fork, stays outside the city's landing, even when it
 is open from a work bead's branch.
 
+**A gascity fork's rebase.** The gascity-keeper sub-pack rebases a city's
+gascity fork onto upstream, and the operator lands each rebase with a
+force-push onto the fork's `main`. No agent force-pushes that branch, the
+refinery included. The sub-pack's landing check then writes the landing on the
+rebase bead. [fork-patching.md](fork-patching.md#agent-driven-rebase) holds the
+procedure.
+
 **Beside the ledger.** The pack also keeps files of its own. Some hold a run's
 progress, such as a paced cadence arm's cursor or the job directory of the
 refinery's merge gate. `gctk rig`'s check records differ, because a later call
@@ -428,9 +435,12 @@ corrective feedback into standing behavior, so attention is never spent twice:
 2. **Distill.** The `feedback-distiller` order clusters observations into
    patterns and promotes recurring ones as ordinary PRs against the pack —
    prompt edits, lint rules under `tools/lint-learned.d/`, doc changes.
+   A fix in code another rig of the city owns is filed as that rig's work, and
+   one in a project outside the city is recorded as an upstream finding, whose
+   report only the operator sends ([outbound-sends.md](outbound-sends.md)).
 3. **Land.** Promotions ride the same work→review→merge pipeline as
-   everything else. A lesson is real when it is merged pack content, not when
-   it is remembered.
+   everything else. A lesson is real when its change is merged, in the pack or
+   in the repository that owns the code, not when it is remembered.
 
 Doctor is the same idea applied to structure: its checks assert invariants
 from [component-model.md](component-model.md) §3 against the live ledger and
@@ -492,7 +502,13 @@ first. Either way the change is a decision on the record, not a drift.
   takes,** as the head a sitting pushes onto an open PR takes every step any
   head takes, and the sitting is not one of their checks.
 - **A copy of a rig's UI that a session runs from a change's tree serves
-  fixture data,** never the live city's.
+  fixture data,** never the live city's. The city's configuration, never a
+  rig's own tree, names each rig whose app reads the city. For such a rig, the
+  live city is kept out of reach of the rig's start command that runs the copy,
+  but not of an app the command starts through the host's simulator service,
+  such as an iOS app, so the command keeps that app on fixture data. Any other
+  rig's start command reaches what the rig's tests reach, the live city
+  included.
 
 ## Debt
 
@@ -541,3 +557,9 @@ why a reader must know it, and the work that retires it.
   moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)
   deletes the old path once every rig has moved and the GitHub intake
   (tk-1tfzr71.21) has landed.
+- **A copy started before the city's configuration named its rig keeps the
+  live city in reach.** A copy keeps the reach it started with, so the
+  decision on a copy of a rig's UI does not hold for it. A capture of the rig
+  takes such a copy as it takes any other, and its demo can then show the live
+  city's data. The work that has that capture refuse such a copy (tk-3abs56p)
+  retires this.

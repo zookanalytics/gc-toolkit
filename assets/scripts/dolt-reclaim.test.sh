@@ -96,7 +96,8 @@ unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG 2>/dev/null || true
 # make_db <name> <noms_bytes>: a database dir with a noms file of that size.
 # A size of -1 means "no noms directory" (an unmanaged/absent store).
 make_db() {
-  local name="$1" bytes="$2" d="$STUB_DOLT_ROOT/$1"
+  local name="$1" bytes="$2"
+  local d="$STUB_DOLT_ROOT/$name"
   rm -rf "$d"; mkdir -p "$d/.dolt"
   if [ "$bytes" != "-1" ]; then
     mkdir -p "$d/.dolt/noms"

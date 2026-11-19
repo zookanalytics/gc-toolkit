@@ -47,6 +47,9 @@ They want to:
 - **act on what the city surfaces without looking anything up** — a decision
   stated with its options, a PR whose summary says what the whole change does, an
   escalation that names what would release it;
+- **be asked while their answer still counts** — a report or a question reaches
+  them before the decision it informs is made, in a place where they can answer
+  it, and the city shows them the answer was taken;
 - **trust that a green change is a right change** — reviewed for whether it is
   correct, and for whether it solved the problem it was dispatched to solve rather
   than a proxy of it;

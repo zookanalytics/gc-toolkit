@@ -17,23 +17,27 @@
 # Playwright headlessly): the only path available to a pool session, which
 # carries no browser MCP.
 #
-# A script drives one of the engine's two surfaces, and the engine's parser
-# tells them apart: a script that declares **Terminal:** among its head lines,
-# the lines above its first ## heading, drives a bash session in the engine's
-# own terminal, and any other drives an app in a page. Both take the same
-# options. A page script needs the app it drives: one app target, named with
-# the flags below. A terminal script brings up no app, and the engine refuses
-# an app target or a --port for one, so this script refuses them first. Its
-# shell starts in --cwd.
+# A script drives the surface the engine's parser names for it. One that drives
+# an app, such as a page or an iOS app on a simulator, needs that app: one app
+# target, named with the flags below. A terminal script drives a bash session
+# in the engine's own terminal and brings up no app, so it takes none, and its
+# shell starts in --cwd. The engine refuses a script given an app target its
+# surface does not take, or given none when it needs one, so this script never
+# asks a script's surface. Given two app targets the engine drives one and says
+# nothing of the other, so this script refuses two.
 #
-# The engine runs inside the sandbox demo-engine-lib.sh defines, where the live
-# city cannot be reached. A --serve command's app runs as a copy of the rig's UI
-# that `gctk rig serve` runs inside the same sandbox, and the engine records
-# the copy at its loopback port. So a copy, a terminal's commands or a page that
-# reads the city's stores or its API fails there, and the clip shows the app on
-# fixture data, or shows the failure, and never live state. The one server
-# outside the sandbox a clip can reach is a rig's app that --base-url names, as
-# below.
+# A --serve command's app runs as a copy of the rig's UI that `gctk rig serve`
+# runs, and the engine records the copy's app where gctk rig serve reports it.
+# For a rig whose app reads the city, the engine and the copy run inside the
+# sandbox demo-engine-lib.sh defines, where the live city cannot be reached. So
+# a copy, a terminal's commands or a page that reads the city's stores or its
+# API fails there, and the clip shows the app on fixture data, or shows the
+# failure, and never live state. The servers outside the sandbox such a clip
+# can reach are a rig's app that --base-url names, as below, and an iOS app on
+# a simulator, which the system's simulator service runs outside the sandbox,
+# whoever started it. For any other rig both run as ordinary processes.
+# docs/demo-capture-sandbox.md says which rigs get the sandbox and what a
+# capture of each can reach.
 #
 # It FAILS CLOSED. A host with no sandbox, a capture the sandbox refuses, a
 # missing engine, a browser that cannot be installed, a script the linter
@@ -52,21 +56,24 @@
 #   --output     MP4 output path (required). Write outside the repo tree — a
 #                demo clip is an artifact, delivered to a PR, never committed.
 #   --serve-dir  serve a static directory with the engine's built-in server.
-#   --serve      serve the app with this command as a copy that `gctk rig
-#                serve` runs from the checkout --cwd names (default: here),
-#                with no address, on a free port of its own, which the command
-#                gets as $PORT. A checkout has one copy, so captures from one
-#                checkout run one after another. A copy of that checkout that
-#                already runs the command is the one recorded, and it keeps
-#                running, and one that runs another command is refused. One
-#                this capture starts ends with it.
+#   --serve      serve the app with this command as a copy that `gctk rig serve`
+#                runs from the checkout --cwd names (default: here), with no
+#                address, on a free port of its own, which the command gets as
+#                $PORT. The copy is up once it answers there, or once the
+#                command prints the URL of the app it brought up, such as an iOS
+#                app on a simulator. A checkout has one copy, so captures from
+#                one checkout run one after another. A copy of that checkout
+#                that already runs the command is the one recorded, and it keeps
+#                running, and one that runs another command is refused. One this
+#                capture starts ends with it.
 #   --base-url   drive a deployed preview, a copy that `gctk rig serve` runs,
-#                or an app that a worktree of a rig serves on this host. Any
-#                other server on this host is refused, as is the app of a rig
-#                that city.toml sets to app_reads_city = "true".
-#                A page script takes exactly one of --serve-dir / --serve /
-#                --base-url; it is how this rig's app is reached. A terminal
-#                script takes none of the three.
+#                an app that a worktree of a rig serves on this host, or an iOS
+#                app on a simulator, as ios-simulator://<device UDID>/<bundle
+#                id>. Any other server on this host is refused, as is the app of
+#                a rig that city.toml sets to app_reads_city = "true".
+#                A script that drives an app takes one of --serve-dir /
+#                --serve / --base-url; it is how this rig's app is reached. A
+#                terminal script takes none of the three.
 #   --port       port for --serve-dir (default: a free port). A port that a
 #                server already answers on is refused.
 #   --cwd        the checkout a --serve command serves the app from, the
@@ -82,14 +89,17 @@
 # it the clip is silent and captioned. A missing key never fails the capture.
 # The last line says whether the clip is narrated or silent.
 #
-# $SPRINTSHOW_BIN, when set and executable, overrides engine resolution and is
-# invoked in its place, inside the same sandbox — the seam the hermetic test
-# drives with a stub engine, and an escape hatch for a caller that has already
-# resolved the engine.
+# $DEMO_ENGINE_BIN, demo-engine-lib.sh's engine override, names an executable
+# that runs in the engine's place, inside the sandbox or not as the engine
+# would, with nothing resolved. It is the seam the hermetic test drives with a
+# stub engine, and an escape hatch for a caller that has already resolved the
+# engine. mol-rig-demo asks a script's surface through the same library, so one
+# override names the engine that answers and the engine that captures.
 #
 # Exit: 0 captured and every step's proof held (output exists and is non-empty),
-# 3 captured but at least one step failed its proof, 2 bad arguments or a page
-# script with no app among them, 1 anything that stopped the capture.
+# 3 captured but at least one step failed its proof, 2 bad arguments, such as
+# two app targets, 1 anything that stopped the capture, including the engine's
+# refusal of the app target it was given, or of none.
 set -u
 
 PROG=rig-demo-capture
@@ -127,27 +137,17 @@ done
 [ -f "$SCRIPT" ] || { echo "$PROG: --script '$SCRIPT' does not exist" >&2; exit 1; }
 case "$MODE" in walkthrough|proof) ;; *) echo "$PROG: --mode must be walkthrough or proof, not '$MODE'" >&2; exit 2 ;; esac
 
-# --- the script's surface ----------------------------------------------------
-# The engine reads a script as a terminal script or a page script by its head
-# lines, and demo-engine-lib.sh holds that rule.
-KIND=$(demo_engine_script_kind "$SCRIPT") || exit 1
-
-# A page script needs exactly one app target. The engine needs one way to reach
-# the app and rejects more than one; enforce it here so the error names the
-# rig-specific input. A terminal script brings up no app, and the engine
-# refuses an app target or a --port for one, so this names that refusal before
-# the browser is provisioned.
+# --- the app target ------------------------------------------------------
+# A script's surface decides whether it takes an app target, and the engine
+# refuses a script given one its surface does not take, or none when it needs
+# one. Of two app targets the engine drives one and says nothing of the other,
+# so two are refused here, naming the rig-specific input.
 TARGETS=0
 [ -n "$SERVE_DIR" ] && TARGETS=$((TARGETS + 1))
 [ -n "$SERVE_CMD" ] && TARGETS=$((TARGETS + 1))
 [ -n "$BASE_URL" ] && TARGETS=$((TARGETS + 1))
-if [ "$KIND" = terminal ]; then
-  if [ "$TARGETS" -ne 0 ] || [ -n "$PORT" ]; then
-    echo "$PROG: '$SCRIPT' is a terminal script, which runs in the engine's own terminal and takes no --serve-dir / --serve / --base-url or --port; its shell starts in --cwd" >&2
-    usage >&2; exit 2
-  fi
-elif [ "$TARGETS" -ne 1 ]; then
-  echo "$PROG: give exactly one of --serve-dir / --serve / --base-url (got $TARGETS)" >&2
+if [ "$TARGETS" -gt 1 ]; then
+  echo "$PROG: give at most one of --serve-dir / --serve / --base-url (got $TARGETS)" >&2
   usage >&2; exit 2
 fi
 [ -z "$SERVE_CWD" ] || [ -d "$SERVE_CWD" ] || { echo "$PROG: --cwd '$SERVE_CWD' is not a directory" >&2; exit 1; }
@@ -173,14 +173,12 @@ OUT_DIR=$(dirname "$OUTPUT")
 mkdir -p "$OUT_DIR" || { echo "$PROG: cannot create output directory '$OUT_DIR'" >&2; exit 1; }
 
 # --- the engine ------------------------------------------------------------
-# demo-engine-lib.sh finds the engine, provisions its browser and runs its CLI
-# in its sandbox. What only a clip needs stays here: ffmpeg to assemble it,
-# which is a host ffmpeg when there is one and otherwise a checkout's
-# ffmpeg-static binary, fetched on first use. $SPRINTSHOW_BIN overrides the
-# engine, and runs in the same sandbox.
-if [ -n "${SPRINTSHOW_BIN:-}" ] && [ -x "${SPRINTSHOW_BIN}" ]; then
-  DEMO_ENGINE_BIN="$SPRINTSHOW_BIN"
-else
+# demo-engine-lib.sh finds the engine, provisions its browser and runs its CLI,
+# in its sandbox for a rig whose app reads the city. What only a clip needs
+# stays here: ffmpeg to assemble it, which is a host ffmpeg when there is one
+# and otherwise a checkout's ffmpeg-static binary, fetched on first use. An
+# engine $DEMO_ENGINE_BIN names runs as it is, as the engine would.
+if [ -z "${DEMO_ENGINE_BIN:-}" ]; then
   demo_engine_resolve || exit 1
   if [ -n "$DEMO_ENGINE_DIR" ]; then
     command -v ffmpeg >/dev/null 2>&1 || [ -x "$DEMO_ENGINE_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$DEMO_ENGINE_DIR" && npm run provision:ffmpeg ) >&2 || { echo "$PROG: could not provision ffmpeg (no host ffmpeg and ffmpeg-static fetch failed)" >&2; exit 1; }
@@ -198,9 +196,8 @@ if ! sprintshow lint "$SCRIPT"; then
 fi
 
 # --- capture --------------------------------------------------------------
-# A --serve command's app runs as a copy, inside the sandbox, and the engine
-# records the copy at its loopback port, which the sandbox opens because gctk
-# rig serve answers that the copy holds it.
+# A --serve command's app runs as a copy, and the engine records the copy's app
+# where gctk rig serve reports it.
 trap 'demo_engine_copy_stop' EXIT
 if [ -n "$SERVE_CMD" ]; then
   demo_engine_copy "${SERVE_CWD:-$(pwd)}" "$SERVE_CMD" || exit 1
@@ -212,7 +209,8 @@ if [ -n "$SERVE_DIR" ]; then
 elif [ -n "$BASE_URL" ]; then
   set -- "$@" --base-url "$BASE_URL"
 else
-  # A terminal script: its shell starts in --cwd, or here.
+  # No app target, as a terminal script takes none: its shell starts in --cwd,
+  # or here. The engine refuses a script that needs an app.
   [ -z "$SERVE_CWD" ] || set -- "$@" --cwd "$SERVE_CWD"
 fi
 [ -z "$PORT" ]     || set -- "$@" --port "$PORT"

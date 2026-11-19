@@ -127,23 +127,26 @@ records the design and its measured cost.
 
 `serve` runs a copy of the rig's UI from the checkout it is called in: the serve
 command its caller passes, with bash at the checkout's top, on a free loopback
-port it is given as `$PORT`, inside the sandbox that
-`assets/scripts/demo-engine-lib.sh` defines for a demo capture, which
-`GCTK_SCRIPTS_DIR` names. A demo capture's `--serve` starts one with no address
-and points the engine at its port. The `converse-edit` skill starts one with the
-city's publish command and address pattern for the operator. Each caller reads
-the rig's `ui_serve_command`, and the city's `ui_publish_command` and
-`ui_address_pattern`, from the rig's formula vars and passes them. A copy is a
-process group led by a detached gctk, `rig serve --lead`, which ends the group
-when the serve command ends, and Gas City's orphan sweep ends it once the
-session that started it has ended. Starts and stops of one checkout take turns
-under a lock beside the copy's record, so two starts that find a copy that died
-run one copy in its place, and two that ask to publish a running copy run one
-publish command. The record and the lock live beside the check records:
+port it is given as `$PORT`, through `assets/scripts/demo-engine-lib.sh`, which
+`GCTK_SCRIPTS_DIR` names, and which runs it inside the sandbox it defines for a
+demo capture when the rig keeps that sandbox. The copy is up once it answers on that port, or once
+the command prints the URL of the app it brought up, such as an iOS app on a
+simulator, and the report's `app_url` says where its app is. A demo capture's
+`--serve` starts one with no address and points the engine at its `app_url`. The
+`converse-edit` skill starts one with the city's publish command and address
+pattern for the operator. Each caller reads the rig's `ui_serve_command`, and
+the city's `ui_publish_command` and `ui_address_pattern`, from the rig's formula
+vars and passes them. A copy is a process group led by a detached gctk,
+`rig serve --lead`, which ends the group when the serve command ends, and Gas
+City's orphan sweep ends it once the session that started it has ended. Starts and
+stops of one checkout take turns under a lock beside the copy's record, so two
+starts that find a copy that died run one copy in its place, and two that ask to
+publish a running copy run one publish command. The record and the lock live
+beside the check records:
 
 | Path under the git common directory | What it holds |
 |---|---|
-| `gc-rig-serve/<hash of the checkout's path>/` | a copy's port, its commands, its leader's pid and start, and its logs |
+| `gc-rig-serve/<hash of the checkout's path>/` | a copy's port, its commands, its app's URL once its serve command prints one, its leader's pid and start, and its logs |
 | `gc-rig-serve/<hash of the checkout's path>.lock` | the file a start or a stop of that checkout's copy holds an flock on while it runs, which the kernel releases if the call dies |
 
 `gctk rig serve --help` states the flags, the states a call reports and the
@@ -178,6 +181,8 @@ internal/gascity/fake/  the runtime adapter's fake, which records each call and 
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, the store's listing, and its blocked set
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
+internal/gcbd/fakegc/  the compiled fake gc, which answers gc's command line from a store in
+                     files for the shell suites, and its contract test against the city's bd
 internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/gh/         the GitHub adapter: one `gh api` call per read, paged to its end
@@ -215,9 +220,10 @@ key-registry.json    every declared key, generated from the declarations
 ## Running the tests
 
 ```bash
-cd services/gctk && go test ./...          # every package
+cd services/gctk && go test ./...          # every gctk package
 cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write key-registry.json again
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd ./arm -run TestStoreAcceptance -v   # the city's bd on a scratch store
+cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd/fakegc -run TestContract -v   # the fake gc against the city's bd
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
 bash assets/scripts/merge.test.sh          # merge through its bridge
 bash assets/scripts/epic.test.sh           # epic through its bridge

@@ -682,10 +682,13 @@ have "a message with detail opens the way the body does" \
     'A message with detail above its hand-back opens the way the body does' "$PROMPT_JOINED"
 have "the message keeps pipeline vocabulary out or says what it means" \
     'Pipeline vocabulary (moot, twin, fold, retract, park) and names learned from code stay out, or say what they mean' "$PROMPT_JOINED"
-# A decision leads with the course as the changes it makes, and offers only
-# options the operator could take, each by what it ships and what it asks of
-# them. The operator profile every sitting renders says what an option's cost
-# is, so the prompt uses its terms and leaves the sentence to the profile.
+# A decision leads with the course as the changes it makes. An option is
+# another way to reach what the operator wants, leaving things as they are is
+# one only when it has a case the operator has not already weighed, any course
+# that leaves a known problem in place says what it breaks, and each option
+# says what it ships and what it asks of them. The operator profile every
+# sitting renders says what an option's cost is, so the prompt uses its terms
+# and leaves the sentence to the profile.
 have "the decision states the course as what would be built or changed, before any reason for it" \
     'State it as the course before any reason for it: what would be built or changed, each change given as what it is today and what it becomes.' "$PROMPT_JOINED"
 have "…and that course is the whole decision when the operator asked for the best solution" \
@@ -694,17 +697,25 @@ have "…states a course that changed again whole" \
     'When the course changes during the sitting, state the new one whole rather than as changes to the last.' "$PROMPT_JOINED"
 have "…and says, among several threads, what it settles and what stays open" \
     'say whether the decision settles one of them or the whole conversation, and what stays open after it.' "$PROMPT_JOINED"
-have "an option is one the operator could take, asking them only for a decision" \
-    'Offer an option only when the operator could take it: it reaches what they asked for, and it asks of them only a decision, never an agent'"'"'s work such as resolving a conflict or merging by hand.' "$PROMPT_JOINED"
-have "…and says what its end state ships and what it asks of the operator" \
-    'Give each option one sentence saying what its end state ships and what it asks of the operator.' "$PROMPT_JOINED"
+have "an option is another way to reach what the operator wants, where the choice turns on their judgment" \
+    'An option is another way to reach what the operator wants, offered when the choice between it and your recommendation turns on their judgment, such as which of two costs to accept.' "$PROMPT_JOINED"
+have "…and with no such choice, the recommendation stands alone" \
+    'The operator can always turn a recommendation down, so when no choice turns on their judgment, offer the recommendation alone.' "$PROMPT_JOINED"
+have "…leaving things as they are is an option only with a case the operator has not already weighed" \
+    'Leaving things as they are is one of these ways only when it has a case the operator has not already weighed, such as a problem too small to be worth the change, or a change that could break something beyond the problem it fixes.' "$PROMPT_JOINED"
+have "…which that option makes" 'That option makes its case.' "$PROMPT_JOINED"
+have "any course that leaves a known problem in place, the recommendation included, says what it breaks and where" \
+    'Any course that leaves a known problem in place, your recommendation included, says what that problem breaks, and where.' "$PROMPT_JOINED"
+have "…and each option asks only a decision and says what it ships and what it asks" \
+    'Each option asks of the operator only a decision, never an agent'"'"'s work such as resolving a conflict or merging by hand, and says in one sentence what it ships and what it asks.' "$PROMPT_JOINED"
+lacks "…in place of a rule on wording an option that accepts a known defect" \
+    'An option that accepts a known defect' "$PROMPT_JOINED" \
+    "leaving things as they are is an option only when it has a case of its own"
 lacks "…in place of an upside and a downside" 'true downside' "$PROMPT_JOINED" \
-    "an option is stated by what its end state ships and what it asks of the operator"
+    "an option is stated by what it ships and what it asks of the operator"
 lacks "…and leaves the operator profile's sentence on an option's cost to the profile" \
     "An option's cost is" "$PROMPT_JOINED" \
     "the operator profile, which every sitting renders, states what an option's cost is"
-have "an option that accepts a known defect names what it breaks" \
-    'names what the defect breaks and where' "$PROMPT_JOINED"
 # A ruling on an open PR lands what the PR's own review asked for on its branch
 # before approval, so the hold lists the points still open, with the reads that
 # show them, and says where each lands.
@@ -721,6 +732,11 @@ have "…counts sharing a file, a screen or a record entry as no scope" \
     'Sharing a file, a screen or a record entry with the PR does not make a point the PR'"'"'s.' "$HOLD_JOINED"
 have "…and leaves a follow-up only a point outside that scope, or one the operator rules separable" \
     'A follow-up carries only a point outside that scope, or one the operator rules separable.' "$HOLD_JOINED"
+# The close-out ends the sitting and offers no course, so its reason names the
+# sitting's topic and that it closed without a ruling.
+have "the close-out's reason names only the sitting's topic and that it closed without a ruling" \
+    'so its reason names only the sitting'"'"'s topic and that it closed without a ruling, and every course stays in the decision' "$HOLD_JOINED"
+have "…in the line the hold offers" 'dismiss --reason "<the sitting'"'"'s topic>: closed without a ruling"' "$HOLD"
 lacks "the hold skill points at the shape and keeps no copy of its order" 'detail and evidence' \
     "$SKILLS/converse-hold/SKILL.md" "the prompt's definition is the one place a framing's order is stated"
 have "the work skill reads the formulas a rig has now" 'gc formula list --rig <rig>' "$WORK_SKILL"
@@ -1245,7 +1261,7 @@ STUB
 cat >"$LC/city/.gc/services/gctk/bin/gctk" <<'STUB'
 #!/usr/bin/env bash
 { printf 'in %s\n' "$(pwd -P)"; printf 'scripts %s\n' "$GCTK_SCRIPTS_DIR"; printf '%s\n' "$@"; } >"$LC_LOG"
-printf '%s\n' '{"state":"running","address":"https://host:1/","port":1}'
+printf '%s\n' '{"state":"running","address":"https://host:1/","port":1,"app_url":"http://127.0.0.1:1/"}'
 STUB
 chmod +x "$LC/bin/gc" "$LC/city/.gc/services/gctk/bin/gctk"
 LC_TREE=$(cd "$LC/tree" && pwd -P)

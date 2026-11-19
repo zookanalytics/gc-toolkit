@@ -384,6 +384,25 @@ describe('the Needs you page', () => {
     expect(bodies).toEqual(['tk-c4nv0', 'tk-2pvj50q']);
   });
 
+  it('rejoins the conversation that holds a decision, and starts one on a decision none holds', async () => {
+    // The cut holds no decision, so this document makes two of its questions
+    // decisions, one of them held by the conversation the read would name.
+    const decisions: Document = structuredClone(board);
+    decisions.rows['tk-toahupq'] = { ...decisions.rows['tk-toahupq'], kind: 'decision', conversation: 'tk-c4nv0', signal: 'In conversation' };
+    decisions.rows['tk-q4dd6mk'] = { ...decisions.rows['tk-q4dd6mk'], kind: 'decision' };
+    rigReads = [() => json({ read_at: READ_AT, board: decisions })];
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    expect(within(rowOf('tk-toahupq')).queryByRole('button', { name: 'Start the conversation' })).toBeNull();
+    fireEvent.click(within(rowOf('tk-toahupq')).getByRole('button', { name: 'Rejoin the conversation' }));
+    await screen.findByRole('complementary', { name: 'Conversation' });
+    fireEvent.click(within(rowOf('tk-q4dd6mk')).getByRole('button', { name: 'Start the conversation' }));
+    await waitFor(() => expect(calls.filter((c) => c.url === 'helm/engage')).toHaveLength(2));
+    const bodies = calls.filter((c) => c.url === 'helm/engage').map((c) => JSON.parse(c.body!).bead);
+    expect(bodies).toEqual(['tk-c4nv0', 'tk-q4dd6mk']);
+  });
+
   it('shows why an engage failed, in the tool’s words', async () => {
     engageReply = () =>
       json(
@@ -784,6 +803,38 @@ describe('Details', () => {
     const block = document.querySelector('.details-block')!;
     expect(text(block)).toContain('Status');
     expect(text(block)).toContain('Holds');
+  });
+
+  it('opens a decision’s Details with its last hand-back, when and where it was recorded, above its description', async () => {
+    const decided: Document = structuredClone(board);
+    decided.rows['tk-q4dd6mk'] = {
+      ...decided.rows['tk-q4dd6mk'],
+      kind: 'decision',
+      handback: { conversation: 'tk-c0nv9', at: '2026-11-17T07:35:05Z', text: '**Ruled: no warning lints.**\n\nThe report it sent is still out.' },
+    };
+    rigReads = [() => json({ read_at: READ_AT, board: decided })];
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    fireEvent.click(within(rowOf('tk-q4dd6mk')).getByRole('button', { name: 'Details' }));
+    await screen.findByRole('heading', { name: 'The ask' });
+    const handback = screen.getByRole('region', { name: 'Last hand-back' });
+    expect(text(handback)).toContain('2026-11-17T07:35:05Z');
+    expect(text(handback)).toContain('tk-c0nv9');
+    expect(text(handback.querySelector('strong'))).toBe('Ruled: no warning lints.');
+    expect(text(handback)).toContain('The report it sent is still out.');
+    const description = [...document.querySelectorAll('.details-block .description')].find((d) => !handback.contains(d))!;
+    expect(text(description)).toContain('Rule on it now.');
+    expect(handback.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('opens a bead with no hand-back with its description', async () => {
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    fireEvent.click(within(rowOf('tk-q4dd6mk')).getByRole('button', { name: 'Details' }));
+    await screen.findByRole('heading', { name: 'The ask' });
+    expect(screen.queryByRole('region', { name: 'Last hand-back' })).toBeNull();
   });
 
   it('shows raw HTML in a description as text, and drops a script link', async () => {

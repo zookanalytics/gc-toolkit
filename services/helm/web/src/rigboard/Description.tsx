@@ -44,21 +44,28 @@ export function Description({ id }: { id: string }) {
       );
     case 'read':
       if (state.text.trim() === '') return <p className="muted">No description.</p>;
-      return (
-        <div className="description">
-          <Markdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: ({ href, children }) => (
-                <a href={href} target="_blank" rel="noreferrer noopener">
-                  {children}
-                </a>
-              ),
-            }}
-          >
-            {state.text}
-          </Markdown>
-        </div>
-      );
+      return <Formatted text={state.text} />;
   }
+}
+
+/** Text a person or a sitting wrote, such as a description or a hand-back,
+ *  formatted from its Markdown. Raw HTML in it shows as text, and each link
+ *  opens in a new tab. */
+export function Formatted({ text }: { text: string }) {
+  return (
+    <div className="description">
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noreferrer noopener">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {text}
+      </Markdown>
+    </div>
+  );
 }

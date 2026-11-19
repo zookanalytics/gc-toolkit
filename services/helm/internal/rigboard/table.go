@@ -30,8 +30,9 @@ import (
 //     open nor a claim reads as the store's word, except the blocked status
 //     Gas Town's pending record writes on a bead whose pull request it holds,
 //     which is the record's own and holds nothing. Group Not moving. A
-//     conversation its sitting stays in (staying) then reads "Waits on <id>",
-//     naming each wait, in Group Queued: its sitting comes back once that work
+//     conversation its sitting stays in, or a decision a ruling left waiting
+//     on the work it sent (staying), then reads "Waits on <id>", naming each
+//     wait, in Group Queued: it is a person's move again once that work
 //     closes.
 //  6. waits says it is in flight. With an open pull request: "Pull request
 //     #<n>", with where it stands. Otherwise "In flight", with its assignee.
@@ -159,13 +160,22 @@ func gateHold(h waits.Holds) *waits.Wait {
 	return nil
 }
 
-// staying reports whether a conversation's row is its sitting's stay
-// ([conversation.Staying]), with a wait of its own holding it as waits answers.
-// prstatus reads a conversation a pull request waits on by the same rule, so
-// the conversation's row and its pull request's agree on whether the operator
-// owes a move.
+// staying reports whether a conversation's or a decision's row waits on work of
+// its own first (prstatus.Stays): a conversation its sitting stays in, or a
+// decision a ruling left waiting on the work it sent. Its own waits are the
+// ones waits names behind a blocked status, which are each the bead's own.
+// prstatus reads a bead a pull request waits on by the same rule, so the bead's
+// row and its pull request's agree on whether the operator owes a move.
 func staying(b bead, h waits.Holds) bool {
-	return conversation.Staying(b.Status, b.Assignee, h.Status == waits.Blocked)
+	var own []prstatus.Blocker
+	if h.Status == waits.Blocked {
+		for _, w := range h.Waits {
+			own = append(own, prstatus.Blocker{ID: w.ID, Title: w.Title, Status: w.Status, IssueType: w.IssueType,
+				AwaitType: w.AwaitType})
+		}
+	}
+	return prstatus.Stays(prstatus.Blocker{ID: b.ID, Title: b.Title, Status: b.Status, IssueType: b.IssueType,
+		AwaitType: b.AwaitType, Assignee: b.Assignee}, own)
 }
 
 // table answers one row. in carries the readers' answers about it.
@@ -217,10 +227,10 @@ func table(in tableInput) verdict {
 	default:
 		return verdict{out: outNotOpen, group: GroupNotMoving, signal: st}
 	}
+	if (in.kind == KindConversation || in.kind == KindDecision) && staying(b, h) {
+		return verdict{out: outNone, group: GroupQueued, signal: "Waits on " + joinIDs(refsOf(h.Waits))}
+	}
 	if in.kind == KindConversation {
-		if staying(b, h) && len(h.Waits) > 0 {
-			return verdict{out: outNone, group: GroupQueued, signal: "Waits on " + joinIDs(refsOf(h.Waits))}
-		}
 		return verdict{out: outNone, signal: conversationWords(b.Assignee)}
 	}
 	if in.kind != KindWork {
@@ -310,10 +320,14 @@ func joinIDs(refs []Ref) string {
 // askOf is row 2's question: whether a row is an ask, and its words. An ask is
 // what the shared readers count as a person's move, and a ruling.
 //
-//   - Question: an open human gate, or an open decision.
+//   - Question: an open human gate, or an open decision that does not wait on
+//     work of its own first (staying). One that waits on the work a ruling
+//     sent is no person's move until that work closes. A question an open
+//     conversation answers reads that conversation's words.
 //   - Conversation: an open conversation that replies to no open gate a
-//     person answers and that its sitting does not stay in. One that replies
-//     to such a gate belongs to that gate's ask, as its conversation. One its
+//     person answers, tracks no open decision that is a question, and that its
+//     sitting does not stay in. One that replies to such a gate or tracks such
+//     a decision belongs to that question's ask, as its conversation. One its
 //     sitting stays in (staying) waits for the return of the work it sent,
 //     which comes back to the operator once that work closes, so until then it
 //     is no person's move.
@@ -323,8 +337,10 @@ func joinIDs(refs []Ref) string {
 //     the listing answers it for the bead.
 //   - Ruling: an epic with members and none open, or a landed Delivery.
 //
-// A gate that is no human gate is never an ask.
-func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQuestionGate func(string) bool,
+// A gate that is no human gate is never an ask. openQuestionGate reports
+// whether a bead is an open human gate, and askingDecision whether it is an
+// open decision that does not stay.
+func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQuestionGate, askingDecision func(string) bool,
 	facts *prFacts, membersOpen, members int, stay bool) *askAnswer {
 	if !isOpen(b) {
 		return nil
@@ -336,7 +352,10 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 		}
 		return questionAsk(answeredBy, answeredByAssignee)
 	case KindDecision:
-		return questionAsk("", "")
+		if stay {
+			return nil
+		}
+		return questionAsk(answeredBy, answeredByAssignee)
 	case KindConversation:
 		if stay {
 			return nil
@@ -345,6 +364,9 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 			if openQuestionGate(g) {
 				return nil
 			}
+		}
+		if subject, _, ok := conversation.Shape(conversationEdges(b)); ok && askingDecision(subject) {
+			return nil
 		}
 		return &askAnswer{kind: AskConversation, words: conversationWords(b.Assignee), need: conversationKind(b.Assignee)}
 	case KindEpic, KindDelivery:
@@ -367,8 +389,9 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 }
 
 // questionAsk is a question's ask: "Question", or its conversation's words when
-// one answers it. It is in conversation once a sitting holds that
-// conversation, and a question otherwise.
+// one answers it, a conversation that replies to a gate or tracks a decision.
+// It is in conversation once a sitting holds that conversation, and a question
+// otherwise.
 func questionAsk(answeredBy, assignee string) *askAnswer {
 	if answeredBy == "" {
 		return &askAnswer{kind: AskQuestion, words: string(AskQuestion), need: NeedKindQuestion}
