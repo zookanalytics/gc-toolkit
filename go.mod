@@ -1,6 +1,6 @@
 module github.com/zookanalytics/gc-toolkit
 
-go 1.26.5
+go 1.27.4
 
 require (
 	charm.land/bubbles/v2 v2.0.0
