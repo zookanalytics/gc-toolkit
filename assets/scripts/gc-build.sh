@@ -29,8 +29,9 @@
 # moves under it on a `bd` upgrade, so `helm-svc probe` asks it, and ok is not
 # reported without it.
 # Exit: 0 current or built, and for helm under --deploy serving · 1 the build
-# or the restart failed, including a build owed with no Go toolchain (the
-# previous binary is left exactly as it was), or the published helm binary
+# or the restart failed, including a build owed with no Go toolchain or with
+# no Go release named in go.mod (the previous binary is left exactly as it
+# was), or the published helm binary
 # cannot read the city's bead stores · 2 usage. A current binary needs no
 # toolchain.
 # Writes, under the component's state root <city>/.gc/services/<name>:
@@ -336,11 +337,27 @@ write_status() { # <kind> [detail]
 }
 
 # Go toolchain: override, PATH, then the conventional system install. It is
-# needed only once there is something to build.
+# needed only once there is something to build. Whichever go starts the build,
+# the build runs the Go release go.mod names (go_release).
 GO="${GC_GO_BIN:-}"
 if [ -z "$GO" ]; then
     if command -v go >/dev/null 2>&1; then GO="go"; else GO="/usr/local/go/bin/go"; fi
 fi
+
+# go_release <go.mod> — the Go release the file names: its toolchain line, else
+# go and the version on its go line, the choice CI's actions/setup-go makes from
+# the same file (parseGoVersionFile). Prints nothing when the file names none.
+go_release() {
+    local line go_line="" toolchain_line=""
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ $line =~ ^toolchain[[:space:]]+(go[0-9]+\.[0-9]+(\.[0-9]+|rc[0-9]+))([[:space:]]|$) ]]; then
+            toolchain_line="${BASH_REMATCH[1]}"
+        elif [[ $line =~ ^go[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)([[:space:]]|$) ]]; then
+            go_line="go${BASH_REMATCH[1]}"
+        fi
+    done < "$1"
+    printf '%s\n' "${toolchain_line:-$go_line}"
+}
 
 # A rebuild changes what a binary can read only if the embedded beads library
 # moves, which is what separates "retry the build" from "the pin is the problem".
@@ -496,6 +513,19 @@ if ! command -v "$GO" >/dev/null 2>&1; then
     exit 1
 fi
 
+# The build runs under GOTOOLCHAIN set to the release go.mod names, so go runs
+# that release whatever version $GO is, and downloads it into the module cache
+# the first time it is another (https://go.dev/doc/toolchain). A go.mod that
+# names no release is a failed build too: the binary would take whichever Go
+# the host has, not the one CI tests.
+GO_RELEASE="$(go_release "$ROOT/go.mod")"
+if [ -z "$GO_RELEASE" ]; then
+    echo "$ME: BUILD FAILED: $ROOT/go.mod names no Go release, on a go line such as 'go 1.27.4' or a toolchain line, to build $ROOT/$DIR with. $BIN left unchanged" >&2
+    write_status failed
+    write_record 1 "$(prev_field binary_rev)" "$(prev_field built_at)"
+    exit 1
+fi
+
 # Linker and cgo scratch goes under $GOTMP, a root this script bounds, never
 # the shared temp dir. GOCACHE stays at its default, which is what keeps
 # rebuilds fast.
@@ -563,9 +593,9 @@ fi
 # a caller's -x test.
 build_ok=0
 BIN_TMP=""
-echo "$ME: building $ROOT/$DIR -> $BIN"
+echo "$ME: building $ROOT/$DIR -> $BIN with $GO_RELEASE"
 if BIN_TMP="$(mktemp "$BIN_DIR/.$BIN_NAME.build.XXXXXX" 2>/dev/null)"; then
-    if ( cd "$ROOT/$DIR" && TMPDIR="$GOTMP_RUN" GOTMPDIR="$GOTMP_RUN" \
+    if ( cd "$ROOT/$DIR" && TMPDIR="$GOTMP_RUN" GOTMPDIR="$GOTMP_RUN" GOTOOLCHAIN="$GO_RELEASE" \
             CGO_CPPFLAGS="$BUILD_CGO_CPPFLAGS" CGO_LDFLAGS="$BUILD_CGO_LDFLAGS" \
             "$GO" build ${GO_BUILD_FLAGS[@]+"${GO_BUILD_FLAGS[@]}"} -o "$BIN_TMP" "$PKG" ) \
         && chmod +x "$BIN_TMP" && mv -f "$BIN_TMP" "$BIN"; then
