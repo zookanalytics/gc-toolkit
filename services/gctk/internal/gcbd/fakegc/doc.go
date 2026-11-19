@@ -33,9 +33,16 @@
 //
 // # The verbs
 //
+// Run under the name bd, the program answers `bd <args>` as `gc bd <args>`, and
+// logs the call as that.
+//
 //   - agent list and convoy list print the file STUB_AGENTS or STUB_CONVOYS
 //     names, an empty list when that file cannot be read, and nothing when
 //     the setting names none.
+//   - hook current prints the bead STUB_HOOK_CURRENT names, which stands for
+//     the claim gc stamps on the calling session's bead. It exits 1, as gc
+//     does, when GC_SESSION_ID names no session or the setting names no bead.
+//   - runtime drain-ack does nothing.
 //   - session logs the call; session list prints the file STUB_SESSIONS names.
 //   - mail does nothing.
 //   - workflow delete-source prints its result line; workflow reopen-source
@@ -57,10 +64,18 @@
 //
 //   - STUB_SHOW_FAIL, STUB_LIST_FAIL, STUB_CREATE_FAIL, STUB_SLING_FAIL,
 //     STUB_KV_FAIL and STUB_GATE_LIST_FAIL fail that verb at exit 1.
+//   - STUB_GC_FAIL fails every call made as gc at exit 1, once the call is
+//     logged, as a gc that cannot load its city does. A call made as bd still
+//     answers.
 //   - STUB_SHOW_FAIL_ON and STUB_LIST_FAIL_ON fail a show or a list whose
 //     arguments carry that text. STUB_LIST_PARTIAL makes such a list print []
 //     and fail; STUB_LIST_TRAILING makes it print a line that is not JSON
 //     after its answer.
+//   - STUB_LIST_OBJECT makes a list answer an error object at exit 0 in place
+//     of its array: every list when set to 1, and otherwise those whose
+//     arguments carry the text.
+//   - STUB_UPDATE_FAIL_ON refuses an update whose id and arguments, joined by
+//     blanks, carry that text.
 //   - STUB_DEP_GARBAGE, STUB_DEP_PARTIAL and STUB_DEP_TRAILING do the same to
 //     a dep list, for every one when set to 1 and otherwise for those whose
 //     arguments carry the text.
