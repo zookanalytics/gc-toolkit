@@ -66,16 +66,17 @@
 #     change to add it. It files the document as work of its own under one
 #     token: a review run's lane raises it as a finding that does not block,
 #     and the round defers it after a listing that counts a closed task, so a
-#     repository is asked once. It files a gap in architecture the change does
-#     not touch without holding the change, and passes no change on a gap in
+#     repository is asked once, and names a bead it lists with what that bead
+#     waits on. It files a gap in architecture the change does not touch
+#     without holding the change, and passes no change on a gap in
 #     architecture it does touch. It files an aggravated pattern's
 #     rearchitecture under a token that names the pattern, after listing the
 #     patterns already filed from the file of its first instance, so one
 #     pattern keeps one bead and another that starts in the same file keeps its
-#     own. This repo's
-#     own docs/review-arch.md and docs/review-triage.md, read the way a review
-#     reads them at its commit, carry the divergence lens and the changes that
-#     make arch mandatory, and the pack's arch skill carries none of that lens.
+#     own. This repo's own docs/review-arch.md and docs/review-triage.md, read
+#     the way a review reads them at its commit, carry the divergence lens and
+#     the changes that make arch mandatory, and the pack's arch skill carries
+#     none of that lens.
 #   - The demo method says a demo shows a reviewer what the change does,
 #     briefly, the way a sprint demo does, and that the check posts only the
 #     visuals such a demo needs. The check itself looks at every place the
@@ -272,6 +273,7 @@ hasF "$ARCH_SKILL" 'the lane files nothing itself. Raise the issue as a finding 
 hasF "$ARCH_SKILL" 'In a review run the round rules its finding deferred' "…and the round rules deferred"
 hasF "$ARCH_SKILL" 'files the issue with `review-run.sh defer`' "…filing it with review-run.sh defer"
 hasF "$ARCH_SKILL" 'For `docs/architecture.md: missing` the listing takes `--all`' "…after a listing that counts a closed task, so a repository is asked for its document once"
+hasF "$ARCH_SKILL" 'the ruling names that bead, its status and what it waits on, which can be another PR than this one' "…and names a bead it lists with what that bead waits on, which this PR's landing need not start"
 hasF "$ARCH_SKILL" 'Drop `--type` from its duplicate probe' "…while under mol-review the duplicate probe counts a task a review run filed"
 notF "$ARCH_SKILL" 'A `docs/architecture.md` at the reviewed commit is a precondition of approval' "…and makes no document a precondition of approval"
 notF "$ARCH_SKILL" 'a passable account' "…asks no change for an account of the architecture it covers"

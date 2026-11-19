@@ -180,8 +180,9 @@ gc bd list --title-contains "<the finding's token>"
 ```
 
 For `docs/architecture.md: missing` the listing takes `--all`, so a repository
-is asked for its document once. When a bead is listed, the ruling names it and
-the round files nothing. Otherwise the round files the issue with
+is asked for its document once. When a bead is listed, the round files nothing,
+and the ruling names that bead, its status and what it waits on, which can be
+another PR than this one. Otherwise the round files the issue with
 `review-run.sh defer`, under a title that ends in the token in parentheses, and
 the ruling names the bead the call prints. That bead waits on the PR, and
 nothing waits on the bead.
