@@ -97,7 +97,8 @@ bead of type `convoy` (`convoyStillAutocloses` in `cmd/gc/cmd_convoy.go`).
 **What it composes.** Native writes in one order: `bd gate create` with the type
 `stay-return`, the conversation as both the bead it blocks and its await id,
 then a `tracks` edge from the gate onto each bead it watches (`bd dep add`), then
-the removal of the conversation's other `blocks` edges (`bd dep remove`). The
+the removal of the conversation's other `blocks` edges onto a convoy or a return
+gate (`bd dep remove`), which leaves a park or any other wait on it in place. The
 verb carries the sitting's one intent, to come back when this work is ready for
 the operator's next decision, through every step: it finds the conversation's
 open gate before it files one, writes the edges in the order that keeps the
