@@ -21,6 +21,11 @@ export interface Document {
    * Doctor is what doctor's newest recorded run found.
    */
   doctor: Doctor;
+  /**
+   * Mail is the operator's mailbox, counted apart from doctor's run, which
+   * the route reads on its own cadence.
+   */
+  mail: Mail;
 }
 /**
  * Doctor is doctor's newest recorded run, as the page shows it. Each time is
@@ -135,4 +140,28 @@ export interface Acceptance {
 export interface Monitor {
   order: string;
   last_good?: string;
+}
+/**
+ * Mail is the operator's mailbox, Gas City's `human`, as the page counts it:
+ * one number beside the failing checks, with how to open the postmaster, who
+ * works through the mailbox with the operator.
+ */
+export interface Mail {
+  /**
+   * Counted is whether a count read. A document built without one shows no
+   * number, and neither does one whose count did not read, whose Why says
+   * why.
+   */
+  counted: boolean;
+  why?: string;
+  /**
+   * Waiting is how many messages wait: the mailbox's open messages, read or
+   * unread, which only an archive takes out.
+   */
+  waiting: number /* int */;
+  /**
+   * Short says why the count may miss messages: a store that did not answer
+   * for its part of the mailbox. Empty when every store answered.
+   */
+  short?: string;
 }

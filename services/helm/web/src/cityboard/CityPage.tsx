@@ -1,9 +1,10 @@
 // The city's page, beside the rig pages, at the address ?city: what doctor
-// found in its newest recorded run. The page reads one document
-// (GET <mount>/helm/city), which decides which checks show, which count in the
-// lead, their order, and whether the run is late, and lays it out in rows
-// drawn with the board's one row structure (Line). Each check is drawn the
-// same way in whichever list holds it. The page derives no state of its own.
+// found in its newest recorded run, and how many messages wait in the
+// operator's mailbox. The page reads one document (GET <mount>/helm/city),
+// which decides which checks show, which count in the lead, their order, and
+// whether the run is late, and lays it out in rows drawn with the board's one
+// row structure (Line). Each check is drawn the same way in whichever list
+// holds it. The page derives no state of its own.
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { Line } from '../rigboard/Line';
@@ -11,11 +12,13 @@ import { readCity } from '../rigboard/read';
 import { Note } from '../rigboard/rows';
 import { usePolledRead, type ReadState } from '../rigboard/usePolledRead';
 import { AMBER, INK, MUTE } from '../rigboard/view';
-import type { Check, Doctor, Monitor, Response as CityResponse } from './document.gen';
+import type { Check, Doctor, Mail, Monitor, Response as CityResponse } from './document.gen';
 
-// The service serves the city's document from its cache for five minutes
-// (server.CityPageTTL), so reading more often than every two and a half
-// minutes re-reads the same bytes.
+// The service serves doctor's part of the city's document from its cache for
+// five minutes (server.CityPageTTL), so reading more often than every two and
+// a half minutes re-reads the same run. The mailbox's count it serves from its
+// cache for a minute (server.CityMailTTL), so the count on screen is at most
+// three and a half minutes old.
 export const CITY_REFRESH_MS = 150_000;
 
 const WHITE = '#FFFFFF';
@@ -29,6 +32,7 @@ export function CityPage() {
     document.title = 'helm · city';
   }, []);
   const doctor = state.last?.city.doctor;
+  const mail = state.last?.city.mail;
   return (
     <div className="page">
       <header className="bar">
@@ -43,7 +47,7 @@ export function CityPage() {
       <div className="body">
         <main className="main">
           <ReadStatus state={state} />
-          {doctor !== undefined && <DoctorView doctor={doctor} />}
+          {doctor !== undefined && <DoctorView doctor={doctor} mail={mail} />}
         </main>
       </div>
     </div>
@@ -90,10 +94,15 @@ type Part = 'failing' | 'not_measured' | 'accepted' | 'monitors';
  *  are folded under their count. */
 const OPEN: Record<Part, boolean> = { failing: true, not_measured: true, accepted: false, monitors: true };
 
-function DoctorView({ doctor: d }: { doctor: Doctor }) {
+function DoctorView({ doctor: d, mail }: { doctor: Doctor; mail: Mail | undefined }) {
   const [open, setOpen] = useState<Record<Part, boolean>>(OPEN);
   if (!d.ran) {
-    return <Note>Doctor has recorded no run in the city's event log, so nothing here says which checks fail.</Note>;
+    return (
+      <>
+        <Note>Doctor has recorded no run in the city's event log, so nothing here says which checks fail.</Note>
+        <MailLead mail={mail} />
+      </>
+    );
   }
   const flip = (part: Part) => setOpen((prev) => ({ ...prev, [part]: !prev[part] }));
   const section = (part: Part, label: string, count: number, rows: ReactNode) => (
@@ -124,6 +133,7 @@ function DoctorView({ doctor: d }: { doctor: Doctor }) {
       ) : (
         <Note>No doctor run has measured the checks yet, so nothing here says which checks fail.</Note>
       )}
+      <MailLead mail={mail} />
       <RunNote doctor={d} />
       {d.failing.length > 0 &&
         section(
@@ -176,6 +186,29 @@ function leadText(d: Doctor): string {
     d.not_measured.length > 0 ? `${d.not_measured.length} not measured` : '',
   ].filter((s) => s !== '');
   return `${failed} failed two runs in a row${left.length > 0 ? `, not counting ${left.join(' and ')}` : ''}.`;
+}
+
+/** How many messages wait in the operator's mailbox, read or not, beside the
+ *  failing checks, with how to open the postmaster, who works through it with
+ *  them. A count that did not read shows why in place of a number, and a
+ *  document with no count shows nothing. */
+function MailLead({ mail }: { mail: Mail | undefined }) {
+  if (mail === undefined || !mail.counted) {
+    return mail?.why !== undefined && mail.why !== '' ? <Note>Your mailbox could not be counted: {mail.why}.</Note> : null;
+  }
+  const n = mail.waiting;
+  return (
+    <div className="lead">
+      <span className="lead-count" style={{ color: n > 0 ? AMBER : GREEN }}>
+        {n}
+      </span>
+      <span className="lead-text">
+        {n === 1 ? 'message waits' : 'messages wait'} in your mailbox, read or not.
+        {n > 0 && ` Open the postmaster to work through ${n === 1 ? 'it' : 'them'}: gc-helm postmaster.`}
+        {mail.short !== undefined && mail.short !== '' && ` The count may miss some: ${mail.short}.`}
+      </span>
+    </div>
+  );
 }
 
 /** When doctor last ran, whether that is late, and whether the run completed. */

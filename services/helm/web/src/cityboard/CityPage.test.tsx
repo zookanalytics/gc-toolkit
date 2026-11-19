@@ -4,7 +4,7 @@ import golden from '../../../internal/cityboard/testdata/city.json';
 import firstRun from '../../../internal/cityboard/testdata/first-run.json';
 import { Page } from '../rigboard/Board';
 import { when } from './CityPage';
-import type { Check, Document, Doctor, Response as CityResponse } from './document.gen';
+import type { Check, Document, Doctor, Mail, Response as CityResponse } from './document.gen';
 
 // The page runs here on the document the city's read builds from a live
 // city's newest doctor run (internal/cityboard/testdata/city.json), so a
@@ -23,6 +23,11 @@ function json(body: unknown, status = 200): Response {
 /** The live document with its doctor changed as the test says. */
 function withDoctor(change: Partial<Doctor>): CityResponse {
   return { ...live, city: { ...live.city, doctor: { ...live.city.doctor, ...change } } };
+}
+
+/** The live document with the mailbox's count the test gives. */
+function withMail(mail: Mail): CityResponse {
+  return { ...live, city: { ...live.city, mail } };
 }
 
 beforeEach(() => {
@@ -234,6 +239,75 @@ describe('a lead that reaches zero, or has nothing to count', () => {
     await loaded();
     expect(document.querySelector('.lead')).toBeNull();
     expect(screen.getByText(/No doctor run has measured the checks yet/)).toBeTruthy();
+  });
+});
+
+describe('the mailbox count', () => {
+  /** The text of each lead, in page order. */
+  function leads(): string[] {
+    return [...document.querySelectorAll('.lead')].map((l) => text(l));
+  }
+
+  it('shows how many messages wait beside the failing checks, with how to open the postmaster', async () => {
+    cityReads = [() => json(withMail({ counted: true, waiting: 130 }))];
+    render(<Page />);
+    await loaded();
+    expect(leads()).toEqual([
+      '15checks have failed two runs in a row, not counting 1 accepted.',
+      '130messages wait in your mailbox, read or not. Open the postmaster to work through them: gc-helm postmaster.',
+    ]);
+  });
+
+  it('says it of one message, and names no postmaster when none waits', async () => {
+    cityReads = [() => json(withMail({ counted: true, waiting: 1 }))];
+    render(<Page />);
+    await loaded();
+    expect(leads()[1]).toBe('1message waits in your mailbox, read or not. Open the postmaster to work through it: gc-helm postmaster.');
+    cleanup();
+    cityReads = [() => json(withMail({ counted: true, waiting: 0 }))];
+    render(<Page />);
+    await loaded();
+    expect(leads()[1]).toBe('0messages wait in your mailbox, read or not.');
+  });
+
+  it('says what a count may miss when a store did not answer', async () => {
+    cityReads = [() => json(withMail({ counted: true, waiting: 4, short: 'mail provider docs: store_slow: read timed out' }))];
+    render(<Page />);
+    await loaded();
+    expect(leads()[1]).toBe(
+      '4messages wait in your mailbox, read or not. Open the postmaster to work through them: gc-helm postmaster. The count may miss some: mail provider docs: store_slow: read timed out.',
+    );
+  });
+
+  it('shows why in place of a number when the count did not read, and nothing for a document with no count', async () => {
+    cityReads = [() => json(withMail({ counted: false, waiting: 0, why: "the supervisor's mail count answered HTTP 503" }))];
+    render(<Page />);
+    await loaded();
+    expect(screen.getByText("Your mailbox could not be counted: the supervisor's mail count answered HTTP 503.")).toBeTruthy();
+    expect(leads()).toHaveLength(1);
+    cleanup();
+    cityReads = [() => json(live)];
+    render(<Page />);
+    await loaded();
+    expect(leads()).toHaveLength(1);
+    expect(screen.queryByText(/mailbox/)).toBeNull();
+  });
+
+  it('shows the count when doctor has recorded no run', async () => {
+    cityReads = [
+      () =>
+        json({
+          read_at: live.read_at,
+          city: {
+            doctor: { ran: false, late: false, completed: false, count: 0, failing: [], not_measured: [], accepted: [], monitors: [] },
+            mail: { counted: true, waiting: 2 },
+          },
+        }),
+    ];
+    render(<Page />);
+    await loaded();
+    expect(screen.getByText(/Doctor has recorded no run/)).toBeTruthy();
+    expect(leads()).toEqual(['2messages wait in your mailbox, read or not. Open the postmaster to work through them: gc-helm postmaster.']);
   });
 });
 
