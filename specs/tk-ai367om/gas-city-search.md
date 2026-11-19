@@ -134,8 +134,8 @@ the gates of its own stay. Then, for each bead it names that has no open return 
 conversation's, it runs one
 `bd gate create --type stay-return --await-id <the bead> --blocks <the conversation>`.
 It finds the conversation's open gate on a bead among the gates that block the
-conversation, which `bd gate list <conversation>` lists with each one's await
-type and await id. On a proxied server bd writes the gate and the
+conversation, which `bd gate list <conversation> --limit 0` lists with each
+one's await type and await id. On a proxied server bd writes the gate and the
 conversation's edge onto it in one transaction (`runGateCreateProxiedServer` in
 `cmd/bd/gate_proxied_server.go`). The city's stores run on a Dolt server, where
 `gateCreateCmd` creates the gate, then adds the edge, then commits, so a create
@@ -195,7 +195,9 @@ At that moment it writes the hold and closes the gate, a native close. In the
 same pass it closes a return gate whose bead has closed, or that no open or
 in-progress conversation waits on, once it is five minutes old, the order's
 cooldown, so a gate whose edge bd is still writing is left to a later pass. It
-reads the open gates with `bd gate list`: a gate's bead is its await id, and its
+reads every open gate with `bd gate list --limit 0`, because bd lists 50 gates
+unless `--limit` says otherwise (`gateListCmd` in `cmd/bd/gate.go`): a gate's
+bead is its await id, and its
 conversation is its dependent through a `blocks` edge
 (`bd dep list <gate> --direction=up --type blocks`). It removes no edge. A
 conversation that waits on several return gates reads ready once each of them
