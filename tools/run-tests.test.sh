@@ -95,13 +95,14 @@
 #     with a here-document in a function's body read as no part of the body.
 #     A change that deletes or moves a program's whole main package reaches
 #     the suites that still compile it by its old path, and one that deletes a
-#     package the program imports, or the file an embed pattern of such a
-#     package names, reaches the suites that compile the unchanged program. A
-#     _test.go file, and a file in no package's directory, reach no suite;
-#     go.mod reaches every program's; a go that cannot list the packages, or
-#     what a program imports, lets a .go file reach every such program and
-#     nothing else reach any; and --affected reaches the same suites from a
-#     branch's commit;
+#     package the program imports, the file an embed pattern of such a package
+#     names, or one of the two files its directory pattern embeds, reaches the
+#     suites that compile the unchanged program. A _test.go file, a file in no
+#     package's directory, and one below the directory of a package that
+#     embeds nothing reach no suite; go.mod reaches every program's; a go that
+#     cannot list the packages, or what a program imports, lets a .go file
+#     reach every such program and nothing else reach any; and --affected
+#     reaches the same suites from a branch's commit;
 #   - a BASE git cannot read, a missing BASE, an option or a range where BASE
 #     belongs, and a PATH beside --affected are usage errors;
 #   - the runner runs no suite, and exits 2, unless its own bash and the first
@@ -1175,8 +1176,9 @@ eq "$(ls "$STATE")" "" "…and starts no suite"
 echo "── 20. a path a Go program is compiled from reaches the suites that compile it ──"
 # A Go module with two programs a library compiles, tool and fake, and a third,
 # server, one suite compiles inline. tool imports lib, which embeds a file from
-# a directory beneath it, and server imports store. The real go lists the
-# packages, with no toolchain download and no workspace.
+# a directory beneath it and a directory of two files, and server imports
+# store. The real go lists the packages, with no toolchain download and no
+# workspace.
 GREPO="$TMP/go-repo"
 mkdir -p "$GREPO/tools"
 cp "$RUNNER" "$GREPO/tools/run-tests.sh"
@@ -1192,14 +1194,19 @@ F
 gfix svc/lib/lib.go <<'F'
 package lib
 
-import _ "embed"
+import "embed"
 
 //go:embed words/greeting.txt
 var greeting string
 
+//go:embed names
+var names embed.FS
+
 func Hello() string { return greeting }
 F
 printf 'hello\n' | gfix svc/lib/words/greeting.txt
+printf 'ann\n' | gfix svc/lib/names/ann.txt
+printf 'bob\n' | gfix svc/lib/names/bob.txt
 gfix svc/lib/lib_test.go <<'F'
 package lib
 
@@ -1320,6 +1327,8 @@ else
     "go.mod reaches every program's suites"
   glist svc/notes.md
   eq "$OUT" "" "a file in no package's directory reaches no program"
+  glist other/store/notes/readme.md
+  eq "$OUT" "" "…nor does one below the directory of a package that embeds nothing"
   # A go that fails stands for one that cannot list the packages.
   mkdir -p "$TMP/failing-go"
   printf '#!/bin/sh\necho "stub go: cannot list" >&2\nexit 1\n' > "$TMP/failing-go/go"
@@ -1376,6 +1385,14 @@ else
   git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "delete the file lib embeds"
   glist --affected base
   eq "$LIST" "$TOOL_SUITES" "…and one that deletes the file lib's embed pattern names reaches the suites compiling tool"
+  # A directory pattern that still finds a file leaves go's answer whole, and
+  # the file the change deleted is in no list that answer gives.
+  git -C "$GREPO" checkout -q -b delete-ann base
+  git -C "$GREPO" rm -q svc/lib/names/ann.txt
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "delete one of the files lib's directory pattern embeds"
+  glist --affected base
+  eq "$LIST" "$TOOL_SUITES" \
+    "a change that deletes one of the two files lib's directory pattern embeds reaches the suites compiling tool, though go's answer is whole"
 fi
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"

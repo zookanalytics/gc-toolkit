@@ -44,9 +44,11 @@
 #     a tracked script compiles, on a line outside a comment that runs
 #     `go build` or `go run` on a ./<package> argument, which names the package
 #     by the end of its path. It is compiled from go.mod and go.sum and, for
-#     each package of the module it imports, its own included, from every file
-#     in the package's directory but the _test.go files, and the files the
-#     package embeds. A ./<package> the module no longer holds as a main
+#     each package of the module it imports, its own included, from the files
+#     in the package's directory, and below it when the package embeds files,
+#     but the _test.go files. An embed pattern can match only files there, and
+#     go's list of the files a package embeds cannot name one the change
+#     deleted. A ./<package> the module no longer holds as a main
 #     package, as when the change deletes or moves the whole package, is
 #     reached by a changed path in a directory the argument names, by the end
 #     of its path. A program go marks incomplete, because it or a package it
@@ -481,16 +483,17 @@ go_reach() {
 # main package is in the directory, a path from the root (see the header).
 program_reached() {
   local d="$1" out line p pd
-  local -A pkg_dirs=() embedded=()
+  local -A pkg_dirs=() embed_dirs=()
   if [ -z "${REACHED[$d]:-}" ]; then
     REACHED[$d]=0
-    if out="$(cd "$ROOT" && go list -e -deps -f '{{if not .Standard}}D {{.Dir}}{{if .Incomplete}}{{"\n"}}I{{end}}{{range .EmbedFiles}}{{"\n"}}E {{$.Dir}}/{{.}}{{end}}{{end}}' "./$d" 2>/dev/null)"; then
+    if out="$(cd "$ROOT" && go list -e -deps -f '{{if not .Standard}}D {{.Dir}}{{if .Incomplete}}{{"\n"}}I{{end}}{{if .EmbedPatterns}}{{"\n"}}E {{.Dir}}{{end}}{{end}}' "./$d" 2>/dev/null)"; then
       while IFS= read -r line; do
         case "$line" in
           I) REACHED[$d]=1 ;;
           "D $ROOT") pkg_dirs[.]=1 ;;
           "D $ROOT/"*) pkg_dirs["${line#"D $ROOT/"}"]=1 ;;
-          "E $ROOT/"*) embedded["${line#"E $ROOT/"}"]=1 ;;
+          "E $ROOT") embed_dirs[.]=1 ;;
+          "E $ROOT/"*) embed_dirs["${line#"E $ROOT/"}"]=1 ;;
         esac
       done < <(printf '%s\n' "$out")
       for p in "${CHANGED[@]}"; do
@@ -500,9 +503,13 @@ program_reached() {
           *_test.go) continue ;;
         esac
         case "$p" in */*) pd="${p%/*}" ;; *) pd=. ;; esac
-        if [ -n "${embedded[$p]:-}" ] || [ -n "${pkg_dirs[$pd]:-}" ]; then
+        if [ -n "${pkg_dirs[$pd]:-}" ]; then
           REACHED[$d]=1; break
         fi
+        while [ -z "${embed_dirs[$pd]:-}" ]; do
+          case "$pd" in .) continue 2 ;; */*) pd="${pd%/*}" ;; *) pd=. ;; esac
+        done
+        REACHED[$d]=1; break
       done
     elif [ "$GO_SHAPED" -eq 1 ]; then
       REACHED[$d]=1
