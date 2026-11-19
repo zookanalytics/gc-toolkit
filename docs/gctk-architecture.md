@@ -410,12 +410,15 @@ Nothing outside it parses a metadata value or spells a key's name.
   as never written.
 - **A wait edge is written only onto a bead of its own prefix that its store
   holds.** bd accepts an edge onto an id its store does not hold and reports
-  success, and the edge holds nothing. So the ledger reads the target in the
-  bead's own store first, and refuses the write when the store does not hold
-  it. bd also keeps an edge between beads of two id prefixes as one into
-  another store, which holds nothing even when this store holds the far bead,
-  so a target of another prefix than the store gives the new bead is refused
-  before the read.
+  success, and the edge holds nothing. bd also keeps an edge between beads of
+  two id prefixes as one into another store, which holds nothing even when this
+  store holds the far bead. So the ledger refuses, with nothing written, a wait
+  edge onto a bead of another prefix, then reads the target in the bead's own
+  store and refuses one the store does not hold. A filing (`Create`) checks
+  the edge from each bead it blocks and the edge onto each bead it waits on
+  against the prefix the store gives the new bead, and `AddBlocker` checks the
+  blocker against the bead that waits on it. Its refusal is `ErrNotHeld`, which
+  a caller tells from any other failure.
 - **The key registry is generated from the declarations.** It is
   `services/gctk/key-registry.json`, and a test fails when it is stale. Each
   entry names its key, its owner, its type, its aliases and, for a pack noun,
