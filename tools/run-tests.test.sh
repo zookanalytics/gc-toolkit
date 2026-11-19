@@ -93,7 +93,9 @@
 #     compiles it, or the library's function that calls that one, and the
 #     sibling and the users of a script that compiles it outside a function,
 #     with a here-document in a function's body read as no part of the body.
-#     A _test.go file, and a file in no package's directory, reach no suite;
+#     A change that deletes or moves a program's whole main package reaches
+#     the suites that still compile it by its old path. A _test.go file, and a
+#     file in no package's directory, reach no suite;
 #     go.mod reaches every program's; a go that cannot list the packages, or
 #     what a program imports, lets a .go file reach every such program and
 #     nothing else reach any; and --affected reaches the same suites from a
@@ -1346,6 +1348,19 @@ else
   git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "add a file to lib"
   glist --affected base
   eq "$LIST" "$TOOL_SUITES" "--affected reaches the same suites when the change is a branch's commit"
+  # go no longer lists a package the change deletes whole, so the suites that
+  # still compile it by its path are found by the path alone.
+  git -C "$GREPO" checkout -q -b delete-fake base
+  git -C "$GREPO" rm -q -r svc/fake
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "delete the fake's package"
+  glist --affected base
+  eq "$LIST" "t/builds-tool.test.sh t/harness-only.test.sh " \
+    "a change that deletes fake's whole package reaches the suites that still compile it"
+  git -C "$GREPO" checkout -q -b move-server base
+  git -C "$GREPO" mv other/cmd/server other/cmd/api
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "move the server's package"
+  glist --affected base
+  eq "$LIST" "t/server.test.sh " "…and one that moves server's reaches the suite that still runs it by its old path"
 fi
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"

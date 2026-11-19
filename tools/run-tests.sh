@@ -46,7 +46,10 @@
 #     by the end of its path. It is compiled from go.mod and go.sum and, for
 #     each package of the module it imports, its own included, from every file
 #     in the package's directory but the _test.go files, and the files the
-#     package embeds. A suite that compiles a reached program runs. Another
+#     package embeds. A ./<package> the module no longer holds as a main
+#     package, as when the change deletes or moves the whole package, is
+#     reached by a changed path in a directory the argument names, by the end
+#     of its path. A suite that compiles a reached program runs. Another
 #     script that compiles one counts as changed, so every rule here applies
 #     to it in turn, unless it compiles the program inside a function: then
 #     the function's name, and the name of each function of the same script
@@ -421,7 +424,7 @@ GO_LISTED=1
 GO_SHAPED=0
 go_reach() {
   local -a builds=()
-  local b file rest n text tok d p fn hit mains=""
+  local b file rest n text tok d p fn hit held mains=""
   local -A main_dir=()
   while IFS= read -r b; do builds+=("$b"); done < <(
     git -C "$ROOT" grep -nIE --no-color \
@@ -449,11 +452,13 @@ go_reach() {
         [ "$GO_SHAPED" -eq 0 ] || hit=1
         continue
       fi
+      held=0
       for d in "${!main_dir[@]}"; do
         case "$d" in
-          "$tok"|*/"$tok") if program_reached "$d"; then hit=1; fi ;;
+          "$tok"|*/"$tok") held=1; if program_reached "$d"; then hit=1; fi ;;
         esac
       done
+      if [ "$held" -eq 0 ] && gone_reached "$tok"; then hit=1; fi
     done < <(printf '%s\n' "$text" \
       | sed -E 's/^(.*[^A-Za-z0-9_.-])?go[[:space:]]+(build|run)[[:space:]]//' \
       | grep -oE '(^|[[:space:]"'\''=(])\./[A-Za-z0-9_][A-Za-z0-9_./-]*' | sed -E 's/^[^.]*//')
@@ -498,6 +503,18 @@ program_reached() {
     fi
   fi
   [ "${REACHED[$d]}" -eq 1 ]
+}
+
+# gone_reached <package> — whether the change reaches a program whose main
+# package the module no longer holds: a changed path in a directory the
+# ./<package> argument names, by the end of its path (see the header).
+gone_reached() {
+  local p pd
+  for p in "${CHANGED[@]}"; do
+    case "$p" in */*) pd="${p%/*}" ;; *) pd=. ;; esac
+    case "$pd" in "$1"|*/"$1") return 0 ;; esac
+  done
+  return 1
 }
 
 # go_callers <path> <function> — adds the function to GO_NAMES, and every
