@@ -28,12 +28,14 @@ state where a rule that binds only gc-toolkit's own repository lives.
 `gc formula show mol-polecat-work --rig gc-toolkit` shows the commands the rig
 declares.
 
-- The polecat's self-review runs `lint_command`, which is
-  `tools/lint-learned.sh` and then `tools/lint.sh` over the files the branch
-  changes. It runs the suites `tools/run-tests.sh --affected origin/main`
-  selects, by the rules in that script's header, and stamps the head that
-  passed on its work bead as `self_review_passed_sha`. When the anchor's stamp
-  names the reviewed commit, the method runs no suite.
+- The polecat's self-review runs `lint_command`: `tools/lint-learned.sh` over
+  the files the branch changes, then `tools/lint.sh`, which checks the step text
+  of the formulas among them and runs shellcheck, go vet and gofmt over the
+  whole tracked tree. It runs the suites
+  `tools/run-tests.sh --affected origin/main` selects, by the rules in that
+  script's header, and stamps the head that passed on its work bead as
+  `self_review_passed_sha`. When the anchor's stamp names the reviewed commit,
+  the method runs no suite.
 - The refinery runs the same `lint_command` at merge, and no tests.
 - CI runs the whole `*.test.sh` suite on Linux and on macOS
   (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
@@ -90,8 +92,8 @@ because such a rule can be worded for any repository and name none.
 
 ## Bash and jq scripts
 
-`tools/lint.sh` shellchecks the `.sh` and shell-shebang files a change names,
-at warning severity (`assets/scripts/shellcheck-run.sh`). An unquoted expansion
+`tools/lint.sh` shellchecks every tracked `.sh` and shell-shebang file, at
+warning severity (`assets/scripts/shellcheck-run.sh`). An unquoted expansion
 (SC2086) and a variable set in a pipeline's subshell (SC2030, SC2031) are info
 findings, so the gate never reports them. A `# shellcheck disable=` directive a
 change adds hides its finding from the gate, so read the reason it gives. Each
