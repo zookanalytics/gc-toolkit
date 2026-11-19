@@ -37,8 +37,8 @@
 #     method's What to check list nor any dimension of it. The correctness
 #     method is method alone: it carries no shell block and reads no record
 #     itself, because the review formula gathers what it reads.
-#   - The correctness method is at most METHOD_WORD_BUDGET words, so a change
-#     that adds to it replaces text.
+#   - The correctness method grows past METHOD_WORD_BUDGET words only in a
+#     change that raises it.
 #   - The pm method says when triage adds it, in words that name no rig: a
 #     diff that changes what the rig's product does for the people it serves,
 #     or what it promises them, and always a diff that changes the product
@@ -121,7 +121,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-review-methods-test.XXXXXX")" || exit 1
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
-# The most words the correctness method's SKILL.md may hold.
+# The correctness method's size, rounded up, so the suite notices when the
+# method grows.
 METHOD_WORD_BUDGET=3100
 
 PASS=0; FAIL=0
@@ -389,7 +390,7 @@ echo "# the correctness method stays inside its word budget"
 WORDS=$(wc -w < "$METHOD" | tr -d ' ')
 [ "$WORDS" -le "$METHOD_WORD_BUDGET" ] && ok "the correctness method is inside its word budget ($WORDS of $METHOD_WORD_BUDGET words)" \
   || bad "the correctness method is inside its word budget" \
-    "$WORDS words, over the budget of $METHOD_WORD_BUDGET: a change that adds to the method replaces text, as the review-rubric carrier in docs/feedback-learning.md says"
+    "$WORDS words, over the budget of $METHOD_WORD_BUDGET: check that the method is still concise, and raise METHOD_WORD_BUDGET if it still needs the words"
 
 echo "# a demo shows a reviewer what the change does, concisely, and the demo method posts only what such a demo needs"
 DEMO="$ROOT/skills/review-demo/SKILL.md"
