@@ -40,8 +40,10 @@
 //     names, an empty list when that file cannot be read, and nothing when
 //     the setting names none.
 //   - hook current prints the bead STUB_HOOK_CURRENT names, which stands for
-//     the claim gc stamps on the calling session's bead. It exits 1, as gc
-//     does, when GC_SESSION_ID names no session or the setting names no bead.
+//     the claim gc stamps on the calling session's bead: the id alone under
+//     --id-only, and otherwise followed by the session that claimed it, in gc's
+//     words. It exits 1, as gc does, when GC_SESSION_ID names no session or the
+//     setting names no bead.
 //   - runtime drain-ack does nothing.
 //   - session logs the call; session list prints the file STUB_SESSIONS names.
 //   - mail does nothing.
