@@ -1,12 +1,15 @@
 package gcbd
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // pinStub puts a `gc` on PATH that logs each call's argv and answers every read
@@ -228,5 +231,125 @@ func TestRouteFollowsTheFirstBeadsPrefix(t *testing.T) {
 	var re *ReadError
 	if _, err := c.Route("tk-2"); !errors.As(err, &re) {
 		t.Errorf("Route with no resolved store = %v; want a *ReadError", err)
+	}
+}
+
+// silentRigsStub puts a `gc` on PATH that answers `bd where` from $STUB_WHERE
+// and never answers `rig list`: it writes its pid, which leads the process
+// group a bounded call runs in, to the file it returns, then waits on a child
+// that holds the call's output, as a child of gc's can.
+func silentRigsStub(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	group := filepath.Join(dir, "group")
+	stub := `#!/bin/sh
+case "$*" in
+"bd where --json") printf '%s\n' "$STUB_WHERE"; exit 0 ;;
+esac
+sleep 60 &
+echo $$ > "$STUB_GROUP"
+wait
+`
+	if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("STUB_GROUP", group)
+	return group
+}
+
+// A rig list that never answers ends at the bound GC_RIG_LIST_TIMEOUT sets,
+// and so does every process it started, whether or not the client has a
+// context of its own: StoreOf reads it as a listing that did not answer, and
+// Route keeps the store gc resolves, as it does over any listing that fails. A
+// client's context that ends first stops the listing at once. Unset or empty,
+// the bound is 120 seconds, the default docs/bead-store-resolution.md gives,
+// and a value that is not a whole number of seconds above 0 is refused before
+// gc is asked.
+func TestARigListThatNeverAnswersEndsAtItsBound(t *testing.T) {
+	group := silentRigsStub(t)
+	t.Setenv("STUB_WHERE", `{"path":"/city/.beads","prefix":"hq"}`)
+	t.Setenv("GC_RIG_LIST_TIMEOUT", "1")
+	const bound = time.Second
+	plain := &Client{bin: "gc"}
+
+	// listing runs read in a goroutine, waits for the stub to start, then calls
+	// stop when there is one, and returns how long read took and what it
+	// returned, once the stub's whole process group is gone. A read that has not
+	// returned once within and stopGrace have passed, and ten seconds more, has
+	// not ended.
+	listing := func(read func() error, stop func(), within time.Duration) (time.Duration, error) {
+		t.Helper()
+		if err := os.Remove(group); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		done := make(chan error, 1)
+		go func() { done <- read() }()
+		pid := stubGroup(t, group)
+		if stop != nil {
+			stop()
+		}
+		select {
+		case err := <-done:
+			took := time.Since(start)
+			groupGone(t, pid)
+			return took, err
+		case <-time.After(within + stopGrace + 10*time.Second):
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			t.Fatalf("the listing had not ended %s after it started", within+stopGrace+10*time.Second)
+			return 0, nil
+		}
+	}
+
+	took, err := listing(func() error { _, _, err := plain.StoreOf("tk-1"); return err }, nil, bound)
+	// A stop that killed gc alone would leave its child holding the listing's
+	// output, and the read would wait out stopGrace for it.
+	if took >= bound+stopGrace {
+		t.Errorf("the listing ended %s after it started, as late as a wait on a child left running", took)
+	}
+	var re *ReadError
+	if !errors.As(err, &re) || re.ID != "tk-1" || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(re.Reason, "did not answer within 1s") {
+		t.Errorf("StoreOf over a listing that never answers = %v; want a *ReadError for tk-1 that names the bound and carries its deadline", err)
+	}
+
+	var routed string
+	_, err = listing(func() (err error) {
+		routed, err = plain.WithContext(context.Background()).Route("tk-1")
+		return err
+	}, nil, bound)
+	if err != nil || routed != "/city/.beads" {
+		t.Errorf("Route over a listing that never answers = %q, %v; want the resolved store, /city/.beads", routed, err)
+	}
+
+	// Under a bound far off, only the context can end the listing.
+	t.Setenv("GC_RIG_LIST_TIMEOUT", "30")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	took, err = listing(func() error { _, _, err := plain.WithContext(ctx).StoreOf("tk-1"); return err }, cancel, 30*time.Second)
+	if !errors.As(err, &re) || !errors.Is(err, context.Canceled) || !strings.Contains(re.Reason, "was stopped") || took >= 10*time.Second {
+		t.Errorf("StoreOf whose context ended first = %v after %s; want a *ReadError carrying the context's stop, at the stop", err, took)
+	}
+
+	for v, want := range map[string]time.Duration{"": 120 * time.Second, "45": 45 * time.Second, "007": 7 * time.Second} {
+		t.Setenv("GC_RIG_LIST_TIMEOUT", v)
+		if got, err := rigListWait(); err != nil || got != want {
+			t.Errorf("GC_RIG_LIST_TIMEOUT=%q bounds the listing by %s, %v; want %s", v, got, err, want)
+		}
+	}
+	os.Unsetenv("GC_RIG_LIST_TIMEOUT")
+	if got, err := rigListWait(); err != nil || got != 120*time.Second {
+		t.Errorf("an unset GC_RIG_LIST_TIMEOUT bounds the listing by %s, %v; want 2m0s", got, err)
+	}
+	log := routeStub(t)
+	t.Setenv("STUB_RIGS", routeRigs)
+	for _, v := range []string{"0", "-5", "+5", " 5", "1.5", "5s", "ten", "99999999999"} {
+		t.Setenv("GC_RIG_LIST_TIMEOUT", v)
+		if _, _, err := plain.RigStore("gc-toolkit"); !errors.As(err, &re) || !strings.Contains(err.Error(), "GC_RIG_LIST_TIMEOUT") {
+			t.Errorf("GC_RIG_LIST_TIMEOUT=%q read the stores as %v; want a *ReadError naming the variable", v, err)
+		}
+		if calls := findCalls(t, log); len(calls) != 0 {
+			t.Errorf("GC_RIG_LIST_TIMEOUT=%q still asked gc %q", v, calls)
+		}
 	}
 }

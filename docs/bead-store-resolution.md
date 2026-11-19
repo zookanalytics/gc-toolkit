@@ -170,12 +170,16 @@ rigs or a prefix no rig carries. The helper writes to stderr only then, so a
 caller may capture both streams in one.
 
 The helper puts one bound on the call, `GC_RIG_LIST_TIMEOUT`, 120 seconds by
-default. The bound exists to cut off a `gc` that never answers, so it sits far
-above what the listing takes on a loaded host, and no caller tunes it as a
-latency budget. A caller under a deadline it does not set bounds the call by the
-time it has left, as it bounds any other call. A doctor check does so within
-`gc doctor`'s per-check timeout, and a board verb within the board's deadline
-for the verb.
+default. gctk's runtime adapter reads the rigs (`gascity.City.Rigs`), and its
+store adapter finds a bead's store by its id's prefix and a rig's store by its
+name (`gcbd.Client.StoreOf`, `gcbd.Client.RigStore`), each by running the
+listing itself under the same variable and default (`gascity.RigListWait`,
+`gcbd.RigListWait`). The bound exists to cut off a `gc` that never answers, so
+it sits far above what the listing takes on a loaded host, and no caller tunes
+it as a latency budget. A caller under a deadline it does not set bounds the
+call by the time it has left, as it bounds any other call. A doctor check does
+so within `gc doctor`'s per-check timeout, and a board verb within the board's
+deadline for the verb.
 
 `gc rig list --json` is slow on a loaded host because of the `running` flag on
 each rig row. Gas City's `doRigList` fills it with `rigHasRunningAgent`. For

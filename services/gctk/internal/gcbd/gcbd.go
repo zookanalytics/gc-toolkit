@@ -217,7 +217,8 @@ const maxDaemonBody = 1 << 20
 // case Show reads straight through bin. db is the store a pinned client names
 // on every call ([Client.In]), empty for the store gc resolves. ctx ends every
 // call the client forks ([Client.WithContext]), and is nil for a client whose
-// calls run to their end.
+// calls run to their end. The listing of stores also ends at a bound of its own
+// ([RigListWait]).
 type Client struct {
 	bin     string
 	httpc   *http.Client
@@ -292,15 +293,55 @@ type listedRig struct {
 	Path   string `json:"path"`
 }
 
-// rigs is each rig `gc rig list --json` names, the city among them. A listing
-// that fails or does not decode returns a *ReadError, which names id when the
-// listing was read to route one.
+// RigListWait bounds each read of the city's rig list when GC_RIG_LIST_TIMEOUT
+// sets none. rig-map.sh and the runtime adapter (gascity.RigListWait) bound
+// their reads by the same variable and default, which cut off a gc that never
+// answers and so sit far above what the listing takes on a loaded host
+// (docs/bead-store-resolution.md, "Reading the rig map").
+const RigListWait = 120 * time.Second
+
+// rigListWait is the bound rigs reads the listing under: GC_RIG_LIST_TIMEOUT's
+// whole seconds, or RigListWait when it is unset or empty. Any other value is
+// an error, as rig-map.sh refuses it too.
+func rigListWait() (time.Duration, error) {
+	v := os.Getenv("GC_RIG_LIST_TIMEOUT")
+	if v == "" {
+		return RigListWait, nil
+	}
+	n, err := strconv.ParseUint(v, 10, 32)
+	if err != nil || n == 0 {
+		return 0, fmt.Errorf("gc rig list was not run: GC_RIG_LIST_TIMEOUT=%q is not a whole number of seconds above 0", v)
+	}
+	return time.Duration(n) * time.Second, nil
+}
+
+// rigs is each rig `gc rig list --json` names, the city among them. The listing
+// ends at rigListWait's bound, or at the client's context when that ends first,
+// and either stop kills every process the listing started. A listing that
+// fails, is stopped or does not decode returns a *ReadError, which names id
+// when the listing was read to route one.
 func (c *Client) rigs(id string) ([]listedRig, error) {
+	limit, err := rigListWait()
+	if err != nil {
+		return nil, &ReadError{ID: id, Reason: err.Error()}
+	}
+	parent := c.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, limit)
+	defer cancel()
 	var stderr bytes.Buffer
-	cmd := c.command("rig", "list", "--json")
+	cmd := c.WithContext(ctx).command("rig", "list", "--json")
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if cause := c.stopped(); cause != nil {
+			return nil, &ReadError{ID: id, Reason: "gc rig list was stopped: " + cause.Error(), Err: cause}
+		}
+		if ctx.Err() != nil {
+			return nil, &ReadError{ID: id, Reason: fmt.Sprintf("gc rig list did not answer within %s", limit), Err: ctx.Err()}
+		}
 		return nil, &ReadError{ID: id, Reason: "gc rig list did not name the stores: " + failure(out, stderr.String())}
 	}
 	var list struct {
