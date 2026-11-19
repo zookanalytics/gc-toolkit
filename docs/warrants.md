@@ -79,8 +79,9 @@ no warrant.
     reads the same record for what gets past it, a forced relaunch and a claimant
     with no poured workflow, so it adds no key and writes nothing to let a run
     through.
-  - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
-    rebases it under an open PR, and waits behind a sibling.
+  - `workspace-setup` waits behind a sibling: when another bead on the branch is
+    in flight in the tree that holds it, the work waits on that bead through a
+    blocks edge and a re-sling armed for when it closes.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
     from one base shares one recorded run, and keys a tracker on a stamp. Core's
     runs each command raw per polecat and matches trackers by title.
@@ -114,16 +115,27 @@ no warrant.
     `internal/sling/sling_attachment.go`, `liveConvoyTrackedWorkflowRoots`: a second
     live root of one formula on one bead is refused, unless `--force` skips the
     lookup, under the lock `withGraphV2SourceWorkflowLock` takes.
+  - `gc worktree` binds a tree to one bead, with that bead's uniquely named
+    branch checked out
+    ([gc worktree](https://docs.gascity.com/reference/cli#gc-worktree)), and
+    `Ensure` in `internal/worktree/worktree.go` adds the tree with git and rolls
+    back when git refuses it. Nothing waits for another bead's tree that holds
+    the branch, or settles which bead's run owns it. The open design inventory
+    #5188 lists ownership and affinity, a task bound to one canonical worktree,
+    among the guarantees worktree enforcement gives, and asks how a setup
+    prevents task and branch ownership races, and #6442 proposes keying a
+    session's worktree to its bound work bead through native provisioning and
+    reaping.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
-  `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
-  branch, and at the handoff detaches the tree and deletes its branch.
+  `workspace-setup`, `self-review` and `submit-and-exit`, and at the handoff
+  detaches the tree and deletes its branch.
 - **Verified.** 2026-11-18, at `gastownhall/gascity` main f932d43b1c and
-  `gastownhall/gascity-packs` main 8ed128846fc.
+  `gastownhall/gascity-packs` main 8ed128846fc. The sibling wait 2026-11-19, at
+  `gastownhall/gascity` main f5302d1dcf, with #5188 and #6442 open.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
-  parked and held work and ends a run by cancelling it. `workspace-setup`: no end
-  is planned for the merge resume, since the refinery brings every branch current
-  by merge and never rebases one
-  ([built-once-target.md](built-once-target.md#merge)).
+  parked and held work and ends a run by cancelling it. `workspace-setup`: Gas
+  City binds a piece of work to one worktree and settles which run owns its
+  branch (gastownhall/gascity#5188, with the per-bead worktrees #6442 proposes).
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
   commit. `submit-and-exit`: the merge and review nouns it holds retire, the
   bring-current guard among them with the old review path (`tk-1tfzr71.122`).
@@ -746,48 +758,3 @@ no warrant.
   arm then becomes a plain `gc sling <pool> <bead> --on <formula>` at arm time,
   and the order, the dispatch lock, the title token, the cap and
   `doctor/check-armed-dispatch-owed` retire.
-
-## Feedback patterns
-
-- **Covers.** The `feedback-pattern` name, the `evidence_count`,
-  `distinct_sources`, `first_seen`, `last_seen`, `promotion_hold`,
-  `proposal_bead`, `proposal_carrier`, `proposal_action` and `remedy_note`
-  keys, in the `[metadata.learning]` table of `lifecycle/lifecycle.toml`. Their
-  writer: `formulas/mol-feedback-distiller.toml`. The pattern's lifecycle is in
-  [feedback-learning.md](feedback-learning.md).
-- **Stands in for.** A learning loop's decision about one recurring piece of
-  agent feedback, kept as work. The record gathers the observations that report
-  the feedback and keeps the evidence they add up to, such as how many distinct
-  events and sources report it. It carries the decision to adopt a standing
-  rule, to wait for more evidence or to dismiss the feedback, and it closes once
-  resolved and reopens when the feedback recurs.
-- **Evidence.**
-  - In `gastownhall/gascity`, no order or formula of the bundled `core` pack
-    reads agent feedback (its `orders/` and `formulas/` directories under
-    `internal/bootstrap/packs/core/`). `gc prompt synth`, which writes a role's
-    prompt, works from a meta-prompt and a baseline template and takes no
-    feedback (`docs/reference/cli.md`).
-  - In `gastownhall/beads`, what keeps knowledge holds no decision.
-    `bd remember` stores a text that `bd prime` injects into each session
-    (`rememberCmd` in `cmd/bd/memory.go`). The Memory Beads proposal (issue
-    #5877, open) would add a Memory Bead, which never becomes ready, blocked,
-    claimed, completed or closed (R1), keeps evidence and confidence as an
-    application's metadata (R3), and leaves judging whether its content is
-    true, duplicated or contradictory to tools outside bd (R30). Either could
-    hold an adopted rule but not the decision to adopt it, and no memory type
-    is in `internal/types/types.go`.
-  - In `gastownhall/gascity-packs`, the packs that capture learnings keep one
-    record per learning. compound-engineering's `ce-compound` skill writes or
-    updates a solution doc, and gstack's skills log each learning to a
-    per-project `learnings.jsonl`. Neither counts how often a piece of feedback
-    recurs or decides whether it becomes a standing rule.
-  - So a pattern is a task the distiller triages, and its lifecycle composes
-    bd's own work states: the `deferred` status with a date (`bd defer
-    --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
-    The search is
-    [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-19, at `gastownhall/gascity` main 7b5614ac70d1,
-  `gastownhall/beads` main 2549ece6e05e and `gastownhall/gascity-packs` main
-  b3e779f03aec.
-- **Retires when.** Gas City ships a loop that decides agents' recurring
-  feedback as work, with the evidence each decision rests on.

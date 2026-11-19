@@ -384,9 +384,10 @@ that ports it deletes the shell it replaces, and the PR's size line
 Feedback is the miner and distiller formulas, the learning-distill skill and
 their orders, and saying each fact once is the only cut its estimate takes.
 Config is `pack.toml`, the check index, the overlays, the pack command, and a
-key registry that declares only the keys of surviving warranted nouns, as data:
-1,494 of the registry's 1,854 lines are comments today. Doctrine is the shared
-fragments and skills, with each doctrine sentence in one home.
+key registry that declares the keys of surviving warranted nouns and the keys of
+the pack's own kinds of work, as data: 1,494 of the registry's 1,854 lines are
+comments today. Doctrine is the shared fragments and skills, with each doctrine
+sentence in one home.
 
 ### Keeper sub-pack
 

@@ -887,7 +887,7 @@ done
 have "the skill looks for the finding in the stores themselves before it files again" \
     'GC_NO_API=1 gc beads list --label upstream-finding' "$EXTERNAL"
 lacks "the skill gives a finding no pack kind: bd's status, label and edge carry it" 'task_kind' "$EXTERNAL" \
-    "nothing counts findings or branches on one, and a pack kind is a pack noun that needs a warrant (docs/warrants.md)"
+    "nothing counts findings or branches on one, and bd's status, label and edge carry it, the primitives a new kind of bead looks for first (AGENTS.md)"
 for probe in '--status deferred' 'isSecurityPolicyEnabled' 'private-vulnerability-reporting'; do
     lacks "…and the doc does not: $probe" "$probe" "$OUTBOUND" "each command an agent runs lives only in the skill"
 done
