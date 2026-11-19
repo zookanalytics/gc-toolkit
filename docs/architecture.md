@@ -98,6 +98,13 @@ Everything else reads.
 Dependabot's or one from a fork, stays outside the city's landing, even when it
 is open from a work bead's branch.
 
+**A gascity fork's rebase.** The gascity-keeper sub-pack rebases a city's
+gascity fork onto upstream, and the operator lands each rebase with a
+force-push onto the fork's `main`. No agent force-pushes that branch, the
+refinery included. The sub-pack's landing check then writes the landing on the
+rebase bead. [fork-patching.md](fork-patching.md#agent-driven-rebase) holds the
+procedure.
+
 **Beside the ledger.** The pack also keeps files of its own. Some hold a run's
 progress, such as a paced cadence arm's cursor or the job directory of the
 refinery's merge gate. `gctk rig`'s check records differ, because a later call
