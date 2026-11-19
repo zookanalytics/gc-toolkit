@@ -645,9 +645,9 @@ no warrant.
     and never the role key `task_kind` that a rework child carries. The search
     is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main 294079d53f57, with
+- **Verified.** 2026-11-19, at `gastownhall/gascity` main f5302d1dcfd5, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
-  main 0f07496d2fa4.
+  main 23d007dac5d4.
 - **Retires when.** Gas City files a request for a pull request's branch that
   the run already attached to the PR's bead works, with no pool to claim it,
   such as a PR monitor that hands its repair to that run. The ask then moves
