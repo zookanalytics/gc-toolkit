@@ -214,11 +214,10 @@ conversation holds the PR's merge, and the head it left takes steps 6 to 8 as
 any other head does.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a `gc` build that moves the text the seed
-audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
-the cadence), or the landing order for a PR on the pending record, records PR
-events and files a human gate, a pack order salvages a dead session's unpushed
-work, a pack order runs `gc doctor` and records each run, which the board shows,
+`gc` build that moves the text the seed audit renders — are handled by these
+reactive paths: `pr-facts.sh` (an arm of the cadence), or the landing order for
+a PR on the pending record, records PR events and files a human gate, a pack
+order runs `gc doctor` and records each run, which the board shows,
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
 edit no writer saw, and `seed-audit-reaudit.sh`, which a landing on the default
 branch calls, slings the one re-render of the default branch's
@@ -226,11 +225,13 @@ branch calls, slings the one re-render of the default branch's
 healer category: writers complete their own transitions, so nothing
 reconstructs pack-written state after the fact.
 
-Gas City's controller recovers a pool seat that holds work and either goes
-quiet or is refused by its provider for a rate limit. It does not act on a pool
-seat that keeps printing while its work stands still, and a pack order files a
-finding on that seat. No pack order releases a dead session's claim, and no part
-of the pack kills a stuck session.
+A session dying is Gas City's to recover. Its controller and core's orphan
+sweep release the dead session's claim, and the session that next claims the
+work resumes in the worktree the bead records. The controller also recovers a
+pool seat that holds work and either goes quiet or is refused by its provider
+for a rate limit. It does not act on a pool seat that keeps printing while its
+work stands still, and a pack order files a finding on that seat. No pack order
+releases a dead session's claim, and no part of the pack kills a stuck session.
 
 ## What the pack supplies and what a rig supplies
 

@@ -311,9 +311,11 @@ orders. Its controller releases a dead session's pool claims, ends the
 processes a closed session left behind, collects wisps and reaps a closed
 bead's worktree, and its work ladder recovers a stuck pool seat. The pack's
 patrol work runs as orders, one that looks and records an event and another
-that acts on it: one pair saves a dead owner's unpushed work, one files a
-finding on a pool seat that keeps printing while its work stands still, and one
-files a human gate on a refinery handoff that has waited too long. The witness
+that acts on it: one pair files a finding on a pool seat that keeps printing
+while its work stands still, and the other files a human gate on a refinery
+handoff that has waited too long. A dead session's work needs no pack order,
+because the session that next claims it resumes in the worktree the bead
+records. The witness
 triages HELP and NOTICE mail, and the mail wakes it. An order runs `gc doctor`
 each hour and records the run, and the board shows the checks that keep
 failing, when doctor last ran, each monitor order's last good run and the
@@ -329,9 +331,9 @@ commit the refinery's copy follows. Each remaining difference names its reason
 and what ends it:
 
 - **No patrol loop.** Mail wakes the witness, and the scripted steps of Gas
-  Town's loop run as orders that look and orders that act, because code does
-  the work that needs no judgment (conversation tk-9l9pg0x). This ends when Gas
-  Town's witness runs its scripted steps outside its session.
+  Town's loop that the city keeps run as orders that look and orders that act,
+  because code does the work that needs no judgment (conversation tk-9l9pg0x).
+  This ends when Gas Town's witness runs its scripted steps outside its session.
 - **Reading our anchors, PR states and conversations.** Our pipeline writes them.
   This ends as the retirements of the old merge path (tk-1tfzr71.70) and the
   old review path (tk-1tfzr71.122) land.
@@ -341,13 +343,13 @@ and what ends it:
   because the operator ruled at tk-rl8gz4b.29's design that it stays and the
   city runs no mayor. This ends when an operator ruling gives escalation to a
   seat.
-- **Recovery returns nothing to the pool.** Gas Town's reopens a dead owner's
-  bead. Gas City's controller and core's orphan sweep release the claim within
-  minutes, and a second writer raced them. This ends when Gas Town's witness
-  leaves the release to them.
-- **Salvage keeps `work_dir`.** Gas Town's moves the path to `artifact_dir`,
-  and our polecats resume from `work_dir`. This ends when the work formula
-  records `artifact_dir`.
+- **No orphan recovery.** Gas Town's witness salvages a dead owner's worktree
+  and reopens its bead. Here Gas City's controller and core's orphan sweep
+  release the claim within minutes, which a second writer would race, and the
+  session that next claims the work resumes in the worktree the bead records
+  (conversation tk-5deozip). Nothing reports an open bead assigned to a dead
+  session that no pool reclaims, a gap that ruling accepts. This ends when Gas
+  Town's witness leaves recovery to Gas City.
 - **A finding in place of a warrant on a stuck polecat.** A pool seat is judged
   by its own writes and gets a finding, because the work ladder recovers a
   quiet seat and no dog serves a warrant here. This ends when Gas City paces a
