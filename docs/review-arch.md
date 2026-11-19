@@ -56,17 +56,21 @@ operational surface, and neither are tests or the fixtures they use.
    message. A change that does not show it is a finding. So is a search Gas
    City's documentation refutes, and that finding names the primitive the
    change should compose instead.
-2. **A pack noun carries a warrant.** A pack noun is a kind of object or state
-   the pack defines for itself, such as a bead kind or a lifecycle state. Its
-   warrant is a dated record of the Gas City primitive it stands in for, the
-   evidence that Gas City lacks it, and the trigger that retires it. The warrant
-   lands in [warrants.md](warrants.md) in the same change. A new pack noun
-   without one is a finding. Glue that runs a series of native calls as one call
-   adds no noun, as long as it adds no semantics that Gas City's own mechanisms
-   express, such as claim leases, assignment, continuation groups and waits.
-   Formulas and orders need no warrant either. A new order or step cluster still
-   shows the search, because Gas City may already ship the job or the loop it
-   adds.
+2. **A pack noun carries a warrant.** A pack noun is a state or a mechanism
+   the pack defines for itself, such as a lifecycle state, a wait, a hold or a
+   claim. Its warrant is a dated record of the Gas City primitive it stands in
+   for, the evidence that Gas City lacks it, and the trigger that retires it.
+   The warrant lands in [warrants.md](warrants.md) in the same change. A new
+   pack noun without one is a finding. A new kind of bead the pack's own work
+   defines, such as a feedback pattern, adds no pack noun while its state is
+   the platform's own, such as bd's status, its edges and its gates, and its
+   keys only record what its work found or decided. It needs no warrant, and
+   it still shows its search under check 1. Glue that runs a series of native
+   calls as one call adds no noun, as long as it adds no semantics that Gas
+   City's own mechanisms express, such as claim leases, assignment,
+   continuation groups and waits. Formulas and orders need no warrant either. A
+   new order or step cluster still shows the search, because Gas City may
+   already ship the job or the loop it adds.
 3. **A converter is a finding on sight.** A converter keeps a pack noun in step
    with one of Gas City's ([pack nouns and converters](#pack-nouns-and-converters)).
    It is a finding whatever else the change does well. It means Gas City now
