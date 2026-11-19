@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 func main() {
@@ -14,6 +13,5 @@ func main() {
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
-		Exec:   syscall.Exec,
 	}))
 }
