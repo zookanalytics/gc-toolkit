@@ -903,15 +903,28 @@ only runs that ended after the bead's last `review-run-failed` gate closed, it
 files a human gate keyed `review-run-failed` instead, naming both runs and how
 each ended ([state-machine.md](state-machine.md#checks)).
 
-**A pour cut short.** Gas City's attach writes the review run, and then the
-bead's `blocks` edge onto its root in a write of its own
-(`wireFormulaCookGraphV2AttachRoot`, gascity `cmd/gc/cmd_formula.go`). A pour
-that stops between the two leaves a review run that no edge of the bead names,
-so the next run of the order finds none attached and pours a second at that
-head. That costs one more review of the head, because a review run pushes only
-under a lease on the head its round judged, and Gas City's claim retires the
-first once the refinery is assigned the bead. The fix belongs upstream, in Gas
-City's attach onto a bead.
+**A pour cut short.** The pour is one `gc formula cook --attach`. It writes the
+bead's input convoy, then the review run, and last, in a write of its own, the
+bead's `blocks` edge onto the run's root (`wireFormulaCookGraphV2AttachRoot`,
+gascity `cmd/gc/cmd_formula.go`). A launch that stops between the run's write
+and the edge's leaves a review run that no edge of the bead names. bd writes
+the run in one transaction, so that run is whole, unless a transient failure
+had Gas City write it bead by bead (`Instantiate`, gascity
+`internal/molecule/molecule.go`), where a launch that stops partway leaves part
+of one. A launch stops there when Gas City
+ends the order's run at the order's timeout, which ends the run's process group
+and each group the run started, the cook's among them (`shellExecRunner`,
+gascity `cmd/gc/order_dispatch.go`), when the host goes down, or when the store
+fails the edge's write, on which the cook exits non-zero and leaves the run.
+The next run of the order then finds no run attached and pours a second at
+that head. That costs one more review of the head, because a review run pushes
+only under a lease on the head its round judged, and Gas City's claim retires
+the first once the refinery is assigned the bead. Gas City does not promise one
+run per bead here: each attach onto a bare bead makes an input convoy of its
+own, and "A caller that wants stable grouping or dedupe should create and
+target an explicit convoy" (gascity
+`engdocs/design/convoy-first-formulas-and-drain-v0.md`). The pack carries no
+code for this gap.
 
 **How the refinery hears of a changed head.** A changed head is the refinery's
 to take once no withdrawal is open on the bead and no review run is attached to
