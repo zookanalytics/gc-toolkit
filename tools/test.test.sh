@@ -119,14 +119,20 @@ run() {
 # kinds -> the kinds the log shows, in order, one word each.
 kinds() { printf '%s\n' "$CALLS" | awk '{ print $1 }' | uniq | tr '\n' ' '; }
 
+# fmake [NAME=value ...] make <args...> — a make in the fixture, clear of the
+# make that may be running this suite, such as CI's `make test`. A make hands
+# its flags and its command-line variables, RUN_TESTS_FLAGS among them, to the
+# makes it starts, which also print the directories they enter.
+fmake() { (cd "$REPO" && env -u MAKEFLAGS -u MFLAGS -u MAKELEVEL -u MAKEOVERRIDES -u RUN_TESTS_FLAGS -u BASE "$@"); }
+
 echo "── the Makefile's two targets ──"
-eq "$(cd "$REPO" && make -n test)" "tools/test.sh all " "make test runs test.sh all"
-eq "$(cd "$REPO" && make -n test-affected)" "tools/test.sh affected origin/main " "make test-affected runs test.sh affected against origin/main"
-eq "$(cd "$REPO" && make -n test-affected BASE=base RUN_TESTS_FLAGS='-j 2 --seconds s.tsv')" "tools/test.sh affected base -j 2 --seconds s.tsv" \
+eq "$(fmake make -n test)" "tools/test.sh all " "make test runs test.sh all"
+eq "$(fmake make -n test-affected)" "tools/test.sh affected origin/main " "make test-affected runs test.sh affected against origin/main"
+eq "$(fmake make -n test-affected BASE=base RUN_TESTS_FLAGS='-j 2 --seconds s.tsv')" "tools/test.sh affected base -j 2 --seconds s.tsv" \
   "BASE replaces the base, and RUN_TESTS_FLAGS follows it"
-eq "$(cd "$REPO" && make -n test RUN_TESTS_FLAGS='-j 2')" "tools/test.sh all -j 2" "RUN_TESTS_FLAGS follows all too"
+eq "$(fmake make -n test RUN_TESTS_FLAGS='-j 2')" "tools/test.sh all -j 2" "RUN_TESTS_FLAGS follows all too"
 : > "$LOG"
-OUT="$(cd "$REPO" && env STUB_LOG="$LOG" STUB_ICU="$TMP/icu" STUB_BUILD="$BUILT_SAME" PATH="$STUBS:$PATH" make test 2>&1)"; RC=$?
+OUT="$(fmake STUB_LOG="$LOG" STUB_ICU="$TMP/icu" STUB_BUILD="$BUILT_SAME" PATH="$STUBS:$PATH" make test 2>&1)"; RC=$?
 eq "$RC" 0 "make test runs to a pass"
 eq "$(awk '{ print $1 }' "$LOG" | uniq | tr '\n' ' ')" "go npm shell " "…through go, npm and the runner"
 
