@@ -46,6 +46,16 @@ run:
   a review round, a rework's round included. bd then reads the conversation as
   ready work, and Gas City wakes the sitting with its thread, as it wakes a
   staying sitting today when its work closes.
+- **Whoever sends the work promises its return, as the send is made.** The
+  sitting promises each piece of work it sends itself, before it signs off:
+  new work, the conversation's own subject, and another PR it sends back. The
+  sign-off promises what its own call sends, the PR under discussion that you
+  send back and a recommendation you accept, and each PR whose merge the
+  conversation holds. The sign-off cannot promise the sitting's own sends,
+  because the record cannot tell work just sent from an exchange you settled:
+  new work can open its PR before the sign-off runs. Work the sitting sends
+  without its promise, on a PR the conversation does not hold, comes back only
+  after it merges, as a stay does today (section 1).
 - **The return gate is defined once, in gctk.** The definition says what the
   gate is, who files it, what closes it and when, and how each reader tells
   that the city closes it and no person does (section 2). It is the only gate
