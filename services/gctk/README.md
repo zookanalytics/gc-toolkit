@@ -123,9 +123,9 @@ records the design and its measured cost.
 
 `serve` runs a copy of the rig's UI from the checkout it is called in: the serve
 command its caller passes, with bash at the checkout's top, on a free loopback
-port it is given as `$PORT`, inside the sandbox that
-`assets/scripts/demo-engine-lib.sh` defines for a demo capture, which
-`GCTK_SCRIPTS_DIR` names. The copy is up once it answers on that port, or once
+port it is given as `$PORT`, through `assets/scripts/demo-engine-lib.sh`, which
+`GCTK_SCRIPTS_DIR` names, and which runs it inside the sandbox it defines for a
+demo capture when the rig keeps that sandbox. The copy is up once it answers on that port, or once
 the command prints the URL of the app it brought up, such as an iOS app on a
 simulator, and the report's `app_url` says where its app is. A demo capture's
 `--serve` starts one with no address and points the engine at its `app_url`. The
