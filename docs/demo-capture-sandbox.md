@@ -51,6 +51,13 @@ macOS's `sandbox-exec` applies one profile, which the pack writes for the run,
 to the first process and to every process that one starts. A host without
 `sandbox-exec` runs no capture, of any rig.
 
+A copy runs as its rig's setting read when the copy started, until it stops.
+So a copy that started while the setting read `"false"` still runs as an
+ordinary process once the rig keeps the sandbox, and a capture of the rig takes
+it as though it ran inside, whether `--serve` finds it running or a
+`--base-url` names its port. `gctk rig serve --stop`, run from the copy's
+checkout, ends it, and the rig's next copy starts inside the sandbox.
+
 ## What it guarantees
 
 A process inside the sandbox:
