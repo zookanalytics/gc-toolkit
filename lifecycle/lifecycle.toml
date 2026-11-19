@@ -1600,7 +1600,10 @@ keys = [
 #   the operator's terminal as the sitting's last words. Absent, the tab says
 #   the sitting recorded no hand-back. Once the conversation reads closed,
 #   pr-sitting-comment.sh shows the text word for word as the visit's conclusion
-#   in its comment on the subject's PR. Never cleared. Freeform multi-line text.
+#   in its comment on the subject's PR. The rig board reads both through gctk's
+#   listing and opens an open decision's Details with the newest hand-back on a
+#   conversation that tracks it, open or closed. Never cleared. Freeform
+#   multi-line text.
 # gc.ruling_consequence — on a conversation, the open PR each of its rulings'
 #   --rework or --retire acts on: a JSON object from the ruling's answer
 #   (`ruled: <ruling>`) to {act, anchor, child}, act `rework` or `retire`,

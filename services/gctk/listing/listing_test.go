@@ -1,7 +1,9 @@
 package listing
 
 import (
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -123,6 +125,49 @@ func TestListingReadsTheClosedBeadsUnderAParent(t *testing.T) {
 	}
 	if closed[1].WorkOutcome != "shipped" || closed[0].Description != "Aim: land one" {
 		t.Errorf("closed = %+v", closed)
+	}
+}
+
+// The beads that record a hand-back are read in one read of the store that
+// reaches closed beads, each with its hand-back and when it was recorded, a
+// live one among them as the listing decoded it. A read that fails is an
+// error, not an empty answer.
+func TestListingReadsTheHandBacks(t *testing.T) {
+	s := rig()
+	tracks := func(id string) gcbd.Edge { return gcbd.Edge{Type: "tracks", ID: id} }
+	s.Put(fake.Bead{ID: "tk-c1", Title: "talk it over", Status: "closed", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c1",
+		Edges:    []gcbd.Edge{tracks("tk-decide")},
+		Metadata: map[string]string{"gc.handback": "tk-decide — ruled\nkeep it", "gc.handback_at": "2026-01-03T00:00:00Z"}})
+	s.Put(fake.Bead{ID: "tk-c2", Title: "talk it over again", Status: "in_progress", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c2",
+		Edges:    []gcbd.Edge{tracks("tk-decide")},
+		Metadata: map[string]string{"gc.handback": "tk-decide — still open", "gc.handback_at": "2026-01-04T00:00:00Z"}})
+	ls, err := read(ledger.New(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(s.Finds())
+	got, err := ls.HandedBack()
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.SortFunc(got, func(a, b Bead) int { return strings.Compare(a.ID, b.ID) })
+	if !slices.Equal(ids(got), []string{"tk-c1", "tk-c2"}) {
+		t.Fatalf("handed back = %v, want both conversations, the closed one among them", ids(got))
+	}
+	if got[0].Handback != "tk-decide — ruled\nkeep it" || got[0].HandbackAt != "2026-01-03T00:00:00Z" || got[1].HandbackAt != "2026-01-04T00:00:00Z" {
+		t.Errorf("handed back = %+v", got)
+	}
+	if finds := s.Finds()[before:]; len(finds) != 1 || finds[0].HasKey != "gc.handback" || !finds[0].Closed {
+		t.Errorf("finds = %+v, want one read of every bead carrying gc.handback, closed ones included", finds)
+	}
+	for _, b := range ls.Live() {
+		if b.ID == "tk-c2" && b.Handback != "tk-decide — still open" {
+			t.Errorf("the live conversation reads %+v", b)
+		}
+	}
+	s.FindErr = errors.New("the store is down")
+	if _, err := ls.HandedBack(); err == nil {
+		t.Error("a failed read answered with no hand-backs")
 	}
 }
 
