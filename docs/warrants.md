@@ -117,8 +117,8 @@ no warrant.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-18, at `gastownhall/gascity` main 5b7728de34 and
-  `gastownhall/gascity-packs` main 0f07496d2fa.
+- **Verified.** 2026-11-18, at `gastownhall/gascity` main f932d43b1c and
+  `gastownhall/gascity-packs` main 8ed128846fc.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
   is planned for the merge resume, since the refinery brings every branch current
