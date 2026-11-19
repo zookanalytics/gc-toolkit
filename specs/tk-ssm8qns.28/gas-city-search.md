@@ -47,7 +47,10 @@ Each was read on 2026-11-19:
   route-scoped dispatch. It is a mark a writer sets on the bead itself, so it
   cannot say that a bead is a person's move because a gate, a decision, a
   conversation or a pull request it waits on is one. No pack writer sets it,
-  and no bead in the city's seven stores carries it, live or closed.
+  and no bead in the city's seven stores carries it, live or closed. gctk's
+  armed start leaves it out of what it starts, as Gas City's pool does
+  (`serveRule`, `services/gctk/arm/arm.go`), and `queue` does not yet read it
+  (tk-whnukvi, held for placement).
 - **Gas City's hold labels.** `hold:mayor` and `hold:external` name a bead's
   required next actor (`DispatchHoldLabels`,
   `internal/beadmeta/hold_labels.go`;

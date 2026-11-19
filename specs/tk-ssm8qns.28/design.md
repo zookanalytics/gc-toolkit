@@ -338,4 +338,6 @@ as the proof, so it lands first.
   gathering lives in, `gather.go`, and whichever of the two builds second
   merges with the other.
 - `queue` keeps its rule for whether the city takes a bead, and `waits` its
-  rule for what holds one. `standing` asks both.
+  rule for what holds one. `standing` asks both. `queue` reads armed or routed
+  work that carries bd's `human` label as taken, though no pool serves it, and
+  tk-whnukvi, held for placement, carries that gap. No bead carries the label.
