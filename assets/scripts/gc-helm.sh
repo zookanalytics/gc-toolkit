@@ -20,7 +20,7 @@
 # open_parity_test.go), converse (takeaway, handback) and the proactive worker
 # (takeaway), operators by hand (park, priority, place), and helm-svc's
 # conversation form on the operator's terminal (conversations, open, engage,
-# po and mechanik).
+# po, mechanik and postmaster).
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable, no city root or flock for Accept's lock — each failure names
 # its own operator move),
@@ -65,9 +65,10 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm  on a terminal, engage's form, the way in, whose tabs start a conversation, return to one, or open mechanik or a rig's Product Owner from the People page; without a terminal, this usage and exit 2
+  gc-helm  on a terminal, engage's form, the way in, whose tabs start a conversation, return to one, or open mechanik, the postmaster or a rig's Product Owner from the People page; without a terminal, this usage and exit 2
   gc-helm po --rig <name>  attach to the rig's Product Owner: a live sitting as it stands, and any other through the controller's start, which opens a new sitting with its prompt
   gc-helm mechanik  attach to mechanik, the city's one, waiting while the controller starts it
+  gc-helm postmaster  attach to the postmaster, the city's one, which works through your mailbox with you: a live sitting as it stands, and any other through the controller's start, which opens a new sitting with its prompt
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; a conversation about an open PR, or a bead of one, holds the PR's merge until it closes; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and the hold on an open PR's merge only while the conversation waits in the queue, since a sitting that has taken it keeps or lifts that hold; one no longer open on the bead or holding another ask files nothing (exit 4); a gate several open beads wait on files the conversation about the one whose wait on it is oldest, with a note naming the others; --from names the bead a gate was reached from, and such a gate files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; --json answers the subject, filed:false, the moment it is filed, and open's last answer is the one that counts, so a subject filed whose conversation is not is named for a re-run onto it
   gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or of several waiting the --from bead when it is one of them and otherwise the one whose wait on it is oldest, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject (a bead or a PR, or a rig's name or prefix typed there for a new topic in that rig), question, model and whether to attach on one screen, filled in from the command line, where --rig fills in the subject and --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
@@ -209,23 +210,23 @@ the operator a second time.
 
 A bare gc-helm on a terminal opens engage's form on starting a conversation.
 The form's pages are tabs at its top: starting a conversation (Ctrl+N),
-returning to one (Ctrl+R), and People (Ctrl+P), which lists mechanik and each
-rig's Product Owner with the state of its session. A page's key goes to it
+returning to one (Ctrl+R), and People (Ctrl+P), which lists mechanik, the
+postmaster and each rig's Product Owner with the state of its session. A page's key goes to it
 from any page and field. ↑ from the subject reaches the tabs, and ←/→ move along
-them. Enter on a person leaves the form and then runs `gc-helm po --rig <name>`
-or `gc-helm mechanik`, so what the verb prints stays on the terminal and its
+them. Enter on a person leaves the form and then runs `gc-helm po --rig <name>`,
+`gc-helm mechanik` or `gc-helm postmaster`, so what the verb prints stays on the terminal and its
 exit status is the form's. A seat takes no question, because Gas City's attach
 carries no message, so the sitting's purpose is given in the sitting. Each rig
 has its own Product Owner, which works that rig's queue and epics, and none
-runs in the city's HQ; mechanik is one for the city. Each verb is `gc session
+runs in the city's HQ; mechanik and the postmaster are each one for the city. Each verb is `gc session
 attach` on the seat's session, by the name `gc agent list` gives it:
-<rig>/<binding>.po for a rig's Product Owner and <binding>.mechanik for
-mechanik, where <binding> is the name the city imports this pack under. It
+<rig>/<binding>.po for a rig's Product Owner, and <binding>.mechanik and
+<binding>.postmaster for the city's two, where <binding> is the name the city imports this pack under. It
 joins a running session as it stands. For a seat that is not running, it asks
 the city's controller to start the session, waits for it to run and then
 attaches, and the controller's start gives the agent its prompt as its first
-message. The Product Owner starts fresh, so a sitting of it that slept or
-ended comes back as a new sitting. A failed attach exits 4 once gc has said
+message. The Product Owner and the postmaster start fresh, so a sitting of
+either that slept or ended comes back as a new sitting. A failed attach exits 4 once gc has said
 why.
 
 dismiss ends the sitting. react slings a proactive first reaction on the bead
@@ -5820,7 +5821,7 @@ helm_form() {
         [ -z "$_hf_root" ] || _hf_bin="$_hf_root/.gc/services/helm/bin/helm-svc"
     fi
     if [ -z "$_hf_bin" ] || [ ! -x "$_hf_bin" ]; then
-        echo "$PROG: $_hf_verb: the conversation form is helm-svc's, and no helm-svc binary is built${_hf_bin:+ at $_hf_bin}. Build it with \"\$(gc gc-toolkit scripts-dir)/gc-build.sh\" helm, or name everything on the command line: $PROG engage <subject> --reason \"<question>\" --no-input to start, $PROG attach <conversation> to return, $PROG po --rig <name> to open a rig's Product Owner, $PROG mechanik to attach to mechanik." >&2
+        echo "$PROG: $_hf_verb: the conversation form is helm-svc's, and no helm-svc binary is built${_hf_bin:+ at $_hf_bin}. Build it with \"\$(gc gc-toolkit scripts-dir)/gc-build.sh\" helm, or name everything on the command line: $PROG engage <subject> --reason \"<question>\" --no-input to start, $PROG attach <conversation> to return, $PROG po --rig <name> to open a rig's Product Owner, $PROG mechanik to attach to mechanik, $PROG postmaster to open the postmaster." >&2
         exit 3
     fi
     exec "$_hf_bin" form --helm "$SCRIPT_PATH" --models "$(engage_list_models | paste -s -d, - 2>/dev/null || true)" "$@"
@@ -6021,7 +6022,7 @@ conversations_all() {
         if [ -z "$_ca_roster" ]; then
             _ca_roster_unread=true
             echo "$PROG: conversations: could not read 'gc agent list', which gives each seat's session its name, so no seat is listed." >&2
-        elif ! _ca_seats=$(printf '%s' "$_ca_list" | scrub | jq -c --argjson rigs "$_ca_rigs" --argjson roster "$_ca_roster" --arg mechanik "$MECHANIK_TEMPLATE" --arg po "$PO_TEMPLATE" "$SEAT_NAMES_JQ$SEATS_JQ" 2>/dev/null); then
+        elif ! _ca_seats=$(printf '%s' "$_ca_list" | scrub | jq -c --argjson rigs "$_ca_rigs" --argjson roster "$_ca_roster" --arg mechanik "$MECHANIK_TEMPLATE" --arg postmaster "$POSTMASTER_TEMPLATE" --arg po "$PO_TEMPLATE" "$SEAT_NAMES_JQ$SEATS_JQ" 2>/dev/null); then
             echo "$PROG: conversations: the seats could not be read from 'gc session list'. Nothing listed." >&2
             exit 4
         fi
@@ -6188,13 +6189,15 @@ cmd_attach() {
     exit 2
 }
 
-# ── The seats: a rig's po, and mechanik ──────────────────────────────
+# ── The seats: a rig's po, mechanik and the postmaster ───────────────
 # The seats the operator sits with, each opened in one step, each a row of the
 # People page in engage's form and each a command of its own. A rig's po, the
 # operator's prioritization partner for that rig's work, is the rig's
 # on-demand named session, which a sitting opens and a drain-ack ends.
 # Mechanik, the operator's standing conversation, is one named session for the
-# city, which the controller keeps running. Each verb is Gas City's attach on
+# city, which the controller keeps running. The postmaster, which works through
+# the operator's mailbox with them, is one on-demand named session for the
+# city, which a sitting opens and a drain-ack ends, as a po's does. Each verb is Gas City's attach on
 # the seat's session, which owns the seat's start and the wait for it: it
 # attaches to a running session, and asks the city's controller to start one
 # that is not running, so the agent takes its prompt as its first message, then
@@ -6203,12 +6206,13 @@ cmd_attach() {
 #
 # Gas City names a seat's session as it names the agent that runs it, after
 # the binding the city imports the pack under, and a rig's po after its rig as
-# well: <binding>.mechanik and <rig>/<binding>.po. The binding is the city's to
+# well: <binding>.mechanik, <binding>.postmaster and <rig>/<binding>.po. The binding is the city's to
 # choose, so the verbs and the People page take a seat's name from the city's
 # agent roster (SEAT_NAMES_JQ), and know a seat only by its template, the agent
 # pack.toml's [[named_session]] stanza names.
 PO_TEMPLATE="po"
 MECHANIK_TEMPLATE="mechanik"
+POSTMASTER_TEMPLATE="postmaster"
 
 # $SEAT_NAMES_JQ — defines seat_names($template; $rig): from the agent roster
 # given as input (`gc agent list --json`), the qualified name of each agent
@@ -6227,10 +6231,11 @@ SEAT_NAMES_JQ='
 # $SEATS_JQ — the seats, as `conversations --json` lists them for the People
 # page, from a `gc session list --json` given as input, with the rigs a new
 # topic can be filed in as $rigs, which leave out the city's HQ, the agent
-# roster as $roster and the seats' templates as $mechanik and $po. It runs after
-# $SEAT_NAMES_JQ. Mechanik comes first, then each rig's po in the order the
-# rigs are listed, each as {seat, rig, session}: seat is the verb that opens
-# it, rig is the po's rig by its name and empty for mechanik, and session is
+# roster as $roster and the seats' templates as $mechanik, $postmaster and $po.
+# It runs after $SEAT_NAMES_JQ. Mechanik comes first, then the postmaster, then
+# each rig's po in the order the rigs are listed, each as {seat, rig, session}:
+# seat is the verb that opens it, rig is the po's rig by its name and empty for
+# the city's two, and session is
 # the open session the list holds under the seat's name, {id, name, state,
 # attached, created_at} with Gas City's own state, or null when it holds none,
 # as for a po that has never run. A seat the roster gives no name, or several,
@@ -6248,6 +6253,7 @@ SEATS_JQ='
                         created_at: ((.created_at // "") | tostring)}) // null)} ]
       else [] end;
   seat("mechanik"; ""; $roster | seat_names($mechanik; ""))
+  + seat("postmaster"; ""; $roster | seat_names($postmaster; ""))
   + [ $rigs[] | .name as $r | seat("po"; $r; $roster | seat_names($po; $r))[] ]
 '
 
@@ -6257,9 +6263,10 @@ SEATS_JQ='
 # takes --rig <name>, the rig whose po it is, named exactly, as open
 # --new-subject --rig takes it, and refuses (exit 4) a rig the city has not,
 # the city's HQ, where Gas City stamps no rig's named session, or a suspended
-# rig, where it starts no session. mechanik takes no argument. A roster that
-# cannot be read, or that names no session for the seat or several, exits 4
-# attaching nothing, and so does a failed attach, after gc has said why.
+# rig, where it starts no session. mechanik and the postmaster take no
+# argument. A roster that cannot be read, or that names no session for the
+# seat or several, exits 4 attaching nothing, and so does a failed attach,
+# after gc has said why.
 cmd_seat() {
     _seat_verb="$1"; _seat_tmpl="$2"; _seat_name="$3"; shift 3
     _seat_rig=""; _seat_rig_set=0
@@ -6267,7 +6274,7 @@ cmd_seat() {
         case "$1" in
             -h|--help) usage; exit 0 ;;
             --rig=*|--rig)
-                [ "$_seat_verb" = po ] || { echo "$PROG: $_seat_verb: unknown flag '$1': mechanik is one for the city" >&2; exit 2; }
+                [ "$_seat_verb" = po ] || { echo "$PROG: $_seat_verb: unknown flag '$1': $_seat_name is one for the city" >&2; exit 2; }
                 case "$1" in
                     --rig=*) _seat_rig="${1#--rig=}"; shift ;;
                     *) shift; [ $# -gt 0 ] || { echo "$PROG: po: --rig requires a value" >&2; exit 2; }
@@ -6345,6 +6352,7 @@ case "${1:-}" in
     attach)        shift; cmd_attach "$@" ;;
     po)            shift; cmd_seat po "$PO_TEMPLATE" "the Product Owner" "$@" ;;
     mechanik)      shift; cmd_seat mechanik "$MECHANIK_TEMPLATE" mechanik "$@" ;;
+    postmaster)    shift; cmd_seat postmaster "$POSTMASTER_TEMPLATE" "the postmaster" "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
     # A bare gc-helm on a terminal is engage's form, the way in. Without a
@@ -6352,6 +6360,6 @@ case "${1:-}" in
     "")            if [ -t 0 ] || [ -n "${GC_HELM_ASSUME_TTY:-}" ]; then
                        cmd_engage
                    fi
-                   echo "$PROG: name a verb (try: engage, attach, po, mechanik, conversations, open, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help); on a terminal, a bare $PROG opens engage's form" >&2; usage; exit 2 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: po, mechanik, open, engage, attach, conversations, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+                   echo "$PROG: name a verb (try: engage, attach, po, mechanik, postmaster, conversations, open, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help); on a terminal, a bare $PROG opens engage's form" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: po, mechanik, postmaster, open, engage, attach, conversations, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

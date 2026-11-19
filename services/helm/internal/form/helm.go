@@ -139,8 +139,8 @@ type City struct {
 // session Gas City's session list holds under the name the seat's verb
 // attaches to, and nil when it holds none, as for a po that has never run.
 type Seat struct {
-	Name    string   `json:"seat"` // which seat, as its verb names it: po or mechanik
-	Rig     string   `json:"rig"`  // a po's rig, by its name; empty for mechanik
+	Name    string   `json:"seat"` // which seat, as its verb names it: po, mechanik or postmaster
+	Rig     string   `json:"rig"`  // a po's rig, by its name; empty for the city's seats
 	Session *Session `json:"session"`
 }
 
@@ -380,8 +380,8 @@ func (s Script) AttachCommand(conversation, model string) *exec.Cmd {
 	return exec.Command("sh", args...)
 }
 
-// SeatCommand is the seat's verb: `po --rig <rig>` for a rig's po, and
-// `mechanik`. Each is Gas City's attach on the seat's session, which asks the
+// SeatCommand is the seat's verb: `po --rig <rig>` for a rig's po,
+// `mechanik` and `postmaster`. Each is Gas City's attach on the seat's session, which asks the
 // city's controller to start a seat that is not running and waits for it to
 // run before it attaches.
 func (s Script) SeatCommand(seat, rig string) *exec.Cmd {

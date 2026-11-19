@@ -278,12 +278,13 @@ the sitting has started. In a suspended rig attaching is off whatever the
 operator chose, and the form saves the question, starts no sitting and leaves.
 `--from`, which engage passes on too, names the bead a `--subject` gate was
 reached from. The People page lists the `seats` that `gc-helm.sh conversations
---json` gives, mechanik and each rig's po, each with its session's state as
-Gas City's session list gives it, and reads them again every ten seconds while
-it is on screen. Enter leaves the terminal to `gc-helm.sh mechanik` or
-`gc-helm.sh po --rig <rig>`, each of which hands it to the seat's session, and
-a seat takes no question. It writes nothing itself, so what it files is what the
-command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
+--json` gives, mechanik, the postmaster and each rig's po, each with its
+session's state as Gas City's session list gives it, and reads them again
+every ten seconds while it is on screen. Enter leaves the terminal to
+`gc-helm.sh mechanik`, `gc-helm.sh postmaster` or `gc-helm.sh po --rig <rig>`,
+each of which hands it to the seat's session, and a seat takes no question. It
+writes nothing itself, so what it files is what the command line files.
+[human-engagement.md](../../docs/human-engagement.md#engage)
 says what it shows and when it saves. `internal/form/testdata/helm-fixture.sh`
 answers those verbs from fixture data, so the form can be run with no city
 behind it.

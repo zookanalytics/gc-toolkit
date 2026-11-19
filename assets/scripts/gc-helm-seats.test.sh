@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for the way in to gc-helm and its seats: a bare `gc-helm`,
-# `gc-helm po --rig <name>` and `gc-helm mechanik`.
+# `gc-helm po --rig <name>`, `gc-helm mechanik` and `gc-helm postmaster`.
 #
 # Runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a stubbed `gc` on
 # PATH that records every call, and the city's rigs from a fixture. No live
@@ -11,24 +11,24 @@
 #   (BARE-NOTTY)  without a terminal it names the verbs and what a bare gc-helm
 #                 does on one, prints the usage and exits 2, opening no form
 #   (BARE-MISSING) with no form built it exits 3, naming the seats' commands
-#   (PO, MK)      a seat's verb reads its session's name from the agent roster
+#   (PO, MK, PM)  a seat's verb reads its session's name from the agent roster
 #                 and makes one `gc session attach` on it, which starts a seat
 #                 that is not running, and nothing else: no session listing, no
 #                 nudge and no wake of its own; once the attach comes back it
 #                 names how to return
 #   (KIT)         under a city that imports the pack as kit, each verb attaches
-#                 to the session the roster names, kit.mechanik and
-#                 <rig>/kit.po
+#                 to the session the roster names, kit.mechanik,
+#                 kit.postmaster and <rig>/kit.po
 #   (PO-RIG)      po needs --rig, the rig by its exact name, and refuses a rig
 #                 the city has not, the city's HQ or a suspended rig, attaching
 #                 nothing
 #   (SEAT-NAME)   a roster that cannot be read exits 4 naming the re-run, and
 #                 one that names no agent of the seat's template in its rig, or
 #                 several, exits 4 naming them, each attaching nothing
-#   (PO-ATTACH-FAIL, MK-ATTACH-FAIL) an attach that fails exits 4, naming the
-#                 re-run and no return
-#   (PO-ARGS, MK-ARGS) an argument or a flag the verb does not take exits 2 and
-#                 calls nothing
+#   (PO-ATTACH-FAIL, MK-ATTACH-FAIL, PM-ATTACH-FAIL) an attach that fails exits
+#                 4, naming the re-run and no return
+#   (PO-ARGS, MK-ARGS, PM-ARGS) an argument or a flag the verb does not take
+#                 exits 2 and calls nothing
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -88,12 +88,14 @@ cat > "$TMP/fixture/rigs.json" <<'RIGS'
 RIGS
 
 # The city's agent roster, as `gc agent list --json` gives it: the pack imported
-# as gc-toolkit, with mechanik for the city and a po in each rig, the HQ aside,
+# as gc-toolkit, with mechanik and the postmaster for the city and a po in each
+# rig, the HQ aside,
 # beside an agent of another name. The same city importing the pack as kit.
 export ROSTER="$TMP/fixture/agents.json"
 cat > "$ROSTER" <<'AGENTS'
 {"city_name":"town","agents":[
  {"name":"mechanik","qualified_name":"gc-toolkit.mechanik","scope":"city"},
+ {"name":"postmaster","qualified_name":"gc-toolkit.postmaster","scope":"city"},
  {"name":"witness","qualified_name":"gc-toolkit/gc-toolkit.witness","dir":"gc-toolkit","scope":"rig"},
  {"name":"po","qualified_name":"gc-toolkit/gc-toolkit.po","dir":"gc-toolkit","scope":"rig"},
  {"name":"po","qualified_name":"paused/gc-toolkit.po","dir":"paused","scope":"rig"}]}
@@ -101,6 +103,7 @@ AGENTS
 cat > "$TMP/fixture/agents-kit.json" <<'AGENTS'
 {"city_name":"town","agents":[
  {"name":"mechanik","qualified_name":"kit.mechanik","scope":"city"},
+ {"name":"postmaster","qualified_name":"kit.postmaster","scope":"city"},
  {"name":"po","qualified_name":"gc-toolkit/kit.po","dir":"gc-toolkit","scope":"rig"},
  {"name":"po","qualified_name":"paused/kit.po","dir":"paused","scope":"rig"}]}
 AGENTS
@@ -134,6 +137,7 @@ eq "$RC" 2 "(BARE-NOTTY) a bare gc-helm without a terminal exits 2"
 has "$OUT" "name a verb" "(BARE-NOTTY) …asking for a verb"
 has "$OUT" "a bare gc-helm opens engage's form" "(BARE-NOTTY) …saying what it does on a terminal"
 has "$OUT" "gc-helm po --rig <name>  attach to the rig's Product Owner" "(BARE-NOTTY) …and printing the usage, the seats included"
+has "$OUT" "gc-helm postmaster  attach to the postmaster" "(BARE-NOTTY) …the postmaster among them"
 eq "$(cat "$FORM_ARGV_FILE" 2>/dev/null || true)" "" "(BARE-NOTTY) …opening no form"
 reset
 set +e
@@ -141,7 +145,7 @@ OUT="$(GC_HELM_ASSUME_TTY=1 GC_HELM_FORM_BIN="$TMP/no-such-form" sh "$SCRIPT" </
 set -e
 eq "$RC" 3 "(BARE-MISSING) with no form built a bare gc-helm exits 3"
 has "$OUT" "no helm-svc binary is built" "(BARE-MISSING) …saying the form is not built"
-has "$OUT" "gc-helm po --rig <name> to open a rig's Product Owner, gc-helm mechanik to attach to mechanik" "(BARE-MISSING) …naming the seats' commands"
+has "$OUT" "gc-helm po --rig <name> to open a rig's Product Owner, gc-helm mechanik to attach to mechanik, gc-helm postmaster to open the postmaster" "(BARE-MISSING) …naming the seats' commands"
 has "$OUT" "gc-helm attach <conversation> to return" "(BARE-MISSING) …and the conversations' commands"
 
 echo "# a seat's verb is Gas City's attach on the seat, by the name the roster gives it, and nothing else"
@@ -156,6 +160,10 @@ reset; run mechanik
 eq "$RC" 0 "(MK) mechanik exits 0 once the attach comes back"
 eq "$CALLED" "agent list --json |session attach gc-toolkit.mechanik " "(MK) …having read the roster and made one attach, on mechanik's seat"
 has "$OUT" "Return to mechanik with: gc-helm mechanik" "(MK) …and naming how to return"
+reset; run postmaster
+eq "$RC" 0 "(PM) postmaster exits 0 once the attach comes back"
+eq "$CALLED" "agent list --json |session attach gc-toolkit.postmaster " "(PM) …having read the roster and made one attach, on the postmaster's seat"
+has "$OUT" "Return to the postmaster with: gc-helm postmaster" "(PM) …and naming how to return"
 
 echo "# a city that imports the pack under another name opens the same seats"
 reset; ROSTER="$TMP/fixture/agents-kit.json" run po --rig gc-toolkit
@@ -165,6 +173,8 @@ has "$OUT" "Return to the Product Owner of gc-toolkit with: gc-helm po --rig gc-
 reset; ROSTER="$TMP/fixture/agents-kit.json" run mechanik
 eq "$RC" 0 "(KIT) mechanik exits 0 there too"
 eq "$CALLED" "agent list --json |session attach kit.mechanik " "(KIT) …attaching to kit.mechanik"
+reset; ROSTER="$TMP/fixture/agents-kit.json" run postmaster
+eq "$CALLED" "agent list --json |session attach kit.postmaster " "(KIT) …and the postmaster to kit.postmaster"
 
 echo "# po names its rig, one the city has and that runs"
 reset; run po
@@ -223,6 +233,10 @@ hasnt "$OUT" "Return to" "(PO-ATTACH-FAIL) …and no return"
 reset; ATTACH_RC=1 run mechanik
 eq "$RC" 4 "(MK-ATTACH-FAIL) mechanik's attach that fails exits 4"
 has "$OUT" "so mechanik was not attached. Re-run: gc-helm mechanik" "(MK-ATTACH-FAIL) …naming the re-run"
+reset; ATTACH_RC=1 run postmaster
+eq "$RC" 4 "(PM-ATTACH-FAIL) the postmaster's attach that fails exits 4"
+has "$OUT" "so the postmaster was not attached. Re-run: gc-helm postmaster" "(PM-ATTACH-FAIL) …naming the re-run"
+hasnt "$OUT" "Return to" "(PM-ATTACH-FAIL) …and no return"
 
 echo "# a seat's verb takes nothing else"
 reset; run po --rig gc-toolkit now
@@ -243,6 +257,13 @@ eq "$CALLED" "" "(MK-ARGS) …and calling nothing"
 reset; run mechanik --bogus
 eq "$RC" 2 "(MK-ARGS) an unknown flag exits 2"
 eq "$CALLED" "" "(MK-ARGS) …and calling nothing"
+reset; run postmaster now
+eq "$RC" 2 "(PM-ARGS) an argument exits 2"
+eq "$CALLED" "" "(PM-ARGS) …and calling nothing"
+reset; run postmaster --rig gc-toolkit
+eq "$RC" 2 "(PM-ARGS) --rig exits 2"
+has "$OUT" "the postmaster is one for the city" "(PM-ARGS) …saying why"
+eq "$CALLED" "" "(PM-ARGS) …and calling nothing"
 
 echo
 echo "gc-helm-seats: $PASS passed, $FAIL failed"

@@ -190,9 +190,9 @@ tab shows before its name:
   name or prefix for a new topic, and the question (*Engage*, below).
 - **Return to a conversation**, Ctrl+R, lists the open conversations
   (*Returning to a conversation*, below).
-- **People**, Ctrl+P, lists the seats the operator sits with: mechanik, of
-  which the city has one, and each rig's po, the Product Owner, by its rig's
-  name and prefix. The city's HQ has none.
+- **People**, Ctrl+P, lists the seats the operator sits with: mechanik and
+  the postmaster, of which the city has one each, and each rig's po, the
+  Product Owner, by its rig's name and prefix. The city's HQ has no po.
 
 A page's key goes straight to that page from any page and any field, and the
 key of the page on screen does nothing. In the question, Ctrl+N and Ctrl+P go
@@ -218,8 +218,9 @@ no seat and says the seats did not read, and the other pages still list. A
 suspended rig's po reads rig suspended, since Gas City starts no session in a
 suspended rig, and the page says why it cannot start and how to resume the rig. The page reads the city again every ten seconds
 while it is on screen. ↑/↓ pick a seat, a line says what Enter does for it, and
-Enter leaves the terminal and then runs the seat's command, `gc-helm mechanik`
-or `gc-helm po --rig <name>`, as the form runs a conversation's attach. So all
+Enter leaves the terminal and then runs the seat's command, `gc-helm mechanik`,
+`gc-helm postmaster` or `gc-helm po --rig <name>`, as the form runs a
+conversation's attach. So all
 the command prints stays on the terminal and its exit status is the form's.
 Each command attaches to the seat's session, starting it first when it is not
 running (*A po sitting*, below). Gas City's attach carries no message, so a
@@ -1605,6 +1606,21 @@ for in the sitting. A sitting the attach starts itself, as it does
 while the city's controller is down, or when the po's last sitting ends
 between the attach's check that it is running and the attach itself, gets the
 po's prompt too, which the attach sends once the session runs.
+
+## A postmaster sitting
+
+The postmaster works through the operator's mailbox, `human`, with them: Gas
+City's alerts and the escalations agents send there. It is a named session of
+the city, one for the city, which the operator opens for one sitting at a time
+from its row on Engage's People page or with `gc-helm postmaster`, Gas City's
+attach on `<binding>.postmaster`. Its sitting starts and ends as a po's does
+(*A po sitting*, above). Only the operator's attach starts it: no escalation,
+default or fallback names it, so the mail still goes to `human`, and the
+board's city page shows how many messages wait there. What it does in a
+sitting is its prompt's (`agents/postmaster/prompt.template.md`): it archives
+what has ended and says so, settles what an owning agent can, files the fix
+for a sender of junk held for the po, and brings the operator only what needs
+them.
 
 ## How a pane dies when no sitting is live
 
