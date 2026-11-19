@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -284,6 +285,32 @@ func (l *Ledger) Create(f *Filing) (string, error) {
 		return "", fmt.Errorf("ledger: the filing of %q may not have landed: %w", f.title, err)
 	}
 	return id, nil
+}
+
+// ErrNotHeld is the error of an edge AddBlocker refused because the store does
+// not hold the bead it would wait on.
+var ErrNotHeld = errors.New("the store does not hold the bead")
+
+// AddBlocker makes blocker hold the bead id, by a blocks edge from id onto it,
+// once a read finds blocker in the store, since bd adds an edge onto an id
+// outside its own prefix, which holds nothing. It refuses with an error that is
+// ErrNotHeld when the store does not hold blocker. A read that fails returns
+// its *ReadError, and an edge write that exits non-zero has failed.
+func (l *Ledger) AddBlocker(id, blocker string) error {
+	rows, err := l.Find(ByID(blocker).WithClosed())
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return fmt.Errorf("ledger: no edge from %s onto %s: %w", id, blocker, ErrNotHeld)
+	}
+	if out, err := l.store.AddEdge(id, blocker, EdgeBlocks); err != nil {
+		if out = strings.TrimSpace(out); out != "" {
+			return fmt.Errorf("ledger: the edge from %s onto %s did not land (%w): %s", id, blocker, err, out)
+		}
+		return fmt.Errorf("ledger: the edge from %s onto %s did not land: %w", id, blocker, err)
+	}
+	return nil
 }
 
 // Commit makes w as one update, whose exit decides whether it landed. A write a

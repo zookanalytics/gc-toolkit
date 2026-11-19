@@ -473,3 +473,35 @@ func TestAViewReadsItsKey(t *testing.T) {
 		t.Fatalf("the view read %q, %v, %v as %s", got, ok, err, v.Name())
 	}
 }
+
+// A blocker is written as the bead's blocks edge onto it, only once a read finds
+// it in the store: a bead the store does not hold, as an id outside its prefix,
+// gets no edge and an error that is ErrNotHeld, and a read or an edge write
+// that fails writes nothing and fails.
+func TestABlockerIsWrittenOnlyOntoABeadTheStoreHolds(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "b-2", Title: "the run", Status: "open"})
+	l := New(s)
+	if err := l.AddBlocker("b-1", "b-2"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := s.Row("b-1")
+	if want := []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "b-2", Title: "the run", Status: "open"}}; !slices.Equal(b.Edges, want) || b.Status != "blocked" {
+		t.Fatalf("the bead stands %s with edges %+v, want blocked with %+v", b.Status, b.Edges, want)
+	}
+	if err := l.AddBlocker("b-1", "zz-elsewhere"); !errors.Is(err, ErrNotHeld) {
+		t.Errorf("an edge onto a bead the store does not hold = %v, want ErrNotHeld", err)
+	}
+	s.FindErr = errors.New("dolt timeout")
+	if err := l.AddBlocker("b-1", "b-2"); err == nil || errors.Is(err, ErrNotHeld) {
+		t.Errorf("an edge whose read failed = %v, want the read's error", err)
+	}
+	s.FindErr, s.EdgeErr = nil, errors.New("database is locked")
+	if err := l.AddBlocker("b-1", "b-2"); err == nil || !strings.Contains(err.Error(), "did not land") {
+		t.Errorf("an edge the store refused = %v", err)
+	}
+	if b, _ := s.Row("b-1"); len(b.Edges) != 1 {
+		t.Errorf("a refused or unread edge was written: %+v", b.Edges)
+	}
+}
