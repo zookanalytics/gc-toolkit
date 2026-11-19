@@ -16,8 +16,9 @@ name: govulncheck
 # It runs under the Go release setup-go takes from go.mod, the one gc-build.sh
 # builds the city's binaries with, so it checks that release's standard
 # library.
-# A draft pull request skips the scan, and nothing else does, for the reason
-# tests.yml gives for its jobs.
+# A draft pull request skips the scan, and nothing else does, and the job sets
+# no name: or matrix, which would rename its check, for the reasons tests.yml
+# gives for its jobs.
 
 on:
   pull_request:
