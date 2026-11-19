@@ -324,6 +324,19 @@ stated burden.
   store's. The risk is that the marks read repeats the query `bd blocked`
   starts from, so a change upstream to that query that the adapter does not
   follow makes the check disagree with the store.
+- **The store adapter's derived prefixes.** The store adapter finds a bead's
+  store by its id's prefix from the city's config (`gc config show --json`),
+  which prints a prefix only where the config sets one, so it derives the rest
+  from the store's name as Gas City's `DeriveBeadsPrefix` does
+  (`internal/config/config.go` at gastownhall/gascity f5302d1dcf). It is
+  re-implemented because no gc command names the store that holds a bead id,
+  and `gc rig list --json`, which prints every prefix Gas City derives, asks
+  the supervisor, the bead store and tmux for each rig's `running` flag. The
+  goal is that Gas City names the store itself: the lookup moves onto a Gas
+  City command that names the store holding a bead id once the city's gc
+  carries one (tk-35lc762), and the derivation goes with it. The risk is that
+  Gas City changes its derivation first, and a store whose prefix the config
+  leaves unset is looked for under the old one.
 - **The run link.** `waits` tells which bead a live workflow run works from
   the input convoy its root names and the bead that convoy tracks, or from a
   classic molecule's issue variable, as `assets/scripts/run-lib.sh` defines
@@ -507,10 +520,10 @@ far bead finds the store does not hold it.
 Every read `waits` makes names one store with bd's `--db`: the store its caller
 names, or the store gc routes a read of the first bead named to. That is the
 one `gc bd where` says gc resolves when its prefix begins the bead's id, and
-otherwise the one whose prefix does, from `gc rig list`. gc routes a read that
-names a bead and no store by the bead's prefix, and a read that names none to
-the store it resolves, so unpinned reads would mix stores: a read of a far bead
-in another rig would find it and hide the edge.
+otherwise the one whose prefix does, from the city's config (`gc config show`).
+gc routes a read that names a bead and no store by the bead's prefix, and a
+read that names none to the store it resolves, so unpinned reads would mix
+stores: a read of a far bead in another rig would find it and hide the edge.
 
 The compensations retire with one repair of bd. Once the bd the city runs
 judges a `waits-for` edge by its gate and returns an error when its read of

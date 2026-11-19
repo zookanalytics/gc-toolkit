@@ -20,10 +20,9 @@ import (
 const RosterWait = 15 * time.Second
 
 // RigListWait bounds each read of the city's rig list when GC_RIG_LIST_TIMEOUT
-// sets none. rig-map.sh and the store adapter (gcbd.RigListWait) bound their
-// reads by the same variable and default, which cut off a gc that never answers
-// and so sit far above what the listing takes on a loaded host
-// (docs/bead-store-resolution.md, "Reading the rig map").
+// sets none. rig-map.sh bounds its read by the same variable and default, which
+// cut off a gc that never answers and so sit far above what the listing takes
+// on a loaded host (docs/bead-store-resolution.md, "Reading the rig map").
 const RigListWait = 120 * time.Second
 
 // Agent is one agent the city's roster names (`gc agent list --json`): the name

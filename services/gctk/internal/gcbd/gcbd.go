@@ -40,6 +40,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/daemon"
 )
@@ -217,8 +218,7 @@ const maxDaemonBody = 1 << 20
 // case Show reads straight through bin. db is the store a pinned client names
 // on every call ([Client.In]), empty for the store gc resolves. ctx ends every
 // call the client forks ([Client.WithContext]), and is nil for a client whose
-// calls run to their end. The listing of stores also ends at a bound of its own
-// ([RigListWait]).
+// calls run to their end.
 type Client struct {
 	bin     string
 	httpc   *http.Client
@@ -285,79 +285,110 @@ func (c *Client) Where() (path, prefix string, err error) {
 	return where.Path, where.Prefix, nil
 }
 
-// listedRig is one rig `gc rig list --json` names, the city among them: its
-// name, its bead prefix, and the path its .beads directory sits under.
-type listedRig struct {
-	Name   string `json:"name"`
-	Prefix string `json:"prefix"`
-	Path   string `json:"path"`
+// configuredRig is one store the city's config names, a rig's or the city's
+// own: its name, its bead prefix, and the folder its .beads directory sits
+// under.
+type configuredRig struct {
+	Name   string `json:"Name"`
+	Prefix string `json:"Prefix"`
+	Path   string `json:"Path"`
 }
 
-// RigListWait bounds each read of the city's rig list when GC_RIG_LIST_TIMEOUT
-// sets none. rig-map.sh and the runtime adapter (gascity.RigListWait) bound
-// their reads by the same variable and default, which cut off a gc that never
-// answers and so sit far above what the listing takes on a loaded host
-// (docs/bead-store-resolution.md, "Reading the rig map").
-const RigListWait = 120 * time.Second
-
-// rigListWait is the bound rigs reads the listing under: GC_RIG_LIST_TIMEOUT's
-// whole seconds, or RigListWait when it is unset or empty. Any other value is
-// an error, as rig-map.sh refuses it too.
-func rigListWait() (time.Duration, error) {
-	v := os.Getenv("GC_RIG_LIST_TIMEOUT")
-	if v == "" {
-		return RigListWait, nil
-	}
-	n, err := strconv.ParseUint(v, 10, 32)
-	if err != nil || n == 0 {
-		return 0, fmt.Errorf("gc rig list was not run: GC_RIG_LIST_TIMEOUT=%q is not a whole number of seconds above 0", v)
-	}
-	return time.Duration(n) * time.Second, nil
-}
-
-// rigs is each rig `gc rig list --json` names, the city among them. The listing
-// ends at rigListWait's bound, or at the client's context when that ends first,
-// and either stop kills every process the listing started. A listing that
-// fails, is stopped or does not decode returns a *ReadError, which names id
-// when the listing was read to route one.
-func (c *Client) rigs(id string) ([]listedRig, error) {
-	limit, err := rigListWait()
-	if err != nil {
-		return nil, &ReadError{ID: id, Reason: err.Error()}
-	}
-	parent := c.ctx
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithTimeout(parent, limit)
-	defer cancel()
+// rigs is each store the city's config names, as `gc config show --json`
+// prints it from the city's files: the city's own store, in the folder the
+// config is read from, under [workspace]'s name and prefix, then each rig's
+// under its [[rigs]] entry. A prefix the config leaves unset is the one Gas
+// City derives from the name ([derivedPrefix]), as Rig.EffectivePrefix and
+// EffectiveHQPrefix do. A read that fails or does not decode returns a
+// *ReadError, which names id when the config was read to route one.
+//
+// gc prints [workspace]'s name and prefix from city.toml where it sets them,
+// and otherwise the ones .gc/site.toml binds (configForDisplay in
+// cmd/gc/cmd_config.go at gastownhall/gascity f5302d1dcf), while Gas City
+// itself takes .gc/site.toml's first. So in a city whose city.toml still sets
+// a name or prefix, a place Gas City warns is legacy, and whose .gc/site.toml
+// binds another, the city's store goes by the city.toml one.
+func (c *Client) rigs(id string) ([]configuredRig, error) {
 	var stderr bytes.Buffer
-	cmd := c.WithContext(ctx).command("rig", "list", "--json")
+	cmd := c.command("config", "show", "--json")
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		if cause := c.stopped(); cause != nil {
-			return nil, &ReadError{ID: id, Reason: "gc rig list was stopped: " + cause.Error(), Err: cause}
+		return nil, &ReadError{ID: id, Reason: "gc config show did not name the stores: " + failure(out, stderr.String())}
+	}
+	var shown struct {
+		CityPath string `json:"city_path"`
+		Config   *struct {
+			Workspace configuredRig   `json:"Workspace"`
+			Rigs      []configuredRig `json:"Rigs"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(Scrub(out), &shown); err != nil {
+		return nil, &ReadError{ID: id, Reason: "gc config show did not decode: " + err.Error()}
+	}
+	if shown.Config == nil {
+		return nil, &ReadError{ID: id, Reason: "gc config show printed no config"}
+	}
+	city := shown.Config.Workspace
+	city.Path = shown.CityPath
+	rigs := append([]configuredRig{city}, shown.Config.Rigs...)
+	for i := range rigs {
+		if rigs[i].Prefix == "" {
+			rigs[i].Prefix = derivedPrefix(rigs[i].Name)
 		}
-		if ctx.Err() != nil {
-			return nil, &ReadError{ID: id, Reason: fmt.Sprintf("gc rig list did not answer within %s", limit), Err: ctx.Err()}
+	}
+	return rigs, nil
+}
+
+// derivedPrefix is the bead prefix Gas City derives from a rig's or the city's
+// name when the config sets none (DeriveBeadsPrefix and splitCompoundWord in
+// internal/config/config.go at gastownhall/gascity f5302d1dcf). It drops a -py
+// or -go suffix and splits the name at each - and _, or, when that leaves one
+// word, wherever a capital follows a character that is not one. Two or more
+// parts give the first letter of each, and one gives the name itself when it
+// is three letters or fewer and its first two otherwise, all lowercased.
+func derivedPrefix(name string) string {
+	name = strings.TrimSuffix(name, "-py")
+	name = strings.TrimSuffix(name, "-go")
+	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' })
+	if len(parts) == 1 {
+		parts = splitCompound(parts[0])
+	}
+	if len(parts) >= 2 {
+		var b strings.Builder
+		for _, p := range parts {
+			if p != "" {
+				b.WriteByte(p[0])
+			}
 		}
-		return nil, &ReadError{ID: id, Reason: "gc rig list did not name the stores: " + failure(out, stderr.String())}
+		return strings.ToLower(b.String())
 	}
-	var list struct {
-		Rigs []listedRig `json:"rigs"`
+	if len(name) <= 3 {
+		return strings.ToLower(name)
 	}
-	if err := json.Unmarshal(Scrub(out), &list); err != nil {
-		return nil, &ReadError{ID: id, Reason: "gc rig list did not decode: " + err.Error()}
+	return strings.ToLower(name[:2])
+}
+
+// splitCompound splits a word wherever a capital follows a character that is
+// not one, so "GasCity" is "Gas" and "City".
+func splitCompound(word string) []string {
+	runes := []rune(word)
+	var parts []string
+	start := 0
+	for i := 1; i < len(runes); i++ {
+		if unicode.IsUpper(runes[i]) && !unicode.IsUpper(runes[i-1]) {
+			parts = append(parts, string(runes[start:i]))
+			start = i
+		}
 	}
-	return list.Rigs, nil
+	return append(parts, string(runes[start:]))
 }
 
 // StoreOf names the store whose bead prefix begins id, the longest such prefix
-// when several do, from the stores `gc rig list --json` names, the city's
-// among them: the store gc routes a read of id to when the read names no
-// store. ok is false when no store's prefix begins id. A listing that fails
-// or does not decode returns a *ReadError.
+// when several do, from the stores the city's config names ([Client.rigs]),
+// the city's among them: the store gc routes a read of id to when the read
+// names no store. ok is false when no store's prefix begins id. A config that
+// does not read or decode returns a *ReadError.
 func (c *Client) StoreOf(id string) (path string, ok bool, err error) {
 	rigs, err := c.rigs(id)
 	if err != nil {
@@ -375,10 +406,11 @@ func (c *Client) StoreOf(id string) (path string, ok bool, err error) {
 	return path, ok, nil
 }
 
-// RigStore names the store of the rig called name, from the stores `gc rig list
-// --json` names, the city's among them: the rig's .beads directory, which a read
-// pinned there names with bd's --db. ok is false when no rig has that name. A
-// listing that fails or does not decode returns a *ReadError.
+// RigStore names the store of the rig called name, from the stores the city's
+// config names ([Client.rigs]), the city's among them: the rig's .beads
+// directory, which a read pinned there names with bd's --db. ok is false when
+// no rig has that name. A config that does not read or decode returns a
+// *ReadError.
 func (c *Client) RigStore(name string) (path string, ok bool, err error) {
 	rigs, err := c.rigs("")
 	if err != nil {
@@ -396,11 +428,11 @@ func (c *Client) RigStore(name string) (path string, ok bool, err error) {
 // it answers from the store gc routes the first bead to: the store gc resolves
 // for this process when no bead is named or its prefix begins the first id,
 // else the store whose prefix does ([Client.StoreOf]). The resolved store
-// answers when no store's prefix begins the id, and when the stores do not
-// list, since a read there finds only the beads that store holds: a bead it
-// does not hold is one its read cannot answer, never another store's. Only a
-// read about a bead in another store than the one resolved here pays for the
-// listing of stores.
+// answers when no store's prefix begins the id, and when the city's config
+// does not read, since a read there finds only the beads that store holds: a
+// bead it does not hold is one its read cannot answer, never another store's.
+// Only a read about a bead in another store than the one resolved here reads
+// the city's config.
 func (c *Client) Route(ids ...string) (string, error) {
 	path, prefix, err := c.Where()
 	if err != nil {

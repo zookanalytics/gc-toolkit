@@ -170,16 +170,12 @@ rigs or a prefix no rig carries. The helper writes to stderr only then, so a
 caller may capture both streams in one.
 
 The helper puts one bound on the call, `GC_RIG_LIST_TIMEOUT`, 120 seconds by
-default. gctk's runtime adapter reads the rigs (`gascity.City.Rigs`), and its
-store adapter finds a bead's store by its id's prefix and a rig's store by its
-name (`gcbd.Client.StoreOf`, `gcbd.Client.RigStore`), each by running the
-listing itself under the same variable and default (`gascity.RigListWait`,
-`gcbd.RigListWait`). The bound exists to cut off a `gc` that never answers, so
-it sits far above what the listing takes on a loaded host, and no caller tunes
-it as a latency budget. A caller under a deadline it does not set bounds the
-call by the time it has left, as it bounds any other call. A doctor check does
-so within `gc doctor`'s per-check timeout, and a board verb within the board's
-deadline for the verb.
+default. The bound exists to cut off a `gc` that never answers, so it sits far
+above what the listing takes on a loaded host, and no caller tunes it as a
+latency budget. A caller under a deadline it does not set bounds the call by the
+time it has left, as it bounds any other call. A doctor check does so within
+`gc doctor`'s per-check timeout, and a board verb within the board's deadline
+for the verb.
 
 `gc rig list --json` is slow on a loaded host because of the `running` flag on
 each rig row. Gas City's `doRigList` fills it with `rigHasRunningAgent`. For
@@ -201,6 +197,15 @@ No cheaper source carries the whole map:
 - `gc status --json` carries no prefixes.
 - `.beads/routes.jsonl` maps each prefix to a relative path, with no names and
   no suspension.
+
+gctk's store adapter needs no rig map. To find a bead's store by its id's
+prefix and a rig's store by its name (`gcbd.Client.StoreOf`,
+`gcbd.Client.RigStore`), it needs each store's name, prefix and folder, and it
+reads them from `gc config show --json`, which Gas City prints from the city's
+config files, so the read waits on no supervisor, bead store or tmux. The
+city's own store is the folder that read names as `city_path`, under the name
+and prefix of the config's `[workspace]`. A prefix the config leaves unset is
+the one Gas City derives from the name.
 
 ## Reading a bead's whole context
 
