@@ -1,9 +1,6 @@
 package main
 
-import (
-	"os"
-	"syscall"
-)
+import "os"
 
 func main() {
 	os.Exit(Run(&Call{
@@ -12,6 +9,5 @@ func main() {
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
-		Exec:   syscall.Exec,
 	}))
 }

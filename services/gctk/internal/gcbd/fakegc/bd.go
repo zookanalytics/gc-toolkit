@@ -6,27 +6,25 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 )
 
 func (c *Call) bd(s, d string, args []string) error {
-	if c.getenv("HOLDS_STUB_READ") != "" {
-		answer, err := c.required("STUB_HOLDS_ANSWER")
-		if err != nil {
-			return err
-		}
-		env := withEnv(c.Env, "HOLDS_STORE="+s, "HOLDS_DEPS="+d)
-		return c.handOff(answer, append([]string{answer, "answer"}, args...), env)
-	}
-	switch {
-	case first(args) == "--db":
-		if len(args) >= 2 {
-			args = args[2:]
-		} else {
+	for {
+		switch {
+		case first(args) == "--db":
+			args = args[min(2, len(args)):]
+			continue
+		case strings.HasPrefix(first(args), "--db="):
 			args = args[1:]
+			continue
+		case first(args) == "--actor" && len(args) >= 2:
+			c.Env = withEnv(c.Env, "BEADS_ACTOR="+args[1])
+			args = args[2:]
+			continue
 		}
-	case strings.HasPrefix(first(args), "--db="):
-		args = args[1:]
+		break
 	}
 	if first(args) == "where" {
 		o := NewObject()
@@ -40,7 +38,7 @@ func (c *Call) bd(s, d string, args []string) error {
 	case "show":
 		return c.show(s, d, args)
 	case "list":
-		return c.list(s, args)
+		return c.list(s, d, args)
 	case "update":
 		return c.update(s, d, args)
 	case "create":
@@ -53,6 +51,16 @@ func (c *Call) bd(s, d string, args []string) error {
 		return c.kv(args)
 	case "gate":
 		return c.gate(s, args)
+	case "blocked":
+		return c.blocked(s, d)
+	case "sql":
+		return c.sql(s, d, args)
+	case "ready":
+		return c.ready(s, d, args)
+	case "comment":
+		return c.comment(s, args)
+	case "comments":
+		return c.comments(s, args)
 	}
 	return c.fail(2, "gc bd stub: unsupported '"+verb+"'")
 }
@@ -262,7 +270,7 @@ func asciiLower(s string) string {
 	return string(b)
 }
 
-func (c *Call) list(s string, args []string) error {
+func (c *Call) list(s, d string, args []string) error {
 	if c.getenv("STUB_LIST_FAIL") != "" {
 		return c.fail(1, "gc: simulated list failure")
 	}
@@ -278,11 +286,11 @@ func (c *Call) list(s string, args []string) error {
 	if t := c.getenv("STUB_LIST_TRAILING"); t != "" && strings.Contains(spaced, t) {
 		trail = true
 	}
-	var statuses, haskey, typ, excl, tcontains string
+	var statuses, haskey, typ, excl, tcontains, parent string
 	var idlist []string
 	listAll := false
 	var fields []string
-	idread, withgates := false, false
+	idread, withgates, withTemplates, withInfra, withEphemeral := false, false, false, false, false
 	value := func(i *int) string {
 		*i++
 		if *i < len(args) {
@@ -303,6 +311,12 @@ func (c *Call) list(s string, args []string) error {
 			listAll = true
 		case a == "--include-gates":
 			withgates = true
+		case a == "--include-templates":
+			withTemplates = true
+		case a == "--include-infra":
+			withInfra = true
+		case a == "--include-ephemeral":
+			withEphemeral = true
 		case strings.HasPrefix(a, "--status="):
 			statuses = strings.TrimPrefix(a, "--status=")
 		case a == "--status":
@@ -319,6 +333,10 @@ func (c *Call) list(s string, args []string) error {
 			typ = strings.TrimPrefix(a, "--type=")
 		case strings.HasPrefix(a, "--exclude-type="):
 			excl = strings.TrimPrefix(a, "--exclude-type=")
+		case a == "--parent":
+			parent = value(&i)
+		case strings.HasPrefix(a, "--parent="):
+			parent = strings.TrimPrefix(a, "--parent=")
 		case a == "--title-contains":
 			tcontains = value(&i)
 		case strings.HasPrefix(a, "--title-contains="):
@@ -333,7 +351,7 @@ func (c *Call) list(s string, args []string) error {
 		}
 		want = append(want, x)
 	}
-	rows, err := readRows(s)
+	rows, edges, err := readStore(s, d)
 	if err != nil {
 		return err
 	}
@@ -386,6 +404,13 @@ func (c *Call) list(s string, args []string) error {
 		if idread && !withgates && strEq(orDefault(get(r, "issue_type"), ""), "gate") {
 			continue
 		}
+		if hidden(r, withTemplates, withInfra, withEphemeral) {
+			continue
+		}
+		links := linksOf(r, edges)
+		if parent != "" && !slices.ContainsFunc(links, func(l link) bool { return l.typ == "parent-child" && l.id == parent }) {
+			continue
+		}
 		if len(want) > 0 {
 			m, err := metadataOf(r)
 			if err != nil {
@@ -404,6 +429,10 @@ func (c *Call) list(s string, args []string) error {
 		}
 		row := r.Clone()
 		priorityOr2(row)
+		if _, stored := row.Get("dependencies"); !stored && len(links) > 0 {
+			id, _ := get(r, "id").(string)
+			row.Set("dependencies", listingDeps(id, links))
+		}
 		out = append(out, row)
 	}
 	c.out(Compact(out) + "\n")
@@ -411,6 +440,22 @@ func (c *Call) list(s string, args []string) error {
 		c.out("gc: simulated trailing output\n")
 	}
 	return nil
+}
+
+// hidden reports whether a listing leaves the row out unless it asks for its
+// kind, as bd's does: a template molecule unless --include-templates, an agent,
+// role or message bead unless --include-infra, and a wisp unless
+// --include-ephemeral or --include-infra.
+func hidden(r *Object, templates, infra, ephemeral bool) bool {
+	switch {
+	case !templates && ToString(get(r, "is_template")) == "true":
+		return true
+	case !infra && contains([]string{"agent", "role", "message"}, ToString(orDefault(get(r, "issue_type"), ""))):
+		return true
+	case !infra && !ephemeral && ToString(get(r, "ephemeral")) == "true":
+		return true
+	}
+	return false
 }
 
 // strEq is jq's `v == $s` for a string $s.
@@ -489,12 +534,12 @@ func (c *Call) update(s, d string, args []string) error {
 		return nil
 	}
 	id := first(ids)
-	if listed(c.getenv("STUB_UPDATE_FAIL"), id) {
+	if listed(c.getenv("STUB_UPDATE_FAIL"), id) || c.carries("STUB_UPDATE_FAIL_ON") {
 		return c.fail(1, "gc: simulated update refusal for "+id)
 	}
-	var sets, unsets []string
-	var note, asg, newstatus, desc, prio, parent string
-	noteSet, asgSet, descSet := false, false, false
+	var sets, unsets, addLabels, removeLabels, setLabels []string
+	var note, asg, newstatus, desc, prio, parent, ifAssignee, ifStatus string
+	noteSet, asgSet, descSet, ifAssigneeSet, ifStatusSet, labelsSet := false, false, false, false, false, false
 	value := func(i *int) string {
 		*i++
 		if *i < len(args) {
@@ -535,6 +580,26 @@ func (c *Call) update(s, d string, args []string) error {
 			parent = strings.TrimPrefix(a, "--parent=")
 		case a == "--parent":
 			parent = value(&i)
+		case a == "--if-assignee":
+			ifAssignee, ifAssigneeSet = value(&i), true
+		case strings.HasPrefix(a, "--if-assignee="):
+			ifAssignee, ifAssigneeSet = strings.TrimPrefix(a, "--if-assignee="), true
+		case a == "--if-status":
+			ifStatus, ifStatusSet = value(&i), true
+		case strings.HasPrefix(a, "--if-status="):
+			ifStatus, ifStatusSet = strings.TrimPrefix(a, "--if-status="), true
+		case a == "--add-label":
+			addLabels = append(addLabels, strings.Split(value(&i), ",")...)
+		case strings.HasPrefix(a, "--add-label="):
+			addLabels = append(addLabels, strings.Split(strings.TrimPrefix(a, "--add-label="), ",")...)
+		case a == "--remove-label":
+			removeLabels = append(removeLabels, strings.Split(value(&i), ",")...)
+		case strings.HasPrefix(a, "--remove-label="):
+			removeLabels = append(removeLabels, strings.Split(strings.TrimPrefix(a, "--remove-label="), ",")...)
+		case a == "--set-labels":
+			setLabels, labelsSet = append(setLabels, strings.Split(value(&i), ",")...), true
+		case strings.HasPrefix(a, "--set-labels="):
+			setLabels, labelsSet = append(setLabels, strings.Split(strings.TrimPrefix(a, "--set-labels="), ",")...), true
 		}
 	}
 	if listed(c.getenv("STUB_CLOSE_FAIL"), id) && newstatus == "closed" {
@@ -561,6 +626,18 @@ func (c *Call) update(s, d string, args []string) error {
 	}
 	if !holds(rows, id) {
 		return c.fail(1, "Error updating "+id+": issue not found")
+	}
+	// A guard is checked against the row as the write finds it, and one that
+	// no longer holds writes nothing and exits 13, as bd's does.
+	if r := firstRow(rows, id); ifAssigneeSet || ifStatusSet {
+		held := ToString(orDefault(get(r, "assignee"), ""))
+		status := ToString(orDefault(get(r, "status"), "open"))
+		switch {
+		case ifAssigneeSet && held != ifAssignee:
+			return c.fail(13, "Error updating "+id+": assignee mismatch: "+id+` is held by "`+held+`", expected "`+ifAssignee+`"`)
+		case ifStatusSet && status != ifStatus:
+			return c.fail(13, "Error updating "+id+": status mismatch: "+id+` is "`+status+`", expected "`+ifStatus+`"`)
+		}
 	}
 	drops := c.dropsFor(id)
 	kept := func(k string) bool { return !contains(drops, k) }
@@ -606,6 +683,9 @@ func (c *Call) update(s, d string, args []string) error {
 		}
 		if newstatus != "" && kept("status") {
 			o.Set("status", newstatus)
+			if newstatus == "closed" {
+				stampClosed(o)
+			}
 		}
 		if prio != "" && kept("priority") {
 			p, err := priority(prio)
@@ -629,6 +709,22 @@ func (c *Call) update(s, d string, args []string) error {
 		}
 		if descSet && kept("description") {
 			o.Set("description", desc)
+		}
+		if labelsSet || len(addLabels) > 0 || len(removeLabels) > 0 {
+			var labels []string
+			if !labelsSet {
+				for _, l := range iterate(get(o, "labels")) {
+					labels = append(labels, ToString(l))
+				}
+			}
+			labels = append(labels, setLabels...)
+			for _, l := range addLabels {
+				if !contains(labels, l) {
+					labels = append(labels, l)
+				}
+			}
+			labels = slices.DeleteFunc(labels, func(l string) bool { return contains(removeLabels, l) })
+			o.Set("labels", strs(labels))
 		}
 	}
 	if err := writeRows(s, rows); err != nil {
@@ -674,9 +770,9 @@ func (c *Call) refuseBlockedClose(s, d, id string) error {
 }
 
 func (c *Call) create(s, d string, args []string) error {
-	title, args := shift(args)
-	body, meta, status, notes, parent, prio, typ := "", "{}", "open", "", "", "", "task"
-	var deps []string
+	title, titled, ephemeral := "", false, false
+	body, meta, status, notes, parent, prio, typ, assignee := "", "{}", "open", "", "", "", "task", ""
+	var deps, labels []string
 	value := func(i *int) string {
 		*i++
 		if *i < len(args) {
@@ -725,6 +821,26 @@ func (c *Call) create(s, d string, args []string) error {
 			}
 		case strings.HasPrefix(a, "--type="):
 			typ = strings.TrimPrefix(a, "--type=")
+		case a == "--title":
+			title, titled = value(&i), true
+		case strings.HasPrefix(a, "--title="):
+			title, titled = strings.TrimPrefix(a, "--title="), true
+		case a == "-d" || a == "--description":
+			body = value(&i)
+		case strings.HasPrefix(a, "--description="):
+			body = strings.TrimPrefix(a, "--description=")
+		case a == "-a" || a == "--assignee":
+			assignee = value(&i)
+		case strings.HasPrefix(a, "--assignee="):
+			assignee = strings.TrimPrefix(a, "--assignee=")
+		case a == "--ephemeral":
+			ephemeral = true
+		case a == "-l" || a == "--labels":
+			labels = append(labels, strings.Split(value(&i), ",")...)
+		case strings.HasPrefix(a, "--labels="):
+			labels = append(labels, strings.Split(strings.TrimPrefix(a, "--labels="), ",")...)
+		case !strings.HasPrefix(a, "-") && !titled:
+			title, titled = a, true
 		}
 	}
 	if parent != "" {
@@ -790,7 +906,7 @@ func (c *Call) create(s, d string, args []string) error {
 	row := NewObject()
 	row.Set("id", id)
 	row.Set("status", status)
-	row.Set("assignee", "")
+	row.Set("assignee", assignee)
 	row.Set("title", title)
 	row.Set("description", body)
 	row.Set("notes", notes)
@@ -801,6 +917,12 @@ func (c *Call) create(s, d string, args []string) error {
 	}
 	if prio != "" {
 		row.Set("priority", prioValue)
+	}
+	if len(labels) > 0 {
+		row.Set("labels", strs(labels))
+	}
+	if ephemeral {
+		row.Set("ephemeral", true)
 	}
 	if err := writeRows(s, append(rows, row)); err != nil {
 		return err
@@ -870,12 +992,37 @@ func (c *Call) close(s, d string, args []string) error {
 			return err
 		}
 	}
+	reason, given := "", false
+	for i := 1; i < len(args); i++ {
+		switch a := args[i]; {
+		case (a == "--reason" || a == "-r") && i+1 < len(args):
+			reason, given = args[i+1], true
+			i++
+		case strings.HasPrefix(a, "--reason="):
+			reason, given = strings.TrimPrefix(a, "--reason="), true
+		}
+	}
 	for _, r := range rows {
 		if idIs(r, id) {
 			r.Set("status", "closed")
+			stampClosed(r)
+			if given {
+				r.Set("close_reason", reason)
+			}
 		}
 	}
 	return writeRows(s, rows)
+}
+
+// closedStamp is the time the fake records a close at.
+const closedStamp = "2026-01-01T00:00:00Z"
+
+// stampClosed gives a row bd closes the closed_at bd records, keeping one the
+// row already carries.
+func stampClosed(r *Object) {
+	if !Truthy(get(r, "closed_at")) {
+		r.Set("closed_at", closedStamp)
+	}
 }
 
 func (c *Call) kv(args []string) error {
@@ -1026,6 +1173,7 @@ func (c *Call) gate(s string, args []string) error {
 			if idIs(r, gid) && !strEq(orDefault(get(r, "status"), "open"), "closed") {
 				r.Set("status", "closed")
 				r.Set("close_reason", reason)
+				stampClosed(r)
 			}
 		}
 		if err := writeRows(s, rows); err != nil {

@@ -112,7 +112,7 @@ func TestUpdateStoresTypedValuesInPlace(t *testing.T) {
 	if r.status != 0 || r.out != "updated a\n" {
 		t.Fatalf("update: %+v", r)
 	}
-	want := `[{"id":"a","status":"closed","metadata":{"keep":"k","typed":1,"flag":true,"txt":" 007 ","num":7,"plus":"+1","eq":"a=b"},"priority":1,"notes":"n1"},{"id":"b"}]` + "\n"
+	want := `[{"id":"a","status":"closed","metadata":{"keep":"k","typed":1,"flag":true,"txt":" 007 ","num":7,"plus":"+1","eq":"a=b"},"closed_at":"2026-01-01T00:00:00Z","priority":1,"notes":"n1"},{"id":"b"}]` + "\n"
 	if got := f.file("beads.json"); got != want {
 		t.Errorf("store after the update:\n got %s\nwant %s", got, want)
 	}
@@ -323,21 +323,365 @@ func TestHangsHoldTheCall(t *testing.T) {
 	}
 }
 
-func TestHoldsReadIsHandedOn(t *testing.T) {
+// ids is the id of each row a listing answers, comma-joined.
+func ids(t *testing.T, r result) string {
+	t.Helper()
+	v, err := Decode([]byte(r.out))
+	if err != nil {
+		t.Fatalf("%q: %v", r.out, err)
+	}
+	var out []string
+	for _, row := range v.([]Value) {
+		out = append(out, get(row.(*Object), "id").(string))
+	}
+	return strings.Join(out, ",")
+}
+
+func TestBlockedReadyAndMarksKeepBdsRule(t *testing.T) {
+	// a waits on b; c's parent e waits on x; k is held by nothing live: its
+	// blocker is closed, an external edge, and a bead the store does not hold;
+	// w waits for spawner s, whose child is live; g is a gate.
+	f := newFixture(t, `[
+		{"id":"a","status":"open","metadata":{"key":"1"}},
+		{"id":"b","status":"open","assignee":"bob","labels":["skip"]},
+		{"id":"e","status":"open","issue_type":"epic"},
+		{"id":"x","status":"in_progress"},
+		{"id":"c","status":"open","parent":"e"},
+		{"id":"k","status":"open","dependencies":[{"id":"done","dependency_type":"blocks"},{"depends_on_id":"far","type":"blocks","external":true}]},
+		{"id":"done","status":"closed"},
+		{"id":"far","status":"open"},
+		{"id":"s","status":"open"},
+		{"id":"sc","status":"open","parent":"s"},
+		{"id":"w","status":"open"},
+		{"id":"g","status":"open","issue_type":"gate"}]`,
+		"b|blocks|a\nx|blocks|e\nk|blocks|nowhere\nw|waits-for|s\n")
+	if got := ids(t, f.gc("bd", "blocked", "--json")); got != "a,e,c,w" {
+		t.Errorf("blocked = %s", got)
+	}
+	r := f.gc("bd", "blocked", "--json")
+	if !strings.Contains(r.out, `"id":"c"`) || !strings.Contains(r.out, `"blocked_by_count":1,"blocked_by":["e"]`) {
+		t.Errorf("a bead held through its parent names the parent: %s", r.out)
+	}
+	if got := ids(t, f.gc("bd", "sql", "--json", "SELECT id FROM issues WHERE is_blocked = 1 AND status <> 'closed'")); got != "a,c,e,w" {
+		t.Errorf("marks = %s", got)
+	}
+	if r := f.gc("bd", "sql", "--json", "SELECT * FROM issues"); r.status != 2 {
+		t.Errorf("another query answers %+v", r)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "b,k,far,s,sc"},
+		{[]string{"--unassigned"}, "k,far,s,sc"},
+		{[]string{"--exclude-label", "skip"}, "k,far,s,sc"},
+		{[]string{"--exclude-type=task"}, ""},
+		{[]string{"--has-metadata-key", "key"}, ""},
+	} {
+		if got := ids(t, f.gc(append([]string{"bd", "ready", "--json", "--limit", "0"}, c.args...)...)); got != c.want {
+			t.Errorf("ready %v = %s, want %s", c.args, got, c.want)
+		}
+	}
+	f.write("deps.txt", "")
+	if got := ids(t, f.gc("bd", "ready", "--has-metadata-key=key", "--json")); got != "a" {
+		t.Errorf("ready by key once nothing holds a = %s", got)
+	}
+}
+
+func TestListCarriesEachEdgeAndSelectsByParent(t *testing.T) {
+	f := newFixture(t, `[{"id":"p","status":"open"},{"id":"c","status":"open","parent":"p"},{"id":"d","status":"open","dependencies":[{"id":"p","dependency_type":"tracks"}]},{"id":"n","status":"open"}]`,
+		"p|blocks|c\nc|tracks|n\n")
+	r := f.gc("bd", "list", "--json")
+	for _, want := range []string{
+		`{"id":"c","status":"open","parent":"p","priority":2,"dependencies":[{"issue_id":"c","depends_on_id":"p","type":"blocks"},{"issue_id":"c","depends_on_id":"p","type":"parent-child"},{"issue_id":"c","depends_on_id":"n","type":"tracks"}]}`,
+		`{"id":"d","status":"open","dependencies":[{"id":"p","dependency_type":"tracks"}],"priority":2}`,
+		`{"id":"n","status":"open","priority":2}`,
+	} {
+		if !strings.Contains(r.out, want) {
+			t.Errorf("list lacks %s:\n%s", want, r.out)
+		}
+	}
+	if got := ids(t, f.gc("bd", "list", "--parent", "p", "--json")); got != "c" {
+		t.Errorf("list --parent p = %s", got)
+	}
+}
+
+func TestCommentsAreKeptPerBead(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","title":"Alpha","status":"open"},{"id":"b","status":"open"}]`, "")
+	f.env = append(f.env, "STUB_COMMENTS="+filepath.Join(f.dir, "comments.json"))
+	if r := f.gc("bd", "comments", "a", "--json"); r.out != "[]\n" || r.status != 0 {
+		t.Errorf("no comments: %+v", r)
+	}
+	if r := f.run([]string{"BEADS_ACTOR=me"}, "bd", "comment", "a", "first"); r.out != "✓ Comment added to a — Alpha\n" || r.status != 0 {
+		t.Errorf("comment: %+v", r)
+	}
+	f.gc("bd", "comment", "b", "other")
+	f.gc("bd", "comment", "a", "second", "--json")
+	r := f.gc("bd", "comments", "a", "--json")
+	if !strings.Contains(r.out, `"issue_id":"a","author":"me","text":"first"`) || !strings.Contains(r.out, `"text":"second"`) || strings.Contains(r.out, "other") {
+		t.Errorf("comments of a: %s", r.out)
+	}
+	if r := f.gc(readFlag, "comments", "a"); r.out != "first\nsecond\n" {
+		t.Errorf("the comments reader: %+v", r)
+	}
+	if r := f.gc("bd", "comment", "nope", "x"); r.status != 1 || r.err != "Error: issue nope not found\n" {
+		t.Errorf("a comment on a bead the store does not hold: %+v", r)
+	}
+	if r := f.gc("bd", "comments", "nope", "--json"); r.status != 1 || !strings.Contains(r.out, `"error":"issue nope not found"`) {
+		t.Errorf("the comments of a bead the store does not hold: %+v", r)
+	}
+}
+
+func TestRigListAnswersTheSetting(t *testing.T) {
 	f := newFixture(t, `[]`, "")
-	var path string
-	var argv, env []string
-	c := &Call{Args: []string{"bd", "--db", "/x", "list", "--json"}, Env: append(f.env, "HOLDS_STUB_READ=1", "STUB_HOLDS_ANSWER=/holds.sh", "HOLDS_STORE=stale"),
-		Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{},
-		Exec: func(p string, a, e []string) error { path, argv, env = p, a, e; return nil }}
+	if r := f.gc("rig", "list", "--json"); r.out != `{"rigs":[]}`+"\n" {
+		t.Errorf("no setting: %+v", r)
+	}
+	f.write("rigs.json", `{"rigs":[{"name":"r"}]}`)
+	if r := f.run([]string{"STUB_RIGS=" + filepath.Join(f.dir, "rigs.json")}, "rig", "list", "--json"); r.out != `{"rigs":[{"name":"r"}]}` {
+		t.Errorf("the setting's file: %+v", r)
+	}
+	if r := f.gc("rig", "status"); r.status != 2 {
+		t.Errorf("another rig verb: %+v", r)
+	}
+}
+
+func TestHookRunsBeforeTheCallItNames(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
+	hook := filepath.Join(f.dir, "hook.sh")
+	f.write("hook.sh", "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$*\" \"$STUB_HOOK_AT\" \"$(cat)\" >> \""+filepath.Join(f.dir, "fired")+"\"\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	set := []string{"STUB_HOOK_AT=update a", "STUB_HOOK=" + hook}
+	f.run(set, "bd", "show", "a", "--json")
+	if _, err := os.Stat(filepath.Join(f.dir, "fired")); err == nil {
+		t.Errorf("a call that does not carry the text ran the hook")
+	}
+	var out, errb bytes.Buffer
+	c := &Call{Args: []string{"bd", "update", "a", "--status=closed"}, Env: append(append([]string{}, f.env...), set...),
+		Stdin: strings.NewReader("the call's own input"), Stdout: &out, Stderr: &errb}
 	if status := Run(c); status != 0 {
-		t.Fatalf("status %d", status)
+		t.Fatalf("update: %d %s", status, errb.String())
 	}
-	if path != "/holds.sh" || strings.Join(argv, " ") != "/holds.sh answer --db /x list --json" {
-		t.Errorf("handed to %s %v", path, argv)
+	if got := f.file("fired"); got != "bd update a --status=closed||\n" {
+		t.Errorf("the hook ran with %q, want the call's arguments, no setting and no input", got)
 	}
-	got := strings.Join(env, "\n")
-	if !strings.Contains(got, "HOLDS_STORE="+filepath.Join(f.dir, "beads.json")) || strings.Contains(got, "HOLDS_STORE=stale") {
-		t.Errorf("env %v", env)
+}
+
+func TestHarnessWritesSetRowsAndLogNothing(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"closed"}]`, "")
+	for _, args := range [][]string{
+		{"row", "a", "status=open", "title=the bead a", "metadata.k=v"},
+		{"row", "b", "status=open", "labels:=[\"x\"]", "priority:=1"},
+		{"set", "a", "metadata.n:=2", "assignee=bob"},
+	} {
+		if r := f.gc(append([]string{writeFlag}, args...)...); r.status != 0 {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	if got, want := f.file("beads.json"), `[{"id":"a","status":"open","title":"the bead a","metadata":{"k":"v","n":2},"assignee":"bob"},{"id":"b","status":"open","labels":["x"],"priority":1}]`+"\n"; got != want {
+		t.Errorf("store %s, want %s", got, want)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"field", "a", "assignee"}, "bob\n"},
+		{[]string{"field", "b", "labels"}, "[\"x\"]\n"},
+		{[]string{"field", "b", "assignee"}, "\n"},
+		{[]string{"field", "z", "assignee"}, "<absent>\n"},
+		{[]string{"ids", "metadata.k=v"}, "a\n"},
+		{[]string{"ids", "status=open"}, "a\nb\n"},
+		{[]string{"ids", "metadata.n=2", "assignee=bob"}, "a\n"},
+	} {
+		if r := f.gc(append([]string{readFlag}, c.args...)...); r.out != c.want {
+			t.Errorf("%v = %q, want %q", c.args, r.out, c.want)
+		}
+	}
+	if r := f.gc(writeFlag, "set", "z", "status=open"); r.status != 1 {
+		t.Errorf("a set on a bead the store does not hold: %+v", r)
+	}
+	if r := f.gc(writeFlag, "set", "a", "nope"); r.status != 2 {
+		t.Errorf("a setting with no value: %+v", r)
+	}
+	if got := f.file("gc.log"); got != "" {
+		t.Errorf("the writes logged %q", got)
+	}
+}
+
+func TestEdgeReadersReadEveryPlaceAnEdgeIs(t *testing.T) {
+	f := newFixture(t, `[{"id":"c","status":"open","dependencies":[{"id":"t2","dependency_type":"tracks"}]},{"id":"d","status":"open"},{"id":"t1"},{"id":"t2"}]`,
+		"c|tracks|t1\nd|tracks|t1\nb|blocks|c\n")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"edges", "c", "tracks"}, "t1 t2\n"},
+		{[]string{"edges", "c", "blocks"}, "b\n"},
+		{[]string{"edges", "d", "blocks"}, "\n"},
+		{[]string{"onto", "t1", "tracks"}, "c d\n"},
+		{[]string{"onto", "t2", "tracks"}, "c\n"},
+	} {
+		if r := f.gc(append([]string{readFlag}, c.args...)...); r.out != c.want {
+			t.Errorf("%v = %q, want %q", c.args, r.out, c.want)
+		}
+	}
+}
+
+func TestFaultsByTextRefuseOnlyTheCallsThatCarryIt(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"},{"id":"b","status":"open"}]`, "")
+	refuse := []string{"STUB_DEP_ADD_FAIL_ON=--type replies-to", "STUB_UPDATE_FAIL_ON=assignee=x"}
+	if r := f.run(refuse, "bd", "dep", "add", "a", "b", "--type", "replies-to"); r.status != 1 {
+		t.Errorf("a dep add that carries the text: %+v", r)
+	}
+	if r := f.run(refuse, "bd", "dep", "add", "a", "b", "--type", "tracks"); r.status != 0 {
+		t.Errorf("a dep add that does not: %+v", r)
+	}
+	if r := f.run(refuse, "bd", "update", "a", "--assignee=x"); r.status != 1 {
+		t.Errorf("an update that carries the text: %+v", r)
+	}
+	if r := f.run(refuse, "bd", "update", "a", "--assignee=y"); r.status != 0 {
+		t.Errorf("an update that does not: %+v", r)
+	}
+	if got := f.file("deps.txt"); got != "a|tracks|b\n" {
+		t.Errorf("deps %q, want only the edge nothing refused", got)
+	}
+	if r := f.gc(readFlag, "assignee", "a"); r.out != "y\n" {
+		t.Errorf("assignee %q", r.out)
+	}
+}
+
+func TestCreateReadsItsFlagsInAnyOrder(t *testing.T) {
+	f := newFixture(t, `[]`, "")
+	if r := f.gc("bd", "create", "-t", "task", "--title", "flagged", "-d", "the body", "--assignee", "human", "-l", "a,b", "--json"); r.status != 0 {
+		t.Fatalf("create: %+v", r)
+	}
+	f.gc("bd", "create", "positional", "--description=told", "--json")
+	want := `[{"id":"new-1","status":"open","assignee":"human","title":"flagged","description":"the body","notes":"","issue_type":"task","metadata":{},"labels":["a","b"]},` +
+		`{"id":"new-2","status":"open","assignee":"","title":"positional","description":"told","notes":"","issue_type":"task","metadata":{}}]` + "\n"
+	if got := f.file("beads.json"); got != want {
+		t.Errorf("store %s\nwant  %s", got, want)
+	}
+}
+
+func TestACloseRecordsWhenAndWhy(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"},{"id":"b","status":"open"},{"id":"c","status":"closed","closed_at":"2025-05-05T00:00:00Z"}]`, "")
+	f.gc("bd", "close", "a", "--reason", "done")
+	f.gc("bd", "update", "b", "--status=closed")
+	f.gc("bd", "close", "c", "-r", "again")
+	want := `[{"id":"a","status":"closed","closed_at":"2026-01-01T00:00:00Z","close_reason":"done"},{"id":"b","status":"closed","closed_at":"2026-01-01T00:00:00Z"},{"id":"c","status":"closed","closed_at":"2025-05-05T00:00:00Z","close_reason":"again"}]` + "\n"
+	if got := f.file("beads.json"); got != want {
+		t.Errorf("store %s\nwant  %s", got, want)
+	}
+}
+
+func TestAGuardThatNoLongerHoldsWritesNothingAndExits13(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open","assignee":"bob"}]`, "")
+	for _, c := range []struct {
+		args   []string
+		status int
+	}{
+		{[]string{"--if-assignee", "carol", "--assignee", "dan"}, 13},
+		{[]string{"--if-status=closed", "--assignee", "dan"}, 13},
+		{[]string{"--if-assignee=bob", "--if-status", "open", "--assignee", "dan"}, 0},
+		{[]string{"--if-assignee", "", "--assignee", "eve"}, 13},
+	} {
+		if r := f.gc(append([]string{"bd", "update", "a"}, c.args...)...); r.status != c.status {
+			t.Errorf("update %v: %+v, want exit %d", c.args, r, c.status)
+		}
+	}
+	if r := f.gc(readFlag, "assignee", "a"); r.out != "dan\n" {
+		t.Errorf("assignee %q, want only the update whose guards held", r.out)
+	}
+}
+
+func TestUpdateEditsLabels(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open","labels":["x","hold:mayor"]}]`, "")
+	f.gc("bd", "update", "a", "--add-label", "y", "--add-label=x", "--remove-label", "hold:mayor")
+	if r := f.gc(readFlag, "field", "a", "labels"); r.out != `["x","y"]`+"\n" {
+		t.Errorf("labels %q", r.out)
+	}
+	f.gc("bd", "update", "a", "--set-labels", "z")
+	if r := f.gc(readFlag, "field", "a", "labels"); r.out != `["z"]`+"\n" {
+		t.Errorf("labels after --set-labels %q", r.out)
+	}
+}
+
+func TestAListingHidesTemplatesInfraAndWisps(t *testing.T) {
+	f := newFixture(t, `[{"id":"t","status":"open"},{"id":"tpl","status":"open","is_template":true},{"id":"m","status":"open","issue_type":"message"},{"id":"w","status":"open","ephemeral":true}]`, "")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--json"}, "t"},
+		{[]string{"--id", "t,tpl,m,w", "--json"}, "t"},
+		{[]string{"--id", "t,tpl,m,w", "--include-templates", "--json"}, "t,tpl"},
+		{[]string{"--id", "t,tpl,m,w", "--include-infra", "--json"}, "t,m,w"},
+		{[]string{"--id", "t,tpl,m,w", "--include-ephemeral", "--json"}, "t,w"},
+	} {
+		if got := ids(t, f.gc(append([]string{"bd", "list"}, c.args...)...)); got != c.want {
+			t.Errorf("list %v = %s, want %s", c.args, got, c.want)
+		}
+	}
+}
+
+func TestABlocksEdgeAcrossAParentChainIsRefused(t *testing.T) {
+	f := newFixture(t, `[{"id":"p","status":"open"},{"id":"c","status":"open","parent":"p"},{"id":"g","status":"open"},{"id":"x","status":"open"}]`, "g|parent-child|c\n")
+	for _, c := range []struct {
+		args   []string
+		status int
+	}{
+		{[]string{"g", "p", "--type", "blocks"}, 1},
+		{[]string{"p", "g", "--type=conditional-blocks"}, 1},
+		{[]string{"c", "p"}, 1},
+		{[]string{"g", "p", "--type", "tracks"}, 0},
+		{[]string{"x", "p", "--type", "blocks"}, 0},
+	} {
+		if r := f.gc(append([]string{"bd", "dep", "add"}, c.args...)...); r.status != c.status {
+			t.Errorf("dep add %v: %+v, want exit %d", c.args, r, c.status)
+		}
+	}
+	if got := f.file("deps.txt"); got != "g|parent-child|c\ng|tracks|p\np|blocks|x\n" {
+		t.Errorf("deps %q", got)
+	}
+}
+
+func TestFailOnRefusesAnyCallThatCarriesTheText(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
+	set := []string{"STUB_FAIL_ON=list --id a"}
+	if r := f.run(set, "bd", "list", "--id", "a", "--json"); r.status != 1 || r.out != "" {
+		t.Errorf("a call that carries the text: %+v", r)
+	}
+	if r := f.run(set, "bd", "show", "a", "--json"); r.status != 0 {
+		t.Errorf("a call that does not: %+v", r)
+	}
+	if got := f.file("gc.log"); got != "bd list --id a --json\nbd show a --json\n" {
+		t.Errorf("log %q: a refused call is still logged", got)
+	}
+}
+
+func TestAHookThatFailsFailsItsCall(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
+	f.write("second.sh", "#!/bin/sh\n[ -e \""+filepath.Join(f.dir, "seen")+"\" ] && exit 1\n: > \""+filepath.Join(f.dir, "seen")+"\"\n")
+	if err := os.Chmod(filepath.Join(f.dir, "second.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	set := []string{"STUB_HOOK_AT=show a", "STUB_HOOK=" + filepath.Join(f.dir, "second.sh")}
+	if r := f.run(set, "bd", "show", "a", "--json"); r.status != 0 {
+		t.Errorf("the first show: %+v", r)
+	}
+	if r := f.run(set, "bd", "show", "a", "--json"); r.status != 1 || r.out != "" {
+		t.Errorf("the second show, whose hook fails: %+v", r)
+	}
+}
+
+func TestUnsetRemovesFieldsAndMetadataKeys(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open","owner":"o","metadata":{"k":"v","keep":"1"}}]`, "")
+	if r := f.gc(writeFlag, "unset", "a", "owner", "metadata.k", "metadata.none"); r.status != 0 {
+		t.Fatalf("unset: %+v", r)
+	}
+	if got := f.file("beads.json"); got != `[{"id":"a","status":"open","metadata":{"keep":"1"}}]`+"\n" {
+		t.Errorf("store %s", got)
 	}
 }
