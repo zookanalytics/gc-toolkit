@@ -21,9 +21,23 @@ type Store interface {
 	// Ready reads the beads q selects that the store reports ready, in the
 	// listing's shape. A read that fails returns a *ReadError.
 	Ready(q ReadyQuery) ([]Bead, error)
+	// Dependents reads the beads that have an edge of type typ onto id. Each
+	// row is the dependent's own fields with the edge's type, and carries none
+	// of its own edges. A read that fails returns a *ReadError, and so does an
+	// id the store does not hold.
+	Dependents(id, typ string) ([]Bead, error)
+	// ReadyIDs reads the id of every bead the store reports ready. A read that
+	// fails returns a *ReadError.
+	ReadyIDs() ([]string, error)
+	// SetState sets one state dimension of id to value, with reason, as one
+	// `gc bd set-state`. An error is a write that did not land.
+	SetState(id, dimension, value, reason string) error
 	// Update makes one `gc bd update` of id with args, returning its output.
 	// An error is a write that did not land.
 	Update(id string, args ...string) (string, error)
+	// AddEdge makes one `gc bd dep add` of an edge of type typ from id onto
+	// target, returning its output. An error is a write that did not land.
+	AddEdge(id, target, typ string) (string, error)
 	// Create makes one `gc bd create` titled title with args, and returns the
 	// new bead's id. An error may still have filed the bead: bd answers a
 	// create whose commit result it lost with the same reply and exit as a

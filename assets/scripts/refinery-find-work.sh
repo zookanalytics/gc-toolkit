@@ -6,8 +6,10 @@
 #
 # Gas Town's selection: the beads assigned to this refinery ($GC_AGENT), open
 # or in progress, that carry a branch, epics left out, in this rig's store. A
-# bead the publication left blocked on its PR's pending record is not open, so
-# it is not listed. Then the pack's differences:
+# bead whose PR waits on the pending record is blocked and assigned to nobody,
+# so it is not listed, and the landing order assigns it to this refinery again
+# when the PR moves to a head the refinery has not validated. Then the pack's
+# differences:
 #
 #   - A bead something holds waits until its waits land. What holds it is the
 #     answer of `gctk bead holds`, the pack's one rule.

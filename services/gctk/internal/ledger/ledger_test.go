@@ -451,6 +451,43 @@ func TestAGuardedWriteLandsOnlyOnTheBeadItWasGuardedOn(t *testing.T) {
 	}
 }
 
+// A write that assigns the bead carries the assignee in its one update, after
+// the status, and an assignee of "" assigns the bead to nobody, which bd's
+// guard on an empty assignee then finds.
+func TestAWriteAssignsTheBeadInItsOneUpdate(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "open", Assignee: "rig/refinery"})
+	l := New(s)
+	w := l.Write("b-1")
+	w.Guard("open", "rig/refinery")
+	w.Status("blocked")
+	w.Assignee("")
+	testText.Set(w, "waiting")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--if-status=open", "--if-assignee=rig/refinery", "--status=blocked", "--assignee=",
+		"--set-metadata", "test.ledger.text=waiting"}
+	if got := s.Writes()[0].Args; !slices.Equal(got, want) {
+		t.Fatalf("the update is %q, want %q", got, want)
+	}
+	if b, _ := s.Row("b-1"); b.Status != "blocked" || b.Assignee != "" {
+		t.Fatalf("the bead reads %s under %q", b.Status, b.Assignee)
+	}
+	w = l.Write("b-1")
+	w.Guard("blocked", "")
+	w.Assignee("rig/refinery")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Writes()[1].Args; !slices.Equal(got, []string{"--if-status=blocked", "--if-assignee=", "--assignee=rig/refinery"}) {
+		t.Fatalf("an assignment alone is %q", got)
+	}
+	if b, _ := s.Row("b-1"); b.Assignee != "rig/refinery" {
+		t.Fatalf("the bead is assigned to %q", b.Assignee)
+	}
+}
+
 // A key's reading face reads the key and names it, and offers no write.
 func TestAViewReadsItsKey(t *testing.T) {
 	s := fake.New()
@@ -463,5 +500,64 @@ func TestAViewReadsItsKey(t *testing.T) {
 	v := testText.View()
 	if got, ok, err := v.Get(r); err != nil || !ok || got != "aliased" || v.Name() != "test.ledger.text" {
 		t.Fatalf("the view read %q, %v, %v as %s", got, ok, err, v.Name())
+	}
+}
+
+// A blocker is written as the bead's blocks edge onto it, only once a read finds
+// it in the store: a bead the store does not hold, as an id outside its prefix,
+// gets no edge and an error that is ErrNotHeld, and a read or an edge write
+// that fails writes nothing and fails.
+func TestABlockerIsWrittenOnlyOntoABeadTheStoreHolds(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "b-2", Title: "the run", Status: "open"})
+	l := New(s)
+	if err := l.AddBlocker("b-1", "b-2"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := s.Row("b-1")
+	if want := []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "b-2", Title: "the run", Status: "open"}}; !slices.Equal(b.Edges, want) || b.Status != "blocked" {
+		t.Fatalf("the bead stands %s with edges %+v, want blocked with %+v", b.Status, b.Edges, want)
+	}
+	if err := l.AddBlocker("b-1", "zz-elsewhere"); !errors.Is(err, ErrNotHeld) {
+		t.Errorf("an edge onto a bead the store does not hold = %v, want ErrNotHeld", err)
+	}
+	s.FindErr = errors.New("dolt timeout")
+	if err := l.AddBlocker("b-1", "b-2"); err == nil || errors.Is(err, ErrNotHeld) {
+		t.Errorf("an edge whose read failed = %v, want the read's error", err)
+	}
+	s.FindErr, s.EdgeErr = nil, errors.New("database is locked")
+	if err := l.AddBlocker("b-1", "b-2"); err == nil || !strings.Contains(err.Error(), "did not land") {
+		t.Errorf("an edge the store refused = %v", err)
+	}
+	if b, _ := s.Row("b-1"); len(b.Edges) != 1 {
+		t.Errorf("a refused or unread edge was written: %+v", b.Edges)
+	}
+}
+
+// A priority is one update naming every bead it gives the priority, and one that
+// does not land fails.
+func TestAPriorityIsOneUpdateOfEveryBeadNamed(t *testing.T) {
+	s := fake.New()
+	for _, id := range []string{"b-1", "b-2", "b-3"} {
+		s.Put(fake.Bead{ID: id, Status: "open", Priority: 2})
+	}
+	l := New(s)
+	if err := l.Prioritize(1, "b-1", "b-3"); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]int{"b-1": 1, "b-2": 2, "b-3": 1} {
+		if b, _ := s.Row(id); b.Priority != want {
+			t.Errorf("%s stands at P%d, want P%d", id, b.Priority, want)
+		}
+	}
+	if w := s.Writes(); len(w) != 2 || !slices.Equal(w[0].Args, []string{"--priority=1"}) {
+		t.Errorf("writes = %+v, want one per bead named, each --priority=1", w)
+	}
+	if err := l.Prioritize(1); err != nil || len(s.Writes()) != 2 {
+		t.Errorf("a priority of no bead = %v, and wrote %+v", err, s.Writes())
+	}
+	if err := l.Prioritize(0, "b-1", "b-missing"); err == nil || !strings.Contains(err.Error(), "did not land") {
+		t.Errorf("a priority of a bead the store does not hold = %v", err)
 	}
 }

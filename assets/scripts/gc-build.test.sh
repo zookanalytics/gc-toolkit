@@ -16,7 +16,7 @@
 #              record names, exactly as they were
 #   (CURRENT)  a current binary needs no toolchain: exit 0, recorded as success
 #   (BUILD)    with a toolchain, the owed build publishes and records its revision
-#   (STAMP)    the binary is stamped with services/gctk's own revision, the
+#   (STAMP)    the binary is stamped with the revision its record names, the
 #              identity `gctk version` reports
 #   (COMMAND)  gctk is a command, not a service: --deploy restarts nothing, the
 #              record carries restart_pending false and no probe fields, no
@@ -29,12 +29,15 @@
 #   (NOCITY)   with neither, it refuses and publishes nothing
 #   (SCOPED)   an inherited GC_SERVICE_STATE_ROOT, or helm's override, does not
 #              move gctk's state root
-#   (DEPS)     a local replace-dep joins source_rev, while the stamp stays the
-#              module's own revision
-# Hermetic: a fixture tree holds a copy of the script beside a stand-in
-# services/gctk; the toolchain is a stub or absent, named by GC_GO_BIN; gc is a
-# stub named by GC_GCTK_GC_BIN; the state roots and the Go scratch dir are temp
-# dirs. No city, no real build, no network.
+#   (DEPBUMP)  a committed change to go.mod and go.sum, a dependency's version
+#              moving, rebuilds with nothing newer than the binary
+#   (OTHER)    a commit that touches none of gctk's inputs, such as one under
+#              services/helm, moves no revision and rebuilds nothing
+# Hermetic: a fixture tree holds a copy of the script beside a stand-in root
+# go.mod and go.sum and a stand-in services/gctk; the toolchain is a stub or
+# absent, named by GC_GO_BIN; gc is a stub named by GC_GCTK_GC_BIN; the state
+# roots and the Go scratch dir are temp dirs. No city, no real build, no
+# network.
 set -uo pipefail
 
 # The state-root fallback ends at <city>/.gc/services/gctk, and the city this
@@ -70,20 +73,32 @@ commit_all() { # <repo> [message]
       -c commit.gpgsign=false commit -q -m "${2:-fixture}" >/dev/null 2>&1
 }
 
-# The script finds its module at ../../services/gctk and names it by the tree
-# hash of that subtree, so the fixture is a committed tree of the same shape.
-# The sources are dated in the past, so a binary written by a case is newer.
+# The script finds the repository root at ../.. and names gctk's revision by
+# git's hash of the `git ls-tree HEAD` listing of its inputs there: go.mod,
+# go.sum and services/gctk. The fixture is a committed tree of the same shape,
+# and identity is that definition, computed the way a reader of the record
+# would. The sources are dated in the past, so a binary written by a case is
+# newer.
+identity() { # <root> — gctk's revision at the root's HEAD, or nothing
+  local listing
+  listing="$(git -C "$1" ls-tree HEAD -- go.mod go.sum services/gctk 2>/dev/null)" || return 0
+  [ -n "$listing" ] || return 0
+  printf '%s\n' "$listing" | git -C "$1" hash-object --stdin 2>/dev/null
+}
 ROOT="$TMP/root"
-mkdir -p "$ROOT/assets/scripts" "$ROOT/services/gctk/cmd/gctk"
+mkdir -p "$ROOT/assets/scripts" "$ROOT/services/gctk/cmd/gctk" "$ROOT/services/helm"
 cp "$HERE/gc-build.sh" "$ROOT/assets/scripts/gc-build.sh"
-printf 'module example.invalid/gctk\n\ngo 1.22\n' > "$ROOT/services/gctk/go.mod"
+printf 'module example.invalid/fixture\n\ngo 1.22\n\nrequire example.invalid/dep v1.0.0\n' > "$ROOT/go.mod"
+printf 'example.invalid/dep v1.0.0 h1:one=\n' > "$ROOT/go.sum"
 printf 'package main\n\nfunc main() {}\n' > "$ROOT/services/gctk/cmd/gctk/main.go"
+printf 'package main\n' > "$ROOT/services/helm/main.go"
 git -C "$ROOT" init -q >/dev/null 2>&1
 commit_all "$ROOT"
-touch -d '2026-01-01 00:00:00' "$ROOT/services/gctk/go.mod" "$ROOT/services/gctk/cmd/gctk/main.go"
-REV=$(git -C "$ROOT/services/gctk" rev-parse 'HEAD:./' 2>/dev/null)
-[ -n "$REV" ] && ok "the fixture module has a revision" \
-             || bad "the fixture module has no revision; every case below would be vacuous"
+touch -d '2026-01-01 00:00:00' "$ROOT/go.mod" "$ROOT/go.sum" "$ROOT/services/gctk/cmd/gctk/main.go" \
+  "$ROOT/services/helm/main.go"
+REV=$(identity "$ROOT")
+[ -n "$REV" ] && ok "the fixture has a revision" \
+             || bad "the fixture has no revision; every case below would be vacuous"
 
 # A stub gc: logs every call, and answers `service list --json` from the file
 # STUB_GC_SERVICES names, failing when there is none.
@@ -195,9 +210,9 @@ eq "$("$STATE/bin/gctk")" "built" "(BUILD) …publishing the binary it built"
 eq "$(field binary_rev)" "$REV" "(BUILD) …and recording the revision it was built from"
 eq "$(field last_build_rc)" "0" "(BUILD) …as a success"
 
-# --- (STAMP) the binary carries its module's revision --------------------------
+# --- (STAMP) the binary carries its revision ----------------------------------
 grep -qxF -- "-X main.sourceRev=$REV" "$GOLOG" \
-  && ok "(STAMP) the build stamps services/gctk's revision for \`gctk version\`" \
+  && ok "(STAMP) the build stamps the revision it records, for \`gctk version\`" \
   || bad "(STAMP) no '-X main.sourceRev=$REV' in the build's arguments: $(tr '\n' ' ' < "$GOLOG")"
 
 # --- (COMMAND) no service, so no restart and no probe --------------------------
@@ -265,32 +280,43 @@ eq "$RC" "0" "(SCOPED) builds with another service's state root in the environme
 [ ! -e "$TMP/helm-root" ] && ok "(SCOPED) nor under helm's override" \
                           || bad "(SCOPED) the build wrote under GC_HELM_STATE_ROOT"
 
-# --- (DEPS) a local replace-dep joins the identity, not the stamp --------------
-# gctk replaces in no local module today; the build reads go.mod's replace
-# directives, so one added later is covered without naming it here.
-ROOT2="$TMP/root2"
-mkdir -p "$ROOT2/assets/scripts" "$ROOT2/services/gctk/cmd/gctk" "$ROOT2/services/dep"
-cp "$HERE/gc-build.sh" "$ROOT2/assets/scripts/gc-build.sh"
-printf 'module example.invalid/gctk\n\ngo 1.22\n\nrequire example.invalid/dep v0.0.0\n\nreplace example.invalid/dep => ../dep\n' \
-  > "$ROOT2/services/gctk/go.mod"
-printf 'package main\n\nfunc main() {}\n' > "$ROOT2/services/gctk/cmd/gctk/main.go"
-printf 'module example.invalid/dep\n\ngo 1.22\n' > "$ROOT2/services/dep/go.mod"
-printf 'package dep\n' > "$ROOT2/services/dep/dep.go"
-git -C "$ROOT2" init -q >/dev/null 2>&1
-commit_all "$ROOT2"
-REV2=$(git -C "$ROOT2/services/gctk" rev-parse 'HEAD:./' 2>/dev/null)
-DEPREV=$(git -C "$ROOT2/services/dep" rev-parse 'HEAD:./' 2>/dev/null)
-STATE2="$TMP/state2"
+# --- (DEPBUMP) a dependency's version moving rebuilds --------------------------
+# A bump rewrites go.mod and go.sum. Their dates are put back behind the binary
+# here, so the mtime scan is blind and only the revision can see the change.
+GOBIN="$TMP/fake-go"
+STATE="$TMP/state-deps"
+run
+eq "$RC" "0" "(DEPBUMP) the first build exits 0"
+eq "$(field binary_rev)" "$REV" "(DEPBUMP) …at the fixture's revision"
+printf 'module example.invalid/fixture\n\ngo 1.22\n\nrequire example.invalid/dep v1.0.1\n' > "$ROOT/go.mod"
+printf 'example.invalid/dep v1.0.1 h1:two=\n' > "$ROOT/go.sum"
+commit_all "$ROOT" "bump example.invalid/dep"
+touch -d '2026-01-01 00:00:00' "$ROOT/go.mod" "$ROOT/go.sum"
+BUMPED=$(identity "$ROOT")
+[ -n "$BUMPED" ] && [ "$BUMPED" != "$REV" ] \
+  && ok "(DEPBUMP) the bump moved the revision" \
+  || bad "(DEPBUMP) the bump did not move the revision; the case cannot show the rebuild"
+[ -z "$(find "$ROOT/go.mod" "$ROOT/go.sum" "$ROOT/services/gctk" -newer "$STATE/bin/gctk" -print -quit 2>/dev/null)" ] \
+  && ok "(DEPBUMP) …and left nothing newer than the binary, so the mtime scan is blind here" \
+  || bad "(DEPBUMP) an input is newer than the binary; the case would pass without reaching the revision"
 : > "$GOLOG"
-OUT=$(GC_GCTK_STATE_ROOT="$STATE2" GC_CITY_PATH="$TMP/city" GC_GCTK_GOTMP="$TMP/gotmp" \
-      GC_GCTK_GC_BIN="$GCBIN" GC_GCTK_ORIGIN_FETCH_TTL=0 STUB_GC_LOG="$GCLOG" \
-      STUB_GO_LOG="$GOLOG" GC_GO_BIN="$GOBIN" bash "$ROOT2/assets/scripts/gc-build.sh" gctk 2>&1); RC=$?
-eq "$RC" "0" "(DEPS) a module with a local replace-dep builds"
-eq "$(field source_rev "$STATE2/build-status.json")" "$REV2 $DEPREV" \
-   "(DEPS) …and its source_rev spans the replaced module's subtree"
-grep -qxF -- "-X main.sourceRev=$REV2" "$GOLOG" \
-  && ok "(DEPS) …while the stamp stays services/gctk's own revision, the one its readers compare" \
-  || bad "(DEPS) the stamp is not '-X main.sourceRev=$REV2': $(tr '\n' ' ' < "$GOLOG")"
+run
+eq "$RC" "0" "(DEPBUMP) the next tick exits 0"
+eq "$(builds)" "1" "(DEPBUMP) …and rebuilds, though nothing is newer than the binary"
+eq "$(field binary_rev)" "$BUMPED" "(DEPBUMP) …recording the bumped revision"
+grep -qxF -- "-X main.sourceRev=$BUMPED" "$GOLOG" \
+  && ok "(DEPBUMP) …and stamping it" \
+  || bad "(DEPBUMP) the stamp is not '-X main.sourceRev=$BUMPED': $(tr '\n' ' ' < "$GOLOG")"
+
+# --- (OTHER) a commit outside gctk's inputs ------------------------------------
+printf 'package main\n\n// a board change\n' > "$ROOT/services/helm/main.go"
+commit_all "$ROOT" "a board change"
+eq "$(identity "$ROOT")" "$BUMPED" "(OTHER) a commit under services/helm leaves gctk's revision where it was"
+: > "$GOLOG"
+run
+eq "$RC" "0" "(OTHER) the tick exits 0"
+has "$OUT" "up to date" "(OTHER) …with the binary current"
+eq "$(builds)" "0" "(OTHER) …so nothing is rebuilt"
 
 echo
 echo "gc-build: $PASS passed, $FAIL failed"

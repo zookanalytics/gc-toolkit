@@ -139,9 +139,14 @@ same gate:
   the gate is the ruling to proceed. A ruling not to proceed is a stand-down
   (below).
 
-Write what is owed so the person can answer it in about a minute: the plain
-stake and what each option costs, with ids only as references. In a sitting,
-the hold step files the gate a wait for the operator's answer needs.
+Write what is owed so the person can answer it in about a minute: the stake
+first, as the gate's title, then the one course you recommend, what accepting
+it ships and what it asks of them, and nothing else, with ids only as
+references. When no one course stands out, say so in its place, and the
+question is for a conversation: once the gate is filed,
+`"$(gc <binding> scripts-dir)/gc-helm.sh" open <gate>` opens one on it, which
+replies to the gate, so the sitting's answer resolves it. In a sitting, the
+hold step files the gate a wait for the operator's answer needs.
 
 ## Ask the operator for a conversation
 
@@ -208,14 +213,18 @@ limits arming too (the work skill).
 - **A wait a person owed, when they rule the work will not go on:**
   `"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>"`,
   with the gate's `await_id` as the key. It removes the arm, ends the run beneath
-  the bead, answers the gate with the ruling and closes the bead. Never answer
-  the gate first and close afterwards: an armed bead is sent as soon as its gate
-  clears, and bd refuses to close a bead an open gate blocks. A gate that also
-  holds another open bead takes no answer here, so pass
+  the bead, answers the gate with the ruling and closes the bead. A gate
+  assigned to the person who owes its action (above) needs nothing from you
+  first: the stand-down takes it back from them, because the ruling answers
+  what it asked. Never answer the gate first and close afterwards: an armed
+  bead is sent as soon as its gate clears, and bd refuses to close a bead an
+  open gate blocks. A gate that also holds another open bead takes no answer
+  here, so pass
   `--successor <the bead that records the ruling>`: this bead leaves the gate, and
   the gate goes on asking about the other one. Never remove that edge yourself
-  first, because an armed bead off its gate is sent too. It refuses, writing
-  nothing, an open PR (retire it, the prs skill) and a bead anything else holds.
+  first, because an armed bead off its gate is sent too. It refuses an open PR
+  (retire it, the prs skill), writing nothing, and a bead anything else holds,
+  writing nothing but the take-back of an assigned gate.
 - **An arm no longer wanted** is removed by its verb, which exits 0 once no arm
   remains:
 ```bash

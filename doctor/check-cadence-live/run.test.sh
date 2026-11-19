@@ -84,15 +84,19 @@ printf '#!/bin/sh\nexit 0\n' > "$TMP/bin/flock"; chmod +x "$TMP/bin/flock"
 export PATH="$TMP/bin:$PATH" HIST_DIR="$TMP/hist" HIST_ARGS="$TMP/hist-args.log"
 # A pack dir that is its own git repo, so arm 3 has a tree revision to compare
 # against. Local and never pushed; the identity is scaffolding. The identity is
-# the services/gctk subtree, not the commit: the build order records and stamps
-# that, so a commit touching nothing under it is not a mismatch.
+# the revision gc-build.sh records and stamps for gctk, not the commit: git's
+# hash of the `git ls-tree HEAD` listing of go.mod, go.sum and services/gctk, so
+# a commit touching none of them is not a mismatch.
 mkdir -p "$TMP/pack/services/gctk/cmd/gctk"
 echo 'package main' > "$TMP/pack/services/gctk/cmd/gctk/main.go"
+printf 'module example.invalid/pack\n' > "$TMP/pack/go.mod"
+printf 'example.invalid/dep v1.0.0 h1:one=\n' > "$TMP/pack/go.sum"
 git -C "$TMP/pack" init -q >/dev/null 2>&1
 git -C "$TMP/pack" add -A >/dev/null 2>&1
 git -C "$TMP/pack" -c user.email=fixture@example.invalid -c user.name=fixture \
     -c commit.gpgsign=false commit -q -m fixture >/dev/null 2>&1
-PACK_REV=$(git -C "$TMP/pack/services/gctk" rev-parse 'HEAD:./' 2>/dev/null)
+PACK_REV=$(git -C "$TMP/pack" ls-tree HEAD -- go.mod go.sum services/gctk 2>/dev/null \
+    | git -C "$TMP/pack" hash-object --stdin 2>/dev/null)
 PACK_COMMIT=$(git -C "$TMP/pack" rev-parse HEAD 2>/dev/null)
 [ -n "$PACK_REV" ] && ok "the fixture pack has a revision for arm 3 to compare" \
                    || bad "no fixture revision; the gctk arm would pass vacuously"
@@ -301,21 +305,34 @@ OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?
 eq "$RC" "0" "a binary built from this checkout is OK"
 has "$OUT" "matches this checkout" "and says so"
 
-# A hand build carries the toolchain's commit stamp; the subtree that commit
-# holds is what the checkout is compared against.
+# A hand build carries the toolchain's commit stamp; the identity at that
+# commit is what the checkout is compared against.
 gctk_stub "$PACK_COMMIT"
 OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?
-eq "$RC" "0" "a binary stamped with the commit that holds this subtree is OK"
+eq "$RC" "0" "a binary stamped with a commit whose gctk inputs this checkout holds is OK"
 has "$OUT" "matches this checkout" "and says so"
 
-# A commit that touches nothing under services/gctk moves HEAD, not the identity.
+# A commit that touches none of gctk's inputs moves HEAD, not the identity.
 echo '# unrelated' >> "$TMP/pack/orders/tick.toml"
 git -C "$TMP/pack" add -A >/dev/null 2>&1
 git -C "$TMP/pack" -c user.email=fixture@example.invalid -c user.name=fixture \
     -c commit.gpgsign=false commit -q -m unrelated >/dev/null 2>&1
 gctk_stub "$PACK_REV"
 OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?
-eq "$RC" "0" "a commit outside services/gctk does not make the deployed binary stale"
+eq "$RC" "0" "a commit outside gctk's inputs does not make the deployed binary stale"
+
+# A dependency bump moves go.sum, one of gctk's inputs, so a binary built before
+# it is behind. The bump is undone afterwards, so the cases below still compare
+# against PACK_REV.
+echo 'example.invalid/dep v1.0.1 h1:two=' > "$TMP/pack/go.sum"
+git -C "$TMP/pack" add -A >/dev/null 2>&1
+git -C "$TMP/pack" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m bump >/dev/null 2>&1
+gctk_stub "$PACK_REV"
+OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?
+eq "$RC" "1" "a binary built before a dependency bump WARNS"
+has "$OUT" "the cadence is running $PACK_REV" "the finding names the revision still running"
+git -C "$TMP/pack" reset -q --hard HEAD~1 >/dev/null 2>&1
 
 gctk_stub "0000000000000000000000000000000000000000"
 OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?

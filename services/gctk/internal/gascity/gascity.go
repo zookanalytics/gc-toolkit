@@ -1,11 +1,13 @@
 // Package gascity is gctk's runtime adapter: Gas City as gctk reaches it apart
 // from its store, which internal/gcbd reaches (docs/gctk-architecture.md, "The
 // adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
-// when it names none, wakes and nudges a session, names the city's root, and
-// runs the pack's scripts that ask a person. A domain reaches them only through
-// Runtime. City is the city gctk runs in, and gascity/fake records what a domain
-// asked and answers as its test says, so a domain's rules are tested in Go with
-// no Gas City.
+// when it names none, reads the city's roster, its named sessions, its rigs and
+// whether a formula resolves, wakes and nudges a session, names the city's root,
+// and runs the pack's scripts that ask a person. A domain reaches them only
+// through Runtime. City is the city gctk runs in, and gascity/fake records what
+// a domain asked and answers as its test says, so a domain's rules are tested
+// in Go with no Gas City. It also states Gas City's dispatch holds (hold.go),
+// the one rule of them each domain asks.
 package gascity
 
 import (
@@ -27,7 +29,7 @@ import (
 type Runtime interface {
 	// Sling runs one `gc sling` and returns what it answered.
 	Sling(s Sling) SlingResult
-	// Cook runs one `gc formula cook --attach` and returns what it answered.
+	// Cook runs one `gc formula cook` and returns what it answered.
 	Cook(c Cook) CookResult
 	// DefaultFormula is the formula sling s pours when it names none: the
 	// default sling formula the city's config gives the agent s.Target
@@ -46,12 +48,26 @@ type Runtime interface {
 	Script(name string, args ...string) Result
 	// CityRoot is the city's root directory, the one that holds its .gc.
 	CityRoot() (string, error)
+	// ShowFormula runs one `gc formula show <name>`.
+	ShowFormula(name string) Result
+	// Agents reads the city's roster. A read that does not answer is an error.
+	Agents() ([]Agent, error)
+	// NamedSessions reads the named sessions the city's config lists. A read
+	// that does not answer is an error.
+	NamedSessions() ([]NamedSession, error)
+	// Rigs reads the rigs the city names, its HQ among them. A read that does
+	// not answer is an error.
+	Rigs() ([]Rig, error)
 }
 
 // Sling is one `gc sling <target> <bead> --on <formula> --title <title>`,
-// with gc's --rig when Rig names one.
+// with gc's --rig when Rig names one and no --title when Title is empty. A
+// sling with NoFormula set pours nothing and files no convoy (`gc sling <target>
+// <bead> --no-formula --no-convoy`): it routes the bead to the target's own
+// name, which a named session's hook serves.
 type Sling struct {
 	Rig, Target, Bead, Formula, Title string
+	NoFormula                         bool
 }
 
 // Result is what a command answered: its exit code and its output, standard
@@ -63,19 +79,21 @@ type Result struct {
 	Err    error
 }
 
-// Cook is one `gc formula cook <formula> --attach <bead> --var <k>=<v>...`: the
-// formula poured as a sub-workflow of its own, which the bead gains a blocks
-// edge onto, with each var passed as cook passes only its --var flags.
+// Cook is one `gc formula cook <formula> --var <k>=<v>...`: the formula poured
+// as a workflow of its own, with each var passed as cook passes only its --var
+// flags.
 type Cook struct {
-	Formula, Bead string
-	Vars          map[string]string
+	Formula string
+	Vars    map[string]string
 }
 
-// CookResult is a cook's Result, with the root of the workflow it attached,
-// read from its --json line, "" when the cook did not answer with one.
+// CookResult is a cook's Result, with the root of the workflow it poured and
+// every bead the pour created, the root among them, read from its --json line,
+// empty when the cook did not answer with one.
 type CookResult struct {
 	Result
-	Root string
+	Root  string
+	Beads []string
 }
 
 // SlingResult is a sling's Result. Live is the workflows gc sling named when it
@@ -100,6 +118,14 @@ type City struct {
 	once   sync.Once
 	agents []agent
 	cfgErr error
+
+	namedOnce sync.Once
+	named     []NamedSession
+	namedErr  error
+
+	rigsOnce sync.Once
+	rigs     []Rig
+	rigsErr  error
 }
 
 var _ Runtime = (*City)(nil)
@@ -139,7 +165,15 @@ func (c *City) Sling(s Sling) SlingResult {
 	if s.Rig != "" {
 		args = append(args, "--rig", s.Rig)
 	}
-	args = append(args, s.Target, s.Bead, "--on", s.Formula, "--title", s.Title)
+	args = append(args, s.Target, s.Bead)
+	if s.NoFormula {
+		args = append(args, "--no-formula", "--no-convoy")
+	} else {
+		args = append(args, "--on", s.Formula)
+		if s.Title != "" {
+			args = append(args, "--title", s.Title)
+		}
+	}
 	r := c.run(c.bin, args...)
 	out := SlingResult{Result: r}
 	if r.Code == 3 {
@@ -149,37 +183,44 @@ func (c *City) Sling(s Sling) SlingResult {
 }
 
 // Cook runs the cook in gctk's own process group, its vars in their names'
-// order, and reads the root from the JSON line it prints, the summary whose
-// root_id names the workflow it attached (formulaCookJSONResult in
-// cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). Its standard input
-// reads nothing.
+// order, and reads the JSON line it prints, the summary whose root_id names the
+// workflow's root and whose id_mapping names each bead the pour created
+// (formulaCookJSONResult in cmd/gc/cmd_formula.go at gastownhall/gascity
+// 08fa618049). It names no bead to attach, because gc hook --claim retires a
+// graph.v2 workflow whose attached bead an agent outside the workflow holds
+// (workflowInputMembersSettled in cmd/gc/cmd_hook_claim.go there). Its standard
+// input reads nothing.
 func (c *City) Cook(k Cook) CookResult {
-	args := []string{"formula", "cook", k.Formula, "--attach", k.Bead, "--json"}
+	args := []string{"formula", "cook", k.Formula, "--json"}
 	for _, name := range slices.Sorted(maps.Keys(k.Vars)) {
 		args = append(args, "--var", name+"="+k.Vars[name])
 	}
 	r := c.run(c.bin, args...)
 	out := CookResult{Result: r}
 	if r.Code == 0 {
-		out.Root = cookedRoot(r.Output)
+		out.Root, out.Beads = cooked(r.Output)
 	}
 	return out
 }
 
-// cookedRoot is the root_id of the last JSON line in output that names one,
-// "" when none does.
-func cookedRoot(output string) string {
-	root := ""
+// cooked is the root_id of the last JSON line in output that names one, and the
+// beads that line's id_mapping names with the root, in id order, "" and none
+// when no line names one.
+func cooked(output string) (string, []string) {
+	root, beads := "", []string(nil)
 	sc := bufio.NewScanner(strings.NewReader(output))
 	for sc.Scan() {
 		var line struct {
-			RootID string `json:"root_id"`
+			RootID    string            `json:"root_id"`
+			IDMapping map[string]string `json:"id_mapping"`
 		}
 		if json.Unmarshal([]byte(strings.TrimSpace(sc.Text())), &line) == nil && line.RootID != "" {
 			root = line.RootID
+			beads = append(slices.Collect(maps.Values(line.IDMapping)), root)
 		}
 	}
-	return root
+	slices.Sort(beads)
+	return root, slices.Compact(beads)
 }
 
 // conflictLine opens the line gc sling prints for each source bead whose live

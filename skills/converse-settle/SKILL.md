@@ -61,13 +61,36 @@ sign-off arms the subject's validating closer (Sign off, below). The `work`
 skill says which bead carries the work and how to choose its formula. When the
 sitting ends at the hand-off for new work that opens its own PR, write what was
 agreed into the create's description in full, because the brief is then all
-the work carries of the discussion. In the block below, the sling runs only
-once the create has returned the bead's id. The comment then records the
-dispatch as one of the visit's actions, which the comment on the subject's PR
-lists:
+the work carries of the discussion.
+
+The work you send is yours to get right. What the operator says is direction to
+reason through: take each point up in the course or say why not. A remark is
+not an order to carry out to the letter, and it is not a decision they made.
+The operator usually engages and reviews at the big picture, unless they call
+out a specific item, and their go means they trust the course. So put first in
+the hand-back's decision, each as its concrete result in a short line, what
+they would most want to stop: anything the course removes, any change of
+scope, and anything it asks of another rig. Send the work once they have
+decided, not while they are still thinking it through.
+
+Write the order in your own voice: what needs doing, why, and what done looks
+like, with each point the operator raised carried into it. Quote their words
+where their words carry the point, and never write your reading as their
+ruling.
+
+The order is the description of a task you file, in this rig's store or
+another's, or the brief of a rework the sign-off files (below). In the block
+below, the description goes through a quoted heredoc, so what it quotes stays
+as written, and the sling runs only once the create has returned the bead's id.
+The comment then records the dispatch as one of the visit's actions, which the
+comment on the subject's PR lists:
 
 ```bash
-WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -er '.id') \
+DESC=$(cat <<'BLOCK'
+<what needs doing, why, and what done looks like, with each point the operator raised>
+BLOCK
+) \
+  && WORK=$(gc bd create "<title>" -t task -d "$DESC" --json | jq -er '.id') \
   && gc sling <rig>/<pool> "$WORK" --on <formula> \
   && gc bd comment "$CONVERSATION" "Sent work: <what it will do, in plain words>"
 ```
@@ -94,6 +117,30 @@ lands, in one plain sentence that names no other rig or its beads.
   ```bash
   gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
   ```
+
+**A rework's order is its ruling line**, which the sign-off hands the rework
+as the operator's ruling (`--rework`, below), so the line carries their words
+or names a brief, never your reading. A line that quotes their words and adds
+nothing of yours is the whole order. When the rework needs more than their
+words, write the order in the notes of the PR's anchor, the bead that carries
+its `merge_result`. A scaffold is such an order already, because the operator
+ruled each of its lines (`converse-iterate-document`):
+
+```bash
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  && BRIEF="## Rework brief ($NOW)
+$(cat <<'BLOCK'
+<what needs doing, why, and what done looks like, with each point the operator raised>
+BLOCK
+)" \
+  && gc bd update <anchor> --append-notes "$BRIEF" \
+  && echo "the brief is written, headed ## Rework brief ($NOW)"
+```
+
+No closing line means the store refused the brief: send no rework. Otherwise
+the ruling line names the brief, as `converse-iterate-document`'s line names
+its scaffold:
+`--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"`.
 
 **A follow-up that cannot start until another bead lands is armed** (the
 `waits` skill). Never send it now, and never leave it for someone to send

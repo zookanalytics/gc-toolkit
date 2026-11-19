@@ -40,38 +40,70 @@
 #   (NO-SANDBOX) a host without sandbox-exec stops the capture before anything
 #               is installed
 #   (CITY)      a known city whose rig map does not read, a working directory
-#               that holds the city's directory, and one inside it in no rig's
-#               worktree each stop the capture; a rig worktree inside the city
-#               is allowed, with its git directories
+#               that holds the city's directory, one inside it in no rig's
+#               worktree, and the own checkout of a rig that keeps the sandbox
+#               each stop the capture, the checkout before anything is
+#               installed; a rig worktree inside the city is allowed, with its
+#               git directories
 #   (PORTS)     a --serve-dir with no --port gets a free one; a port a server
 #               already answers on, and a --base-url on this host where nothing
 #               of this user's listens, stop the capture
+#   (IOS)       a --base-url that names an iOS app on a simulator provisions
+#               Appium through the engine first, and opens three free ports,
+#               no other, which the engine gets as --port; its screenshot takes
+#               no --scale; a call that also names a --serve-dir or a --port is
+#               refused, and zsh and bash 3.2 open the same three ports
 #   (LOCAL-APP) a --base-url on this host captures when every process that
 #               listens on its port works in a worktree of a rig whose
-#               app_reads_city setting is "false", and the sandbox opens that
-#               port and no other. Each other case stops the capture and says
-#               why: a rig set to "true", any other value, a read that fails,
-#               the rig that holds the capture's own scripts, a listener in no
-#               rig's worktree, a listener lsof names no directory for, no
-#               listener, no lsof, a port a city variable names, and a URL
-#               whose port is out of range
+#               app_reads_city setting is "false", which runs with no sandbox,
+#               or when gctk rig serve reports a copy's app at that port, which
+#               runs with no sandbox for a copy of such a rig and otherwise in
+#               the sandbox, opening that port and no other. Each other case
+#               stops the capture and says why: a rig set to "true", any other
+#               value, a read that fails, the rig that holds the capture's own
+#               scripts, a port the checkout's copy does not hold, the port of a
+#               copy whose app is on a simulator, a listener in no rig's
+#               worktree, a listener lsof names no directory for, no listener,
+#               no lsof, a port a city variable names, and a URL whose port is
+#               out of range
+#   (PLAIN)     a capture that captures only from rigs whose app_reads_city is
+#               "false", through its --cwd, its --serve-dir, its copy or the
+#               working directory, one from such a rig's own checkout with the
+#               engine resolved, and a command demo_engine_sandboxed runs from
+#               such a rig's worktree, run with no sandbox-exec and without the
+#               variables that point at the city, and say so; one that captures
+#               from a rig set to "true", the rig that holds the library, the
+#               city's own repository, a directory in no rig's repository or a
+#               rig whose setting does not read keeps the sandbox; and a call of
+#               the library's CLI whose --base-url is its copy's app captures
+#               from the copy's checkout whatever --cwd it names
 #   (ISOLATION) on a host with sandbox-exec, a terminal capture whose command
 #               reads the city's files, its stores, gc's home and a service on
 #               its loopback, and lists the city's variables, reaches none of
 #               them, though the same command run outside the sandbox does; a
 #               capture's own server answers it on each of a run of free ports,
 #               which opens neither another loopback service nor a Unix socket;
-#               and with the host's lsof, an app server in a worktree of a rig
-#               whose app_reads_city is "false" answers a page capture's
-#               --base-url on each of a run of ports, with the same two still
-#               shut, while the same server in a rig set to "true" is refused
-#               and a terminal capture in the first rig's worktree reaches
-#               neither the app nor the city
+#               and with the host's lsof, a copy of a rig set to "true" answers
+#               a page capture's --base-url on each of a run of ports, with the
+#               same two still shut, the same server outside a copy is refused,
+#               and a terminal capture in that rig's worktree reaches neither
+#               the app nor the city, while a page capture of an app server in
+#               a worktree of a rig whose app_reads_city is "false", and a
+#               terminal capture there, run with no sandbox and reach both,
+#               though not the city's variables
 #   (SHELLS)    under zsh and macOS's bash 3.2, the shells an agent can source
 #               the library in, the skill's resolve block runs, and an engine
 #               call hands the engine the arguments and the profile this suite's
 #               bash does and drops the variables that point at the city, for a
-#               server the engine starts and for a rig's app on this host
+#               server the engine starts, for a copy of a rig set to "true" and
+#               for a rig's app on this host that runs with no sandbox, and the
+#               surface the engine names for a script is printed
+#   (SURFACE)   demo_engine_script_kind prints the surface the engine's surface
+#               command names, whatever the script's lines say, asking inside
+#               the sandbox, and resolves the engine first only when nothing
+#               chose one. An engine with no surface command, one that refuses,
+#               and an answer that names no surface each print nothing and exit
+#               1 with the reason, which names the command
 # What each capture adds to the policy is tested beside it, in
 # rig-demo-capture.test.sh and demo-screenshot.test.sh.
 #
@@ -105,9 +137,10 @@ TMPD="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/demo-engine-lib-test.XXXXXX")" && pwd -
 API_PID=""; API_SOCK=""; APP_PID=""
 trap '[ -z "$API_PID" ] || kill "$API_PID" 2>/dev/null; [ -z "$APP_PID" ] || kill "$APP_PID" 2>/dev/null; rm -rf "$TMPD" ${API_SOCK:+"$API_SOCK"}' EXIT
 
-# Only the tools the two captures call. env -i keeps everything else off PATH.
+# Only the tools the two captures and the library call. env -i keeps everything
+# else off PATH.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
-for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat od awk env readlink git; do
+for c in bash sed tr head tail dirname mkdir mktemp mv rm tee wc cat od awk env readlink git; do
   p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
   ln -s "$p" "$FARM/$c"
 done
@@ -208,7 +241,7 @@ cat >"$BIN/sandbox-exec" <<'SBX'
 printf '%s\n' "$2" >"${SANDBOX_PROFILE:-/dev/null}"
 env >"${SANDBOX_ENV:-/dev/null}"
 shift 2
-exec "$@"
+IN_SANDBOX=1 exec "$@"
 SBX
 # lsof answers from $LISTENERS, one "<port> <pid> <working directory>" per
 # line: the pids that listen on the port -iTCP: names, or the working directory
@@ -249,15 +282,28 @@ NOLSOF="$TMPD/bin-nolsof"; mkdir -p "$NOLSOF"
 for s in jq node npx npm gc ffmpeg sandbox-exec; do ln -s "$BIN/$s" "$NOLSOF/$s"; done
 
 # The engine's CLI: help lists its commands, lint passes, run writes the clip
-# and the engine's closing report, and screenshot writes the PNG.
+# and the engine's closing report, and screenshot writes the PNG. It keeps the
+# environment it runs in in $ENGINE_ENV. surface prints $SURFACE_ANSWER,
+# {"surface":"page"} when it is empty, and reads no line of the script. With
+# SURFACE_REFUSE set it refuses as the engine refuses a script that is missing,
+# with nothing on stdout, and with ENGINE_NO_SURFACE set it answers as an engine
+# with no surface command does.
 ENGINE_STUB="$TMPD/engine"
 cat >"$ENGINE_STUB" <<'ENGINE'
 #!/usr/bin/env bash
 printf 'engine %s\n' "$*" >>"${CALLLOG:?}"
+env >"${ENGINE_ENV:-/dev/null}"
 o=""; prev=""
 for a in "$@"; do [ "$prev" = "-o" ] && o="$a"; prev="$a"; done
 case "${1:-}" in
   help) printf 'Usage:\n  sprintshow run <demo.md> [options]\n  sprintshow screenshot <demo.md> -o <file.png> [options]\n' ;;
+  surface)
+    if [ -n "${ENGINE_NO_SURFACE:-}" ]; then
+      printf 'unknown command: surface\n\n' >&2; printf 'Usage:\n  sprintshow run <demo.md> [options]\n'; exit 1
+    fi
+    if [ -n "${SURFACE_REFUSE:-}" ]; then printf '\n✖ demo script not found: %s\n' "${2:-}" >&2; exit 1; fi
+    ans=${SURFACE_ANSWER:-}; [ -n "$ans" ] || ans='{"surface":"page"}'
+    printf '%s\n' "$ans" ;;
   run)
     printf 'mp4-bytes\n' >"$o"
     printf '\n✅ silent demo → %s\n' "$o" ;;
@@ -271,13 +317,29 @@ ENGINE
 chmod +x "$ENGINE_STUB"
 
 # gctk answers `rig serve --check` with a copy running on $COPY_PORT, and with
-# no copy when COPY_PORT is unset, logging each call and where it ran.
+# no copy when COPY_PORT is unset, logging each call and where it ran. The
+# copy's app is where gctk reports a copy that answers on its port, at its
+# loopback URL, or at $COPY_APP_URL, the URL a serve command printed. Its report
+# says its serve command runs inside the sandbox, or as $COPY_SANDBOXED says:
+# false for one that runs as an ordinary process, and none for a report with no
+# sandboxed key, as a gctk from before that key gives. A start reports that
+# copy as one it ran, or as one it found running when COPY_STARTED is false,
+# and a stop reports it stopped.
 GCTK_STUB="$TMPD/gctk"
 cat >"$GCTK_STUB" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${CALLLOG:?}"
+case "$*" in "rig serve --stop") printf '{"state":"stopped","checkout":"%s"}\n' "$(pwd)"; exit 0 ;; esac
+sandboxed=",\"sandboxed\":${COPY_SANDBOXED:-true}"; [ "${COPY_SANDBOXED:-}" != none ] || sandboxed=""
+if [ "${1:-} ${2:-} ${3:-}" = "rig serve --command" ] && [ -n "${COPY_PORT:-}" ]; then
+  started=',"started":true'; [ "${COPY_STARTED:-true}" = true ] || started=""
+  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s"%s%s}\n' \
+    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}" "$sandboxed" "$started"
+  exit 0
+fi
 if [ "$*" = "rig serve --check" ] && [ -n "${COPY_PORT:-}" ]; then
-  printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$COPY_PORT"
+  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s","address":""%s}\n' \
+    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}" "$sandboxed"
   exit 0
 fi
 printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"
@@ -297,7 +359,7 @@ WORK="$TMPD/work"; mkdir -p "$WORK/app"
 SCRIPT="$WORK/demo.md"; printf '# Demo: fixture\n\n**Start:** `/`\n' >"$SCRIPT"
 printf '<!doctype html><title>x</title>\n' >"$WORK/app/index.html"
 CALLLOG="$TMPD/calls.log"; OUTF="$TMPD/stdout"; ERRF="$TMPD/stderr"
-SANDBOX_PROFILE="$TMPD/sandbox.profile"; SANDBOX_ENV="$TMPD/sandbox.env"
+SANDBOX_PROFILE="$TMPD/sandbox.profile"; SANDBOX_ENV="$TMPD/sandbox.env"; ENGINE_ENV="$TMPD/engine.env"
 
 # Each capture as this suite drives it: the file it writes, the call that
 # starts its capture, and the call that shows the capture runs on a local
@@ -327,13 +389,30 @@ capture() {
     video)      argv=(bash "$VIDEO" --script "$SCRIPT" --output "$(output_of video)" "${target[@]}") ;;
     screenshot) argv=(bash "$SHOT" page --script "$SCRIPT" "${target[@]}" --output "$(output_of screenshot)") ;;
   esac
-  : >"$CALLLOG"; rm -f "$(output_of "$cap")" "$SANDBOX_PROFILE" "$SANDBOX_ENV"
+  : >"$CALLLOG"; rm -f "$(output_of "$cap")" "$SANDBOX_PROFILE" "$SANDBOX_ENV" "$ENGINE_ENV"
   ( cd "$from" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
-      ENGINE_STUB="$ENGINE_STUB" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" \
+      ENGINE_STUB="$ENGINE_STUB" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" ENGINE_ENV="$ENGINE_ENV" \
       ${envs[@]+"${envs[@]}"} "${argv[@]}" >"$OUTF" 2>"$ERRF" )
   RC=$?
 }
 profile() { cat "$SANDBOX_PROFILE" 2>/dev/null; }
+# no_sandbox <cap> <case> <rig checkout>: the capture just run ran its engine's
+# capture with no sandbox-exec, which marks what it runs with IN_SANDBOX,
+# without the variables that point at the city, and said it runs so because
+# what it captures lies in that rig's repository. A video lints first, from the
+# working directory, which decides that run's sandbox apart from its capture's.
+no_sandbox() {
+  ok "($1) $2 runs the engine" "[ -s '$ENGINE_ENV' ]"
+  eq "$(grep -c '^IN_SANDBOX=' "$ENGINE_ENV" 2>/dev/null)" 0 "($1) $2 runs the engine's capture with no sandbox-exec"
+  eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$ENGINE_ENV" 2>/dev/null)" 0 "($1) $2 runs the engine without the variables that point at the city"
+  has "the capture runs as an ordinary process, with no sandbox, because what it captures lies in the repository of $3, whose app_reads_city is \"false\"" "$(err)" "($1) $2 says it runs with no sandbox, and why"
+}
+# in_sandbox <cap> <case>: the capture just run ran its engine's capture under
+# sandbox-exec.
+in_sandbox() {
+  eq "$(grep -c '^IN_SANDBOX=' "$ENGINE_ENV" 2>/dev/null)" 1 "($1) $2 runs the engine's capture under sandbox-exec"
+  hasnt "the capture runs as an ordinary process" "$(err)" "($1) $2 never says it runs with no sandbox"
+}
 # profile_line <text>: the first line of the last profile holding it, or 0;
 # profile_last <text>: the last such line.
 profile_line() { awk -v s="$1" 'index($0, s) { print NR; found = 1; exit } END { if (!found) print 0 }' "$SANDBOX_PROFILE" 2>/dev/null || echo 0; }
@@ -466,6 +545,72 @@ for cap in video screenshot; do
   not_captured "$cap"
 done
 
+# kind_run <script> [VAR=VAL ...]: source the library in a fresh bash, from
+# $WORK, against the stubs, and run demo_engine_script_kind on the script, with
+# stdout in $OUTF, stderr in $ERRF and the exit status in $RC.
+kind_run() {
+  local script="$1"; shift
+  : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV"
+  ( cd "$WORK" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+      ENGINE_STUB="$ENGINE_STUB" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" \
+      "$@" bash -c '. "$1" && demo_engine_script_kind "$2"' kind "$LIB" "$script" >"$OUTF" 2>"$ERRF" )
+  RC=$?
+}
+kind_out() { cat "$OUTF"; }
+TERMSCRIPT="$WORK/terminal.md"
+printf '# Demo: a report\n\n**Terminal:** 100x30\n\n## Steps\n\n1. **It prints**\n   `run true`\n' >"$TERMSCRIPT"
+
+echo "# SURFACE: demo_engine_script_kind prints the surface the engine's surface command names, asking inside the sandbox"
+kind_run "$SCRIPT" SS_RIG="$ENGINE"
+eq "$RC" 0 "(surface) the engine names a script's surface"
+eq "$(kind_out)" "page" "(surface) it prints the surface the engine names"
+has "engine = local sprintshow rig ($ENGINE)" "$(err)" "(surface) with no engine chosen, it resolves one first"
+P=$(line_of "provision:browser"); S=$(line_of "engine surface $SCRIPT")
+ok "(surface) the engine is resolved before it is asked (provision line $P, surface line $S)" "[ '$P' -gt 0 ] && [ '$S' -gt '$P' ]"
+has "node [$ENGINE/src/cli.ts] [surface] [$SCRIPT]" "$(calls)" "(surface) it asks the checkout's CLI"
+has "(allow file-read-data (subpath \"$SCRIPT\"))" "$(profile)" "(surface) inside the sandbox, which lets the engine read the script"
+kind_run "$TERMSCRIPT" SS_RIG="$ENGINE"
+eq "$(kind_out)" "page" "(surface) a script whose lines declare **Terminal:** is the surface the engine names, so no line of it is read"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" SURFACE_ANSWER='{"surface":"terminal"}'
+eq "$(kind_out)" "terminal" "(surface) and a script whose lines declare nothing is a terminal script when the engine names it one"
+kind_run "$SCRIPT" SURFACE_ANSWER='{"surface":"ios"}'
+eq "$RC" 0 "(surface) the published package names a script's surface"
+eq "$(kind_out)" "ios" "(surface) and a surface beyond page and terminal is printed as the engine names it"
+has "npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell" "$(calls)" "(surface) the published package is resolved first"
+has "npx --yes @zookanalytics/sprintshow surface $SCRIPT" "$(calls)" "(surface) then asked"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" DEMO_ENGINE_DIR="$ENGINE"
+eq "$RC" 0 "(surface) an engine already chosen names the surface"
+hasnt "provision:browser" "$(calls)" "(surface) and is not resolved again"
+has "node [$ENGINE/src/cli.ts] [surface] [$SCRIPT]" "$(calls)" "(surface) but asked as it was chosen"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" DEMO_ENGINE_BIN="$ENGINE_STUB" SURFACE_ANSWER='{"surface":"terminal"}'
+eq "$RC" 0 "(surface) the engine DEMO_ENGINE_BIN names is asked for the surface"
+eq "$(kind_out)" "terminal" "(surface) and its answer is printed"
+has "engine surface $SCRIPT" "$(calls)" "(surface) it is asked directly"
+has "(allow file-read-data (subpath \"$SCRIPT\"))" "$(profile)" "(surface) inside the sandbox"
+hasnt "provision:browser" "$(calls)" "(surface) and nothing is resolved, though the city has a checkout"
+hasnt "[$ENGINE/src/cli.ts]" "$(calls)" "(surface) whose CLI never runs"
+
+echo "# SURFACE: an engine that names no surface prints nothing and exits 1, naming the surface command"
+kind_run "$SCRIPT" SS_RIG="$ENGINE" ENGINE_NO_SURFACE=1
+eq "$RC" 1 "(surface) an engine with no surface command exits 1"
+eq "$(kind_out)" "" "(surface) and prints nothing, its help included"
+has "the SprintShow engine ($ENGINE) has no surface command, so it cannot name the surface '$SCRIPT' drives; update it to a SprintShow whose 'sprintshow help' lists 'sprintshow surface'" "$(err)" "(surface) it names the missing command"
+kind_run "$WORK/missing.md" SS_RIG="$ENGINE" SURFACE_REFUSE=1
+eq "$RC" 1 "(surface) a script the engine refuses exits 1"
+eq "$(kind_out)" "" "(surface) and prints nothing"
+has "demo script not found: $WORK/missing.md" "$(err)" "(surface) the engine's reason reaches the caller"
+has "named no surface for '$WORK/missing.md' ('sprintshow surface' exited 1)" "$(err)" "(surface) with the command that named none"
+for ans in '{"surface":""}' '{"surface":42}' '{"surface":"two words"}' 'page' '{"surface":"page"}{"surface":"page"}' '{}'; do
+  kind_run "$SCRIPT" SS_RIG="$ENGINE" SURFACE_ANSWER="$ans"
+  eq "$RC" 1 "(surface) the answer $ans names no surface, so it exits 1"
+  eq "$(kind_out)" "" "(surface) and prints nothing for $ans"
+  has "answered 'sprintshow surface' for '$SCRIPT' with no surface" "$(err)" "(surface) it says the answer named none"
+done
+STUB_PATH="$NOSBX" kind_run "$SCRIPT" SS_RIG="$ENGINE"
+eq "$RC" 1 "(surface) a host with no sandbox names no surface"
+has "sandbox-exec not found" "$(err)" "(surface) it says why"
+hasnt "engine surface" "$(calls)" "(surface) and the engine is never asked"
+
 # A city for the sandbox's cases. gc's home lists it, and the environment names
 # it, one of its rigs and that rig's store. Its rig map lists that rig, a rig
 # whose checkout lies outside the city's directory, and the engine. Each place
@@ -589,11 +734,21 @@ for cap in video screenshot; do
   eq "$RC" 1 "($cap) a working directory in the city's, in no rig worktree, exits 1"
   has "$CITY/.gc/notes lies in $CITY" "$(err)" "($cap) it says the directory lies in the city's"
   not_captured "$cap"
-  capture "$cap" FROM="$RIGA" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
-  eq "$RC" 1 "($cap) a rig's own checkout, which holds its store, exits 1"
+  capture "$cap" FROM="$RIGA" SS_RIG="$ENGINE" "${CITY_ENV[@]}" RIG_VARS='{"alpha":{"app_reads_city":"true"}}'
+  eq "$RC" 1 "($cap) the own checkout of a rig set to \"true\", which holds its store, exits 1"
   has "$RIGA holds " "$(err)" "($cap) it names the checkout"
   has "capture from a rig worktree" "$(err)" "($cap) and says where a capture can run instead"
+  eq "$(calls | grep -c -v '^gc ')" 0 "($cap) and nothing is installed, and nothing runs, before the refusal"
   not_captured "$cap"
+  echo "# ($cap) PLAIN: the own checkout of a rig whose app_reads_city is \"false\" captures what lies in that rig, with the engine the capture resolves"
+  capture "$cap" FROM="$RIGA" SS_RIG="$ENGINE" "${CITY_ENV[@]}" -- --serve-dir "$RIGA"
+  eq "$RC" 0 "($cap) a capture of that checkout, from that checkout, exits 0"
+  has "npm run provision:browser (in $ENGINE)" "$(calls)" "($cap) the engine is resolved and its browser provisioned"
+  no_sandbox "$cap" "a capture from that checkout" "$RIGA"
+  capture "$cap" FROM="$RIGA" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
+  eq "$RC" 1 "($cap) the same checkout capturing a directory in no rig, which keeps the sandbox, exits 1"
+  has "$RIGA holds " "$(err)" "($cap) the sandbox still refuses the checkout"
+  not_run "$cap"
   capture "$cap" FROM="$RWT" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
   eq "$RC" 0 "($cap) a rig worktree in the city's directory captures"
   has "(allow file-read-data file-write* (subpath \"$RWT\"))" "$(profile)" "($cap) the worktree is allowed"
@@ -618,6 +773,28 @@ for cap in video screenshot; do
   capture "$cap" SS_RIG="$ENGINE" -- --base-url https://preview.example.com
   eq "$RC" 0 "($cap) a deployed preview captures"
   hasnt "(allow network-outbound (remote ip" "$(profile)" "($cap) and opens no loopback port"
+
+  echo "# ($cap) IOS: an iOS app on a simulator gets three free ports, opened in the sandbox and handed to the engine, once Appium is provisioned"
+  IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+  capture "$cap" SS_RIG="$ENGINE" FREE_PORT="$(printf '50301\n50302\n50303')" -- --base-url "$IOS_APP"
+  eq "$RC" 0 "($cap) an iOS app captures"
+  for p in 50301 50302 50303; do
+    has "(allow network-outbound (remote ip \"localhost:$p\"))" "$(profile)" "($cap) the sandbox opens port $p"
+  done
+  eq "$(profile | grep -c 'allow network-outbound (remote ip')" 3 "($cap) and no other loopback port"
+  has "[--base-url] [$IOS_APP]" "$(calls)" "($cap) the engine drives the app the URL names"
+  has "[--port] [50301,50302,50303]" "$(calls)" "($cap) and gets the three ports as --port"
+  P=$(line_of "npm run provision:appium (in $ENGINE)"); E=$(line_of "$(local_call "$cap")")
+  ok "($cap) the engine checkout provisions Appium before the capture runs (lines $P, $E)" "[ '$P' -gt 0 ] && [ '$E' -gt '$P' ]"
+  [ "$cap" != screenshot ] || hasnt "[--scale]" "$(calls)" "(screenshot) an iOS app's PNG is the device's own, with no --scale"
+  capture "$cap" FREE_PORT="$(printf '50301\n50302\n50303')" -- --base-url "$IOS_APP"
+  eq "$RC" 0 "($cap) an iOS app captures on the published engine"
+  P=$(line_of "npx --yes @zookanalytics/sprintshow provision appium"); E=$(line_of "$(published_call "$cap")")
+  ok "($cap) which provisions Appium first (lines $P, $E)" "[ '$P' -gt 0 ] && [ '$E' -gt '$P' ]"
+  capture "$cap" SS_RIG="$ENGINE" FREE_PORT="$(printf '50301\n50302')" -- --base-url "$IOS_APP"
+  eq "$RC" 1 "($cap) an iOS app with fewer than three free ports exits 1"
+  has "could not find three free ports" "$(err)" "($cap) it says so"
+  not_run "$cap"
 done
 
 # local_refused <cap> <case> <wanted reason>: the capture just run was refused
@@ -628,41 +805,105 @@ local_refused() {
   has "$3" "$(err)" "($1) and why a capture may not reach that server"
   not_run "$1"
 }
+# copy_refused <cap> <case> <url> <checkout> <how> <why>: the capture just run
+# was refused the copy that gctk rig serve runs from the checkout, whose app the
+# URL is and whose report says <how> it runs, because a capture from the
+# checkout keeps the sandbox for <why>, naming what ends the copy, and it never
+# ran.
+copy_refused() {
+  eq "$RC" 1 "($1) $2 exits 1"
+  has "--base-url $3 is the app of a copy that gctk rig serve runs from $4$5. A capture from $4 keeps the sandbox now, because it lies in $6, and a copy keeps the reach it started with, so the capture refuses the copy: gctk rig serve --stop, run from $4, ends it, and the next copy starts inside the sandbox" "$(err)" "($1) it says the copy does not run as a capture from its checkout now asks, and why"
+  not_run "$1"
+}
 echo "# LOCAL-APP: mol-rig-demo declares app_reads_city with the default \"false\""
 FORMULA="$(cd "$HERE/../../formulas" && pwd)/mol-rig-demo.toml"
 eq "$(awk '/^\[/ { s = ($0 == "[vars.app_reads_city]"); next } s && /^default[ \t]*=/ { sub(/^default[ \t]*=[ \t]*/, ""); print; exit }' "$FORMULA")" '"false"' \
   "(LOCAL-APP) mol-rig-demo declares app_reads_city with the default \"false\", as the gc stub answers it"
 for cap in video screenshot; do
-  echo "# ($cap) LOCAL-APP: a --base-url on this host reaches a server that works in a worktree of a rig whose app_reads_city is \"false\", at that server's port alone"
+  echo "# ($cap) LOCAL-APP: a --base-url on this host reaches a server that works in a worktree of a rig whose app_reads_city is \"false\", with no sandbox"
   for url in http://127.0.0.1:5180/ http://localhost:5180 'http://[::1]:5180/fixture'; do
     capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT" -- --base-url "$url"
     eq "$RC" 0 "($cap) --base-url $url, served from a worktree of a rig whose app_reads_city is \"false\", captures"
     has "--base-url $url is served from a worktree of $RIGA, whose app_reads_city is \"false\"" "$(err)" "($cap) it says whose server the capture reaches"
     has "--base-url $url" "$(calls)" "($cap) the engine drives that URL"
-    has "(allow network-outbound (remote ip \"localhost:5180\"))" "$(profile)" "($cap) the sandbox opens the server's port"
-    eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 1 "($cap) and no other loopback port"
-    has "(deny network-outbound (remote ip \"localhost:*\"))" "$(profile)" "($cap) and denies every other one"
+    no_sandbox "$cap" "a capture of that server" "$RIGA"
   done
   has "gc formula show mol-rig-demo --rig alpha --json" "$(calls)" "($cap) it reads the rig's app_reads_city by naming the rig to gc"
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="80 4242 $RWT" -- --base-url http://localhost/
   eq "$RC" 0 "($cap) a URL that names no port captures"
-  has "(allow network-outbound (remote ip \"localhost:80\"))" "$(profile)" "($cap) at the port its scheme implies"
+  has "lsof -nP -t -iTCP:80 -sTCP:LISTEN" "$(calls)" "($cap) at the port its scheme implies"
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" RIG_VARS='{"alpha":{"app_reads_city":"false"}}' LISTENERS="5180 4242 $RWT" -- --base-url http://127.0.0.1:5180/
   eq "$RC" 0 "($cap) a rig whose own app_reads_city is \"false\" captures"
+  no_sandbox "$cap" "a capture of a rig that city.toml sets to \"false\"" "$RIGA"
 
   echo "# ($cap) LOCAL-APP: a rig that city.toml sets to \"true\" keeps the refusal, which says so"
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
   local_refused "$cap" "a server in a worktree of a rig set to \"true\"" "process 4243, which listens on port 5181, works in a worktree of $RIGB, for which city.toml sets app_reads_city = \"true\""
 
-  echo "# ($cap) LOCAL-APP: a copy that gctk rig serve runs holds its port, so a capture reaches it whatever the rig's app_reads_city"
+  echo "# ($cap) LOCAL-APP: a copy that gctk rig serve runs holds its port, so a capture reaches it whatever the rig's app_reads_city, in the sandbox for a rig set to \"true\""
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
   eq "$RC" 0 "($cap) a copy's port, in a worktree of a rig set to \"true\", captures"
   has "--base-url http://127.0.0.1:5181/ is a copy that gctk rig serve runs from $BWT inside the sandbox" "$(err)" "($cap) it says a copy holds the port"
   has "gctk rig serve --check (in $BWT)" "$(calls)" "($cap) it asks gctk in the checkout the listener works in"
+  in_sandbox "$cap" "a capture of a copy of a rig set to \"true\""
   has "(allow network-outbound (remote ip \"localhost:5181\"))" "$(profile)" "($cap) the sandbox opens the copy's port"
   eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 1 "($cap) and no other loopback port"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5180 LISTENERS="5180 4242 $RWT" -- --base-url http://127.0.0.1:5180/
+  eq "$RC" 0 "($cap) a copy's port, in a worktree of a rig whose app_reads_city is \"false\", captures"
+  has "--base-url http://127.0.0.1:5180/ is a copy that gctk rig serve runs from $RWT" "$(err)" "($cap) it says a copy holds the port"
+  hasnt "inside the sandbox" "$(err)" "($cap) and never that the copy is inside the sandbox"
+  no_sandbox "$cap" "a capture of a copy of that rig" "$RIGA"
+
+  echo "# ($cap) PLAIN: a capture of the copy it serves its app as is judged by the copy's checkout, an iOS app's included"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5192 COPY_APP_URL="$IOS_APP" FREE_PORT="$(printf '50301\n50302\n50303')" -- --serve "node serve.mjs" --cwd "$RWT"
+  eq "$RC" 0 "($cap) an iOS app a copy of a rig whose app_reads_city is \"false\" brought up captures"
+  has "gctk rig serve --command node serve.mjs (in $RWT)" "$(calls)" "($cap) the copy runs from that rig's worktree"
+  has "[--base-url] [$IOS_APP]" "$(calls)" "($cap) the engine drives the app the copy brought up"
+  no_sandbox "$cap" "a capture of that copy's app" "$RIGA"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5193 COPY_APP_URL="$IOS_APP" FREE_PORT="$(printf '50301\n50302\n50303')" -- --serve "node serve.mjs" --cwd "$BWT"
+  eq "$RC" 0 "($cap) the same app, which a copy of a rig set to \"true\" brought up, captures"
+  in_sandbox "$cap" "a capture of that copy's app"
+  eq "$(profile | grep -c 'allow network-outbound (remote ip')" 3 "($cap) and opens the iOS run's three ports alone"
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5999 LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
   local_refused "$cap" "a port the checkout's copy does not hold" "for which city.toml sets app_reads_city = \"true\""
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 COPY_APP_URL="$IOS_APP" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  local_refused "$cap" "the port of a copy whose app is on a simulator, where another server listens" "process 4243, which listens on port 5181, works in a worktree of $RIGB, for which city.toml sets app_reads_city = \"true\""
+  hasnt "is a copy that gctk rig serve runs" "$(err)" "($cap) it takes that server for no copy"
+
+  echo "# ($cap) COPY-RECORD: a copy keeps the reach it started with, so once its rig keeps the sandbox a capture takes it only when its report says it runs inside, whether --base-url names it or --serve finds it, and leaves a copy it found running"
+  # The copy started while city.toml set beta to "false", so its report says it
+  # runs as an ordinary process. LOCAL_ENV sets beta to "true".
+  BETA_FALSE=(RIG_VARS='{"beta":{"app_reads_city":"false"}}')
+  PLAIN_COPY=(GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 COPY_SANDBOXED=false COPY_STARTED=false LISTENERS="5181 4243 $BWT")
+  BETA_TRUE="the repository of $RIGB, for which city.toml sets app_reads_city = \"true\""
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${BETA_FALSE[@]}" "${PLAIN_COPY[@]}" -- --base-url http://127.0.0.1:5181/
+  eq "$RC" 0 "($cap) a copy whose report says it runs as an ordinary process captures while its rig reads \"false\""
+  no_sandbox "$cap" "that capture" "$RIGB"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" -- --base-url http://127.0.0.1:5181/
+  copy_refused "$cap" "the same copy, which --base-url names once city.toml sets its rig to \"true\"," http://127.0.0.1:5181/ "$BWT" " as an ordinary process, as its report says" "$BETA_TRUE"
+  hasnt "gctk rig serve --stop" "$(calls)" "($cap) and leaves the copy running"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${BETA_FALSE[@]}" "${PLAIN_COPY[@]}" -- --serve "node serve.mjs" --cwd "$BWT"
+  eq "$RC" 0 "($cap) --serve finds that copy running and captures it while its rig reads \"false\""
+  no_sandbox "$cap" "that capture" "$RIGB"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" -- --serve "node serve.mjs" --cwd "$BWT"
+  copy_refused "$cap" "the same copy, which --serve finds running once its rig is set to \"true\"," http://127.0.0.1:5181/ "$BWT" " as an ordinary process, as its report says" "$BETA_TRUE"
+  has "gctk rig serve --command node serve.mjs (in $BWT)" "$(calls)" "($cap) the start found it running"
+  hasnt "gctk rig serve --stop" "$(calls)" "($cap) and the capture leaves it running"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" COPY_PORT=5193 COPY_APP_URL="$IOS_APP" FREE_PORT="$(printf '50301\n50302\n50303')" -- --serve "node serve.mjs" --cwd "$BWT"
+  copy_refused "$cap" "a copy whose app is on a simulator, which --serve finds running once its rig is set to \"true\"," "$IOS_APP" "$BWT" " as an ordinary process, as its report says" "$BETA_TRUE"
+  hasnt "gctk rig serve --stop" "$(calls)" "($cap) and leaves that copy running"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" COPY_STARTED=true -- --serve "node serve.mjs" --cwd "$BWT"
+  copy_refused "$cap" "a copy the capture started itself, whose report says it runs as an ordinary process," http://127.0.0.1:5181/ "$BWT" " as an ordinary process, as its report says" "$BETA_TRUE"
+  has "gctk rig serve --stop (in $BWT)" "$(calls)" "($cap) and the capture stops the copy it started"
+
+  echo "# ($cap) COPY-RECORD: a report that does not say, and a setting that does not read, keep the refusal"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" COPY_SANDBOXED=none -- --base-url http://127.0.0.1:5181/
+  copy_refused "$cap" "a copy whose report has no sandboxed key, as a gctk from before it gives," http://127.0.0.1:5181/ "$BWT" ", and its report does not say that it runs inside the sandbox" "$BETA_TRUE"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" COPY_SANDBOXED=none "${BETA_FALSE[@]}" -- --base-url http://127.0.0.1:5181/
+  eq "$RC" 0 "($cap) that copy captures while its rig reads \"false\""
+  no_sandbox "$cap" "that capture" "$RIGB"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5180 COPY_SANDBOXED=false COPY_STARTED=false FORMULA_RC=1 LISTENERS="5180 4242 $RWT" -- --base-url http://127.0.0.1:5180/
+  copy_refused "$cap" "a copy of a rig whose app_reads_city does not read at the capture," http://127.0.0.1:5180/ "$RWT" " as an ordinary process, as its report says" "the repository of $RIGA, whose app_reads_city did not read, because gc formula show mol-rig-demo --rig alpha answered nothing jq could read, so it counts as \"true\""
 
   echo "# ($cap) LOCAL-APP: any value but \"false\", and a read that fails, counts as \"true\""
   for v in yes True ''; do
@@ -683,6 +924,7 @@ for cap in video screenshot; do
   local_refused "$cap" "a server in a worktree of the rig that holds the pack's own source" "process 4260, which listens on port 5190, works in a worktree of $PACKRIG, which holds this pack's own source, so its app_reads_city counts as \"true\""
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5190 4260 $PWT" -- --base-url http://127.0.0.1:5190/
   eq "$RC" 0 "($cap) the same server captures when the capture's scripts lie in no rig's repository"
+  no_sandbox "$cap" "that capture" "$PACKRIG"
 
   echo "# ($cap) LOCAL-APP: a server that works in a rig's checkout, in the city's own repository or in no rig's repository, or on a port the city's variables name, keeps the refusal"
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5182 4244 $RIGA" -- --base-url http://127.0.0.1:5182/
@@ -710,32 +952,171 @@ for cap in video screenshot; do
   local_refused "$cap" "a URL that names no port a server can take" "the URL names no port from 1 to 65535"
 done
 
-echo "# SANDBOXED: demo_engine_sandboxed runs a command inside the capture's sandbox, with the one loopback port it names open"
+TSCRIPT="$WORK/terminal.md"
+printf '# Demo: a command\n\n**Terminal:**\n\n## Steps\n\n1. **It runs**\n   `run true`\n' >"$TSCRIPT"
+for cap in video screenshot; do
+  echo "# ($cap) PLAIN: a --serve-dir in a worktree of a rig whose app_reads_city is \"false\" runs with no sandbox"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --serve-dir "$RWT"
+  eq "$RC" 0 "($cap) a --serve-dir in that rig's worktree captures"
+  no_sandbox "$cap" "a capture of that directory" "$RIGA"
+  has "--serve-dir $RWT" "$(calls)" "($cap) the engine serves that directory"
+
+  echo "# ($cap) PLAIN: a --serve-dir in a rig set to \"true\", any other value, a setting that does not read, the rig that holds the library, or the city's own repository keeps the sandbox"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --serve-dir "$BWT"
+  eq "$RC" 0 "($cap) a --serve-dir in a worktree of a rig set to \"true\" captures"
+  in_sandbox "$cap" "a capture of that directory"
+  has "(allow file-read-data file-write* (subpath \"$BWT\"))" "$(profile)" "($cap) the sandbox opens that worktree"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" RIG_VARS='{"alpha":{"app_reads_city":"yes"}}' -- --serve-dir "$RWT"
+  eq "$RC" 0 "($cap) a --serve-dir in a worktree of a rig whose app_reads_city is 'yes' captures"
+  in_sandbox "$cap" "a capture of that directory"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" FORMULA_RC=1 -- --serve-dir "$RWT"
+  eq "$RC" 0 "($cap) a --serve-dir in a worktree of a rig whose app_reads_city does not read captures"
+  in_sandbox "$cap" "a capture of that directory"
+  VIDEO="$PACK_VIDEO" SHOT="$PACK_SHOT" capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --serve-dir "$PWT"
+  eq "$RC" 0 "($cap) a --serve-dir in a worktree of the rig that holds the capture's own scripts captures"
+  in_sandbox "$cap" "a capture of that directory"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --serve-dir "$HQWT"
+  eq "$RC" 0 "($cap) a --serve-dir in a worktree of the city's own repository captures"
+  in_sandbox "$cap" "a capture of that directory"
+
+  echo "# ($cap) PLAIN: a run that names no checkout is judged by its working directory"
+  capture "$cap" FROM="$RWT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --base-url https://preview.example.com
+  eq "$RC" 0 "($cap) a deployed preview captured from a worktree of a rig whose app_reads_city is \"false\" captures"
+  no_sandbox "$cap" "that capture" "$RIGA"
+  capture "$cap" FROM="$BWT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --base-url https://preview.example.com
+  eq "$RC" 0 "($cap) the same capture from a worktree of a rig set to \"true\" captures"
+  in_sandbox "$cap" "that capture"
+done
+echo "# (video) PLAIN: a terminal script's --cwd decides"
+SCRIPT="$TSCRIPT" capture video SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --cwd "$RWT"
+eq "$RC" 0 "(video) a terminal script whose shell starts in a worktree of a rig whose app_reads_city is \"false\" captures"
+has "--cwd] [$RWT]" "$(calls)" "(video) its shell starts there"
+no_sandbox video "that capture" "$RIGA"
+SCRIPT="$TSCRIPT" capture video SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --cwd "$BWT"
+eq "$RC" 0 "(video) the same script starting in a worktree of a rig set to \"true\" captures"
+in_sandbox video "that capture"
+
+echo "# PLAIN: a call of the library's CLI whose --base-url is its copy's app captures from the copy's checkout, whatever --cwd it names"
+cat >"$TMPD/copy-cli.sh" <<'SH'
+. "$PACK_SCRIPTS/demo-engine-lib.sh" || exit 1
+demo_engine_copy "$1" "node serve.mjs" || exit 1
+shift
+demo_engine_cli run demo.md --base-url "$DEMO_ENGINE_COPY_URL" "$@"
+SH
+# copy_cli [VAR=VAL ...] -- <checkout> <argument...>: from $WORK, serve a copy
+# from the checkout through the library, then run the library's CLI on the
+# copy's app with the arguments, with the engine stub in the engine's place.
+copy_cli() {
+  local -a envs
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
+  shift
+  : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV" "$ENGINE_ENV"
+  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+      ENGINE_STUB="$ENGINE_STUB" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" ENGINE_ENV="$ENGINE_ENV" \
+      PACK_SCRIPTS="$HERE" DEMO_ENGINE_BIN="$ENGINE_STUB" GCTK_BIN="$GCTK_STUB" \
+      ${envs[@]+"${envs[@]}"} bash "$TMPD/copy-cli.sh" "$@" >"$OUTF" 2>"$ERRF" )
+  RC=$?
+}
+IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+COPY_IOS=(COPY_PORT=5194 COPY_APP_URL="$IOS_APP" FREE_PORT="$(printf '50301\n50302\n50303')")
+copy_cli "${LOCAL_ENV[@]}" "${COPY_IOS[@]}" -- "$BWT" --cwd "$RWT"
+eq "$RC" 0 "(copy) an iOS app a copy of a rig set to \"true\" brought up captures, given a --cwd in a worktree of a rig whose app_reads_city is \"false\""
+has "gctk rig serve --command node serve.mjs (in $BWT)" "$(calls)" "(copy) the copy runs from the worktree of the rig set to \"true\""
+has "engine run demo.md --base-url $IOS_APP --cwd $RWT" "$(calls)" "(copy) the engine drives the copy's app, with the --cwd it was given"
+in_sandbox copy "that capture"
+eq "$(profile | grep -c 'allow network-outbound (remote ip')" 3 "(copy) and opens the iOS run's three ports alone"
+copy_cli "${LOCAL_ENV[@]}" "${COPY_IOS[@]}" -- "$RWT" --cwd "$RWT"
+eq "$RC" 0 "(copy) the same call, with the copy in that worktree of the rig whose app_reads_city is \"false\", captures"
+no_sandbox copy "that capture" "$RIGA"
+
+echo "# COPY-RECORD: a run that keeps the sandbox for another directory takes a copy of a rig whose app_reads_city is \"false\" that runs as an ordinary process, which a start would run so again"
+copy_cli "${LOCAL_ENV[@]}" COPY_PORT=5180 COPY_SANDBOXED=false LISTENERS="5180 4242 $RWT" -- "$RWT" --cwd "$BWT"
+eq "$RC" 0 "(copy) a copy's port, in that rig's worktree, captures with a --cwd in a worktree of a rig set to \"true\""
+has "--base-url http://127.0.0.1:5180/ is a copy that gctk rig serve runs from $RWT, which lies in the repository of $RIGA, whose app_reads_city is \"false\", so the copy need not run inside the sandbox" "$(err)" "(copy) it says the copy runs with no sandbox, and why that stands"
+in_sandbox copy "that capture"
+has "(allow network-outbound (remote ip \"localhost:5180\"))" "$(profile)" "(copy) the sandbox opens the copy's port"
+copy_cli "${LOCAL_ENV[@]}" "${COPY_IOS[@]}" COPY_SANDBOXED=false -- "$RWT" --cwd "$BWT"
+eq "$RC" 0 "(copy) so does an iOS app that copy brought up"
+in_sandbox copy "that capture"
+
+echo "# SANDBOXED: demo_engine_sandboxed runs a command inside the capture's sandbox, with the one loopback port it names open, for a rig that keeps it"
 cat >"$TMPD/sandboxed.sh" <<'SH'
 . "$PACK_SCRIPTS/demo-engine-lib.sh" || exit 1
 demo_engine_sandboxed "$@"
 SH
 # sandboxed [VAR=VAL ...] -- <port> <dir> <command...>: run demo_engine_sandboxed
-# from $RWT, as gctk rig serve runs a copy's serve command from its checkout.
+# from <dir>, or from $BWT when <dir> is no directory, as gctk rig serve runs a
+# copy's serve command from its checkout.
 sandboxed() {
   local -a envs
+  local from="$BWT"
   while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
   shift
+  [ ! -d "${2:-}" ] || from="$2"
   : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV"
-  ( cd "$RWT" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
-      SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" PACK_SCRIPTS="$HERE" \
+  ( cd "$from" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+      SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" PACK_SCRIPTS="${SB_SCRIPTS:-$HERE}" \
       ${envs[@]+"${envs[@]}"} bash "$TMPD/sandboxed.sh" "$@" >"$OUTF" 2>"$ERRF" )
   RC=$?
 }
-sandboxed "${CITY_ENV[@]}" GC_SESSION_ID=s1 -- 5197 "$RWT" bash -c 'echo ran in the sandbox'
+sandboxed "${LOCAL_ENV[@]}" GC_SESSION_ID=s1 -- 5197 "$BWT" bash -c 'echo ran in the sandbox'
 eq "$RC" 0 "(sandboxed) the command runs"
 eq "$(cat "$OUTF")" "ran in the sandbox" "(sandboxed) with its output its own"
 has '(allow network-outbound (remote ip "localhost:5197"))' "$(profile)" "(sandboxed) the profile opens the port it names"
 eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 1 "(sandboxed) and no other loopback port"
 has '(deny network-outbound (remote ip "localhost:*"))' "$(profile)" "(sandboxed) and denies every other one"
-has "(allow file-read-data file-write* (subpath \"$RWT\"))" "$(profile)" "(sandboxed) the directory is read and written, as its rig worktree"
-has "(deny file-read-data file-write* (subpath \"$RIGA\"))" "$(profile)" "(sandboxed) and the rig's checkout stays denied"
+has "(allow file-read-data file-write* (subpath \"$BWT\"))" "$(profile)" "(sandboxed) the directory is read and written, as its rig worktree"
+has "(deny file-read-data file-write* (subpath \"$RIGB\"))" "$(profile)" "(sandboxed) and the rig's checkout stays denied"
 eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$SANDBOX_ENV")" 0 "(sandboxed) the command runs with none of the variables that point at the city"
+REC="$TMPD/copy-record"; mkdir -p "$REC"
+sandboxed "${LOCAL_ENV[@]}" DEMO_ENGINE_SANDBOX_RECORD="$REC/sandboxed" -- 5197 "$BWT" bash -c 'echo ran in the sandbox'
+eq "$RC" 0 "(sandboxed) a command whose caller names a record runs"
+eq "$(cat "$REC/sandboxed" 2>/dev/null)" true "(sandboxed) the record says it runs inside the sandbox"
+hasnt "DEMO_ENGINE_SANDBOX_RECORD=" "$(cat "$SANDBOX_ENV")" "(sandboxed) and the command never learns where the record is"
+
+echo "# PLAIN: demo_engine_sandboxed runs a command from a worktree of a rig whose app_reads_city is \"false\" as an ordinary process"
+sandboxed "${LOCAL_ENV[@]}" GC_SESSION_ID=s1 -- 5197 "$RWT" bash -c "echo ran with no sandbox; env >'$TMPD/plain.env'"
+eq "$RC" 0 "(plain) the command runs"
+eq "$(cat "$OUTF")" "ran with no sandbox" "(plain) with its output its own"
+ok "(plain) and no sandbox-exec runs it" "[ ! -e '$SANDBOX_PROFILE' ]"
+has "the command runs as an ordinary process, with no sandbox, because $RWT lies in the repository of $RIGA, whose app_reads_city is \"false\"" "$(err)" "(plain) it says why"
+eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$TMPD/plain.env")" 0 "(plain) the command runs with none of the variables that point at the city"
+has "CALLLOG=" "$(cat "$TMPD/plain.env")" "(plain) and with the rest of the environment"
+rm -f "$REC/sandboxed"
+sandboxed "${LOCAL_ENV[@]}" DEMO_ENGINE_SANDBOX_RECORD="$REC/sandboxed" -- 5197 "$RWT" bash -c "env >'$TMPD/plain.env'"
+eq "$(cat "$REC/sandboxed" 2>/dev/null)" false "(plain) the record a caller names says the command runs as an ordinary process"
+hasnt "DEMO_ENGINE_SANDBOX_RECORD=" "$(cat "$TMPD/plain.env")" "(plain) and the command never learns where the record is"
+for keep in "a rig set to \"true\"|$BWT|" "a rig whose app_reads_city is 'yes'|$RWT|RIG_VARS={\"alpha\":{\"app_reads_city\":\"yes\"}}" \
+    "a rig whose app_reads_city does not read|$RWT|FORMULA_RC=1" "the city's own repository|$HQWT|" "no rig's repository|$WORK|"; do
+  IFS='|' read -r what dir extra <<<"$keep"
+  sandboxed "${LOCAL_ENV[@]}" ${extra:+"$extra"} -- 5197 "$dir" bash -c :
+  eq "$RC" 0 "(plain) a command from a directory in $what runs"
+  has '(allow network-outbound (remote ip "localhost:5197"))' "$(profile)" "(plain) inside the sandbox"
+done
+SB_SCRIPTS="$PACKRIG/assets/scripts" sandboxed "${LOCAL_ENV[@]}" -- 5197 "$PWT" bash -c :
+eq "$RC" 0 "(plain) a command from a worktree of the rig that holds the library runs"
+has '(allow network-outbound (remote ip "localhost:5197"))' "$(profile)" "(plain) inside the sandbox"
+# No shell of the library's holds the command's output open, so a command that
+# closes its standard output and runs on ends that output for its reader, in
+# the sandbox and with none. The reader is cat on a process substitution, which
+# ends with the output, where a command substitution would wait for the command
+# too. The farm holds no sleep, so the command names the host's.
+for run in "sandboxed|$BWT" "plain|$RWT"; do
+  IFS='|' read -r how dir <<<"$run"
+  PIDF="$TMPD/sandboxed.pid"; rm -f "$PIDF"
+  START=$SECONDS
+  GOT=$(cat < <( cd "$dir" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+      SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" PACK_SCRIPTS="$HERE" PIDF="$PIDF" \
+      "${LOCAL_ENV[@]}" bash "$TMPD/sandboxed.sh" 5197 "$dir" \
+      bash -c 'echo $$ >"$PIDF"; printf closed; exec 1>&-; exec /bin/sleep 30' 2>"$ERRF" ))
+  TOOK=$((SECONDS - START))
+  RAN_ON=ended
+  [ -s "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null && RAN_ON=running
+  [ ! -s "$PIDF" ] || kill "$(cat "$PIDF")" 2>/dev/null
+  eq "$GOT" "closed" "($how) a command that closes its standard output gives its reader all of it"
+  eq "$RAN_ON" running "($how) and runs on once the output has ended"
+  eq "$([ "$TOOK" -lt 20 ] && echo "while it runs" || echo "after ${TOOK}s")" "while it runs" "($how) and that output ends while the command runs on"
+done
 sandboxed "${CITY_ENV[@]}" -- 0 "$RWT" true
 eq "$RC" 1 "(sandboxed) a port that is no port is refused"
 sandboxed "${CITY_ENV[@]}" -- 5197 "$TMPD/nowhere" true
@@ -743,6 +1124,14 @@ eq "$RC" 1 "(sandboxed) a directory that does not exist is refused"
 sandboxed "${CITY_ENV[@]}" -- 5197 "$TMPD" true
 eq "$RC" 1 "(sandboxed) a directory that holds the city's is refused"
 has "$TMPD holds " "$(err)" "(sandboxed) and it names what the directory holds"
+rm -f "$REC/sandboxed"
+sandboxed "${CITY_ENV[@]}" DEMO_ENGINE_SANDBOX_RECORD="$REC/sandboxed" -- 5197 "$TMPD" true
+eq "$RC" 1 "(sandboxed) a refused run whose caller names a record exits 1"
+ok "(sandboxed) and writes no record" "[ ! -e '$REC/sandboxed' ]"
+sandboxed "${LOCAL_ENV[@]}" DEMO_ENGINE_SANDBOX_RECORD="$TMPD/no-such-dir/sandboxed" -- 5197 "$BWT" bash -c "echo ran >'$TMPD/unrecorded.ran'"
+eq "$RC" 1 "(sandboxed) a record that cannot be written exits 1"
+has "could not be written, so the command does not run" "$(err)" "(sandboxed) and says why"
+ok "(sandboxed) and the command never runs" "[ ! -e '$TMPD/unrecorded.ran' ]"
 STUB_PATH="$NOSBX" sandboxed "${CITY_ENV[@]}" -- 5197 "$RWT" true
 eq "$RC" 1 "(sandboxed) a host with no sandbox runs nothing"
 
@@ -864,13 +1253,15 @@ JS
     has "other reached" "$outside" "(ISOLATION) outside the sandbox the loopback service answers"
     has "socket reached" "$outside" "(ISOLATION) and so does the Unix socket"
 
-    # A rig's app, served on this host from a worktree of a rig whose
-    # app_reads_city is "false", answers a page capture's --base-url, which
-    # opens no other loopback service and no Unix socket. The host's own lsof
-    # finds the server. This also runs on several ports, for the reason above.
-    # The same server in a worktree of a rig set to "true" is refused, and a
-    # terminal capture in the first rig's worktree reaches neither the app nor
-    # the city.
+    # A copy of a rig set to "true", on this host, answers a page capture's
+    # --base-url, which opens no other loopback service and no Unix socket. The
+    # host's own lsof finds the copy's process, and gctk's stub reports the copy.
+    # This also runs on several ports, for the reason above. The same server
+    # outside a copy is refused, and a terminal capture in that rig's worktree
+    # reaches neither the app nor the city. A capture of a server in a worktree
+    # of a rig whose app_reads_city is "false", and a terminal capture there,
+    # run with no sandbox, so they reach the app and the city, though not the
+    # city's variables.
     if ! LSOF_BIN=$(command -v lsof); then
       echo "# ISOLATION: a rig's own app on this host is SKIPPED (no lsof on this host)"
     else
@@ -918,48 +1309,74 @@ JS
         APPPORT="$(cat "$TMPD/app.port" 2>/dev/null)"
       }
       stop_app() { [ -z "$APP_PID" ] || { kill "$APP_PID" 2>/dev/null; wait "$APP_PID" 2>/dev/null; }; APP_PID=""; }
-      # app_capture: a page capture of the app at APPPORT, from $WORK, through the
-      # host's sandbox and lsof, with its output in $out and its status in $rc.
+      # app_capture [VAR=VAL ...]: a page capture of the app at APPPORT, from
+      # $WORK, through the host's sandbox and lsof, with its output in $out and
+      # its status in $rc.
       app_capture() {
         : >"$CMD_OUT"
         out=$( cd "$WORK" && env -i PATH="$REALSBX:$REALLSOF:$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
             ENGINE_STUB="$BASE_STUB" REAL_NODE="$REAL_NODE" BASEKNOCK="$BASEKNOCK" APIPORT="$APIPORT" API_SOCK="$API_SOCK" \
-            CMD_OUT="$CMD_OUT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" \
+            CMD_OUT="$CMD_OUT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "$@" \
             bash "$SHOT" page --script "$SCRIPT" --base-url "http://127.0.0.1:$APPPORT/" --output "$WORK/app.png" 2>&1 ); rc=$?
       }
       for _ in 1 2 3 4; do
-        start_app "$RWT"
-        app_capture
+        start_app "$BWT"
+        app_capture GCTK_BIN="$GCTK_STUB" COPY_PORT="$APPPORT"
         stop_app
         inside="$(cat "$CMD_OUT")"
-        eq "$rc" 0 "(LOCAL-APP) a page capture of a server in a worktree of a rig whose app_reads_city is \"false\", on port $APPPORT, runs in the host's sandbox"
-        has "is served from a worktree of $RIGA" "$out" "(LOCAL-APP) the host's lsof finds the server in the rig's worktree"
-        has "app reached" "$inside" "(LOCAL-APP) the capture reaches that server"
+        eq "$rc" 0 "(LOCAL-APP) a page capture of a copy of a rig set to \"true\", on port $APPPORT, runs in the host's sandbox"
+        has "is a copy that gctk rig serve runs from $BWT inside the sandbox" "$out" "(LOCAL-APP) the host's lsof finds the copy's process in the rig's worktree"
+        has "app reached" "$inside" "(LOCAL-APP) the capture reaches that copy"
         hasnt "other reached" "$inside" "(LOCAL-APP) and no other loopback service"
         hasnt "socket reached" "$inside" "(LOCAL-APP) and no Unix socket"
       done
       start_app "$BWT"
       app_capture
       stop_app
-      eq "$rc" 1 "(LOCAL-APP) the same capture of a server in a worktree of a rig set to \"true\" exits 1"
+      eq "$rc" 1 "(LOCAL-APP) the same capture of a server in that worktree that is no copy exits 1"
       has "works in a worktree of $RIGB, for which city.toml sets app_reads_city = \"true\"" "$out" "(LOCAL-APP) because city.toml sets that rig to \"true\""
       eq "$(cat "$CMD_OUT")" "" "(LOCAL-APP) and the engine never runs"
-
       start_app "$RWT"
-      TPROBE="(exec 3<>/dev/tcp/127.0.0.1/$APPPORT && cat <&3); (exec 3<>/dev/tcp/127.0.0.1/$APIPORT && cat <&3); cat '$CITY/city.toml' '$RIGA/.beads/issues.jsonl' '$GCH/cities.toml'; echo PROBED"
-      : >"$CMD_OUT"
-      out=$( cd "$RWT" && env -i PATH="$REALSBX:$REALLSOF:$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
-          ENGINE_STUB="$EXEC_STUB" CMD_OUT="$CMD_OUT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" \
-          bash "$SHOT" terminal --command "$TPROBE" --cwd "$RWT" --output "$WORK/term.png" 2>&1 ); rc=$?
-      inside="$(cat "$CMD_OUT")"
-      outside=$( cd "$RWT" && bash -c "$TPROBE" 2>&1 )
+      app_capture
       stop_app
-      eq "$rc" 0 "(LOCAL-APP) a terminal capture in the first rig's worktree runs, in the host's sandbox"
+      inside="$(cat "$CMD_OUT")"
+      eq "$rc" 0 "(PLAIN) a page capture of a server in a worktree of a rig whose app_reads_city is \"false\" runs"
+      has "is served from a worktree of $RIGA" "$out" "(PLAIN) the host's lsof finds the server in the rig's worktree"
+      has "the capture runs as an ordinary process, with no sandbox" "$out" "(PLAIN) and the capture runs with no sandbox"
+      has "app reached" "$inside" "(PLAIN) it reaches that server"
+      has "other reached" "$inside" "(PLAIN) and the other loopback service, as the rig's own tests do"
+      has "socket reached" "$inside" "(PLAIN) and the Unix socket"
+
+      # tprobe <rig worktree>: a terminal capture in the worktree whose command
+      # asks the app at APPPORT and the loopback service, reads the city's files
+      # and prints the city's variables, with what it printed in $inside and
+      # what the same command prints outside any sandbox in $outside.
+      tprobe() {
+        TPROBE="(exec 3<>/dev/tcp/127.0.0.1/$APPPORT && cat <&3); (exec 3<>/dev/tcp/127.0.0.1/$APIPORT && cat <&3); cat '$CITY/city.toml' '$RIGA/.beads/issues.jsonl' '$GCH/cities.toml'; env | awk '/^(GC|GT|BEADS|BD|DOLT)_/ || /^TMUX=/ { print \"CITY-VARIABLE \" \$0 }'; echo PROBED"
+        : >"$CMD_OUT"
+        out=$( cd "$1" && env -i PATH="$REALSBX:$REALLSOF:$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+            ENGINE_STUB="$EXEC_STUB" CMD_OUT="$CMD_OUT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" \
+            bash "$SHOT" terminal --command "$TPROBE" --cwd "$1" --output "$WORK/term.png" 2>&1 ); rc=$?
+        inside="$(cat "$CMD_OUT")"
+        outside=$( cd "$1" && env -i PATH="$BIN:$FARM" HOME="$TMPD" "${LOCAL_ENV[@]}" bash -c "$TPROBE" 2>&1 )
+      }
+      start_app "$RWT"
+      tprobe "$BWT"
+      eq "$rc" 0 "(LOCAL-APP) a terminal capture in a worktree of a rig set to \"true\" runs, in the host's sandbox"
       has "PROBED" "$inside" "(LOCAL-APP) its command runs to the end"
-      for secret in APP-OK SECRET-API SECRET-CITY-CONFIG SECRET-RIG-STORE SECRET-GC-HOME; do
+      for secret in APP-OK SECRET-API SECRET-CITY-CONFIG SECRET-RIG-STORE SECRET-GC-HOME "CITY-VARIABLE GC_CITY_PATH="; do
         hasnt "$secret" "$inside" "(LOCAL-APP) the terminal capture does not reach $secret"
         has "$secret" "$outside" "(LOCAL-APP) though the same command outside the sandbox reaches $secret"
       done
+      tprobe "$RWT"
+      stop_app
+      eq "$rc" 0 "(PLAIN) a terminal capture in a worktree of a rig whose app_reads_city is \"false\" runs"
+      has "the capture runs as an ordinary process, with no sandbox" "$out" "(PLAIN) with no sandbox"
+      has "PROBED" "$inside" "(PLAIN) its command runs to the end"
+      for secret in APP-OK SECRET-API SECRET-CITY-CONFIG SECRET-RIG-STORE SECRET-GC-HOME; do
+        has "$secret" "$inside" "(PLAIN) the terminal capture reaches $secret, as the same command outside a capture does"
+      done
+      hasnt "CITY-VARIABLE" "$inside" "(PLAIN) though none of the city's variables"
     fi
   fi
 fi
@@ -1051,18 +1468,23 @@ echo "# SHELLS: the library runs in the agent's own shell, which can be zsh or m
 # with the arguments reaches the engine and the profile.
 skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --serve-dir app --port 5199 -o clip.mp4#' >"$TMPD/skill-serve.sh"
 skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --base-url http://127.0.0.1:5180/ -o clip.mp4#' >"$TMPD/skill-base.sh"
+skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --base-url http://127.0.0.1:5181/ -o clip.mp4#' >"$TMPD/skill-copy.sh"
 skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --base-url http://127.0.0.1:5180/ --serve-dir app -o clip.mp4#' >"$TMPD/skill-two.sh"
 skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --serve "npm run dev" --port 5173 -o clip.mp4#' >"$TMPD/skill-engine-serve.sh"
 # shell_run <shell> <block> [VAR=VAL ...]: run the block through the shell, in
 # the city's environment and the variables given.
 shell_run() {
   local sh="$1" blk="$2"; shift 2
-  : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV"
+  : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV" "$ENGINE_ENV"
   ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
-      ENGINE_STUB="$ENGINE_STUB" PACK_SCRIPTS="$HERE" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" \
+      ENGINE_STUB="$ENGINE_STUB" PACK_SCRIPTS="$HERE" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" ENGINE_ENV="$ENGINE_ENV" \
       "${CITY_ENV[@]}" "$@" "$sh" "$blk" >"$OUTF" 2>"$ERRF" )
   RC=$?
 }
+printf '. "%s" && demo_engine_script_kind demo.md\n' "$LIB" >"$TMPD/kind.sh"
+shell_run bash "$TMPD/kind.sh"
+eq "$RC" 0 "(shells) this suite's bash asks the engine for a script's surface"
+eq "$(cat "$OUTF")" "page" "(shells) and prints the surface it names"
 shell_run bash "$TMPD/skill-serve.sh"
 eq "$RC" 0 "(shells) this suite's bash runs the engine call"
 has "node [$ENGINE/src/cli.ts] [run] [demo.md] [--serve-dir] [app] [--port] [5199] [-o] [clip.mp4]" "$(calls)" "(shells) and the engine gets its arguments"
@@ -1070,21 +1492,46 @@ has '(allow network-outbound (remote ip "localhost:5199"))' "$(profile)" "(shell
 SERVE_CALLS="$(calls)"; SERVE_PROFILE="$(profile)"
 shell_run bash "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT"
 eq "$RC" 0 "(shells) this suite's bash runs an engine call whose --base-url a worktree of a rig whose app_reads_city is \"false\" serves"
-has '(allow network-outbound (remote ip "localhost:5180"))' "$(profile)" "(shells) and the profile opens that server's port"
-BASE_CALLS="$(calls)"; BASE_PROFILE="$(profile)"
+ok "(shells) and runs it with no sandbox-exec" "[ ! -e '$SANDBOX_PROFILE' ]"
+has "the capture runs as an ordinary process, with no sandbox, because what it captures lies in the repository of $RIGA" "$(err)" "(shells) which it says"
+BASE_CALLS="$(calls)"
+shell_run bash "$TMPD/skill-copy.sh" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 LISTENERS="5181 4243 $BWT"
+eq "$RC" 0 "(shells) this suite's bash runs an engine call whose --base-url is a copy of a rig set to \"true\""
+has '(allow network-outbound (remote ip "localhost:5181"))' "$(profile)" "(shells) and the profile opens the copy's port"
+COPY_CALLS="$(calls)"; COPY_PROFILE="$(profile)"
 shell_run bash "$TMPD/skill-two.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT"
 eq "$RC" 1 "(shells) an engine call that names a --base-url on this host and a --serve-dir exits 1"
 has "--base-url http://127.0.0.1:5180/ and --serve-dir each name an app to capture" "$(err)" "(shells) it says the call names two apps"
 hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
 shell_run bash "$TMPD/skill-engine-serve.sh"
 eq "$RC" 1 "(shells) an engine call that names --serve exits 1"
-has "the engine's --serve would start a server whose port the sandbox cannot vouch for; serve the app as a copy with gctk rig serve" "$(err)" "(shells) it says why, and what serves the app instead"
+has "the engine's --serve would start a server of its own; serve the app as a copy with gctk rig serve" "$(err)" "(shells) it says why, and what serves the app instead"
+hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
+IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP -o clip.mp4#" >"$TMPD/skill-ios.sh"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP --port 4723,8100,9100 -o clip.mp4#" >"$TMPD/skill-ios-port.sh"
+skill_block 2 | sed "s#<command> <arguments\.\.\.>#run demo.md --base-url $IOS_APP --serve-dir app -o clip.mp4#" >"$TMPD/skill-ios-two.sh"
+THREE="$(printf '50301\n50302\n50303')"
+shell_run bash "$TMPD/skill-ios.sh" FREE_PORT="$THREE"
+eq "$RC" 0 "(shells) this suite's bash runs an engine call on an iOS app"
+has "[--base-url] [$IOS_APP] [-o] [clip.mp4] [--port] [50301,50302,50303]" "$(calls)" "(shells) and the engine gets the three ports"
+IOS_CALLS="$(calls)"; IOS_PROFILE="$(profile)"
+shell_run bash "$TMPD/skill-ios-port.sh" FREE_PORT="$THREE"
+eq "$RC" 1 "(shells) an engine call on an iOS app that names --port exits 1"
+has "an iOS app run takes no --port" "$(err)" "(shells) it says the capture picks those ports"
+hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
+shell_run bash "$TMPD/skill-ios-two.sh" FREE_PORT="$THREE"
+eq "$RC" 1 "(shells) an engine call that names an iOS app and a --serve-dir exits 1"
+has "--base-url $IOS_APP and --serve-dir each name an app to capture" "$(err)" "(shells) it says the call names two apps"
 hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
 for sh in /bin/zsh /bin/bash; do
   if [ ! -x "$sh" ]; then echo "# SHELLS: $sh SKIPPED (not on this host)"; continue; fi
   shell_run "$sh" "$TMPD/skill-resolve.sh"
   eq "$RC" 0 "(shells) $sh runs the resolve block"
   has "engine = local sprintshow rig ($ENGINE)" "$(err)" "(shells) $sh chooses the local engine"
+  shell_run "$sh" "$TMPD/kind.sh"
+  eq "$RC" 0 "(shells) $sh asks the engine for a script's surface"
+  eq "$(cat "$OUTF")" "page" "(shells) $sh prints the surface it names"
   shell_run "$sh" "$TMPD/skill-serve.sh"
   eq "$RC" 0 "(shells) $sh runs the engine call"
   eq "$(calls)" "$SERVE_CALLS" "(shells) $sh hands the engine the same arguments"
@@ -1093,20 +1540,31 @@ for sh in /bin/zsh /bin/bash; do
   shell_run "$sh" "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT"
   eq "$RC" 0 "(shells) $sh runs the engine call whose --base-url a worktree of a rig whose app_reads_city is \"false\" serves"
   eq "$(calls)" "$BASE_CALLS" "(shells) $sh asks lsof and hands the engine what this suite's bash does"
-  eq "$(profile)" "$BASE_PROFILE" "(shells) $sh builds the same profile for it"
+  ok "(shells) $sh runs it with no sandbox-exec" "[ ! -e '$SANDBOX_PROFILE' ]"
+  has "the capture runs as an ordinary process, with no sandbox, because what it captures lies in the repository of $RIGA" "$(err)" "(shells) $sh says so"
+  eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$ENGINE_ENV")" 0 "(shells) $sh drops the variables that point at the city with no sandbox too"
+  shell_run "$sh" "$TMPD/skill-copy.sh" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 LISTENERS="5181 4243 $BWT"
+  eq "$RC" 0 "(shells) $sh runs the engine call whose --base-url is a copy of a rig set to \"true\""
+  eq "$(calls)" "$COPY_CALLS" "(shells) $sh asks gctk and hands the engine what this suite's bash does"
+  eq "$(profile)" "$COPY_PROFILE" "(shells) $sh builds the same profile for it"
   shell_run "$sh" "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4243 $BWT"
   eq "$RC" 1 "(shells) $sh refuses the same call when a worktree of a rig set to \"true\" serves the port"
   has "for which city.toml sets app_reads_city = \"true\"" "$(err)" "(shells) $sh names why"
+  shell_run "$sh" "$TMPD/skill-ios.sh" FREE_PORT="$THREE"
+  eq "$RC" 0 "(shells) $sh runs the engine call on an iOS app"
+  eq "$(calls)" "$IOS_CALLS" "(shells) $sh hands it the same arguments"
+  eq "$(profile)" "$IOS_PROFILE" "(shells) $sh opens the same three ports"
 done
 
 echo "# NO-COPY: no other script, and no skill's example code, finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
 # One grep finds the files that name a step anywhere; only those are read again
-# without their comment lines, so a script that names a step in prose passes.
-# A skill is read again as its fenced code blocks alone, so its prose can name
-# a step too. The steps are the browser install, by either installer, the rig
-# lookup's select, however a copy spaces them, the Node version read, and the
-# path of the engine's CLI in a checkout.
-STEPS='provision:browser|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"|node[[:space:]]+--version|src/cli\.ts'
+# without their comment lines, so a script that names a step in prose passes. A
+# skill is read again as its fenced code blocks alone, so its prose can name a
+# step too. The steps are the browser install, by either installer, Appium's, by
+# either form of the engine's provision command, the rig lookup's select,
+# however a copy spaces them, the Node version read, and the path of the
+# engine's CLI in a checkout.
+STEPS='provision:browser|provision:appium|provision[[:space:]]+appium|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"|node[[:space:]]+--version|src/cli\.ts'
 COPIES=""
 while IFS= read -r f; do
   case "$f" in ""|"$LIB"|*.test.sh) continue ;; esac

@@ -69,10 +69,11 @@ nothing. The script chmods before it deletes, and the measurement is what
 proves the deletion happened.
 
 Agents are told the rule rather than a set of habits. The `scratch-reclaim`
-prompt fragment states that scratch does not outlive an inactive session, so
-durable work goes in the repo. It carries one habit beyond that, because the
-reaper cannot cover it: a single turn can exhaust the quota between passes, so
-build artifacts and whole-store bead dumps stay out of scratch.
+prompt fragment states that a scratchpad belongs to one session and does not
+outlive it, and it names where a file that must outlive the session goes
+instead. It also tells agents to keep build artifacts and whole-store bead
+dumps out of scratch, because the reaper cannot cover them: a single turn can
+exhaust the quota between passes.
 
 ## Ended sessions
 

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -288,10 +289,11 @@ func outsideAddress() net.IP {
 }
 
 // sandboxStub stands in for demo-engine-lib.sh. Its demo_engine_sandboxed
-// logs its port, its directory, PROG and its working directory, then runs the
-// command in the directory, as the real one does inside the sandbox.
+// logs its port, its directory, PROG, its working directory and the record it
+// is named, or unset, then runs the command in the directory, as the real one
+// does inside the sandbox.
 const sandboxStub = `demo_engine_sandboxed() {
-  printf '%s|%s|%s|%s\n' "$1" "$2" "$PROG" "$(pwd -P)" > "$SANDBOX_LOG"
+  printf '%s|%s|%s|%s|%s\n' "$1" "$2" "$PROG" "$(pwd -P)" "${DEMO_ENGINE_SANDBOX_RECORD-unset}" > "$SANDBOX_LOG"
   local dir=$2
   shift 2
   cd "$dir" && exec "$@"
@@ -304,6 +306,7 @@ func TestStartInTheSandboxRunsTheCommandThroughTheLibraryFromItsDirectory(t *tes
 		t.Fatal(err)
 	}
 	work, lib, log := filepath.Join(dir, "work"), filepath.Join(dir, "lib.sh"), filepath.Join(dir, "sandbox.log")
+	record := filepath.Join(dir, "sandboxed")
 	if err := os.Mkdir(work, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +321,7 @@ func TestStartInTheSandboxRunsTheCommandThroughTheLibraryFromItsDirectory(t *tes
 		Env:     []string{"PORT=4242", "SANDBOX_LOG=" + log},
 		Out:     &out,
 		Relay:   true,
-		Sandbox: &Sandbox{Lib: lib, Port: 4242, Prog: "gctk host test"},
+		Sandbox: &Sandbox{Lib: lib, Port: 4242, Prog: "gctk host test", Record: record},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -331,8 +334,16 @@ func TestStartInTheSandboxRunsTheCommandThroughTheLibraryFromItsDirectory(t *tes
 		t.Errorf("relayed %q, want %q: the command's output and errors, through the relay", got, want)
 	}
 	b, _ := os.ReadFile(log)
-	if got, want := strings.TrimSpace(string(b)), "4242|"+work+"|gctk host test|"+work; got != want {
-		t.Errorf("the sandbox got %q, want %q: the port, the directory and the name its messages start with, from the directory", got, want)
+	if got, want := strings.TrimSpace(string(b)), "4242|"+work+"|gctk host test|"+work+"|"+record; got != want {
+		t.Errorf("the sandbox got %q, want %q: the port, the directory, the name its messages start with and the record, from the directory", got, want)
+	}
+	if c, err := h.Start(Spec{Argv: []string{"true"}, Dir: work, Env: []string{"SANDBOX_LOG=" + log}, Sandbox: &Sandbox{Lib: lib, Port: 4242}}); err != nil {
+		t.Fatal(err)
+	} else if code := c.Wait(); code != 0 {
+		t.Errorf("a sandbox with no record: Wait = %d, want 0", code)
+	}
+	if b, _ := os.ReadFile(log); !strings.HasSuffix(strings.TrimSpace(string(b)), "|unset") {
+		t.Errorf("a sandbox with no record got %q, want no record named", strings.TrimSpace(string(b)))
 	}
 
 	if c, err := h.Start(Spec{Argv: []string{"true"}, Dir: work, Sandbox: &Sandbox{Lib: filepath.Join(dir, "none.sh"), Port: 4242}}); err != nil {
@@ -342,6 +353,157 @@ func TestStartInTheSandboxRunsTheCommandThroughTheLibraryFromItsDirectory(t *tes
 	}
 	if _, err := h.Start(Spec{Argv: []string{"true"}, Sandbox: &Sandbox{Lib: lib, Port: 4242}}); err == nil {
 		t.Error("a sandboxed start with no directory started")
+	}
+}
+
+func TestStartGivesStdoutTheStandardOutputAloneRelayedOrNot(t *testing.T) {
+	h := Local()
+	for _, k := range []struct{ relay, noOut bool }{{true, false}, {false, false}, {true, true}, {false, true}} {
+		var out, errs bytes.Buffer
+		s := Spec{
+			Argv:   []string{"bash", "-c", `echo one; echo err >&2; printf two`},
+			Out:    &errs,
+			Stdout: &out,
+			Relay:  k.relay,
+		}
+		if k.noOut {
+			s.Out = nil
+		}
+		c, err := h.Start(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A relayed process's output is copied once Relayed says so, and any
+		// other's once the process has been waited for.
+		if k.relay {
+			<-c.Relayed()
+		} else {
+			c.Wait()
+		}
+		wantErr := "err\n"
+		if k.noOut {
+			wantErr = ""
+		}
+		if out.String() != "one\ntwo" || errs.String() != wantErr {
+			t.Errorf("relay %v, no Out %v: Stdout got %q and Out %q, want the standard output and the standard error apart", k.relay, k.noOut, out.String(), errs.String())
+		}
+		c.Wait()
+	}
+}
+
+// ending is a writer that takes the end of its stream (Ender): it keeps what
+// was written into it, and closes ended at End.
+type ending struct {
+	mu    sync.Mutex
+	got   bytes.Buffer
+	ended chan struct{}
+}
+
+func newEnding() *ending { return &ending{ended: make(chan struct{})} }
+
+func (e *ending) Write(b []byte) (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.got.Write(b)
+}
+
+func (e *ending) End() { close(e.ended) }
+
+func (e *ending) String() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.got.String()
+}
+
+// A relay tells each writer that is an Ender when its own stream ends, once
+// all of the stream is in it: Stdout as soon as the process closes its
+// standard output and runs on, and Out once the process has ended.
+func TestARelayTellsAnEnderWhenItsStreamEnds(t *testing.T) {
+	h := Local()
+	out, errs := newEnding(), newEnding()
+	c, err := h.Start(Spec{
+		Argv:    []string{"bash", "-c", `printf 'one\ntwo'; exec 1>&-; echo err >&2; exec sleep 60`},
+		Out:     errs,
+		Stdout:  out,
+		Relay:   true,
+		Session: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := c.Pid()
+	t.Cleanup(func() { _ = h.SignalGroup(pid, syscall.SIGKILL); c.Wait() })
+	select {
+	case <-out.ended:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the standard output's end never reached Stdout")
+	}
+	if got := out.String(); got != "one\ntwo" {
+		t.Errorf("Stdout held %q at its end, want the whole standard output", got)
+	}
+	if _, ok := h.Proc(pid); !ok {
+		t.Fatal("the process had ended, so this shows nothing of a stream that ends before its process")
+	}
+	select {
+	case <-errs.ended:
+		t.Fatal("Out was told its stream ended while the process still holds its standard error")
+	default:
+	}
+	if err := h.SignalGroup(pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	c.Wait()
+	select {
+	case <-c.Relayed():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the relay did not finish once the process ended")
+	}
+	select {
+	case <-errs.ended:
+	default:
+		t.Fatal("the relay finished without telling Out its stream ended")
+	}
+	if got := errs.String(); got != "err\n" {
+		t.Errorf("Out held %q, want the standard error", got)
+	}
+}
+
+// refusing is an ending that refuses every write, as a writer whose file fails
+// does.
+type refusing struct{ *ending }
+
+func (refusing) Write([]byte) (int, error) { return 0, syscall.EIO }
+
+// A relay whose copy of a stream stops at a write its writer refuses tells
+// that writer no end, because the stream did not end there, and still tells
+// the process's other stream when it ends.
+func TestARelayTellsAWriterThatRefusesAWriteNoEnd(t *testing.T) {
+	h := Local()
+	out, errs := refusing{newEnding()}, newEnding()
+	c, err := h.Start(Spec{
+		Argv:   []string{"bash", "-c", `printf one; echo err >&2`},
+		Out:    errs,
+		Stdout: out,
+		Relay:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Wait()
+	select {
+	case <-c.Relayed():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the relay did not finish once the process ended")
+	}
+	select {
+	case <-out.ended:
+		t.Error("Stdout was told its stream ended, though its copy stopped at the write it refused")
+	default:
+	}
+	select {
+	case <-errs.ended:
+	default:
+		t.Error("Out was not told its stream ended, though all of it was copied in")
 	}
 }
 

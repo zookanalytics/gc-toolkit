@@ -25,37 +25,51 @@ import (
 // pack is imported under, which the review run's pools carry.
 const boundRefinery = "rig/gc-toolkit.refinery"
 
-// pours is the pour of a review run as gc formula cook --attach makes it: the
-// root, which carries its formula and vars, and the bead's blocks edge onto it,
-// which the store's blocked listing holds the bead on. err fails the pour, and
-// a run already attached when it pours fails the test, since cook would attach
-// a second.
+// pours is the pour of a review run as gc formula cook makes it: the root,
+// which carries its formula and vars, and a member of its own, both at the
+// formula's priority, and no edge onto them. err fails the pour, and elsewhere
+// pours them into a store other than the bead's.
 type pours struct {
-	mu    sync.Mutex
-	store *fake.Store
-	t     *testing.T
-	vars  []map[string]string
-	err   error
+	mu        sync.Mutex
+	store     *fake.Store
+	vars      []map[string]string
+	err       error
+	elsewhere bool
 }
 
-func (p *pours) Pour(formula, b string, vars map[string]string) (string, error) {
+func (p *pours) Pour(formula string, vars map[string]string) (pr.Poured, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.err != nil {
-		return "", p.err
+		return pr.Poured{}, p.err
 	}
 	p.vars = append(p.vars, maps.Clone(vars))
 	root := fmt.Sprintf("tk-run%d", len(p.vars))
+	if p.elsewhere {
+		return pr.Poured{Root: root, Beads: []string{root}}, nil
+	}
 	md := map[string]string{"gc.kind": "workflow", "gc.formula_name": formula}
 	for k, v := range vars {
 		md["gc.var."+k] = v
 	}
-	p.store.Put(fake.Bead{ID: root, Title: formula, Status: "open", Metadata: md})
-	row, _ := p.store.Row(b)
-	row.Edges = append(row.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: root, Title: formula, Status: "open"})
-	p.store.Put(row)
-	p.store.List(b, root)
-	return root, nil
+	p.store.Put(fake.Bead{ID: root, Title: formula, Status: "open", Priority: 2, Metadata: md})
+	spec := root + "-spec"
+	p.store.Put(fake.Bead{ID: spec, Title: "Step spec", Status: "open", Priority: 2,
+		Metadata: map[string]string{"gc.root_bead_id": root, "gc.kind": "spec"}})
+	return pr.Poured{Root: root, Beads: []string{root, spec}}, nil
+}
+
+// listing is the fake store with bd's blocked rule for the edge the order adds
+// onto a run: a blocks edge from a bead onto an open bead makes the store's
+// blocked listing hold the bead on it.
+type listing struct{ *fake.Store }
+
+func (s listing) AddEdge(id, target, typ string) (string, error) {
+	out, err := s.Store.AddEdge(id, target, typ)
+	if far, held := s.Store.Row(target); err == nil && typ == gcbd.EdgeBlocks && held && far.Status != "closed" {
+		s.Store.List(id, target)
+	}
+	return out, err
 }
 
 func (p *pours) count() int {
@@ -75,12 +89,10 @@ func newAdmit(t *testing.T) *admitting {
 	t.Helper()
 	d := newCycle(t)
 	d.l.Refinery = boundRefinery
-	d.edit(t, func(b *fake.Bead) {
-		b.Assignee = boundRefinery
-		delete(b.Metadata, "review_results")
-	})
-	p := &pours{store: d.store, t: t}
+	d.edit(t, func(b *fake.Bead) { delete(b.Metadata, "review_results") })
+	p := &pours{store: d.store}
 	d.l.Runs = p
+	d.l.Ledger = ledger.New(listing{d.store})
 	return &admitting{land: d, runs: p}
 }
 
@@ -581,10 +593,217 @@ func TestAnAskFiledToWaitOnAnOpenBeadGetsNoRunUntilThatBeadCloses(t *testing.T) 
 func TestARefineryAddressWithNoBindingPoursNothing(t *testing.T) {
 	d := newAdmit(t)
 	d.l.Refinery = refinery
-	d.edit(t, func(b *fake.Bead) { b.Assignee = refinery })
 	o := d.once(t)
 	is(t, o, pr.ActChecked)
 	if d.runs.count() != 0 || !strings.Contains(o.Detail, "rig/refinery") {
 		t.Fatalf("a refinery with no binding poured %d runs (%s)", d.runs.count(), o.Detail)
+	}
+}
+
+// edged reports whether the bead has a blocks edge onto root.
+func edged(t *testing.T, d *admitting, root string) bool {
+	t.Helper()
+	return slices.ContainsFunc(d.row(t).Edges, func(e gcbd.Edge) bool { return e.Type == gcbd.EdgeBlocks && e.ID == root })
+}
+
+// stray puts a live run of the review formula whose pr_bead var names the bead
+// and onto which the bead has no edge, as a pour leaves it when it stops before
+// the bead's edge lands, with its shadow var as given.
+func (d *admitting) stray(id, shadow string) {
+	d.store.Put(fake.Bead{ID: id, Title: "mol-pr-review", Status: "open", Metadata: map[string]string{
+		"gc.kind": "workflow", "gc.formula_name": "mol-pr-review", "gc.var.pr_bead": bead,
+		"gc.var.head": head, "gc.var.target": "main", "gc.var.shadow": shadow}})
+}
+
+// A pour gives each bead it created the bead's priority, then the bead its
+// blocks edge onto the run's root. A priority that does not land leaves the
+// run at the formula's priority and attached all the same.
+func TestAPourRanksTheRunAtTheBeadsPriorityAndAttachesIt(t *testing.T) {
+	d := newAdmit(t)
+	d.edit(t, func(b *fake.Bead) { b.Priority = 1 })
+	is(t, d.once(t), pr.ActPoured)
+	for _, id := range []string{"tk-run1", "tk-run1-spec"} {
+		if r, _ := d.store.Row(id); r.Priority != 1 {
+			t.Errorf("%s stands at P%d, want the bead's P1", id, r.Priority)
+		}
+	}
+	if !edged(t, d, "tk-run1") {
+		t.Fatalf("the bead has no blocks edge onto the run it poured: %+v", d.row(t).Edges)
+	}
+
+	e := newAdmit(t)
+	e.edit(t, func(b *fake.Bead) { b.Priority = 1 })
+	e.store.BeforeUpdate = func(_ string, args []string) error {
+		if slices.Contains(args, "--priority=1") {
+			return errors.New("bd: update: database is locked")
+		}
+		return nil
+	}
+	o := e.once(t)
+	is(t, o, pr.ActPoured)
+	if r, _ := e.store.Row("tk-run1"); r.Priority != 2 || !edged(t, e, "tk-run1") || !strings.Contains(o.Detail, "keep the formula's priority") {
+		t.Fatalf("a priority that did not land left the run at P%d, attached %v (%s)", r.Priority, edged(t, e, "tk-run1"), o.Detail)
+	}
+}
+
+// A live run whose pr_bead var names the bead and that no edge of the bead
+// names, a pour that stopped before its edge landed, gets that edge from the
+// next run, which pours no other. A shadow run writes nothing outside itself,
+// so it gets no edge, and a run is poured beside it.
+func TestARunWhoseEdgeNeverLandedIsAttachedInPlaceOfAPour(t *testing.T) {
+	d := newAdmit(t)
+	d.stray("tk-lost", "false")
+	o := d.once(t)
+	is(t, o, pr.ActChecked)
+	if d.runs.count() != 0 || !edged(t, d, "tk-lost") || !strings.Contains(o.Detail, "tk-lost") {
+		t.Fatalf("a run with no edge got edge %v and %d runs beside it (%s)", edged(t, d, "tk-lost"), d.runs.count(), o.Detail)
+	}
+	ofRead(t, d.land, head)
+	is(t, d.once(t), pr.ActChecked)
+	if d.runs.count() != 0 {
+		t.Fatalf("the attached run did not keep the next run from pouring: %d runs", d.runs.count())
+	}
+
+	e := newAdmit(t)
+	e.stray("tk-shadow", "true")
+	is(t, e.once(t), pr.ActPoured)
+	if edged(t, e, "tk-shadow") || !edged(t, e, "tk-run1") {
+		t.Fatalf("a shadow run was attached, or the run poured beside it was not: %+v", e.row(t).Edges)
+	}
+}
+
+// An edge onto the poured run that does not land is written by the next run,
+// which pours no other.
+func TestAnEdgeThatDidNotLandIsWrittenByTheNextRun(t *testing.T) {
+	d := newAdmit(t)
+	d.store.EdgeErr = errors.New("bd: dep add: database is locked")
+	is(t, d.once(t), pr.ActRetry)
+	ofRead(t, d.land, head)
+	d.store.EdgeErr = nil
+	is(t, d.once(t), pr.ActChecked)
+	if d.runs.count() != 1 || !edged(t, d, "tk-run1") {
+		t.Fatalf("the next run poured %d runs and attached the first %v, want one run, attached", d.runs.count(), edged(t, d, "tk-run1"))
+	}
+}
+
+// A run that ended before its edge landed is attached all the same, before the
+// runs that ended are counted. While its edge does not land, no other run is
+// poured. Once it lands, the run counts toward the two runs at the head that
+// ended without a result, in the pass that attaches it.
+func TestARunThatEndedBeforeItsEdgeLandedCountsTowardTheGate(t *testing.T) {
+	d := newAdmit(t)
+	d.store.EdgeErr = errors.New("bd: dep add: database is locked")
+	is(t, d.once(t), pr.ActRetry)
+	d.end(t, "tk-run1", "canceled", "2026-11-17T09:00:01Z")
+	ofRead(t, d.land, head)
+	o := d.once(t)
+	is(t, o, pr.ActRetry)
+	if d.runs.count() != 1 || !strings.Contains(o.Detail, "tk-run1") {
+		t.Fatalf("a pass whose edge onto an ended run did not land poured %d runs, want the one (%s)", d.runs.count(), o.Detail)
+	}
+	d.store.EdgeErr = nil
+	o = d.once(t)
+	is(t, o, pr.ActPoured)
+	if !edged(t, d, "tk-run1") || !edged(t, d, "tk-run2") || !strings.Contains(o.Detail, "tk-run1 had no edge") {
+		t.Fatalf("the pass attached the ended run %v and the run it poured %v (%s)", edged(t, d, "tk-run1"), edged(t, d, "tk-run2"), o.Detail)
+	}
+	d.end(t, "tk-run2", "canceled", "2026-11-17T09:00:02Z")
+	ofRead(t, d.land, head)
+	is(t, d.once(t), pr.ActExcepted)
+	if !gated(d, "review-run-failed") || d.runs.count() != 2 {
+		t.Fatalf("the second failure filed %v and poured %d runs, want the gate and two runs", d.gates.list(), d.runs.count())
+	}
+
+	e := newAdmit(t)
+	e.stray("tk-lost1", "false")
+	e.stray("tk-lost2", "false")
+	e.end(t, "tk-lost1", "canceled", "2026-11-17T09:00:01Z")
+	e.end(t, "tk-lost2", "canceled", "2026-11-17T09:00:02Z")
+	o = e.once(t)
+	is(t, o, pr.ActExcepted)
+	if !gated(e, "review-run-failed") || e.runs.count() != 0 || !edged(t, e, "tk-lost1") || !edged(t, e, "tk-lost2") {
+		t.Fatalf("two ended runs with no edge filed %v, poured %d runs and were attached %v, %v (%s)", e.gates.list(),
+			e.runs.count(), edged(t, e, "tk-lost1"), edged(t, e, "tk-lost2"), o.Detail)
+	}
+}
+
+// A run whose edge did not land holds the bead as an attached run does from the
+// first decision of the run that attaches it. A changed head waits for it with
+// the marker kept, and does not go to the refinery. A result the run recorded
+// at the head before its root ended neither marks a draft ready nor has a ready
+// PR's merge requested. A retired PR's close waits for it.
+func TestARunWhoseEdgeDidNotLandHoldsTheBeadFromTheNextRunsFirstDecision(t *testing.T) {
+	interrupted := func(t *testing.T) *admitting {
+		t.Helper()
+		d := newAdmit(t)
+		d.store.EdgeErr = errors.New("bd: dep add: database is locked")
+		is(t, d.once(t), pr.ActRetry)
+		d.store.EdgeErr = nil
+		return d
+	}
+
+	d := interrupted(t)
+	d.pr.Facts.HeadRefOid = later
+	o := d.once(t)
+	is(t, o, pr.ActRequeued)
+	if b := d.row(t); !edged(t, d, "tk-run1") || b.Metadata["pr_reconcile_pending"] != "true" || !strings.Contains(o.Detail, "tk-run1") {
+		t.Fatalf("a changed head with the run live got edge %v and marker %q (%s)", edged(t, d, "tk-run1"), b.Metadata["pr_reconcile_pending"], o.Detail)
+	}
+
+	for _, draft := range []bool{true, false} {
+		e := interrupted(t)
+		e.edit(t, func(b *fake.Bead) {
+			b.Metadata["review_results"] = `[{"head":"` + head + `","target":"main","passed":true,"run":"tk-run1"}]`
+		})
+		e.pr.Facts.IsDraft = draft
+		o := e.once(t)
+		is(t, o, pr.ActChecked)
+		if !edged(t, e, "tk-run1") || len(asks(e.github)) != 0 {
+			t.Fatalf("a result passed with the run live, the PR a draft %v, got edge %v and asked %v (%s)", draft, edged(t, e, "tk-run1"), asks(e.github), o.Detail)
+		}
+	}
+
+	f, r := retired(t)
+	g := &admitting{land: f}
+	g.stray("tk-lost", "false")
+	f.pr.Facts.State = "CLOSED"
+	o = f.once(t)
+	is(t, o, pr.ActChecked)
+	if !edged(t, g, "tk-lost") || len(r.asked()) != 0 || !strings.Contains(o.Detail, "waits for the review run tk-lost") {
+		t.Fatalf("a retired PR with the run live got edge %v and asked the writer %v (%s)", edged(t, g, "tk-lost"), r.asked(), o.Detail)
+	}
+}
+
+// A run whose root the bead's store does not hold is one the bead cannot wait
+// on and no later run can find, so the order asks a person through a gate
+// keyed review-run-outside-store, and pours no other while the gate holds the
+// bead. A gate that does not file leaves the run recorded on the bead, and the
+// next run files the gate for that run in place of a pour.
+func TestARunPouredOutsideTheBeadsStoreGetsTheGate(t *testing.T) {
+	d := newAdmit(t)
+	d.runs.elsewhere = true
+	d.gates.err = errors.New("human-gate: could not read the bead's gates")
+	is(t, d.once(t), pr.ActRetry)
+	ofRead(t, d.land, head)
+	if got := d.row(t).Metadata["review_run_outside_store"]; got != "tk-run1" {
+		t.Fatalf("a gate that did not file left the run recorded as %q, want tk-run1", got)
+	}
+	d.gates.err = nil
+	o := d.once(t)
+	is(t, o, pr.ActExcepted)
+	ofRead(t, d.land, head)
+	if !gated(d, "review-run-outside-store") || d.runs.count() != 1 {
+		t.Fatalf("the next run filed %v and poured %d runs, want the gate and the one run (%s)", d.gates.list(), d.runs.count(), o.Detail)
+	}
+	if msg := d.gates.messages[len(d.gates.messages)-1]; !strings.Contains(msg, "tk-run1") {
+		t.Fatalf("the gate's message does not name the run: %s", msg)
+	}
+	if got, kept := d.row(t).Metadata["review_run_outside_store"]; kept {
+		t.Fatalf("the gate filed and the bead still records the run %q", got)
+	}
+	d.gate(t, "tk-g1", "review-run-outside-store")
+	is(t, d.once(t), pr.ActChecked)
+	if d.runs.count() != 1 {
+		t.Fatalf("the order poured a run while the gate held the bead: %d runs", d.runs.count())
 	}
 }

@@ -682,10 +682,13 @@ have "a message with detail opens the way the body does" \
     'A message with detail above its hand-back opens the way the body does' "$PROMPT_JOINED"
 have "the message keeps pipeline vocabulary out or says what it means" \
     'Pipeline vocabulary (moot, twin, fold, retract, park) and names learned from code stay out, or say what they mean' "$PROMPT_JOINED"
-# A decision leads with the course as the changes it makes, and offers only
-# options the operator could take, each by what it ships and what it asks of
-# them. The operator profile every sitting renders says what an option's cost
-# is, so the prompt uses its terms and leaves the sentence to the profile.
+# A decision leads with the course as the changes it makes. An option is
+# another way to reach what the operator wants, leaving things as they are is
+# one only when it has a case the operator has not already weighed, any course
+# that leaves a known problem in place says what it breaks, and each option
+# says what it ships and what it asks of them. The operator profile every
+# sitting renders says what an option's cost is, so the prompt uses its terms
+# and leaves the sentence to the profile.
 have "the decision states the course as what would be built or changed, before any reason for it" \
     'State it as the course before any reason for it: what would be built or changed, each change given as what it is today and what it becomes.' "$PROMPT_JOINED"
 have "…and that course is the whole decision when the operator asked for the best solution" \
@@ -694,17 +697,25 @@ have "…states a course that changed again whole" \
     'When the course changes during the sitting, state the new one whole rather than as changes to the last.' "$PROMPT_JOINED"
 have "…and says, among several threads, what it settles and what stays open" \
     'say whether the decision settles one of them or the whole conversation, and what stays open after it.' "$PROMPT_JOINED"
-have "an option is one the operator could take, asking them only for a decision" \
-    'Offer an option only when the operator could take it: it reaches what they asked for, and it asks of them only a decision, never an agent'"'"'s work such as resolving a conflict or merging by hand.' "$PROMPT_JOINED"
-have "…and says what its end state ships and what it asks of the operator" \
-    'Give each option one sentence saying what its end state ships and what it asks of the operator.' "$PROMPT_JOINED"
+have "an option is another way to reach what the operator wants, where the choice turns on their judgment" \
+    'An option is another way to reach what the operator wants, offered when the choice between it and your recommendation turns on their judgment, such as which of two costs to accept.' "$PROMPT_JOINED"
+have "…and with no such choice, the recommendation stands alone" \
+    'The operator can always turn a recommendation down, so when no choice turns on their judgment, offer the recommendation alone.' "$PROMPT_JOINED"
+have "…leaving things as they are is an option only with a case the operator has not already weighed" \
+    'Leaving things as they are is one of these ways only when it has a case the operator has not already weighed, such as a problem too small to be worth the change, or a change that could break something beyond the problem it fixes.' "$PROMPT_JOINED"
+have "…which that option makes" 'That option makes its case.' "$PROMPT_JOINED"
+have "any course that leaves a known problem in place, the recommendation included, says what it breaks and where" \
+    'Any course that leaves a known problem in place, your recommendation included, says what that problem breaks, and where.' "$PROMPT_JOINED"
+have "…and each option asks only a decision and says what it ships and what it asks" \
+    'Each option asks of the operator only a decision, never an agent'"'"'s work such as resolving a conflict or merging by hand, and says in one sentence what it ships and what it asks.' "$PROMPT_JOINED"
+lacks "…in place of a rule on wording an option that accepts a known defect" \
+    'An option that accepts a known defect' "$PROMPT_JOINED" \
+    "leaving things as they are is an option only when it has a case of its own"
 lacks "…in place of an upside and a downside" 'true downside' "$PROMPT_JOINED" \
-    "an option is stated by what its end state ships and what it asks of the operator"
+    "an option is stated by what it ships and what it asks of the operator"
 lacks "…and leaves the operator profile's sentence on an option's cost to the profile" \
     "An option's cost is" "$PROMPT_JOINED" \
     "the operator profile, which every sitting renders, states what an option's cost is"
-have "an option that accepts a known defect names what it breaks" \
-    'names what the defect breaks and where' "$PROMPT_JOINED"
 # A ruling on an open PR lands what the PR's own review asked for on its branch
 # before approval, so the hold lists the points still open, with the reads that
 # show them, and says where each lands.
@@ -721,6 +732,11 @@ have "…counts sharing a file, a screen or a record entry as no scope" \
     'Sharing a file, a screen or a record entry with the PR does not make a point the PR'"'"'s.' "$HOLD_JOINED"
 have "…and leaves a follow-up only a point outside that scope, or one the operator rules separable" \
     'A follow-up carries only a point outside that scope, or one the operator rules separable.' "$HOLD_JOINED"
+# The close-out ends the sitting and offers no course, so its reason names the
+# sitting's topic and that it closed without a ruling.
+have "the close-out's reason names only the sitting's topic and that it closed without a ruling" \
+    'so its reason names only the sitting'"'"'s topic and that it closed without a ruling, and every course stays in the decision' "$HOLD_JOINED"
+have "…in the line the hold offers" 'dismiss --reason "<the sitting'"'"'s topic>: closed without a ruling"' "$HOLD"
 lacks "the hold skill points at the shape and keeps no copy of its order" 'detail and evidence' \
     "$SKILLS/converse-hold/SKILL.md" "the prompt's definition is the one place a framing's order is stated"
 have "the work skill reads the formulas a rig has now" 'gc formula list --rig <rig>' "$WORK_SKILL"
@@ -1212,6 +1228,84 @@ for sh_ in $shells; do
         bad "($sh_) converse-iterate-document: a scaffold the store refuses is not reported as written" "exit $rc"
     fi
 done
+echo "── a sitting answers for the work it sends ──"
+# The work a sitting sends is its own to get right. It reasons through what the
+# operator says, reads their go as trust in the course, puts first in the
+# decision what they would most want to stop, and sends once they have decided.
+tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-order"
+tr -s '[:space:]' ' ' <"$CONTINUE" >"$TMP/continue-order"
+tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-order"
+have "the settle skill makes the work a sitting sends its own to get right" \
+    'The work you send is yours to get right.' "$TMP/settle-order"
+have "…takes what the operator says as direction to reason through, point by point" \
+    'What the operator says is direction to reason through: take each point up in the course or say why not.' "$TMP/settle-order"
+have "…holds a remark to be neither an order to the letter nor a decision of theirs" \
+    'A remark is not an order to carry out to the letter, and it is not a decision they made.' "$TMP/settle-order"
+have "…reads their go, given at the big picture, as trust in the course" \
+    'The operator usually engages and reviews at the big picture, unless they call out a specific item, and their go means they trust the course.' "$TMP/settle-order"
+have "…puts first in the decision, each as its concrete result, what they would most want to stop" \
+    'So put first in the hand-back'"'"'s decision, each as its concrete result in a short line, what they would most want to stop: anything the course removes, any change of scope, and anything it asks of another rig.' "$TMP/settle-order"
+have "…and sends the work once they have decided" \
+    'Send the work once they have decided, not while they are still thinking it through.' "$TMP/settle-order"
+have "the continue skill writes a turn's work order the settle skill's way, before anything files it" \
+    'Write the order of work or a rework that a turn'"'"'s ruling sends as `converse-settle` gives it (Send the work), before you or the answer files it.' "$TMP/continue-order"
+have "the prompt makes the work a sitting sends its own to get right, with what the operator would most want to stop first" \
+    'What the operator says is direction to reason through, and their go means they trust the course, so the work you send is yours to get right. They usually engage at the big picture, so put first in the decision what they would most want to stop: anything the course removes, any change of scope and anything it asks of another rig (`converse-settle`).' "$TMP/prompt-order"
+echo "── a sitting writes the order of the work it sends in its own voice ──"
+# The order, a task's description or a rework's brief, is one statement in the
+# sitting's own voice that carries each point the operator raised. A rework's
+# ruling line reaches the rework as the operator's ruling, so it carries their
+# words or names the brief.
+have "the order is written in the sitting's own voice, with each point the operator raised carried into it" \
+    'Write the order in your own voice: what needs doing, why, and what done looks like, with each point the operator raised carried into it.' "$TMP/settle-order"
+have "…quoting their words where they carry the point, and never the sitting's reading as their ruling" \
+    'Quote their words where their words carry the point, and never write your reading as their ruling.' "$TMP/settle-order"
+have "…in a task's description, in this rig's store or another's, and in a rework's brief" \
+    'The order is the description of a task you file, in this rig'"'"'s store or another'"'"'s, or the brief of a rework the sign-off files' "$TMP/settle-order"
+have "a rework's ruling line carries the operator's words or names a brief, never the sitting's reading" \
+    'which the sign-off hands the rework as the operator'"'"'s ruling (`--rework`, below), so the line carries their words or names a brief, never your reading. A line that quotes their words and adds nothing of yours is the whole order.' "$TMP/settle-order"
+have "…and names the brief written on the PR's anchor" \
+    '--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"' "$SETTLE"
+fenced_block "$SETTLE" 'gc sling <rig>/<pool> "$WORK"' | fill_block >"$CH/order-block"
+fenced_block "$SETTLE" '--append-notes "$BRIEF"' | fill_block >"$CH/brief-block"
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    rc=$(run_chain "$run" "$CH/order-block")
+    if [ "$rc" -eq 0 ] && grep -qxF -- 'gc bd create x -t task -d x --json' "$CH/log"; then
+        ok "($sh_) converse-settle: the task a sitting files carries its order as its description"
+    else
+        bad "($sh_) converse-settle: the task a sitting files carries its order as its description" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+    sed 's/^x$/"the `echo ran` and $HOME stay as written"/' "$CH/order-block" >"$CH/literal-order"
+    rc=$(run_chain "$run" "$CH/literal-order")
+    if [ "$rc" -eq 0 ] && grep -qxF -- 'gc bd create x -t task -d "the `echo ran` and $HOME stay as written" --json' "$CH/log" \
+        && grep -qxF -- 'gc sling x/x tk-new --on x' "$CH/log"; then
+        ok "($sh_) converse-settle: what the task's description quotes stays as written, and the task is sent"
+    else
+        bad "($sh_) converse-settle: what the task's description quotes stays as written, and the task is sent" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+    rc=$(run_chain "$run" "$CH/brief-block")
+    if [ "$rc" -eq 0 ] && head -n 1 "$CH/notes" | grep -qE '^## Rework brief \([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\)$' \
+        && [ "$(sed -n 2p "$CH/notes")" = x ]; then
+        ok "($sh_) converse-settle: a rework's brief lands headed by when it was written, its order beneath"
+    else
+        bad "($sh_) converse-settle: a rework's brief lands headed by when it was written, its order beneath" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    sed 's/^x$/"the `echo ran` and $HOME stay as written"/' "$CH/brief-block" >"$CH/literal-brief"
+    rc=$(run_chain "$run" "$CH/literal-brief")
+    if [ "$rc" -eq 0 ] && grep -qxF '"the `echo ran` and $HOME stay as written"' "$CH/notes"; then
+        ok "($sh_) converse-settle: what the brief quotes stays as written"
+    else
+        bad "($sh_) converse-settle: what the brief quotes stays as written" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    rc=$(run_chain "$run" "$CH/brief-block" 1)
+    if [ "$rc" -ne 0 ] && [ ! -s "$CH/notes" ]; then
+        ok "($sh_) converse-settle: a brief the store refuses is not reported as written"
+    else
+        bad "($sh_) converse-settle: a brief the store refuses is not reported as written" "exit $rc"
+    fi
+done
 echo "── a sitting makes a change the operator rules it make through Work's writers ──"
 # A sitting's change is held on its conversation and goes through the writers a
 # polecat's work goes through, under --held-by, so the step table loads the edit
@@ -1245,7 +1339,7 @@ STUB
 cat >"$LC/city/.gc/services/gctk/bin/gctk" <<'STUB'
 #!/usr/bin/env bash
 { printf 'in %s\n' "$(pwd -P)"; printf 'scripts %s\n' "$GCTK_SCRIPTS_DIR"; printf '%s\n' "$@"; } >"$LC_LOG"
-printf '%s\n' '{"state":"running","address":"https://host:1/","port":1}'
+printf '%s\n' '{"state":"running","address":"https://host:1/","port":1,"app_url":"http://127.0.0.1:1/"}'
 STUB
 chmod +x "$LC/bin/gc" "$LC/city/.gc/services/gctk/bin/gctk"
 LC_TREE=$(cd "$LC/tree" && pwd -P)

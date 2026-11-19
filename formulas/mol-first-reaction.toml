@@ -6,7 +6,7 @@ can accept, hold it on an edge, hand a confident no-op to a validating closer,
 or put a question to the operator as a human gate. A reaction never closes the
 bead, and code it produces takes the gated `mr` path only.
 
-`tools/gc-proactive.sh sling <bead>` slings this formula on the bead, once its
+`gctk reaction sling <bead>` slings this formula on the bead, once its
 refusals pass: `gc sling <rig>/gc-toolkit.proactive <bead> --on
 mol-first-reaction`. The run is the reaction's lease, Gas City's run cancel is
 its stop, and gc sling refuses a second live run on the bead, so a reaction
@@ -48,8 +48,10 @@ The check is the reaction's first act, before it reads the subject. It asks the
 sling's refusals again and writes nothing. It passes over this run, whose root
 is the `root_bead_id` your claim carries, and over a first-reaction gate whose
 message names that root, so a reaction re-offered after it filed its gate goes
-on. Run
-`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/../../tools/gc-proactive.sh" sling <subject> --check --run <root>`.
+on. Run it with the gctk the city builds:
+```bash
+"${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}" reaction check <subject> --run <root>
+```
 Exit 0: react. Exit 3, 4, 5 or 6 is a refusal: the subject is reacted to,
 spoken for, decided or not a reaction's kind, so end the run with no gate, which
 drains this session too:

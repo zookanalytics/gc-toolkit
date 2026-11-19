@@ -239,15 +239,6 @@ exit 1
 STUB
 chmod +x "$BIN/gc"
 
-# gc-proactive.sh stand-in for the real patrol-finding.sh: the pool takes a
-# reaction, and each call is recorded.
-cat > "$BIN/gc-proactive" <<'STUB'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$STUB_LOG/proactive.log"
-exit 0
-STUB
-chmod +x "$BIN/gc-proactive"
-
 # jq stand-in, put on PATH for one sweep only: it plays a sweep worker killed
 # while it writes PR STUB_KILL_PR's posts, by printing part of a line and then
 # killing the worker that started it. Every other call goes to the real jq.
@@ -292,9 +283,21 @@ export STUB_LOG="$TMP" STUB_FIX="$FIX" STUB_STORE="$STORE"
 # the gctk built from this checkout what a held finding still waits on.
 unset GC_PATROL_FINDING_TOOL GC_BD_LIB GC_FINDING_DEFAULT_RIG
 export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
-GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so a held finding's waits cannot be read"; exit 1; }
-export GCTK_BIN
-export GC_PROACTIVE_TOOL="$BIN/gc-proactive"
+GCTK_BUILT="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so a held finding's waits cannot be read"; exit 1; }
+# gctk's reaction verbs stand in for the real patrol-finding.sh's first
+# reaction: the pool takes one, and each call is recorded. Every other verb is
+# the build's.
+cat > "$BIN/gctk" <<STUB
+#!/usr/bin/env bash
+if [ "\${1:-}" = reaction ]; then
+  shift
+  printf '%s\\n' "\$*" >> "\$STUB_LOG/proactive.log"
+  exit 0
+fi
+exec "$GCTK_BUILT" "\$@"
+STUB
+chmod +x "$BIN/gctk"
+export GCTK_BIN="$BIN/gctk"
 export GC_RIG=fixture-rig
 # The swept checkout is the repository pr-post.sh reads the rig's declaration
 # from, whatever rig GC_RIG_ROOT names (case 111), so the session's own value

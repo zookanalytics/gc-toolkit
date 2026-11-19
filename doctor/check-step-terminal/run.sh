@@ -147,10 +147,10 @@ JQ_ISSUES='(if type == "object" and (.issues | type) == "array" then .issues
 JQ_EPOCH='def ep: (try ((tostring) | sub("\\.[0-9]+"; "") | fromdateiso8601) catch null);'
 JQ_META='def m($k): (((.metadata[$k] // "") | tostring)
             | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | gsub("[[:cntrl:]]"; " "));'
-# What counts as a dispatch path, from the one definition shared with the
-# proactive scan and check-blocked-work-armed. Exposes $DISPATCH_PATH_JQ, which
-# step_row_stream applies. An unsourceable one warns: without it no step can be
-# told to be offerable.
+# What counts as a dispatch path, from the one definition shared with
+# check-blocked-work-armed. Exposes $DISPATCH_PATH_JQ, which step_row_stream
+# applies. An unsourceable one warns: without it no step can be told to be
+# offerable.
 # shellcheck source=../../assets/scripts/dispatch-path.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/dispatch-path.sh" || {
     echo "cannot determine whether step beads reach terminal states (I8)"
