@@ -15,7 +15,7 @@
 # exits (harness_run_parts, at the end of this file).
 
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
+bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1${2:+ ($2)}"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
@@ -176,6 +176,17 @@ RUNS
 
 # A failed write of the store is a failed suite, never a store left as it was.
 store() { printf '%s' "$1" > "$STUB_STORE" || { bad "store: the write of $STUB_STORE failed"; return 1; }; }
+# json_str <text> — the text as a JSON string, escaped as jq -R escapes it, for
+# a fixture written in bash. It starts no process. A control byte other than a
+# newline, a carriage return, a tab, a backspace or a form feed stays raw, so a
+# store holding one fails its read at exit 3.
+json_str() {
+  local s="$1"
+  s="${s//\\/\\\\}"; s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"; s="${s//$'\r'/\\r}"; s="${s//$'\t'/\\t}"
+  s="${s//$'\b'/\\b}"; s="${s//$'\f'/\\f}"
+  printf '"%s"' "$s"
+}
 # The readers of what a bead carries ask the fake gc, which answers them without
 # a line in STUB_GC_LOG, and start no jq (fakegc's harnessRead).
 meta()  { "$HARNESS_FAKE_GC" --harness-read meta "$1" "$2"; }

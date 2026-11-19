@@ -2,138 +2,39 @@
 # Test for self-review-check.sh — the exit condition of the self-review check
 # loop in mol-polecat-work.
 #
-# It EXECUTES the real shipped script against stub `bd` / `gc` binaries, the
+# It EXECUTES the real shipped script against the compiled fake gc, as gc and
+# as the bd the script calls itself, over a store each case writes, the
 # run-lib.sh stub (the run of the root each case names), a real fixture git
-# worktree, and the real `gctk` built from this checkout, whose
-# records the cases write by running `gctk rig` in the fixture the way an
-# iteration does. So the exit-code contract (0 verified-green, 1 everything
-# else, fail-closed on any unreadable state), the record reads and the
-# exhaustion note are pinned against the code that ships, not a paraphrase.
+# worktree, and the real `gctk` built from this checkout, whose records the
+# cases write by running `gctk rig` in the fixture the way an iteration does. So
+# the exit-code contract (0 verified-green, 1 everything else, fail-closed on
+# any unreadable state), the record reads and the exhaustion note are pinned
+# against the code that ships, not a paraphrase.
 set -uo pipefail
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/self-review-check-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# The fixture worktree and gctk rig run the real git, which harness_init puts
+# beneath the harness's git stub and the test floor's refusal.
+REAL_GIT="$(command -v git)" || { echo "git is required for this test" >&2; exit 1; }
 # shellcheck source=test-harness.sh
-. "$HERE/test-harness.sh"   # harness_build_gctk
+. "$HERE/test-harness.sh"
 harness_build_gctk
 [ -n "$GCTK_BUILT" ] || { echo "FAIL - $GCTK_BUILD_ERR"; exit 1; }
+harness_init
+ln -sf "$REAL_GIT" "$BIN/git"
+# The script reads and writes through bd itself, which the fake answers under
+# that name.
+ln -s gc "$BIN/bd"
+# The runs file each case writes answers run-lib.sh, not the runs of the store.
+unset RUN_LIB_STUB_CMD
 # Host signing of commits and tags must not make this suite need a signing agent.
 export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
   GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 SCRIPT="$HERE/self-review-check.sh"
 [ -f "$SCRIPT" ] || { echo "missing $SCRIPT" >&2; exit 1; }
-
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
-
-# --- stubs -------------------------------------------------------------------
-# Both stubs read $TMP/state.env, so each case varies the bead metadata the
-# script sees without re-writing the stubs.
-mkdir -p "$TMP/bin"
-
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
-# bd show <id> --json | bd list … --json | bd update <id> …
-. "$STATE"
-case "$1" in
-show)
-  case "$2" in
-  "$ROOT_ID")
-    printf '[{"id":"%s","metadata":{"gc.kind":"workflow"' "$ROOT_ID"
-    [ -n "$MD_ROOT_ISSUE" ] && printf ',"gc.var.issue":"%s"' "$MD_ROOT_ISSUE"
-    [ -n "$MD_ROOT_VARS" ] && printf ',%s' "$MD_ROOT_VARS"
-    printf '}}]'
-    ;;
-  "$ISSUE_ID")
-    printf '[{"id":"%s","metadata":{' "$ISSUE_ID"
-    sep=""
-    [ -n "$MD_WORK_DIR" ]    && { printf '%s"work_dir":"%s"' "$sep" "$MD_WORK_DIR"; sep=","; }
-    [ -n "$MD_BRANCH" ]      && { printf '%s"branch":"%s"' "$sep" "$MD_BRANCH"; sep=","; }
-    [ -n "$MD_ROUTE" ]       && { printf '%s"gc.execution_routed_to":"%s"' "$sep" "$MD_ROUTE"; sep=","; }
-    [ -n "$MD_ABORTED_AT" ]  && { printf '%s"aborted_at":"%s"' "$sep" "$MD_ABORTED_AT"; sep=","; }
-    # A pre-existing mark is JSON kept as a string, as bd keeps it.
-    [ -n "$MD_PRE_LINT" ]    && { printf '%s"rig_check_pre_existing.lint":%s' "$sep" "$(printf '%s' "$MD_PRE_LINT" | jq -Rs .)"; sep=","; }
-    [ -n "$MD_PRE_TEST" ]    && { printf '%s"rig_check_pre_existing.test":%s' "$sep" "$(printf '%s' "$MD_PRE_TEST" | jq -Rs .)"; sep=","; }
-    [ -n "$MD_SETUP_BUILD" ] && { printf '%s"self_review_setup_build":%s' "$sep" "$(printf '%s' "$MD_SETUP_BUILD" | jq -Rs .)"; sep=","; }
-    [ -n "$MD_PRE_BUILD" ]   && { printf '%s"rig_check_pre_existing.build":%s' "$sep" "$(printf '%s' "$MD_PRE_BUILD" | jq -Rs .)"; sep=","; }
-    printf '}'
-    [ -n "$MD_NOTES" ] && printf ',"notes":%s' "$(printf '%s' "$MD_NOTES" | jq -Rs .)"
-    printf '}]'
-    ;;
-  *)
-    # An iteration bead: the root pointer for the GC_WISP_ID fallback, the
-    # gc.control_for lineage the budget lookup joins the control bead on, and
-    # optionally the budget stamped on the subject itself.
-    printf '[{"id":"%s","metadata":{"gc.root_bead_id":"%s","gc.control_for":"self-review"' "$2" "$ROOT_ID"
-    [ -n "$MD_SUBJECT_MAX" ] && printf ',"gc.max_attempts":"%s"' "$MD_SUBJECT_MAX"
-    printf '}}]'
-    ;;
-  esac
-  ;;
-list)
-  # The ralph control-bead lookup (gc.root_bead_id + gc.kind=ralph).
-  if [ -n "$MD_MAX_ATTEMPTS" ]; then
-    printf '[{"id":"control-1","metadata":{"gc.kind":"ralph","gc.step_id":"self-review","gc.max_attempts":"%s"}}]' "$MD_MAX_ATTEMPTS"
-  else
-    printf '[]'
-  fi
-  ;;
-update)
-  [ "$UPDATE_FAILS" = "1" ] && { echo "stub: write refused" >&2; exit 1; }
-  printf 'bd update %s\n' "$*" >> "$CALLS"
-  ;;
-*)
-  exit 1
-  ;;
-esac
-BD
-
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
-# gc session nudge <target> <message>
-#
-# GC_COLD=1 models the ralph condition env with a cold import cache: every gc
-# invocation dies on the import closure before doing any work. The checker must
-# still reach a correct verdict, so no bead resolution may depend on gc.
-. "$STATE"
-if [ "$GC_COLD" = "1" ]; then
-  printf 'gc %s\n' "$1" >> "$CALLS"
-  echo "city import … locked but not cached at /nonexistent; run 'gc import install'" >&2
-  exit 1
-fi
-if [ "$1" = "convoy" ]; then
-  # Resolution must be bd-only: record the call so a regression that reintroduces
-  # the dependency is visible, and fail the way a cold cache would.
-  printf 'gc convoy %s\n' "$2" >> "$CALLS"
-  echo "stub: self-review-check.sh must not shell out to gc convoy" >&2
-  exit 1
-fi
-if [ "$1" = "session" ] && [ "$2" = "nudge" ]; then
-  printf 'gc session nudge %s\n' "$3" >> "$CALLS"
-  exit 0
-fi
-# The step's check call reads the work bead's tree from what the bd stub serves.
-if [ "$1" = "bd" ] && [ "$2" = "show" ]; then
-  shift
-  exec "${0%/*}/bd" "$@"
-fi
-# The self-review step's note of setup and build lands in the state the bd stub
-# serves, so the exit condition reads what the step wrote.
-if [ "$1" = "bd" ] && [ "$2" = "update" ]; then
-  for a in "$@"; do
-    case "$a" in
-    self_review_setup_build=*) printf 'MD_SETUP_BUILD=%q\n' "${a#self_review_setup_build=}" >> "$STATE" ;;
-    esac
-  done
-  exit 0
-fi
-exit 0
-GC
-
-chmod +x "$TMP/bin/bd" "$TMP/bin/gc"
-export PATH="$TMP/bin:$PATH"
-export STATE="$TMP/state.env"
-export CALLS="$TMP/calls.log"
+CALLS="$STUB_GC_LOG"
 
 # --- fixture repo ------------------------------------------------------------
 WT="$TMP/worktree"
@@ -145,9 +46,13 @@ echo base > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm base
 echo more > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm work
 HEAD_SHA=$(git -C "$WT" rev-parse HEAD)
 OLD_SHA=$(git -C "$WT" rev-parse HEAD~1)
-# The step's note of setup and build at <commit>: setup <s>, build <b>, the
-# build command [bc], default make, and the setup command [sc], default none.
-noted() { jq -nc --arg c "$1" --arg s "$2" --arg b "$3" --arg bc "${4-make}" --arg sc "${5-}" '{commit: $c, setup: $s, build: $b, setup_command: $sc, build_command: $bc}'; }
+# The step's note of setup and build at <commit>, as rig-checks.sh writes it:
+# setup <s>, build <b>, the build command [bc], default make, and the setup
+# command [sc], default none.
+noted() {
+  printf '{"commit":%s,"setup":%s,"build":%s,"setup_command":%s,"build_command":%s}' \
+    "$(json_str "$1")" "$(json_str "$2")" "$(json_str "$3")" "$(json_str "${5-}")" "$(json_str "${4-make}")"
+}
 # Unless a case says otherwise, setup and build passed at HEAD.
 SB_GREEN=$(noted "$HEAD_SHA" none pass)
 # A second worktree of the same clone, at HEAD~1, and a third at HEAD: records
@@ -169,63 +74,90 @@ green() {
 clear_records() { rm -rf "${WT:?}/.git/gc-rig-checks"; }
 # recorded <check> : the record `--check` prints at the fixture worktree's HEAD.
 recorded() { ( cd "$WT" && "$GCTK_BUILT" rig "$1" --check 2>/dev/null ); }
+# go_json_str <text> : the text as a JSON string the way gctk writes it, Go's
+# encoder, which escapes <, > and & as well as what json_str escapes.
+go_json_str() {
+  local j; j=$(json_str "$1")
+  j="${j//</\\u003c}"; j="${j//>/\\u003e}"; j="${j//&/\\u0026}"
+  printf '%s' "$j"
+}
 # premark <commit> <record> [tracker...] : a pre-existing mark, in the shape
 # rig-check-pre-existing.sh writes.
-premark() { local c="$1" r="$2"; shift 2; jq -cn --arg c "$c" --argjson r "$r" '{commit: $c, record: $r, trackers: $ARGS.positional}' --args "$@"; }
-# pour_vars : the vars the case's pour renders, as one JSON object. A command
-# defaults to what green and SB_GREEN ran, and a case sets VAR_<NAME> to declare
-# another, or to empty for a command the rig does not declare.
+premark() {
+  local c="$1" r="$2" t trackers=""; shift 2
+  for t in "$@"; do trackers+="${trackers:+,}$(json_str "$t")"; done
+  printf '{"commit":%s,"record":%s,"trackers":[%s]}' "$(json_str "$c")" "$r" "$trackers"
+}
+# pour_vars : the vars the case's pour renders, in the pour's order, as
+# POUR_NAMES and POUR_VALUES. A command defaults to what green and SB_GREEN
+# ran, and a case sets VAR_<NAME> to declare another, or to empty for a command
+# the rig does not declare.
 pour_vars() {
-  jq -nc --arg base "${VAR_BASE-main}" --arg setup "${VAR_SETUP-}" --arg typecheck "${VAR_TYPECHECK-}" \
-    --arg lint "${VAR_LINT-true}" --arg build "${VAR_BUILD-make}" --arg affected "${VAR_AFFECTED-true}" \
-    --arg test "${VAR_TEST-}" '{base_branch: $base, setup_command: $setup,
-      typecheck_command: $typecheck, lint_command: $lint, build_command: $build,
-      affected_tests_command: $affected, test_command: $test, binding_prefix: "gc-toolkit."}'
+  POUR_NAMES=(base_branch setup_command typecheck_command lint_command build_command affected_tests_command test_command binding_prefix)
+  POUR_VALUES=("${VAR_BASE-main}" "${VAR_SETUP-}" "${VAR_TYPECHECK-}" "${VAR_LINT-true}" "${VAR_BUILD-make}"
+    "${VAR_AFFECTED-true}" "${VAR_TEST-}" gc-toolkit.)
+}
+# pair <name> <key> <value> : appends "<key>":<value> to the JSON members the
+# variable <name> holds, when the value is not empty.
+pair() {
+  [ -n "$3" ] || return 0
+  printf -v "$1" '%s%s%s:%s' "${!1}" "${!1:+,}" "$(json_str "$2")" "$(json_str "$3")"
 }
 
+# write_state : the store the case's script reads, and the run of its root.
+# The root carries gc.var.issue, and gc.var.<name> for each var its pour
+# rendered non-empty, as gascity stamps them. The work bead carries what
+# workspace-setup and the checks recorded on it. The iteration iter-1 carries
+# the root pointer for the GC_WISP_ID fallback, the gc.control_for lineage the
+# budget lookup joins the control bead on, and optionally the budget stamped on
+# the subject itself. The ralph control bead carries the budget unless
+# MD_MAX_ATTEMPTS is empty. A key whose value is empty is not written.
 write_state() {
-  local issue_id="${ISSUE_ID-gc-issue}"
-  cat > "$STATE" <<EOF
-ROOT_ID="${ROOT_ID-wisp-1}"
-ISSUE_ID="$issue_id"
-MD_ROOT_ISSUE="${MD_ROOT_ISSUE-$issue_id}"
-GC_COLD="${GC_COLD-0}"
-MD_WORK_DIR="${MD_WORK_DIR-$WT}"
-MD_BRANCH="${MD_BRANCH-polecat/gc-issue}"
-MD_ROUTE="${MD_ROUTE-gc-toolkit/gc-toolkit.polecat}"
-MD_ABORTED_AT="${MD_ABORTED_AT-}"
-MD_MAX_ATTEMPTS="${MD_MAX_ATTEMPTS-3}"
-MD_SUBJECT_MAX="${MD_SUBJECT_MAX-}"
-UPDATE_FAILS="${UPDATE_FAILS-0}"
-EOF
-  # A JSON value carries quotes, so it is written shell-quoted.
-  printf 'MD_PRE_LINT=%q\n' "${MD_PRE_LINT-}" >> "$STATE"
-  printf 'MD_PRE_TEST=%q\n' "${MD_PRE_TEST-}" >> "$STATE"
-  printf 'MD_SETUP_BUILD=%q\n' "${MD_SETUP_BUILD-$SB_GREEN}" >> "$STATE"
-  printf 'MD_PRE_BUILD=%q\n' "${MD_PRE_BUILD-}" >> "$STATE"
-  printf 'MD_NOTES=%q\n' "${MD_NOTES-}" >> "$STATE"
+  local issue_id="${ISSUE_ID-gc-issue}" root="${ROOT_ID-wisp-1}" root_meta issue_meta iter_meta i rows
+  pour_vars
+  root_meta='"gc.kind":"workflow"'
+  pair root_meta gc.var.issue "${MD_ROOT_ISSUE-$issue_id}"
+  for i in "${!POUR_NAMES[@]}"; do pair root_meta "gc.var.${POUR_NAMES[i]}" "${POUR_VALUES[i]}"; done
+  issue_meta=""
+  pair issue_meta work_dir "${MD_WORK_DIR-$WT}"
+  pair issue_meta branch "${MD_BRANCH-polecat/gc-issue}"
+  pair issue_meta gc.execution_routed_to "${MD_ROUTE-gc-toolkit/gc-toolkit.polecat}"
+  pair issue_meta aborted_at "${MD_ABORTED_AT-}"
+  # A pre-existing mark is JSON kept as a string, as bd keeps it.
+  pair issue_meta rig_check_pre_existing.lint "${MD_PRE_LINT-}"
+  pair issue_meta rig_check_pre_existing.test "${MD_PRE_TEST-}"
+  pair issue_meta self_review_setup_build "${MD_SETUP_BUILD-$SB_GREEN}"
+  pair issue_meta rig_check_pre_existing.build "${MD_PRE_BUILD-}"
+  iter_meta=""
+  pair iter_meta gc.root_bead_id "$root"
+  pair iter_meta gc.control_for self-review
+  pair iter_meta gc.max_attempts "${MD_SUBJECT_MAX-}"
+  rows="{\"id\":$(json_str "$root"),\"metadata\":{$root_meta}}"
+  rows+=",{\"id\":$(json_str "$issue_id"),\"metadata\":{$issue_meta}${MD_NOTES:+,\"notes\":$(json_str "$MD_NOTES")}}"
+  rows+=",{\"id\":\"iter-1\",\"metadata\":{$iter_meta}}"
+  if [ -n "${MD_MAX_ATTEMPTS-3}" ]; then
+    rows+=",{\"id\":\"control-1\",\"metadata\":{\"gc.kind\":\"ralph\",\"gc.step_id\":\"self-review\",\"gc.max_attempts\":$(json_str "${MD_MAX_ATTEMPTS-3}"),\"gc.root_bead_id\":$(json_str "$root")}}"
+  fi
+  store "[$rows]"
   # The run of the root, as run-lib.sh would name it: by default it works the
   # case's issue, and RUN_BEAD="" is a run that names no bead.
-  jq -nc --arg root "${ROOT_ID-wisp-1}" --arg bead "${RUN_BEAD-$issue_id}" \
-    '[{root: $root, convoy: "convoy-1", bead: $bead, formula: "mol-polecat-work", live: true}]' > "$TMP/runs.json"
-  # The root carries gc.var.<name> for each var the pour rendered non-empty, as
-  # gascity stamps it, and the stub splices these pairs into its metadata.
-  local stamps
-  stamps=$(pour_vars | jq -c 'with_entries(select(.value != "") | .key |= "gc.var." + .)')
-  stamps=${stamps#\{}
-  printf 'MD_ROOT_VARS=%q\n' "${stamps%\}}" >> "$STATE"
+  printf '[{"root":%s,"convoy":"convoy-1","bead":%s,"formula":"mol-polecat-work","live":true}]' \
+    "$(json_str "$root")" "$(json_str "${RUN_BEAD-$issue_id}")" > "$TMP/runs.json"
 }
 
 # Run the script in a cwd that is deliberately NOT the fixture worktree: the
 # script must resolve the worktree from bead metadata, never from cwd.
 # GC_ITERATION default 1 keeps the gate cases far from the budget so they never
-# trip the exhaustion note.
+# trip the exhaustion note. GC_COLD=1 is the ralph condition env with a cold
+# import cache, where every gc call dies before doing any work, and
+# UPDATE_FAILS=1 a store that refuses the work bead's write.
 run_case() {
   local desc="$1" want="$2"
   : > "$CALLS"
   ( cd "$TMP" && GC_WISP_ID="${ROOT_ID-wisp-1}" GC_BEAD_ID=iter-1 \
       GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" \
       RUN_LIB_STUB_FAIL="${RUN_FAILS:+subject}" \
+      STUB_GC_FAIL="${GC_COLD:+1}" STUB_UPDATE_FAIL="${UPDATE_FAILS:+${ISSUE_ID-gc-issue}}" \
       GC_ITERATION="${ITERATION-1}" GCTK_BIN="${GCTK-$GCTK_BUILT}" bash "$SCRIPT" ) >"$TMP/out" 2>&1
   local got=$?
   if [ "$got" = "$want" ]; then ok "$desc (exit $got)"
@@ -430,10 +362,10 @@ assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: 
 
 # --- 3d4. the step's own block, rendered as a pour renders it -------------------
 # The self-review step's check call, rendered with the case's commands, runs
-# rig-checks.sh in the fixture worktree against the gctk built from this checkout. The root stub
-# stamps the same commands, as a pour does, and the block's note of setup and
-# build reaches the state the bd stub serves, so the exit condition reads what
-# the block wrote.
+# rig-checks.sh in the fixture worktree against the gctk built from this
+# checkout. The root carries the same commands, as a pour stamps them, and the
+# block notes setup and build on the work bead in the store, so the exit
+# condition reads what the block wrote.
 ROOT="$(cd "$HERE/../.." && pwd)"
 awk '
   /^```bash$/ {buf = ""; f = 1; next}
@@ -445,10 +377,19 @@ grep -qF 'rig-checks.sh" self-review' "$TMP/checks.tmpl" \
 # render_checks : the block, each placeholder filled with what the case's pour
 # renders (pour_vars).
 render_checks() {
-  jq -Rr --argjson v "$(pour_vars)" \
-    'reduce ($v | to_entries[]) as $e (.; split("{{" + $e.key + "}}") | join($e.value))' "$TMP/checks.tmpl" \
+  local t i
+  t=$(<"$TMP/checks.tmpl"); pour_vars
+  for i in "${!POUR_NAMES[@]}"; do t=$(fill "$t" "${POUR_NAMES[i]}" "${POUR_VALUES[i]}"); done
+  printf '%s\n' "$t" \
     | sed -e "s|\"<the work bead>\"|\"\${ISSUE_ID-gc-issue}\"|" \
           -e "s|\"\$(b='gc-toolkit.'; gc \"\${b%.}\" scripts-dir)/rig-checks.sh\"|\"$HERE/rig-checks.sh\"|"
+}
+# fill <text> <name> <value> : the text with each {{name}} in it replaced by the
+# value, taken literally.
+fill() {
+  local t="$1" k="{{$2}}" out=""
+  while [[ "$t" == *"$k"* ]]; do out+="${t%%"$k"*}$3"; t="${t#*"$k"}"; done
+  printf '%s' "$out$t"
 }
 # run_checks <shell> : the rendered block in the fixture worktree.
 run_checks() {
@@ -466,12 +407,10 @@ for sh in $SHELLS; do
   run_checks "$sh"
   run_case "$sh: FAIL after the step's own block ran a build that fails on a clean tree" 1
   assert_out "$sh: …naming the build" "not green at $HEAD_SHA: build"
-  # The note the block wrote is the last MD_SETUP_BUILD line in the state.
-  # shellcheck disable=SC1090  # the generated state file the stubs read
-  BLOCK_NOTE=$(MD_SETUP_BUILD=""; . "$STATE"; printf '%s' "$MD_SETUP_BUILD")
-  eq "$(printf '%s' "$BLOCK_NOTE" | jq -r '[.commit, .setup, .build, .build_command] | join(" ")')" "$HEAD_SHA none fail exit 1" \
+  BLOCK_NOTE=$(meta gc-issue self_review_setup_build)
+  eq "$BLOCK_NOTE" "$(noted "$HEAD_SHA" none fail 'exit 1')" \
     "$sh: the block notes HEAD, no setup, the failed build and its command"
-  printf 'MD_PRE_BUILD=%q\n' "$(premark "$HEAD_SHA" "$BLOCK_NOTE" tk-b1)" >> "$STATE"
+  MD_SETUP_BUILD="$BLOCK_NOTE"; MD_PRE_BUILD=$(premark "$HEAD_SHA" "$BLOCK_NOTE" tk-b1); write_state
   run_case "$sh: PASS once a pre-existing mark holds the note the block wrote" 0
   reset_env; MD_SETUP_BUILD=""; VAR_BUILD=true; write_state
   run_checks "$sh"
@@ -481,9 +420,7 @@ for sh in $SHELLS; do
   reset_env; MD_SETUP_BUILD=""; VAR_BUILD=""; write_state
   VAR_SETUP=true VAR_BUILD=true run_checks "$sh"
   run_case "$sh: PASS after the block ran the repo's own setup and build where the step declares neither" 0
-  # shellcheck disable=SC1090  # the generated state file the stubs read
-  BLOCK_NOTE=$(MD_SETUP_BUILD=""; . "$STATE"; printf '%s' "$MD_SETUP_BUILD")
-  eq "$(printf '%s' "$BLOCK_NOTE" | jq -r '[.commit, .setup, .build, .setup_command, .build_command] | join(" ")')" "$HEAD_SHA pass pass true true" \
+  eq "$(meta gc-issue self_review_setup_build)" "$(noted "$HEAD_SHA" pass pass true true)" \
     "$sh: …with a note that names them"
   # What setup and build leave that git does not ignore is put back, so the
   # checks after them run, and the block notes them, in one run of the block.
@@ -499,8 +436,8 @@ for sh in $SHELLS; do
   VAR_LINT=$'cat <<EOF >/dev/null\nit\'s a "body" ) (\n\nEOF\ntrue'; write_state
   run_checks "$sh"
   run_case "$sh: PASS after the block ran multi-line commands and one holding a here-document" 0
-  eq "$(recorded lint | jq -r '.command')" "$VAR_LINT" "$sh: …with the here-document's command recorded whole"
-  eq "$(recorded test | jq -r '.command')" "$VAR_AFFECTED" "$sh: …and the multi-line test run"
+  has "$(recorded lint)" "\"command\":$(go_json_str "$VAR_LINT")}" "$sh: …with the here-document's command recorded whole"
+  has "$(recorded test)" "\"command\":$(go_json_str "$VAR_AFFECTED")}" "$sh: …and the multi-line test run"
   # A test run that leaves a file keeps its record, and the note the block
   # wrote before the run stands, so removing the file is all the loop needs.
   reset_env; MD_SETUP_BUILD=""; VAR_AFFECTED='printf x > cover.out'; VAR_BUILD=true; write_state
@@ -518,9 +455,9 @@ for sh in $SHELLS; do
     grep -qF "gctk rig lint: machine failure, nothing recorded" "$TMP/checks.out" \
       && ok "$sh: the block's lint run of $crash stops at exit 4 with nothing recorded" \
       || { bad "$sh: the block's lint run of $crash stops at exit 4 with nothing recorded"; sed 's/^/       /' "$TMP/checks.out"; }
-    eq "$(recorded lint | jq -r '.command')" "true" "$sh: …which leaves the pass of another command at HEAD"
+    has "$(recorded lint)" '"command":"true"}' "$sh: …which leaves the pass of another command at HEAD"
     run_case "$sh: FAIL when the declared lint run stopped beside another command's pass at HEAD ($crash)" 1
-    assert_out "$sh: …naming that pass as another run's" "lint: the record at $HEAD_SHA is of \"true\", not of the declared $(jq -nr --arg c "$crash" '$c | @json'), so it answers nothing here"
+    assert_out "$sh: …naming that pass as another run's" "lint: the record at $HEAD_SHA is of \"true\", not of the declared $(json_str "$crash"), so it answers nothing here"
   done
 done
 # Records already at HEAD outlive an edit, so a build run over uncommitted
@@ -597,7 +534,8 @@ run_case "FAIL (fail-closed) when the run names no bead, as when gc.var.issue di
 # because resolution is bd-only, and gc convoy must never be reached.
 reset_env; GC_COLD=1; write_state; green
 run_case "PASS under a cold gc (resolution is bd-only, and the record reads call no gc)" 0
-refute_call "resolution must not shell out to gc convoy" "gc convoy"
+if grep -q '^convoy ' "$CALLS"; then bad "resolution must not shell out to gc convoy"; sed 's/^/       /' "$CALLS"
+else ok "resolution must not shell out to gc convoy"; fi
 
 # --- 12. exhaustion note ----------------------------------------------------
 # The last failing attempt (GC_ITERATION >= gc.max_attempts) notes the
@@ -614,7 +552,7 @@ if [ "$(grep -c '^bd update ' "$CALLS")" = 1 ]; then ok "the note is the conditi
 for flag in --set-metadata --unset-metadata --assignee --status; do
   refute_call "the note's write carries no $flag: it routes, assigns, reopens and stamps nothing" "$flag"
 done
-refute_call "nothing is nudged" "gc session nudge"
+refute_call "nothing is nudged" "session nudge"
 
 # --- 13. one note for a run ---------------------------------------------------
 # A work bead whose notes already record this run's exhaustion is left alone: a
@@ -655,39 +593,33 @@ assert_out "says the note did not land" "the exhaustion note did not land on gc-
 # decline.sh, the call files the self-review-exhausted gate on the work bead,
 # makes the work bead wait on it armed to re-sling mol-polecat-work, cancels the
 # run at the iteration it holds and drains, in that order. The gate, the wait
-# and the cancel are stubs that record their calls; decline.test.sh holds what
-# decline.sh does when one of them does not land.
+# and the cancel are stand-ins that record their calls, in the log the fake
+# writes its calls to; decline.test.sh holds what decline.sh does when one of
+# them does not land.
 DECLINE_CALL=$(grep -E '^`"\$\(b=.\{\{binding_prefix\}\}.; gc "\$\{b%\.\}" scripts-dir\)/decline\.sh" --step self-review ' "$ROOT/formulas/mol-polecat-work.toml")
 if [ "$(printf '%s\n' "$DECLINE_CALL" | grep -c 'decline\.sh')" = 1 ]; then ok "the self-review step carries one decline.sh call for its last attempt"; else
   bad "the self-review step carries one decline.sh call for its last attempt (found: $DECLINE_CALL)"; fi
-DPACK="$TMP/decline-pack"; DBIN="$TMP/decline-bin"; mkdir -p "$DPACK" "$DBIN"
+# The pack the fake's scripts-dir names: the real decline.sh beside them.
+DPACK="$TMP/decline-pack/assets/scripts"; mkdir -p "$DPACK"
 cp "$HERE/decline.sh" "$DPACK/"
 for stub in human-gate:gate await-ruling:await run-cancel:cancel; do
   printf '#!/usr/bin/env bash\nprintf %s "$*" >> "$DCALLS"\n' "'${stub#*:} %s\\n'" > "$DPACK/${stub%%:*}.sh"
 done
 chmod +x "$DPACK"/*.sh
-cat > "$DBIN/gc" <<'GC'
-#!/usr/bin/env bash
-case "$1 $2" in
-  "gc-toolkit scripts-dir") printf '%s\n' "$DPACK" ;;
-  "hook current") printf 'iter-3\n' ;;
-  "bd show") printf '[{"id":"iter-3","status":"in_progress","assignee":"me","metadata":{"gc.step_ref":"self-review.iteration.3"}}]\n' ;;
-  "runtime drain-ack") printf 'drain\n' >> "$DCALLS" ;;
-  *) exit 1 ;;
-esac
-GC
-chmod +x "$DBIN/gc"
 printf '%s\n' "$DECLINE_CALL" | sed -e 's/^`//' -e 's/`$//' \
   -e "s|{{binding_prefix}}|gc-toolkit.|g" -e 's|"<the work bead>"|"gc-issue"|' > "$TMP/decline.sh"
 grep -q -e '{{' -e '<the work bead>' "$TMP/decline.sh" \
   && bad "the decline call renders with a placeholder a pour leaves unfilled" \
   || ok "a pour fills every placeholder in the decline call"
+# The iteration this session's hook names, a step of the run.
+store '[{"id":"iter-3","status":"in_progress","assignee":"me","metadata":{"gc.step_ref":"self-review.iteration.3"}}]'
 for sh in $SHELLS; do
   : > "$TMP/decline.calls"
-  ( cd "$TMP" && env PATH="$DBIN:$PATH" DPACK="$DPACK" DCALLS="$TMP/decline.calls" "$sh" "$TMP/decline.sh" ) >"$TMP/decline.out" 2>&1
+  ( cd "$TMP" && env STUB_PACK="$TMP/decline-pack" STUB_GC_LOG="$TMP/decline.calls" DCALLS="$TMP/decline.calls" \
+      GC_SESSION_ID=me STUB_HOOK_CURRENT=iter-3 "$sh" "$TMP/decline.sh" ) >"$TMP/decline.out" 2>&1
   rc=$?
   eq "$rc" 0 "$sh: the last attempt's decline exits 0"
-  eq "$(awk '{ print $1 }' "$TMP/decline.calls" | tr '\n' ';')" "gate;await;cancel;drain;" \
+  eq "$(awk '/^(gate|await|cancel) / { print $1 } /^runtime drain-ack$/ { print "drain" }' "$TMP/decline.calls" | tr '\n' ';')" "gate;await;cancel;drain;" \
     "$sh: …filing the gate, then the wait, then the run's cancel, then the drain"
   assert_decline() { grep -qE -- "$2" "$TMP/decline.calls" && ok "$sh: $1" || { bad "$sh: $1"; sed 's/^/       /' "$TMP/decline.calls"; }; }
   assert_decline "…the gate blocks the work bead under self-review-exhausted" '^gate --subject gc-issue --key self-review-exhausted --message '
