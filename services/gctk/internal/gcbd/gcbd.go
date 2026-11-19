@@ -297,10 +297,14 @@ type configuredRig struct {
 // rigs is each store the city's config names, as `gc config show --json`
 // prints it from the city's files: the city's own store, in the folder the
 // config is read from, under [workspace]'s name and prefix, then each rig's
-// under its [[rigs]] entry. A prefix the config leaves unset is the one Gas
-// City derives from the name ([derivedPrefix]), as Rig.EffectivePrefix and
-// EffectiveHQPrefix do. A read that fails or does not decode returns a
-// *ReadError, which names id when the config was read to route one.
+// under its [[rigs]] entry. A rig folder the config gives as a relative path
+// is under the city's folder, as Gas City's resolveRigPaths
+// (cmd/gc/beads_provider_lifecycle.go at gastownhall/gascity f5302d1dcf) takes
+// it, so no store's folder depends on the directory the caller runs in. A
+// prefix the config leaves unset is the one Gas City derives from the name
+// ([derivedPrefix]), as Rig.EffectivePrefix and EffectiveHQPrefix do. A read
+// that fails or does not decode returns a *ReadError, which names id when the
+// config was read to route one.
 //
 // gc prints [workspace]'s name and prefix from city.toml where it sets them,
 // and otherwise the ones .gc/site.toml binds (configForDisplay in
@@ -333,6 +337,9 @@ func (c *Client) rigs(id string) ([]configuredRig, error) {
 	city.Path = shown.CityPath
 	rigs := append([]configuredRig{city}, shown.Config.Rigs...)
 	for i := range rigs {
+		if strings.TrimSpace(rigs[i].Path) != "" && !filepath.IsAbs(rigs[i].Path) {
+			rigs[i].Path = filepath.Join(shown.CityPath, rigs[i].Path)
+		}
 		if rigs[i].Prefix == "" {
 			rigs[i].Prefix = derivedPrefix(rigs[i].Name)
 		}

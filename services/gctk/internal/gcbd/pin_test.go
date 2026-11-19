@@ -118,15 +118,17 @@ func TestWhereNamesTheResolvedStore(t *testing.T) {
 
 // The city's config as `gc config show --json` prints it: the city's own store
 // in the folder it was read from, under [workspace], and its rigs, among them
-// one whose prefix begins another's, one bound to no folder, and one whose
-// prefix the config leaves for Gas City to derive from its name.
+// one whose prefix begins another's, one bound to no folder, one whose prefix
+// the config leaves for Gas City to derive from its name, and one whose folder
+// it gives relative to the city's.
 const routeConfig = `{"schema_version":"1","city_path":"/city","config":{
  "Workspace":{"Name":"city","Prefix":"hq","Provider":"claude"},
  "Rigs":[
   {"Name":"gc-toolkit","Path":"/city/rigs/gc-toolkit","Prefix":"tk","Suspended":false},
   {"Name":"tk-extra","Path":"/city/rigs/extra","Prefix":"tk-x"},
   {"Name":"unbound","Path":"","Prefix":"ub"},
-  {"Name":"myFrontend","Path":"/city/rigs/front","Prefix":""}]},
+  {"Name":"myFrontend","Path":"/city/rigs/front","Prefix":""},
+  {"Name":"project","Path":"rigs/project","Prefix":"pr"}]},
  "warnings":[],"validation":{"ok":true,"warnings":[],"errors":[]}}`
 
 // readsTheConfigOnly fails t unless every call in log read the city's config,
@@ -143,7 +145,7 @@ func readsTheConfigOnly(t *testing.T, log string) {
 // StoreOf names the store whose prefix begins the id, the longest such when
 // several do, and none when no bound store's prefix begins it, from the city's
 // config alone. A prefix the config leaves unset is the one Gas City derives
-// from the name.
+// from the name, and a folder it gives as a relative path is under the city's.
 func TestStoreOfNamesTheLongestPrefix(t *testing.T) {
 	log := routeStub(t)
 	t.Setenv("STUB_CONFIG", routeConfig)
@@ -156,6 +158,7 @@ func TestStoreOfNamesTheLongestPrefix(t *testing.T) {
 		{"tk-x-1", "/city/rigs/extra/.beads", true},
 		{"hq-wisp-1a2b3", "/city/.beads", true},
 		{"mf-7", "/city/rigs/front/.beads", true},
+		{"pr-1", "/city/rigs/project/.beads", true},
 		{"ub-1", "", false},
 		{"zz-1", "", false},
 		{"tkx-1", "", false},
@@ -209,7 +212,8 @@ func TestDerivedPrefixFollowsGasCity(t *testing.T) {
 
 // RigStore names the .beads directory under the folder the city's config gives
 // the rig of that name, the city's among them, from one read of the config
-// each. A prefix is no rig's name, a rig the config binds to no folder has no
+// each, under the city's folder when the config gives a relative path. A
+// prefix is no rig's name, a rig the config binds to no folder has no
 // store, and a config that does not read or decode is a *ReadError.
 func TestRigStoreNamesTheRigsBeadsDirectory(t *testing.T) {
 	log := routeStub(t)
@@ -221,6 +225,7 @@ func TestRigStoreNamesTheRigsBeadsDirectory(t *testing.T) {
 	}{
 		{"gc-toolkit", "/city/rigs/gc-toolkit/.beads", true},
 		{"city", "/city/.beads", true},
+		{"project", "/city/rigs/project/.beads", true},
 		{"tk", "", false},
 		{"unbound", "", false},
 		{"nowhere", "", false},
@@ -264,6 +269,7 @@ func TestRouteFollowsTheFirstBeadsPrefix(t *testing.T) {
 		{[]string{"hq-10", "tk-2"}, "/city/.beads", false},
 		{[]string{"tk-2", "hq-10"}, "/city/rigs/gc-toolkit/.beads", true},
 		{[]string{"mf-3"}, "/city/rigs/front/.beads", true},
+		{[]string{"pr-4"}, "/city/rigs/project/.beads", true},
 		{[]string{"zz-9"}, "/city/.beads", true},
 	} {
 		if err := os.WriteFile(log, nil, 0o644); err != nil {

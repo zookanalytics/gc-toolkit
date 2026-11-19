@@ -204,8 +204,9 @@ prefix and a rig's store by its name (`gcbd.Client.StoreOf`,
 reads them from `gc config show --json`, which Gas City prints from the city's
 config files, so the read waits on no supervisor, bead store or tmux. The
 city's own store is the folder that read names as `city_path`, under the name
-and prefix of the config's `[workspace]`. A prefix the config leaves unset is
-the one Gas City derives from the name.
+and prefix of the config's `[workspace]`. A rig folder the config gives as a
+relative path is under the city's folder, as Gas City reads it. A prefix the
+config leaves unset is the one Gas City derives from the name.
 
 ## Reading a bead's whole context
 
