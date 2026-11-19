@@ -233,3 +233,40 @@ func TestStoreAcceptance(t *testing.T) {
 		t.Errorf("adapter: the beads read %+v (%v), want both at P1", rows, err)
 	}
 }
+
+// The listing's narrowing, as the bounded reads take it: an assignee matches
+// one name exactly, the statuses named are each read, and Listed leaves out the
+// wisp the listing hides unless asked.
+func TestStoreAcceptanceNarrowsTheListing(t *testing.T) {
+	if !gcbdtest.Asked() {
+		t.Skip("the store acceptance test runs the city's bd on a scratch store; GCTK_STORE_ACCEPTANCE=1 runs it")
+	}
+	s := gcbdtest.New(t, "pn")
+	queued := s.Create("queued", "--assignee", "rig/refinery")
+	claimed := s.Create("claimed", "--assignee", "rig/refinery", "--status", "in_progress")
+	near := s.Create("near", "--assignee", "rig/refinery-2")
+	wisp := s.Create("wisp", "--assignee", "rig/refinery", "--ephemeral")
+	blocked := s.Create("blocked", "--assignee", "rig/refinery", "--status", "blocked")
+	s.Enter(t, "")
+	c := &Client{bin: "gc"}
+	for _, tc := range []struct {
+		name string
+		q    Query
+		want []string
+	}{
+		{"one assignee's open beads that the listing shows", Query{Assignee: "rig/refinery", Statuses: []string{"open"}, Listed: true}, []string{queued}},
+		{"the open and in-progress beads that the listing shows", Query{Every: true, Statuses: []string{"open", "in_progress"}, Listed: true}, []string{claimed, near, queued}},
+		{"one assignee's open beads in every plane", Query{Assignee: "rig/refinery", Statuses: []string{"open"}}, []string{queued, wisp}},
+	} {
+		rows, err := c.Find(tc.q)
+		var got []string
+		for _, r := range rows {
+			got = append(got, r.ID)
+		}
+		slices.Sort(got)
+		want := slices.Sorted(slices.Values(tc.want))
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("%s = %v, %v; want %v (blocked %s)", tc.name, got, err, want, blocked)
+		}
+	}
+}

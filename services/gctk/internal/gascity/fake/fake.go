@@ -1,7 +1,8 @@
 // Package fake is the runtime adapter's fake: it records each call a domain
-// makes of gascity.Runtime and answers as its test says, so a domain's rules
-// about Gas City are tested in Go with no Gas City (docs/gctk-architecture.md,
-// "The adapters").
+// makes of gascity.Runtime, and each doctor run, event and list read a domain
+// asks for through an interface of its own, and answers as its test says, so
+// a domain's rules about Gas City are tested in Go with no Gas City
+// (docs/gctk-architecture.md, "The adapters").
 package fake
 
 import (

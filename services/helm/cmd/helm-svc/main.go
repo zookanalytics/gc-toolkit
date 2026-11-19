@@ -126,6 +126,7 @@ func serve() {
 		server.WithActuator(selectActuator(cityPath)),
 		server.WithCityPath(cityPath),
 		server.WithRigBoard(source.NewGC(cityPath), server.RigBoardTTL),
+		server.WithCityPage(source.NewEventLog(), server.CityPageTTL),
 	)
 
 	// The supervisor removes any stale socket before spawning us, so we own

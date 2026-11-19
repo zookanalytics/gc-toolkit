@@ -791,3 +791,33 @@ no warrant.
   b3e779f03aec.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
+
+## Patrol findings
+
+- **Covers.** `assets/scripts/patrol-finding.sh`, the one writer of a patrol
+  finding, and the finding's keys in the `[metadata.patrol_findings]` table of
+  `lifecycle/lifecycle.toml`.
+- **Stands in for.** A keyed problem record: one record per situation a patrol
+  or an order observes, which a report of the same situation finds again by
+  its key and counts as a recurrence, and which stays until the problem is
+  resolved.
+- **Evidence.** In `gastownhall/gascity`, nothing keeps current state per
+  problem key:
+  - `gc mail send --dedup` suppresses a send while an unarchived message with
+    the same key is in the same mailbox, and once that message is archived the
+    next send alerts again (`newMailSendCmd`'s `--dedup` in
+    `cmd/gc/cmd_mail.go`).
+  - Core's `escalate.sh` keys an incident only to throttle its mail: with
+    `--incident-key` an unchanged incident is not sent again inside a reminder
+    window, `--resolve-incident` forgets it, and the state it keeps under
+    `.gc/incidents` is best-effort
+    (`internal/bootstrap/packs/core/assets/scripts/escalate.sh`).
+  - `gc event emit` appends one event to the city's log and keeps no state per
+    key (`cmd/gc/cmd_event_emit.go`).
+  - A doctor result needs no such record, because the doctor order records
+    each run as one event, whose newest is what doctor found last
+    ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)).
+    So this entry covers the patrol finding alone.
+- **Verified.** 2026-11-16, at `gastownhall/gascity` main c7eb6d2f43.
+- **Retires when.** Gas City ships a keyed problem record: one record per key,
+  which a recurrence finds and updates and which stays until it is resolved.

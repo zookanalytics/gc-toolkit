@@ -964,8 +964,8 @@ sittings, so it shows no failed start either.
 
 ## Architecture
 
-The packages, with clean dependency lines `board <- source <- server <- cmd`
-and `rigboard <- server`:
+The packages, with clean dependency lines `board <- source <- server <- cmd`,
+`rigboard <- server` and `cityboard <- source`:
 
 | Package | Responsibility |
 |---|---|
@@ -973,6 +973,7 @@ and `rigboard <- server`:
 | `internal/source` | The data-access **seam**. `Source` interface + two backends: `BeadsSource` (in-process beads library, the default) and `SupervisorSource` (HTTP client against the supervisor API). |
 | `internal/server` | HTTP routes + a server-side TTL cache of the computed board, and of each rig's board document. |
 | `internal/rigboard` | The rig board's read: one gctk listing of a rig's store, the pack's shared readers asked of its rows, and the one table that names each row's group and signal. See *The rig board*, below. |
+| `internal/cityboard` | The city page's read: doctor's newest run from the city's event log, and which of its checks the page shows and counts. See *The city page*, below. |
 | `internal/verbs` | Runs a `gc-helm.sh` write verb for the server's POST routes, under a deadline that kills the run's whole process group. It owns no verb logic. |
 | `web` | The operator's web app (Vite + React + TS) and the `go:embed` that compiles its built bundle into the binary. |
 | `cmd/helm-svc` | Entrypoint: listen on the `GC_SERVICE_SOCKET` unix socket, wire source→server, graceful SIGTERM. |
@@ -1309,7 +1310,9 @@ rows at all, rather than an all-clear nobody measured.
 `web/` is a Vite + React + TypeScript app, the operator's board, embedded in the
 binary and served at the service mount. It is one page per rig, with the rig in
 the address (`?rig=<name>`); with no rig there, it lists the city's rigs from
-`GET <mount>/helm/rigs` as links. Nothing rolls up across rigs.
+`GET <mount>/helm/rigs` as links. Nothing rolls up across rigs. Beside the rig
+pages, `?city` is the city's page (see *The city page*), and the bar of the rig
+list and of each rig page links to it.
 
 **What it reads.** One rig's document, `GET <mount>/helm/rigs/{rig}` (see *The
 rig board*), which it lays out as four pages: Epics, Needs you, Work queue and
@@ -1581,6 +1584,67 @@ from a city with
 `RIGBOARD_CUT_CITY=<city root> go test ./internal/rigboard -run TestCutFixture`,
 then write the golden with `go test ./internal/rigboard -run TestFixtureBoard -update`.
 
+## The city page (`GET <mount>/helm/city`)
+
+The city's page shows what doctor found in its newest recorded run
+(`specs/tk-1tfzr71.158/design.md`, section 5). `web/src/cityboard/` draws it at
+the address `?city`, with the board's one row structure (`Line`).
+
+**What it reads.** The newest `gc-toolkit.doctor.ran` event in the city's event
+log, which the doctor order records each hour (`gctk doctor run`), read from the
+supervisor's `GET /v0/city/{city}/events?type=gc-toolkit.doctor.ran&limit=1`
+(`source.EventLog`). The route answers the newest match first, and the read names
+no window, so a doctor that has stopped still shows its last run. Its payload is
+gctk's `doctor.Record`, which `internal/cityboard` decodes.
+`specs/tk-1tfzr71.178/gas-city-search.md` says why the page reads the event log
+and what Gas City's own dashboard shows of it.
+
+**What it shows.** `internal/cityboard` decides it, and the page lays it out:
+
+- when doctor last ran, and whether that run completed. A run that started more
+  than two hours before the read is late, twice the order's cadence. It is the
+  one lateness rule the board holds, because doctor cannot report that it
+  stopped;
+- each failing check that two runs in a row measured failing and the operator
+  has not accepted, with the time it first failed and its runs in a row. A
+  rig's instance of a per-rig check, `rig:<rig>:<check>`, is a row of its own.
+  The streak counts only the runs that measured the check, so a run that did not
+  complete or did not measure it adds nothing. A check that showed failing and
+  that the run could not measure stays, counted, with why, until a run measures
+  it ok or the operator accepts it;
+- each other check the run did not measure, as not measured;
+- the checks `doctor/accepted.toml` accepts, folded under their count, each with
+  its reason and ruling;
+- each monitor order's last good run, as the run recorded it. Whether a monitor
+  is late or failing is Gas City's verdict, in its order checks, which reach the
+  page as checks, so the page holds no rule for it.
+
+The page leads with the count of the failing checks it shows, which reaches zero
+when no check has failed two runs in a row. The words beside the count say so,
+and name how many accepted checks and checks not measured it leaves out. With no
+run in the log, or none that measured the checks, it shows no count and says why.
+
+**How it is cached.** The document is cached whole for five minutes
+(`server.CityPageTTL`), with one read at a time, since the newest run changes
+once an hour. The board's write routes change no doctor run, so a write leaves
+it cached. A failed read, or a newest event that holds no run's record, answers
+502 with the failure, and the page keeps the last good document and says the
+read failed. The page reads it every two and a half minutes, and whenever the
+tab is shown again.
+
+**Its types are generated.** `web/src/cityboard/document.gen.ts` comes from
+`internal/cityboard/document.go`, through tygo, and `TestPageTypesAreCurrent`
+fails when it is stale. `internal/cityboard/testdata/doctor.ran.json` is a live
+city's newest doctor event, with its store and a rig renamed, and
+`TestTheLiveRunsPage` holds the document built from it to
+`internal/cityboard/testdata/city.json`, which the page's tests read and
+helm-fixture serves:
+
+```bash
+cd services/helm
+go test ./internal/cityboard -run 'TestPageTypesAreCurrent|TestTheLiveRunsPage' -update   # writes both again
+```
+
 ## Actuating from the board (`POST <mount>/helm/{open,accept,engage,dismiss}`)
 
 The board's write routes — the only writes this service serves; everything else
@@ -1796,8 +1860,9 @@ it under a real service mount) and leave `GC_HELM_SOURCE` unset.
 
 `cmd/helm-fixture` serves the app this commit embeds with no city behind it.
 `/helm` answers a board file as JSON, `GET /helm/rigs` and
-`GET /helm/rigs/{rig}` answer one rig's document, and `POST /helm/<verb>`
-answers a canned answer, so nothing it serves reads or writes a city. It is
+`GET /helm/rigs/{rig}` answer one rig's document, `GET /helm/city` answers the
+city's document, and `POST /helm/<verb>` answers a canned answer, so nothing it
+serves reads or writes a city. It is
 gc-toolkit's declared `ui_serve_command`, so a demo capture of the board serves
 it as its `--serve` command (`docs/review-demo.md`), and a sitting's live copy
 of the board runs it too, each as a copy that `gctk rig serve` runs.
@@ -1805,7 +1870,7 @@ of the board runs it too, each as a copy that `gctk rig serve` runs.
 ```bash
 cd services/helm
 PORT=5199 go run ./cmd/helm-fixture        # the gc-toolkit fixture, on 127.0.0.1:5199/?rig=gc-toolkit
-go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --rig-board <file> --answers <dir>
+go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --rig-board <file> --city <file> --answers <dir>
 ```
 
 - `--rig-board` is one rig's document, in the shape
@@ -1814,6 +1879,11 @@ go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --rig-board <file> --answers <di
   builds from the committed gc-toolkit fixture. The rig list names the one rig
   the document names, and both routes give the time the fixture started as the
   read time.
+- `--city` is the city's document, in the shape
+  `web/src/cityboard/document.gen.ts` names, which the city page reads. The
+  default is `internal/cityboard/testdata/city.json`, the document the city's
+  read builds from a live city's newest doctor run. Its route gives the time the
+  fixture started as the read time.
 - `--board` is the answer at `/helm`, in the shape `web/src/contract.ts` names.
   The default is `web/src/board.fixture.json`, the contract sample
   `TestBoardFixture` writes, which carries every key of the board contract. The

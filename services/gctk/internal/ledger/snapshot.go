@@ -64,6 +64,9 @@ func (r *Record) AwaitID() string { return r.row.AwaitID }
 // CreatedAt is when the bead was created, as the row writes the time.
 func (r *Record) CreatedAt() string { return r.row.CreatedAtString() }
 
+// UpdatedAt is when the bead was last written, as the row writes the time.
+func (r *Record) UpdatedAt() string { return r.row.UpdatedAtString() }
+
 // ClosedAt is when the bead closed, as the row writes the time, "" while it is
 // live.
 func (r *Record) ClosedAt() string { return r.row.ClosedAtString() }
@@ -78,6 +81,11 @@ func (r *Record) EphemeralPlane() bool { return r.row.InEphemeralPlane() }
 
 // Template reports whether the bead is a template molecule.
 func (r *Record) Template() bool { return r.row.Template() }
+
+// ListedByDefault reports whether bd's listing shows the bead when asked for
+// nothing more: it is outside the ephemeral plane, no template molecule, and
+// neither a gate nor an infrastructure bead.
+func (r *Record) ListedByDefault() bool { return r.row.ListedByDefault() }
 
 // Rendered is every metadata value the row holds, each as the pack's scripts
 // render it, `(.metadata[k] // "") | tostring`. It is the input of a domain
