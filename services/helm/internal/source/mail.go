@@ -55,7 +55,7 @@ func (m *MailCount) Count(ctx context.Context) (int, string, error) {
 	if err != nil {
 		return 0, "", fmt.Errorf("the supervisor's mail count did not answer: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMailCountAnswer))
 	if err != nil {
 		return 0, "", fmt.Errorf("the supervisor's mail count answer did not read: %w", err)
