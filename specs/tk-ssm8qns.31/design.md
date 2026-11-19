@@ -24,9 +24,9 @@ that logged each call and refused every write.
 The first reaction now runs in gctk, and this design says, for each thing the
 sitting found, whether to change it. 1a makes a check faster and 1b makes an
 idle sweep read far less, both with the same answers. 3a fixes a rule that
-refuses routes to pools Gas City runs without a cap. 3b and 6a hand two
-questions back to Gas City's own answers. The other rows keep what exists, or
-leave it to work that already owns it.
+refuses routes to pools Gas City runs without a cap. 3b hands a question back
+to Gas City's own answer. The other rows keep what exists, or leave it to work
+that already owns it.
 
 Each row is one ruling, and you can take or refuse each one alone. Approving the
 design as it stands takes every recommendation, and refusing a row takes the
@@ -45,7 +45,7 @@ other way it names.
 | 5b | "May this bead take a reaction" is asked at four points under two rules, and in one case the check and the sling disagree | Leave it to the same redesign, whose target 1 moves the question to the offer path | A note on that bead | Make the check apply the sling's rule exactly now |
 | 5c | The emergency lane, which routes a fix for a red main at P0 past placement, used once in the month counted | Keep it | Nothing changes | Retire it, so such a fix waits for placement |
 | 5d | The blocked exit files the bead its subject waits on, and arms the subject's dispatch | Keep both | Nothing changes | Retire either act |
-| 6a | The arm's start keeps its own guard for a pour Gas City left unfinished, the guard you ruled Gas City's for the reaction | Remove it, as the reaction's was removed | A dispatch whose pour a killed client left fenced reads as sent, and nobody is asked | Keep it until Gas City finishes or clears such pours |
+| 6a | The arm's start keeps its own guard for a pour Gas City left unfinished, the guard you ruled Gas City's for the reaction | Keep it until Gas City finishes or clears such pours, which 6c asks for | Nothing changes: a dispatch whose pour a killed client left fenced stays armed, and you are asked to close the pour | Remove it, as the reaction's was removed, so such a dispatch reads as sent, its work does not run, and nobody is asked |
 | 6b | Accept cannot see a pour Gas City left unfinished | Hold the report on the board member that rewrites Accept | A note there, and a wait | Fix Accept's search now, in code that member rewrites |
 | 6c | The ask that Gas City finish or clear such pours, whose first part an open upstream issue already asks | Send its second part as an issue, and its first as a comment on that issue | Your send | Leave it held |
 
@@ -443,18 +443,30 @@ holds a gate under the key it asks under, which its cap on attempts shares, or
 the conversation it opens instead on a bead that has an open child (`ask`,
 `start.go:557`).
 
-Recommended, as my reading of how far your ruling reaches: remove the fence
-reads and the ask. A root that carries `molecule_failed=true` stays an attempt
-that failed, which the start tries again under its existing cap on attempts,
-and the cap asks a person once they run out (`askCap`, `start.go:539`). Any other
-root it finds counts as the pour that landed. The cost: a pour that a killed
-client left fenced, with no failure stamp, then reads as landed, so its dispatch
-retires and its work does not run until someone notices. The start also stops
-reading every bead under a root, a scan of the whole store for each root on each
-retry. Your words in conversation tk-gy4953q (2026-11-17 at 23:40Z) bear on the
-trade: "Building code that can't fail is different from building lots of code to
-try and manage every failure." The other way keeps the guard until Gas City
-finishes or clears such pours, which 6c asks for.
+Recommended: keep the guard until Gas City finishes or clears such pours, which
+6c asks for. You arm a dispatch so that nobody has to remember to send it once
+its blockers close (docs/deferred-dispatch.md), and the guard is the only code
+in the pack that reads the fence, so it is what tells you when a fenced pour
+would lose a dispatch you asked for. Keeping it adds no code, and it reads only
+after an earlier attempt or on an exit 3 of `gc sling` (`start.go:335-350`, and
+`liveOnExit3`, `start.go:395`). Your ruling was given for the reaction's guard,
+so whether this one goes is this row's question.
+
+The other way removes the fence reads and the ask, as the reaction's were
+removed. A root that carries `molecule_failed=true` stays an attempt that
+failed, which the start tries again under its existing cap on attempts, and the
+cap asks a person once they run out (`askCap`, `start.go:539`). Any other root
+it finds counts as the pour that landed. The cost: a pour that a killed client
+left fenced, with no failure stamp, then reads as landed, so its dispatch
+retires, its work does not run until someone notices, and nothing records that
+it was owed. What it saves is the read of every bead under a root, a scan of the
+whole store for each root on each retry. Your words in conversation tk-gy4953q
+(2026-11-17 at 23:40Z) bear on the trade: "Building code that can't fail is
+different from building lots of code to try and manage every failure." The
+recommendation departs from the lean of those words because the guard already
+exists, and removing it gives up a dispatch you asked for to save a read made
+only on a retry. What would make the failure unable to happen is Gas City's
+fix, which 6c asks for, and once it lands the guard can go.
 
 ### 6b. Accept
 
@@ -482,7 +494,7 @@ gastownhall/gascity#6179, open, says "a client killed mid-instantiation leaves a
 fenced workflow that nothing activates, voids or reports", and #6177 asks the
 same of a pour that failed (tk-fm9js29). No upstream issue asks the second part,
 searched on 2026-11-19. Recommended: send the second part as an issue and the
-first as the city's case on #6179, since #6179's fix is what removes 6a's cost.
+first as the city's case on #6179, since #6179's fix is what lets 6a's guard go.
 The other way leaves it held.
 
 ## 7. The units
@@ -490,10 +502,10 @@ The other way leaves it held.
 tk-ssm8qns.32 builds what you approve on `integration/tk-ssm8qns.21`, one commit
 for each unit, after a first act it makes whatever you rule. A unit whose rulings
 you all refuse is not built, and a refused ruling's part of a unit drops out of
-it. The effort's summary names the belief the units serve: the pack borrows
-before it invents (docs/foundation.md), since they take what Gas City and bd
-answer instead of working it out again, and they leave Gas City's states to Gas
-City.
+it. Unit 3 is 6a's other way, so it is built only if you refuse 6a. The
+effort's summary names the belief the units serve: the pack borrows before it
+invents (docs/foundation.md), since they take what Gas City and bd answer
+instead of working it out again.
 
 **The first act**, notes and filings with no code:
 
@@ -538,7 +550,7 @@ City.
 - The pool rule over the roster goes, with 3a's comparison.
 - Tests for each answer of the dry run, and the callers' suites updated.
 
-**Unit 3: the arm's start (6a).** `pours` drops its fence reads, and with them
+**Unit 3: the arm's start, only if you refuse 6a.** `pours` drops its fence reads, and with them
 its read of the beads under each root. `askUnfinished` goes, and the cap's ask
 keeps the key the two shared. A root carrying `molecule_failed=true` is a failed
 attempt, and any other root found is the pour that landed, on a retry and on an
