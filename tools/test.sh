@@ -75,18 +75,25 @@ FLOOR="$ROOT/tools/test-floor"
 
 WEB=1
 if [ "$MODE" = affected ]; then
-  if ! change="$(git -C "$ROOT" diff --no-color --name-only --no-renames "${BASE}...HEAD" --)"; then
+  # git writes the names NUL-separated, as for tools/run-tests.sh, so a name git
+  # would quote, such as one with a non-ASCII character or a tab, arrives whole.
+  change_file="$(mktemp "${TMPDIR:-/tmp}/test-change.XXXXXX")" || {
+    echo "$PROG: mktemp failed" >&2; exit 2; }
+  if ! git -C "$ROOT" diff --no-color --name-only --no-renames -z "${BASE}...HEAD" -- >"$change_file"; then
+    rm -f "$change_file"
     echo "$PROG: cannot read the change from $BASE to HEAD (git diff ${BASE}...HEAD failed)" >&2
     exit 2
   fi
-  if [ -z "$change" ]; then
+  changed=0 WEB=0
+  while IFS= read -r -d '' path; do
+    changed=1
+    case "$path" in services/helm/*) WEB=1 ;; esac
+  done <"$change_file"
+  rm -f "$change_file"
+  if [ "$changed" -eq 0 ]; then
     echo "$PROG: ${BASE}...HEAD changes no file — nothing to run"
     exit 0
   fi
-  case $'\n'"$change" in
-    *$'\n'services/helm/*) ;;
-    *) WEB=0 ;;
-  esac
 fi
 
 # hermetic <command>... — runs the command as the header says go and web run.

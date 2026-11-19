@@ -24,8 +24,9 @@
 #   - affected reads the change HEAD's commits make since BASE: it runs the Go
 #     tests and the runner's --affected BASE subset, and the web checks only
 #     when the change touches services/helm, the app's own files or another
-#     file of helm's, such as the read's golden board the app's tests render;
-#     a change that names no file runs nothing and exits 0;
+#     file of helm's, such as the read's golden board the app's tests render,
+#     a file whose name git quotes, with a non-ASCII character or a tab,
+#     included; a change that names no file runs nothing and exits 0;
 #   - no mode, another mode, affected with no BASE or with an option for one,
 #     a BASE git cannot read, and a tree without the test floor are usage
 #     errors that run nothing.
@@ -230,6 +231,21 @@ gitc commit -q -am "change the read's golden board"
 run affected base
 eq "$(kinds)" "go npm shell " "a change elsewhere under services/helm, such as the golden board the app's tests render, runs them too"
 eq "$RC" 0 "…and passes when they do"
+# git quotes a name with a non-ASCII character when core.quotePath is on, its
+# default, and a name with a tab always.
+gitc config core.quotePath true
+gitc checkout -q -b accent base
+printf 'export const x = 1\n' > "$REPO/services/helm/web/caf"$'\xc3\xa9'".ts"
+gitc add -A
+gitc commit -q -m "add a file whose name holds a non-ASCII character"
+run affected base
+eq "$(kinds)" "go npm shell " "a change to a file under services/helm whose name holds a non-ASCII character runs the web checks"
+gitc checkout -q -b tab base
+printf 'export const y = 1\n' > "$REPO/services/helm/web/a"$'\t'"b.ts"
+gitc add -A
+gitc commit -q -m "add a file whose name holds a tab"
+run affected base
+eq "$(kinds)" "go npm shell " "…and so does one whose name holds a tab"
 gitc checkout -q -b same base
 run affected base
 eq "$RC" 0 "a change that names no file exits 0"
