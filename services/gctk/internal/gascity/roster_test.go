@@ -192,7 +192,9 @@ func TestARigListThatNeverAnswersEndsAtItsBound(t *testing.T) {
 			t.Errorf("GC_RIG_LIST_TIMEOUT=%q bounds the read by %s, %v, want %s", v, got, err, want)
 		}
 	}
-	os.Unsetenv("GC_RIG_LIST_TIMEOUT")
+	if err := os.Unsetenv("GC_RIG_LIST_TIMEOUT"); err != nil {
+		t.Fatal(err)
+	}
 	if got, err := rigListWait(); err != nil || got != RigListWait {
 		t.Errorf("an unset GC_RIG_LIST_TIMEOUT bounds the read by %s, %v, want %s", got, err, RigListWait)
 	}

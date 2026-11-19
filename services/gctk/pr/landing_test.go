@@ -1857,7 +1857,7 @@ func TestTheShellsFlockAndTheRecordLockExcludeEachOther(t *testing.T) {
 	if err := hold.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer hold.Wait()
+	defer func() { _ = hold.Wait() }()
 	time.Sleep(300 * time.Millisecond)
 	if _, err := record.Lock(dir, 100*time.Millisecond); !errors.Is(err, record.ErrLockWait) {
 		t.Fatalf("gctk took the lock while flock(1) held it: %v", err)

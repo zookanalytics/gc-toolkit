@@ -154,7 +154,9 @@ func TestPRComposeAPublishedBody(t *testing.T) {
 		if _, err := w.WriteString(body); err != nil {
 			t.Fatal(err)
 		}
-		w.Close()
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
 		stdin := os.Stdin
 		os.Stdin = r
 		defer func() { os.Stdin = stdin }()

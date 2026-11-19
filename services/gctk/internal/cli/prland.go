@@ -428,8 +428,8 @@ func (a seedAudit) Stale(commit string) ([]string, error) {
 		return nil, fmt.Errorf("no file for the stale pages: %w", err)
 	}
 	list := f.Name()
-	f.Close()
-	defer os.Remove(list)
+	_ = f.Close()
+	defer func() { _ = os.Remove(list) }()
 	res := a.rt.Script("render-seed-audit.sh", "--root", a.dir, "--check-merge", commit, commit, "--base-stale-out", list)
 	if why := res.Failure(); why != "" {
 		return nil, fmt.Errorf("render-seed-audit.sh: %s", why)

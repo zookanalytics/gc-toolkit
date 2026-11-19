@@ -52,7 +52,9 @@ func TestCityAcceptance(t *testing.T) {
 	for _, kv := range os.Environ() {
 		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "GC_") || strings.HasPrefix(name, "BEADS_") {
 			t.Setenv(name, "")
-			os.Unsetenv(name)
+			if err := os.Unsetenv(name); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	t.Setenv("GC_HOME", filepath.Join(dir, "home"))

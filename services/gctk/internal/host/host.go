@@ -208,8 +208,8 @@ func (local) Start(s Spec) (Child, error) {
 	closeAll := func() {
 		for _, r := range relays {
 			if r.r != nil {
-				r.r.Close()
-				r.w.Close()
+				_ = r.r.Close()
+				_ = r.w.Close()
 			}
 		}
 	}
@@ -227,11 +227,11 @@ func (local) Start(s Spec) (Child, error) {
 	}
 	err := cmd.Start()
 	for _, r := range relays {
-		r.w.Close()
+		_ = r.w.Close()
 	}
 	if err != nil {
 		for _, r := range relays {
-			r.r.Close()
+			_ = r.r.Close()
 		}
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func (local) Start(s Spec) (Child, error) {
 		go func() {
 			defer wg.Done()
 			_, err := io.Copy(r.to, r.r)
-			r.r.Close()
+			_ = r.r.Close()
 			if e, ok := r.to.(Ender); ok && err == nil {
 				e.End()
 			}
@@ -386,7 +386,7 @@ func (local) FreePort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
@@ -395,7 +395,7 @@ func (local) Answers(port int) bool {
 	if err != nil {
 		return false
 	}
-	c.Close()
+	_ = c.Close()
 	return true
 }
 
