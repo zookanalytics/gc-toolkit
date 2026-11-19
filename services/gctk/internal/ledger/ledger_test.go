@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -20,6 +21,7 @@ var (
 	testText   = Declare("test.ledger.text", String, "a plain value", Alias("test.ledger.old_text"))
 	testRecord = Declare("test.ledger.record", JSON[record](), "a JSON value")
 	testShell  = ReadOnly("test.ledger.shell", String, "a key shell writes")
+	testFlag   = Declare("test.ledger.flag", JSON[bool](), "a JSON flag")
 )
 
 func TestOneActIsOneWrite(t *testing.T) {
@@ -178,6 +180,48 @@ func TestAKeyReadsItsAliasAndClearsBoth(t *testing.T) {
 	want := []string{"--unset-metadata", "test.ledger.text", "--unset-metadata", "test.ledger.old_text"}
 	if got := s.Writes()[0].Args; !slices.Equal(got, want) {
 		t.Errorf("clear = %q, want %q", got, want)
+	}
+}
+
+// rowOf is the record of a bead row whose metadata is the JSON object given,
+// each value typed as bd stores it, decoded as the store adapter decodes a row.
+func rowOf(t *testing.T, metadata string) *Record {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(`{"id":"b-1","status":"open","metadata":` + metadata + `}`))
+	dec.UseNumber()
+	var b gcbd.Bead
+	if err := dec.Decode(&b); err != nil {
+		t.Fatal(err)
+	}
+	return records([]gcbd.Bead{b})[0]
+}
+
+// A String key reads a row as the pack's scripts read one, `(.metadata[k] //
+// "")`. A stored JSON false holds no value, as a null holds none, so a current
+// spelling that holds false gives way to its alias. A string "false" keeps its
+// text, and true and a number read as their JSON text. A JSON key decodes a
+// stored false, so a JSON flag holds false.
+func TestAStringKeyReadsAStoredFalseAsNoValue(t *testing.T) {
+	for _, c := range []struct {
+		stored, want string
+		held         bool
+	}{
+		{`false`, "", false},
+		{`null`, "", false},
+		{`"false"`, "false", true},
+		{`true`, "true", true},
+		{`0`, "0", true},
+	} {
+		got, held, err := testShell.Get(rowOf(t, `{"test.ledger.shell":`+c.stored+`}`))
+		if got != c.want || held != c.held || err != nil {
+			t.Errorf("a key holding %s read %q, %v, %v; want %q, %v", c.stored, got, held, err, c.want, c.held)
+		}
+	}
+	if got, held, err := testText.Get(rowOf(t, `{"test.ledger.text":false,"test.ledger.old_text":"older"}`)); got != "older" || !held || err != nil {
+		t.Errorf("a current spelling holding false read %q, %v, %v; want its alias's value", got, held, err)
+	}
+	if got, held, err := testFlag.Get(rowOf(t, `{"test.ledger.flag":false}`)); got || !held || err != nil {
+		t.Errorf("a JSON flag holding false read %v, %v, %v; want false, held", got, held, err)
 	}
 }
 

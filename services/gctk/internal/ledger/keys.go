@@ -16,13 +16,21 @@ type Codec[T any] struct {
 	Type   string
 	Decode func(string) (T, error)
 	Encode func(T) (string, error)
+
+	// falseUnset reads a stored JSON false as a value the row does not hold.
+	// A JSON key decodes a stored false as it decodes any other value.
+	falseUnset bool
 }
 
-// String is the codec of a key stored as plain text.
+// String is the codec of a key stored as plain text, read as the pack's scripts
+// read a key, `(.metadata[k] // "")`: a stored JSON false holds no value, as a
+// null holds none, and a string "false" keeps its text. bd stores a value
+// spelled false, such as --set-metadata k=false writes, as JSON false.
 var String = Codec[string]{
-	Type:   "string",
-	Decode: func(s string) (string, error) { return s, nil },
-	Encode: func(s string) (string, error) { return s, nil },
+	Type:       "string",
+	Decode:     func(s string) (string, error) { return s, nil },
+	Encode:     func(s string) (string, error) { return s, nil },
+	falseUnset: true,
 }
 
 // JSON is the codec of a key stored as one JSON value in a string.
@@ -112,7 +120,7 @@ func (v View[T]) Name() string { return v.key.Name() }
 // decode is an error.
 func (k Key[T]) Get(r *Record) (v T, ok bool, err error) {
 	for _, name := range append([]string{k.decl.name}, k.decl.aliases...) {
-		raw, held := r.value(name)
+		raw, held := r.value(name, k.codec.falseUnset)
 		if !held {
 			continue
 		}

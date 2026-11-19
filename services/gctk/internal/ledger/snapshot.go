@@ -118,10 +118,10 @@ func (r *Record) Parents() ([]string, error) {
 
 // value is a metadata key's stored text, and whether the row holds the key. A
 // string is itself, and any other JSON value is its JSON text. A null value is
-// one the row does not hold.
-func (r *Record) value(name string) (string, bool) {
+// one the row does not hold, and so is a false when falseUnset.
+func (r *Record) value(name string, falseUnset bool) (string, bool) {
 	v, ok := r.row.Metadata[name]
-	if !ok || v == nil {
+	if !ok || v == nil || (falseUnset && v == false) {
 		return "", false
 	}
 	switch t := v.(type) {
