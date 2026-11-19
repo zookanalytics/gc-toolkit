@@ -319,20 +319,18 @@ and so no review run is ever attached to a bead the refinery is assigned,
 which Gas City's claim would read as handed off. A bead on the record assigned
 to anyone else is that assignee's while they work it: the landing order writes
 nothing to it and requests no merge, the PR's status names who holds it, and
-the order works it again once the assignee is gone. A blocked, pending bead the
-refinery is still assigned is one no publication leaves, and the order assigns
-it to nobody in one write. A writer that takes a PR off the record says so in
-its own write: the refinery's send-back to the pool clears the marker in the
-write that reopens the bead, `gc-helm.sh takeaway --release` refuses a bead on
-the record, and a ruling retires the PR.
+the order works it again once the assignee is gone. A writer that takes a PR off
+the record says so in its own write: the refinery's send-back to the pool clears
+the marker in the write that reopens the bead, `gc-helm.sh takeaway --release`
+refuses a bead on the record, and a ruling retires the PR.
 
 ## Checks
 
 A check is one review of a PR at a head, by the check's own method. On a rig on
 the pending record, a PR's checks run as the lanes of a review run,
 `mol-pr-review`, one run per head the refinery validates. The landing order
-pours it with `gc formula cook` and attaches it to the bead that owns the PR by
-the bead's `blocks` edge onto the run's root, which holds the bead while the run
+pours it, attached to the bead that owns the PR by `gc formula cook --attach`,
+so the bead's `blocks` edge onto the run's root holds the bead while the run
 lives. It pours one when the evaluator finds no passed result at the validated
 head and target, or when the bead carries an ask the run can take. It pours none
 while a run is attached, while another open bead other than an ask names the

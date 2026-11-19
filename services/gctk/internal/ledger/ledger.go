@@ -313,22 +313,6 @@ func (l *Ledger) AddBlocker(id, blocker string) error {
 	return nil
 }
 
-// Prioritize gives each bead named priority p in one update, which bd makes
-// bead by bead. An update that exits non-zero failed for one of them at least,
-// and may have written the others.
-func (l *Ledger) Prioritize(p int, ids ...string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	if out, err := l.store.Update(ids[0], append(slices.Clone(ids[1:]), "--priority="+strconv.Itoa(p))...); err != nil {
-		if out = strings.TrimSpace(out); out != "" {
-			return fmt.Errorf("ledger: the priority of %s did not land (%w): %s", strings.Join(ids, ", "), err, out)
-		}
-		return fmt.Errorf("ledger: the priority of %s did not land: %w", strings.Join(ids, ", "), err)
-	}
-	return nil
-}
-
 // Commit makes w as one update, whose exit decides whether it landed. A write a
 // Set refused, a write that changes nothing and an update that exits non-zero
 // all fail, and nothing reads the write back. A write its guard refused fails
