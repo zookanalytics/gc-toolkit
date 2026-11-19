@@ -123,10 +123,10 @@ wait (the design's section 13).
 
 ## Filing it: `gctk gate return`
 
-**What it composes.** The stay's sign-off runs the verb after the send its
-ruling makes and before it leaves the conversation open, on each bead it
-promises on, and the sitting runs it before the sign-off for a PR it sent back
-itself through the `prs` skill (the design's section 1). The verb makes native
+**What it composes.** Whoever sends a piece of work runs the verb once the send
+is made: the sitting for each piece of work it sends itself, before it signs
+off, and the stay's sign-off for the work its own call sends, before it leaves
+the conversation open (the design's section 1). The verb makes native
 writes in one order while the conversation is still claimed, so none of them
 can bring the sitting back early. First it removes the conversation's `blocks`
 edges onto its closed return gates (`bd dep remove`), so a return reads only
@@ -171,14 +171,18 @@ has closed, or in a store the landing order does not read.
   ran the verb once the stay had landed. A stop between the two left a stay
   with no promise, which came back only after the merge, or not at all while
   the conversation held that PR's merge, and the sitting had to check for it
-  on a later entry. The sign-off can file the gate itself, with no new flag: it
-  already says what its ruling does to each PR it reaches, sending it back with
-  `--rework` or leaving it standing with `--no-rework`, and work with no PR on
-  the record was just sent. The one case it cannot read is another PR that the
-  sitting sent back itself through the `prs` skill, so for that one the sitting
-  runs the verb before the sign-off. The gate comes after the send because a
-  rework's PR is already ready at its head when the operator rules, so the
-  landing order's next pass would close a gate filed before the ask was open.
+  on a later entry. Now whoever sends the work promises it once the send is
+  made, which needs no new flag. The sign-off knows the sends its own call
+  makes, `--rework` and `--accept`. It cannot tell the sitting's own sends
+  from what the store reads: a bead with no PR on the record was just sent, but
+  new work can open its PR before the sign-off runs, or before a re-run of it,
+  and its PR then reads as a settled exchange's PR does. So the sitting
+  promises each piece of work it sends itself, as it does for a PR it sends
+  back through the `prs` skill. A flag on the sign-off naming the beads to
+  promise would add a key to carry what the verb's gate already records. The
+  gate comes after the send because a rework's PR is already ready at its head
+  when the operator rules, so the landing order's next pass would close a gate
+  filed before the ask was open.
 - **Gas City's session wait**, above.
 
 ## Closing it: the landing order
@@ -377,6 +381,10 @@ leaves the return to a sitting with no thread.
   sign-off between its send and its gate: the gate its re-run files closes on
   the landing order's next pass, so the sitting comes back for that round up
   to a cooldown later than it would have.
+- **Work the sitting sends and does not promise** waits through a convoy, as
+  settled work does, so that stay comes back after the merge. Its record cannot
+  tell the sign-off whether it was just sent, which is why the promise rests
+  with whoever sends the work.
 - **The board's supervisor fallback** reads a staying conversation as parked.
 - **A sitting whose session has closed** is not woken. The hold still goes on
   at the end of the round, and the return starts once the operator engages the
