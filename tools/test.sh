@@ -18,7 +18,10 @@
 # tools/run-tests.sh --affected does, and runs:
 #   - go: every Go package's tests, as all runs them, since a Go test's reach
 #     is Go's own command over the module to decide;
-#   - web: the same checks, when the change touches services/helm/web;
+#   - web: the same checks, when the change touches services/helm, the board
+#     the app is the page of. The app's tests render the document helm's read
+#     builds, its golden in internal/rigboard/testdata, so a change to the read
+#     can fail them with no change to the app;
 #   - shell: the suites `tools/run-tests.sh --affected BASE` selects.
 # A change that names no file runs nothing.
 #
@@ -81,7 +84,7 @@ if [ "$MODE" = affected ]; then
     exit 0
   fi
   case $'\n'"$change" in
-    *$'\n'services/helm/web/*) ;;
+    *$'\n'services/helm/*) ;;
     *) WEB=0 ;;
   esac
 fi

@@ -23,8 +23,9 @@
 #     as it was;
 #   - affected reads the change HEAD's commits make since BASE: it runs the Go
 #     tests and the runner's --affected BASE subset, and the web checks only
-#     when the change touches services/helm/web; a change that names no file
-#     runs nothing and exits 0;
+#     when the change touches services/helm, the app's own files or another
+#     file of helm's, such as the read's golden board the app's tests render;
+#     a change that names no file runs nothing and exits 0;
 #   - no mode, another mode, affected with no BASE or with an option for one,
 #     a BASE git cannot read, and a tree without the test floor are usage
 #     errors that run nothing.
@@ -53,13 +54,15 @@ trap 'rm -rf "$TMP"' EXIT
 REPO="$TMP/repo"
 STUBS="$TMP/stubs"
 LOG="$TMP/calls"
-mkdir -p "$REPO/tools" "$REPO/assets/scripts" "$REPO/services/helm/web/dist/assets" "$REPO/docs" "$STUBS"
+mkdir -p "$REPO/tools" "$REPO/assets/scripts" "$REPO/services/helm/web/dist/assets" \
+  "$REPO/services/helm/internal/rigboard/testdata" "$REPO/docs" "$STUBS"
 cp "$SRC/Makefile" "$REPO/Makefile"
 cp "$SRC/tools/test.sh" "$REPO/tools/test.sh"
 cp -R "$SRC/tools/test-floor" "$REPO/tools/"
 cp "$SRC/assets/scripts/icu4c-cgo.sh" "$REPO/assets/scripts/icu4c-cgo.sh"
 printf '<html>board</html>\n' > "$REPO/services/helm/web/dist/index.html"
 printf 'console.log(1)\n' > "$REPO/services/helm/web/dist/assets/index.js"
+printf '{"rows":[]}\n' > "$REPO/services/helm/internal/rigboard/testdata/gc-toolkit.board.json"
 printf '# notes\n' > "$REPO/docs/notes.md"
 
 # Each stand-in logs one line: its name and arguments, the directory it ran in,
@@ -211,7 +214,7 @@ printf '# notes, changed\n' > "$REPO/docs/notes.md"
 gitc commit -q -am "change a doc"
 run affected base -j 2
 eq "$RC" 0 "affected passes when every kind it runs passes"
-eq "$(kinds)" "go shell " "a change outside services/helm/web runs go and the runner, and no web check"
+eq "$(kinds)" "go shell " "a change outside services/helm runs go and the runner, and no web check"
 eq "$(printf '%s\n' "$CALLS" | grep '^shell ' | sed 's/ |.*//')" "shell -j 2 --affected base" "the runner gets the options, then --affected BASE"
 hasnt "$OUT" "test: web" "…and the end has no web line"
 gitc checkout -q -b web base
@@ -220,6 +223,12 @@ gitc commit -q -am "change the board"
 mkdir -p "$TMP/built-web"; cp -R "$REPO/services/helm/web/dist"/. "$TMP/built-web"/
 STUB_BUILD="$TMP/built-web" run affected base
 eq "$(kinds)" "go npm shell " "a change under services/helm/web runs the web checks too"
+eq "$RC" 0 "…and passes when they do"
+gitc checkout -q -b read base
+printf '{"rows":[{"id":"tk-1"}]}\n' > "$REPO/services/helm/internal/rigboard/testdata/gc-toolkit.board.json"
+gitc commit -q -am "change the read's golden board"
+run affected base
+eq "$(kinds)" "go npm shell " "a change elsewhere under services/helm, such as the golden board the app's tests render, runs them too"
 eq "$RC" 0 "…and passes when they do"
 gitc checkout -q -b same base
 run affected base

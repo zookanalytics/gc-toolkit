@@ -30,7 +30,7 @@ The repository has two test commands, the Makefile's targets, and
 `go test ./...` from the root, the helm web app's typecheck, tests and build,
 whose output must match the committed `dist/`, and every `*.test.sh`.
 `make test-affected` runs the tests a change since `origin/main` can affect:
-the Go tests again, the web checks when the change touches `services/helm/web`,
+the Go tests again, the web checks when the change touches `services/helm`,
 and the suites `tools/run-tests.sh --affected origin/main` selects, by the
 rules in that script's header.
 `gc formula show mol-polecat-work --rig gc-toolkit` shows the commands the rig
@@ -278,8 +278,10 @@ code.
 
 `make test` runs the app's typecheck, its tests and its build, and fails when
 the build's output differs from the committed `dist/`. `make test-affected`
-runs the same checks for a change under `services/helm/web`. No gate lints
-TypeScript.
+runs the same checks for a change under `services/helm`, the app's own files
+or helm's Go code, because the app's tests render the document the rig read
+builds (`src/rigboard/Board.test.tsx` reads the read's golden in
+`internal/rigboard/testdata`). No gate lints TypeScript.
 
 - **The bundle is committed.** helm-svc embeds `dist/` (`web/embed.go`) and
   its builder never runs npm, so a change to the app's runtime code ships only
@@ -298,7 +300,7 @@ TypeScript.
   sample stops matching the type. `go test ./web -run TestBoardFixture -update`
   regenerates the sample. The test commands run both: the parity test with the
   Go tests, and the sample's check in the web build, which `make test-affected`
-  runs for a change under `services/helm/web`.
+  runs for a change under `services/helm`.
 - **Writes carry `X-GC-Request`.** The supervisor proxies helm-svc and refuses
   a mutation without that header, with a 403 that never reaches helm-svc.
   Every write client takes `SVC_WRITE_HEADERS` from `src/svcWrite.ts`, and
