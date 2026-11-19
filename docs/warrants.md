@@ -798,7 +798,8 @@ no warrant.
   directory under the city's `.gc/runtime/packs/gc-toolkit/memory-intake`: the
   list of the notes the distiller kept, each with the bead it waits on or the
   date it is next due, the text of each note it removed, and the names of the
-  removed notes whose pointers did not all come out.
+  removed notes whose pointers did not all come out. It also covers the folder
+  in each memory directory that holds each file the intake displaced.
 - **Stands in for.** Agent memory kept as beads. A memory that is a bead has
   its versions, its writer and its links to work in the ledger, and bd keeps
   the text of one that is deleted. Claude Code keeps memory as files, so the

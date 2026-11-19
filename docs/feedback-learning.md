@@ -180,7 +180,9 @@ the notes the judge kept, with each one's hash and what it waits on, and the
 text of each note it removed, in the pack's state directory. It removes a note
 only while the note is unchanged since the judge read it, and takes out the
 lines of the index and of a collection note (`hub-*.md`) that link a note it
-removed.
+removed. A note it removes, and the text each of its edits replaces, stay as
+files in the memory directory's hidden `.memory-intake` folder, since an agent
+that opened one before can still write to it.
 
 Where what an agent learns goes is guidance every Claude role that keeps
 memory carries in its prompt (`template-fragments/memory-notes.template.md`),

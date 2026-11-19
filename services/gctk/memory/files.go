@@ -20,16 +20,17 @@ import (
 // A new text goes in by an exchange: the new file and the file under the name
 // swap in one step, so the name holds a whole file at every moment. A
 // displaced file that fails the check is a writer's save, and it is swapped
-// back. A removal, once the note's text is kept, moves the file aside to a new
-// name in the same directory. A moved file that fails the check goes back by a
-// rename that fails when a writer has made a new file under the name since.
+// back. A removal, once the note's text is kept, moves the file aside. A moved
+// file that fails the check goes back by a rename that fails when a writer has
+// made a new file under the name since.
 //
-// A write through a handle a writer opened before the exchange or the move
-// lands in the displaced file, so the check sees it, unless it lands after the
-// check, and then it is removed with the displaced file. A run killed while a
-// file is displaced leaves it under its .memory-intake.* name. It holds the
-// text the intake replaced or has kept, unless a writer saved in the moment
-// before the exchange or the move.
+// A writer that opened a file before the exchange or the move can write to it
+// at any moment after, so the intake removes no file that a note's name has
+// held. Each file it displaces stays in the directory's .memory-intake folder,
+// which nothing empties. A write through such a handle that lands before the
+// check is a save the check sees. One that lands after the check, or before a
+// check that a kill stopped, stays in the displaced file in that folder, and
+// the note under the name does not carry it.
 //
 // A removal leaves a note's name free only until a writer saves under it, so
 // a pointer to a removed note comes out only while its name holds no file. A
@@ -48,13 +49,26 @@ var errChanged = errors.New("it changed since it was listed")
 // test can land an agent's save or a kill there. A rewrite takes "swap", the
 // exchange, then "check", the read of the displaced file and the edit run
 // again, then "back", the exchange that returns a displaced file that failed
-// the check. A removal takes "move", the move aside, then "check", then
-// "finish", the removal of the moved file.
+// the check. A removal takes "move", the move aside, then "check".
 var beforeStep = func(step, file string) {}
+
+// asideDir is the folder in a memory directory that holds each file the intake
+// displaced.
+const asideDir = ".memory-intake"
+
+// asideFile makes a new empty file in the aside folder of file's directory, its
+// name begun with file's. A directory that is gone gets no folder.
+func asideFile(file string) (*os.File, error) {
+	dir := filepath.Join(filepath.Dir(file), asideDir)
+	if err := os.Mkdir(dir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+		return nil, err
+	}
+	return os.CreateTemp(dir, filepath.Base(file)+".*")
+}
 
 // put swaps the file at tmp, which holds after, in under file's name while
 // file holds text and edit still makes after of it, and reports whether it
-// did.
+// did. The file that leaves the name stays at tmp.
 func put(file, tmp, text, after string, edit func(string) (string, error)) (bool, error) {
 	beforeStep("swap", file)
 	if err := exchange(tmp, file); err != nil {
@@ -64,7 +78,6 @@ func put(file, tmp, text, after string, edit func(string) (string, error)) (bool
 	beforeStep("check", file)
 	if now, err := os.ReadFile(tmp); err == nil && string(now) == text {
 		if again, err := edit(text); err == nil && again == after {
-			os.Remove(tmp)
 			return true, nil
 		}
 	}
@@ -73,15 +86,14 @@ func put(file, tmp, text, after string, edit func(string) (string, error)) (bool
 		return false, fmt.Errorf("%s holds the intake's edit, and the save it displaced is at %s: %w", file, tmp, err)
 	}
 	if now, err := os.ReadFile(tmp); err == nil && string(now) == after {
-		os.Remove(tmp)
 		return false, nil
 	}
 	return false, fmt.Errorf("%s was saved twice while it was written: it holds the first save, and what was under its name after that is at %s", file, tmp)
 }
 
-// aside moves file to a new name beside it, and returns that name.
+// aside moves file into the aside folder, and returns its name there.
 func aside(file string) (string, error) {
-	f, err := os.CreateTemp(filepath.Dir(file), ".memory-intake.*")
+	f, err := asideFile(file)
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +119,8 @@ func back(moved, file string) error {
 	return fmt.Errorf("%s is at %s and could not be put back under its name: %w", file, moved, err)
 }
 
-// take removes file while it holds the text whose hash is full.
+// take removes file from under its name, into the aside folder, while it holds
+// the text whose hash is full.
 func take(file, full string) (removal, error) {
 	beforeStep("move", file)
 	moved, err := aside(file)
@@ -120,10 +133,6 @@ func take(file, full string) (removal, error) {
 	beforeStep("check", file)
 	now, err := os.ReadFile(moved)
 	if err == nil && sum(string(now)) == full {
-		beforeStep("finish", file)
-		if err := os.Remove(moved); err != nil {
-			return failed, errors.Join(err, back(moved, file))
-		}
 		return removed, nil
 	}
 	if berr := back(moved, file); berr != nil || err != nil {
@@ -154,7 +163,7 @@ func rewrite(file string, edit func(string) (string, error)) (string, bool, erro
 		if fi, err := os.Stat(file); err == nil {
 			mode = fi.Mode().Perm()
 		}
-		tmp, err := os.CreateTemp(filepath.Dir(file), ".memory-intake.*")
+		tmp, err := asideFile(file)
 		if err != nil {
 			return "", false, err
 		}

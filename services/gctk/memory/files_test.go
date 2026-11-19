@@ -88,8 +88,8 @@ func TestRewriteIsGuardedOnTheTextItRead(t *testing.T) {
 	if got := read(t, f); got != "one\nagent\nintake\nagent\nagent\nagent\n" {
 		t.Errorf("the file reads %q; want the agent's text alone", got)
 	}
-	if entries, _ := os.ReadDir(filepath.Dir(f)); len(entries) != 1 {
-		t.Errorf("the rewrite left %d files beside the note", len(entries)-1)
+	if left := beside(t, f); len(left) != 0 {
+		t.Errorf("the rewrite left %q beside the note", left)
 	}
 }
 
@@ -150,9 +150,9 @@ func TestRewriteKeepsBothSavesOfTwoWriters(t *testing.T) {
 	if wrote || err == nil || errors.Is(err, errMoved) {
 		t.Fatalf("rewrite = %v, %v; want it to fail on the two saves", wrote, err)
 	}
-	left := beside(t, f)
+	left := displaced(t, f)
 	if read(t, f) != "one\nfirst\n" || len(left) != 1 {
-		t.Fatalf("the file reads %q, with %q beside it; want the first save, and one file beside it", read(t, f), left)
+		t.Fatalf("the file reads %q, with %q aside; want the first save, and one file aside", read(t, f), left)
 	}
 	for name, text := range left {
 		if text != "second\n" || !strings.Contains(err.Error(), name) {
@@ -162,7 +162,7 @@ func TestRewriteKeepsBothSavesOfTwoWriters(t *testing.T) {
 }
 
 // A rewrite killed at any step leaves a whole file under the name, and every
-// text it displaced beside it.
+// text it displaced in the aside folder.
 func TestARewriteKilledAtAnyStepLeavesAWholeFile(t *testing.T) {
 	edit := func(text string) (string, error) { return text + "intake\n", nil }
 	for _, c := range []struct {
@@ -179,13 +179,13 @@ func TestARewriteKilledAtAnyStepLeavesAWholeFile(t *testing.T) {
 				landAt(t, "swap", func(f string) { appendTo(t, f, c.race) })
 			}
 			killedAt(t, c.step, func() { rewrite(f, edit) })
-			left := beside(t, f)
+			left := displaced(t, f)
 			if read(t, f) != c.name || len(left) != 1 {
-				t.Fatalf("the file reads %q, with %q beside it; want %q, and one file beside it", read(t, f), left, c.name)
+				t.Fatalf("the file reads %q, with %q aside; want %q, and one file aside", read(t, f), left, c.name)
 			}
 			for _, text := range left {
 				if text != c.left {
-					t.Errorf("beside the file %q; want %q", text, c.left)
+					t.Errorf("aside %q; want %q", text, c.left)
 				}
 			}
 		})
@@ -218,9 +218,6 @@ func TestRemoveNoteKeepsASaveMadeAtEachStep(t *testing.T) {
 		"as a new file before the check": {func(t *testing.T) {
 			landAt(t, "check", func(f string) { write(t, f, "d lesson.\nagent\n") })
 		}, removed},
-		"as a new file after the check": {func(t *testing.T) {
-			landAt(t, "finish", func(f string) { write(t, f, "d lesson.\nagent\n") })
-		}, removed},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir, state := t.TempDir(), t.TempDir()
@@ -244,6 +241,9 @@ func TestRemoveNoteKeepsASaveMadeAtEachStep(t *testing.T) {
 			if r == stays && len(all) != 0 {
 				t.Errorf("kept %v for a note that stayed", all)
 			}
+			if aside := displaced(t, f); r == removed && (len(aside) != 1 || !holds(aside, "d lesson.\n")) || r == stays && len(aside) != 0 {
+				t.Errorf("aside %q; want the note removed, and nothing for a note that stayed", aside)
+			}
 		})
 	}
 }
@@ -261,9 +261,9 @@ func TestRemoveNoteKeepsBothSavesOfTwoWriters(t *testing.T) {
 	if r != failed || err == nil {
 		t.Fatalf("removeNote = %v, %v; want it to fail on the two saves", r, err)
 	}
-	left := beside(t, f)
+	left := displaced(t, f)
 	if read(t, f) != "second\n" || len(left) != 1 {
-		t.Fatalf("the note reads %q, with %q beside it; want the second save, and one file beside it", read(t, f), left)
+		t.Fatalf("the note reads %q, with %q aside; want the second save, and one file aside", read(t, f), left)
 	}
 	for name, text := range left {
 		if text != "d lesson.\nfirst\n" || !strings.Contains(err.Error(), name) {
@@ -274,7 +274,7 @@ func TestRemoveNoteKeepsBothSavesOfTwoWriters(t *testing.T) {
 
 // A removal killed at any step leaves the note's text under its name or kept.
 func TestARemovalKilledAtAnyStepKeepsTheText(t *testing.T) {
-	for _, step := range []string{"move", "check", "finish"} {
+	for _, step := range []string{"move", "check"} {
 		t.Run(step, func(t *testing.T) {
 			dir, state := t.TempDir(), t.TempDir()
 			f := filepath.Join(dir, "d.md")
@@ -286,6 +286,59 @@ func TestARemovalKilledAtAnyStepKeepsTheText(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A save through a handle a writer opened before a write, landing once the
+// write is done, stays in the file the write took from under the name: the
+// note a removal moved aside, the text a rewrite displaced, and the edit a
+// rewrite swapped back.
+func TestASaveThroughAHandleOpenedBeforeAWriteStays(t *testing.T) {
+	late := func(t *testing.T, h *os.File) {
+		t.Helper()
+		if _, err := h.WriteString("agent\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edit := func(text string) (string, error) { return text + "intake\n", nil }
+	t.Run("removal", func(t *testing.T) {
+		dir, state := t.TempDir(), t.TempDir()
+		f := filepath.Join(dir, "d.md")
+		write(t, f, "d lesson.\n")
+		h := openAppend(t, f)
+		if r, kept, err := removeNote(state, dir, "d.md", sum("d lesson.\n")); r != removed || err != nil || read(t, kept) != "d lesson.\n" {
+			t.Fatalf("removeNote = %v, %v; want it removed with the text listed kept", r, err)
+		}
+		late(t, h)
+		if aside := displaced(t, f); exists(f) || !holds(aside, "d lesson.\nagent\n") {
+			t.Errorf("aside %q; want the note with the save", aside)
+		}
+	})
+	t.Run("rewrite", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "n.md")
+		write(t, f, "one\n")
+		h := openAppend(t, f)
+		if _, wrote, err := rewrite(f, edit); err != nil || !wrote {
+			t.Fatalf("rewrite = %v, %v", wrote, err)
+		}
+		late(t, h)
+		if aside := displaced(t, f); read(t, f) != "one\nintake\n" || !holds(aside, "one\nagent\n") {
+			t.Errorf("the file reads %q, with %q aside; want the edit, and the text it displaced with the save", read(t, f), aside)
+		}
+	})
+	t.Run("rewrite swapped back", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "n.md")
+		write(t, f, "one\n")
+		landAt(t, "swap", func(f string) { appendTo(t, f, "first\n") })
+		var h *os.File
+		landAt(t, "back", func(f string) { h = openAppend(t, f) })
+		if _, wrote, err := rewrite(f, edit); err != nil || !wrote {
+			t.Fatalf("rewrite = %v, %v", wrote, err)
+		}
+		late(t, h)
+		if aside := displaced(t, f); read(t, f) != "one\nfirst\nintake\n" || !holds(aside, "one\nintake\nagent\n") {
+			t.Errorf("the file reads %q, with %q aside; want the second try's edit, and the first's with the save", read(t, f), aside)
+		}
+	})
 }
 
 // A link names the note its destination names in the directory. A destination

@@ -1,7 +1,9 @@
 package memory
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -261,11 +263,40 @@ func beside(t *testing.T, file string) map[string]string {
 	}
 	out := map[string]string{}
 	for _, e := range entries {
-		if p := filepath.Join(filepath.Dir(file), e.Name()); p != file {
+		if p := filepath.Join(filepath.Dir(file), e.Name()); p != file && !e.IsDir() {
 			out[e.Name()] = read(t, p)
 		}
 	}
 	return out
+}
+
+// displaced is the text of each file in the aside folder of file's directory,
+// by name.
+func displaced(t *testing.T, file string) map[string]string {
+	t.Helper()
+	dir := filepath.Join(filepath.Dir(file), asideDir)
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		out[e.Name()] = read(t, filepath.Join(dir, e.Name()))
+	}
+	return out
+}
+
+// holds reports whether one of files holds text.
+func holds(files map[string]string, text string) bool {
+	for _, got := range files {
+		if got == text {
+			return true
+		}
+	}
+	return false
 }
 
 func read(t *testing.T, file string) string {
