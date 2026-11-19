@@ -17,7 +17,10 @@ what a test at a script's command line covers, what stands in for each outside
 system and what holds it to the real one, and how a test reads the state it
 asserts on.
 
-**Boundaries.** How tests are run in parallel, their parts and their time
+**Boundaries.** The repository's two test commands, `make test` and
+`make test-affected`, are the [Makefile](../Makefile)'s, and
+[tools/test.sh](../tools/test.sh) says what each runs. How the shell suites are
+run in parallel, which of them a change selects, their parts and their time
 limits are [tools/run-tests.sh](../tools/run-tests.sh)'s header. What a CI
 check runs is [.github/workflows/tests.yml](../.github/workflows/tests.yml).
 The rules a gctk domain follows as it moves out of shell are

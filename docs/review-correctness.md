@@ -25,21 +25,36 @@ state where a rule that binds only gc-toolkit's own repository lives.
 
 ## Where the gates run
 
+The repository has two test commands, the Makefile's targets, and
+`tools/test.sh` says what each runs. `make test` runs every test: the Go tests,
+`go test ./...` from the root, the helm web app's typecheck, tests and build,
+whose output must match the committed `dist/`, and every `*.test.sh`.
+`make test-affected` runs the tests a change since `origin/main` can affect:
+the Go tests again, the web checks when the change touches `services/helm`,
+and the suites `tools/run-tests.sh --affected origin/main` selects, by the
+rules in that script's header.
 `gc formula show mol-polecat-work --rig gc-toolkit` shows the commands the rig
 declares.
 
 - The polecat's self-review runs `lint_command`: `tools/lint-learned.sh` over
   the files the branch changes, then `tools/lint.sh`, which checks the step text
   of the formulas among them and runs shellcheck, go vet and gofmt over the
-  whole tracked tree. It runs the suites
-  `tools/run-tests.sh --affected origin/main` selects, by the rules in that
-  script's header, through `gctk rig`, which records the result at the commit
-  it ran at. When that record at the reviewed commit is a pass, the method runs
-  no suite.
+  whole tracked tree. It runs `affected_tests_command`, or `test_command` where
+  the rig declares no affected one, through `gctk rig`, which records the
+  result and the command at the commit it ran at.
 - The refinery runs the same `lint_command` at merge, and no tests.
-- CI runs the whole `*.test.sh` suite on Linux and on macOS
-  (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
-  merge waits on the checks main's ruleset requires.
+- CI runs `make test` on Linux and on macOS (`.github/workflows/tests.yml`), as
+  the checks `test` and `test-macos`, and no lint. Main's ruleset requires
+  both, so every merge waits on every test passing on both platforms.
+
+A review runs no test that a gate already ran at the commit it reviews. The
+review prints the test record with the command it ran, and a pass covers what
+that command runs. `make test` and `make test-affected` run the Go tests, the
+web checks and the suites, as above, so after a pass of either the method runs
+nothing.
+`tools/run-tests.sh` runs only the suites, so after a pass of a command that
+runs it alone, the review runs `make test-affected` plain for the Go tests and
+the web checks, and the suites run again with them.
 
 ## Pack content every rig runs
 
@@ -205,18 +220,14 @@ each file needing it carries as a copy.
 ## The Go services
 
 `tools/lint.sh` runs `go vet ./...` over the repository's one Go module and
-`gofmt -l` over every tracked Go file, at the self-review and at merge. Vet
-type-checks test files and runs none of them, and no gate runs `go test`. CI's
-whole suite drives gctk end to end, because each suite whose scripts reach
-`lifecycle.sh` or `merge.sh` builds gctk from the checkout (`harness_build_gctk`
-in `assets/scripts/test-harness.sh`). `merge.test.sh` and `lifecycle.test.sh`
-name none of gctk's `.go` files, so the affected subset leaves them out of a
-gctk change, and no suite it selects for a Go change builds the code that
-changed. No suite builds or runs helm-svc. So on a Go diff the review runs
-`go test ./...` from the repository root, and for gctk the suites of the
-commands it changes. On the host helm compiles only with ICU's cgo flags, so
-its tests run with `CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags`
-in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
+`gofmt -l` over every tracked Go file, at the self-review and at merge. Both
+test commands run `go test ./...` from the root, so CI runs every Go test, and
+so does a self-review whose test command runs either one. The shell suites
+drive gctk end to end, because each suite whose scripts reach `lifecycle.sh` or
+`merge.sh` builds gctk from the checkout (`harness_build_gctk` in
+`assets/scripts/test-harness.sh`), and the affected subset runs those suites
+for a change to any package gctk is built from. No suite builds or runs
+helm-svc, so its Go tests are all that test helm's Go code.
 
 - **Live at the next build, with no fallback.** The `gctk-build` and
   `helm-build` orders run `assets/scripts/gc-build.sh` every five minutes, so
@@ -271,16 +282,18 @@ in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
 
 ## The helm web app
 
-No gate runs the web checks or lints TypeScript. `npm run typecheck`,
-`npm test` and `npm run build` run in no CI job, suite or gate command, and no
-suite the affected subset selects for a path under `services/helm/web` runs
-the app's code. The review runs them in `services/helm/web` after `npm ci`,
-then checks that `git status --porcelain -- dist` prints nothing.
+`make test` runs the app's typecheck, its tests and its build, and fails when
+the build's output differs from the committed `dist/`. `make test-affected`
+runs the same checks for a change under `services/helm`, the app's own files
+or helm's Go code, because the app's tests render the document the rig read
+builds (`src/rigboard/Board.test.tsx` reads the read's golden in
+`internal/rigboard/testdata`). No gate lints TypeScript.
 
 - **The bundle is committed.** helm-svc embeds `dist/` (`web/embed.go`) and
   its builder never runs npm, so a change to the app's runtime code ships only
   with the rebuilt `dist/` in the same diff. A runtime change that ships
-  renames `dist/assets/index-*.js`, and no gate compares `dist/` with `src/`.
+  renames `dist/assets/index-*.js`, and the test commands fail while `dist/`
+  lags `src/`.
 - **The page's types are generated.** The page reads one document per rig, and
   `src/rigboard/document.gen.ts` is generated from its Go types by
   `go test ./internal/rigboard -run TestPageTypesAreCurrent -update`, which
@@ -291,7 +304,9 @@ then checks that `git status --porcelain -- dist` prints nothing.
   `web/contract_parity_test.go` compares the two in both directions, and
   `src/contract.fixture.ts` fails `npm run build` when the committed wire
   sample stops matching the type. `go test ./web -run TestBoardFixture -update`
-  regenerates the sample. Neither check runs in a gate.
+  regenerates the sample. The test commands run both: the parity test with the
+  Go tests, and the sample's check in the web build, which `make test-affected`
+  runs for a change under `services/helm`.
 - **Writes carry `X-GC-Request`.** The supervisor proxies helm-svc and refuses
   a mutation without that header, with a 403 that never reaches helm-svc.
   Every write client takes `SVC_WRITE_HEADERS` from `src/svcWrite.ts`, and
