@@ -541,9 +541,3 @@ why a reader must know it, and the work that retires it.
   moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)
   deletes the old path once every rig has moved and the GitHub intake
   (tk-1tfzr71.21) has landed.
-- **A copy started before the city's configuration named its rig keeps the
-  live city in reach.** A copy keeps the reach it started with, so the
-  decision on a copy of a rig's UI does not hold for it. A capture of the rig
-  takes such a copy as it takes any other, and its demo can then show the live
-  city's data. The work that has that capture refuse such a copy (tk-3abs56p)
-  retires this.

@@ -255,25 +255,27 @@ exit 1
 NPX
 # gctk, at the city's build path, stands in for gctk rig serve: a start runs the
 # serve command through the library, which GCTK_SCRIPTS_DIR names, as the copy's
-# leader does, keeps the profile it ran in when sandbox-exec ran it, and reports
-# the copy on 50200 as one it started, its app at FAKE_APP_URL, or at the copy's
-# loopback URL when that is empty, which --check then reports from the copy's
-# checkout. lsof names the copy's process as the one listening there, working in
-# that checkout.
+# leader does, with the record where the library says whether the command runs
+# inside the sandbox, keeps the profile it ran in when sandbox-exec ran it, and
+# reports the copy on 50200 as one it started, its app at FAKE_APP_URL, or at
+# the copy's loopback URL when that is empty, which --check then reports from
+# the copy's checkout. Each report carries that record as sandboxed. lsof names
+# the copy's process as the one listening there, working in that checkout.
 mkdir -p "$CITY/.gc/services/gctk/bin"
 { printf '%s\n' "$SHEBANG"; cat; } > "$CITY/.gc/services/gctk/bin/gctk" <<'GCTK'
 printf '%s (in %s)\n' "$*" "$(pwd)" >> "$FAKE_DIR/gctk.argv"
+sandboxed() { case "$(cat "$FAKE_DIR/sandboxed" 2>/dev/null)" in true) printf ',"sandboxed":true' ;; false) printf ',"sandboxed":false' ;; esac; }
 case "$*" in
   "rig serve --check")
-    if [ "$(cat "$FAKE_DIR/copy-dir" 2>/dev/null)" = "$(pwd)" ]; then printf '{"state":"running","port":50200,"app_url":"%s"}\n' "${FAKE_APP_URL:-http://127.0.0.1:50200/}"; exit 0; fi
+    if [ "$(cat "$FAKE_DIR/copy-dir" 2>/dev/null)" = "$(pwd)" ]; then printf '{"state":"running","port":50200,"app_url":"%s"%s}\n' "${FAKE_APP_URL:-http://127.0.0.1:50200/}" "$(sandboxed)"; exit 0; fi
     printf '{"state":"none"}\n'; exit 3 ;;
   "rig serve --command "*)
-    rm -f "$FAKE_DIR/profile"
-    ( . "$GCTK_SCRIPTS_DIR/demo-engine-lib.sh" && demo_engine_sandboxed 50200 "$(pwd)" true ) \
+    rm -f "$FAKE_DIR/profile" "$FAKE_DIR/sandboxed"
+    ( export DEMO_ENGINE_SANDBOX_RECORD="$FAKE_DIR/sandboxed" && . "$GCTK_SCRIPTS_DIR/demo-engine-lib.sh" && demo_engine_sandboxed 50200 "$(pwd)" true ) \
       || { printf '{"state":"failed","reason":"serve-exited"}\n'; exit 1; }
     [ ! -e "$FAKE_DIR/profile" ] || cp "$FAKE_DIR/profile" "$FAKE_DIR/copy-profile"
     pwd > "$FAKE_DIR/copy-dir"
-    printf '{"state":"running","port":50200,"app_url":"%s","started":true}\n' "${FAKE_APP_URL:-http://127.0.0.1:50200/}" ;;
+    printf '{"state":"running","port":50200,"app_url":"%s"%s,"started":true}\n' "${FAKE_APP_URL:-http://127.0.0.1:50200/}" "$(sandboxed)" ;;
   "rig serve --stop") rm -f "$FAKE_DIR/copy-dir"; printf '{"state":"stopped"}\n' ;;
 esac
 exit 0
