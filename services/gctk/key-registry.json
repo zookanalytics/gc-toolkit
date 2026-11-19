@@ -214,6 +214,22 @@
     "doc": "The run link reports a run's formula as its root's. The formula a workflow root was poured from, which Gas City stamps at the pour (lifecycle/lifecycle.toml, [metadata.runtime_owned]). A live root of mol-pr-review that a blocks edge of a PR's bead names is a review run attached to the bead, and the landing order marks no PR ready while one is."
   },
   {
+    "name": "gc.handback",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "On a conversation, the latest hand-back its converse sitting posted, whole, which gc-helm.sh handback writes, each record replacing the one before (lifecycle/lifecycle.toml, [metadata.human_surface])."
+  },
+  {
+    "name": "gc.handback_at",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "When a conversation's latest hand-back was recorded, RFC 3339 UTC, written with it."
+  },
+  {
     "name": "gc.input_convoy_id",
     "type": "string",
     "readers": [

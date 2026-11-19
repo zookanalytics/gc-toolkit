@@ -80,18 +80,19 @@ func open(c *gcbd.Client, db string, ids ...string) (*Ledger, error) {
 var ErrGuard = gcbd.ErrGuard
 
 // Write is one act on one bead: every key it sets or clears, the title it gives
-// the bead, the status it moves the bead to, the note it appends and the guard
-// it lands under, made in one update.
+// the bead, the status it moves the bead to, the agent it assigns the bead to,
+// the note it appends and the guard it lands under, made in one update.
 type Write struct {
-	id     string
-	title  string
-	sets   []string // key=value, in the order set
-	unsets []string
-	status string
-	note   string
-	prio   *int
-	guard  *guard
-	err    error
+	id       string
+	title    string
+	sets     []string // key=value, in the order set
+	unsets   []string
+	status   string
+	assignee *string
+	note     string
+	prio     *int
+	guard    *guard
+	err      error
 }
 
 // guard is the status and assignee a write lands under.
@@ -126,6 +127,12 @@ func (w *Write) Title(title string) { w.title = title }
 // checked close, which bd refuses while a live blocker or an open child holds
 // the bead.
 func (w *Write) Status(status string) { w.status = status }
+
+// Assignee assigns the bead to assignee in the same write, "" for nobody. Gas
+// City reads an assignee as the delivery of the bead to that session as its
+// work, so an act that hands the bead to an agent assigns it, and an act that
+// ends the agent's work assigns it to nobody.
+func (w *Write) Assignee(assignee string) { w.assignee = &assignee }
 
 // Note appends text to the bead's notes in the same write, so the act and its
 // record land together or not at all. A later Note replaces an earlier one.
@@ -162,8 +169,8 @@ func (w *Write) WorkRecord(outcome, commit, branch string) {
 // is ErrGuard.
 func (w *Write) Guard(status, assignee string) { w.guard = &guard{status: status, assignee: assignee} }
 
-// args is the update's arguments: the guard, the status, the title, every set,
-// every removal, then the note.
+// args is the update's arguments: the guard, the status, the assignee, the
+// title, every set, every removal, then the note.
 func (w *Write) args() []string {
 	var args []string
 	if w.guard != nil {
@@ -171,6 +178,9 @@ func (w *Write) args() []string {
 	}
 	if w.status != "" {
 		args = append(args, "--status="+w.status)
+	}
+	if w.assignee != nil {
+		args = append(args, "--assignee="+*w.assignee)
 	}
 	if w.title != "" {
 		args = append(args, "--title", w.title)
@@ -327,7 +337,7 @@ func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
-	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.title == "" && w.note == "" && w.prio == nil {
+	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" && w.prio == nil {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}
 	if out, err := l.store.Update(w.id, w.args()...); err != nil {

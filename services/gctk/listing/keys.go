@@ -17,6 +17,11 @@ var (
 	workOutcomeKey = ledger.ReadOnly("gc.work_outcome", ledger.String,
 		"A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's "+
 			"(lifecycle/lifecycle.toml, [metadata.runtime_owned]).", ledger.Alias("work_outcome"))
+	handbackKey = ledger.ReadOnly("gc.handback", ledger.String,
+		"On a conversation, the latest hand-back its converse sitting posted, whole, which gc-helm.sh "+
+			"handback writes, each record replacing the one before (lifecycle/lifecycle.toml, [metadata.human_surface]).")
+	handbackAtKey = ledger.ReadOnly("gc.handback_at", ledger.String,
+		"When a conversation's latest hand-back was recorded, RFC 3339 UTC, written with it.")
 )
 
 // An epic's contract and its latest ruling (lifecycle/lifecycle.toml,

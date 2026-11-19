@@ -228,14 +228,15 @@ and, each behind an opt-in flag so a caller pays only for what it needs:
 is transitive. A bead is `advancing` when its own state moves and every open
 blocker beneath it advances too. Its own state moves when it is in progress or
 hooked, routed to a worker or pool, assigned to an agent, a review, rework,
-validation or finding bead of the review cycle, armed for deferred dispatch, or
-a merge anchor the cadence will act on. Anything else is `stuck`, and `stuck_on`
-names the bead that stops it, with one of these reasons:
+validation or finding bead of the review cycle, armed for deferred dispatch, a
+merge anchor the cadence will act on, or the bead a live run works. Anything
+else is `stuck`, and `stuck_on` names the bead that stops it, with one of these
+reasons:
 
 | `why` | The bead that stops it |
 |---|---|
 | `human` | is a human gate, is assigned to `human`, is a decision, is a finding that needs the operator, or is an anchor parked in a human state |
-| `unrouted` | is open with no route, no arm and no assignee, so nothing picks it up |
+| `unrouted` | is open with no route, no arm, no assignee and no live run working it, so nothing picks it up |
 | `held` | has any status but open, in progress or hooked: blocked, deferred, pinned, or a status its store adds |
 | `approval` | is a PR the cadence has settled, waiting on the operator's review (review required, or changes requested) |
 | `merge-hold` | carries an operator merge or rebase hold |
@@ -243,17 +244,29 @@ names the bead that stops it, with one of these reasons:
 | `unread` | is an anchor whose machine axis, or whose PR posture at that axis's head, is not recorded |
 | `capped` | is armed, but its dispatch hit the sling-failure cap and went to a person |
 | `cycle` | waits, through its blockers, on itself |
-| `unknown` | could not be read, or lives in a store no rig carries |
+| `unknown` | could not be read, lives in a store no rig carries, or is open with no route, no arm and no assignee and was read from a store the walk could not place or whose runs could not be read |
 | `budget` | lies past where the walk stopped reading |
 
 So an armed bead takes its blockers' verdict, and a routed bead behind an orphan
 is stuck on the orphan. A merge anchor is judged by its recorded `pr.machine`
-and `pr_posture`, never by the route the merge cadence clears. A human gate, a
-decision or a bead assigned to `human` outranks every moving state except in
-progress. A row read cannot see liveness. A claim or route whose session has
-died still reads advancing. A bead a poured molecule is working, whether its
-work bead or one of its inline steps, carries no route of its own, so it reads
-`unrouted` while that molecule runs.
+and `pr_posture`, never by the route the merge cadence clears or by a run that
+works it. A human gate, a decision or a bead assigned to `human` outranks every
+moving state except in progress.
+
+A pour leaves the bead its run works open, unassigned and unrouted, so its row
+alone cannot say a run holds it. The walk asks the bead's store which beads its
+live runs work, through the map verb of `assets/scripts/run-lib.sh`, the pack's
+one reader of that link. It asks only a store it has placed, the one `--db` or
+`--store` names or a bead's prefix binds. A read of runs names no bead, so gc
+would answer an unpinned one from the caller's own store, whichever store the
+bead came from. Such a bead read from a store the walk could not place reads
+`unknown`. A run is live until its root closes. Its input convoy
+is no sign of one, because a run that finished or was cancelled leaves the
+convoy open for as long as the bead is open. The runs name the bead a run works
+and none of its steps, so an inline step, which carries no route of its own,
+reads `unrouted`. Liveness is out of reach of these reads: a claim, a route or
+a run whose session has died still reads advancing, and
+`doctor/check-root-advancing` reports a stranded root.
 
 The converse opening opts into both, so its subject slice, the readiness verdict
 and the epic-health snapshot arrive from one call. A caller that only needs
@@ -329,4 +342,7 @@ nearest first, and counts each one as open until its row comes back, so a level
 wider than the budget has left is cut short. A closed row costs nothing against
 the budget. When a cut read brings back closed rows, the beads it left out lead
 the next read, which counts as a level. Anything the walk has not read when it
-stops reads stuck with `why=budget`.
+stops reads stuck with `why=budget`. A store's runs are read once in a walk,
+and only once the store holds a walked bead whose row alone reads `unrouted`, or
+holds the subject while a walked bead waits on it, since nothing else reads the
+subject's own state.

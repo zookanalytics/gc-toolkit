@@ -477,7 +477,7 @@ default_sling_formula = "mol-polecat-work"
 #
 # gc-toolkit is the plain shape: this pack and nothing else, shared with the
 # city's application rigs. gascity adds the opt-in sub-pack plus the
-# [[rigs.patches]] that append its rebase doctrine to two agents — not
+# [[rigs.patches]] block that appends its rebase doctrine to the polecat — not
 # decoration, it is the only way the fragment table in INDEX.md can show the
 # rig-scope divergence that `gc prime` cannot render.
 [[rigs]]
@@ -498,9 +498,6 @@ source = "@@ROOT@@/packs/gascity-keeper"
 [[rigs.patches]]
 agent = "polecat"
 inject_fragments_append = ["rebase-conventions", "polecat-patterns"]
-[[rigs.patches]]
-agent = "refinery"
-inject_fragments_append = ["rebase-conventions", "refinery-rebase-handling"]
 EOF
     cat > "$CITY/.gc/site.toml" <<'EOF'
 [[rig]]

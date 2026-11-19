@@ -10,11 +10,15 @@ the retirement pass over adopted rules is unconditional, every run. Judging
 uses the learning-distill rubric (D6: promotion is a reasoned judgment — a
 standing directive or operator-endorsed observation promotes at N=1, a
 diff-scoped nit waits for recurrence; counts and heat are inputs, never
-arithmetic). Output: at most a few change-unit `prompt-update` beads. Each
-waits for the operator's placement, then rides the pool worker -> refinery ->
+arithmetic). Output: at most a few change-unit beads, each a `prompt-update`
+proposal or a fix in code. Each prompt-update and engineering bead waits for
+the operator's placement, then rides the pool worker -> refinery ->
 operator-review pipeline (D3). Base rate: ZERO or ONE proposals per run; a
 chatty run is a smell.
 
+A lesson one moment needs is a fix in the code that moment loads, and the
+rubric's Fixes in code says where it goes, what its engineering bead says and
+how code another owner holds is filed.
 A proposal names a CARRIER before it names rule text: a conventions bullet,
 an operator-profile entry, a work-quality entry, a review-rubric dimension, or
 an exemplar pair.
@@ -361,7 +365,7 @@ written down — the D3 reviewer judges from the PR alone), **hold** (say
 what recurrence would change the call), **contest** (becomes a human gate in
 file-and-dispatch), **discard with reason**, **surface** (Gate 1 block — hold
 awaiting corroboration or operator endorsement), or **route-to-engineering**
-(Gate 2 — file-and-dispatch files an engineering bead instead). §7 turns each
+(the rubric's Fixes in code: file-and-dispatch files its bead). §7 turns each
 outcome into the pattern's state.
 
 ## 5. Retirement pass over adopted rules — EVERY run (gated runs included)
@@ -532,15 +536,17 @@ gc bd dep add "$PATTERN" "$BEAD" --type=blocks
 gc bd update "$PATTERN" --set-metadata "proposal_bead=$BEAD" --set-metadata "proposal_carrier=<carrier>" --set-metadata "proposal_action=<action>"
 ```
 
-## 1b. Engineering beads (Gate 2 outcomes)
+## 1b. Engineering beads (fixes in code)
 
-A route-to-engineering cluster gets ONE ordinary work bead describing the
-mechanical fix (lint / doctor check / gate / code change). It waits for
-placement the same way: `-l hold:mayor` on its create, and no route. It
-carries no task_kind=prompt-update and no bullet-cap accounting. Dedup on the
-pattern bead's `eng_bead` first (skip while it or its PR is live).
+A route-to-engineering cluster gets ONE ordinary work bead, briefed and filed
+as the rubric's Fixes in code says. It waits for placement the same way:
+`-l hold:mayor` on its create, and no route. It carries no
+task_kind=prompt-update and no bullet-cap accounting. Dedup on the pattern
+bead's `eng_bead` first (skip while it or its PR is live).
 The pattern waits on it and records the outcome, so later runs neither
-re-judge toward prose nor file a duplicate:
+re-judge toward prose nor file a duplicate. A bead in another store takes no
+edge, and an upstream finding takes neither command (the rubric's Fixes in
+code):
 ```bash
 gc bd dep add "$PATTERN" "$EBEAD" --type=blocks
 ```

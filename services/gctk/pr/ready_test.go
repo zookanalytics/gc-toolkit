@@ -81,13 +81,14 @@ func (r *rule) Awaiting(_, _ string, ts []feedback.Thread) ([]string, error) {
 
 // world is one bead on the pending record and its PR on GitHub.
 type world struct {
-	store  *fake.Store
-	github *ghfake.GitHub
-	rule   *rule
-	pr     *ghfake.PR
-	md     map[string]string
-	edges  []gcbd.Edge
-	others []fake.Bead
+	store    *fake.Store
+	github   *ghfake.GitHub
+	rule     *rule
+	pr       *ghfake.PR
+	md       map[string]string
+	edges    []gcbd.Edge
+	others   []fake.Bead
+	assignee string
 }
 
 func approve(id int64, login, at string) gh.Review {
@@ -128,8 +129,7 @@ func ready() *world {
 
 // put writes the world's bead with md as its metadata, and the other beads.
 func (w *world) put(md map[string]string) {
-	w.store.Put(fake.Bead{ID: bead, Title: "the work", Status: "blocked", Assignee: "rig/refinery",
-		Metadata: md, Edges: w.edges})
+	w.store.Put(fake.Bead{ID: bead, Title: "the work", Status: "blocked", Assignee: w.assignee, Metadata: md, Edges: w.edges})
 	for _, b := range w.others {
 		w.store.Put(b)
 	}
@@ -562,6 +562,15 @@ func TestTheBeadsOwnWaitsAndHolds(t *testing.T) {
 	}
 	t.Run("the blocked status the record writes is no wait", func(t *testing.T) {
 		isReady(t, ready().answer(t))
+	})
+	t.Run("a bead someone is assigned is theirs while they work it", func(t *testing.T) {
+		w := ready()
+		w.assignee = "rig/gc-toolkit.polecat-1"
+		a := w.answer(t)
+		only(t, a, pr.KindAssigned)
+		if c := a.Conditions[0]; c.Value != w.assignee || !strings.Contains(c.Detail, w.assignee) {
+			t.Fatalf("the condition %+v does not name who works the bead", c)
+		}
 	})
 }
 

@@ -45,6 +45,7 @@ var pkgLayer = map[string]struct {
 	"internal/gcbd":          {adapter, "store"},
 	"internal/gcbd/fake":     {adapter, "store"},
 	"internal/gcbd/gcbdtest": {adapter, "store"},
+	"internal/gcbd/fakegc":   {layer: binary},
 	"internal/daemon":        {adapter, "store"},
 	"internal/feedback":      {adapter, "feedback"},
 	"internal/git":           {adapter, "git"},

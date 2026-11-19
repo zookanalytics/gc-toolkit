@@ -1602,7 +1602,10 @@ keys = [
 #   the operator's terminal as the sitting's last words. Absent, the tab says
 #   the sitting recorded no hand-back. Once the conversation reads closed,
 #   pr-sitting-comment.sh shows the text word for word as the visit's conclusion
-#   in its comment on the subject's PR. Never cleared. Freeform multi-line text.
+#   in its comment on the subject's PR. The rig board reads both through gctk's
+#   listing and opens an open decision's Details with the newest hand-back on a
+#   conversation that tracks it, open or closed. Never cleared. Freeform
+#   multi-line text.
 # gc.ruling_consequence — on a conversation, the open PR each of its rulings'
 #   --rework or --retire acts on: a JSON object from the ruling's answer
 #   (`ruled: <ruling>`) to {act, anchor, child}, act `rework` or `retire`,
@@ -1886,7 +1889,10 @@ keys = [
 #   it read back from origin and the branch that head is on. The close of an ask
 #   an earlier round of the run fixed, by `gctk review passed --record`, writes
 #   them from the fix's commit and the PR's branch, which the repair pushed that
-#   commit onto from a worktree of the rig checkout. bead-rehome.sh
+#   commit onto from a worktree of the rig checkout. The opt-in
+#   packs/gascity-keeper sub-pack's landing check (rebase-landing.sh) writes them
+#   from the rebased tip the operator pushed and the branch it landed on, when
+#   it closes a landed rebase. bead-rehome.sh
 #   reads gc.work_dir and gc.work_commit — with the pack-written bare work_dir
 #   defined in merge_identity — as proof a run produced work before a duplicate
 #   or fixed-upstream close.
@@ -1904,9 +1910,10 @@ keys = [
 #   bead closes, and warns on a missing or unknown value unless
 #   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `shipped`
 #   from the lifecycle writer's transition into `merged`, from
-#   mol-refinery-patrol.toml's rework hand-back close and from the review
-#   loop's check (`gctk review passed --record`) closing an ask an earlier
-#   round fixed, and `no-op` from
+#   mol-refinery-patrol.toml's rework hand-back close, from the review loop's
+#   check (`gctk review passed --record`) closing an ask an earlier round fixed
+#   and from the gascity-keeper sub-pack's landing check closing a landed
+#   rebase, and `no-op` from
 #   mol-validate-close, work-outcome.sh on every conversation close, the
 #   observation-filing recipes, the review loop's check closing any other ask
 #   the run answered, the landing order's close of a withdrawal it carried out,
