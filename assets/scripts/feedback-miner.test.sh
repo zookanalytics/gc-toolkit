@@ -786,8 +786,15 @@ OUT=$(PATH="$KILLBIN:$PATH" STUB_KILL_PR=11 "$SUT" sweep --checkout "$CO" --days
 has "$OUT" "did not read, left for the next run: 11" "(85c) a worker killed while it writes a PR's posts leaves that PR unread"
 "$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 11 review 101)")" "outside" "(85d) so a resumed sweep into the same dir reads it again"
-WHOLE=0; while IFS= read -r l; do case "$l" in \{*\}) ;; *) WHOLE=1 ;; esac; done < "$W/sweep.jsonl"
-eq "$WHOLE" "0" "(85e) and every line of the resumed sweep is a whole object"
+# A whole line is one post: it opens with the post's key, closes its object,
+# and opens no second post, as a cut line joined to the next line does. A last
+# line with no newline is read too.
+WHOLE=0
+while IFS= read -r l || [ -n "$l" ]; do
+  case "$l" in '{"key":"'*'}') ;; *) WHOLE=1 ;; esac
+  case "${l#\{}" in *'{"key":'*) WHOLE=1 ;; esac
+done < "$W/sweep.jsonl"
+eq "$WHOLE" "0" "(85e) and every line of the resumed sweep is one whole post"
 # A sweep cut short before it finished writes no read.txt.
 rm -f "$W/read.txt"
 kv_put "$(day 30)"
