@@ -38,7 +38,7 @@ declares.
 - CI (`.github/workflows/tests.yml`) runs on a pull request to main once the
   pull request is ready, and on a push to main. `test` and `test-macos` run the
   whole `*.test.sh` suite on Linux and on macOS, and `go` and `go-macos` run
-  `go vet ./...` and `go test ./...` in `services/gctk` and in `services/helm`,
+  `go vet ./...` and `go test ./...` over every Go package in the repository,
   on Linux and on macOS. No CI job runs `lint_command` or an npm command. Every
   merge waits on the checks main's ruleset requires, which are `test`,
   `test-macos` and `go`, so a failure only `go-macos` shows holds no merge.
@@ -214,8 +214,8 @@ each file needing it carries as a copy.
 `tools/lint.sh` runs `go vet ./...` in each module and `gofmt -l` over every
 tracked Go file, at the self-review and at merge. Vet type-checks test files
 and runs none of them, so neither the self-review nor the merge runs
-`go test`. CI's `go` and `go-macos` jobs run `go test ./...` in both modules,
-and only `go` holds a merge. CI's whole suite also drives gctk end to end,
+`go test`. CI's `go` and `go-macos` jobs run it over every Go package, and
+only `go` holds a merge. CI's whole suite also drives gctk end to end,
 because each suite whose scripts reach `lifecycle.sh` or `merge.sh` builds gctk
 from the checkout (`harness_build_gctk` in `assets/scripts/test-harness.sh`).
 `merge.test.sh` and `lifecycle.test.sh` name none of gctk's `.go` files, so the
@@ -289,8 +289,8 @@ On the host helm compiles only with ICU's cgo flags, so its tests run with
 No gate runs the web checks or lints TypeScript. `npm run typecheck`,
 `npm test` and `npm run build` run in no CI job, suite or gate command, and no
 suite the affected subset selects for a path under `services/helm/web` runs
-the app's code. CI's `go` and `go-macos` jobs run helm's Go tests, the ones
-that read the app's files among them. The review runs the npm commands in
+the app's code. CI's `go` and `go-macos` jobs run helm's Go tests, among them
+those that read the app's files. The review runs the npm commands in
 `services/helm/web` after `npm ci`, then checks that
 `git status --porcelain -- dist` prints nothing.
 
@@ -308,7 +308,7 @@ that read the app's files among them. The review runs the npm commands in
   `web/contract_parity_test.go` compares the two in both directions, and
   `src/contract.fixture.ts` fails `npm run build` when the committed wire
   sample stops matching the type. `go test ./web -run TestBoardFixture -update`
-  regenerates the sample. CI's go jobs run `web/contract_parity_test.go`, and
+  regenerates the sample. CI's Go jobs run `web/contract_parity_test.go`, and
   no gate runs `npm run build`.
 - **Writes carry `X-GC-Request`.** The supervisor proxies helm-svc and refuses
   a mutation without that header, with a 403 that never reaches helm-svc.
