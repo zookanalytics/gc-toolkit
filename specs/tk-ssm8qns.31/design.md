@@ -25,12 +25,15 @@ The first reaction now runs in gctk, and this design says, for each thing the
 sitting found, whether to change it. 1a makes a check faster and 1b makes an
 idle sweep read far less, both with the same answers. 3a fixes a rule that
 refuses routes to pools Gas City runs without a cap. 3b hands a question back
-to Gas City's own answer. The other rows keep what exists, or leave it to work
-that already owns it.
+to Gas City's own answer. 6c fixes, on the city's fork of Gas City, the one path
+that leaves a pour half-finished, and 6a's guard goes once the city runs that
+build. The other rows keep what exists, or leave it to work that already owns
+it.
 
 Each row is one ruling, and you can take or refuse each one alone. Approving the
 design as it stands takes every recommendation, and refusing a row takes the
-other way it names.
+other way it names. You ruled rows 6a to 6c in conversation tk-fp92h81 on
+2026-11-19, and what they send is filed: section 6 names each bead.
 
 | # | The finding | Recommended | What approving it ships | The other way |
 |---|---|---|---|---|
@@ -45,9 +48,9 @@ other way it names.
 | 5b | "May this bead take a reaction" is asked at four points under two rules, and in one case the check and the sling disagree | Leave it to the same redesign, whose target 1 moves the question to the offer path | A note on that bead | Make the check apply the sling's rule exactly now |
 | 5c | The emergency lane, which routes a fix for a red main at P0 past placement, used once in the month counted | Keep it | Nothing changes | Retire it, so such a fix waits for placement |
 | 5d | The blocked exit files the bead its subject waits on, and arms the subject's dispatch | Keep both | Nothing changes | Retire either act |
-| 6a | The arm's start keeps its own guard for a pour Gas City left unfinished, the guard you ruled Gas City's for the reaction | Keep it until Gas City finishes or clears such pours, which 6c asks for | Nothing changes: a dispatch whose pour a killed client left fenced stays armed, and you are asked to close the pour | Remove it, as the reaction's was removed, so such a dispatch reads as sent, its work does not run, and nobody is asked |
-| 6b | Accept cannot see a pour Gas City left unfinished | Hold the report on the board member that rewrites Accept | A note there, and a wait | Fix Accept's search now, in code that member rewrites |
-| 6c | The ask that Gas City finish or clear such pours, whose first part an open upstream issue already asks | Send its second part as an issue, and its first as a comment on that issue | Your send | Leave it held |
+| 6a | The arm's start keeps its own guard for a pour Gas City left unfinished, the guard you ruled Gas City's for the reaction | Keep it until the city runs a build with 6c's fix, then remove it | Nothing changes now. The removal is filed (tk-ssm8qns.34), and it waits on a gate you clear once you have installed that build | Remove it now, ahead of the fix, so until the fix is live a dispatch whose pour a killed client left fenced reads as sent, its work does not run, and nobody is asked |
+| 6b | Accept cannot see a pour Gas City left unfinished | Leave Accept as it is, and close the report once 6c's fix is live | A note on the board member that rewrites Accept, and the report's wait on 6a's removal | Fix Accept's search now, in code that member rewrites |
+| 6c | Gas City leaves a pour half-finished on one path, its fallback from the one-batch pour to a bead-by-bead pour | Fix it on the city's fork: where a batch pour exists, a batch that fails twice returns its error, and the fallback is not taken | The fix, built by the gascity rig (gc-3znzo8), with a commit written to serve as an upstream PR's description, which you offer upstream when you choose | Keep the fallback, and have Gas City's check for an existing run close a half-finished pour and pour again: nearer to what upstream's issue proposes, more code on the fork, and 6a's guard stays in a smaller form |
 
 Section 7 lists the units tk-ssm8qns.32 builds from what you approve.
 
@@ -417,17 +420,39 @@ off or fails twice, it fences each bead with `gc.instantiating` until the pour
 finishes, and a pour that stops part way can stay fenced. Gas City then counts
 the root as live, so `gc sling` refuses another run of the formula on that bead
 with exit 3 until a person runs `gc convoy delete <root> --force` (gc-3znzo8's
-description, read at 6589a7df45). No such pour exists today. No bead in any of
-the seven stores carries `gc.instantiating=true` or an open
+first description, read at 6589a7df45). No such pour exists today. No bead in
+any of the seven stores carries `gc.instantiating=true` or an open
 `molecule_failed=true`, and the 321 beads that keep the key, empty, are
 gc-toolkit's, from 35 pours of 2026-09-22 to 10-10.
+
+That fallback is the one path to the state. Where the store offers the
+one-batch pour and graph apply is on, Gas City's `Instantiate`
+(`internal/molecule/molecule.go`) returns a batch error that is not transient
+with no fallback. After a transient one it tries the batch once more, and only a
+second transient error falls through to the bead-by-bead pour. The one call that
+sets the fence (`fenceGraphWorkflowBead`, same file) sits on that pour. The
+transient errors are timeouts and connection failures
+(`isTransientGraphApplyError`, `internal/molecule/graph_apply.go`). A batch is
+one transaction by each store's own description (`BdStore.ApplyGraphPlan`, which
+is one `bd create --graph` command, and `NativeDoltStore.ApplyGraphPlan`, both
+under `internal/beads`), so it leaves a whole run or nothing. A bead poured bead
+by bead keeps the key, and the newest bead that carries it was made on
+2026-10-10, so no pour in the city has taken the fallback in the forty days
+since (the seven stores, read again on 2026-11-19 at 20:35Z). These were read at
+6589a7df45, the city's build and the fork's main that day.
 
 Of the reaction's guard you asked: "why does this code need it when we don't
 otherwise have this logic protecting the pack. This is city's responsibility,
 right? And arguably somethign the architecture should just handle."
 (conversation tk-8nri3k3, 2026-11-16 at 17:01Z). You then ruled that the port
 leave it out, with an ask for Gas City written up (that conversation's notes,
-"Ruled and carried out"). Two other places carry the same state.
+"Ruled and carried out"). Two other places carry the same state, and of the
+three rows below you said: "For 6a, 6b, 6c, basically the Gas City asks, we
+shoudl make the fixes on our fork and then I can prioritize trying to get that
+fix accepted as a PR. Especially if it's a clear fix that we can support as
+being logically consistent with Gas City." (conversation tk-fp92h81,
+2026-11-19). That conversation put the course in the three rows to you, and you
+answered "Yes as recommended".
 
 ### 6a. The arm's start
 
@@ -443,30 +468,35 @@ holds a gate under the key it asks under, which its cap on attempts shares, or
 the conversation it opens instead on a bead that has an open child (`ask`,
 `start.go:557`).
 
-Recommended: keep the guard until Gas City finishes or clears such pours, which
-6c asks for. You arm a dispatch so that nobody has to remember to send it once
-its blockers close (docs/deferred-dispatch.md), and the guard is the only code
-in the pack that reads the fence, so it is what tells you when a fenced pour
-would lose a dispatch you asked for. Keeping it adds no code, and it reads only
-after an earlier attempt or on an exit 3 of `gc sling` (`start.go:335-350`, and
-`liveOnExit3`, `start.go:395`). Your ruling was given for the reaction's guard,
-so whether this one goes is this row's question.
+Recommended, and ruled in conversation tk-fp92h81: keep the guard until the
+city runs a gc built with 6c's fix, then remove it. You arm a dispatch so that
+nobody has to remember to send it once its blockers close
+(docs/deferred-dispatch.md), and the guard is the only code in the pack that
+reads the fence, so until the fix is live it is what tells you when a fenced
+pour would lose a dispatch you asked for. Keeping it until then adds no code,
+and it reads only after an earlier attempt or on an exit 3 of `gc sling`
+(`start.go:335-350`, and `liveOnExit3`, `start.go:395`). Once the city's gc no
+longer takes the fallback, nothing writes the fence, and the guard reads for a
+state that cannot occur. Your words in conversation tk-gy4953q (2026-11-17 at
+23:40Z) say why it goes then: "Building code that can't fail is different from
+building lots of code to try and manage every failure."
 
-The other way removes the fence reads and the ask, as the reaction's were
-removed. A root that carries `molecule_failed=true` stays an attempt that
-failed, which the start tries again under its existing cap on attempts, and the
-cap asks a person once they run out (`askCap`, `start.go:539`). Any other root
-it finds counts as the pour that landed. The cost: a pour that a killed client
-left fenced, with no failure stamp, then reads as landed, so its dispatch
-retires, its work does not run until someone notices, and nothing records that
-it was owed. What it saves is the read of every bead under a root, a scan of the
-whole store for each root on each retry. Your words in conversation tk-gy4953q
-(2026-11-17 at 23:40Z) bear on the trade: "Building code that can't fail is
-different from building lots of code to try and manage every failure." The
-recommendation departs from the lean of those words because the guard already
-exists, and removing it gives up a dispatch you asked for to save a read made
-only on a retry. What would make the failure unable to happen is Gas City's
-fix, which 6c asks for, and once it lands the guard can go.
+tk-ssm8qns.34 is the removal. It takes out the fence reads and the ask, as the
+reaction's were taken out. A root that carries `molecule_failed=true` stays an
+attempt that failed, which the start tries again under its existing cap on
+attempts, and the cap asks a person once they run out (`askCap`,
+`start.go:539`). Any other root the start finds counts as the pour that landed.
+The read of every bead under a root goes too, a scan of the whole store for
+each root on each retry. The removal is armed behind a human gate (tk-s94k05i)
+that you clear once you have installed a gc built with the fix. The fix is a
+bead in the gascity store, and an edge across two stores holds nothing, so a
+person's gate carries the wait. The removal's first step checks the installed
+build against the fix's commit before it removes anything.
+
+The other way removes the guard now, ahead of the fix. Until the fix is live, a
+pour that a killed client left fenced, with no failure stamp, would then read as
+landed, so its dispatch retires, its work does not run until someone notices,
+and nothing records that it was owed.
 
 ### 6b. Accept
 
@@ -479,33 +509,77 @@ tk-1tfzr71.24, whose contract reduces each `gc-helm.sh` verb to native writes,
 and AGENTS.md gives such code no new work. Accept also runs only on a
 recommendation, and none has been made since 2026-10-13 (item 2).
 
-Recommended: append the problem to tk-1tfzr71.24's notes and hold tk-fm9js29 on
-it, so that it is checked and closed once that member lands. The other way fixes
-the search now by adding `--include-gates`, which AGENTS.md allows only as a
-stopgap for harm to you now, and no such harm is current.
+Recommended, and ruled in conversation tk-fp92h81: leave Accept as it is, and
+close the report once 6c's fix is live. The states tk-fm9js29 names arise only
+when Gas City falls back from its one-batch pour, as the report itself says, so
+once the city's gc no longer takes the fallback, Accept's search has nothing it
+cannot see. tk-fm9js29 waits on tk-ssm8qns.34, 6a's removal, which lands only
+once the installed gc carries the fix. The validating closer then checks the
+report against its close brief and closes it. tk-1tfzr71.24's notes carry the
+problem, as AGENTS.md asks of a problem in code a scheduled bead retires, so the
+rewrite of Accept confirms the fix is live or treats such a root as unfinished.
+The other way fixes the search now by adding `--include-gates`, which AGENTS.md
+allows only as a stopgap for harm to you now, and no such harm is current.
 
-### 6c. The ask for Gas City
+### 6c. The fix, on the city's fork
 
-gc-3znzo8 asks Gas City to finish, fail or remove a root its fallback left
-fenced, or to stop counting such a root as live, and to unset the key when it
-lifts the fence. It is held for your placement in the gascity store, written for
-you to decide and send. Its first part is already asked upstream:
-gastownhall/gascity#6179, open, says "a client killed mid-instantiation leaves a
-fenced workflow that nothing activates, voids or reports", and #6177 asks the
-same of a pour that failed (tk-fm9js29). No upstream issue asks the second part,
-searched on 2026-11-19. Recommended: send the second part as an issue and the
-first as the city's case on #6179, since #6179's fix is what lets 6a's guard go.
-The other way leaves it held.
+Recommended, and ruled in conversation tk-fp92h81: fix the cause on the city's
+fork of Gas City, by the process in docs/fork-patching.md, and offer the fix
+upstream when you choose. Where the store offers the one-batch pour and graph
+apply is on, a batch that fails a second time with a transient error returns
+that error, and `Instantiate` no longer falls through to the bead-by-bead pour.
+A store with no batch pour keeps that pour. A batch that timed out may have
+committed, so a sling that fails this way leaves a whole run or nothing, and
+never part of one. Nothing then writes the fence in the city, and neither a
+fenced root nor a failed root left open can arise.
+
+gc-3znzo8, in the gascity store, carries the fix. It was the ask held for you to
+send, and its description is now the fix's brief, placed with that rig's polecat
+pool on 2026-11-19. The brief asks for a regression test, for what each caller
+of `Instantiate` does with the returned error, and for a commit body that reads
+as an upstream PR's description. Offering it upstream stays yours, and this
+design sends nothing upstream.
+
+The case that the fix is consistent with Gas City: a batch error that is not
+transient already returns with no fallback, so the fix makes the transient case
+end the same way after its retry. The fallback also answers a timeout by sending
+bead-by-bead writes to a store that has just timed out twice, where a pour is
+likeliest to stop part way, and upstream's own report of the state,
+gastownhall/gascity#6179, came from a pour made against a server "answering
+with i/o timeouts". What tells against upstream taking it: upstream added the
+fallback on purpose, in its PR 3477, "fix(molecule): fallback on native graph
+apply timeouts", which nobody here has read past its title, and the brief has
+the builder read it first. #6179 and #6177, upstream's issues on the two states,
+are open, labelled bugs, with nobody assigned and no PR that fixes either. #6179
+suggests three directions, each of which repairs such a root and keeps the
+path: refuse to adopt it, give the stale fence an owner, or resume the pour
+(read on 2026-11-19).
+
+The other way keeps the fallback, and has Gas City's check for an existing run
+treat a half-finished pour as a failed one, closing it and pouring again, as
+the sling already closes a root under the same key that carries
+`molecule_failed=true` (`closeFailedGraphV2RootsByKey`,
+`internal/sling/sling.go`). That is nearer to
+#6179's first direction. It is more code on the fork, and it needs a rule for
+when a fenced pour counts as dead, because the fence names no owner and no
+time. A half-finished pour can still happen, and 6a's guard stays in a smaller
+form. You were offered it and took the fix above.
+
+Dropped from the ask gc-3znzo8 first held: that Gas City unset the key when it
+lifts the fence. Once nothing writes the fence in the city, no new bead carries
+the key, and the 321 that keep it are closed. You have not ruled on dropping
+it. Conversation tk-fp92h81 proposes it.
 
 ## 7. The units
 
 tk-ssm8qns.32 builds what you approve on `integration/tk-ssm8qns.21`, one commit
 for each unit, after a first act it makes whatever you rule. A unit whose rulings
 you all refuse is not built, and a refused ruling's part of a unit drops out of
-it. Unit 3 is 6a's other way, so it is built only if you refuse 6a. The
-effort's summary names the belief the units serve: the pack borrows before it
-invents (docs/foundation.md), since they take what Gas City and bd answer
-instead of working it out again.
+it. The removal of the arm's guard is no unit of this effort. tk-ssm8qns.34
+builds it on its own once the city runs a gc with 6c's fix, so the effort does
+not wait on the fork. The effort's summary names the belief the units serve: the
+pack borrows before it invents (docs/foundation.md), since they take what Gas
+City and bd answer instead of working it out again.
 
 **The first act**, notes and filings with no code:
 
@@ -517,12 +591,14 @@ instead of working it out again.
   tk-1tfzr71.24's path.
 - Item 4's design bead is filed under the home you rule, with section 4's facts
   as its description, and that epic's own rules decide when it runs.
-- tk-1tfzr71.24 gets 6b's problem appended to its notes, and tk-fm9js29 is held
-  on it, as the `gc-toolkit.waits` skill's "Have a bead checked and closed once
-  other work lands" says.
-- gc-3znzo8 gets a note with 6a's ruling.
 - 1c's ask to bd's maintainers is filed in the gc-toolkit store with section 1's
-  figures, held for your placement and written for you to send, as gc-3znzo8 is.
+  figures, held for your placement and written for you to send.
+
+Rows 6a to 6c leave the first act nothing to do. Conversation tk-fp92h81 made
+their filings on your ruling of 2026-11-19: gc-3znzo8 is placed as the fix,
+tk-ssm8qns.34 is armed behind its gate, tk-fm9js29 waits on it with its close
+brief, as the `gc-toolkit.waits` skill's "Have a bead checked and closed once
+other work lands" says, and tk-1tfzr71.24's notes carry 6b's problem.
 
 **Unit 1: the reads and the cap (1a, 1b, 3a).**
 
@@ -550,17 +626,18 @@ instead of working it out again.
 - The pool rule over the roster goes, with 3a's comparison.
 - Tests for each answer of the dry run, and the callers' suites updated.
 
-**Unit 3: the arm's start, only if you refuse 6a.** `pours` drops its fence reads, and with them
-its read of the beads under each root. `askUnfinished` goes, and the cap's ask
-keeps the key the two shared. A root carrying `molecule_failed=true` is a failed
-attempt, and any other root found is the pour that landed, on a retry and on an
-exit 3 alike. The start's tests for the unfinished pour go with it, and a test
-pins each case that stays.
+**Outside the effort: the arm's start (6a), which tk-ssm8qns.34 builds once the
+fix is live.** `pours` drops its fence reads, and with them its read of the
+beads under each root. `askUnfinished` goes, and the cap's ask keeps the key the
+two shared. A root carrying `molecule_failed=true` is a failed attempt, and any
+other root found is the pour that landed, on a retry and on an exit 3 alike. The
+start's tests for the unfinished pour go with it, and a test pins each case that
+stays.
 
 **Against the bead's Done when.** You rule on each row above at this design's
-gate. What you rule to change lands through the units and the first act, and
-what you rule to keep, or to leave with other work, is recorded on the bead
-that owns it.
+gate. What you rule to change lands through the units, the first act and, for
+rows 6a to 6c, the beads section 6 names. What you rule to keep, or to leave
+with other work, is recorded on the bead that owns it.
 
 ## 8. The Gas City search
 
@@ -575,12 +652,14 @@ Gas City has no `gc agent show`, and the supervisor's read of one agent
 (`agentByName`, `internal/api/huma_handlers_agents.go`) takes suspension from the
 agent's config and its session alone, so it would read a pool in a suspended rig
 or city as live. For 1c, bd 1.3.4's `blocked` has no id filter and no brief form
-(section 1c), which is why 1c is an ask. Units 1 and 3 add no surface: unit 1
-narrows reads and reorders one, and unit 3 removes the arm's ask.
+(section 1c), which is why 1c is an ask. Unit 1 and the removal of the arm's
+guard add no surface: unit 1 narrows reads and reorders one, and the removal
+takes the arm's ask away.
 
 ## 9. The deletion plan
 
-`tools/deletion-plan.tsv` at 508a9324c names none of the files the units change:
+`tools/deletion-plan.tsv` at 508a9324c names none of the files the units and the
+removal of the arm's guard change:
 `services/gctk/reaction`, `services/gctk/waits`, `services/gctk/arm/start.go`,
 the runtime adapter `services/gctk/internal/gascity`, the command's
 `services/gctk/internal/cli/reaction.go`, `assets/scripts/operator-intake.sh`
@@ -595,4 +674,5 @@ runtime adapter, `services/gctk/internal/gascity/gascity.go` and its fake, which
 PRs #1580, #1559, #1557 and #1550 also change, #1580 and #1559 in its `Sling`.
 #1557 also changes `patrol-finding.sh`, and #1550 and #1597 change the adapter's
 `roster.go`. #1596 changes `refusal.go` and #1584 `start.go`, each away from the
-code units 1 and 3 change. Whichever lands second merges the other.
+code unit 1 and the removal of the arm's guard change. Whichever lands second
+merges the other.
