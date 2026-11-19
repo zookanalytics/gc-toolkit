@@ -199,8 +199,10 @@ already decides the end of a round: `readyBar`'s conditions other than the draft
 flag (`services/gctk/pr/draft.go`, `decide` in `services/gctk/pr/landing.go`).
 At that moment it writes the hold and closes the gate, a native close. In the
 same pass it closes a return gate whose bead has closed, or that no open or
-in-progress conversation waits on, once it is five minutes old, the order's
-cooldown, so a gate whose edge bd is still writing is left to a later pass. It
+in-progress conversation waits on once it is five minutes old, the order's
+cooldown. bd writes a gate's edge right after the gate, in the same process,
+so five minutes is far longer than a create takes, though the age does not
+prove that a create has finished (what it leaves in place, below). It
 reads every open gate with `bd gate list --limit 0`, because bd lists 50 gates
 unless `--limit` says otherwise (`gateListCmd` in `cmd/bd/gate.go`): a gate's
 bead is its await id, and its
@@ -385,6 +387,13 @@ leaves the return to a sitting with no thread.
 - **A gate create that stops before its edge**, on the city's Dolt server,
   leaves an open gate that nothing waits on until the landing order's first
   pass after it is five minutes old.
+- **A gate create that stalls between its gate and its edge for more than five
+  minutes**, on the city's Dolt server. The landing order can close the gate
+  first, as one that nothing waits on, and the edge that lands after the close
+  holds nothing, so that gate never brings the sitting back for that work's
+  decision. bd runs the two writes back to back in one process
+  (`gateCreateCmd`), so this needs that process or the store to stall that
+  long between them.
 - **A round that ends while the stay is being made**: before its gate is filed,
   as after a stop inside the sign-off between its send and its gate, or after
   its gate is filed and before the sign-off reads it, which closes that gate
