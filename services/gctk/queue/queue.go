@@ -23,8 +23,8 @@
 // bead it waits on. So every reader that names the same work in one read gets
 // the same order.
 //
-// The package sits outside internal/ so the helm board, a separate module, can
-// import it.
+// The package sits outside internal/ so the helm board, which lies outside
+// services/gctk, can import it.
 package queue
 
 import (

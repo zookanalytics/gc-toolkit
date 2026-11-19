@@ -495,10 +495,13 @@ first. Either way the change is a decision on the record, not a drift.
   takes,** as the head a sitting pushes onto an open PR takes every step any
   head takes, and the sitting is not one of their checks.
 - **A copy of a rig's UI that a session runs from a change's tree serves
-  fixture data,** never the live city's. The live city is kept out of reach of
-  the rig's start command that runs the copy, but not of an app the command
-  starts through the host's simulator service, such as an iOS app, so the
-  command keeps that app on fixture data.
+  fixture data,** never the live city's. The city's configuration, never a
+  rig's own tree, names each rig whose app reads the city. For such a rig, the
+  live city is kept out of reach of the rig's start command that runs the copy,
+  but not of an app the command starts through the host's simulator service,
+  such as an iOS app, so the command keeps that app on fixture data. Any other
+  rig's start command reaches what the rig's tests reach, the live city
+  included.
 
 ## Debt
 
@@ -538,3 +541,9 @@ why a reader must know it, and the work that retires it.
   moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)
   deletes the old path once every rig has moved and the GitHub intake
   (tk-1tfzr71.21) has landed.
+- **A copy started before the city's configuration named its rig keeps the
+  live city in reach.** A copy keeps the reach it started with, so the
+  decision on a copy of a rig's UI does not hold for it. A capture of the rig
+  takes such a copy as it takes any other, and its demo can then show the live
+  city's data. The work that has that capture refuse such a copy (tk-3abs56p)
+  retires this.

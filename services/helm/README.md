@@ -1068,7 +1068,7 @@ serves carries no PR phase and no held value, and reads its liveness as any othe
 bead does.
 
 **Costs of the library backend, paid at build time, not per request:** the
-module went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
+board went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
 `helm-svc` is ~161 MB, and the Go floor moved to 1.26.5. A cold build measured
 **2m29s** on 2026-08-22 (1.3 GB of build cache); a warm one ~12.5s. Those
 numbers are why the build does not run in the service start path — see
@@ -1156,7 +1156,7 @@ The build does **not** run in the service start path, and this is load-bearing.
 
 The supervisor gives a `proxy_process` **5 seconds** to answer its health probe
 (`proxyProcessReadyTimeout`, gascity `internal/workspacesvc/proxy_process.go`).
-A warm build of this module takes ~12.5s and a cold one 2m29s. A build started
+A warm build of helm-svc takes ~12.5s and a cold one 2m29s. A build started
 by the launcher therefore never finished inside the window — not on a slow day,
 ever — and `waitReady` then called `stopProcessGroup()`, killing the build along
 with the start. The next start began again and was killed at 5s again.
@@ -1265,12 +1265,12 @@ atomic rename:
 |---|---|
 | `component` | which binary this record describes |
 | `built_at` | when the binary now on disk was produced |
-| `source_rev` | the revision the last build tick saw in the sources — the tree hash of the component's own subtree at HEAD (`git rev-parse HEAD:./` from the module), so a merge touching nothing under it does not move it |
+| `source_rev` | the revision the last build tick saw in the sources — one hash over the component's inputs at HEAD: git's hash of the `git ls-tree HEAD` listing of the root go.mod and go.sum and the folders the binary compiles from (`services/helm` and `services/gctk` for helm, `services/gctk` for gctk), so a merge touching none of them does not move it |
 | `binary_rev` | the revision the binary now on disk was built from, in the same terms |
 | `last_build_rc` | exit status of the last build ATTEMPT; 0 for success |
 | `restart_pending` | a published binary nothing is running yet |
 | `checked_at` | when the build order last ran at all |
-| `behind_main` | how many commits `origin/<default>` carries under the component's source paths that the checkout's HEAD lacks — how far off-main the served code is. REPORT-ONLY: it bands the row, never triggers a rebuild |
+| `behind_main` | how many commits `origin/<default>` carries under the component's inputs that the checkout's HEAD lacks — how far off-main the served code is. REPORT-ONLY: it bands the row, never triggers a rebuild |
 
 `source_rev` and `binary_rev` diverge exactly when a build failed and the last
 good binary kept serving, which is the gap worth showing. A tick that finds the

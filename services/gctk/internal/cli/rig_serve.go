@@ -23,7 +23,8 @@ import (
 
 const rigServeLong = `Runs a copy of the rig's UI from the checkout the current directory sits in:
 the command --command passes, with bash at the checkout's top, on a free
-loopback port it is given as $PORT, inside the sandbox a demo capture runs in.
+loopback port it is given as $PORT, as a demo capture of the checkout's rig
+runs it.
 The copy is up once it answers on that port as its own, or once the command
 prints the URL of the app it brought up on a line of its standard output, as
 ios-simulator://<device UDID>/<bundle id> names an iOS app on a simulator. A
@@ -53,11 +54,13 @@ whole process group, which has a minute after SIGTERM to end before SIGKILL.
 Starts and stops of one checkout take turns: one that finds another under way
 waits for it to end, and acts on the copy it left. A check waits for neither.
 
-The sandbox is the one demo-engine-lib.sh defines, in the pack's scripts
-directory, which GCTK_SCRIPTS_DIR names. The serve command cannot read the
-city's directories, reach a loopback port but its own, or signal a process
-outside the sandbox, and it runs with none of the variables that point a
-command at the city. The publish command runs outside it. A copy ends when it is
+The serve command runs through demo-engine-lib.sh, in the pack's scripts
+directory, which GCTK_SCRIPTS_DIR names. For a rig whose app_reads_city is not
+"false" it runs inside the sandbox that file defines for a demo capture, where
+it cannot read the city's directories, reach a loopback port but its own, or
+signal a process outside the sandbox. For any other rig it runs as an ordinary
+process. Either way it runs with none of the variables that point a command at
+the city. The publish command runs outside any sandbox. A copy ends when it is
 stopped, when its serve command ends, or once the session that started it has
 ended, through Gas City's orphan sweep, which reads the session's values from
 the copy's leader.
