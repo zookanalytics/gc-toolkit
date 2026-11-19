@@ -638,8 +638,8 @@ question for each row it draws. The answer is in the board's words.
      that work closes.
   7. `answers`, `members` or `gate`: it has no move of its own, as above.
   8. `in-flight`: it is work in flight by steering.md's definition
-     ([In flight](steering.md#in-flight)), and where its pull request stands
-     is part of the answer.
+     ([In flight](steering.md#in-flight)), or work a live run works, and
+     where its pull request stands is part of the answer.
   9. `scheduled`: it is work that is armed, routed or assigned, and no
      dispatch hold holds it.
   10. `not-scheduled`: it is any other work.
@@ -666,11 +666,11 @@ one bead. They sit in `standing/person`, beneath `prstatus`, which reads them
 for what holds a pull request.
 
 `standing` computes no wait, no pull request's status and no place in the
-queue. It takes what holds a bead from `waits`, where a pull request stands and
-the human gates and beads a person owes along a bead's waits from `prstatus`,
-whether the city takes a bead from `queue`, and a conversation's shape from
-`conversation`. What it adds is the rule above, which turns those answers into
-a group and a move.
+queue. It takes what holds a bead and whether a live run works it from
+`waits`, where a pull request stands and the human gates and beads a person
+owes along a bead's waits from `prstatus`, whether the city takes a bead from
+`queue`, and a conversation's shape from `conversation`. What it adds is the
+rule above, which turns those answers into a group and a move.
 
 ## The rules a domain move follows
 

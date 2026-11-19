@@ -179,7 +179,7 @@ stuck on itself, unread. The full rule is
 | `answers` | is a conversation that answers a question | none | its words, in the question's row | stuck on the question |
 | `members` | is an epic or Delivery with open members | none | its counts | advancing while every open member does |
 | `gate` | is a gate that is no human gate | none | nothing of its own | stuck on itself |
-| `in-flight` | is work in flight: claimed, carrying a branch or merge result, or worked by a live run past load-context | `queued` | Pull request #`<n>` with where it stands, or In flight | advancing while what it waits on does |
+| `in-flight` | is work in flight: claimed, carrying a branch or merge result, or worked by a live run | `queued` | Pull request #`<n>` with where it stands, or In flight | advancing while what it waits on does |
 | `scheduled` | is work that is armed, routed or assigned, and no dispatch hold holds | `queued` | Queued, or Waits on `<id>` | advancing while what it waits on does |
 | `not-scheduled` | is any other work | `not-moving` | Not scheduled | stuck on itself |
 
@@ -264,6 +264,11 @@ flowchart TB
   `Read`, `Derive`, `Render` and the rest of the PR's rule.
 - **`pr`** drops `admit.go`'s `isHumanGate` and asks `standing/person`.
 - **`listing`** fills its `PersonBlocker` field from `standing/person`.
+- **`waits`** exports a read of its run link, whether a live run works a bead,
+  which `standing`'s `in-flight` rule asks. Its rule for what holds a bead does
+  not change: its in-flight test still counts a run only once the run has
+  passed load-context, because that test answers whether an ancestor's wait
+  still holds work that has not started.
 - **`standing`** (new) holds the answer and its rules: the table and the ask,
   moved from `rigboard`'s `table.go` and `build.go`, and the advance and the
   frontier. It asks `waits`, `prstatus`, `queue`, `conversation` and
@@ -319,9 +324,10 @@ Then the units:
   the table and the ask moved from the board, and the board's rig read asks
   `standing` for every row. `standing`'s Go tests hold every rule the board's
   table tests held, and `TestFixtureBoard` passes on the golden as committed.
-  The `routed-to-you` clause for a bead assigned to `human` comes last, as a
-  commit of its own with its own test, and the golden's diff shows any fixture
-  row it changes.
+  Two clauses come last, each as a commit of its own with its own test, and
+  the golden's diff in each shows every fixture row it changes: the `in-flight`
+  rule's clause for a bead a live run works, with the run-link read `waits`
+  exports, and the `routed-to-you` clause for a bead assigned to `human`.
 - **Unit 2: the verb, and bead-context.sh asks it.** It adds the advance and
   the frontier to `standing`, with the members rule and their Go tests, and
   builds `gctk bead stands` with its README row. bead-context.sh deletes its
