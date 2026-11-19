@@ -407,6 +407,135 @@ func TestAFoundFixThatALabelHoldsIsSentNowhere(t *testing.T) {
 	}
 }
 
+// waitingFix puts in w's store an open fix of the request's title and the PR's
+// target, tk-document, and the prerequisite it waits on, tk-prerequisite,
+// which the store's blocked listing names as its wait.
+func waitingFix(w *world) {
+	w.store.Put(bead{ID: "tk-prerequisite", Title: "the prerequisite", Status: "open", IssueType: "task"})
+	w.store.Put(bead{ID: "tk-document", Title: aheadTitle, Status: "open", IssueType: "task",
+		Metadata: map[string]string{"target": target},
+		Edges:    []gcbd.Edge{{ID: "tk-prerequisite", Type: gcbd.EdgeBlocks, Status: "open"}}})
+	w.store.List("tk-document", "tk-prerequisite")
+}
+
+// A found fix that a wait holds, as gctk bead holds reads it, its own such as
+// a prerequisite or a person's gate, or an ancestor's, or one the store cannot
+// judge yet, is armed for the pool and the formula in place of its sling,
+// because gc sling reads no wait, and the ask waits on it.
+func TestAFoundFixThatAWaitHoldsIsArmedInPlaceOfItsSling(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		put     func(*world)
+		waiting string
+	}{
+		{"a prerequisite", waitingFix, "blocked on tk-prerequisite"},
+		{"a person's gate", func(w *world) {
+			w.store.Put(bead{ID: "tk-gate", Title: "decide the route", Status: "open", IssueType: "gate", AwaitType: "human"})
+			w.store.Put(bead{ID: "tk-document", Title: aheadTitle, Status: "open", IssueType: "task",
+				Metadata: map[string]string{"target": target},
+				Edges:    []gcbd.Edge{{ID: "tk-gate", Type: gcbd.EdgeBlocks, Status: "open", IssueType: "gate", AwaitType: "human"}}})
+			w.store.List("tk-document", "tk-gate")
+		}, "blocked on tk-gate"},
+		{"an ancestor's prerequisite", func(w *world) {
+			w.store.Put(bead{ID: "tk-prerequisite", Title: "the prerequisite", Status: "open", IssueType: "task"})
+			w.store.Put(bead{ID: "tk-epic", Title: "the epic", Status: "open", IssueType: "epic",
+				Edges: []gcbd.Edge{{ID: "tk-prerequisite", Type: gcbd.EdgeBlocks, Status: "open"}}})
+			w.store.Put(bead{ID: "tk-document", Title: aheadTitle, Status: "open", IssueType: "task",
+				Metadata: map[string]string{"target": target},
+				Edges:    []gcbd.Edge{{ID: "tk-epic", Type: gcbd.EdgeParentChild, Status: "open"}}})
+			w.store.List("tk-epic", "tk-prerequisite")
+			w.store.Mark("tk-epic")
+			w.store.List("tk-document", "tk-epic")
+		}, "held on tk-prerequisite through tk-epic"},
+		{"a waits-for edge", func(w *world) {
+			w.store.Put(bead{ID: "tk-spawner", Title: "the spawner", Status: "open", IssueType: "task"})
+			w.store.Put(bead{ID: "tk-document", Title: aheadTitle, Status: "open", IssueType: "task",
+				Metadata: map[string]string{"target": target},
+				Edges:    []gcbd.Edge{{ID: "tk-spawner", Type: gcbd.EdgeWaitsFor, Status: "open"}}})
+		}, "unjudged on tk-spawner"},
+	} {
+		w := newWorld(t)
+		c.put(w)
+		rt := routes(w)
+		rt.Root = t.TempDir()
+		req := aheadReq(prBead)
+		req.Actor = "repair"
+		got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, req, archIndex(t))
+		if err != nil || got.Fix != "tk-document" || got.FixFiled || !got.AskFiled || got.Sent || !got.Armed ||
+			got.Waiting != c.waiting || len(got.Live) != 0 || got.Held != "" {
+			t.Fatalf("%s: SendAhead = %+v, %v; want tk-document found and armed while it is %s, and the ask filed", c.name, got, err, c.waiting)
+		}
+		if s := rt.Slings(); len(s) != 0 {
+			t.Fatalf("%s: slings = %+v; want the waiting fix slung nowhere", c.name, s)
+		}
+		rows, err := w.ledger().Find(ledger.ByID(got.Fix))
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("%s: the fix read %v, %v", c.name, rows, err)
+		}
+		if a := armrecord.Of(rows[0]); a == nil || a.Target != aheadPool || a.Formula() != aheadOn || a.ArmedBy != "repair" ||
+			!strings.Contains(a.Reason, c.waiting) {
+			t.Fatalf("%s: the fix's arm reads %+v; want it armed for %s on %s by repair, naming what holds it", c.name, a, aheadPool, aheadOn)
+		}
+		askRow, _ := w.store.Row(got.Ask)
+		if !slices.ContainsFunc(askRow.Edges, func(e gcbd.Edge) bool { return e.Type == gcbd.EdgeBlocks && e.ID == got.Fix }) {
+			t.Fatalf("%s: the ask's edges are %+v, without its wait on the fix", c.name, askRow.Edges)
+		}
+	}
+}
+
+// A fix armed while a wait holds it is sent once the wait lands: a call that
+// runs again meanwhile sends nothing, the deferred-dispatch order's start holds
+// the fix while its prerequisite is open, and once the prerequisite has landed
+// the start slings the fix to the pool on the formula.
+func TestAFixArmedBehindAWaitIsSentOnceTheWaitLands(t *testing.T) {
+	w := newWorld(t)
+	waitingFix(w)
+	rt := routes(w)
+	rt.Root = t.TempDir()
+	got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+	if err != nil || got.Fix != "tk-document" || !got.Armed || got.Sent {
+		t.Fatalf("SendAhead = %+v, %v; want tk-document found and armed", got, err)
+	}
+	again, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+	if err != nil || again.Fix != got.Fix || again.Armed || again.Sent || again.Ask != got.Ask || again.AskFiled {
+		t.Fatalf("a second call = %+v, %v; want the armed fix and its ask found, and nothing sent", again, err)
+	}
+
+	arms := &arm.Arms{Ledger: w.ledger(), Runtime: rt, Locks: t.TempDir(), Now: time.Now, Actor: "start", Wait: time.Second}
+	start := func() arm.Act {
+		var act arm.Act
+		if _, err := arms.StartArmed(arm.StartOptions{}, func(l arm.Line) {
+			if l.ID == got.Fix {
+				act = l.Start
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return act
+	}
+	if act := start(); act.Action != arm.ActHold || act.Case != "blocked" || len(rt.Slings()) != 0 {
+		t.Fatalf("the start's act while the prerequisite is open = %+v, slings %+v; want the fix held and nothing slung", act, rt.Slings())
+	}
+
+	const landed = "2026-11-19T03:00:00Z"
+	w.store.Put(bead{ID: "tk-prerequisite", Title: "the prerequisite", Status: "closed", IssueType: "task", ClosedAt: landed})
+	row, _ := w.store.Row(got.Fix)
+	for i := range row.Edges {
+		if row.Edges[i].ID == "tk-prerequisite" {
+			row.Edges[i].Status, row.Edges[i].ClosedAt = "closed", landed
+		}
+	}
+	w.store.Put(row)
+	w.store.Unlist(got.Fix)
+	w.store.MakeReady(got.Fix)
+	if act := start(); act.Action != arm.ActStart {
+		t.Fatalf("the start's act once the prerequisite landed = %+v; want the fix sent", act)
+	}
+	if s := rt.Slings(); len(s) != 1 || s[0].Target != aheadPool || s[0].Bead != got.Fix || s[0].Formula != aheadOn {
+		t.Fatalf("slings = %+v; want the fix slung once to %s on %s", s, aheadPool, aheadOn)
+	}
+}
+
 // A bead of the fix's title that waits on the PR's bead, by an edge of its own
 // as a fix deferred behind the PR does, or through the beads it waits on,
 // closed ones included, cannot also land ahead of the PR, because the ask that

@@ -55,7 +55,9 @@ The reading reaches the architecture document alone. A fix of another kind that
 a lane's rule lands ahead of a PR needs a route the intake rule admits on a
 ruling of its own.
 
-The route overrides no hold. A found bead of the document's title that a hold
-label holds, such as the `hold:mayor` of work waiting for placement, is sent
-nowhere, because a sling reads no hold, and the change waits on it while the
-hold stands.
+The route overrides no hold and no wait. A found bead of the document's title
+that a hold label holds, such as the `hold:mayor` of work waiting for
+placement, is sent nowhere, because a sling reads no hold, and the change waits
+on it while the hold stands. One that a wait holds, such as a prerequisite or a
+person's gate, is armed for the repair pool instead, because a sling reads no
+wait either, and the deferred-dispatch order sends it once nothing holds it.

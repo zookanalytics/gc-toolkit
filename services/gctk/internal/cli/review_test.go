@@ -202,7 +202,8 @@ func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 // filed, the fix slung, at the first call; both found, the fix on its way, at
 // the next; both filed and the sling's failure, exit 2, when the sling does not
 // land; both filed and the fix armed, when the sling finds a live workflow on
-// it; and exit 3 with nothing filed for a bead with no PR on the record.
+// it; a found fix held by its label, or armed while a wait holds it, and the
+// ask filed; and exit 3 with nothing filed for a bead with no PR on the record.
 // Each usage error is exit 1.
 func TestReviewAheadPrintsWhatStands(t *testing.T) {
 	pr := fake.Bead{ID: "tk-pr", Status: "blocked", IssueType: "task", Metadata: map[string]string{
@@ -263,6 +264,18 @@ func TestReviewAheadPrintsWhatStands(t *testing.T) {
 	code, out, errOut = ahead(s, &gcfake.Runtime{})
 	if code != 0 || out != "tk-held found, held by its hold:mayor label, so it is sent nowhere\nfk-1 filed, waiting on tk-held\n" {
 		t.Fatalf("a call that finds the fix held = %d, %q, %q", code, out, errOut)
+	}
+
+	s = fake.New()
+	s.Put(pr)
+	s.Put(fake.Bead{ID: "tk-pre", Status: "open", IssueType: "task"})
+	s.Put(fake.Bead{ID: "tk-doc", Title: req.Title, Status: "open", IssueType: "task", Metadata: map[string]string{"target": "main"},
+		Edges: []gcbd.Edge{{ID: "tk-pre", Type: gcbd.EdgeBlocks, Status: "open"}}})
+	s.List("tk-doc", "tk-pre")
+	code, out, errOut = ahead(s, &gcfake.Runtime{Root: t.TempDir()})
+	if code != 0 || out != "tk-doc found, armed for rig/gc-toolkit.polecat on mol-polecat-work, since gctk bead holds reads it "+
+		"blocked on tk-pre: the deferred-dispatch order sends it once nothing holds it\nfk-1 filed, waiting on tk-doc\n" {
+		t.Fatalf("a call that finds the fix waiting = %d, %q, %q", code, out, errOut)
 	}
 
 	s = fake.New()

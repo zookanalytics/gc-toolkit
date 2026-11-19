@@ -29,8 +29,8 @@ the fix is filed in the store of the PR's bead.
 
 **Covered: `gc sling`.** "Route a bead to a session config or agent using the
 target's sling_query", with `--on <formula>` for the formula it is poured on
-(`docs/reference/cli.md`, "gc sling"). Nothing holds the fix, so it is slung at
-once rather than armed for deferred dispatch.
+(`docs/reference/cli.md`, "gc sling"). Nothing holds a fix the verb files, so it
+is slung at once rather than armed for deferred dispatch.
 
 A fix found by its title and target can carry one of Gas City's hold labels:
 `hold:mayor` and `hold:external` (`DispatchHoldLabels`) or `human`
@@ -40,6 +40,16 @@ sling reads none of them: no code under `internal/sling`, and none in
 `cmd/gc/cmd_sling.go`, names a hold label. So the verb asks the arm domain's
 `HoldLabel`, which reads those labels as Gas City compares them, and slings no
 fix that one holds.
+
+A found fix can also carry a wait, its own or an ancestor's, such as a
+prerequisite or a person's gate. The sling reads none:
+`validateExistingBeadInQuerier` (`internal/sling/sling_core.go`) checks only
+that the bead exists, nothing else in `internal/sling` reads its readiness
+before the pour, and upstream tracks the gap as the open bugs #7163 and #8832
+([warrants.md](../../docs/warrants.md#deferred-dispatch-residual)). So the verb
+asks the waits domain what holds a found fix, as `gctk bead holds` does, and
+arms one that a wait holds for the same pool and formula through the arm
+domain's own arm, whose start sends it once nothing holds it.
 
 A sling can find a live workflow on the fix. gc sling then exits 3, names each
 root, and points at `--force`, which replaces a formulas v2 workflow, or at
@@ -97,8 +107,9 @@ them, the round would pass and the PR would merge with the document missing.
   that an open ask on the PR already waits on, else the open fix of that title
   and target, or files it, then files the ask in one create with its wait, and
   only then slings the fix, so no fix it sends can land before the ask that
-  waits on it stands. When that sling finds a live workflow on the fix, it arms
-  the fix instead, through the arm domain's own arm. A fix lands only on its target, so a PR into another
+  waits on it stands. It arms a found fix that a wait holds in place of the
+  sling, and arms the fix when that sling finds a live workflow on it, each
+  through the arm domain's own arm. A fix lands only on its target, so a PR into another
   branch gets a fix of its own. These are bd's create, the same create again and
   `gc sling`, run as one call, so it adds no noun
   ([review-arch.md](../../docs/review-arch.md), check 2). It finds or files the

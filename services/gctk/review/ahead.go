@@ -42,7 +42,11 @@ import (
 // runs that ask for one fix at once file it once. A found fix that a label
 // holds from every pool, such as the hold:mayor of work that waits for the
 // operator's placement, is sent nowhere, because gc sling reads no hold, and
-// the ask waits on it while the hold stands. A sling that finds a live workflow
+// the ask waits on it while the hold stands. gc sling reads no wait either, so
+// a found fix that a wait holds, its own or an ancestor's, as gctk bead holds
+// reads it, such as a prerequisite or a person's gate, is armed for the same
+// pool and formula in place of its sling, and the deferred-dispatch order's
+// start sends it once nothing holds it. A sling that finds a live workflow
 // on the fix, gc sling's exit 3, does not show the fix on its way: the workflow
 // can be a pour Gas City left unfinished, which cannot finish and beside which
 // gc sling pours no other. So the call arms the fix for the same pool and
@@ -63,13 +67,16 @@ type AheadRequest struct {
 
 // Ahead is what SendAhead did: the fix and the ask that waits on it, whether
 // each was filed or found, whether this call sent the fix to the pool or armed
-// it, with the live workflows gc sling named on the fix that it armed over, and
-// the label that holds a found fix from every pool, "" when none does.
+// it, with the live workflows gc sling named on the fix that it armed over, or
+// what holds a found fix that it armed in place of its sling, as gctk bead holds
+// reads it, such as "blocked on tk-1", and the label that holds a found fix
+// from every pool, "" when none does.
 type Ahead struct {
 	Fix, Ask           string
 	FixFiled, AskFiled bool
 	Sent, Armed        bool
 	Live               []string
+	Waiting            string
 	Held               string
 }
 
@@ -77,8 +84,9 @@ type Ahead struct {
 // open bead of its title that lands on the PR's target and does not wait on the
 // bead, files the ask on the bead that waits on it, and then sends it to
 // req.Pool on req.Formula unless it is on its way already or a label holds it.
-// When gc sling finds a live workflow on the fix, it arms the fix for req.Pool
-// on req.Formula instead (armOver). It finds or files the fix under
+// When a wait holds a found fix, it arms the fix for req.Pool on req.Formula in
+// place of the sling (armBehind), and when gc sling finds a live workflow on
+// the fix, it arms it so too (armOver). It finds or files the fix under
 // the record lock of the store whose .beads directory is dir, waiting up to
 // wait for it. It refuses what FileAsk refuses, and a request that sends no
 // check back, before anything is filed. A read that fails, and a lock not
@@ -117,6 +125,19 @@ func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runt
 		return out, fmt.Errorf("%s carries the fix, and the ask that holds the PR for it did not file: %w", out.Fix, err)
 	}
 	if out.FixFiled || (out.Held == "" && unsent(fix)) {
+		if !out.FixFiled {
+			waiting, err := waitsOf(l, out.Fix)
+			if err != nil {
+				return out, fmt.Errorf("%s carries the fix, and what holds it did not read, so the next call sends it: %w", out.Fix, err)
+			}
+			if waiting != "" {
+				if err := armBehind(l, rt, wait, req, out.Fix, waiting); err != nil {
+					return out, err
+				}
+				out.Armed, out.Waiting = true, waiting
+				return out, nil
+			}
+		}
 		res := rt.Sling(gascity.Sling{Target: req.Pool, Bead: out.Fix, Formula: req.Formula})
 		switch {
 		case res.Code == 0 && res.Err == nil:
@@ -149,21 +170,72 @@ func armOver(l *ledger.Ledger, rt gascity.Runtime, wait time.Duration, req Ahead
 	if len(live) > 0 {
 		found = "the live workflow " + strings.Join(live, ", ")
 	}
-	fail := func(err error) error {
+	reason := fmt.Sprintf("gc sling found %s on this fix ahead of %s's PR, which can be a pour Gas City left unfinished, so the start judges it when it sends the fix",
+		found, req.Bead)
+	if err := armFix(l, rt, wait, req, fix, reason); err != nil {
 		return fmt.Errorf("%s carries the fix, gc sling found %s on it, and its arm for %s did not land, so the next call arms it: %w",
 			fix, found, req.Pool, err)
 	}
-	locks, err := arm.LockDir(rt)
-	if err != nil {
-		return fail(err)
-	}
-	a := &arm.Arms{Ledger: l, Runtime: rt, Locks: locks, Now: time.Now, Actor: req.Actor, Wait: wait}
-	reason := fmt.Sprintf("gc sling found %s on this fix ahead of %s's PR, which can be a pour Gas City left unfinished, so the start judges it when it sends the fix",
-		found, req.Bead)
-	if _, err := a.Arm(arm.Request{ID: fix, Target: req.Pool, Formula: req.Formula, Reason: reason}); err != nil {
-		return fail(err)
+	return nil
+}
+
+// armBehind arms fix for req.Pool on req.Formula in place of its sling, while
+// a wait holds it, which waiting says as waitsOf says it. gc sling reads no
+// wait, so the deferred-dispatch order's start sends the fix once nothing
+// holds it. An arm that does not land returns its error, and the next call
+// arms the fix.
+func armBehind(l *ledger.Ledger, rt gascity.Runtime, wait time.Duration, req AheadRequest, fix, waiting string) error {
+	reason := fmt.Sprintf("gctk bead holds reads this fix ahead of %s's PR %s, and gc sling reads no wait, so the start sends it once nothing holds it",
+		req.Bead, waiting)
+	if err := armFix(l, rt, wait, req, fix, reason); err != nil {
+		return fmt.Errorf("%s carries the fix, gctk bead holds reads it %s, and its arm for %s did not land, so the next call arms it: %w",
+			fix, waiting, req.Pool, err)
 	}
 	return nil
+}
+
+// armFix arms fix for req.Pool on req.Formula, as gctk bead arm arms a bead,
+// with why as the arm's reason.
+func armFix(l *ledger.Ledger, rt gascity.Runtime, wait time.Duration, req AheadRequest, fix, why string) error {
+	locks, err := arm.LockDir(rt)
+	if err != nil {
+		return err
+	}
+	a := &arm.Arms{Ledger: l, Runtime: rt, Locks: locks, Now: time.Now, Actor: req.Actor, Wait: wait}
+	_, err = a.Arm(arm.Request{ID: fix, Target: req.Pool, Formula: req.Formula, Reason: why})
+	return err
+}
+
+// waitsOf is what holds the bead id names, as gctk bead holds reads it, in a
+// phrase: its status and the beads its waits are on, each wait of an ancestor
+// naming that ancestor, such as "blocked on tk-1" or "held on tk-2 through
+// tk-3". It is "" when nothing holds the bead.
+func waitsOf(l *ledger.Ledger, id string) (string, error) {
+	snap, err := waits.Read(l, id)
+	if err != nil {
+		return "", err
+	}
+	h, err := snap.Holds(id)
+	if err != nil {
+		return "", err
+	}
+	if h.Status == waits.Clear {
+		return "", nil
+	}
+	var on []string
+	for _, w := range h.Waits {
+		s := w.ID
+		if w.Ancestor != "" {
+			s += " through " + w.Ancestor
+		}
+		if !slices.Contains(on, s) {
+			on = append(on, s)
+		}
+	}
+	if len(on) == 0 {
+		return string(h.Status), nil
+	}
+	return string(h.Status) + " on " + strings.Join(on, ", "), nil
 }
 
 // fixFor finds or files the fix SendAhead sends, holding the store's record

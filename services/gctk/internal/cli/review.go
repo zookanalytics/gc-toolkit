@@ -565,19 +565,23 @@ instead, and the case --file holds joins its notes, so a second PR into the
 same branch that needs the same fix waits on the same bead. A found bead that
 is on no way to a pool is slung too, unless a label holds it from every pool,
 such as the hold:mayor of work that waits for the operator's placement: it is
-then sent nowhere, and the ask waits on it while the hold stands. When gc
-sling finds a live workflow on the fix (its exit 3), which can be a pour Gas
-City left unfinished, the fix is armed for --pool on --on instead, as gctk bead
-arm arms a bead, and the deferred-dispatch order's start judges that workflow
-when it sends the fix: it retires the arm once a pour has landed, and asks a
-person about one Gas City left unfinished.
+then sent nowhere, and the ask waits on it while the hold stands. A found bead
+that a wait holds, its own or an ancestor's, as gctk bead holds reads it, is
+armed for --pool on --on in place of the sling, as gctk bead arm arms a bead,
+because gc sling reads no wait: the deferred-dispatch order sends it once
+nothing holds it. When gc sling finds a live workflow on the fix (its exit 3),
+which can be a pour Gas City left unfinished, the fix is armed for --pool on
+--on instead, as gctk bead arm arms a bead, and the deferred-dispatch order's
+start judges that workflow when it sends the fix: it retires the arm once a
+pour has landed, and asks a person about one Gas City left unfinished.
 
-Before it slings the fix, it files an ask on the bead that owns the PR, to run
-each --check again once the fix lands, so no fix it sends can land before the
-ask that waits on it stands. The ask waits on the fix by its own blocks edge,
-written in its create, and holds the PR's merge from the moment it is filed.
-While the fix is open the ask counts for nothing, so no review run is poured for
-it, and once the fix closes the landing order pours a run that takes it.
+Before it slings or arms the fix, it files an ask on the bead that owns the
+PR, to run each --check again once the fix lands, so no fix it sends can land
+before the ask that waits on it stands. The ask waits on the fix by its own
+blocks edge, written in its create, and holds the PR's merge from the moment it
+is filed. While the fix is open the ask counts for nothing, so no review run is
+poured for it, and once the fix closes the landing order pours a run that takes
+it.
 
 It refuses a bead that owns no PR on the record and a check the index does not
 declare, each before anything is filed. It prints the fix, filed or found, and
@@ -664,6 +668,9 @@ func aheadIn(l *ledger.Ledger, dir string, rt gascity.Runtime, req review.AheadR
 		switch {
 		case got.Sent:
 			fmt.Fprintf(stdout, "%s %s, slung to %s on %s\n", got.Fix, how, req.Pool, req.Formula)
+		case got.Armed && got.Waiting != "":
+			fmt.Fprintf(stdout, "%s %s, armed for %s on %s, since gctk bead holds reads it %s: the deferred-dispatch order sends it once nothing holds it\n",
+				got.Fix, how, req.Pool, req.Formula, got.Waiting)
 		case got.Armed:
 			found := "a live workflow it did not name"
 			if len(got.Live) > 0 {
