@@ -59,7 +59,8 @@ directory, which GCTK_SCRIPTS_DIR names. For a rig whose app_reads_city is not
 "false" it runs inside the sandbox that file defines for a demo capture, where
 it cannot read the city's directories, reach a loopback port but its own, or
 signal a process outside the sandbox. For any other rig it runs as an ordinary
-process. Either way it runs with none of the variables that point a command at
+process. The setting is read as the command starts, and the copy runs so until
+it stops. Either way it runs with none of the variables that point a command at
 the city. The publish command runs outside any sandbox. A copy ends when it is
 stopped, when its serve command ends, or once the session that started it has
 ended, through Gas City's orphan sweep, which reads the session's values from
@@ -71,8 +72,13 @@ else the copy's loopback URL, its address, empty when it has none, its log, the
 serve command's exit status once it has ended, and, in reason and detail, why. A
 start that found no copy running and ran one also prints "started": true, so its
 caller knows the copy is its own to stop. A start that found the copy running
-prints no started key. rig's own lines, and the last lines of the log of a copy
-that failed or ended, go to stderr.
+prints no started key. A running copy's line also carries sandboxed, true when
+its serve command runs inside the sandbox and false when it runs as an ordinary
+process, as demo-engine-lib.sh recorded before the command started, and none
+when the copy's record does not say, as a copy a gctk from before that record
+started does not. A demo capture of a checkout that keeps the sandbox refuses a
+copy whose line does not carry "sandboxed": true. rig's own lines, and the last
+lines of the log of a copy that failed or ended, go to stderr.
 
   state          exit  meaning
   running        0     the copy runs and is up

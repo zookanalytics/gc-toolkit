@@ -116,7 +116,14 @@ type Sandbox struct {
 	Port int
 	// Prog is the name the sandbox's messages start with.
 	Prog string
+	// Record, when set, is the file where demo_engine_sandboxed writes whether
+	// the process runs inside the sandbox, true or false, before the process
+	// starts.
+	Record string
 }
+
+// sandboxRecordVar names Sandbox.Record to demo_engine_sandboxed.
+const sandboxRecordVar = "DEMO_ENGINE_SANDBOX_RECORD"
 
 // Child is a process Start started.
 type Child interface {
@@ -171,6 +178,9 @@ func (local) Start(s Spec) (Child, error) {
 		}
 		argv = append([]string{"bash", "-c", sandboxed, b.Prog, b.Lib, strconv.Itoa(b.Port), s.Dir}, argv...)
 		env = append(slices.Clone(env), "PROG="+b.Prog)
+		if b.Record != "" {
+			env = append(env, sandboxRecordVar+"="+b.Record)
+		}
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = s.Dir
