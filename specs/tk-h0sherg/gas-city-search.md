@@ -1,6 +1,6 @@
 ---
 name: Gas City search for an ask that waits (tk-h0sherg)
-description: The primitives searched in bd and Gas City for filing a review ask that waits on another bead from its first write, with what each covers and why gctk still checks the waited bead's id prefix and store itself. Read it when building or reviewing `gctk review ask --waiting-on` or the sign-off's `--rework-waiting-on`, as AGENTS.md asks of a change that adds a flag.
+description: The primitives searched in bd and Gas City for filing a review ask that waits on another bead from its first write, with what each covers and why gctk's ledger still checks the id prefix and the store of every wait edge it writes. Read it when building or reviewing `gctk review ask --waiting-on` or the sign-off's `--rework-waiting-on`, as AGENTS.md asks of a change that adds a flag.
 ---
 
 # Gas City search for an ask that waits
@@ -35,10 +35,13 @@ tier and on a ready frontier, so a create's `--deps` reaches bd as written.
 
 **Not covered on every transport, and a store holding the bead does not cover
 it.** bd decides whether an edge is local by the id prefixes of its two beads,
-not by whether the store holds the far bead. gctk refuses, with nothing filed,
-an ask on a PR's bead of another prefix than the one its store gives the ask, a
-wait on a bead of another prefix than the PR's bead, and then a wait on a bead
-of that prefix that the PR's store does not hold.
+not by whether the store holds the far bead. gctk's ledger refuses, with
+nothing written, every wait edge it writes onto a bead of another prefix than
+the bead at the edge's other end, and then one onto a bead the store does not
+hold. For the ask, that refuses, with nothing filed, a PR's bead of another
+prefix than the one its store gives the ask, a wait on a bead of another prefix
+than that, and a wait on a bead of that prefix that the PR's store does not
+hold.
 
 - bd classifies an edge by prefix. `IsExternalDepTarget` in
   `internal/storage/issueops/dependencies.go` reads an edge whose two ids carry
@@ -103,11 +106,18 @@ of that prefix that the PR's store does not hold.
 So a wait on a bead of another prefix files with an edge that holds nothing on
 either path, whether or not the store holds that bead, and the ask reads clear
 and the race stays with no sign. Gas City's `gc bd` adds no check, as above.
-gctk's check reads the prefix the PR's store gives the ask with `gc bd config
-get issue_prefix`, pinned to that store, and files nothing when the read fails
-or names no prefix. It compares that prefix and each wait's with the PR bead's,
-then reads each waited bead in the PR's store before the create, and it is the
-same on every transport.
+gctk's ledger makes the check for every wait edge it writes: in a filing's
+create (`Ledger.Create`), for the edge from each bead the new bead blocks and
+the edge onto each bead it waits on, and in an edge it adds to a bead that
+exists (`Ledger.AddBlocker`). For a filing, it reads the prefix the store gives
+the new bead with `gc bd config get issue_prefix`, pinned to that store, and
+files nothing when the read fails or names no prefix. It compares that prefix
+with each far bead's, as `ExtractPrefix` reads them, then reads every far bead
+in the store in one read before the create, and it is the same on every
+transport. `AddBlocker` compares the two beads' own prefixes before its read.
+The ask is one such filing, so its edge onto the PR's bead and each of its
+waits pass that check, and `gctk review ask` reports the ledger's refusal as
+its own.
 
 ## Report an ask a re-run finds that does not wait
 
