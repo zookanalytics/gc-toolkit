@@ -97,7 +97,7 @@ func judge(run *Run, n int, asks []Ask) []string {
 		why = append(why, fmt.Sprintf("rule-and-repair ruled at %s, not at the head triage judged, %s", rp.Head, head))
 	}
 	for _, r := range rp.Rulings {
-		why = append(why, ruled(r, head)...)
+		why = append(why, ruled(r, head, run.Shadow)...)
 	}
 	for _, p := range it.Triage.Checks {
 		ln, ok := lane(it, p.Check)
@@ -147,8 +147,8 @@ func judge(run *Run, n int, asks []Ask) []string {
 
 // ruled is why one ruling at head does not count as ruled, or as ruled and
 // passing: a ruling outside the set, a must-fix, and a question that names no
-// gate.
-func ruled(r Ruling, head string) []string {
+// gate, unless the run is a shadow, which files no gate.
+func ruled(r Ruling, head string, shadow bool) []string {
 	switch {
 	case r.Ask == "" && (r.Check == "" || r.Finding == ""):
 		return []string{fmt.Sprintf("a ruling names neither an ask nor a lane's finding (it reads %q)", r.Ruling)}
@@ -156,7 +156,7 @@ func ruled(r Ruling, head string) []string {
 		return []string{fmt.Sprintf("%s is ruled %q, which is not a ruling (%s)", r.Subject(), r.Ruling, strings.Join(rulings, ", "))}
 	case r.Ruling == RulingMustFix:
 		return []string{fmt.Sprintf("%s was ruled must-fix at %s", r.Subject(), head)}
-	case r.Ruling == RulingQuestion && r.Gate == "":
+	case r.Ruling == RulingQuestion && !shadow && r.Gate == "":
 		return []string{fmt.Sprintf("%s was put to a person and names no gate", r.Subject())}
 	}
 	return nil

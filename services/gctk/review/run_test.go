@@ -232,6 +232,40 @@ func TestAQuestionPutToAPerson(t *testing.T) {
 	mustFail(t, w.passed(0), "was put to a person and names no gate")
 }
 
+// A shadow run files no gate, so its round puts a point to a person with a
+// question that names none: the output check takes the round, and the round
+// passes, as a real run's does once the question names its gate. The result
+// the shadow run would have written does not pass, as a real run's does not
+// while that gate is open, and it writes nothing. The same round in a real run
+// is refused by both the output check and the pass rule.
+func TestAShadowRunsQuestionNamesNoGate(t *testing.T) {
+	for _, shadow := range []bool{true, false} {
+		w := newWorld(t)
+		if shadow {
+			w.shadowRun()
+		}
+		w.output(triage(1, h1, "correctness"))
+		w.output(lane(1, "correctness", h1, review.VerdictRequestChanges, "F1"))
+		round := repair(1, h1, "", review.Ruling{Check: "correctness", Finding: "F1", Ruling: review.RulingQuestion,
+			Reason: "only the operator can say which"})
+		err := w.check(w.step(1, "rule-and-repair"), round, nil)
+		w.output(round)
+		if !shadow {
+			mustRefuse(t, err, "is put to a person and names no gate")
+			mustFail(t, w.passed(0), "was put to a person and names no gate")
+			continue
+		}
+		if err != nil {
+			t.Errorf("the output check refused a shadow round's question that names no gate: %v", err)
+		}
+		mustPass(t, w.passed(0))
+		if got := w.record(1); !got.Shadow || got.Result == nil || got.Result.Passed || len(w.store.Writes()) != 0 {
+			t.Errorf("the shadow run recorded %+v and wrote %+v; want a result that does not pass and nothing written",
+				got, w.store.Writes())
+		}
+	}
+}
+
 // A round that pushed made a head triage has not judged, so the iteration
 // does not pass, and the next one triages the head it pushed.
 func TestARepairThatPushed(t *testing.T) {

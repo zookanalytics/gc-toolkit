@@ -107,6 +107,9 @@ func Record(l *ledger.Ledger, dir string, wait time.Duration, v *Verdict, filer 
 			out.Open = append(out.Open, gate)
 		}
 	}
+	if run.Shadow && askedWithNoGate(run) {
+		passed = false
+	}
 	out.Result = &Result{Head: head, Target: run.Target, Passed: passed, Run: run.Root}
 	answered := answeredAsks(run, last)
 	if run.Shadow {
@@ -206,6 +209,21 @@ func gates(run *Run) []string {
 		}
 	}
 	return out
+}
+
+// askedWithNoGate is whether a round of run put a point to a person with a
+// question that names no gate, as a shadow run's round does, because it files
+// none. A real run's result does not pass while the gate its question filed is
+// open, so a shadow run's result does not pass once a round asked one.
+func askedWithNoGate(run *Run) bool {
+	for _, it := range run.Iterations {
+		if it.Repair != nil && slices.ContainsFunc(it.Repair.Rulings, func(r Ruling) bool {
+			return r.Ruling == RulingQuestion && r.Gate == ""
+		}) {
+			return true
+		}
+	}
+	return false
 }
 
 // answeredAsks is each ask the round of iteration last answered: ruled
