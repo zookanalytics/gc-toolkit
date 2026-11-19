@@ -357,6 +357,70 @@ func TestAFoundFixThatALabelHoldsIsSentNowhere(t *testing.T) {
 	}
 }
 
+// A bead of the fix's title that waits on the PR's bead, by an edge of its own
+// as a fix deferred behind the PR does, or through the beads it waits on,
+// closed ones included, cannot also land ahead of the PR, because the ask that
+// waited on it would close a cycle. The call passes it over and files a fix of
+// its own, and a call that runs again, after the ask filed or after the ask's
+// create failed, finds that fix and not the bead it passed over. A bead whose
+// waits do not reach the PR's bead, such as one found from it, is the fix.
+func TestABeadThatWaitsOnThePRIsNotSentAheadOfIt(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		edges []gcbd.Edge
+		taken bool
+	}{
+		{"deferred behind the PR", []gcbd.Edge{{ID: prBead, Type: gcbd.EdgeBlocks}}, false},
+		{"behind a closed bead that waits on the PR", []gcbd.Edge{{ID: "tk-closed", Type: gcbd.EdgeBlocks}}, false},
+		{"a child of the PR's bead", []gcbd.Edge{{ID: prBead, Type: gcbd.EdgeParentChild}}, false},
+		{"found from the PR's bead", []gcbd.Edge{{ID: prBead, Type: "discovered-from"}}, true},
+		{"behind a bead that does not wait on the PR", []gcbd.Edge{{ID: "tk-other", Type: gcbd.EdgeBlocks}}, true},
+	} {
+		// fk-0 sorts before the fk-1 a call files, so the lowest id alone would take it.
+		setup := func() *world {
+			w := newWorld(t)
+			w.store.Put(bead{ID: "tk-closed", Status: "closed", IssueType: "task",
+				Edges: []gcbd.Edge{{ID: prBead, Type: gcbd.EdgeConditionalBlocks}}})
+			w.store.Put(bead{ID: "tk-other", Status: "open", IssueType: "task"})
+			w.store.Put(bead{ID: "fk-0", Title: aheadTitle, Status: "open", IssueType: "task",
+				Metadata: map[string]string{"target": target}, Edges: c.edges})
+			return w
+		}
+		w := setup()
+		rt := routes(w)
+		got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		askRow, _ := w.store.Row(got.Ask)
+		waited := slices.ContainsFunc(askRow.Edges, func(e gcbd.Edge) bool { return e.ID == "fk-0" })
+		if c.taken {
+			if got.Fix != "fk-0" || got.FixFiled || !got.AskFiled || !waited {
+				t.Errorf("%s: SendAhead = %+v, the ask's edges %+v; want fk-0 found and waited on", c.name, got, askRow.Edges)
+			}
+			continue
+		}
+		if got.Fix == "fk-0" || !got.FixFiled || !got.Sent || !got.AskFiled || waited {
+			t.Fatalf("%s: SendAhead = %+v, the ask's edges %+v; want a fix of its own filed, slung and waited on", c.name, got, askRow.Edges)
+		}
+		again, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+		if err != nil || again.Fix != got.Fix || again.FixFiled || again.Sent || again.Ask != got.Ask || again.AskFiled {
+			t.Fatalf("%s: a second call = %+v, %v; want the fix and the ask found, and nothing filed or slung", c.name, again, err)
+		}
+
+		w = setup()
+		rt = routes(w)
+		first, err := review.SendAhead(ledger.New(&refusing{Store: w.store, left: 1}), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+		if err == nil || first.Fix == "fk-0" || !first.FixFiled || first.Ask != "" {
+			t.Fatalf("%s: SendAhead = %+v, %v; want a fix of its own filed, and the ask's failure", c.name, first, err)
+		}
+		retry, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, aheadReq(prBead), archIndex(t))
+		if err != nil || retry.Fix != first.Fix || retry.FixFiled || !retry.Sent || !retry.AskFiled {
+			t.Fatalf("%s: the next call = %+v, %v; want the fix it filed found and slung, and the ask filed", c.name, retry, err)
+		}
+	}
+}
+
 // What FileAsk refuses, and a fix that sends no check back, file nothing and
 // sling nothing.
 func TestAFixAheadIsRefusedBeforeAnythingIsFiled(t *testing.T) {

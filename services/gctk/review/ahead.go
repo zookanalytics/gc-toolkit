@@ -29,7 +29,9 @@ import (
 // The fix is found by its title and its target among the store's open beads,
 // so a second PR into the same branch whose lane asks for the same fix waits on
 // the same bead, and that PR's case joins the bead's notes. A fix lands only on
-// its target, so a PR into another branch gets a fix of its own. A call that
+// its target, so a PR into another branch gets a fix of its own. A bead that
+// waits on the PR's bead, as a fix deferred behind the PR does, cannot also land
+// ahead of the PR, so the call passes it over. A call that
 // runs again for the same PR finds first the fix of that title and target that
 // its open ask waits on, closed or not, so a fix that landed before the call ran
 // again is not filed and sent a second time. A fix another PR's run sent can
@@ -61,8 +63,9 @@ type Ahead struct {
 }
 
 // SendAhead files the fix req names ahead of the PR the bead owns, or finds the
-// open bead of its title that lands on the PR's target, files the ask on the
-// bead that waits on it, and then sends it to req.Pool on req.Formula unless it
+// open bead of its title that lands on the PR's target and does not wait on the
+// bead, files the ask on the bead that waits on it, and then sends it to
+// req.Pool on req.Formula unless it
 // is on its way already or a label holds it. It finds or files the fix under
 // the record lock of the store whose .beads directory is dir, waiting up to
 // wait for it. It refuses what FileAsk refuses, and a request that sends no
@@ -122,7 +125,8 @@ func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runt
 // lock from its first read of the fix to the fix's create, so two review runs
 // that ask for one fix at once file it once: the fix of its title and the PR's
 // target that an open ask on the PR waits on, else the open bead of that title
-// and target, whose notes take the PR's case, else a new bead. It fills in out's
+// and target that does not wait on owner, whose notes take the PR's case, else
+// a new bead. It fills in out's
 // fix, and returns the found fix's record, nil for a fix it filed.
 func fixFor(l *ledger.Ledger, dir string, wait time.Duration, owner *ledger.Record, rec record.Record, title, desc, pr string, out *Ahead) (*ledger.Record, error) {
 	release, err := record.Lock(dir, wait)
@@ -219,23 +223,62 @@ func sentFix(l *ledger.Ledger, owner *ledger.Record, title, target string) (*led
 	return found, nil
 }
 
-// openFix is the open bead of title that lands on target, other than the bead
-// not, the one of lowest id when several are, and nil when none is.
-func openFix(l *ledger.Ledger, title, target, not string) (*ledger.Record, error) {
+// openFix is the open bead of title that lands on target, other than owner, that
+// does not wait on owner, the one of lowest id when several are, and nil when
+// none is.
+func openFix(l *ledger.Ledger, title, target, owner string) (*ledger.Record, error) {
 	rows, err := l.Find(ledger.Titled(title))
 	if err != nil {
 		return nil, err
 	}
-	var found *ledger.Record
+	rows = slices.DeleteFunc(rows, func(r *ledger.Record) bool {
+		return !fixOf(r, title, target) || r.Status() == "closed" || r.ID == owner
+	})
+	slices.SortFunc(rows, func(a, b *ledger.Record) int { return strings.Compare(a.ID, b.ID) })
 	for _, r := range rows {
-		if !fixOf(r, title, target) || r.Status() == "closed" || r.ID == not {
-			continue
+		waits, err := waitsOn(l, r, owner)
+		if err != nil {
+			return nil, err
 		}
-		if found == nil || r.ID < found.ID {
-			found = r
+		if !waits {
+			return r, nil
 		}
 	}
-	return found, nil
+	return nil, nil
+}
+
+// waitsOn reports whether r waits on the bead id names, by an edge of its own or
+// through the beads it waits on, closed ones included, over the edges bd's cycle
+// check follows: blocks, conditional-blocks and parent-child
+// (cycleReachabilityQuery in internal/storage/issueops/dependencies.go, beads
+// v1.3.4). An ask on that bead that waited on r would close a cycle, and bd
+// refuses its create.
+func waitsOn(l *ledger.Ledger, r *ledger.Record, id string) (bool, error) {
+	seen := map[string]bool{r.ID: true}
+	for next := []*ledger.Record{r}; len(next) > 0; {
+		var far []string
+		for _, n := range next {
+			edges, err := n.Edges()
+			if err != nil {
+				return false, &ledger.ReadError{ID: n.ID, Reason: "its edges did not decode: " + err.Error()}
+			}
+			for _, e := range edges {
+				switch {
+				case e.Type != ledger.EdgeBlocks && e.Type != ledger.EdgeConditionalBlocks && e.Type != ledger.EdgeParentChild:
+				case e.ID == id:
+					return true, nil
+				case !seen[e.ID]:
+					seen[e.ID] = true
+					far = append(far, e.ID)
+				}
+			}
+		}
+		var err error
+		if next, err = l.Find(ledger.ByID(far...).WithClosed()); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 // fixOf reports whether r is the fix of title that lands on target. A fix lands
