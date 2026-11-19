@@ -62,6 +62,10 @@ a script asks it with `gctk bead stands <bead>...`.
 - The verb's word is fresh, `stands`, because `bd status` and a bead's own
   status mean other things and answer differently
   ([the search](gas-city-search.md#the-verbs-word)).
+- The package's word is the question's own, a bead's standing. The pack's
+  other use of it, a standing record (`assets/scripts/standing-kinds.sh`),
+  ends with the liveness sweep (tk-1tfzr71.19), because the conversation on
+  standing records (tk-2pvj50q) ruled that the city keeps none.
 
 **Cost:** two packages and one verb. `prstatus` keeps its walk of what holds a
 bead that only a person moves (`Holding`). The walk weighs another pull request
