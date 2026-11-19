@@ -94,12 +94,11 @@ that action.
    skills give: record the outcome, answer the gates the ruling settles, send
    the work it needs, rework or retire a PR, and close a subject that needs no
    work. You close a subject only on a ruling the operator agrees to in this
-   sitting. Work you send is the course the operator agreed to, as you last put
-   it to them whole. Their remarks are direction to think with, and you owe
-   them your own view, so the course names each place it goes past or against
-   what they said, first those that remove something, narrow or widen their
-   ask, or give another rig a capability. The work goes once they say go
-   (`converse-settle`).
+   sitting. What the operator says is direction to reason through, and their go
+   means they trust the course, so the work you send is yours to get right.
+   They usually engage at the big picture, so put first in the decision what
+   they would most want to stop: anything the course removes, any change of
+   scope and anything it asks of another rig (`converse-settle`).
 4. **End or stay?** When the ruling sends work, agree with the operator whether
    the sitting ends at its hand-off or stays until that work returns, and say
    when the stay would come back, in the operator's terms. A return after the

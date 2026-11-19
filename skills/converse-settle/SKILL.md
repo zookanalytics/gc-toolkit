@@ -63,16 +63,15 @@ sitting ends at the hand-off for new work that opens its own PR, write what was
 agreed into the create's description in full, because the brief is then all
 the work carries of the discussion.
 
-The work is the course the operator agreed to, as you last put it to them
-whole. Their remarks are direction to think with, and you owe them your own
-view, so the course can go past or against what they said. It names each place
-it does as its concrete result, in a short line they can answer, such as
-"Ctrl+R is removed", and first each such place that removes something, narrows
-or widens what they asked for, or gives another rig a capability. The work
-goes once they say go, and agreement with a direction while they are still
-asking questions is not a go. A part of those kinds that the course did not
-name goes back to them in a hand-back's decision that restates the course, and
-the conversation stays open until they rule (`converse-continue`).
+The work you send is yours to get right. What the operator says is direction to
+reason through: take each point up in the course or say why not. A remark is
+not an order to carry out to the letter, and it is not a decision they made.
+The operator usually engages and reviews at the big picture, unless they call
+out a specific item, and their go means they trust the course. So put first in
+the hand-back's decision, each as its concrete result in a short line, what
+they would most want to stop: anything the course removes, any change of
+scope, and anything it asks of another rig. Send the work once they have
+decided, not while they are still thinking it through.
 
 Write the order in your own voice: what needs doing, why, and what done looks
 like, with each point the operator raised carried into it. Quote their words

@@ -1212,26 +1212,29 @@ for sh_ in $shells; do
         bad "($sh_) converse-iterate-document: a scaffold the store refuses is not reported as written" "exit $rc"
     fi
 done
-echo "── a sitting's work order holds to the course the operator agreed to ──"
-# The work a sitting sends is the course the operator agreed to, which names
-# each place it goes past or against what they said.
+echo "── a sitting answers for the work it sends ──"
+# The work a sitting sends is its own to get right. It reasons through what the
+# operator says, reads their go as trust in the course, puts first in the
+# decision what they would most want to stop, and sends once they have decided.
 tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-order"
 tr -s '[:space:]' ' ' <"$CONTINUE" >"$TMP/continue-order"
 tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-order"
-have "the settle skill holds the work to the course the operator agreed to" \
-    'The work is the course the operator agreed to, as you last put it to them whole.' "$TMP/settle-order"
-have "…takes their remarks as direction, and owes them the sitting's own view" \
-    'Their remarks are direction to think with, and you owe them your own view, so the course can go past or against what they said.' "$TMP/settle-order"
-have "…names each place the course departs from what they said, a removal, a change of reach or another rig's capability first" \
-    'It names each place it does as its concrete result, in a short line they can answer, such as "Ctrl+R is removed", and first each such place that removes something, narrows or widens what they asked for, or gives another rig a capability.' "$TMP/settle-order"
-have "…sends the work on their go, which agreement while they are still asking is not" \
-    'The work goes once they say go, and agreement with a direction while they are still asking questions is not a go.' "$TMP/settle-order"
-have "…and puts a part of those kinds that the course did not name back to them first" \
-    'A part of those kinds that the course did not name goes back to them in a hand-back'"'"'s decision that restates the course' "$TMP/settle-order"
+have "the settle skill makes the work a sitting sends its own to get right" \
+    'The work you send is yours to get right.' "$TMP/settle-order"
+have "…takes what the operator says as direction to reason through, point by point" \
+    'What the operator says is direction to reason through: take each point up in the course or say why not.' "$TMP/settle-order"
+have "…holds a remark to be neither an order to the letter nor a decision of theirs" \
+    'A remark is not an order to carry out to the letter, and it is not a decision they made.' "$TMP/settle-order"
+have "…reads their go, given at the big picture, as trust in the course" \
+    'The operator usually engages and reviews at the big picture, unless they call out a specific item, and their go means they trust the course.' "$TMP/settle-order"
+have "…puts first in the decision, each as its concrete result, what they would most want to stop" \
+    'So put first in the hand-back'"'"'s decision, each as its concrete result in a short line, what they would most want to stop: anything the course removes, any change of scope, and anything it asks of another rig.' "$TMP/settle-order"
+have "…and sends the work once they have decided" \
+    'Send the work once they have decided, not while they are still thinking it through.' "$TMP/settle-order"
 have "the continue skill writes a turn's work order the settle skill's way, before anything files it" \
-    'Write the order of work or a rework that a turn'"'"'s ruling sends as `converse-settle` gives it (Send the work), before you or the answer files it, because a removal, a change of scope or another rig'"'"'s capability that the agreed course did not name goes back to the operator first.' "$TMP/continue-order"
-have "the prompt holds the work a sitting sends to the course the operator agreed to, naming where it departs from what they said" \
-    'Work you send is the course the operator agreed to, as you last put it to them whole. Their remarks are direction to think with, and you owe them your own view, so the course names each place it goes past or against what they said, first those that remove something, narrow or widen their ask, or give another rig a capability. The work goes once they say go' "$TMP/prompt-order"
+    'Write the order of work or a rework that a turn'"'"'s ruling sends as `converse-settle` gives it (Send the work), before you or the answer files it.' "$TMP/continue-order"
+have "the prompt makes the work a sitting sends its own to get right, with what the operator would most want to stop first" \
+    'What the operator says is direction to reason through, and their go means they trust the course, so the work you send is yours to get right. They usually engage at the big picture, so put first in the decision what they would most want to stop: anything the course removes, any change of scope and anything it asks of another rig (`converse-settle`).' "$TMP/prompt-order"
 echo "── a sitting writes the order of the work it sends in its own voice ──"
 # The order, a task's description or a rework's brief, is one statement in the
 # sitting's own voice that carries each point the operator raised. A rework's
