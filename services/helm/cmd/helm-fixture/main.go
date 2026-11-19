@@ -41,11 +41,11 @@ import (
 )
 
 // defaultBoard is the contract sample TestBoardFixture writes from the Go types,
-// relative to the module root, the directory the command runs from.
+// relative to services/helm, the directory the command runs from.
 const defaultBoard = "web/src/board.fixture.json"
 
 // defaultRigBoard is the document the rig read builds from the committed
-// gc-toolkit fixture, which TestFixtureBoard holds, relative to the module root.
+// gc-toolkit fixture, which TestFixtureBoard holds, relative to services/helm.
 const defaultRigBoard = "internal/rigboard/testdata/gc-toolkit.board.json"
 
 func main() {

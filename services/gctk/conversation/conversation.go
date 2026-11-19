@@ -13,8 +13,8 @@
 // otherwise blocks nothing: the PR's anchor depends on it through a `blocks`
 // edge (gc-helm.sh, conversation_hold_merge).
 //
-// The package sits outside internal/ so the helm board, a separate module, can
-// import it.
+// The package sits outside internal/ so the helm board, which lies outside
+// services/gctk, can import it.
 package conversation
 
 import (

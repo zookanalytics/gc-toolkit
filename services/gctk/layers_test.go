@@ -33,9 +33,9 @@ const (
 
 var layerName = map[int]string{adapter: "adapter", theLedger: "ledger", domain: "domain", command: "command", binary: "binary"}
 
-// pkgLayer places every package in the module. An adapter names the outside
+// pkgLayer places every gctk package. An adapter names the outside
 // system it reaches, and the store adapter is the one the ledger reaches. A
-// package added to the module is placed here, or this test fails.
+// package added to gctk is placed here, or this test fails.
 var pkgLayer = map[string]struct {
 	layer   int
 	adapter string
@@ -106,8 +106,8 @@ func TestImportsPointDown(t *testing.T) {
 	}
 }
 
-// moduleImports reads, for each package in the module, the module packages its
-// non-test files import.
+// moduleImports reads, for each gctk package, the gctk packages its non-test
+// files import.
 func moduleImports(t *testing.T) map[string][]string {
 	t.Helper()
 	out := map[string][]string{}

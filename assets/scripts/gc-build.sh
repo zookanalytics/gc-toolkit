@@ -4,7 +4,7 @@
 # builds nothing, and a failed build leaves the LAST GOOD binary in place:
 #   helm  helm-svc, the board backend, run by the gc-helm-svc.sh launcher. The
 #         supervisor gives a proxy_process 5s to answer its health probe, and
-#         this module builds in ~12.5s warm / 2m29s cold, so a build in the
+#         helm-svc builds in ~12.5s warm / 2m29s cold, so a build in the
 #         launcher's start path is always killed mid-compile.
 #   gctk  the merge cadence's compiled data plane, exec'd by the cadence
 #         scripts whose logic it carries. A build inside the cadence would put
@@ -21,9 +21,10 @@
 #                                      run does.
 # A binary is stale when a source is newer than it (find -newer), or when the
 # recorded binary_rev differs from the revision this run sees, because find
-# -newer is blind to an input a commit deleted. The revision is the module
-# SUBTREE's tree hash, so a merge that touches nothing under it neither rebuilds
-# nor republishes. A helm binary is also stale when it cannot READ the stores it
+# -newer is blind to an input a commit deleted. The revision is one hash over
+# the binary's inputs at HEAD, the folders it compiles from and the module's
+# go.mod and go.sum, so a merge that touches none of them neither rebuilds nor
+# republishes. A helm binary is also stale when it cannot READ the stores it
 # serves: that is fixed by the beads library it embedded, while the store schema
 # moves under it on a `bd` upgrade, so `helm-svc probe` asks it, and ok is not
 # reported without it.
@@ -37,7 +38,7 @@
 #   build-status.json  the record the board's PACK rows read: source_rev
 #                      against binary_rev, built_at, last_build_rc,
 #                      restart_pending, behind_main (commits behind
-#                      origin/<default> under the component's sources,
+#                      origin/<default> under the component's inputs,
 #                      report-only), checked_at, and for helm probe_status and
 #                      probe_detail
 #   build-status       helm only: `ok <ts>` built/current AND probed readable ·
@@ -72,26 +73,32 @@ for arg in "$@"; do
     esac
 done
 
-# The component table: where each module lives, what it compiles to, and which
-# per-component steps it takes. Everything below the table is one body for every
-# component.
+# The component table: what each binary compiles from, what it compiles to, and
+# which per-component steps it takes. Everything below the table is one body for
+# every component.
+#   DIR      the component's own folder, where its main package and anything it
+#            embeds live (helm embeds web/dist).
+#   IMPORTS  every other folder of this repository it compiles from. helm
+#            imports gctk's domain packages, prstatus among them, the status core
+#            the PR-label writer also derives from. gctk compiles from its own
+#            folder alone (services/gctk/deps_test.go).
 #   SERVICE  the supervisor service that runs the binary, empty for a command.
 #            A service gates --deploy on the city running it, takes its state
 #            root from the city's service listing, and is restarted onto a
 #            published binary.
 #   PROBE    1: ask the binary (`<binary> probe`) whether it can read the city's
 #            bead stores before reporting it ok or putting it into service.
-#   ICU      1: the module links ICU through a cgo package (Dolt's
+#   ICU      1: the binary links ICU through a cgo package (Dolt's
 #            go-icu-regex), so on macOS the compile is pointed at Homebrew's
 #            keg-only icu4c.
-#   STAMP    1: stamp the module's revision into the binary at link time, for
-#            the readers that compare the binary itself against the checkout.
+#   STAMP    1: stamp the binary's revision into it at link time, for the
+#            readers that compare the binary itself against the checkout.
 # PROBE_TIMEOUT is generous on purpose: a false "unreadable" turns a healthy
 # city red and buys a futile rebuild, so a cold Dolt open must be allowed to
 # finish.
 case "$COMPONENT" in
     helm)
-        MOD_REL=services/helm PKG=./cmd/helm-svc BIN_NAME=helm-svc
+        DIR=services/helm IMPORTS=(services/gctk) PKG=./cmd/helm-svc BIN_NAME=helm-svc
         SERVICE="${GC_HELM_SERVICE_NAME:-helm}" PROBE=1 ICU=1 STAMP=0
         STATE_ROOT_ENV=GC_HELM_STATE_ROOT
         GOTMP="${GC_HELM_GOTMP:-/var/tmp/gotmp}"
@@ -101,7 +108,7 @@ case "$COMPONENT" in
         PROBE_TIMEOUT="${GC_HELM_BUILD_PROBE_TIMEOUT:-60}"
         ;;
     gctk)
-        MOD_REL=services/gctk PKG=./cmd/gctk BIN_NAME=gctk
+        DIR=services/gctk IMPORTS=() PKG=./cmd/gctk BIN_NAME=gctk
         SERVICE="" PROBE=0 ICU=0 STAMP=1
         STATE_ROOT_ENV=GC_GCTK_STATE_ROOT
         GOTMP="${GC_GCTK_GOTMP:-/var/tmp/gotmp}"
@@ -115,40 +122,18 @@ esac
 ME="gc-build $COMPONENT"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MOD="$(cd "$HERE/../../$MOD_REL" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
 if [ "$ICU" -eq 1 ]; then
     # shellcheck source=icu4c-cgo.sh
     . "$HERE/icu4c-cgo.sh" || { echo "$ME: cannot source icu4c-cgo.sh from $HERE" >&2; exit 1; }
 fi
 
-# Every `replace <module> => <local path>` in the module's go.mod points at a
-# sibling module whose sources are compiled into the binary: helm replaces in
-# services/gctk, the prstatus status core the PR-label writer also derives
-# from. Those sources are build inputs, so SOURCE_REV (the staleness identity),
-# newer_than_binary (the mtime scan) and behind_main all span them: a change
-# confined to a replaced sibling must rebuild the binary, or it serves stale
-# logic while every other reader of that sibling has moved. Reading the replace
-# directives rather than naming the siblings keeps every future local module
-# covered by construction.
-local_dep_mods() {
-    awk '
-        function rhs(   i) { for (i = 1; i <= NF; i++) if ($i == "=>") return $(i + 1); return "" }
-        $1 == "replace" && $2 == "(" { inblock = 1; next }
-        inblock && $1 == ")"         { inblock = 0; next }
-        $1 == "replace" && /=>/      { print rhs(); next }
-        inblock && /=>/              { print rhs() }
-    ' "$MOD/go.mod" 2>/dev/null | while IFS= read -r _p; do
-        case "$_p" in
-            /*)        ( cd "$_p"      2>/dev/null && pwd ) ;;
-            ./*|../*)  ( cd "$MOD/$_p" 2>/dev/null && pwd ) ;;
-            *) continue ;;   # a versioned module-path replacement, not a local dir
-        esac
-    done
-}
-LOCAL_DEP_MODS=()
-while IFS= read -r _m; do
-    if [ -n "$_m" ]; then LOCAL_DEP_MODS+=("$_m"); fi
-done < <(local_dep_mods)
+# The binary's inputs, relative to ROOT, the module root: go.mod and go.sum,
+# which pin every dependency the binary compiles, and the folders it compiles
+# from. SOURCE_REV (the staleness identity), newer_than_binary (the mtime scan)
+# and behind_main all span exactly these, so a change confined to a folder the
+# binary imports rebuilds it, and a dependency bump rebuilds both binaries.
+INPUTS=(go.mod go.sum "$DIR" ${IMPORTS[@]+"${IMPORTS[@]}"})
 
 # The city this run builds for: the env chain an order's process and a shell
 # inside the city both carry, else the city_path of the service listing below,
@@ -226,33 +211,30 @@ mkdir -p "$BIN_DIR"
 RESTART_PENDING="$STATE_ROOT/restart-pending"
 
 STATUS="$STATE_ROOT/build-status.json"
-# HEAD:./ is the tree hash of $MOD at HEAD — the identity of this module's
-# committed inputs, deletions included. The repo HEAD would move on every merge
-# to main and cost a rebuild, and for a service a restart, for each. Each local
-# module the component replaces in adds its own subtree hash, so a sibling-only
-# change moves SOURCE_REV without widening the identity to all of main.
-MOD_REV="$(git -C "$MOD" rev-parse 'HEAD:./' 2>/dev/null || true)"
-SOURCE_REV="$MOD_REV"
-if [ -n "$SOURCE_REV" ]; then
-    for _dep in ${LOCAL_DEP_MODS[@]+"${LOCAL_DEP_MODS[@]}"}; do
-        _dep_rev="$(git -C "$_dep" rev-parse 'HEAD:./' 2>/dev/null || true)"
-        [ -n "$_dep_rev" ] && SOURCE_REV="$SOURCE_REV $_dep_rev"
-    done
+# SOURCE_REV is the identity of the binary's committed inputs, deletions
+# included: git's hash of the listing `git ls-tree HEAD` gives for INPUTS, the
+# tree of each folder and the blob of go.mod and go.sum. The repo HEAD would
+# move on every merge to main and cost a rebuild, and for a service a restart,
+# for each. A tick that cannot list them (git absent, no commit) leaves it
+# empty, never the hash of an empty listing.
+SOURCE_REV=""
+if _listing="$(git -C "$ROOT" ls-tree HEAD -- "${INPUTS[@]}" 2>/dev/null)" && [ -n "$_listing" ]; then
+    SOURCE_REV="$(printf '%s\n' "$_listing" | git -C "$ROOT" hash-object --stdin 2>/dev/null || true)"
 fi
 
 # behind_main — how far this checkout is behind origin/<default> under the
-# component's source paths, REPORT-ONLY. Everything above keys on the LOCAL
-# checkout: SOURCE_REV is HEAD's subtree, newer_than_binary scans HEAD's files.
+# binary's inputs, REPORT-ONLY. Everything above keys on the LOCAL checkout:
+# SOURCE_REV lists HEAD's inputs, newer_than_binary scans HEAD's files.
 # So a checkout parked off-main (another branch, or one not fast-forwarded)
 # keeps its binary current with THAT branch — source_rev == binary_rev, a clean
 # probe — while what it serves is behind main. Nothing above can see that, so the
 # PACK row would read a false "ok". This counts the commits origin/<default>
-# carries under the component's sources that HEAD lacks, and the board bands a
+# carries under the binary's inputs that HEAD lacks, and the board bands a
 # nonzero count as drift.
 #
 # It NEVER feeds need_build. A checkout may be off-main on purpose, and a rebuild
-# on every unrelated main merge is exactly what the SOURCE_REV subtree-hash
-# identity exists to avoid — the requirement is to REPORT drift, not to rebuild
+# on every unrelated main merge is exactly what the SOURCE_REV identity exists
+# to avoid — the requirement is to REPORT drift, not to rebuild
 # on it. The comparison wants a fresh origin ref: reconcile-rig-checkouts fetches
 # origin on its own cadence, so it is usually already current, and this fetch is
 # bounded to at most one ATTEMPT per FETCH_TTL for each state root (0 disables
@@ -260,45 +242,29 @@ fi
 # failing origin costs one attempt per TTL rather than one per tick. Every step
 # degrades to "gap unknown" (0), never to a failed build.
 BEHIND_MAIN=0
-REPO_ROOT="$(git -C "$MOD" rev-parse --show-toplevel 2>/dev/null || true)"
-if [ -n "$REPO_ROOT" ]; then
-    SRC_PATHS=()
-    for _p in "$MOD" ${LOCAL_DEP_MODS[@]+"${LOCAL_DEP_MODS[@]}"}; do
-        # A pathspec has to be inside this repo, and "behind origin/main" is this
-        # repo's question; a replace-dep resolved to another checkout is dropped.
-        # Both answers come from git, which resolves symlinks for each module
-        # the way it did for REPO_ROOT. MOD and the replace-deps are logical
-        # `pwd` paths, so a string match against REPO_ROOT misses every module
-        # of a checkout reached through a symlinked path.
-        [ "$(git -C "$_p" rev-parse --show-toplevel 2>/dev/null || true)" = "$REPO_ROOT" ] || continue
-        _prefix="$(git -C "$_p" rev-parse --show-prefix 2>/dev/null || true)"
-        SRC_PATHS+=("${_prefix:-.}")
-    done
-    if [ "${#SRC_PATHS[@]}" -gt 0 ]; then
-        DEFAULT_REF="$(git -C "$REPO_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"
-        case "$FETCH_TTL" in ''|*[!0-9]*) FETCH_TTL=1800 ;; esac
-        FETCH_MARK="$STATE_ROOT/origin-fetch-at"
-        NOW_S="$(date +%s 2>/dev/null || echo 0)"
-        LAST_S=0
-        [ -f "$FETCH_MARK" ] && LAST_S="$(cat "$FETCH_MARK" 2>/dev/null || echo 0)"
-        case "$LAST_S" in ''|*[!0-9]*) LAST_S=0 ;; esac
-        # Record the attempt BEFORE fetching, not only on success. The cost the
-        # cadence bounds is the fetch ATTEMPT, so a marker advanced only after a
-        # successful fetch leaves an unreachable or unauthenticated origin
-        # re-attempting on every later tick. Advancing it here holds a failing
-        # origin to one attempt per TTL; the gap below still reads off the last
-        # origin ref, so a lost fetch degrades to a stale count, never a failure.
-        if [ "$FETCH_TTL" -gt 0 ] && [ "$((NOW_S - LAST_S))" -ge "$FETCH_TTL" ]; then
-            printf '%s\n' "$NOW_S" > "$FETCH_MARK" 2>/dev/null || true
-            git -C "$REPO_ROOT" fetch --quiet --no-tags origin "${DEFAULT_REF#origin/}" 2>/dev/null || true
-        fi
-        # Commits the default branch carries under the component's sources that
-        # HEAD lacks: 0 when on main and current, when ahead, or when the ref is
-        # absent.
-        _behind="$(git -C "$REPO_ROOT" rev-list --count "HEAD..$DEFAULT_REF" -- "${SRC_PATHS[@]}" 2>/dev/null || true)"
-        case "$_behind" in ''|*[!0-9]*) _behind=0 ;; esac
-        BEHIND_MAIN="$_behind"
+if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    DEFAULT_REF="$(git -C "$ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"
+    case "$FETCH_TTL" in ''|*[!0-9]*) FETCH_TTL=1800 ;; esac
+    FETCH_MARK="$STATE_ROOT/origin-fetch-at"
+    NOW_S="$(date +%s 2>/dev/null || echo 0)"
+    LAST_S=0
+    [ -f "$FETCH_MARK" ] && LAST_S="$(cat "$FETCH_MARK" 2>/dev/null || echo 0)"
+    case "$LAST_S" in ''|*[!0-9]*) LAST_S=0 ;; esac
+    # Record the attempt BEFORE fetching, not only on success. The cost the
+    # cadence bounds is the fetch ATTEMPT, so a marker advanced only after a
+    # successful fetch leaves an unreachable or unauthenticated origin
+    # re-attempting on every later tick. Advancing it here holds a failing
+    # origin to one attempt per TTL; the gap below still reads off the last
+    # origin ref, so a lost fetch degrades to a stale count, never a failure.
+    if [ "$FETCH_TTL" -gt 0 ] && [ "$((NOW_S - LAST_S))" -ge "$FETCH_TTL" ]; then
+        printf '%s\n' "$NOW_S" > "$FETCH_MARK" 2>/dev/null || true
+        git -C "$ROOT" fetch --quiet --no-tags origin "${DEFAULT_REF#origin/}" 2>/dev/null || true
     fi
+    # Commits the default branch carries under the binary's inputs that HEAD
+    # lacks: 0 when on main and current, when ahead, or when the ref is absent.
+    _behind="$(git -C "$ROOT" rev-list --count "HEAD..$DEFAULT_REF" -- "${INPUTS[@]}" 2>/dev/null || true)"
+    case "$_behind" in ''|*[!0-9]*) _behind=0 ;; esac
+    BEHIND_MAIN="$_behind"
 fi
 
 # What the probe said about the binary this run reports on, in one variable:
@@ -405,10 +371,12 @@ embedded_beads() { # <binary> — the pinned library version, or "unknown"
 
 # Build inputs: *.go, go.mod/go.sum (explicit — `-name '*.go'` misses them, and
 # a dependency-only bump must still rebuild), and web/dist (helm's go:embed).
-# Scanned across $MOD and every local module it replaces in, so a sibling-only
-# edit is seen as newer. node_modules pruned.
+# Scanned across every one of INPUTS, so an edit in a folder the binary imports
+# is seen as newer. node_modules pruned.
 newer_than_binary() {
-    find "$MOD" ${LOCAL_DEP_MODS[@]+"${LOCAL_DEP_MODS[@]}"} -name node_modules -prune -o \( -name '*.go' -o -name go.mod -o -name go.sum -o -path "$MOD/web/dist/*" \) -newer "$BIN" -print -quit 2>/dev/null
+    local _in _paths=()
+    for _in in "${INPUTS[@]}"; do _paths+=("$ROOT/$_in"); done
+    find "${_paths[@]}" -name node_modules -prune -o \( -name '*.go' -o -name go.mod -o -name go.sum -o -path "$ROOT/$DIR/web/dist/*" \) -newer "$BIN" -print -quit 2>/dev/null
 }
 
 # Is the pid alive? Tells a live scratch dir from a stranded one.
@@ -507,7 +475,7 @@ if [ "$need_build" -eq 0 ]; then
     # every five minutes buries the remedy it cannot perform itself.
     EMBEDDED="$(embedded_beads "$BIN")"
     if [ "$(cat "$PROBE_LATCH" 2>/dev/null || true)" = "$EMBEDDED" ]; then
-        echo "$ME: $BIN CANNOT READ the city's bead stores, and a rebuild would embed the same $BEADS_MODULE $EMBEDDED; bump it in $MOD/go.mod. Detail: $PROBE_DETAIL" >&2
+        echo "$ME: $BIN CANNOT READ the city's bead stores, and a rebuild would embed the same $BEADS_MODULE $EMBEDDED; bump it in $ROOT/go.mod. Detail: $PROBE_DETAIL" >&2
         write_status unreadable "$PROBE_DETAIL"
         write_record 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
         exit 1
@@ -522,7 +490,7 @@ fi
 # merge pass and every epic the work skill files, since lifecycle.sh, merge.sh
 # and epic.sh have nothing else to exec, and a city that has one keeps it.
 if ! command -v "$GO" >/dev/null 2>&1; then
-    echo "$ME: BUILD FAILED: no Go toolchain ($GO) to build $MOD; set GC_GO_BIN. $BIN left unchanged" >&2
+    echo "$ME: BUILD FAILED: no Go toolchain ($GO) to build $ROOT/$DIR; set GC_GO_BIN. $BIN left unchanged" >&2
     write_status failed
     write_record 1 "$(prev_field binary_rev)" "$(prev_field built_at)"
     exit 1
@@ -581,13 +549,13 @@ if [ "$ICU" -eq 1 ]; then
 fi
 
 # A stamping component's binary carries the revision it was built from
-# (`gctk version`), stamped as its module's own subtree hash, so
-# doctor/check-cadence-live compares one identity against the checkout rather
-# than a commit hash against a tree hash. A build with no revision to
-# stamp falls back to the toolchain's VCS stamp.
+# (`gctk version`), stamped as SOURCE_REV, so doctor/check-cadence-live
+# compares the identity the build records against the checkout rather than a
+# commit hash. A build with no revision to stamp falls back to the toolchain's
+# VCS stamp.
 GO_BUILD_FLAGS=()
-if [ "$STAMP" -eq 1 ] && [ -n "$MOD_REV" ]; then
-    GO_BUILD_FLAGS+=(-ldflags "-X main.sourceRev=$MOD_REV")
+if [ "$STAMP" -eq 1 ] && [ -n "$SOURCE_REV" ]; then
+    GO_BUILD_FLAGS+=(-ldflags "-X main.sourceRev=$SOURCE_REV")
 fi
 
 # Publish only via atomic rename from a scratch file beside $BIN: an in-place
@@ -595,9 +563,9 @@ fi
 # a caller's -x test.
 build_ok=0
 BIN_TMP=""
-echo "$ME: building $MOD -> $BIN"
+echo "$ME: building $ROOT/$DIR -> $BIN"
 if BIN_TMP="$(mktemp "$BIN_DIR/.$BIN_NAME.build.XXXXXX" 2>/dev/null)"; then
-    if ( cd "$MOD" && TMPDIR="$GOTMP_RUN" GOTMPDIR="$GOTMP_RUN" \
+    if ( cd "$ROOT/$DIR" && TMPDIR="$GOTMP_RUN" GOTMPDIR="$GOTMP_RUN" \
             CGO_CPPFLAGS="$BUILD_CGO_CPPFLAGS" CGO_LDFLAGS="$BUILD_CGO_LDFLAGS" \
             "$GO" build ${GO_BUILD_FLAGS[@]+"${GO_BUILD_FLAGS[@]}"} -o "$BIN_TMP" "$PKG" ) \
         && chmod +x "$BIN_TMP" && mv -f "$BIN_TMP" "$BIN"; then

@@ -11,8 +11,8 @@
 // those rows too, with the GitHub read the landing order saved on the PR's
 // bead ([Listing.PRAnswers]).
 //
-// The package sits outside internal/ so the helm board, a separate module, can
-// import it, while the ledger stays internal.
+// The package sits outside internal/ so the helm board, which lies outside
+// services/gctk, can import it, while the ledger stays internal.
 package listing
 
 import (

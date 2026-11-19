@@ -204,16 +204,16 @@ each file needing it carries as a copy.
 
 ## The Go services
 
-`tools/lint.sh` runs `go vet ./...` in each module and `gofmt -l` over every
-tracked Go file, at the self-review and at merge. Vet type-checks test files
-and runs none of them, and no gate runs `go test`. CI's whole suite drives gctk
-end to end, because each suite whose scripts reach `lifecycle.sh` or
-`merge.sh` builds gctk from the checkout (`harness_build_gctk` in
-`assets/scripts/test-harness.sh`). `merge.test.sh` and `lifecycle.test.sh`
+`tools/lint.sh` runs `go vet ./...` over the repository's one Go module and
+`gofmt -l` over every tracked Go file, at the self-review and at merge. Vet
+type-checks test files and runs none of them, and no gate runs `go test`. CI's
+whole suite drives gctk end to end, because each suite whose scripts reach
+`lifecycle.sh` or `merge.sh` builds gctk from the checkout (`harness_build_gctk`
+in `assets/scripts/test-harness.sh`). `merge.test.sh` and `lifecycle.test.sh`
 name none of gctk's `.go` files, so the affected subset leaves them out of a
 gctk change, and no suite it selects for a Go change builds the code that
 changed. No suite builds or runs helm-svc. So on a Go diff the review runs
-`go test ./...` in each module the diff touches, and for gctk the suites of the
+`go test ./...` from the repository root, and for gctk the suites of the
 commands it changes. On the host helm compiles only with ICU's cgo flags, so
 its tests run with `CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags`
 in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.

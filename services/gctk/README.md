@@ -216,7 +216,7 @@ key-registry.json    every declared key, generated from the declarations
 ## Running the tests
 
 ```bash
-cd services/gctk && go test ./...          # every package
+cd services/gctk && go test ./...          # every gctk package
 cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write key-registry.json again
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd ./arm -run TestStoreAcceptance -v   # the city's bd on a scratch store
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd/fakegc -run TestContract -v   # the fake gc against the city's bd

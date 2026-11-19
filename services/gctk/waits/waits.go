@@ -14,8 +14,8 @@
 // state lives at once in its status, its metadata stamps and the position of a
 // workflow poured for it, and the test goes once that state has one home.
 //
-// The package sits outside internal/ so the helm board, a separate module, can
-// import it.
+// The package sits outside internal/ so the helm board, which lies outside
+// services/gctk, can import it.
 package waits
 
 import (
