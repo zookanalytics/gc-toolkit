@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# lint.test.sh — guards lint.yml, the lint check on GitHub: the events that run
+# it, the one job and its id, the draft gate that is the job's whole if:, the
+# concurrency group the job holds, and the version of golangci-lint it runs,
+# which only .golangci-lint-version names.
+#
+# A draft pull request must not run the lint, and a push to main, a manual
+# dispatch and the marking of a draft as ready must. Main's ruleset names a
+# required check by its job's id, and a name: or a matrix on the job renames
+# it, so the job is `lint` and sets neither. The city's merge counts no skipped
+# result, so the draft gate is the job's whole if:: a condition of its own that
+# skipped the job at a ready head would hold that pull request's merge. The job
+# holds a concurrency group named for the workflow, the job and the ref, that
+# cancels the run in progress, and the workflow holds none, for the reasons
+# tests.test.sh gives for tests.yml.
+#
+# tools/lint.sh and this job lint with the same release because each reads it
+# from .golangci-lint-version, so the job reads the file and names no release
+# of its own.
+#
+# Hermetic: reads lint.yml with Psych, the YAML parser Ruby ships, as
+# action-pins.test.sh reads every workflow. Needs ruby.
+
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WF="$HERE/lint.yml"
+
+[ -f "$WF" ] || { echo "lint.test.sh: cannot find lint.yml at $WF" >&2; exit 2; }
+ruby -e 'require "psych"' 2>/dev/null \
+    || { echo "lint.test.sh: needs ruby with Psych, its YAML parser, to read lint.yml" >&2; exit 2; }
+
+# The check exits 0 when lint.yml holds every rule, 1 naming each rule it
+# breaks, and 2 when it cannot read the file. Psych reads the bare key on as
+# true, as YAML 1.1 does, so the events are under either key.
+ruby - "$WF" <<'RUBY'
+require 'psych'
+
+failures = []
+fail_with = ->(msg) { failures << msg }
+begin
+  doc = Psych.safe_load(File.read(ARGV[0]), aliases: false)
+  raise 'its top level is not a mapping' unless doc.is_a?(Hash)
+rescue StandardError, Psych::Exception => e
+  warn "lint.test.sh: cannot read lint.yml: #{e.message}"
+  exit 2
+end
+
+events = doc[true] || doc['on'] || {}
+types = Array(events.dig('pull_request', 'types'))
+%w[opened synchronize reopened ready_for_review].each do |t|
+  fail_with.("pull_request types must include '#{t}'") unless types.include?(t)
+end
+fail_with.("pull_request must run for main") unless Array(events.dig('pull_request', 'branches')) == ['main']
+fail_with.("a push to main must run the lint") unless Array(events.dig('push', 'branches')) == ['main']
+fail_with.("a manual dispatch must run the lint") unless events.key?('workflow_dispatch')
+
+fail_with.("the workflow must hold no concurrency group, each job holds its own") if doc.key?('concurrency')
+
+jobs = doc['jobs'] || {}
+fail_with.("lint.yml must have one job, lint, and has #{jobs.keys.inspect}") unless jobs.keys == ['lint']
+job = jobs['lint'] || {}
+%w[name strategy].each do |k|
+  fail_with.("job lint must not set #{k}:, which renames the check main's ruleset requires") if job.key?(k)
+end
+gate = "github.event_name != 'pull_request' || github.event.pull_request.draft == false"
+fail_with.("job lint's whole if: must be the draft gate, #{gate}, and is #{job['if'].inspect}") unless job['if'] == gate
+group = '${{ github.workflow }}-lint-${{ github.ref }}'
+conc = job['concurrency'].is_a?(Hash) ? job['concurrency'] : {}
+fail_with.("job lint's concurrency group must be #{group}") unless conc['group'] == group
+fail_with.("job lint's concurrency must cancel the run in progress") unless conc['cancel-in-progress'] == true
+
+runs = Array(job['steps']).map { |s| s.is_a?(Hash) ? s['run'].to_s : '' }
+pinned = runs.select { |r| r.include?('golangci-lint@$(cat .golangci-lint-version)') }
+fail_with.("job lint must run golangci-lint at the release .golangci-lint-version names") if pinned.empty?
+named = runs.join("\n").scan(/golangci-lint@(v[0-9][^\s"']*)/).flatten
+fail_with.("job lint names a release of its own, #{named.join(', ')}; it reads .golangci-lint-version") unless named.empty?
+
+failures.each { |f| warn "lint.test.sh: FAIL — #{f}" }
+exit 1 unless failures.empty?
+puts 'lint.test.sh: OK'
+RUBY
