@@ -628,10 +628,14 @@ the effort's branch brought current with main (sections 14 and 15).
 
 This design's own change states the rule in `docs/architecture.md` at the
 document's altitude. Its "How humans engage" says when a stay comes back, that
-it comes back through its own task, which waits on a return gate the landing
-order closes, that a visit and a fresh context leave the return alone, that the
-return always waits for the operator, what holds the PR until the operator
-settles, and that the conversation stays available until its subject closes.
+it comes back through its own task, which waits in the store on a return gate
+while Gas City sleeps the sitting, that the landing order holds the PR's merge
+and releases the return at the end of a round, that a visit and a fresh context
+leave the return alone, that the return always waits for the operator, what
+holds the PR until the operator settles, and that the conversation stays
+available until its subject closes. The gate's package, its closes and how the
+wake reaches the sitting are how the parts carry the return out, so they stay
+in this design.
 Its Debt names the stay that comes back only when its work closes, with
 tk-vrg93t0 as the work that retires it, and the words unit narrows that entry to
 the rigs still on the old review path. The gate's close is a close, so step 9 of

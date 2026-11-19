@@ -367,15 +367,12 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   after it. For work with no PR, the return is due when the work closes. For
   work on a PR, whether it opens one or reworks the PR under discussion, the
   next decision is the approval, in every round. The sitting comes back
-  through its own task. While the work is out, its conversation waits on a
-  return gate, the one gate kind of the pack's own, which gctk's `gate`
-  package defines, and Gas City sleeps the sitting. When a round ends at the
-  head the refinery validated, the landing order puts the conversation's hold
-  on the PR's merge and then closes the gate, which also closes once the work
-  closes. The conversation is then ready work, and Gas City wakes the sitting
-  with its thread, or sends a sitting still up a notice that the gate closed.
-  A visit to the sitting and a fresh context for it change neither the
-  conversation nor its gate, so the return outlasts both. On each return the
+  through its own task: while the work is out, its conversation waits in the
+  store on a return gate, and Gas City sleeps the sitting and wakes it with its
+  thread when the return is due. When a round ends at the head the refinery
+  validated, the landing order puts the conversation's hold on the PR's merge
+  and releases the return. A visit to the sitting and a fresh context for it
+  leave the store alone, so the return outlasts both. On each return the
   sitting compares the work with what was agreed, tells the operator where it
   matches and where it departs, and waits for the operator, even when it finds
   that the work matches. The PR does not merge until the operator settles
