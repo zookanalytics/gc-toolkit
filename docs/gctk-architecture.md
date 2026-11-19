@@ -614,7 +614,8 @@ question for each row it draws. The answer is in the board's words.
   when the city takes it as things stand, `not-moving` when nothing moves it as
   things stand, and `closed`. A bead with no move of its own has no group: a
   conversation that answers a question, which the question's row carries, an
-  epic or a Delivery with open members, and a gate that is no human gate.
+  epic or a Delivery with open members or with no members at all, and a gate
+  that is no human gate.
 - **The rule that placed it.** The first of these that applies answers:
   1. `closed`.
   2. `ask`: the bead is itself what a person owes, and the answer names the
@@ -623,8 +624,9 @@ question for each row it draws. The answer is in the board's words.
      it is an open conversation its sitting does not stay in, which answers no
      open human gate and tracks no decision that asks. It is a `pull-request`
      when its pull request reads needs-review or needs-attention, a `ruling`
-     when it is an epic whose members have all closed or a landed Delivery,
-     and `routed-to-you` when it is any other open bead only a person clears.
+     when it is an epic with members and none of them open, or a landed
+     Delivery, and `routed-to-you` when it is any other open bead only a
+     person clears.
      Work that carries `hold:mayor` asks nothing, because Gas City's hold
      names the Product Owner as its next actor.
   3. `own-wait` or `further-along`: a human gate, or a bead only a person

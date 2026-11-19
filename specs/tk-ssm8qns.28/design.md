@@ -181,7 +181,7 @@ stuck on itself, unread. The full rule is
 | `status` | has a status no pool offers, such as deferred | `not-moving` | Deferred, or the status | stuck on itself |
 | `staying` | is a conversation its sitting stays in, or a decision a ruling left waiting on the work it sent | `queued` | Waits on `<id>` | advancing while that work does |
 | `answers` | is a conversation that answers a question | none | its words, in the question's row | stuck on the question |
-| `members` | is an epic or Delivery with open members | none | its counts | advancing while every open member does |
+| `members` | is an epic or Delivery with open members, or with no members at all | none | its counts | advancing while every open member does, and stuck on itself with no members |
 | `gate` | is a gate that is no human gate | none | nothing of its own | stuck on itself |
 | `in-flight` | is work in flight: claimed, carrying a branch or merge result, or worked by a live run | `queued` | Pull request #`<n>` with where it stands, or In flight | advancing while what it waits on does |
 | `scheduled` | is work that is armed, routed or assigned, and no dispatch hold holds | `queued` | Queued, or Waits on `<id>` | advancing while what it waits on does |
