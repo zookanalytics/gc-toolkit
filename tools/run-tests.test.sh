@@ -94,8 +94,10 @@
 #     sibling and the users of a script that compiles it outside a function,
 #     with a here-document in a function's body read as no part of the body.
 #     A change that deletes or moves a program's whole main package reaches
-#     the suites that still compile it by its old path. A _test.go file, and a
-#     file in no package's directory, reach no suite;
+#     the suites that still compile it by its old path, and one that deletes a
+#     package the program imports, or the file an embed pattern of such a
+#     package names, reaches the suites that compile the unchanged program. A
+#     _test.go file, and a file in no package's directory, reach no suite;
 #     go.mod reaches every program's; a go that cannot list the packages, or
 #     what a program imports, lets a .go file reach every such program and
 #     nothing else reach any; and --affected reaches the same suites from a
@@ -1361,6 +1363,19 @@ else
   git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "move the server's package"
   glist --affected base
   eq "$LIST" "t/server.test.sh " "…and one that moves server's reaches the suite that still runs it by its old path"
+  # An import or an embed pattern that finds nothing leaves go's answer
+  # incomplete, so it cannot place the path the change deleted.
+  git -C "$GREPO" checkout -q -b delete-store base
+  git -C "$GREPO" rm -q -r other/store
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "delete the package server imports"
+  glist --affected base
+  eq "$LIST" "t/server.test.sh " \
+    "a change that deletes a package server imports reaches the suite that runs server, though server's package and that suite are unchanged"
+  git -C "$GREPO" checkout -q -b delete-greeting base
+  git -C "$GREPO" rm -q svc/lib/words/greeting.txt
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "delete the file lib embeds"
+  glist --affected base
+  eq "$LIST" "$TOOL_SUITES" "…and one that deletes the file lib's embed pattern names reaches the suites compiling tool"
 fi
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"

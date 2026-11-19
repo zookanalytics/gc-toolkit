@@ -49,7 +49,11 @@
 #     package embeds. A ./<package> the module no longer holds as a main
 #     package, as when the change deletes or moves the whole package, is
 #     reached by a changed path in a directory the argument names, by the end
-#     of its path. A suite that compiles a reached program runs. Another
+#     of its path. A program go marks incomplete, because it or a package it
+#     imports has an error, as when the change deletes a package the program
+#     imports or every file one of their embed patterns matches, is reached by
+#     any changed path, since go's list then cannot say what the program is
+#     compiled from. A suite that compiles a reached program runs. Another
 #     script that compiles one counts as changed, so every rule here applies
 #     to it in turn, unless it compiles the program inside a function: then
 #     the function's name, and the name of each function of the same script
@@ -480,15 +484,17 @@ program_reached() {
   local -A pkg_dirs=() embedded=()
   if [ -z "${REACHED[$d]:-}" ]; then
     REACHED[$d]=0
-    if out="$(cd "$ROOT" && go list -e -deps -f '{{if not .Standard}}D {{.Dir}}{{range .EmbedFiles}}{{"\n"}}E {{$.Dir}}/{{.}}{{end}}{{end}}' "./$d" 2>/dev/null)"; then
+    if out="$(cd "$ROOT" && go list -e -deps -f '{{if not .Standard}}D {{.Dir}}{{if .Incomplete}}{{"\n"}}I{{end}}{{range .EmbedFiles}}{{"\n"}}E {{$.Dir}}/{{.}}{{end}}{{end}}' "./$d" 2>/dev/null)"; then
       while IFS= read -r line; do
         case "$line" in
+          I) REACHED[$d]=1 ;;
           "D $ROOT") pkg_dirs[.]=1 ;;
           "D $ROOT/"*) pkg_dirs["${line#"D $ROOT/"}"]=1 ;;
           "E $ROOT/"*) embedded["${line#"E $ROOT/"}"]=1 ;;
         esac
       done < <(printf '%s\n' "$out")
       for p in "${CHANGED[@]}"; do
+        [ "${REACHED[$d]}" -eq 0 ] || break
         case "$p" in
           go.mod|go.sum) REACHED[$d]=1; break ;;
           *_test.go) continue ;;
