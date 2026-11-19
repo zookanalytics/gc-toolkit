@@ -194,6 +194,59 @@ func TestStoreOfDerivesTheCitysPrefix(t *testing.T) {
 	}
 }
 
+// The city's store goes by the name and prefix its .gc/site.toml binds, ahead
+// of the ones city.toml's [workspace] still sets, which gc config show prints,
+// as Gas City takes them. Each binding stands alone: a prefix bound alone
+// keeps the printed name, and a name bound alone, with no prefix set anywhere,
+// gives the prefix Gas City derives from it. A binding that does not decode is
+// a *ReadError.
+func TestTheCitysStoreGoesByItsSiteBinding(t *testing.T) {
+	routeStub(t)
+	t.Setenv("STUB_WHERE", `{"path":"/caller/.beads","prefix":"zz"}`)
+	city := t.TempDir()
+	if err := os.Mkdir(filepath.Join(city, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(city, ".beads")
+	c := &Client{bin: "gc"}
+	bind := func(site, name, prefix string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(city, ".gc", "site.toml"), []byte(site), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("STUB_CONFIG", `{"city_path":"`+city+`","config":{"Workspace":{"Name":"`+name+`","Prefix":"`+prefix+`"},"Rigs":[]}}`)
+	}
+	for _, tc := range []struct {
+		site, name, prefix string // the binding, and the [workspace] gc config show prints
+		id, otherID        string // a bead the city's store holds, and one no store does
+		named, otherName   string // the city's name, and a name no store has
+	}{
+		{"workspace_name = \"site-city\"\nworkspace_prefix = \"sc\"\n\n[[rig]]\nname = \"project\"\npath = \"/rigs/project\"\n",
+			"declared-city", "old", "sc-1", "old-1", "site-city", "declared-city"},
+		{"workspace_prefix = \"sc\"\n", "declared-city", "old", "sc-2", "old-2", "declared-city", "site-city"},
+		{"workspace_name = \"GasCity\"\n", "declared-city", "", "gc-3", "dc-3", "GasCity", "declared-city"},
+	} {
+		bind(tc.site, tc.name, tc.prefix)
+		if got, err := c.Route(tc.id); err != nil || got != store {
+			t.Errorf("binding %q: Route(%s) = %q, %v; want the city's store", tc.site, tc.id, got, err)
+		}
+		if got, ok, err := c.StoreOf(tc.otherID); err != nil || ok {
+			t.Errorf("binding %q: StoreOf(%s) = %q, %v, %v; want no store", tc.site, tc.otherID, got, ok, err)
+		}
+		if got, ok, err := c.RigStore(tc.named); err != nil || !ok || got != store {
+			t.Errorf("binding %q: RigStore(%s) = %q, %v, %v; want the city's store", tc.site, tc.named, got, ok, err)
+		}
+		if got, ok, err := c.RigStore(tc.otherName); err != nil || ok {
+			t.Errorf("binding %q: RigStore(%s) = %q, %v, %v; want no store", tc.site, tc.otherName, got, ok, err)
+		}
+	}
+	bind("workspace_prefix = \n", "declared-city", "old")
+	var re *ReadError
+	if _, _, err := c.StoreOf("sc-4"); !errors.As(err, &re) || re.ID != "sc-4" {
+		t.Errorf("StoreOf over a binding that does not decode = %v; want a *ReadError for sc-4", err)
+	}
+}
+
 // derivedPrefix gives the prefix Gas City derives from a name, on Gas City's
 // own cases (TestDeriveBeadsPrefix in internal/config/config_test.go at
 // gastownhall/gascity f5302d1dcf).

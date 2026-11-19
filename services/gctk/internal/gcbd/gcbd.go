@@ -42,6 +42,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/pelletier/go-toml/v2"
+
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/daemon"
 )
 
@@ -296,22 +298,16 @@ type configuredRig struct {
 
 // rigs is each store the city's config names, as `gc config show --json`
 // prints it from the city's files: the city's own store, in the folder the
-// config is read from, under [workspace]'s name and prefix, then each rig's
-// under its [[rigs]] entry. A rig folder the config gives as a relative path
-// is under the city's folder, as Gas City's resolveRigPaths
-// (cmd/gc/beads_provider_lifecycle.go at gastownhall/gascity f5302d1dcf) takes
-// it, so no store's folder depends on the directory the caller runs in. A
-// prefix the config leaves unset is the one Gas City derives from the name
-// ([derivedPrefix]), as Rig.EffectivePrefix and EffectiveHQPrefix do. A read
-// that fails or does not decode returns a *ReadError, which names id when the
-// config was read to route one.
-//
-// gc prints [workspace]'s name and prefix from city.toml where it sets them,
-// and otherwise the ones .gc/site.toml binds (configForDisplay in
-// cmd/gc/cmd_config.go at gastownhall/gascity f5302d1dcf), while Gas City
-// itself takes .gc/site.toml's first. So in a city whose city.toml still sets
-// a name or prefix, a place Gas City warns is legacy, and whose .gc/site.toml
-// binds another, the city's store goes by the city.toml one.
+// config is read from, under the city's name and prefix, then each rig's under
+// its [[rigs]] entry. The city's name and prefix are the ones .gc/site.toml
+// binds, where it binds them, and otherwise [workspace]'s ([siteIdentity]). A
+// rig folder the config gives as a relative path is under the city's folder,
+// as Gas City's resolveRigPaths (cmd/gc/beads_provider_lifecycle.go at
+// gastownhall/gascity f5302d1dcf) takes it, so no store's folder depends on
+// the directory the caller runs in. A prefix the config leaves unset is the one
+// Gas City derives from the name ([derivedPrefix]), as Rig.EffectivePrefix and
+// EffectiveHQPrefix do. A config or site binding that does not read or decode
+// returns a *ReadError, which names id when the config was read to route one.
 func (c *Client) rigs(id string) ([]configuredRig, error) {
 	var stderr bytes.Buffer
 	cmd := c.command("config", "show", "--json")
@@ -335,6 +331,16 @@ func (c *Client) rigs(id string) ([]configuredRig, error) {
 	}
 	city := shown.Config.Workspace
 	city.Path = shown.CityPath
+	name, prefix, err := siteIdentity(shown.CityPath)
+	if err != nil {
+		return nil, &ReadError{ID: id, Reason: "the city's site binding did not read: " + err.Error()}
+	}
+	if name != "" {
+		city.Name = name
+	}
+	if prefix != "" {
+		city.Prefix = prefix
+	}
 	rigs := append([]configuredRig{city}, shown.Config.Rigs...)
 	for i := range rigs {
 		if strings.TrimSpace(rigs[i].Path) != "" && !filepath.IsAbs(rigs[i].Path) {
@@ -345,6 +351,31 @@ func (c *Client) rigs(id string) ([]configuredRig, error) {
 		}
 	}
 	return rigs, nil
+}
+
+// siteIdentity is the city's name and prefix that .gc/site.toml under cityPath
+// binds, each empty where it binds none, as both are in a city with no such
+// file. Gas City takes each ahead of the one city.toml's [workspace] sets
+// (applyWorkspaceIdentityBinding in internal/config/site_binding.go at
+// gastownhall/gascity f5302d1dcf), but `gc config show` prints one that
+// city.toml still sets, a place Gas City warns is legacy, in place of the bound
+// one (configForDisplay in cmd/gc/cmd_config.go).
+func siteIdentity(cityPath string) (name, prefix string, err error) {
+	raw, err := os.ReadFile(filepath.Join(cityPath, ".gc", "site.toml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	var site struct {
+		Name   string `toml:"workspace_name"`
+		Prefix string `toml:"workspace_prefix"`
+	}
+	if err := toml.Unmarshal(raw, &site); err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(site.Name), strings.TrimSpace(site.Prefix), nil
 }
 
 // derivedPrefix is the bead prefix Gas City derives from a rig's or the city's

@@ -327,19 +327,22 @@ stated burden.
 - **The store adapter's reading of the config.** The store adapter finds a
   bead's store by its id's prefix from the city's config
   (`gc config show --json`), which prints a prefix only where the config sets
-  one and a rig's folder as the config gives it. So it derives the rest of the
-  prefixes from the store's name as Gas City's `DeriveBeadsPrefix` does
-  (`internal/config/config.go`), and takes a relative folder under the city's
-  as `resolveRigPaths` does (`cmd/gc/beads_provider_lifecycle.go`, both at
-  gastownhall/gascity f5302d1dcf). It is re-implemented because no gc command
-  names the store that holds a bead id, and `gc rig list --json`, which prints
-  every prefix Gas City derives and every folder it resolves, asks the
-  supervisor, the bead store and tmux for each rig's `running` flag. The goal
-  is that Gas City names the store itself: the lookup moves onto a Gas City
-  command that names the store holding a bead id once the city's gc carries
-  one (tk-35lc762), and these rules go with it. The risk is that Gas City
-  changes one of them first, and the lookup looks for a store under its old
-  prefix or folder.
+  one, a rig's folder as the config gives it, and a city name or prefix that
+  `city.toml` still sets in place of the one `.gc/site.toml` binds. So it
+  derives the rest of the prefixes from the store's name as Gas City's
+  `DeriveBeadsPrefix` does (`internal/config/config.go`), takes a relative
+  folder under the city's as `resolveRigPaths` does
+  (`cmd/gc/beads_provider_lifecycle.go`), and reads the city's name and prefix
+  from `.gc/site.toml` first as `applyWorkspaceIdentityBinding` does
+  (`internal/config/site_binding.go`, all at gastownhall/gascity f5302d1dcf).
+  It is re-implemented because no gc command names the store that holds a bead
+  id, and `gc rig list --json`, which prints each store's name, prefix and
+  folder as Gas City resolves them, asks the supervisor, the bead store and
+  tmux for each rig's `running` flag. The goal is that Gas City names the store
+  itself: the lookup moves onto a Gas City command that names the store holding
+  a bead id once the city's gc carries one (tk-35lc762), and these rules go
+  with it. The risk is that Gas City changes one of them first, and the lookup
+  looks for a store under its old name, prefix or folder.
 - **The run link.** `waits` tells which bead a live workflow run works from
   the input convoy its root names and the bead that convoy tracks, or from a
   classic molecule's issue variable, as `assets/scripts/run-lib.sh` defines
