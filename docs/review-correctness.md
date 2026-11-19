@@ -43,10 +43,17 @@ declares.
   merge waits on the checks main's ruleset requires, which are `test`,
   `test-macos` and `go`, so a failure only `go-macos` shows holds no merge.
 - The self-review and the refinery run their gates on the city's host, which is
-  macOS, and CI runs on GitHub's runners. The correctness check reads green
-  before its pull request opens (its `phase` in `review-checks.toml` is
-  `pre-open`), so CI's jobs first run on a change after its first review, and
-  the review formula prints no CI result.
+  macOS, and CI runs on GitHub's runners. A review run judges an open pull
+  request at one head. The city opens each pull request as a draft and returns
+  it to draft before each push it makes onto it, and the landing order marks it
+  ready once a review has passed at its head, without waiting for CI (the draft
+  cycle in `services/gctk/pr/draft.go`). CI's jobs skip a draft, so at a head
+  the city pushed they first run once its review there has passed. A pull
+  request that is already ready when its review starts, such as one a person
+  marked ready, can have CI results at that head. The lane's read,
+  `review-run.sh lane`, prints none of them: it prints the published pull
+  request, the diff, the rig's guidance and what `gctk rig` recorded at the
+  head.
 
 ## Pack content every rig runs
 
@@ -222,7 +229,7 @@ from the checkout (`harness_build_gctk` in `assets/scripts/test-harness.sh`).
 affected subset leaves them out of a gctk change, and no suite it selects for a
 Go change builds the code that changed. No suite builds or runs helm-svc.
 
-No CI result reaches the review ([Where the gates run](#where-the-gates-run)),
+The lane's read prints no CI result ([Where the gates run](#where-the-gates-run)),
 so on a Go diff the review runs `go test ./...` in each module the diff
 touches, and in `services/helm` whenever the diff touches `services/gctk`,
 whose packages helm builds through the `replace` in its `go.mod`. The host is
