@@ -782,8 +782,9 @@ for whether this design still needs it:
   ruled that GitHub asks for review at once at the end of a round, so no draft
   rule is kept.
 - **The move onto the first review run's convoy**: dropped. A rework stay on the
-  review path waits through a convoy that tracks the anchor from its sign-off,
-  one the sign-off makes when no run has poured one.
+  review path waits on the anchor's return gate, which its sign-off files after
+  the ask (section 1). A convoy is the wait only of a stay that promises
+  nothing on its work, such as one after a settled exchange (section 7).
 - **The entry's `ready` and its `READING`, `READ`, `WAIT` and `MOVE` values**:
   dropped. The gate's close reason says why the sitting woke.
 - **The clean return's lift of the merge hold**: dropped. Only the operator's
