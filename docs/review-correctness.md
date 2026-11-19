@@ -39,16 +39,22 @@ declares.
 - The polecat's self-review runs `lint_command`: `tools/lint-learned.sh` over
   the files the branch changes, then `tools/lint.sh`, which checks the step text
   of the formulas among them and runs shellcheck, go vet and gofmt over the
-  whole tracked tree. It runs `make test-affected` through `gctk rig`, which
-  records the result at the commit it ran at.
+  whole tracked tree. It runs `affected_tests_command`, or `test_command` where
+  the rig declares no affected one, through `gctk rig`, which records the
+  result and the command at the commit it ran at.
 - The refinery runs the same `lint_command` at merge, and no tests.
 - CI runs `make test` on Linux and on macOS (`.github/workflows/tests.yml`), as
   the checks `test` and `test-macos`, and no lint. Main's ruleset requires
   both, so every merge waits on every test passing on both platforms.
 
 A review runs no test that a gate already ran at the commit it reviews. The
-self-review's record there covers the Go tests and the web checks as well as
-the suites, and when it is a pass the method runs nothing.
+review prints the test record with the command it ran, and a pass covers what
+that command runs. `make test` and `make test-affected` run the Go tests, the
+web checks and the suites, as above, so after a pass of either the method runs
+nothing.
+`tools/run-tests.sh` runs only the suites, so after a pass of a command that
+runs it alone, the review runs `make test-affected` plain for the Go tests and
+the web checks, and the suites run again with them.
 
 ## Pack content every rig runs
 
@@ -215,13 +221,13 @@ each file needing it carries as a copy.
 
 `tools/lint.sh` runs `go vet ./...` over the repository's one Go module and
 `gofmt -l` over every tracked Go file, at the self-review and at merge. Both
-test commands run `go test ./...` from the root, so the self-review and CI run
-every Go test. The shell suites drive gctk end to end, because each suite whose
-scripts reach `lifecycle.sh` or `merge.sh` builds gctk from the checkout
-(`harness_build_gctk` in `assets/scripts/test-harness.sh`), and the affected
-subset runs those suites for a change to any package gctk is built from. No
-suite builds or runs helm-svc, so its Go tests are all that test helm's Go
-code.
+test commands run `go test ./...` from the root, so CI runs every Go test, and
+so does a self-review whose test command runs either one. The shell suites
+drive gctk end to end, because each suite whose scripts reach `lifecycle.sh` or
+`merge.sh` builds gctk from the checkout (`harness_build_gctk` in
+`assets/scripts/test-harness.sh`), and the affected subset runs those suites
+for a change to any package gctk is built from. No suite builds or runs
+helm-svc, so its Go tests are all that test helm's Go code.
 
 - **Live at the next build, with no fallback.** The `gctk-build` and
   `helm-build` orders run `assets/scripts/gc-build.sh` every five minutes, so
