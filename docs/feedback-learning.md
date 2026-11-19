@@ -182,10 +182,11 @@ only while the note is unchanged since the judge read it, and takes out the
 lines of the index and of a collection note (`hub-*.md`) that link a note it
 removed.
 
-What goes in memory is guidance every Claude role that keeps memory carries
-in its prompt (`template-fragments/memory-notes.template.md`): what a note
-holds and how to write one so it can be acted on, and that what is to be
-evaluated goes in an observation bead.
+Where what an agent learns goes is guidance every Claude role that keeps
+memory carries in its prompt (`template-fragments/memory-notes.template.md`),
+a list of three places: its memory holds what should change the next agent's
+behavior, an observation holds a correction to how agents work, and a bead's
+notes hold the state of its open work.
 
 ## The promotion path
 

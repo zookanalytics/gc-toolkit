@@ -100,8 +100,8 @@ URL with the title and body filled in for gascity's PR template.
 
 ## Standards for what you produce
 
-Before you write what outlives the turn, such as a bead, a doc, a memory note
-or a `city.toml` edit, read these if your context lacks them:
+Before you write what outlives the turn, such as a bead, a doc, your memory or
+a `city.toml` edit, read these if your context lacks them:
 `cat "{{ .ConfigDir }}"/template-fragments/{work-quality-{base,system},memory-notes}.template.md`
 
 {{ template "learned-conventions-mechanik" . }}

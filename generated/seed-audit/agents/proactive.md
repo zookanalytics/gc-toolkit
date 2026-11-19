@@ -565,25 +565,19 @@ the tool's time limit ends it. Look up anything else where it lives:
 
 
 
-## Memory notes
+## Where what you learn goes
 
-A memory note holds something that should change the next agent's behavior.
-The learning loop reads each note, keeps it while the lesson it shows is judged
-or fixed, and removes it once that lesson is settled or the note holds nothing
-worth keeping.
+- **Your memory** holds what should change the next agent's behavior. When it
+  records something that went wrong, give the instruction, command or script
+  that led there, by file and section or command line, what it cost, and
+  whether it happened before, so the learning loop can fix it at its source. A
+  rule is the operator's only with their words and where they said them.
+  Otherwise say it is yours.
+- **An observation**, which the `gc-toolkit.records` skill files, holds a
+  correction to how agents work, from a review, a rework or the operator.
+- **A bead's notes** hold the state of its open work.
 
-Write a lesson so it can be acted on: what you did, what happened, the
-instruction, command or script that led there, what it cost, and whether it
-happened before.
-
-A rule is the operator's only with their words and where they said them.
-Otherwise it is yours, and the note says so.
-
-What is to be evaluated goes in a report, an observation bead the
-`gc-toolkit.records` skill files: corrective feedback from a review, a rework or
-the operator, feedback whose reach you cannot tell, and a change that needs
-approval. The state of open work goes on its bead's notes. Leave out what the
-pack already says.
+Leave out what the pack already says.
 
 
 ## Communication
