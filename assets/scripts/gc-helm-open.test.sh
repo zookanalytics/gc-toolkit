@@ -1682,7 +1682,7 @@ unset FAKE_PR_ROWS
 
 # --- (RESOLVE-REACT / RESOLVE-ENGAGE) the resolved subject drives the write ----
 # react and engage resolve the same reference open does, then act on the LIVE
-# bead: react slings it through gc-proactive.sh, engage holds a conversation
+# bead: react slings it through gctk reaction sling, engage holds a conversation
 # about it in a new sitting. These cases drive the REAL verbs over a stub that
 # answers the resolve reads and, for engage, the conversation lookup, the spawn
 # and the bind, and assert the id each verb writes is the RESOLVED one (a
@@ -1744,12 +1744,12 @@ esac
 exit 0
 REBIN
 chmod +x "$TMP/rebin/gc"
-cat > "$TMP/rebin/gc-proactive.sh" <<'PROACTIVE'
+cat > "$TMP/rebin/gctk" <<'GCTK'
 #!/usr/bin/env bash
-printf 'proactive %s\n' "$*" >> "$FAKE_SLING"
+printf 'gctk %s\n' "$*" >> "$FAKE_SLING"
 exit 0
-PROACTIVE
-chmod +x "$TMP/rebin/gc-proactive.sh"
+GCTK
+chmod +x "$TMP/rebin/gctk"
 # A real .beads store for the rig, so the resolver can pin --db for the PR search
 # react/engage run; without it the resolver fails closed before resolving. engage
 # also refuses up front a rig whose checkout carries no converse template
@@ -1759,13 +1759,13 @@ mkdir -p "$TMP/rebinrig/.beads" "$TMP/rebinrig/agents/converse-claude-opus"
 export REBINRIG="$TMP/rebinrig"
 export FAKE_SLING="$TMP/slung" CONV_STATE="$TMP/conv_state"
 
-# run_react <arg> — drive the REAL cmd_react; the fake gc-proactive.sh records
-# the `sling` argv so the resolved subject is checked against the slung id.
+# run_react <arg> — drive the REAL cmd_react; the fake gctk records the
+# `reaction sling` argv so the resolved subject is checked against the slung id.
 run_react() {
     : > "$FAKE_SLING"
     set +e
-    OUT="$(PATH="$TMP/rebin:$PATH" GC_PROACTIVE_TOOL="$TMP/rebin/gc-proactive.sh" \
-        sh "$SCRIPT" react "$1" --dry-run 2>"$TMP/err")"; RC=$?
+    OUT="$(PATH="$TMP/rebin:$PATH" GCTK_BIN="$TMP/rebin/gctk" \
+        sh "$SCRIPT" react "$1" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"; SLUNG="$(cat "$FAKE_SLING")"
 }
@@ -1785,7 +1785,7 @@ export FAKE_PR_ROWS='[]'
 run_react tk-pred
 eq "$RC" "0" "(RESOLVE-REACT-SUPERSEDE) react resolves a settled id and slings"
 grep -q 'sling tk-succ' <<< "$SLUNG" \
-  && ok "(RESOLVE-REACT-SUPERSEDE) gc-proactive.sh is slung the live successor" \
+  && ok "(RESOLVE-REACT-SUPERSEDE) gctk reaction sling is handed the live successor" \
   || bad "(RESOLVE-REACT-SUPERSEDE) slung the successor (slung: $SLUNG)"
 grep -q 'sling tk-pred' <<< "$SLUNG" \
   && bad "(RESOLVE-REACT-SUPERSEDE) slung the settled predecessor" \
@@ -1796,7 +1796,7 @@ export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":
 run_react 615
 eq "$RC" "0" "(RESOLVE-REACT-PR) react resolves a PR number and slings"
 grep -q 'sling tk-prbead' <<< "$SLUNG" \
-  && ok "(RESOLVE-REACT-PR) gc-proactive.sh is slung the bead recording the PR" \
+  && ok "(RESOLVE-REACT-PR) gctk reaction sling is handed the bead recording the PR" \
   || bad "(RESOLVE-REACT-PR) slung the PR anchor (slung: $SLUNG)"
 grep -qE 'sling 615( |$)' <<< "$SLUNG" \
   && bad "(RESOLVE-REACT-PR) slung the raw PR number" \

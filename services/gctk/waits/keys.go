@@ -26,6 +26,8 @@ var (
 		"The formula contract a root was poured under. A root reading graph.v2 is a run's root.")
 	rootBeadKey = ledger.ReadOnly("gc.root_bead_id", ledger.String,
 		"The workflow root a step was poured under.")
+	formulaNameKey = ledger.ReadOnly("gc.formula_name", ledger.String,
+		"The run link reports a run's formula as its root's.")
 	stepRefKey = ledger.ReadOnly("gc.step_ref", ledger.String,
 		"The formula step a step bead carries out, as <formula>.<step>. A live run with an open step whose "+
 			"ref ends in .load-context has not passed load-context.")

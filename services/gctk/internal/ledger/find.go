@@ -126,6 +126,31 @@ func Ready[T any](l *Ledger, k Key[T], rule ServeRule) ([]*Record, error) {
 	return records(rows), nil
 }
 
+// ReadyByPriority reads every bead the store reports ready under rule, by bd's
+// own readiness, highest priority first by bd's priority sort. Each record's
+// edges are the listing's, as Find's are. A read that fails returns its
+// *ReadError.
+func (l *Ledger) ReadyByPriority(rule ServeRule) ([]*Record, error) {
+	rows, err := l.store.Ready(gcbd.ReadyQuery{Every: true, Unassigned: rule.Unassigned, ByPriority: true,
+		ExcludeTypes: slices.Clone(rule.ExcludeTypes), ExcludeLabels: slices.Clone(rule.ExcludeLabels)})
+	if err != nil {
+		return nil, err
+	}
+	return records(rows), nil
+}
+
+// Dependents reads the beads that have an edge of type typ onto id. Each
+// record carries the dependent's own fields, its keys among them, and no
+// edges, since the store's dependents read prints none. A read that fails
+// returns its *ReadError, and so does an id the store does not hold.
+func (l *Ledger) Dependents(id, typ string) ([]*Record, error) {
+	rows, err := l.store.Dependents(id, typ)
+	if err != nil {
+		return nil, err
+	}
+	return records(rows), nil
+}
+
 func records(rows []gcbd.Bead) []*Record {
 	out := make([]*Record, len(rows))
 	for i := range rows {

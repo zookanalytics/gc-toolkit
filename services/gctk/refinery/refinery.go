@@ -37,8 +37,11 @@ const (
 	// pool claims it, observed under two hours, so a bead past this bound is
 	// not churn.
 	Bound = 4 * time.Hour
-	// Deadline bounds the look's reads, and CallBound the record of its event,
-	// so a run ends inside the two minutes its order gives it.
+	// Deadline bounds the look's store reads, counted from the start of its
+	// run, and CallBound the record of its event. The rig list and the agent
+	// list keep the runtime adapter's own bounds (gascity.RigListWait,
+	// gascity.RosterWait), so a run ends inside the two minutes its order
+	// gives it when those two lists answer within Deadline.
 	Deadline  = 90 * time.Second
 	CallBound = 20 * time.Second
 )
@@ -46,8 +49,8 @@ const (
 // City is Gas City as the look reaches it: the rig list, the agent list and
 // the event log.
 type City interface {
-	Rigs(ctx context.Context) ([]gascity.Rig, error)
-	Agents(ctx context.Context) ([]gascity.Agent, error)
+	Rigs() ([]gascity.Rig, error)
+	Agents() ([]gascity.Agent, error)
 	Emit(ctx context.Context, e gascity.Emit) error
 }
 
@@ -121,11 +124,11 @@ func (q *Queue) Run() Outcome {
 	ctx, cancel := context.WithTimeout(context.Background(), Deadline)
 	defer cancel()
 	now := q.Now().UTC().Truncate(time.Second)
-	rigs, err := q.City.Rigs(ctx)
+	rigs, err := q.City.Rigs()
 	if err != nil {
 		return Outcome{Failures: []string{"the rig list did not read, so no queue was judged: " + err.Error()}}
 	}
-	agents, err := q.City.Agents(ctx)
+	agents, err := q.City.Agents()
 	if err != nil {
 		return Outcome{Failures: []string{"the agent list did not read, so no queue was judged: " + err.Error()}}
 	}

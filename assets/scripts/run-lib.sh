@@ -71,8 +71,6 @@
 # whether its work has landed.
 # doctor/check-po-queue-only takes the map of each store that holds a bead in
 # the po's queue, to find a held bead a live run already works.
-# tools/gc-proactive.sh drops the beads the map's live runs work from a scan,
-# and refuses a first reaction to a bead a live run works.
 # blocker-holder.sh takes the runs that work each live blocker of an anchor
 # that no route or claim marks, to tell one a live run works from one nothing
 # does.

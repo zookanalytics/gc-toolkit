@@ -31,7 +31,7 @@ func (r *Roster) Sessions(context.Context) ([]gascity.Session, error) {
 }
 
 // Rigs records the read and answers the rig list.
-func (r *Roster) Rigs(context.Context) ([]gascity.Rig, error) {
+func (r *Roster) Rigs() ([]gascity.Rig, error) {
 	r.read("rigs")
 	if r.RigsErr != nil {
 		return nil, r.RigsErr
@@ -40,7 +40,7 @@ func (r *Roster) Rigs(context.Context) ([]gascity.Rig, error) {
 }
 
 // Agents records the read and answers the agent list.
-func (r *Roster) Agents(context.Context) ([]gascity.Agent, error) {
+func (r *Roster) Agents() ([]gascity.Agent, error) {
 	r.read("agents")
 	if r.AgentsErr != nil {
 		return nil, r.AgentsErr

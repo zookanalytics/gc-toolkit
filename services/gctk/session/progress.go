@@ -28,8 +28,11 @@ const (
 	// Bound is how long a busy seat may go without a write before the look
 	// reports it.
 	Bound = 3 * time.Hour
-	// Deadline bounds the look's reads, and CallBound the record of its event,
-	// so a run ends inside the two minutes its order gives it.
+	// Deadline bounds the look's session list and store reads, counted from
+	// the start of its run, and CallBound the record of its event. The rig list
+	// keeps the runtime adapter's own bound (gascity.RigListWait), so a run
+	// ends inside the two minutes its order gives it when the session and rig
+	// lists answer within Deadline.
 	Deadline  = 90 * time.Second
 	CallBound = 20 * time.Second
 )
@@ -38,7 +41,7 @@ const (
 // the event log.
 type City interface {
 	Sessions(ctx context.Context) ([]gascity.Session, error)
-	Rigs(ctx context.Context) ([]gascity.Rig, error)
+	Rigs() ([]gascity.Rig, error)
 	Emit(ctx context.Context, e gascity.Emit) error
 }
 
@@ -134,7 +137,7 @@ func (p *Progress) Run() Outcome {
 	if err != nil {
 		return Outcome{Failures: []string{err.Error()}}
 	}
-	rigs, err := p.City.Rigs(ctx)
+	rigs, err := p.City.Rigs()
 	if err != nil {
 		return Outcome{Failures: []string{"the rig list did not read, so no seat was judged: " + err.Error()}}
 	}

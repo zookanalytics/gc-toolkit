@@ -58,10 +58,20 @@ func (p *pass) AddEdge(id, target, typ string) (string, error) { return "", errP
 
 func (p *pass) Create(title string, args ...string) (string, error) { return "", errPassWrite }
 
+func (p *pass) SetState(id, dimension, value, reason string) error { return errPassWrite }
+
 // Ready reads the store's ready set afresh each time it is asked: readiness is
 // the store's answer at the moment it is read, and no row the pass keeps
 // answers it.
 func (p *pass) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) { return p.store.Ready(q) }
+
+// ReadyIDs reads the store's ready set afresh each time it is asked, as Ready
+// does.
+func (p *pass) ReadyIDs() ([]string, error) { return p.store.ReadyIDs() }
+
+// Dependents reads the store afresh each time it is asked: its rows carry no
+// edges, so the pass keeps none of them in place of a listing's row.
+func (p *pass) Dependents(id, typ string) ([]gcbd.Bead, error) { return p.store.Dependents(id, typ) }
 
 // Blocked reads the store's blocked set the first time it is asked, and answers
 // with that read every time after.

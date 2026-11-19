@@ -117,7 +117,8 @@
 # that stops after the withdrawal leaves a state the next run completes,
 # because a resolved gate stays resolved. With --except-key, --check reads the
 # same holds, so a caller that answers those gates itself, such as
-# stand-down.sh, can stop before its first write.
+# stand-down.sh, learns before it answers any of them whether the close can
+# follow.
 # An already-closed origin is the REPAIR path: it gains the edge, read back the
 # same way, and an appended note, with the gates skipped and no wait moved (the
 # close they would guard already happened). The note is written only while the
