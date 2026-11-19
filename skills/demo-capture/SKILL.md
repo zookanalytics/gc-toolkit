@@ -190,9 +190,11 @@ runs as a copy.
 A `--base-url` on this host works for a copy that `gctk rig serve` runs, and for
 a rig's own app running in a worktree of that rig, unless `city.toml` sets
 `app_reads_city = "true"` for the rig. A capture of a copy of a rig that keeps
-the sandbox runs inside it, and a capture of any other copy or rig's app runs
-with no sandbox. Otherwise the capture refuses the URL and says why. Then serve
-the app as a copy or with `--serve-dir`, or capture a deployed preview.
+the sandbox runs inside it, and takes the copy only when the copy runs inside it
+too, which a copy started before the rig kept the sandbox does not. A capture of
+any other copy or rig's app runs with no sandbox. Otherwise the capture refuses
+the URL and says why. Then serve the app as a copy or with `--serve-dir`, or
+capture a deployed preview.
 
 A script that declares `**Platform:** iOS` drives an iOS app on a simulator,
 named by its `ios-simulator://<device UDID>/<bundle id>` URL as `--base-url`,
