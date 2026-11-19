@@ -496,7 +496,11 @@ while [ $# -gt 0 ]; do
     --successor)  shift; [ $# -gt 0 ] || die "--successor needs a bead id"; SUCCESSOR="$1" ;;
     --pr-anchor)  shift; [ $# -gt 0 ] || die "--pr-anchor needs a bead id"; PR_PICK="$1" ;;
     --check)      shift; [ $# -gt 0 ] || die "--check needs a check's name"; CHECKS+=(--check "$1") ;;
-    --rework-waiting-on) shift; [ -n "${1:-}" ] || die "--rework-waiting-on needs a bead id"; REWORK_WAITS+=(--waiting-on "$1") ;;
+    --rework-waiting-on) shift; REWORK_WAIT="${1:-}"
+                  # gctk review ask trims a wait's id, and a re-run compares this
+                  # value with the ask's edges, so it is trimmed here too.
+                  REWORK_WAIT="${REWORK_WAIT#"${REWORK_WAIT%%[![:space:]]*}"}"; REWORK_WAIT="${REWORK_WAIT%"${REWORK_WAIT##*[![:space:]]}"}"
+                  [ -n "$REWORK_WAIT" ] || die "--rework-waiting-on needs a bead id"; REWORK_WAITS+=(--waiting-on "$REWORK_WAIT") ;;
     --accept)     ACCEPT=yes ;;
     --var)        shift; [ $# -gt 0 ] || die "--var needs <key>=<value>"
                   case "$1" in

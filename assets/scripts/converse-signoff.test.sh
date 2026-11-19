@@ -547,8 +547,9 @@ _a=""; _r=""; _p=""; for x in "$@"; do [ "$_p" = "--anchor" ] && _a="$x"; [ "$_p
 if [ -n "${REWORK_ASK:-}" ]; then
   # On the pending record the writer files an ask instead: a task naming the
   # conversation as its source through a discovered-from edge, and waiting on
-  # each --waiting-on bead by its own blocks edge.
-  _w='[]'; _p=""; for x in "$@"; do [ "$_p" = "--waiting-on" ] && _w=$(jq -c --arg w "$x" '. + [{type:"blocks", on:$w}]' <<< "$_w"); _p="$x"; done
+  # each --waiting-on bead by its own blocks edge, onto the id trimmed as gctk
+  # review ask trims it.
+  _w='[]'; _p=""; for x in "$@"; do [ "$_p" = "--waiting-on" ] && _w=$(jq -c --arg w "$x" '. + [{type:"blocks", on:($w | gsub("^\\s+|\\s+$"; ""))}]' <<< "$_w"); _p="$x"; done
   [ -f "$STORE/b/$_child.json" ] || jq -n --arg id "$_child" --arg a "$_a" --arg r "$_r" --argjson w "$_w" '{id:$id, title:"Review ask: the ruling", issue_type:"task",
       status:"open", assignee:"", metadata:{branch:"polecat/anc"}, deps:([{type:"discovered-from", on:$r}] + $w)}' > "$STORE/b/$_child.json"
   echo "$_child ask filed"
@@ -2216,6 +2217,14 @@ setf tk-ask status closed
 REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
 eq "$RC $(field tk-conv status)" "0 closed" "(REWORK-WAITS-RERUN) …while a re-run whose ask waited on that bead signs off"
 has "$OUT" "tk-ask, the rework an earlier attempt of this ruling filed on tk-anc, has closed, so the rework has nothing left to do" "(REWORK-WAITS-RERUN) …taking the ask that ran as the ruling's rework"
+# gctk review ask trims a wait's id, so the sign-off passes each wait on
+# trimmed and compares the trimmed id with the ask's edges: a re-run that names
+# the wait with the same spaces around it finds the ask that waits on it.
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on " tk-pr2 "
+has "$(cat "$CALLS")" "--waiting-on tk-pr2" "(REWORK-WAITS-TRIM) a wait named with spaces around it is passed on trimmed"
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on " tk-pr2 "
+eq "$RC $(field tk-conv status)" "0 closed" "(REWORK-WAITS-TRIM) …and a re-run naming it the same way finds the ask that waits on it and signs off"
 # A ruling that reaches two open PRs reworks the one its --pr-anchor names. The
 # return leaves that --pr-anchor out with the --rework, since --no-rework takes
 # none and leaves both PRs standing.
