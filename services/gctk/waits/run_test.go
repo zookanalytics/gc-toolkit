@@ -31,12 +31,7 @@ type runLibFixture struct {
 		Name string `json:"name"`
 		Verb string `json:"verb"`
 		Arg  string `json:"arg"`
-		Runs []struct {
-			Root   string `json:"root"`
-			Convoy string `json:"convoy"`
-			Bead   string `json:"bead"`
-			Live   bool   `json:"live"`
-		} `json:"runs"`
+		Runs []Run  `json:"runs"`
 	} `json:"cases"`
 }
 
@@ -62,46 +57,49 @@ func fixtureStore(t *testing.T) (*fake.Store, runLibFixture) {
 	return s, fx
 }
 
-// The Go copy reads every live run, as run-lib.sh's map verb does, so over the
-// fixture's store it names the runs the map case names, and for each runs case
-// the live runs the case names for its bead.
-func TestLiveRunsAgreeWithRunLibFixture(t *testing.T) {
+// The Go copy reads every live run, as run-lib.sh's map verb does, and every
+// run that works one bead, live or not, as its runs verb does, so over the
+// fixture's store LiveRuns names the runs each map case names and RunsOf the
+// runs each runs case names for its bead, each with its convoy, its bead, its
+// formula and its liveness.
+func TestRunsAgreeWithRunLibFixture(t *testing.T) {
 	s, fx := fixtureStore(t)
-	runs, err := liveRuns(ledger.New(s))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := func(bead string) []string {
-		var out []string
-		for _, r := range runs {
-			if bead == "" || r.bead == bead {
-				out = append(out, r.root+"/"+r.convoy+"/"+r.bead)
-			}
-		}
-		return out
-	}
+	l := ledger.New(s)
 	checked := 0
 	for _, c := range fx.Cases {
-		if c.Verb != "map" && c.Verb != "runs" {
+		var got []Run
+		var err error
+		switch c.Verb {
+		case "map":
+			got, err = LiveRuns(l)
+		case "runs":
+			if c.Arg == "" {
+				t.Fatalf("%s: a runs case names no bead", c.Name)
+			}
+			got, err = RunsOf(l, c.Arg)
+		default:
 			continue
 		}
-		var want []string
-		for _, r := range c.Runs {
-			if r.Live {
-				want = append(want, r.Root+"/"+r.Convoy+"/"+r.Bead)
-			}
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
 		}
-		slices.Sort(want)
-		if c.Verb == "runs" && c.Arg == "" {
-			t.Fatalf("%s: a runs case names no bead", c.Name)
-		}
-		if g := got(c.Arg); !slices.Equal(g, want) {
-			t.Errorf("%s: the Go copy reads %v, the fixture names %v", c.Name, g, want)
+		if !slices.Equal(got, c.Runs) && !(len(got) == 0 && len(c.Runs) == 0) {
+			t.Errorf("%s: the Go copy reads %+v, the fixture names %+v", c.Name, got, c.Runs)
 		}
 		checked++
 	}
 	if checked < 2 {
 		t.Fatalf("the fixture carries %d map and runs cases; the copy agreed with none worth the name", checked)
+	}
+}
+
+// A bead the store does not hold has no runs to read: RunsOf fails, as
+// run-lib.sh's runs verb fails on bd's refusal to resolve it, rather than
+// answer none.
+func TestRunsOfFailsForABeadTheStoreDoesNotHold(t *testing.T) {
+	s, _ := fixtureStore(t)
+	if runs, err := RunsOf(ledger.New(s), "ghost-1"); err == nil {
+		t.Errorf("RunsOf(ghost-1) = %+v, want the store's refusal", runs)
 	}
 }
 

@@ -1228,6 +1228,84 @@ for sh_ in $shells; do
         bad "($sh_) converse-iterate-document: a scaffold the store refuses is not reported as written" "exit $rc"
     fi
 done
+echo "── a sitting answers for the work it sends ──"
+# The work a sitting sends is its own to get right. It reasons through what the
+# operator says, reads their go as trust in the course, puts first in the
+# decision what they would most want to stop, and sends once they have decided.
+tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-order"
+tr -s '[:space:]' ' ' <"$CONTINUE" >"$TMP/continue-order"
+tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-order"
+have "the settle skill makes the work a sitting sends its own to get right" \
+    'The work you send is yours to get right.' "$TMP/settle-order"
+have "…takes what the operator says as direction to reason through, point by point" \
+    'What the operator says is direction to reason through: take each point up in the course or say why not.' "$TMP/settle-order"
+have "…holds a remark to be neither an order to the letter nor a decision of theirs" \
+    'A remark is not an order to carry out to the letter, and it is not a decision they made.' "$TMP/settle-order"
+have "…reads their go, given at the big picture, as trust in the course" \
+    'The operator usually engages and reviews at the big picture, unless they call out a specific item, and their go means they trust the course.' "$TMP/settle-order"
+have "…puts first in the decision, each as its concrete result, what they would most want to stop" \
+    'So put first in the hand-back'"'"'s decision, each as its concrete result in a short line, what they would most want to stop: anything the course removes, any change of scope, and anything it asks of another rig.' "$TMP/settle-order"
+have "…and sends the work once they have decided" \
+    'Send the work once they have decided, not while they are still thinking it through.' "$TMP/settle-order"
+have "the continue skill writes a turn's work order the settle skill's way, before anything files it" \
+    'Write the order of work or a rework that a turn'"'"'s ruling sends as `converse-settle` gives it (Send the work), before you or the answer files it.' "$TMP/continue-order"
+have "the prompt makes the work a sitting sends its own to get right, with what the operator would most want to stop first" \
+    'What the operator says is direction to reason through, and their go means they trust the course, so the work you send is yours to get right. They usually engage at the big picture, so put first in the decision what they would most want to stop: anything the course removes, any change of scope and anything it asks of another rig (`converse-settle`).' "$TMP/prompt-order"
+echo "── a sitting writes the order of the work it sends in its own voice ──"
+# The order, a task's description or a rework's brief, is one statement in the
+# sitting's own voice that carries each point the operator raised. A rework's
+# ruling line reaches the rework as the operator's ruling, so it carries their
+# words or names the brief.
+have "the order is written in the sitting's own voice, with each point the operator raised carried into it" \
+    'Write the order in your own voice: what needs doing, why, and what done looks like, with each point the operator raised carried into it.' "$TMP/settle-order"
+have "…quoting their words where they carry the point, and never the sitting's reading as their ruling" \
+    'Quote their words where their words carry the point, and never write your reading as their ruling.' "$TMP/settle-order"
+have "…in a task's description, in this rig's store or another's, and in a rework's brief" \
+    'The order is the description of a task you file, in this rig'"'"'s store or another'"'"'s, or the brief of a rework the sign-off files' "$TMP/settle-order"
+have "a rework's ruling line carries the operator's words or names a brief, never the sitting's reading" \
+    'which the sign-off hands the rework as the operator'"'"'s ruling (`--rework`, below), so the line carries their words or names a brief, never your reading. A line that quotes their words and adds nothing of yours is the whole order.' "$TMP/settle-order"
+have "…and names the brief written on the PR's anchor" \
+    '--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"' "$SETTLE"
+fenced_block "$SETTLE" 'gc sling <rig>/<pool> "$WORK"' | fill_block >"$CH/order-block"
+fenced_block "$SETTLE" '--append-notes "$BRIEF"' | fill_block >"$CH/brief-block"
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    rc=$(run_chain "$run" "$CH/order-block")
+    if [ "$rc" -eq 0 ] && grep -qxF -- 'gc bd create x -t task -d x --json' "$CH/log"; then
+        ok "($sh_) converse-settle: the task a sitting files carries its order as its description"
+    else
+        bad "($sh_) converse-settle: the task a sitting files carries its order as its description" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+    sed 's/^x$/"the `echo ran` and $HOME stay as written"/' "$CH/order-block" >"$CH/literal-order"
+    rc=$(run_chain "$run" "$CH/literal-order")
+    if [ "$rc" -eq 0 ] && grep -qxF -- 'gc bd create x -t task -d "the `echo ran` and $HOME stay as written" --json' "$CH/log" \
+        && grep -qxF -- 'gc sling x/x tk-new --on x' "$CH/log"; then
+        ok "($sh_) converse-settle: what the task's description quotes stays as written, and the task is sent"
+    else
+        bad "($sh_) converse-settle: what the task's description quotes stays as written, and the task is sent" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+    rc=$(run_chain "$run" "$CH/brief-block")
+    if [ "$rc" -eq 0 ] && head -n 1 "$CH/notes" | grep -qE '^## Rework brief \([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\)$' \
+        && [ "$(sed -n 2p "$CH/notes")" = x ]; then
+        ok "($sh_) converse-settle: a rework's brief lands headed by when it was written, its order beneath"
+    else
+        bad "($sh_) converse-settle: a rework's brief lands headed by when it was written, its order beneath" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    sed 's/^x$/"the `echo ran` and $HOME stay as written"/' "$CH/brief-block" >"$CH/literal-brief"
+    rc=$(run_chain "$run" "$CH/literal-brief")
+    if [ "$rc" -eq 0 ] && grep -qxF '"the `echo ran` and $HOME stay as written"' "$CH/notes"; then
+        ok "($sh_) converse-settle: what the brief quotes stays as written"
+    else
+        bad "($sh_) converse-settle: what the brief quotes stays as written" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    rc=$(run_chain "$run" "$CH/brief-block" 1)
+    if [ "$rc" -ne 0 ] && [ ! -s "$CH/notes" ]; then
+        ok "($sh_) converse-settle: a brief the store refuses is not reported as written"
+    else
+        bad "($sh_) converse-settle: a brief the store refuses is not reported as written" "exit $rc"
+    fi
+done
 echo "── a sitting makes a change the operator rules it make through Work's writers ──"
 # A sitting's change is held on its conversation and goes through the writers a
 # polecat's work goes through, under --held-by, so the step table loads the edit

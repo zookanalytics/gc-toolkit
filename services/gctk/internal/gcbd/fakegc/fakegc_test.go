@@ -54,8 +54,13 @@ type result struct {
 
 // run answers `gc <args>` with the settings given ahead of the fixture's own.
 func (f *fixture) run(settings []string, args ...string) result {
+	return f.runAs("gc", settings, args...)
+}
+
+// runAs answers `<name> <args>`, the program run under name.
+func (f *fixture) runAs(name string, settings []string, args ...string) result {
 	var out, errb bytes.Buffer
-	c := &Call{Args: args, Env: append(append([]string{}, f.env...), settings...), Stdout: &out, Stderr: &errb}
+	c := &Call{Name: name, Args: args, Env: append(append([]string{}, f.env...), settings...), Stdout: &out, Stderr: &errb}
 	status := Run(c)
 	return result{out.String(), errb.String(), status}
 }
@@ -683,5 +688,125 @@ func TestUnsetRemovesFieldsAndMetadataKeys(t *testing.T) {
 	}
 	if got := f.file("beads.json"); got != `[{"id":"a","status":"open","metadata":{"keep":"1"}}]`+"\n" {
 		t.Errorf("store %s", got)
+	}
+}
+
+func TestACallMadeAsBdAnswersAsGcBd(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
+	viaGc := f.gc("bd", "show", "a", "--json")
+	asBd := f.runAs("bd", nil, "show", "a", "--json")
+	if asBd.status != 0 || asBd.out != viaGc.out {
+		t.Errorf("bd show a = %+v, gc bd show a = %+v", asBd, viaGc)
+	}
+	if r := f.runAs("bd", nil, "update", "a", "--status=closed"); r.status != 0 || !strings.Contains(f.file("beads.json"), `"status":"closed"`) {
+		t.Errorf("bd update: %+v", r)
+	}
+	if got := f.file("gc.log"); got != "bd show a --json\nbd show a --json\nbd update a --status=closed\n" {
+		t.Errorf("log = %q", got)
+	}
+}
+
+func TestGcFailFailsEveryGcCallButNotOneMadeAsBd(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
+	cold := []string{"STUB_GC_FAIL=1"}
+	for _, args := range [][]string{{"bd", "show", "a", "--json"}, {"convoy", "list"}, {"session", "nudge", "x", "m"}} {
+		if r := f.run(cold, args...); r.status != 1 || r.out != "" {
+			t.Errorf("gc %v: %+v, want a failure", args, r)
+		}
+	}
+	if r := f.runAs("bd", cold, "show", "a", "--json"); r.status != 0 || !strings.HasPrefix(r.out, `[{"id":"a"`) {
+		t.Errorf("bd show a: %+v", r)
+	}
+	if got := f.file("gc.log"); got != "bd show a --json\nconvoy list\nsession nudge x m\nbd show a --json\n" {
+		t.Errorf("a failed call is still logged: log = %q", got)
+	}
+	if got := f.file("session.log"); got != "" {
+		t.Errorf("a failed session call reached the session log: %q", got)
+	}
+}
+
+func TestACallMadeAsBdIsMatchedAsGcBd(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
+	if r := f.runAs("bd", []string{"STUB_FAIL_ON=bd show a"}, "show", "a", "--json"); r.status != 1 || r.out != "" {
+		t.Errorf("STUB_FAIL_ON: %+v, want a failure", r)
+	}
+	hook := filepath.Join(f.dir, "hook.sh")
+	f.write("hook.sh", "#!/bin/sh\nprintf '%s\\n' \"$*\" > \""+filepath.Join(f.dir, "fired")+"\"\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.runAs("bd", []string{"STUB_HOOK_AT=bd update a", "STUB_HOOK=" + hook}, "update", "a", "--status=closed"); r.status != 0 {
+		t.Fatalf("update: %+v", r)
+	}
+	if got := f.file("fired"); got != "bd update a --status=closed\n" {
+		t.Errorf("the hook ran with %q, want the call's arguments as gc bd's", got)
+	}
+}
+
+func TestHookCurrentNamesTheClaim(t *testing.T) {
+	f := newFixture(t, `[]`, "")
+	for _, c := range []struct {
+		settings []string
+		args     []string
+		status   int
+		out      string
+	}{
+		{[]string{"GC_SESSION_ID=s1", "STUB_HOOK_CURRENT=tk-w"}, []string{"--id-only"}, 0, "tk-w\n"},
+		{[]string{"GC_SESSION_ID=s1", "STUB_HOOK_CURRENT=tk-w"}, nil, 0, "tk-w (claimed by session s1)\n"},
+		{[]string{"GC_SESSION_ID=s1", "STUB_HOOK_CURRENT="}, []string{"--id-only"}, 1, ""},
+		{[]string{"STUB_HOOK_CURRENT=tk-w"}, []string{"--id-only"}, 1, ""},
+	} {
+		r := f.run(c.settings, append([]string{"hook", "current"}, c.args...)...)
+		if r.status != c.status || r.out != c.out {
+			t.Errorf("%v %v: %+v, want %d %q", c.settings, c.args, r, c.status, c.out)
+		}
+	}
+	if r := f.run(nil, "hook", "--claim"); r.status != 2 {
+		t.Errorf("another hook verb: %+v, want unsupported", r)
+	}
+}
+
+func TestRuntimeDrainAckAnswersAndIsLogged(t *testing.T) {
+	f := newFixture(t, `[]`, "")
+	if r := f.gc("runtime", "drain-ack"); r.status != 0 || r.out != "" {
+		t.Errorf("drain-ack: %+v", r)
+	}
+	if r := f.gc("runtime", "request-restart"); r.status != 2 {
+		t.Errorf("another runtime verb: %+v, want unsupported", r)
+	}
+	if got := f.file("gc.log"); got != "runtime drain-ack\nruntime request-restart\n" {
+		t.Errorf("log = %q", got)
+	}
+}
+
+func TestUpdateFailOnRefusesByTheTextOfItsArguments(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"},{"id":"b","status":"open"}]`, "")
+	on := []string{"STUB_UPDATE_FAIL_ON=k=v"}
+	if r := f.run(on, "bd", "update", "a", "--set-metadata", "k=v", "--status=closed"); r.status != 1 || !strings.Contains(r.err, "simulated update refusal for a") {
+		t.Errorf("an update carrying the text: %+v", r)
+	}
+	if r := f.run(on, "bd", "update", "a", "--set-metadata", "k=w"); r.status != 0 {
+		t.Errorf("an update without the text: %+v", r)
+	}
+	if r := f.run([]string{"STUB_UPDATE_FAIL_ON=b --status"}, "bd", "update", "b", "--status=closed"); r.status != 1 {
+		t.Errorf("text spanning the id and an argument: %+v", r)
+	}
+	if got := f.file("beads.json"); got != `[{"id":"a","status":"open","metadata":{"k":"w"}},{"id":"b","status":"open"}]`+"\n" {
+		t.Errorf("store = %s", got)
+	}
+}
+
+func TestListObjectAnswersAnObjectAtExitZero(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open","metadata":{"branch":"x"}}]`, "")
+	object := `{"error":"gc: simulated answer that is not a list"}` + "\n"
+	if r := f.run([]string{"STUB_LIST_OBJECT=1"}, "bd", "list", "--json"); r.status != 0 || r.out != object {
+		t.Errorf("every list: %+v", r)
+	}
+	limited := []string{"STUB_LIST_OBJECT=branch=x"}
+	if r := f.run(limited, "bd", "list", "--metadata-field", "branch=x", "--json"); r.status != 0 || r.out != object {
+		t.Errorf("a list carrying the text: %+v", r)
+	}
+	if r := f.run(limited, "bd", "list", "--json"); r.status != 0 || !strings.HasPrefix(r.out, `[{"id":"a"`) {
+		t.Errorf("a list without the text: %+v", r)
 	}
 }

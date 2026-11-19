@@ -14,9 +14,11 @@ import (
 	"time"
 )
 
-// A Call is one run of the fake: its arguments after the program name, its
-// environment, and its standard streams.
+// A Call is one run of the fake: the name it ran under, its arguments after
+// that name, its environment, and its standard streams.
 type Call struct {
+	// Name is the program's name. A call made as bd answers as `gc bd` does.
+	Name   string
 	Args   []string
 	Env    []string
 	Stdin  io.Reader
@@ -94,6 +96,10 @@ func run(c *Call) error {
 	if len(c.Args) > 0 && c.Args[0] == writeFlag {
 		return harnessWrite(c, c.Args[1:])
 	}
+	asBd := c.Name == "bd"
+	if asBd {
+		c.Args = append([]string{"bd"}, c.Args...)
+	}
 	s, err := c.required("STUB_STORE")
 	if err != nil {
 		return err
@@ -108,6 +114,9 @@ func run(c *Call) error {
 	}
 	if err := appendFile(logPath, strings.Join(c.Args, " ")+"\n"); err != nil {
 		return err
+	}
+	if !asBd && c.getenv("STUB_GC_FAIL") != "" {
+		return c.fail(1, "gc: simulated failure of every gc call")
 	}
 	if c.carries("STUB_FAIL_ON") {
 		return c.fail(1, "gc: simulated failure of a call that carries '"+c.getenv("STUB_FAIL_ON")+"'")
@@ -135,6 +144,14 @@ func run(c *Call) error {
 			return c.catOr(c.getenv("STUB_CONVOYS"), `{"convoys":[]}`)
 		}
 		return nil
+	case "hook":
+		if first(args) == "current" {
+			return c.hookCurrent(args[1:])
+		}
+	case "runtime":
+		if first(args) == "drain-ack" {
+			return nil
+		}
 	case "session":
 		return c.session(args)
 	case "mail":
@@ -247,6 +264,27 @@ func (c *Call) session(args []string) error {
 			c.out(string(data))
 		}
 	}
+	return nil
+}
+
+// hookCurrent answers `gc hook current`: the bead STUB_HOOK_CURRENT names, which
+// stands for the claim gc stamps on the calling session's bead. As gc does, it
+// exits 1 for a call with no session identity and for a session that has
+// claimed nothing.
+func (c *Call) hookCurrent(args []string) error {
+	sid := strings.TrimSpace(c.getenv("GC_SESSION_ID"))
+	if sid == "" {
+		return c.fail(1, "gc hook current: no session identity (set $GC_SESSION_ID); only a session that claimed work has a current bead")
+	}
+	id := strings.TrimSpace(c.getenv("STUB_HOOK_CURRENT"))
+	if id == "" {
+		return c.fail(1, "gc hook current: session "+sid+" has no current claim (nothing claimed through gc hook --claim)")
+	}
+	if contains(args, "--id-only") {
+		c.out(id + "\n")
+		return nil
+	}
+	c.out(id + " (claimed by session " + sid + ")\n")
 	return nil
 }
 

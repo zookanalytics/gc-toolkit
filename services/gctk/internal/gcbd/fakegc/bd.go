@@ -282,6 +282,10 @@ func (c *Call) list(s, d string, args []string) error {
 		c.out("[]\n")
 		return c.fail(1, "gc: simulated mid-query store error")
 	}
+	if knob(c.getenv("STUB_LIST_OBJECT"), args) {
+		c.out(`{"error":"gc: simulated answer that is not a list"}` + "\n")
+		return nil
+	}
 	trail := false
 	if t := c.getenv("STUB_LIST_TRAILING"); t != "" && strings.Contains(spaced, t) {
 		trail = true
