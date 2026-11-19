@@ -90,8 +90,8 @@ for it.
 **Cost:** bead-context.sh reads differently in the cases
 [listed below](#what-bead-contextsh-reads-differently). The board changes for
 one kind of bead, a bead that is no task and is assigned to `human`: the board
-reads it as queued, and the shared answer reads it as routed to you. No store
-holds one.
+reads it as queued, and the shared answer reads it as routed to you, and a pull
+request that waits on one reads as held by it. No store holds one.
 
 ### 3. tk-zk895uj and tk-hwam111
 
@@ -224,8 +224,12 @@ Every other reading keeps its verdict and takes the shared word:
 The board's one change is the `routed-to-you` clause for a bead assigned to
 `human` that is no task. The board reads such a bead as queued today, because
 `queue` counts any assignee as the city's, and `human` is the operator's queue
-by the pack's own rule (`conversation.IsAssignee`). No bead in any of the
-city's seven stores is assigned to `human`.
+by the pack's own rule (`conversation.IsAssignee`). The clause is part of the
+rule for a bead only a person clears, so every reader of that rule takes it: a
+pull request that waits on such a bead reads as held by it, in its status and
+on the board's row, as it is by a decision. No open bead in the city's seven
+stores is assigned to `human`, and the two closed ones are tasks, so no
+reading changes today.
 
 ## Where the code goes
 
@@ -269,12 +273,13 @@ flowchart TB
   question it answers, its counts, its views, its pages and its order of work,
   which it takes from `queue`. `TestFixtureBoard` holds its document to the
   committed golden.
-- **Retiring code** changes by one call each. `gctk merge`
-  (`internal/cli/merge.go`, retired by tk-1tfzr71.70) and the old board's
-  reader (`services/helm/internal/board/human.go`, retired by tk-1tfzr71.24)
-  each call `prstatus.IsHumanGate` once. Each call swaps onto
-  `standing/person` in the same change, and nothing else there changes. Rule 7
-  of
+- **Retiring code** changes only at its calls of the moved rules. `gctk merge`
+  (`internal/cli/merge.go`, retired by tk-1tfzr71.70) calls
+  `prstatus.IsHumanGate` once. The old board's reader
+  (`services/helm/internal/board`, retired by tk-1tfzr71.24) calls it once in
+  `human.go`, and calls `prstatus.IsPersonBlocker` once in `derive.go`. Each
+  call swaps onto `standing/person` in the same change, and nothing else there
+  changes. Rule 7 of
   [the rules a domain move follows](../../docs/gctk-architecture.md#the-rules-a-domain-move-follows)
   makes that exception for a shared shell definition a move deletes. The
   definition here is Go, and a call left on it would not build, so the same
@@ -306,7 +311,7 @@ Then the units:
 
 - **Unit 1, tk-ssm8qns.29 itself: the owner, and the board asks it.** It builds
   `standing/person` and moves the three rules into it. `prstatus`, `pr`,
-  `listing` and the two retiring call sites ask it. It builds `standing` with
+  `listing` and the retiring code's calls ask it. It builds `standing` with
   the table and the ask moved from the board, and the board's rig read asks
   `standing` for every row. `standing`'s Go tests hold every rule the board's
   table tests held, and `TestFixtureBoard` passes on the golden as committed.
@@ -328,7 +333,7 @@ as the proof, so it lands first.
 
 - The board's direct store reader and its pack-stamped rows
   (`services/helm/internal/board`), which tk-1tfzr71.24 retires, take only the
-  one call above.
+  two calls above.
 - `assets/scripts/liveness-classify.sh` and `liveness-recheck.sh`, which
   tk-1tfzr71.19 retires, and `services/helm/web/contract_parity_test.go`, which
   tk-1tfzr71.25 retires, take nothing.
