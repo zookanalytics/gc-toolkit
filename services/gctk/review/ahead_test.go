@@ -2,6 +2,7 @@ package review_test
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -571,6 +572,61 @@ func TestAnIterationWhoseFindingIsSentAheadPasses(t *testing.T) {
 	}
 	w.output(rp)
 	mustPass(t, w.passed(1))
+}
+
+// A finding sent ahead stands only on an ask that holds the PR for its fix: one
+// that a wait of its own holds, so no round takes it or closes it while the fix
+// is open, and that sends the finding's check back. An ask a round can take,
+// one that waits on nothing or on a fix that has closed, even one the same
+// round answers, and a held ask that sends another check back are refused by
+// the output check. Written all the same, such a round does not pass, and the
+// loop's last attempt records a result that does not pass.
+func TestOnlyAnAskThatHoldsThePRForTheFixStandsForAFindingSentAhead(t *testing.T) {
+	answered := review.Ruling{Ask: "tk-other", Ruling: review.RulingAnswered, Reason: "its check ran at the head"}
+	for _, c := range []struct {
+		name string
+		put  func(w *world)
+		rp   review.Repair
+		why  string
+	}{
+		{"an ask that waits on nothing and sends no check back, answered in the same round",
+			func(w *world) { w.ask("tk-other", "") },
+			repair(1, h1, "", aheadRuling("tk-other"), answered), "which no wait of its own holds"},
+		{"an ask that sends the check back and waits on nothing",
+			func(w *world) { w.ask("tk-other", "arch") },
+			repair(1, h1, "", aheadRuling("tk-other"), answered), "which no wait of its own holds"},
+		{"an ask whose fix has closed",
+			func(w *world) {
+				w.store.Put(bead{ID: "tk-fix", Status: "closed", IssueType: "task", ClosedAt: "2026-11-18T09:00:00Z"})
+				w.ask("tk-other", "arch", gcbd.Edge{ID: "tk-fix", Type: gcbd.EdgeBlocks, Status: "closed", ClosedAt: "2026-11-18T09:00:00Z"})
+			},
+			repair(1, h1, "", aheadRuling("tk-other"), answered), "which no wait of its own holds"},
+		{"a held ask that sends another check back",
+			func(w *world) {
+				w.store.Put(bead{ID: "tk-fix", Status: "open", IssueType: "task"})
+				w.ask("tk-other", "pm", gcbd.Edge{ID: "tk-fix", Type: gcbd.EdgeBlocks})
+				w.store.List("tk-other", "tk-fix")
+				w.store.Mark("tk-other")
+			},
+			repair(1, h1, "", aheadRuling("tk-other")), "which does not send arch back"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newWorld(t)
+			run, _ := w.store.Row(root)
+			run.Metadata["gc.var.max_attempts"] = "1"
+			w.store.Put(run)
+			c.put(w)
+			w.output(triage(1, h1, "arch"))
+			w.output(lane(1, "arch", h1, review.VerdictRequestChanges, "A1"))
+			mustRefuse(t, w.check(w.step(1, "rule-and-repair"), c.rp, nil), c.why)
+			w.output(c.rp)
+			mustFail(t, w.passed(1), c.why)
+			got := w.record(1)
+			if !got.Exhausted || !reflect.DeepEqual(w.results(), []review.Result{{Head: h1, Target: target, Run: root}}) {
+				t.Fatalf("the loop's last attempt recorded %+v, %+v; want a result that does not pass", got, w.results())
+			}
+		})
+	}
 }
 
 // The head's comment answers a finding sent ahead with the ask its PR waits on,

@@ -12,6 +12,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
 // A fix that lands ahead of a PR is work that a lane's rule keeps off the PR's
@@ -279,6 +280,27 @@ func waitsOn(l *ledger.Ledger, r *ledger.Record, id string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// aheadHold is why the ask an ahead ruling names does not hold the PR for the
+// finding's fix, "" when it does. It holds the PR when it is an open ask on the
+// bead that a wait of its own holds, as the ask SendAhead files waits on the
+// fix, so no round takes it, and no round's ruling closes it, while that wait
+// is open, and when it sends the finding's check back, so the run that takes
+// it once the fix lands judges the PR again.
+func aheadHold(r Ruling, asks []Ask) string {
+	i := slices.IndexFunc(asks, func(a Ask) bool { return a.ID == r.Waits })
+	switch {
+	case i < 0 || !asks[i].Open():
+		return fmt.Sprintf("%s is sent ahead to wait on %s, which is no open ask on the bead", r.Subject(), r.Waits)
+	case asks[i].Holds != waits.Blocked:
+		return fmt.Sprintf("%s is sent ahead to wait on %s, which no wait of its own holds, so a round can take it and nothing holds the PR for the fix",
+			r.Subject(), r.Waits)
+	case !slices.ContainsFunc(asks[i].Checks, func(c string) bool { return strings.EqualFold(c, r.Check) }):
+		return fmt.Sprintf("%s is sent ahead to wait on %s, which does not send %s back, so nothing judges the PR again once the fix lands",
+			r.Subject(), r.Waits, r.Check)
+	}
+	return ""
 }
 
 // fixOf reports whether r is the fix of title that lands on target. A fix lands

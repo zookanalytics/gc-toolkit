@@ -64,10 +64,11 @@ reads. None of its rulings, must-fix, declined, deferred, answered and
 question, says that a fix lands ahead of the PR. A deferred point renders as
 work done "once this PR lands", which is false here.
 So the change adds the ruling `ahead`, and the key `waits` in the round's
-output, which names the ask. The output check refuses an `ahead` ruling whose
-`waits` names no open ask on the bead, so no round can claim the wait without
-it. Without that check, the round would pass and the PR would merge with the
-document missing.
+output, which names the ask. The output check and the pass rule refuse an
+`ahead` ruling whose `waits` names no open ask on the bead that a wait of its
+own holds and that sends the finding's check back, so no round can claim the
+wait without it, or name an ask that a round can take and close. Without
+them, the round would pass and the PR would merge with the document missing.
 
 ## What the change adds, and what it does not
 

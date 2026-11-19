@@ -58,8 +58,9 @@ const (
 	RulingQuestion = "question"
 	// RulingAhead: a lane's finding that holds, whose lane's rule lands its fix
 	// ahead of the PR in a PR of its own (SendAhead), so the round changes no
-	// code for it. The ruling names the ask on the bead that waits on the fix,
-	// which holds the PR's merge until a run takes it.
+	// code for it. The ruling names the ask on the bead that waits on the fix
+	// and sends the finding's check back, which holds the PR's merge until a
+	// run takes it.
 	RulingAhead = "ahead"
 )
 
