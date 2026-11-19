@@ -19,8 +19,8 @@ import (
 // bead to its close of the asks the run answered, bead-rehome.sh holds it
 // from its read of a bead to its close, pr-dispose.sh holds it from its read of
 // the bead that owns a PR to its stamp of a ruling's disposition, and
-// `gctk review ahead` holds it from its first read of a fix ahead of a PR to
-// that fix's filing.
+// `gctk review ahead` holds it from its read of the bead that owns a PR to its
+// filing of the ask that holds the PR for a fix ahead of it.
 // Nothing that holds it takes another lock, so no two writers wait on each
 // other in a cycle.
 const LockFile = "pr-record.lock"

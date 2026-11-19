@@ -2,9 +2,11 @@ package review_test
 
 import (
 	"errors"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	gcfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
@@ -177,6 +180,100 @@ func TestTwoPRsAskingForOneFixAtOnceShareIt(t *testing.T) {
 	}
 	if n := len(rt.Slings()); n != 1 {
 		t.Fatalf("the fix was slung %d times; want once", n)
+	}
+}
+
+// closingPR is a store that stops once on its way, at the read of the PR's
+// bead when at is "read" and at the ask's create when it is "ask": it says on
+// paused that it has reached that point, and goes on once resume closes. Each
+// bead filed while the PR's bead is closed fails the test.
+type closingPR struct {
+	gcbd.Store
+	w              *world
+	at             string
+	paused, resume chan struct{}
+	once           sync.Once
+}
+
+func (s *closingPR) pause() {
+	s.once.Do(func() {
+		s.paused <- struct{}{}
+		<-s.resume
+	})
+}
+
+func (s *closingPR) Find(q gcbd.Query) ([]gcbd.Bead, error) {
+	rows, err := s.Store.Find(q)
+	if s.at == "read" && len(q.IDs) == 1 && q.IDs[0] == prBead {
+		s.pause()
+	}
+	return rows, err
+}
+
+func (s *closingPR) Create(title string, args ...string) (string, error) {
+	if s.at == "ask" && strings.HasPrefix(title, "Review ask:") {
+		s.pause()
+	}
+	if pr, _ := s.w.store.Row(prBead); pr.Status == "closed" {
+		s.w.t.Errorf("stopped at the %s: %q was filed after %s closed", s.at, title, prBead)
+	}
+	return s.Store.Create(title, args...)
+}
+
+// A writer that closes the PR's bead under the store's record lock, as the
+// landing order does once the PR has merged, closes it before the call reads
+// the bead, which refuses it, or once the call has filed the fix and the ask:
+// the call holds the lock from that read to the ask's filing, so nothing is
+// filed for a bead that closed after the call read it.
+func TestNothingIsFiledForABeadThatClosedAfterTheCallReadIt(t *testing.T) {
+	for _, at := range []string{"read", "ask"} {
+		w := newWorld(t)
+		store := &closingPR{Store: w.store, w: w, at: at, paused: make(chan struct{}, 1), resume: make(chan struct{})}
+		dir, rt := t.TempDir(), routes(w)
+		done := make(chan error, 1)
+		go func() {
+			_, err := review.SendAhead(ledger.New(store), dir, 10*time.Second, rt, aheadReq(prBead), archIndex(t))
+			done <- err
+		}()
+		select {
+		case <-store.paused:
+		case err := <-done:
+			t.Fatalf("the call returned %v before it reached the %s", err, at)
+		}
+		closed := make(chan error, 1)
+		go func() {
+			release, err := record.Lock(dir, 10*time.Second)
+			if err == nil {
+				pr, _ := w.store.Row(prBead)
+				pr.Status, pr.Metadata = "closed", maps.Clone(pr.Metadata)
+				pr.Metadata["merge_result"] = "merged"
+				w.store.Put(pr)
+				release()
+			}
+			closed <- err
+		}()
+		// Without the lock held from the read to the ask, the close lands while
+		// the call is stopped.
+		var closeErr error
+		landed := false
+		select {
+		case closeErr = <-closed:
+			landed = true
+		case <-time.After(500 * time.Millisecond):
+		}
+		close(store.resume)
+		if err := <-done; err != nil {
+			t.Fatalf("stopped at the %s: the call returned %v; want the fix and its ask filed before the close", at, err)
+		}
+		if !landed {
+			closeErr = <-closed
+		}
+		if closeErr != nil {
+			t.Fatalf("stopped at the %s: the close did not take the record lock: %v", at, closeErr)
+		}
+		if n := len(w.store.Creates()); n != 2 {
+			t.Fatalf("stopped at the %s: %d beads were filed; want the fix and its ask", at, n)
+		}
 	}
 }
 
@@ -621,6 +718,11 @@ func TestAFixAheadIsRefusedBeforeAnythingIsFiled(t *testing.T) {
 		{"a bead with no PR on the record", func(w *world) {
 			pr, _ := w.store.Row(prBead)
 			pr.Metadata["merge_result"] = "mr_merged"
+			w.store.Put(pr)
+		}, func() review.AheadRequest { return aheadReq(prBead) }},
+		{"a closed bead", func(w *world) {
+			pr, _ := w.store.Row(prBead)
+			pr.Status = "closed"
 			w.store.Put(pr)
 		}, func() review.AheadRequest { return aheadReq(prBead) }},
 	} {

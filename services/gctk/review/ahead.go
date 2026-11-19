@@ -38,8 +38,11 @@ import (
 // again is not filed and sent a second time. A fix another PR's run sent can
 // still land before this PR's ask on it files, when that create fails, and the
 // call that runs again then files the fix anew. Each call holds the store's
-// record lock from its first read of the fix to the fix's filing, so two review
-// runs that ask for one fix at once file it once. A found fix that a label
+// record lock from its read of the PR's bead to the ask's filing, so two review
+// runs that ask for one fix at once file it once, and a writer that closes the
+// PR's bead under the lock, as the landing order does once the PR has merged,
+// closes it before that read, which refuses it, or once the ask stands. The
+// lock is free again before the fix is sent or armed. A found fix that a label
 // holds from every pool, such as the hold:mayor of work that waits for the
 // operator's placement, is sent nowhere, because gc sling reads no hold, and
 // the ask waits on it while the hold stands. gc sling reads no wait either, so
@@ -86,14 +89,15 @@ type Ahead struct {
 // req.Pool on req.Formula unless it is on its way already or a label holds it.
 // When a wait holds a found fix, it arms the fix for req.Pool on req.Formula in
 // place of the sling (armBehind), and when gc sling finds a live workflow on
-// the fix, it arms it so too (armOver). It finds or files the fix under
-// the record lock of the store whose .beads directory is dir, waiting up to
-// wait for it. It refuses what FileAsk refuses, and a request that sends no
-// check back, before anything is filed. A read that fails, and a lock not
-// taken, return their error. A write that fails returns its error with what
-// landed before it, which the next call finds: the fix through the open ask
-// that waits on it, or by its title and target while it is open, and the ask
-// by its reason.
+// the fix, it arms it so too (armOver). It reads the bead, finds or files the
+// fix and files the ask under the record lock of the store whose .beads
+// directory is dir, waiting up to wait for it (fileAhead), and sends or arms
+// the fix once the lock is free. It refuses what FileAsk refuses, and a
+// request that sends no check back, before anything is filed. A read that
+// fails, and a lock not taken, return their error. A write that fails returns
+// its error with what landed before it, which the next call finds: the fix
+// through the open ask that waits on it, or by its title and target while it
+// is open, and the ask by its reason.
 func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runtime, req AheadRequest, index func(at string) (Index, error)) (Ahead, error) {
 	var out Ahead
 	title, desc := strings.TrimSpace(req.Title), strings.TrimSpace(req.Description)
@@ -103,26 +107,9 @@ func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runt
 	if len(req.Checks) == 0 {
 		return out, &Refusal{Bead: req.Bead, Why: "the fix sends no check back, so nothing would judge the PR once it lands"}
 	}
-	owner, rec, branch, err := askable(l, req.Bead)
+	fix, err := fileAhead(l, dir, wait, req, title, desc, index, &out)
 	if err != nil {
 		return out, err
-	}
-	checks, err := askChecks(req.Bead, rec.Head, req.Checks, index)
-	if err != nil {
-		return out, err
-	}
-	pr := owner.ID + "'s PR"
-	if rec.URL != "" {
-		pr += " " + rec.URL
-	}
-	fix, err := fixFor(l, dir, wait, owner, rec, title, desc, pr, &out)
-	if err != nil {
-		return out, err
-	}
-	reason := fmt.Sprintf("Run %s again once %s lands ahead of this PR: %s", strings.Join(checks, ", "), out.Fix, title)
-	out.Ask, out.AskFiled, err = fileAsk(l, owner, branch, reason, "", checks, []string{out.Fix})
-	if err != nil {
-		return out, fmt.Errorf("%s carries the fix, and the ask that holds the PR for it did not file: %w", out.Fix, err)
 	}
 	if out.FixFiled || (out.Held == "" && unsent(fix)) {
 		if !out.FixFiled {
@@ -238,19 +225,47 @@ func waitsOf(l *ledger.Ledger, id string) (string, error) {
 	return string(h.Status) + " on " + strings.Join(on, ", "), nil
 }
 
-// fixFor finds or files the fix SendAhead sends, holding the store's record
-// lock from its first read of the fix to the fix's create, so two review runs
-// that ask for one fix at once file it once: the fix of its title and the PR's
-// target that an open ask on the PR waits on, else the open bead of that title
-// and target that does not wait on owner, whose notes take the PR's case, else
-// a new bead. It fills in out's
-// fix, and returns the found fix's record, nil for a fix it filed.
-func fixFor(l *ledger.Ledger, dir string, wait time.Duration, owner *ledger.Record, rec record.Record, title, desc, pr string, out *Ahead) (*ledger.Record, error) {
+// fileAhead reads the bead req names as FileAsk reads it, finds or files the
+// fix (fixFor) and files the ask on the bead that waits on it, holding the
+// store's record lock, in dir, from that read to the ask's filing. It fills in
+// out's fix and ask, and returns the found fix's record, nil for a fix it
+// filed.
+func fileAhead(l *ledger.Ledger, dir string, wait time.Duration, req AheadRequest, title, desc string, index func(at string) (Index, error), out *Ahead) (*ledger.Record, error) {
 	release, err := record.Lock(dir, wait)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
+	owner, rec, branch, err := askable(l, req.Bead)
+	if err != nil {
+		return nil, err
+	}
+	checks, err := askChecks(req.Bead, rec.Head, req.Checks, index)
+	if err != nil {
+		return nil, err
+	}
+	pr := owner.ID + "'s PR"
+	if rec.URL != "" {
+		pr += " " + rec.URL
+	}
+	fix, err := fixFor(l, owner, rec, title, desc, pr, out)
+	if err != nil {
+		return nil, err
+	}
+	reason := fmt.Sprintf("Run %s again once %s lands ahead of this PR: %s", strings.Join(checks, ", "), out.Fix, title)
+	out.Ask, out.AskFiled, err = fileAsk(l, owner, branch, reason, "", checks, []string{out.Fix})
+	if err != nil {
+		return nil, fmt.Errorf("%s carries the fix, and the ask that holds the PR for it did not file: %w", out.Fix, err)
+	}
+	return fix, nil
+}
+
+// fixFor finds or files the fix SendAhead sends, under the record lock its
+// caller holds: the fix of its title and the PR's target that an open ask on
+// the PR waits on, else the open bead of that title and target that does not
+// wait on owner, whose notes take the PR's case, else a new bead. It fills in
+// out's fix, and returns the found fix's record, nil for a fix it filed.
+func fixFor(l *ledger.Ledger, owner *ledger.Record, rec record.Record, title, desc, pr string, out *Ahead) (*ledger.Record, error) {
 	fix, err := sentFix(l, owner, title, rec.Target)
 	if err != nil {
 		return nil, err
