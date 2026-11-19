@@ -451,6 +451,24 @@ func TestRigListAnswersTheSetting(t *testing.T) {
 	}
 }
 
+func TestConfigShowAnswersTheSetting(t *testing.T) {
+	f := newFixture(t, `[]`, "")
+	if r := f.gc("config", "show", "--json"); r.status != 0 || r.out != noConfig+"\n" {
+		t.Errorf("no setting: %+v, want a config that names no agent", r)
+	}
+	cfg := `{"ok":true,"config":{"Agents":[{"Name":"pool","Dir":"rig","DefaultSlingFormula":"mol-polecat-work"}]}}`
+	f.write("config.json", cfg)
+	if r := f.run([]string{"STUB_CONFIG=" + filepath.Join(f.dir, "config.json")}, "config", "show", "--json"); r.out != cfg {
+		t.Errorf("the setting's file: %+v", r)
+	}
+	if r := f.run([]string{"STUB_CONFIG=" + filepath.Join(f.dir, "none.json")}, "config", "show", "--json"); r.out != noConfig+"\n" {
+		t.Errorf("a file that does not read: %+v, want a config that names no agent", r)
+	}
+	if r := f.gc("config", "validate"); r.status != 2 {
+		t.Errorf("another config verb: %+v", r)
+	}
+}
+
 func TestHookRunsBeforeTheCallItNames(t *testing.T) {
 	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
 	hook := filepath.Join(f.dir, "hook.sh")
@@ -666,6 +684,25 @@ func TestFailOnRefusesAnyCallThatCarriesTheText(t *testing.T) {
 	}
 }
 
+func TestListFailAfterFailsEveryListOnceTheTextIsLogged(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
+	set := []string{"STUB_LIST_FAIL_AFTER=--status=closed"}
+	if r := f.run(set, "bd", "list", "--json"); r.status != 0 {
+		t.Errorf("a list before any call carries the text: %+v", r)
+	}
+	if r := f.run(set, "bd", "update", "a", "--status=closed"); r.status != 0 {
+		t.Fatalf("the update that carries it: %+v", r)
+	}
+	if r := f.run(set, "bd", "list", "--id", "a", "--all", "--json"); r.status != 1 || r.out != "" {
+		t.Errorf("a list after it: %+v, want it failed", r)
+	}
+	for _, args := range [][]string{{"bd", "show", "a", "--json"}, {"bd", "dep", "list", "a", "--json"}} {
+		if r := f.run(set, args...); r.status != 0 {
+			t.Errorf("%v, which is not a list: %+v", args, r)
+		}
+	}
+}
+
 func TestAHookThatFailsFailsItsCall(t *testing.T) {
 	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
 	f.write("second.sh", "#!/bin/sh\n[ -e \""+filepath.Join(f.dir, "seen")+"\" ] && exit 1\n: > \""+filepath.Join(f.dir, "seen")+"\"\n")
@@ -678,6 +715,67 @@ func TestAHookThatFailsFailsItsCall(t *testing.T) {
 	}
 	if r := f.run(set, "bd", "show", "a", "--json"); r.status != 1 || r.out != "" {
 		t.Errorf("the second show, whose hook fails: %+v", r)
+	}
+}
+
+func TestAfterWriteRunsOnceEachWriteHasLanded(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"},{"id":"g","status":"open","issue_type":"gate"}]`, "")
+	fired := filepath.Join(f.dir, "fired")
+	// The program records its arguments, whether the setting reached it, and
+	// the store as it finds it, so each line shows the write had landed.
+	prog := filepath.Join(f.dir, "after.sh")
+	f.write("after.sh", "#!/bin/sh\nIFS= read -r s < \"$STUB_STORE\"\nprintf '%s|%s|%s\\n' \"$*\" \"$STUB_AFTER_WRITE\" \"$s\" >> \""+fired+"\"\nexit 3\n")
+	if err := os.Chmod(prog, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	set := []string{"STUB_AFTER_WRITE=" + prog}
+	for _, args := range [][]string{
+		{"bd", "show", "a", "--json"},
+		{"bd", "list", "--json"},
+		{"bd", "dep", "list", "a", "--json"},
+		{"bd", "gate", "list", "--json"},
+		{"rig", "list", "--json"},
+	} {
+		if r := f.run(set, args...); r.status != 0 {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	if _, err := os.Stat(fired); err == nil {
+		t.Fatalf("a read ran the program: %s", f.file("fired"))
+	}
+	if r := f.run(set, "bd", "update", "a", "--if-status=in_progress", "--status=closed"); r.status != 13 {
+		t.Fatalf("a guarded update that does not hold: %+v", r)
+	}
+	if _, err := os.Stat(fired); err == nil {
+		t.Fatalf("a write that did not land ran the program: %s", f.file("fired"))
+	}
+	if r := f.run(set, "bd", "--db", "/x/.beads", "update", "a", "--status=in_progress"); r.status != 0 {
+		t.Errorf("an update whose program exits 3: %+v, want the update's own 0", r)
+	}
+	want := "bd --db /x/.beads update a --status=in_progress||" + `[{"id":"a","status":"in_progress"},{"id":"g","status":"open","issue_type":"gate"}]` + "\n"
+	if got := f.file("fired"); got != want {
+		t.Errorf("after the update the program ran with %q, want %q", got, want)
+	}
+	f.write("fired", "")
+	for _, args := range [][]string{
+		{"bd", "dep", "add", "a", "g"},
+		{"bd", "dep", "remove", "a", "g"},
+		{"bd", "gate", "resolve", "g", "--reason", "ruled: no"},
+		{"bd", "close", "a"},
+	} {
+		if r := f.run(set, args...); r.status != 0 {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	var verbs []string
+	for _, l := range strings.Split(strings.TrimSuffix(f.file("fired"), "\n"), "\n") {
+		verbs = append(verbs, strings.SplitN(l, "|", 2)[0])
+	}
+	if got := strings.Join(verbs, ","); got != "bd dep add a g,bd dep remove a g,bd gate resolve g --reason ruled: no,bd close a" {
+		t.Errorf("the program ran after %q, want once after each write", got)
+	}
+	if r := f.run([]string{"STUB_AFTER_WRITE=" + filepath.Join(f.dir, "missing.sh")}, "bd", "update", "a", "--assignee=x"); r.status == 0 {
+		t.Errorf("a program that does not start: %+v, want the call failed", r)
 	}
 }
 

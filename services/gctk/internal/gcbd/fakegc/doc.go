@@ -42,7 +42,9 @@
 //   - agent list and convoy list print the file STUB_AGENTS or STUB_CONVOYS
 //     names, an empty list when that file cannot be read, and nothing when
 //     the setting names none. rig list prints the file STUB_RIGS names, and a
-//     list of no rig when the setting names none.
+//     list of no rig when the setting names none. config show prints the file
+//     STUB_CONFIG names, and a config that names no agent when the setting
+//     names none or that file cannot be read.
 //   - hook current prints the bead STUB_HOOK_CURRENT names, which stands for
 //     the claim gc stamps on the calling session's bead: the id alone under
 //     --id-only, and otherwise followed by the session that claimed it, in gc's
@@ -86,7 +88,9 @@
 //   - STUB_SHOW_FAIL_ON and STUB_LIST_FAIL_ON fail a show or a list whose
 //     arguments carry that text. STUB_LIST_PARTIAL makes such a list print []
 //     and fail; STUB_LIST_TRAILING makes it print a line that is not JSON
-//     after its answer.
+//     after its answer. STUB_LIST_FAIL_AFTER fails every list once a call
+//     whose arguments carry that text is in STUB_GC_LOG, as a store that goes
+//     down after a write.
 //   - STUB_LIST_OBJECT makes a list answer an error object at exit 0 in place
 //     of its array: every list when set to 1, and otherwise those whose
 //     arguments carry the text.
@@ -116,6 +120,12 @@
 //     arguments carry the text STUB_HOOK_AT names, with the call's arguments
 //     (Call.hook). It can land another writer's change between two of a
 //     script's calls, and its exit status, when not 0, fails the call.
+//   - STUB_AFTER_WRITE names a program run after each bd call that writes the
+//     store has landed (an update, a create, a close, a comment, a dep add or
+//     remove, or a gate resolve), with the call's arguments (Call.afterWrite).
+//     It can run another process, such as the deferred-dispatch order's pass,
+//     at each moment a script's write leaves, and its own writes do not run it
+//     again.
 //   - STUB_CREATE_GARBAGE answers a create that landed with a line that is
 //     not JSON.
 //   - STUB_SESSION_LIST_RC, STUB_DELETE_SOURCE_RC and STUB_REOPEN_SOURCE_RC
