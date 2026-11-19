@@ -125,8 +125,9 @@ wait (the design's section 13).
 
 **What it composes.** Whoever sends a piece of work runs the verb once the send
 is made: the sitting for each piece of work it sends itself, before it signs
-off, and the stay's sign-off for the work its own call sends, before it leaves
-the conversation open (the design's section 1). The verb makes native
+off, and the stay's sign-off for the work its own call sends, and for each open
+PR the stay names whose merge the conversation holds, before it leaves the
+conversation open (the design's section 1). The verb makes native
 writes in one order while the conversation is still claimed, so none of them
 can bring the sitting back early. First it removes the conversation's `blocks`
 edges onto its closed return gates (`bd dep remove`), so a return reads only
@@ -180,9 +181,14 @@ has closed, or in a store the landing order does not read.
   promises each piece of work it sends itself, as it does for a PR it sends
   back through the `prs` skill. A flag on the sign-off naming the beads to
   promise would add a key to carry what the verb's gate already records. The
-  gate comes after the send because a rework's PR is already ready at its head
-  when the operator rules, so the landing order's next pass would close a gate
-  filed before the ask was open.
+  one fact the sign-off reads for itself is the conversation's hold on a PR,
+  the edge only the operator's settlement lifts, so it promises each PR the
+  conversation holds. That also covers a promise whose gate the end of its
+  round closed before the sign-off read it, since the landing order holds the
+  PR before it closes the gate, and a gate filed after a round's end closes on
+  the order's next pass. The gate comes after the send because a rework's PR
+  is already ready at its head when the operator rules, so the landing order's
+  next pass would close a gate filed before the ask was open.
 - **Gas City's session wait**, above.
 
 ## Closing it: the landing order
@@ -379,14 +385,17 @@ leaves the return to a sitting with no thread.
 - **A gate create that stops before its edge**, on the city's Dolt server,
   leaves an open gate that nothing waits on until the landing order's first
   pass after it is five minutes old.
-- **A round that ends before its gate is filed**, as after a stop inside the
-  sign-off between its send and its gate: the gate its re-run files closes on
+- **A round that ends while the stay is being made**: before its gate is filed,
+  as after a stop inside the sign-off between its send and its gate, or after
+  its gate is filed and before the sign-off reads it, which closes that gate
+  and holds the PR. The gate the sign-off or its re-run then files closes on
   the landing order's next pass, so the sitting comes back for that round up
   to a cooldown later than it would have.
 - **Work the sitting sends and does not promise** waits through a convoy, as
-  settled work does, so that stay comes back after the merge. Its record cannot
-  tell the sign-off whether it was just sent, which is why the promise rests
-  with whoever sends the work.
+  settled work does, so that stay comes back after the merge, unless the
+  conversation holds that work's PR, which the sign-off promises. Its record
+  cannot tell the sign-off whether it was just sent, which is why the promise
+  rests with whoever sends the work.
 - **The board's supervisor fallback** reads a staying conversation as parked.
 - **A sitting whose session has closed** is not woken. The hold still goes on
   at the end of the round, and the return starts once the operator engages the
