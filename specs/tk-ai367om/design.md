@@ -373,11 +373,22 @@ The sitting takes the return up when its entry reads `returned`, in this order:
    return gate has closed. The gate's close reason names the bead and the
    moment: the end of a round at a head, or the bead's close. The reason is in
    the record, so the sitting needs no notice to trust.
-2. **Hold first.** It claims the conversation back and records the hold's
-   `holding:` line in one guarded write: the claim-back's
-   `gc bd update --if-assignee "$GC_ALIAS" --if-status open --status in_progress`
-   (`converse-stay`) carries the line as its `--append-notes`, and bd applies the
-   guard and both changes as one update (`cmd/bd/update.go`). From then on the
+2. **Hold first.** The entry has already claimed the conversation: it runs
+   `gc hook --claim` before it reads the stay, so a conversation it reads as
+   `returned` is in progress under the sitting. The sitting records the hold's
+   `holding:` line in one write guarded on that claim:
+
+   ```bash
+   gc bd update "$CONVERSATION" --if-assignee "$GC_ALIAS" --if-status in_progress \
+     --append-notes "holding: <what the operator owes>"
+   ```
+
+   bd applies the guard and the line as one update, and a guard that does not
+   match writes nothing and exits 13 (`cmd/bd/update.go`), as when the operator
+   ended the conversation meanwhile. The sitting then records no hold, and says
+   in the thread what stopped it. `converse-stay`'s claim-back, guarded on
+   `open`, is for a stay that stopped short: on a return it finds the
+   conversation claimed and writes nothing. Once the line is recorded, the
    conversation is the operator's move, and a restart reads the hold that stands
    (`converse-entry.sh`, `interrupted`, with `converse-continue`).
 3. **Read the result** at the PR's head, which is the head the round ended at,
@@ -580,9 +591,9 @@ over:
   visits, and ending.
 - **`converse-settle`**: send, then stay, then promise, and a stay on the
   conversation's own subject (section 8).
-- **`converse-hold`**: the hold of a returned exchange, recorded in the write
-  that claims the conversation back, and the lift of the PR's merge hold only on
-  the operator's settlement.
+- **`converse-hold`**: the hold of a returned exchange, recorded in one write
+  guarded on the claim the entry took (section 5), and the lift of the PR's
+  merge hold only on the operator's settlement.
 - **`docs/product-goals.md`** gains one sentence in its "Human gates and
   conversations" surface: a conversation the operator asks to stay with its work
   comes back to discuss it before their next decision about that work, never
@@ -692,7 +703,7 @@ runs but the convoy wait, because the promise's verb refuses such a rig.
 |---|---|---|---|
 | 1. The return gate (gctk) | The package `services/gctk/gate`: the return gate's await type and title, the rule for who closes a gate of each await type and the human-gate rule, the gate's filing, and its close with its reason. The verb `gctk gate return` with its refusals. In the landing order's pass, at the end of a round on a draft or on a PR that is ready already: for each open return gate that watches the bead, the bead's `blocks` edge onto each open or in-progress conversation the gate blocks, then the gate's close, before the ready transition or the evaluator's read; and in every pass, the close of an open return gate whose watched bead has closed or whose conversations have all closed. The main board's `heldByPerson`, the rig board's `gateHold` and `parked`, `prstatus.IsHumanGate` and the pr domain's `isHumanGate` read the definition. `docs/gctk-architecture.md` gains the verb's row, the `gate` noun and the order's new step, and `docs/warrants.md` the return gate's warrant (section 13). Tests: the gate the verb files and the one it finds, the stay's one wait after the verb with a park on the conversation left in place, and each refusal; the hold and the close for new work, for a rework and for the subject; a send-back the run answers with no push closes the gate at the round's end on a ready PR, and an approval from an earlier round does not merge it; a gate filed after its round ended closes on the next pass, with the hold already there left alone; a round with no open return gate writes nothing; a conversation that has closed gets no hold; an edge already there is left alone; a failed read or write leaves the gate open and is retried; a PR in its base's merge queue is left to GitHub; a gate whose watched bead has closed, or whose conversations have all closed, closes; the boards read a conversation that waits on its return gate as queued, and a park as a person's. | this rewrite (tk-1gsaloy) | unit 2, once tk-ps47p6p brings the branch current |
 | 2. The stay waits through a convoy, and the entry reads the gate (scripts) | `converse-signoff.sh --stay`: the wait onto the newest open convoy that tracks each bead it waits on, or onto one it makes with `gc convoy create`; a stay on the subject, with the subject left waiting on nothing of its own convoy, from PR #1515's head with its open-convoy fix; on the review path, a stay on the PR whose merge the conversation holds; on the old path, that stay refused as today. `converse-entry.sh`: `waiting` and `returned` read through the convoy, and through the return gate once the sitting has promised one. The stay's line agrees with the record when each bead it names has the conversation's edge onto a convoy that tracks it, or is watched by a gate the conversation waits on, or has closed. Tests, one per row of section 3 and of section 10: what the sign-off writes, a convoy made when none is open, a closed convoy that is no wait, the entry before and after the convoy closes and before and after the gate closes, and the old path's refusal. | unit 1 and tk-ps47p6p | unit 3, once tk-imuvm2j brings the branch current |
-| 3. The words | The converse prompt's "End or stay?" and its handling of a return; `converse-stay`, `converse-settle` and `converse-hold` (section 11); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; the skill-needs pins of the table and of each example's call through the real parsers, among them the promise's call, and an entry that reads `waiting` with no open return gate after a stay that promised one; the stay's Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path. | unit 2 and tk-imuvm2j | the landing |
+| 3. The words | The converse prompt's "End or stay?" and its handling of a return; `converse-stay`, `converse-settle` and `converse-hold` (section 11); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; the skill-needs pins of the table and of each example's call through the real parsers, among them the promise's call, and an entry that reads `waiting` with no open return gate after a stay that promised one; the return's hold write, guarded on the claim the entry took, which records the `holding:` line on an ordinary return, and the entry after it, which a restart reads as `interrupted` with the hold standing; the stay's Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path. | unit 2 and tk-imuvm2j | the landing |
 
 The initiative's "Done when" asks for a test of each row of the table. Units 1
 and 2 hold the rows in their suites, and unit 3 pins them in the words.
@@ -777,8 +788,8 @@ bd, at beads v1.3.4:
   edges (`types.IsSchedulingEdge`).
 - `bd dep remove` confirms the same way whether or not the edge was there
   (`cmd/bd/dep.go`), and a guarded `bd update` applies its guard and every change
-  it carries, `--status` and `--append-notes` among them, as one update
-  (`cmd/bd/update.go`).
+  it carries, `--append-notes` among them, as one update. When its guard does not
+  match, it writes nothing and exits 13 (`cmd/bd/update.go`).
 
 GitHub, through its GraphQL API, read on 2026-11-16: no rig in the city has a
 merge queue on its default branch (`repository.mergeQueue`, read for each rig
@@ -815,8 +826,11 @@ The pack, at integration/tk-vrg93t0 2a6fd322e:
   (`agents/converse-claude-opus/agent.toml` and its siblings).
 - `converse-entry.sh` prints `fresh`, `interrupted`, `waiting`, `returned`,
   `none`, `stop` or `unreadable`, and reads a stay off its `staying:` lines and
-  its own `blocks` edges. A claimed conversation whose newest line is `holding:`
-  reads as a hold that stands.
+  its own `blocks` edges. It claims the conversation with `gc hook --claim`
+  before it reads a stay, so a conversation it reads as `returned` is in
+  progress under the sitting (the ordinary return in `converse-entry.test.sh`).
+  A claimed conversation whose newest line is `holding:` reads as a hold that
+  stands.
 - `gc-helm.sh park` files a gate with no await type, which a person closes to
   release the park, and every closer in the pack closes a human gate only.
 - `gate-ensure.sh` and `rework-child.sh` are on the deletion plan with
