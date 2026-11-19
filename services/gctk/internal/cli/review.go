@@ -565,7 +565,12 @@ instead, and the case --file holds joins its notes, so a second PR into the
 same branch that needs the same fix waits on the same bead. A found bead that
 is on no way to a pool is slung too, unless a label holds it from every pool,
 such as the hold:mayor of work that waits for the operator's placement: it is
-then sent nowhere, and the ask waits on it while the hold stands.
+then sent nowhere, and the ask waits on it while the hold stands. When gc
+sling finds a live workflow on the fix (its exit 3), which can be a pour Gas
+City left unfinished, the fix is armed for --pool on --on instead, as gctk bead
+arm arms a bead, and the deferred-dispatch order's start judges that workflow
+when it sends the fix: it retires the arm once a pour has landed, and asks a
+person about one Gas City left unfinished.
 
 Before it slings the fix, it files an ask on the bead that owns the PR, to run
 each --check again once the fix lands, so no fix it sends can land before the
@@ -580,8 +585,8 @@ the ask, filed or found.
 
 exit: 0 the fix and its ask stand
       1 usage
-      2 a read, a create or the sling did not answer, and the next call finds
-        what landed before it
+      2 a read, a create, the sling or the arm did not answer, and the next
+        call finds what landed before it
       3 refused, and nothing was filed`
 
 func newReviewAheadCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -614,7 +619,8 @@ func newReviewAheadCmd(stdout, stderr io.Writer) *cobra.Command {
 			if err != nil || strings.TrimSpace(string(raw)) == "" {
 				return fmt.Errorf("--file %q holds no description of the fix", file)
 			}
-			req := review.AheadRequest{Bead: bead, Title: title, Description: string(raw), Pool: pool, Formula: formula, Checks: checks}
+			req := review.AheadRequest{Bead: bead, Title: title, Description: string(raw), Pool: pool, Formula: formula, Checks: checks,
+				Actor: actor()}
 			return exit(reviewAhead(req, db, gascity.New(), stdout, stderr))
 		},
 	}
@@ -658,6 +664,13 @@ func aheadIn(l *ledger.Ledger, dir string, rt gascity.Runtime, req review.AheadR
 		switch {
 		case got.Sent:
 			fmt.Fprintf(stdout, "%s %s, slung to %s on %s\n", got.Fix, how, req.Pool, req.Formula)
+		case got.Armed:
+			found := "a live workflow it did not name"
+			if len(got.Live) > 0 {
+				found = "the live workflow " + strings.Join(got.Live, ", ")
+			}
+			fmt.Fprintf(stdout, "%s %s, armed for %s on %s, since gc sling found %s on it: the deferred-dispatch order sends it, and asks a person about a pour Gas City left unfinished\n",
+				got.Fix, how, req.Pool, req.Formula, found)
 		case got.Held != "":
 			fmt.Fprintf(stdout, "%s %s, held by its %s label, so it is sent nowhere\n", got.Fix, how, got.Held)
 		case err == nil:

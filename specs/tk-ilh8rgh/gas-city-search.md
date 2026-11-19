@@ -41,6 +41,27 @@ sling reads none of them: no code under `internal/sling`, and none in
 `HoldLabel`, which reads those labels as Gas City compares them, and slings no
 fix that one holds.
 
+A sling can find a live workflow on the fix. gc sling then exits 3, names each
+root, and points at `--force`, which replaces a formulas v2 workflow, or at
+`gc workflow delete-source <bead> --apply` (`printSourceWorkflowConflictLines`
+and `sourceWorkflowCleanupCommand` in `cmd/gc/cmd_sling.go`). `gc workflow` is
+a hidden alias of `gc convoy` (`newWorkflowCmd` in
+`cmd/gc/cmd_convoy_dispatch.go`), whose `delete-source` closes every live
+workflow sourced from the bead (`docs/reference/cli.md`,
+"gc convoy delete-source"). Both end the workflow whether it can finish or not,
+and nothing in that page reads whether it can. A pour that fails part way
+leaves the beads it made, its root first among them, marked `molecule_failed`
+for cleanup (`Instantiate` in `internal/molecule/molecule.go`), and the sling
+stamps the work bead's route only once its workflow has started
+(`restampWorkBeadRouting`, after `doStartGraphWorkflow` returns, in
+`internal/sling/sling_core.go`), so a fix the call finds on no way to a pool
+can carry such a pour. The pack's arm domain already judges one: its start
+reads the roots a sling's exit 3 names and the beads poured under each, retires
+the arm once a pour has landed, and asks a person about a pour Gas City left
+unfinished, keeping the arm until it sends the bead
+(`services/gctk/arm/start.go`). So on exit 3 the verb arms the fix for the same
+pool and formula, and adds no reader of its own.
+
 ## Judge the PR again once the fix lands
 
 **Not covered by Gas City.** Its event for a closed blocker is core's
@@ -76,7 +97,8 @@ them, the round would pass and the PR would merge with the document missing.
   that an open ask on the PR already waits on, else the open fix of that title
   and target, or files it, then files the ask in one create with its wait, and
   only then slings the fix, so no fix it sends can land before the ask that
-  waits on it stands. A fix lands only on its target, so a PR into another
+  waits on it stands. When that sling finds a live workflow on the fix, it arms
+  the fix instead, through the arm domain's own arm. A fix lands only on its target, so a PR into another
   branch gets a fix of its own. These are bd's create, the same create again and
   `gc sling`, run as one call, so it adds no noun
   ([review-arch.md](../../docs/review-arch.md), check 2). It finds or files the

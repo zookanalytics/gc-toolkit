@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/arm"
+	armrecord "github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	gcfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -288,14 +290,61 @@ func TestAFixWhoseSlingFailedIsSentByTheNextCall(t *testing.T) {
 	if err != nil || again.Fix != got.Fix || again.FixFiled || !again.Sent || again.Ask != got.Ask || again.AskFiled {
 		t.Fatalf("the next call = %+v, %v; want the fix found and slung, and the ask found", again, err)
 	}
-	live := &gcfake.Runtime{OnSling: func(gascity.Sling) gascity.SlingResult {
+}
+
+// A sling that finds a live workflow on the fix, gc sling's exit 3, does not
+// show the fix on its way, since the workflow can be a pour Gas City left
+// unfinished, which cannot finish and beside which gc sling pours no other. The
+// call arms the fix for the pool and the formula, a call that runs again sends
+// nothing more, and the deferred-dispatch order's start reads the pour when it
+// sends the fix and asks a person about it, keeping the arm.
+func TestAFixWhoseSlingFindsALiveWorkflowIsArmed(t *testing.T) {
+	w := newWorld(t)
+	w.store.Put(bead{ID: "tk-wf", Status: "open", IssueType: "task", Metadata: map[string]string{"molecule_failed": "true"}})
+	rt := &gcfake.Runtime{Root: t.TempDir(), OnSling: func(gascity.Sling) gascity.SlingResult {
 		return gascity.SlingResult{Result: gascity.Result{Code: 3}, Live: []string{"tk-wf"}}
 	}}
-	row, _ := w.store.Row(got.Fix)
-	delete(row.Metadata, "gc.routed_to")
-	w.store.Put(row)
-	if third, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, live, aheadReq(prBead), archIndex(t)); err != nil || third.Sent {
-		t.Fatalf("a call whose sling finds a live workflow on the fix = %+v, %v; want it standing, sent already", third, err)
+	req := aheadReq(prBead)
+	req.Actor = "repair"
+	got, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, req, archIndex(t))
+	if err != nil || !got.FixFiled || !got.AskFiled || got.Sent || !got.Armed || !slices.Equal(got.Live, []string{"tk-wf"}) {
+		t.Fatalf("SendAhead = %+v, %v; want the fix filed and armed over tk-wf, and the ask filed", got, err)
+	}
+	rows, err := w.ledger().Find(ledger.ByID(got.Fix))
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("the fix read %v, %v", rows, err)
+	}
+	if a := armrecord.Of(rows[0]); a == nil || a.Target != aheadPool || a.Formula() != aheadOn || a.ArmedBy != "repair" ||
+		!strings.Contains(a.Reason, "tk-wf") {
+		t.Fatalf("the fix's arm reads %+v; want it armed for %s on %s by repair, naming tk-wf", a, aheadPool, aheadOn)
+	}
+
+	again, err := review.SendAhead(w.ledger(), t.TempDir(), time.Second, rt, req, archIndex(t))
+	if err != nil || again.Fix != got.Fix || again.FixFiled || again.Sent || again.Armed || again.Ask != got.Ask {
+		t.Fatalf("a second call = %+v, %v; want the armed fix and the ask found, and nothing sent", again, err)
+	}
+	if n := len(rt.Slings()); n != 1 {
+		t.Fatalf("the fix was slung %d times by the calls; want once", n)
+	}
+
+	w.store.MakeReady(got.Fix)
+	arms := &arm.Arms{Ledger: w.ledger(), Runtime: rt, Locks: t.TempDir(), Now: time.Now, Actor: "start", Wait: time.Second}
+	var line arm.Line
+	if _, err := arms.StartArmed(arm.StartOptions{}, func(l arm.Line) {
+		if l.ID == got.Fix {
+			line = l
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if line.Start.Action != arm.ActAsk || line.Start.Case != "unfinished" || !strings.Contains(line.Start.Why, "tk-wf") {
+		t.Fatalf("the start's act on the fix = %+v; want a person asked about the unfinished pour tk-wf", line.Start)
+	}
+	if calls := rt.Scripts(); len(calls) != 1 || calls[0].Name != "human-gate.sh" || !slices.Contains(calls[0].Args, got.Fix) {
+		t.Fatalf("the start ran %+v; want one human gate on %s", calls, got.Fix)
+	}
+	if rows, _ := w.ledger().Find(ledger.ByID(got.Fix)); len(rows) != 1 || armrecord.Of(rows[0]) == nil {
+		t.Fatal("the start asked a person and left the fix unarmed")
 	}
 }
 

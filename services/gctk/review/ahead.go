@@ -42,32 +42,43 @@ import (
 // runs that ask for one fix at once file it once. A found fix that a label
 // holds from every pool, such as the hold:mayor of work that waits for the
 // operator's placement, is sent nowhere, because gc sling reads no hold, and
-// the ask waits on it while the hold stands.
+// the ask waits on it while the hold stands. A sling that finds a live workflow
+// on the fix, gc sling's exit 3, does not show the fix on its way: the workflow
+// can be a pour Gas City left unfinished, which cannot finish and beside which
+// gc sling pours no other. So the call arms the fix for the same pool and
+// formula, and the deferred-dispatch order's start judges that workflow when it
+// sends the fix: it retires the arm once a pour it names has landed, and asks a
+// person about one Gas City left unfinished, keeping the arm until the fix is
+// sent.
 
 // AheadRequest is a fix to file ahead of the PR the bead owns: its title, what
-// it must hold, the pool and the formula it is sent on, and the checks the ask
-// sends back once it lands.
+// it must hold, the pool and the formula it is sent on, the checks the ask
+// sends back once it lands, and who the note of an arm the call makes names.
 type AheadRequest struct {
 	Bead, Title, Description string
 	Pool, Formula            string
 	Checks                   []string
+	Actor                    string
 }
 
 // Ahead is what SendAhead did: the fix and the ask that waits on it, whether
-// each was filed or found, whether this call sent the fix to the pool, and the
-// label that holds a found fix from every pool, "" when none does.
+// each was filed or found, whether this call sent the fix to the pool or armed
+// it, with the live workflows gc sling named on the fix that it armed over, and
+// the label that holds a found fix from every pool, "" when none does.
 type Ahead struct {
 	Fix, Ask           string
 	FixFiled, AskFiled bool
-	Sent               bool
+	Sent, Armed        bool
+	Live               []string
 	Held               string
 }
 
 // SendAhead files the fix req names ahead of the PR the bead owns, or finds the
 // open bead of its title that lands on the PR's target and does not wait on the
 // bead, files the ask on the bead that waits on it, and then sends it to
-// req.Pool on req.Formula unless it
-// is on its way already or a label holds it. It finds or files the fix under
+// req.Pool on req.Formula unless it is on its way already or a label holds it.
+// When gc sling finds a live workflow on the fix, it arms the fix for req.Pool
+// on req.Formula instead (armOver). It finds or files the fix under
 // the record lock of the store whose .beads directory is dir, waiting up to
 // wait for it. It refuses what FileAsk refuses, and a request that sends no
 // check back, before anything is filed. A read that fails, and a lock not
@@ -110,7 +121,11 @@ func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runt
 		switch {
 		case res.Code == 0 && res.Err == nil:
 			out.Sent = true
-		case res.Code == 3 && len(res.Live) > 0:
+		case res.Code == 3:
+			if err := armOver(l, rt, wait, req, out.Fix, res.Live); err != nil {
+				return out, err
+			}
+			out.Armed, out.Live = true, res.Live
 		default:
 			why := fmt.Sprintf("exit %d: %s", res.Code, oneLine(res.Output))
 			if res.Err != nil {
@@ -120,6 +135,35 @@ func SendAhead(l *ledger.Ledger, dir string, wait time.Duration, rt gascity.Runt
 		}
 	}
 	return out, nil
+}
+
+// armOver arms fix for req.Pool on req.Formula, so the deferred-dispatch order
+// sends it, once gc sling has found a live workflow on it, the roots live
+// names. The arm's start reads the workflows its own sling finds and the beads
+// poured under each: it retires the arm once a pour has landed, and asks a
+// person about a pour Gas City left unfinished, which gc sling refuses another
+// pour beside, keeping the arm until the fix is sent. An arm that does not land
+// returns its error, and the next call slings the fix again.
+func armOver(l *ledger.Ledger, rt gascity.Runtime, wait time.Duration, req AheadRequest, fix string, live []string) error {
+	found := "a live workflow it did not name"
+	if len(live) > 0 {
+		found = "the live workflow " + strings.Join(live, ", ")
+	}
+	fail := func(err error) error {
+		return fmt.Errorf("%s carries the fix, gc sling found %s on it, and its arm for %s did not land, so the next call arms it: %w",
+			fix, found, req.Pool, err)
+	}
+	locks, err := arm.LockDir(rt)
+	if err != nil {
+		return fail(err)
+	}
+	a := &arm.Arms{Ledger: l, Runtime: rt, Locks: locks, Now: time.Now, Actor: req.Actor, Wait: wait}
+	reason := fmt.Sprintf("gc sling found %s on this fix ahead of %s's PR, which can be a pour Gas City left unfinished, so the start judges it when it sends the fix",
+		found, req.Bead)
+	if _, err := a.Arm(arm.Request{ID: fix, Target: req.Pool, Formula: req.Formula, Reason: reason}); err != nil {
+		return fail(err)
+	}
+	return nil
 }
 
 // fixFor finds or files the fix SendAhead sends, holding the store's record

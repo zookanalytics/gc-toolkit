@@ -201,7 +201,8 @@ func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 // A fix ahead of a PR prints the fix and the ask that holds the PR for it: both
 // filed, the fix slung, at the first call; both found, the fix on its way, at
 // the next; both filed and the sling's failure, exit 2, when the sling does not
-// land; and exit 3 with nothing filed for a bead with no PR on the record.
+// land; both filed and the fix armed, when the sling finds a live workflow on
+// it; and exit 3 with nothing filed for a bead with no PR on the record.
 // Each usage error is exit 1.
 func TestReviewAheadPrintsWhatStands(t *testing.T) {
 	pr := fake.Bead{ID: "tk-pr", Status: "blocked", IssueType: "task", Metadata: map[string]string{
@@ -242,6 +243,17 @@ func TestReviewAheadPrintsWhatStands(t *testing.T) {
 	code, out, errOut = ahead(s, failing)
 	if code != 2 || out != "fk-1 filed\nfk-2 filed, waiting on fk-1\n" || !strings.Contains(errOut, "no such pool") {
 		t.Fatalf("a call whose sling fails = %d, %q, %q", code, out, errOut)
+	}
+
+	s = fake.New()
+	s.Put(pr)
+	live := &gcfake.Runtime{Root: t.TempDir(), OnSling: func(gascity.Sling) gascity.SlingResult {
+		return gascity.SlingResult{Result: gascity.Result{Code: 3}, Live: []string{"tk-wf"}}
+	}}
+	code, out, errOut = ahead(s, live)
+	if code != 0 || out != "fk-1 filed, armed for rig/gc-toolkit.polecat on mol-polecat-work, since gc sling found the live workflow tk-wf "+
+		"on it: the deferred-dispatch order sends it, and asks a person about a pour Gas City left unfinished\nfk-2 filed, waiting on fk-1\n" {
+		t.Fatalf("a call whose sling finds a live workflow = %d, %q, %q", code, out, errOut)
 	}
 
 	s = fake.New()
