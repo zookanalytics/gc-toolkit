@@ -1,6 +1,6 @@
 ---
 name: Gas City search for a stay that comes back before the operator's next decision
-description: Use when you review or build a unit of the design in specs/tk-ai367om/design.md, in which a staying sitting promises its return with a return gate of the pack's own that the landing order closes, and need the Gas City, bd and GitHub primitives each piece of its surface composes, what was searched for each and found not to cover it, and why the promise is a gate kind defined in gctk, the closer is the landing order, the wake is Gas City's for ready assigned work, the stay's own wait is a convoy, the hold is the conversation's existing hold on a PR's merge, the readers take one rule from gctk, and a visit and a fresh context need nothing from Gas City.
+description: Use when you review or build a unit of the design in specs/tk-ai367om/design.md, in which a staying sitting promises its return with a return gate of the pack's own that the landing order closes, and need the Gas City, bd and GitHub primitives each piece of its surface composes, what was searched for each and found not to cover it, and why the promise is a gate kind defined in gctk, the closer is the landing order, the wake is Gas City's for ready assigned work, a stay that promises nothing waits through a convoy, the hold is the conversation's existing hold on a PR's merge, the readers take one rule from gctk, and a visit and a fresh context need nothing from Gas City.
 ---
 
 # Gas City search: a stay that comes back before the operator's next decision
@@ -28,8 +28,9 @@ read again at the commits above.
 await id its `--await-id` names, and writes the `blocks` edge of the bead its
 `--blocks` names onto the gate (`buildGateIssue` and `gateCreateCmd` in
 `cmd/bd/gate.go`). The bead that waits leaves `bd ready` until the gate closes.
-This is bd's shape for waiting on a state other than a close: a bead stands for
-the state, and its close releases what waits on it. bd's help for `bd gate`
+This is how bd waits on a state other than a close, for the types it
+documents: a bead stands for the state, and its close releases what waits on
+it. bd's help for `bd gate`
 says gates "must be closed (manually or via watchers) for the blocked step to
 proceed".
 
@@ -43,6 +44,25 @@ closer is the gate's only one. The gate names the work by its await id, which
 bd's help gives as the "Condition identifier (run ID, PR number, etc.)" a gate
 waits on, and the conversation is the bead its `--blocks` names. An await id is
 no edge, so bd's cycle check never meets it (`types.IsSchedulingEdge`).
+
+**What bd and Gas City say about gates.** Neither gives guidance for a gate type
+of one's own. bd's help documents the types `human`, `timer`, `gh:run`, `gh:pr`
+and `bead`, stores any `--type` unchecked (`buildGateIssue`), and says gates
+"must be closed (manually or via watchers)" without defining a watcher. The
+return gate uses that opening, with the landing order as its watcher. Gas City,
+at upstream main 17d7d77ce2, maps `gt gate` to `gc wait` and to formula gates,
+and calls durable waits "the closest platform concept"
+(`docs/reference/gastown-command-map.md`). A formula's `[steps.gate]` stamps its
+declared type verbatim as `gc.gate_type` metadata, "the parser never validates
+them", and "No bundled watcher resolves any gate type"
+(`docs/reference/specs/formula-spec-v2.md`). Its stores "have no gate-condition
+column" (`GateTypeMetadataKey` in `internal/beadmeta/keys.go`). The gate kind it
+defines for itself, the cross-store gate, is marked by the label
+`gc:cross-store-gate` and `gc.cross_store_gate_*` metadata, and its controller
+releases it (`internal/dispatch/cross_store_gate.go`). So the return gate stands
+in for Gas City's session wait, the primitive Gas City offers for this wait,
+which cannot hold the promise today (below), and the gate's warrant names that
+wait (the design's section 13).
 
 **What else was searched.**
 
@@ -81,22 +101,35 @@ no edge, so bd's cycle check never meets it (`types.IsSchedulingEdge`).
   restart change neither the conversation nor its gate.
 - **A `blocks` edge onto the work.** It clears only when the work closes, which
   for a PR is after the merge. It also meets the hold's cycle and the subject's
-  one edge (the stay's wait, below).
+  one edge (the convoy wait, below).
 - **A plain gate, or a task, that the pack closes.** A reader could not tell it
   from a person's: the board counts a gate with no await type as a person's
   (`sweptGate` in `services/helm/internal/board/state.go`), as the park gate
   `gc-helm.sh park` files is, and a task reads as work. The await type is the
   field bd gives a gate for what it waits on.
-- **A metadata key naming the gate's kind.** bd's await type already carries it,
-  and the store's lite read includes it (`IssueBaseColumnsLite` in
-  `internal/storage/sqlbuild/sqlbuild.go`), so a key would be a second field for
-  one fact.
+- **A metadata key naming the gate's kind.** Gas City marks the gate kinds it
+  defines in metadata and labels: a formula gate's type as `gc.gate_type`,
+  since its stores have no gate-condition column, and the cross-store gate by
+  a label and `gc.cross_store_gate_*` keys (above). A bd gate carries its kind
+  in a field of its own, the await type, which the store's lite read includes
+  (`IssueBaseColumnsLite` in `internal/storage/sqlbuild/sqlbuild.go`), and
+  every reader of the return gate reads bd's rows: `bd gate list`, and a gate's
+  row in `bd show` and in `bd dep list`. So for a bd gate the await type holds,
+  and a key would be a second field for one fact. The one reader it misses is
+  the board's fallback onto the supervisor's API, whose bead carries metadata
+  and no await type (`apiBead` in `services/helm/internal/source/supervisor.go`),
+  so there a waiting conversation reads as parked. The design keeps that limit.
+  A key would remove it, and so would the API carrying a bead's await type.
 
 ## Filing it: `gctk gate return`
 
-**What it composes.** Native writes in one order. First it removes the
-conversation's `blocks` edges onto its closed return gates (`bd dep remove`),
-while the stay's convoys keep the conversation waiting, so a return reads only
+**What it composes.** The stay's sign-off runs the verb after the send its
+ruling makes and before it leaves the conversation open, on each bead it
+promises on, and the sitting runs it before the sign-off for a PR it sent back
+itself through the `prs` skill (the design's section 1). The verb makes native
+writes in one order while the conversation is still claimed, so none of them
+can bring the sitting back early. First it removes the conversation's `blocks`
+edges onto its closed return gates (`bd dep remove`), so a return reads only
 the gates of its own stay. Then, for each bead it names that has no open return gate of the
 conversation's, it runs one
 `bd gate create --type stay-return --await-id <the bead> --blocks <the conversation>`.
@@ -110,14 +143,14 @@ that stops between the two leaves a gate that nothing waits on. The verb's
 re-run finds no gate the conversation waits on for that bead and files one,
 and the landing order closes the stray (closing it, below). An open gate keeps
 the conversation's edge from its create, so a bead whose gate is still open
-gets no second one. Last it removes the conversation's `blocks` edges onto a convoy
-(`bd dep remove`), which leaves a park or any other wait on it in place. The
-verb carries the sitting's one intent, to come back when this work is ready for
-the operator's next decision, through every step: it finds the conversation's
-open gate on a bead before it files one, writes the edges in the order that
-keeps the conversation waiting throughout, and refuses a gate nothing would
-close, on a bead in another store, on a bead that has closed, or in a store the
-landing order does not read.
+gets no second one. As it files a bead's gate, it removes the conversation's
+`blocks` edge onto a convoy that tracks that bead (`bd dep remove`), which only
+a settled stay on that bead leaves, and it leaves a park or any other wait on
+the conversation in place. The verb carries the stay's one intent, to come back
+when this work is ready for the operator's next decision, through every step:
+it finds the conversation's open gate on a bead before it files one, and
+refuses a gate nothing would close, on a bead in another store, on a bead that
+has closed, or in a store the landing order does not read.
 
 **What else was searched.**
 
@@ -127,17 +160,25 @@ landing order does not read.
   the conversation and watches nothing, which no close reaches while the
   conversation is open. The await id is the field bd gives a gate for what it
   waits on, and the conversation is the bead the gate blocks.
-- **`bd gate create` alone.** It leaves the stay's edges onto its convoys. bd
-  reads a bead ready only once every bead it waits on through a `blocks` edge
-  has closed, so the conversation would come back only once its work had closed.
+- **`bd gate create` alone.** It leaves a convoy wait that a settled stay on the
+  same bead left, and bd reads a bead ready only once every bead it waits on
+  through a `blocks` edge has closed, so the conversation would come back only
+  once that work had closed.
 - **The sitting typing the writes itself.** That is several writes in one order
   and refusals the sitting would derive each time, the steps gctk's verbs take
   out of an agent's hands.
-- **The sign-off filing the gate.** `converse-signoff.sh --stay` cannot tell a
-  stay that awaits a return from one that follows a settled exchange without a
-  new flag, and whether to promise the return is the sitting's call, as the
-  previous revision's session wait was. A flag would grow a script whose new
-  intent gctk can hold.
+- **A promise made after the stay**, the earlier order, in which the sitting
+  ran the verb once the stay had landed. A stop between the two left a stay
+  with no promise, which came back only after the merge, or not at all while
+  the conversation held that PR's merge, and the sitting had to check for it
+  on a later entry. The sign-off can file the gate itself, with no new flag: it
+  already says what its ruling does to each PR it reaches, sending it back with
+  `--rework` or leaving it standing with `--no-rework`, and work with no PR on
+  the record was just sent. The one case it cannot read is another PR that the
+  sitting sent back itself through the `prs` skill, so for that one the sitting
+  runs the verb before the sign-off. The gate comes after the send because a
+  rework's PR is already ready at its head when the operator rules, so the
+  landing order's next pass would close a gate filed before the ask was open.
 - **Gas City's session wait**, above.
 
 ## Closing it: the landing order
@@ -219,11 +260,10 @@ with its thread, and its claim read `ready_assignment` (the edge path in
   conversation's readiness already wakes it with no write of the order's.
 - **The session wait's wake**, above.
 
-## The stay's own wait: a convoy
+## The wait of a stay that promises nothing: a convoy
 
-**What it composes.** The stay that follows a settled exchange, and every stay
-until its sitting promises the return, waits on its work's close through a
-convoy that tracks the work alone and carries no `owned` label, which Gas City
+**What it composes.** A stay that promises nothing on a bead, as one that
+follows a settled exchange, waits on that bead's close through a convoy that tracks the work alone and carries no `owned` label, which Gas City
 closes once the work closes (`convoyStillAutocloses`). A graph.v2 pour on a bead
 that is not a convoy mints a fresh one-item convoy that tracks it
 (`NormalizeInputConvoy` and `CreateSingleItemInputConvoy` in
@@ -333,9 +373,10 @@ leaves the return to a sitting with no thread.
 - **A gate create that stops before its edge**, on the city's Dolt server,
   leaves an open gate that nothing waits on until the landing order's first
   pass after it is five minutes old.
-- **A return never promised.** A restart between the stay and the promise leaves
-  the conversation waiting on its work's close, and the sitting promises the
-  return when its entry reads `waiting` with no open return gate.
+- **A round that ends before its gate is filed**, as after a stop inside the
+  sign-off between its send and its gate: the gate its re-run files closes on
+  the landing order's next pass, so the sitting comes back for that round up
+  to a cooldown later than it would have.
 - **The board's supervisor fallback** reads a staying conversation as parked.
 - **A sitting whose session has closed** is not woken. The hold still goes on
   at the end of the round, and the return starts once the operator engages the

@@ -86,27 +86,30 @@ leave alone, so nothing waits for Gas City.
 A stay runs these steps in this order:
 
 1. **Agree and send the work.** The sitting and the operator agree what the work
-   must do, and the sitting sends it as it does today. It slings new work or the
-   subject, or sends the PR under discussion back through `converse-rework.sh`,
-   which on the review path files the ruling as an ask on the PR's bead.
-2. **Stay.** `converse-signoff.sh --stay` records what the operator agreed and
-   leaves the conversation open under its sitting, waiting in the store for its
-   work to close, through a convoy that tracks it (section 3).
-3. **Promise the return.** Once the stay has landed, the sitting files a
-   return gate on each bead whose next decision it is staying for:
+   must do, and the work is sent as it is today. The sitting slings new work or
+   the subject before it signs off. A ruling that sends the PR under discussion
+   back is sent by the sign-off itself, through `converse-rework.sh`
+   (`--rework`), which on the review path files the ruling as an ask on the
+   PR's bead.
+2. **Stay, with the promise.** `converse-signoff.sh --stay` makes the stay in
+   one call, in this order: it records what the operator agreed and carries out
+   the send its ruling makes, then files a return gate on each bead whose next
+   decision the stay is for, then leaves the conversation open under its
+   sitting. It files the gates through gctk:
 
    ```bash
-   gctk gate return "$CONVERSATION" --on <the bead>
+   gctk gate return "$CONVERSATION" --on <the bead>...
    ```
 
-   The conversation then waits on its return gates in place of the convoy, so
-   the sitting comes back once each of them has closed (section 2). A stay that
-   follows a settled exchange promises nothing for that work (section 7).
-4. **Keep talking, or leave.** While the operator is attached, the sitting runs
+   The conversation then waits on each of those gates, and on each other bead
+   of its work through a convoy that tracks it (section 3), so the sitting
+   comes back once each of them has closed (section 2). Nothing is written once
+   the stay has landed.
+3. **Keep talking, or leave.** While the operator is attached, the sitting runs
    and answers them. Once they detach, Gas City sleeps it after its template's
    idle window (`sleep_after_idle`, ten minutes for the converse templates),
    because its conversation waits on an open bead.
-5. **Come back.** At the end of a round on the PR, the landing order puts the
+4. **Come back.** At the end of a round on the PR, the landing order puts the
    hold on the PR and closes the gate on its bead (section 4). The conversation
    is then ready work assigned to the sitting, so Gas City wakes the sitting and
    resumes its thread (`wake_mode = "resume"`), and the prompt runs the entry,
@@ -114,29 +117,69 @@ A stay runs these steps in this order:
    that a blocker closed instead. The sitting holds the conversation for the
    operator, reads the result, compares it with what was agreed, posts what it
    found, and waits for the operator (section 5).
-6. **The operator rules.** They can send the work back, and the sitting runs
-   steps 1 to 3 again for the next round. They can settle the exchange, and the
-   sitting releases the PR's merge and stays available (section 7). Or they end
-   the conversation.
+5. **The operator rules.** They can send the work back, and the sitting runs
+   steps 1 and 2 again for the next round. They can settle the exchange, and
+   the sitting releases the PR's merge and stays available (section 7). Or they
+   end the conversation.
+
+**Which beads the stay promises on.** The sign-off knows what its ruling does to
+each piece of work it names. It promises the return on the PR its `--rework`
+sends back, and on each bead it waits on that has no PR on the record yet,
+because that work was just sent (`pr.OnRecord`, which `gctk pr status` reads).
+A bead whose return gate is still open stays promised: the sign-off passes it
+to the verb, which finds that gate and files none, and the bead gets no convoy
+wait. It promises nothing on a PR on the record that its ruling leaves
+standing, as after a settled exchange (`--no-rework`), and waits on that work's
+close through a convoy (section 7). One case only the sitting can tell: a PR other than the
+one under discussion that the sitting sent back itself through the `prs`
+skill's `gctk review ask`, which the sign-off does not send. For that PR the
+sitting runs `gctk gate return` after the ask and before the sign-off, and the
+sign-off finds the gate. The sign-off refuses a stay on a PR whose merge the
+conversation holds when no open return gate covers that PR, because the stay
+would wait for a close the hold keeps from coming.
+
+**A stay that stops partway.** The sign-off writes its first `staying:` line
+before any other write, so a restart anywhere in the call reads a stay that
+stopped short, and the stay's own re-run finishes it (`converse-stay`, "A stay
+that stopped short"). No step is left for the sitting to remember later:
+
+- **Before the send**, nothing has been sent, and the re-run makes the whole
+  call.
+- **After the send and before a gate**, the ask is open and the conversation is
+  still the sitting's claimed work, not a stay. The re-run finds the send
+  recorded, sends nothing again, and files the gate. If the round ended
+  meanwhile, the gate filed after it closes on the landing order's next pass,
+  so the sitting comes back for that round then.
+- **Inside a gate's create**, between the gate and its edge, the re-run files the
+  gate again, and the landing order closes the one that nothing waits on
+  (section 2).
+- **After the gates and before the conversation is left open**, the re-run finds
+  each open gate, files none again, and leaves the conversation open. A gate
+  that closed meanwhile leaves the conversation ready once it is open, and the
+  call ends by sending the sitting to its entry, which reads `returned`.
 
 What each command does, and what a stay uses it for:
 
 | Command | What it does | In a stay |
 |---|---|---|
-| `converse-signoff.sh --stay` | Writes everything a sign-off writes, then leaves the conversation open under its sitting, waiting on each bead of the work it sent through a convoy that tracks that bead. | The stay. |
-| `gctk gate return <conversation> --on <bead>...` | Files the conversation's return gate on each bead, or finds that bead's open one. It makes the conversation's open return gates the stay's waits: it removes the conversation's `blocks` edges onto its closed return gates, so a return reads only the gates of its own stay, then removes its `blocks` edges onto a convoy, the waits of its stays. An open gate keeps the conversation's edge from its create, so nothing is promised again on a bead whose gate is still open. A wait anything else put on the conversation stays, such as a park, because `gc-helm.sh park` takes any open bead that is not in flight. | The promise, once the stay has landed. |
+| `converse-signoff.sh --stay` | Writes everything a sign-off writes, the send its ruling makes among them, then files the return gates through `gctk gate return`, then leaves the conversation open under its sitting, waiting on each bead it promises on through its gate and on each other bead of its work through a convoy that tracks that bead. It refuses a stay on a PR whose merge the conversation holds when no open return gate covers that PR. | The stay, with its promise. |
+| `gctk gate return <conversation> --on <bead>...` | Files the conversation's return gate on each bead, or finds that bead's open one. It first removes the conversation's `blocks` edges onto its closed return gates, so a return reads only the gates of its own stay, and as it files a bead's gate it removes the conversation's `blocks` edge onto a convoy that tracks that bead, which only a settled stay on that bead leaves. An open gate keeps the conversation's edge from its create, so nothing is promised again on a bead whose gate is still open. A wait anything else put on the conversation stays, such as a park, because `gc-helm.sh park` takes any open bead that is not in flight. | The promise: run by the stay's sign-off after its send, and by the sitting for a PR it sent back through the `prs` skill. |
 | `gctk pr reconcile`, the landing order | In each pass, puts the hold on a PR whose round has ended and then closes each return gate on the PR's bead. It also closes a return gate whose work has closed, or that no open or in-progress conversation waits on. It removes no edge (section 2). | What brings the sitting back. |
 | `gc session attach <session>` | Attaches to a running session, or has the controller start one that is not running, with its thread. It changes neither the conversation nor its gate. | The way back in (section 9). |
 | `gc session reset` | Restarts the session with a fresh thread, under the same alias and the same assigned work. It changes neither the conversation nor its gate. | A return handed to a fresh context (section 5). |
 | `gc runtime drain-ack` | Lets the controller stop the session. The core reaper closes a drained session once it is a day old. | Never while staying, because a closed session leaves the return to a sitting with no thread. A sign-off that ends the conversation drains. |
 
-**Why the promise replaces the stay's wait.** bd reads a bead as ready only once
+**Why a promised bead has no convoy wait.** bd reads a bead as ready only once
 every bead it waits on through a `blocks` edge has closed. A conversation that
-waited on the convoy and on the gate together would come back only once its work
-had closed, after the decision the gate is for. So the conversation waits on one
-of them at a time: on its work's close through the convoy, or on its work's next
-decision through its return gates, each of which its bead's close closes as
-well. Either wait is open work blocking the conversation its sitting is
+waited on a bead's convoy and on its gate together would come back only once
+that work had closed, after the decision the gate is for. So for each bead the
+stay names, the conversation waits on one of them: on the bead's next decision
+through its return gate, which the bead's close closes as well, or on the
+bead's close through a convoy when the stay promises nothing on it. A convoy
+wait that an earlier settled stay left on a bead the stay now promises on, as
+when the operator sends back a PR they had settled, is removed by
+`gctk gate return` as it files that bead's gate, before the sign-off leaves the
+conversation open. Either wait is open work blocking the conversation its sitting is
 assigned. That lets the sitting sleep, since blocked open assignments do not
 prevent the idle sleep (`computeAwakeSet` in `cmd/gc/compute_awake_set.go`), and
 it keeps the
@@ -163,8 +206,10 @@ later gate kind of the pack's would be defined in the same package.
   title names the work and the moment in the operator's words, because the
   board shows it as what the conversation waits on, and its description names
   the definition.
-- **Who files it.** The sitting, with `gctk gate return`, once its stay has
-  landed (section 1). The verb files each gate with one command:
+- **Who files it.** The stay's sign-off, through `gctk gate return`, after the
+  send its ruling makes and before it leaves the conversation open, and the
+  sitting itself, with the same verb, for a PR it sent back through the `prs`
+  skill (section 1). The verb files each gate with one command:
 
   ```bash
   bd gate create --type stay-return --await-id <the bead> --blocks <the conversation>
@@ -264,12 +309,15 @@ later gate kind of the pack's would be defined in the same package.
 On a rig that has moved onto the review run, each stay comes back as this table
 gives. Section 10 gives a rig still on the old review path.
 
-| The ruling sends | The stay waits through | Its return gate watches | It comes back |
-|---|---|---|---|
-| New work that opens its own PR | an open convoy that tracks the work | the work's bead | at the end of each round on its PR, and when the work closes |
-| A rework of the PR under discussion | an open convoy that tracks the PR's anchor | the anchor | at the end of the round the rework starts, and of each later round the operator rules |
-| The conversation's own subject | an open convoy that tracks the subject | the subject | at the end of each round on the subject's PR, and when the subject closes |
-| Work that opens no PR | an open convoy that tracks the work | the work's bead | when the work closes |
+| The ruling sends | The stay waits on a return gate on | It comes back |
+|---|---|---|
+| New work that opens its own PR | the work's bead | at the end of each round on its PR, and when the work closes |
+| A rework of the PR under discussion | the PR's anchor | at the end of the round the rework starts, and of each later round the operator rules |
+| The conversation's own subject | the subject | at the end of each round on the subject's PR, and when the subject closes |
+| Work that opens no PR | the work's bead | when the work closes |
+
+A stay that follows a settled exchange promises nothing on that work, and waits
+on its close through an open convoy that tracks it (section 7).
 
 **The moment a PR is ready for the operator's approval.** A round ends when the
 record is pending at the PR's head, which is the head the refinery validated,
@@ -296,8 +344,7 @@ marks the moment:
   operator asked for is on the branch, before the approval. That is the
   promised result, so the old path's rework stay waits on it (section 10).
 
-**Why the stay waits through a convoy, and the return through the gate.** The
-hold of section 4 is the PR's bead's `blocks` edge onto the conversation, and bd
+**Why neither wait is an edge onto the work.** The hold of section 4 is the PR's bead's `blocks` edge onto the conversation, and bd
 refuses an edge from the conversation onto that bead while the hold stands,
 because its cycle check walks `blocks`, `conditional-blocks` and `parent-child`
 edges (`types.IsSchedulingEdge`, beads `internal/types/types.go`). A stay on
@@ -316,14 +363,15 @@ run, which the landing order pours with
 `gc formula cook mol-pr-review --attach <bead>` (`runs.Pour` in
 `services/gctk/internal/cli/prland.go`). Gas City mints a fresh one-item convoy
 for each such pour (`NormalizeInputConvoy` and `CreateSingleItemInputConvoy` in
-`internal/graphv2/invocation.go`). The sign-off waits on the newest open one,
-the rule `subject_convoy` applies in `converse-signoff.sh` at PR #1515's head.
+`internal/graphv2/invocation.go`). On a bead it promises nothing on, the
+sign-off waits on the newest open one, the rule `subject_convoy` applies in
+`converse-signoff.sh` at PR #1515's head.
 When none is open, as for a change handed over through `work-submit.sh`, a raw
 route or a PR whose first review run has not poured, it makes one with
 `gc convoy create <name> <bead>`.
 
-**Several works.** A stay names every bead it waits on. The sitting promises the
-return on each bead whose decision it is staying for, and each of those beads
+**Several works.** A stay names every bead it waits on. It promises the return
+on each bead whose decision it is staying for (section 1), and each of those beads
 has a return gate of its own. The conversation waits on all of them, so the
 sitting comes back once each is ready for the operator's next decision or has
 closed (section 2). A bead whose round ends first is held from that end, and
@@ -427,10 +475,15 @@ The sitting takes the return up when its entry reads `returned`, in this order:
    open. Each closed gate's close reason names its bead and the moment: the end
    of a round at a head, or the bead's close. The reason is in the record, so
    the sitting needs no notice to trust.
-2. **Hold first.** The entry has already claimed the conversation: it runs
-   `gc hook --claim` before it reads the stay, so a conversation it reads as
-   `returned` is in progress under the sitting. The sitting records the hold's
-   `holding:` line in one write guarded on that claim:
+2. **Record what the operator owes, first.** The PR's merge is already held
+   when the sitting wakes: the landing order wrote the conversation's hold on
+   the PR before it closed the gate (section 4), and the PR stays held if the
+   sitting never wakes. What the sitting records here is the conversation's own
+   record of what the operator owes, its `holding:` line, which a restart
+   reads. The line holds no merge. The entry has already claimed the
+   conversation: it runs `gc hook --claim` before it reads the stay, so a
+   conversation it reads as `returned` is in progress under the sitting. The
+   sitting records the line in one write guarded on that claim:
 
    ```bash
    gc bd update "$CONVERSATION" --if-assignee "$GC_ALIAS" --if-status in_progress \
@@ -439,12 +492,12 @@ The sitting takes the return up when its entry reads `returned`, in this order:
 
    bd applies the guard and the line as one update, and a guard that does not
    match writes nothing and exits 13 (`cmd/bd/update.go`), as when the operator
-   ended the conversation meanwhile. The sitting then records no hold, and says
+   ended the conversation meanwhile. The sitting then records no line, and says
    in the thread what stopped it. `converse-stay`'s claim-back, guarded on
    `open`, is for a stay that stopped short: on a return it finds the
    conversation claimed and writes nothing. Once the line is recorded, the
-   conversation is the operator's move, and a restart reads the hold that stands
-   (`converse-entry.sh`, `interrupted`, with `converse-continue`).
+   conversation is the operator's move, and a restart reads the line that
+   stands (`converse-entry.sh`, `interrupted`, with `converse-continue`).
 3. **Read the result** at the PR's head, which is the head the round ended at,
    with the change since the head the sitting last read and the review run's
    account of each round between.
@@ -455,19 +508,12 @@ The sitting takes the return up when its entry reads `returned`, in this order:
    advice. When it finds that the work matches, it says so.
 6. **Wait for the operator.** The hold stands until they rule.
 
-**A return cut short.** A restart after step 2 reads the hold that stands, and
-the sitting carries the return on from its thread, or from the record when the
-thread is gone: the hold's line and what it has already posted on the PR. A
+**A return cut short.** A restart after step 2 reads the `holding:` line that
+stands, and the sitting carries the return on from its thread, or from the
+record when the thread is gone: that line and what it has already posted on the
+PR. A
 restart before step 2 reads `returned` again, because the closed gate stays in
 the store.
-
-**A return never promised.** A restart between the stay and the promise leaves
-the conversation waiting on its work's close. So on an entry that reads
-`waiting`, the sitting checks that its conversation waits on an open return gate
-on each bead the stay's hand-back promised one on, and promises again when it
-does not. Nothing else takes a promise away early: a visit and a fresh context
-change neither the conversation nor its gates, and only the landing order
-closes a gate (section 2).
 
 **A return handed to a fresh context.** When the sitting's context runs low
 during the return, it hands the return over as `converse-stay` gives ("When your
@@ -488,9 +534,12 @@ and otherwise stays available (section 7).
 **A send-back through the sitting.** The operator's ruling sends the PR back: an
 ask on the PR's bead through `converse-rework.sh` for the PR under discussion,
 or `gctk review ask` through the `prs` skill for another PR such as new work's.
-The sitting stays again and promises again, and the hold stays on the PR. The
-ask is open before the promise, so the round has not ended when the gate is
-filed. The round ends whether or not the review run pushes:
+The sitting stays again, and the stay files the ask before the gate: the
+sign-off sends the ask with `--rework` and then files the gate, and for another
+PR the sitting files the ask through the `prs` skill and runs
+`gctk gate return` before it signs off. So the round has not ended when the gate
+is filed, and the hold stays on the PR. The round ends whether or not the
+review run pushes:
 
 - **The run pushes a fix.** Its push returns the PR to draft, and the round ends
   at the new head, as any round does.
@@ -519,8 +568,9 @@ Nothing records which head a return read, because no rule waits on that record.
 **Settling.** The operator rules that the returned exchange is settled, for
 example that the work may merge. The sitting lifts the hold, records the ruling,
 and stays on with no promise for that work: it signs off with `--stay` on the
-same work and files no return gate on it, so its conversation waits on the
-work's close through the convoy. A bead of the stay whose return gate is still
+same work with a ruling that leaves its PR standing (`--no-rework`), so the
+sign-off files no return gate on it, and its conversation waits on the work's
+close through a convoy. A bead of the stay whose return gate is still
 open keeps it: the conversation goes on waiting on that gate, and nothing is
 promised again on it (section 3). The conversation is open under its sitting
 again, the sitting
@@ -547,25 +597,27 @@ PR #1515 (its head 6ffdc541f, which `refs/pull/1515/head` keeps) let a sitting
 stay when its ruling sends its own subject, by waiting on the input convoy the
 subject's dispatch pours, and came back after the merge. What holds from it:
 
-- **The wait in the store** is a convoy that tracks the subject, as section 3
-  gives for every stay.
+- **The wait in the store** is the subject's return gate, or, once the
+  operator has settled the subject's exchange, a convoy that tracks the
+  subject (section 3).
 - **An open convoy only.** A convoy closed by hand, or one that has closed, is no
   wait. PR #1515's correctness round made the entry count only an open convoy
   (finding tk-xvjd1u7, fixed at 275cbf44b), and the build keeps that.
-- **The order of the writes.** The sitting sends the subject first, so the
-  dispatch's convoy exists, then stays, then promises.
+- **The order of the writes.** The sitting sends the subject first, then signs
+  off with the stay, which files the subject's gate and then leaves the
+  conversation open.
 - **The subject waits on nothing of its own convoy.** A `blocks` edge from the
   subject onto a convoy that tracks it would hold the subject's own work and its
   close, so the sign-off writes the conversation's wait alone.
 
 What changes is when the sitting comes back: at the end of each round on the
 subject's PR, not after the merge. The sign-off takes a stay on the subject on
-either path, since the convoy removes the edge bd would refuse, and the return
-gate names the subject by its await id. A stay on the PR under
+either path, since neither its return gate, which names the subject by its
+await id, nor a convoy is an edge onto the subject. A stay on the PR under
 discussion is the same case on the review path, so there the sign-off stops
-refusing a stay on the PR whose merge the conversation holds, because the stay
-comes back before that merge. On the old path it keeps refusing that stay
-(section 10).
+refusing a stay on the PR whose merge the conversation holds once a return gate
+covers that PR, because the stay comes back before that merge. On the old path
+it keeps refusing that stay (section 10).
 
 ## 9. Visits and fresh contexts while the work is out
 
@@ -614,11 +666,12 @@ Gas City rig as a bug in its own right, and this effort waits on none of them
 The end of a round is read only by the landing order, which a rig's PRs reach
 once its cutover sets `pending_through_merge` and moves its open beads onto the
 record (`refinery-land.sh`; gc-toolkit cut over with tk-1tfzr71.78). On the old path no
-order reads it, so the sitting promises no return there, and the promise's verb
-refuses one (section 2). Until a rig cuts over:
+order reads it, so a stay promises no return there: the sign-off files no gate
+on such a rig, and the promise's verb refuses one (section 2). Until a rig cuts
+over:
 
 - **A rework stay** waits on its rework child, through a convoy as every stay
-  does, so it comes back when the rework reaches the PR's branch, before the
+  that promises nothing does, so it comes back when the rework reaches the PR's branch, before the
   approval. The conversation's hold on the anchor, which engage writes, holds the
   merge until the operator settles the return.
 - **A stay on new work or on the conversation's own subject** would come back
@@ -628,7 +681,7 @@ refuses one (section 2). Until a rig cuts over:
 - **A stay on the PR whose merge the conversation holds** stays refused, because
   it would wait for that merge while the conversation holds it, and nothing
   would bring the sitting back before it.
-- **How the sitting tells the path.** A PR's bead whose merge result is on the
+- **How the sign-off and the sitting tell the path.** A PR's bead whose merge result is on the
   record is on the new path (`pr.OnRecord`, which `gctk pr status` reads). For
   work with no PR yet, the rig's switch tells it, read as `refinery-lib.sh` reads
   the rig's formula vars (`gc formula show mol-refinery-patrol --rig <rig> --json`,
@@ -654,14 +707,17 @@ over:
   the stay would come back, by the table, and that it will come back to discuss
   the result whatever it finds. On an entry that reads `returned`, the prompt
   runs the return (`converse-stay`).
-- **`converse-stay`**: the promise and its command once the stay lands, the
-  return's steps with the hold first, a return cut short, a return never
-  promised, a return handed to a fresh context, several works, which come back
+- **`converse-stay`**: the stay and its promise in one call, the sitting's own
+  `gctk gate return` for a PR it sent back through the `prs` skill, a stay
+  that stopped short and its re-run, the return's steps with the record of
+  what the operator owes first, a return cut short, a return handed to a fresh
+  context, several works, which come back
   together once each is ready or has closed, settling, staying available,
   visits, among them one that discusses a piece of work ready before the rest,
   and ending.
-- **`converse-settle`**: send, then stay, then promise, and a stay on the
-  conversation's own subject (section 8).
+- **`converse-settle`**: send, then the stay, which files the gate before it
+  leaves the conversation open, and a stay on the conversation's own subject
+  (section 8).
 - **`converse-hold`**: the hold of a returned exchange, recorded in one write
   guarded on the claim the entry took (section 5), and the lift of the PR's
   merge hold only on the operator's settlement.
@@ -725,7 +781,8 @@ for whether this design still needs it:
   unit 3 that stood for it: dropped. The ruling of 2026-11-18 answered that gate
   and the one on unit 1.
 - **Kept**: the hold put on at the end of a round before the sitting wakes; the
-  convoy wait from PR #1515; the narrowing to the stays' own conversations; the
+  convoy wait from PR #1515, for a stay that promises nothing on its work; the
+  narrowing to the stays' own conversations; the
   merge-queue boundary; and the old path's rows.
 
 ## 13. The surface this adds
@@ -737,24 +794,32 @@ Each item's search is in [gas-city-search.md](gas-city-search.md).
   metadata key, because its await type, its await id and its edges are bd's own
   fields. As a pack noun it needs a warrant (`docs/foundation.md`,
   "Boundaries"), which unit 1 adds to `docs/warrants.md` with the gate. The
-  warrant stands in for a gate that bd or Gas City closes when a review round
-  leaves a PR ready for the operator's approval, a round with no push included.
-  Its evidence is the search's section on the promise, and it retires when bd
-  or Gas City ships such a gate.
+  warrant names Gas City's session wait as the primitive the gate stands in
+  for: Gas City calls its durable waits the closest platform concept to a gate,
+  and its session wait cannot hold the promise today. Its evidence is the
+  search's section on the promise. It retires when Gas City's session wait
+  keeps a promise through an attach and a reset and wakes a sitting that slept
+  at the end of its idle window, or when bd or Gas City ships a gate that
+  closes when a review round leaves a PR ready for the operator's approval, a
+  round with no push included.
 - **`gctk gate return <conversation> --on <bead>...`**, a verb of the agent
-  class under a new noun, `gate`, which owns the pack's gate kinds: the
-  sitting's promise (section 1).
+  class under a new noun, `gate`, which owns the pack's gate kinds: the stay's
+  promise, which the sign-off runs after its send, and the sitting's own for a
+  PR it sent back through the `prs` skill (section 1).
 - **The landing order** (`gctk pr reconcile`) gains one step in its pass: the
   hold and the close of the return gates at the end of a round, before its ready
   transition or the evaluator's read, and the close of a return gate whose work
   has closed or that no open or in-progress conversation waits on. It removes no
   edge, and its ready transition is unchanged.
 - **The boards** read who closes a gate from the definition (section 2).
-- **`converse-signoff.sh --stay`**, an existing mode, waits through a convoy that
-  tracks each bead it waits on, the newest open one or one it makes with
-  `gc convoy create`. It takes a stay on the conversation's own subject, writing
-  the subject no wait onto its own convoy, and on the review path a stay on the
-  PR whose merge the conversation holds. It gains no flag.
+- **`converse-signoff.sh --stay`**, an existing mode, files the return gate on
+  each bead it promises on through `gctk gate return`, after its send and
+  before it leaves the conversation open, and waits through a convoy that
+  tracks each other bead it waits on, the newest open one or one it makes with
+  `gc convoy create`. It takes a stay on the conversation's own subject,
+  writing the subject no wait onto its own convoy, and on the review path a
+  stay on the PR whose merge the conversation holds once a return gate covers
+  that PR. It refuses that stay when none does. It gains no flag.
 - **`converse-entry.sh`** reads a stay's wait through its convoy or its return
   gate. It gains no entry and no value.
 
@@ -773,13 +838,14 @@ is added.
 
 Each of units 1 to 3 lands on `integration/tk-vrg93t0`, keeps the suite green
 and leaves the city working. On a rig still on the old path, nothing they add
-runs but the convoy wait, because the promise's verb refuses such a rig.
+runs but the convoy wait, because the sign-off files no gate there and the
+promise's verb refuses such a rig.
 
 | Unit | What it does | Waits on | Releases |
 |---|---|---|---|
-| 1. The return gate (gctk) | The package `services/gctk/gate`: the return gate's await type and title, the rule for who closes a gate of each await type and the human-gate rule, the gate's filing, and its close with its reason. The verb `gctk gate return` with its refusals, which files each gate with one `bd gate create` whose await id is the bead and whose blocked bead is the conversation. In the landing order's pass, at the end of a round on a draft or on a PR that is ready already: for each open return gate whose await id is the bead, the bead's `blocks` edge onto the conversation that waits on the gate when it is open or in progress, then the gate's close, before the ready transition or the evaluator's read; and in every pass, the close of an open return gate whose bead has closed, or that no open or in-progress conversation waits on once it is five minutes old, with no edge removed. The main board's `heldByPerson`, the rig board's `gateHold` and `parked`, `prstatus.IsHumanGate` and the pr domain's `isHumanGate` read the definition. `docs/gctk-architecture.md` gains the verb's row, the `gate` noun and the order's new step, and `docs/warrants.md` the return gate's warrant (section 13). Tests: the gate the verb files on each bead and the one it finds, the conversation's waits after the verb, onto each of its open return gates and onto no convoy or closed return gate, with a park on the conversation left in place, and each refusal; the hold and the close for new work, for a rework and for the subject; a send-back the run answers with no push closes the gate at the round's end on a ready PR, and an approval from an earlier round does not merge it; a gate filed after its round ended closes on the next pass, with the hold already there left alone; a round with no open return gate writes nothing; a conversation that has closed gets no hold; an edge already there is left alone; a failed read or write leaves the gate open and is retried; a PR in its base's merge queue is left to GitHub; a gate whose bead or whose conversation has closed closes; a gate that nothing waits on, as a create that stopped before its edge leaves, closes once it is five minutes old and not before; with several works, a gate that closes leaves the conversation waiting on the others, each bead whose round ends gets its hold and its gate closes in that pass, and the conversation reads ready only once its last gate has closed; the verb promises nothing again on a bead whose gate is still open; the boards read a conversation that waits on its return gate as queued, and a park as a person's. | this rewrite (tk-1gsaloy) | unit 2, once tk-ps47p6p brings the branch current |
-| 2. The stay waits through a convoy, and the entry reads the gate (scripts) | `converse-signoff.sh --stay`: the wait onto the newest open convoy that tracks each bead it waits on, or onto one it makes with `gc convoy create`; a stay on the subject, with the subject left waiting on nothing of its own convoy, from PR #1515's head with its open-convoy fix; on the review path, a stay on the PR whose merge the conversation holds; on the old path, that stay refused as today. `converse-entry.sh`: `waiting` and `returned` read through the convoy, and through the return gates once the sitting has promised them. The stay's line agrees with the record when each bead it names has the conversation's edge onto a convoy that tracks it, or is the await id of a return gate the conversation waits on, or has closed. Tests, one per row of section 3 and of section 10: what the sign-off writes, a convoy made when none is open, a closed convoy that is no wait, the entry before and after the convoy closes and before and after the gate closes, and the old path's refusal. | unit 1 and tk-ps47p6p | unit 3, once tk-imuvm2j brings the branch current |
-| 3. The words | The converse prompt's "End or stay?" and its handling of a return; `converse-stay`, `converse-settle` and `converse-hold` (section 11); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; the skill-needs pins of the table and of each example's call through the real parsers, among them the promise's call, a stay on several works that comes back once each is ready or has closed, a stay again after a visit that names only the work still out, and an entry that reads `waiting` with no open return gate after a stay that promised one; the return's hold write, guarded on the claim the entry took, which records the `holding:` line on an ordinary return, and the entry after it, which a restart reads as `interrupted` with the hold standing; the stay's Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path. | unit 2 and tk-imuvm2j | the landing |
+| 1. The return gate (gctk) | The package `services/gctk/gate`: the return gate's await type and title, the rule for who closes a gate of each await type and the human-gate rule, the gate's filing, and its close with its reason. The verb `gctk gate return` with its refusals, which files each gate with one `bd gate create` whose await id is the bead and whose blocked bead is the conversation. In the landing order's pass, at the end of a round on a draft or on a PR that is ready already: for each open return gate whose await id is the bead, the bead's `blocks` edge onto the conversation that waits on the gate when it is open or in progress, then the gate's close, before the ready transition or the evaluator's read; and in every pass, the close of an open return gate whose bead has closed, or that no open or in-progress conversation waits on once it is five minutes old, with no edge removed. The main board's `heldByPerson`, the rig board's `gateHold` and `parked`, `prstatus.IsHumanGate` and the pr domain's `isHumanGate` read the definition. `docs/gctk-architecture.md` gains the verb's row, the `gate` noun and the order's new step, and `docs/warrants.md` the return gate's warrant (section 13). Tests: the gate the verb files on each bead and the one it finds, the conversation's waits after the verb, onto each of its open return gates, onto no closed return gate and onto no convoy that tracks a bead it promises on, with a park and its other convoys left in place, and each refusal; the hold and the close for new work, for a rework and for the subject; a send-back the run answers with no push closes the gate at the round's end on a ready PR, and an approval from an earlier round does not merge it; a gate filed after its round ended closes on the next pass, with the hold already there left alone; a round with no open return gate writes nothing; a conversation that has closed gets no hold; an edge already there is left alone; a failed read or write leaves the gate open and is retried; a PR in its base's merge queue is left to GitHub; a gate whose bead or whose conversation has closed closes; a gate that nothing waits on, as a create that stopped before its edge leaves, closes once it is five minutes old and not before; with several works, a gate that closes leaves the conversation waiting on the others, each bead whose round ends gets its hold and its gate closes in that pass, and the conversation reads ready only once its last gate has closed; the verb promises nothing again on a bead whose gate is still open; the boards read a conversation that waits on its return gate as queued, and a park as a person's. | this rewrite (tk-1gsaloy) | unit 2, once tk-ps47p6p brings the branch current |
+| 2. The stay carries its promise, and the entry reads it (scripts) | `converse-signoff.sh --stay`: after the send its ruling makes and before it leaves the conversation open, the return gate on each bead it promises on, through `gctk gate return`: the PR its `--rework` sends back, each bead it waits on that has no PR on the record, and each bead whose return gate is still open, which the verb finds; the wait onto the newest open convoy that tracks each other bead it waits on, or onto one it makes with `gc convoy create`; a stay on the subject, with the subject left waiting on nothing of its own convoy, from PR #1515's head with its open-convoy fix; on the review path, a stay on the PR whose merge the conversation holds when a return gate covers that PR, and that stay refused when none does; on the old path, that stay refused as today. `converse-entry.sh`: `waiting` and `returned` read through the return gates and the convoys. The stay's line agrees with the record when each bead it names has the conversation's edge onto a convoy that tracks it, or is the await id of a return gate the conversation waits on, or has closed. Tests, one per row of section 3 and of section 10: what the sign-off writes, the gates it files after the send and the beads it files them on, a convoy made when none is open, a closed convoy that is no wait, the refusal of a stay on a held PR that no open gate covers, what a stop at each point of the call leaves and the re-run that finishes it, the entry before and after the convoy closes and before and after the gate closes, and the old path's refusal. | unit 1 and tk-ps47p6p | unit 3, once tk-imuvm2j brings the branch current |
+| 3. The words | The converse prompt's "End or stay?" and its handling of a return; `converse-stay`, `converse-settle` and `converse-hold` (section 11); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; the skill-needs pins of the table and of each example's call through the real parsers, among them the stay's call, the sitting's `gctk gate return` for a PR sent back through the `prs` skill, a stay on several works that comes back once each is ready or has closed, and a stay again after a visit that names only the work still out; the return's hold write, guarded on the claim the entry took, which records the `holding:` line on an ordinary return, and the entry after it, which a restart reads as `interrupted` with the hold standing; the stay's Debt entry in `docs/architecture.md`, narrowed to the rigs still on the old review path. | unit 2 and tk-imuvm2j | the landing |
 
 The initiative's "Done when" asks for a test of each row of the table. Units 1
 and 2 hold the rows in their suites, and unit 3 pins them in the words.
@@ -839,6 +905,16 @@ Gas City, at upstream main 17d7d77ce2:
   wait registered before a fresh restart is cancelled as `continuation-stale`
   (`WaitInfo.ContinuationStale` in `internal/session/waits.go`;
   `cmd/gc/cmd_wait.go`).
+- `gt gate` maps to `gc wait` and to formula gates, and "Durable waits are the
+  closest platform concept" (`docs/reference/gastown-command-map.md`).
+- A formula's `[steps.gate]` stamps its declared type verbatim on the gate bead
+  as `gc.gate_type` metadata, "the parser never validates them", and "No
+  bundled watcher resolves any gate type"
+  (`docs/reference/specs/formula-spec-v2.md`). Gas City's stores "have no
+  gate-condition column" (`GateTypeMetadataKey` in `internal/beadmeta/keys.go`).
+- The gate kind Gas City defines for itself, the cross-store gate, is marked by
+  the label `gc:cross-store-gate` and `gc.cross_store_gate_*` metadata, and its
+  controller releases it (`internal/dispatch/cross_store_gate.go`).
 - The core reaper closes drained sessions older than a day
   (`gc session prune --state drained --before "$SESSION_STATE_PRUNE_AGE"` in
   `internal/bootstrap/packs/core/assets/scripts/reaper.sh`, 24h by default).
@@ -859,8 +935,10 @@ bd, at beads v1.3.4:
   server it creates the gate, then adds the edge, then commits, and only on a
   proxied server does it write both in one transaction
   (`runGateCreateProxiedServer` in `cmd/bd/gate_proxied_server.go`). The city's
-  stores run on a Dolt server (`dolt_mode` `server`). Its help documents the
-  types `human`, `timer`, `gh:run` and `gh:pr`.
+  stores run on a Dolt server (`dolt_mode` `server`).
+- `bd gate --help` documents the types `human`, `timer`, `gh:run`, `gh:pr` and
+  `bead`, and says gates "must be closed (manually or via watchers) for the
+  blocked step to proceed". It gives no guidance for a type of one's own.
 - `bd gate list <bead>` lists the gates that block that bead, and `bd gate list`
   every open gate in the store, each with its await type and await id. `--all`
   adds the closed ones.
