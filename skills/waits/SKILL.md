@@ -213,10 +213,13 @@ limits arming too (the work skill).
 - **A wait a person owed, when they rule the work will not go on:**
   `"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>"`,
   with the gate's `await_id` as the key. It removes the arm, ends the run beneath
-  the bead, answers the gate with the ruling and closes the bead. Never answer
-  the gate first and close afterwards: an armed bead is sent as soon as its gate
-  clears, and bd refuses to close a bead an open gate blocks. A gate that also
-  holds another open bead takes no answer here, so pass
+  the bead, answers the gate with the ruling and closes the bead. A gate
+  assigned to the person who owes its action (above) needs nothing from you
+  first: the stand-down takes it back from them, because the ruling answers
+  what it asked. Never answer the gate first and close afterwards: an armed
+  bead is sent as soon as its gate clears, and bd refuses to close a bead an
+  open gate blocks. A gate that also holds another open bead takes no answer
+  here, so pass
   `--successor <the bead that records the ruling>`: this bead leaves the gate, and
   the gate goes on asking about the other one. Never remove that edge yourself
   first, because an armed bead off its gate is sent too. It refuses, writing
