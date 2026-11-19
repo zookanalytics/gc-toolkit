@@ -556,10 +556,11 @@ the difference between a bead someone can dispose of and one that just sits:
 
 **3. Compose the PR summary.** Load the skill
 `{{binding_prefix}}commit-conventions` and write the summary to the standard it
-gives, in a file outside the worktree, which the hand-off below reads. Fix each
-mention of another rig this lists. An empty or absent file writes no summary and
-leaves one already on the anchor standing, so leave the file empty only when that
-one meets the standard.
+gives, in a file outside the worktree and outside your home, such as the one
+`mktemp "${TMPDIR:-/tmp}/summary.XXXXXX"` prints, which the hand-off below reads.
+Fix each mention of another rig this lists. An empty or absent file writes no
+summary and leaves one already on the anchor standing, so leave the file empty
+only when that one meets the standard.
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-mentions.sh" --file "<the summary file>"
 ```

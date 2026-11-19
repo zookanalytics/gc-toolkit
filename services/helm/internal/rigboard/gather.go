@@ -122,6 +122,10 @@ type gathered struct {
 	noFacts map[string]bool
 	// order is queue.Order's answer for every open piece of work (openWork).
 	order queue.Ordered
+	// handedBack is every bead that records a hand-back, closed or live, read
+	// only while an open decision is a row, since only a decision's Details
+	// shows one.
+	handedBack []bead
 }
 
 // Read reads one rig's store once, through a gctk listing, and builds its
@@ -217,6 +221,12 @@ func gather(ls *listing.Listing, rig string) (*gathered, error) {
 
 	if g.order, err = queue.Order(openWork(g.open), ls); err != nil {
 		return nil, fmt.Errorf("place the work of %s: %w", rig, err)
+	}
+
+	if slices.ContainsFunc(g.open, func(b bead) bool { return ownRow(b) && ownKind(b) == KindDecision }) {
+		if g.handedBack, err = ls.HandedBack(); err != nil {
+			return nil, fmt.Errorf("read the hand-backs of %s: %w", rig, err)
+		}
 	}
 	return g, nil
 }

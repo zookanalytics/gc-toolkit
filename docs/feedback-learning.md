@@ -9,9 +9,10 @@ The learning system's purpose is **ceiling-raising**: capturing what the
 operator cares about and responds to, so agents present better options
 and escalations over time. It works through one path. Feedback is
 recorded as observation beads; a distiller judges what the observations
-add up to; every resulting behavior change lands as an operator-reviewed
-PR against this pack. Nothing changes agent behavior until that PR
-merges.
+add up to; every resulting change to the pack lands as an operator-reviewed
+PR against this pack, a fix in code another rig owns is filed as that rig's
+work, and one in a project outside the city is recorded as an upstream finding
+for the operator. Nothing changes agent behavior until such a change merges.
 
 Hardened detectors (`tools/lint-learned.d/`) and doctor checks are **not
 the learning system**. They are ordinary pack hygiene — a well-architected
@@ -148,22 +149,33 @@ them onto pattern beads, and decides which clusters have earned a rule.
 A pattern bead (`task_kind=feedback-pattern`) is backlog work the distiller
 triages, the way a bug is, and nothing routes or assigns it. Every run leaves
 each pattern in one of three states: closed once resolved (its rule adopted,
-every follow-up it spawned closed, or dismissed as not a pattern), waiting on
-its follow-up through a `blocks` edge, or deferred with a date while it gathers
-evidence. A deferred pattern comes back to the distiller when its date passes,
-and a closed one reopens when its feedback recurs. `gc bd ready` lists a
-pattern only while it needs a decision, which the distiller makes on its next
-run.
+every follow-up it spawned closed, its fix recorded as an upstream finding, or
+dismissed as not a pattern), waiting on its follow-up through a `blocks` edge,
+or deferred with a date while it gathers evidence. A deferred pattern comes
+back to the distiller when its date passes, and a closed one reopens when its
+feedback recurs. `gc bd ready` lists a pattern only while it needs a decision,
+which the distiller makes on its next run.
 Each surviving proposal becomes one `prompt-update` bead carrying the
 exact rule text, the evidence list, and the reasoning. A proposal is new
 work, so the distiller files it held with Gas City's `hold:mayor` label and
 routed to no pool, and it waits for the operator's placement sitting
 ([steering.md](steering.md)). Once the sitting places it under an epic or
 routes it on its own, a polecat builds it and the refinery opens the PR;
-**operator review of that PR is the gate**. An engineering bead from
-Gate 2 below waits for placement the same way. The distiller records and
-proposes — it never edits a prompt, fragment, or skill, and neither does
-any capturing agent.
+**operator review of that PR is the gate**.
+
+A lesson one moment needs, such as the work of one formula step, is not a
+rule for every turn. The distiller makes it a fix in the code that moment
+loads, such as a skill, a formula step, a script or a review's method, and
+files an engineering bead that states the failure, the moment, the file that
+owns the rule and what done looks like, leaving the words to whoever builds
+it. When a file already owns the rule, the fix makes that file reach the
+moment instead of copying the rule. An engineering bead, including one from
+Gate 2 below, waits for placement the same way. A fix in code another rig
+owns is filed as that rig's work, and one in a project outside the city is
+recorded as an upstream finding for the operator, which no pattern waits on.
+The rubric's Fixes in code section says how the distiller chooses where a fix
+goes. The distiller records and proposes — it never edits a prompt, fragment,
+skill or other code, and neither does any capturing agent.
 
 ### Three gates on promotion into a paid carrier
 
@@ -194,9 +206,10 @@ pays for. Three gates — defined in full in the `learning-distill` rubric,
   verification gap, a race, a missing mechanical check) does not become a
   prompt bullet — a bullet an agent can forget fails silently, since the
   agent who forgets the behavior is the one who skips the bullet. It routes
-  instead to an **engineering work bead** (the promotion-time twin of the
-  retirement pass's *hardenable?* question). Only a concrete behavior keyed
-  to a concrete trigger promotes as prose.
+  instead to an **engineering work bead** for a mechanism at the moment the
+  agent fails (the promotion-time twin of the retirement pass's
+  *hardenable?* question). Only a concrete behavior keyed to a concrete
+  trigger promotes as prose.
 - **Lever fit (Gate 3).** A candidate that clears Gate 2 is a concrete
   behavior keyed to a trigger, but that does not yet make a static entry the
   right *lever* for it. A `convention` bullet or a `work-quality` entry
