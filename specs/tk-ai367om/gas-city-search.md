@@ -39,10 +39,10 @@ other await type (`evaluateGates` in `cmd/bd/gate.go`; `isMachineCheckableGate`
 in `cmd/bd/close.go` lists the same types). Gas City's core sweep runs
 `gate check --type=timer` and `--type=gh` in each store
 (`internal/bootstrap/packs/core/assets/scripts/gate-sweep.sh`). So the pack's
-closer is the gate's only one. The gate watches the work through bd's `tracks`
-edge, the relation a convoy uses for its members. bd's cycle check does not walk
-it (`types.IsSchedulingEdge`), and Gas City's convoy rules read it only on a
-bead of type `convoy` (`convoyStillAutocloses` in `cmd/gc/cmd_convoy.go`).
+closer is the gate's only one. The gate names the work by its await id, which
+bd's help gives as the "Condition identifier (run ID, PR number, etc.)" a gate
+waits on, and the conversation is the bead its `--blocks` names. An await id is
+no edge, so bd's cycle check never meets it (`types.IsSchedulingEdge`).
 
 **What else was searched.**
 
@@ -99,9 +99,17 @@ conversation's `blocks` edges onto its closed return gates (`bd dep remove`),
 while the stay's convoys keep the conversation waiting, because the landing
 order reads a conversation that waits on a closed return gate as one whose
 return is due. Then, for each bead it names that has no open return gate of the
-conversation's, it runs `bd gate create` with the type `stay-return`, the
-conversation as both the bead it blocks and its await id, and writes a `tracks`
-edge from the gate onto that bead (`bd dep add`). Then it writes the
+conversation's, it runs one
+`bd gate create --type stay-return --await-id <the bead> --blocks <the conversation>`.
+It finds the conversation's open gate on a bead among the gates that block the
+conversation, which `bd gate list <conversation>` lists with each one's await
+type and await id. On a proxied server bd writes the gate and the
+conversation's edge onto it in one transaction (`runGateCreateProxiedServer` in
+`cmd/bd/gate_proxied_server.go`). The city's stores run on a Dolt server, where
+`gateCreateCmd` creates the gate, then adds the edge, then commits, so a create
+that stops between the two leaves a gate that nothing waits on. The verb's
+re-run finds no gate the conversation waits on for that bead and files one,
+and the landing order closes the stray (closing it, below). Then it writes the
 conversation's `blocks` edge onto each of its other open return gates
 (`bd dep add`). Last it removes the conversation's `blocks` edges onto a convoy
 (`bd dep remove`), which leaves a park or any other wait on it in place. The
@@ -114,8 +122,13 @@ landing order does not read.
 
 **What else was searched.**
 
-- **`bd gate create` alone.** It files the gate and the conversation's edge onto
-  it, but not the watch, and it leaves the stay's edges onto its convoys. bd
+- **A `tracks` edge from the gate onto the work**, as a convoy tracks its
+  members, with the conversation as the gate's await id. It is a write of its
+  own after the create, so a stop between them leaves a gate that already holds
+  the conversation and watches nothing, which no close reaches while the
+  conversation is open. The await id is the field bd gives a gate for what it
+  waits on, and the conversation is the bead the gate blocks.
+- **`bd gate create` alone.** It leaves the stay's edges onto its convoys. bd
   reads a bead ready only once every bead it waits on through a `blocks` edge
   has closed, so the conversation would come back only once its work had closed.
 - **The sitting typing the writes itself.** That is several writes in one order
@@ -135,8 +148,12 @@ rig-scoped exec order `orders/pr-reconcile.toml` on a five-minute cooldown)
 already decides the end of a round: `readyBar`'s conditions other than the draft
 flag (`services/gctk/pr/draft.go`, `decide` in `services/gctk/pr/landing.go`).
 At that moment it writes the hold and closes the gate, a native close. In the
-same pass it closes a return gate whose bead has closed, or whose conversation
-has. Once a conversation waits on a return gate that has closed, the pass
+same pass it closes a return gate whose bead has closed, or that no open or
+in-progress conversation waits on, once it is five minutes old, the order's
+cooldown, so a gate whose edge bd is still writing is left to a later pass. It
+reads the open gates with `bd gate list`: a gate's bead is its await id, and its
+conversation is its dependent through a `blocks` edge
+(`bd dep list <gate> --direction=up --type blocks`). Once a conversation waits on a return gate that has closed, the pass
 removes the conversation's `blocks` edges onto its open return gates
 (`bd dep remove`), so bd reads the conversation as ready at the first gate to
 close, and the other gates keep watching their beads. The review-lanes design
@@ -159,9 +176,9 @@ placed the wake at this point of the pass, in its section 9
   The core order `cascade-nudge-on-blocker-close` runs on `bead.closed` and
   nudges the assignees of the closed bead's dependents
   (`internal/bootstrap/packs/core/orders/cascade-nudge-on-blocker-close.toml`).
-  The gate watches its work through `tracks`, so it is no dependent of the work,
-  and a nudge closes nothing. The landing order's pass reads the gate's watched
-  beads instead.
+  The gate names its work by its await id, so it is no dependent of the work,
+  and a nudge closes nothing. The landing order's pass reads each gate's bead
+  instead.
 - **bd's `waits-for` edge with the `any-children` gate**, a wait that clears at
   the first of several to close. It waits on the `parent-child` children of a
   spawner bead, and it clears once any child has closed, for as long as that
@@ -312,6 +329,9 @@ leaves the return to a sitting with no thread.
   yet posted what it found.
 - **A watched bead's close reaches the gate on the landing order's next pass**,
   up to its cooldown later than a convoy's close would wake the sitting.
+- **A gate create that stops before its edge**, on the city's Dolt server,
+  leaves an open gate that nothing waits on until the landing order's first
+  pass after it is five minutes old.
 - **A return never promised.** A restart between the stay and the promise leaves
   the conversation waiting on its work's close, and the sitting promises the
   return when its entry reads `waiting` with no open return gate.
