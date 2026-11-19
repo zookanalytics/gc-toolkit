@@ -328,6 +328,14 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
     reads only its two fixed hold values, whose names are not roles.
   - **Mechanik**, the operator's standing conversation, owns how the city works
     and every edit to the town repo.
+  - **The postmaster**, one for the city, works through the operator's
+    mailbox, Gas City's `human`, with them: a session of the city the operator
+    opens for a sitting as they open a po
+    ([human-engagement.md](human-engagement.md#a-postmaster-sitting)). It owns
+    each archive it makes there, the replies and nudges that settle a message
+    with the agent that owns its problem, and the fixes it files held for the
+    po. No escalation, default or fallback names it, so the mail still goes to
+    `human`, and it plans, places and starts no new work.
   - **A converse sitting** holds one bead's conversation, below. The patrols,
     the pools and the refinery keep what they own.
 - **A subject is the bead a human gate or a conversation is about.** Its notes
@@ -402,14 +410,14 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   and re-ranks the work that follows it, workflows already poured included
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
-  per render from the ledger, from Gas City's `human` mailbox, and from Gas
-  City's event log, which holds doctor's runs and each monitor order's last
-  good run. `gc-helm.sh` carries the write verbs open, engage, react, takeaway,
-  dismiss, accept, park, priority and place, and the read-only verb resolve.
-  The board's one write that `gc-helm.sh` does not carry is archiving a
-  mailbox message, which Gas City's mail performs. Accept clears a first
-  reaction's recommendation gate and nothing else, under the bead's acceptance
-  lock, and is offered only while no other human gate blocks the bead. The po's
+  per render from the ledger and from Gas City's event log, which holds
+  doctor's runs and each monitor order's last good run. Its city page counts
+  the messages waiting in Gas City's `human` mailbox and lists none, since the
+  postmaster works through them with the operator. `gc-helm.sh` carries the
+  write verbs open, engage, react, takeaway, dismiss, accept, park, priority
+  and place, and the read-only verb resolve. Accept clears a first reaction's
+  recommendation gate and nothing else, under the bead's acceptance lock, and
+  is offered only while no other human gate blocks the bead. The po's
   backlog refinement works the queue, every bead `hold:mayor` holds in any
   spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
   works without the board: it spends no state, so it can never be wrong for
@@ -540,9 +548,6 @@ why a reader must know it, and the work that retires it.
   session's work to the pool beside Gas City's release, and the deacon runs
   `gc doctor` and files each failure as a patrol finding for a first reaction.
   The second landing of tk-1tfzr71.19 retires both.
-- **The board lists no mailbox yet.** It neither reads Gas City's `human`
-  mailbox nor archives a message in it, so no message there reaches the
-  operator on the board. The inbox bead that tk-1tfzr71.159 files retires it.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
