@@ -86,10 +86,11 @@
 #     --base-url's port or the one whose app demo_engine_copy served, and a run
 #     that captures from that copy's checkout keeps the sandbox, while the
 #     copy's report does not say that its serve command runs inside it. A copy
-#     keeps the reach it started with, so such a copy started while its rig's
-#     app_reads_city read "false", or a gctk from before that report started
-#     it, and it can reach the live city. The refusal stops no copy: one the
-#     capture started is demo_engine_copy_stop's to end.
+#     keeps the reach it started with, so such a copy either started while its
+#     rig's app_reads_city read "false", and can reach the live city, or a gctk
+#     from before that report started it, and nothing shows how it runs. The
+#     refusal stops no copy: one the capture started is demo_engine_copy_stop's
+#     to end.
 # A run with no sandbox is refused in each of these cases but the first and the
 # last. A host without sandbox-exec runs no capture at all.
 #
@@ -794,10 +795,10 @@ _demo_engine_plain_why() {
 # captures from the checkout keeps the sandbox, and the copy's report, whose
 # sandboxed it is given, does not say the copy's serve command runs inside it.
 # A copy runs as the setting read when it started, until it stops, so such a
-# copy started while its rig's app_reads_city read "false", or a gctk from
-# before that report started it, and it can reach the live city. It stops no
-# copy: one the run found may serve another caller, and one the capture started
-# is demo_engine_copy_stop's to end.
+# copy either started while its rig's app_reads_city read "false", and can reach
+# the live city, or a gctk from before that report started it, and nothing shows
+# how it runs. It stops no copy: one the run found may serve another caller, and
+# one the capture started is demo_engine_copy_stop's to end.
 _demo_engine_copy_refused() {
   local how where checkout
   [ "$3" != true ] || return 1
