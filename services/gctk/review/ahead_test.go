@@ -480,7 +480,8 @@ func TestAFindingSentAhead(t *testing.T) {
 
 // An iteration whose finding is sent ahead passes while the ask it names waits
 // on the fix, which spends no attempt, and one whose ruling names no ask does
-// not pass.
+// not pass, unless the run is a shadow, which files no ask: the round the
+// output check takes from it passes.
 func TestAnIterationWhoseFindingIsSentAheadPasses(t *testing.T) {
 	w := newWorld(t)
 	w.held()
@@ -495,6 +496,17 @@ func TestAnIterationWhoseFindingIsSentAheadPasses(t *testing.T) {
 	w.output(lane(1, "arch", h1, review.VerdictRequestChanges, "A1"))
 	w.output(repair(1, h1, "", aheadRuling("")))
 	mustFail(t, w.passed(1), "was sent ahead and names no ask the PR waits on")
+
+	w = newWorld(t)
+	w.shadowRun()
+	w.output(triage(1, h1, "arch"))
+	w.output(lane(1, "arch", h1, review.VerdictRequestChanges, "A1"))
+	rp := repair(1, h1, "", aheadRuling(""))
+	if err := w.check(w.step(1, "rule-and-repair"), rp, nil); err != nil {
+		t.Fatalf("a shadow run's finding sent ahead with no ask: %v", err)
+	}
+	w.output(rp)
+	mustPass(t, w.passed(1))
 }
 
 // The head's comment answers a finding sent ahead with the ask its PR waits on,
