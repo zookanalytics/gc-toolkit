@@ -174,11 +174,13 @@ func (e *Refusal) Error() string { return "nothing filed on " + e.Bead + ": " + 
 // closed, which it returns instead, so a filer that runs again after its ask
 // closed files nothing. The ask waits on each bead req.WaitsOn names by its own
 // edge, written in its create, so no run can take it before those close. It
-// refuses a bead that owns no PR on the record, a check req sends back that the
-// index does not declare, the index at the head the refinery validated, which
-// index reads, and a bead to wait on that the store does not hold. A read that
-// fails returns its error with nothing filed, and a create that fails may still
-// have filed the ask, which the next call finds.
+// refuses a bead that owns no PR on the record, and a check req sends back that
+// the index does not declare, the index at the head the refinery validated,
+// which index reads. The ledger files no ask that would wait on a bead the
+// store does not hold, and FileAsk returns its error, which is
+// ledger.ErrNotHeld. A read that fails returns its error with nothing filed,
+// and a create that fails may still have filed the ask, which the next call
+// finds.
 func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, error)) (id string, filed bool, err error) {
 	owner, rec, branch, err := askable(l, req.Bead)
 	if err != nil {
@@ -187,17 +189,6 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 	checks, err := askChecks(req.Bead, rec.Head, req.Checks, index)
 	if err != nil {
 		return "", false, err
-	}
-	if len(req.WaitsOn) > 0 {
-		held, err := l.Find(ledger.ByID(req.WaitsOn...).WithClosed())
-		if err != nil {
-			return "", false, err
-		}
-		for _, w := range req.WaitsOn {
-			if !slices.ContainsFunc(held, func(r *ledger.Record) bool { return r.ID == w }) {
-				return "", false, &Refusal{Bead: req.Bead, Why: fmt.Sprintf("the store holds no bead %s for the ask to wait on", w)}
-			}
-		}
 	}
 	return fileAsk(l, owner, branch, req.Reason, req.Source, checks, req.WaitsOn)
 }

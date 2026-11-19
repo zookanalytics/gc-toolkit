@@ -159,6 +159,35 @@ func TestAFilingThatWaitsOnABeadIsHeldFromItsCreate(t *testing.T) {
 	}
 }
 
+// A filing waits only on a bead the store holds, open or closed, which a read
+// finds before the create: one that would wait on a bead the store does not
+// hold files nothing and fails with an error that is ErrNotHeld, and one whose
+// read fails files nothing and returns the read's error.
+func TestAFilingWaitsOnlyOnABeadTheStoreHolds(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "first", Status: "closed"})
+	l := New(s)
+	waiting := func(ids ...string) *Filing {
+		f := l.File("ask", "task")
+		f.WaitsOn(ids...)
+		return f
+	}
+	if _, err := l.Create(waiting("first", "zz-elsewhere")); !errors.Is(err, ErrNotHeld) || !strings.Contains(err.Error(), "zz-elsewhere") {
+		t.Fatalf("a filing that would wait on a bead the store does not hold = %v, want ErrNotHeld naming it", err)
+	}
+	s.FindErr = errors.New("dolt timeout")
+	if _, err := l.Create(waiting("first")); err == nil || errors.Is(err, ErrNotHeld) {
+		t.Fatalf("a filing whose read of its waits failed = %v, want the read's error", err)
+	}
+	if len(s.Creates()) != 0 {
+		t.Fatalf("a refused or unread filing reached the store: %+v", s.Creates())
+	}
+	s.FindErr = nil
+	if _, err := l.Create(waiting("first")); err != nil {
+		t.Fatalf("a filing that waits on a closed bead the store holds = %v", err)
+	}
+}
+
 // A filing a Set refused, or one that names no title, files nothing, and a
 // create the store failed says the bead may have been filed.
 func TestAFilingThatCannotLandFilesNothing(t *testing.T) {

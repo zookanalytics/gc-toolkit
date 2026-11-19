@@ -636,13 +636,12 @@ func TestAFixAheadIsRefusedBeforeAnythingIsFiled(t *testing.T) {
 }
 
 // An ask that waits on a bead names only one the store holds, so its wait
-// holds it.
+// holds it: the ledger files no ask that would wait on any other.
 func TestAnAskWaitsOnlyOnABeadTheStoreHolds(t *testing.T) {
 	w := newWorld(t)
 	_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "after it", WaitsOn: []string{"gc-elsewhere"}}, nil)
-	var refused *review.Refusal
-	if !errors.As(err, &refused) || len(w.store.Creates()) != 0 {
-		t.Fatalf("an ask waiting on a bead the store does not hold: %v; want it refused with nothing filed", err)
+	if !errors.Is(err, ledger.ErrNotHeld) || len(w.store.Creates()) != 0 {
+		t.Fatalf("an ask waiting on a bead the store does not hold: %v; want the ledger's ErrNotHeld with nothing filed", err)
 	}
 	w.store.Put(bead{ID: "tk-first", Status: "open", IssueType: "task"})
 	id, filed, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "after it", WaitsOn: []string{"tk-first"}}, nil)

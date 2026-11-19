@@ -222,8 +222,8 @@ func (f *Filing) Blocks(ids ...string) { f.blocks = append(f.blocks, ids...) }
 
 // WaitsOn makes the new bead wait on each bead named, by its own blocks edge
 // onto that bead, written in the create itself, so it is held from the moment
-// it exists. bd writes an edge onto a bead outside the store's prefix that
-// holds nothing, so the caller names only beads the store holds.
+// it exists. Create files the bead only once a read finds each of them in the
+// store.
 func (f *Filing) WaitsOn(ids ...string) { f.waits = append(f.waits, ids...) }
 
 // From records the bead the new one was found from, by the new bead's own
@@ -273,10 +273,14 @@ func (f *Filing) args() ([]string, error) {
 }
 
 // Create files f as one create and returns the new bead's id. A filing a Set
-// refused, or one with no title or type, files nothing. A create the store
-// failed may still have filed the bead, as gcbd.Store.Create says, so its
-// error says that whether it did is unknown, and the caller finds the bead
-// before it files again.
+// refused, or one with no title or type, files nothing. bd writes an edge onto
+// an id outside its store's prefix and reports success, and the edge holds
+// nothing, so a filing that waits on beads files only once a read finds each of
+// them in the store: when the store does not hold one, it files nothing and
+// fails with an error that is ErrNotHeld, and a read that fails returns its
+// *ReadError with nothing filed. A create the store failed may still have filed
+// the bead, as gcbd.Store.Create says, so its error says that whether it did is
+// unknown, and the caller finds the bead before it files again.
 func (l *Ledger) Create(f *Filing) (string, error) {
 	if f.err != nil {
 		return "", f.err
@@ -288,6 +292,17 @@ func (l *Ledger) Create(f *Filing) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("ledger: the filing of %q did not encode: %w", f.title, err)
 	}
+	if len(f.waits) > 0 {
+		held, err := l.Find(ByID(f.waits...).WithClosed())
+		if err != nil {
+			return "", err
+		}
+		for _, w := range f.waits {
+			if !slices.ContainsFunc(held, func(r *Record) bool { return r.ID == w }) {
+				return "", fmt.Errorf("ledger: nothing filed for %q, which would wait on %s: %w", f.title, w, ErrNotHeld)
+			}
+		}
+	}
 	id, err := l.store.Create(f.title, args...)
 	if err != nil {
 		return "", fmt.Errorf("ledger: the filing of %q may not have landed: %w", f.title, err)
@@ -295,8 +310,8 @@ func (l *Ledger) Create(f *Filing) (string, error) {
 	return id, nil
 }
 
-// ErrNotHeld is the error of an edge AddBlocker refused because the store does
-// not hold the bead it would wait on.
+// ErrNotHeld is the error of a wait edge the ledger refused because the store
+// does not hold the bead it would wait on.
 var ErrNotHeld = errors.New("the store does not hold the bead")
 
 // AddBlocker makes blocker hold the bead id, by a blocks edge from id onto it,
