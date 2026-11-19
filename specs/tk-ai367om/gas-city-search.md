@@ -94,17 +94,23 @@ bead of type `convoy` (`convoyStillAutocloses` in `cmd/gc/cmd_convoy.go`).
 
 ## Filing it: `gctk gate return`
 
-**What it composes.** Native writes in one order: `bd gate create` with the type
-`stay-return`, the conversation as both the bead it blocks and its await id,
-then a `tracks` edge from the gate onto each bead it watches (`bd dep add`), then
-the removal of the conversation's other `blocks` edges onto a convoy or a return
-gate (`bd dep remove`), which leaves a park or any other wait on it in place. The
+**What it composes.** Native writes in one order. First it removes the
+conversation's `blocks` edges onto its closed return gates (`bd dep remove`),
+while the stay's convoys keep the conversation waiting, because the landing
+order reads a conversation that waits on a closed return gate as one whose
+return is due. Then, for each bead it names that has no open return gate of the
+conversation's, it runs `bd gate create` with the type `stay-return`, the
+conversation as both the bead it blocks and its await id, and writes a `tracks`
+edge from the gate onto that bead (`bd dep add`). Then it writes the
+conversation's `blocks` edge onto each of its other open return gates
+(`bd dep add`). Last it removes the conversation's `blocks` edges onto a convoy
+(`bd dep remove`), which leaves a park or any other wait on it in place. The
 verb carries the sitting's one intent, to come back when this work is ready for
 the operator's next decision, through every step: it finds the conversation's
-open gate before it files one, writes the edges in the order that keeps the
-conversation waiting throughout, and refuses a gate nothing would close, on a
-bead in another store, on a bead that has closed, or in a store the landing
-order does not read.
+open gate on a bead before it files one, writes the edges in the order that
+keeps the conversation waiting throughout, and refuses a gate nothing would
+close, on a bead in another store, on a bead that has closed, or in a store the
+landing order does not read.
 
 **What else was searched.**
 
@@ -129,9 +135,13 @@ rig-scoped exec order `orders/pr-reconcile.toml` on a five-minute cooldown)
 already decides the end of a round: `readyBar`'s conditions other than the draft
 flag (`services/gctk/pr/draft.go`, `decide` in `services/gctk/pr/landing.go`).
 At that moment it writes the hold and closes the gate, a native close. In the
-same pass it closes a return gate whose watched bead has closed, or whose
-conversations have all closed. The review-lanes design placed the wake at this
-point of the pass, in its section 9 (`specs/tk-1tfzr71.108/design.md`).
+same pass it closes a return gate whose bead has closed, or whose conversation
+has. Once a conversation waits on a return gate that has closed, the pass
+removes the conversation's `blocks` edges onto its open return gates
+(`bd dep remove`), so bd reads the conversation as ready at the first gate to
+close, and the other gates keep watching their beads. The review-lanes design
+placed the wake at this point of the pass, in its section 9
+(`specs/tk-1tfzr71.108/design.md`).
 
 **What else was searched.**
 
@@ -152,6 +162,19 @@ point of the pass, in its section 9 (`specs/tk-1tfzr71.108/design.md`).
   The gate watches its work through `tracks`, so it is no dependent of the work,
   and a nudge closes nothing. The landing order's pass reads the gate's watched
   beads instead.
+- **bd's `waits-for` edge with the `any-children` gate**, a wait that clears at
+  the first of several to close. It waits on the `parent-child` children of a
+  spawner bead, and it clears once any child has closed, for as long as that
+  child stays closed (`waitsForGateBlockedSQL` in
+  `internal/storage/issueops/blocked_state.go`). So each promise would need a
+  spawner of its own, with its gates as the spawner's children. The pack's
+  readers of a stay read the conversation's own `blocks` edges: the PR's status
+  asks `conversation.Staying` with them (`staying` in
+  `services/gctk/prstatus/gates.go`), and `gctk bead holds`, which the rig board
+  reads, reads a bead with a `waits-for` edge of its own as unjudged, not
+  blocked. One gate on each bead, under the conversation's `blocks` edges, with
+  its edges onto the rest removed at the first close, keeps the wait those
+  readers read.
 
 ## The sleep and the wake: Gas City's, unchanged
 
@@ -274,9 +297,10 @@ rule's Go readers read it there (the design's section 2).
 
 **What it composes.** The sign-off without `--stay` closes the conversation and
 releases its holds with the close. The landing order then closes the
-conversation's open return gate on its next pass, since nothing the gate blocks
-is open, so no return gate outlives its conversation and the sitting runs no
-command of its own for it. A stay never drains, because the core reaper closes
+conversation's open return gates on its next pass, since the conversation they
+return to has closed, so no return gate outlives its conversation and the
+sitting runs no command of its own for it. A stay never drains, because the
+core reaper closes
 drained sessions older than a day (`gc session prune --state drained` in
 `internal/bootstrap/packs/core/assets/scripts/reaper.sh`), and a closed session
 leaves the return to a sitting with no thread.
@@ -291,9 +315,6 @@ leaves the return to a sitting with no thread.
 - **A return never promised.** A restart between the stay and the promise leaves
   the conversation waiting on its work's close, and the sitting promises the
   return when its entry reads `waiting` with no open return gate.
-- **A bead whose round ends while the sitting holds the conversation for
-  another** is held only once the sitting promises again and the landing order's
-  next pass finds the new gate.
 - **The board's supervisor fallback** reads a staying conversation as parked.
 - **A sitting whose session has closed** is not woken. The hold still goes on
   at the end of the round, and the return starts once the operator engages the
