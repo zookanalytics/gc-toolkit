@@ -1,6 +1,7 @@
 package review
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -182,16 +183,13 @@ func (e *Refusal) Error() string { return "nothing filed on " + e.Bead + ": " + 
 //
 // It refuses a bead that owns no PR on the record, and a check req sends back
 // that the check index does not declare at the head the refinery validated,
-// which index reads. It refuses a bead that does not carry the id prefix its
-// store gives the ask, since bd keeps an edge between beads of two prefixes as
-// one into another rig's store, which holds nothing, and a bd store can hold a
-// bead of another prefix. It refuses a wait whose edge would hold nothing, on a bead
-// of another id prefix than the bead's or on one the bead's own store does not
-// hold (waitsIn). It refuses to return an ask it finds that does not wait on
+// which index reads. It refuses to return an ask it finds that does not wait on
 // every bead req names, because a run can take that ask before they close, or
-// already has. A refusal files nothing. A read that fails returns its error
-// with nothing filed, and a create that fails may still have filed the ask,
-// which the next call finds.
+// already has. The ledger refuses the ask's create when its edge onto the bead,
+// or onto a bead it waits on, would hold nothing, as it refuses every such wait
+// edge (ledger.NotHeld), and FileAsk returns that refusal as its own. A refusal
+// files nothing. A read that fails returns its error with nothing filed, and a
+// create that fails may still have filed the ask, which the next call finds.
 func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, error)) (id string, filed bool, err error) {
 	owner, err := one(l, req.Bead)
 	if err != nil {
@@ -226,19 +224,7 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 			}
 		}
 	}
-	prefix, err := l.Prefix()
-	if err != nil {
-		return "", false, err
-	}
-	if idPrefix(prefix+"-") != idPrefix(owner.ID) {
-		return "", false, &Refusal{Bead: req.Bead, Why: fmt.Sprintf(
-			"its store gives the ask the id prefix %s, and bd keeps an edge between beads of two prefixes as one into another rig's store, which holds nothing, so neither the ask's edge onto it nor a wait would hold",
-			prefix)}
-	}
-	waits, err := waitsIn(l, owner.ID, req)
-	if err != nil {
-		return "", false, err
-	}
+	waits := waitsOf(req)
 	reason := strings.TrimSpace(req.Reason)
 	asks, err := asksOf(l, owner)
 	if err != nil {
@@ -277,67 +263,26 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 		f.From(req.Source)
 	}
 	id, err = l.Create(f)
+	var refused *ledger.NotHeld
+	if errors.As(err, &refused) {
+		return "", false, &Refusal{Bead: req.Bead, Why: refused.Error()}
+	}
 	if err != nil {
 		return "", false, err
 	}
 	return id, true, nil
 }
 
-// waitsIn is each bead req names for the ask to wait on, once each and in the
-// order named, and it refuses each one whose edge would hold nothing. bd keeps
-// an edge between beads of two id prefixes as an edge into another repository,
-// which holds nothing even when this store holds the far bead
-// (IsExternalDepTarget), and owner carries the prefix its store gives the ask,
-// as FileAsk checks first, so a wait of another prefix than owner's is refused. So
-// is one that the ledger's store, the store of the bead that owns the PR, does
-// not hold.
-func waitsIn(l *ledger.Ledger, owner string, req AskRequest) ([]string, error) {
+// waitsOf is each bead req names for the ask to wait on, once each and in the
+// order named.
+func waitsOf(req AskRequest) []string {
 	var waits []string
 	for _, w := range req.WaitingOn {
 		if w = strings.TrimSpace(w); w != "" && !slices.Contains(waits, w) {
 			waits = append(waits, w)
 		}
 	}
-	if len(waits) == 0 {
-		return nil, nil
-	}
-	var foreign []string
-	for _, w := range waits {
-		if idPrefix(w) != idPrefix(owner) {
-			foreign = append(foreign, w)
-		}
-	}
-	if len(foreign) > 0 {
-		return nil, &Refusal{Bead: req.Bead, Why: fmt.Sprintf(
-			"%s does not carry the id prefix of %s, and bd keeps an edge between beads of two prefixes as one into another rig's store, which holds nothing even when this store holds the bead",
-			strings.Join(foreign, " or "), owner)}
-	}
-	rows, err := l.Find(ledger.ByID(waits...).WithClosed())
-	if err != nil {
-		return nil, err
-	}
-	var missing []string
-	for _, w := range waits {
-		if !slices.ContainsFunc(rows, func(r *ledger.Record) bool { return r.ID == w }) {
-			missing = append(missing, w)
-		}
-	}
-	if len(missing) > 0 {
-		return nil, &Refusal{Bead: req.Bead, Why: fmt.Sprintf(
-			"its store holds no bead %s for the ask to wait on", strings.Join(missing, " or "))}
-	}
-	return waits, nil
-}
-
-// idPrefix is a bead id's prefix, the text before its first "-", or "" for an
-// id with none. Two ids share one exactly when bd's ExtractPrefix gives them
-// one.
-func idPrefix(id string) string {
-	p, _, ok := strings.Cut(id, "-")
-	if !ok {
-		return ""
-	}
-	return p
+	return waits
 }
 
 // askTitle is an ask's title: its reason's first line, cut to fit a listing.

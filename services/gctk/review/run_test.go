@@ -765,16 +765,17 @@ func TestAnAskThatWaitsLandsWithItsWaitInOneCreate(t *testing.T) {
 	}
 }
 
-// A wait whose edge would hold nothing is refused by name with nothing filed.
-// bd keeps an edge between beads of two id prefixes as one into another rig's
-// store, so a bead of another prefix is refused whether another rig's store
-// holds it or the PR's store does. A bead of the PR bead's prefix is refused
-// when the store does not hold it.
+// A wait whose edge would hold nothing is refused by name with nothing filed,
+// by the ledger's rule for every wait edge, which FileAsk returns as its own
+// refusal. bd keeps an edge between beads of two id prefixes as one into
+// another rig's store, so a bead of another prefix is refused whether another
+// rig's store holds it or the PR's store does. A bead of the PR bead's prefix
+// is refused when the store does not hold it.
 func TestAnAskThatWaitsOnABeadItsEdgeWouldNotHoldIsRefused(t *testing.T) {
 	for _, c := range []struct{ name, wait, why string }{
-		{"a bead in another rig's store", "rb-other", "does not carry the id prefix of " + prBead},
-		{"a bead of another prefix that the PR's store holds", "rb-held", "does not carry the id prefix of " + prBead},
-		{"a bead of the PR's prefix that the store does not hold", "tk-gone", "its store holds no bead"},
+		{"a bead in another rig's store", "rb-other", "rb-other does not carry the id prefix tk,"},
+		{"a bead of another prefix that the PR's store holds", "rb-held", "rb-held does not carry the id prefix tk,"},
+		{"a bead of the PR's prefix that the store does not hold", "tk-gone", "the store holds no bead tk-gone"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			w := newWorld(t)
@@ -796,7 +797,7 @@ func TestAnAskThatWaitsOnABeadItsEdgeWouldNotHoldIsRefused(t *testing.T) {
 // files, which bd allows under --force or allowed_prefixes. An ask on such a
 // PR's bead is refused with nothing filed, with or without a wait of the
 // bead's prefix, since bd keeps both the ask's edge onto the bead and its wait
-// as edges into another rig's store.
+// as edges into another rig's store, and the ledger refuses both.
 func TestAnAskOnABeadOfAnotherPrefixThanItsStoreIsRefused(t *testing.T) {
 	w := newWorld(t)
 	pr, _ := w.store.Row(prBead)
@@ -806,8 +807,8 @@ func TestAnAskOnABeadOfAnotherPrefixThanItsStoreIsRefused(t *testing.T) {
 	for _, waits := range [][]string{nil, {"rb-other"}} {
 		_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: "rb-pr", Reason: "Fix the cap.", WaitingOn: waits}, nil)
 		var refused *review.Refusal
-		if !errors.As(err, &refused) || !strings.Contains(err.Error(), "gives the ask the id prefix tk") {
-			t.Fatalf("an ask on rb-pr in a store of prefix tk, waiting on %v: %v; want a refusal naming the prefix tk", waits, err)
+		if !errors.As(err, &refused) || !strings.Contains(err.Error(), "rb-pr") || !strings.Contains(err.Error(), "does not carry the id prefix tk,") {
+			t.Fatalf("an ask on rb-pr in a store of prefix tk, waiting on %v: %v; want a refusal naming rb-pr and the prefix tk", waits, err)
 		}
 	}
 	if n := len(w.store.Creates()); n != 0 {
