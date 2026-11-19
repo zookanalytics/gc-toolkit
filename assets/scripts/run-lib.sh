@@ -71,14 +71,14 @@
 # whether its work has landed.
 # doctor/check-po-queue-only takes the map of each store that holds a bead in
 # the po's queue, to find a held bead a live run already works.
-# tools/gc-proactive.sh drops the beads the map's live runs work from a scan,
-# and refuses a first reaction to a bead a live run works.
 # blocker-holder.sh takes the runs that work each live blocker of an anchor
 # that no route or claim marks, to tell one a live run works from one nothing
 # does.
 # store-only-exit.sh takes the run whose root its session's claimed step
 # names, to confirm it is live and works the bead over the step's --convoy
 # before that root holds the validating closer it arms until the run ends.
+# bead-context.sh takes the map of each store that holds a bead its walk would
+# otherwise read unrouted, so a bead a live run works reads advancing.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copies in

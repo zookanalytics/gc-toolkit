@@ -129,12 +129,15 @@ that does not import the pack itself.
   posts on a pull request stays out of review when it opens with gc-toolkit's
   no-review mark or with a marker the rig declares in
   `not-for-review.toml` ([not-for-review.md](not-for-review.md)).
-- **Demo captures of a rig's app** — a demo capture can record a rig's app
-  that a worktree of the rig serves on this host. Setting
-  `app_reads_city = "true"` among a rig's `[rigs.formula_vars]` in `city.toml`
-  turns that off for the rig. Set it for a rig whose app reads the city, such
-  as a rig that develops code for a city. The gc-toolkit rig the city imports
-  the pack from needs no setting.
+- **Demo captures of a rig's app** — a demo capture of a rig runs as an
+  ordinary process, and can record the app a worktree of the rig serves on this
+  host. Setting `app_reads_city = "true"` among a rig's `[rigs.formula_vars]` in
+  `city.toml` runs the rig's captures and app copies inside the capture
+  sandbox instead, which keeps the live city out of their reach and refuses the
+  rig's servers on this host
+  ([demo-capture-sandbox.md](demo-capture-sandbox.md)). Set it for a rig whose
+  app reads the city, such as a rig that develops code for a city. The
+  gc-toolkit rig the city imports the pack from needs no setting.
 
 ---
 
@@ -168,7 +171,7 @@ source = "rigs/gc-toolkit/packs/gascity-keeper"
 ```
 
 The complete wiring snippet — including the `[[rigs.patches]]`
-fragment-injection blocks for refinery and polecat — lives in the sub-pack
+fragment-injection block for the polecat — lives in the sub-pack
 itself: [`packs/gascity-keeper/pack.toml`](../packs/gascity-keeper/pack.toml).
 The sub-pack ships its own `[[named_session]]` (`scope = "rig"`), so the
 keeper is spawnable without an extra block; it resolves to

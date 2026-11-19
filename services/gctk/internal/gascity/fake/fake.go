@@ -1,7 +1,7 @@
-// Package fake is the runtime adapter's fake: it records each sling, cook,
-// session wake, nudge and script call a domain makes and answers as its test
-// says, so a domain's rules about Gas City are tested in Go with no Gas City
-// (docs/gctk-architecture.md, "The adapters").
+// Package fake is the runtime adapter's fake: it records each call a domain
+// makes of gascity.Runtime and answers as its test says, so a domain's rules
+// about Gas City are tested in Go with no Gas City (docs/gctk-architecture.md,
+// "The adapters").
 package fake
 
 import (
@@ -30,11 +30,8 @@ type Runtime struct {
 	// Root is the city's root, and RootErr fails the read of it.
 	Root    string
 	RootErr error
-	// RigList is the city's rigs, and RigsErr fails the read of them. Settings
-	// is the settings file Claude sessions start with, and SettingsErr fails
-	// the read of it.
-	RigList     []gascity.Rig
-	RigsErr     error
+	// Settings is the settings file Claude sessions start with, and
+	// SettingsErr fails the read of it.
 	Settings    string
 	SettingsErr error
 	// OnSling answers a sling, and nil answers exit 0. OnScript answers a script
@@ -46,6 +43,15 @@ type Runtime struct {
 	OnCook   func(gascity.Cook) gascity.CookResult
 	OnWake   func(session string) gascity.Result
 	OnNudge  func(Nudge) gascity.Result
+	// Formulas the city resolves, which ShowFormula answers exit 0 for. Every
+	// other name answers exit 1.
+	Resolves []string
+	// Roster, Named and RigList answer the roster, the named sessions and the
+	// rig list, and RosterErr, NamedErr and RigsErr fail each read.
+	Roster                       []gascity.Agent
+	Named                        []gascity.NamedSession
+	RigList                      []gascity.Rig
+	RosterErr, NamedErr, RigsErr error
 
 	mu      sync.Mutex
 	slings  []gascity.Sling
@@ -54,6 +60,7 @@ type Runtime struct {
 	cooks   []gascity.Cook
 	wakes   []string
 	nudges  []Nudge
+	reads   []string
 }
 
 // Nudge is one nudge: the session nudged and the message.
@@ -178,14 +185,6 @@ func (r *Runtime) CityRoot() (string, error) {
 	return r.Root, nil
 }
 
-// Rigs answers the rigs the test set.
-func (r *Runtime) Rigs() ([]gascity.Rig, error) {
-	if r.RigsErr != nil {
-		return nil, r.RigsErr
-	}
-	return slices.Clone(r.RigList), nil
-}
-
 // ClaudeSettings answers the settings file the test set.
 func (r *Runtime) ClaudeSettings() (string, error) {
 	if r.SettingsErr != nil {
@@ -213,4 +212,56 @@ func (r *Runtime) Scripts() []Call {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.scripts)
+}
+
+// ShowFormula answers exit 0 for a formula Resolves names, and exit 1 for any
+// other.
+func (r *Runtime) ShowFormula(name string) gascity.Result {
+	r.read("formula " + name)
+	if slices.Contains(r.Resolves, name) {
+		return gascity.Result{}
+	}
+	return gascity.Result{Code: 1, Output: "formula " + name + " not found"}
+}
+
+// Agents answers Roster, or RosterErr.
+func (r *Runtime) Agents() ([]gascity.Agent, error) {
+	r.read("roster")
+	if r.RosterErr != nil {
+		return nil, r.RosterErr
+	}
+	return slices.Clone(r.Roster), nil
+}
+
+// NamedSessions answers Named, or NamedErr.
+func (r *Runtime) NamedSessions() ([]gascity.NamedSession, error) {
+	r.read("named")
+	if r.NamedErr != nil {
+		return nil, r.NamedErr
+	}
+	return slices.Clone(r.Named), nil
+}
+
+// Rigs answers RigList, or RigsErr.
+func (r *Runtime) Rigs() ([]gascity.Rig, error) {
+	r.read("rigs")
+	if r.RigsErr != nil {
+		return nil, r.RigsErr
+	}
+	return slices.Clone(r.RigList), nil
+}
+
+func (r *Runtime) read(what string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reads = append(r.reads, what)
+}
+
+// Reads returns every read of the roster ("roster"), the named sessions
+// ("named"), the rig list ("rigs") and a formula ("formula <name>") the domain
+// made, in order.
+func (r *Runtime) Reads() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.reads)
 }

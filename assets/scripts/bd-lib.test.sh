@@ -1036,7 +1036,7 @@ eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | [
 # definition of a human gate. Comment lines are left out, so a reader that names
 # the rule in prose but no longer applies it still fails.
 ROOT="$(cd "$HERE/../.." && pwd)"
-for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/check-hq-marooned-work/run.sh; do
+for r in doctor/check-blocked-work-armed/run.sh doctor/check-hq-marooned-work/run.sh; do
   code=$(grep -vE '^[[:space:]]*#' "$ROOT/$r")
   if grep -qE '^[[:space:]]*\.[[:space:]].*bd-lib\.sh' <<< "$code"; then ok "(READERS) $r sources bd-lib.sh"
   else bad "(READERS) $r sources bd-lib.sh"; fi

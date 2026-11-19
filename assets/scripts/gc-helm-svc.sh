@@ -11,7 +11,7 @@
 # THIS SCRIPT DOES NOT BUILD. Building here cannot work: the
 # supervisor allows a proxy_process 5s to answer its health probe
 # (proxyProcessReadyTimeout, gascity internal/workspacesvc/proxy_process.go),
-# while a warm build of this module takes ~12.5s and a cold one 2m29s. The
+# while a warm build of helm-svc takes ~12.5s and a cold one 2m29s. The
 # deadline always won, and waitReady's stopProcessGroup() then killed the build
 # along with the start — 2,677 abandoned staging files in three days, and a
 # restart that could only ever report "did not become ready before timeout".

@@ -377,9 +377,11 @@ one commit.
 When the change is to a rig's UI, the operator reacts to a copy of it: a live
 page served from the tree on fixture data, at an address of its own that they
 open in their own browser. `gctk rig serve` runs the copy from the checkout you
-run it in, inside the sandbox a demo capture runs in, where the live city
-cannot be reached. Start one once the tree is set up, with the rig's serve
-command and the city's publisher, which the rig's formula vars carry:
+run it in, as a demo capture of the rig runs it: inside the capture's sandbox,
+where the live city cannot be reached, for a rig whose `app_reads_city` is not
+`"false"`, and as an ordinary process for any other rig. Start one once the
+tree is set up, with the rig's serve command and the city's publisher, which
+the rig's formula vars carry:
 
 ```bash
 VARS=$(gc formula show mol-rig-demo --rig "$GC_RIG" --json)
@@ -395,19 +397,22 @@ It prints one JSON line: `address` is the address to give the operator, and
 safe to run again, after a restart too. It reports the copy that runs, or starts
 one, and publishes again a copy that has lost its address.
 `( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --check )`
-says whether the copy runs, answers on its port and still has its address. A
-copy that runs and does not answer, such as one whose start was cut off while
-its serve command built, reads as `"state":"not-answering"`: run the start
-again, which waits for it to answer and stops it when it does not. The copy runs
-what its serve command built when it started, so an edit the command does not
-reload shows only once you stop the copy and start it again, which gives it a
-new port and address to give the operator.
+says whether the copy runs, is up and still has its address. A copy that runs
+and is not up, such as one whose start was cut off while its serve command
+built, reads as `"state":"not-answering"`: run the start again, which waits for
+it to be up and stops it when it is not. The copy runs what its serve command
+built when it started, so an edit the command does not reload shows only once
+you stop the copy and start it again, which gives it a new port and address to
+give the operator.
 
-Where `address` is empty, `detail` says why. A copy whose publish command ended
-gets its address back when you run the start again. A start that fails says why
-in `reason` and `detail`. One that fails `address-taken` found the copy on a
-port another mapping already publishes, and left it running there, so stop the
-copy and start it again, which runs it on another port. Where the city sets no
+Where `address` is empty, `detail` says why. A copy whose command brought its
+app up on a simulator, such as an iOS app, never has one, because the app runs
+on this host's simulator and not on the copy's port, so stop it as below. A copy
+whose publish command ended gets its address back when you run the start again.
+A start that fails says why in `reason` and `detail`. One that fails
+`address-taken` found the copy on a port another mapping already publishes, and
+left it running there, so stop the copy and start it again, which runs it on
+another port. Where the city sets no
 publisher, or a second start still prints no address, the city can give no
 address and the operator cannot open the copy, so stop it with
 `( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )`.
@@ -513,6 +518,11 @@ answer it:
   ```
 
   Gas City's reaper removes the tree once the change closes.
+- **The refinery published it** (`its PR waits on the pending record`). The
+  change is the PR now, assigned to nobody while the landing order works it.
+  Remove your edge the same way, because it would hold the PR's merge until the
+  conversation closes, and tell the operator. A further edit is an edit of the
+  PR's branch (An open PR's branch).
 - **Someone else holds it**: it is assigned to another holder, a run works it,
   or it is routed to a pool. Remove your edge the same way, because it would
   hold their work until the conversation closes, and tell the operator who
@@ -645,4 +655,5 @@ child the pool runs. A polecat resumes your branch, because Work's setup takes
 the branch the change records. When the operator wants to react to a finding
 live, they engage the change. Once it heads an open PR on the pending record,
 you edit that PR's branch (An open PR's branch, above), and Work's writers
-refuse a change a polecat or the refinery holds.
+refuse a change a polecat or the refinery holds, and one whose PR waits on the
+pending record.

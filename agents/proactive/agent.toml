@@ -1,7 +1,7 @@
 # proactive — the dedicated, small, always-on pool that runs first reactions.
 # A reaction is a run of formulas/mol-first-reaction.toml slung on its subject
-# by `tools/gc-proactive.sh sling` and `gc-proactive.sh scan --sling`. The pour
-# routes the run's one step, react, to this pool, and Gas City's default work
+# by `gctk reaction sling` and `gctk reaction sweep`. The pour routes the
+# run's one step, react, to this pool, and Gas City's default work
 # query offers that step to a worker, which reads the subject, writes a card
 # to its notes, then disposes the subject — route it to a pool (or, when no
 # epic holds it, hold it with Gas City's hold:mayor label for the operator's

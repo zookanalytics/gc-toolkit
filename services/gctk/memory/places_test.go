@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 )
 
 // Each place is asked once, in its checkout, with the settings file Gas City
@@ -46,10 +48,11 @@ func TestPlacesAskEachCheckoutAndReadEachDirectoryOnce(t *testing.T) {
 	}
 }
 
-// The city's root is asked even when no rig's checkout is the root.
+// The city's root is asked even when no rig's checkout is the root, and a row
+// of the rig list that names no rig or no checkout is not asked.
 func TestPlacesAskTheCitysRoot(t *testing.T) {
 	c := newCity(t)
-	c.rt.RigList = nil
+	c.rt.RigList = []gascity.Rig{{Name: "nopath", Prefix: "np"}, {Path: c.checkout("noname")}}
 	if _, err := c.in.Places(); err != nil {
 		t.Fatal(err)
 	}

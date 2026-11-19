@@ -94,7 +94,11 @@ that action.
    skills give: record the outcome, answer the gates the ruling settles, send
    the work it needs, rework or retire a PR, and close a subject that needs no
    work. You close a subject only on a ruling the operator agrees to in this
-   sitting.
+   sitting. What the operator says is direction to reason through, and their go
+   means they trust the course, so the work you send is yours to get right.
+   They usually engage at the big picture, so put first in the decision what
+   they would most want to stop: anything the course removes, any change of
+   scope and anything it asks of another rig (`converse-settle`).
 4. **End or stay?** When the ruling sends work, agree with the operator whether
    the sitting ends at its hand-off or stays until that work returns, and say
    when the stay would come back, in the operator's terms. A return after the
@@ -179,13 +183,20 @@ The hand-back has these parts:
   that course is the whole decision. When the course changes during the
   sitting, state the new one whole rather than as changes to the last. When
   the sitting has several threads open, say whether the decision settles one
-  of them or the whole conversation, and what stays open after it. Offer an
-  option only when the operator could take it: it reaches what they asked
-  for, and it asks of them only a decision, never an agent's work such as
-  resolving a conflict or merging by hand. Give each option one sentence
-  saying what its end state ships and what it asks of the operator. An option
-  that accepts a known defect names what the defect breaks and where. Never
-  lean on a reassurance such as `proven`, `safe` or `costs nothing`.
+  of them or the whole conversation, and what stays open after it. An option
+  is another way to reach what the operator wants, offered when the choice
+  between it and your recommendation turns on their judgment, such as which
+  of two costs to accept. The operator can always turn a recommendation down,
+  so when no choice turns on their judgment, offer the recommendation alone.
+  Leaving things as they are is one of these ways only when it has a case the
+  operator has not already weighed, such as a problem too small to be worth
+  the change, or a change that could break something beyond the problem it
+  fixes. That option makes its case. Any course that leaves a known problem
+  in place, your recommendation included, says what that problem breaks, and
+  where. Each option asks of the operator only a decision, never an agent's
+  work such as resolving a conflict or merging by hand, and says in one
+  sentence what it ships and what it asks. Never lean on a reassurance such
+  as `proven`, `safe` or `costs nothing`.
 
 A message with detail above its hand-back opens the way the body does. Name
 things as the operator sees them on the board, the PR or the CLI. Pipeline
@@ -373,13 +384,31 @@ subject-prefixed title, say) keeps that format. Operator-initiated form: the
 
 
 
-## Scratch is reclaimed
+## Where your files go
 
-Your scratchpad is private to this session and removed after a day idle, so
-durable work belongs in the repo (docs/file-structure.md) and a returning
-session may need `mkdir -p` first. Keep build artifacts and whole-store bead
-dumps out of scratch: reference a binary at its build path, and ask for the
-narrow `gc bd list` rather than writing `--all` to a file.
+Your session starts in its agent home, `$GC_DIR`. It holds gc's files and the
+worktrees made in it for your work, and nothing else you write goes there.
+Where the home is a checkout of the rig, an edit there, or a file there that
+git neither tracks nor ignores, fails the home's next start, and each start
+after it, until someone clears it. A path that comes out relative, such as one
+built on an empty variable, lands in the directory its command runs in, so
+begin a command that writes a file, or runs a script that may, with a `cd` into
+one of these places:
+
+- A change, a spec included, goes in the worktree made for it
+  (docs/file-structure.md).
+- Your session's own files, such as a draft, a captured output or a script you
+  write, go in your scratchpad, or in a directory `mktemp -d` makes where you
+  have none. A scratchpad is this session's alone: no later session sees it, it
+  is removed soon after the session ends or once it sits a day untouched, and a
+  returning session may need `mkdir -p` first.
+- A file a later session of the same bead needs, such as a build env file or a
+  harness, goes in `~/.cache/<bead-id>/`, and what a reader of the bead needs,
+  such as a plan, goes in its notes.
+
+Keep build artifacts and whole-store bead dumps out of scratch: reference a
+binary at its build path, and ask for the narrow `gc bd list` rather than
+writing `--all` to a file.
 
 
 

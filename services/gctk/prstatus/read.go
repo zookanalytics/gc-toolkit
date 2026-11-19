@@ -39,8 +39,8 @@ var ErrUnresolved = errors.New("the anchor does not resolve")
 // Read gathers the [Facts] the city records about each anchor's PR: the anchor's
 // own row, its in-flight set over [InFlightStatuses], and what holds it that
 // only a person moves, which [Holding] reads through its `blocks` edges: the
-// open human gates, the beads a person owes the next move on, and the
-// conversations that hold it while their sittings stay for work. It is the one
+// open human gates, the beads a person owes the next move on, and the beads
+// that hold it while they wait on work of their own first. It is the one
 // place that decides what is read, so every reader that asks what holds a PR, or
 // where a PR stands, gives Read its own [Store] and decides from the same facts.
 //
@@ -133,7 +133,7 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 // holds, the posture, the machine verdict with its cause and sentence, the
 // thread count, the draft-stage markers and its landing state. [Read] adds what
 // it gathers beside the row to them: the gates, the beads a person owes, the
-// staying conversations and the in-flight count.
+// beads that wait on work of their own first and the in-flight count.
 // [Holding] weighs a merge anchor it reaches by its row's facts, and the helm
 // board reads a row that is no PR, or whose PR has no answer, by them alone.
 func RowFacts(md map[string]string) Facts {

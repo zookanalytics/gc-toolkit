@@ -117,8 +117,8 @@ no warrant.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main 8e7d91b583 and
-  `gastownhall/gascity-packs` main 0f07496d2fa.
+- **Verified.** 2026-11-18, at `gastownhall/gascity` main f932d43b1c and
+  `gastownhall/gascity-packs` main 8ed128846fc.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
   is planned for the merge resume, since the refinery brings every branch current
@@ -352,8 +352,8 @@ no warrant.
     in Gas City handles a refusal inside the closes Gas City makes itself, such
     as the autoclose sweep's retry of a convoy, wisp or molecule autoclose
     (`cmd/gc/autoclose_sweep.go` 21-22).
-- **Verified.** 2026-11-13, at `gastownhall/gascity-packs` main 1f6d8e41c,
-  `gastownhall/beads` main 526c1c877 and `gastownhall/gascity` main cb9105579.
+- **Verified.** 2026-11-17, at `gastownhall/gascity-packs` main 0f07496d2,
+  `gastownhall/beads` main 8cdfa796a and `gastownhall/gascity` main 6cf1cccd6.
 - **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
   make. The exception then moves onto what Gas Town records.
 
@@ -488,9 +488,9 @@ no warrant.
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
-- **Verified.** 2026-11-17, at `gastownhall/gascity` main f715d7b92d47,
+- **Verified.** 2026-11-18, at `gastownhall/gascity` main 5b7728de34,
   `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
-  126b30aad7f5.
+  a6b7cd769437.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
   request's reviews, the required checks at its head and its review threads,
   where a reader of the PR's own bead finds them, for example once its PR
@@ -595,7 +595,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-16, at `gastownhall/gascity` main 192fa2d39407, with
+- **Verified.** 2026-11-18, at `gastownhall/gascity` main 5b7728de34, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 0f07496d2fa4.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
@@ -739,7 +739,7 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-14, at `gastownhall/gascity` main 420b7bb65f, with
+- **Verified.** 2026-11-17, at `gastownhall/gascity` main f715d7b92d, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
@@ -786,9 +786,9 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-17, at `gastownhall/gascity` main 5f7cd988a6be,
-  `gastownhall/beads` main 8cdfa796a8f5 and `gastownhall/gascity-packs` main
-  0f07496d2fa4.
+- **Verified.** 2026-11-19, at `gastownhall/gascity` main f5302d1dcfd5,
+  `gastownhall/beads` main 3a274fbf8f76 and `gastownhall/gascity-packs` main
+  23d007dac5d4.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
 

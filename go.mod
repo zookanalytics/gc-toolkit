@@ -1,4 +1,4 @@
-module github.com/zookanalytics/gc-toolkit/services/helm
+module github.com/zookanalytics/gc-toolkit
 
 go 1.26.5
 
@@ -8,16 +8,11 @@ require (
 	charm.land/lipgloss/v2 v2.0.5
 	github.com/atotto/clipboard v0.1.4
 	github.com/gzuidhof/tygo v0.2.21
+	github.com/spf13/cobra v1.10.2
 	github.com/steveyegge/beads v1.2.2-0.20260825072917-62d211937bd3
 	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.47.0
 )
-
-// prstatus is the shared status core; the helm board and the PR label writer
-// derive the status: taxonomy from it. Same repo, separate module, so a local
-// replace points at the sibling checkout.
-require github.com/zookanalytics/gc-toolkit/services/gctk v0.0.0-00010101000000-000000000000
-
-replace github.com/zookanalytics/gc-toolkit/services/gctk => ../gctk
 
 require (
 	cel.dev/expr v0.25.2 // indirect
@@ -121,6 +116,7 @@ require (
 	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/juju/gnuflag v1.0.0 // indirect
 	github.com/kch42/buzhash v0.0.0-20160816060738-9bdec3dec7c6 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
@@ -184,7 +180,6 @@ require (
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/text v0.40.0 // indirect

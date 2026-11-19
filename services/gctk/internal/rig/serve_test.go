@@ -29,8 +29,12 @@ import (
 // and a fake machine whose programs are:
 //   - the leader, `<binary> rig serve --lead <record>`, which runs Lead;
 //   - a serve command, by its text: "fail" says "cannot serve" and exits 3,
-//     "hang" runs and never listens, "missing" names no program, and any other
-//     listens on its sandbox's port until it ends;
+//     "hang" runs and never listens, "missing" names no program, "app" prints
+//     its app's URL on its standard output, in two writes, and never listens,
+//     "app-cr" prints it with a carriage return alone after it, "app-at-eof"
+//     prints it with no line end and closes its standard output, each running
+//     on without listening, "app-on-stderr" prints it on its standard error
+//     only, and any other listens on its sandbox's port until it ends;
 //   - a publish command, any other `bash -c`, by its mode, "publish <mode>":
 //     ok stays running; again-once refuses its first run as Tailscale does
 //     while another client changes the serve config; taken-first refuses the
@@ -117,6 +121,33 @@ func (f *serveFixture) serveProgram(command string) fake.Program {
 		return func(p *fake.Process) int { <-p.Done(); return 0 }
 	case "missing":
 		return nil
+	case "app":
+		return func(p *fake.Process) int {
+			fmt.Fprintln(p.Out(), "booting a device")
+			fmt.Fprint(p.Stdout(), "App ready: ios-simulator://"+strings.ToLower(testUDID)+"/com.exam")
+			fmt.Fprint(p.Stdout(), "ple.Board.\n")
+			<-p.Done()
+			return 0
+		}
+	case "app-cr":
+		return func(p *fake.Process) int {
+			fmt.Fprint(p.Stdout(), "booting\rios-simulator://"+testUDID+"/com.example.Board\r")
+			<-p.Done()
+			return 0
+		}
+	case "app-at-eof":
+		return func(p *fake.Process) int {
+			fmt.Fprint(p.Stdout(), "booting\r\nios-simulator://"+testUDID+"/com.example.Board")
+			p.CloseStdout()
+			<-p.Done()
+			return 0
+		}
+	case "app-on-stderr":
+		return func(p *fake.Process) int {
+			fmt.Fprintln(p.Out(), "ios-simulator://"+testUDID+"/com.example.Board")
+			<-p.Done()
+			return 0
+		}
 	}
 	return func(p *fake.Process) int {
 		s := p.Spec()
@@ -129,6 +160,9 @@ func (f *serveFixture) serveProgram(command string) fake.Program {
 		return 0
 	}
 }
+
+// testUDID is a simulator device's UDID, as simctl prints it.
+const testUDID = "265F099F-E558-4E32-82BE-F70A75EC0716"
 
 func (f *serveFixture) publishProgram(mode string) fake.Program {
 	return func(p *fake.Process) int {
@@ -317,7 +351,7 @@ func (f *serveFixture) claim(t *testing.T, checkout string, values map[string]st
 		t.Fatal(err)
 	}
 	base := map[string]string{"checkout": checkout, "scripts": f.scripts,
-		"grace_ms": strconv.FormatInt(StopGrace.Milliseconds(), 10)}
+		"grace_ms": strconv.FormatInt(CopyStopGrace.Milliseconds(), 10)}
 	for k, v := range values {
 		base[k] = v
 	}
@@ -366,6 +400,9 @@ func TestServeRunsTheCommandInTheSandboxFromTheCheckoutOnAPortOfItsOwn(t *testin
 		mustRun(t, r)
 		if r.Port <= 0 || !f.me.Answers(r.Port) {
 			t.Fatalf("the copy does not answer on the port it reports, %d", r.Port)
+		}
+		if want := "http://127.0.0.1:" + strconv.Itoa(r.Port) + "/"; r.AppURL != want {
+			t.Errorf("app_url %q, want the copy's loopback URL %q", r.AppURL, want)
 		}
 		if address(r) != "" || !strings.Contains(r.Detail, "started without --publish-command") {
 			t.Errorf("address %q, detail %q: want no address, and why", address(r), r.Detail)
@@ -495,8 +532,8 @@ func TestServeAStopEndsTheMembersFirstAndTheLeaderLast(t *testing.T) {
 		if at(leader) < at(served) || at(leader) < at(pub) {
 			t.Errorf("ends %+v: want the serve command %d and the publish command %d before the leader %d", ends, served, pub, leader)
 		}
-		if e := f.endOf(t, leader); e.Status != 128+int(syscall.SIGTERM) || e.At.Sub(start) >= StopGrace {
-			t.Errorf("the leader ended %+v, %s after the stop: want 143, before the grace of %s", e, e.At.Sub(start), StopGrace)
+		if e := f.endOf(t, leader); e.Status != 128+int(syscall.SIGTERM) || e.At.Sub(start) >= CopyStopGrace {
+			t.Errorf("the leader ended %+v, %s after the stop: want 143, before the grace of %s", e, e.At.Sub(start), CopyStopGrace)
 		}
 	})
 }
@@ -636,7 +673,7 @@ func TestServeACopyThatEndsTakesItsPublishCommandWithIt(t *testing.T) {
 		leader, pub := f.leader(f.repo), f.publisherOf(f.repo)
 		start := time.Now()
 		_ = f.me.Signal(f.starts("serve")[0].Pid, syscall.SIGTERM)
-		if !waitFor(StopGrace+10*time.Second, func() bool { return f.me.GroupGone(leader) }) {
+		if !waitFor(CopyStopGrace+10*time.Second, func() bool { return f.me.GroupGone(leader) }) {
 			t.Fatalf("the leader did not end the group once the serve command ended: %v", f.me.Members(leader))
 		}
 		if p, l := f.endOf(t, pub), f.endOf(t, leader); !p.At.Equal(start) || !l.At.Equal(start) || p.Status != 143 {
@@ -1068,15 +1105,15 @@ func TestServeAPublishCommandThatIgnoresTermEndsWithTheLeaderAfterTheGrace(t *te
 		leader, pub := f.leader(f.repo), f.publisherOf(f.repo)
 		start := time.Now()
 		_ = f.me.Signal(leader, syscall.SIGTERM)
-		if !waitFor(StopGrace+10*time.Second, func() bool { return !f.running(leader) }) {
+		if !waitFor(CopyStopGrace+10*time.Second, func() bool { return !f.running(leader) }) {
 			t.Fatal("the leader did not end")
 		}
 		l, p := f.endOf(t, leader), f.endOf(t, pub)
 		if p.At.After(l.At) || p.Status != 128+int(syscall.SIGKILL) {
 			t.Errorf("the publish command ended %+v, the leader %+v: want it killed, no later than the leader", p, l)
 		}
-		if l.At.Sub(start) != StopGrace {
-			t.Errorf("the leader ended %s after SIGTERM, want at its grace of %s", l.At.Sub(start), StopGrace)
+		if l.At.Sub(start) != CopyStopGrace {
+			t.Errorf("the leader ended %s after SIGTERM, want at its grace of %s", l.At.Sub(start), CopyStopGrace)
 		}
 		if !f.me.GroupGone(leader) {
 			t.Errorf("members of the copy's group are left: %v", f.me.Members(leader))
@@ -1103,10 +1140,158 @@ func TestServeAStopKillsAGroupThatOutlivesSigterm(t *testing.T) {
 		if s := f.copies.Stop(f.repo); s.State != CopyStopped {
 			t.Fatalf("stop = %s (%s), want stopped", s.State, s.Detail)
 		}
-		if e := f.endOf(t, leader); e.Status != 128+int(syscall.SIGKILL) || e.At.Sub(start) != StopGrace {
-			t.Errorf("the leader ended %+v, %s after the stop: want SIGKILL once the grace of %s was up", e, e.At.Sub(start), StopGrace)
+		if e := f.endOf(t, leader); e.Status != 128+int(syscall.SIGKILL) || e.At.Sub(start) != time.Minute {
+			t.Errorf("the leader ended %+v, %s after the stop: want SIGKILL once its minute was up", e, e.At.Sub(start))
 		}
 	})
+}
+
+func TestServeACopyIsUpOnceItsCommandPrintsItsAppsURL(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		o := f.publishing("ok", "https://host.example:$PORT/")
+		o.Command = "app"
+		r := f.copies.Serve(f.repo, o)
+		mustRun(t, r)
+		want := "ios-simulator://" + testUDID + "/com.example.Board"
+		if r.AppURL != want || r.Port <= 0 || f.me.Answers(r.Port) {
+			t.Errorf("app_url %q on port %d (answers: %v), want %q, up with nothing on the copy's port", r.AppURL, r.Port, f.me.Answers(r.Port), want)
+		}
+		if address(r) != "" || !strings.Contains(r.Detail, "printed its app's URL") {
+			t.Errorf("address %q, detail %q: want no address, because an address publishes the copy's port", address(r), r.Detail)
+		}
+		if c := f.copies.Check(f.repo); c.State != CopyRunning || c.AppURL != want {
+			t.Errorf("check = %s with app_url %q, want running at %q", c.State, c.AppURL, want)
+		}
+		published := len(f.starts("publish"))
+		again := f.copies.Serve(f.repo, o)
+		mustRun(t, again)
+		if again.AppURL != want || address(again) != "" || len(f.starts("publish")) != published {
+			t.Errorf("a second start: app_url %q, address %q, publish starts %d (was %d), want the same URL, no address and no publish",
+				again.AppURL, address(again), len(f.starts("publish")), published)
+		}
+		f.copies.Stop(f.repo)
+	})
+}
+
+// The serve command's standard output is read in the engine's lines: one
+// ends at a carriage return as at a line feed, and the text the output ends
+// on is its last line, so a command that prints its URL so and runs on is up.
+func TestServeReadsTheAppsURLInTheEnginesLines(t *testing.T) {
+	for _, command := range []string{"app-cr", "app-at-eof"} {
+		t.Run(command, func(t *testing.T) {
+			serveTest(t, func(t *testing.T, f *serveFixture) {
+				o := f.opts(command)
+				o.Wait = 2 * time.Second
+				r := f.copies.Serve(f.repo, o)
+				mustRun(t, r)
+				if want := "ios-simulator://" + testUDID + "/com.example.Board"; r.AppURL != want {
+					t.Errorf("app_url %q, want %q", r.AppURL, want)
+				}
+				f.copies.Stop(f.repo)
+			})
+		})
+	}
+}
+
+// refusingLog is a serve log that refuses its second write and takes every
+// other.
+type refusingLog struct{ writes int }
+
+func (l *refusingLog) Write(b []byte) (int, error) {
+	l.writes++
+	if l.writes == 2 {
+		return 0, syscall.EIO
+	}
+	return len(b), nil
+}
+
+// The leader reads the standard output as far as the relay copies it into the
+// log. The copy stops at a write the log refuses, so the text before that
+// write is cut off, not the output's last line, and names no app though it
+// reads as a URL, whether the command then ends or closes its output and runs
+// on, and nothing written after it is read. The same text at the output's end
+// is its last line.
+func TestServeTakesNoAppsURLFromAnOutputCutOffByTheLog(t *testing.T) {
+	cut := "ios-simulator://" + testUDID + "/com.example"
+	for _, k := range []struct {
+		name   string
+		writes []string
+		close  bool
+		want   string
+	}{
+		{"at the output's end", []string{cut}, false, cut},
+		{"cut off as the command ends", []string{cut, ".Board\n", cut + ".Board\n"}, false, ""},
+		{"cut off as the command closes its output", []string{cut, ".Board\n"}, true, ""},
+	} {
+		t.Run(k.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				m := fake.New()
+				t.Cleanup(m.Halt)
+				m.Programs = func(host.Spec) fake.Program {
+					return func(p *fake.Process) int {
+						for _, w := range k.writes {
+							fmt.Fprint(p.Stdout(), w)
+						}
+						if k.close {
+							p.CloseStdout()
+							<-p.Done()
+						}
+						return 0
+					}
+				}
+				rec := copyRec{dir: t.TempDir()}
+				if _, err := m.Caller().Start(host.Spec{Argv: []string{"serve"}, Stdout: readURL(rec, &refusingLog{}), Relay: true}); err != nil {
+					t.Fatal(err)
+				}
+				synctest.Wait()
+				if got := rec.read("app_url"); got != k.want {
+					t.Errorf("app_url %q, want %q", got, k.want)
+				}
+			})
+		})
+	}
+}
+
+func TestServeReadsTheAppsURLOnlyFromTheStandardOutput(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		o := f.opts("app-on-stderr")
+		o.Wait = 2 * time.Second
+		r := f.copies.Serve(f.repo, o)
+		if r.State != CopyFailed || r.Reason != "not-answering" || !strings.Contains(r.Detail, "printed no app's URL") {
+			t.Errorf("a URL on the standard error alone: %s %s (%s), want failed not-answering, naming both signals", r.State, r.Reason, r.Detail)
+		}
+	})
+}
+
+func TestAppURLInReadsTheEnginesForm(t *testing.T) {
+	want := "ios-simulator://" + testUDID + "/com.example.Board"
+	lower := strings.ToLower(testUDID)
+	for _, line := range []string{
+		"ios-simulator://" + testUDID + "/com.example.Board",
+		"App ready: ios-simulator://" + testUDID + "/com.example.Board.",
+		`{"url":"ios-simulator://` + testUDID + `/com.example.Board"}`,
+		"ready (IOS-Simulator://" + lower + "/com.example.Board/), at last",
+		"\x1b[32mios-simulator://" + testUDID + "/com.example.Board\x1b[0m",
+		"a path, ios-simulator://" + testUDID + "/com.example.Board/more, then the app: ios-simulator://" + testUDID + "/com.example.Board",
+	} {
+		if got := appURLIn(line); got != want {
+			t.Errorf("appURLIn(%q) = %q, want %q", line, got, want)
+		}
+	}
+	for _, line := range []string{
+		"booting a device",
+		"http://127.0.0.1:4000/",
+		"ios-simulator://" + testUDID + "/com.example.Board/more",
+		"ios-simulator://" + testUDID + "/com.example.Board?launch=1",
+		"ios-simulator://" + testUDID + "/com.example.Board#top",
+		"ios-simulator://" + testUDID + "/com.example.Board_debug",
+		"ios-simulator://booted/com.example.Board",
+		"ios-simulator://" + testUDID + "/",
+	} {
+		if got := appURLIn(line); got != "" {
+			t.Errorf("appURLIn(%q) = %q, want none", line, got)
+		}
+	}
 }
 
 func TestServeTriesAgainAPublishRefusedWhileTheConfigChanges(t *testing.T) {

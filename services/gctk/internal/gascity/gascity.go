@@ -1,12 +1,14 @@
 // Package gascity is gctk's runtime adapter: Gas City as gctk reaches it apart
 // from its store, which internal/gcbd reaches (docs/gctk-architecture.md, "The
 // adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
-// when it names none, wakes and nudges a session, names the city's root, its
-// rigs and the settings file its Claude sessions start with, and runs the
-// pack's scripts that ask a person. A domain reaches them only through
-// Runtime. City is the city gctk runs in, and gascity/fake records what a domain
-// asked and answers as its test says, so a domain's rules are tested in Go with
-// no Gas City.
+// when it names none, reads the city's roster, its named sessions, its rigs and
+// whether a formula resolves, wakes and nudges a session, names the city's root
+// and the settings file its Claude sessions start with, and runs the pack's
+// scripts that ask a person. A domain reaches them only through Runtime. City
+// is the city gctk runs in, and gascity/fake records what a domain asked and
+// answers as its test says, so a domain's rules are tested in Go with no Gas
+// City. It also states Gas City's dispatch holds (hold.go), the one rule of
+// them each domain asks.
 package gascity
 
 import (
@@ -47,24 +49,29 @@ type Runtime interface {
 	Script(name string, args ...string) Result
 	// CityRoot is the city's root directory, the one that holds its .gc.
 	CityRoot() (string, error)
-	// Rigs is each rig `gc rig list --json` names, the city's HQ among them.
+	// ShowFormula runs one `gc formula show <name>`.
+	ShowFormula(name string) Result
+	// Agents reads the city's roster. A read that does not answer is an error.
+	Agents() ([]Agent, error)
+	// NamedSessions reads the named sessions the city's config lists. A read
+	// that does not answer is an error.
+	NamedSessions() ([]NamedSession, error)
+	// Rigs reads the rigs the city names, its HQ among them. A read that does
+	// not answer is an error.
 	Rigs() ([]Rig, error)
 	// ClaudeSettings is the settings file Gas City starts each Claude session
 	// with, whether or not it is there.
 	ClaudeSettings() (string, error)
 }
 
-// Rig is one rig the city names: its name, its checkout, its bead prefix, and
-// whether it is the city's HQ, whose checkout is the city's root.
-type Rig struct {
-	Name, Path, Prefix string
-	HQ                 bool
-}
-
 // Sling is one `gc sling <target> <bead> --on <formula> --title <title>`,
-// with gc's --rig when Rig names one.
+// with gc's --rig when Rig names one and no --title when Title is empty. A
+// sling with NoFormula set pours nothing and files no convoy (`gc sling <target>
+// <bead> --no-formula --no-convoy`): it routes the bead to the target's own
+// name, which a named session's hook serves.
 type Sling struct {
 	Rig, Target, Bead, Formula, Title string
+	NoFormula                         bool
 }
 
 // Result is what a command answered: its exit code and its output, standard
@@ -115,6 +122,14 @@ type City struct {
 	once   sync.Once
 	agents []agent
 	cfgErr error
+
+	namedOnce sync.Once
+	named     []NamedSession
+	namedErr  error
+
+	rigsOnce sync.Once
+	rigs     []Rig
+	rigsErr  error
 }
 
 var _ Runtime = (*City)(nil)
@@ -154,7 +169,15 @@ func (c *City) Sling(s Sling) SlingResult {
 	if s.Rig != "" {
 		args = append(args, "--rig", s.Rig)
 	}
-	args = append(args, s.Target, s.Bead, "--on", s.Formula, "--title", s.Title)
+	args = append(args, s.Target, s.Bead)
+	if s.NoFormula {
+		args = append(args, "--no-formula", "--no-convoy")
+	} else {
+		args = append(args, "--on", s.Formula)
+		if s.Title != "" {
+			args = append(args, "--title", s.Title)
+		}
+	}
 	r := c.run(c.bin, args...)
 	out := SlingResult{Result: r}
 	if r.Code == 3 {
@@ -435,33 +458,6 @@ func (c *City) CityRoot() (string, error) {
 		}
 	}
 	return "", errors.New("no city root: GC_CITY_PATH, GC_CITY and GC_CITY_ROOT name none, and gc rig list names no HQ rig holding .gc")
-}
-
-// Rigs reads `gc rig list --json`, leaving out a row that names no rig or no
-// checkout.
-func (c *City) Rigs() ([]Rig, error) {
-	r := c.run(c.bin, "rig", "list", "--json")
-	if r.Code != 0 {
-		return nil, fmt.Errorf("gc rig list did not read: %s", r.why())
-	}
-	var list struct {
-		Rigs []struct {
-			Name   string `json:"name"`
-			Path   string `json:"path"`
-			Prefix string `json:"prefix"`
-			HQ     bool   `json:"hq"`
-		} `json:"rigs"`
-	}
-	if err := json.Unmarshal([]byte(r.Output), &list); err != nil {
-		return nil, fmt.Errorf("gc rig list's answer did not decode: %v", err)
-	}
-	out := make([]Rig, 0, len(list.Rigs))
-	for _, rig := range list.Rigs {
-		if rig.Name != "" && rig.Path != "" {
-			out = append(out, Rig{Name: rig.Name, Path: rig.Path, Prefix: rig.Prefix, HQ: rig.HQ})
-		}
-	}
-	return out, nil
 }
 
 // ClaudeSettings is <city root>/.gc/settings.json, which Gas City projects

@@ -22,8 +22,7 @@ for attention.
 The run is your lease on the reaction. Your step's instructions carry the run's
 mechanics: where S comes from, the check that is your first act, the decline
 that ends a refused reaction, and the close of your step. This prompt is the
-reaction itself: the card, and the exit `assets/scripts/first-reaction-dispose.sh`
-performs.
+reaction itself: the card, and the exit `gctk reaction dispose` performs.
 
 ## Startup Protocol
 
@@ -64,10 +63,10 @@ exit
 ### The check, before you read S
 
 Your first act is the check your step's instructions give:
-`tools/gc-proactive.sh sling <S> --check --run <root>`. It asks the refusals the
-sling asked, writes nothing, and passes over your own run and over a
-first-reaction gate whose message names your run. Exit 0: react. Exit 3, 4, 5 or
-6 is a refusal: S is reacted to, spoken for, decided, or not a reaction's kind.
+`gctk reaction check <S> --run <root>`. It asks the refusals the sling asked,
+writes nothing, and passes over your own run and over a first-reaction gate
+whose message names your run. Exit 0: react. Exit 3, 4, 5 or 6 is a refusal: S
+is reacted to, spoken for, decided, or not a reaction's kind.
 End the reaction with the decline your step gives, passing the refusal the check
 printed as its reason. The decline cancels your run with no gate and drains this
 session. Any other exit decided nothing, so run the check again once the store
@@ -227,7 +226,7 @@ recommendation and why the operator might discuss instead: `recommend:
 <action>; execute via <mol> — discuss if <caveat>`. The card is what the
 execution worker reads if the operator Accepts: broad direction, not a spec.
 
-`first-reaction-dispose.sh` performs each exit against the subject. Run the exit
+`gctk reaction dispose` performs each exit against the subject. Run the exit
 as one block. The headline (`--takeaway`, your card's **Decision needed** as one
 line of at most 140 characters, refused rather than truncated if longer) and the
 reason (`--reason`, why this disposition and not the others, required) sit in
@@ -245,8 +244,11 @@ REASON=$(cat <<'WHY'
 <why this exit and not the others>
 WHY
 )
-DISPOSE="$(gc gc-toolkit scripts-dir)/first-reaction-dispose.sh"
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition <exit> <its flags>
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+export GCTK_SCRIPTS_DIR="$(gc gc-toolkit scripts-dir)"
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition <exit> <its flags>
 ```
 
 The block's last line, for each exit:
@@ -258,19 +260,19 @@ The block's last line, for each exit:
 # bead you reacted to: where several beads share one cause, the card says so
 # and one bead naming the cause is the one routed. A subject that is not a
 # member of an epic is held for placement instead of routed.
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable
 # An emergency, a red main or a broken gate: the exit checks main's checks and
 # routes at P0 only when the check it names is failing.
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --emergency "<the failing check on main>"
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --emergency "<the failing check on main>"
 # Work that is a named agent's own goes TO that agent: --assign hands the
 # subject to it in the form it finds its work in, a route for the mechanik
-# and the assignee for the refinery or the keeper, and nudges the agent
-# when bd reports the bead ready.
+# and the assignee for the refinery, and nudges the agent when bd reports
+# the bead ready.
 # A town-repo edit takes gc-toolkit.mechanik. The exit refuses the po, which
 # takes no work by assignment: work no epic holds is routed, and the exit
 # holds it for placement. It refuses the deacon and the witness, which take
-# mail and no bead.
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --assign gc-toolkit.mechanik
+# mail and no bead, and the keeper, which takes no first reaction's bead.
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --assign gc-toolkit.mechanik
 
 # blocked — the wait is an EDGE, never prose: an unheld bead is still ready
 # and still claimed by the next worker. The blocker must live in the same
@@ -286,32 +288,32 @@ The block's last line, for each exit:
 # agent while it waits, in the same form, and the agent is nudged once the
 # wait lifts, so no dispatch is armed. Omit both only for a bead nobody takes
 # (a decision, a research note).
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-route <rig>/<rig>.polecat
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --blocker "<what has to happen first>" --then-route <rig>/<rig>.polecat
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-assign gc-toolkit.mechanik
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-route <rig>/<rig>.polecat
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --blocker "<what has to happen first>" --then-route <rig>/<rig>.polecat
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-assign gc-toolkit.mechanik
 
 # close — hand a confident no-op to the validating closer (mol-validate-close
 # on this rig's polecat pool; --route names another). The reason is the
 # closer's brief: why there is no work, the successor that carries it when
 # there is one, and the counter-case for keeping the bead open, so the closer
 # can disagree.
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition close
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition close
 # The subject's job ends once another bead lands, such as the bead that
 # retires its code: the exit holds the subject on that bead and arms the
 # closer for when it closes, so the reason says what that landing fixes and
 # what the closer should check once it has.
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition close --waiting-on <bead-id>
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition close --waiting-on <bead-id>
 
 # ruling — a fork, an irreversible action, or a policy call; Discuss-only.
-# The script files the human gate itself (human-gate.sh, key
+# The exit files the human gate itself (human-gate.sh, key
 # first-reaction), which holds the subject and reaches the operator on the
 # subject's row of the board. You file nothing else.
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition ruling
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition ruling
 
 # recommend — the same gate, naming the execution mol the operator can
 # Accept. The headline reads "recommend: <action>; execute via <mol> —
 # discuss if <caveat>".
-"$DISPOSE" "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition recommend --recommended-formula <mol>
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition recommend --recommended-formula <mol>
 ```
 
 The exit's status says what to do next:
@@ -510,13 +512,31 @@ one with `--quiet-window`.
 
 
 
-## Scratch is reclaimed
+## Where your files go
 
-Your scratchpad is private to this session and removed after a day idle, so
-durable work belongs in the repo (docs/file-structure.md) and a returning
-session may need `mkdir -p` first. Keep build artifacts and whole-store bead
-dumps out of scratch: reference a binary at its build path, and ask for the
-narrow `gc bd list` rather than writing `--all` to a file.
+Your session starts in its agent home, `$GC_DIR`. It holds gc's files and the
+worktrees made in it for your work, and nothing else you write goes there.
+Where the home is a checkout of the rig, an edit there, or a file there that
+git neither tracks nor ignores, fails the home's next start, and each start
+after it, until someone clears it. A path that comes out relative, such as one
+built on an empty variable, lands in the directory its command runs in, so
+begin a command that writes a file, or runs a script that may, with a `cd` into
+one of these places:
+
+- A change, a spec included, goes in the worktree made for it
+  (docs/file-structure.md).
+- Your session's own files, such as a draft, a captured output or a script you
+  write, go in your scratchpad, or in a directory `mktemp -d` makes where you
+  have none. A scratchpad is this session's alone: no later session sees it, it
+  is removed soon after the session ends or once it sits a day untouched, and a
+  returning session may need `mkdir -p` first.
+- A file a later session of the same bead needs, such as a build env file or a
+  harness, goes in `~/.cache/<bead-id>/`, and what a reader of the bead needs,
+  such as a plan, goes in its notes.
+
+Keep build artifacts and whole-store bead dumps out of scratch: reference a
+binary at its build path, and ask for the narrow `gc bd list` rather than
+writing `--all` to a file.
 
 
 

@@ -49,7 +49,7 @@ command -v gc >/dev/null 2>&1 || { echo "converse-invalidate-recommendation: gc 
 
 # A live recommendation is a NON-EMPTY gc.recommended_formula: every reader —
 # the board's Accept derivation (services/helm/internal/board/derive.go tests
-# `rf != ""`), gc-helm.sh accept, and first-reaction-dispose.sh's stale-clear —
+# `rf != ""`), gc-helm.sh accept, and gctk reaction dispose's stale-clear —
 # treats a present-but-empty key as no recommendation, so this does too. One read
 # answers both questions the strip needs — is the subject readable, and is there
 # a live value to strip — so a subject that changes between reads cannot record a

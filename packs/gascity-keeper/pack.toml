@@ -2,13 +2,13 @@
 #
 # Bundles the keeper agent (operator front-end for upstream sync /
 # rebase / PR-prep workflows), its supporting formulas (the
-# `mol-upstream-gc-*` family), and the rebase-handling doctrine that
-# refinery and polecat in a fork-bearing rig need.
+# `mol-upstream-gc-*` family), and the rebase doctrine that the
+# polecats in a fork-bearing rig need.
 #
-# Imports nothing on its own. The patches below target agents that
-# the importing rig pulled in via gc-toolkit (refinery, polecat),
-# so this pack only composes correctly when loaded alongside the
-# gc-toolkit core pack.
+# Imports nothing on its own. The patch below targets an agent that
+# the importing rig pulled in via gc-toolkit (polecat), so this pack
+# only composes correctly when loaded alongside the gc-toolkit core
+# pack.
 #
 # Imported only by the gascity rig — the rig that maintains the
 # `zookanalytics/gascity ← gastownhall/gascity` fork. Other rigs
@@ -22,16 +22,14 @@ schema = 2
 
 # The sub-pack ships the keeper, its `mol-upstream-gc-*` formulas, and
 # the gascity-rig-specific fragments (rebase-conventions,
-# rebase-conventions-force-push, polecat-patterns,
-# refinery-rebase-handling). It does NOT carry
-# `[[patches.agent]]` blocks: sub-pack patches can only target agents
-# the sub-pack itself imports, and importing gastown here would
-# duplicate gastown's agents under the `gascity-keeper` binding (so the
-# gc-toolkit-patched refinery / polecat get shadowed by bare gastown
-# copies). The right home for the fragment-injection patches is the
-# importing city/rig — the importing city's `city.toml` carries
-# `[[rigs.patches]]` blocks for the gascity rig alongside
-# `[rigs.imports.gascity-keeper]`.
+# polecat-patterns). It does NOT carry `[[patches.agent]]` blocks:
+# sub-pack patches can only target agents the sub-pack itself imports,
+# and importing gastown here would duplicate gastown's agents under the
+# `gascity-keeper` binding (so the gc-toolkit-patched polecat gets
+# shadowed by a bare gastown copy). The right home for the
+# fragment-injection patch is the importing city/rig — the importing
+# city's `city.toml` carries a `[[rigs.patches]]` block for the gascity
+# rig alongside `[rigs.imports.gascity-keeper]`.
 
 # template-fragments/ also holds symlinks to the root-pack fragments
 # the keeper prompt composes (watch-dispatched-work, where-to-search,
@@ -59,27 +57,20 @@ schema = 2
 #   source = "<path-to-your-gc-toolkit-checkout>/packs/gascity-keeper"
 #
 #   [[rigs.patches]]
-#   agent = "refinery"
-#   inject_fragments_append = ["rebase-conventions", "rebase-conventions-force-push", "refinery-rebase-handling"]
-#
-#   [[rigs.patches]]
 #   agent = "polecat"
 #   inject_fragments_append = ["rebase-conventions", "polecat-patterns"]
 #
 # `rebase-conventions` is the polecat-facing doctrine (classification,
-# check loop, conflict policy, resume). `rebase-conventions-force-push`
-# is the refinery-only half: who owns
-# `git push --force-with-lease HEAD:main` on the rebase tail. Elect it
-# for refinery ONLY — the polecat never performs the force-push, and the
-# polecat slice already carries a short pointer to it. Injecting it into
-# polecat costs ~2.3 KB of prompt on every spawn of that pool and buys
-# nothing (tk-yhwfv.1).
+# check loop, conflict policy, resume, and how a finished rebase lands).
+# The refinery takes no rebase fragment: the operator force-pushes each
+# rebase onto main from the human gate the rebase formula files, so a
+# rebase never reaches the refinery.
 #
-# The `[[rigs.patches]]` blocks are nested inside the `[[rigs]]`
-# block (TOML scoping), so they apply to that one rig only.
-# After editing city.toml, run `gc config show` to confirm the
-# keeper resolves as `<rig-name>/gascity-keeper.keeper` and the
-# fragments compose into the rig's refinery and polecat.
+# The `[[rigs.patches]]` block is nested inside the `[[rigs]]` block
+# (TOML scoping), so it applies to that one rig only. After editing
+# city.toml, run `gc config show` to confirm the keeper resolves as
+# `<rig-name>/gascity-keeper.keeper` and the fragments compose into the
+# rig's polecat.
 
 # Materialise the keeper on demand in whichever rig imports this pack.
 # The agent ships as bare `keeper` inside the sub-pack; the binding

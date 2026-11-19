@@ -422,6 +422,43 @@ func TestAGuardedWriteLandsOnlyOnTheBeadItWasGuardedOn(t *testing.T) {
 	}
 }
 
+// A write that assigns the bead carries the assignee in its one update, after
+// the status, and an assignee of "" assigns the bead to nobody, which bd's
+// guard on an empty assignee then finds.
+func TestAWriteAssignsTheBeadInItsOneUpdate(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "open", Assignee: "rig/refinery"})
+	l := New(s)
+	w := l.Write("b-1")
+	w.Guard("open", "rig/refinery")
+	w.Status("blocked")
+	w.Assignee("")
+	testText.Set(w, "waiting")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--if-status=open", "--if-assignee=rig/refinery", "--status=blocked", "--assignee=",
+		"--set-metadata", "test.ledger.text=waiting"}
+	if got := s.Writes()[0].Args; !slices.Equal(got, want) {
+		t.Fatalf("the update is %q, want %q", got, want)
+	}
+	if b, _ := s.Row("b-1"); b.Status != "blocked" || b.Assignee != "" {
+		t.Fatalf("the bead reads %s under %q", b.Status, b.Assignee)
+	}
+	w = l.Write("b-1")
+	w.Guard("blocked", "")
+	w.Assignee("rig/refinery")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Writes()[1].Args; !slices.Equal(got, []string{"--if-status=blocked", "--if-assignee=", "--assignee=rig/refinery"}) {
+		t.Fatalf("an assignment alone is %q", got)
+	}
+	if b, _ := s.Row("b-1"); b.Assignee != "rig/refinery" {
+		t.Fatalf("the bead is assigned to %q", b.Assignee)
+	}
+}
+
 // A key's reading face reads the key and names it, and offers no write.
 func TestAViewReadsItsKey(t *testing.T) {
 	s := fake.New()

@@ -107,11 +107,15 @@ it cannot go without is its hypothesis: one sentence that says for whom, what
 changes and the signal that shows it worked. A rough sentence that sets the
 general direction is enough. When the operator has stated none, write one
 yourself and file at once, without asking first, with the handle and the
-boundaries too when you can. Wherever you report the filing, quote each field
-you wrote and call it your proposal. A Delivery carries an `Aim:` line instead,
-as above. An area that is only ever improvable has no hypothesis to answer, so
-it is not an epic, and its work is ordinary flow (`docs/epics.md`, "Epics are
-mortal").
+boundaries too when you can. Write each field from the outcome the epic seeks,
+even when you file the epic from inside a design for its work, so that it would
+still read true if a different design landed. Each closure check tests that
+outcome, and no field names a mechanism of the design, such as its judge, its
+schedule, the limits it sets or the records it keeps. Wherever you report the
+filing, quote each field you wrote and call it your proposal. A Delivery
+carries an `Aim:` line instead, as above. An area that is only ever improvable
+has no hypothesis to answer, so it is not an epic, and its work is ordinary
+flow (`docs/epics.md`, "Epics are mortal").
 
 The writer refuses an epic whose parent is not an epic when it has no
 hypothesis, and files nothing. It prints the new epic's id:

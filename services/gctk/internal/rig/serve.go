@@ -1,9 +1,11 @@
 package rig
 
 // A copy of a rig's UI: the rig's serve command, run from a checkout on a
-// loopback port of its own, inside the sandbox the pack's demo capture runs
-// in, and published at an address of its own only when its caller asks. A
-// demo capture points its engine at the copy's port, and a sitting gives the
+// loopback port of its own, as the pack's demo capture runs it, and published
+// at an address of its own only when its caller asks. The
+// copy is up once it answers on its port, or once its serve command prints the
+// URL of the app it brought up, such as an iOS app on a simulator. A demo
+// capture points its engine at the copy's app, and a sitting gives the
 // operator its address, so both see the UI through one path.
 //
 // A copy is a process group of its own, led by a gctk process that start
@@ -14,12 +16,14 @@ package rig
 // after the grace, and it ends last, so a copy whose leader is gone has
 // nothing left running.
 //
-// The serve command runs inside the sandbox that demo-engine-lib.sh, in the
-// pack's scripts directory, defines for a capture: it cannot read the city's
-// directories, reach a loopback port but its own or a Unix socket, or signal a
-// process outside, and it runs with none of the variables that point a command
-// at the city. The publish command is the city's, and it runs outside the
-// sandbox, beside the leader.
+// The serve command runs through demo-engine-lib.sh, in the pack's scripts
+// directory, which runs it as a capture of the checkout's rig runs. For a rig
+// whose app reads the city that is inside the capture's sandbox, where it
+// cannot read the city's directories, reach a loopback port but its own or a
+// Unix socket, or signal a process outside. For any other rig it is an
+// ordinary process. Either way it runs with none of the variables that point a
+// command at the city. The publish command is the city's, and it runs outside
+// any sandbox, beside the leader.
 //
 // A copy ends when its caller stops it. It also ends once the session that
 // started it has ended, through Gas City's orphan sweep, which this composes
@@ -68,7 +72,7 @@ const (
 )
 
 // SandboxLib is the file in the pack's scripts directory that defines the
-// capture's sandbox, which a copy's serve command runs inside.
+// capture's sandbox, through which a copy's serve command runs.
 const SandboxLib = "demo-engine-lib.sh"
 
 // serveDirName is the copies' directory under the git common directory, beside
@@ -77,6 +81,10 @@ const serveDirName = "gc-rig-serve"
 
 // tries bounds the port moves and the publishes tried again.
 const tries = 3
+
+// CopyStopGrace is how long a stopped copy's process group has between SIGTERM
+// and SIGKILL. A variable so a test can shorten it.
+var CopyStopGrace = time.Minute
 
 // SettleTime is how long a publish command must run before the copy counts as
 // published. A variable so a test can shorten it.
@@ -89,6 +97,9 @@ type Report struct {
 	// Checkout is the top of the checkout the copy runs from, which names it.
 	Checkout string `json:"checkout"`
 	Port     int    `json:"port,omitempty"`
+	// AppURL is where a running copy's app is: the URL its serve command
+	// printed, or the copy's own loopback URL.
+	AppURL string `json:"app_url,omitempty"`
 	// Address is set for a running copy, and empty when it has none.
 	Address *string `json:"address,omitempty"`
 	Log     string  `json:"log,omitempty"`
@@ -116,7 +127,7 @@ type ServeOpts struct {
 	Publish        bool
 	PublishCommand string
 	AddressPattern string
-	// Wait bounds how long start waits for the copy to answer on its port.
+	// Wait bounds how long start waits for the copy to be up.
 	Wait time.Duration
 	// ScriptsDir is the pack's scripts directory, which holds SandboxLib.
 	ScriptsDir string
@@ -334,15 +345,19 @@ func (r copyRec) publisherAlive() bool {
 	return ok && p.Parent == leader
 }
 
-// ready reports whether the copy answers on its port and holds it.
+// ready reports whether the copy is up: its serve command has printed its
+// app's URL, or the copy answers on its port and holds it.
 func (r copyRec) ready() (bool, string) {
+	if r.read("app_url") != "" {
+		return true, ""
+	}
 	port, ok := r.num("port")
 	pid, okp := r.num("pid")
 	if !ok || !okp {
 		return false, "its record names no port or no leader"
 	}
 	if !r.h.Answers(port) {
-		return false, fmt.Sprintf("nothing answers on port %d", port)
+		return false, fmt.Sprintf("nothing answers on port %d, and the serve command has printed no app's URL", port)
 	}
 	return r.owned(port, pid)
 }
@@ -381,11 +396,15 @@ func tail(path string, n int) string {
 
 func (r copyRec) running(checkout string) Report {
 	port, _ := r.num("port")
+	app := r.read("app_url")
 	addr := ""
-	if r.publisherAlive() {
+	if app == "" && r.publisherAlive() {
 		addr = r.read("address")
 	}
-	rep := Report{State: CopyRunning, Checkout: checkout, Port: port, Address: &addr, Log: r.path("serve.log")}
+	if app == "" {
+		app = fmt.Sprintf("http://127.0.0.1:%d/", port)
+	}
+	rep := Report{State: CopyRunning, Checkout: checkout, Port: port, AppURL: app, Address: &addr, Log: r.path("serve.log")}
 	if addr == "" {
 		rep.Detail = r.noAddressWhy()
 	}
@@ -395,6 +414,8 @@ func (r copyRec) running(checkout string) Report {
 // noAddressWhy says why a running copy has no address.
 func (r copyRec) noAddressWhy() string {
 	switch {
+	case r.read("app_url") != "":
+		return fmt.Sprintf("its serve command printed its app's URL, %s, and an address publishes only the copy's port, where the app is not, so it has no address", r.read("app_url"))
 	case !r.has("asked"):
 		return "it was started without --publish-command, so it has no address"
 	case r.read("publish_command") == "" || r.read("address_pattern") == "":
@@ -420,7 +441,7 @@ func (r copyRec) stopGroup() bool {
 		return true
 	}
 	_ = r.h.SignalGroup(pid, syscall.SIGTERM)
-	deadline := time.Now().Add(StopGrace)
+	deadline := time.Now().Add(CopyStopGrace)
 	for !r.h.GroupGone(pid) && time.Now().Before(deadline) {
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -460,10 +481,10 @@ func leaderArgv(dir string) ([]string, error) {
 // command runs, with another publish command or address pattern. When another
 // mapping holds the copy's port, a start moves a copy it ran to another port,
 // and fails, leaving the copy where it runs, for a copy it found. A start
-// reports a copy once it answers on its port and holds it, and stops a copy of
-// its command that does not within the wait, whether it ran the copy or found
-// it. A start holds the checkout's lock throughout, so one that finds another
-// start or a stop of the checkout under way waits for it to end first.
+// reports a copy once it is up, and stops a copy of its command that is not up
+// within the wait, whether it ran the copy or found it. A start holds the
+// checkout's lock throughout, so one that finds another start or a stop of the
+// checkout under way waits for it to end first.
 func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 	failed := func(reason, detail string) Report {
 		return Report{State: CopyFailed, Reason: reason, Checkout: checkout, Detail: detail}
@@ -502,11 +523,12 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 		if running := rec.read("command"); running != o.Command {
 			return failed("other-command", fmt.Sprintf("a copy of this checkout already runs another serve command (%s); stop it with gctk rig serve --stop, or serve from another checkout", running))
 		}
-		// The checkout's copy runs. It is reported once it answers, published
-		// first when an address is asked for. The start that ran it may have
-		// been cut off before its wait ended, so this start's wait decides, as a
-		// new copy's does.
-		if o.Publish {
+		// The checkout's copy runs. It is reported once it is up, published
+		// first when an address is asked for, unless its serve command printed
+		// its app's URL, since its port is not where that app is. The start
+		// that ran it may have been cut off before its wait ended, so this
+		// start's wait decides, as a new copy's does.
+		if o.Publish && rec.read("app_url") == "" {
 			// A copy whose publish command runs is reported at the address its
 			// record holds for that command. A start that asks for another
 			// publish command or address pattern, an empty one included, would
@@ -540,7 +562,7 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 		return rec.await(checkout, o.Wait)
 	}
 	for name, v := range map[string]string{"checkout": checkout, "command": o.Command, "scripts": o.ScriptsDir,
-		"grace_ms": strconv.FormatInt(StopGrace.Milliseconds(), 10)} {
+		"grace_ms": strconv.FormatInt(CopyStopGrace.Milliseconds(), 10)} {
 		if err := rec.write(name, v); err != nil {
 			_ = os.RemoveAll(rec.dir)
 			return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec.dir, err))
@@ -638,7 +660,7 @@ func (r copyRec) publishSaid(what string) bool {
 
 // launch runs a copy over the claimed record, on a free port, publishing it
 // when its record asks for an address the caller could give, and reports it
-// once it answers. A copy whose port another mapping already publishes is
+// once it is up. A copy whose port another mapping already publishes is
 // stopped and run again on another port, and one whose process group
 // survives the stop fails the start and keeps its record.
 func (c *Copies) launch(rec copyRec, checkout string, o ServeOpts) Report {
@@ -652,7 +674,7 @@ func (c *Copies) launch(rec copyRec, checkout string, o ServeOpts) Report {
 		if err != nil {
 			return failed("no-free-port", fmt.Sprintf("no free loopback port could be picked: %v", err))
 		}
-		rec.remove("pid", "start_id", "publisher", "rc", "serve.log", "publish.log", "address")
+		rec.remove("pid", "start_id", "publisher", "rc", "serve.log", "publish.log", "address", "app_url")
 		if err := rec.write("port", strconv.Itoa(port)); err != nil {
 			return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec.dir, err))
 		}
@@ -710,9 +732,9 @@ func (r copyRec) startLeader() (string, string) {
 	return "", ""
 }
 
-// await waits for the copy to answer on its port and hold it, and reports it.
-// A copy whose leader ends first, or that does not answer within the wait, is
-// stopped, and its record goes, unless its process group survives the stop.
+// await waits for the copy to be up, and reports it. A copy whose leader ends
+// first, or that is not up within the wait, is stopped, and its record goes,
+// unless its process group survives the stop.
 func (r copyRec) await(checkout string, wait time.Duration) Report {
 	port, _ := r.num("port")
 	deadline := time.Now().Add(wait)
@@ -723,7 +745,7 @@ func (r copyRec) await(checkout string, wait time.Duration) Report {
 		}
 		if !r.alive() {
 			rep := Report{State: CopyFailed, Reason: "serve-exited", Checkout: checkout,
-				Detail: fmt.Sprintf("the serve command ended before the copy answered on port %d", port),
+				Detail: fmt.Sprintf("the serve command ended before the copy answered on port %d or printed its app's URL", port),
 				Tail:   tail(r.path("serve.log"), 20)}
 			if rc, okRC := r.exitCode(); okRC {
 				rep.ExitCode = &rc
@@ -733,10 +755,10 @@ func (r copyRec) await(checkout string, wait time.Duration) Report {
 		}
 		if !time.Now().Before(deadline) {
 			if !r.stopGroup() {
-				return r.notStopped(checkout, fmt.Sprintf("the copy did not answer on port %d within %s (%s), so this start stopped it", port, wait, why))
+				return r.notStopped(checkout, fmt.Sprintf("the copy was not up within %s (%s), so this start stopped it", wait, why))
 			}
 			rep := Report{State: CopyFailed, Reason: "not-answering", Checkout: checkout,
-				Detail: fmt.Sprintf("the copy did not answer on port %d within %s (%s), so it was stopped", port, wait, why),
+				Detail: fmt.Sprintf("the copy was not up within %s (%s), so it was stopped", wait, why),
 				Tail:   tail(r.path("serve.log"), 20)}
 			_ = os.RemoveAll(r.dir)
 			return rep
@@ -781,7 +803,7 @@ func (c *Copies) Check(checkout string) Report {
 		}
 		port, _ := rec.num("port")
 		return Report{State: CopyNotAnswering, Checkout: checkout, Port: port, Log: rec.path("serve.log"),
-			Detail: fmt.Sprintf("the copy runs and does not answer on port %d as its own (%s); a start waits for it to, and stops it when it does not", port, why),
+			Detail: fmt.Sprintf("the copy runs and is not up (%s); a start waits for it to be, and stops it when it is not", why),
 			Tail:   tail(rec.path("serve.log"), 20)}
 	}
 	rep := Report{State: CopyDied, Checkout: checkout, Log: rec.path("serve.log"), Tail: tail(rec.path("serve.log"), 20)}
@@ -825,8 +847,8 @@ func (c *Copies) Stop(checkout string) Report {
 // --- the leader --------------------------------------------------------------
 
 // Lead runs the copy whose record is dir, on h, the host as the leader sees
-// it: the serve command, inside the sandbox, and the publish command each time
-// the leader gets SIGUSR1. It ends the copy's whole process group when the
+// it: the serve command, as the pack's demo capture runs one, and the publish
+// command each time the leader gets SIGUSR1. It ends the copy's whole process group when the
 // serve command ends or a signal ends the leader, and returns the code the
 // leader exits with. It sets its signals up before it records its pid, so a
 // signal start sends once it reads the pid reaches it.
@@ -835,7 +857,7 @@ func Lead(h host.Host, dir string) int {
 	sigs := make(chan os.Signal, 8)
 	h.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGUSR1)
 	me := h.Pid()
-	grace := StopGrace
+	grace := CopyStopGrace
 	if ms, ok := rec.num("grace_ms"); ok {
 		grace = time.Duration(ms) * time.Millisecond
 	}
@@ -882,12 +904,14 @@ func Lead(h host.Host, dir string) int {
 	defer logf.Close()
 	// The serve command writes through a relay the leader copies into the
 	// log, so the sandbox never has to grant a write to the record. A serve
-	// command whose leader is gone dies at its next write.
+	// command whose leader is gone dies at its next write. The leader reads its
+	// standard output for the app's URL on the way.
 	serve, err := h.Start(host.Spec{
 		Argv:    []string{"bash", "-c", rec.read("command")},
 		Dir:     checkout,
 		Env:     []string{"PORT=" + strconv.Itoa(port)},
 		Out:     logf,
+		Stdout:  readURL(rec, logf),
 		Relay:   true,
 		Sandbox: &host.Sandbox{Lib: filepath.Join(rec.read("scripts"), SandboxLib), Port: port, Prog: "gctk rig serve"},
 	})

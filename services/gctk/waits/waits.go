@@ -14,8 +14,8 @@
 // state lives at once in its status, its metadata stamps and the position of a
 // workflow poured for it, and the test goes once that state has one home.
 //
-// The package sits outside internal/ so the helm board, a separate module, can
-// import it.
+// The package sits outside internal/ so the helm board, which lies outside
+// services/gctk, can import it.
 package waits
 
 import (
@@ -99,6 +99,16 @@ var waitTypes = []string{ledger.EdgeBlocks, ledger.EdgeConditionalBlocks, ledger
 
 func isWait(e ledger.Edge) bool { return slices.Contains(waitTypes, e.Type) }
 
+// notHeld is why Holds answers a bead the store does not hold.
+const notHeld = "the store holds no such bead"
+
+// NotHeld reports whether err is Holds' answer for a bead the store does not
+// hold, such as one in another store, rather than a read that failed.
+func NotHeld(err error) bool {
+	var re *ledger.ReadError
+	return errors.As(err, &re) && re.Reason == notHeld
+}
+
 // Snapshot is one pass's read of what holds the beads named: the ledger's
 // snapshot of them and their ancestors with the store's blocked set, the
 // listing's view of each one's edges, and the runs that tell whether each is in
@@ -146,7 +156,7 @@ func Read(l *ledger.Ledger, ids ...string) (*Snapshot, error) {
 	var held []string
 	for _, id := range ids {
 		if _, ok := edges[id]; !ok {
-			s.missing[id] = &ledger.ReadError{ID: id, Reason: "the store holds no such bead"}
+			s.missing[id] = &ledger.ReadError{ID: id, Reason: notHeld}
 			continue
 		}
 		held = append(held, id)
@@ -246,20 +256,20 @@ func (s *Snapshot) readFlight(l *ledger.Ledger, ids []string) error {
 	if len(unsettled) == 0 {
 		return nil
 	}
-	runs, err := liveRuns(l)
+	runs, err := LiveRuns(l)
 	if err != nil {
 		return err
 	}
 	for _, r := range runs {
-		if r.bead == "" || !slices.Contains(unsettled, r.bead) || s.flight[r.bead] != "" {
+		if r.Bead == "" || !slices.Contains(unsettled, r.Bead) || s.flight[r.Bead] != "" {
 			continue
 		}
-		past, err := pastLoadContext(l, r.root)
+		past, err := pastLoadContext(l, r.Root)
 		if err != nil {
 			return err
 		}
 		if past {
-			s.flight[r.bead] = "workflow " + r.root + " past load-context"
+			s.flight[r.Bead] = "workflow " + r.Root + " past load-context"
 		}
 	}
 	return nil

@@ -40,9 +40,10 @@ type Places struct {
 }
 
 // Places asks Claude Code where a session started in each rig's checkout and in
-// the city's root keeps its memory, and reads one place per real path. A place
-// Claude Code names no directory for, or whose answer is not a directory, is
-// one it cannot learn. An error is a city whose root or rigs did not read.
+// the city's root keeps its memory, and reads one place per real path. A row of
+// the rig list that names no rig or no checkout is no place. A place Claude
+// Code names no directory for, or whose answer is not a directory, is one it
+// cannot learn. An error is a city whose root or rigs did not read.
 func (in *Intake) Places() (Places, error) {
 	root, err := in.Runtime.CityRoot()
 	if err != nil {
@@ -61,7 +62,7 @@ func (in *Intake) Places() (Places, error) {
 	var asks []ask
 	seen := map[string]bool{}
 	for _, r := range rigs {
-		if !seen[r.Path] {
+		if r.Name != "" && r.Path != "" && !seen[r.Path] {
 			seen[r.Path] = true
 			asks = append(asks, ask{r.Name, r.Path})
 		}

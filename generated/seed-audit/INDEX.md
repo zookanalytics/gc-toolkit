@@ -88,6 +88,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` |
 | [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` |
 | [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` |
+| [`mol-upstream-gc-rebase-finish`](formulas/mol-upstream-gc-rebase-finish.md) | `gascity` |
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` |
 | [`mol-validate`](formulas/mol-validate.md) | `city` |
@@ -127,8 +128,7 @@ runs to re-prime after compaction.
 |  | `gascity` | 2 | `rebase-conventions`, `polecat-patterns` |
 | polecat-codex | `gascity`, `gc-toolkit` | 1 | _none_ |
 | proactive | `gascity`, `gc-toolkit` | 1 | _none_ |
-| refinery **DIVERGES** | `gc-toolkit` | 2 | _none_ |
-|  | `gascity` | 2 | `rebase-conventions`, `refinery-rebase-handling` |
+| refinery | `gascity`, `gc-toolkit` | 1 | _none_ |
 | witness | `gascity`, `gc-toolkit` | 1 | _none_ |
 
 ## Path placeholders

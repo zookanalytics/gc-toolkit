@@ -48,10 +48,9 @@ Approving this record decides five things:
 3. **The ask to the move into gctk** (section 4). This work does not wait for
    the move, and the move takes its domains in the order of what their suites
    cost wherever it has no stronger reason.
-4. **What the macOS check runs** (section 5). It runs every test that runs code
-   on the host's tools. That is every shell suite today, and it gains the Go
-   tests of the adapters that start the host's tools, which today run only on
-   Linux.
+4. **What the macOS checks run** (section 5). Every test runs on the host's
+   tools: the macOS check runs every shell suite, and the macOS Go check runs
+   every Go test, as the go check does on Linux.
 5. **The first Delivery** (section 6). It has six units, each its own change.
 
 What it costs, and what waiting costs, are in section 6.
@@ -378,8 +377,8 @@ from the move:
 3. **A moved rule's tests start no process**, as section 2 says. The three verbs
    in the Debt section are the exceptions, until tk-ssm8qns.16.
 4. **An adapter that starts a host tool keeps a test that starts it.** That test
-   stays in the adapter's own package, where unit 6 runs it on the macOS check
-   as well.
+   stays in the adapter's own package, where the macOS Go check runs it on the
+   host's tools, as it runs every Go test.
 
 ### The code that stays in shell
 
@@ -405,23 +404,24 @@ in a UTF-8 locale, reads into the variable's name. One was in a shipped script
 (`liveness-sweep.test.sh`, fixed in 13fa10a16). So the host's tools include its
 bash and its locale, not only the BSD userland.
 
-**It keeps running every test that runs code on the host's tools.** Today that
-is every shell suite. Nearly every one runs shipped shell, or formula step text
-an agent runs on the host, through those tools. The few that check CI's own
-files cost seconds and stay in, unmarked. It does not run a sample of the
-suites, because a sample keeps the backstop only for the code the sample
-reaches.
+**It keeps running every shell suite.** Nearly every one runs shipped shell, or
+formula step text an agent runs on the host, through those tools. The few that
+check CI's own files cost seconds and stay in, unmarked. It does not run a
+sample of the suites, because a sample keeps the backstop only for the code the
+sample reaches.
 
-**It gains the Go tests that start the host's tools.** gctk's host adapter runs
-ps, lsof and kill, and its git adapter runs git, and CI runs their tests only
-on Linux today. That is a gap in the same backstop, and unit 6 closes it.
-
-**It never runs Go tests on fakes.** Those behave the same on both platforms
-and run once, on the go check.
+**Every Go test runs on macOS too, in a Go check of its own.** gctk's host
+adapter runs ps, lsof and kill, its git adapter runs git, and the pr package's
+lock test runs flock, so Go code meets the host's tools as shell does. The
+macOS Go check, go-macos, runs what the go check runs on Linux, `go vet ./...`
+and `go test ./...` in each Go module, beside the macOS check, so the suite's
+check gets no slower. It fails by name when a tool a test starts is missing, so
+no test skips quietly. It runs every Go test rather than a list of packages,
+because a list keeps the backstop only for the packages it names.
 
 So the macOS check shrinks as the shell does. A rule that moves into Go leaves
-the macOS check altogether, and that is why the move does more for this check
-than for the others.
+it for the Go checks, where its tests start no process, and that is why the
+move does more for this check than for the others.
 
 ## 6. The first Delivery
 
@@ -436,7 +436,7 @@ Each unit is its own change, filed as a Story once this design is approved.
 | 3 | **The compiled fake gc and its contract test.** A Go program in `services/gctk` answers the gc command line that the harness's bash stub answers, over the same store files and fault settings, and `test-harness.sh` installs it. Its contract test runs the same calls against a scratch store of the bd the city runs, as the store adapter's acceptance test does. `docs/testing.md` states the approach for whoever writes a test. | Each harness stub call goes from 12.7–19.1 ms to 3.2–4.7 ms. The kept harness suites spend few seconds in stubs: of those profiled, `pr-open.test.sh` spends about 10 and each of the others under 4, so the kept ground gains about 17 test-seconds here, and most of the fake's gain comes in units 4 and 5. While `pr-facts.test.sh` lives, its 35% stub share makes it about a quarter faster. | 1 |
 | 4 | **The engagement and conversation suites no Feature names move onto the fake:** stand-down, bead-rehome, converse-signoff, bead-context, conversation-merge-hold, first-reaction-dispose and converse-rework. | About 120 macOS test-seconds, projected from each suite's measured stub time and jq. | 3 |
 | 5 | **The work, shared and doctor suites with the most stub time move onto the fake:** work-submit, patrol-finding, check-armed-dispatch-owed, work-setup, feedback-miner, self-review-check and check-session-store-scope. | About 75 macOS test-seconds, projected the same way. | 3 |
-| 6 | **The macOS check runs the Go tests that start the host's tools:** gctk's host and git adapters, and the store adapter's tests that drive a stub gc. | It adds those packages' tests, each under a second on the go check, and their compiling, which for gctk took 4.3 s cold on the host. It closes the backstop gap in section 5. | — |
+| 6 | **Every Go test runs on macOS, in a Go check of its own:** go-macos runs `go vet ./...` and `go test ./...` in `services/gctk` and `services/helm` on macos-latest, as the go check does on Linux, beside the macOS check. | The suite's check gets no slower. On the macOS host every gctk test took 44 s from an empty build cache, and on Linux the board's vet and tests take about 2m40s, most of it its cold compile. It closes the backstop gap in section 5. | — |
 
 Once this design is approved, tk-ssm8qns also gets the cost order of section 4
 as a note, for its next checkpoint.

@@ -254,11 +254,11 @@ func RegistryJSON() ([]byte, error) {
 	return append(raw, '\n'), nil
 }
 
-// modulePath is the module every declaring package sits in. The registry names
-// a package by its path within it.
+// modulePath is gctk's import path, which every declaring package sits under.
+// The registry names a package by its path within it.
 const modulePath = "github.com/zookanalytics/gc-toolkit/services/gctk/"
 
-// callerPackage is the import path, within the module, of the package whose
+// callerPackage is the import path, within gctk, of the package whose
 // code is skip frames up the stack. A key's owner is the package that declared
 // it, so no declaration names its owner by hand.
 func callerPackage(skip int) string {

@@ -18,12 +18,12 @@
 #   the ≤140-codepoint length gate
 #   the retired board verb refuses and names helm-svc board
 #   the rig-enumeration helper leaving no trap installed on its caller
-#   the react verb: an already-reacted sling skip (exit 3) re-raised as react's
-#     own no-op code (5), distinct from a dispatch (0) and a real failure (4),
-#     a live-workflow sling skip (exit 4) re-raised as react's code (6), a
-#     dispatch-path sling skip (exit 5) re-raised as react's code (7), and a
-#     standing-record or feedback-pattern skip (exit 6) re-raised as react's
-#     code (8)
+#   the react verb, one call of gctk reaction sling: an already-reacted sling
+#     skip (exit 3) re-raised as react's own no-op code (5), distinct from a
+#     dispatch (0) and a real failure (4), a live-workflow sling skip (exit 4)
+#     re-raised as react's code (6), a dispatch-path sling skip (exit 5)
+#     re-raised as react's code (7), and a standing-record or feedback-pattern
+#     skip (exit 6) re-raised as react's code (8)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -669,6 +669,21 @@ grep -q -- '--set-metadata gc.takeaway=routed — folded onto this branch' "$TMP
 grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
   && ok "(EDGERIDE) …and the all-rider sitting is stamped settled (I1: no held marker without an edge)" \
   || bad "(EDGERIDE) all-rider takeaway left unsettled — I1 would flag it: $(cat "$TMP/updates")"
+
+# (EDGERECORD) a same-branch rider whose PR waits on the pending record has its
+# work on the branch, since only the refinery's publication of its pushed head
+# writes that record, and the record leaves it assigned to nobody.
+: > "$TMP/deps"; : > "$TMP/updates"
+printf 'A-w-rec|polecat/A-ONBR\n' >> "$TMP/branches"
+printf 'A-w-rec|pull_request_pending\n' > "$TMP/merge"
+sh "$SCRIPT" takeaway A-ONBR "routed — the rider waits on its PR" --by converse \
+   --waiting-on A-w-rec >/dev/null 2>&1 || true
+eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" \
+  "(EDGERECORD) a same-branch rider on the pending record is landed — no edge"
+grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
+  && ok "(EDGERECORD) …and the all-rider sitting is stamped settled" \
+  || bad "(EDGERECORD) a rider on the record left the sitting unsettled: $(cat "$TMP/updates")"
+: > "$TMP/merge"
 
 # (EDGECLOSED) the other landing proof: a same-branch rider that has MERGED.
 : > "$TMP/deps"; : > "$TMP/updates"
@@ -1509,6 +1524,24 @@ grep -qE '^bd update A-DETPR .*--status=open' "$TMP/updates" \
   && ok "(DETACHED) …with its park" || bad "(DETACHED) the park was lost: $(cat "$TMP/updates")"
 : > "$TMP/merge"
 
+# (RECORD) a bead whose PR waits on the pending record is assigned to nobody
+# while the landing order works it, so --release, which would leave the order
+# working it, is refused before anything is written, naming what does stop the
+# order: a human gate on the bead, or the PR's retirement.
+printf 'A-PEND|pull_request_pending\nA-HCHG|pull_request_head_changed\n' > "$TMP/merge"
+for rb in A-PEND A-HCHG; do
+  : > "$TMP/updates"; : > "$TMP/slings"; : > "$FAKE_CANCELS"
+  RCRC=0
+  sh "$SCRIPT" takeaway "$rb" "stopped" --release --no-wait >/dev/null 2>"$TMP/rcerr" || RCRC=$?
+  eq "$RCRC" "2" "(RECORD) --release on $rb, whose PR waits on the pending record, is refused"
+  eq "$(grep -c . "$TMP/updates" || true)|$(grep -c . "$TMP/slings" || true)|$(grep -c . "$FAKE_CANCELS" || true)" "0|0|0" \
+    "(RECORD) …before anything is written or cancelled"
+  { grep -q "human-gate.sh --subject $rb" "$TMP/rcerr" && grep -q "pr-dispose.sh --anchor $rb" "$TMP/rcerr"; } \
+    && ok "(RECORD) …naming a human gate on the bead and the PR's retirement" \
+    || bad "(RECORD) the refusal names neither (stderr: $(cat "$TMP/rcerr"))"
+done
+: > "$TMP/merge"
+
 # (NAMEDWAIT) a wait the call names is a claim on the bead as an edge is.
 : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/slings"
 NWRC=0
@@ -2017,22 +2050,25 @@ eq "$(find "$ENUMTMP" -name 'gctk-rig-map.*' | wc -l | tr -d ' ')" "0" \
 
 echo ""
 echo "── react: an already-reacted skip is a distinct exit, not a silent dispatch ──"
-# react is a thin wrapper over tools/gc-proactive.sh `sling`. That tool exits
-# RC_ALREADY_REACTED (3) when it refuses a bead a first reaction already runs
-# on, or an open conversation tracks — a no-op that dispatched nothing. react must re-raise that as
-# its OWN no-op code (5), distinct from a dispatch (0) and a real failure (4),
-# so an intake caller (operator-intake.sh) files its own conversation instead of
-# waiting for a reaction that never ran. Drive the REAL react over a fake sling whose exit
-# code is the one thing under test (rig resolution uses the gc `rig list` stub).
-cat > "$TMP/bin/gc-proactive.sh" <<'PRO'
+# react is one call of `gctk reaction sling`, which exits 3 when it refuses a
+# bead a first reaction already runs on, or an open conversation tracks — a
+# no-op that dispatched nothing. react must re-raise that as its OWN no-op code
+# (5), distinct from a dispatch (0) and a real failure (4), so an intake caller
+# (operator-intake.sh) files its own conversation instead of waiting for a
+# reaction that never ran. Drive the REAL react over a fake gctk whose exit code
+# is the one thing under test (rig resolution uses the gc `rig list` stub).
+cat > "$TMP/bin/gctk-react" <<'PRO'
 #!/usr/bin/env bash
+printf '%s GC_RIG=%s\n' "$*" "${GC_RIG:-}" >> "$REACT_CALLS"
 exit "${FAKE_SLING_RC:-0}"
 PRO
-chmod +x "$TMP/bin/gc-proactive.sh"
-export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
+chmod +x "$TMP/bin/gctk-react"
+SAVED_GCTK_BIN="$GCTK_BIN"; export GCTK_BIN="$TMP/bin/gctk-react" REACT_CALLS="$TMP/react-calls"
+: > "$REACT_CALLS"
 
 rrc=0; FAKE_SLING_RC=3 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr" || rrc=$?
 eq "$rrc" "5" "(REACT) an already-reacted skip (sling exit 3) becomes react exit 5"
+eq "$(cat "$REACT_CALLS")" "reaction sling tk-react1 GC_RIG=gc-toolkit" "(REACT) …from one call of gctk reaction sling, under the subject's rig"
 grep -q "a first reaction already runs on tk-react1, or an open conversation tracks it" "$TMP/rerr" \
   && ok "(REACT) …and names the no-op cause" \
   || bad "(REACT) react no-op message missing: $(cat "$TMP/rerr")"
@@ -2088,7 +2124,13 @@ grep -q "tk-react1 is a standing record or a feedback pattern" "$TMP/rerr5" \
 grep -q "already runs on\|live workflow\|routed or armed\|failed" "$TMP/rerr5" \
   && bad "(REACT) a kind skip must not read as another skip or as a failure" \
   || ok "(REACT) …and is neither of the other skips nor a failure"
-unset GC_PROACTIVE_TOOL FAKE_SLING_RC
+rrc=0; sh "$SCRIPT" react tk-react1 --nudge >/dev/null 2>&1 || rrc=$?
+eq "$rrc" "2" "(REACT) --nudge, which no caller passed, is no flag of react's"
+rrc=0; GCTK_BIN="$TMP/bin/no-such-gctk" sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr6" || rrc=$?
+eq "$rrc" "4" "(REACT) with no gctk binary to run, react fails (exit 4)"
+grep -q "there is no gctk binary to sling a first reaction with" "$TMP/rerr6" \
+  && ok "(REACT) …saying so" || bad "(REACT) react's missing-binary message missing: $(cat "$TMP/rerr6")"
+export GCTK_BIN="$SAVED_GCTK_BIN"; unset FAKE_SLING_RC REACT_CALLS
 
 echo ""
 echo "gc-helm takeaway + react (release run end, waiting-on edges, length gate, react no-op exit): $PASS passed, $FAIL failed"
