@@ -4,7 +4,7 @@
 #
 # THE SPLIT. gc-helm-svc.sh used to build the binary and then exec it. The
 # supervisor allows a proxy_process 5s to answer its health probe
-# (proxyProcessReadyTimeout); a warm build of this module takes ~12.5s and a
+# (proxyProcessReadyTimeout); a warm build of helm-svc takes ~12.5s and a
 # cold one 2m29s. So the build never finished inside the window, waitReady's
 # stopProcessGroup() killed it along with the start, and the next start began
 # again — 2,677 abandoned .helm-svc.build.* staging files in three days, and a
@@ -28,7 +28,7 @@
 # run dirs whose pid is gone and day-old un-owned scratch.
 #
 # These run the REAL scripts — copied into a throwaway rig tree, because they
-# derive the Go module from their own path — with a stub toolchain on GC_GO_BIN,
+# derive the repository root from their own path — with a stub toolchain on GC_GO_BIN,
 # a stub gc on GC_HELM_GC_BIN, stub uname and brew first on PATH, and
 # GC_HELM_GOTMP pointed at scratch under $TMPDIR. No live city, no network, no
 # real /var/tmp/gotmp. Covered:
@@ -45,7 +45,7 @@
 #   (REBUILD)     rebuilds when a source is newer than the binary
 #   (CURRENT)     up-to-date binary -> no toolchain call, exit 0
 #   (GOMOD)       a go.mod-only change still counts as newer
-#   (DEPMOD)      a change in a local replace-dep (services/gctk) forces a rebuild
+#   (DEPMOD)      a change in services/gctk, which helm-svc imports, forces a rebuild
 #   (ICU)         on macOS the build's cgo is pointed at Homebrew's keg-only icu4c
 #   (ICUKEEP)     CGO flags already set are kept, with the keg's appended
 #   (NOICU)       a prefix with no icu4c installed under it adds nothing, and says so
@@ -108,8 +108,13 @@
 #   (STATUSDEL)   a deletion-only change rebuilds — `find -newer` is blind to an
 #                 input that no longer exists, and the record must never name a
 #                 revision the binary was not built from
-#   (DEPREV)      a sibling-subtree revision change rebuilds when mtime is blind;
-#                 SOURCE_REV spans every local replace-dep, not just services/helm
+#   (DEPREV)      a services/gctk revision change rebuilds when mtime is blind;
+#                 SOURCE_REV spans every folder helm-svc compiles from, not just
+#                 services/helm
+#   (DEPBUMP)     a committed go.mod and go.sum change, a dependency's version
+#                 moving, rebuilds when mtime is blind
+#   (OTHER)       a commit that touches none of helm-svc's inputs moves no
+#                 revision and rebuilds nothing
 #   (STATUSPEND)  a published-but-not-serving binary is recorded as such
 #   (STATUSTMP)   the record is published by rename, leaving no staging file
 #   (BEHINDMAIN)  a checkout behind origin/main under the helm sources records
@@ -249,7 +254,8 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
     # The builder sources its icu4c cgo flags from beside itself.
     cp "$HERE/icu4c-cgo.sh" "$ROOT/assets/scripts/icu4c-cgo.sh"
     echo 'package main' > "$ROOT/services/helm/cmd/helm-svc/main.go"
-    printf 'module helm\n' > "$ROOT/services/helm/go.mod"
+    printf 'module example.invalid/fixture\n' > "$ROOT/go.mod"
+    printf 'example.invalid/dep v1.0.0 h1:one=\n' > "$ROOT/go.sum"
     # The REAL `gc service list --json` reports `service_name`, not `name`, and
     # carries `city_path` + a relative `state_root`. An earlier stub here said
     # `name`; the suite passed while the live gate matched nothing, so the order
@@ -347,27 +353,31 @@ touch_source() { touch "$ROOT/services/helm/cmd/helm-svc/main.go"; }
 # are the whole point of the record, and a fixture with no repo would let every
 # revision assertion pass vacuously against the empty string. Local and never
 # pushed, so the identity here is scaffolding, not provenance. What comes back
-# is the services/helm SUBTREE's tree hash — the identity the builder records,
-# which moves only when something under the module changes.
+# is the identity the builder records: git's hash of the `git ls-tree HEAD`
+# listing of helm-svc's inputs, go.mod, go.sum, services/helm and services/gctk,
+# which moves only when one of them changes.
+identity() { # <dir> -> helm-svc's revision at the dir's HEAD on stdout
+    local listing
+    listing="$(git -C "$1" ls-tree HEAD -- go.mod go.sum services/helm services/gctk 2>/dev/null)" || return 1
+    [ -n "$listing" ] || return 1
+    printf '%s\n' "$listing" | git -C "$1" hash-object --stdin 2>/dev/null
+}
 commit_fixture() { # <dir> -> the new revision on stdout
     git -C "$1" init -q >/dev/null 2>&1 || return 1
     git -C "$1" add -A >/dev/null 2>&1 || return 1
     git -C "$1" -c user.email=fixture@example.invalid -c user.name=fixture \
         -c commit.gpgsign=false commit -q -m "fixture" >/dev/null 2>&1 || return 1
-    git -C "$1/services/helm" rev-parse 'HEAD:./' 2>/dev/null
+    identity "$1"
 }
 
-# Wire a local replace-dependency into the fixture the way services/helm wires
-# the real prstatus core: a sibling services/gctk module reached through a
-# `=> ../gctk` replace in helm's go.mod. The stub toolchain never compiles it;
-# what matters is that the builder resolves the replace and folds the sibling's
-# sources into both its staleness identity and its mtime scan.
+# Give the fixture the services/gctk folder helm-svc compiles from, the way the
+# real board imports gctk's domain packages, prstatus among them. The stub
+# toolchain never compiles it; what matters is that the builder folds the
+# folder's sources into both its staleness identity and its mtime scan.
 add_gctk_dep() {
-    mkdir -p "$ROOT/services/gctk"
-    printf 'module gctk\n\ngo 1.26.5\n'   > "$ROOT/services/gctk/go.mod"
-    printf 'package prstatus\n'            > "$ROOT/services/gctk/prstatus.go"
-    printf 'package prstatus\n'            > "$ROOT/services/gctk/extra.go"
-    printf 'require gctk v0.0.0\n\nreplace gctk => ../gctk\n' >> "$ROOT/services/helm/go.mod"
+    mkdir -p "$ROOT/services/gctk/prstatus"
+    printf 'package prstatus\n'            > "$ROOT/services/gctk/prstatus/prstatus.go"
+    printf 'package prstatus\n'            > "$ROOT/services/gctk/prstatus/extra.go"
 }
 
 # `has`, not `//`: jq's alternative operator treats FALSE as absent, so a
@@ -507,7 +517,7 @@ has "$OUT" "helm-svc-stub ran:" "(REBUILD) the freshly built binary replaced the
 # --- case: go.mod-only change still counts -------------------------
 fixture
 cache_binary
-touch "$ROOT/services/helm/go.mod"
+touch "$ROOT/go.mod"
 run_build
 eq "$RC" 0 "(GOMOD) exits 0"
 present "$RECORD" "(GOMOD) a go.mod-only change triggers a rebuild"
@@ -524,16 +534,16 @@ has "$OUT" "up to date" "(CURRENT) says so"
 absent "$RECORD" "(CURRENT) the toolchain was never invoked"
 present "$GOTMP/go-link-old" "(CURRENT) the sweep is scoped to builds; scratch is untouched"
 
-# --- case: a change in a local replace-dep (services/gctk) rebuilds -----------
-# helm-svc embeds services/gctk — the shared prstatus core the PR label writer
-# also derives from — through a `=> ../gctk` replace. A change confined to that
-# sibling touches no file under services/helm, so unless the mtime scan spans the
-# replace-deps the builder reports the binary current while the label path has
-# already moved, and the board and the label diverge again.
+# --- case: a change in services/gctk, which helm-svc imports, rebuilds ---------
+# helm-svc compiles gctk's domain packages, among them the shared prstatus core
+# the PR label writer also derives from. A change confined to services/gctk
+# touches no file under services/helm, so unless the mtime scan spans every
+# folder the binary compiles from, the builder reports the binary current while
+# the label path has already moved, and the board and the label diverge again.
 fixture
 add_gctk_dep
 cache_binary
-touch "$ROOT/services/gctk/prstatus.go"
+touch "$ROOT/services/gctk/prstatus/prstatus.go"
 [ -z "$(find "$ROOT/services/helm" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
     && ok "(DEPMOD) the change is confined to services/gctk — nothing under services/helm is newer" \
     || bad "(DEPMOD) something under services/helm is newer; the case would not isolate the sibling"
@@ -1131,32 +1141,76 @@ eq "$RC" 0 "(STATUSDEL) the next tick exits 0"
 present "$RECORD" "(STATUSDEL) the deleted input forces a rebuild"
 eq "$(status_field binary_rev)" "$REV_E" "(STATUSDEL) so binary_rev names a revision the binary was really built from"
 
-# --- case: a sibling-subtree revision change rebuilds when mtime is blind -----
+# --- case: a services/gctk revision change rebuilds when mtime is blind -------
 # The revision identity catches what `find -newer` cannot see — a deletion. It
-# must span the replace-deps too: a file removed from services/gctk leaves
-# nothing newer than the binary, so only a SOURCE_REV that covers the sibling's
-# subtree forces the rebuild. Without it the record names a revision the binary
-# was never built from, exactly the STATUSDEL failure but one module over.
+# must span every folder the binary compiles from: a file removed from
+# services/gctk leaves nothing newer than the binary, so only a SOURCE_REV that
+# covers services/gctk forces the rebuild. Without it the record names a
+# revision the binary was never built from, exactly the STATUSDEL failure but
+# one folder over.
 fixture
 add_gctk_dep
-commit_fixture "$ROOT" >/dev/null 2>&1 || true
-GCTK_REV1="$(git -C "$ROOT/services/gctk" rev-parse 'HEAD:./' 2>/dev/null || true)"
+GCTK_REV1="$(commit_fixture "$ROOT" || true)"
 run_build
 eq "$RC" 0 "(DEPREV) the first build exits 0"
-has "$(status_field source_rev)" "$GCTK_REV1" "(DEPREV) source_rev spans the replaced sibling's subtree"
+eq "$(status_field source_rev)" "$GCTK_REV1" "(DEPREV) source_rev is the revision over every folder helm-svc compiles from"
 rm -f "$RECORD"
-git -C "$ROOT" rm -q "services/gctk/extra.go" >/dev/null 2>&1 || true
-commit_fixture "$ROOT" >/dev/null 2>&1 || true
-GCTK_REV2="$(git -C "$ROOT/services/gctk" rev-parse 'HEAD:./' 2>/dev/null || true)"
+git -C "$ROOT" rm -q "services/gctk/prstatus/extra.go" >/dev/null 2>&1 || true
+GCTK_REV2="$(commit_fixture "$ROOT" || true)"
 [ -n "$GCTK_REV2" ] && [ "$GCTK_REV2" != "$GCTK_REV1" ] \
-    && ok "(DEPREV) the sibling deletion advanced its subtree" \
-    || bad "(DEPREV) the sibling subtree did not advance; the case cannot reach the blind spot"
-[ -z "$(find "$ROOT/services/helm" "$ROOT/services/gctk" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
+    && ok "(DEPREV) the services/gctk deletion advanced the revision" \
+    || bad "(DEPREV) the revision did not advance; the case cannot reach the blind spot"
+[ -z "$(find "$ROOT/go.mod" "$ROOT/go.sum" "$ROOT/services/helm" "$ROOT/services/gctk" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
     && ok "(DEPREV) the deletion leaves nothing newer — the mtime test is blind here" \
     || bad "(DEPREV) something is newer than the binary; the case would not reach the revision path"
 run_build
 eq "$RC" 0 "(DEPREV) the next tick exits 0"
-present "$RECORD" "(DEPREV) a sibling-subtree revision change forces a rebuild"
+present "$RECORD" "(DEPREV) a services/gctk revision change forces a rebuild"
+eq "$(status_field binary_rev)" "$GCTK_REV2" "(DEPREV) and binary_rev names the revision it was built from"
+
+# --- case: a dependency's version moving rebuilds when mtime is blind ---------
+# A bump rewrites go.mod and go.sum, which pin every module helm-svc compiles.
+# Their dates are put back behind the binary, so only the revision sees it.
+fixture
+add_gctk_dep
+BUMP_REV1="$(commit_fixture "$ROOT" || true)"
+run_build
+eq "$RC" 0 "(DEPBUMP) the first build exits 0"
+rm -f "$RECORD"
+printf 'module example.invalid/fixture\n\nrequire example.invalid/dep v1.0.1\n' > "$ROOT/go.mod"
+printf 'example.invalid/dep v1.0.1 h1:two=\n' > "$ROOT/go.sum"
+BUMP_REV2="$(commit_fixture "$ROOT" || true)"
+age_mins "$ROOT/go.mod" 60
+age_mins "$ROOT/go.sum" 60
+[ -n "$BUMP_REV2" ] && [ "$BUMP_REV2" != "$BUMP_REV1" ] \
+    && ok "(DEPBUMP) the bump advanced the revision" \
+    || bad "(DEPBUMP) the revision did not advance; the case cannot reach the blind spot"
+[ -z "$(find "$ROOT/go.mod" "$ROOT/go.sum" "$ROOT/services/helm" "$ROOT/services/gctk" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
+    && ok "(DEPBUMP) the bump leaves nothing newer — the mtime test is blind here" \
+    || bad "(DEPBUMP) something is newer than the binary; the case would not reach the revision path"
+run_build
+eq "$RC" 0 "(DEPBUMP) the next tick exits 0"
+present "$RECORD" "(DEPBUMP) a go.mod and go.sum change forces a rebuild"
+eq "$(status_field binary_rev)" "$BUMP_REV2" "(DEPBUMP) and binary_rev names the bumped revision"
+
+# --- case: a commit that touches none of helm-svc's inputs --------------------
+# The revision spans helm-svc's inputs and nothing else, so a merge to main that
+# touches none of them neither rebuilds the binary nor restarts the service.
+fixture
+add_gctk_dep
+mkdir -p "$ROOT/docs"
+echo 'notes' > "$ROOT/docs/notes.md"
+OTHER_REV1="$(commit_fixture "$ROOT" || true)"
+run_build
+eq "$RC" 0 "(OTHER) the first build exits 0"
+rm -f "$RECORD"
+echo 'more notes' >> "$ROOT/docs/notes.md"
+OTHER_REV2="$(commit_fixture "$ROOT" || true)"
+eq "$OTHER_REV2" "$OTHER_REV1" "(OTHER) a commit outside helm-svc's inputs leaves its revision where it was"
+run_build
+eq "$RC" 0 "(OTHER) the next tick exits 0"
+absent "$RECORD" "(OTHER) and builds nothing"
+has "$OUT" "up to date" "(OTHER) the binary is current"
 
 # --- case: published but not serving -----------------------------------------
 fixture
@@ -1193,7 +1247,7 @@ grep -q 'mv -f "$tmp" "$STATUS"' "$BUILD" \
 # off-main keeps its binary current with THAT branch and reports a clean row.
 # behind_main is the axis that sees the gap against main — and it must NOT feed
 # the rebuild decision, because a checkout may be off-main on purpose and the
-# SOURCE_REV subtree-hash identity is what decides a build.
+# SOURCE_REV identity is what decides a build.
 fixture
 commit_fixture "$ROOT" >/dev/null 2>&1 || true
 A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
@@ -1219,7 +1273,7 @@ rm -f "$RECORD" "$RECORD.out"
 date +%s > "$STATE/origin-fetch-at"
 run_build
 eq "$RC" 0 "(BEHINDMAIN) the next tick exits 0"
-absent "$RECORD" "(BEHINDMAIN) behind-main alone never rebuilds — the subtree-hash identity still decides"
+absent "$RECORD" "(BEHINDMAIN) behind-main alone never rebuilds — the revision identity still decides"
 has "$OUT" "up to date" "(BEHINDMAIN) the binary is current with its own sources"
 BEHIND2="$(status_field behind_main)"
 [ "${BEHIND2:-0}" -ge 1 ] 2>/dev/null \
@@ -1274,11 +1328,10 @@ eq "$(cat "$STATE/origin-fetch-at" 2>/dev/null)" "$SENTINEL" \
     "(FETCHFAIL) a fresh marker keeps the next tick from re-fetching before the TTL"
 
 # --- case: a checkout reached through a symlinked path still counts its gap ----
-# The builder derives its module paths with logical `pwd`, and git answers the
-# repo root with symlinks resolved. Matched as strings, the two spellings
-# disagreed whenever the checkout was reached through a symlink: every helm path
-# dropped out, the block skipped its fetch, and behind_main read 0 for a
-# checkout that was behind. Run the build through a link to the fixture root.
+# The builder derives the repository root with logical `pwd`, while git answers
+# for the checkout with symlinks resolved, so the two spell one checkout
+# differently when it is reached through a symlink. The gap and the fetch must
+# not depend on the spelling. Run the build through a link to the fixture root.
 fixture
 commit_fixture "$ROOT" >/dev/null 2>&1 || true
 A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
