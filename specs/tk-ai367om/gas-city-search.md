@@ -96,9 +96,8 @@ no edge, so bd's cycle check never meets it (`types.IsSchedulingEdge`).
 
 **What it composes.** Native writes in one order. First it removes the
 conversation's `blocks` edges onto its closed return gates (`bd dep remove`),
-while the stay's convoys keep the conversation waiting, because the landing
-order reads a conversation that waits on a closed return gate as one whose
-return is due. Then, for each bead it names that has no open return gate of the
+while the stay's convoys keep the conversation waiting, so a return reads only
+the gates of its own stay. Then, for each bead it names that has no open return gate of the
 conversation's, it runs one
 `bd gate create --type stay-return --await-id <the bead> --blocks <the conversation>`.
 It finds the conversation's open gate on a bead among the gates that block the
@@ -109,9 +108,9 @@ conversation's edge onto it in one transaction (`runGateCreateProxiedServer` in
 `gateCreateCmd` creates the gate, then adds the edge, then commits, so a create
 that stops between the two leaves a gate that nothing waits on. The verb's
 re-run finds no gate the conversation waits on for that bead and files one,
-and the landing order closes the stray (closing it, below). Then it writes the
-conversation's `blocks` edge onto each of its other open return gates
-(`bd dep add`). Last it removes the conversation's `blocks` edges onto a convoy
+and the landing order closes the stray (closing it, below). An open gate keeps
+the conversation's edge from its create, so a bead whose gate is still open
+gets no second one. Last it removes the conversation's `blocks` edges onto a convoy
 (`bd dep remove`), which leaves a park or any other wait on it in place. The
 verb carries the sitting's one intent, to come back when this work is ready for
 the operator's next decision, through every step: it finds the conversation's
@@ -153,10 +152,11 @@ in-progress conversation waits on, once it is five minutes old, the order's
 cooldown, so a gate whose edge bd is still writing is left to a later pass. It
 reads the open gates with `bd gate list`: a gate's bead is its await id, and its
 conversation is its dependent through a `blocks` edge
-(`bd dep list <gate> --direction=up --type blocks`). Once a conversation waits on a return gate that has closed, the pass
-removes the conversation's `blocks` edges onto its open return gates
-(`bd dep remove`), so bd reads the conversation as ready at the first gate to
-close, and the other gates keep watching their beads. The review-lanes design
+(`bd dep list <gate> --direction=up --type blocks`). It removes no edge. A
+conversation that waits on several return gates reads ready once each of them
+has closed, which is bd's rule for a bead with several `blocks` edges, so the
+sitting comes back once every piece of work it stays for is ready or closed.
+The review-lanes design
 placed the wake at this point of the pass, in its section 9
 (`specs/tk-1tfzr71.108/design.md`).
 
@@ -189,8 +189,9 @@ placed the wake at this point of the pass, in its section 9
   asks `conversation.Staying` with them (`staying` in
   `services/gctk/prstatus/gates.go`), and `gctk bead holds`, which the rig board
   reads, reads a bead with a `waits-for` edge of its own as unjudged, not
-  blocked. One gate on each bead, under the conversation's `blocks` edges, with
-  its edges onto the rest removed at the first close, keeps the wait those
+  blocked. The return now comes once every gate has closed, bd's own rule for
+  the conversation's `blocks` edges, so no wait that clears at the first close
+  is needed, and one gate on each bead under those edges keeps the wait those
   readers read.
 
 ## The sleep and the wake: Gas City's, unchanged

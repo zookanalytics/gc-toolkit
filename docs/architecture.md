@@ -371,7 +371,9 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   store on a return gate, and Gas City sleeps the sitting and wakes it with its
   thread when the return is due. When a round ends at the head the refinery
   validated, the landing order puts the conversation's hold on the PR's merge
-  and releases the return. A visit to the sitting and a fresh context for it
+  and closes that work's return gate. A sitting that stays for several pieces
+  of work comes back once each is ready for the operator or has closed. A
+  visit to the sitting and a fresh context for it
   leave the store alone, so the return outlasts both. On each return the
   sitting compares the work with what was agreed, tells the operator where it
   matches and where it departs, and waits for the operator, even when it finds
