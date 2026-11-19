@@ -569,8 +569,8 @@ form. You were offered it and took the fix above.
 
 Dropped from the ask gc-3znzo8 first held: that Gas City unset the key when it
 lifts the fence. Once nothing writes the fence in the city, no new bead carries
-the key, and the 321 that keep it are closed. You have not ruled on dropping
-it. Conversation tk-fp92h81 proposes it.
+the key, and the 321 that keep it are closed. Conversation tk-fp92h81 put the
+drop to you apart from the course, and you answered "yes, go".
 
 ## 7. The units
 
