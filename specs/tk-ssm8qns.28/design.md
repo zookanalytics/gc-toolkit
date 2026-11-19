@@ -302,9 +302,10 @@ flowchart TB
   call swaps onto `standing/person` in the same change, and nothing else there
   changes. Rule 7 of
   [the rules a domain move follows](../../docs/gctk-architecture.md#the-rules-a-domain-move-follows)
-  makes that exception for a shared shell definition a move deletes. The
-  definition here is Go, and a call left on it would not build, so the same
-  exception applies.
+  makes that exception for a shared definition a move deletes, in shell or in
+  Go. A call left on a deleted Go definition would not build, and keeping the
+  definitions for the retiring callers would leave `prstatus` holding rules
+  this move takes from it.
 
 The move follows those rules whole. The intent moves with every caller (rule
 1), dependencies point down, as the figure shows (rule 2), `standing` takes

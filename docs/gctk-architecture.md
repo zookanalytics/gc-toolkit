@@ -701,9 +701,10 @@ rule above, which turns those answers into a group and a move.
    the deletion plan retires
    ([built-once-target.md](built-once-target.md#the-rules), rule 1). A caller
    there is replaced by the member that retires it, and that member's
-   replacement asks the domain. The one exception is a shared shell definition
-   that the move deletes. Each of its call sites swaps onto the domain in the
-   same change, in retiring code too, and nothing else there changes.
+   replacement asks the domain. The one exception is a shared definition that
+   the move deletes, in shell or in Go. Each of its call sites swaps onto the
+   domain in the same change, in retiring code too, and nothing else there
+   changes.
 
 ## Debt
 
