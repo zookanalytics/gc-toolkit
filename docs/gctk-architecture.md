@@ -1,6 +1,6 @@
 ---
 name: gctk architecture — the CLI, its callers, the ledger and the adapters
-description: The shape gctk is built to. Its CLI is a product, and every verb on it is called by an agent, a hook or an order and defends the feature it adds over the native call it wraps, or names the debt it contains and what retires it. The page covers that bar, the surface and its caller classes, the rule that names a verb, the rule that admits an order and what an order guarantees, the code that parallels Gas City's, the ledger, the adapters, how commands, orders, doctor checks and the board compose the domains, the contract of `bead holds`, which answers what holds a bead, and the rules a domain move follows. Read it before moving logic into gctk, adding or naming a verb or an order, declaring a metadata key, or deciding what holds a bead.
+description: The shape gctk is built to. Its CLI is a product, and every verb on it is called by an agent, a hook or an order and defends the feature it adds over the native call it wraps, or names the debt it contains and what retires it. The page covers that bar, the surface and its caller classes, the rule that names a verb, the rule that admits an order and what an order guarantees, the code that parallels Gas City's, the ledger, the adapters, how commands, orders, doctor checks and the board compose the domains, the contract of `bead holds`, which answers what holds a bead, the contract of `bead stands`, which answers where a bead stands and whose move it is, and the rules a domain move follows. Read it before moving logic into gctk, adding or naming a verb or an order, declaring a metadata key, or deciding what holds a bead or whose move it is.
 ---
 
 # gctk architecture
@@ -21,7 +21,8 @@ surface with each verb's caller class, intent and defense, the rule that names
 a verb, the rule that admits an order and what an order guarantees, the code
 that parallels Gas City's, the ledger, the adapters, how commands, orders,
 doctor checks and the helm board compose the domains, the contract of
-`bead holds`, where the one rule for what holds a bead lives, the rules
+`bead holds`, where the one rule for what holds a bead lives, the contract of
+`bead stands`, where the one rule for whose move a bead is lives, the rules
 every domain move follows, and the debt where the built code falls short of
 that shape.
 
@@ -90,12 +91,13 @@ the verbs, and a package that no verb of any class reaches is dead code.
 
 A row's defense cell carries the verb's whole meaning. A verb gets a contract
 section below only when no steward doc holds its semantics, and its row links
-that section. `bead holds` has one, because no other doc defines what holds a
-bead.
+that section. `bead holds` and `bead stands` have one each, because no other
+doc defines what holds a bead or whose move it is.
 
 | Verb | Caller class | Intent | Defense |
 |---|---|---|---|
 | `gctk bead holds [--db <path>] <bead>...` | agent, hook, order | what holds each bead, in the store `--db` names or the one gc routes the first bead to: one status, the waits behind it, its own pending waits and when the last one landed, why it is in flight, its arm, and its wait edges into another store | It puts "is this blocked?" in one place, where [the census](../specs/tk-ssm8qns.2/blocked-census.md) finds 46 places deciding it by 27 rules, and it gives one consistent reading where the store's blocked mark, its close rule and its blocked listing disagree ([its contract](#the-bead-holds-contract)). A raw row read stays native, and any question about what holds a bead, or what its close waits on, is this verb. |
+| `gctk bead stands [--db <path>] <bead>...` | agent | where each bead stands and whose move it is: its group in the helm board's words, the rule that placed it there, what a person owes when the bead is itself the ask, the beads that rule names, and how far the city carries it without a person | Gas City and bd answer whether a bead is ready or blocked, and name a bead's next actor only by a label a writer sets on that bead (`hold:mayor`, `hold:external`, bd's `human`), so none answers whose move a bead is from what it waits on, the pull request it carries or a conversation about it ([the search](../specs/tk-ssm8qns.28/gas-city-search.md)). The verb gives the answer the helm board's rig read gives, so an agent's read of a bead and the board cannot disagree ([its contract](#the-bead-stands-contract)). |
 | `gctk bead arm <bead> --target <rig>/<pool> [--on <formula>] --reason <text>` | agent, hook | start this bead by itself once nothing holds it, on a formula | One intent over gc's lower-level sling and routing calls. Gas City keeps no launch for later ([warrants.md](warrants.md#deferred-dispatch-residual)), so the arm records one: the caller states what starts and on what, and the start performs every later step. It records the formula it pours, the one named or the target's default from the city's config, so the root each start pours carries the arm's token. It refuses an arm that could never fire or would fire wrong: a closed, dispatched or non-open bead, another arm already on it, a target with no formula, and a wait edge into another store, which bd never holds a bead on. |
 | `gctk bead disarm <bead> --reason <text>` | agent, hook | stop an armed bead from starting by itself | The other half of the arm's intent. It takes the bead's dispatch lock, so once it exits 0 no start has the bead in flight and none will send it, which is what lets a stop release the bead's holds after it. |
 | `gctk bead start-armed` | order | start each armed bead that nothing holds any more, exactly once, and retire the arm of a bead that closed or whose work another path delivered | Gas City slings only when asked. Its `cascade-nudge-on-blocker-close` order nudges the assignees of a closed bead's dependents and slings nothing ([warrants.md](warrants.md#deferred-dispatch-residual)). The start selects by `bd ready` with the flags Gas City renders for a pool's routed demand, so it sends what the pool would serve, and holds back the `waits-for` edges and waits into another store that bd cannot judge. It sends each arm once from Gas City's own records: `gc sling`'s exit 3 when a live workflow works the bead, and the token `arm:<bead>@<armed at>` on the root each start pours, which a start searches after an earlier attempt, so a pour whose run has ended is not made again. A root Gas City left unfinished is neither, so the start asks a person about it. Each start runs under the bead's dispatch lock, which `arm` and `disarm` take too, and the retire of a delivered bead covers the run another path poured, which carries no token ([deferred-dispatch.md](deferred-dispatch.md#exactly-once)). |
@@ -536,11 +538,13 @@ bubble's clock, and no rule's test needs a tool on the machine.
   questions the commands ask, against one snapshot per render, so it shows what
   the loops act on. Its rig page reads each rig's store through `listing`, one
   pass that lists the store once, decodes each key the page shows through the
-  listing's declarations, and answers `waits`, `prstatus` and `queue` from those
-  rows. The page lists work in the order `queue` gives for the open work the
-  page names, the order the work is expected to land in. Its ranking, bands and
-  grouping are its own. A question that a loop also acts on belongs to a domain,
-  not to the board.
+  listing's declarations, and asks `standing` over those rows where each row's
+  bead stands and whose move it is, which `standing` answers from `waits`,
+  `prstatus` and `queue`. The page lists work in the order `queue` gives for
+  the open work the page names, the order the work is expected to land in. Its
+  words, ranking, bands and grouping are its own, and so is the fold of a
+  conversation into the row of the question it answers. A question that a loop
+  or an agent also asks belongs to a domain, not to the board.
 
 ## The `bead holds` contract
 
@@ -599,6 +603,74 @@ held bead is the one the store's own answers lead to, parent by parent. It
 never walks the graph to compute a hold and never judges a gate, so a change in
 the store's rule reaches every caller at once, and the pack's use of that rule
 is one package.
+
+## The `bead stands` contract
+
+`gctk bead stands` answers where a bead stands and whose move it is, through
+the `standing` package, and the helm board's rig read asks the package the same
+question for each row it draws. The answer is in the board's words.
+
+- **Its group.** `waiting-on-you` when a person owes the next move, `queued`
+  when the city takes it as things stand, `not-moving` when nothing moves it as
+  things stand, and `closed`. A bead with no move of its own has no group: a
+  conversation that answers a question, which the question's row carries, an
+  epic or a Delivery with open members, and a gate that is no human gate.
+- **The rule that placed it.** The first of these that applies answers:
+  1. `closed`.
+  2. `ask`: the bead is itself what a person owes, and the answer names the
+     ask. It is a `question` when it is an open human gate, or an open decision
+     that does not wait on work of its own first. It is a `conversation` when
+     it is an open conversation its sitting does not stay in, which answers no
+     open human gate and tracks no decision that asks. It is a `pull-request`
+     when its pull request reads needs-review or needs-attention, a `ruling`
+     when it is an epic whose members have all closed or a landed Delivery,
+     and `routed-to-you` when it is any other open bead only a person clears.
+     Work that carries `hold:mayor` asks nothing, because Gas City's hold
+     names the Product Owner as its next actor.
+  3. `own-wait` or `further-along`: a human gate, or a bead only a person
+     clears, holds it through a wait of its own, or further along its waits,
+     an ancestor's included.
+  4. `parked`: a gate that is no human gate holds it, its own or an
+     ancestor's.
+  5. `status`: its status is one no pool offers, such as deferred.
+  6. `staying`: it is a conversation its sitting stays in, or a decision a
+     ruling left waiting on the work it sent. It is a person's move again once
+     that work closes.
+  7. `answers`, `members` or `gate`: it has no move of its own, as above.
+  8. `in-flight`: it is work in flight by steering.md's definition
+     ([In flight](steering.md#in-flight)), and where its pull request stands
+     is part of the answer.
+  9. `scheduled`: it is work that is armed, routed or assigned, and no
+     dispatch hold holds it.
+  10. `not-scheduled`: it is any other work.
+
+  A read that cannot answer the part a rule needs answers `unread` at that
+  rule, and says why.
+- **The beads the rule names.** Its waits, the gate or the bead a person owes,
+  or the question a conversation answers.
+- **How far the city carries it.** A bead advances when it is queued and every
+  bead it waits on advances, and an epic or a Delivery advances when every
+  open member does. Any other bead is stuck on the bead that stops it. That is
+  the bead its rule names when the rule is about another bead: the gate or the
+  bead a person owes, the gate that parks it, or the question a conversation
+  answers. A queued bead, an epic or a Delivery is stuck on what stops the
+  first of its waits or members that does not advance. Any other bead is stuck
+  on itself. A bead's frontier is `ready` when nothing holds it, as
+  `bead holds` answers, and otherwise `advancing` or `stuck` by the beads it
+  waits on.
+
+A bead only a person clears is an open decision, a conversation, or any bead
+assigned to `human`, the operator's queue. That rule, the rule for a human gate
+and the rule for a bead that waits on work of its own first are the rules about
+one bead. They sit in `standing/person`, beneath `prstatus`, which reads them
+for what holds a pull request.
+
+`standing` computes no wait, no pull request's status and no place in the
+queue. It takes what holds a bead from `waits`, where a pull request stands and
+the human gates and beads a person owes along a bead's waits from `prstatus`,
+whether the city takes a bead from `queue`, and a conversation's shape from
+`conversation`. What it adds is the rule above, which turns those answers into
+a group and a move.
 
 ## The rules a domain move follows
 
@@ -660,6 +732,15 @@ why a reader must know it, and the work that retires it.
   counts as its human gates the ones whose rows name it and the ones among its
   blockers that are not closed. The board member (tk-1tfzr71.24) retires that
   read or writes the warrant it stands on.
+- **A bead's standing is decided outside `standing`.** The helm board's rig
+  read decides each row's group itself (`services/helm/internal/rigboard`,
+  `table.go` and `build.go`), and `assets/scripts/bead-context.sh` decides
+  again, in jq, whether a bead advances, so the board and an agent's read of a
+  bead disagree where [the contract](#the-bead-stands-contract) settles them.
+  The rules about one bead sit in `prstatus`, and `pr` keeps its own copy of
+  the rule for a human gate. The effort that builds the design
+  (tk-ssm8qns.27) moves each onto `standing` and `standing/person` and deletes
+  the copies.
 - **`epic create`, `session title` and `rig`'s checks start processes outside
   an adapter.** `epic create` files the epic with its own `gc bd create`,
   `session title` runs `gc session rename` and `gc session submit`, and the
