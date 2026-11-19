@@ -810,3 +810,64 @@ func TestListObjectAnswersAnObjectAtExitZero(t *testing.T) {
 		t.Errorf("a list without the text: %+v", r)
 	}
 }
+
+func TestSetStateSwapsTheDimensionsLabelAndRecordsAnEvent(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open","labels":["x","situation:active"]}]`, "")
+	r := f.gc("bd", "set-state", "a", "situation=cleared", "--reason", "fixed")
+	if r.status != 0 || r.out != "✓ Set situation = cleared on a\n  Previous: active\n  Event: new-2\n" {
+		t.Fatalf("set-state: %d %q %s", r.status, r.out, r.err)
+	}
+	if r := f.gc(readFlag, "field", "a", "labels"); r.out != `["x","situation:cleared"]`+"\n" {
+		t.Errorf("labels %q, want the dimension's one label swapped", r.out)
+	}
+	for field, want := range map[string]string{"status": "closed", "issue_type": "event", "priority": "4",
+		"title": "State change: situation → cleared", "description": "Changed situation from active to cleared\n\nReason: fixed"} {
+		if r := f.gc(readFlag, "field", "new-2", field); r.out != want+"\n" {
+			t.Errorf("the event's %s is %q, want %q", field, r.out, want)
+		}
+	}
+	if r := f.gc(readFlag, "parents", "new-2"); r.out != "a\n" {
+		t.Errorf("the event's parents are %q, want the bead", r.out)
+	}
+	r = f.gc("bd", "set-state", "a", "situation=cleared", "--json")
+	if r.status != 0 || r.out != `{"changed":false,"dimension":"situation","issue_id":"a","value":"cleared"}`+"\n" {
+		t.Errorf("a set-state to the value the bead holds: %d %q", r.status, r.out)
+	}
+	if n := strings.Count(f.file("beads.json"), `"issue_type":"event"`); n != 1 {
+		t.Errorf("%d events after a set-state that changed nothing, want 1", n)
+	}
+	r = f.gc("bd", "set-state", "a", "mode=degraded", "--json")
+	if r.out != `{"changed":true,"dimension":"mode","event_id":"new-3","issue_id":"a","new_value":"degraded","old_value":null}`+"\n" {
+		t.Errorf("a first value for a dimension: %q", r.out)
+	}
+	if r := f.gc(readFlag, "field", "new-3", "description"); r.out != "Set mode to degraded\n" {
+		t.Errorf("the first value's event says %q", r.out)
+	}
+	before := f.file("beads.json")
+	for _, args := range [][]string{{"nope", "situation=active"}, {"a", "situation"}, {"a", "=active"}, {"a"}} {
+		if r := f.gc(append([]string{"bd", "set-state"}, args...)...); r.status != 1 {
+			t.Errorf("set-state %v: exit %d, want 1", args, r.status)
+		}
+	}
+	if f.file("beads.json") != before {
+		t.Errorf("a refused set-state wrote the store")
+	}
+}
+
+func TestKvListAnswersEveryKeyByKey(t *testing.T) {
+	f := newFixture(t, "[]", "")
+	if r := f.gc("bd", "kv", "list", "--json"); r.status != 0 || r.out != `{"schema_version":1}`+"\n" {
+		t.Errorf("an empty kv's list: %d %q", r.status, r.out)
+	}
+	f.gc("bd", "kv", "set", "b", "2")
+	f.gc("bd", "kv", "set", "a", "x=1")
+	if r := f.gc("bd", "kv", "list", "--json"); r.out != `{"a":"x=1","b":"2","schema_version":1}`+"\n" {
+		t.Errorf("kv list --json: %q", r.out)
+	}
+	if r := f.gc("bd", "kv", "list"); r.out != "\nKey-Value Store:\n  a = x=1\n  b = 2\n" {
+		t.Errorf("kv list: %q", r.out)
+	}
+	if r := f.run([]string{"STUB_KV_FAIL=1"}, "bd", "kv", "list", "--json"); r.status != 1 || r.out != "" {
+		t.Errorf("kv list under STUB_KV_FAIL: %+v", r)
+	}
+}
