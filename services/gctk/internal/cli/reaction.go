@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -51,7 +50,7 @@ move is someone's already is refused, by the first of these that holds:
 A read that does not answer decides nothing and exits 1.
 
 --db names the store, a store's .beads directory. Without it the subject's
-store is the one its id's prefix names in the city's rig list.`
+store is the one gc routes the bead to.`
 
 const reactionCheckLong = `The first act of the reaction whose run is <root>: whether <bead> takes it. It
 applies sling's refusals and writes nothing. The asking run is no second
@@ -274,19 +273,14 @@ func newReactionDeliverableCmd(stdout io.Writer) *cobra.Command {
 	}
 }
 
-// reactionFor is the reaction over bead's store, --db or else the one its id's
-// prefix names in the city's rig list, in the caller's rig, saying each line to
-// stderr.
+// reactionFor is the reaction over bead's store, --db or else the one gc routes
+// the bead to, in the caller's rig, saying each line to stderr.
 func reactionFor(bead, db string, stderr io.Writer, prog string) (*reaction.Reactions, error) {
-	rt := gascity.New()
-	if db == "" {
-		db = subjectStore(rt, bead)
-	}
 	l, err := ledger.Open(db, bead)
 	if err != nil {
 		return nil, fmt.Errorf("could not open %s's store (%v)", bead, err)
 	}
-	return &reaction.Reactions{Ledger: l, Runtime: rt, Rig: strings.TrimSpace(os.Getenv("GC_RIG")), DB: db, Now: time.Now,
+	return &reaction.Reactions{Ledger: l, Runtime: gascity.New(), Rig: strings.TrimSpace(os.Getenv("GC_RIG")), DB: db, Now: time.Now,
 		Log: func(line string) { fmt.Fprintf(stderr, "%s: %s\n", prog, line) }}, nil
 }
 
@@ -329,7 +323,7 @@ passes over it. A flag set for an exit that does not take it is refused
 before anything is read.
 
 --db names the store, a store's .beads directory. Without it the subject's
-store is the one its id's prefix names in the city's rig list.
+store is the one gc routes the bead to.
 
 exit: 0 disposed
       2 usage, or a route or hand-off nothing would claim: nothing written
@@ -377,18 +371,16 @@ func newReactionDisposeCmd(stdout, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-// disposeReaction checks the call, opens the subject's store, and takes the
-// exit. The city's rig list is read once, for the store and for each rule that
-// asks which rig owns a store.
+// disposeReaction checks the call, opens the subject's store, --db or else the
+// one gc routes the bead to, and takes the exit. The call's check and the exit
+// share one runtime, so the rules that ask which rig owns a store read the
+// city's rig list once between them.
 func disposeReaction(d *reaction.Dispose, db string, stdout, stderr io.Writer) error {
 	const prog = "gctk reaction dispose"
 	rig := strings.TrimSpace(os.Getenv("GC_RIG"))
 	rt := gascity.New()
 	if err := reaction.Validate(rt, rig, d); err != nil {
 		return err
-	}
-	if db == "" {
-		db = subjectStore(rt, d.Bead)
 	}
 	l, err := ledger.Open(db, d.Bead)
 	if err != nil {
@@ -428,24 +420,4 @@ func disposeReaction(d *reaction.Dispose, db string, stdout, stderr io.Writer) e
 	}
 	fmt.Fprintf(stderr, "%s: %v\n", prog, err)
 	return exit(4)
-}
-
-// subjectStore is the store of the rig whose prefix is the bead's, from the city's
-// rig list, empty when the list does not read or names no such rig with a
-// store, so that gc routes the bead to its store instead.
-func subjectStore(rt gascity.Runtime, bead string) string {
-	rigs, err := rt.Rigs()
-	if err != nil {
-		return ""
-	}
-	prefix, _, _ := strings.Cut(bead, "-")
-	for _, g := range rigs {
-		if g.Prefix != prefix || g.Path == "" {
-			continue
-		}
-		if fi, err := os.Stat(filepath.Join(g.Path, ".beads")); err == nil && fi.IsDir() {
-			return filepath.Join(g.Path, ".beads")
-		}
-	}
-	return ""
 }

@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,18 +13,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/reaction"
 )
 
-// stubLoggingGC puts a gc on PATH that logs each call and answers the rig list
-// with rigs, and returns the log's path.
+// stubLoggingGC puts a gc on PATH that logs each call, answers the rig list
+// with rigs and the store gc resolves here with $STUB_WHERE, and returns the
+// log's path.
 func stubLoggingGC(t *testing.T, rigs string) string {
 	t.Helper()
 	bin := t.TempDir()
 	log := filepath.Join(bin, "log")
-	stub := "#!/bin/sh\necho \"$*\" >> '" + log + "'\ncase \"$1 $2\" in \"rig list\") printf '%s' \"$STUB_RIGS\" ;; esac\nexit 0\n"
+	stub := "#!/bin/sh\necho \"$*\" >> '" + log + "'\ncase \"$1 $2\" in \"rig list\") printf '%s' \"$STUB_RIGS\" ;; \"bd where\") printf '%s' \"$STUB_WHERE\" ;; esac\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -58,40 +56,48 @@ func TestReactionDisposeRefusesUsageBeforeAnyCall(t *testing.T) {
 	}
 }
 
-// The subject's store is the .beads directory of the rig whose prefix is the
-// bead's, from the city's rig list, and none when no such rig holds one, so
-// that gc routes the bead instead.
-func TestReactionDisposeFindsTheSubjectsStoreByItsPrefix(t *testing.T) {
-	rig := t.TempDir()
-	if err := os.Mkdir(filepath.Join(rig, ".beads"), 0o755); err != nil {
-		t.Fatal(err)
+// With no --db, a check, a sling and a dispose read their subject from the
+// store gc routes it to, as every gctk verb that names a bead does: when gc
+// resolves another store here, the store of the rig whose prefix is the longest
+// that begins the subject's id.
+func TestReactionVerbsReadTheStoreGcRoutesTheSubjectTo(t *testing.T) {
+	dir := t.TempDir()
+	short, long := filepath.Join(dir, "tk", ".beads"), filepath.Join(dir, "tk-x", ".beads")
+	for _, d := range []string{short, long} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	rt := &fake.Runtime{RigList: []gascity.Rig{{Name: "town", Path: t.TempDir(), Prefix: "hq", HQ: true}, {Name: "gc-toolkit", Path: rig, Prefix: "tk"}}}
-	if got := subjectStore(rt, "tk-sub"); got != filepath.Join(rig, ".beads") {
-		t.Errorf("tk-sub's store is %q", got)
-	}
-	if got := subjectStore(rt, "hq-sub"); got != "" {
-		t.Errorf("a rig with no .beads named the store %q", got)
-	}
-	if got := subjectStore(rt, "zz-sub"); got != "" {
-		t.Errorf("a prefix no rig owns named the store %q", got)
-	}
-	rt.RigsErr = errors.New("gc rig list did not answer within 1s")
-	if got := subjectStore(rt, "tk-sub"); got != "" {
-		t.Errorf("a rig list that did not read named the store %q", got)
+	log := stubLoggingGC(t, `{"rigs":[{"name":"town","prefix":"hq","path":"`+dir+`","hq":true},{"name":"tk","prefix":"tk","path":"`+filepath.Dir(short)+`"},{"name":"tk-x","prefix":"tk-x","path":"`+filepath.Dir(long)+`"}]}`)
+	t.Setenv("STUB_WHERE", `{"path":"`+filepath.Join(dir, ".beads")+`","prefix":"hq"}`)
+	t.Setenv("GC_RIG", "gc-toolkit")
+	for name, args := range map[string][]string{
+		"a check":   {"reaction", "check", "tk-x-sub", "--run", "tk-root"},
+		"a sling":   {"reaction", "sling", "tk-x-sub"},
+		"a dispose": {"reaction", "dispose", "tk-x-sub", "--disposition", "ruling", "--reason", "r", "--takeaway", "t"},
+	} {
+		if err := os.WriteFile(log, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var out, errb bytes.Buffer
+		Run(args, "test", &out, &errb)
+		if len(calls(t, log, "bd --db "+long+" ")) == 0 || len(calls(t, log, "bd --db "+short+" ")) > 0 {
+			t.Errorf("%s read %v, want reads of %s alone", name, calls(t, log, "bd "), long)
+		}
 	}
 }
 
-// A check whose rig list never answers ends once the list's bound passes and
-// decides nothing, as a check does when the store does not answer.
+// A check of a subject in the store gc resolves here reads no rig list, so a
+// rig list that never answers cannot hold it, and the check decides nothing
+// once that store does not answer.
 func TestReactionCheckEndsWhenTheRigListNeverAnswers(t *testing.T) {
 	bin := t.TempDir()
-	stub := "#!/bin/sh\ncase \"$1 $2\" in \"rig list\") exec sleep 60 ;; esac\nexit 1\n"
+	stub := "#!/bin/sh\ncase \"$1 $2\" in \"rig list\") exec sleep 60 ;; \"bd where\") printf '{\"path\":\"" + bin + "/.beads\",\"prefix\":\"tk\"}'; exit 0 ;; esac\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("GC_RIG_LIST_TIMEOUT", "1")
+	t.Setenv("GC_RIG_LIST_TIMEOUT", "")
 	t.Setenv("GC_RIG", "gc-toolkit")
 	start := time.Now()
 	var out, errb bytes.Buffer
@@ -323,8 +329,8 @@ func TestReactionSweepDryRunListsTheSubject(t *testing.T) {
 }
 
 // Each command reads the city's rig list at most once, however many questions
-// it asks of it: the sling for its subject's store, the dispose for its
-// subject's store and the pool it routes to, and the sweep, which the order
+// it asks of it: the dispose for the pool it routes to, and the sling, whose
+// subject is in the store gc resolves here, and the sweep, which the order
 // gives its store, not at all. Each makes one ready read at most.
 func TestReactionVerbsReadTheRigListOnce(t *testing.T) {
 	log, store := stubCity(t, []byte("[]"))
@@ -333,7 +339,7 @@ func TestReactionVerbsReadTheRigListOnce(t *testing.T) {
 		rigs  int
 		sling string
 	}{
-		"a sling":   {[]string{"reaction", "sling", "tk-sub"}, 1, "sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive tk-sub --on mol-first-reaction"},
+		"a sling":   {[]string{"reaction", "sling", "tk-sub"}, 0, "sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive tk-sub --on mol-first-reaction"},
 		"a sweep":   {[]string{"reaction", "sweep", "--db", store}, 0, "sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive tk-sub --on mol-first-reaction"},
 		"a dispose": {[]string{"reaction", "dispose", "tk-sub", "--disposition", "close", "--reason", "nothing to do", "--takeaway", "nothing to do"}, 1, "sling --rig gc-toolkit gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close"},
 	} {
