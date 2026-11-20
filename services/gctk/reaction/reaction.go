@@ -37,9 +37,10 @@ import (
 // recommendedFormulaKey is the action a recommend exit leaves for the
 // operator's Accept, which that exit alone sets.
 var recommendedFormulaKey = ledger.Declare("gc.recommended_formula", ledger.String,
-	"The execution formula a first reaction's recommend exit puts to the operator: the board offers Accept, "+
-		"which slings that formula at the bead, beside the exit's human gate. gctk reaction dispose sets it once "+
-		"the gate is filed and clears it before any exit acts, so no recommendation is older than the newest "+
+	"The execution formula a first reaction's recommend exit puts to the operator beside the exit's human gate: "+
+		"gctk reaction accept, which a sitting's sign-off runs with --accept, slings that formula at the bead. "+
+		"gctk reaction dispose sets it once the gate is filed and clears it before any exit acts, so no "+
+		"recommendation is older than the newest "+
 		"first-reaction gate. gctk reaction accept clears it in the write that records its dispatch. "+
 		"converse-invalidate-recommendation.sh clears it and converse-signoff.sh reads it, in shell "+
 		"(docs/gctk-architecture.md, Debt). Absent or empty, the bead carries no recommendation.")

@@ -23,11 +23,11 @@ import (
 // It clears that one gate and nothing else: separate situations on one bead are
 // separate gates, and each gate's close does something of its own.
 //
-// It is offered while all three hold: the bead carries the recommendation; its
-// gate is open and unassigned, or closed with an acceptance an earlier Accept did
-// not finish; and no other open human gate blocks the bead, since the bead's
-// next step waits for each gate that blocks it and a formula's sling reads no
-// blocks edge.
+// It takes the recommendation only while all three hold: the bead carries it;
+// its gate is open and unassigned, or closed with an acceptance an earlier
+// Accept did not finish; and no other open human gate blocks the bead, since
+// the bead's next step waits for each gate that blocks it and a formula's
+// sling reads no blocks edge.
 //
 // Every Accept on a bead runs under the bead's acceptance lock, from before its
 // live read of those conditions to its last write. Its first write removes the

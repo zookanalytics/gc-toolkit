@@ -297,7 +297,8 @@ subject open: a reaction disposes a bead and never closes it.
               the check failing there.
   recommend   the action is known and warrants the operator's trigger: a
               human gate under first-reaction holds the bead, and
-              --recommended-formula <mol> is what the board's Accept runs.
+              --recommended-formula <mol> is what gctk reaction accept runs
+              once the operator takes it.
   blocked     the bead waits: each --waiting-on <bead> becomes a blocks edge,
               --blocker "<title>" files the bead it waits on, and --then-route
               arms its dispatch for when the wait lifts, or --then-assign hands

@@ -1317,9 +1317,10 @@ keys = [
   "gc.first_reaction", "gc.first_reaction_reason", "gc.first_reaction_target",
   "gc.first_reaction_at",
 ]
-# gc.recommended_formula — the execution mol a recommend exit names, which the
-#   operator can Accept from the subject's row on the board. The reaction domain
-#   owns it (services/gctk/reaction, listed in services/gctk/key-registry.json),
+# gc.recommended_formula — the execution mol a recommend exit names, which
+#   gctk reaction accept dispatches once the operator takes it, as a sitting's
+#   sign-off does with --accept. The reaction domain owns it
+#   (services/gctk/reaction, listed in services/gctk/key-registry.json),
 #   and it stays registered here while shell still clears it. gctk reaction
 #   dispose sets it once a recommend's gate is filed and unsets a stale one
 #   before any exit acts, each write taking its exit. gctk reaction accept
@@ -1327,8 +1328,8 @@ keys = [
 #   converse-invalidate-recommendation.sh unsets it when a sitting judges the
 #   recommendation no longer valid. gctk reaction accept and
 #   converse-invalidate-recommendation.sh both read it as a non-empty value, so
-#   absent and empty both mean no live recommendation, and the subject offers
-#   Discuss only. A formula name that `gc formula show` resolves.
+#   absent and empty both mean no live recommendation, which no Accept takes.
+#   A formula name that `gc formula show` resolves.
 # gc.recommended_formula_dispatched — the formula gctk reaction accept slung,
 #   written in the update that unsets gc.recommended_formula. The reaction
 #   domain owns it (services/gctk/reaction), and it stays registered here while

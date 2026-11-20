@@ -307,7 +307,7 @@
     "name": "gc.recommended_formula",
     "type": "string",
     "owner": "reaction",
-    "doc": "The execution formula a first reaction's recommend exit puts to the operator: the board offers Accept, which slings that formula at the bead, beside the exit's human gate. gctk reaction dispose sets it once the gate is filed and clears it before any exit acts, so no recommendation is older than the newest first-reaction gate. gctk reaction accept clears it in the write that records its dispatch. converse-invalidate-recommendation.sh clears it and converse-signoff.sh reads it, in shell (docs/gctk-architecture.md, Debt). Absent or empty, the bead carries no recommendation."
+    "doc": "The execution formula a first reaction's recommend exit puts to the operator beside the exit's human gate: gctk reaction accept, which a sitting's sign-off runs with --accept, slings that formula at the bead. gctk reaction dispose sets it once the gate is filed and clears it before any exit acts, so no recommendation is older than the newest first-reaction gate. gctk reaction accept clears it in the write that records its dispatch. converse-invalidate-recommendation.sh clears it and converse-signoff.sh reads it, in shell (docs/gctk-architecture.md, Debt). Absent or empty, the bead carries no recommendation."
   },
   {
     "name": "gc.recommended_formula_dispatched",

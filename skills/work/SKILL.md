@@ -378,9 +378,10 @@ GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead takeaway <bead> "<wh
 - **Withdraw a recommendation** the bead should not take, keeping the bead open
   for discussion:
   `SUBJECT=<bead> CONVERSATION=<conversation> "$(gc <binding> scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
-  It strips `gc.recommended_formula`, so the board stops offering Accept, and
-  leaves the gate that put the recommendation to the operator open until it is
-  answered. When the bead itself should go, close it instead (below).
+  It strips `gc.recommended_formula`, so `gctk reaction accept` and a
+  sign-off's `--accept` refuse the bead, and leaves the gate that put the
+  recommendation to the operator open until it is answered. When the bead
+  itself should go, close it instead (below).
 
 When the work already has an open pull request, retire the pull request instead
 of stopping the bead, and send more work on its branch to a rework child, both

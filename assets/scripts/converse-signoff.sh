@@ -917,7 +917,7 @@ if [ -n "$ACCEPT" ]; then
               | select(((.id // "") | tostring) as $i | ($a | index($i)) == null)
               | "\(.id) (\(.title // "untitled"))" ] | join("; ")')
   [ -z "$OTHERS" ] \
-    || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or leave the recommendation's gate owed until it is cleared, when Accept on the board takes the recommendation"
+    || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or sign off without --accept and with --leave on the recommendation's gate ($REC_GATES). The recommendation's gate then stays on the operator's page as a question, and once the other gate is cleared, the sitting that answers the question takes the recommendation with --accept"
 fi
 # A stay's work can be a member of the subject, as an epic's own decomposition
 # is, at any depth. The subject cannot wait on it, since bd refuses a blocks
