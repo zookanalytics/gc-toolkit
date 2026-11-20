@@ -104,23 +104,54 @@ func TestAFetchStoppedAtItsBoundGetsASIGTERMAndLeavesNoLock(t *testing.T) {
 	}
 }
 
-func TestAFetchThatOutlivesItsStopGraceIsKilled(t *testing.T) {
-	dir := fakeFetch(t, "trap '' TERM", "sleep 30\n")
+// A git that ignores the SIGTERM, with a child that ignores it too and holds its
+// stderr, is killed with its whole group once the grace has passed, so no
+// process of the fetch outlives it. The test stops the fetch once the child has
+// recorded its pid, since a child forked after the kill would never start.
+func TestAFetchThatOutlivesItsStopGraceIsKilledWithItsGroup(t *testing.T) {
+	marks := t.TempDir()
+	child := filepath.Join(marks, "child.pid")
+	dir := fakeFetch(t, "trap '' TERM", "sleep 30 &\necho $! > '"+child+"'\nwait $!\n")
 	shortGrace(t, time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), fetchBound)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	stopped := make(chan time.Time, 1)
+	go func() {
+		appears(child, 10*time.Second)
+		stopped <- time.Now()
+		cancel()
+	}()
 
-	start := time.Now()
 	err := FetchBranch(ctx, dir, "main")
-	elapsed := time.Since(start)
+	elapsed := time.Since(<-stopped)
 	if elapsed > 10*time.Second {
-		t.Errorf("the fetch returned after %s, past its bound and its %s grace", elapsed.Round(time.Millisecond), fetchStopGrace)
+		t.Errorf("the fetch returned %s after its stop, past its %s grace", elapsed.Round(time.Millisecond), fetchStopGrace)
 	}
 	if elapsed < fetchStopGrace {
-		t.Errorf("the fetch returned after %s, before the %s grace a git that ignores SIGTERM gets", elapsed.Round(time.Millisecond), fetchStopGrace)
+		t.Errorf("the fetch returned %s after its stop, before the %s grace a git that ignores SIGTERM gets", elapsed.Round(time.Millisecond), fetchStopGrace)
 	}
-	if err == nil {
-		t.Errorf("a fetch killed after its grace reported success")
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("a fetch killed after its grace returned %v, want the stop's error", err)
+	}
+	raw, readErr := os.ReadFile(child)
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if readErr != nil || pid <= 0 {
+		t.Fatalf("the fake git never recorded its child: %v", readErr)
+	}
+	if !ends(pid, 5*time.Second) {
+		t.Errorf("the child %d that ignored the SIGTERM outlived the fetch", pid)
+	}
+}
+
+// ends reports whether the process pid has exited and been reaped within d.
+func ends(pid int, d time.Duration) bool {
+	for deadline := time.Now().Add(d); ; time.Sleep(20 * time.Millisecond) {
+		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
 	}
 }
 

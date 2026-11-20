@@ -195,8 +195,8 @@ func ValidBranch(name string) bool {
 	return exec.Command("git", "check-ref-format", "refs/heads/"+name).Run() == nil
 }
 
-// fetchStopGrace is how long a fetch that was stopped has to exit before git is
-// killed outright. A variable so a test can shorten it.
+// fetchStopGrace is how long a fetch that was stopped has to exit before git's
+// process group is killed outright. A variable so a test can shorten it.
 var fetchStopGrace = 5 * time.Second
 
 // Interrupted is a fetch that a SIGTERM or SIGINT to this process stopped. The
@@ -216,24 +216,29 @@ func (e *Interrupted) Error() string { return fmt.Sprintf("git fetch: stopped by
 // refs/remotes/origin/<branch>.lock, which git removes on SIGTERM and cannot on
 // SIGKILL, and a lock left behind fails every later fetch of the branch there
 // until a person deletes it. The ssh that carries the fetch is git's child, so
-// the group is what reaches both. A git still running fetchStopGrace after the
-// stop is killed outright. A stopped fetch returns an error that wraps the one
-// that ended ctx.
+// the group is what reaches both. A fetch still running fetchStopGrace after the
+// stop gets a SIGKILL to the group, which ends git and any child of git's that
+// ignored the SIGTERM. A stopped fetch returns an error that wraps the one that
+// ended ctx.
 //
 // Its own group puts git out of reach of a signal sent to this process's group,
 // which is how an order runner stops a run that outlives its timeout. So a
-// SIGTERM or SIGINT that reaches this process during the fetch goes on to git's
-// group, and the fetch returns *Interrupted once git has exited. A signal this
-// process inherited as ignored stays ignored.
+// SIGTERM or SIGINT that reaches this process during the fetch stops it as ctx
+// ending does, and the fetch returns *Interrupted once git has exited. A signal
+// this process inherited as ignored stays ignored.
 func FetchBranch(ctx context.Context, dir, branch string) error {
 	if !ValidBranch(branch) {
 		return fmt.Errorf("git fetch: %q is not a branch name", branch)
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--no-tags", "origin",
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("git fetch: origin/%s was stopped: %w", branch, err)
+	}
+	cmd := exec.Command("git", "-C", dir, "fetch", "--no-tags", "origin",
 		"+refs/heads/"+branch+":refs/remotes/origin/"+branch)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
+	// With no context on the command, this bounds only how long Wait waits,
+	// once git has exited, on a pipe that a process outside its group holds.
 	cmd.WaitDelay = fetchStopGrace
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -250,18 +255,25 @@ func FetchBranch(ctx context.Context, dir, branch string) error {
 	}
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
+	halt := func() error {
+		group := -cmd.Process.Pid
+		_ = syscall.Kill(group, syscall.SIGTERM)
+		select {
+		case err := <-waited:
+			return err
+		case <-time.After(fetchStopGrace):
+			_ = syscall.Kill(group, syscall.SIGKILL)
+			return <-waited
+		}
+	}
 	var err error
 	var got os.Signal
 	select {
 	case err = <-waited:
+	case <-ctx.Done():
+		err = halt()
 	case got = <-stop:
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-		select {
-		case err = <-waited:
-		case <-time.After(fetchStopGrace):
-			_ = cmd.Process.Kill()
-			err = <-waited
-		}
+		err = halt()
 	}
 	// A signal that arrived as git finished is still this process's to take.
 	if got == nil {
