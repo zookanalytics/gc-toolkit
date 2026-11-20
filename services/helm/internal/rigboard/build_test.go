@@ -243,7 +243,7 @@ func TestWorkAReaderCouldNotAnswer(t *testing.T) {
 // answered, which queue places nowhere, even when its row reads as an ask. In
 // graph, tk-loose is routed to a pool and waits on a park gate.
 func TestWorkWhoseWaitsAreUnread(t *testing.T) {
-	routedToYou := func(answered bool) Document {
+	assignedToYou := func(answered bool) Document {
 		g := graph()
 		for i := range g.open {
 			if g.open[i].ID == "tk-loose" {
@@ -257,17 +257,17 @@ func TestWorkWhoseWaitsAreUnread(t *testing.T) {
 		}
 		return boardOf(t, g)
 	}
-	if doc := routedToYou(true); doc.Rows["tk-loose"].Ask != AskRoutedToYou || !slices.Contains(doc.WorkQueue.Queue, "tk-loose") {
+	if doc := assignedToYou(true); doc.Rows["tk-loose"].Ask != AskAssignedToYou || !slices.Contains(doc.WorkQueue.Queue, "tk-loose") {
 		t.Fatalf("answered, tk-loose asks %q in queue %v; want %q and queued, so the case is not built",
-			doc.Rows["tk-loose"].Ask, doc.WorkQueue.Queue, AskRoutedToYou)
+			doc.Rows["tk-loose"].Ask, doc.WorkQueue.Queue, AskAssignedToYou)
 	}
-	doc := routedToYou(false)
+	doc := assignedToYou(false)
 	want := WorkQueue{Queue: []string{"tk-b.1", "tk-b.2"}, NotScheduled: []string{"tk-a.1.1", "tk-loose2"}, Unread: []string{"tk-loose"}}
 	if !sameQueue(doc.WorkQueue, want) {
 		t.Errorf("work queue = %+v, want %+v: tk-loose has no place, so it is listed apart", doc.WorkQueue, want)
 	}
-	if a := doc.Rows["tk-loose"].Ask; a != AskRoutedToYou {
-		t.Errorf("tk-loose asks %q, want %q", a, AskRoutedToYou)
+	if a := doc.Rows["tk-loose"].Ask; a != AskAssignedToYou {
+		t.Errorf("tk-loose asks %q, want %q", a, AskAssignedToYou)
 	}
 }
 
@@ -339,7 +339,7 @@ func TestWorkForTheProductOwner(t *testing.T) {
 	})
 
 	t.Run("held work is no need, whatever it would ask of a person", func(t *testing.T) {
-		routedToYou := func(held bool) Document {
+		assignedToYou := func(held bool) Document {
 			g := graph()
 			if held {
 				hold(g, "tk-b.1")
@@ -351,10 +351,10 @@ func TestWorkForTheProductOwner(t *testing.T) {
 			}
 			return boardOf(t, g)
 		}
-		if a := routedToYou(false).Rows["tk-b.1"].Ask; a != AskRoutedToYou {
-			t.Fatalf("unheld, tk-b.1 asks %q, want %q, so the case is not built", a, AskRoutedToYou)
+		if a := assignedToYou(false).Rows["tk-b.1"].Ask; a != AskAssignedToYou {
+			t.Fatalf("unheld, tk-b.1 asks %q, want %q, so the case is not built", a, AskAssignedToYou)
 		}
-		doc := routedToYou(true)
+		doc := assignedToYou(true)
 		if a := doc.Rows["tk-b.1"].Ask; a != "" {
 			t.Errorf("held tk-b.1 asks %q, want no ask", a)
 		}
@@ -1140,7 +1140,7 @@ func TestNeedsThatCount(t *testing.T) {
 		}
 		want := []KindCount{{NeedKindPullRequest, 1}, {NeedKindQuestion, 2}, {NeedKindWaitsForYou, 1}, {NeedKindInConversation, 1}, {NeedKindRuling, 0}}
 		if !slices.Equal(n.Kinds, want) {
-			t.Errorf("kinds = %+v, want %+v: the five kinds, a zero among them, and no Routed to you", n.Kinds, want)
+			t.Errorf("kinds = %+v, want %+v: the five kinds, a zero among them, and no Assigned to you", n.Kinds, want)
 		}
 	})
 	t.Run("an epic's view counts its own needs by the same rule", func(t *testing.T) {
@@ -1161,8 +1161,8 @@ func TestNeedsThatCount(t *testing.T) {
 			}
 		}
 	})
-	t.Run("routed to you is a kind only where one counts", func(t *testing.T) {
-		routed := func(id string) NeedsYou {
+	t.Run("assigned to you is a kind only where one counts", func(t *testing.T) {
+		assigned := func(id string) NeedsYou {
 			g := graph()
 			for i := range g.open {
 				if g.open[i].ID == id {
@@ -1172,11 +1172,11 @@ func TestNeedsThatCount(t *testing.T) {
 			return boardOf(t, g).NeedsYou
 		}
 		// tk-loose waits on a park, so it is listed apart and its kind is not counted.
-		if v := routed("tk-loose"); len(v.Kinds) != 5 || !slices.Contains(ids(v.NotCounted), "tk-loose") {
-			t.Errorf("a parked routed need gives kinds %+v and folds %v", v.Kinds, ids(v.NotCounted))
+		if v := assigned("tk-loose"); len(v.Kinds) != 5 || !slices.Contains(ids(v.NotCounted), "tk-loose") {
+			t.Errorf("a parked assigned need gives kinds %+v and folds %v", v.Kinds, ids(v.NotCounted))
 		}
-		if v := routed("tk-b.1"); len(v.Kinds) != 6 || v.Kinds[5] != (KindCount{NeedKindRoutedToYou, 1}) {
-			t.Errorf("a routed need that counts gives kinds %+v, want Routed to you last", v.Kinds)
+		if v := assigned("tk-b.1"); len(v.Kinds) != 6 || v.Kinds[5] != (KindCount{NeedKindAssignedToYou, 1}) {
+			t.Errorf("an assigned need that counts gives kinds %+v, want Assigned to you last", v.Kinds)
 		}
 	})
 }

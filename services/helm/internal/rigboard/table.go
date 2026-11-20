@@ -66,11 +66,11 @@ const (
 type Ask string
 
 const (
-	AskQuestion     Ask = "Question"
-	AskConversation Ask = "Conversation"
-	AskPullRequest  Ask = "Pull request"
-	AskRoutedToYou  Ask = "Routed to you"
-	AskRuling       Ask = "Ruling"
+	AskQuestion      Ask = "Question"
+	AskConversation  Ask = "Conversation"
+	AskPullRequest   Ask = "Pull request"
+	AskAssignedToYou Ask = "Assigned to you"
+	AskRuling        Ask = "Ruling"
 )
 
 // NeedKind is the kind of need a row is, the kinds a Needs you view counts and
@@ -86,7 +86,7 @@ const (
 	NeedKindWaitsForYou    NeedKind = "Conversation waits for you"
 	NeedKindInConversation NeedKind = "In conversation"
 	NeedKindRuling         NeedKind = "Ruling"
-	NeedKindRoutedToYou    NeedKind = "Routed to you"
+	NeedKindAssignedToYou  NeedKind = "Assigned to you"
 )
 
 // outcome is the row of the table that answered.
@@ -333,7 +333,7 @@ func joinIDs(refs []Ref) string {
 //     is no person's move.
 //   - Pull request: a bead whose pull request reads needs-review or
 //     needs-attention, in those words.
-//   - Routed to you: any other open bead prstatus.IsPersonBlocker counts, as
+//   - Assigned to you: any other open bead prstatus.IsPersonBlocker counts, as
 //     the listing answers it for the bead.
 //   - Ruling: an epic with members and none open, or a landed Delivery.
 //
@@ -383,7 +383,7 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 		}
 	}
 	if b.PersonBlocker {
-		return &askAnswer{kind: AskRoutedToYou, words: string(AskRoutedToYou), need: NeedKindRoutedToYou}
+		return &askAnswer{kind: AskAssignedToYou, words: string(AskAssignedToYou), need: NeedKindAssignedToYou}
 	}
 	return nil
 }

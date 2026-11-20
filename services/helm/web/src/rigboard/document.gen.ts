@@ -273,7 +273,7 @@ export interface Need {
  * Count is the needs that count, and it reaches zero only when nothing that
  * counts needs you. Kinds is how many of them are of each kind: Pull request,
  * Question, Conversation waits for you, In conversation and Ruling, each one
- * zero included, then Routed to you when one counts. Counted lists the needs
+ * zero included, then Assigned to you when one counts. Counted lists the needs
  * that count, and NotCounted the needs that do not.
  */
 export interface NeedsYou {
@@ -333,9 +333,9 @@ export type Group = typeof GroupWaitingOnYou | typeof GroupQueued | typeof Group
 export const AskQuestion = "Question";
 export const AskConversation = "Conversation";
 export const AskPullRequest = "Pull request";
-export const AskRoutedToYou = "Routed to you";
+export const AskAssignedToYou = "Assigned to you";
 export const AskRuling = "Ruling";
-export type Ask = typeof AskQuestion | typeof AskConversation | typeof AskPullRequest | typeof AskRoutedToYou | typeof AskRuling;
+export type Ask = typeof AskQuestion | typeof AskConversation | typeof AskPullRequest | typeof AskAssignedToYou | typeof AskRuling;
 /**
  * NeedKind is the kind of need a row is, the kinds a Needs you view counts and
  * filters its needs by. It is the row's ask, in the ask's own words, except
@@ -348,5 +348,5 @@ export const NeedKindQuestion = "Question";
 export const NeedKindWaitsForYou = "Conversation waits for you";
 export const NeedKindInConversation = "In conversation";
 export const NeedKindRuling = "Ruling";
-export const NeedKindRoutedToYou = "Routed to you";
-export type NeedKind = typeof NeedKindPullRequest | typeof NeedKindQuestion | typeof NeedKindWaitsForYou | typeof NeedKindInConversation | typeof NeedKindRuling | typeof NeedKindRoutedToYou;
+export const NeedKindAssignedToYou = "Assigned to you";
+export type NeedKind = typeof NeedKindPullRequest | typeof NeedKindQuestion | typeof NeedKindWaitsForYou | typeof NeedKindInConversation | typeof NeedKindRuling | typeof NeedKindAssignedToYou;

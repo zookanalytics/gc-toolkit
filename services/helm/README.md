@@ -1319,11 +1319,11 @@ list.
 
 **How it draws.** Two views make up the pages. Needs you is one entry per need
 (a question, a decision, a conversation, a pull request waiting on the
-operator's review, work routed to them, a ruling), with every bead the need
+operator's review, work assigned to them, a ruling), with every bead the need
 holds beneath it in the Work queue's order. Each Needs you view leads with how
 many of its needs count, and beneath that how many of each kind count: pull
 requests, questions, conversations waiting for you, in conversation and
-rulings, a zero among them, then routed to you when one counts. A kind's count
+rulings, a zero among them, then assigned to you when one counts. A kind's count
 shows that kind alone, and a second click shows every kind again. The needs
 that do not count, those about parked work or work held for the Product Owner,
 fold beneath the rest under Parked or unprioritized, closed until opened. The

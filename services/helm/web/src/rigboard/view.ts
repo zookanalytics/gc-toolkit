@@ -90,7 +90,7 @@ export const NEED_WORDS: Record<NeedKind, { one: string; many: string }> = {
   'Conversation waits for you': { one: 'conversation waiting for you', many: 'conversations waiting for you' },
   'In conversation': { one: 'in conversation', many: 'in conversation' },
   Ruling: { one: 'ruling', many: 'rulings' },
-  'Routed to you': { one: 'routed to you', many: 'routed to you' },
+  'Assigned to you': { one: 'assigned to you', many: 'assigned to you' },
 };
 
 export const INK = '#1B1F23';
