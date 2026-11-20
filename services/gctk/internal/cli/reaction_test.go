@@ -461,7 +461,8 @@ func TestReactionCheckReadsAFalseRouteAsNone(t *testing.T) {
 // The sweep reads the keys that set a bead apart from raw input as the scripts
 // read them, `(.metadata[k] // "")`, over values bd stored typed: false and null
 // hold no value, so a ready bead whose keys hold only those is a candidate, and
-// any other value, true and a number among them, passes the bead over.
+// any other value, true, a number and the string "false" among them, passes the
+// bead over.
 func TestReactionSweepReadsTypedKeysAsTheScriptsDo(t *testing.T) {
 	log, store := stubCity(t, []byte("[]"))
 	keys := []string{"gc.routed_to", "gc.step_ref", "gc.step_id", "gc.root_bead_id", "gc.takeaway", "gc.takeaway_by",
@@ -485,7 +486,7 @@ func TestReactionSweepReadsTypedKeysAsTheScriptsDo(t *testing.T) {
 		}
 	}
 	for _, k := range keys {
-		for _, set := range []string{"true", "0"} {
+		for _, set := range []string{"true", "0", `"false"`} {
 			if listed("{" + strconv.Quote(k) + ":" + set + "}") {
 				t.Errorf("a bead whose %s holds %s was listed", k, set)
 			}

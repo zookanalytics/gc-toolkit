@@ -1,0 +1,27 @@
+# doctor-run — run gc doctor every hour and record each run as one Gas City
+# event, gc-toolkit.doctor.ran (specs/tk-1tfzr71.158/design.md, section 5).
+# Gas City keeps no doctor result: gc doctor --json prints its report and
+# stores nothing. So `gctk doctor run` records each run's failing checks with
+# the time each first failed and how many runs in a row found it failing, the
+# checks it did not measure, the checks doctor/accepted.toml accepts, and each
+# monitor order's last good run. The newest event is what doctor found last.
+# It never passes --fix, and it writes no bead.
+#
+# Exec, not a formula: a run reads doctor's report and the event log, with no
+# judgment for an LLM, on the orchestrator, so no agent's session restart can
+# end it. City scope: gc doctor checks the whole city and every rig, so one run
+# per city.
+#
+# The verb ends gc doctor at its 20-minute deadline, and bounds each of its
+# three reads and writes of the event log at two minutes, so a run ends inside
+# this 1800s timeout, and services/gctk/doctor's test holds the deadline below
+# it. A run that does not complete still records why, and exits non-zero, so
+# Gas City records order.failed and its order-outcome-healthy check counts it.
+# Tune from city.toml [[orders.overrides]].
+[order]
+description = "Run gc doctor every hour, never with --fix, and record the run as one gc-toolkit.doctor.ran event"
+trigger = "cooldown"
+interval = "1h"
+timeout = "1800s"
+exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" doctor run --accepted \"$PACK_DIR/doctor/accepted.toml\""
+scope = "city"

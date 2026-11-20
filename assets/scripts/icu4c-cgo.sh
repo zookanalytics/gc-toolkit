@@ -20,8 +20,8 @@
 #     prerequisite. Off macOS brew is never asked. Each message starts with
 #     <prog>. Returns 0.
 #
-# Callers: assets/scripts/gc-build.sh (for helm), tools/lint.sh and the go-macos
-# job in .github/workflows/tests.yml.
+# Callers: assets/scripts/gc-build.sh (for helm), tools/lint.sh, the go-macos
+# job in .github/workflows/tests.yml and .github/workflows/govulncheck.yml.
 
 icu4c_cgo_flags() { # <prog>
     local prog="$1" prefix=""

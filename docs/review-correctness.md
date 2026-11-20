@@ -38,9 +38,10 @@ declares.
   no suite.
 - The refinery runs the same `lint_command` at merge, and no tests.
 - CI runs the whole `*.test.sh` suite and every Go test on Linux and on macOS
-  (`.github/workflows/tests.yml`), golangci-lint on Linux
-  (`.github/workflows/lint.yml`), and no web check. Every merge waits on the
-  checks main's ruleset requires.
+  (`.github/workflows/tests.yml`) and golangci-lint on Linux
+  (`.github/workflows/lint.yml`), scans for known vulnerabilities in what the
+  code calls (`.github/workflows/govulncheck.yml`), and runs no web check.
+  Every merge waits on the checks main's ruleset requires.
 
 ## Pack content every rig runs
 

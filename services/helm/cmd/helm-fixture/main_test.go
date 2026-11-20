@@ -50,6 +50,7 @@ func noEnv(string) string { return "" }
 func TestRunRefusesWhatItCannotServe(t *testing.T) {
 	board := filepath.Join(moduleRoot, defaultBoard)
 	rig := filepath.Join(moduleRoot, defaultRigBoard)
+	city := filepath.Join(moduleRoot, defaultCity)
 	badAnswers := t.TempDir()
 	if err := os.WriteFile(filepath.Join(badAnswers, "dismiss.json"), []byte("dismissed"), 0o644); err != nil {
 		t.Fatal(err)
@@ -71,10 +72,12 @@ func TestRunRefusesWhatItCannotServe(t *testing.T) {
 		{"an argument it does not take", []string{"--board", board, "--addr", "127.0.0.1:0", "extra"}, noEnv, 2, "takes no arguments"},
 		{"a flag it does not take", []string{"--port", "1"}, noEnv, 2, "flag provided but not defined"},
 		{"a board it cannot read", []string{"--board", filepath.Join(t.TempDir(), "missing.json"), "--addr", "127.0.0.1:0"}, noEnv, 1, "read the board answer"},
-		{"a board that is not JSON", []string{"--board", notJSON, "--rig-board", rig, "--addr", "127.0.0.1:0"}, noEnv, 1, "not JSON"},
+		{"a board that is not JSON", []string{"--board", notJSON, "--rig-board", rig, "--city", city, "--addr", "127.0.0.1:0"}, noEnv, 1, "not JSON"},
 		{"a rig document it cannot read", []string{"--board", board, "--rig-board", filepath.Join(t.TempDir(), "missing.json"), "--addr", "127.0.0.1:0"}, noEnv, 1, "read the rig document"},
-		{"a rig document that is not JSON", []string{"--board", board, "--rig-board", notJSON, "--addr", "127.0.0.1:0"}, noEnv, 1, "rig document is not a JSON object"},
-		{"an answer that is not JSON", []string{"--board", board, "--rig-board", rig, "--answers", badAnswers, "--addr", "127.0.0.1:0"}, noEnv, 1, "dismiss.json"},
+		{"a rig document that is not JSON", []string{"--board", board, "--rig-board", notJSON, "--city", city, "--addr", "127.0.0.1:0"}, noEnv, 1, "rig document is not a JSON object"},
+		{"a city document it cannot read", []string{"--board", board, "--rig-board", rig, "--city", filepath.Join(t.TempDir(), "missing.json"), "--addr", "127.0.0.1:0"}, noEnv, 1, "read the city document"},
+		{"a city document that is not JSON", []string{"--board", board, "--rig-board", rig, "--city", notJSON, "--addr", "127.0.0.1:0"}, noEnv, 1, "city document is not a JSON object"},
+		{"an answer that is not JSON", []string{"--board", board, "--rig-board", rig, "--city", city, "--answers", badAnswers, "--addr", "127.0.0.1:0"}, noEnv, 1, "dismiss.json"},
 	}
 	for _, c := range cases {
 		var stderr bytes.Buffer
@@ -120,6 +123,7 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 	}
 	board := filepath.Join(moduleRoot, defaultBoard)
 	rig := filepath.Join(moduleRoot, defaultRigBoard)
+	city := filepath.Join(moduleRoot, defaultCity)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ready := make(chan string, 1)
@@ -132,7 +136,7 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 		return ""
 	}
 	go func() {
-		done <- run(ctx, []string{"--board", board, "--rig-board", rig, "--answers", answers}, env, &stderr, ready)
+		done <- run(ctx, []string{"--board", board, "--rig-board", rig, "--city", city, "--answers", answers}, env, &stderr, ready)
 	}()
 
 	var base string
@@ -172,6 +176,13 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 	}
 	if res, body := get(t, http.MethodGet, base+"/helm/rigs/gc-toolkit", ""); res.StatusCode != http.StatusOK || !sameJSON(t, rigBoardOf(t, body), wantRig) {
 		t.Errorf("GET /helm/rigs/gc-toolkit: %d, want the rig document file as its board", res.StatusCode)
+	}
+	wantCity, err := os.ReadFile(city)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, body := get(t, http.MethodGet, base+"/helm/city", ""); res.StatusCode != http.StatusOK || !sameJSON(t, cityOf(t, body), wantCity) {
+		t.Errorf("GET /helm/city: %d, want the city document file as its city", res.StatusCode)
 	}
 
 	cancel()
@@ -300,6 +311,10 @@ func TestTheDeclaredCommandServesTheBoard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	city, err := os.ReadFile(filepath.Join(mod, defaultCity))
+	if err != nil {
+		t.Fatal(err)
+	}
 	shell, err := os.ReadFile(filepath.Join(mod, "web/dist/index.html"))
 	if err != nil {
 		t.Fatal(err)
@@ -319,6 +334,9 @@ func TestTheDeclaredCommandServesTheBoard(t *testing.T) {
 		}
 		if res, body := get(t, http.MethodGet, base+"/helm/rigs/gc-toolkit", ""); res.StatusCode != http.StatusOK || !sameJSON(t, rigBoardOf(t, body), rig) {
 			t.Errorf("GET /helm/rigs/gc-toolkit: %d, want %s as its board", res.StatusCode, defaultRigBoard)
+		}
+		if res, body := get(t, http.MethodGet, base+"/helm/city", ""); res.StatusCode != http.StatusOK || !sameJSON(t, cityOf(t, body), city) {
+			t.Errorf("GET /helm/city: %d, want %s as its city", res.StatusCode, defaultCity)
 		}
 		if res, body := get(t, http.MethodPost, base+"/helm/dismiss", ""); res.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), `"reason":"unavailable"`) {
 			t.Errorf("POST /helm/dismiss with no answer: %d %s, want 503 unavailable", res.StatusCode, body)
@@ -352,6 +370,22 @@ func rigBoardOf(t *testing.T, body []byte) []byte {
 		t.Error("the rig answer carries no read time")
 	}
 	return answer.Board
+}
+
+// cityOf is the city document the city route's answer carries.
+func cityOf(t *testing.T, body []byte) []byte {
+	t.Helper()
+	var answer struct {
+		ReadAt string          `json:"read_at"`
+		City   json.RawMessage `json:"city"`
+	}
+	if err := json.Unmarshal(body, &answer); err != nil {
+		t.Fatalf("the city answer is not JSON: %v", err)
+	}
+	if answer.ReadAt == "" {
+		t.Error("the city answer carries no read time")
+	}
+	return answer.City
 }
 
 // sameJSON reports whether two JSON texts hold the same value.
