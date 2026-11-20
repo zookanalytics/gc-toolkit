@@ -478,6 +478,9 @@ func newReactionAcceptCmd(stdout, stderr io.Writer) *cobra.Command {
 			if ref == "" {
 				return errors.New("name the bead: gctk reaction accept <bead>")
 			}
+			if err := reaction.CheckVars(req.Vars); err != nil {
+				return acceptStopped(err, stderr, prog)
+			}
 			rt := gascity.New()
 			if reaction.IsPRReference(ref) {
 				id, err := reaction.Resolve(rt, ref)

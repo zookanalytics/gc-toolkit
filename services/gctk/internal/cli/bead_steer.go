@@ -72,6 +72,10 @@ func newBeadParkCmd(stdout, stderr io.Writer) *cobra.Command {
 			if c.Flags().Changed("waiting-on") && strings.TrimSpace(waitingOn) == "" {
 				return errors.New("--waiting-on requires a bead id")
 			}
+			if _, err := park.Validate(req); err != nil {
+				fmt.Fprintf(stderr, "%s: %v\n", prog, err)
+				return exit(2)
+			}
 			l, err := ledger.Open(db, req.Bead)
 			if err != nil {
 				fmt.Fprintf(stderr, "%s: could not open %s's store (%v). Nothing was written\n", prog, req.Bead, err)

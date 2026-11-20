@@ -92,30 +92,10 @@ func Refused(err error) bool {
 // what the park holds.
 func (p *Parks) Park(req Request) (Parked, error) {
 	var out Parked
-	req.Bead, req.WaitingOn = strings.TrimSpace(req.Bead), strings.TrimSpace(req.WaitingOn)
-	textForm := req.Text != ""
-	switch {
-	case req.Bead == "":
-		return out, refuse("park needs <bead-id>")
-	case textForm && req.WaitingOn != "":
-		return out, refuse("\"<text>\" and --waiting-on are the two forms of a park, and a park takes one. The text form files a gate of its own, titled with why %s is parked and what releases it; --waiting-on parks %s behind %s and files no gate. Pass one. Nothing was written", req.Bead, req.Bead, req.WaitingOn)
-	case !textForm && req.WaitingOn == "":
-		return out, refuse("park needs \"<text>\", one line of at most %d characters saying why %s is parked and what releases it, or --waiting-on <bead-id> to park it behind an existing bead. Nothing was written", lifecycle.TakeawayMax, req.Bead)
-	case req.WaitingOn != "" && req.BodySet:
-		return out, refuse("--body describes the gate the text form files, and --waiting-on files none, so the body would be dropped. Use the text form to describe a park of its own. Nothing was written")
+	req, err := Validate(req)
+	if err != nil {
+		return out, err
 	}
-	if textForm {
-		title, err := lifecycle.Headline(req.Text)
-		var long *lifecycle.LongHeadline
-		switch {
-		case errors.As(err, &long):
-			return out, refuse("the text is %d characters, and the cap is %d. It is the park gate's title, one line read wherever the gate is listed. Cut it to why the bead is parked and what releases it, and put the rest in --body. Nothing was written", long.Len, lifecycle.TakeawayMax)
-		case err != nil:
-			return out, refuse("park needs \"<text>\", the one-line headline of at most %d characters saying why %s is parked and what releases it. Nothing was written", lifecycle.TakeawayMax, req.Bead)
-		}
-		req.Text = title
-	}
-
 	bead, err := p.read(req.Bead)
 	switch {
 	case err != nil:
@@ -143,6 +123,37 @@ func (p *Parks) Park(req Request) (Parked, error) {
 		return p.waitOn(req, sv, out)
 	}
 	return p.gate(req, bead, out)
+}
+
+// Validate refuses a call for what it asks, before anything is read: both
+// forms or neither, a body beside --waiting-on, and a title that is not a
+// headline. It returns the call with the bead and the bead to wait on trimmed
+// and the title on one line.
+func Validate(req Request) (Request, error) {
+	req.Bead, req.WaitingOn = strings.TrimSpace(req.Bead), strings.TrimSpace(req.WaitingOn)
+	textForm := req.Text != ""
+	switch {
+	case req.Bead == "":
+		return req, refuse("park needs <bead-id>")
+	case textForm && req.WaitingOn != "":
+		return req, refuse("\"<text>\" and --waiting-on are the two forms of a park, and a park takes one. The text form files a gate of its own, titled with why %s is parked and what releases it; --waiting-on parks %s behind %s and files no gate. Pass one. Nothing was written", req.Bead, req.Bead, req.WaitingOn)
+	case !textForm && req.WaitingOn == "":
+		return req, refuse("park needs \"<text>\", one line of at most %d characters saying why %s is parked and what releases it, or --waiting-on <bead-id> to park it behind an existing bead. Nothing was written", lifecycle.TakeawayMax, req.Bead)
+	case req.WaitingOn != "" && req.BodySet:
+		return req, refuse("--body describes the gate the text form files, and --waiting-on files none, so the body would be dropped. Use the text form to describe a park of its own. Nothing was written")
+	}
+	if textForm {
+		title, err := lifecycle.Headline(req.Text)
+		var long *lifecycle.LongHeadline
+		switch {
+		case errors.As(err, &long):
+			return req, refuse("the text is %d characters, and the cap is %d. It is the park gate's title, one line read wherever the gate is listed. Cut it to why the bead is parked and what releases it, and put the rest in --body. Nothing was written", long.Len, lifecycle.TakeawayMax)
+		case err != nil:
+			return req, refuse("park needs \"<text>\", the one-line headline of at most %d characters saying why %s is parked and what releases it. Nothing was written", lifecycle.TakeawayMax, req.Bead)
+		}
+		req.Text = title
+	}
+	return req, nil
 }
 
 // waitOn parks the bead behind req.WaitingOn, by a blocks edge onto it.

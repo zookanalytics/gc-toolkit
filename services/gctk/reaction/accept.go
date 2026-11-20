@@ -111,6 +111,16 @@ func stop(code int, format string, args ...any) error {
 // varForm is a var a caller settled: a key, then = and its value, on one line.
 var varForm = regexp.MustCompile(`^[^=\n][^\n]*=[^\n]*$`)
 
+// CheckVars refuses, with exit 2, a var that is not <key>=<value> on one line.
+func CheckVars(vars []string) error {
+	for _, v := range vars {
+		if !varForm.MatchString(v) {
+			return stop(2, "--var takes <key>=<value> on one line, not %q", v)
+		}
+	}
+	return nil
+}
+
 // answerForm is an Accept's answer on a gate: the formula and the token.
 var answerForm = regexp.MustCompile(`^ruled: accepted (\S+) accept:([0-9a-f]+)$`)
 
@@ -122,10 +132,8 @@ func (r *Reactions) Accept(req AcceptRequest) (Accepted, error) {
 	if bead == "" {
 		return out, stop(2, "accept needs <bead-id>")
 	}
-	for _, v := range req.Vars {
-		if !varForm.MatchString(v) {
-			return out, stop(2, "--var takes <key>=<value> on one line, not %q", v)
-		}
+	if err := CheckVars(req.Vars); err != nil {
+		return out, err
 	}
 	release, holder, err := r.acceptLock(bead)
 	switch {
