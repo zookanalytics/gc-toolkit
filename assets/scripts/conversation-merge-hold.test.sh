@@ -134,7 +134,7 @@ field() { local v; v=$(bfield "$1" "$2"); [ "$v" = "<absent>" ] || printf '%s' "
 deps_of() { bedges "$1" "$2"; }
 acts() { local a; a=$(bcomments "$1"); printf '%s' "${a//$'\n'/|}"; }
 # An open PR's anchor, and the PR's review in flight.
-pr() { fresh; bead tk-anc task open '{"merge_result":"pull_request","pr_number":"41"}'; }
+pr() { fresh; bead tk-anc task blocked '{"merge_result":"pull_request_pending","pr_number":"41"}'; }
 pr_review() { pr; bead tk-rev task open '{"task_kind":"review","anchor_bead":"tk-anc"}'; }
 # gate_on <bead> <gate> — an open human gate the bead waits on.
 gate_on() {
@@ -148,6 +148,8 @@ filed_on() { local c; c=$(bonto "$1" tracks); printf '%s' "${c%% *}"; }
 # the store, sorted and space-separated.
 conversations_on() { bonto "$1" tracks; }
 derive() { (cd "$TMP/cwd" && "$GCTK" pr status "$1" --json 2>/dev/null) || echo "derive-failed"; }
+# held_of <bead> — the held: values the PR derives, bracketed.
+held_of() { local s; s=$(status_of "$1"); printf '%s' "${s#* }"; }
 status_of() { local d; d=$(derive "$1"); printf '%s [%s]' "$(json_get "$d" status)" "$(json_get_strs "$d" held)"; }
 # holds_of <bead> — what holds the bead by gctk bead holds, the rule the work
 # gate at load-context and every reader of a bead's waits share: its status,
@@ -226,7 +228,10 @@ rework_of() { local r; r=$(bids metadata.task_kind=rework "metadata.anchor_bead=
 
 echo "# opening a conversation on an open PR's anchor holds the PR's merge"
 pr
-eq "$(status_of tk-anc)" "needs-review []" "(OPEN-ANCHOR) before any conversation, the PR reads needs-review"
+# The status a fresh PR derives before any conversation, which each case below
+# returns to once its conversation lets the merge go.
+BASE=$(status_of tk-anc)
+eq "${BASE#* }" "[]" "(OPEN-ANCHOR) before any conversation, nothing holds the PR"
 run_open tk-anc --reason "should this land as built?" --json
 C=$(opened_conv)
 eq "$RC" 0 "(OPEN-ANCHOR) open exits 0"
@@ -253,7 +258,7 @@ eq "$RC" 0 "(SIGNOFF) the sign-off exits 0"
 eq "$(field "$C" status)" "closed" "(SIGNOFF) the conversation is closed"
 no_release && ok "(SIGNOFF) …and nothing is written to release the merge" \
     || bad "(SIGNOFF) …and nothing is written to release the merge ($(tr '\n' ';' < "$CALLS"))"
-eq "$(status_of tk-anc)" "needs-review []" "(SIGNOFF) the PR derives what it did before the conversation opened"
+eq "$(status_of tk-anc)" "$BASE" "(SIGNOFF) the PR derives what it did before the conversation opened"
 eq "$(holds_of tk-anc)" "clear " "(SIGNOFF) …and nothing holds the anchor, though the edge onto the closed conversation stays"
 
 echo "# an open PR on the pending record is held the same way, blocked or open"
@@ -275,7 +280,7 @@ eq "$RC" 0 "(DISMISS) dismiss exits 0"
 eq "$(field "$C" status)" "closed" "(DISMISS) the conversation is closed"
 no_release && ok "(DISMISS) …with nothing written to release the merge" \
     || bad "(DISMISS) …with nothing written to release the merge ($(tr '\n' ';' < "$CALLS"))"
-eq "$(status_of tk-anc)" "needs-review []" "(DISMISS) the PR derives what it did before the conversation opened"
+eq "$(status_of tk-anc)" "$BASE" "(DISMISS) the PR derives what it did before the conversation opened"
 
 echo "# the premise re-check's moot close frees the merge, and the conversation keeps no headline"
 pr; run_open tk-anc --json; C=$(opened_conv)
@@ -290,17 +295,17 @@ eq "$(field "$C" close_reason)" "moot: $MOOT_WHY" "(MOOT) …while the conversat
 has "$(field tk-anc notes)" "moot (conversation $C): $MOOT_WHY" "(MOOT) …and so do the subject's notes"
 no_release && ok "(MOOT) …with nothing written to release the merge" \
     || bad "(MOOT) …with nothing written to release the merge ($(tr '\n' ';' < "$CALLS"))"
-eq "$(status_of tk-anc)" "needs-review []" "(MOOT) the PR derives what it did before the conversation opened"
+eq "$(status_of tk-anc)" "$BASE" "(MOOT) the PR derives what it did before the conversation opened"
 
 echo "# a bare close of the conversation frees the merge too"
 pr; run_open tk-anc --json; C=$(opened_conv)
 gc bd close "$C" --reason "closed by hand" >/dev/null
-eq "$(status_of tk-anc)" "needs-review []" "(BARE-CLOSE) a gc bd close by hand frees the merge"
+eq "$(status_of tk-anc)" "$BASE" "(BARE-CLOSE) a gc bd close by hand frees the merge"
 eq "$(holds_of tk-anc)" "clear " "(BARE-CLOSE) …and nothing holds the anchor"
 
 echo "# a conversation on the PR's review holds the anchor's merge, and the review goes on"
 pr_review
-eq "$(status_of tk-anc)" "working []" "(OPEN-REVIEW) with its review in flight, the PR reads working"
+eq "$(held_of tk-anc)" "[]" "(OPEN-REVIEW) with its review in flight, nothing holds the PR"
 run_open tk-rev --reason "is this review stuck?" --json
 C=$(opened_conv)
 eq "$RC" 0 "(OPEN-REVIEW) open exits 0"
@@ -325,7 +330,7 @@ lands_before "converse-rework " "bd close $C " \
 RW=$(rework_of tk-anc)
 eq "$(field "$C" status)" "closed" "(REVIEW-RULING) the conversation is closed"
 eq "$(holds_of tk-anc)" "blocked $RW" "(REVIEW-RULING) the anchor now waits on the rework alone"
-eq "$(status_of tk-anc)" "working []" "(REVIEW-RULING) …so the PR reads working"
+eq "$(held_of tk-anc)" "[]" "(REVIEW-RULING) …so nothing holds the PR for a person"
 
 echo "# a ruling on a turn that does not sign off files the rework at once, and the rework goes on"
 pr_review
@@ -374,15 +379,15 @@ has "$OUT" "the merge of tk-anc no longer waits for this conversation" "(LIFT) �
 eq "$(deps_of tk-anc blocks)" "" "(LIFT) the anchor's edge onto the conversation is gone"
 eq "$(acts "$C")" "Lifted the hold on the PR's merge: the operator opened this to get the PR merged" "(LIFT) …and the conversation records why, among the visit's actions"
 eq "$(field "$C" status)" "open" "(LIFT) the conversation stays open"
-eq "$(status_of tk-anc)" "needs-review []" "(LIFT) the PR reads what it did before the conversation opened"
+eq "$(status_of tk-anc)" "$BASE" "(LIFT) the PR reads what it did before the conversation opened"
 run_block "$TMP/hold-lift.sh" "$C" tk-anc
 eq "$RC" 0 "(LIFT) a second lift, with no edge left to remove, still exits 0"
 
 echo "# a PR that opened after its conversation started is held from the hold step on"
-fresh; bead tk-anc task open '{"merge_result":"pre_open_gate"}'
+fresh; bead tk-anc task open '{}'
 run_open tk-anc --json; C=$(opened_conv)
 eq "$(deps_of tk-anc blocks)" "" "(HOLD-STEP) a conversation on a pre-open anchor takes no edge, which would stop the work"
-bset tk-anc metadata.merge_result=pull_request metadata.pr_number=41
+bset tk-anc status=blocked metadata.merge_result=pull_request_pending metadata.pr_number=41
 run_block "$TMP/hold-add.sh" "$C" tk-anc
 eq "$RC" 0 "(HOLD-STEP) the hold step's add exits 0 once the PR has opened"
 has "$OUT" "the merge of tk-anc waits for this conversation" "(HOLD-STEP) …saying the merge waits"
@@ -400,7 +405,7 @@ fresh; bead tk-anc task closed '{"merge_result":"merged"}'; bead tk-rev task ope
 run_open tk-rev --json
 eq "$RC" 0 "(NOT-PR) a conversation on the review of a merged PR is filed"
 hasnt "$(writes)" "--type blocks" "(NOT-PR) …and takes no edge"
-fresh; bead tk-anc task open '{"merge_result":"pre_open_gate"}'; bead tk-rev task open '{"task_kind":"review","anchor_bead":"tk-anc"}'
+fresh; bead tk-anc task open '{}'; bead tk-rev task open '{"task_kind":"review","anchor_bead":"tk-anc"}'
 run_open tk-rev --json
 hasnt "$(writes)" "--type blocks" "(NOT-PR) a review of a pre-open anchor takes no edge either"
 
@@ -444,9 +449,9 @@ gc bd gate resolve tk-q --reason "answered in another sitting" >/dev/null
 eq "$(status_of tk-anc)" "needs-attention [blocked]" "(REPLY-FAIL) once another sitting answers the gate, the PR stays held"
 eq "$(holds_of tk-anc)" "blocked $C" "(REPLY-FAIL) …by the conversation, which is still open"
 # A conversation filed before its PR opened holds no merge until open joins it.
-fresh; bead tk-anc task open '{"merge_result":"pre_open_gate"}'
+fresh; bead tk-anc task open '{}'
 run_open tk-anc --json; C=$(opened_conv)
-bset tk-anc metadata.merge_result=pull_request metadata.pr_number=41; gate_on tk-anc tk-q
+bset tk-anc status=blocked metadata.merge_result=pull_request_pending metadata.pr_number=41; gate_on tk-anc tk-q
 : > "$CALLS"
 STUB_DEP_ADD_FAIL_ON="--type replies-to" run_open tk-q --reason "and should it wait for the gate?" --json
 eq "$RC" 4 "(REPLY-FAIL) joining a queued conversation through a gate whose reply the store refuses exits 4"
@@ -484,7 +489,7 @@ has "$ERR" "the sitting c-$C has taken conversation $C out of the queue, so the 
     "(SAVE-AGAIN) …which open says"
 eq "$(holds_of tk-anc)" "blocked tk-q" "(SAVE-AGAIN) only the gate the conversation answers holds the anchor"
 gc bd gate resolve tk-q --reason "answered in the sitting" >/dev/null
-eq "$(status_of tk-anc)" "needs-review []" "(SAVE-AGAIN) …so once the sitting answers it, the PR is free to merge"
+eq "$(status_of tk-anc)" "$BASE" "(SAVE-AGAIN) …so once the sitting answers it, the PR is free to merge"
 # A sitting that keeps the hold keeps it through the save again.
 pr; gate_on tk-anc tk-q
 STUB_DEP_ADD_FAIL_ON="--type replies-to" run_open tk-q --allow-duplicate --if-subject tk-anc --reason "$Q" --json
