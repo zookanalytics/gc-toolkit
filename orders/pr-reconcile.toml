@@ -4,11 +4,12 @@
 # this order decides each of those records on its own read of the PR, made in
 # the act: a merge pinned to the head that read judged, or added to its base's
 # merge queue with it, an exception, a draft's ready transition, and a
-# withdrawal's dismissals and close. A run decides a record only once its PR
-# moved or its bead changed since a run decided it with no act owed, which it
-# tells from the store, the read the one-PR update saves for orders/pr-poll.toml
-# and orders/pr-compare.toml among it, so a run in which nothing changed asks
-# GitHub nothing. Its bead closes once the merge commit is on the freshly
+# withdrawal's dismissals and close. A run decides a record once its PR moved
+# or its bead changed since a run decided it with no act owed, which it tells
+# from the store, the read the one-PR update saves for orders/pr-poll.toml and
+# orders/pr-compare.toml among it, and at least once an hour, so a run in which
+# nothing changed and no record's hour is up asks GitHub nothing. Its bead
+# closes once the merge commit is on the freshly
 # fetched target. A PR open at another head goes
 # back to the refinery, which a run wakes and nudges for it when only a
 # conversation or an ask holds the PR's bead, and the exceptions stay blocked

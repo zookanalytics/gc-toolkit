@@ -76,13 +76,15 @@ exit: 0 recorded
 const prReconcileLong = `One run of the landing order over the store's pending records: the beads that
 carry the marker pr_reconcile_pending, and the beads on the record that carry a
 ruling's disposition, an open or blocked bead only while it is assigned to
-nobody or to the refinery. It reads the store once, and decides a record only
-once its PR moved or its bead changed since a run decided it with no act owed.
-After such a decision it keeps on the bead the digest of what the decision read
-of the store (pr_landing_digest), the read the one-PR update (gctk pr refresh)
-saved on the bead among it, and a later run passes over the record, with no
-read of GitHub and no write, until the digest of what it reads differs. A
-digest that is missing or wrong has the record decided again.
+nobody or to the refinery. It reads the store once, and decides a record once
+its PR moved or its bead changed since a run decided it with no act owed, and
+at least once an hour. After such a decision it keeps on the bead the digest of
+what the decision read of the store, the read the one-PR update (gctk pr
+refresh) saved on the bead among it, with the decision's time
+(pr_landing_digest), and a later run passes over the record, with no read of
+GitHub and no write, until the digest of what it reads differs or an hour has
+passed since that time. A digest that is missing or wrong has the record
+decided again.
 
 It decides a record on its own read of the PR, made in the act, wherever the
 decision depends on GitHub, and on the store alone where it does not, such as
@@ -197,7 +199,7 @@ review-run-failed instead, naming both runs and how each ended.
 
 The run saves none of what it reads of GitHub: the one-PR update is the one
 writer of pr_github_read, pr_state and pr_last_checked_at. A record that owes
-no act gets one write, its digest.
+no act gets one write, its digest with the decision's time.
 
 It keeps each PR's status: and held: labels equal to what the store derives,
 for every PR the store's live beads own, on the pending record or not. For

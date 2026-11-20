@@ -552,6 +552,68 @@ func TestOpenUnchangedPRStaysBlocked(t *testing.T) {
 	}
 }
 
+// A decision that owed no act stands an hour while nothing it read of the
+// store changes, so a change on GitHub that the PR watch never saves, here an
+// approval, is decided on the run's own read once that hour is up, and not
+// before.
+func TestAChangeTheWatchMissedIsDecidedOnTheRunsOwnReadOnceTheHourIsUp(t *testing.T) {
+	d := newLand(t)
+	c := d.timed()
+	d.pr.Reviews = nil
+	is(t, d.once(t), pr.ActChecked)
+	if ws := d.runWrites(); !keptDigest(ws) {
+		t.Fatalf("a record that owes no act was written %+v, want the digest of what the run decided on", ws)
+	}
+	d.pr.Reviews = []gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z")}
+	c.advance(time.Hour - time.Second)
+	o := d.run(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "a run decided the record at 2026-11-12T09:00:00Z, less than an hour ago") {
+		t.Fatalf("a record inside its hour says %q", o.Detail)
+	}
+	readsNoGitHub(t, d)
+	if ws := d.runWrites(); len(ws) != 0 || len(d.github.Asks()) != 0 {
+		t.Fatalf("a run inside the record's hour wrote %+v and asked %v", ws, asks(d.github))
+	}
+	c.advance(time.Second)
+	is(t, d.run(t), pr.ActRequested)
+	if reads := d.runReads(); len(reads) == 0 || reads[0] != "PullRequest" {
+		t.Fatalf("the run decided without its own read of the PR: %v", reads)
+	}
+	if len(d.github.Asks()) != 1 {
+		t.Fatalf("the run once the hour was up asked %v, want one merge request", asks(d.github))
+	}
+}
+
+// A decision made for any other reason starts the record's hour again: the PR
+// watch saves a change half an hour in, a run decides the record on it, and the
+// next run on the record's own read comes an hour after that decision.
+func TestADecisionMadeForAnotherReasonStartsTheHourAgain(t *testing.T) {
+	d := newLand(t)
+	c := d.timed()
+	d.pr.Reviews = nil
+	is(t, d.once(t), pr.ActChecked)
+	c.advance(30 * time.Minute)
+	is(t, d.once(t), pr.ActChecked)
+	if reads := d.runReads(); len(reads) == 0 || reads[0] != "PullRequest" {
+		t.Fatalf("a run after the watch saved a change decided without its own read: %v", reads)
+	}
+	if ws := d.runWrites(); !keptDigest(ws) {
+		t.Fatalf("the decision half an hour in was written %+v, want the digest of what it decided on", ws)
+	}
+	c.advance(time.Hour - time.Second)
+	is(t, d.run(t), pr.ActChecked)
+	readsNoGitHub(t, d)
+	c.advance(time.Second)
+	is(t, d.run(t), pr.ActChecked)
+	if reads := d.runReads(); len(reads) == 0 || reads[0] != "PullRequest" {
+		t.Fatalf("the run an hour after the last decision decided without its own read: %v", reads)
+	}
+	if ws := d.runWrites(); !keptDigest(ws) {
+		t.Fatalf("the decision once the hour was up was written %+v, want the digest of what it decided on", ws)
+	}
+}
+
 // A PR outside the clone's origin owes no act the run can make: it reads no
 // GitHub, writes nothing, and the run's exit says the record could not be
 // decided.

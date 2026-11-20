@@ -532,9 +532,9 @@
   },
   {
     "name": "pr_landing_digest",
-    "type": "string",
+    "type": "json",
     "owner": "pr",
-    "doc": "The digest of the store as the landing order read it when it last decided a bead's pending record and owed no act: the bead's status, assignee and metadata but this key, the read the PR watch saved among them, each bead its blocks edges name, each ask on it with what holds it, the evaluator's waits and the work anchored to it, and the other open work on its branch. A run decides the record, on its own read of GitHub, only while the digest of the store as it reads it differs from this one, so a run in which nothing moved on GitHub and nothing changed in the store asks GitHub nothing. An act that does not complete leaves it as it is, and nothing clears it."
+    "doc": "The landing order's last decision of a bead's pending record that owed no act, one JSON object: digest, the digest of the store as the decision read it, the bead's status, assignee and metadata but this key, the read the PR watch saved among them, each bead its blocks edges name, each ask on it with what holds it, the evaluator's waits and the work anchored to it, and the other open work on its branch; and at, when the decision was made. A run decides the record, on its own read of GitHub, while the digest of the store as it reads it differs from this one, and once an hour has passed since at, whatever the digest, so a change the digest does not show waits an hour at most. Each decision that owes no act writes it again, so a decision made for any reason starts the hour again, and a run in which nothing moved on GitHub, nothing changed in the store and no record's hour is up asks GitHub nothing. An act that does not complete leaves it as it is, and nothing clears it."
   },
   {
     "name": "pr_last_checked_at",

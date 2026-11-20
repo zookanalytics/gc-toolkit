@@ -56,16 +56,28 @@ var withdrawHeadKey = ledger.Declare("withdraw_head", ledger.String,
 		"contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is "+
 		"filed, and never cleared.")
 
-// The landing order's digest of what it last decided a record on, which this
-// domain owns: the landing order alone writes it and reads it.
-var decidedKey = ledger.Declare("pr_landing_digest", ledger.String,
-	"The digest of the store as the landing order read it when it last decided a bead's pending record and owed "+
-		"no act: the bead's status, assignee and metadata but this key, the read the PR watch saved among them, each "+
-		"bead its blocks edges name, each ask on it with what holds it, the evaluator's waits and the work anchored "+
-		"to it, and the other open work on its branch. A run decides the record, on its own read of GitHub, only "+
-		"while the digest of the store as it reads it differs from this one, so a run in which nothing moved on "+
-		"GitHub and nothing changed in the store asks GitHub nothing. An act that does not complete leaves it as it "+
-		"is, and nothing clears it.")
+// decided is the landing order's last decision of a record that owed no act:
+// the digest of what it read of the store, and when it was made, RFC 3339 UTC
+// to the second.
+type decided struct {
+	Digest string `json:"digest"`
+	At     string `json:"at"`
+}
+
+// The landing order's digest of what it last decided a record on, with the
+// decision's time, which this domain owns: the landing order alone writes it
+// and reads it.
+var decidedKey = ledger.Declare("pr_landing_digest", ledger.JSON[decided](),
+	"The landing order's last decision of a bead's pending record that owed no act, one JSON object: digest, the "+
+		"digest of the store as the decision read it, the bead's status, assignee and metadata but this key, the "+
+		"read the PR watch saved among them, each bead its blocks edges name, each ask on it with what holds it, the "+
+		"evaluator's waits and the work anchored to it, and the other open work on its branch; and at, when the "+
+		"decision was made. A run decides the record, on its own read of GitHub, while the digest of the store as "+
+		"it reads it differs from this one, and once an hour has passed since at, whatever the digest, so a change "+
+		"the digest does not show waits an hour at most. Each decision that owes no act writes it again, so a "+
+		"decision made for any reason starts the hour again, and a run in which nothing moved on GitHub, nothing "+
+		"changed in the store and no record's hour is up asks GitHub nothing. An act that does not complete leaves "+
+		"it as it is, and nothing clears it.")
 
 // The runtime's stamps on a workflow root, which tell the landing order that a
 // review run is attached to the bead that owns a PR: a live root of the review

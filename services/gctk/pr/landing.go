@@ -280,9 +280,9 @@ const (
 	// the PR stands as the record says, or the disposition writer holds a
 	// retired PR's close for now, and the next run hands it over again. A run
 	// keeps the digest of what a decision that owed no act read (one), and
-	// decides the record again only once that changes, so a decision a failed
-	// read, or a merge state GitHub had not computed, left unmade is ActRetry,
-	// never this.
+	// decides the record again only once that changes or freshCheck has passed,
+	// so a decision a failed read, or a merge state GitHub had not computed,
+	// left unmade is ActRetry, never this.
 	ActChecked = "checked"
 	// ActRequested: the evaluator found the PR ready on the run's own read of
 	// GitHub, and the run asked GitHub to merge it, or to add it to its base's
@@ -727,12 +727,13 @@ func doing(a act) plan { return plan{act: a} }
 // through a read of their own. Each marked record that is closed, or open or
 // blocked and assigned to nobody or to the refinery (mayWork), and each bead it
 // reads for its disposition (disposing), owes a decision, which its act makes
-// under the record lock (one), unless nothing a decision reads of the store,
-// the read the PR watch saved among it, changed since a run decided it with no
-// act owed (unchanged). It leaves out a bead that anyone else is assigned,
-// since a run writes nothing to it. A record that does not read as a record is
-// not one the run can act on. With Labels set, the label writes the owned PRs
-// owe follow (labelPlans). The plans are in id order.
+// under the record lock (one), unless a run decided it with no act owed less
+// than freshCheck ago and nothing a decision reads of the store, the read the
+// PR watch saved among it, changed since (unchanged). It leaves out a bead
+// that anyone else is assigned, since a run writes nothing to it. A record
+// that does not read as a record is not one the run can act on. With Labels
+// set, the label writes the owned PRs owe follow (labelPlans). The plans are
+// in id order.
 func (u *run) plan() ([]plan, error) {
 	pass := u.Ledger.Pass()
 	rows, err := pass.Find(record.Marked())
@@ -803,9 +804,10 @@ func (u *run) plan() ([]plan, error) {
 	}
 	var out []plan
 	for _, r := range due {
-		if u.unchanged(pass, r) {
+		if at, ok := u.unchanged(pass, r); ok {
 			out = append(out, plan{id: r.ID, out: RunOutcome{Bead: r.ID, Action: ActChecked, Detail: "nothing moved " +
-				"on GitHub and nothing changed in the store since a run decided the record, so the run read nothing of GitHub"}})
+				"on GitHub and nothing changed in the store since a run decided the record at " + at +
+				", less than an hour ago, so the run read nothing of GitHub"}})
 			continue
 		}
 		out = append(out, plan{id: r.ID, due: true})
@@ -877,8 +879,9 @@ func (u *run) state(l *ledger.Ledger, r *ledger.Record) (state, *RunOutcome) {
 // store and its reads of GitHub among what the stop ends. A lock that does
 // not come free inside the act's bound, or an act the stop ended, is an act
 // that did not complete. A decision that owes no act keeps the digest of what
-// it read of the store (keep), so a later run decides the record again only
-// once something it reads has changed.
+// it read of the store, with its time (keep), so a later run decides the
+// record again only once something it reads has changed or freshCheck has
+// passed.
 func (u *run) one(ctx context.Context, id string, stop time.Duration) RunOutcome {
 	// Acts run one at a time, so the run's ledger is the act's for its length.
 	unbound := u.Ledger
@@ -933,7 +936,7 @@ func (u *run) one(ctx context.Context, id string, stop time.Duration) RunOutcome
 // on it with what holds it, the evaluator's own waits on the bead and the work
 // anchored to it, and the other open work on its branch. A change to any of
 // them, on GitHub through the saved read or in the store, makes the record due
-// again.
+// again, and so does freshCheck's passing.
 type decision struct {
 	Status   string            `json:"status"`
 	Assignee string            `json:"assignee"`
@@ -1003,26 +1006,43 @@ func (u *run) digest(s state) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// freshCheck is how long a decision that owed no act stands while nothing it
+// read of the store changes. Past it a run decides the record again, on its own
+// read of GitHub, so a change the digest does not show, such as one on GitHub
+// that the PR watch has not saved, waits this long at most.
+const freshCheck = time.Hour
+
 // unchanged reports whether a run decided the record r carries, read through
-// pass, with no act owed, and nothing a decision reads of the store, the read
-// the PR watch saved among it, changed since: its digest is the one that run
-// kept (decidedKey).
-func (u *run) unchanged(pass *ledger.Ledger, r *ledger.Record) bool {
+// pass, with no act owed less than freshCheck ago, and nothing a decision reads
+// of the store, the read the PR watch saved among it, changed since: its
+// digest is the one that run kept (decidedKey). at is when that run decided
+// it. A kept time that does not read, or reads later than the run's clock,
+// leaves the record due.
+func (u *run) unchanged(pass *ledger.Ledger, r *ledger.Record) (at string, ok bool) {
 	kept, _, err := decidedKey.Get(r)
-	if err != nil || kept == "" {
-		return false
+	if err != nil || kept.Digest == "" {
+		return "", false
+	}
+	when, err := time.Parse(time.RFC3339, kept.At)
+	if err != nil {
+		return "", false
+	}
+	if age := u.clock().Sub(when); age < 0 || age >= freshCheck {
+		return "", false
 	}
 	s, missed := u.state(pass, r)
-	return missed == nil && u.digest(s) == kept
+	return kept.At, missed == nil && u.digest(s) == kept.Digest
 }
 
-// keep records d, the digest of what the act decided the record s read on, once
-// the act owed nothing, guarded on the status and assignee it read. An act that
-// wrote the record, or a write the store did not take, leaves the record's
-// digest other than the store's, so the next run decides it again.
+// keep records d, the digest of what the act decided the record s read on, with
+// the time the act read it, once the act owed nothing, guarded on the status
+// and assignee it read. So each decision that owes no act starts the record's
+// freshCheck again. An act that wrote the record, or a write the store did not
+// take, leaves the record's digest other than the store's, so the next run
+// decides it again.
 func (u *run) keep(s state, d string) {
 	w := u.Ledger.Write(s.id)
-	decidedKey.Set(w, d)
+	decidedKey.Set(w, decided{Digest: d, At: s.now})
 	w.Guard(s.status, s.assignee)
 	_ = u.Ledger.Commit(w)
 }
