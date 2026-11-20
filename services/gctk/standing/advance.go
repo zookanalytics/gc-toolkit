@@ -41,7 +41,12 @@ const (
 // other bead on itself. A bead the read holds no answer for, and a bead met
 // again on the way down from itself, a cycle, are stuck on themselves, unread,
 // and a bead behind a waits-for wait, which the store cannot judge yet, is
-// stuck on that wait, unread.
+// stuck on that wait, unread. A wait on a bead with no standing of its own
+// ([Stands]) reads as the bead that speaks for it: the anchor of work a merge
+// anchor carries, and the bead a live run works for the run's root. Where that
+// is the waiting bead itself, such as an anchor that waits on its own rework
+// or on the review run that works it, the wait is the bead's own work, which
+// its own answer speaks for, so it stops nothing, as queue places such a bead.
 func (r *Reading) Advance(id string) (Advance, bool) {
 	a, ok := r.advances[id]
 	return a, ok
@@ -65,7 +70,7 @@ func (r *Reading) Frontier(id string) (Frontier, bool) {
 	if h.Status == waits.Clear {
 		return FrontierReady, true
 	}
-	if !r.behind(h.Waits, map[string]bool{}).Advancing {
+	if !r.behind(id, h.Waits, map[string]bool{}).Advancing {
 		return FrontierStuck, true
 	}
 	return FrontierAdvancing, true
@@ -121,11 +126,11 @@ func (r *Reading) advance(id string, on map[string]bool) Advance {
 			for _, m := range open {
 				members = append(members, waits.Wait{ID: m})
 			}
-			adv = r.behind(members, on)
+			adv = r.behind(id, members, on)
 		}
 	case RuleStaying, RuleInFlight, RuleScheduled:
 		// The rule names the waits behind what holds the bead.
-		adv = r.behind(r.holds[id].Waits, on)
+		adv = r.behind(id, r.holds[id].Waits, on)
 	default:
 		adv = stuck(id, string(a.Rule))
 	}
@@ -133,16 +138,25 @@ func (r *Reading) advance(id string, on map[string]bool) Advance {
 	return adv
 }
 
-// behind is the advance of a bead that advances while each bead ws names does:
-// what stops the first that does not, and advancing when each does. A wait the
-// store cannot judge yet ([waits.Wait.Unjudged]) holds the bead whatever its
-// bead's own advance, so it reads unread.
-func (r *Reading) behind(ws []waits.Wait, on map[string]bool) Advance {
+// behind is the advance of bead self, which advances while each bead ws names
+// does: what stops the first that does not, and advancing when each does. A
+// wait the store cannot judge yet ([waits.Wait.Unjudged]) holds the bead
+// whatever its bead's own advance, so it reads unread. A wait on a bead with
+// no standing of its own reads as the bead that speaks for it, and stops
+// nothing where that is self.
+func (r *Reading) behind(self string, ws []waits.Wait, on map[string]bool) Advance {
 	for _, w := range ws {
 		if w.Unjudged() {
 			return stuck(w.ID, string(RuleUnread))
 		}
-		if adv := r.advance(w.ID, on); !adv.Advancing {
+		id := w.ID
+		if t, ok := r.through[id]; ok {
+			if t == self {
+				continue
+			}
+			id = t
+		}
+		if adv := r.advance(id, on); !adv.Advancing {
 			return adv
 		}
 	}

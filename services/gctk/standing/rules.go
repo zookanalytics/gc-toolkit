@@ -186,10 +186,14 @@ func (r *Reading) members(id string) (all, open []string) {
 // which the read holds and has not answered: each wait of a bead the read was
 // asked about, which its frontier reads; each bead a queued bead waits on,
 // which it advances behind; and each open member of an epic or a Delivery the
-// members rule placed, which it advances with.
+// members rule placed, which it advances with. A wait on a bead with no
+// standing of its own reaches the bead that speaks for it.
 func (r *Reading) reach(ids []string) []string {
 	var next []string
 	add := func(id string) {
+		if t, ok := r.through[id]; ok {
+			id = t
+		}
 		if _, held := r.beads[id]; !held {
 			return
 		}

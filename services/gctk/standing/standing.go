@@ -120,6 +120,10 @@ type Reading struct {
 	order  queue.Ordered
 	// places is each piece of work's place in order, by id.
 	places map[string]queue.Place
+	// through is the bead that speaks for each bead with no standing of its
+	// own that the read met: the anchor of work a merge anchor carries, and the
+	// bead a live run works for the run's root.
+	through map[string]string
 	// advances is how far the city carries each open bead answered.
 	advances map[string]Advance
 }
@@ -137,11 +141,15 @@ func Read(ids []string, s Store) (*Reading, error) {
 		answeredBy: map[string]string{}, gathered: map[string]bool{}, holds: map[string]waits.Holds{},
 		unread: map[string]error{}, stays: map[string]bool{}, holding: map[string]prstatus.Holds{},
 		unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{}, prAnswers: map[string]pr.Answer{},
-		noFacts: map[string]bool{}, worked: map[string]string{}, advances: map[string]Advance{}}
+		noFacts: map[string]bool{}, worked: map[string]string{}, through: map[string]string{},
+		advances: map[string]Advance{}}
 	live := s.Every()
 	add := func(b Bead) {
 		if _, dup := r.beads[b.ID]; !dup && Stands(b) {
 			r.beads[b.ID] = b
+		}
+		if b.Anchor != "" && !Stands(b) {
+			r.through[b.ID] = b.Anchor
 		}
 	}
 	for _, b := range live {
@@ -197,8 +205,14 @@ func Read(ids []string, s Store) (*Reading, error) {
 		return nil, fmt.Errorf("read the live runs: %w", err)
 	}
 	for _, run := range runs {
-		if run.Live && run.Bead != "" && r.worked[run.Bead] == "" {
+		if !run.Live || run.Bead == "" {
+			continue
+		}
+		if r.worked[run.Bead] == "" {
 			r.worked[run.Bead] = run.Root
+		}
+		if _, held := r.beads[run.Root]; !held && run.Root != "" {
+			r.through[run.Root] = run.Bead
 		}
 	}
 	if r.order, err = queue.Order(openWork(live), s); err != nil {
