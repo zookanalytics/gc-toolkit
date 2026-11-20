@@ -159,6 +159,10 @@ func run(c *Call) error {
 			return c.convoyStatus(s, d, args[1:])
 		}
 		return nil
+	case "order":
+		if first(args) == "list" {
+			return c.catOr(c.getenv("STUB_ORDERS"), `{"orders":[]}`)
+		}
 	case "hook":
 		if first(args) == "current" {
 			return c.hookCurrent(args[1:])

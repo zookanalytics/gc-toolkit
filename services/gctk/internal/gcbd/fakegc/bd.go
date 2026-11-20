@@ -177,6 +177,7 @@ func (c *Call) show(s, d string, args []string) error {
 			ids = append(ids, a)
 		}
 	}
+	withDependents := slices.Contains(args, "--include-dependents")
 	id := first(ids)
 	if hook := c.getenv("STUB_SHOW_HOOK"); hook != "" && executable(hook) {
 		_, _ = c.spawn(c.Stdout, hook, id)
@@ -209,13 +210,14 @@ func (c *Call) show(s, d string, args []string) error {
 				if e.issue() != id {
 					continue
 				}
+				// bd's show joins each edge to its far bead's row, so an edge onto
+				// a bead the store does not hold, one into another store, is left
+				// out, where a listing keeps it.
 				far := firstRow(rows, e.on())
 				if far == nil {
-					far = NewObject()
-					far.Set("id", e.on())
-				} else {
-					far = far.Clone()
+					continue
 				}
+				far = far.Clone()
 				far.Set("dependency_type", e.typ)
 				deps = append(deps, far)
 			}
@@ -229,11 +231,47 @@ func (c *Call) show(s, d string, args []string) error {
 				}
 				row.Set("dependencies", kept)
 			}
+			if withDependents {
+				if on := dependents(rows, edges, id); len(on) > 0 {
+					row.Set("dependents", on)
+				}
+			}
 			out = append(out, row)
 		}
 	}
+	if c.getenv("STUB_SHOW_RAW_CONTROL") != "" {
+		c.out(compactRawControl(out) + "\n")
+		return nil
+	}
 	c.out(Compact(out) + "\n")
 	return nil
+}
+
+// dependents is what bd's show --include-dependents adds to a bead: each bead
+// in the store with an edge onto it, in the store's order, cut to its id,
+// title, status, priority and type and the edge's type.
+func dependents(rows []*Object, edges []edge, id string) []Value {
+	out := []Value{}
+	for _, r := range rows {
+		for _, l := range linksOf(r, edges) {
+			if l.external || l.id != id {
+				continue
+			}
+			d := NewObject()
+			for _, k := range []string{"id", "title", "status"} {
+				if v, has := r.Get(k); has {
+					d.Set(k, v)
+				}
+			}
+			d.Set("priority", orDefault(get(r, "priority"), Number("2")))
+			if v, has := r.Get("issue_type"); has {
+				d.Set("issue_type", v)
+			}
+			d.Set("dependency_type", l.typ)
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // withoutExternal is jq's `map(select(.external != true))` over a row's
@@ -435,7 +473,9 @@ func (c *Call) list(s, d string, args []string) error {
 				continue
 			}
 		}
-		if statuses == "" && !listAll && strEq(get(r, "status"), "closed") {
+		// bd's default scope leaves out closed and pinned beads, and keeps
+		// every other status, a status the store adds included.
+		if statuses == "" && !listAll && (strEq(get(r, "status"), "closed") || strEq(get(r, "status"), "pinned")) {
 			continue
 		}
 		if statuses != "" {

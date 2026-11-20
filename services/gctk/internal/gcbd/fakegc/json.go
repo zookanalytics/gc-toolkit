@@ -174,7 +174,18 @@ func Compact(v Value) string {
 	return b.String()
 }
 
-func writeCompact(b *strings.Builder, v Value) {
+// compactRawControl is v as Compact prints it, but with each C0 control
+// character in a string written as its raw byte where Compact escapes it, as
+// an answer that carries one arrives.
+func compactRawControl(v Value) string {
+	var b strings.Builder
+	writeValue(&b, v, true)
+	return b.String()
+}
+
+func writeCompact(b *strings.Builder, v Value) { writeValue(b, v, false) }
+
+func writeValue(b *strings.Builder, v Value, rawControl bool) {
 	switch t := v.(type) {
 	case nil:
 		b.WriteString("null")
@@ -183,14 +194,14 @@ func writeCompact(b *strings.Builder, v Value) {
 	case Number:
 		b.WriteString(canonicalNumber(string(t)))
 	case string:
-		writeString(b, t)
+		writeStringAs(b, t, rawControl)
 	case []Value:
 		b.WriteByte('[')
 		for i, x := range t {
 			if i > 0 {
 				b.WriteByte(',')
 			}
-			writeCompact(b, x)
+			writeValue(b, x, rawControl)
 		}
 		b.WriteByte(']')
 	case *Object:
@@ -199,9 +210,9 @@ func writeCompact(b *strings.Builder, v Value) {
 			if i > 0 {
 				b.WriteByte(',')
 			}
-			writeString(b, k)
+			writeStringAs(b, k, rawControl)
 			b.WriteByte(':')
-			writeCompact(b, t.vals[k])
+			writeValue(b, t.vals[k], rawControl)
 		}
 		b.WriteByte('}')
 	default:
@@ -277,12 +288,18 @@ func ToString(v Value) string {
 // writeString writes s as jq writes a string: a quote and a backslash escaped,
 // a control character or DEL as \b, \t, \n, \f, \r or a \u escape, and every
 // other character as itself.
-func writeString(b *strings.Builder, s string) {
+func writeString(b *strings.Builder, s string) { writeStringAs(b, s, false) }
+
+// writeStringAs writes s as writeString does, or with rawControl each C0
+// control character as its raw byte.
+func writeStringAs(b *strings.Builder, s string, rawControl bool) {
 	b.WriteByte('"')
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
 		i += size
 		switch {
+		case rawControl && r < 0x20:
+			b.WriteRune(r)
 		case r == '"':
 			b.WriteString(`\"`)
 		case r == '\\':
