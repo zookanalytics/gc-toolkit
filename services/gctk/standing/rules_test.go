@@ -21,6 +21,8 @@ type facts struct {
 	answer   *pr.Answer
 	prUnread bool
 	place    *queue.Place
+	// worked is true for a bead a live run works.
+	worked bool
 }
 
 // readingOf is a read holding one bead and the readers' answers about it.
@@ -28,7 +30,11 @@ func readingOf(b Bead, k Kind, f facts) *Reading {
 	r := &Reading{beads: map[string]Bead{b.ID: b}, kinds: map[string]Kind{b.ID: k}, answers: map[string]Answer{},
 		answeredBy: map[string]string{}, holds: map[string]waits.Holds{}, unread: map[string]error{},
 		holding: map[string]prstatus.Holds{}, unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{},
-		prAnswers: map[string]pr.Answer{}, noFacts: map[string]bool{}, places: map[string]queue.Place{}}
+		prAnswers: map[string]pr.Answer{}, noFacts: map[string]bool{}, places: map[string]queue.Place{},
+		worked: map[string]string{}}
+	if f.worked {
+		r.worked[b.ID] = "tk-root"
+	}
 	if f.holds != nil {
 		r.holds[b.ID] = *f.holds
 		if root := rootOf(b.ID, *f.holds); root != "" {
@@ -142,6 +148,8 @@ func TestTable(t *testing.T) {
 			rule: RuleScheduled, group: GroupQueued, names: []string{"tk-other"}},
 		{name: "nobody scheduled it, and it names what it waits on", b: work, kind: KindWork, f: facts{holds: blockedOn(workWait), place: untaken},
 			rule: RuleNotScheduled, group: GroupNotMoving, names: []string{"tk-other"}},
+		{name: "a live run works it from the run's start, before waits counts it in flight", b: work, kind: KindWork,
+			f: facts{holds: clear, place: untaken, worked: true}, rule: RuleInFlight, group: GroupQueued},
 		{name: "work that queue placed nowhere is unread", b: work, kind: KindWork, f: facts{holds: clear},
 			rule: RuleUnread},
 		{name: "an epic with no ask has members of its own", b: Bead{ID: "tk-e", Status: "open", IssueType: "epic"}, kind: KindEpic, f: facts{holds: clear},

@@ -73,6 +73,9 @@ type Store interface {
 	// ClosedBeneath returns the closed beads whose own parent-child edge names
 	// one of parents.
 	ClosedBeneath(parents []string) ([]Bead, error)
+	// LiveRuns returns every live run the store holds, each with the bead it
+	// works ([waits.LiveRuns]).
+	LiveRuns() ([]waits.Run, error)
 }
 
 // Stands reports whether a bead has a standing of its own. A convoy, work a
@@ -101,7 +104,9 @@ type Reading struct {
 	facts      map[string]prstatus.Facts
 	prAnswers  map[string]pr.Answer
 	noFacts    map[string]bool
-	order      queue.Ordered
+	// worked is the root of the live run that works each bead one works.
+	worked map[string]string
+	order  queue.Ordered
 	// places is each piece of work's place in order, by id.
 	places map[string]queue.Place
 }
@@ -112,7 +117,7 @@ type Reading struct {
 // rest are answered.
 func Read(ids []string, s Store) (*Reading, error) {
 	r := &Reading{beads: map[string]Bead{}, kinds: map[string]Kind{}, answers: map[string]Answer{},
-		answeredBy: map[string]string{}, unwalked: map[string]bool{}, noFacts: map[string]bool{}}
+		answeredBy: map[string]string{}, unwalked: map[string]bool{}, noFacts: map[string]bool{}, worked: map[string]string{}}
 	live := s.Every()
 	add := func(b Bead) {
 		if _, dup := r.beads[b.ID]; !dup && Stands(b) {
@@ -169,6 +174,16 @@ func Read(ids []string, s Store) (*Reading, error) {
 	var err error
 	if r.holds, r.unread, err = s.Holds(open); err != nil {
 		return nil, fmt.Errorf("read what holds the beads: %w", err)
+	}
+
+	runs, err := s.LiveRuns()
+	if err != nil {
+		return nil, fmt.Errorf("read the live runs: %w", err)
+	}
+	for _, run := range runs {
+		if run.Live && run.Bead != "" && r.worked[run.Bead] == "" {
+			r.worked[run.Bead] = run.Root
+		}
 	}
 
 	roots := holdingRoots(open, r.holds)

@@ -281,7 +281,8 @@ func (r *Reading) questionOf(b Bead, stays map[string]bool) (Ref, bool) {
 //     that is no ask answers a question, whose row carries it. An epic or a
 //     Delivery that is no ruling has open members or none at all. A gate that
 //     is no human gate holds what waits on it. No group.
-//  8. in-flight: waits says it is work in flight. Group queued.
+//  8. in-flight: waits says it is work in flight, or a live run works it,
+//     from the run's start. Group queued.
 //  9. scheduled: the city takes it as things stand, as its place in queue's
 //     order says (queue.Place): it is armed, routed to a pool or assigned to
 //     an agent, and no dispatch hold holds it. Group queued.
@@ -342,7 +343,10 @@ func (r *Reading) table(b Bead, k Kind, ask Ask, stays map[string]bool) Answer {
 		// staying row answered above, so only a gate that is no human gate does.
 		return Answer{Rule: RuleGate}
 	}
-	if h.InFlight != "" {
+	// waits counts a run in flight only once it has passed load-context, which
+	// answers whether an ancestor's wait still holds work that has not
+	// started. A bead a live run works is the city's from the run's start.
+	if h.InFlight != "" || r.worked[b.ID] != "" {
 		return Answer{Group: GroupQueued, Rule: RuleInFlight, Names: refsOf(h.Waits)}
 	}
 	place, ok := r.places[b.ID]

@@ -75,7 +75,8 @@ func graph() *testRead {
 // gives as that bead's blockers. noFacts holds each bead whose pull request a
 // reader could not answer for, and answers the evaluator's answer for each pull
 // request on the pending record. prs, when a test gives one, is a prstatus
-// store over the same beads, which answers prstatus's reads instead.
+// store over the same beads, which answers prstatus's reads instead, and runs
+// are the live runs.
 type testRead struct {
 	rig        string
 	open       []bead
@@ -85,6 +86,7 @@ type testRead struct {
 	noFacts    map[string]bool
 	answers    map[string]pr.Answer
 	prs        prstatus.Store
+	runs       []waits.Run
 	handedBack []bead
 }
 
@@ -196,6 +198,8 @@ func (s storeOf) ClosedBeneath(parents []string) ([]standing.Bead, error) {
 	}
 	return out, nil
 }
+
+func (s storeOf) LiveRuns() ([]waits.Run, error) { return s.r.runs, nil }
 
 func parentsOf(b bead) []string { return parents(b) }
 

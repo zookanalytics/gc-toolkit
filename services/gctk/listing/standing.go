@@ -1,6 +1,9 @@
 package listing
 
-import "github.com/zookanalytics/gc-toolkit/services/gctk/standing"
+import (
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
+)
 
 var _ standing.Store = (*Listing)(nil)
 
@@ -59,6 +62,10 @@ func (ls *Listing) ClosedBeneath(parents []string) ([]standing.Bead, error) {
 	}
 	return out, nil
 }
+
+// LiveRuns implements standing.Store: every live run, through the listing's
+// pass.
+func (ls *Listing) LiveRuns() ([]waits.Run, error) { return waits.LiveRuns(ls.pass) }
 
 // Standing is the bead in the fields standing reads.
 func (b Bead) Standing() standing.Bead {
