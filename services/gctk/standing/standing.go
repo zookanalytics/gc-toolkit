@@ -86,38 +86,58 @@ func Stands(b Bead) bool {
 	return issueType(b) != "convoy" && b.Anchor == "" && !b.Run && !b.EphemeralPlane && !b.Template
 }
 
-// Reading is one read's answers: each bead's standing, and the readers'
-// answers it drew on, which a caller that draws the same beads reuses rather
-// than asking the readers again.
+// Reading is one read's answers: each bead's standing, how far the city
+// carries it, and the readers' answers it drew on, which a caller that draws
+// the same beads reuses rather than asking the readers again.
 type Reading struct {
 	beads   map[string]Bead
 	kinds   map[string]Kind
 	answers map[string]Answer
+	// asked is each bead the read was asked about, and unanswered why one of
+	// them has no answer.
+	asked      map[string]bool
+	unanswered map[string]string
+	// children is each bead's children, by id.
+	children map[string][]string
 	// answeredBy is the open conversation that answers each open human gate,
 	// the first that replies to it, and each open decision, the first that
 	// tracks it.
 	answeredBy map[string]string
-	holds      map[string]waits.Holds
-	unread     map[string]error
-	holding    map[string]prstatus.Holds
-	unwalked   map[string]bool
-	facts      map[string]prstatus.Facts
-	prAnswers  map[string]pr.Answer
-	noFacts    map[string]bool
+	// gathered is each open bead whose facts the read gathered.
+	gathered map[string]bool
+	holds    map[string]waits.Holds
+	unread   map[string]error
+	// stays is whether each conversation and decision whose holds were read
+	// waits on work of its own first.
+	stays     map[string]bool
+	holding   map[string]prstatus.Holds
+	unwalked  map[string]bool
+	facts     map[string]prstatus.Facts
+	prAnswers map[string]pr.Answer
+	noFacts   map[string]bool
 	// worked is the root of the live run that works each bead one works.
 	worked map[string]string
 	order  queue.Ordered
 	// places is each piece of work's place in order, by id.
 	places map[string]queue.Place
+	// advances is how far the city carries each open bead answered.
+	advances map[string]Advance
 }
 
-// Read answers where each bead named stands, through one store. Every read it
-// makes goes through s, and a read that fails returns its error and no answer.
-// A reader that could not answer for one bead leaves that bead unread, and the
-// rest are answered.
+// Read answers where each bead named stands and how far the city carries it,
+// through one store. It answers too each bead the advance or the frontier of a
+// bead named reads ([Reading.Advance], [Reading.Frontier]), level by level
+// until a level reaches no bead it has not answered. Every read it makes goes
+// through s, and a read that fails returns its error and no answer. A reader
+// that could not answer for one bead leaves that bead unread, and the rest are
+// answered.
 func Read(ids []string, s Store) (*Reading, error) {
 	r := &Reading{beads: map[string]Bead{}, kinds: map[string]Kind{}, answers: map[string]Answer{},
-		answeredBy: map[string]string{}, unwalked: map[string]bool{}, noFacts: map[string]bool{}, worked: map[string]string{}}
+		asked: map[string]bool{}, unanswered: map[string]string{}, children: map[string][]string{},
+		answeredBy: map[string]string{}, gathered: map[string]bool{}, holds: map[string]waits.Holds{},
+		unread: map[string]error{}, stays: map[string]bool{}, holding: map[string]prstatus.Holds{},
+		unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{}, prAnswers: map[string]pr.Answer{},
+		noFacts: map[string]bool{}, worked: map[string]string{}, advances: map[string]Advance{}}
 	live := s.Every()
 	add := func(b Bead) {
 		if _, dup := r.beads[b.ID]; !dup && Stands(b) {
@@ -129,7 +149,8 @@ func Read(ids []string, s Store) (*Reading, error) {
 	}
 	var missing []string
 	for _, id := range ids {
-		if _, ok := r.beads[id]; !ok {
+		r.asked[id] = true
+		if _, ok := r.beads[id]; !ok && !slices.Contains(missing, id) {
 			missing = append(missing, id)
 		}
 	}
@@ -139,7 +160,15 @@ func Read(ids []string, s Store) (*Reading, error) {
 			return nil, fmt.Errorf("read the beads asked about: %w", err)
 		}
 		for _, id := range missing {
-			if b, ok := found[id]; ok {
+			b, ok := found[id]
+			switch {
+			case !ok:
+				r.unanswered[id] = "the store holds no such bead"
+			case !Stands(b):
+				r.unanswered[id] = "it has no standing of its own: a convoy, work a merge anchor carries, " +
+					"a run's root or step, a row of the store's ephemeral plane and a template molecule each " +
+					"speak through another bead"
+			default:
 				add(b)
 			}
 		}
@@ -163,14 +192,59 @@ func Read(ids []string, s Store) (*Reading, error) {
 	}
 	r.index()
 
+	runs, err := s.LiveRuns()
+	if err != nil {
+		return nil, fmt.Errorf("read the live runs: %w", err)
+	}
+	for _, run := range runs {
+		if run.Live && run.Bead != "" && r.worked[run.Bead] == "" {
+			r.worked[run.Bead] = run.Root
+		}
+	}
+	if r.order, err = queue.Order(openWork(live), s); err != nil {
+		return nil, fmt.Errorf("place the work: %w", err)
+	}
+	r.places = map[string]queue.Place{}
+	for _, list := range [][]queue.Place{r.order.Queue, r.order.NotScheduled} {
+		for _, p := range list {
+			r.places[p.ID] = p
+		}
+	}
+
+	var level []string
+	for _, id := range ids {
+		if _, ok := r.beads[id]; ok && !slices.Contains(level, id) {
+			level = append(level, id)
+		}
+	}
+	sort.Strings(level)
+	for len(level) > 0 {
+		if err := r.gather(level, s); err != nil {
+			return nil, err
+		}
+		r.answer(level)
+		level = r.reach(level)
+	}
+	r.advanceAll()
+	return r, nil
+}
+
+// gather reads the facts the table answers each open bead named from, for
+// each it has not read them for: what holds it, and what holds each decision
+// an open conversation among them tracks, the gates and the beads a person
+// owes along its waits, and its pull request.
+func (r *Reading) gather(ids []string, s Store) error {
 	var open []string
 	for _, id := range ids {
-		if b, ok := r.beads[id]; ok && isOpen(b) {
+		if b, ok := r.beads[id]; ok && isOpen(b) && !r.gathered[id] {
+			r.gathered[id] = true
 			open = append(open, id)
 		}
 	}
+	if len(open) == 0 {
+		return nil
+	}
 	sort.Strings(open)
-	open = slices.Compact(open)
 	// An open conversation that tracks an open decision is itself the ask while
 	// that decision waits on work of its own first, which what holds the
 	// decision tells, so each decision a conversation named tracks is read too,
@@ -184,36 +258,48 @@ func Read(ids []string, s Store) (*Reading, error) {
 			held = append(held, subj)
 		}
 	}
+	held = slices.DeleteFunc(held, func(id string) bool {
+		_, read := r.holds[id]
+		return read || r.unread[id] != nil
+	})
 	sort.Strings(held)
 	held = slices.Compact(held)
-	var err error
-	if r.holds, r.unread, err = s.Holds(held); err != nil {
-		return nil, fmt.Errorf("read what holds the beads: %w", err)
-	}
-
-	runs, err := s.LiveRuns()
-	if err != nil {
-		return nil, fmt.Errorf("read the live runs: %w", err)
-	}
-	for _, run := range runs {
-		if run.Live && run.Bead != "" && r.worked[run.Bead] == "" {
-			r.worked[run.Bead] = run.Root
+	if len(held) > 0 {
+		holds, unread, err := s.Holds(held)
+		if err != nil {
+			return fmt.Errorf("read what holds the beads: %w", err)
 		}
-	}
-
-	roots := holdingRoots(open, r.holds)
-	holding, err := prstatus.Holding(roots, s.Blockers)
-	if err != nil {
-		if !errors.Is(err, prstatus.ErrWalkBound) {
-			return nil, fmt.Errorf("read what a person owes: %w", err)
-		}
-		for _, root := range roots {
-			if _, ok := holding[root]; !ok {
-				r.unwalked[root] = true
+		for id, h := range holds {
+			r.holds[id] = h
+			if k := r.kinds[id]; k == KindConversation || k == KindDecision {
+				r.stays[id] = staying(r.beads[id], h)
 			}
 		}
+		for id, e := range unread {
+			r.unread[id] = e
+		}
 	}
-	r.holding = holding
+
+	roots := slices.DeleteFunc(holdingRoots(open, r.holds), func(root string) bool {
+		_, read := r.holding[root]
+		return read || r.unwalked[root]
+	})
+	if len(roots) > 0 {
+		holding, err := prstatus.Holding(roots, s.Blockers)
+		if err != nil {
+			if !errors.Is(err, prstatus.ErrWalkBound) {
+				return fmt.Errorf("read what a person owes: %w", err)
+			}
+			for _, root := range roots {
+				if _, ok := holding[root]; !ok {
+					r.unwalked[root] = true
+				}
+			}
+		}
+		for root, h := range holding {
+			r.holding[root] = h
+		}
+	}
 
 	var anchors []string
 	for _, id := range open {
@@ -221,10 +307,13 @@ func Read(ids []string, s Store) (*Reading, error) {
 			anchors = append(anchors, id)
 		}
 	}
+	if len(anchors) == 0 {
+		return nil
+	}
 	facts, err := prstatus.Read(anchors, s)
 	if err != nil {
 		if !errors.Is(err, prstatus.ErrWalkBound) && !errors.Is(err, prstatus.ErrUnresolved) {
-			return nil, fmt.Errorf("read the pull requests: %w", err)
+			return fmt.Errorf("read the pull requests: %w", err)
 		}
 		for _, a := range anchors {
 			if _, ok := facts[a]; !ok {
@@ -232,7 +321,9 @@ func Read(ids []string, s Store) (*Reading, error) {
 			}
 		}
 	}
-	r.facts = facts
+	for a, f := range facts {
+		r.facts[a] = f
+	}
 	// A pull request on the pending record stands where the evaluator's answer
 	// says, and one it could not answer for reads unread, as `gctk pr status`
 	// derives nothing for it.
@@ -242,28 +333,22 @@ func Read(ids []string, s Store) (*Reading, error) {
 			pending = append(pending, a)
 		}
 	}
-	r.prAnswers, _ = s.PRAnswers(pending)
+	if len(pending) == 0 {
+		return nil
+	}
+	answers, _ := s.PRAnswers(pending)
 	for _, a := range pending {
-		if _, ok := r.prAnswers[a]; !ok {
+		if ans, ok := answers[a]; ok {
+			r.prAnswers[a] = ans
+		} else {
 			r.noFacts[a] = true
 		}
 	}
-
-	if r.order, err = queue.Order(openWork(live), s); err != nil {
-		return nil, fmt.Errorf("place the work: %w", err)
-	}
-	r.places = map[string]queue.Place{}
-	for _, list := range [][]queue.Place{r.order.Queue, r.order.NotScheduled} {
-		for _, p := range list {
-			r.places[p.ID] = p
-		}
-	}
-
-	r.answer(ids)
-	return r, nil
+	return nil
 }
 
-// index reads what each bead is and which conversation answers each question.
+// index reads what each bead is, the children of each, and which conversation
+// answers each question.
 func (r *Reading) index() {
 	ids := make([]string, 0, len(r.beads))
 	for id := range r.beads {
@@ -272,6 +357,9 @@ func (r *Reading) index() {
 	sort.Strings(ids)
 	for _, id := range ids {
 		r.kinds[id] = r.kindOf(r.beads[id])
+		for _, p := range edgesOf(r.beads[id], "parent-child") {
+			r.children[p] = append(r.children[p], id)
+		}
 	}
 	for _, id := range ids {
 		b := r.beads[id]
@@ -290,12 +378,18 @@ func (r *Reading) index() {
 	}
 }
 
-// Answer is where a bead named stands, and false for a bead the read did not
-// answer, one the store holds no bead of its own for.
+// Answer is where a bead stands, for each bead named and each the advance or
+// the frontier of one reads, and false for a bead the read did not answer, such
+// as one the store holds no bead of its own for ([Reading.Unanswered]).
 func (r *Reading) Answer(id string) (Answer, bool) {
 	a, ok := r.answers[id]
 	return a, ok
 }
+
+// Unanswered is why the read has no answer for a bead named: the store holds
+// no such bead, or the bead has no standing of its own ([Stands]). It is ""
+// for a bead the read answered, and for one it was not asked about.
+func (r *Reading) Unanswered(id string) string { return r.unanswered[id] }
 
 // Kind is what a bead is, and "" for one the read holds no bead for.
 func (r *Reading) Kind(id string) Kind { return r.kinds[id] }

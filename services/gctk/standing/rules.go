@@ -2,6 +2,7 @@ package standing
 
 import (
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
@@ -136,28 +137,15 @@ func (r *Reading) openDecision(id string) bool {
 	return ok && isOpen(b) && r.kinds[id] == KindDecision
 }
 
-// answer answers each bead named that the read holds a bead for.
+// answer answers each bead named that the read holds a bead for and has not
+// answered.
 func (r *Reading) answer(ids []string) {
-	// Whether each conversation and decision waits on work of its own first,
-	// read before any ask, since a conversation's ask reads whether the
-	// decision it tracks stays.
-	stays := map[string]bool{}
-	for id, b := range r.beads {
-		if k := r.kinds[id]; k == KindConversation || k == KindDecision {
-			if h, ok := r.holds[id]; ok {
-				stays[id] = staying(b, h)
-			}
-		}
-	}
-	children := map[string][]string{}
-	for id, b := range r.beads {
-		for _, p := range edgesOf(b, "parent-child") {
-			children[p] = append(children[p], id)
-		}
-	}
 	for _, id := range ids {
 		b, ok := r.beads[id]
 		if !ok {
+			continue
+		}
+		if _, done := r.answers[id]; done {
 			continue
 		}
 		k := r.kinds[id]
@@ -166,25 +154,73 @@ func (r *Reading) answer(ids []string) {
 		// would ask, such as a review of its pull request: hold:mayor names the
 		// Product Owner as its next actor.
 		if !r.ForProductOwner(id) {
-			// An epic's or a Delivery's members are the work, the Deliveries and
-			// the child epics its children's parent-child edges place under it.
-			// A child epic with a hypothesis of its own reads as an epic, not a
-			// Delivery, and while it is open its parent is not done.
 			members, open := 0, 0
 			if k == KindEpic || k == KindDelivery {
-				for _, c := range children[id] {
-					if ck := r.kinds[c]; ck == KindWork || ck == KindDelivery || ck == KindEpic {
-						members++
-						if isOpen(r.beads[c]) {
-							open++
-						}
-					}
-				}
+				all, live := r.members(id)
+				members, open = len(all), len(live)
 			}
-			ask = r.askOf(b, k, stays, open, members)
+			ask = r.askOf(b, k, r.stays, open, members)
 		}
-		r.answers[id] = r.table(b, k, ask, stays)
+		r.answers[id] = r.table(b, k, ask, r.stays)
 	}
+}
+
+// members are an epic's or a Delivery's members, by id, and the open ones
+// among them: the work, the Deliveries and the child epics its children's
+// parent-child edges place under it. A child epic with a hypothesis of its own
+// reads as an epic, not a Delivery, and while it is open its parent is not
+// done.
+func (r *Reading) members(id string) (all, open []string) {
+	for _, c := range r.children[id] {
+		if ck := r.kinds[c]; ck == KindWork || ck == KindDelivery || ck == KindEpic {
+			all = append(all, c)
+			if isOpen(r.beads[c]) {
+				open = append(open, c)
+			}
+		}
+	}
+	return all, open
+}
+
+// reach is the beads the advance and the frontier of the beads named read,
+// which the read holds and has not answered: each wait of a bead the read was
+// asked about, which its frontier reads; each bead a queued bead waits on,
+// which it advances behind; and each open member of an epic or a Delivery the
+// members rule placed, which it advances with.
+func (r *Reading) reach(ids []string) []string {
+	var next []string
+	add := func(id string) {
+		if _, held := r.beads[id]; !held {
+			return
+		}
+		if _, done := r.answers[id]; !done && !slices.Contains(next, id) {
+			next = append(next, id)
+		}
+	}
+	for _, id := range ids {
+		a, ok := r.answers[id]
+		if !ok {
+			continue
+		}
+		if r.asked[id] {
+			for _, w := range r.holds[id].Waits {
+				add(w.ID)
+			}
+		}
+		switch a.Rule {
+		case RuleStaying, RuleInFlight, RuleScheduled:
+			for _, n := range a.Names {
+				add(n.ID)
+			}
+		case RuleMembers:
+			_, open := r.members(id)
+			for _, m := range open {
+				add(m)
+			}
+		}
+	}
+	sort.Strings(next)
+	return next
 }
 
 // askOf is whether a bead is itself an ask, and which: what the shared readers
