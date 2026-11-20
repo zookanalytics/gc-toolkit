@@ -116,10 +116,6 @@ default = "200"
 id = "read-memory"
 title = "End the agent memory waits that are done, before load-and-gate lists the due notes"
 description = """
-Agent memory notes are the loop's second intake. `gctk memory` keeps a list
-for each memory directory, and the learning-distill skill's memory section is
-how the judge reads a note.
-
 Only the pack's home rig reads memory, as load-and-gate's gate says: when
 `grep -q '^name *= *"gc-toolkit"' "$(git rev-parse --show-toplevel)/pack.toml"`
 exits non-zero, close this step and go on.
@@ -128,12 +124,10 @@ On the home rig, end the waits that are done:
 
 `GCTK_SCRIPTS_DIR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)" "${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}" memory settle`
 
-It asks Claude Code where the sessions of each rig and of the city's root keep
-memory, removes each note whose fix has landed with its text kept, makes due
-again each note whose wait ended with no fix landed, and prints each place.
-Exit 3 says it filed a finding for a place whose memory directory it could not
-learn, and any other non-zero exit names what it could not do. The run goes on
-either way: load-and-gate lists the due notes of the places it read.
+It prints each place it read and what it ended. Exit 3 says it filed a finding
+for a place whose memory directory it could not learn, and any other non-zero
+exit names what it could not do. The run goes on either way: load-and-gate
+lists the due notes of the places it read.
 
 Then close this step (non-terminal: the same session then takes load-and-gate
 with `gc hook --claim --json`):
