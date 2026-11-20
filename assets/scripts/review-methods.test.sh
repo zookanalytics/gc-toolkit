@@ -126,6 +126,12 @@
 #   - The demo method states the size at which a page is captured. It is 1280
 #     by 900 by default, the script's Device line can name another, and a
 #     resize step changes it from that step on.
+#   - The demo method records the reviewed commit served on this host. It
+#     records from the draft's deployed preview, and reads the preview, only
+#     for a rig that cannot run its app on this host or a change whose claim
+#     exists only where it is deployed, and only once the preview is built
+#     from the reviewed commit. Its verdict says what a clip or a screenshot
+#     was recorded from, and for a preview, why.
 #
 # Hermetic: reads this checkout and a scratch git repository; no gc, store or
 # network.
@@ -572,6 +578,21 @@ hasF "$DEMO" 'line can name another size, such as `390x844`, or a device the eng
 hasF "$DEMO" 'A `resize <width>x<height>` step changes the size from that step on.' "…as a resize step can"
 hasF "$ROOT/skills/review-pm/SKILL.md" "whether a visual proves its claim and whether a screen or message meets the rig's standards." \
   "the pm method leaves the rig's standards to the demo check"
+
+echo "# the demo method records the reviewed commit served on this host, and the deployed preview only for a change that lives in the deployment"
+awk '/^### Produce it and deliver it$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.produce"
+hasF "$TMP/demo.produce" 'The app target is the reviewed worktree served on this host' \
+  "a capture's app target is the reviewed worktree served on this host"
+hasF "$TMP/demo.produce" 'is the app target instead for a rig with no way to run its app on this host, and for a change whose claim exists only where it is deployed.' \
+  "…and the draft's deployed preview only for a rig that cannot run its app here or a change whose claim exists only where it is deployed"
+hasF "$TMP/demo.produce" 'Record nothing else from a preview.' "…and for nothing else"
+hasF "$TMP/demo.produce" 'Record a preview only once it is built from `<reviewed_oid>`.' "…and only once the preview is built from the reviewed commit"
+hasF "$TMP/demo.reads" 'and its deployed preview where the app target under `video` records from it.' \
+  "the demo method reads the draft's preview only where the app target records from it"
+hasF "$TMP/verdict.demo" "and what it was recorded from: the reviewed commit served on this host, or the draft's preview and why." \
+  "the demo verdict says what a clip was recorded from, and for a preview, why"
+hasF "$TMP/verdict.demo" "what it was rendered from: the reviewed commit and any fixture that stands in for live data, or the draft's preview and why." \
+  "…and what a screenshot was rendered from"
 
 echo "# the pm method says when triage adds it, and asks a rig once for missing product goals"
 PM="$ROOT/skills/review-pm/SKILL.md"
