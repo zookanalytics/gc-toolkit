@@ -4,12 +4,10 @@
 # test. tools/measure.sh reads them at a PR's merge base, so the PR's size
 # section names the lines a change adds to each. A change that retires a file
 # removes its row.
-assets/scripts/merge-tail-report.sh	tk-1tfzr71.70
-assets/scripts/merge-tail-report.test.sh	tk-1tfzr71.70
-assets/scripts/pre-open-rebase.sh	tk-1tfzr71.70
-assets/scripts/pre-open-rebase.test.sh	tk-1tfzr71.70
 assets/scripts/approval-withdraw.sh	tk-1tfzr71.122
 assets/scripts/approval-withdraw.test.sh	tk-1tfzr71.122
+assets/scripts/blocker-holder.sh	tk-1tfzr71.122
+assets/scripts/blocker-holder.test.sh	tk-1tfzr71.122
 assets/scripts/bring-current-audit.sh	tk-1tfzr71.122
 assets/scripts/bring-current-audit.test.sh	tk-1tfzr71.122
 assets/scripts/bring-current-guard.sh	tk-1tfzr71.122
