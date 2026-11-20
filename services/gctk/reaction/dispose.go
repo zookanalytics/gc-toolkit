@@ -15,7 +15,7 @@ import (
 )
 
 // Dispose is one exit a reaction takes on its subject, Bead: the exit, why it
-// was chosen, the board's headline, the run that reacted, who disposed it, and
+// was chosen, the subject's headline, the run that reacted, who disposed it, and
 // the exit's own flags. Set names each flag the call set, by its name, so a
 // flag set to an empty value is still refused by an exit that takes none.
 type Dispose struct {
@@ -103,7 +103,7 @@ func Validate(rt gascity.Runtime, rig string, d *Dispose) error {
 		return usage("--reason is required: the record of why this exit was chosen is what makes a wrong call visible")
 	}
 	if d.Takeaway == "" {
-		return usage("--takeaway is required: it is the board headline the operator reads")
+		return usage("--takeaway is required: it is the subject's one-line headline")
 	}
 	if d.Set["run"] {
 		if !runID.MatchString(d.Run) {
@@ -168,7 +168,7 @@ func Validate(rt gascity.Runtime, rig string, d *Dispose) error {
 		}
 	case Recommend, Ruling:
 		if n := utf8.RuneCountInString(oneLine(d.Takeaway)); n > 140 {
-			return usage("--takeaway is %d characters, and the cap is 140, because it is the gate's title and the board headline", n)
+			return usage("--takeaway is %d characters, and the cap is 140, because it is the gate's title and the subject's headline", n)
 		}
 		if d.Disposition == Recommend {
 			if d.RecommendedFormula == "" {
@@ -544,7 +544,7 @@ func (r *Reactions) closeExit(d *Dispose, waiting []string, out Disposed) (Dispo
 		return out, fmt.Errorf("could not append the close brief to %s's notes (%v); the validating closer reads it there, so nothing was dispatched. Clear the cause and re-run this command", d.Bead, err)
 	}
 	if _, err := r.Takeaway(takeaway.Request{Bead: d.Bead, Text: d.Takeaway, By: d.By}); err != nil {
-		return out, fmt.Errorf("the close brief is on %s, but its board headline did not land (%v), so no closer was dispatched. Clear the cause and re-run this command", d.Bead, err)
+		return out, fmt.Errorf("the close brief is on %s, but its headline did not land (%v), so no closer was dispatched. Clear the cause and re-run this command", d.Bead, err)
 	}
 	if len(waiting) > 0 {
 		for _, h := range waiting {

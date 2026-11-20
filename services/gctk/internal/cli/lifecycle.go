@@ -356,30 +356,30 @@ func squeezeSpace(s string) string {
 	return b.String()
 }
 
-// normalizeTakeaway applies the two gates the board's NEEDS cell imposes,
-// returning the text to write or the lines that refuse it.
+// normalizeTakeaway applies the two gates a bead's headline takes, returning
+// the text to write or the lines that refuse it.
 //
 // The flag's presence is not a takeaway: whitespace normalizes to nothing, and
 // an empty one would overwrite the headline a bead carries with nothing, under
-// a fresh date and author. gc-helm.sh, the other writer of that cell, refuses
-// it the same way.
+// a fresh date and author. The takeaway package, the other writer of the
+// headline, refuses it the same way.
 //
 // Over the cap it REJECTS rather than truncating: only the author knows which
-// clause is the headline. The length is CODEPOINTS, which is what both renderers
-// measure — counting bytes would refuse a takeaway well inside the cap the
+// clause is the headline. The length is CODEPOINTS, as lifecycle.Headline
+// counts it — counting bytes would refuse a takeaway well inside the cap the
 // moment it carried an em dash.
 func normalizeTakeaway(s string) (string, []string) {
 	s = squeezeSpace(s)
 	if s == "" {
 		return "", []string{
-			"--takeaway is empty; it renders as the board's NEEDS cell, and an empty one tells the operator nothing",
+			"--takeaway is empty; it is the bead's headline, and an empty one tells the operator nothing",
 			"give it the one sentence the operator needs, or drop the flag.",
 		}
 	}
 	if n := utf8.RuneCountInString(s); n > lifecycle.TakeawayMax {
 		return "", []string{
 			fmt.Sprintf("--takeaway is %d chars; the cap is %d", n, lifecycle.TakeawayMax),
-			"it renders as the board's NEEDS cell — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in --append-notes.",
+			"it is the bead's headline — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in --append-notes.",
 		}
 	}
 	return s, nil

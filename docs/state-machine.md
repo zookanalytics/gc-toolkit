@@ -930,14 +930,13 @@ PR for any unresolved thread, answered or not. The merge does not read the
 count, so on a base that requires no thread resolution an approved PR still
 lands while `held: review` stands.
 
-`prstatus.Held` is the rule, and the helm board shows the same values as a row's
-`pr_held`, from the same derivation over the same facts. `prstatus.Read` gathers
-those facts for every reader: the anchor's own row, `pr.unanswered_threads`
-among it, its in-flight set, every bead carrying the anchor's `anchor_bead`, any
-`task_kind`, at a live status (`prstatus.InFlightStatuses`), and the gates and
-the beads a person owes that its walk reaches. `gctk pr status` and
-the board's beads source each hand it their own adapter onto the store, and
-neither gathers or decides any of it.
+`prstatus.Held` is the rule, over the facts `prstatus.Read` gathers for every
+reader: the anchor's own row, `pr.unanswered_threads` among it, its in-flight
+set, every bead carrying the anchor's `anchor_bead`, any `task_kind`, at a live
+status (`prstatus.InFlightStatuses`), and the gates and the beads a person owes
+that its walk reaches. `gctk pr status` and the rig board each hand
+`prstatus.Read` their own adapter onto the store, and neither gathers or
+decides any of it.
 
 A blocked machine verdict whose cause is outside its writer's vocabulary holds
 the PR wherever it was recorded, as any state the derivation cannot name does.

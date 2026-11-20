@@ -213,6 +213,18 @@ for s in $BLOCKS; do
         || bad "$s: looks for no writer in a checkout or a variable an earlier call set" "found:$found"
     refs=$(grep -oF -- "$RESOLVE" "$f" | wc -l | tr -d ' ')
     writers=$(grep -oE '"\$\(gc <binding> scripts-dir\)/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u)
+    # The gctk-bin block names the city's build of gctk, which is no writer of
+    # the pack's, by the one definition gctk-bin.test.sh holds.
+    stray=$(awk '/# >>> gctk-bin$/ { skip = 1; next } /# <<< gctk-bin$/ { skip = 0; next } !skip' "$f" \
+        | grep -oE '"\$(\{[^}]*\}|[A-Za-z_][A-Za-z_0-9]*)/[A-Za-z0-9._-]+' | sort -u | tr '\n' ' ')
+    [ -z "$stray" ] && ok "$s: every writer an example calls goes through the pack command" \
+        || bad "$s: every writer an example calls goes through the pack command" "stray: $stray"
+    # A skill that names no pack script and no binding calls none of the pack's
+    # writers, so it has none to resolve and no binding to name.
+    if [ "${refs:-0}" -eq 0 ] && ! grep -qE -- '<binding>|\.sh([^A-Za-z0-9_]|$)' "$f"; then
+        ok "$s: names no pack script, so it resolves none and names no binding"
+        continue
+    fi
     [ "${refs:-0}" -gt 0 ] && ok "$s: calls its writers through gc <binding> scripts-dir (calls: $refs)" \
         || bad "$s: calls its writers through gc <binding> scripts-dir" "no $RESOLVE<writer>\" call found"
     tr '\n' ' ' <"$f" >"$TMP/joined-$s"
@@ -222,12 +234,6 @@ for s in $BLOCKS; do
     else
         bad "$s: says where the agent reads the binding" "no \`gc-toolkit\` in \`gc-toolkit.$s\` with gc skill list's FROM column"
     fi
-    # The gctk-bin block names the city's build of gctk, which is no writer of
-    # the pack's, by the one definition gctk-bin.test.sh holds.
-    stray=$(awk '/# >>> gctk-bin$/ { skip = 1; next } /# <<< gctk-bin$/ { skip = 0; next } !skip' "$f" \
-        | grep -oE '"\$(\{[^}]*\}|[A-Za-z_][A-Za-z_0-9]*)/[A-Za-z0-9._-]+' | sort -u | tr '\n' ' ')
-    [ -z "$stray" ] && ok "$s: every writer an example calls goes through the pack command" \
-        || bad "$s: every writer an example calls goes through the pack command" "stray: $stray"
     missing=""
     for w in $writers; do
         [ -x "$ROOT/assets/scripts/$w" ] || missing="$missing $w"

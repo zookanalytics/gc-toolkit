@@ -417,14 +417,6 @@ neither a route nor an arm. Its remedy, arming the member, leaves the member
 held until the park is released, since an ancestor's wait holds an armed bead
 that has not started.
 
-The helm board reads a park as a hold, not a fault. It reads the blockers of
-each member and of the parents above it on the board, so a member under a park
-that nothing else holds counts as parked for the operator rather than
-stranded, and the parked epic names the gate that holds it. A member that has a
-row of its own reads parked there too and names the gate, so the board asks for
-no disposition of it while the park holds it. The board's `parked` kind is
-something else: a bead the board lists because it carries a takeaway.
-
 The rig board's Needs you lists a need about parked work apart from the rest
 and does not count it. It tells a park as a wait on a gate that is no human
 gate, the gate the text form of `park` files, which its table reads as "Held by

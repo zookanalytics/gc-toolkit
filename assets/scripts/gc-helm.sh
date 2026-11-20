@@ -1744,7 +1744,7 @@ current_sitting() {
 # recorded before, so the conversation carries the sitting's latest words. engage's
 # attach path prints them once the sitting's session has ended and the
 # operator's tab is back at a shell, where nothing of the pane survives. The
-# takeaway is the board's one-line headline; this is the hand-back whole.
+# takeaway is the subject's one-line headline; this is the hand-back whole.
 # gc.handback and gc.handback_at land in one write, whose exit says whether they
 # landed.
 cmd_handback() {

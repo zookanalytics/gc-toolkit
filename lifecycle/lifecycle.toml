@@ -433,9 +433,9 @@ since_format = "RFC 3339 UTC"
 # agent clears the route; a pool route left on directly-assigned work reads as
 # demand for work no pool is offered.
 #
-# THE OPERATOR-FACING QUESTION is gc.takeaway. The helm board spends it as the
-# row's NEEDS sentence, so lifecycle.sh refuses a --takeaway that normalizes to
-# nothing, and one longer than the 140 codepoints the cell holds.
+# THE HEADLINE is gc.takeaway, one line read at a glance, so lifecycle.sh
+# refuses a --takeaway that normalizes to nothing, and one longer than 140
+# codepoints.
 #
 # A WAIT IS AN EDGE, never a metadata string (I1, doctor/check-wait-is-an-edge):
 # `blocks` is the edge type the pack writes for a hold, one of the three bd

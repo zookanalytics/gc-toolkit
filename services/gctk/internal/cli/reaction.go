@@ -359,7 +359,7 @@ func newReactionDisposeCmd(stdout, stderr io.Writer) *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&d.Disposition, "disposition", "", "the exit: actionable, recommend, blocked, close or ruling")
 	f.StringVar(&d.Reason, "reason", "", "why this exit, which lands on the bead beside it")
-	f.StringVar(&d.Takeaway, "takeaway", "", "the board headline, at most 140 characters")
+	f.StringVar(&d.Takeaway, "takeaway", "", "the subject's headline, at most 140 characters")
 	f.StringVar(&d.Run, "run", "", "the root of the reaction's run, the root_bead_id its react step's claim returned")
 	f.StringVar(&d.By, "by", "proactive", "who disposed the bead, which the headline names")
 	f.StringVar(&db, "db", "", "the store, a store's .beads directory")

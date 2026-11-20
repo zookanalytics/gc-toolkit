@@ -170,13 +170,10 @@ disables the renudge order, and the creation notice is a record in an unread
 mailbox rather than the reach. A city whose operator reads mail keeps both, and
 every gate the pack files reaches that operator through them unchanged.
 
-**The board is the reach.** The helm board folds each open human gate onto the
-row of every bead it blocks, shows the gate's title as that row's NEEDS, and
-keeps the row owed, ordered by how long it has been owed, until the gate is
-cleared, its filer withdraws it, or, for the gate that put a recommendation to
-the operator, Accept clears it. A gate none of whose beads has a live row keeps
-a row of its own that states what it asks, so no open gate is off the board.
-Nothing re-mails, and no session claims a gate, so a gate a sitting is
+**The board is the reach.** The helm board draws each open human gate as a
+question, and lists the gate and each bead it holds as waiting on the operator,
+until the gate is cleared, its filer withdraws it, or, for the gate that put a
+recommendation to the operator, Accept clears it. Nothing re-mails, and no session claims a gate, so a gate a sitting is
 discussing is still open and unassigned until the sitting answers it.
 
 ## The way in
@@ -1274,7 +1271,7 @@ under the key, and each gate Accept would answer there.
 ## How a parked subject comes back
 
 A sitting that reaches a conclusion leaves its subject with a `gc.takeaway`,
-one board-visible headline of what was settled or what is being waited for. A
+a one-line headline of what was settled or what is being waited for. A
 takeaway exempts nothing anywhere in the liveness family —
 `liveness-sweep.sh`, its precheck and `liveness-recheck.sh`. The wait it names
 does, for as long as that wait is live, and every shape the wait takes is a
@@ -1288,16 +1285,15 @@ record of what the sitting concluded. A subject a sitting's ruling leaves
 waiting on work comes back through the validating closer the sign-off arms
 instead ([The sitting](#the-sitting)), which checks it once that work lands.
 
-**Routed work is wider than the board's disposition-due.** The board derives
-"blocker landed — dispose or resume" from the `blocks` edges
-`gctk bead takeaway --waiting-on` writes. Routed work filed as a child of the
-subject cannot carry that edge, because bd refuses a `blocks` edge from a
-parent onto its own descendant
+**Routed work is wider than the subject's `blocks` edges.**
+`gctk bead takeaway --waiting-on` records a routed wait as a `blocks` edge.
+Routed work filed as a child of the subject cannot carry that edge, because bd
+refuses a `blocks` edge from a parent onto its own descendant
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-parent-cannot-be-blocked-by-its-own-descendant)).
 The sweep therefore reads the union of the subject's `blocks` edges and its
 children, and readiness is that at least one recorded wait exists and every one
 of them has closed. Work routed with neither recording, a sibling named only in
-the takeaway's prose, is invisible to both.
+the takeaway's prose, is invisible to the sweep.
 
 **So routed work is filed beside the subject.** A dependency the subject waits
 on sits beside it, under the subject's own parent when one applies, or under
@@ -1306,7 +1302,7 @@ the nearest open bead above that parent once it has closed
 `takeaway --waiting-on <work>` then takes. Work that genuinely
 decomposes an epic subject is the one exception: it is the epic's member, and
 containment carries the wait. Routed work already filed as a child stays where
-it is, and both readers handle it.
+it is, and the sweep reads it there.
 
 **Where prose alone is correct.** `gctk bead takeaway` writes prose with no
 edge where nothing waits, and each such call passes `--no-wait`, which stamps
@@ -1424,9 +1420,10 @@ the thread.
 written. That is enough for a reap, because the record survives, and not
 enough for a wait, because nothing in the city re-reads prose. So a routed wait
 is also written as a `blocks` edge, `gctk bead takeaway <subject> "…"
---waiting-on <work-bead>`, and the board re-derives on every render whether the
-blocker has closed, promoting the row to "blocker landed — dispose or resume"
-when it has. A wait whose work has already landed on the subject's own branch
+--waiting-on <work-bead>`, which keeps the subject out of `bd ready` until that
+work closes, and the subject then comes back as
+[How a parked subject comes back](#how-a-parked-subject-comes-back) says. A
+wait whose work has already landed on the subject's own branch
 is the one the verb folds: its deliverable is in the subject's head, so the
 subject's own merge lands it, and `takeaway` writes no edge there, because an
 edge would gate that merge on work that merges with it. Landed is proven, not

@@ -81,12 +81,11 @@ var (
 	}
 )
 
-// TakeawayMax caps a headline in codepoints: a takeaway, which the board spends
-// as a row's NEEDS cell, and a park gate's title, each one line read at a
-// glance. Headline applies it for gctk's writers. assets/scripts/gc-helm.sh
-// carries its own copy, TAKEAWAY_MAX, for the verbs it still holds, and
-// `gctk lifecycle --dump-machine` prints this one for lifecycle.test.sh to hold
-// against it.
+// TakeawayMax caps a headline in codepoints: a takeaway and a park gate's
+// title, each one line read at a glance. Headline applies it for gctk's
+// writers. assets/scripts/gc-helm.sh carries its own copy, TAKEAWAY_MAX, for
+// the verbs it still holds, and `gctk lifecycle --dump-machine` prints this one
+// for lifecycle.test.sh to hold against it.
 const TakeawayMax = 140
 
 func contains(haystack []string, needle string) bool {

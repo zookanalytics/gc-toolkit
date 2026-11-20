@@ -651,8 +651,8 @@ out="$("$SUT" transition r-4 --to pull_request --expect pull_request --set-dated
 eq "$rc" 0 "the same record with no --route lands"
 eq "$(meta r-4 'gc.routed_to')" "" "…clearing the route, as a detached state's entry does"
 
-# --- --takeaway writes the board's headline --------------------------------------
-# The helm board spends gc.takeaway as a row's NEEDS sentence. A transition into
+# --- --takeaway writes the bead's headline ---------------------------------------
+# gc.takeaway is the bead's one-line headline. A transition into
 # a human state needs none, since the gate its caller files says what is asked.
 # A caller that passes --takeaway gets the headline in the transition's one
 # update, capped, and refused when it says nothing.
