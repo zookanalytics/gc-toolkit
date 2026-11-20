@@ -632,17 +632,19 @@ po's backlog refinement with the operator ([steering.md](steering.md)).
 
 The fallback path files a conversation in the operator's queue directly,
 through `gc-helm.sh open`, which is where filing a conversation lives. It runs
-on `--no-react`, and when `gctk reaction deliverable` answers that the
-proactive pool is not registered, is suspended or is capped at zero slots. It
+on `--no-react`, and when `gctk reaction deliverable` answers no for the
+subject: Gas City's preview of the reaction's sling refuses it, or warns that
+the proactive pool, its rig or the city is suspended or that the pool runs no
+sessions. It
 also runs when the sling slings nothing: it fails, or it refuses the subject
 because a first reaction already runs on it or an open conversation tracks it,
 a live workflow already drives it, it is already routed or armed, held,
 assigned or not open, an open human gate blocks it, or it is a standing record
 or a feedback pattern, whose kind takes no first reaction. A react path that could not
 deliver would leave a run waiting on a pool that cannot take it, and no
-conversation at all, the one outcome this channel exists to prevent. A roster
-the deliverable check cannot read answers yes, because absence of evidence is
-not evidence the pool is gone.
+conversation at all, the one outcome this channel exists to prevent. A
+preview that does not answer reads as yes, because absence of evidence is not
+evidence the pool is gone.
 
 **The intake stamps `gc.origin=operator` on the subject**, on both paths and
 never over an origin already recorded. It is a fact the reaction weighs, not a

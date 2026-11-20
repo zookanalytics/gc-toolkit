@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -258,6 +259,9 @@ func TestBlockedArmsItsDispatchLast(t *testing.T) {
 	wantCode(t, code, 2, err, "(BLKROUTE) --then-route to a pool nothing runs")
 	if got := w.writes(); len(got) != 0 {
 		t.Errorf("(BLKROUTE) wrote %q", got)
+	}
+	if asked, want := w.rt.Previews(), (gascity.Sling{Rig: "gc-toolkit", Target: "gc-toolkit/gc-toolkit.nosuchpool", Bead: "tk-sub"}); len(asked) != 1 || asked[0] != want {
+		t.Errorf("(BLKROUTE) previewed %+v; want the arm's own sling, with the formula the target pours by default, %+v", asked, want)
 	}
 }
 

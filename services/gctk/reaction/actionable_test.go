@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
@@ -110,8 +111,8 @@ func TestActionableReleasesTheBeadToItsPool(t *testing.T) {
 	if want := "tk-sub disposed as actionable (gc-toolkit/gc-toolkit.polecat)"; out != want {
 		t.Errorf("(ACT) the exit reported %q, want %q", out, want)
 	}
-	if r := strings.Join(w.rt.Reads(), ","); !strings.Contains(r, "roster") {
-		t.Errorf("(ACTPOOL) the exit did not ask the roster whether the pool can claim: %s", r)
+	if asked, want := w.rt.Previews(), (gascity.Sling{Target: "gc-toolkit/gc-toolkit.polecat", Bead: "tk-sub", NoFormula: true}); len(asked) != 1 || asked[0] != want {
+		t.Errorf("(ACTPOOL) the exit previewed %+v; want the release's own raw route, %+v", asked, want)
 	}
 
 	w = newWorld(t)

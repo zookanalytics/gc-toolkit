@@ -14,54 +14,56 @@ func prefixOf(id string) string {
 	return p
 }
 
-// Deliverable answers whether work routed to target, a rig-qualified pool,
-// would be picked up. It answers no when the target's rig reads another store
-// than the one bead lives in, since a rig's pool claims only its own store's
-// beads (gc sling refuses that route as a CrossStoreRouteError), and when the
-// city's roster shows the pool cannot claim: no agent is registered there, it
-// is suspended, or its sessions are capped below one. A store check needs bead,
-// and is skipped when it is empty. No is a positive finding only: a roster or
-// rig list that does not read answers yes, because it is no evidence that the
-// pool is gone. why says what the answer rests on.
-func (r *Reactions) Deliverable(target, bead string) (ok bool, why string) {
-	if bead != "" {
-		if rigs, err := r.Runtime.Rigs(); err == nil {
-			rigName, _, _ := strings.Cut(target, "/")
-			targetPrefix := rigPrefix(rigs, rigName)
-			if beadPrefix := prefixOf(bead); targetPrefix != "" && targetPrefix != beadPrefix {
-				owner := "no rig, since none owns prefix " + beadPrefix + "-"
-				for _, g := range rigs {
-					if g.Prefix == beadPrefix {
-						owner = g.Name
-						break
-					}
-				}
-				return false, fmt.Sprintf("%s reads the %s store (prefix %s-) but %s lives in the store of %s (prefix %s-), and a rig's pool claims only the beads of its own store, so a bead routed there is open, unassigned and offered to nobody (gc sling refuses this route as a CrossStoreRouteError)",
-					target, rigName, targetPrefix, bead, owner, beadPrefix)
-			}
-		}
-	}
-	agents, err := r.Runtime.Agents()
-	if err != nil {
-		return true, fmt.Sprintf("the city's roster did not read (%v), so the pool at %s is taken as live: an unreadable roster is no evidence that it is gone", err, target)
-	}
-	var a *gascity.Agent
-	for i := range agents {
-		if agents[i].QualifiedName == target {
-			a = &agents[i]
-			break
-		}
-	}
+// Deliverable answers whether the bead of s, a sling about to be made, would
+// be picked up where s sends it, by Gas City's own preview of that sling. It
+// answers no when Gas City refuses the sling, as it refuses a target the city
+// resolves no agent by and a route into a store the target does not read, and
+// when the preview warns that the city, the target or the target's rig is
+// suspended, or that the target's pool runs no sessions, which Gas City reads
+// only from a cap of 0. No is a positive finding only: a preview that does not
+// answer answers yes, because it is no evidence that the pool is gone. why
+// says what the answer rests on.
+//
+// Two answers follow from asking the sling's own preview. A process that sets
+// GC_SUSPENDED=1 is answered yes for a pool the city's state does not suspend,
+// since the sling passes over that override, which does not say whether the
+// controller runs the pool (targetScopeSuspension in
+// internal/sling/sling_core.go at gastownhall/gascity 1feaf7eeb7). And the
+// preview checks a route's store only once it finds the bead not routed to the
+// target already: a bead Gas City counts as routed there, with a live tracking
+// convoy, previews as going ahead with no store check (preflight in the same
+// file), so a route into another store passes only when the bead's routing was
+// already wrong before the question.
+func (r *Reactions) Deliverable(s gascity.Sling) (ok bool, why string) {
+	p := r.Runtime.Preview(s)
 	switch {
-	case a == nil:
-		return false, fmt.Sprintf("no agent is registered at %s in this city, so work routed there is routed to nobody", target)
-	case a.Suspended:
-		return false, fmt.Sprintf("the pool at %s is suspended, so work routed there sits unclaimed until it resumes", target)
+	case !p.Answered:
+		return true, fmt.Sprintf("Gas City's preview of the sling to %s did not answer (%s), so the pool is taken as live: a preview that does not answer is no evidence that it is gone", s.Target, p.Unanswered())
+	case p.Refused != "":
+		return false, fmt.Sprintf("gc sling refuses to send %s to %s (%s)", s.Bead, s.Target, p.Refused)
 	}
-	if n, set := a.MaxSessions(); set && n < 1 {
-		return false, fmt.Sprintf("the pool at %s runs no sessions (its maximum is %d), so nothing can claim work routed there", target, n)
+	if warned := targetWords(s.Target, p.TargetWarnings()); len(warned) > 0 {
+		return false, fmt.Sprintf("Gas City's preview of the sling warns that %s, so work sent there sits unclaimed", strings.Join(warned, " and "))
 	}
-	return true, fmt.Sprintf("%s is registered and not suspended, and its cap only queues work routed there", target)
+	return true, fmt.Sprintf("Gas City's preview of the sling of %s to %s refuses nothing and warns of no suspension or empty pool", s.Bead, s.Target)
+}
+
+// targetWords is each of a preview's warnings about target, in words.
+func targetWords(target string, warnings []string) []string {
+	var out []string
+	for _, w := range warnings {
+		switch w {
+		case gascity.CitySuspended:
+			out = append(out, "the city is suspended")
+		case gascity.AgentSuspended:
+			out = append(out, target+" is suspended")
+		case gascity.RigSuspended:
+			out = append(out, "the rig of "+target+" is suspended")
+		case gascity.PoolEmpty:
+			out = append(out, target+" runs no sessions (its max_active_sessions is 0)")
+		}
+	}
+	return out
 }
 
 // Assignable answers whether a bead handed to the named agent who would be

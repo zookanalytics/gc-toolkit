@@ -818,6 +818,6 @@ no warrant.
     each run as one event, whose newest is what doctor found last
     ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)).
     So this entry covers the patrol finding alone.
-- **Verified.** 2026-11-16, at `gastownhall/gascity` main c7eb6d2f43.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b1194.
 - **Retires when.** Gas City ships a keyed problem record: one record per key,
   which a recurrence finds and updates and which stays until it is resolved.

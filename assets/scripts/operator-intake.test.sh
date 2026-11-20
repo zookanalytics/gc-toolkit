@@ -259,7 +259,7 @@ has "$CALLS" "-d why is dolt wedging under load" "(DIRECT) the topic is the subj
 run yes "how should we shard the refinery queue"
 eq "$RC" "0" "(SINGLE) the react path exits 0"
 has "$CALLS" "helm react tk-newsub" "(SINGLE) a first reaction is filed for the new subject"
-has "$CALLS" "gctk reaction deliverable GC_RIG=gc-toolkit" "(SINGLE) the pool's answer is asked under the subject's rig"
+has "$CALLS" "gctk reaction deliverable tk-newsub GC_RIG=gc-toolkit" "(SINGLE) the pool's answer is asked of the subject, under its rig"
 hasnt "$CALLS" "helm open" "(SINGLE) no conversation is filed — the reaction files it"
 has "$OUT" "nothing waits on you yet" "(SINGLE) the operator is told nothing waits on them yet"
 has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"

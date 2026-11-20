@@ -2,46 +2,74 @@ package reaction
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 )
 
-// A pool answers no only on a positive finding: a target whose rig reads
-// another store than the bead's, an agent the roster does not register, one
-// suspended, or one whose sessions are capped below one. A roster or a rig list
-// that does not read answers yes, and with no bead named the store is not
-// asked.
-func TestThePoolAnswersNoOnlyOnAFinding(t *testing.T) {
-	zero := 0
+// A pool answers no only on a finding of Gas City's preview of the sling about
+// to be made, which it asks of that very sling and reads no roster for: a
+// refusal, such as of a target the city resolves no agent by or of a route into
+// a store the target does not read, or a warning that the city, the target or
+// its rig is suspended, or that the target's pool runs no sessions. A warning
+// about the bead alone, and a preview that does not answer, answer yes.
+func TestThePoolAnswersByGasCitysPreviewOfTheSling(t *testing.T) {
+	answered := func(warnings ...string) gascity.SlingPreview {
+		return gascity.SlingPreview{Answered: true, Warnings: warnings}
+	}
+	const pool = "gc-toolkit/gc-toolkit.polecat"
 	for name, c := range map[string]struct {
-		target, bead string
-		edit         func(*world)
-		ok           bool
-		why          string
+		preview gascity.SlingPreview
+		ok      bool
+		why     string
 	}{
-		"a registered pool":        {"gc-toolkit/gc-toolkit.polecat", "tk-sub", nil, true, "is registered and not suspended"},
-		"a pool in another store":  {"gc-toolkit/gc-toolkit.polecat", "hq-sub", nil, false, "reads the gc-toolkit store (prefix tk-) but hq-sub lives in the store of town (prefix hq-)"},
-		"a store no rig owns":      {"gc-toolkit/gc-toolkit.polecat", "zz-sub", nil, false, "since none owns prefix zz-"},
-		"no bead to ask the store": {"gc-toolkit/gc-toolkit.polecat", "", func(w *world) { w.rt.RigsErr = errors.New("unasked") }, true, ""},
-		"an absent pool":           {"gc-toolkit/gc-toolkit.nosuch", "tk-sub", nil, false, "no agent is registered at gc-toolkit/gc-toolkit.nosuch"},
-		"a suspended pool": {"gc-toolkit/gc-toolkit.polecat", "tk-sub", func(w *world) { w.rt.Roster[0].Suspended = true }, false,
-			"is suspended"},
-		"a pool capped at zero": {"gc-toolkit/gc-toolkit.polecat", "tk-sub", func(w *world) { w.rt.Roster[0].Pool.Max = &zero }, false,
-			"runs no sessions"},
-		"an unreadable roster": {"gc-toolkit/gc-toolkit.nosuch", "tk-sub", func(w *world) { w.rt.RosterErr = errors.New("gc agent list did not answer within 15s") }, true,
-			"an unreadable roster is no evidence that it is gone"},
-		"an unreadable rig list": {"gc-toolkit/gc-toolkit.polecat", "hq-sub", func(w *world) { w.rt.RigsErr = errors.New("no rigs") }, true, ""},
+		"a sling Gas City would make": {answered(), true, "refuses nothing and warns of no suspension or empty pool"},
+		"a warning about the bead":    {answered("bead tk-sub is claimed by gc-toolkit/gc-toolkit.polecat-2"), true, "refuses nothing"},
+		"an unresolved target": {gascity.SlingPreview{Answered: true, Unresolved: true, Refused: `gc sling: agent "x" not found in city.toml`}, false,
+			`gc sling refuses to send tk-sub to ` + pool + ` (gc sling: agent "x" not found in city.toml)`},
+		"a route into another store": {gascity.SlingPreview{Answered: true, Refused: "gc sling: refusing cross-store route: bead tk-sub lives in rig:gc-toolkit"}, false,
+			"refusing cross-store route"},
+		"a suspended city":      {answered(gascity.CitySuspended), false, "warns that the city is suspended, so work sent there sits unclaimed"},
+		"a suspended pool":      {answered(gascity.AgentSuspended), false, "warns that " + pool + " is suspended"},
+		"a suspended rig":       {answered(gascity.RigSuspended), false, "warns that the rig of " + pool + " is suspended"},
+		"a pool capped at zero": {answered(gascity.PoolEmpty), false, "warns that " + pool + " runs no sessions"},
+		"two warnings":          {answered(gascity.AgentSuspended, "bead tk-sub is claimed", gascity.PoolEmpty), false, "is suspended and " + pool + " runs no sessions"},
+		"a preview that does not answer": {gascity.SlingPreview{Bounded: gascity.Bounded{Code: -1, Err: gascity.ErrDeadline}}, true,
+			"did not answer (ended at its deadline), so the pool is taken as live: a preview that does not answer is no evidence that it is gone"},
 	} {
 		w := newWorld(t)
-		if c.edit != nil {
-			c.edit(w)
-		}
-		ok, why := w.r.Deliverable(c.target, c.bead)
+		w.rt.OnPreview = func(gascity.Sling) gascity.SlingPreview { return c.preview }
+		s := gascity.Sling{Target: pool, Bead: "tk-sub", NoFormula: true}
+		ok, why := w.r.Deliverable(s)
 		if ok != c.ok || !strings.Contains(why, c.why) {
 			t.Errorf("%s: Deliverable = %v, %q; want %v holding %q", name, ok, why, c.ok, c.why)
 		}
+		if asked := w.rt.Previews(); len(asked) != 1 || asked[0] != s || slices.Contains(w.rt.Reads(), "roster") {
+			t.Errorf("%s: previewed %+v and read %v; want the one sling previewed and no roster read", name, asked, w.rt.Reads())
+		}
+	}
+}
+
+// The proactive pool's answer is the preview of the reaction's own sling. A
+// process that sets GC_SUSPENDED=1 is answered as the sling answers it, so a
+// pool the city's state does not suspend, which the roster shows suspended to
+// that process, is answered yes.
+func TestTheProactivePoolIsAnsweredForTheReactionsOwnSling(t *testing.T) {
+	t.Setenv("GC_SUSPENDED", "1")
+	w := newWorld(t)
+	for i := range w.rt.Roster {
+		w.rt.Roster[i].Suspended = true
+	}
+	ok, why := w.r.ProactiveDeliverable("tk-sub")
+	want := gascity.Sling{Rig: "gc-toolkit", Target: "gc-toolkit/gc-toolkit.proactive", Bead: "tk-sub", Formula: Formula}
+	if asked := w.rt.Previews(); !ok || len(asked) != 1 || asked[0] != want {
+		t.Errorf("ProactiveDeliverable = %v, %q, previewing %+v; want yes, previewing %+v", ok, why, asked, want)
+	}
+	w.r.Rig = ""
+	if ok, why := w.r.ProactiveDeliverable("tk-sub"); ok || why != ErrNoRig.Error() || len(w.rt.Previews()) != 1 {
+		t.Errorf("in no rig: ProactiveDeliverable = %v, %q, with %d previews; want no, previewing nothing more", ok, why, len(w.rt.Previews()))
 	}
 }
 

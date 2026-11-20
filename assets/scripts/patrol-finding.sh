@@ -602,7 +602,7 @@ if [ ! -x "$GCTK" ]; then
   warn "cannot find gctk (looked at $GCTK); $BEAD waits for the next sweep"
   exit 0
 fi
-if ! "$GCTK" reaction deliverable >/dev/null 2>&1; then
+if ! "$GCTK" reaction deliverable "$BEAD" >/dev/null 2>&1; then
   warn "the proactive pool cannot pick a reaction up right now; $BEAD waits for the next sweep"
   exit 0
 fi

@@ -304,17 +304,20 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		}
 	}
 
-	// Route and hand off only where something can claim. A route intake holds
-	// is never written, so it is not asked about.
-	claimRoute := ""
+	// Route and hand off only where something can claim, by Gas City's preview
+	// of the sling each would make: the actionable exit's release routes the
+	// bead raw (gc-helm.sh takeaway's --route), and the close exit slings, or
+	// arms, the validating closer. A route intake holds is never written, so it
+	// is not asked about.
+	claimRoute, claim := "", gascity.Sling{}
 	switch {
 	case d.Disposition == Actionable && admit != "" && d.Assign == "":
-		claimRoute = d.Route
+		claimRoute, claim = d.Route, gascity.Sling{Target: d.Route, Bead: d.Bead, NoFormula: true}
 	case d.Disposition == Close:
-		claimRoute = d.Route
+		claimRoute, claim = d.Route, gascity.Sling{Rig: r.Rig, Target: d.Route, Bead: d.Bead, Formula: closer}
 	}
 	if claimRoute != "" {
-		if ok, why := r.Deliverable(claimRoute, d.Bead); !ok {
+		if ok, why := r.Deliverable(claim); !ok {
 			if d.Disposition == Actionable {
 				return out, usage("%s cannot pick this bead up: %s. Routing there would leave %s open, unassigned and offered to nobody. Route it to a pool that can claim it, or hand it with --assign to the named agent whose work it is (a town-repo edit is gc-toolkit.mechanik's). Put it to the operator (--disposition recommend or ruling) only when the next move is the operator's", claimRoute, why, d.Bead)
 			}
@@ -332,7 +335,9 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		}
 	}
 	if d.Disposition == Blocked && d.ThenRoute != "" && admit != "" {
-		if ok, why := r.Deliverable(d.ThenRoute, d.Bead); !ok {
+		// The arm's start slings the bead with the formula the target pours by
+		// default.
+		if ok, why := r.Deliverable(gascity.Sling{Rig: r.Rig, Target: d.ThenRoute, Bead: d.Bead}); !ok {
 			return out, usage("--then-route %s cannot pick this bead up: %s. Arming it would record a dispatch the deferred-dispatch order replays into a failure every pass. Pass a pool that runs, such as <rig>/gc-toolkit.polecat, or omit --then-route when no pool takes this bead", d.ThenRoute, why)
 		}
 	}

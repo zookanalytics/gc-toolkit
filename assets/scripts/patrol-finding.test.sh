@@ -279,7 +279,7 @@ has "$OUT" "filed fnd-1" "(first) reports the bead it filed"
 eq "$(meta fnd-1 'finding.first_seen')" "$(meta fnd-1 'finding.last_seen')" "(first) first_seen == last_seen"
 
 # It reaches the reaction, and only after the bead verified.
-has "$(cat "$STUB_PROACTIVE_LOG")" "deliverable" "(first) asks whether the pool can pick a reaction up"
+has "$(cat "$STUB_PROACTIVE_LOG")" "deliverable fnd-1" "(first) asks whether the pool can pick a reaction up on the bead"
 has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-1" "(first) slings the first reaction at the bead"
 hasnt "$(cat "$STUB_GC_LOG")" "visit:" "(first) no visit is filed on this path"
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 )
@@ -40,12 +41,17 @@ func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	}
 
 	w = newWorld(t)
-	w.rt.Roster = w.rt.Roster[1:]
+	w.rt.OnPreview = func(gascity.Sling) gascity.SlingPreview {
+		return gascity.SlingPreview{Answered: true, Unresolved: true, Refused: `gc sling: agent "gc-toolkit/gc-toolkit.polecat" not found in city.toml`}
+	}
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
 	wantCode(t, code, 2, err, "(CLOSE) a closer pool that cannot claim")
 	errHas(t, err, "Put it to the operator instead", "(CLOSE) naming the exits that reach a person")
 	if got := w.writes(); len(got) != 0 {
 		t.Errorf("(CLOSE) wrote %q", got)
+	}
+	if asked, want := w.rt.Previews(), (gascity.Sling{Rig: "gc-toolkit", Target: "gc-toolkit/gc-toolkit.polecat", Bead: "tk-sub", Formula: closer}); len(asked) != 1 || asked[0] != want {
+		t.Errorf("(CLOSE) previewed %+v; want the closer's own sling, %+v", asked, want)
 	}
 
 	w = newWorld(t)

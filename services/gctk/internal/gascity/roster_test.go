@@ -38,9 +38,9 @@ func rosterCalls(t *testing.T, log string) []string {
 	return strings.Split(strings.TrimSpace(string(raw)), "\n")
 }
 
-// The roster reads every agent with the fields the pool's and a named agent's
-// answers read, and a roster that does not answer, or answers with no list, is
-// an error rather than an empty city.
+// The roster reads every agent with the fields a named agent's answer reads,
+// and a roster that does not answer, or answers with no list, is an error
+// rather than an empty city.
 func TestTheRosterReadsEveryAgent(t *testing.T) {
 	c, _ := rosterCity(t, map[string]string{"agent-list": `{"agents":[
 		{"qualified_name":"rig/gc-toolkit.polecat","name":"polecat","dir":"rig","scope":"rig","suspended":false,"pool":{"min":0,"max":2}},
@@ -49,11 +49,11 @@ func TestTheRosterReadsEveryAgent(t *testing.T) {
 	if err != nil || len(agents) != 2 {
 		t.Fatalf("Agents = %+v, %v", agents, err)
 	}
-	if n, ok := agents[0].MaxSessions(); !ok || n != 2 || agents[0].Dir != "rig" || agents[0].Scope != "rig" {
-		t.Errorf("the pool read as %+v (max %d, %v)", agents[0], n, ok)
+	if a := agents[0]; a.QualifiedName != "rig/gc-toolkit.polecat" || a.Name != "polecat" || a.Dir != "rig" || a.Scope != "rig" || a.Suspended {
+		t.Errorf("the pool read as %+v", a)
 	}
-	if _, ok := agents[1].MaxSessions(); ok || !agents[1].Suspended || agents[1].Dir != "" {
-		t.Errorf("the named agent read as %+v", agents[1])
+	if a := agents[1]; a.Name != "mechanik" || a.Scope != "city" || !a.Suspended || a.Dir != "" {
+		t.Errorf("the named agent read as %+v", a)
 	}
 	for _, reply := range []string{`{"ok":true}`, `not json`} {
 		c, _ := rosterCity(t, map[string]string{"agent-list": reply})

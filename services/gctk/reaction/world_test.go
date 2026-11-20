@@ -65,18 +65,13 @@ func newWorld(t *testing.T) *world {
 		w.sync()
 	}
 	w.store.OnFind = func(q gcbd.Query) { w.add("FIND " + strings.Join(q.IDs, " ")) }
-	two := 2
 	w.rt = &rtfake.Runtime{
 		Resolves: []string{"mol-x", "mol-polecat-work"},
 		Roster: []gascity.Agent{
-			{QualifiedName: "gc-toolkit/gc-toolkit.polecat", Name: "polecat", Dir: "gc-toolkit", Scope: "rig", Pool: &struct {
-				Max *int `json:"max"`
-			}{Max: &two}},
+			{QualifiedName: "gc-toolkit/gc-toolkit.polecat", Name: "polecat", Dir: "gc-toolkit", Scope: "rig"},
 			{QualifiedName: "gc-toolkit.mechanik", Name: "mechanik", Scope: "city"},
 			{QualifiedName: "gc-toolkit/gc-toolkit.refinery", Name: "refinery", Dir: "gc-toolkit", Scope: "rig"},
-			{QualifiedName: "gc-toolkit/gc-toolkit.proactive", Name: "proactive", Dir: "gc-toolkit", Scope: "rig", Pool: &struct {
-				Max *int `json:"max"`
-			}{Max: &two}},
+			{QualifiedName: "gc-toolkit/gc-toolkit.proactive", Name: "proactive", Dir: "gc-toolkit", Scope: "rig"},
 		},
 		Named: []gascity.NamedSession{{Template: "mechanik"}, {Template: "refinery", Dir: "gc-toolkit"}},
 		RigList: []gascity.Rig{
@@ -85,6 +80,16 @@ func newWorld(t *testing.T) *world {
 		},
 	}
 	w.rt.OnScript = w.script
+	// The city's preview of a sling resolves an agent its roster lists, and
+	// refuses any other target as gc sling does.
+	w.rt.OnPreview = func(s gascity.Sling) gascity.SlingPreview {
+		for _, a := range w.rt.Roster {
+			if a.QualifiedName == s.Target {
+				return gascity.SlingPreview{Answered: true}
+			}
+		}
+		return gascity.SlingPreview{Answered: true, Unresolved: true, Refused: `gc sling: agent "` + s.Target + `" not found in city.toml`}
+	}
 	w.rt.OnSling = func(s gascity.Sling) gascity.SlingResult {
 		line := "SLING " + s.Target + " " + s.Bead
 		if s.NoFormula {

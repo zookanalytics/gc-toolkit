@@ -241,29 +241,37 @@ func newReactionSweepCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 const reactionDeliverableLong = `Whether the rig's proactive pool, GC_RIG/gc-toolkit.proactive, can take a
-first reaction now. A slung reaction waits for a slot at no cost, but one routed
-to a pool the city's roster shows absent, suspended or capped at zero waits for
-nobody. No is a positive finding only: a roster that does not read answers yes,
-since it is no evidence that the pool is gone. It prints yes or no, and why, on
-stdout.
+first reaction on <bead> now. A slung reaction waits for a slot at no cost, but
+one sent where nothing claims it waits for nobody. The answer is Gas City's own
+preview of the reaction's sling, gc sling --dry-run, which writes nothing: no
+when it refuses the sling, as it refuses a target the city resolves no agent by
+and a route into another rig's store, or when it warns that the city, the pool
+or its rig is suspended or that the pool runs no sessions. No is a positive
+finding only: a preview that does not answer answers yes, since it is no
+evidence that the pool is gone. It prints yes or no, and why, on stdout.
 
 exit: 0 yes
-      1 no`
+      1 no
+      2 usage`
 
 func newReactionDeliverableCmd(stdout io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:   "deliverable",
-		Short: "whether this rig's proactive pool can take a first reaction now",
+		Use:   "deliverable <bead>",
+		Short: "whether this rig's proactive pool can take a first reaction on a bead now",
 		Long:  reactionDeliverableLong,
-		Args:  cobra.NoArgs,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			bead := strings.TrimSpace(args[0])
+			if bead == "" {
+				return errors.New("name the bead: gctk reaction deliverable <bead>")
+			}
 			rig := strings.TrimSpace(os.Getenv("GC_RIG"))
 			if rig == "" {
 				fmt.Fprintf(stdout, "no: %v\n", reaction.ErrNoRig)
 				return exit(1)
 			}
 			r := &reaction.Reactions{Runtime: gascity.New(), Rig: rig}
-			ok, why := r.ProactiveDeliverable()
+			ok, why := r.ProactiveDeliverable(bead)
 			if !ok {
 				fmt.Fprintf(stdout, "no: %s\n", why)
 				return exit(1)

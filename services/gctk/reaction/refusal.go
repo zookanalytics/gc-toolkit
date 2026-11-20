@@ -158,14 +158,14 @@ func (r *Reactions) proactiveTarget() (string, error) {
 }
 
 // ProactiveDeliverable answers whether the rig's proactive pool can take a
-// first reaction now, as Deliverable answers for a pool, with no bead named.
-// A caller in no rig is answered no.
-func (r *Reactions) ProactiveDeliverable() (ok bool, why string) {
+// first reaction on bead now, as Deliverable answers for the sling Sling would
+// make. A caller in no rig is answered no.
+func (r *Reactions) ProactiveDeliverable(bead string) (ok bool, why string) {
 	target, err := r.proactiveTarget()
 	if err != nil {
 		return false, err.Error()
 	}
-	return r.Deliverable(target, "")
+	return r.Deliverable(gascity.Sling{Rig: r.Rig, Target: target, Bead: bead, Formula: Formula})
 }
 
 // refusal is the first refusal that holds on bead, in their order: the kind,
