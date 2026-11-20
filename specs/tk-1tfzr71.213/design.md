@@ -1,6 +1,6 @@
 ---
 name: Design — the board reads only the shared readers, and gc-helm's verbs move into gctk
-description: The design record for tk-1tfzr71.213, the design child of initiative tk-1tfzr71.24, read at main 790e32ee5 and Gas City upstream main bfe7a19cc2. It retires the tile board with its own store reader, which ends the ICU helper; has `helm-svc board --json` print the page's document; turns the work queue's "Not scheduled" list into the row of ready work no queue holds; moves gc-helm.sh's steering and record verbs into gctk and leaves its conversation verbs to tk-ssm8qns.15; keeps the takeaway fields until a bead of their own decides them; and runs the build orders only when their source moves. Read it to approve the design at its gate, or to build one of the units it defines.
+description: The design record for tk-1tfzr71.213, the design child of initiative tk-1tfzr71.24, read at main 790e32ee5 and Gas City upstream main bfe7a19cc2. It retires the tile board with its own store reader, which ends the ICU helper; has `helm-svc board --json` print the page's document; turns the work queue's "Not scheduled" list into the row of ready work no queue holds; moves gc-helm.sh's steering and record verbs into gctk and leaves its conversation verbs to tk-ssm8qns.15; keeps the takeaway fields until a bead of their own decides them; and runs the build orders only while a build is owed. Read it to approve the design at its gate, or to build one of the units it defines.
 ---
 
 # Design: the board reads only the shared readers, and gc-helm's verbs move into gctk
@@ -76,17 +76,17 @@ probe the library. Approving this design makes these changes.
    instead, the scan reads the bead's first-reaction run, and the three checks
    change, which about doubles this member's reach into code it otherwise leaves
    alone.
-6. **The build orders run only when their source has moved.** helm's and gctk's
-   build orders become condition orders: each pass asks `gc-build.sh` whether
-   the checkout's source differs from what the binary was built from, and runs
-   the build only then (section 8). Gain: no run and no run record on the passes
-   where nothing changed, today one every five minutes or so for each, and two
-   orders leave the four-per-pass dispatch budget the city's other clock-driven
-   orders share. Cost: a cheap check every pass, and a build that fails is tried
-   again when the source moves or a person runs the order, where today it is
-   tried every five minutes. No Gas City primitive rebuilds a service when its
-   source changes. gctk's order is this design's addition to the contract, which
-   names only helm's.
+6. **The build orders run only while a build is owed.** helm's and gctk's build
+   orders become condition orders: each pass asks `gc-build.sh` whether the
+   binary is missing or was built from a revision other than the checkout's, and
+   runs the build only then (section 8). Gain: no run and no run record on the
+   passes where nothing is owed, today one every five minutes or so for each,
+   and two orders leave the four-per-pass dispatch budget the city's other
+   clock-driven orders share. A build that fails is still tried again every five
+   minutes until it succeeds, as today, so a failure that clears needs no one.
+   Cost: a cheap check every pass. No Gas City primitive rebuilds a service when
+   its source changes. gctk's order is this design's addition to the contract,
+   which names only helm's.
 
 The work lands in five units on the integration branch (section 10), and the
 old and new answers are compared on the live city before the old board's unit
@@ -335,10 +335,14 @@ source has changed, so most runs build nothing.
 Unit 5 gives `gc-build.sh` a mode that only answers whether a build is owed, and
 makes each order a condition order whose check is that mode. A build is owed
 when the binary is missing or was built from a revision other than the
-checkout's, and no build has been tried for the checkout's revision. So a failed
-build is not tried again on every pass, a city's first build included. A person
-runs the order to try it again sooner. The script stays a script because it
-builds gctk's own binary, which gctk cannot hold.
+checkout's. It is due at once when the checkout's revision is not the one the
+last run saw, and otherwise five minutes after that run, today's pace. So a
+build that failed for a reason that clears, such as a download that did not
+answer, is tried again until it succeeds with no one acting, and a failed build
+is not tried on every pass, a city's first build included. Each run's record,
+`build-status.json`, holds the revision it saw and the time it ran. A person
+runs the order to try it sooner. The script stays a script because it builds
+gctk's own binary, which gctk cannot hold.
 
 The Gas City search, at upstream bfe7a19cc2:
 
