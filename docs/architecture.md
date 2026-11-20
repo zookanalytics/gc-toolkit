@@ -389,28 +389,27 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
-- **A park decides when work runs.** `gc-helm.sh park` gives a bead a `blocks`
-  edge onto a gate of its own, titled with why it is parked and what releases
-  it. bd's cascade keeps the routed work under the bead out of every pool's
+- **A park decides when work runs.** A park gives a bead a `blocks` edge onto
+  a gate of its own, titled with why it is parked and what releases it. bd's
+  cascade keeps the routed work under the bead out of every pool's
   offer, work already in flight finishes, and closing the gate releases the
   park. [steering.md](steering.md) says what a park holds and what it does not.
 - **A priority decides the order work runs in.** A bead's priority is the
   priority of the bead it follows plus its own shift, so work under an epic
   queues at the epic's priority. A PR's finishing work, which never has a
   parent, runs one level sooner than its anchor, and at P0 once the PR is
-  approved. `gc-helm.sh priority` sets an epic's priority, or a member's shift,
-  and re-ranks the work that follows it, workflows already poured included
+  approved. Setting an epic's priority, or a member's shift, re-ranks the work
+  that follows it, workflows already poured included
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
-  per render from the ledger, from Gas City's `human` mailbox, and from Gas
-  City's event log, which holds doctor's runs and each monitor order's last
-  good run. `gc-helm.sh` carries the write verbs open, engage, react, takeaway,
-  dismiss, accept, park, priority and place, and the read-only verb resolve.
-  The board's one write that `gc-helm.sh` does not carry is archiving a
-  mailbox message, which Gas City's mail performs. Accept clears a first
-  reaction's recommendation gate and nothing else, under the bead's acceptance
-  lock, and is offered only while no other human gate blocks the bead. The po's
-  backlog refinement works the queue, every bead `hold:mayor` holds in any
+  per render through gctk's shared readers over the ledger, from Gas City's
+  `human` mailbox, and from Gas City's event log, which holds doctor's runs and
+  each monitor order's last good run. It reads no store of its own. The write
+  verbs are gctk commands, which skills, prompts and the board's write routes
+  call. The board's one write that gctk does not carry is archiving a mailbox
+  message, which Gas City's mail performs. Accept clears a first reaction's
+  recommendation gate and nothing else, under the bead's acceptance lock. The
+  po's backlog refinement works the queue, every bead `hold:mayor` holds in any
   spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
   works without the board: it spends no state, so it can never be wrong for
   longer than one render.
@@ -524,11 +523,16 @@ why a reader must know it, and the work that retires it.
   bead moves the rig onto the pending record, along with a sitting's
   retirement of one (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which
   waits on every cutover, deletes the old path once no open bead is on it.
-- **The agents' board derives a pending PR's status by another rule.**
-  `helm-svc board` phases a PR on the pending record with the old path's rule
-  over the keys its beads source reads, so its phase can differ from the PR's
-  status label. The board member (tk-1tfzr71.24) replaces that source with a
-  reader of the evaluator's rule over the saved GitHub read.
+- **The agents' board still reads the store itself.** `helm-svc board` and the
+  `/helm` route derive their rows from each store through an embedded copy of
+  the beads library, and phase a PR on the pending record by the old path's
+  rule, so their answer can differ from the page's and from the PR's status
+  label, and the library needs cgo and ICU to build. The board member
+  (tk-1tfzr71.24) retires that reader.
+- **`gc-helm.sh` still carries the write verbs.** They run as shell, and gctk
+  reaches two of them through the script. The board member (tk-1tfzr71.24)
+  moves the steering and record verbs into gctk, and tk-ssm8qns.15 moves the
+  conversation verbs.
 - **The merge cadence still admits work on a pending record.** It files work
   for a PR on the pending record beside the landing order
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
