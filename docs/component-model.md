@@ -607,8 +607,9 @@ prerequisite, and the four exclusions above are what such a check encodes.
 - **The po is engagement.** The po (`agents/po/`) is the seat the operator
   opens to place the queue of held new work and to steer the epics, so its
   product is the operator's steering. It runs no component of its own: its
-  writes are `gc-helm.sh`'s place, park and priority, `gc bd set-state` for a
-  hold, and `bead-rehome.sh` for a close, each placed above.
+  writes are `gctk bead place` and `gctk bead park`, `queue-priority.sh move`
+  for a priority, `gc bd set-state` for a hold, and `bead-rehome.sh` for a
+  close, each placed above.
 - **`reconcile-rig-checkouts` is merge.** A directory-imported pack runs from
   the working tree, so a merged PR does not execute until the checkout syncs.
   The order completes a merge's effect. `doctor/check-pour-text-current` reads
