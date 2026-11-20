@@ -34,9 +34,11 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
-// The takeaway's keys, which this package alone writes, each in the one update
-// that writes the headline. Shell still reads them (docs/gctk-architecture.md,
-// Debt), so they stay registered in lifecycle/lifecycle.toml too.
+// The takeaway's keys, which this package writes, each in the one update that
+// writes the headline. gctk lifecycle's --takeaway also writes them itself
+// until the old merge path retires, and shell still reads them
+// (docs/gctk-architecture.md, Debt), so they stay registered in
+// lifecycle/lifecycle.toml too.
 var (
 	textKey = ledger.Declare("gc.takeaway", ledger.String,
 		"A bead's headline: the one line, at most lifecycle.TakeawayMax codepoints, that its handling concluded, "+

@@ -367,16 +367,15 @@ one. Each item goes one of three ways:
   its own, as write 2 answers one, and run the writer last. The release ends
   the run beneath the bead through the pack's run-cancel.sh, which it finds
   where GCTK_SCRIPTS_DIR points:
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "<the ruling, one sentence>" --release --no-wait
+```
+A Delivery never moves whole, because its aim answers this epic's hypothesis,
+so its Stories move one by one.
 
-  ```bash
-  # >>> gctk-bin
-  GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
-  # <<< gctk-bin
-  GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "<the ruling, one sentence>" --release --no-wait
-  ```
-
-  A Delivery never moves whole, because its aim answers this epic's hypothesis,
-  so its Stories move one by one.
 - **Work worth doing on its own moves out to ordinary flow** with no parent:
   `gc bd update <bead> --parent ""`. That is a decision about the item, never
   the default for whatever is left.
