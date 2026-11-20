@@ -50,12 +50,12 @@ func TestBeadStandsPrintsOneLinePerBead(t *testing.T) {
 		t.Fatalf("exit %d with %d lines; want 0 with one line per bead", code, len(lines))
 	}
 	want := []string{
-		`{"advance":"stuck","ask":"","frontier":"stuck","group":"waiting-on-you","id":"epic","names":[{"id":"gate","title":"park the epic"}],"rule":"own-wait","stuck_on":{"id":"gate","why":"own-wait"},"why":""}`,
-		`{"advance":"stuck","ask":"question","frontier":"ready","group":"waiting-on-you","id":"gate","names":[],"rule":"ask","stuck_on":{"id":"gate","why":"question"},"why":""}`,
-		`{"advance":"stuck","ask":"","frontier":"stuck","group":"waiting-on-you","id":"member","names":[{"id":"gate","title":"park the epic"}],"rule":"further-along","stuck_on":{"id":"gate","why":"further-along"},"why":""}`,
-		`{"advance":"advancing","ask":"","frontier":"advancing","group":"queued","id":"own","names":[{"id":"blocker","title":"the work it waits on"}],"rule":"scheduled","stuck_on":null,"why":""}`,
-		`{"advance":"advancing","ask":"","frontier":"ready","group":"queued","id":"worked","names":[],"rule":"in-flight","stuck_on":null,"why":""}`,
-		`{"advance":"stuck","ask":"","frontier":"stuck","group":"not-moving","id":"waiter","names":[{"id":"spawner","title":""}],"rule":"not-scheduled","stuck_on":{"id":"waiter","why":"not-scheduled"},"why":""}`,
+		`{"advance":"stuck","ask":"","frontier":{"verdict":"stuck","waits":[{"advance":"stuck","id":"gate","stuck_on":{"id":"gate","why":"question"}}]},"group":"waiting-on-you","id":"epic","names":[{"id":"gate","title":"park the epic"}],"rule":"own-wait","stuck_on":{"id":"gate","why":"own-wait"},"why":""}`,
+		`{"advance":"stuck","ask":"question","frontier":{"verdict":"ready","waits":[]},"group":"waiting-on-you","id":"gate","names":[],"rule":"ask","stuck_on":{"id":"gate","why":"question"},"why":""}`,
+		`{"advance":"stuck","ask":"","frontier":{"verdict":"stuck","waits":[{"advance":"stuck","id":"gate","stuck_on":{"id":"gate","why":"question"}}]},"group":"waiting-on-you","id":"member","names":[{"id":"gate","title":"park the epic"}],"rule":"further-along","stuck_on":{"id":"gate","why":"further-along"},"why":""}`,
+		`{"advance":"advancing","ask":"","frontier":{"verdict":"advancing","waits":[{"advance":"advancing","id":"blocker","stuck_on":null}]},"group":"queued","id":"own","names":[{"id":"blocker","title":"the work it waits on"}],"rule":"scheduled","stuck_on":null,"why":""}`,
+		`{"advance":"advancing","ask":"","frontier":{"verdict":"ready","waits":[]},"group":"queued","id":"worked","names":[],"rule":"in-flight","stuck_on":null,"why":""}`,
+		`{"advance":"stuck","ask":"","frontier":{"verdict":"stuck","waits":[{"advance":"stuck","id":"spawner","stuck_on":{"id":"spawner","why":"unread"}}]},"group":"not-moving","id":"waiter","names":[{"id":"spawner","title":""}],"rule":"not-scheduled","stuck_on":{"id":"waiter","why":"not-scheduled"},"why":""}`,
 	}
 	for i, w := range want {
 		raw, _ := json.Marshal(lines[i])

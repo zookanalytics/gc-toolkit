@@ -1,6 +1,7 @@
 package standing
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -92,112 +93,112 @@ func TestAdvance(t *testing.T) {
 		runs     []waits.Run
 		asked    string
 		want     Advance
-		frontier Frontier
+		frontier Verdict
 	}{
 		{name: "queued work nothing holds advances, and nothing holds it",
-			live: []Bead{work("tk-x", pool)}, asked: "tk-x", want: advancing, frontier: FrontierReady},
+			live: []Bead{work("tk-x", pool)}, asked: "tk-x", want: advancing, frontier: VerdictReady},
 		{name: "work nobody takes is stuck on itself",
-			live: []Bead{work("tk-x", "")}, asked: "tk-x", want: stuck("tk-x", "not-scheduled"), frontier: FrontierReady},
+			live: []Bead{work("tk-x", "")}, asked: "tk-x", want: stuck("tk-x", "not-scheduled"), frontier: VerdictReady},
 		{name: "work a live run works advances from the run's start",
 			live: []Bead{work("tk-x", "")}, runs: []waits.Run{{Root: "tk-root", Bead: "tk-x", Live: true}},
-			asked: "tk-x", want: advancing, frontier: FrontierReady},
+			asked: "tk-x", want: advancing, frontier: VerdictReady},
 		{name: "routed work held for the Product Owner is work nobody takes",
 			live:  []Bead{{ID: "tk-x", Status: "open", IssueType: "task", Assignee: pool, Labels: []string{"hold:mayor"}}},
-			asked: "tk-x", want: stuck("tk-x", "not-scheduled"), frontier: FrontierReady},
+			asked: "tk-x", want: stuck("tk-x", "not-scheduled"), frontier: VerdictReady},
 		{name: "queued work advances behind queued work",
 			live: []Bead{work("tk-x", pool), work("tk-y", pool)}, waitsOn: map[string][]string{"tk-x": {"tk-y"}},
-			asked: "tk-x", want: advancing, frontier: FrontierAdvancing},
+			asked: "tk-x", want: advancing, frontier: VerdictAdvancing},
 		{name: "queued work behind work nobody takes is stuck on that work",
 			live: []Bead{work("tk-x", pool), work("tk-w", "")}, waitsOn: map[string][]string{"tk-x": {"tk-w"}},
-			asked: "tk-x", want: stuck("tk-w", "not-scheduled"), frontier: FrontierStuck},
+			asked: "tk-x", want: stuck("tk-w", "not-scheduled"), frontier: VerdictStuck},
 		{name: "queued work is stuck on what stops the first wait that does not advance",
 			live: []Bead{work("tk-x", pool), work("tk-a", pool), work("tk-y", pool),
 				{ID: "tk-z", Title: "tk-z", Status: "deferred", IssueType: "task", Assignee: pool}},
 			waitsOn: map[string][]string{"tk-x": {"tk-a", "tk-y"}, "tk-y": {"tk-z"}},
-			asked:   "tk-x", want: stuck("tk-z", "status"), frontier: FrontierStuck},
+			asked:   "tk-x", want: stuck("tk-z", "status"), frontier: VerdictStuck},
 		{name: "a closed wait holds nothing",
 			live: []Bead{work("tk-x", pool)}, waitsOn: map[string][]string{"tk-x": {"tk-done"}},
 			closed: []Bead{{ID: "tk-done", Status: "closed", IssueType: "task"}},
-			asked:  "tk-x", want: advancing, frontier: FrontierReady},
+			asked:  "tk-x", want: advancing, frontier: VerdictReady},
 		{name: "work behind a human gate is stuck on the gate, its own wait",
 			live: []Bead{work("tk-x", pool), humanGate}, waitsOn: map[string][]string{"tk-x": {"tk-g"}},
-			asked: "tk-x", want: stuck("tk-g", "own-wait"), frontier: FrontierStuck},
+			asked: "tk-x", want: stuck("tk-g", "own-wait"), frontier: VerdictStuck},
 		{name: "work behind work behind a human gate is stuck on the gate further along",
 			live:    []Bead{work("tk-x", pool), work("tk-y", pool), humanGate},
 			waitsOn: map[string][]string{"tk-x": {"tk-y"}, "tk-y": {"tk-g"}},
-			asked:   "tk-x", want: stuck("tk-g", "further-along"), frontier: FrontierStuck},
+			asked:   "tk-x", want: stuck("tk-g", "further-along"), frontier: VerdictStuck},
 		{name: "work in your queue is stuck on itself, and what it waits on advances apart",
 			live: []Bead{work("tk-x", "human"), work("tk-y", pool)}, waitsOn: map[string][]string{"tk-x": {"tk-y"}},
-			asked: "tk-x", want: stuck("tk-x", "routed-to-you"), frontier: FrontierAdvancing},
+			asked: "tk-x", want: stuck("tk-x", "routed-to-you"), frontier: VerdictAdvancing},
 		{name: "a parked bead is stuck on the gate that parks it",
 			live: []Bead{work("tk-x", pool), park}, waitsOn: map[string][]string{"tk-x": {"tk-park"}},
-			asked: "tk-x", want: stuck("tk-park", "parked"), frontier: FrontierStuck},
+			asked: "tk-x", want: stuck("tk-park", "parked"), frontier: VerdictStuck},
 		{name: "a gate that is no human gate is stuck on itself",
-			live: []Bead{park}, asked: "tk-park", want: stuck("tk-park", "gate"), frontier: FrontierReady},
+			live: []Bead{park}, asked: "tk-park", want: stuck("tk-park", "gate"), frontier: VerdictReady},
 		{name: "a question is stuck on itself, and what holds it is read apart",
-			live: []Bead{decision}, asked: "tk-d", want: stuck("tk-d", "question"), frontier: FrontierReady},
+			live: []Bead{decision}, asked: "tk-d", want: stuck("tk-d", "question"), frontier: VerdictReady},
 		{name: "a decision a ruling left waiting on the work it sent advances while that work does",
 			live: []Bead{decision, work("tk-w", pool)}, waitsOn: map[string][]string{"tk-d": {"tk-w"}},
-			asked: "tk-d", want: advancing, frontier: FrontierAdvancing},
+			asked: "tk-d", want: advancing, frontier: VerdictAdvancing},
 		{name: "a decision a ruling left waiting on work nobody takes is stuck on that work",
 			live: []Bead{decision, work("tk-w", "")}, waitsOn: map[string][]string{"tk-d": {"tk-w"}},
-			asked: "tk-d", want: stuck("tk-w", "not-scheduled"), frontier: FrontierStuck},
+			asked: "tk-d", want: stuck("tk-w", "not-scheduled"), frontier: VerdictStuck},
 		{name: "a conversation its sitting stays in advances while the work it sent does",
 			live: []Bead{
 				{ID: "tk-c", Title: "talk", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c",
 					Edges: []Edge{{ID: "tk-s", Type: "tracks"}}},
 				work("tk-s", ""), work("tk-w", pool)},
 			waitsOn: map[string][]string{"tk-c": {"tk-w"}},
-			asked:   "tk-c", want: advancing, frontier: FrontierAdvancing},
+			asked:   "tk-c", want: advancing, frontier: VerdictAdvancing},
 		{name: "a conversation that answers a question is stuck on the question",
 			live: []Bead{
 				{ID: "tk-c", Title: "talk", Status: "open", IssueType: "task", Assignee: "human",
 					Edges: []Edge{{ID: "tk-s", Type: "tracks"}, {ID: "tk-g", Type: "replies-to"}}},
 				work("tk-s", ""), humanGate},
-			asked: "tk-c", want: stuck("tk-g", "answers"), frontier: FrontierReady},
+			asked: "tk-c", want: stuck("tk-g", "answers"), frontier: VerdictReady},
 		{name: "an epic advances while every open member does",
 			live:  []Bead{epic, under(work("tk-m1", pool), "tk-e"), under(work("tk-m2", pool), "tk-e")},
-			asked: "tk-e", want: advancing, frontier: FrontierReady},
+			asked: "tk-e", want: advancing, frontier: VerdictReady},
 		{name: "an epic is stuck on what stops the first open member that does not advance",
 			live: []Bead{epic, under(work("tk-m1", pool), "tk-e"), under(work("tk-m2", pool), "tk-e"),
 				under(work("tk-m3", ""), "tk-e"), work("tk-w", "")},
 			waitsOn: map[string][]string{"tk-m2": {"tk-w"}},
-			asked:   "tk-e", want: stuck("tk-w", "not-scheduled"), frontier: FrontierReady},
+			asked:   "tk-e", want: stuck("tk-w", "not-scheduled"), frontier: VerdictReady},
 		{name: "an epic's closed members leave it advancing with its open ones",
 			live:   []Bead{epic, under(work("tk-m1", pool), "tk-e")},
 			closed: []Bead{under(Bead{ID: "tk-m0", Status: "closed", IssueType: "task"}, "tk-e")},
-			asked:  "tk-e", want: advancing, frontier: FrontierReady},
+			asked:  "tk-e", want: advancing, frontier: VerdictReady},
 		{name: "an epic with no members is stuck on itself",
-			live: []Bead{epic}, asked: "tk-e", want: stuck("tk-e", "members"), frontier: FrontierReady},
+			live: []Bead{epic}, asked: "tk-e", want: stuck("tk-e", "members"), frontier: VerdictReady},
 		{name: "an epic whose members are all closed waits for a ruling",
 			live:   []Bead{epic},
 			closed: []Bead{under(Bead{ID: "tk-m0", Status: "closed", IssueType: "task"}, "tk-e")},
-			asked:  "tk-e", want: stuck("tk-e", "ruling"), frontier: FrontierReady},
+			asked:  "tk-e", want: stuck("tk-e", "ruling"), frontier: VerdictReady},
 		{name: "an epic's open member that is no work, such as a gate, is no member",
 			live:  []Bead{epic, under(park, "tk-e")},
-			asked: "tk-e", want: stuck("tk-e", "members"), frontier: FrontierReady},
+			asked: "tk-e", want: stuck("tk-e", "members"), frontier: VerdictReady},
 		{name: "a wait with no standing of its own reads unread",
 			live:    []Bead{work("tk-x", pool), {ID: "tk-step", Title: "a step", Status: "open", IssueType: "task", Run: true}},
 			waitsOn: map[string][]string{"tk-x": {"tk-step"}},
-			asked:   "tk-x", want: stuck("tk-step", "unread"), frontier: FrontierStuck},
+			asked:   "tk-x", want: stuck("tk-step", "unread"), frontier: VerdictStuck},
 		{name: "an anchor that waits on the review run that works it advances, as its own work",
 			live:    []Bead{work("tk-x", pool), {ID: "tk-root", Title: "mol-pr-review", Status: "open", IssueType: "task", Run: true}},
 			waitsOn: map[string][]string{"tk-x": {"tk-root"}},
 			runs:    []waits.Run{{Root: "tk-root", Bead: "tk-x", Live: true}},
-			asked:   "tk-x", want: advancing, frontier: FrontierAdvancing},
+			asked:   "tk-x", want: advancing, frontier: VerdictAdvancing},
 		{name: "an anchor that waits on its own rework advances, as its own work",
 			live:    []Bead{work("tk-x", pool), {ID: "tk-rw", Title: "rework", Status: "open", IssueType: "task", Anchor: "tk-x"}},
 			waitsOn: map[string][]string{"tk-x": {"tk-rw"}},
-			asked:   "tk-x", want: advancing, frontier: FrontierAdvancing},
+			asked:   "tk-x", want: advancing, frontier: VerdictAdvancing},
 		{name: "work that waits on another bead's rework waits on that bead",
 			live: []Bead{work("tk-x", pool), work("tk-y", ""),
 				{ID: "tk-rw", Title: "rework", Status: "open", IssueType: "task", Anchor: "tk-y"}},
 			waitsOn: map[string][]string{"tk-x": {"tk-rw"}},
-			asked:   "tk-x", want: stuck("tk-y", "not-scheduled"), frontier: FrontierStuck},
+			asked:   "tk-x", want: stuck("tk-y", "not-scheduled"), frontier: VerdictStuck},
 		{name: "work that waits on itself through other work reads unread",
 			live:    []Bead{work("tk-x", pool), work("tk-y", pool)},
 			waitsOn: map[string][]string{"tk-x": {"tk-y"}, "tk-y": {"tk-x"}},
-			asked:   "tk-x", want: stuck("tk-x", "unread"), frontier: FrontierStuck},
+			asked:   "tk-x", want: stuck("tk-x", "unread"), frontier: VerdictStuck},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -216,8 +217,8 @@ func TestAdvance(t *testing.T) {
 				if !ok || got != c.want {
 					t.Errorf("asked about %v: Advance = %+v, %v, want %+v", ids, got, ok, c.want)
 				}
-				if f, ok := r.Frontier(c.asked); !ok || f != c.frontier {
-					t.Errorf("asked about %v: Frontier = %q, %v, want %q", ids, f, ok, c.frontier)
+				if f, ok := r.Frontier(c.asked); !ok || f.Verdict != c.frontier {
+					t.Errorf("asked about %v: Frontier = %+v, %v, want %q", ids, f, ok, c.frontier)
 				}
 			}
 		})
@@ -237,11 +238,12 @@ func TestTheFrontierIsReadForABeadAsked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f, ok := r.Frontier("tk-x"); !ok || f != FrontierStuck {
-		t.Errorf("Frontier(tk-x) = %q, %v, want stuck", f, ok)
+	want := Frontier{Verdict: VerdictStuck, Waits: []Waited{{ID: "tk-w", Advance: stuck("tk-w", "not-scheduled")}}}
+	if f, ok := r.Frontier("tk-x"); !ok || !reflect.DeepEqual(f, want) {
+		t.Errorf("Frontier(tk-x) = %+v, %v, want %+v", f, ok, want)
 	}
 	if f, ok := r.Frontier("tk-w"); ok {
-		t.Errorf("Frontier(tk-w) = %q for a bead the read was not asked about", f)
+		t.Errorf("Frontier(tk-w) = %+v for a bead the read was not asked about", f)
 	}
 	if adv, ok := r.Advance("tk-w"); !ok || adv != stuck("tk-w", "not-scheduled") {
 		t.Errorf("Advance(tk-w) = %+v, %v, want stuck on itself, not-scheduled", adv, ok)
@@ -253,7 +255,7 @@ func TestTheFrontierIsReadForABeadAsked(t *testing.T) {
 		t.Errorf("Advance(tk-done) = %+v for a closed bead", adv)
 	}
 	if f, ok := r.Frontier("tk-done"); ok {
-		t.Errorf("Frontier(tk-done) = %q for a closed bead", f)
+		t.Errorf("Frontier(tk-done) = %+v for a closed bead", f)
 	}
 }
 
@@ -320,8 +322,36 @@ func TestAWaitTheStoreCannotJudgeHolds(t *testing.T) {
 		if adv, _ := r.Advance("tk-x"); adv != stuck("tk-spawner", "unread") {
 			t.Errorf("asked about %v: Advance(tk-x) = %+v, want stuck on tk-spawner, unread", ids, adv)
 		}
-		if f, _ := r.Frontier("tk-x"); f != FrontierStuck {
-			t.Errorf("asked about %v: Frontier(tk-x) = %q, want stuck", ids, f)
+		want := Frontier{Verdict: VerdictStuck, Waits: []Waited{{ID: "tk-spawner", Advance: stuck("tk-spawner", "unread")}}}
+		if f, _ := r.Frontier("tk-x"); !reflect.DeepEqual(f, want) {
+			t.Errorf("asked about %v: Frontier(tk-x) = %+v, want %+v", ids, f, want)
 		}
+	}
+}
+
+// TestTheFrontierReadsEachWait: the frontier names each wait behind what holds
+// the bead, in waits' order, with how far the city carries it as the verdict
+// reads it: the bead's own work advances, and a wait on another bead's work
+// reads as that bead.
+func TestTheFrontierReadsEachWait(t *testing.T) {
+	const pool = "gc-toolkit.polecat"
+	g := graphOf([]Bead{
+		{ID: "tk-x", Status: "open", IssueType: "task", Assignee: pool},
+		{ID: "tk-own", Status: "open", IssueType: "task", Anchor: "tk-x"},
+		{ID: "tk-y", Status: "open", IssueType: "task", Assignee: pool},
+		{ID: "tk-theirs", Status: "open", IssueType: "task", Anchor: "tk-z"},
+		{ID: "tk-z", Status: "open", IssueType: "task"},
+	}, map[string][]string{"tk-x": {"tk-own", "tk-y", "tk-theirs"}})
+	r, err := Read([]string{"tk-x"}, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Frontier{Verdict: VerdictStuck, Waits: []Waited{
+		{ID: "tk-own", Advance: Advance{Advancing: true}},
+		{ID: "tk-y", Advance: Advance{Advancing: true}},
+		{ID: "tk-theirs", Advance: stuck("tk-z", "not-scheduled")},
+	}}
+	if f, ok := r.Frontier("tk-x"); !ok || !reflect.DeepEqual(f, want) {
+		t.Errorf("Frontier(tk-x) = %+v, %v, want %+v", f, ok, want)
 	}
 }

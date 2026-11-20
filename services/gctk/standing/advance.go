@@ -19,16 +19,31 @@ type Advance struct {
 	Why string
 }
 
-// Frontier is where a bead stands by the beads it waits on: ready when nothing
-// holds it, advancing when every wait behind what holds it advances, and stuck
-// when one does not.
-type Frontier string
+// Frontier is where a bead stands by the beads it waits on: its verdict, and
+// each wait behind what holds it, in the order waits names them, with how far
+// the city carries that wait as the verdict reads it.
+type Frontier struct {
+	Verdict Verdict
+	Waits   []Waited
+}
+
+// Verdict is a frontier in one word: ready when nothing holds the bead,
+// advancing when every wait behind what holds it advances, and stuck when one
+// does not.
+type Verdict string
 
 const (
-	FrontierReady     Frontier = "ready"
-	FrontierAdvancing Frontier = "advancing"
-	FrontierStuck     Frontier = "stuck"
+	VerdictReady     Verdict = "ready"
+	VerdictAdvancing Verdict = "advancing"
+	VerdictStuck     Verdict = "stuck"
 )
+
+// Waited is one wait behind what holds a bead, and how far the city carries it
+// as the bead's frontier reads it.
+type Waited struct {
+	ID      string
+	Advance Advance
+}
 
 // Advance is how far the city carries an open bead, for each the read answered,
 // and false for a closed bead and for one it did not answer. A bead advances
@@ -56,24 +71,30 @@ func (r *Reading) Advance(id string) (Advance, bool) {
 // waits on, and false for a closed bead and for one it was not asked about or
 // did not answer. It is ready when waits answers that nothing holds it, and
 // otherwise advancing when every wait behind that answer advances and stuck
-// when one does not, a waits-for wait among them, or when waits could not
-// answer what holds it.
+// when one does not, or when waits could not answer what holds it. Each wait
+// reads as it does in the bead's advance: a waits-for wait is stuck on itself,
+// unread, and a wait that is the bead's own work advances.
 func (r *Reading) Frontier(id string) (Frontier, bool) {
 	b, ok := r.beads[id]
 	if !ok || !r.asked[id] || !isOpen(b) {
-		return "", false
+		return Frontier{}, false
 	}
 	h, ok := r.holds[id]
 	if !ok {
-		return FrontierStuck, true
+		return Frontier{Verdict: VerdictStuck}, true
 	}
 	if h.Status == waits.Clear {
-		return FrontierReady, true
+		return Frontier{Verdict: VerdictReady}, true
 	}
-	if !r.behind(id, h.Waits, map[string]bool{}).Advancing {
-		return FrontierStuck, true
+	f := Frontier{Verdict: VerdictAdvancing}
+	for _, w := range h.Waits {
+		adv := r.waited(id, w, map[string]bool{})
+		f.Waits = append(f.Waits, Waited{ID: w.ID, Advance: adv})
+		if !adv.Advancing {
+			f.Verdict = VerdictStuck
+		}
 	}
-	return FrontierAdvancing, true
+	return f, true
 }
 
 // advanceAll reads how far the city carries each open bead answered, by id, so
@@ -138,29 +159,33 @@ func (r *Reading) advance(id string, on map[string]bool) Advance {
 	return adv
 }
 
-// behind is the advance of bead self, which advances while each bead ws names
-// does: what stops the first that does not, and advancing when each does. A
-// wait the store cannot judge yet ([waits.Wait.Unjudged]) holds the bead
-// whatever its bead's own advance, so it reads unread. A wait on a bead with
-// no standing of its own reads as the bead that speaks for it, and stops
-// nothing where that is self.
+// behind is the advance of bead self, which advances while each wait in ws
+// does: what stops the first that does not, and advancing when each does.
 func (r *Reading) behind(self string, ws []waits.Wait, on map[string]bool) Advance {
 	for _, w := range ws {
-		if w.Unjudged() {
-			return stuck(w.ID, string(RuleUnread))
-		}
-		id := w.ID
-		if t, ok := r.through[id]; ok {
-			if t == self {
-				continue
-			}
-			id = t
-		}
-		if adv := r.advance(id, on); !adv.Advancing {
+		if adv := r.waited(self, w, on); !adv.Advancing {
 			return adv
 		}
 	}
 	return Advance{Advancing: true}
+}
+
+// waited is how far the city carries one wait of bead self. A wait the store
+// cannot judge yet ([waits.Wait.Unjudged]) holds self whatever its bead's own
+// advance, so it reads unread. A wait on a bead with no standing of its own
+// reads as the bead that speaks for it, and advances where that is self.
+func (r *Reading) waited(self string, w waits.Wait, on map[string]bool) Advance {
+	if w.Unjudged() {
+		return stuck(w.ID, string(RuleUnread))
+	}
+	id := w.ID
+	if t, ok := r.through[id]; ok {
+		if t == self {
+			return Advance{Advancing: true}
+		}
+		id = t
+	}
+	return r.advance(id, on)
 }
 
 func stuck(on, why string) Advance { return Advance{On: on, Why: why} }

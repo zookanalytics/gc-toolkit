@@ -46,10 +46,15 @@ advancing, or stuck, with stuck_on {"id", "why"} naming the bead that stops
 it, itself included, and the word that says why, its ask or the rule that
 names that bead. A queued bead advances while every bead it waits on does,
 and an epic or a Delivery the members rule places while every open member
-does. frontier is where an open bead stands by what it waits on: ready when
-nothing holds it, as gctk bead holds answers, advancing when every wait
-behind that answer advances, and stuck when one does not. A closed bead's
-advance and frontier are "" and its stuck_on is null.
+does. frontier is where an open bead stands by what it waits on,
+{"verdict", "waits"}: verdict is ready when nothing holds it, as gctk bead
+holds answers, advancing when every wait behind that answer advances, and
+stuck when one does not, and waits is each of those waits in holds' order,
+{"id", "advance", "stuck_on"}, as the verdict reads it. A waits-for wait,
+which the store cannot judge yet, is stuck on itself, unread, and a wait
+that is the bead's own work, such as an anchor's own rework or the review
+run that works it, advances. A closed bead's advance is "", and its
+stuck_on and frontier are null.
 
 A bead the store does not hold, and one with no standing of its own, such as
 a convoy or a run's step, prints {"id", "error"}, and so does every bead
@@ -100,7 +105,18 @@ type standsLine struct {
 	Why      string      `json:"why"`
 	Advance  string      `json:"advance"`
 	StuckOn  *stuckOn    `json:"stuck_on"`
-	Frontier string      `json:"frontier"`
+	Frontier *frontier   `json:"frontier"`
+}
+
+type frontier struct {
+	Verdict string       `json:"verdict"`
+	Waits   []waitedLine `json:"waits"`
+}
+
+type waitedLine struct {
+	ID      string   `json:"id"`
+	Advance string   `json:"advance"`
+	StuckOn *stuckOn `json:"stuck_on"`
 }
 
 type standsRef struct {
@@ -164,13 +180,23 @@ func standsLineOf(r *standing.Reading, id string) (standsLine, bool) {
 		l.Names = append(l.Names, standsRef{ID: n.ID, Title: n.Title})
 	}
 	if adv, ok := r.Advance(id); ok {
-		l.Advance = "advancing"
-		if !adv.Advancing {
-			l.Advance, l.StuckOn = "stuck", &stuckOn{ID: adv.On, Why: adv.Why}
-		}
+		l.Advance, l.StuckOn = advanceOf(adv)
 	}
 	if f, ok := r.Frontier(id); ok {
-		l.Frontier = string(f)
+		l.Frontier = &frontier{Verdict: string(f.Verdict), Waits: []waitedLine{}}
+		for _, w := range f.Waits {
+			wl := waitedLine{ID: w.ID}
+			wl.Advance, wl.StuckOn = advanceOf(w.Advance)
+			l.Frontier.Waits = append(l.Frontier.Waits, wl)
+		}
 	}
 	return l, true
+}
+
+// advanceOf is an advance in the line's words.
+func advanceOf(adv standing.Advance) (string, *stuckOn) {
+	if adv.Advancing {
+		return "advancing", nil
+	}
+	return "stuck", &stuckOn{ID: adv.On, Why: adv.Why}
 }
