@@ -109,12 +109,13 @@ type Listing struct {
 }
 
 // Read lists the store at db, a store's .beads directory, once: every live
-// bead it holds. With db empty it reads the store gc resolves. A read that
-// fails returns its error and no listing. Every read of the store the listing
-// makes, then and for each question asked of it later, ends when ctx does, and
-// the processes it started end with it.
-func Read(ctx context.Context, db string) (*Listing, error) {
-	l, err := ledger.OpenContext(ctx, db)
+// bead it holds. With db empty it reads the store gc routes a read of the
+// first of ids to, as [ledger.Open] does, and the store gc resolves when ids
+// names none. A read that fails returns its error and no listing. Every read of
+// the store the listing makes, then and for each question asked of it later,
+// ends when ctx does, and the processes it started end with it.
+func Read(ctx context.Context, db string, ids ...string) (*Listing, error) {
+	l, err := ledger.OpenContext(ctx, db, ids...)
 	if err != nil {
 		return nil, err
 	}

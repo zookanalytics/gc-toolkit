@@ -12,8 +12,8 @@ import (
 // storeStub answers the reads `gctk bead holds` makes from one store,
 // $STUB_STORE, a JSON array of rows in a show's shape: `bd show` returns the
 // rows named, each leaving out an edge whose far bead the store does not hold,
-// and `bd list` returns the rows its --id, --has-metadata-key, --metadata-field
-// and --all select, in a listing's shape, every edge kept. `bd blocked`
+// and `bd list` returns the rows its --id, --has-metadata-key, --metadata-field,
+// --parent and --all select, in a listing's shape, every edge kept. `bd blocked`
 // answers $STUB_BLOCKED and `bd sql` $STUB_MARKS. $STUB_BLOCKED_RC fails the
 // listing. `bd where` names /stub/.beads at prefix "st", and `rig list` names
 // that store alone, so no store's prefix begins an id here. Each call logs the
@@ -33,21 +33,23 @@ case "$1 $2" in
         | .dependencies = [ (.dependencies // [])[] | select(.id as $d | any($all[]; .id == $d)) ] ]' ;;
 "bd list")
   shift 2
-  ids=""; hk=""; mf=""; all=""
+  ids=""; hk=""; mf=""; all=""; parent=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --id) ids="$2"; shift ;;
       --has-metadata-key) hk="$2"; shift ;;
       --metadata-field) mf="$2"; shift ;;
+      --parent) parent="$2"; shift ;;
       --all) all=1 ;;
     esac
     shift
   done
-  printf '%s' "$STUB_STORE" | jq -c --arg ids "$ids" --arg hk "$hk" --arg mf "$mf" --arg all "$all" '
+  printf '%s' "$STUB_STORE" | jq -c --arg ids "$ids" --arg hk "$hk" --arg mf "$mf" --arg all "$all" --arg parent "$parent" '
     [ .[] | select($all == "1" or .status != "closed")
       | select($ids == "" or (.id as $i | any($ids | split(",")[]; . == $i)))
       | select($hk == "" or ((.metadata // {}) | has($hk)))
       | select($mf == "" or (($mf | split("=")) as [$k, $v] | (.metadata // {})[$k] == $v))
+      | select($parent == "" or any((.dependencies // [])[]; .dependency_type == "parent-child" and .id == $parent))
       | .id as $self
       | .dependencies = [ (.dependencies // [])[] | {issue_id: $self, depends_on_id: .id, type: .dependency_type} ] ]' ;;
 "bd blocked") printf '%s\n' "${STUB_BLOCKED:-[]}"; exit "${STUB_BLOCKED_RC:-0}" ;;

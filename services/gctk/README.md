@@ -15,6 +15,7 @@ through `gc bd` and the supervisor's API.
 | Command | What it does | Documented in |
 |---|---|---|
 | `bead holds` | what holds each bead named, from one read of the store: one status (blocked, held, unjudged or clear) with the waits behind it and whether each is the bead's own or an ancestor's, its own pending waits and when the last landed, why it is in flight, its arm, and its wait edges into another store, one JSON object per line, read from the store `--db` names or the one gc routes the first bead to | `gctk bead holds --help`, `internal/cli/bead.go`, `waits` |
+| `bead stands` | where each bead named stands and whose move it is, from one listing of the store: its group in the helm board's words, the rule that placed it, what a person owes when the bead is itself the ask, the beads that rule names, how far the city carries it without a person and the bead that stops it, and where it stands by what it waits on, one JSON object per line, read from the store `--db` names or the one gc routes the first bead to | `gctk bead stands --help`, `internal/cli/beadstands.go`, `standing` |
 | `bead arm`, `bead disarm` | arm a bead to start by itself once nothing holds it, on a formula through a pool, or remove its arm, each in one write under the bead's dispatch lock | `gctk bead arm --help`, `gctk bead disarm --help`, `arm` |
 | `bead start-armed` | the deferred-dispatch order's pass: retire the arm of each closed or delivered bead, and start each armed bead the pool's own serve rule would serve and nothing bd cannot judge holds, exactly once, printing one JSON line per arm; `--dry-run` writes nothing | `gctk bead start-armed --help`, `arm`, [docs/deferred-dispatch.md](../../docs/deferred-dispatch.md) |
 | `doctor run` | the doctor order's run: `gc doctor --json` under a deadline, never with `--fix`, recorded as one `gc-toolkit.doctor.ran` event whose payload names each failing check with the time it first failed and its streak, each check the run did not measure, each the accepted file accepts, and each monitor order's last good run; a run that did not complete carries the previous run's lists and exits 1 | `gctk doctor run --help`, `internal/cli/doctor.go`, `doctor` |
@@ -213,6 +214,7 @@ waits/               what holds a bead, from one snapshot: the rule by where the
                      in-flight test, the run link's copy and the keys it reads, read-only
 standing/            where a bead stands and whose move it is: its group in the helm board's
                      words, the rule that placed it, its ask and the beads that rule names,
+                     how far the city carries it and where it stands by what it waits on,
                      from waits', prstatus's and queue's answers, read through the Store a
                      listing implements
 standing/person/     the rules about one bead: a human gate, a bead only a person clears, and
