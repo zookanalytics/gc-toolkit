@@ -1,0 +1,86 @@
+name: govulncheck
+
+# Scans the repository's Go module for known vulnerabilities in what its code
+# calls, on pull requests to main and on pushes to main. govulncheck checks
+# every package of ./... against the Go vulnerability database. At its default
+# scan level it exits 3, which fails this check, only when the code calls a
+# vulnerable function. A vulnerability in a package the code imports without
+# calling it, or in a module it only requires, is listed in the log and fails
+# nothing. The scanner's version is pinned below, and the database is read
+# fresh on every run, so a vulnerability published in something the code calls
+# turns this check red with no change to the repository.
+# The scan runs on macOS, the platform the city builds and runs its binaries
+# on. govulncheck keeps only the advisories and the source files of the
+# platform it scans, so a Linux scan would pass over a vulnerability that only
+# the macOS build reaches, such as one in crypto/x509's Darwin code.
+# It runs under the Go release setup-go takes from go.mod, the one gc-build.sh
+# builds the city's binaries with, so it checks that release's standard
+# library.
+# A draft pull request skips the scan, and nothing else does, and the job sets
+# no name: or matrix, which would rename its check, for the reasons tests.yml
+# gives for its jobs.
+
+on:
+  pull_request:
+    branches: [main]
+    # Specifying types replaces GitHub's default set, so opened/synchronize/
+    # reopened are kept explicitly; ready_for_review runs the scan when a draft
+    # is marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # A concurrency group of the job's own, for the reason tests.yml's test job
+    # gives.
+    concurrency:
+      group: ${{ github.workflow }}-govulncheck-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # helm's cgo needs icu4c's headers, which the host installs from
+      # Homebrew.
+      - name: Install icu4c
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+        run: brew install icu4c
+
+      # `go install` with a version builds the scanner outside the module, with
+      # the Go setup-go installed, so the scanner adds nothing to go.mod.
+      - name: Install govulncheck
+        env:
+          GOVULNCHECK_VERSION: v1.10.0
+        run: GOBIN="$RUNNER_TEMP/bin" go install "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION"
+
+      # The board's bead-store reader opens its embedded store only in a cgo
+      # build (beads_cgo.go in github.com/steveyegge/beads), and gc-build.sh
+      # builds the board with cgo. A scan without cgo reads about a third of the
+      # board's packages and passes over what that store calls, so cgo is turned
+      # on by name: a runner with no C compiler fails the scan instead of
+      # scanning a smaller program. Homebrew keeps icu4c off the default search
+      # path, so the include and lib paths come from icu4c-cgo.sh, as they do
+      # for gc-build.sh's helm build.
+      - name: Scan for known vulnerabilities in what the code calls
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          . assets/scripts/icu4c-cgo.sh
+          icu4c_cgo_flags govulncheck
+          export CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS"
+          "$RUNNER_TEMP/bin/govulncheck" -show version ./...
