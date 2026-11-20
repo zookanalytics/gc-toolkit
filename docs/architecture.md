@@ -398,9 +398,9 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   priority of the bead it follows plus its own shift, so work under an epic
   queues at the epic's priority. A PR's finishing work, which never has a
   parent, runs one level sooner than its anchor, and at P0 once the PR is
-  approved. `queue-priority.sh move` sets an epic's priority, or a member's
-  shift, and re-ranks the work that follows it, workflows already poured
-  included ([steering.md](steering.md#priority)).
+  approved. Setting an epic's priority, or a member's shift, re-ranks the work
+  that follows it, workflows already poured included
+  ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render through gctk's shared readers over the ledger, from Gas City's
   `human` mailbox, and from Gas City's event log, which holds doctor's runs and
