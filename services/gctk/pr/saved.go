@@ -211,9 +211,12 @@ func labels(s gh.Signs) []string { return listed(slices.Sorted(slices.Values(s.L
 // by the one-PR update's table (specs/tk-1tfzr71.149/design.md, section 4). A
 // part whose own signs differ is stale. A move of the comment, review or
 // dismissed count makes the PR part stale too, since reviews move its merge
-// state, and so does a move of the checks, which are read with it. Every part
-// is stale when the saved read lacks a part or stale says it is not current for
-// the bead.
+// state, and so does a move of the checks, which are read with it. The PR part
+// of an open PR whose merge state GitHub read as UNKNOWN stays stale until a
+// read finds the state, since GitHub computes it after a push or a base move
+// and moves no sign when it does; a merged or closed PR's reads UNKNOWN for
+// good. Every part is stale when the saved read lacks a part or stale says it
+// is not current for the bead.
 func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 	if stale != "" || saved == nil || saved.PR == nil || saved.Checks == nil || saved.Conversation == nil ||
 		saved.Labels == nil {
@@ -225,7 +228,8 @@ func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 	c := saved.Conversation.Signs
 	counts := c.Comments != s.Comments || c.Reviews != s.Reviews || c.Dismissed != s.Dismissed
 	p.conversation = counts || c.UpdatedAt != s.UpdatedAt
-	p.pr = saved.PR.Signs != prSigns(s) || p.checks || counts
+	unknown := saved.PR.State == "OPEN" && saved.PR.MergeState == "UNKNOWN"
+	p.pr = saved.PR.Signs != prSigns(s) || p.checks || counts || unknown
 	return p
 }
 

@@ -896,11 +896,12 @@ same, so an older read never replaces a newer one, even a newer one that found
 nothing new. A bead on the
 pending record gets `pr_state`, the PR's state lower-cased, and
 `pr_last_checked_at` in the same write. An open PR's merge state that GitHub
-reads as `UNKNOWN`, which it computes after a push or a base move, is saved
-with the PR part's earlier signs, so the next pass reads the part again.
-GitHub reads a merged PR's merge state as `UNKNOWN` for good, so the part of a
-PR that is not open is saved with the signs read with it. A read that fails
-saves nothing. The update is the one writer of these three keys.
+reads as `UNKNOWN`, which it computes after a push or a base move and which
+moves no sign once computed, keeps the PR part due, so each pass reads the part
+again until a read finds the state, whether the PR's own signs or only its
+checks moved. GitHub reads a merged PR's merge state as `UNKNOWN` for good, so
+a PR that is not open is read again only when its signs move. A read that
+fails saves nothing. The update is the one writer of these three keys.
 
 `gctk pr refresh --pr <url>` is the same update run alone for one PR, which
 reads the PR's signs itself first: the call a webhook's rule can make for the PR

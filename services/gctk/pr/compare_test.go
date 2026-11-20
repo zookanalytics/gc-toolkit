@@ -269,9 +269,9 @@ func TestAFailedFullReadKeepsTheSavedReadAndFailsThePass(t *testing.T) {
 	updated(t, d.compare(t), "conversation")
 }
 
-// A merged PR's merge state reads UNKNOWN for good, so the PR part of a merged
-// or closed PR that reads UNKNOWN keeps the signs read with it, and the next
-// pass finds nothing moved.
+// A merged PR's merge state reads UNKNOWN for good, so only an open PR's
+// unknown merge state keeps its PR part due: the part of a merged or closed PR
+// that reads UNKNOWN is saved, and the next pass finds nothing moved.
 func TestAMergedPRsUnknownMergeStateIsSavedWithItsSigns(t *testing.T) {
 	for _, state := range []string{"MERGED", "CLOSED"} {
 		t.Run(state, func(t *testing.T) {

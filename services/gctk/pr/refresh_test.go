@@ -379,28 +379,44 @@ func TestAFailedReadKeepsTheSavedSignsAndFailsThePass(t *testing.T) {
 	}
 }
 
-// GitHub computes a merge state after a push or a base move: a read of it as
-// unknown is saved, and the PR part keeps its earlier signs, so the next pass
-// reads the part again (section 4).
-func TestAMergeStateReadUnknownKeepsThePartsEarlierSigns(t *testing.T) {
-	d := newWatched(t)
-	d.poll(t)
-	first := d.saved(t, bead).PR.Signs
-	d.pr.BaseTip = "c000000000000000000000000000000000000000"
-	d.pr.Facts.MergeStateStatus = "UNKNOWN"
-	updated(t, d.poll(t), "pr")
-	s := d.saved(t, bead)
-	if s.PR.MergeState != "UNKNOWN" || s.PR.Signs != first {
-		t.Fatalf("saved %s with signs %+v, want UNKNOWN with the earlier signs %+v", s.PR.MergeState, s.PR.Signs, first)
-	}
-	reads := len(d.github.Reads())
-	d.pr.Facts.MergeStateStatus = "CLEAN"
-	updated(t, d.poll(t), "pr")
-	if got := d.readsSince(reads); !slices.Equal(got, []string{"Signs", "PullRequestPart"}) {
-		t.Fatalf("the next pass read %v, want the PR part again", got)
-	}
-	if s := d.saved(t, bead); s.PR.MergeState != "CLEAN" || s.PR.Signs.BaseTip != d.pr.BaseTip {
-		t.Fatalf("the next pass saved %+v", *s.PR)
+// GitHub computes an open PR's merge state after a push or a base move, and
+// moves no sign once it has: a read of it as unknown is saved, and each pass
+// reads the PR part again until a read finds the state, whether the PR's own
+// signs moved or only its checks did.
+func TestAnOpenPRsUnknownMergeStateIsReadAgainUntilGitHubComputesIt(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		move  func(d *watched)
+		saved string
+	}{
+		{"the base's tip", func(d *watched) { d.pr.BaseTip = "c000000000000000000000000000000000000000" }, "pr"},
+		{"a finished check", func(d *watched) { d.pr.Rollup = "SUCCESS" }, "pr, checks"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newWatched(t)
+			d.pr.Rollup = "PENDING"
+			d.poll(t)
+			c.move(d)
+			d.pr.Facts.MergeStateStatus = "UNKNOWN"
+			updated(t, d.poll(t), c.saved)
+			if s := d.saved(t, bead); s.PR.MergeState != "UNKNOWN" {
+				t.Fatalf("saved the merge state %s, want UNKNOWN", s.PR.MergeState)
+			}
+			reads := len(d.github.Reads())
+			d.poll(t)
+			if got := d.readsSince(reads); !slices.Equal(got, []string{"Signs", "PullRequestPart"}) {
+				t.Fatalf("a pass while GitHub reads it unknown read %v, want the PR part again", got)
+			}
+			d.pr.Facts.MergeStateStatus = "CLEAN"
+			updated(t, d.poll(t), "pr")
+			if s := d.saved(t, bead); s.PR.MergeState != "CLEAN" {
+				t.Fatalf("the pass once GitHub computed it saved %s", s.PR.MergeState)
+			}
+			reads = len(d.github.Reads())
+			if rep := d.poll(t); len(rep.Updates) != 0 || !slices.Equal(d.readsSince(reads), []string{"Signs"}) {
+				t.Fatalf("the pass after the state was found read %v and updated %+v", d.readsSince(reads), rep.Updates)
+			}
+		})
 	}
 }
 
