@@ -31,13 +31,13 @@ Every run leaves each pattern decided: closed once resolved, waiting on the
 follow-up it spawned, or deferred with a date while it gathers evidence. A
 closed pattern reopens when its feedback recurs.
 
-Agent memory notes are the loop's second intake. read-memory ends the waits
-that are done, and the due notes join the pending set, so the cadence gate
-counts them and the judge reads each one by the rubric's memory section
-beside the observations. file-and-dispatch applies each note's decision.
-`gctk memory` keeps each memory directory's list.
+read-memory ends the waits of agents' memory notes that are done, and the due
+notes join the pending set, so the cadence gate counts them and the judge
+reads each one by the rubric's memory section beside the observations.
+file-and-dispatch applies each note's decision. `gctk memory` keeps each
+memory directory's list.
 
-Bead-filing, plus the memory intake's writes through `gctk memory`: this
+Bead-filing, plus the writes `gctk memory` makes in memory directories: this
 formula never edits a fragment, prompt, or skill — only an operator-merged PR
 changes agent behavior.
 
