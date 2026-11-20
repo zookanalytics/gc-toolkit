@@ -149,8 +149,11 @@ func run(c *Call) error {
 			return c.catOr(c.getenv("STUB_CONFIG"), noConfig)
 		}
 	case "convoy":
-		if first(args) == "list" {
+		switch first(args) {
+		case "list":
 			return c.catOr(c.getenv("STUB_CONVOYS"), `{"convoys":[]}`)
+		case "status":
+			return c.convoyStatus(s, d, args[1:])
 		}
 		return nil
 	case "hook":

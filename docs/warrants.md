@@ -634,18 +634,23 @@ no warrant.
     later review must run.
   - The rest of an ask is native: a task bead, a blocks edge onto the PR's
     bead filed in the same create, the `branch` key the record declares, a
-    discovered-from edge to the bead it came from, and no route or assignee.
+    discovered-from edge to the bead it came from, a blocks edge of its own
+    onto each bead it waits on, filed in that create through bd's
+    `--deps blocked-by` (`parseDepSpec` and `canonicalDependencyType` in
+    `cmd/bd/create_deps.go`, at `gastownhall/beads` v1.3.4, 7ef2fd05eb0c),
+    and no route or assignee.
     Gas City's sling stamps `gc.execution_routed_to` on a work bead whose
     workflow it started, clears its `gc.routed_to` and `gc.run_target`, and
     leaves the bead unassigned while the workflow's steps are claimed
     (`restampWorkBeadRouting` in `internal/sling/sling_core.go`, read at
-    `gastownhall/gascity` main d2254b579682), so an ask carries neither route,
+    `gastownhall/gascity` main 6cf1cccd640d), so an ask carries neither route,
     and never the role key `task_kind` that a rework child carries. The search
     is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main 294079d53f57, with
-  the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
-  main 0f07496d2fa4.
+- **Verified.** 2026-11-17, at `gastownhall/gascity` main 6cf1cccd640d, with
+  the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
+  main 0f07496d2fa4, and `gastownhall/beads` v1.3.4 (7ef2fd05eb0c), the bd
+  the city runs.
 - **Retires when.** Gas City files a request for a pull request's branch that
   the run already attached to the PR's bead works, with no pool to claim it,
   such as a PR monitor that hands its repair to that run. The ask then moves

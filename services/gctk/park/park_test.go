@@ -13,9 +13,11 @@ import (
 )
 
 // newStore is a store holding the epic tk-epic, its children tk-c1 and tk-c2,
-// tk-c1's child tk-g1, and the bead tk-other beside them.
+// tk-c1's child tk-g1, and the bead tk-other beside them. It files a gate
+// under their prefix, since the ledger writes no wait edge between two.
 func newStore() *fake.Store {
 	s := fake.New()
+	s.IDPrefix = "tk"
 	s.Put(fake.Bead{ID: "tk-epic", Title: "the epic", Status: "open", IssueType: "epic"})
 	s.Put(fake.Bead{ID: "tk-c1", Title: "child one", Status: "open", IssueType: "task", Edges: []gcbd.Edge{child("tk-epic")}})
 	s.Put(fake.Bead{ID: "tk-c2", Title: "child two", Status: "open", IssueType: "task", Edges: []gcbd.Edge{child("tk-epic")}})

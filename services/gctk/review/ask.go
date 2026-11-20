@@ -1,6 +1,7 @@
 package review
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -22,19 +23,21 @@ import (
 // does. refinery-lib.sh's refinery_ask applies the same rule to the beads the
 // refinery reads, and a test runs that definition over the beads this one
 // classifies. An ask's description is its reason, a discovered-from edge names
-// the bead it came from when it came from one, and review_checks names the
-// checks it sends back. It has no parent, because an ask filed under the bead
-// it blocks would read held through that bead for as long as it stays open.
+// the bead it came from when it came from one, review_checks names the checks
+// it sends back, and its own blocks edges name the beads it waits on. It has no
+// parent, because an ask filed under the bead it blocks would read held through
+// that bead for as long as it stays open.
 //
 // A run can take an ask only when nothing holds it, which `gctk bead holds`
 // reads as clear. Every reader of an ask here applies that one test, so an ask
 // that waits on other work is neither taken nor counted against a pass.
 
-// Ask is one ask on a PR's bead as the store holds it. Holds is what
+// Ask is one ask on a PR's bead as the store holds it. WaitingOn is each bead
+// its own blocks edges name, open or closed, and Holds is what
 // `gctk bead holds` reads for an open ask, "" for a closed one.
 type Ask struct {
 	ID, Status, Reason, Source string
-	Checks                     []string
+	Checks, WaitingOn          []string
 	Holds                      waits.Status
 }
 
@@ -100,8 +103,11 @@ func AsksIn(l *ledger.Ledger, owner *ledger.Record, rows []*ledger.Record) ([]As
 			return nil, &ledger.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}
 		}
 		for _, e := range redges {
-			if e.Type == "discovered-from" {
+			switch e.Type {
+			case "discovered-from":
 				a.Source = e.ID
+			case ledger.EdgeBlocks:
+				a.WaitingOn = append(a.WaitingOn, e.ID)
 			}
 		}
 		a.Checks = splitChecks(str(checksKey, r))
@@ -155,10 +161,11 @@ func splitChecks(list string) []string {
 }
 
 // AskRequest is an ask to file on the bead that owns a PR: why, the bead it
-// came from when it came from one, and the checks it sends back.
+// came from when it came from one, the checks it sends back, and the beads it
+// waits on, which no run takes it before.
 type AskRequest struct {
 	Bead, Reason, Source string
-	Checks               []string
+	Checks, WaitingOn    []string
 }
 
 // Refusal is an ask filing the review domain refuses, with why. Nothing was
@@ -170,11 +177,19 @@ func (e *Refusal) Error() string { return "nothing filed on " + e.Bead + ": " + 
 // FileAsk files the ask req names and returns its id, with filed false when an
 // ask of the same source and reason already stands on the bead, open or
 // closed, which it returns instead, so a filer that runs again after its ask
-// closed files nothing. It refuses a bead that owns no PR on the record, and a
-// check index names no check req sends back: the index at the head the
-// refinery validated, which index reads. A read that fails returns its error
-// with nothing filed, and a create that fails may still have filed the ask,
-// which the next call finds.
+// closed files nothing. The ask waits on each bead req names by its own blocks
+// edge, written in the create that files it, so no landing pass reads the ask
+// clear before it waits.
+//
+// It refuses a bead that owns no PR on the record, and a check req sends back
+// that the check index does not declare at the head the refinery validated,
+// which index reads. It refuses to return an ask it finds that does not wait on
+// every bead req names, because a run can take that ask before they close, or
+// already has. The ledger refuses the ask's create when its edge onto the bead,
+// or onto a bead it waits on, would hold nothing, as it refuses every such wait
+// edge (ledger.NotHeld), and FileAsk returns that refusal as its own. A refusal
+// files nothing. A read that fails returns its error with nothing filed, and a
+// create that fails may still have filed the ask, which the next call finds.
 func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, error)) (id string, filed bool, err error) {
 	owner, err := one(l, req.Bead)
 	if err != nil {
@@ -209,15 +224,32 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 			}
 		}
 	}
+	waits := waitsOf(req)
 	reason := strings.TrimSpace(req.Reason)
 	asks, err := asksOf(l, owner)
 	if err != nil {
 		return "", false, err
 	}
 	for _, a := range asks {
-		if a.Reason == reason && a.Source == req.Source {
-			return a.ID, false, nil
+		if a.Reason != reason || a.Source != req.Source {
+			continue
 		}
+		var lacks []string
+		for _, w := range waits {
+			if !slices.Contains(a.WaitingOn, w) {
+				lacks = append(lacks, w)
+			}
+		}
+		if len(lacks) > 0 {
+			why := fmt.Sprintf("ask %s of the same source and reason is open and does not wait on %s, so a run can take it before that work lands",
+				a.ID, strings.Join(lacks, " or "))
+			if !a.Open() {
+				why = fmt.Sprintf("ask %s of the same source and reason closed without waiting on %s, so a run may have worked it before that work landed",
+					a.ID, strings.Join(lacks, " or "))
+			}
+			return "", false, &Refusal{Bead: req.Bead, Why: why}
+		}
+		return a.ID, false, nil
 	}
 	f := l.File(askTitle(reason), "task")
 	f.Description(reason)
@@ -226,14 +258,31 @@ func FileAsk(l *ledger.Ledger, req AskRequest, index func(at string) (Index, err
 		checksKey.Set(f, strings.Join(checks, ","))
 	}
 	f.Blocks(owner.ID)
+	f.BlockedBy(waits...)
 	if req.Source != "" {
 		f.From(req.Source)
 	}
 	id, err = l.Create(f)
+	var refused *ledger.NotHeld
+	if errors.As(err, &refused) {
+		return "", false, &Refusal{Bead: req.Bead, Why: refused.Error()}
+	}
 	if err != nil {
 		return "", false, err
 	}
 	return id, true, nil
+}
+
+// waitsOf is each bead req names for the ask to wait on, once each and in the
+// order named.
+func waitsOf(req AskRequest) []string {
+	var waits []string
+	for _, w := range req.WaitingOn {
+		if w = strings.TrimSpace(w); w != "" && !slices.Contains(waits, w) {
+			waits = append(waits, w)
+		}
+	}
+	return waits
 }
 
 // askTitle is an ask's title: its reason's first line, cut to fit a listing.

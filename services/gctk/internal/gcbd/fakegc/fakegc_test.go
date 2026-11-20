@@ -969,3 +969,56 @@ func TestKvListAnswersEveryKeyByKey(t *testing.T) {
 		t.Errorf("kv list under STUB_KV_FAIL: %+v", r)
 	}
 }
+
+func TestUpdateWritesTheTitleAndRefusesABlankOne(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","title":"old","status":"open"},{"id":"b","title":"old","status":"open"}]`, "")
+	if r := f.gc("bd", "update", "a", "--title", "new a", "--set-metadata", "k=v"); r.status != 0 {
+		t.Errorf("--title: %+v", r)
+	}
+	if r := f.gc("bd", "update", "b", "--title=new b"); r.status != 0 {
+		t.Errorf("--title=: %+v", r)
+	}
+	for _, blank := range []string{"", "  "} {
+		if r := f.gc("bd", "update", "b", "--title", blank, "--set-metadata", "k=v"); r.status != 1 || !strings.Contains(r.err, "title cannot be empty") {
+			t.Errorf("--title %q: %+v, want bd's refusal", blank, r)
+		}
+	}
+	want := `[{"id":"a","title":"new a","status":"open","metadata":{"k":"v"}},{"id":"b","title":"new b","status":"open"}]` + "\n"
+	if got := f.file("beads.json"); got != want {
+		t.Errorf("store = %s, want %s", got, want)
+	}
+}
+
+func TestConvoyStatusAnswersItsMembersAsGcReadsThem(t *testing.T) {
+	f := newFixture(t, `[{"id":"cv","title":"the convoy","status":"open","issue_type":"convoy","labels":["owned","x"],"metadata":{"target":"main","convoy.owner":"me","other":"o"}},`+
+		`{"id":"c-late","title":"late child","status":"closed","parent":"cv","created_at":"2026-01-03T00:00:00Z"},`+
+		`{"id":"c-early","title":"early child","status":"open","created_at":"2026-01-01T00:00:00Z"},`+
+		`{"id":"t-both","title":"tracked child","status":"in_progress","assignee":"bob","issue_type":"bug","parent":"cv","created_at":"2026-01-02T00:00:00Z"},`+
+		`{"id":"t-only","title":"tracked","status":"open","created_at":"2026-01-02T00:00:00Z"},`+
+		`{"id":"other","title":"no member","status":"open","created_at":"2026-01-01T00:00:00Z"},`+
+		`{"id":"empty","title":"no members","status":"open","issue_type":"convoy"},{"id":"task","title":"a task","status":"open"}]`,
+		"c-early|parent-child|cv\ncv|tracks|t-both\ncv|tracks|t-only\ncv|tracks|gone\nother|tracks|t-only\n")
+	want := `{"children":[{"id":"gone","title":"gone","status":"unknown","type":"task","dangling_track":true},` +
+		`{"id":"c-early","title":"early child","status":"open","type":"task"},` +
+		`{"id":"t-both","title":"tracked child","status":"in_progress","type":"bug","assignee":"bob"},` +
+		`{"id":"t-only","title":"tracked","status":"open","type":"task"},` +
+		`{"id":"c-late","title":"late child","status":"closed","type":"task"}],` +
+		`"convoy":{"id":"cv","title":"the convoy","status":"open","owned":true,"fields":{"owner":"me","target":"main"},"labels":["owned","x"]},` +
+		`"ok":true,"progress":{"closed":1,"total":5,"dangling_tracks":1},"schema_version":"1"}` + "\n"
+	if r := f.gc("convoy", "status", "cv", "--json"); r.status != 0 || r.out != want {
+		t.Errorf("a convoy's members:\n got %+v\nwant %s", r, want)
+	}
+	none := `{"children":[],"convoy":{"id":"empty","title":"no members","status":"open","owned":false,"fields":{}},"ok":true,"progress":{"closed":0,"total":0},"schema_version":"1"}` + "\n"
+	if r := f.gc("convoy", "status", "--json", "empty"); r.status != 0 || r.out != none {
+		t.Errorf("a convoy with no members:\n got %+v\nwant %s", r, none)
+	}
+	failed := `{"schema_version":"1","ok":false,"error":{"code":"command_failed","message":"command failed; see stderr for diagnostics","exit_code":1}}` + "\n"
+	for id, why := range map[string]string{"task": "bead task is not a convoy", "nope": "convoy nope not found"} {
+		if r := f.gc("convoy", "status", id, "--json"); r.status != 1 || r.out != failed || !strings.Contains(r.err, why) {
+			t.Errorf("convoy status %s: %+v, want gc's refusal: %s", id, r, why)
+		}
+	}
+	if r := f.gc("convoy", "status", "cv"); r.status != 2 {
+		t.Errorf("the text answer: %+v, want unsupported", r)
+	}
+}

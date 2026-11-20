@@ -220,7 +220,8 @@ Start where the return stands:
    place of a `--rework`, whose child has landed. Leave out the `--pr-anchor`
    that named the PR the rework went to: the sign-off takes one only beside
    `--rework` or `--retire`, and `--no-rework` leaves every PR the ruling
-   reaches standing. The return's `--outcome` says what landed, in place of the
+   reaches standing. Leave out each `--check` and `--rework-waiting-on` the
+   `--rework` carried too, since the sign-off takes them only beside it. The return's `--outcome` says what landed, in place of the
    stay's `staying —` headline, which would otherwise stay on the subject. This
    sign-off answers nothing the stay already answered, and leaves the subject's
    closer as the stay armed it. When the comparison leaves the operator
