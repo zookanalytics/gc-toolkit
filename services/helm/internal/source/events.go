@@ -52,7 +52,7 @@ func (l *EventLog) Newest(ctx context.Context, typ string) (*cityboard.Event, er
 	if err != nil {
 		return nil, fmt.Errorf("the supervisor's event log did not answer: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxEventAnswer))
 	if err != nil {
 		return nil, fmt.Errorf("the supervisor's event log answer did not read: %w", err)

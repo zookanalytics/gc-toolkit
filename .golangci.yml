@@ -1,0 +1,62 @@
+# The repository's Go lint. tools/lint.sh runs it at each self-review and
+# merge, and the lint check in .github/workflows/lint.yml runs it on GitHub,
+# both at the golangci-lint version .golangci-lint-version names. Every rule
+# enabled here fails the lint, and a rule that should not hold is turned off
+# here with its reason.
+version: "2"
+
+run:
+  # Self-reviews and merges lint at the same time on one host, and a run
+  # waiting on another's lock in $TMPDIR gives up after 5 s. The lock guards
+  # nothing the runs share, because the result cache takes concurrent runs.
+  allow-parallel-runners: true
+
+issues:
+  # Every finding prints, not the first 50 of a linter and 3 of a kind.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # These print a command's report to the writer it was handed, its stdout
+      # or stderr, where a failed write leaves nothing to report it to. A write
+      # to a file or a record whose failure must be reported checks its error
+      # itself, because this hides it.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    staticcheck:
+      # golangci-lint's default list, without the QF checks: staticcheck itself
+      # runs those only behind a debug flag, because they are refactorings an
+      # editor offers, not defects.
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -QF*
+  exclusions:
+    rules:
+      # Code the deletion schedule in docs/built-once-target.md retires gets no
+      # new work (AGENTS.md), so its findings wait for the code to go, and the
+      # change that removes the code removes its rule. The schedule retires
+      # `gctk merge` with the old merge path, and the board's embedded store
+      # reader with its second data plane.
+      - path: services/gctk/internal/cli/merge\.go
+        linters:
+          - errcheck
+        text: 'Error return value of `(f\.Close|os\.Remove)` is not checked'
+      - path: services/helm/internal/source/beads\.go
+        linters:
+          - errcheck
+        text: 'Error return value of `f\.Close` is not checked'
