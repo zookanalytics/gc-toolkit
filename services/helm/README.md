@@ -894,14 +894,15 @@ narrower, not wrong — and marks the gather partial.
 
 The service's `/helm` answer carries the record in the board's order: open
 first, longest-open first, then most recently closed. The rig board's page does
-not draw it; a conversation reaches the page as an ask on Needs you. One its
-sitting stays in, open under the sitting with a wait of its own holding it, is
-no ask until the work it sent closes: its row reads "Waits on" that work, in the
-Queued group. The pull request whose merge it holds is no ask either, because
-prstatus reads that PR `working` until the work closes, approved or not. Once
-the work closes, the conversation and its pull request are both asks again. One
-its sitting has claimed to hold stays an ask, whatever edge an earlier stay left
-on it.
+not draw it; a conversation reaches the page as an ask on Needs you, its own or
+that of the question it answers, a human gate it replies to or a decision it
+tracks. One its sitting stays in, open under the sitting with a wait of its own
+holding it, is no ask until the work it sent closes: its row reads "Waits on"
+that work, in the Queued group. The pull request whose merge it holds is no ask
+either, because prstatus reads that PR `working` until the work closes,
+approved or not. Once the work closes, the conversation and its pull request
+are both asks again. One its sitting has claimed to hold stays an ask, whatever
+edge an earlier stay left on it.
 
 `helm-svc board --json` prints the tiles alone. The record rides the service's
 envelope as `sittings`, because a second shape in the bare array would break
@@ -963,8 +964,8 @@ sittings, so it shows no failed start either.
 
 ## Architecture
 
-The packages, with clean dependency lines `board <- source <- server <- cmd`
-and `rigboard <- server`:
+The packages, with clean dependency lines `board <- source <- server <- cmd`,
+`rigboard <- server` and `cityboard <- source`:
 
 | Package | Responsibility |
 |---|---|
@@ -972,6 +973,7 @@ and `rigboard <- server`:
 | `internal/source` | The data-access **seam**. `Source` interface + two backends: `BeadsSource` (in-process beads library, the default) and `SupervisorSource` (HTTP client against the supervisor API). It also holds the readers the rig board is handed: the `gc` command (`NewGC`) and the supervisor API (`SupervisorAPI`). |
 | `internal/server` | HTTP routes + a server-side TTL cache of the computed board, and of each rig's board document. |
 | `internal/rigboard` | The rig board's read: one gctk listing of a rig's store, the pack's shared readers asked of its rows, and the one table that names each row's group and signal, with the line saying when GitHub was last asked, read through the supervisor API. See *The rig board*, below. |
+| `internal/cityboard` | The city page's read: doctor's newest run from the city's event log, and which of its checks the page shows and counts. See *The city page*, below. |
 | `internal/verbs` | Runs a `gc-helm.sh` write verb for the server's POST routes, under a deadline that kills the run's whole process group. It owns no verb logic. |
 | `web` | The operator's web app (Vite + React + TS) and the `go:embed` that compiles its built bundle into the binary. |
 | `cmd/helm-svc` | Entrypoint: listen on the `GC_SERVICE_SOCKET` unix socket, wire source→server, graceful SIGTERM. |
@@ -1067,7 +1069,7 @@ serves carries no PR phase and no held value, and reads its liveness as any othe
 bead does.
 
 **Costs of the library backend, paid at build time, not per request:** the
-module went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
+board went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
 `helm-svc` is ~161 MB, and the Go floor moved to 1.26.5. A cold build measured
 **2m29s** on 2026-08-22 (1.3 GB of build cache); a warm one ~12.5s. Those
 numbers are why the build does not run in the service start path — see
@@ -1155,7 +1157,7 @@ The build does **not** run in the service start path, and this is load-bearing.
 
 The supervisor gives a `proxy_process` **5 seconds** to answer its health probe
 (`proxyProcessReadyTimeout`, gascity `internal/workspacesvc/proxy_process.go`).
-A warm build of this module takes ~12.5s and a cold one 2m29s. A build started
+A warm build of helm-svc takes ~12.5s and a cold one 2m29s. A build started
 by the launcher therefore never finished inside the window — not on a slow day,
 ever — and `waitReady` then called `stopProcessGroup()`, killing the build along
 with the start. The next start began again and was killed at 5s again.
@@ -1264,12 +1266,12 @@ atomic rename:
 |---|---|
 | `component` | which binary this record describes |
 | `built_at` | when the binary now on disk was produced |
-| `source_rev` | the revision the last build tick saw in the sources — the tree hash of the component's own subtree at HEAD (`git rev-parse HEAD:./` from the module), so a merge touching nothing under it does not move it |
+| `source_rev` | the revision the last build tick saw in the sources — one hash over the component's inputs at HEAD: git's hash of the `git ls-tree HEAD` listing of the root go.mod and go.sum and the folders the binary compiles from (`services/helm` and `services/gctk` for helm, `services/gctk` for gctk), so a merge touching none of them does not move it |
 | `binary_rev` | the revision the binary now on disk was built from, in the same terms |
 | `last_build_rc` | exit status of the last build ATTEMPT; 0 for success |
 | `restart_pending` | a published binary nothing is running yet |
 | `checked_at` | when the build order last ran at all |
-| `behind_main` | how many commits `origin/<default>` carries under the component's source paths that the checkout's HEAD lacks — how far off-main the served code is. REPORT-ONLY: it bands the row, never triggers a rebuild |
+| `behind_main` | how many commits `origin/<default>` carries under the component's inputs that the checkout's HEAD lacks — how far off-main the served code is. REPORT-ONLY: it bands the row, never triggers a rebuild |
 
 `source_rev` and `binary_rev` diverge exactly when a build failed and the last
 good binary kept serving, which is the gap worth showing. A tick that finds the
@@ -1308,7 +1310,9 @@ rows at all, rather than an all-clear nobody measured.
 `web/` is a Vite + React + TypeScript app, the operator's board, embedded in the
 binary and served at the service mount. It is one page per rig, with the rig in
 the address (`?rig=<name>`); with no rig there, it lists the city's rigs from
-`GET <mount>/helm/rigs` as links. Nothing rolls up across rigs.
+`GET <mount>/helm/rigs` as links. Nothing rolls up across rigs. Beside the rig
+pages, `?city` is the city's page (see *The city page*), and the bar of the rig
+list and of each rig page links to it.
 
 **What it reads.** One rig's document, `GET <mount>/helm/rigs/{rig}` (see *The
 rig board*), which it lays out as four pages: Epics, Needs you, Work queue and
@@ -1487,17 +1491,22 @@ such as a closed bead a wait names, read once. A closed epic among those
 members, such as a Delivery that landed while its epic stays open, gets the
 same read for its own closed members. A member is kept only when its own
 parent-child edge names the parent. Closed work beneath a bead that is not an
-epic is not read, since that would take one call per parent. Every reader is
-asked of the listing's rows, so one document never mixes two reads of a bead:
+epic is not read, since that would take one call per parent. While the rig has
+an open decision, one `gc bd list --has-metadata-key gc.handback --all` reads
+every bead that records a hand-back, the closed conversations of sittings that
+ended at their hand-off among them, for the newest a decision's Details opens
+with. It reads every hand-back the store holds, so its cost grows with the
+sittings the rig has had. Every reader is asked of the listing's rows, so one
+document never mixes two reads of a bead:
 
 | Reader | What the read takes from it |
 |---|---|
-| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), or a row of the store's ephemeral plane |
+| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), or a row of the store's ephemeral plane; every bead that records a hand-back (`Listing.HandedBack`) |
 | `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
-| `services/gctk/prstatus` (`Holding` over `Listing.Blockers`) | what a person owes on a bead through its `blocks` edges |
+| `services/gctk/prstatus` (`Holding` over `Listing.Blockers`, and `Stays`) | what a person owes on a bead through its `blocks` edges, and whether a conversation or a decision waits on work of its own first, which is no person's move until that work closes |
 | `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | each open pull request's facts, and where one on the old record stands and what holds it |
 | `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it: the evaluator's answer over the listing's rows and the read the one-PR update saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
-| `services/gctk/conversation` | what a conversation is, what it tracks and replies to |
+| `services/gctk/conversation` | what a conversation is, what it tracks and replies to, so a decision it tracks and a gate it replies to read its state |
 | `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows and waits' answers, and whether the city takes each piece as things stand |
 
 The listing reads the store's ephemeral plane and its templates because waits
@@ -1606,6 +1615,67 @@ holds it to `internal/rigboard/testdata/gc-toolkit.board.json`. Cut it again
 from a city with
 `RIGBOARD_CUT_CITY=<city root> go test ./internal/rigboard -run TestCutFixture`,
 then write the golden with `go test ./internal/rigboard -run TestFixtureBoard -update`.
+
+## The city page (`GET <mount>/helm/city`)
+
+The city's page shows what doctor found in its newest recorded run
+(`specs/tk-1tfzr71.158/design.md`, section 5). `web/src/cityboard/` draws it at
+the address `?city`, with the board's one row structure (`Line`).
+
+**What it reads.** The newest `gc-toolkit.doctor.ran` event in the city's event
+log, which the doctor order records each hour (`gctk doctor run`), read from the
+supervisor's `GET /v0/city/{city}/events?type=gc-toolkit.doctor.ran&limit=1`
+(`source.EventLog`). The route answers the newest match first, and the read names
+no window, so a doctor that has stopped still shows its last run. Its payload is
+gctk's `doctor.Record`, which `internal/cityboard` decodes.
+`specs/tk-1tfzr71.178/gas-city-search.md` says why the page reads the event log
+and what Gas City's own dashboard shows of it.
+
+**What it shows.** `internal/cityboard` decides it, and the page lays it out:
+
+- when doctor last ran, and whether that run completed. A run that started more
+  than two hours before the read is late, twice the order's cadence. It is the
+  one lateness rule the board holds, because doctor cannot report that it
+  stopped;
+- each failing check that two runs in a row measured failing and the operator
+  has not accepted, with the time it first failed and its runs in a row. A
+  rig's instance of a per-rig check, `rig:<rig>:<check>`, is a row of its own.
+  The streak counts only the runs that measured the check, so a run that did not
+  complete or did not measure it adds nothing. A check that showed failing and
+  that the run could not measure stays, counted, with why, until a run measures
+  it ok or the operator accepts it;
+- each other check the run did not measure, as not measured;
+- the checks `doctor/accepted.toml` accepts, folded under their count, each with
+  its reason and ruling;
+- each monitor order's last good run, as the run recorded it. Whether a monitor
+  is late or failing is Gas City's verdict, in its order checks, which reach the
+  page as checks, so the page holds no rule for it.
+
+The page leads with the count of the failing checks it shows, which reaches zero
+when no check has failed two runs in a row. The words beside the count say so,
+and name how many accepted checks and checks not measured it leaves out. With no
+run in the log, or none that measured the checks, it shows no count and says why.
+
+**How it is cached.** The document is cached whole for five minutes
+(`server.CityPageTTL`), with one read at a time, since the newest run changes
+once an hour. The board's write routes change no doctor run, so a write leaves
+it cached. A failed read, or a newest event that holds no run's record, answers
+502 with the failure, and the page keeps the last good document and says the
+read failed. The page reads it every two and a half minutes, and whenever the
+tab is shown again.
+
+**Its types are generated.** `web/src/cityboard/document.gen.ts` comes from
+`internal/cityboard/document.go`, through tygo, and `TestPageTypesAreCurrent`
+fails when it is stale. `internal/cityboard/testdata/doctor.ran.json` is a live
+city's newest doctor event, with its store and a rig renamed, and
+`TestTheLiveRunsPage` holds the document built from it to
+`internal/cityboard/testdata/city.json`, which the page's tests read and
+helm-fixture serves:
+
+```bash
+cd services/helm
+go test ./internal/cityboard -run 'TestPageTypesAreCurrent|TestTheLiveRunsPage' -update   # writes both again
+```
 
 ## Actuating from the board (`POST <mount>/helm/{open,accept,engage,dismiss}`)
 
@@ -1823,8 +1893,9 @@ it under a real service mount) and leave `GC_HELM_SOURCE` unset.
 `cmd/helm-fixture` serves the app this commit embeds with no city behind it.
 `/helm` answers a board file as JSON, `GET /helm/rigs` and
 `GET /helm/rigs/{rig}` answer one rig's document, with GitHub last asked at the
-time the fixture started, and `POST /helm/<verb>` answers a canned answer, so
-nothing it serves reads or writes a city. It is
+time the fixture started, `GET /helm/city` answers the city's document, and
+`POST /helm/<verb>` answers a canned answer, so nothing it serves reads or
+writes a city. It is
 gc-toolkit's declared `ui_serve_command`, so a demo capture of the board serves
 it as its `--serve` command (`docs/review-demo.md`), and a sitting's live copy
 of the board runs it too, each as a copy that `gctk rig serve` runs.
@@ -1832,7 +1903,7 @@ of the board runs it too, each as a copy that `gctk rig serve` runs.
 ```bash
 cd services/helm
 PORT=5199 go run ./cmd/helm-fixture        # the gc-toolkit fixture, on 127.0.0.1:5199/?rig=gc-toolkit
-go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --rig-board <file> --answers <dir>
+go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --rig-board <file> --city <file> --answers <dir>
 ```
 
 - `--rig-board` is one rig's document, in the shape
@@ -1841,6 +1912,11 @@ go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --rig-board <file> --answers <di
   builds from the committed gc-toolkit fixture. The rig list names the one rig
   the document names, and both routes give the time the fixture started as the
   read time.
+- `--city` is the city's document, in the shape
+  `web/src/cityboard/document.gen.ts` names, which the city page reads. The
+  default is `internal/cityboard/testdata/city.json`, the document the city's
+  read builds from a live city's newest doctor run. Its route gives the time the
+  fixture started as the read time.
 - `--board` is the answer at `/helm`, in the shape `web/src/contract.ts` names.
   The default is `web/src/board.fixture.json`, the contract sample
   `TestBoardFixture` writes, which carries every key of the board contract. The

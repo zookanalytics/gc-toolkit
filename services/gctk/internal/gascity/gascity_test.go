@@ -328,7 +328,7 @@ func TestAsActsAsItsActorInItsDirectory(t *testing.T) {
 
 // A cook passes its vars in their names' order, as --var flags, and reads the
 // root from the summary line it prints with --json (formulaCookJSONResult in
-// cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). A cook that exits
+// cmd/gc/cmd_formula.go at gastownhall/gascity 03f6fe825c). A cook that exits
 // non-zero names no root, and one whose output names none answers with none.
 func TestCookPassesItsVarsAndReadsTheRoot(t *testing.T) {
 	dir := t.TempDir()

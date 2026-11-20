@@ -145,8 +145,14 @@ type Row struct {
 	// the Unprioritized page alone lists: its work in the Work queue's order,
 	// then the epics and Deliveries it holds.
 	Holds []string `json:"holds"`
-	// Conversation is, for a question, the open conversation that answers it.
+	// Conversation is, for a human gate or a decision, the open conversation
+	// that answers it: the first that replies to the gate, or the first that
+	// tracks the decision.
 	Conversation string `json:"conversation,omitempty"`
+	// Handback is, for an open decision, the newest hand-back a sitting
+	// recorded on a conversation that tracks it, open or closed, which its
+	// Details opens with. A decision whose conversations record none has none.
+	Handback *Handback `json:"handback,omitempty"`
 	// Anchored are the open beads that carry anchor_bead naming this one: its
 	// reviews, reworks, validations and findings, which have no row of their
 	// own.
@@ -157,6 +163,15 @@ type Row struct {
 type Ref struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+}
+
+// Handback is a hand-back a converse sitting recorded on its conversation
+// (gc-helm.sh handback): the conversation, when the hand-back was recorded, and
+// its text, whole, as the sitting posted it.
+type Handback struct {
+	Conversation string `json:"conversation"`
+	At           string `json:"at,omitempty"`
+	Text         string `json:"text"`
 }
 
 // Reason is one thing that holds a pull request: the held: value it stands

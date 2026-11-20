@@ -35,16 +35,30 @@
 # sitting's conversation. A gate this
 # bead leaves carries no ruling, so it cannot be the evidence.
 #
-# Nothing is written, and the exit is 1, for a bead whose close this cannot
-# carry out:
+# A gate can be assigned to the person who owes the action it asks for (the
+# waits skill), and bead-rehome.sh --check holds a gate a person is assigned,
+# which is how a retry of a close leaves that gate to them. The ruling answers
+# what the gate asked, so before that check this takes each gate the ruling
+# answers back from its assignee, in a write that lands only while the gate is
+# open and still assigned to whoever this read. That write stands when the check
+# then refuses, since the ruling has answered the gate either way. A dry run
+# writes nothing, so it names the gates it would take back and stops before the
+# check. A gate this bead leaves keeps its assignee, because it goes on asking
+# about another bead. So does a gate in any status but open. The check refuses
+# both.
+#
+# Apart from those take-backs, nothing is written, and the exit is 1, for a bead
+# whose close this cannot carry out:
 #   * an open PR, which the prs skill retires, because the PR has to close before
 #     an answer releases its merge;
+#   * a bead at one of the pending record's exceptions, until its record names
+#     its PR and GitHub reads each PR the record names closed or merged;
 #   * a gate under the key that also holds another open bead, with that gate as
 #     the only evidence. --successor names other evidence and lets this bead leave
 #     it, and an answer once this bead has closed releases the rest;
-#   * anything bead-rehome.sh --check refuses: another open human gate, a gate
-#     assigned to a person, another live blocker, an open child, a claim, or a
-#     disposition already naming other evidence.
+#   * anything bead-rehome.sh --check refuses: another open human gate, a gate a
+#     person is assigned that this does not take back, another live blocker, an
+#     open child, a claim, or a disposition already naming other evidence.
 #
 # A step that does not land exits 1 and names what has landed. Re-running
 # converges: the arm stays gone, an answered gate stays answered and still names
@@ -80,7 +94,9 @@ usage: stand-down.sh <work-bead> --key <situation-key> --ruling <why>
                 the close (required)
   --successor   the evidence the close points at; default the gate under the key,
                 which a gate that also holds another open bead cannot be
-  --dry-run     resolve and report; write nothing
+  --dry-run     resolve and report; write nothing. A gate a real run takes back
+                from its assignee ends the report, because what else would hold
+                the close is read after that write
 
 exit: 0 the bead is closed · 1 it is not, or it closed and its edge may not be
       recorded · 2 usage
@@ -151,6 +167,35 @@ case "$WORK_MR" in
     refuse "$WORK owns an open PR ($WORK_MR), which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off." ;;
 esac
 
+# The record stops following a bead's PR at an exception, and its pr_state then
+# holds the exception's word, so only GitHub says whether that PR is still open.
+# record.Exception, in services/gctk/pr/record, names these values, and
+# stand-down.test.sh holds this copy to it.
+RECORD_EXCEPTIONS="pull_request_reconcile_invalid pull_request_closed_unmerged pull_request_merged_unvalidated_head pull_request_merge_evidence_contradiction pull_request_legacy_closed_unverified pull_request_merged_close_refused"
+PR_URL_RE='^https://[^/]+/[^/]+/[^/]+/pull/[0-9]+$'
+case " $RECORD_EXCEPTIONS " in
+  *" ${WORK_MR:-none} "*)
+    READ_PRS=" "
+    for pr_key in pr_url existing_pr; do
+      pr=$(row_meta "$WORK_JSON" "$pr_key" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+      [ -n "$pr" ] || continue
+      case "$READ_PRS" in *" $pr "*) continue ;; esac
+      READ_PRS="$READ_PRS$pr "
+      [[ $pr =~ $PR_URL_RE ]] \
+        || refuse "$WORK is at $WORK_MR, and its $pr_key reads '$pr', which is not a PR's URL, so GitHub cannot say whether that PR is still open. Correct $pr_key, then run this again."
+      PR_STATE=$(gh pr view "$pr" --json state -q .state </dev/null 2>/dev/null) || PR_STATE=""
+      case "$PR_STATE" in
+        CLOSED|MERGED) ;;
+        OPEN)
+          refuse "$WORK is at $WORK_MR, and its PR $pr is still open, which a stand-down would leave open behind the closed bead. Close it first, then run this again: gh pr close $pr. At an exception, closing the PR by hand files no gate." ;;
+        *)
+          refuse "$WORK is at $WORK_MR, and GitHub did not say whether its PR $pr is still open: gh pr view $pr --json state did not answer. Run this again once it does." ;;
+      esac
+    done
+    [ "$READ_PRS" != " " ] \
+      || refuse "$WORK is at $WORK_MR, and neither pr_url nor existing_pr names its PR, so GitHub cannot say whether that PR is still open. Set pr_url to the PR's URL, then run this again." ;;
+esac
+
 GATES=$(bd_human_gates "$WORK") || refuse "could not read the human gates of $WORK."
 OPEN_GATES=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY") \
   || refuse "could not read the human gates of $WORK."
@@ -184,8 +229,42 @@ case " $SHARED " in
     refuse "$SHARED_WHY, and an answer here would release it, so that gate stays open and cannot carry this ruling. Name the evidence with --successor, and $WORK alone stands down and leaves the gate. To release the rest too, answer the gate once $WORK has closed." ;;
 esac
 
-"$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --except-key "$KEY" --check >/dev/null \
-  || refuse "$WORK cannot close: bead-rehome.sh refused it, as printed above."
+# The gates to take back, one per line: the gate, a tab, its assignee.
+TAKE_BACK=$(printf '%s' "$OPEN_GATES" | jq -r --arg shared "$SHARED" '
+  ($shared | split(" ")) as $left
+  | .[] | select(((.status // "open") | tostring) == "open")
+        | ((.assignee // "") | tostring) as $who
+        | select($who != "" and ((.id // "") as $id | $left | index($id)) == null)
+        | [.id, $who] | @tsv' 2>/dev/null) \
+  || refuse "could not read who is assigned the gates under $KEY."
+
+[ "$DRY_RUN" = 1 ] || [ -x "$GCTK" ] \
+  || refuse "There is no gctk binary at '$GCTK' to remove the arm with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is)."
+
+if [ -n "$TAKE_BACK" ] && [ "$DRY_RUN" = 1 ]; then
+  echo "$PROG: DRY RUN: the ruling answers each gate under $KEY, so a real run first takes back $(printf '%s\n' "$TAKE_BACK" | awk -F'\t' '{ printf "%sgate %s from %s", (NR > 1 ? ", " : ""), $1, $2 }'), and reads what else would hold the close of $WORK only after that write. A dry run writes nothing, so it cannot say whether $WORK would close."
+  exit 0
+fi
+
+# A take-back that does not land leaves the gate as the check below reads it.
+TOOK=""
+while IFS=$'\t' read -r gate who; do
+  [ -n "$gate" ] || continue
+  if gc bd update "$gate" --if-status=open --if-assignee="$who" --assignee="" </dev/null >/dev/null 2>&1; then
+    TOOK=1
+    echo "$PROG: took gate $gate back from $who, because the ruling answers it"
+  else
+    echo "$PROG: gate $gate was not taken back from $who: bd refused it, or the gate changed since it was read" >&2
+  fi
+done <<EOF
+$TAKE_BACK
+EOF
+
+if ! "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --except-key "$KEY" --check >/dev/null; then
+  [ -n "$TOOK" ] || refuse "$WORK cannot close: bead-rehome.sh refused it, as printed above."
+  echo "$PROG: $WORK cannot close: bead-rehome.sh refused it, as printed above. Nothing was written but the take-back printed above, which stands, because the ruling answers what each gate asked." >&2
+  exit 1
+fi
 
 case "$RULING" in
   ruled:*) ANSWER="$RULING" ;;
@@ -196,8 +275,6 @@ if [ "$DRY_RUN" = 1 ]; then
   echo "$PROG: DRY RUN: $WORK would lose its arm and its run, each open gate under $KEY would resolve with \"$ANSWER\"${SHARED:+ apart from any it would leave open ($SHARED_WHY)}, and $WORK would close as not needed, per $SUCCESSOR"
   exit 0
 fi
-
-[ -x "$GCTK" ] || refuse "There is no gctk binary at '$GCTK' to remove the arm with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is)."
 
 # Each step below is one a re-run takes again, so a stop names what stands.
 stopped() { echo "$PROG: $1 Re-run this command once that is repaired." >&2; exit 1; }

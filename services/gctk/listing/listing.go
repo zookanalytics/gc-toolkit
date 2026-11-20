@@ -13,8 +13,8 @@
 // ([Listing.PRAnswers]), and derives the labels each open PR shows from both
 // ([Listing.PRLabels]).
 //
-// The package sits outside internal/ so the helm board, a separate module, can
-// import it, while the ledger stays internal.
+// The package sits outside internal/ so the helm board, which lies outside
+// services/gctk, can import it, while the ledger stays internal.
 package listing
 
 import (
@@ -70,6 +70,10 @@ type Bead struct {
 	// Epic is its contract and latest ruling, empty on a bead that records
 	// none.
 	Epic Epic
+	// Handback is the latest hand-back a conversation's sitting recorded on
+	// it, and HandbackAt when, each empty on a bead that records none.
+	Handback   string
+	HandbackAt string
 	// Run is true for one of a run's own beads, its root or a step poured under
 	// it ([waits.IsRootOrStep]).
 	Run bool
@@ -183,6 +187,7 @@ func beadOf(r *ledger.Record) (Bead, error) {
 			ClosureCondition: text(epicClosureKey, r), Indicators: text(epicIndicatorsKey, r), Ruling: text(epicRulingKey, r),
 			RulingReason: text(epicRulingReasonKey, r), RulingAt: text(epicRulingAtKey, r),
 		},
+		Handback: text(handbackKey, r), HandbackAt: text(handbackAtKey, r),
 		Run: waits.IsRootOrStep(r), PersonBlocker: prstatus.IsPersonBlocker(blockerOf(r))}
 	for _, e := range edges {
 		b.Edges = append(b.Edges, Edge{ID: e.ID, Type: e.Type})
@@ -250,6 +255,26 @@ func (ls *Listing) closedUnder(parent string) ([]Bead, error) {
 		if !slices.Contains(ps, parent) {
 			continue
 		}
+		b, err := ls.bead(r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
+
+// HandedBack reads every bead in the store that records a hand-back, closed or
+// live: the conversations whose sittings posted one, a sitting that ended at
+// its hand-off among them, since its conversation has closed. It is one read of
+// the store, and a read that fails returns its error.
+func (ls *Listing) HandedBack() ([]Bead, error) {
+	recs, err := ls.pass.Find(ledger.Carrying(handbackKey).WithClosed())
+	if err != nil {
+		return nil, fmt.Errorf("list the beads that record a hand-back: %w", err)
+	}
+	out := make([]Bead, 0, len(recs))
+	for _, r := range recs {
 		b, err := ls.bead(r)
 		if err != nil {
 			return nil, err

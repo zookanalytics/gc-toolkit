@@ -232,7 +232,7 @@ func TestEachSignsMoveReadsItsRowOfTheTable(t *testing.T) {
 				t.Fatalf("the pass wrote %d times, want once: %+v", len(ws), ws)
 			}
 			args := strings.Join(ws[0].Args, " ")
-			for _, want := range []string{"--if-status=blocked", "--if-assignee=rig/refinery", "pr_github_read=",
+			for _, want := range []string{"--if-status=blocked", "--if-assignee= ", "pr_github_read=",
 				"pr_state=", "pr_last_checked_at="} {
 				if !strings.Contains(args, want) {
 					t.Errorf("the write %q lacks %q", args, want)

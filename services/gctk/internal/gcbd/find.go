@@ -10,11 +10,14 @@ import (
 // Query is one `gc bd list` read: the beads it names, the beads that carry a
 // metadata key, the beads whose key holds one value, the beads the store lists
 // under a parent, the beads whose title holds a text, the beads of one issue
-// type, or, with Every, every bead. It reads every bead the query selects,
-// wisps, gates, infrastructure beads and template molecules among them, since a
-// listing hides each of those unless asked, and live beads alone unless Closed
-// is set. The store's --parent filter can return a bead whose own parent-child
-// edge names another parent, so a reader keeps a child by its own edge.
+// type, the beads assigned to one assignee, the beads in the statuses named,
+// or, with Every, every bead, and each field set narrows the others. It reads
+// every bead the query selects, wisps, gates, infrastructure beads and template
+// molecules among them, since a listing hides each of those unless asked, and
+// with Listed it reads only the beads the listing shows when asked for nothing
+// more. It reads live beads alone unless Closed is set. The store's --parent
+// filter can return a bead whose own parent-child edge names another parent, so
+// a reader keeps a child by its own edge.
 type Query struct {
 	IDs           []string
 	HasKey        string
@@ -23,14 +26,18 @@ type Query struct {
 	Parent        string
 	TitleContains string
 	Type          string
+	Assignee      string
+	Statuses      []string
 	Every         bool
+	Listed        bool
 	Closed        bool
 }
 
 // selects reports whether q names what it reads: ids, a key, a parent, a title's
-// text, an issue type, or every bead.
+// text, an issue type, an assignee, statuses, or every bead.
 func (q Query) selects() bool {
-	return len(q.IDs) > 0 || q.HasKey != "" || q.Key != "" || q.Parent != "" || q.TitleContains != "" || q.Type != "" || q.Every
+	return len(q.IDs) > 0 || q.HasKey != "" || q.Key != "" || q.Parent != "" || q.TitleContains != "" || q.Type != "" ||
+		q.Assignee != "" || len(q.Statuses) > 0 || q.Every
 }
 
 // idBatch is how many ids one list read names, so a read of many beads never
@@ -39,7 +46,11 @@ const idBatch = 200
 
 // args is the list's arguments, less the ids.
 func (q Query) args() []string {
-	args := []string{"--include-ephemeral", "--include-gates", "--include-infra", "--include-templates", "--json", "--limit", "0"}
+	var args []string
+	if !q.Listed {
+		args = append(args, "--include-ephemeral", "--include-gates", "--include-infra", "--include-templates")
+	}
+	args = append(args, "--json", "--limit", "0")
 	if q.Closed {
 		args = append(args, "--all")
 	}
@@ -58,6 +69,14 @@ func (q Query) args() []string {
 	if q.Type != "" {
 		args = append(args, "--type", q.Type)
 	}
+	if q.Assignee != "" {
+		args = append(args, "--assignee", q.Assignee)
+	}
+	if len(q.Statuses) > 0 {
+		// bd keeps only the last of repeated --status flags, so the statuses
+		// go in one, comma-separated.
+		args = append(args, "--status", strings.Join(q.Statuses, ","))
+	}
 	return args
 }
 
@@ -67,7 +86,7 @@ func (q Query) args() []string {
 // query that selects nothing is refused before any read.
 func (c *Client) Find(q Query) ([]Bead, error) {
 	if !q.selects() {
-		return nil, &ReadError{Reason: "a find selects no beads: name ids, a key, a key and its value, a parent, a title's text, an issue type, or every bead"}
+		return nil, &ReadError{Reason: "a find selects no beads: name ids, a key, a key and its value, a parent, a title's text, an issue type, an assignee, statuses, or every bead"}
 	}
 	if len(q.IDs) == 0 {
 		return c.findOnce(q.args())

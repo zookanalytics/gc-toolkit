@@ -724,6 +724,283 @@ func TestAPullRequestThatWaitsOnAStay(t *testing.T) {
 	}
 }
 
+// onNeedsYou reports whether a Needs you view lists id, counted or not.
+func onNeedsYou(v NeedsYou, id string) bool {
+	has := func(n Need) bool { return n.ID == id }
+	return slices.ContainsFunc(v.Counted, has) || slices.ContainsFunc(v.NotCounted, has)
+}
+
+// TestADecisionThatWaitsOnItsWork holds a decision to the record a ruling that
+// sends work leaves: the decision open, with a `blocks` edge onto that work.
+// While the work is out the decision is no person's move, so it is no need and
+// reads as waiting on that work, in Queued. Once the work closes it is the
+// operator's question again. A decision whose only wait is a gate is the
+// operator's question all along.
+func TestADecisionThatWaitsOnItsWork(t *testing.T) {
+	work := waits.Wait{ID: "tk-w", Type: "blocks", Title: "the work it sent", Status: "open", IssueType: "task"}
+	gate := waits.Wait{ID: "tk-q", Type: "blocks", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
+	for _, c := range []struct {
+		name   string
+		holds  waits.Holds
+		ask    Ask
+		group  Group
+		signal string
+	}{
+		{name: "while the work is out", holds: waits.Holds{ID: "tk-d", Status: waits.Blocked, Waits: []waits.Wait{work}},
+			group: GroupQueued, signal: "Waits on tk-w"},
+		{name: "once the work has closed", holds: waits.Holds{ID: "tk-d", Status: waits.Clear},
+			ask: AskQuestion, group: GroupWaitingOnYou, signal: "Question"},
+		{name: "while only a gate holds it", holds: waits.Holds{ID: "tk-d", Status: waits.Blocked, Waits: []waits.Wait{gate}},
+			ask: AskQuestion, group: GroupWaitingOnYou, signal: "Question"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := graph()
+			g.open = append(g.open,
+				bead{ID: "tk-d", Title: "keep the old flag?", Status: "open", Priority: 1, IssueType: "decision", CreatedAt: "2026-01-11",
+					Edges: []listing.Edge{{ID: "tk-w", Type: "blocks"}}},
+				bead{ID: "tk-w", Title: "the work it sent", Status: "open", Priority: 2, IssueType: "task", CreatedAt: "2026-01-11",
+					RoutedTo: "gc-toolkit/gc-toolkit.polecat"})
+			g.holds["tk-d"] = c.holds
+			g.holds["tk-w"] = waits.Holds{ID: "tk-w", Status: waits.Clear}
+			if c.holds.Status == waits.Blocked {
+				var owed prstatus.Holds
+				for _, w := range c.holds.Waits {
+					if prstatus.IsHumanGate(w.IssueType, w.AwaitType) {
+						owed.Gates = append(owed.Gates, prstatus.Blocker{ID: w.ID, Title: w.Title, Status: w.Status, IssueType: w.IssueType, AwaitType: w.AwaitType})
+					}
+				}
+				g.holding["tk-d"] = owed
+			}
+			doc := boardOf(t, g)
+			r := doc.Rows["tk-d"]
+			if r.Ask != c.ask || r.Group != c.group || r.Signal != c.signal {
+				t.Errorf("tk-d reads ask %q, %q in %q, want ask %q, %q in %q", r.Ask, r.Signal, r.Group, c.ask, c.signal, c.group)
+			}
+			if listed := onNeedsYou(doc.NeedsYou, "tk-d"); listed != (c.ask != "") {
+				t.Errorf("Needs you lists tk-d: %v, want %v", listed, c.ask != "")
+			}
+		})
+	}
+}
+
+// TestAPullRequestThatWaitsOnARuledDecision holds a pull request whose merge a
+// decision holds to the work that decision's ruling sent: while that work is
+// out neither the decision nor the pull request is the operator's move, and
+// once it closes both are. The pull request's facts and what holds each row
+// come from prstatus over the same beads, as gather reads them.
+func TestAPullRequestThatWaitsOnARuledDecision(t *testing.T) {
+	for _, c := range []struct {
+		name, work        string
+		counted           []string
+		prGroup, dGroup   Group
+		prSignal, dSignal string
+	}{
+		{name: "while the work is out", work: "open",
+			prGroup: GroupQueued, prSignal: "Pull request #7", dGroup: GroupQueued, dSignal: "Waits on tk-w"},
+		{name: "once the work has closed", work: "closed", counted: []string{"tk-d", "tk-pr"},
+			prGroup: GroupWaitingOnYou, prSignal: "needs-attention", dGroup: GroupWaitingOnYou, dSignal: "Question"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			prMeta := map[string]string{"merge_result": "pull_request",
+				"pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}
+			store := fixture.NewStore([]fixture.Bead{
+				{ID: "tk-pr", Title: "the change", Status: "open", IssueType: "task", WaitsOn: []string{"tk-d"}, Metadata: prMeta},
+				{ID: "tk-d", Title: "keep the old flag?", Status: "open", IssueType: "decision", WaitsOn: []string{"tk-w"}},
+				{ID: "tk-w", Title: "drop the flag's callers", Status: c.work, IssueType: "task"},
+			})
+			decision := waits.Wait{ID: "tk-d", Type: "blocks", Title: "keep the old flag?", Status: "open", IssueType: "decision"}
+			pr := bead{ID: "tk-pr", Title: "the change", Status: "open", Priority: 2, IssueType: "task", MergeResult: "pull_request", PRNumber: "7",
+				Assignee: "gc-toolkit/refinery", CreatedAt: "2026-01-01", Edges: []listing.Edge{{ID: "tk-d", Type: "blocks"}}}
+			d := bead{ID: "tk-d", Title: "keep the old flag?", Status: "open", Priority: 2, IssueType: "decision",
+				CreatedAt: "2026-01-02", Edges: []listing.Edge{{ID: "tk-w", Type: "blocks"}}}
+			g := &gathered{rig: "gc-toolkit", open: []bead{pr, d},
+				holds: map[string]waits.Holds{
+					"tk-pr": {ID: "tk-pr", Status: waits.Blocked, Waits: []waits.Wait{decision}, InFlight: "carries merge_result"},
+					"tk-d":  {ID: "tk-d", Status: waits.Clear},
+				},
+				unread: map[string]error{}, unwalked: map[string]bool{}, noFacts: map[string]bool{}}
+			if c.work != "closed" {
+				g.open = append(g.open, bead{ID: "tk-w", Title: "drop the flag's callers", Status: "open", Priority: 2, IssueType: "task",
+					RoutedTo: "gc-toolkit/gc-toolkit.polecat", CreatedAt: "2026-01-03"})
+				g.holds["tk-d"] = waits.Holds{ID: "tk-d", Status: waits.Blocked,
+					Waits: []waits.Wait{{ID: "tk-w", Type: "blocks", Title: "drop the flag's callers", Status: "open", IssueType: "task"}}}
+				g.holds["tk-w"] = waits.Holds{ID: "tk-w", Status: waits.Clear}
+			}
+			var ids []string
+			for _, b := range g.open {
+				ids = append(ids, b.ID)
+			}
+			var err error
+			if g.holding, err = prstatus.Holding(holdingRoots(ids, g.holds), store.Blockers); err != nil {
+				t.Fatal(err)
+			}
+			if g.facts, err = prstatus.Read([]string{"tk-pr"}, store); err != nil {
+				t.Fatal(err)
+			}
+			doc := boardOf(t, g)
+			var counted []string
+			for _, n := range doc.NeedsYou.Counted {
+				counted = append(counted, n.ID)
+			}
+			slices.Sort(counted)
+			if !slices.Equal(counted, c.counted) {
+				t.Errorf("Needs you counts %v, want %v", counted, c.counted)
+			}
+			if r := doc.Rows["tk-pr"]; r.Group != c.prGroup || r.Signal != c.prSignal {
+				t.Errorf("tk-pr reads %q in %q, want %q in %q", r.Signal, r.Group, c.prSignal, c.prGroup)
+			}
+			if r := doc.Rows["tk-d"]; r.Group != c.dGroup || r.Signal != c.dSignal {
+				t.Errorf("tk-d reads %q in %q, want %q in %q", r.Signal, r.Group, c.dSignal, c.dGroup)
+			}
+		})
+	}
+}
+
+// TestADecisionAConversationHolds holds a decision an open conversation tracks
+// to that conversation's state, as a question a conversation replies to is: it
+// reads the conversation's words and names it, so the page rejoins it, and the
+// conversation's own row is no need of its own. A decision that waits on the
+// work a ruling sent is no question even then, so its conversation is its own
+// need.
+func TestADecisionAConversationHolds(t *testing.T) {
+	sitting := "gc-toolkit/gc-toolkit.tk-c"
+	work := waits.Wait{ID: "tk-w", Type: "blocks", Title: "the work it sent", Status: "open", IssueType: "task"}
+	for _, c := range []struct {
+		name, status, assignee string
+		waiting                bool
+		dAsk, cAsk             Ask
+		dSignal                string
+		need                   NeedKind
+	}{
+		{name: "in the operator's queue", status: "open", assignee: "human",
+			dAsk: AskQuestion, dSignal: "Conversation waits for you", need: NeedKindQuestion},
+		{name: "held by a sitting", status: "in_progress", assignee: sitting,
+			dAsk: AskQuestion, dSignal: "In conversation", need: NeedKindInConversation},
+		{name: "held by a sitting while the work a ruling sent is out", status: "in_progress", assignee: sitting, waiting: true,
+			cAsk: AskConversation, dSignal: "Waits on tk-w", need: NeedKindInConversation},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := graph()
+			g.open = append(g.open,
+				bead{ID: "tk-d", Title: "keep the old flag?", Status: "open", Priority: 1, IssueType: "decision", CreatedAt: "2026-01-11",
+					Edges: []listing.Edge{{ID: "tk-w", Type: "blocks"}}},
+				bead{ID: "tk-c", Title: "talk it through", Status: c.status, Priority: 1, IssueType: "task", Assignee: c.assignee,
+					CreatedAt: "2026-01-11", Edges: []listing.Edge{{ID: "tk-d", Type: "tracks"}}})
+			g.holds["tk-d"] = waits.Holds{ID: "tk-d", Status: waits.Clear}
+			g.holds["tk-c"] = waits.Holds{ID: "tk-c", Status: waits.Clear}
+			if c.waiting {
+				g.open = append(g.open, bead{ID: "tk-w", Title: "the work it sent", Status: "open", Priority: 2, IssueType: "task",
+					RoutedTo: "gc-toolkit/gc-toolkit.polecat", CreatedAt: "2026-01-11"})
+				g.holds["tk-w"] = waits.Holds{ID: "tk-w", Status: waits.Clear}
+				g.holds["tk-d"] = waits.Holds{ID: "tk-d", Status: waits.Blocked, Waits: []waits.Wait{work}}
+				g.holding["tk-d"] = prstatus.Holds{}
+			}
+			doc := boardOf(t, g)
+			d, conv := doc.Rows["tk-d"], doc.Rows["tk-c"]
+			if d.Ask != c.dAsk || d.Signal != c.dSignal || d.Conversation != "tk-c" {
+				t.Errorf("tk-d reads ask %q, %q, conversation %q; want ask %q, %q, conversation tk-c", d.Ask, d.Signal, d.Conversation, c.dAsk, c.dSignal)
+			}
+			if conv.Ask != c.cAsk {
+				t.Errorf("tk-c reads ask %q, want %q", conv.Ask, c.cAsk)
+			}
+			need := "tk-d"
+			if c.dAsk == "" {
+				need = "tk-c"
+			}
+			if !slices.ContainsFunc(doc.NeedsYou.Counted, func(n Need) bool { return n.ID == need && n.Kind == c.need }) {
+				t.Errorf("Needs you counts %+v, want %s as %q", doc.NeedsYou.Counted, need, c.need)
+			}
+			other := map[string]string{"tk-d": "tk-c", "tk-c": "tk-d"}[need]
+			if onNeedsYou(doc.NeedsYou, other) {
+				t.Errorf("Needs you lists %s beside %s, want the one need", other, need)
+			}
+		})
+	}
+}
+
+// TestWorkThatWaitsOnADecisionsConversation holds work that waits on a
+// conversation that answers a decision to the decision's ask: the
+// conversation's own row is no need, so the decision's need lists the work it
+// holds, as a gate's need lists the work behind the conversation that replies
+// to it.
+func TestWorkThatWaitsOnADecisionsConversation(t *testing.T) {
+	g := graph()
+	g.open = append(g.open,
+		bead{ID: "tk-d", Title: "keep the old flag?", Status: "open", Priority: 1, IssueType: "decision", CreatedAt: "2026-01-11"},
+		bead{ID: "tk-c", Title: "talk it through", Status: "open", Priority: 1, IssueType: "task", Assignee: "human",
+			CreatedAt: "2026-01-11", Edges: []listing.Edge{{ID: "tk-d", Type: "tracks"}}},
+		bead{ID: "tk-w", Title: "waits on the talk", Status: "open", Priority: 2, IssueType: "task", CreatedAt: "2026-01-11",
+			RoutedTo: "gc-toolkit/gc-toolkit.polecat", Edges: []listing.Edge{{ID: "tk-c", Type: "blocks"}}})
+	for _, id := range []string{"tk-d", "tk-c"} {
+		g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}
+	}
+	g.holds["tk-w"] = waits.Holds{ID: "tk-w", Status: waits.Blocked,
+		Waits: []waits.Wait{{ID: "tk-c", Type: "blocks", Title: "talk it through", Status: "open", IssueType: "task"}}}
+	g.holding["tk-w"] = prstatus.Holds{Owed: []prstatus.Blocker{{ID: "tk-c", Title: "talk it through", Status: "open", IssueType: "task", Assignee: "human"}}}
+	doc := boardOf(t, g)
+	if got := doc.Rows["tk-d"].Holds; !slices.Equal(got, []string{"tk-w"}) {
+		t.Errorf("tk-d holds %v, want the work behind its conversation", got)
+	}
+	if !slices.ContainsFunc(doc.NeedsYou.Counted, func(n Need) bool { return n.ID == "tk-d" && slices.Equal(n.Holds, []string{"tk-w"}) }) {
+		t.Errorf("Needs you counts %+v, want tk-d with tk-w beneath it", doc.NeedsYou.Counted)
+	}
+}
+
+// TestADecisionsLastHandBack holds a decision's hand-back to the newest a
+// sitting recorded on a conversation that tracks it, closed or open, by when
+// each was recorded and then by id. A hand-back on a conversation about another
+// bead, on a bead that is no conversation, or one that is empty is none of the
+// decision's, and a decision with none shows none.
+func TestADecisionsLastHandBack(t *testing.T) {
+	tracks := func(ids ...string) []listing.Edge {
+		var out []listing.Edge
+		for _, id := range ids {
+			out = append(out, listing.Edge{ID: id, Type: "tracks"})
+		}
+		return out
+	}
+	conv := func(id, status, at, text string, edges []listing.Edge) bead {
+		return bead{ID: id, Title: "talk " + id, Status: status, IssueType: "task", Assignee: "gc-toolkit/gc-toolkit." + id,
+			Edges: edges, Handback: text, HandbackAt: at, CreatedAt: "2026-01-11"}
+	}
+	g := graph()
+	live := conv("tk-c2", "in_progress", "2026-01-04T00:00:00Z", "tk-d — still open", tracks("tk-d"))
+	g.open = append(g.open,
+		bead{ID: "tk-d", Title: "keep the old flag?", Status: "open", Priority: 1, IssueType: "decision", CreatedAt: "2026-01-11"},
+		bead{ID: "tk-d2", Title: "and the new one?", Status: "open", Priority: 1, IssueType: "decision", CreatedAt: "2026-01-11"},
+		bead{ID: "tk-d3", Title: "which name?", Status: "open", Priority: 1, IssueType: "decision", CreatedAt: "2026-01-11"},
+		live)
+	for _, id := range []string{"tk-d", "tk-d2", "tk-d3", "tk-c2"} {
+		g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}
+	}
+	g.handedBack = []bead{
+		conv("tk-c1", "closed", "2026-01-05T00:00:00Z", "tk-d — ruled\nkeep it", tracks("tk-d")),
+		live,
+		conv("tk-c0", "closed", "2026-01-06T00:00:00Z", "about the queue", tracks("tk-q")),
+		conv("tk-c9", "closed", "2026-01-07T00:00:00Z", "two subjects", tracks("tk-d", "tk-d2")),
+		conv("tk-c8", "closed", "2026-01-08T00:00:00Z", "  ", tracks("tk-d")),
+		{ID: "tk-x", Title: "no conversation", Status: "closed", IssueType: "task", Edges: tracks("tk-d"), Handback: "stray", HandbackAt: "2026-01-09T00:00:00Z"},
+		conv("tk-c3", "closed", "2026-01-05T00:00:00Z", "first of two", tracks("tk-d3")),
+		conv("tk-c4", "closed", "2026-01-05T00:00:00Z", "second of two", tracks("tk-d3")),
+	}
+	for range 5 {
+		doc := boardOf(t, g)
+		if h := doc.Rows["tk-d"].Handback; h == nil || *h != (Handback{Conversation: "tk-c1", At: "2026-01-05T00:00:00Z", Text: "tk-d — ruled\nkeep it"}) {
+			t.Errorf("tk-d's hand-back = %+v, want the closed conversation's, the newest", h)
+		}
+		if h := doc.Rows["tk-d3"].Handback; h == nil || h.Conversation != "tk-c4" {
+			t.Errorf("tk-d3's hand-back = %+v, want tk-c4's, the later id at the same time", h)
+		}
+		if h := doc.Rows["tk-d2"].Handback; h != nil {
+			t.Errorf("tk-d2's hand-back = %+v, want none", h)
+		}
+		if h := doc.Rows["tk-q"].Handback; h != nil {
+			t.Errorf("the question's hand-back = %+v, want none: only a decision's Details shows one", h)
+		}
+		slices.Reverse(g.handedBack)
+	}
+}
+
 // TestNeedsThatCount holds each view to the needs that count. Gate tk-park
 // parks epics tk-pe, whose members have all closed so it asks for a ruling, and
 // tk-pf, which holds pull request tk-pr in flight. Question tk-pq waits on the

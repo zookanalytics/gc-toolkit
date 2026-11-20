@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
@@ -240,7 +241,7 @@ func (a *audit) calls() (checks, reaudits []string) {
 	return slices.Clone(a.checks), slices.Clone(a.reaudits)
 }
 
-// land is one bead on the pending record, blocked and assigned to the refinery,
+// land is one bead on the pending record, blocked and assigned to nobody,
 // whose PR the evaluator reads ready, with the landing order's sources and the
 // PR watch's one-PR update, which saves GitHub's side on the bead. reads and
 // writes mark where the last run's GitHub reads and store writes start.
@@ -294,7 +295,7 @@ func newLand(t *testing.T) *land {
 		},
 		Wait: 5 * time.Second,
 	}
-	d.put("blocked", refinery)
+	d.put("blocked", "")
 	return d
 }
 
@@ -412,8 +413,7 @@ func publication(h string) record.Publication {
 func (d *land) also(t *testing.T, id, status string) {
 	t.Helper()
 	b := d.row(t)
-	d.store.Put(fake.Bead{ID: id, Title: "more work", Status: status, Assignee: refinery,
-		Metadata: maps.Clone(b.Metadata)})
+	d.store.Put(fake.Bead{ID: id, Title: "more work", Status: status, Metadata: maps.Clone(b.Metadata)})
 }
 
 // --- Gas Town's cases -------------------------------------------------------
@@ -439,15 +439,15 @@ func TestRecordBlocksWithoutClosing(t *testing.T) {
 	if strings.Contains(arm, "--status=") {
 		t.Errorf("the first write moves the bead: %q", arm)
 	}
-	for _, want := range []string{"--if-status=open", "--status=blocked", "pr_reconcile_pending=true",
-		"merge_result=pull_request_pending", "pr_head_sha=" + head} {
+	for _, want := range []string{"--if-status=open", "--if-assignee=" + refinery, "--status=blocked", "--assignee=",
+		"pr_reconcile_pending=true", "merge_result=pull_request_pending", "pr_head_sha=" + head} {
 		if !strings.Contains(whole, want) {
 			t.Errorf("the record's write %q lacks %q", whole, want)
 		}
 	}
 	b := d.row(t)
-	if b.Status != "blocked" || b.Assignee != refinery {
-		t.Fatalf("recorded bead is %s under %s, want blocked under the refinery", b.Status, b.Assignee)
+	if b.Status != "blocked" || b.Assignee != "" {
+		t.Fatalf("recorded bead is %s under %q, want blocked and assigned to nobody", b.Status, b.Assignee)
 	}
 	meta(t, b, map[string]string{"merge_result": record.Pending, "pr_url": prURL, "pr_number": "7", "pr_repo": repo,
 		"pr_head_sha": head, "pr_state": "<absent>", "merged_target": "main", "pr_last_checked_at": "<absent>",
@@ -496,8 +496,8 @@ func TestOpenUnchangedPRStaysBlocked(t *testing.T) {
 	d.pr.Reviews = nil
 	is(t, d.once(t), pr.ActChecked)
 	b := d.row(t)
-	if b.Status != "blocked" || b.Assignee != refinery {
-		t.Fatalf("an unchanged open PR left the bead %s under %s", b.Status, b.Assignee)
+	if b.Status != "blocked" || b.Assignee != "" {
+		t.Fatalf("an unchanged open PR left the bead %s under %q", b.Status, b.Assignee)
 	}
 	meta(t, b, map[string]string{"pr_state": "open", "pr_reconcile_pending": "true"})
 	readsNoGitHub(t, d)
@@ -530,25 +530,31 @@ func TestAnOriginMismatchActsOnNothingAndWritesNothing(t *testing.T) {
 
 // A writer that died between the publication's two writes left an open bead
 // with only the marker and the PR to reuse. The run sends it back to the
-// refinery as half written and requests no merge.
+// refinery as half written and requests no merge. The write that sends it back
+// assigns it to the refinery, so a half-written record nobody is assigned goes
+// to the refinery too.
 func TestAMarkerOnlyOpenRecordGoesBackForRevalidation(t *testing.T) {
-	d := newLand(t)
-	d.md = map[string]string{"branch": branch, "pr_reconcile_pending": "true", "existing_pr": prURL,
-		"pr_url": prURL, "pr_head_sha": head}
-	d.put("open", refinery)
-	is(t, d.once(t), pr.ActRevalidate)
-	b := d.row(t)
-	if b.Status != "open" || b.Assignee != refinery {
-		t.Fatalf("a half-written record left the bead %s under %s", b.Status, b.Assignee)
-	}
-	meta(t, b, map[string]string{"merge_result": record.Incomplete, "existing_pr": prURL, "pr_url": "<absent>",
-		"pr_head_sha": "<absent>", "pr_reconcile_pending": "<absent>", "pr_state": "<absent>"})
-	if b.Metadata["rejection_reason"] == "" {
-		t.Fatal("the bead goes back with no reason")
-	}
-	readsNoGitHub(t, d)
-	if len(d.github.Asks()) != 0 {
-		t.Fatalf("a half-written record asked %v", asks(d.github))
+	for name, assignee := range map[string]string{"the refinery's": refinery, "nobody's": ""} {
+		t.Run(name, func(t *testing.T) {
+			d := newLand(t)
+			d.md = map[string]string{"branch": branch, "pr_reconcile_pending": "true", "existing_pr": prURL,
+				"pr_url": prURL, "pr_head_sha": head}
+			d.put("open", assignee)
+			is(t, d.once(t), pr.ActRevalidate)
+			b := d.row(t)
+			if b.Status != "open" || b.Assignee != refinery {
+				t.Fatalf("a half-written record left the bead %s under %q", b.Status, b.Assignee)
+			}
+			meta(t, b, map[string]string{"merge_result": record.Incomplete, "existing_pr": prURL, "pr_url": "<absent>",
+				"pr_head_sha": "<absent>", "pr_reconcile_pending": "<absent>", "pr_state": "<absent>"})
+			if b.Metadata["rejection_reason"] == "" {
+				t.Fatal("the bead goes back with no reason")
+			}
+			readsNoGitHub(t, d)
+			if len(d.github.Asks()) != 0 {
+				t.Fatalf("a half-written record asked %v", asks(d.github))
+			}
+		})
 	}
 }
 
@@ -558,12 +564,12 @@ func TestACompleteOpenPendingRecordFinishesItsBlockFirst(t *testing.T) {
 	d.put("open", refinery)
 	is(t, d.once(t), pr.ActChecked)
 	ws := d.runWrites()
-	if len(ws) != 1 || !slices.Contains(ws[0].Args, "--status=blocked") {
+	if len(ws) != 1 || !slices.Contains(ws[0].Args, "--status=blocked") || !slices.Contains(ws[0].Args, "--assignee=") {
 		t.Fatalf("the run's writes are not the block alone: %+v", ws)
 	}
 	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "true"})
-	if d.row(t).Status != "blocked" {
-		t.Fatal("the bead is not blocked")
+	if b := d.row(t); b.Status != "blocked" || b.Assignee != "" {
+		t.Fatalf("the bead is %s under %q, want blocked and assigned to nobody", b.Status, b.Assignee)
 	}
 }
 
@@ -571,11 +577,11 @@ func TestAChangedHeadOpenMarkerIsSettled(t *testing.T) {
 	d := newLand(t)
 	d.md["merge_result"] = record.HeadChanged
 	d.md["observed_pr_head_sha"] = other
-	d.put("open", refinery)
+	d.put("open", "")
 	is(t, d.once(t), pr.ActSettled)
 	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
-	if d.row(t).Status != "open" {
-		t.Fatalf("the settle moved the bead to %s", d.row(t).Status)
+	if b := d.row(t); b.Status != "open" || b.Assignee != refinery {
+		t.Fatalf("the settle left the bead %s under %q", b.Status, b.Assignee)
 	}
 	readsNoGitHub(t, d)
 }
@@ -589,7 +595,7 @@ func TestAnInvalidBlockedRecordIsAnExceptionBeforeTheSavedReadIsRead(t *testing.
 			} else {
 				d.md["merge_result"] = result
 			}
-			d.put("blocked", refinery)
+			d.put("blocked", "")
 			is(t, d.run(t), pr.ActExcepted)
 			b := d.row(t)
 			meta(t, b, map[string]string{"merge_result": record.Invalid, "pr_reconcile_pending": "<absent>"})
@@ -608,6 +614,9 @@ func TestAnOpenChangedHeadIsRequeuedForValidation(t *testing.T) {
 	d := newLand(t)
 	d.pr.Facts.HeadRefOid = other
 	is(t, d.once(t), pr.ActRequeued)
+	if ws := d.runWrites(); len(ws) != 1 || !slices.Contains(ws[0].Args, "--assignee="+refinery) {
+		t.Fatalf("the requeue wrote %+v, want one write that hands the head to the refinery", ws)
+	}
 	b := d.row(t)
 	if b.Status != "open" || b.Assignee != refinery {
 		t.Fatalf("a changed head left the bead %s under %s", b.Status, b.Assignee)
@@ -659,7 +668,7 @@ func TestASavedReadOlderThanTheValidatedHeadSendsNothingBack(t *testing.T) {
 func TestAValidatedRewrittenHeadIsNotSentBackOnTheReadFromBeforeIt(t *testing.T) {
 	d := newLand(t)
 	d.refresh(t)
-	d.edit(t, func(b *fake.Bead) { b.Status = "open" })
+	d.edit(t, func(b *fake.Bead) { b.Status, b.Assignee = "open", refinery })
 	d.pr.Facts.HeadRefOid = rewrite
 	if err := d.l.Record(bead, record.Publication{URL: prURL, Number: 7, Repo: "acme/widgets", Head: rewrite,
 		Target: "main"}); err != nil {
@@ -814,8 +823,8 @@ func TestAnExceptionWhoseGateDidNotFileIsFiledByTheNextRun(t *testing.T) {
 	}
 }
 
-// An exception on a bead that a release took between the act's read and its
-// write records nothing and files no gate.
+// An exception on a bead that moved between the act's read and its write, as
+// one a person reopened, records nothing and files no gate.
 func TestAnExceptionOnABeadThatMovedFilesNoGate(t *testing.T) {
 	d := newLand(t)
 	d.pr.Facts.State = "CLOSED"
@@ -982,7 +991,7 @@ func TestAFailedFetchOrMergeReadWritesNothingAndTheNextRunActs(t *testing.T) {
 
 func TestAClosedBeadWithNoVerifiedMergeIsReopenedBlocked(t *testing.T) {
 	d := newLand(t)
-	d.put("closed", refinery)
+	d.put("closed", "")
 	is(t, d.once(t), pr.ActExcepted)
 	b := d.row(t)
 	if b.Status != "blocked" {
@@ -1002,7 +1011,7 @@ func TestAClosedBeadOnAVerifiedMergeHasItsMarkerCleared(t *testing.T) {
 		"pr_merged_at": "2026-11-12T08:30:00Z"} {
 		d.md[k] = v
 	}
-	d.put("closed", refinery)
+	d.put("closed", "")
 	is(t, d.once(t), pr.ActSettled)
 	if b := d.row(t); b.Status != "closed" || b.Metadata["pr_reconcile_pending"] != "" {
 		t.Fatalf("the settle left %s with marker %q", b.Status, b.Metadata["pr_reconcile_pending"])
@@ -1552,7 +1561,7 @@ func TestTheMergeActsOnlyWhenTheSavedReadAndItsOwnReadFindThePRReady(t *testing.
 			t.Fatal(err)
 		}
 		d.md["pr_github_read"] = string(raw)
-		d.put("blocked", refinery)
+		d.put("blocked", "")
 	}
 	readyRead := pr.GitHubRead{ReadAt: "2026-11-12T08:00:00Z", URL: prURL, Number: 7, Repository: repo,
 		HeadBranch: branch, Base: "main", Head: head, State: "OPEN", MergeState: "CLEAN",
@@ -1822,6 +1831,9 @@ func dispose(d *land) error {
 	return err
 }
 
+// The record lock is the store's, so the refinery's publication waits while an
+// act holds the lock, and lands after the act's last write: here the act hands
+// a changed head to the refinery, which publishes it.
 func TestARecordWriteWaitsWhileAnActHoldsTheLockAndLandsAfterItsLastWrite(t *testing.T) {
 	d := newLand(t)
 	d.pr.Facts.HeadRefOid = other
@@ -1846,15 +1858,22 @@ func TestARecordWriteWaitsWhileAnActHoldsTheLockAndLandsAfterItsLastWrite(t *tes
 		!slices.Contains(ws[2].Args, "pr_head_sha="+other) {
 		t.Fatalf("the writes landed out of order: %+v", ws)
 	}
-	meta(t, d.row(t), map[string]string{"pr_head_sha": other, "merge_result": record.Pending})
+	b := d.row(t)
+	if b.Status != "blocked" || b.Assignee != "" {
+		t.Fatalf("the published bead is %s under %q", b.Status, b.Assignee)
+	}
+	meta(t, b, map[string]string{"pr_head_sha": other, "merge_result": record.Pending})
 }
 
-// A publication at a new head holds the lock across its two writes. A run that
-// decided the record from the store before then waits for the lock, reads the
-// whole record at the new head, and finds the saved read older than it, so it
-// sends nothing back and merges nothing.
+// A publication at a new head holds the lock across its two writes. An act
+// that starts between them waits for the lock, reads the whole record,
+// blocked and assigned to nobody, at the new head, and finds the saved read
+// older than it, so it sends nothing back and merges nothing.
 func TestAnActWaitsWhileARecordWriteHoldsTheLockThenDecidesOnTheWholeRecord(t *testing.T) {
 	d := newLand(t)
+	d.md["merge_result"], d.md["observed_pr_head_sha"] = record.HeadChanged, other
+	delete(d.md, "pr_reconcile_pending")
+	d.put("open", refinery)
 	d.refresh(t)
 	d.pr.Facts.HeadRefOid = other // the refinery validated a new head and pushed it
 	d.co.descends[other] = []string{head}
@@ -1937,10 +1956,10 @@ func TestADispositionThatClosesBeforeAPublicationTakesTheLockLeavesNoRecord(t *t
 	}
 }
 
-func TestACloseOrAReleaseBetweenThePublicationsReadAndItsFirstWriteIsRefused(t *testing.T) {
+func TestACloseOrAReassignmentBetweenThePublicationsReadAndItsFirstWriteIsRefused(t *testing.T) {
 	for name, move := range map[string]func(*fake.Bead){
-		"a close":                func(b *fake.Bead) { b.Status = "closed" },
-		"a stand-down's release": func(b *fake.Bead) { b.Assignee = "" },
+		"a close":        func(b *fake.Bead) { b.Status = "closed" },
+		"a reassignment": func(b *fake.Bead) { b.Assignee = "" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := newLand(t)
@@ -2005,46 +2024,108 @@ func TestADispositionThatStartsBeforeAPublicationMarksTheBeadWaitsThenClearsTheM
 	}
 }
 
-func TestAReleaseAfterTheRecordLeavesTheBeadReleased(t *testing.T) {
+// A bead on the record assigned to someone other than the refinery is that
+// assignee's while they work it: no run lists it, and a run that reads it
+// assigned after its listing names who holds it. Neither writes anything to
+// it, reads GitHub, requests a merge or pours a review run, and once the
+// assignee is gone the next run works it as a waiting bead.
+func TestABeadAssignedToAnotherIsLeftToItsAssignee(t *testing.T) {
+	const holder = "rig/gc-toolkit.polecat-1"
 	check := func(t *testing.T, d *land) {
 		t.Helper()
-		b := d.row(t)
-		if b.Status != "open" || b.Assignee != "" {
-			t.Fatalf("the released bead is %s under %q", b.Status, b.Assignee)
-		}
-		if b.Metadata["pr_reconcile_pending"] != "" || !strings.Contains(b.Notes, prURL) {
-			t.Fatalf("the marker %q stands, or the note %q names no PR", b.Metadata["pr_reconcile_pending"], b.Notes)
-		}
-		meta(t, b, map[string]string{"merge_result": record.Pending, "pr_head_sha": head})
+		n, reads := len(d.store.Writes()), len(d.github.Reads())
 		for i := 0; i < 2; i++ {
 			if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
-				t.Fatalf("a later run read the released bead: %+v", out)
+				t.Fatalf("a run took the held bead: %+v", out)
 			}
 		}
-		if slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MergePullRequest" }) {
-			t.Fatalf("a released bead's PR was asked to merge: %v", asks(d.github))
+		b := d.row(t)
+		if b.Status != "blocked" || b.Assignee != holder {
+			t.Fatalf("the held bead is %s under %q", b.Status, b.Assignee)
 		}
+		meta(t, b, map[string]string{"pr_reconcile_pending": "true", "merge_result": record.Pending})
+		if len(d.store.Writes()) != n || len(d.github.Reads()) != reads || len(d.github.Asks()) != 0 {
+			t.Fatalf("the runs wrote %+v, read GitHub %v or asked for a merge %v", d.store.Writes()[n:],
+				d.github.Reads()[reads:], asks(d.github))
+		}
+		d.put("blocked", "")
+		is(t, d.once(t), pr.ActRequested)
 	}
-	t.Run("after its record", func(t *testing.T) {
+	t.Run("before a run lists it", func(t *testing.T) {
 		d := newLand(t)
-		d.put("open", "")
-		is(t, d.once(t), pr.ActReleased)
+		d.put("blocked", holder)
+		check(t, d)
+	})
+	t.Run("between a run's listing and its read", func(t *testing.T) {
+		d := newLand(t)
+		d.refresh(t)
+		assigned := false
+		d.store.OnFind = func(q gcbd.Query) {
+			if !assigned && slices.Contains(q.IDs, bead) {
+				assigned = true
+				d.put("blocked", holder)
+			}
+		}
+		o := d.run(t)
+		is(t, o, pr.ActAssigned)
+		if !strings.Contains(o.Detail, holder) {
+			t.Fatalf("the outcome %q does not name who holds the bead", o.Detail)
+		}
+		if ws, reads := d.runWrites(), d.runReads(); len(ws) != 0 || len(reads) != 0 {
+			t.Fatalf("the run wrote %+v or read GitHub %v", ws, reads)
+		}
+		d.store.OnFind = nil
 		check(t, d)
 	})
 	t.Run("while the merge reads GitHub", func(t *testing.T) {
 		d := newLand(t)
+		d.refresh(t)
 		d.github.OnRead = func(method string, _ *ghfake.PR) {
 			if method == "PullRequest" {
-				if b, _ := d.store.Row(bead); b.Assignee != "" {
-					d.put("open", "")
+				if b, _ := d.store.Row(bead); b.Assignee == "" {
+					d.put("blocked", holder)
 				}
 			}
 		}
-		is(t, d.once(t), pr.ActMoved)
+		o := d.run(t)
+		is(t, o, pr.ActChecked)
+		if !strings.Contains(o.Detail, "assigned") || len(d.runWrites()) != 0 || len(d.github.Asks()) != 0 {
+			t.Fatalf("a bead assigned during the merge's read did %q, wrote %+v and asked %v", o.Detail, d.runWrites(), asks(d.github))
+		}
 		d.github.OnRead = nil
-		is(t, d.once(t), pr.ActReleased)
 		check(t, d)
 	})
+}
+
+// Beads on the record that agents other than the refinery are assigned are
+// left out of a run's pass, since a run writes nothing to them: each run
+// decides the waiting bead beside them alone, and leaves the held beads as
+// they were.
+func TestBeadsAssignedToAnotherAreLeftOutOfARunsPass(t *testing.T) {
+	const holder = "rig/gc-toolkit.polecat-1"
+	d := newLand(t)
+	var held []string
+	for i := range 3 {
+		id := fmt.Sprintf("tk-held%d", i)
+		md := maps.Clone(d.md)
+		md["branch"] = "polecat/" + id
+		md["pr_url"] = fmt.Sprintf("https://github.com/%s/pull/%d", repo, 100+i)
+		md["pr_number"] = fmt.Sprint(100 + i)
+		d.store.Put(fake.Bead{ID: id, Title: "held work", Status: "blocked", Assignee: holder, Metadata: md})
+		held = append(held, id)
+	}
+	n := len(d.store.Writes())
+	for run := range 2 {
+		out := d.reconcile(t, pr.Options{})
+		if len(out) != 1 || out[0].Bead != bead {
+			t.Fatalf("run %d decided %+v, want the waiting bead alone", run+1, out)
+		}
+	}
+	for _, w := range d.store.Writes()[n:] {
+		if slices.Contains(held, w.ID) {
+			t.Fatalf("a run wrote to a held bead: %+v", w)
+		}
+	}
 }
 
 func TestASecondRunActsOnARecordOnlyOnceTheFirstHasWrittenIt(t *testing.T) {
@@ -2084,8 +2165,8 @@ func TestASecondRunActsOnARecordOnlyOnceTheFirstHasWrittenIt(t *testing.T) {
 }
 
 // A run that read a half-written bead, before the refinery requeued it to the
-// pool, writes nothing. The next run clears its marker, names the PR in a note
-// and leaves it with the pool.
+// pool, writes nothing. The requeue's own write clears the marker, so no later
+// run reads the bead, and it stays with the pool.
 func TestARunThatReadAHalfWrittenBeadBeforeItsRequeueToThePoolWritesNothing(t *testing.T) {
 	d := newLand(t)
 	d.md = map[string]string{"branch": branch, "pr_reconcile_pending": "true", "existing_pr": prURL}
@@ -2095,19 +2176,22 @@ func TestARunThatReadAHalfWrittenBeadBeforeItsRequeueToThePoolWritesNothing(t *t
 	d.store.BeforeUpdate = func(string, []string) error {
 		if !once {
 			once = true
-			d.put("open", "") // the refinery's requeue through gc sling unassigns it
+			// The refinery's requeue reopens it unassigned with its marker cleared.
+			d.md = map[string]string{"branch": branch, "existing_pr": prURL, "rejection_reason": "test TestX fails"}
+			d.put("open", "")
 		}
 		return nil
 	}
 	is(t, d.run(t), pr.ActMoved)
 	b := d.row(t)
-	if b.Metadata["merge_result"] != "" || b.Metadata["pr_reconcile_pending"] != "true" {
+	if b.Metadata["merge_result"] != "" || b.Metadata["pr_reconcile_pending"] != "" {
 		t.Fatalf("the refused write landed: %v", b.Metadata)
 	}
-	is(t, d.once(t), pr.ActReleased)
-	b = d.row(t)
-	if b.Status != "open" || b.Assignee != "" || b.Metadata["pr_reconcile_pending"] != "" || !strings.Contains(b.Notes, prURL) {
-		t.Fatalf("the requeued bead is %s under %q carrying %v, notes %q", b.Status, b.Assignee, b.Metadata, b.Notes)
+	if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
+		t.Fatalf("a later run read the requeued bead: %+v", out)
+	}
+	if b = d.row(t); b.Status != "open" || b.Assignee != "" {
+		t.Fatalf("the requeued bead is %s under %q", b.Status, b.Assignee)
 	}
 }
 

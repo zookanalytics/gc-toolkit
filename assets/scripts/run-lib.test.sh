@@ -244,9 +244,9 @@ assets/scripts/liveness-sweep.sh
 doctor/check-blocked-work-armed/run.sh
 doctor/check-root-advancing/run.sh
 doctor/check-po-queue-only/run.sh
-tools/gc-proactive.sh
 assets/scripts/blocker-holder.sh
-assets/scripts/store-only-exit.sh"
+assets/scripts/store-only-exit.sh
+assets/scripts/bead-context.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"

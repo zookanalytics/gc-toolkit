@@ -4,18 +4,26 @@
 #
 # The defects it guards against: a linter that could not run reads as a clean
 # pass (fail-closed violated), shell or step-text findings get swallowed into 0,
-# a go module is silently skipped, a Go file gofmt would rewrite passes, or go
-# vet on macOS is not pointed at the icu4c headers services/helm's cgo needs, or
-# a warrant list that could not run reads as nothing touched, or one that ran
-# fails the lint or goes unprinted.
+# a tracked shell file goes unlinted because no change names it, because git
+# quotes its path or because its name reads as an option, a listing of
+# the tracked files that could not be written or read back reads as a tree with
+# no shell, no module and no Go in it, a Go leg takes its files from a listing
+# of its own that no check covers, one call's shell findings are lost among the
+# calls the tree is split across, a go module is silently skipped, a module or
+# a Go file goes unchecked because git quotes its path or because its name reads
+# as an option, a Go file gofmt would rewrite passes, or go vet on macOS
+# is not pointed at the icu4c headers services/helm's cgo needs, or a warrant
+# list that could not run reads as nothing touched, or one that ran fails the
+# lint or goes unprinted.
 #
 # Hermetic: a throwaway git repo holds a stub shellcheck-run.sh, a stub
 # lint-step-text.sh and a stub warrants-touched.sh whose exit codes the test
 # sets, and a tracked go.mod, and lint.sh runs with PATH pointing at a
 # stub bin — so whether shellcheck, go and gofmt "ran" and what they returned
-# is the test's to decide. No real shellcheck or go toolchain is required. The
-# host is stubbed the same way: a stub uname names it and a stub brew answers
-# for icu4c, so the macOS path runs on any platform.
+# is the test's to decide, and a stub nproc sets how many calls the shell lint
+# makes. No real shellcheck or go toolchain is required. The host is stubbed the
+# same way: a stub uname names it and a stub brew answers for icu4c, so the
+# macOS path runs on any platform.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -88,11 +96,19 @@ EOF
 make_warrants 0
 
 # --- Stub bin: only the externals lint.sh reaches for. -----------------------
-# lint.sh needs git, basename and dirname; go and gofmt are stubbed so their
-# presence and exit codes are the test's to set. Everything else lint.sh uses is
-# a builtin.
+# lint.sh needs git, dirname, mktemp and rm; go and gofmt are stubbed so their
+# presence and exit codes are the test's to set. The stub nproc prints
+# STUB_NPROC, and with none set fails as on a host without nproc, which leaves
+# the shell lint one call, since the bin holds no getconf or sysctl. Everything
+# else lint.sh uses is a builtin.
 STUB="$TMP/bin"; mkdir -p "$STUB"
-for t in git basename dirname; do ln -s "$(command -v "$t")" "$STUB/$t"; done
+for t in git dirname mktemp rm; do ln -s "$(command -v "$t")" "$STUB/$t"; done
+cat > "$STUB/nproc" <<'EOF'
+#!/bin/sh
+[ -n "${STUB_NPROC:-}" ] || exit 1
+echo "$STUB_NPROC"
+EOF
+chmod +x "$STUB/nproc"
 
 # The stub go records the CGO flags it was handed, one run at a time.
 make_go() {  # $1 = exit code
@@ -125,13 +141,16 @@ fi
 exit 1
 EOF
 chmod +x "$STUB/uname" "$STUB/brew"
-HOST_OS=""; ICU_PREFIX=""; CGO_CPPFLAGS_IN=""; CGO_LDFLAGS_IN=""
+HOST_OS=""; ICU_PREFIX=""; CGO_CPPFLAGS_IN=""; CGO_LDFLAGS_IN=""; NPROC=""
 
 # Invoke bash by absolute path: with PATH=$STUB the command word itself resolves
-# against the stub, where there is no bash.
+# against the stub, where there is no bash. Each run gets a TMPDIR of its own,
+# so a case can see what a run left there.
 BASH_BIN="${BASH:-$(command -v bash)}"
+LINT_TMP="$TMP/lint-tmp"; mkdir -p "$LINT_TMP"
 run_sut() {  # args = files; runs in $REPO with the stubbed PATH and host
   if ( cd "$REPO" && PATH="$STUB" STUB_HOST_OS="$HOST_OS" STUB_ICU_PREFIX="$ICU_PREFIX" \
+         STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
          CGO_CPPFLAGS="$CGO_CPPFLAGS_IN" CGO_LDFLAGS="$CGO_LDFLAGS_IN" \
          "$BASH_BIN" "$SUT" "$@" ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
 }
@@ -165,11 +184,34 @@ run_sut subject.sh
 grep -qi 'not on PATH' "$TMP/out" && ok "go missing: report names the missing runner" \
   || bad "go missing: report is silent about the missing go"
 
-# --- F: no shell files given -> shell skipped, go still runs, exit 0. --------
-make_wrapper 0; make_go 0; : > "$TMP/go.log"
+# --- F: no files given -> the shell lint still covers the tracked tree. -----
+# lint.sh lists the tracked shell files itself, so a run handed no file still
+# lints subject.sh, and go vet still runs.
+make_wrapper 0; make_go 0; : > "$TMP/go.log"; : > "$TMP/wrapper.log"
 run_sut
-[ "$rc" -eq 0 ] && ok "no files: shell skipped, go clean, exit 0" || bad "no files: expected 0, got $rc"
+[ "$rc" -eq 0 ] && ok "no files: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "no files: expected 0, got $rc"; }
+grep -q 'subject.sh' "$TMP/wrapper.log" \
+  && ok "no files: the tracked shell file is still linted" \
+  || bad "no files: subject.sh never reached shellcheck-run.sh"
+grep -q 'shell: 1 file(s) clean' "$TMP/out" && ok "no files: the shell lint reports it clean" \
+  || bad "no files: no clean shell line: $(cat "$TMP/out")"
 grep -q 'stub-go ran' "$TMP/go.log" && ok "no files: go vet still ran" || bad "no files: go vet did not run"
+
+# --- F2: the files given do not narrow the shell lint. -----------------------
+# Handed only a non-shell file, it still lints every tracked shell file. An
+# untracked shell file it is handed is not part of the merge and stays out, as
+# an untracked Go file does.
+make_wrapper 0; make_go 0; : > "$TMP/wrapper.log"
+printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/loose.sh"
+run_sut services/foo/go.mod loose.sh
+[ "$rc" -eq 0 ] && ok "files given: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "files given: expected 0, got $rc"; }
+grep -q 'subject.sh' "$TMP/wrapper.log" \
+  && ok "files given: a tracked shell file no change names is linted" \
+  || bad "files given: subject.sh never reached shellcheck-run.sh"
+grep -q 'loose.sh' "$TMP/wrapper.log" \
+  && bad "files given: an untracked shell file was linted" \
+  || ok "files given: an untracked shell file is out of scope"
+rm -f "$REPO/loose.sh"
 
 # --- G: wrapper missing -> structural error (exit 2). ------------------------
 make_go 0; rm -f "$WRAP"
@@ -186,33 +228,253 @@ if ( cd "$TMP" && PATH="$STUB" "$BASH_BIN" "$SUT" ) >"$TMP/out" 2>"$TMP/err"; th
 # the refinery reports a clean shell lint on a hook that was never checked.
 make_wrapper 0; make_go 0; : > "$TMP/wrapper.log"
 printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/hook-noext"
-run_sut hook-noext
+git -C "$REPO" add hook-noext
+git -C "$REPO" commit -qm 'add an extensionless shell script'
+run_sut
 [ "$rc" -eq 0 ] && ok "shebang shell file: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "shebang shell file: expected 0, got $rc"; }
 grep -q 'hook-noext' "$TMP/wrapper.log" \
   && ok "shebang shell file: shellcheck-run.sh received it" \
   || bad "shebang shell file: dropped — shellcheck-run.sh never saw it"
-grep -qi 'no shell files given' "$TMP/out" \
-  && bad "shebang shell file: reported as skipped" \
-  || ok "shebang shell file: not reported as skipped"
+grep -q 'shell: 2 file(s) clean' "$TMP/out" \
+  && ok "shebang shell file: counted with the tracked shell files" \
+  || bad "shebang shell file: not counted: $(cat "$TMP/out")"
 
 # --- J: an extensionless non-shell script is still dropped. ------------------
 # The predicate admits only shells shellcheck can lint; a python shebang handed
 # to shellcheck would turn a clean run into a spurious finding, so it drops out.
 make_wrapper 0; make_go 0; : > "$TMP/wrapper.log"
 printf '#!/usr/bin/env python3\nprint("hi")\n' > "$REPO/script-noext"
-run_sut script-noext
+git -C "$REPO" add script-noext
+git -C "$REPO" commit -qm 'add an extensionless python script'
+run_sut
 [ "$rc" -eq 0 ] && ok "non-shell shebang: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "non-shell shebang: expected 0, got $rc"; }
 grep -q 'script-noext' "$TMP/wrapper.log" \
   && bad "non-shell shebang: wrongly linted as shell" \
   || ok "non-shell shebang: dropped, not linted"
-grep -qi 'no shell files given' "$TMP/out" \
-  && ok "non-shell shebang: reported skipped" \
-  || bad "non-shell shebang: not reported skipped"
+grep -q 'shell: 2 file(s) clean' "$TMP/out" \
+  && ok "non-shell shebang: not counted as a shell file" \
+  || bad "non-shell shebang: counted: $(cat "$TMP/out")"
+
+# --- K: a tracked shell file whose path git quotes is still linted. ----------
+# git's default listing quotes a path that holds a double quote, a backslash or
+# a control character, and no file is found under the quoted name, so the file
+# dropped out of the lint. The stub wrapper logs each file it is handed on a
+# line of its own, and the file leaves the tree once the case has run.
+QUOTED=$'odd"na\\me\tx.sh'
+printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/$QUOTED"
+git -C "$REPO" add -- "$QUOTED"
+cat > "$WRAP" <<EOF
+#!/bin/sh
+printf '%s\n' "\$@" >> "$TMP/wrapper-files.log"
+exit 0
+EOF
+chmod +x "$WRAP"
+make_go 0; : > "$TMP/wrapper-files.log"
+run_sut
+[ "$rc" -eq 0 ] && ok "quoted path: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "quoted path: expected 0, got $rc"; }
+grep -qxF -- "./$QUOTED" "$TMP/wrapper-files.log" \
+  && ok "quoted path: shellcheck-run.sh received the file under its own name" \
+  || bad "quoted path: dropped, shellcheck-run.sh got: $(cat "$TMP/wrapper-files.log")"
+grep -q 'shell: 3 file(s) clean' "$TMP/out" \
+  && ok "quoted path: counted with the tracked shell files" \
+  || bad "quoted path: not counted: $(cat "$TMP/out")"
+git -C "$REPO" rm -q --cached -- "$QUOTED"; rm -f "$REPO/$QUOTED"
+
+# --- K2: a tracked shell file named like an option is still linted. ---------
+# A file named --help is listed first, and handed on by its bare name it
+# reached the runner as its help option, which exits 0 before shellcheck runs.
+# The real runner stands in for the stub here, copied rather than linked
+# because later cases write their stub over it. Under it a stub shellcheck logs
+# each argument on a line of its own and reports a finding. The runner's
+# `env bash` shebang needs a bash on the stub PATH while the case runs.
+cp "$HERE/../assets/scripts/shellcheck-run.sh" "$WRAP"; chmod +x "$WRAP"
+ln -s "$BASH_BIN" "$STUB/bash"
+cat > "$STUB/shellcheck" <<EOF
+#!/bin/sh
+printf '%s\n' "\$@" >> "$TMP/shellcheck-args.log"
+echo "stub shellcheck finding"
+exit 1
+EOF
+chmod +x "$STUB/shellcheck"
+printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/--help"
+git -C "$REPO" add -- --help
+make_go 0; : > "$TMP/shellcheck-args.log"
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "option-like name: the finding fails the lint, exit 1" \
+  || { cat "$TMP/out" "$TMP/err"; bad "option-like name: expected 1, got $rc"; }
+grep -qxF -- ./--help "$TMP/shellcheck-args.log" \
+  && ok "option-like name: shellcheck received it as a path" \
+  || bad "option-like name: shellcheck got: $(cat "$TMP/shellcheck-args.log")"
+grep -qxF -- ./subject.sh "$TMP/shellcheck-args.log" \
+  && ok "option-like name: the files beside it are linted too" \
+  || bad "option-like name: subject.sh never reached shellcheck"
+grep -q 'shell: FAIL — shellcheck findings (shellcheck-run.sh exit 1)' "$TMP/out" \
+  && ok "option-like name: the summary names the findings" \
+  || bad "option-like name: no findings line: $(cat "$TMP/out")"
+git -C "$REPO" rm -q --cached -- --help; rm -f -- "$REPO/--help"
+rm -f "$STUB/bash" "$STUB/shellcheck"
+
+# --- The calls the shell lint splits the tree across. ------------------------
+# Three more tracked shell files make five. The stub wrapper logs each call's
+# files on a line of its own.
+for n in 1 2 3; do printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/s$n.sh"; done
+git -C "$REPO" add s1.sh s2.sh s3.sh
+git -C "$REPO" commit -qm 'add three shell files'
+SHELL_SET="$(printf './%s\n' hook-noext s1.sh s2.sh s3.sh subject.sh | sort | tr '\n' ' ')"
+called_files() {  # every logged call's files, sorted, a duplicate kept
+  sed 's/^stub-shellcheck-run ran: //' "$TMP/wrapper.log" | tr ' ' '\n' | grep . | sort | tr '\n' ' '
+}
+
+# --- X: one call per core, and each file in exactly one call. ----------------
+make_wrapper 0; make_go 0; : > "$TMP/wrapper.log"; NPROC=3
+run_sut
+[ "$rc" -eq 0 ] && ok "three cores: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "three cores: expected 0, got $rc"; }
+eq "$(grep -c . "$TMP/wrapper.log")" 3 "three cores: shellcheck-run.sh is called three times"
+eq "$(called_files)" "$SHELL_SET" "three cores: every tracked shell file reaches exactly one call"
+grep -q 'shell: 5 file(s) clean' "$TMP/out" && ok "three cores: the summary counts every file" \
+  || bad "three cores: no clean line for five files: $(cat "$TMP/out")"
+
+# --- X2: more cores than files -> one call per file. -------------------------
+: > "$TMP/wrapper.log"; NPROC=64
+run_sut
+[ "$rc" -eq 0 ] && ok "more cores than files: exit 0" || bad "more cores than files: expected 0, got $rc"
+eq "$(grep -c . "$TMP/wrapper.log")" 5 "more cores than files: one call per file"
+eq "$(called_files)" "$SHELL_SET" "more cores than files: each file in one call"
+
+# --- Y: one call's findings fail the lint, and only that call's output prints.
+# The wrapper finds a defect only in s2.sh: the call that holds it prints the
+# finding and a line on stderr and exits 1, and every other call prints a line
+# of its own and exits 0.
+cat > "$WRAP" <<EOF
+#!/bin/sh
+echo "stub-shellcheck-run ran: \$*" >> "$TMP/wrapper.log"
+case " \$* " in
+  *" ./s2.sh "*) echo "stub finding in s2.sh"; echo "stub note on stderr" >&2; exit 1 ;;
+esac
+echo "stub clean call"
+exit 0
+EOF
+chmod +x "$WRAP"
+: > "$TMP/wrapper.log"; NPROC=3
+run_sut
+[ "$rc" -eq 1 ] && ok "one call fails: exit 1" || bad "one call fails: expected 1, got $rc"
+grep -q 'stub finding in s2.sh' "$TMP/out" && ok "one call fails: its findings print" \
+  || bad "one call fails: its findings are lost: $(cat "$TMP/out")"
+grep -q 'stub note on stderr' "$TMP/err" && ok "one call fails: its stderr prints on stderr" \
+  || bad "one call fails: its stderr is lost: $(cat "$TMP/err")"
+grep -q 'stub clean call' "$TMP/out" \
+  && bad "one call fails: a clean call's output printed" \
+  || ok "one call fails: no clean call's output prints"
+grep -q 'shell: FAIL — shellcheck findings (shellcheck-run.sh exit 1)' "$TMP/out" \
+  && ok "one call fails: the summary names the findings" \
+  || bad "one call fails: no findings line: $(cat "$TMP/out")"
+
+# --- Z: no shellcheck on PATH in any call -> fail-closed, said once. ---------
+cat > "$WRAP" <<EOF
+#!/bin/sh
+echo "stub-shellcheck-run ran: \$*" >> "$TMP/wrapper.log"
+echo "stub: no shellcheck" >&2
+exit 3
+EOF
+chmod +x "$WRAP"
+: > "$TMP/wrapper.log"; NPROC=3
+run_sut
+[ "$rc" -eq 1 ] && ok "no runner in any call: exit 1 (fail-closed)" || bad "no runner in any call: expected 1, got $rc"
+eq "$(grep -c 'stub: no shellcheck' "$TMP/err")" 1 "no runner in any call: the message prints once"
+grep -q 'shellcheck could not run' "$TMP/out" && ok "no runner in any call: the summary names the fail-closed" \
+  || bad "no runner in any call: the summary is silent: $(cat "$TMP/out")"
+NPROC=""
+eq "$(ls -A "$LINT_TMP")" "" "the shell lint's runs, passed or failed, leave nothing in TMPDIR"
+
+# --- The tracked-file listing fails -> structural error (exit 2). ------------
+# An empty list from a failed git ls-files reads like a tree with no shell, no
+# module and no Go in it, which skips those checks and passes. The git wrapper
+# refuses only that listing, the whole tree's, and hands every other git call
+# on.
+make_wrapper 0; make_go 0
+REAL_GIT="$(command -v git)"
+rm -f "$STUB/git"
+cat > "$STUB/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" ls-files -z ") echo "stub-git: ls-files refused" >&2; exit 128 ;;
+esac
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$STUB/git"
+run_sut subject.sh
+[ "$rc" -eq 2 ] && ok "tracked listing fails: structural error (exit 2)" || bad "tracked listing fails: expected 2, got $rc"
+grep -q 'cannot enumerate tracked files under' "$TMP/err" \
+  && ok "tracked listing fails: error names the failed listing" \
+  || bad "tracked listing fails: error is silent about the listing"
+rm -f "$STUB/git"; ln -s "$REAL_GIT" "$STUB/git"
+
+# --- The listing cannot be written -> structural error (exit 2). -------------
+# lint.sh reads the listing back from a file, so a write that failed must stop
+# it. Read from a here-string, a listing past 64 KiB is backed by a temp file
+# bash writes, and when that write fails the loop reads nothing, which skips
+# the checks the listing feeds and passes. A thousand more tracked files take
+# the listing past 64 KiB, and the run refuses every file write: SIGXFSZ
+# ignored and a file size limit of 0. Its output comes back through a pipe,
+# which the limit leaves alone.
+make_wrapper 0; make_go 0
+pads=()
+for ((i = 0; i < 1000; i++)); do pads+=("pad-$(printf '%064d' "$i").txt"); done
+( cd "$REPO" && for p in "${pads[@]}"; do : > "$p"; done )
+git -C "$REPO" add -- "${pads[@]}"
+if out="$( ( cd "$REPO" && trap '' XFSZ && ulimit -f 0 \
+       && PATH="$STUB" STUB_HOST_OS="$HOST_OS" STUB_ICU_PREFIX="$ICU_PREFIX" \
+          STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
+          CGO_CPPFLAGS="$CGO_CPPFLAGS_IN" CGO_LDFLAGS="$CGO_LDFLAGS_IN" \
+          "$BASH_BIN" "$SUT" subject.sh ) 2>&1 )"; then rc=0; else rc=$?; fi
+printf '%s\n' "$out" > "$TMP/out"
+[ "$rc" -eq 2 ] && ok "listing not written: structural error (exit 2)" \
+  || bad "listing not written: expected 2, got $rc: $(cat "$TMP/out")"
+grep -q 'cannot enumerate tracked files under' "$TMP/out" \
+  && ok "listing not written: error names the failed listing" \
+  || bad "listing not written: error is silent about the listing: $(cat "$TMP/out")"
+grep -q -e 'no tracked shell files' -e 'no go.mod modules' -e 'no tracked Go files' "$TMP/out" \
+  && bad "listing not written: read as a tree with no shell, no module or no Go in it" \
+  || ok "listing not written: not read as a tree with no shell, no module or no Go in it"
+eq "$(ls -A "$LINT_TMP")" "" "listing not written: the run leaves nothing in TMPDIR"
+git -C "$REPO" rm -q --cached -- "${pads[@]}"
+( cd "$REPO" && rm -f -- "${pads[@]}" )
+
+# --- The listing cannot be read back -> structural error (exit 2). -----------
+# The git wrapper writes the listing and then removes the file it wrote, so the
+# loop that reads it back finds nothing to open.
+make_wrapper 0; make_go 0
+rm -f "$STUB/git"
+cat > "$STUB/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" ls-files -z ") "$REAL_GIT" "\$@"; rc=\$?; rm -f "\$TMPDIR"/lint.*/listing; exit \$rc ;;
+esac
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$STUB/git"
+run_sut subject.sh
+[ "$rc" -eq 2 ] && ok "listing not read back: structural error (exit 2)" || bad "listing not read back: expected 2, got $rc"
+grep -q 'cannot read the listing of tracked files' "$TMP/err" \
+  && ok "listing not read back: error names the failed read" \
+  || bad "listing not read back: error is silent about the read: $(cat "$TMP/out" "$TMP/err")"
+rm -f "$STUB/git"; ln -s "$REAL_GIT" "$STUB/git"
+
+# --- No directory for the lint's files -> structural error (exit 2). ---------
+rm -f "$STUB/mktemp"
+printf '#!/bin/sh\nexit 1\n' > "$STUB/mktemp"; chmod +x "$STUB/mktemp"
+run_sut subject.sh
+[ "$rc" -eq 2 ] && ok "no directory for its files: structural error (exit 2)" || bad "no directory for its files: expected 2, got $rc"
+grep -q "cannot make a directory for the lint's files" "$TMP/err" \
+  && ok "no directory for its files: error names it" \
+  || bad "no directory for its files: error is silent about it"
+rm -f "$STUB/mktemp"; ln -s "$(command -v mktemp)" "$STUB/mktemp"
 
 # --- Gofmt: a tracked Go file, judged by a stub gofmt. -----------------------
 # Real gofmt -l prints each file it would rewrite and exits 0, and exits 2 when
-# it cannot read or parse a file. The stub logs its argv, prints the files the
-# test names, and exits the code the test sets.
+# it cannot read or parse a file. The stub logs its argv, both on one line and
+# one argument to a line, prints the files the test names, and exits the code
+# the test sets.
 printf 'package foo\n' > "$REPO/services/foo/foo.go"
 git -C "$REPO" add services/foo/foo.go
 git -C "$REPO" commit -qm 'add a Go file'
@@ -222,6 +484,7 @@ make_gofmt() {  # $1 = exit code; further args = files to list as not gofmt-clea
   {
     echo '#!/bin/sh'
     echo "echo \"stub-gofmt ran: \$*\" >> \"$TMP/gofmt.log\""
+    echo "printf '%s\\n' \"\$@\" >> \"$TMP/gofmt-args.log\""
     for f in "$@"; do echo "echo '$f'"; done
     echo "exit $code"
   } > "$STUB/gofmt"
@@ -248,13 +511,39 @@ grep -q 'scratch.go' "$TMP/gofmt.log" \
   || ok "gofmt clean: an untracked Go file is out of scope"
 rm -f "$REPO/services/foo/scratch.go"
 
-# --- L: gofmt lists a file -> exit 1, and the report names it. ---------------
-make_wrapper 0; make_go 0; make_gofmt 0 services/foo/foo.go
+# --- L: gofmt lists files -> exit 1, and the report names each. --------------
+make_wrapper 0; make_go 0; make_gofmt 0 services/foo/foo.go services/foo/bar.go
 run_sut subject.sh
 [ "$rc" -eq 1 ] && ok "gofmt drift: exit 1" || bad "gofmt drift: expected 1, got $rc"
-grep -q 'services/foo/foo.go is not gofmt-clean' "$TMP/out" \
-  && ok "gofmt drift: report names the file" \
-  || bad "gofmt drift: report does not name services/foo/foo.go"
+for f in services/foo/foo.go services/foo/bar.go; do
+  grep -qF "$f is not gofmt-clean" "$TMP/out" \
+    && ok "gofmt drift: report names $f" \
+    || bad "gofmt drift: report does not name $f: $(cat "$TMP/out")"
+done
+
+# --- L2: a long gofmt list is reported whole, though no file can be written. -
+# Read from a here-string, a list past 64 KiB is backed by a temp file bash
+# writes, and when that write fails the loop reads nothing and the leg reports
+# the tree clean. The run refuses every file write past 1 KiB, with SIGXFSZ
+# ignored, which leaves room for the tracked listing, and the stub gofmt lists
+# 2000 files. Its output comes back through a pipe, which the limit leaves
+# alone.
+make_wrapper 0; make_go 0
+cat > "$STUB/gofmt" <<'EOF'
+#!/bin/sh
+i=0
+while [ "$i" -lt 2000 ]; do printf 'services/foo/%060d.go\n' "$i"; i=$((i + 1)); done
+EOF
+chmod +x "$STUB/gofmt"
+if out="$( ( cd "$REPO" && trap '' XFSZ && ulimit -f 1 \
+       && PATH="$STUB" STUB_HOST_OS="$HOST_OS" STUB_ICU_PREFIX="$ICU_PREFIX" \
+          STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
+          CGO_CPPFLAGS="$CGO_CPPFLAGS_IN" CGO_LDFLAGS="$CGO_LDFLAGS_IN" \
+          "$BASH_BIN" "$SUT" subject.sh ) 2>&1 )"; then rc=0; else rc=$?; fi
+printf '%s\n' "$out" > "$TMP/out"
+[ "$rc" -eq 1 ] && ok "long gofmt list: exit 1" \
+  || bad "long gofmt list: expected 1, got $rc: $(tail -5 "$TMP/out")"
+eq "$(grep -c 'is not gofmt-clean' "$TMP/out")" 2000 "long gofmt list: the report names every listed file"
 
 # --- M: gofmt cannot parse a file (exit 2, nothing listed) -> exit 1. --------
 # The listing is empty, so only the exit code shows a file went unchecked.
@@ -271,27 +560,75 @@ run_sut subject.sh
 grep -q "'gofmt' not on PATH" "$TMP/out" && ok "gofmt missing: report names the missing gofmt" \
   || bad "gofmt missing: report is silent about the missing gofmt"
 
-# --- O: the Go-file listing fails -> structural error (exit 2). --------------
-# An empty list from a failed git ls-files reads exactly like a tree with no Go
-# in it, which skips gofmt and passes. The git wrapper refuses only that listing
-# and hands every other git call to the real binary.
+# --- O: the Go legs take their files from the tracked listing. ---------------
+# A listing a Go leg made of its own would sit outside the listing's checks
+# above, and one that failed would read as a tree with no module or no Go in
+# it. The git wrapper refuses every listing but the whole tree's and hands
+# every other git call on, and the module is still vetted and the Go file
+# still checked.
 make_wrapper 0; make_go 0; make_gofmt 0
 REAL_GIT="$(command -v git)"
 rm -f "$STUB/git"
 cat > "$STUB/git" <<EOF
 #!/bin/sh
 case " \$* " in
-  *" ls-files "*"*.go"*) echo "stub-git: ls-files refused" >&2; exit 128 ;;
+  *" ls-files -z ") ;;
+  *" ls-files "*) echo "stub-git: ls-files refused" >&2; exit 128 ;;
 esac
 exec "$REAL_GIT" "\$@"
 EOF
 chmod +x "$STUB/git"
 run_sut subject.sh
-[ "$rc" -eq 2 ] && ok "Go listing fails: structural error (exit 2)" || bad "Go listing fails: expected 2, got $rc"
-grep -q 'cannot enumerate tracked Go files' "$TMP/err" \
-  && ok "Go listing fails: error names the failed listing" \
-  || bad "Go listing fails: error is silent about the listing"
+[ "$rc" -eq 0 ] && ok "Go legs: exit 0 with every narrower listing refused" \
+  || { cat "$TMP/out" "$TMP/err"; bad "Go legs: expected 0, got $rc"; }
+grep -q 'go: services/foo vet clean' "$TMP/out" && ok "Go legs: go vet still vets the module" \
+  || bad "Go legs: the module went unvetted: $(cat "$TMP/out")"
+grep -q 'gofmt: 1 Go file(s) clean' "$TMP/out" && ok "Go legs: gofmt still checks the Go file" \
+  || bad "Go legs: the Go file went unchecked: $(cat "$TMP/out")"
 rm -f "$STUB/git"; ln -s "$REAL_GIT" "$STUB/git"
+
+# --- Every tracked go.mod is a module, whatever its directory is called. -----
+# The root's go.mod, one under a directory named like an option and one under a
+# directory whose path git quotes are each vetted. Handed to basename or
+# dirname, -m/go.mod reads as their options, and git's default listing names
+# the quoted directory under a name no directory has.
+QDIR=$'q"d\\ir\tm'
+mkdir -p "$REPO/-m" "$REPO/$QDIR"
+for d in . -m "$QDIR"; do printf 'module m\n\ngo 1.27\n' > "$REPO/$d/go.mod"; done
+git -C "$REPO" add -- go.mod -m/go.mod "$QDIR/go.mod"
+make_wrapper 0; make_go 0; make_gofmt 0; : > "$TMP/go.log"
+run_sut subject.sh
+[ "$rc" -eq 0 ] && ok "modules: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "modules: expected 0, got $rc"; }
+for m in . services/foo -m "$QDIR"; do
+  grep -qxF -- "  go: $m vet clean" "$TMP/out" && ok "modules: $m is vetted" \
+    || bad "modules: $m went unvetted: $(cat "$TMP/out")"
+done
+eq "$(grep -c 'stub-go ran' "$TMP/go.log")" 4 "modules: go vet runs once in each module"
+git -C "$REPO" rm -q --cached -- go.mod -m/go.mod "$QDIR/go.mod"
+rm -f -- "$REPO/go.mod" "$REPO/-m/go.mod" "$REPO/$QDIR/go.mod"
+rmdir -- "$REPO/-m" "$REPO/$QDIR"
+
+# --- Every tracked Go file reaches gofmt under its own name. -----------------
+# A Go file named like an option, listed first, reaches gofmt as a flag, and
+# git's default listing names a path that holds a double quote, a backslash or
+# a control character under a quoted name gofmt cannot open.
+QGO=$'odd"na\\me\tx.go'
+printf 'package foo\n' > "$REPO/-x.go"
+printf 'package foo\n' > "$REPO/$QGO"
+git -C "$REPO" add -- -x.go "$QGO"
+make_wrapper 0; make_go 0; make_gofmt 0; : > "$TMP/gofmt-args.log"
+run_sut subject.sh
+[ "$rc" -eq 0 ] && ok "Go file names: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "Go file names: expected 0, got $rc"; }
+grep -qxF -- ./-x.go "$TMP/gofmt-args.log" \
+  && ok "Go file names: a file named like an option reaches gofmt as a path" \
+  || bad "Go file names: gofmt got: $(cat "$TMP/gofmt-args.log")"
+grep -qxF -- "./$QGO" "$TMP/gofmt-args.log" \
+  && ok "Go file names: a file whose path git quotes reaches gofmt under its own name" \
+  || bad "Go file names: gofmt got: $(cat "$TMP/gofmt-args.log")"
+grep -q 'gofmt: 3 Go file(s) clean' "$TMP/out" && ok "Go file names: counted with the tracked Go files" \
+  || bad "Go file names: not counted: $(cat "$TMP/out")"
+git -C "$REPO" rm -q --cached -- -x.go "$QGO"
+rm -f -- "$REPO/-x.go" "$REPO/$QGO"
 
 # --- The icu4c cgo flags go vet is handed. -----------------------------------
 # services/helm reaches ICU through Dolt's go-icu-regex, a cgo package, and go

@@ -15,6 +15,8 @@ const testBoard = `{"generated_at":"2026-10-17T00:00:00Z","rows":[]}`
 
 const testRig = `{"rig":"example-rig","rows":{"tk-abc12":{"id":"tk-abc12","title":"A & B"}},"epics":[]}`
 
+const testCity = `{"doctor":{"ran":true,"late":false,"completed":true,"count":1,"failing":[{"name":"orphan-sessions & co","status":"warning"}],"not_measured":[],"accepted":[],"monitors":[]}}`
+
 // spaStub stands in for the embedded app's handler and names the path it got.
 var spaStub = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -30,7 +32,7 @@ func serve(t *testing.T, h http.Handler, method, path string) *httptest.Response
 
 func mustHandler(t *testing.T, answers map[string]Answer) http.Handler {
 	t.Helper()
-	h, err := Handler([]byte(testBoard), []byte(testRig), answers, spaStub)
+	h, err := Handler([]byte(testBoard), []byte(testRig), []byte(testCity), answers, spaStub)
 	if err != nil {
 		t.Fatalf("Handler: %v", err)
 	}
@@ -130,20 +132,46 @@ func TestAPathThatNamesNoVerbIsNotFound(t *testing.T) {
 
 func TestHandlerRefusesABoardThatIsNotAJSONObject(t *testing.T) {
 	for _, board := range []string{"", "not json", "[1,2]", `"board"`, "{"} {
-		if _, err := Handler([]byte(board), []byte(testRig), nil, spaStub); err == nil {
+		if _, err := Handler([]byte(board), []byte(testRig), []byte(testCity), nil, spaStub); err == nil {
 			t.Errorf("Handler(%q): no error, want a refusal", board)
 		}
 	}
-	if _, err := Handler([]byte(testBoard), []byte(testRig), nil, nil); err == nil {
+	if _, err := Handler([]byte(testBoard), []byte(testRig), []byte(testCity), nil, nil); err == nil {
 		t.Error("Handler with no app handler: no error, want a refusal")
 	}
 }
 
 func TestHandlerRefusesARigDocumentThatNamesNoRig(t *testing.T) {
 	for _, rig := range []string{"", "not json", "[1,2]", `{"rows":{}}`, `{"rig":""}`} {
-		if _, err := Handler([]byte(testBoard), []byte(rig), nil, spaStub); err == nil {
+		if _, err := Handler([]byte(testBoard), []byte(rig), []byte(testCity), nil, spaStub); err == nil {
 			t.Errorf("Handler with the rig document %q: no error, want a refusal", rig)
 		}
+	}
+}
+
+func TestHandlerRefusesACityDocumentThatHoldsNoDoctorRun(t *testing.T) {
+	for _, city := range []string{"", "not json", "[1,2]", `{}`, `{"doctor":null}`} {
+		if _, err := Handler([]byte(testBoard), []byte(testRig), []byte(city), nil, spaStub); err == nil {
+			t.Errorf("Handler with the city document %q: no error, want a refusal", city)
+		}
+	}
+}
+
+// TestTheCityPageIsServedAtItsRoute reads the city page's route as the page
+// reads it: the city's document as given, with the fixture's read time beside
+// it.
+func TestTheCityPageIsServedAtItsRoute(t *testing.T) {
+	h := mustHandler(t, nil)
+	rec := serve(t, h, http.MethodGet, "/helm/city")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("GET /helm/city: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	var answer cityAnswer
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil {
+		t.Fatalf("the city answer %q is not JSON: %v", rec.Body.String(), err)
+	}
+	if string(answer.City) != testCity || answer.ReadAt == "" {
+		t.Errorf("GET /helm/city: city %s read at %q, want the document as given and a read time", answer.City, answer.ReadAt)
 	}
 }
 

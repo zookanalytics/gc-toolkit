@@ -181,9 +181,17 @@ export interface Row {
    */
   holds: string[];
   /**
-   * Conversation is, for a question, the open conversation that answers it.
+   * Conversation is, for a human gate or a decision, the open conversation
+   * that answers it: the first that replies to the gate, or the first that
+   * tracks the decision.
    */
   conversation?: string;
+  /**
+   * Handback is, for an open decision, the newest hand-back a sitting
+   * recorded on a conversation that tracks it, open or closed, which its
+   * Details opens with. A decision whose conversations record none has none.
+   */
+  handback?: Handback;
   /**
    * Anchored are the open beads that carry anchor_bead naming this one: its
    * reviews, reworks, validations and findings, which have no row of their
@@ -197,6 +205,16 @@ export interface Row {
 export interface Ref {
   id: string;
   title: string;
+}
+/**
+ * Handback is a hand-back a converse sitting recorded on its conversation
+ * (gc-helm.sh handback): the conversation, when the hand-back was recorded, and
+ * its text, whole, as the sitting posted it.
+ */
+export interface Handback {
+  conversation: string;
+  at?: string;
+  text: string;
 }
 /**
  * Reason is one thing that holds a pull request: the held: value it stands

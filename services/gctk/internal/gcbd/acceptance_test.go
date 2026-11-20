@@ -178,4 +178,74 @@ func TestStoreAcceptance(t *testing.T) {
 	if out, err := s.Try("close", child); err != nil {
 		t.Errorf("bd refused to close %s, held only through its parent: %s", child, out)
 	}
+
+	// The adapter's edge is bd's blocks edge, which leaves the bead's status as
+	// it stands. bd refuses an edge onto an id of its own prefix it does not
+	// hold, and adds one onto an id of another prefix, which its show leaves
+	// out.
+	waits, run := s.Create("the bead"), s.Create("the run")
+	s.Run("update", waits, "--status=blocked")
+	if out, err := c.AddEdge(waits, run, EdgeBlocks); err != nil {
+		t.Fatalf("adapter: the edge from %s onto %s = %v: %s", waits, run, err, out)
+	}
+	waiting, err := c.Rows([]string{waits})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edges, err := waiting[0].Edges()
+	if err != nil || len(edges) != 1 || edges[0].ID != run || edges[0].Type != EdgeBlocks || waiting[0].StatusLower() != "blocked" {
+		t.Errorf("adapter: the bead stands %s with edges %+v (%v), want blocked with one blocks edge onto %s", waiting[0].StatusLower(), edges, err, run)
+	}
+	if _, err := c.AddEdge(waits, "pb-gone", EdgeBlocks); err == nil {
+		t.Error("adapter: bd added an edge onto an id of its own prefix it does not hold")
+	}
+	if out, err := c.AddEdge(waits, "zz-gone", EdgeBlocks); err != nil || strings.Contains(s.Run("show", waits, "--json"), "zz-gone") {
+		t.Errorf("adapter: an edge onto an id of another prefix = %v: %s; want exit 0 and no edge a show names", err, out)
+	}
+
+	// One update names several beads, and gives each the priority.
+	second := s.Create("the run's step")
+	if out, err := c.Update(run, second, "--priority=1"); err != nil {
+		t.Fatalf("adapter: the priority of %s and %s = %v: %s", run, second, err, out)
+	}
+	if rows, err := c.Rows([]string{run, second}); err != nil || len(rows) != 2 || rows[0].PriorityInt() != 1 || rows[1].PriorityInt() != 1 {
+		t.Errorf("adapter: the beads read %+v (%v), want both at P1", rows, err)
+	}
+}
+
+// The listing's narrowing, as the bounded reads take it: an assignee matches
+// one name exactly, the statuses named are each read, and Listed leaves out the
+// wisp the listing hides unless asked.
+func TestStoreAcceptanceNarrowsTheListing(t *testing.T) {
+	if !gcbdtest.Asked() {
+		t.Skip("the store acceptance test runs the city's bd on a scratch store; GCTK_STORE_ACCEPTANCE=1 runs it")
+	}
+	s := gcbdtest.New(t, "pn")
+	queued := s.Create("queued", "--assignee", "rig/refinery")
+	claimed := s.Create("claimed", "--assignee", "rig/refinery", "--status", "in_progress")
+	near := s.Create("near", "--assignee", "rig/refinery-2")
+	wisp := s.Create("wisp", "--assignee", "rig/refinery", "--ephemeral")
+	blocked := s.Create("blocked", "--assignee", "rig/refinery", "--status", "blocked")
+	s.Enter(t, "")
+	c := &Client{bin: "gc"}
+	for _, tc := range []struct {
+		name string
+		q    Query
+		want []string
+	}{
+		{"one assignee's open beads that the listing shows", Query{Assignee: "rig/refinery", Statuses: []string{"open"}, Listed: true}, []string{queued}},
+		{"the open and in-progress beads that the listing shows", Query{Every: true, Statuses: []string{"open", "in_progress"}, Listed: true}, []string{claimed, near, queued}},
+		{"one assignee's open beads in every plane", Query{Assignee: "rig/refinery", Statuses: []string{"open"}}, []string{queued, wisp}},
+	} {
+		rows, err := c.Find(tc.q)
+		var got []string
+		for _, r := range rows {
+			got = append(got, r.ID)
+		}
+		slices.Sort(got)
+		want := slices.Sorted(slices.Values(tc.want))
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("%s = %v, %v; want %v (blocked %s)", tc.name, got, err, want, blocked)
+		}
+	}
 }

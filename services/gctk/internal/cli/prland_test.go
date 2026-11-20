@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -262,11 +263,49 @@ func TestTheRefinerysWakeWakesThenNudgesThroughTheRuntime(t *testing.T) {
 	}
 }
 
+// The landing order pours a review run through the runtime adapter's cook,
+// attached to the bead that owns the PR, with its vars, and answers with the
+// root the cook named. A cook that did not exit 0, or that named no root, is an
+// error that says why.
+func TestAReviewRunIsPouredAttachedToItsBeadThroughTheRuntime(t *testing.T) {
+	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/gc-toolkit.refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := l.Runs.(runs); !ok {
+		t.Fatalf("the landing order pours through %T, not the runtime", l.Runs)
+	}
+	rt := &gcfake.Runtime{}
+	vars := map[string]string{"pr_bead": "tk-1", "head": validated, "target": "main"}
+	root, err := runs{rt: rt}.Pour("mol-pr-review", "tk-1", vars)
+	if err != nil || root != "cooked-1" {
+		t.Fatalf("the pour answered %q, %v", root, err)
+	}
+	if got := rt.Cooks(); len(got) != 1 || got[0].Formula != "mol-pr-review" || got[0].Bead != "tk-1" || !maps.Equal(got[0].Vars, vars) {
+		t.Fatalf("cooked %+v, want mol-pr-review attached to tk-1 with its vars", got)
+	}
+
+	rt = &gcfake.Runtime{OnCook: func(gascity.Cook) gascity.CookResult {
+		return gascity.CookResult{Result: gascity.Result{Code: 1, Output: "gc formula cook: attach bead tk-1: not found"}}
+	}}
+	if _, err := (runs{rt: rt}).Pour("mol-pr-review", "tk-1", vars); err == nil ||
+		!strings.Contains(err.Error(), "gc formula cook mol-pr-review --attach tk-1: exit 1") {
+		t.Fatalf("a cook that did not exit 0 answered %v", err)
+	}
+	rt = &gcfake.Runtime{OnCook: func(gascity.Cook) gascity.CookResult {
+		return gascity.CookResult{Result: gascity.Result{Output: "Root: tk-other"}}
+	}}
+	if _, err := (runs{rt: rt}).Pour("mol-pr-review", "tk-1", vars); err == nil || !strings.Contains(err.Error(), "named no root") {
+		t.Fatalf("a cook that named no root answered %v", err)
+	}
+}
+
 // The landing order closes a bead whose PR a ruling retired through the
 // runtime adapter: the pack's bead-rehome.sh, from GCTK_SCRIPTS_DIR, gets the
-// bead, the disposition, the note and the run's judgment of the bead, and runs
-// as the refinery the bead is assigned to. Its exits 4 and 5 are a close held
-// for now, and any other failure is an error carrying the script's own words.
+// bead, the disposition, the note and the run's judgment of the bead, a waiting
+// bead's empty assignee among it, and runs as the refinery. Its exits 4 and 5
+// are a close held for now, and any other failure is an error carrying the
+// script's own words.
 func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing.T) {
 	scripts := t.TempDir()
 	log := filepath.Join(scripts, "calls")
@@ -282,13 +321,13 @@ func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "rig/gc-toolkit.refinery", Note: "PR #7 closed",
+	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "", Note: "PR #7 closed",
 		Disposition: pr.Disposition{Kind: "not-needed", Successor: "tk-conv", Store: "rig:rig"}}
 	if err := l.Dispositions.Close(x); err != nil {
 		t.Fatal(err)
 	}
 	want := "actor=rig/gc-toolkit.refinery\n--origin\ntk-1\n--successor\ntk-conv\n--kind\nnot-needed\n--note\nPR #7 closed\n" +
-		"--successor-store\nrig:rig\n--if-status\nblocked\n--if-assignee\nrig/gc-toolkit.refinery\n--if-ruled\n"
+		"--successor-store\nrig:rig\n--if-status\nblocked\n--if-assignee\n\n--if-ruled\n"
 	if raw, _ := os.ReadFile(log); string(raw) != want {
 		t.Fatalf("bead-rehome.sh got %q, want %q", raw, want)
 	}

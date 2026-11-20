@@ -28,13 +28,10 @@ const boundRefinery = "rig/gc-toolkit.refinery"
 
 // pours is the pour of a review run as gc formula cook --attach makes it: the
 // root, which carries its formula and vars, and the bead's blocks edge onto it,
-// which the store's blocked listing holds the bead on. err fails the pour, and
-// a run already attached when it pours fails the test, since cook would attach
-// a second.
+// which the store's blocked listing holds the bead on. err fails the pour.
 type pours struct {
 	mu    sync.Mutex
 	store *fake.Store
-	t     *testing.T
 	vars  []map[string]string
 	err   error
 }
@@ -76,11 +73,8 @@ func newAdmit(t *testing.T) *admitting {
 	t.Helper()
 	d := newCycle(t)
 	d.l.Refinery = boundRefinery
-	d.edit(t, func(b *fake.Bead) {
-		b.Assignee = boundRefinery
-		delete(b.Metadata, "review_results")
-	})
-	p := &pours{store: d.store, t: t}
+	d.edit(t, func(b *fake.Bead) { delete(b.Metadata, "review_results") })
+	p := &pours{store: d.store}
 	d.l.Runs = p
 	return &admitting{land: d, runs: p}
 }
@@ -572,7 +566,6 @@ func TestAnAskAnOpenBeadHoldsWaitsAndThePassAfterItsHolderClosesPoursOne(t *test
 func TestARefineryAddressWithNoBindingPoursNothing(t *testing.T) {
 	d := newAdmit(t)
 	d.l.Refinery = refinery
-	d.edit(t, func(b *fake.Bead) { b.Assignee = refinery })
 	o := d.once(t)
 	is(t, o, pr.ActChecked)
 	if d.runs.count() != 0 || !strings.Contains(o.Detail, "rig/refinery") {

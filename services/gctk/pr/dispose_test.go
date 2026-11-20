@@ -222,7 +222,7 @@ func TestTheDispositionWriterIsHandedTheRunsJudgment(t *testing.T) {
 	d, r := retired(t)
 	d.pr.Facts.State = "CLOSED"
 	is(t, d.once(t), pr.ActDisposed)
-	want := pr.Disposal{Bead: bead, Status: "blocked", Assignee: refinery,
+	want := pr.Disposal{Bead: bead, Status: "blocked", Assignee: "",
 		Disposition: pr.Disposition{Kind: "not-needed", Successor: conversation},
 		Note:        "PR #7 closed under the disposition a ruling recorded before the close"}
 	if got := r.disposals(); len(got) != 1 || got[0] != want {
@@ -244,31 +244,33 @@ func (g *gap) Close(x pr.Disposal) error {
 	return g.rehome.Close(x)
 }
 
-// A release that lands once the act has freed the record lock, as
-// hand-back.sh's or refinery-requeue.sh's can, since neither takes the lock,
-// holds the close: the writer is held to what the act judged, not to a read
-// made after the release. The next run reads the bead as released: it clears
-// the marker and closes nothing.
-func TestABeadReleasedOnceTheRunFreesTheLockIsLeftWhereTheReleaseLeftIt(t *testing.T) {
+// An assignment that lands once the act has freed the record lock, as a claim
+// can, since it takes no record lock, holds the close: the writer is held to
+// what the act judged, not to a read made after the assignment. The next run
+// leaves the bead to its assignee: it writes nothing and closes nothing.
+func TestABeadAssignedOnceTheRunFreesTheLockIsLeftToItsAssignee(t *testing.T) {
+	const holder = "rig/gc-toolkit.polecat-1"
 	d, r := retired(t)
 	d.pr.Facts.State = "CLOSED"
 	d.l.Dispositions = &gap{rehome: r, change: func() {
-		d.edit(t, func(b *fake.Bead) { b.Status, b.Assignee = "open", "" })
+		d.edit(t, func(b *fake.Bead) { b.Status, b.Assignee = "open", holder })
 	}}
 	o := d.once(t)
 	is(t, o, pr.ActChecked)
-	if !strings.Contains(o.Detail, "not blocked under \""+refinery+"\" as the run judged it") {
+	if !strings.Contains(o.Detail, "not blocked under \"\" as the run judged it") {
 		t.Fatalf("the held close says %q", o.Detail)
 	}
-	if b := d.row(t); b.Status != "open" || b.Assignee != "" {
-		t.Fatalf("the released bead is %s under %q", b.Status, b.Assignee)
+	if b := d.row(t); b.Status != "open" || b.Assignee != holder {
+		t.Fatalf("the assigned bead is %s under %q", b.Status, b.Assignee)
 	}
-	is(t, d.once(t), pr.ActReleased)
+	n := len(d.store.Writes())
+	if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
+		t.Fatalf("the next run took the assigned bead: %+v", out)
+	}
 	b := d.row(t)
-	if b.Status != "open" || len(r.asked()) != 1 {
-		t.Fatalf("the next run left the bead %s and asked the writer %v", b.Status, r.asked())
+	if b.Status != "open" || len(r.asked()) != 1 || len(d.store.Writes()) != n {
+		t.Fatalf("the next run left the bead %s, asked the writer %v and wrote %+v", b.Status, r.asked(), d.store.Writes()[n:])
 	}
-	meta(t, b, map[string]string{"pr_reconcile_pending": ""})
 }
 
 // A second ruling that lands once the run has freed the lock, as pr-dispose.sh
@@ -300,13 +302,13 @@ func TestARulingRecordedOnceTheRunFreesTheLockIsCarriedOutByTheNextRun(t *testin
 	}
 }
 
-// A changed head the order sent back to the refinery carries no marker, and the
+// A changed head the order handed to the refinery carries no marker, and the
 // order reads it all the same once a ruling's disposition is on it, so its
 // close reaches the writer. With no disposition the order does not read it.
 func TestARetiredChangedHeadIsReadWithoutItsMarker(t *testing.T) {
 	d, r := retired(t)
 	d.edit(t, func(b *fake.Bead) {
-		b.Status = "open"
+		b.Status, b.Assignee = "open", refinery
 		b.Metadata["merge_result"] = record.HeadChanged
 		b.Metadata["observed_pr_head_sha"] = other
 		delete(b.Metadata, "pr_reconcile_pending")
@@ -329,14 +331,26 @@ func TestARetiredChangedHeadIsReadWithoutItsMarker(t *testing.T) {
 	}
 }
 
-// The order reads a disposition only on a bead the refinery holds on the
-// record: one a release took, or one whose disposition is not whole, is not
-// read for it.
-func TestADispositionIsReadOnlyOnTheRefinerysBeadOnTheRecord(t *testing.T) {
+// The order reads a disposition only on a bead on the record assigned to
+// nobody or to the refinery: one assigned to anyone else, or one whose
+// disposition is not whole, is not read for it.
+func TestADispositionIsReadOnlyOnABeadOnTheRecordNoOneElseIsAssigned(t *testing.T) {
+	for _, assignee := range []string{"", refinery} {
+		d, r := retired(t)
+		d.edit(t, func(b *fake.Bead) {
+			b.Status, b.Assignee = "open", assignee
+			delete(b.Metadata, "pr_reconcile_pending")
+		})
+		d.pr.Facts.State = "CLOSED"
+		is(t, d.once(t), pr.ActDisposed)
+		if want := []string{bead + " not-needed " + conversation}; !slices.Equal(r.asked(), want) {
+			t.Fatalf("assigned to %q, the writer was asked %v, want %v", assignee, r.asked(), want)
+		}
+	}
 	for name, change := range map[string]func(*fake.Bead){
-		"released":     func(b *fake.Bead) { b.Assignee = "rig/gc-toolkit.polecat-1" },
-		"no successor": func(b *fake.Bead) { delete(b.Metadata, "gc.pr_close_disposition_successor") },
-		"unknown kind": func(b *fake.Bead) { b.Metadata["gc.pr_close_disposition_kind"] = "abandoned" },
+		"assigned to another": func(b *fake.Bead) { b.Assignee = "rig/gc-toolkit.polecat-1" },
+		"no successor":        func(b *fake.Bead) { delete(b.Metadata, "gc.pr_close_disposition_successor") },
+		"unknown kind":        func(b *fake.Bead) { b.Metadata["gc.pr_close_disposition_kind"] = "abandoned" },
 		"off the record": func(b *fake.Bead) {
 			b.Metadata["merge_result"] = "pull_request"
 		},

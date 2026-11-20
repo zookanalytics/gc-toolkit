@@ -39,10 +39,10 @@ func savedRead(t *testing.T, edit func(*pr.GitHubRead)) string {
 	return string(raw)
 }
 
-// pendingRows is a rig whose tk-a owns PR 7 on Gas Town's pending record, at
-// the blocked status the record writes, validated at pendingHead into main
-// with a review result passed there, and carrying read as the read the one-PR
-// update saved, none when read is empty. The old record's posture is
+// pendingRows is a rig whose tk-a owns PR 7 on Gas Town's pending record,
+// blocked and assigned to nobody as the record writes it, validated at
+// pendingHead into main with a review result passed there, and carrying read as
+// the read the one-PR update saved, none when read is empty. The old record's posture is
 // left on it, approved, which prstatus.Derive reads as merging. With gated,
 // tk-a waits on tk-q, an open human gate. tk-o owns PR 8 on the old record,
 // approved.
@@ -57,7 +57,7 @@ func pendingRows(t *testing.T, gated bool, read string) []json.RawMessage {
 		md["pr_github_read"] = read
 	}
 	a := map[string]any{"id": "tk-a", "title": "pending work", "status": "blocked", "priority": 2, "issue_type": "task",
-		"assignee": "gc-toolkit/refinery", "metadata": md, "created_at": "2026-01-01"}
+		"metadata": md, "created_at": "2026-01-01"}
 	if gated {
 		a["dependencies"] = []map[string]any{{"issue_id": "tk-a", "depends_on_id": "tk-q", "type": "blocks"}}
 	}

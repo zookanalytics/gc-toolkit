@@ -54,12 +54,24 @@ func (p *pass) Rows(ids []string) ([]gcbd.Bead, error) {
 
 func (p *pass) Update(id string, args ...string) (string, error) { return "", errPassWrite }
 
+func (p *pass) AddEdge(id, target, typ string) (string, error) { return "", errPassWrite }
+
 func (p *pass) Create(title string, args ...string) (string, error) { return "", errPassWrite }
+
+func (p *pass) SetState(id, dimension, value, reason string) error { return errPassWrite }
 
 // Ready reads the store's ready set afresh each time it is asked: readiness is
 // the store's answer at the moment it is read, and no row the pass keeps
 // answers it.
 func (p *pass) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) { return p.store.Ready(q) }
+
+// ReadyIDs reads the store's ready set afresh each time it is asked, as Ready
+// does.
+func (p *pass) ReadyIDs() ([]string, error) { return p.store.ReadyIDs() }
+
+// Dependents reads the store afresh each time it is asked: its rows carry no
+// edges, so the pass keeps none of them in place of a listing's row.
+func (p *pass) Dependents(id, typ string) ([]gcbd.Bead, error) { return p.store.Dependents(id, typ) }
 
 // Blocked reads the store's blocked set the first time it is asked, and answers
 // with that read every time after.
@@ -117,7 +129,7 @@ func (p *pass) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 				}
 			}
 		}
-		if q.Every && !q.Closed && len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" {
+		if everyLive(q) {
 			p.listed = true
 		}
 		p.mu.Unlock()
@@ -173,12 +185,29 @@ func (p *pass) keep(rows []gcbd.Bead) []*gcbd.Bead {
 // live reports whether a row is live: any status but closed.
 func live(r *gcbd.Bead) bool { return r.StatusLower() != "closed" }
 
+// everyLive reports whether q reads every live bead and narrows the read by
+// nothing, so its rows answer any later selection of live beads.
+func everyLive(q gcbd.Query) bool {
+	return q.Every && !q.Closed && !q.Listed && len(q.IDs) == 0 && len(q.Statuses) == 0 &&
+		q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && q.Type == "" && q.Assignee == ""
+}
+
 // selected reports whether q selects r: its status, the ids named, the key it
-// carries, the value that key holds, the text its title holds and its issue
-// type, as the store's listing selects them. A key's value compares as the
-// scripts render it, `(.metadata[k] // "") | tostring`.
+// carries, the value that key holds, the text its title holds, its issue type,
+// its assignee, and whether the listing shows it unless asked, as the store's
+// listing selects them. A key's value compares as the scripts render it,
+// `(.metadata[k] // "") | tostring`.
 func selected(q gcbd.Query, r *gcbd.Bead) bool {
 	if !q.Closed && !live(r) {
+		return false
+	}
+	if len(q.Statuses) > 0 && !slices.Contains(q.Statuses, r.StatusLower()) {
+		return false
+	}
+	if q.Listed && !r.ListedByDefault() {
+		return false
+	}
+	if q.Assignee != "" && r.AssigneeString() != q.Assignee {
 		return false
 	}
 	if len(q.IDs) > 0 && !slices.Contains(q.IDs, r.ID) {

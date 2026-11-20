@@ -598,6 +598,14 @@ button.kind:hover {
   padding-top: 4px;
 }
 
+.handback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e2e3de;
+}
+
 .description {
   font-size: 14px;
   line-height: 1.5;

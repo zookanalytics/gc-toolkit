@@ -10,7 +10,7 @@
 #
 # Usage:
 #   run-tests.sh [-j N] [-t SECS] [--retry N|--no-retry] [--list] [-q]
-#                [--affected BASE | PATH ...]
+#                [--seconds FILE] [--affected BASE | PATH ...]
 #
 #   -j, --jobs N       concurrent runs (default: $TEST_JOBS or half the cores)
 #   -t, --timeout SECS end a run that writes nothing for SECS (below), 0 disables
@@ -22,6 +22,7 @@
 #                      BASE (below), for example --affected origin/main
 #       --list         print what would run, one run per line, and exit
 #   -q, --quiet        print only the summary and the failures
+#       --seconds FILE write each run's seconds to FILE (below)
 #
 # With neither PATH nor --affected it runs every tracked *.test.sh. With PATHs
 # it runs the affected subset, the tests a change to those paths can break:
@@ -79,6 +80,14 @@
 # does) therefore cannot wedge the runner on a pipe that never reaches EOF, and
 # the group is killed once the file's own process exits so the child cannot
 # outlive the file that spawned it.
+#
+# --seconds FILE keeps each run's time for a reader such as CI. The file is
+# emptied before anything runs, and each run of the parallel wave adds one line
+# to it as the run ends: "<run>\t<seconds>\t<status>". The run is named as its
+# report line names it, the seconds are its wall time in whole seconds, and the
+# status is PASS, FAIL[<exit>] or TIMEOUT. A serial re-run adds no line, so the
+# seconds sum to the suite's test-seconds, its runs' wall times added up. A FILE
+# that cannot be written is a usage error.
 #
 # The timeout ends a run that has hung, never one that is only slow. A suite
 # writes a line for each assertion, and a loaded host makes a sound run take
@@ -147,6 +156,14 @@
 # under either prefix that is meant for one file, such as
 # GC_TMUX_TEST_WAIT_SECS, reaches it only then.
 #
+# A run with a file that sources the shared harness
+# (assets/scripts/test-harness.sh) builds the compiled fake gc from this tree
+# once, before the first file starts, and names it in RUN_TESTS_FAKE_GC, so
+# such a file copies that build instead of making its own. When the build
+# fails the runner says so and names none, and each such file then builds the
+# fake itself and fails with the compiler's message. The runner is the only
+# source of RUN_TESTS_FAKE_GC. A file run directly builds the fake itself.
+#
 # The runner needs bash 5.1 or later, both its own and the first on PATH, which
 # starts each file.
 #
@@ -188,6 +205,8 @@ LIST_ONLY=0
 QUIET=0
 AFFECTED=""
 AFFECTED_SET=0
+SECONDS_FILE=""
+SECONDS_SET=0
 declare -a ARGS=()
 
 while [ $# -gt 0 ]; do
@@ -205,6 +224,8 @@ while [ $# -gt 0 ]; do
     --affected=*)  AFFECTED="${1#--affected=}"; AFFECTED_SET=1; shift ;;
     --list)        LIST_ONLY=1; shift ;;
     -q|--quiet)    QUIET=1; shift ;;
+    --seconds)     SECONDS_FILE="${2:-}"; SECONDS_SET=1; shift; [ $# -eq 0 ] || shift ;;
+    --seconds=*)   SECONDS_FILE="${1#--seconds=}"; SECONDS_SET=1; shift ;;
     -h|--help)     usage; exit 0 ;;
     --)            shift; while [ $# -gt 0 ]; do ARGS+=("$1"); shift; done ;;
     -*)            echo "run-tests: unknown option '$1'" >&2; exit 2 ;;
@@ -216,6 +237,13 @@ case "$JOBS" in ''|*[!0-9]*) echo "run-tests: --jobs must be a positive integer"
 case "$TIMEOUT" in ''|*[!0-9]*) echo "run-tests: --timeout must be a non-negative integer (0 disables)" >&2; exit 2 ;; esac
 case "$RETRY" in ''|*[!0-9]*) echo "run-tests: --retry must be a non-negative integer (0 disables)" >&2; exit 2 ;; esac
 [ "$JOBS" -ge 1 ] || JOBS=1
+if [ "$SECONDS_SET" -eq 1 ]; then
+  case "$SECONDS_FILE" in
+    '') echo "run-tests: --seconds needs a file to write" >&2; exit 2 ;;
+    -*) echo "run-tests: --seconds needs a file to write, not the option '$SECONDS_FILE'" >&2; exit 2 ;;
+  esac
+  { : >"$SECONDS_FILE"; } 2>/dev/null || { echo "run-tests: cannot write the --seconds file '$SECONDS_FILE'" >&2; exit 2; }
+fi
 if [ "$AFFECTED_SET" -eq 1 ]; then
   case "$AFFECTED" in
     '')    echo "run-tests: --affected needs a base, such as origin/main" >&2; exit 2 ;;
@@ -529,6 +557,16 @@ unset "${!GC_@}" "${!BEADS_@}"
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")" || { echo "run-tests: mktemp failed" >&2; exit 2; }
 trap 'rm -rf "$LOGDIR"' EXIT
 
+# The fake gc a file that sources the shared harness runs (see the header).
+unset RUN_TESTS_FAKE_GC
+if [ -d "$ROOT/services/gctk/internal/gcbd/fakegc" ] && grep -q -F test-harness.sh -- "${TESTS[@]}" 2>/dev/null; then
+  if (cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$LOGDIR/fake-gc" ./internal/gcbd/fakegc) >"$LOGDIR/fake-gc.log" 2>&1; then
+    export RUN_TESTS_FAKE_GC="$LOGDIR/fake-gc"
+  else
+    echo "run-tests: the fake gc did not build, so each file that sources the shared harness builds its own: $(tail -3 "$LOGDIR/fake-gc.log" | tr '\n' ' ')" >&2
+  fi
+fi
+
 total="${#RUN_FILE[@]}"
 [ "$JOBS" -gt "$total" ] && JOBS="$total"
 START="$SECONDS"
@@ -648,6 +686,7 @@ finish() {
   if [ "$QUIET" -eq 0 ] || [ "$rc" -ne 0 ]; then
     printf '  %-10s %s (%ds)\n' "$status" "$rel" "$dur"
   fi
+  [ -z "$SECONDS_FILE" ] || printf '%s\t%s\t%s\n' "$rel" "$dur" "$status" >>"$SECONDS_FILE"
   unset 'PID_IDX[$pid]' 'PID_START[$pid]'
 }
 

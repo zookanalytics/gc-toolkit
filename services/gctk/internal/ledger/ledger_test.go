@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ var (
 	testText   = Declare("test.ledger.text", String, "a plain value", Alias("test.ledger.old_text"))
 	testRecord = Declare("test.ledger.record", JSON[record](), "a JSON value")
 	testShell  = ReadOnly("test.ledger.shell", String, "a key shell writes")
+	testFlag   = Declare("test.ledger.flag", JSON[bool](), "a JSON flag")
 )
 
 func TestOneActIsOneWrite(t *testing.T) {
@@ -182,6 +184,48 @@ func TestAKeyReadsItsAliasAndClearsBoth(t *testing.T) {
 	want := []string{"--unset-metadata", "test.ledger.text", "--unset-metadata", "test.ledger.old_text"}
 	if got := s.Writes()[0].Args; !slices.Equal(got, want) {
 		t.Errorf("clear = %q, want %q", got, want)
+	}
+}
+
+// rowOf is the record of a bead row whose metadata is the JSON object given,
+// each value typed as bd stores it, decoded as the store adapter decodes a row.
+func rowOf(t *testing.T, metadata string) *Record {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(`{"id":"b-1","status":"open","metadata":` + metadata + `}`))
+	dec.UseNumber()
+	var b gcbd.Bead
+	if err := dec.Decode(&b); err != nil {
+		t.Fatal(err)
+	}
+	return records([]gcbd.Bead{b})[0]
+}
+
+// A String key reads a row as the pack's scripts read one, `(.metadata[k] //
+// "")`. A stored JSON false holds no value, as a null holds none, so a current
+// spelling that holds false gives way to its alias. A string "false" keeps its
+// text, and true and a number read as their JSON text. A JSON key decodes a
+// stored false, so a JSON flag holds false.
+func TestAStringKeyReadsAStoredFalseAsNoValue(t *testing.T) {
+	for _, c := range []struct {
+		stored, want string
+		held         bool
+	}{
+		{`false`, "", false},
+		{`null`, "", false},
+		{`"false"`, "false", true},
+		{`true`, "true", true},
+		{`0`, "0", true},
+	} {
+		got, held, err := testShell.Get(rowOf(t, `{"test.ledger.shell":`+c.stored+`}`))
+		if got != c.want || held != c.held || err != nil {
+			t.Errorf("a key holding %s read %q, %v, %v; want %q, %v", c.stored, got, held, err, c.want, c.held)
+		}
+	}
+	if got, held, err := testText.Get(rowOf(t, `{"test.ledger.text":false,"test.ledger.old_text":"older"}`)); got != "older" || !held || err != nil {
+		t.Errorf("a current spelling holding false read %q, %v, %v; want its alias's value", got, held, err)
+	}
+	if got, held, err := testFlag.Get(rowOf(t, `{"test.ledger.flag":false}`)); got || !held || err != nil {
+		t.Errorf("a JSON flag holding false read %v, %v, %v; want false, held", got, held, err)
 	}
 }
 
@@ -426,6 +470,43 @@ func TestAGuardedWriteLandsOnlyOnTheBeadItWasGuardedOn(t *testing.T) {
 	}
 }
 
+// A write that assigns the bead carries the assignee in its one update, after
+// the status, and an assignee of "" assigns the bead to nobody, which bd's
+// guard on an empty assignee then finds.
+func TestAWriteAssignsTheBeadInItsOneUpdate(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "open", Assignee: "rig/refinery"})
+	l := New(s)
+	w := l.Write("b-1")
+	w.Guard("open", "rig/refinery")
+	w.Status("blocked")
+	w.Assignee("")
+	testText.Set(w, "waiting")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--if-status=open", "--if-assignee=rig/refinery", "--status=blocked", "--assignee=",
+		"--set-metadata", "test.ledger.text=waiting"}
+	if got := s.Writes()[0].Args; !slices.Equal(got, want) {
+		t.Fatalf("the update is %q, want %q", got, want)
+	}
+	if b, _ := s.Row("b-1"); b.Status != "blocked" || b.Assignee != "" {
+		t.Fatalf("the bead reads %s under %q", b.Status, b.Assignee)
+	}
+	w = l.Write("b-1")
+	w.Guard("blocked", "")
+	w.Assignee("rig/refinery")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Writes()[1].Args; !slices.Equal(got, []string{"--if-status=blocked", "--if-assignee=", "--assignee=rig/refinery"}) {
+		t.Fatalf("an assignment alone is %q", got)
+	}
+	if b, _ := s.Row("b-1"); b.Assignee != "rig/refinery" {
+		t.Fatalf("the bead is assigned to %q", b.Assignee)
+	}
+}
+
 // A key's reading face reads the key and names it, and offers no write.
 func TestAViewReadsItsKey(t *testing.T) {
 	s := fake.New()
@@ -467,5 +548,37 @@ func TestWithinEndsTheStoresCallsWithItsContext(t *testing.T) {
 	f := New(fake.New())
 	if f.Within(ctx) != f {
 		t.Fatal("a fake store's ledger did not answer as it does")
+	}
+}
+
+// A blocker is written as the bead's blocks edge onto it, only once a read finds
+// it in the store: a bead the store does not hold, as an id outside its prefix,
+// gets no edge and an error that is ErrNotHeld, and a read or an edge write
+// that fails writes nothing and fails.
+func TestABlockerIsWrittenOnlyOntoABeadTheStoreHolds(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "b-2", Title: "the run", Status: "open"})
+	l := New(s)
+	if err := l.AddBlocker("b-1", "b-2"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := s.Row("b-1")
+	if want := []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "b-2", Title: "the run", Status: "open"}}; !slices.Equal(b.Edges, want) || b.Status != "blocked" {
+		t.Fatalf("the bead stands %s with edges %+v, want blocked with %+v", b.Status, b.Edges, want)
+	}
+	if err := l.AddBlocker("b-1", "zz-elsewhere"); !errors.Is(err, ErrNotHeld) {
+		t.Errorf("an edge onto a bead the store does not hold = %v, want ErrNotHeld", err)
+	}
+	s.FindErr = errors.New("dolt timeout")
+	if err := l.AddBlocker("b-1", "b-2"); err == nil || errors.Is(err, ErrNotHeld) {
+		t.Errorf("an edge whose read failed = %v, want the read's error", err)
+	}
+	s.FindErr, s.EdgeErr = nil, errors.New("database is locked")
+	if err := l.AddBlocker("b-1", "b-2"); err == nil || !strings.Contains(err.Error(), "did not land") {
+		t.Errorf("an edge the store refused = %v", err)
+	}
+	if b, _ := s.Row("b-1"); len(b.Edges) != 1 {
+		t.Errorf("a refused or unread edge was written: %+v", b.Edges)
 	}
 }

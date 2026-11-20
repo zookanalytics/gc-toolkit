@@ -33,9 +33,9 @@ const (
 
 var layerName = map[int]string{adapter: "adapter", theLedger: "ledger", domain: "domain", command: "command", binary: "binary"}
 
-// pkgLayer places every package in the module. An adapter names the outside
+// pkgLayer places every gctk package. An adapter names the outside
 // system it reaches, and the store adapter is the one the ledger reaches. A
-// package added to the module is placed here, or this test fails.
+// package added to gctk is placed here, or this test fails.
 var pkgLayer = map[string]struct {
 	layer   int
 	adapter string
@@ -45,6 +45,7 @@ var pkgLayer = map[string]struct {
 	"internal/gcbd":          {adapter, "store"},
 	"internal/gcbd/fake":     {adapter, "store"},
 	"internal/gcbd/gcbdtest": {adapter, "store"},
+	"internal/gcbd/fakegc":   {layer: binary},
 	"internal/daemon":        {adapter, "store"},
 	"internal/feedback":      {adapter, "feedback"},
 	"internal/git":           {adapter, "git"},
@@ -58,6 +59,7 @@ var pkgLayer = map[string]struct {
 	"arm":                    {layer: domain},
 	"arm/record":             {layer: domain},
 	"conversation":           {layer: domain},
+	"doctor":                 {layer: domain},
 	"epic":                   {layer: domain},
 	"listing":                {layer: domain},
 	"pr":                     {layer: domain},
@@ -65,7 +67,10 @@ var pkgLayer = map[string]struct {
 	"prstatus":               {layer: domain},
 	"prstatus/fixture":       {layer: domain},
 	"queue":                  {layer: domain},
+	"reaction":               {layer: domain},
+	"refinery":               {layer: domain},
 	"review":                 {layer: domain},
+	"session":                {layer: domain},
 	"waits":                  {layer: domain},
 	"internal/cli":           {layer: command},
 	"cmd/gctk":               {layer: binary},
@@ -105,8 +110,8 @@ func TestImportsPointDown(t *testing.T) {
 	}
 }
 
-// moduleImports reads, for each package in the module, the module packages its
-// non-test files import.
+// moduleImports reads, for each gctk package, the gctk packages its non-test
+// files import.
 func moduleImports(t *testing.T) map[string][]string {
 	t.Helper()
 	out := map[string][]string{}

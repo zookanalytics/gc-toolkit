@@ -229,7 +229,7 @@ ended comes back as a new sitting. A failed attach exits 4 once gc has said
 why.
 
 dismiss ends the sitting. react slings a proactive first reaction on the bead
-via tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
+through gctk reaction sling (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one update, and exits 4 before anything
 follows it when the store refuses that update. --release first removes the
 bead's arm through gctk bead disarm, so the deferred-dispatch start cannot send
@@ -257,7 +257,11 @@ lifts the bead's hold:mayor in the release's write, because sending a held bead
 on is a placement, and Gas City serves no bead a hold label holds, assigned or
 not. Both are refused on an anchor whose merge_result is pre_open_gate or
 pull_request, since the merge cadence drives it and work on its branch goes to
-a child. --assign is refused
+a child. --release itself is refused, with nothing written, on a bead whose PR
+waits on the pending record (pull_request_pending or
+pull_request_head_changed): the landing order works that bead while it is
+assigned to nobody, so a release would not stop it, and the refusal names what
+does, a human gate on the bead or the PR's retirement. --assign is refused
 beside --route and on a closed anchor, and without --waiting-on also on a bead
 blocked by anything but a human gate; with --waiting-on the named waits gate
 the hand-off, since the agent's hook offers the bead only once bd reports it
@@ -593,7 +597,6 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=dispatch-path.sh
 . "${GC_DISPATCH_PATH_LIB:-$SCRIPT_DIR/dispatch-path.sh}" \
     || { echo "$PROG: cannot source dispatch-path.sh from $SCRIPT_DIR" >&2; exit 3; }
-PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # The priority move's writer, which owns the priority function and the store's
 # priority lock.
 QUEUE_PRIORITY_TOOL="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPT_DIR/queue-priority.sh}"
@@ -1487,6 +1490,19 @@ cmd_takeaway() {
     fi
     # <<< takeaway-release-closed-anchor
 
+    # A bead whose PR waits on the pending record is assigned to nobody while
+    # the landing order works it, so a release, which reopens and unassigns it,
+    # leaves the order working it. A human gate on the bead holds its merge and
+    # its next review run, and the PR's retirement closes the PR and then the
+    # bead, so the refusal names those two. Refused before anything is written.
+    if [ -n "$release_park" ]; then
+        case "$anchor_mr" in
+            pull_request_pending|pull_request_head_changed)
+                echo "$PROG: takeaway: --release on $bead, whose PR waits on the pending record ($anchor_mr). The landing order works that bead while it is assigned to nobody, so a release would not stop it. To hold the PR for a person, file a human gate on $bead: $SCRIPT_DIR/human-gate.sh --subject $bead --key <key> --message '<what the person decides>'. To end the PR, retire it: $SCRIPT_DIR/pr-dispose.sh --anchor $bead --successor <bead> --kind <kind> --note '<why>', or --retire on a sitting's sign-off. Re-run without --release to land the headline alone. Nothing was written." >&2
+                exit 2 ;;
+        esac
+    fi
+
     # An anchor in a detached state rests unrouted and unassigned while the merge
     # cadence drives it (lifecycle.toml detached_states), and work on its branch
     # goes to a child (the prs skill). A route or an assignee would offer the
@@ -1558,9 +1574,11 @@ cmd_takeaway() {
     # workspace-setup, before the wait implements, pushes or hands off, so
     # equality proves the wait MEANS to ride this branch, not that its work is
     # on it. The proof its work landed is a post-push state: the wait is closed
-    # (merged), or its assignee is the refinery (the handoff submit-and-exit
-    # writes only after it verifies the push). Absent the proof — a wait still
-    # open under a pool, or a probe that will not read — the edge stands, so
+    # (merged), its assignee is the refinery (the handoff submit-and-exit
+    # writes only after it verifies the push), or its PR waits on the pending
+    # record, which only the refinery's publication of the pushed head writes.
+    # Absent the proof — a wait still open under a pool, or a probe that will
+    # not read — the edge stands, so
     # <bead> cannot merge past work that has not landed. Only a landed rider is
     # dropped; if EVERY named wait is one, the sitting is settled with respect to
     # all of them, so no_wait is set and the headline stamps gc.takeaway_settled
@@ -1593,10 +1611,12 @@ cmd_takeaway() {
             _wbranch=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then ((.[0].metadata // {}).branch // "") else "" end' 2>/dev/null)
             _wstatus=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)
             _wassignee=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then (.[0].assignee // "") else "" end' 2>/dev/null)
+            _wmr=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then ((.[0].metadata // {}).merge_result // "") else "" end' 2>/dev/null)
             _rider=""
             if [ -n "$subj_branch" ] && [ "$_wbranch" = "$subj_branch" ]; then
                 case "$_wstatus" in closed) _rider=1 ;; esac
                 case "$_wassignee" in refinery|*.refinery|*/refinery) _rider=1 ;; esac
+                case "$_wmr" in pull_request_pending|pull_request_head_changed) _rider=1 ;; esac
             fi
             if [ -n "$_rider" ]; then
                 skipped_riders="$skipped_riders $_w"
@@ -1660,11 +1680,11 @@ cmd_takeaway() {
         if [ -n "$blocked_by$route_waits" ] && [ "$dest_flag" = "--route" ]; then
             _rerun="Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest."
             [ -z "$route_waits" ] || _rerun="Re-run without --route, which still lands the headline, the release and the waits, and leaves the bead at rest."
-            echo "$PROG: takeaway: --route '$route' on $bead, ${blocked_by:+which is blocked by $blocked_by}${blocked_by:+${route_waits:+, and }}${route_waits:+whose --waiting-on names$route_waits}. None of those is a human gate on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever.${route_unread:+ The row of$route_unread did not read, so nothing shows it closed or a human gate.} $_rerun A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
+            echo "$PROG: takeaway: --route '$route' on $bead, ${blocked_by:+which is blocked by $blocked_by}${blocked_by:+${route_waits:+, and }}${route_waits:+whose --waiting-on names$route_waits}. None of those is a human gate on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever.${route_unread:+ The row of$route_unread did not read, so nothing shows it closed or a human gate.} $_rerun A bead that should reach a pool once its blocker clears is gctk reaction dispose --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
             exit 2
         fi
         if [ -n "$blocked_by" ]; then
-            echo "$PROG: takeaway: --assign '$assign' on $bead, which is blocked by $blocked_by. None of those is a human gate on $bead, so the work is on them: assigned, $bead reaches '$assign' once they close, as a record of work that already happened. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach '$assign' once its blocker clears names that wait: first-reaction-dispose.sh --disposition blocked --then-assign '$assign'." >&2
+            echo "$PROG: takeaway: --assign '$assign' on $bead, which is blocked by $blocked_by. None of those is a human gate on $bead, so the work is on them: assigned, $bead reaches '$assign' once they close, as a record of work that already happened. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach '$assign' once its blocker clears names that wait: gctk reaction dispose --disposition blocked --then-assign '$assign'." >&2
             exit 2
         fi
     fi
@@ -1745,7 +1765,7 @@ EOF
         fi
     fi
     # What follows a zero exit cannot be taken back: the run's end below, and
-    # what a caller writes next, as when first-reaction-dispose.sh arms, hands
+    # what a caller writes next, as when gctk reaction dispose arms, hands
     # over or holds the bead, or converse-signoff.sh resolves gates and closes
     # the conversation. So a refused update ends the verb here, with no wait
     # edge and no run's end, and a re-run writes the whole update again.
@@ -3360,18 +3380,15 @@ $gate_desc}"
 }
 
 # ── Verb: react ──────────────────────────────────────────────────────
-# Thin wrapper over tools/gc-proactive.sh `sling`, which applies the
-# refusals and slings a run of mol-first-reaction on the subject, so a
-# proactive worker reads the subject, writes a first-reaction card, and
-# disposes it.
+# One call of `gctk reaction sling`, which applies the refusals and slings a
+# run of mol-first-reaction on the subject, so a proactive worker reads the
+# subject, writes a first-reaction card, and disposes it.
 cmd_react() {
-    bead=""; reason=""; nudge=""; dry=""
+    bead=""; reason=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) reason="${1#--reason=}"; shift ;;
             --reason) shift; [ $# -gt 0 ] || { echo "$PROG: react: --reason requires a value" >&2; exit 2; }; reason="$1"; shift ;;
-            --nudge) nudge=1; shift ;;
-            -n|--dry-run) dry=1; shift ;;
             -h|--help) usage; exit 0 ;;
             -*) echo "$PROG: react: unknown flag '$1'" >&2; exit 2 ;;
             *) [ -z "$bead" ] || { echo "$PROG: react takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
@@ -3379,33 +3396,27 @@ cmd_react() {
     done
     [ -n "$bead" ] || { echo "$PROG: react needs <bead-id>" >&2; usage; exit 2; }
 
-    tool="$PROACTIVE_TOOL"
-    [ -x "$tool" ] || tool="$(command -v gc-proactive.sh 2>/dev/null || true)"
-    [ -n "$tool" ] && [ -x "$tool" ] \
-        || { echo "$PROG: react: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)" >&2; exit 4; }
+    if ! react_bin=$(helm_gctk); then
+        echo "$PROG: react: there is no gctk binary to sling a first reaction with (GCTK_BIN names one, or the city root its build sits under)" >&2
+        exit 4
+    fi
 
     # Resolve a PR reference or a settled disposition to the live owning bead
     # (parity with open), before the rig is derived from the id prefix.
     resolve_live_subject "$bead"
     bead="$RESOLVED_SUBJECT"
 
-    # Pin bd at the bead's rig (parity with open).
-    path=$(rig_path_for_bead "$bead")
-    [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
-
-    # gc-proactive.sh rig-qualifies its pool target from GC_RIG and fails
-    # closed when unset. Gate on the NAME resolving — not on $path/.beads
-    # existing — so a cross-rig react still qualifies the target.
+    # The sling's pool is the subject's rig's: gctk rig-qualifies it from
+    # GC_RIG and fails closed when GC_RIG is unset. Gate on the NAME
+    # resolving, so a cross-rig react still qualifies the target. gctk finds
+    # the subject's store itself.
     rig=$(rig_name_for_bead "$bead")
     [ -n "$rig" ] && export GC_RIG="$rig"
 
-    # The reason is log-only operator intent; gc-proactive.sh has no --reason.
+    # The reason is log-only operator intent; the sling takes none.
     [ -n "$reason" ] && echo "$PROG: react $bead — $reason" >&2
 
-    set -- sling "$bead"
-    [ -n "$nudge" ] && set -- "$@" --nudge
-    [ -n "$dry" ] && set -- "$@" --dry-run
-    # gc-proactive.sh sling refuses a subject with a code of its cause: 3 when a
+    # gctk reaction sling refuses a subject with a code of its cause: 3 when a
     # first reaction already runs on it or an open conversation tracks it, 4
     # when a live run of another formula works it, 5 when it is already routed
     # or armed, held, assigned, not open, or waits on a person's answer, and 6
@@ -3415,7 +3426,7 @@ cmd_react() {
     # (operator-intake.sh) files its own conversation, naming the cause,
     # instead of waiting for a reaction that is already running or never ran;
     # any other non-zero is a real failure.
-    if "$tool" "$@"; then
+    if "$react_bin" reaction sling "$bead"; then
         :
     else
         sling_rc=$?
@@ -3435,13 +3446,13 @@ cmd_react() {
             echo "$PROG: react: $bead is a standing record or a feedback pattern, whose kind takes no first reaction — nothing slung. Open a conversation directly." >&2
             exit 8
         fi
-        echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
+        echo "$PROG: react: gctk reaction sling '$bead' failed" >&2
         exit 4
     fi
 
     # The reaction runs async once the pool claims its step; just clear the
     # cache.
-    if [ -z "$dry" ]; then bust_cache; fi
+    bust_cache
 }
 
 # ── The current sitting, inferred from session state ─────────────────
@@ -4719,9 +4730,9 @@ engage_resolve_skill() {
 # files the subject's one conversation itself, through open, so the subject
 # exists for a moment before anything tracks it. It is filed assigned to
 # `human`, the operator who asked, in the create itself, so no first reaction
-# can start on it in that moment: the scan reads only unassigned beads, and
-# tools/gc-proactive.sh sling refuses an assigned one, as a reaction's own
-# first act does. Once its conversation is filed, open hands the subject to it
+# can start on it in that moment: the sweep reads only unassigned beads, and
+# gctk reaction sling refuses an assigned one, as a reaction's own first act
+# does. Once its conversation is filed, open hands the subject to it
 # (open_handoff), and from then the open conversation keeps a first reaction
 # off it. gc.origin=operator is the honest origin.
 create_subject() {

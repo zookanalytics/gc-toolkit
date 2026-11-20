@@ -12,7 +12,7 @@ Components 5-6). A first reaction is a run of `formulas/mol-first-reaction.toml`
 slung on its subject (specs/tk-1tfzr71.105/design.md). A proactive worker claims
 the run's one step, `react`, reads the subject as the run's input convoy's one
 member, and runs the refusals check as its first act
-(`tools/gc-proactive.sh sling <subject> --check --run <root>`). It then gives the
+(`gctk reaction check <subject> --run <root>`). It then gives the
 subject a cheap first reaction: it writes a first-reaction card to the notes,
 headed with its run, and disposes the subject. It routes the subject to the pool
 that does that work or holds it with Gas City's `hold:mayor` label for the
@@ -31,9 +31,9 @@ supersession banner before citing the rest of it.
 ## Why we built this
 
 "Proactive" is deliberately NOT a resident loop (the operator deferred that). A
-reaction is a run slung per subject — by `tools/gc-proactive.sh sling`
+reaction is a run slung per subject — by `gctk reaction sling`
 (operator/board one-shot, via `gc-helm react`, and a patrol finding at filing)
-or the scan order's `scan --sling` sweep over movable-forward beads — and the
+or the scan order's `gctk reaction sweep` over movable-forward beads — and the
 pour routes its step here. This pool is where those reactions execute. It is a
 sibling of the impl polecat pool (same worktree/refinery machinery) with three
 deliberate differences, all from the design's budget + security commitments:
@@ -77,10 +77,10 @@ The first reaction NEVER closes its subject — every disposition advances it
 and leaves it open, the `close` disposition included: it routes the subject to a
 validating closer (mol-validate-close), which re-checks the no-work call and
 closes the subject on its own confident check or escalates.
-`assets/scripts/first-reaction-dispose.sh` performs each of them through native
-writes. No key on the subject records that a reaction landed: the run is the
-record while it runs, `gc sling` refuses a second, and the state the exit wrote
-and its headline keep the subject out of the scan afterwards. A worker that dies
+`gctk reaction dispose` performs each of them through native writes. No key on
+the subject records that a reaction landed: the run is the record while it
+runs, `gc sling` refuses a second, and the state the exit wrote and its
+headline keep the subject out of the scan afterwards. A worker that dies
 before it closes its step leaves the step to the next, whose check passes only
 while the exit has not dispatched the subject; that worker finds the card its run
 wrote and re-runs the same exit. The card in the subject's notes records which
@@ -95,9 +95,9 @@ routes or holds, a determinable action that warrants the operator's trigger is a
 recommend, and only a genuine fork, an irreversible or destructive action, or a
 policy call with no action to offer is a ruling. The guardrail lives in the
 reacting agent's rubric (`agents/proactive/prompt.template.md`), not in an
-origin gate on the script.
+origin gate on `gctk reaction dispose`.
 
-Gate: `tools/gc-proactive.test.sh` covers the sling, its refusals, the check and
-the scan; `assets/scripts/first-reaction-dispose.test.sh` covers the exits
-themselves. Design refs: specs/tk-1tfzr71.105/design.md; design-doc.md Key
-Components 5-6, Phase 4.
+Gate: the Go tests of `services/gctk/reaction` cover the sling, its refusals,
+the check, the sweep and the exits.
+Design refs: specs/tk-1tfzr71.105/design.md; design-doc.md Key Components 5-6,
+Phase 4.

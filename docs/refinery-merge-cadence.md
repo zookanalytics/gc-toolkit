@@ -993,8 +993,10 @@ A run acts from the beads. It lists the beads that carry the marker
 `pr_reconcile_pending`, and every live bead, in one pass over the store, and
 decides each record from the store and the read the one-PR update saved on its
 bead ([The PR watch](#the-pr-watch)), by the evaluator's rule as `gctk pr
-status` applies it. It decides each bead the refinery holds on the record with
-a ruling's disposition on it too, with or without the marker. It reads GitHub
+status` applies it. It decides each bead on the record with a ruling's
+disposition on it too, with or without the marker. It takes an open or
+blocked bead only while it is assigned to nobody or to the refinery, and
+writes nothing to a bead someone else works. It reads GitHub
 only for a merge, so it reads no record's PR to decide and takes no count of
 records. It takes the records that owe an act in a shuffled order, so a record
 whose act is slow or keeps failing holds no other back, starts no act more than
@@ -1020,10 +1022,10 @@ through the PR watch, and a record that owes no act gets no write.
 | The PR | The run |
 |---|---|
 | open at the head the refinery validated | marks a draft ready, without waiting for CI, once a review result passed at that head and target, no review run is attached and no ask a run can take is open. Otherwise it asks the evaluator over the saved read whether the PR is ready. A ready one gets the merge's own read of GitHub, made in its act, on which the evaluator decides again, and GitHub is asked to squash-merge it only while its head is the head that read judged (`mergePullRequest` with `expectedHeadOid`), or to add it to its base's merge queue with that head where the base requires one. One that is not ready gets a review run when no review result passed at that head and target, or an ask nothing holds is open on the bead (below). The next run decides again from the read the PR watch saves next |
-| open at another head | sends the bead back to the refinery, open, as `pull_request_head_changed`, and wakes the refinery for it while only conversations and asks hold the bead (below). The refinery validates the new head and records it pending again. When it will not land the head as it stands, such as on a conflict with the target, it files the reason as an ask and then records the PR pending at the head its prep read (`refinery-requeue.sh`), so the ask holds the merge before the head is pending, a later run pours the review run that answers it, and its find-work leaves the ask alone. The saved read can be older than the refinery's record, since the refinery pushes a head before it records it and validates whatever its prep fetched, a branch a person rewrote included, so the act fetches the PR's branch before it sends anything back. A tip at the saved head confirms the read, and the bead goes back at it. When the tip contains the validated head, in the history the rig's clone holds, nothing is sent back until the PR watch reads the PR again. Any other tip goes back as the head the branch holds, and a fetch or a read that fails sends nothing back until the next run. The refinery's prep takes the branch as it fetches it, so a reset head is the one it validates (`refinery-prep.sh`) |
+| open at another head | records the bead open, as `pull_request_head_changed`, and hands the head to the refinery in the write that assigns it the bead, once no withdrawal and no review run holds the head. While only conversations and asks hold the bead, it wakes the refinery after that write and clears the marker only once the wake lands (below). The refinery validates the new head and records it pending again. When it will not land the head as it stands, such as on a conflict with the target, it files the reason as an ask and then records the PR pending at the head its prep read (`refinery-requeue.sh`), so the ask holds the merge before the head is pending, a later run pours the review run that answers it, and its find-work leaves the ask alone. The saved read can be older than the refinery's record, since the refinery pushes a head before it records it and validates whatever its prep fetched, a branch a person rewrote included, so the act fetches the PR's branch before it sends anything back. A tip at the saved head confirms the read, and the bead goes back at it. When the tip contains the validated head, in the history the rig's clone holds, nothing is sent back until the PR watch reads the PR again. Any other tip goes back as the head the branch holds, and a fetch or a read that fails sends nothing back until the next run. The refinery's prep takes the branch as it fetches it, so a reset head is the one it validates (`refinery-prep.sh`) |
 | merged at the validated head, with the merge commit on the freshly fetched target | records `mr_merged` and closes the bead; when bd refuses that close, for an open child or a live blocker, records the exception `pull_request_merged_close_refused` with the merge's evidence, and files its human gate |
 | closed unmerged, merged at another head, or no longer the PR the record names | records the exception, keeps the bead blocked and files a human gate keyed by its value |
-| retired by a ruling, whose bead carries the disposition `pr-dispose.sh` records under the record lock before it closes the PR | requests no merge, pours no review run and marks nothing ready while the PR is open. Once the saved read finds the PR closed and no review run is attached, an act closes the asks and the withdrawals still open on the bead, then, with the record lock free, closes the bead onto the ruling's successor through `bead-rehome.sh`, run as the refinery ([state-machine.md](state-machine.md#disposition)). The script closes it only while it still has the status and assignee the act read under the lock and still records the ruling the act read, so a bead released or ruled again once the lock is free goes to the next run, which reads it again. A close the script holds, such as one the ruling's open conversation holds, waits for the next run, which hands it over again, and fails no run. A retired PR that merged all the same lands as any other |
+| retired by a ruling, whose bead carries the disposition `pr-dispose.sh` records under the record lock before it closes the PR | requests no merge, pours no review run and marks nothing ready while the PR is open. Once the saved read finds the PR closed and no review run is attached, an act closes the asks and the withdrawals still open on the bead, then, with the record lock free, closes the bead onto the ruling's successor through `bead-rehome.sh`, run as the refinery ([state-machine.md](state-machine.md#disposition)). The script closes it only while it still has the status and assignee the act read under the lock and still records the ruling the act read, so a bead reassigned or ruled again once the lock is free goes to the next run, which reads it again. A close the script holds, such as one the ruling's open conversation holds, waits for the next run, which hands it over again, and fails no run. A retired PR that merged all the same lands as any other |
 | no read of the PR saved on the bead, or a read of another PR | nothing, until the PR watch saves the PR's read |
 | an act that did not complete: a request GitHub refused or did not answer, a fetch that failed, a merge commit not yet on the target, or an act stopped at its 30 seconds | records nothing: the difference stays on the bead, the next run acts on it, and the run exits 2, so Gas City's run record holds the failure |
 
@@ -1044,8 +1046,8 @@ approval is dismissed. When GitHub refuses a dismissal, it files a human gate
 on the bead keyed `approval-withdraw-refused`. A dismissal GitHub does not
 answer, a fetch that fails, or a read of the clone's history that does not
 answer, leaves the withdrawal for the next run. A withdrawal holds the bead
-from the refinery until it is carried out, so a record the run sends back to
-the refinery keeps its marker while one is open, and the order still reads it.
+from the refinery until it is carried out, so a changed head stays assigned to
+nobody and keeps its marker while one is open, and the order still reads it.
 
 **The review run.** A run pours a PR's review run, `mol-pr-review`, with
 `gc formula cook --attach` onto the bead under the record lock. Its vars are the
@@ -1062,19 +1064,51 @@ only runs that ended after the bead's last `review-run-failed` gate closed, it
 files a human gate keyed `review-run-failed` instead, naming both runs and how
 each ended ([state-machine.md](state-machine.md#checks)).
 
+**A pour cut short.** The pour is one `gc formula cook --attach`. It writes the
+bead's input convoy, then the review run, and last, in a write of its own, the
+bead's `blocks` edge onto the run's root (`wireFormulaCookGraphV2AttachRoot`,
+gascity `cmd/gc/cmd_formula.go`). A launch that stops between the run's write
+and the edge's leaves a review run that no edge of the bead names. bd writes
+the run in one transaction, so that run is whole, unless a transient failure
+had Gas City write it bead by bead (`Instantiate`, gascity
+`internal/molecule/molecule.go`), where a launch that stops partway leaves part
+of one. A launch stops there when Gas City
+ends the order's run at the order's timeout, which ends the run's process group
+and each group the run started, the cook's among them (`shellExecRunner`,
+gascity `cmd/gc/order_dispatch.go`), when the host goes down, or when the store
+fails the edge's write, on which the cook exits non-zero and leaves the run.
+The next run of the order then finds no run attached and pours a second at
+that head. That costs one more review of the head, because a review run pushes
+only under a lease on the head its round judged, and Gas City's claim retires
+the first once the refinery is assigned the bead. Gas City does not promise one
+run per bead here: each attach onto a bare bead makes an input convoy of its
+own, and "A caller that wants stable grouping or dedupe should create and
+target an explicit convoy" (gascity
+`engdocs/design/convoy-first-formulas-and-drain-v0.md`). Measured on
+2026-11-19, the 49 attaches the order made on 2026-11-17 wrote the edge 6 to 21
+seconds after the run's root was created, about 10 on average, and none of the
+135 review runs poured from 2026-11-17 to 2026-11-19 lacks its edge. The pack
+carries no code for this gap, and nothing in it watches for such a run.
+
 **How the refinery hears of a changed head.** A changed head is the refinery's
 to take once no withdrawal is open on the bead and no review run is attached to
-it, and the record keeps its marker until then, so a later run carries the
-withdrawal out or reads the run's end. The run then clears the marker. When
-nothing holds the bead at that point, Gas City gives the refinery its turn: an
+it. Until then the bead stays assigned to nobody and keeps its marker, so a
+later run carries the withdrawal out or reads the run's end, and no run is ever
+attached to a bead the refinery is assigned, which Gas City's claim would read
+as handed off ([the search](../specs/tk-1tfzr71.209/gas-city-search.md)). The
+run then hands the head over in one write that assigns the bead to the
+refinery and clears the marker. When nothing holds the bead at that point, Gas
+City gives the refinery its turn: an
 open bead assigned to the refinery that the store reads as ready is demand that
 wakes it, and core's `cascade-nudge-on-blocker-close` order nudges it when the
 bead's last blocker closes. A conversation or an ask on the PR holds the bead
 too, and holds only its merge, so the refinery's find-work takes the bead past
 it, but while one is open Gas City gives the refinery no turn for the bead. So
-when only conversations and asks hold the bead, the run wakes the refinery and
-nudges it, with `gc session wake` and `gc session nudge` as a polecat's
-hand-off does, before the write that clears the marker. That is the run that
+when only conversations and asks hold the bead, the run hands the head over in
+two writes with the wake between them. It assigns the bead to the refinery,
+wakes the refinery and nudges it, with `gc session wake` and
+`gc session nudge` as a polecat's hand-off does, and only then clears the
+marker, so the find-work the wake starts lists the bead. That is the run that
 requeues the head when no withdrawal or run holds it, and otherwise the first
 run after the review run or the withdrawal ends, since each run decides every
 record from the beads. A run that comes to the act more than 45 seconds in does
@@ -1113,11 +1147,17 @@ Gas City's gates and each event would start a run of its own.
 
 **What a run acts on.** A run acts only on a bead it reads under the lock as
 carrying the marker, or as an open or blocked bead on the record that carries a
-ruling's disposition, with or without the marker, and, unless the bead is
-closed, still assigned to the refinery, and each write is guarded on the status
-and assignee it read. A bead
-that a release took from the refinery has its marker cleared and its PR named
-in a note, and nothing else written.
+ruling's disposition, with or without the marker, and each write is guarded on
+the status and assignee it read. A bead's assignee says who works it now:
+nobody while its PR waits, and the refinery while it validates a head the PR
+moved to. A bead assigned to anyone else is that assignee's while they work
+it. A run does not take it, and a run that reads it assigned after taking it
+writes nothing to it, requests no merge and pours no review run. The PR's
+status names who holds it, and a later run works it once the assignee is gone.
+What takes a PR off the record is a write that says so: the refinery's send-back
+to the pool clears the marker in the write that reopens the bead, and a ruling
+retires the PR. A human gate on the bead holds its merge and its next review
+run.
 
 **The labels.** A run keeps each PR's `status:` and `held:` labels equal to
 what the store derives, for every PR the rig's live beads own, on the pending

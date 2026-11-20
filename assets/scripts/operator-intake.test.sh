@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for operator-intake.sh — the operator's intake.
 # Runs the REAL script (via `sh`, as shipped) with `gc`,
-# `gc-helm.sh` and `gc-proactive.sh` stubbed on PATH — no live city, Dolt,
+# `gc-helm.sh` and gctk's `reaction deliverable` stubbed — no live city, Dolt,
 # network, or sessions.
 #
 # What the cases are guarding, and why each one was worth a test:
@@ -201,18 +201,19 @@ fi
 exit "${FAKE_HELM_RC:-0}"
 HELM
 
-# --- gc-proactive.sh stub -----------------------------------------------------
-# $FAKE_DELIVERABLE picks the deliverable answer: yes / no.
-cat > "$TMP/bin/gc-proactive.sh" <<'PRO'
+# --- gctk stub ----------------------------------------------------------------
+# $FAKE_DELIVERABLE picks the answer of `gctk reaction deliverable`: yes / no.
+cat > "$TMP/bin/gctk" <<'GCTK'
 #!/usr/bin/env bash
-printf 'proactive %s\n' "$*" >> "$FAKE_CALLS"
+printf 'gctk %s GC_RIG=%s\n' "$*" "${GC_RIG:-}" >> "$FAKE_CALLS"
+[ "$1 $2" = "reaction deliverable" ] || { echo "gctk stub: unexpected call: $*" >&2; exit 2; }
 case "${FAKE_DELIVERABLE:-yes}" in
   yes) echo "yes: the proactive pool is always on — its cap only queues a routed reaction"; exit 0 ;;
   no)  echo "no: this pool cannot run it (stub-stated reason) — a routed reaction would sit unclaimed"; exit 1 ;;
 esac
-PRO
+GCTK
 
-chmod +x "$TMP/bin/gc" "$TMP/bin/gc-helm.sh" "$TMP/bin/gc-proactive.sh"
+chmod +x "$TMP/bin/gc" "$TMP/bin/gc-helm.sh" "$TMP/bin/gctk"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_CALLS="$TMP/calls"
@@ -221,7 +222,7 @@ export FAKE_BODY="$TMP/body"
 export FAKE_RIGS="$TMP/rigs"
 export FAKE_STATUS_CALLS="$TMP/status-calls"
 export GC_HELM_TOOL="$TMP/bin/gc-helm.sh"
-export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
+export GCTK_BIN="$TMP/bin/gctk"
 export TMPDIR="$TMP"
 
 # run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS/STATUS_CALLS
@@ -258,6 +259,7 @@ has "$CALLS" "-d why is dolt wedging under load" "(DIRECT) the topic is the subj
 run yes "how should we shard the refinery queue"
 eq "$RC" "0" "(SINGLE) the react path exits 0"
 has "$CALLS" "helm react tk-newsub" "(SINGLE) a first reaction is filed for the new subject"
+has "$CALLS" "gctk reaction deliverable GC_RIG=gc-toolkit" "(SINGLE) the pool's answer is asked under the subject's rig"
 hasnt "$CALLS" "helm open" "(SINGLE) no conversation is filed — the reaction files it"
 has "$OUT" "nothing waits on you yet" "(SINGLE) the operator is told nothing waits on them yet"
 has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"
@@ -271,14 +273,14 @@ has "$OUT" "conversation filed" "(SHED) the summary reports a filed conversation
 run no "a topic"
 has "$OUT" "stub-stated reason" "(SHED) the tool's stated reason is relayed verbatim"
 
-# A proactive tool that is missing entirely is the same situation: no reaction
-# is coming, so the conversation must be filed rather than waited for.
+# A gctk that is missing entirely is the same situation: no reaction is
+# coming, so the conversation must be filed rather than waited for.
 : > "$FAKE_CALLS"
 set +e
-OUT="$(GC_PROACTIVE_TOOL="$TMP/bin/nonexistent.sh" sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
+OUT="$(GCTK_BIN="$TMP/bin/nonexistent" sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
 set -e
 CALLS="$(cat "$FAKE_CALLS")"
-eq "$RC" "0" "(SHED/missing) a missing gc-proactive.sh still exits 0"
+eq "$RC" "0" "(SHED/missing) a missing gctk still exits 0"
 has "$CALLS" "helm open tk-newsub" "(SHED/missing) the conversation is filed directly"
 
 # --- (RECOVER) a reaction that fails to file still ends in a conversation -----

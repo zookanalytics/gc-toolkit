@@ -16,13 +16,25 @@ type Codec[T any] struct {
 	Type   string
 	Decode func(string) (T, error)
 	Encode func(T) (string, error)
+
+	// falseUnset reads a stored JSON false as a value the row does not hold.
+	// A JSON key decodes a stored false as it decodes any other value.
+	falseUnset bool
 }
 
-// String is the codec of a key stored as plain text.
+// String is the codec of a key that holds text, such as an id, a name or a
+// time, or a marker that is off until something sets it. Text has no false,
+// and a marker that holds false is off, as an unset one is. So a stored JSON
+// false holds no value, as a null holds none, and a string "false" keeps its
+// text. bd stores a value spelled false, such as --set-metadata k=false writes,
+// as JSON false. A key whose false differs from unset, such as a setting that
+// is on until someone turns it off, is declared with JSON[bool], which reads a
+// stored false as false.
 var String = Codec[string]{
-	Type:   "string",
-	Decode: func(s string) (string, error) { return s, nil },
-	Encode: func(s string) (string, error) { return s, nil },
+	Type:       "string",
+	Decode:     func(s string) (string, error) { return s, nil },
+	Encode:     func(s string) (string, error) { return s, nil },
+	falseUnset: true,
 }
 
 // JSON is the codec of a key stored as one JSON value in a string.
@@ -112,7 +124,7 @@ func (v View[T]) Name() string { return v.key.Name() }
 // decode is an error.
 func (k Key[T]) Get(r *Record) (v T, ok bool, err error) {
 	for _, name := range append([]string{k.decl.name}, k.decl.aliases...) {
-		raw, held := r.value(name)
+		raw, held := r.value(name, k.codec.falseUnset)
 		if !held {
 			continue
 		}
@@ -254,11 +266,11 @@ func RegistryJSON() ([]byte, error) {
 	return append(raw, '\n'), nil
 }
 
-// modulePath is the module every declaring package sits in. The registry names
-// a package by its path within it.
+// modulePath is gctk's import path, which every declaring package sits under.
+// The registry names a package by its path within it.
 const modulePath = "github.com/zookanalytics/gc-toolkit/services/gctk/"
 
-// callerPackage is the import path, within the module, of the package whose
+// callerPackage is the import path, within gctk, of the package whose
 // code is skip frames up the stack. A key's owner is the package that declared
 // it, so no declaration names its owner by hand.
 func callerPackage(skip int) string {

@@ -278,6 +278,31 @@ func (c *Client) Rows(ids []string) ([]Bead, error) {
 	return rows, nil
 }
 
+// Dependents reads the beads that have an edge of type typ onto id, in one
+// `gc bd dep list <id> --direction=up --type <typ> --json`, under Blocked's
+// strict contract. Each row is the dependent's own fields, its metadata among
+// them, with the edge's type in DependencyType, and carries none of its own
+// edges. bd refuses an id it cannot resolve, so an id the store does not hold
+// fails the read with a *ReadError.
+func (c *Client) Dependents(id, typ string) ([]Bead, error) {
+	raw, err := c.strictArray("bd", "dep", "list", id, "--direction=up", "--type", typ, "--json")
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var rows []Bead
+	if err := dec.Decode(&rows); err != nil {
+		return nil, &ReadError{ID: id, Reason: "gc bd dep list's rows did not decode: " + err.Error()}
+	}
+	for i := range rows {
+		if rows[i].ID == "" {
+			return nil, &ReadError{ID: id, Reason: "gc bd dep list returned a row with no id"}
+		}
+	}
+	return rows, nil
+}
+
 // Blocked reads the store's blocked set: `gc bd blocked`, then the marks it is
 // checked against. A read that fails returns a *ReadError.
 func (c *Client) Blocked() (*BlockedSet, error) {

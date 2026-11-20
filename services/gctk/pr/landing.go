@@ -24,24 +24,28 @@ import (
 // store and the read the one-PR update (refresh.go) saved on its bead, and
 // reads GitHub only for a merge, which it decides again on its own read of the
 // PR and pins to the head it judged. It closes a bead once the merge commit is
-// on the target, sends a changed head back to the refinery and sees that the
+// on the target, hands a changed head to the refinery and sees that the
 // refinery hears of it, keeps the exceptions blocked behind a human gate, marks
 // a draft ready and carries out an approval's withdrawal, each from the saved
-// read. A ruling that retires a PR records its disposition on the bead under
-// the record lock and then closes the PR (pr-dispose.sh). A run requests no
-// merge of a PR whose bead carries it, and once the saved read finds the PR
-// closed the bead goes to the disposition writer, bead-rehome.sh, which closes
-// it onto the successor the ruling named, with the lock free, while the bead
-// still has the status and assignee the run judged and still records that
-// ruling. A run saves none of what GitHub says: the one-PR update is the one
-// writer of GitHub's side on a bead, the saved read, pr_state and
-// pr_last_checked_at. Both take the store's record lock, Record across both of
-// its writes and a run for one act at a time, and every write they make
-// carries bd's guards on the status and the assignee
-// read under the lock, so neither writes over a bead that a close or a release
-// reached first. A run that lands a PR on the rig's default branch then checks
-// that branch's seed audit with the lock free, and asks for the branch's
-// re-render when the audit is stale, holding no PR for it (the design's call 1).
+// read. A bead's assignee says who works it now (Gas City's delivery of work to
+// a session): the refinery while it validates a head, and nobody while the PR
+// waits. A run works a bead assigned to nobody or to the refinery, and leaves
+// one assigned to anyone else to that assignee. A ruling that retires a PR
+// records its disposition on the bead under the record lock and then closes
+// the PR (pr-dispose.sh). A run requests no merge of a PR whose bead carries
+// it, and once the saved read finds the PR closed the bead goes to the
+// disposition writer, bead-rehome.sh, which closes it onto the successor the
+// ruling named, with the lock free, while the bead still has the status and
+// assignee the run judged and still records that ruling. A run saves none of
+// what GitHub says: the one-PR update is the one writer of GitHub's side on a
+// bead, the saved read, pr_state and pr_last_checked_at. Both take the store's
+// record lock, Record across both of its writes and a run for one act at a
+// time, and every write they make carries bd's guards on the status and the
+// assignee read under the lock, so neither writes over a bead that a close or
+// an assignment reached first. A run that lands a PR on the rig's default
+// branch then checks that branch's seed audit with the lock free, and asks for
+// the branch's re-render when the audit is stale, holding no PR for it (the
+// design's call 1).
 
 // Hub is GitHub as the landing order and the draft cycle reach it: the
 // evaluator's reads, which the merge makes, a merge request or an enqueue
@@ -102,11 +106,11 @@ type Waker interface {
 // Dispositions is the writer of a close that is not a landing, bead-rehome.sh,
 // as the landing order reaches it for a bead whose PR a ruling retired. Close
 // closes the bead x names onto the successor its ruling named, under its kind,
-// with its note beside the close, acting as the refinery the bead is assigned
-// to. The writer takes the store's record lock itself, from its read of the
-// bead to its close, so the order calls it with the lock free, and it closes
-// the bead only while the bead still has the status and assignee the run
-// judged it under and still records the ruling the run read. A close the writer
+// with its note beside the close, acting as the refinery. The writer takes the
+// store's record lock itself, from its read of the bead to its close, so the
+// order calls it with the lock free, and it closes the bead only while the bead
+// still has the status and assignee the run judged it under and still records
+// the ruling the run read. A close the writer
 // holds for now, because a wait on the bead is still open or the bead moved
 // since the run judged it or since the writer read it, is a *HeldClose. An act
 // does not stop the writer, since it ends the bead's branch on the git remote
@@ -141,26 +145,27 @@ func (d Disposition) ruling() string {
 // HeldClose is a disposition's close the writer holds for now, saying why: a
 // wait still open on the bead, such as the conversation of the sitting that
 // ruled, or a move since the run judged the bead or the writer read it, such as
-// a release or a second ruling. The next run reads the bead again.
+// an assignment or a second ruling. The next run reads the bead again.
 type HeldClose struct{ Why string }
 
 func (e *HeldClose) Error() string { return e.Why }
 
 // Landing is what the record's verbs act through. Dir is the store's .beads
-// directory, where the record lock lives, and Refinery the assignee of a bead
-// the refinery holds, which is also the session Wake wakes. Hub is GitHub on a
-// host, each call stopped when ctx ends. Feedback loads the definition of
-// feedback, once a run first needs it. Mark reads the city's mark, which a
-// dismissal's message carries, from the writer that owns it. Runs pours a PR's
-// review run, and Dispositions closes a bead whose PR a ruling retired. Audit
-// is the rig's seed audit, nil for a rig whose repository carries none. Wake
-// gives the refinery a turn for a changed head that only conversations and asks
-// hold. Labels keeps the labels of each PR the store's live beads own equal to
-// the ones the store derives, and a run writes none when it is nil. Wait bounds
-// how long a writer waits for the lock, and Yield is how long a run lets the
-// lock stand free between two acts, so a writer waiting for it takes it.
-// Shuffle orders the acts a run takes, at random when nil. Now is the clock a
-// write's stamp and a run's window read, the system's when nil.
+// directory, where the record lock lives, and Refinery the refinery's assignee,
+// the one a hand-over of a changed head assigns, which is also the session Wake
+// wakes. Hub is GitHub on a host, each call stopped when ctx ends. Feedback
+// loads the definition of feedback, once a run first needs it. Mark reads the
+// city's mark, which a dismissal's message carries, from the writer that owns
+// it. Runs pours a PR's review run, and Dispositions closes a bead whose PR a
+// ruling retired. Audit is the rig's seed audit, nil for a rig whose repository
+// carries none. Wake gives the refinery a turn for a changed head that only
+// conversations and asks hold. Labels keeps the labels of each PR the store's
+// live beads own equal to the ones the store derives, and a run writes none
+// when it is nil. Wait bounds how long a writer waits for the lock, and Yield
+// is how long a run lets the lock stand free between two acts, so a writer
+// waiting for it takes it. Shuffle orders the acts a run takes, at random when
+// nil. Now is the clock a write's stamp and a run's window read, the system's
+// when nil.
 type Landing struct {
 	Ledger       *ledger.Ledger
 	Dir          string
@@ -203,11 +208,12 @@ func (e *Refusal) Error() string {
 
 // Record writes the pending record of p on bead, in Gas Town's two writes,
 // holding the record lock across both: first the marker and the PR the refinery
-// may reuse, then the whole record with the bead blocked. It reads the bead
-// under the lock first, and writes only on a bead that is not closed and is
-// assigned to the refinery, each write guarded on the status and assignee it
-// read. A bead it refuses returns a *Refusal. The PR must be in the rig's own
-// repository, which Record checks before it takes the lock.
+// may reuse, then the whole record with the bead blocked and assigned to
+// nobody. It reads the bead under the lock first, and writes only on a bead that
+// is not closed and is assigned to the refinery, each write guarded on the
+// status and assignee it read. A bead it refuses returns a *Refusal. The PR
+// must be in the rig's own repository, which Record checks before it takes the
+// lock.
 func (l Landing) Record(bead string, p record.Publication) error {
 	if err := p.Valid(); err != nil {
 		return err
@@ -240,7 +246,7 @@ func (l Landing) Record(bead string, p record.Publication) error {
 	record.Arm(arm, p.URL)
 	if err := l.Ledger.Commit(arm); err != nil {
 		if errors.Is(err, ledger.ErrGuard) {
-			return &Refusal{Bead: bead, Why: "it was closed or released after this publication read it"}
+			return &Refusal{Bead: bead, Why: "it was closed or reassigned after this publication read it"}
 		}
 		return err
 	}
@@ -249,7 +255,7 @@ func (l Landing) Record(bead string, p record.Publication) error {
 	record.Publish(publish, p)
 	if err := l.Ledger.Commit(publish); err != nil {
 		if errors.Is(err, ledger.ErrGuard) {
-			return &Refusal{Bead: bead, Armed: true, Why: "it was closed or released between the publication's two writes"}
+			return &Refusal{Bead: bead, Armed: true, Why: "it was closed or reassigned between the publication's two writes"}
 		}
 		return fmt.Errorf("%s: the marker landed and the record did not: %w", bead, err)
 	}
@@ -288,8 +294,8 @@ const (
 	// ActDisposed: the PR closed under the disposition a ruling recorded, and
 	// the disposition writer closed the bead onto the ruling's successor.
 	ActDisposed = "disposed"
-	// ActRequeued: the PR is open at another head, and the bead went back to the
-	// refinery.
+	// ActRequeued: the PR is open at another head, and the run recorded it,
+	// handing the head to the refinery unless something the order owes holds it.
 	ActRequeued = "requeued"
 	// ActRevalidate: the record was half written, and the bead went back to the
 	// refinery for its full validation.
@@ -305,9 +311,12 @@ const (
 	// ones the store derives, and the run had the labels' writer write them:
 	// the derived labels on an open PR, and none on one that merged or closed.
 	ActLabeled = "labeled"
-	// ActReleased: a release took the bead from the refinery, and the run cleared
-	// the marker and named the PR in a note.
-	ActReleased = "released"
+	// ActAssigned: the bead is assigned to someone other than the refinery, who
+	// works it now, so the act wrote nothing to it, requested no merge and
+	// poured no review run. A run decides no such bead from its pass (plan), so
+	// this one was assigned after the pass read it, and a later run works it
+	// once the assignee is gone.
+	ActAssigned = "assigned"
 	// ActSettled: no further run is owed, and the run cleared the marker.
 	ActSettled = "settled"
 	// ActBlocked: the publication's second write had landed on a bead still
@@ -343,14 +352,15 @@ type Options struct {
 	Stop   time.Duration
 }
 
-// Reconcile is one run of the landing order. It reads the store once, through
-// a ledger pass that lists the beads that carry the marker, closed ones too,
-// and every live bead, and decides each record that carries the marker, and
-// each bead on the record that carries a ruling's disposition (disposing), from
-// the store and the read saved on its bead. A record that owes no act reports
-// what it waits on. With Labels set, each PR the live beads own whose saved
-// labels differ from the ones the store derives owes a label write too
-// (labelPlans). The records and the PRs that owe an act are taken in a
+// Reconcile is one run of the landing order. It reads the store once, through a
+// ledger pass that lists the beads that carry the marker, closed ones too, and
+// every live bead, and decides each record that carries the marker, and each
+// bead on the record that carries a ruling's disposition (disposing), an open
+// or blocked one only while it is assigned to nobody or to the refinery
+// (mayWork), from the store and the read saved on its bead. A record that owes
+// no act reports what it waits on. With Labels set, each PR the live beads own
+// whose saved labels differ from the ones the store derives owes a label write
+// too (labelPlans). The records and the PRs that owe an act are taken in a
 // shuffled order, so one whose act is slow or keeps failing holds no other
 // back, and none is started past o.Window. Each record's act reads its record
 // again under the record lock, decides again from that read, and acts within
@@ -358,11 +368,11 @@ type Options struct {
 // write takes no lock and writes nothing on the bead, and stops at o.Stop too.
 // A bead whose PR closed under a ruling's disposition goes to the disposition
 // writer once the lock is released (dispose). A record that lands on the rig's
-// default branch has the branch's seed audit checked once the lock is
-// released, inside the window, and its outcome says what the check found. It
-// reports each outcome to report as it goes, and returns an error when the
-// listing did not answer, or when a record or a PR's labels could not be
-// decided or its act did not complete.
+// default branch has the branch's seed audit checked once the lock is released,
+// inside the window, and its outcome says what the check found. It reports each
+// outcome to report as it goes, and returns an error when the listing did not
+// answer, or when a record or a PR's labels could not be decided or its act did
+// not complete.
 func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	u := &run{Landing: l}
 	start := u.clock()
@@ -446,10 +456,10 @@ func (l Landing) clock() time.Time {
 
 // disposing reports whether a run reads r for the disposition a ruling
 // recorded on it, whatever its marker: r owns a PR on the record, is open or
-// blocked, is the refinery's and carries a whole disposition. rec is r's
-// record.
+// blocked, is assigned to nobody or to the refinery and carries a whole
+// disposition. rec is r's record.
 func (l Landing) disposing(r *ledger.Record, rec record.Record) bool {
-	if !record.OnRecord(rec.Result) || r.Assignee() != l.Refinery {
+	if !record.OnRecord(rec.Result) || !l.mayWork(r) {
 		return false
 	}
 	if s := r.Status(); s != "open" && s != "blocked" {
@@ -457,6 +467,13 @@ func (l Landing) disposing(r *ledger.Record, rec record.Record) bool {
 	}
 	_, whole, err := dispositionOf(r)
 	return err == nil && whole
+}
+
+// mayWork reports whether r's assignee leaves it to a run: nobody, or the
+// refinery. Anyone else assigned r works it now.
+func (l Landing) mayWork(r *ledger.Record) bool {
+	a := r.Assignee()
+	return a == "" || a == l.Refinery
 }
 
 // dispositionOf reads the disposition a ruling recorded on r, and whether it
@@ -692,17 +709,18 @@ func none(s state, action, detail string) plan {
 
 func doing(a act) plan { return plan{act: a} }
 
-// plan reads the store once, through a pass that lists the beads that carry
-// the marker, closed ones too, and then, when there is one or the run keeps
-// the PRs' labels, every live bead, so each question the decisions ask answers
-// from those rows. The live beads that carry a ruling's disposition answer
-// from those rows too, and from a read of their own when the pass holds no
-// live bead. It decides each marked record that is open, blocked or closed,
-// and each bead it reads for its disposition (disposing), and a record it
-// could not decide owes an act, whose read under the lock decides it. A record
-// that does not read as a record is not one the run can act on. With Labels
-// set, the label writes the owned PRs owe follow (labelPlans). The plans are
-// in id order.
+// plan reads the store once, through a pass that lists the beads that carry the
+// marker, closed ones too, and then, when there is one or the run keeps the
+// PRs' labels, every live bead, so each question the decisions ask answers from
+// those rows. The live beads that carry a ruling's disposition answer from
+// those rows too, and from a read of their own when the pass holds no live
+// bead. It decides each marked record that is closed, or open or blocked and
+// assigned to nobody or to the refinery (mayWork), leaving out one that anyone
+// else is assigned, since a run writes nothing to it, and each bead it reads
+// for its disposition (disposing), and a record it could not decide owes an
+// act, whose read under the lock decides it. A record that does not read as a
+// record is not one the run can act on. With Labels set, the label writes the
+// owned PRs owe follow (labelPlans). The plans are in id order.
 func (u *run) plan() ([]plan, error) {
 	pass := u.Ledger.Pass()
 	rows, err := pass.Find(record.Marked())
@@ -735,7 +753,11 @@ func (u *run) plan() ([]plan, error) {
 			continue
 		}
 		switch r.Status() {
-		case "open", "blocked", "closed":
+		case "open", "blocked":
+			if !u.mayWork(r) {
+				continue
+			}
+		case "closed":
 		default:
 			continue
 		}
@@ -784,11 +806,11 @@ func (u *run) decideRow(l *ledger.Ledger, r *ledger.Record) plan {
 }
 
 // state reads the record r carries, through l: its record, the disposition a
-// ruling recorded on it, its branch and provenance instant, and for a bead the
-// refinery holds open or blocked, what its blocks edges name. A bead whose
-// record no longer carries the marker, unless a run reads it for its
-// disposition (disposing), or whose parts do not read, gets the outcome that
-// says so in place of a state.
+// ruling recorded on it, its branch and provenance instant, and for an open or
+// blocked bead assigned to nobody or to the refinery, what its blocks edges
+// name. A bead whose record no longer carries the marker, unless a run reads it
+// for its disposition (disposing), or whose parts do not read, gets the outcome
+// that says so in place of a state.
 func (u *run) state(l *ledger.Ledger, r *ledger.Record) (state, *RunOutcome) {
 	id := r.ID
 	failed := func(why string, err error) (state, *RunOutcome) {
@@ -815,7 +837,7 @@ func (u *run) state(l *ledger.Ledger, r *ledger.Record) (state, *RunOutcome) {
 	}
 	s := state{id: id, status: r.Status(), assignee: r.Assignee(), branch: strings.TrimSpace(branch),
 		since: strings.TrimSpace(since), row: r, rec: rec, disposition: d, ruled: ruled, now: u.stamp(), reads: l}
-	if (s.status != "open" && s.status != "blocked") || s.assignee != u.Refinery {
+	if (s.status != "open" && s.status != "blocked") || !u.mayWork(r) {
 		return s, nil
 	}
 	rows, err := blockersIn(l, r, true)
@@ -887,8 +909,9 @@ func (u *run) decide(s state) plan {
 	switch {
 	case s.status == "closed":
 		return u.decideClosed(s)
-	case s.assignee != u.Refinery:
-		return doing(func(context.Context, carriedOut) RunOutcome { return u.released(s) })
+	case !u.mayWork(s.row):
+		return none(s, ActAssigned, fmt.Sprintf("assigned to %s, who works it now, so nothing is written, no merge "+
+			"is requested and no review run is poured; a later run works it once the assignee is gone", s.assignee))
 	case s.status != "open" && s.status != "blocked":
 		return none(s, ActSkipped, "the bead's status "+s.status+" is none the record knows")
 	case s.ruled && record.OnRecord(s.rec.Result):
@@ -913,20 +936,6 @@ func (u *run) commit(s state, w *ledger.Write, done RunOutcome) RunOutcome {
 	return done
 }
 
-// released clears the marker of a bead a release took from the refinery, and
-// names the PR in a note, writing nothing else, so the bead stays where the
-// release left it.
-func (u *run) released(s state) RunOutcome {
-	pr := firstOf(s.rec.URL, s.rec.ExistingPR, "the pull request it recorded")
-	note := fmt.Sprintf("The landing order found %s %s and assigned to %s, not to the refinery, while it carried "+
-		"the pending record of %s, so it cleared the record's marker and left the bead as it stands (%s).",
-		s.id, s.status, nobody(s.assignee), pr, s.now)
-	w := u.Ledger.Write(s.id)
-	record.Unmark(w, note)
-	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActReleased,
-		Detail: fmt.Sprintf("assigned to %s, not to the refinery: the marker is cleared and %s is named in a note", nobody(s.assignee), pr)})
-}
-
 // decideClosed decides a closed bead that still carries the marker. One closed
 // on a verified merge owes nothing more, and its marker clears. Any other is a
 // close that took no lock and reached the bead with no verified merge, which a
@@ -935,7 +944,7 @@ func (u *run) decideClosed(s state) plan {
 	if s.rec.Result == record.Merged && mergeEvidence(s.rec) {
 		return doing(func(context.Context, carriedOut) RunOutcome {
 			w := u.Ledger.Write(s.id)
-			record.Unmark(w, "")
+			record.Unmark(w)
 			return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActSettled,
 				Detail: "closed on a verified merge at " + s.rec.MergedSHA + ": the marker is cleared"})
 		})
@@ -949,12 +958,12 @@ func (u *run) decideClosed(s state) plan {
 			"the work goes back to the refinery or stands down.", s.id, pr, s.id))
 }
 
-// decideOpen decides an open bead the refinery holds. A changed head is held
-// from the refinery while a withdrawal is open on the bead, which the run
+// decideOpen decides an open bead assigned to nobody or to the refinery. A
+// changed head is held from the refinery while a withdrawal is open on the bead, which the run
 // carries out, or while a review run is attached to it, whose end a later run
 // reads, and the marker stays until then. Once neither holds it, the run hands
 // it to the refinery (handOver). A whole record whose second write landed moves
-// to blocked and is decided on. Anything else is a record a dead writer left
+// to blocked and to nobody, and is decided on. Anything else is a record a dead writer left
 // half written, which goes back to the refinery for its full validation.
 func (u *run) decideOpen(s state) plan {
 	switch {
@@ -974,7 +983,7 @@ func (u *run) decideOpen(s state) plan {
 			if done.Action != ActBlocked {
 				return done
 			}
-			s.status = "blocked"
+			s.status, s.assignee = "blocked", ""
 			next := u.decideBlocked(s)
 			if next.act == nil {
 				if next.out.Bead == "" {
@@ -987,7 +996,7 @@ func (u *run) decideOpen(s state) plan {
 	}
 	return doing(func(context.Context, carriedOut) RunOutcome {
 		w := u.Ledger.Write(s.id)
-		record.Revalidate(w, "Interrupted PR handoff record is incomplete; full refinery validation is required")
+		record.Revalidate(w, "Interrupted PR handoff record is incomplete; full refinery validation is required", u.Refinery)
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRevalidate,
 			Detail: "the record was half written: the bead goes back to the refinery, and no merge is requested"})
 	})
@@ -1023,8 +1032,8 @@ func identity(p *SavedPR, s state, number int) []string {
 	return identityGaps(named, s.rec.URL, number, s.rec.Repo, s.branch, s.rec.Target)
 }
 
-// decideRequeued decides a changed head the run sent back to the refinery while
-// a withdrawal is open on it, from the saved read. It carries the withdrawal
+// decideRequeued decides, from the saved read, a changed head that a withdrawal
+// open on the bead holds from the refinery. It carries the withdrawal
 // out while the PR is open, keeping the marker while a withdrawal is open or a
 // review run is attached, so the bead goes to the refinery once nothing the
 // order owes holds it (handOver). A PR that closed or merged meanwhile is the
@@ -1079,8 +1088,8 @@ func (u *run) decideRequeued(s state) plan {
 	return none(s, ActRetry, fmt.Sprintf("the saved read gives the PR's state as %q, which is no state the record knows; the next run decides again", saved.PR.State))
 }
 
-// decideBlocked decides a blocked bead the refinery holds: the record must be
-// whole and must read pending, or a verified merge whose close did not land.
+// decideBlocked decides a blocked bead: the record must be whole and must read
+// pending, or a verified merge whose close did not land.
 // Its PR is decided from the saved read.
 func (u *run) decideBlocked(s state) plan {
 	r := s.rec
@@ -1249,7 +1258,7 @@ func (u *run) moot(id, status, assignee, note string) error {
 // disposition to the disposition writer, with the record lock free, and says
 // what became of it: out, what the act did under the lock, with the writer's
 // answer after it. A close the writer holds for now, such as one an open wait
-// on the bead holds, or the close of a bead released or ruled again since the
+// on the bead holds, or the close of a bead reassigned or ruled again since the
 // act judged it, waits for the next run, which reads the bead again under the
 // lock, so it reports as checked. The writer runs to its end, past the act's
 // bound (Dispositions).
@@ -1318,11 +1327,12 @@ func (u *run) decideHeadChanged(s state, saved *SavedRead) plan {
 	}))
 }
 
-// sendBack sends the bead back to the refinery at seen, the head the saved
-// read found in place of the one the refinery validated, once the act has
-// carried out the record's withdrawals as c says. The bead keeps its marker
-// while a withdrawal is still open or a review run is attached, and until the
-// hand-over has woken a refinery that nothing else tells of the head
+// sendBack records the bead's changed head at seen, the head the saved read
+// found in place of the one the refinery validated, once the act has carried
+// out the record's withdrawals as c says, and hands the head to the refinery.
+// The bead keeps its marker, assigned to nobody, while a withdrawal is still
+// open or a review run is attached, and until the hand-over has assigned the
+// bead to a refinery that nothing else tells of the head and woken it
 // (handOver). shown, when set, says for the outcome what showed that the head
 // is not the validated one.
 func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carriedOut) RunOutcome {
@@ -1336,10 +1346,11 @@ func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carri
 	if !c.held && len(s.runs) > 0 {
 		detail = withNote(said+"; "+onRuns(s), c.note)
 	}
-	// The requeue keeps the marker while a withdrawal or an attached run holds
-	// the changed head, and for the hand-over that wakes the refinery once the
+	// The requeue keeps the marker, and the bead assigned to nobody, while a
+	// withdrawal or an attached run holds the changed head, and for the
+	// hand-over that assigns the bead to the refinery and wakes it once the
 	// requeue lands, or that reads what holds the bead again when this read
-	// fails.
+	// fails. Otherwise its own write hands the head to the refinery.
 	watched := c.held || len(s.runs) > 0
 	var holds []hold
 	var unread error
@@ -1347,9 +1358,13 @@ func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carri
 		holds, unread = u.mergeHolds(s)
 	}
 	keep := watched || unread != nil || len(holds) > 0
+	to, done := u.Refinery, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: detail + "; the bead is assigned to the refinery"}
+	if keep {
+		to, done.Detail = "", detail
+	}
 	w := u.Ledger.Write(s.id)
-	record.Requeue(w, r.URL, seen, reason, keep)
-	done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: detail})
+	record.Requeue(w, r.URL, seen, reason, to)
+	done = u.commit(s, w, done)
 	if done.Action != ActRequeued || !keep || watched {
 		return done
 	}
@@ -1457,10 +1472,10 @@ func (u *run) merge(ctx context.Context, s state, c carriedOut) RunOutcome {
 			"merge's own read found it not ready, so no merge was requested: "+strings.Join(slices.Compact(not), ", "), c.note)}
 	}
 	// The merge request is the one act no guard can take back, so the bead is
-	// read once more just before it: a close or a release that took no lock and
-	// landed during the act's reads stops it here. One that lands after this
+	// read once more just before it: a close or an assignment that took no lock
+	// and landed during the act's reads stops it here. One that lands after this
 	// read is the residual the design names, a merge requested before the run
-	// could read the release. A ruling's disposition takes the record lock, so
+	// could read the assignment. A ruling's disposition takes the record lock, so
 	// none lands while the act holds it: one recorded before the act read the
 	// bead under the lock took the act to decideDisposed, and one that comes
 	// later waits for the lock and lands after the request.
@@ -1701,7 +1716,7 @@ func (u *run) gate(ctx context.Context, s state, result, message string, done Ru
 			Detail: fmt.Sprintf("%s: the human gate did not file; the next run files it: %v", result, err)}
 	}
 	w := u.Ledger.Write(s.id)
-	record.Unmark(w, "")
+	record.Unmark(w)
 	return u.commit(s, w, done)
 }
 
