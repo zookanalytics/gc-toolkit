@@ -106,12 +106,6 @@ func dueIn(p Place, units []Unit, rows []row, today string) []Due {
 // ref names u in p to a decision.
 func ref(p Place, u Unit) string { return p.Key[:16] + "/" + u.Name + "@" + u.Full[:16] }
 
-// fileExists reports whether a regular file is at path.
-func fileExists(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && fi.Mode().IsRegular()
-}
-
 // hubs is the index and each collection note dir holds, by name.
 func hubs(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)

@@ -75,7 +75,7 @@ trap 'echo stopped >> "$l"; exit 143' TERM
 echo trapped >> "$l"
 while :; do sleep 0.05; done`)
 	for c.timeout = 200 * time.Millisecond; ; c.timeout *= 2 {
-		os.Remove(log)
+		_ = os.Remove(log)
 		start := time.Now()
 		_, err := c.MemoryDir(Ask{Dir: t.TempDir()})
 		if err == nil || !strings.Contains(err.Error(), "did not answer within") {

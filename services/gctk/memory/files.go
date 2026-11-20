@@ -72,7 +72,7 @@ func asideFile(file string) (*os.File, error) {
 func put(file, tmp, text, after string, edit func(string) (string, error)) (bool, error) {
 	beforeStep("swap", file)
 	if err := exchange(tmp, file); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return false, err
 	}
 	beforeStep("check", file)
@@ -97,9 +97,9 @@ func aside(file string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	f.Close()
+	_ = f.Close()
 	if err := os.Rename(file, f.Name()); err != nil {
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name())
 		return "", err
 	}
 	return f.Name(), nil
@@ -169,7 +169,7 @@ func rewrite(file string, edit func(string) (string, error)) (string, bool, erro
 		}
 		_, werr := tmp.WriteString(after)
 		if err := errors.Join(werr, tmp.Close(), os.Chmod(tmp.Name(), mode)); err != nil {
-			os.Remove(tmp.Name())
+			_ = os.Remove(tmp.Name())
 			return "", false, err
 		}
 		wrote, err := put(file, tmp.Name(), string(before), after, edit)
@@ -233,7 +233,7 @@ func removeNote(state, dir, name, full string) (removal, string, error) {
 	r, err := take(file, full)
 	if r != removed {
 		if made {
-			os.Remove(kept)
+			_ = os.Remove(kept)
 		}
 		return r, "", err
 	}
@@ -253,7 +253,7 @@ func removeEntry(state, dir string, u Unit) (r removal, kept string, hubGone boo
 	})
 	if err != nil || !wrote {
 		if made {
-			os.Remove(kept)
+			_ = os.Remove(kept)
 		}
 		if err == nil || errors.Is(err, errChanged) || errors.Is(err, errMoved) || errors.Is(err, os.ErrNotExist) {
 			return stays, "", false, nil

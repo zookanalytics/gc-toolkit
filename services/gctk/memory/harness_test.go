@@ -178,7 +178,7 @@ func appendTo(t *testing.T, file, text string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.WriteString(text); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func openAppend(t *testing.T, file string) *os.File {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { f.Close() })
+	t.Cleanup(func() { _ = f.Close() })
 	return f
 }
 

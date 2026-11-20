@@ -154,18 +154,18 @@ func (in *Intake) lock(state, dir string) (func(), error) {
 			break
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("the lock under %s: %w", state, err)
 		}
 		if !time.Now().Before(deadline) {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("another run held the lock under %s for %s", state, wait)
 		}
 		time.Sleep(lockPoll)
 	}
 	release := func() {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
+		_ = f.Close()
 	}
 	if _, err := os.Stat(filepath.Join(state, pathFile)); errors.Is(err, os.ErrNotExist) {
 		if err := replace(filepath.Join(state, pathFile), dir+"\n", 0o644); err != nil {
@@ -186,11 +186,11 @@ func replace(file, text string, mode os.FileMode) error {
 	_, werr := tmp.WriteString(text)
 	cerr := tmp.Close()
 	if err := cmp.Or(werr, cerr, os.Chmod(tmp.Name(), mode)); err != nil {
-		os.Remove(tmp.Name())
+		_ = os.Remove(tmp.Name())
 		return fmt.Errorf("cannot write %s: %w", file, err)
 	}
 	if err := os.Rename(tmp.Name(), file); err != nil {
-		os.Remove(tmp.Name())
+		_ = os.Remove(tmp.Name())
 		return fmt.Errorf("cannot write %s: %w", file, err)
 	}
 	return nil

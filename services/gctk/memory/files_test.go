@@ -178,7 +178,7 @@ func TestARewriteKilledAtAnyStepLeavesAWholeFile(t *testing.T) {
 			if c.race != "" {
 				landAt(t, "swap", func(f string) { appendTo(t, f, c.race) })
 			}
-			killedAt(t, c.step, func() { rewrite(f, edit) })
+			killedAt(t, c.step, func() { _, _, _ = rewrite(f, edit) })
 			left := displaced(t, f)
 			if read(t, f) != c.name || len(left) != 1 {
 				t.Fatalf("the file reads %q, with %q aside; want %q, and one file aside", read(t, f), left, c.name)
@@ -279,7 +279,7 @@ func TestARemovalKilledAtAnyStepKeepsTheText(t *testing.T) {
 			dir, state := t.TempDir(), t.TempDir()
 			f := filepath.Join(dir, "d.md")
 			write(t, f, "d lesson.\n")
-			killedAt(t, step, func() { removeNote(state, dir, "d.md", sum("d lesson.\n")) })
+			killedAt(t, step, func() { _, _, _ = removeNote(state, dir, "d.md", sum("d lesson.\n")) })
 			kept := filepath.Join(state, "removed", "d.md@"+sum("d lesson.\n"))
 			if exists(f) && read(t, f) != "d lesson.\n" || !exists(f) && read(t, kept) != "d lesson.\n" {
 				t.Errorf("the note's text is neither under its name nor kept")
