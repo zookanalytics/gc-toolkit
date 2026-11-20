@@ -54,12 +54,12 @@
 // Run under the name bd, the program answers `bd <args>` as `gc bd <args>`, and
 // logs the call as that.
 //
-//   - agent list and convoy list print the file STUB_AGENTS or STUB_CONVOYS
-//     names, an empty list when that file cannot be read, and nothing when
-//     the setting names none. rig list prints the file STUB_RIGS names, and a
-//     list of no rig when the setting names none. config show prints the file
-//     STUB_CONFIG names, and a config that names no agent when the setting
-//     names none or that file cannot be read.
+//   - agent list, convoy list and order list print the file STUB_AGENTS,
+//     STUB_CONVOYS or STUB_ORDERS names, an empty list when that file cannot
+//     be read, and nothing when the setting names none. rig list prints the
+//     file STUB_RIGS names, and a list of no rig when the setting names none.
+//     config show prints the file STUB_CONFIG names, and a config that names
+//     no agent when the setting names none or that file cannot be read.
 //   - hook current prints the bead STUB_HOOK_CURRENT names, which stands for
 //     the claim gc stamps on the calling session's bead: the id alone under
 //     --id-only, and otherwise followed by the session that claimed it, in gc's
