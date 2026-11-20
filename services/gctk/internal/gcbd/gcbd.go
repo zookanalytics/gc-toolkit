@@ -662,7 +662,7 @@ func (c *Client) showViaDaemon(id string) (*Bead, string) {
 	if err != nil {
 		return nil, "transport"
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, "status-" + strconv.Itoa(resp.StatusCode)
 	}
