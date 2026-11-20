@@ -494,9 +494,9 @@ first. Either way the change is a decision on the record, not a drift.
   GitHub read the one-PR update saved on the PR's bead and the store as it is
   at the read. The board says for each rig when GitHub was last asked. Every
   reader of GitHub draws on one API allowance.
-- **Only the merge acts on a fresh read of GitHub,** and the saved GitHub read
-  grants nothing. The evaluator's answer is computed at each read and stored
-  nowhere.
+- **An act no later run decides again is made only on its own fresh read of
+  GitHub,** as the merge is, and the saved GitHub read grants no such act. The
+  evaluator's answer is computed at each read and stored nowhere.
 - **A review, a hold or a change of base that arrives after the landing
   order's read is not part of its decision to merge,** even when GitHub carries
   out the merge request after it.
