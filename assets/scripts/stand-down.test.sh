@@ -6,8 +6,9 @@
 # the gate first makes the bead ready, which is what an arm waits for. So the
 # suite gives the fake store what makes those two true, a `blocks` edge that holds
 # a close and keeps a bead out of the ready listing, and runs the real
-# stand-down.sh, gc-helm.sh, bead-rehome.sh and finalize-gate.sh over it, with
-# the arm's verbs those scripts call run by gctk built from this checkout.
+# stand-down.sh, bead-rehome.sh and finalize-gate.sh over it, with the arm's
+# verbs and the takeaway those scripts call run by gctk built from this
+# checkout.
 #
 # What is exercised here:
 #   * the orders a person would try by hand, as controls: a close first is refused,
@@ -80,7 +81,10 @@ printf '%s\n' '{"ok":true,"config":{"Agents":[{"Name":"pool","Dir":"rig","Defaul
 printf '%s\n' '{"sessions":[]}' > "$STUB_SESSIONS"
 mkdir -p "$TMP/rig/.beads"
 printf '{"rigs":[{"name":"tkrig","path":"%s","prefix":"tk"}]}\n' "$TMP/rig" > "$STUB_RIGS"
-export BEADS_ACTOR=a-person GC_RUN_CANCEL_TOOL="$BIN/run-cancel" GC_BRANCH_END_TOOL="$BIN/branch-end"
+export BEADS_ACTOR=a-person GC_BRANCH_END_TOOL="$BIN/branch-end"
+# The takeaway's release runs run-cancel.sh from GCTK_SCRIPTS_DIR, which here
+# holds the stand-in alone.
+export GCTK_SCRIPTS_DIR="$TMP/scripts"
 export STUB_GH_STATES="$TMP/gh-states" LANDED="$TMP/landed" LAND_LOG="$TMP/land.log" PASS_LOG="$TMP/pass.log" AT_EDGE="$TMP/at-edge"
 
 # --- stand-ins for what is not gc -------------------------------------------------
@@ -131,6 +135,7 @@ r=$(gc --harness-read meta tk-w gc.routed_to); [ "$r" != "<absent>" ] || r=""
 printf '%s|%s\n' "$a" "$r" > "${AT_EDGE:?}"
 STUB
 chmod +x "$BIN/run-cancel" "$BIN/branch-end" "$BIN/gh" "$TMP/land" "$TMP/after-write" "$TMP/at-edge"
+mkdir -p "$GCTK_SCRIPTS_DIR" && ln -s "$BIN/run-cancel" "$GCTK_SCRIPTS_DIR/run-cancel.sh"
 
 # --- fixtures ----------------------------------------------------------------------
 # An edge is a dep row: `edge <id> <type> <on>` is <id>'s edge onto <on>.
@@ -171,6 +176,9 @@ sling_lines() { grep '^sling ' "$STUB_GC_LOG" || true; }
 run()    { OUT=$("$SCRIPT" "$@" 2>&1); RC=$?; }
 pass()   { PASS_OUT=$("$GCTK_BIN" bead start-armed 2>&1); PASS_RC=$?; }
 line_of() { grep -n -F -- "$1" "$STUB_GC_LOG" | head -1 | cut -d: -f1; }
+# close_of <bead> — the line of the bead's close, a guarded update that moves it
+# to closed, which the release's guarded update before it does not.
+close_of() { grep -n -F -- "update $1 --if-status" "$STUB_GC_LOG" | grep -F -- "--status=closed" | head -1 | cut -d: -f1; }
 # The store's writes among the fake's log lines, gctk's own included, which name
 # their store ahead of the verb.
 WRITES='^bd (--(db|actor) [^ ]+ )*(update|close|gate resolve|dep remove|dep add)'
@@ -224,7 +232,7 @@ for k in gc.routed_to gc.session_id gc.session_name gc.execution_routed_to; do
 done
 DISARM=$(line_of "--unset-metadata gc.dispatch_when_ready ")
 ANSWER=$(line_of "gate resolve tk-g")
-CLOSE=$(line_of "update tk-w --if-status")
+CLOSE=$(close_of tk-w)
 if [ -n "$DISARM" ] && [ -n "$ANSWER" ] && [ -n "$CLOSE" ] && [ "$DISARM" -lt "$ANSWER" ] && [ "$ANSWER" -lt "$CLOSE" ]; then
   ok "the arm goes first, then the answer, then the close"
 else
@@ -524,7 +532,7 @@ has "$OUT" "left gate tk-g, which stays open: gate tk-g also holds tk-o" "…and
 DISARM=$(line_of "--unset-metadata gc.dispatch_when_ready ")
 RELEASE=$(line_of "gc.takeaway=")
 LEAVE=$(line_of "dep remove tk-w tk-g")
-CLOSE=$(line_of "update tk-w --if-status")
+CLOSE=$(close_of tk-w)
 if [ -n "$DISARM" ] && [ -n "$RELEASE" ] && [ -n "$LEAVE" ] && [ -n "$CLOSE" ] && [ "$DISARM" -lt "$RELEASE" ] && [ "$RELEASE" -lt "$LEAVE" ] && [ "$LEAVE" -lt "$CLOSE" ]; then
   ok "the arm goes first, then the route, then the edge, then the close"
 else

@@ -331,9 +331,17 @@ name the formula and why you chose it.
 
 ## Stop or redirect work already sent
 
-- **Stop it.**
-  `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<why it stops>" --release --no-wait`
-  stops any workflow running on the bead and leaves the bead open, unassigned
+- **Stop it.** The release ends the run beneath the bead through the pack's
+  run-cancel.sh, which it finds where GCTK_SCRIPTS_DIR points:
+
+  ```bash
+  # >>> gctk-bin
+  GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+  # <<< gctk-bin
+  GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead takeaway <bead> "<why it stops>" --release --no-wait
+  ```
+
+  It stops any workflow running on the bead and leaves the bead open, unassigned
   and routed to no pool, with that sentence as its headline. Its first write
   removes the bead's deferred-dispatch arm, so the order does not send the bead
   again once nothing holds it, and a disarm that does not land stops the
@@ -348,8 +356,9 @@ name the formula and why you chose it.
   `"$(gc <binding> scripts-dir)/human-gate.sh" --subject <bead> --key <situation-key> --message "<what must happen before it goes on>"`,
   which prints the gate's id, and pass `--waiting-on <gate>` in place of
   `--no-wait`.
-- **Send it elsewhere.** Name where it goes in the same call:
-  `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
+- **Send it elsewhere.** Name where it goes in the same call, with `$GCTK` as
+  above:
+  `GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
   For the refinery or the keeper, pass `--assign <named-agent>` in place of
   `--route <rig>/<pool>`, which writes the assignee in the release, then nudge
   it once the bead is ready, as Send a bead to a named agent says. For the

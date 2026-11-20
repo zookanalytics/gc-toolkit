@@ -52,7 +52,10 @@ Write one sentence that says what the bead needs now, and name what it waits
 on:
 
 ```bash
-"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait
 ```
 
 Pass `--no-wait` when the bead waits on nothing. When it waits, pass
