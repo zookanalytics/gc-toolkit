@@ -54,12 +54,12 @@
 // Run under the name bd, the program answers `bd <args>` as `gc bd <args>`, and
 // logs the call as that.
 //
-//   - agent list and convoy list print the file STUB_AGENTS or STUB_CONVOYS
-//     names, an empty list when that file cannot be read, and nothing when
-//     the setting names none. rig list prints the file STUB_RIGS names, and a
-//     list of no rig when the setting names none. config show prints the file
-//     STUB_CONFIG names, and a config that names no agent when the setting
-//     names none or that file cannot be read.
+//   - agent list, convoy list and order list print the file STUB_AGENTS,
+//     STUB_CONVOYS or STUB_ORDERS names, an empty list when that file cannot
+//     be read, and nothing when the setting names none. rig list prints the
+//     file STUB_RIGS names, and a list of no rig when the setting names none.
+//     config show prints the file STUB_CONFIG names, and a config that names
+//     no agent when the setting names none or that file cannot be read.
 //   - convoy status <id> --json answers the convoy's members from the store,
 //     as gc reads them: the beads that name it as their parent, then the
 //     beads its tracks edges point at, sorted by created_at and then id, with

@@ -451,6 +451,23 @@ func TestRigListAnswersTheSetting(t *testing.T) {
 	}
 }
 
+func TestOrderListAnswersTheSetting(t *testing.T) {
+	f := newFixture(t, `[]`, "")
+	if r := f.gc("order", "list", "--json"); r.status != 0 || r.out != "" {
+		t.Errorf("no setting: %+v, want nothing at exit 0", r)
+	}
+	f.write("orders.json", `{"orders":[{"name":"o","trigger":"cooldown","interval":"5m"}]}`)
+	if r := f.run([]string{"STUB_ORDERS=" + filepath.Join(f.dir, "orders.json")}, "order", "list", "--json"); r.status != 0 || r.out != `{"orders":[{"name":"o","trigger":"cooldown","interval":"5m"}]}` {
+		t.Errorf("the setting's file: %+v", r)
+	}
+	if r := f.run([]string{"STUB_ORDERS=" + filepath.Join(f.dir, "missing.json")}, "order", "list", "--json"); r.out != `{"orders":[]}`+"\n" {
+		t.Errorf("a file that cannot be read: %+v, want an empty registry", r)
+	}
+	if r := f.gc("order", "run", "o"); r.status != 2 {
+		t.Errorf("another order verb: %+v", r)
+	}
+}
+
 func TestConfigShowAnswersTheSetting(t *testing.T) {
 	f := newFixture(t, `[]`, "")
 	if r := f.gc("config", "show", "--json"); r.status != 0 || r.out != noConfig+"\n" {
