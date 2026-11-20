@@ -190,12 +190,12 @@ The build does **not** run in the service start path, and this is load-bearing.
 
 The supervisor gives a `proxy_process` **5 seconds** to answer its health probe
 (`proxyProcessReadyTimeout`, gascity `internal/workspacesvc/proxy_process.go`).
-A warm build of helm-svc takes ~12.5s and a cold one 2m29s. A build started
-by the launcher therefore never finished inside the window — not on a slow day,
-ever — and `waitReady` then called `stopProcessGroup()`, killing the build along
-with the start. The next start began again and was killed at 5s again.
+A cold build of helm-svc takes longer: 5 to 6s at loads of 14 to 20, and a
+warm one under a second. A cold build started by the launcher loses that race,
+and `waitReady` then calls `stopProcessGroup()`, killing the build along with
+the start.
 
-That loop was visible on disk: on 2026-08-22 this service's `bin/` held **2,677**
+Killed starts are visible on disk: on 2026-08-22 this service's `bin/` held **2,677**
 zero-byte `.helm-svc.build.XXXXXX` staging files laid down over three days, one
 per killed start, each a `mktemp` that never reached its `mv`.
 

@@ -4,10 +4,10 @@
 #
 # THE SPLIT. gc-helm-svc.sh used to build the binary and then exec it. The
 # supervisor allows a proxy_process 5s to answer its health probe
-# (proxyProcessReadyTimeout); a warm build of helm-svc takes ~12.5s and a
-# cold one 2m29s. So the build never finished inside the window, waitReady's
-# stopProcessGroup() killed it along with the start, and the next start began
-# again — 2,677 abandoned .helm-svc.build.* staging files in three days, and a
+# (proxyProcessReadyTimeout), and a build of helm-svc that linked Dolt took
+# ~12.5s warm and 2m29s cold. So the build never finished inside the window,
+# waitReady's stopProcessGroup() killed it along with the start, and the next
+# start began again — 2,677 abandoned .helm-svc.build.* staging files in three days, and a
 # restart that could only report "did not become ready before timeout".
 #
 # Building now lives in gc-build.sh (component helm), out of band, driven by the
@@ -1100,7 +1100,7 @@ grep -q 'GOTMP_RUN_OWNED" -eq 1' "$BUILD" \
 # build for the cases it exercises; this refuses the whole shape, so a future
 # edit cannot reintroduce a build down some path the cases do not reach.
 if grep -qE '(go build|GC_GO_BIN|GOTMPDIR|newer_than_binary)' "$SVC"; then
-    bad "(STATIC) the launcher has grown a build again — it has 5s, and the build needs 12.5s"
+    bad "(STATIC) the launcher has grown a build again — it has 5s, and a cold build takes longer"
 else
     ok "(STATIC) the launcher contains no build"
 fi

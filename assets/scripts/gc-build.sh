@@ -4,8 +4,9 @@
 # builds nothing, and a failed build leaves the LAST GOOD binary in place:
 #   helm  helm-svc, the board backend, run by the gc-helm-svc.sh launcher. The
 #         supervisor gives a proxy_process 5s to answer its health probe, and
-#         helm-svc builds in ~12.5s warm / 2m29s cold, so a build in the
-#         launcher's start path is always killed mid-compile.
+#         a cold build of helm-svc takes longer (5 to 6s at loads of 14 to
+#         20), so a cold build in the launcher's start path is killed
+#         mid-compile.
 #   gctk  the merge cadence's compiled data plane, exec'd by the cadence
 #         scripts whose logic it carries. A build inside the cadence would put
 #         a Go toolchain in the path of a merge, and a failed one would take the
