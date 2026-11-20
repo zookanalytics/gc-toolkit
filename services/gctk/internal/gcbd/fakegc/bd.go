@@ -248,9 +248,8 @@ func (c *Call) show(s, d string, args []string) error {
 }
 
 // dependents is what bd's show --include-dependents adds to a bead: each bead
-// in the store with an edge onto it, in the store's order, which is the order
-// bd creates them in, cut to its id, title, status, priority and type and the
-// edge's type.
+// in the store with an edge onto it, in the store's order, cut to its id,
+// title, status, priority and type and the edge's type.
 func dependents(rows []*Object, edges []edge, id string) []Value {
 	out := []Value{}
 	for _, r := range rows {
