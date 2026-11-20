@@ -96,8 +96,9 @@ func writeList(state string, rows []row) error {
 	return replace(filepath.Join(state, listFile), b.String(), 0o644)
 }
 
-// readGone reads the notes removed whose pointers did not all come out, kept
-// under state one quoted name a line, none when it keeps none.
+// readGone reads the notes removed, or being removed when a run stopped, whose
+// pointers did not all come out, kept under state one quoted name a line, none
+// when it keeps none.
 func readGone(state string) (map[string]bool, error) {
 	gone := map[string]bool{}
 	raw, err := os.ReadFile(filepath.Join(state, goneFile))
@@ -130,6 +131,20 @@ func writeGone(state string, gone map[string]bool) error {
 		b.WriteString(strconv.Quote(name) + "\n")
 	}
 	return replace(file, b.String(), 0o644)
+}
+
+// recordGone adds name to the notes kept under state before its note is
+// removed, so a run stopped once the note has moved leaves the next run the
+// name whose pointers it takes out. A name whose note stays still holds a
+// file, so no run takes its pointers out, and the run's end records it no
+// more.
+func recordGone(state, name string) error {
+	gone, err := readGone(state)
+	if err != nil || gone[name] {
+		return err
+	}
+	gone[name] = true
+	return writeGone(state, gone)
 }
 
 // lock takes the lock on a directory's state, making the state and its path

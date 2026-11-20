@@ -214,7 +214,8 @@ const (
 )
 
 // removeNote removes a note, or a collection note left with no entries, while
-// it holds the text whose hash is full, once that text is kept.
+// it holds the text whose hash is full, once that text is kept and its name is
+// recorded for its pointers to come out.
 func removeNote(state, dir, name, full string) (removal, string, error) {
 	file := filepath.Join(dir, name)
 	raw, err := os.ReadFile(file)
@@ -229,6 +230,12 @@ func removeNote(state, dir, name, full string) (removal, string, error) {
 	kept, made, err := keep(state, name, full, string(raw))
 	if err != nil {
 		return failed, "", fmt.Errorf("its text was not kept: %w", err)
+	}
+	if err := recordGone(state, name); err != nil {
+		if made {
+			_ = os.Remove(kept)
+		}
+		return failed, "", fmt.Errorf("its name was not recorded for its pointers to come out: %w", err)
 	}
 	r, err := take(file, full)
 	if r != removed {

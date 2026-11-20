@@ -587,6 +587,36 @@ func TestAPointerThatDidNotComeOutGoesOnTheNextRun(t *testing.T) {
 	}
 }
 
+// A drop killed at either step of its note's removal leaves the next run the
+// note's name: a settle then takes out the pointer to a note that moved, keeps
+// the pointer to one that stays, and records the name no more.
+func TestADropKilledAtAnyStepLeavesItsPointerToTheNextRun(t *testing.T) {
+	for step, want := range map[string]string{
+		"move":  "- [N](n.md) — the lesson\n- [O](o.md) — another\n",
+		"check": "- [O](o.md) — another\n",
+	} {
+		t.Run(step, func(t *testing.T) {
+			c := newCity(t)
+			m := c.rig("r", "tk")
+			index := filepath.Join(m, indexName)
+			write(t, index, "- [N](n.md) — the lesson\n- [O](o.md) — another\n")
+			write(t, filepath.Join(m, "n.md"), "n lesson.\n")
+			write(t, filepath.Join(m, "o.md"), "o lesson.\n")
+			r := refOf(c.due(), "n.md")
+			killedAt(t, step, func() { c.apply(r + " drop") })
+			if s := c.settle(); len(s.Failed) > 0 {
+				t.Fatal(s.Failed)
+			}
+			if got := read(t, index); got != want {
+				t.Errorf("the index reads %q, want %q", got, want)
+			}
+			if exists(filepath.Join(c.state(m), goneFile)) {
+				t.Error("n.md is still recorded once the settle is done")
+			}
+		})
+	}
+}
+
 // A note saved under the name of one whose pointer is left for the next run
 // keeps that pointer and the judge's decision on it, and is recorded no more.
 func TestAPointerLeftForTheNextRunStaysForANoteSavedUnderItsName(t *testing.T) {
