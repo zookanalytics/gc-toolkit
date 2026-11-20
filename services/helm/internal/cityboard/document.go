@@ -1,11 +1,12 @@
 package cityboard
 
-// The document the city's read builds: what doctor's newest recorded run
-// found, as the city page shows it. Go decides which checks the page shows,
-// which of them count in its lead and in what order, and whether the run is
-// late, and the page lays them out. The page's TypeScript types are generated
-// from this file (web/src/cityboard/document.gen.ts), and
-// TestPageTypesAreCurrent fails when that file is stale.
+// The document the city's read builds: what doctor's newest recorded run found,
+// and how many messages wait in the operator's mailbox, as the city page shows
+// them. Go decides which checks the page shows, which of them count in its lead
+// and in what order, and whether the run is late, and the page lays them out.
+// The page's TypeScript types are generated from this file
+// (web/src/cityboard/document.gen.ts), and TestPageTypesAreCurrent fails when
+// that file is stale.
 
 // Response is what the city's route answers: the document, and the time its
 // read finished beside it.
@@ -18,6 +19,9 @@ type Response struct {
 type Document struct {
 	// Doctor is what doctor's newest recorded run found.
 	Doctor Doctor `json:"doctor"`
+	// Mail is the operator's mailbox, counted apart from doctor's run, which
+	// the route reads on its own cadence.
+	Mail Mail `json:"mail"`
 }
 
 // Doctor is doctor's newest recorded run, as the page shows it. Each time is
@@ -100,4 +104,21 @@ type Acceptance struct {
 type Monitor struct {
 	Order    string `json:"order"`
 	LastGood string `json:"last_good,omitempty"`
+}
+
+// Mail is the operator's mailbox, Gas City's `human`, as the page counts it:
+// one number beside the failing checks, with how to open the postmaster, who
+// works through the mailbox with the operator.
+type Mail struct {
+	// Counted is whether a count read. A document built without one shows no
+	// number, and neither does one whose count did not read, whose Why says
+	// why.
+	Counted bool   `json:"counted"`
+	Why     string `json:"why,omitempty"`
+	// Waiting is how many messages wait: the mailbox's open messages, read or
+	// unread, which only an archive takes out.
+	Waiting int `json:"waiting"`
+	// Short says why the count may miss messages: a store that did not answer
+	// for its part of the mailbox. Empty when every store answered.
+	Short string `json:"short,omitempty"`
 }

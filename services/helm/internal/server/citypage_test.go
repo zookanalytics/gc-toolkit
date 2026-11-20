@@ -33,10 +33,30 @@ func (l *cityLog) Newest(_ context.Context, typ string) (*cityboard.Event, error
 	return &cityboard.Event{Seq: 1, Type: typ, Payload: json.RawMessage(payload)}, nil
 }
 
+// cityMail stands in for the operator's mailbox: the count it answers, what it
+// may miss, or its failure, and the count of reads.
+type cityMail struct {
+	mu      sync.Mutex
+	reads   int
+	waiting int
+	short   string
+	fail    error
+}
+
+func (m *cityMail) Count(context.Context) (int, string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reads++
+	if m.fail != nil {
+		return 0, "", m.fail
+	}
+	return m.waiting, m.short, nil
+}
+
 func TestCityPageRoute(t *testing.T) {
 	now := time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC)
 	l := &cityLog{started: now.Add(-3 * time.Hour)}
-	s := New(newFake(), time.Minute, WithCityPage(l, CityPageTTL))
+	s := New(newFake(), time.Minute, WithCityPage(l, &cityMail{waiting: 130}, CityPageTTL))
 	s.now = func() time.Time { return now }
 	rr := get(t, s, "/helm/city")
 	var resp cityboard.Response
@@ -47,6 +67,9 @@ func TestCityPageRoute(t *testing.T) {
 	if resp.ReadAt != "2026-11-17T01:00:00Z" || !d.Ran || !d.Late || d.Count != 1 || d.Failing[0].Name != "orphan-sessions" {
 		t.Errorf("document = %+v", resp)
 	}
+	if m := resp.City.Mail; m != (cityboard.Mail{Counted: true, Waiting: 130}) {
+		t.Errorf("mail = %+v, want 130 counted", m)
+	}
 }
 
 // TestCityPageCaches holds the document to its time to live: one read serves
@@ -55,7 +78,7 @@ func TestCityPageRoute(t *testing.T) {
 func TestCityPageCaches(t *testing.T) {
 	now := time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC)
 	l := &cityLog{started: now}
-	s := New(newFake(), time.Minute, WithCityPage(l, CityPageTTL))
+	s := New(newFake(), time.Minute, WithCityPage(l, &cityMail{}, CityPageTTL))
 	s.now = func() time.Time { return now }
 	for range 3 {
 		if rr := get(t, s, "/helm/city"); rr.Code != http.StatusOK {
@@ -78,7 +101,7 @@ func TestCityPageCaches(t *testing.T) {
 // TestCityPageSaysAFailedRead holds a failed read to an error naming it, never
 // a document drawn from nothing.
 func TestCityPageSaysAFailedRead(t *testing.T) {
-	s := New(newFake(), time.Minute, WithCityPage(&cityLog{fail: errors.New("the supervisor did not answer")}, CityPageTTL))
+	s := New(newFake(), time.Minute, WithCityPage(&cityLog{fail: errors.New("the supervisor did not answer")}, &cityMail{}, CityPageTTL))
 	rr := get(t, s, "/helm/city")
 	if rr.Code != http.StatusBadGateway || !strings.Contains(rr.Body.String(), "the supervisor did not answer") {
 		t.Fatalf("a failed read = %d %s, want 502 naming the failure", rr.Code, rr.Body.String())
@@ -92,5 +115,70 @@ func TestCityPageOff(t *testing.T) {
 	s := New(newFake(), time.Minute)
 	if rr := get(t, s, "/helm/city"); rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("without the city page = %d, want 503", rr.Code)
+	}
+}
+
+// TestCityPageCountsTheMailAtMostOnceAMinute holds the mailbox's count to its
+// own time to live: one count serves every request inside a minute, and the
+// first request past it counts again while the doctor document stays cached.
+func TestCityPageCountsTheMailAtMostOnceAMinute(t *testing.T) {
+	now := time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC)
+	l, box := &cityLog{started: now}, &cityMail{waiting: 7}
+	s := New(newFake(), time.Minute, WithCityPage(l, box, CityPageTTL))
+	s.now = func() time.Time { return now }
+	for range 3 {
+		get(t, s, "/helm/city")
+	}
+	s.now = func() time.Time { return now.Add(CityMailTTL - time.Second) }
+	get(t, s, "/helm/city")
+	if box.reads != 1 {
+		t.Fatalf("four requests inside a minute counted %d times, want once", box.reads)
+	}
+	box.waiting = 3
+	s.now = func() time.Time { return now.Add(CityMailTTL + time.Second) }
+	rr := get(t, s, "/helm/city")
+	var resp cityboard.Response
+	if json.Unmarshal(rr.Body.Bytes(), &resp) != nil || box.reads != 2 || resp.City.Mail.Waiting != 3 {
+		t.Fatalf("a request past the minute: %d counts, mail %+v; want a second count of 3", box.reads, resp.City.Mail)
+	}
+	if l.reads != 1 {
+		t.Fatalf("the doctor document was read %d times, want once inside its own time to live", l.reads)
+	}
+}
+
+// TestCityPageSaysACountThatDidNotRead answers the document with no number and
+// the reason, and keeps that answer for its minute too, so a failing mailbox is
+// asked no more often than a healthy one.
+func TestCityPageSaysACountThatDidNotRead(t *testing.T) {
+	now := time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC)
+	box := &cityMail{fail: errors.New("the supervisor's mail count answered HTTP 503")}
+	s := New(newFake(), time.Minute, WithCityPage(&cityLog{started: now}, box, CityPageTTL))
+	s.now = func() time.Time { return now }
+	for range 2 {
+		rr := get(t, s, "/helm/city")
+		var resp cityboard.Response
+		if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &resp) != nil {
+			t.Fatalf("GET /helm/city = %d %s", rr.Code, rr.Body.String())
+		}
+		if m := resp.City.Mail; m.Counted || m.Why != "the supervisor's mail count answered HTTP 503" || !resp.City.Doctor.Ran {
+			t.Fatalf("a count that did not read: mail %+v, doctor ran %v", m, resp.City.Doctor.Ran)
+		}
+	}
+	if box.reads != 1 {
+		t.Fatalf("a failing mailbox was counted %d times inside a minute, want once", box.reads)
+	}
+}
+
+// A service with no mailbox to count says so in place of a number.
+func TestCityPageWithNoMailbox(t *testing.T) {
+	now := time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC)
+	s := New(newFake(), time.Minute, WithCityPage(&cityLog{started: now}, nil, CityPageTTL))
+	s.now = func() time.Time { return now }
+	var resp cityboard.Response
+	if rr := get(t, s, "/helm/city"); rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &resp) != nil {
+		t.Fatalf("GET /helm/city = %d %s", rr.Code, rr.Body.String())
+	}
+	if m := resp.City.Mail; m.Counted || m.Why != "this service counts no mail" {
+		t.Errorf("mail = %+v", m)
 	}
 }

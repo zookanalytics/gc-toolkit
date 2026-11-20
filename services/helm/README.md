@@ -278,12 +278,13 @@ the sitting has started. In a suspended rig attaching is off whatever the
 operator chose, and the form saves the question, starts no sitting and leaves.
 `--from`, which engage passes on too, names the bead a `--subject` gate was
 reached from. The People page lists the `seats` that `gc-helm.sh conversations
---json` gives, mechanik and each rig's po, each with its session's state as
-Gas City's session list gives it, and reads them again every ten seconds while
-it is on screen. Enter leaves the terminal to `gc-helm.sh mechanik` or
-`gc-helm.sh po --rig <rig>`, each of which hands it to the seat's session, and
-a seat takes no question. It writes nothing itself, so what it files is what the
-command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
+--json` gives, mechanik, the postmaster and each rig's po, each with its
+session's state as Gas City's session list gives it, and reads them again
+every ten seconds while it is on screen. Enter leaves the terminal to
+`gc-helm.sh mechanik`, `gc-helm.sh postmaster` or `gc-helm.sh po --rig <rig>`,
+each of which hands it to the seat's session, and a seat takes no question. It
+writes nothing itself, so what it files is what the command line files.
+[human-engagement.md](../../docs/human-engagement.md#engage)
 says what it shows and when it saves. `internal/form/testdata/helm-fixture.sh`
 answers those verbs from fixture data, so the form can be run with no city
 behind it.
@@ -1587,8 +1588,9 @@ then write the golden with `go test ./internal/rigboard -run TestFixtureBoard -u
 ## The city page (`GET <mount>/helm/city`)
 
 The city's page shows what doctor found in its newest recorded run
-(`specs/tk-1tfzr71.158/design.md`, section 5). `web/src/cityboard/` draws it at
-the address `?city`, with the board's one row structure (`Line`).
+(`specs/tk-1tfzr71.158/design.md`, section 5), and how many messages wait in
+the operator's mailbox. `web/src/cityboard/` draws it at the address `?city`,
+with the board's one row structure (`Line`).
 
 **What it reads.** The newest `gc-toolkit.doctor.ran` event in the city's event
 log, which the doctor order records each hour (`gctk doctor run`), read from the
@@ -1597,7 +1599,12 @@ supervisor's `GET /v0/city/{city}/events?type=gc-toolkit.doctor.ran&limit=1`
 no window, so a doctor that has stopped still shows its last run. Its payload is
 gctk's `doctor.Record`, which `internal/cityboard` decodes.
 `specs/tk-1tfzr71.178/gas-city-search.md` says why the page reads the event log
-and what Gas City's own dashboard shows of it.
+and what Gas City's own dashboard shows of it. The mailbox's count is the
+`total` of the supervisor's `GET /v0/city/{city}/mail/count?agent=human`
+(`source.MailCount`): the open messages of Gas City's `human` mailbox, read or
+unread, which only an archive takes out.
+`specs/tk-1tfzr71.207/gas-city-search.md` says why the page counts them and
+lists none.
 
 **What it shows.** `internal/cityboard` decides it, and the page lays it out:
 
@@ -1623,14 +1630,21 @@ The page leads with the count of the failing checks it shows, which reaches zero
 when no check has failed two runs in a row. The words beside the count say so,
 and name how many accepted checks and checks not measured it leaves out. With no
 run in the log, or none that measured the checks, it shows no count and says why.
+Beside that count it shows how many messages wait in the mailbox, with how to
+open the postmaster, who works through it with the operator (`gc-helm
+postmaster`). A count that did not read shows why in place of a number, and a
+count that some store did not answer for says what it may miss.
 
-**How it is cached.** The document is cached whole for five minutes
+**How it is cached.** Doctor's part of the document is cached for five minutes
 (`server.CityPageTTL`), with one read at a time, since the newest run changes
-once an hour. The board's write routes change no doctor run, so a write leaves
-it cached. A failed read, or a newest event that holds no run's record, answers
-502 with the failure, and the page keeps the last good document and says the
-read failed. The page reads it every two and a half minutes, and whenever the
-tab is shown again.
+once an hour. The mailbox's count is cached apart, for a minute
+(`server.CityMailTTL`), so it is counted at most once a minute however many
+pages are open, and a count that did not read is kept for that minute too. The
+board's write routes change no doctor run and no mail, so a write leaves both
+cached. A failed read of the event log, or a newest event that holds no run's
+record, answers 502 with the failure, and the page keeps the last good document
+and says the read failed. The page reads it every two and a half minutes, and
+whenever the tab is shown again.
 
 **Its types are generated.** `web/src/cityboard/document.gen.ts` comes from
 `internal/cityboard/document.go`, through tygo, and `TestPageTypesAreCurrent`

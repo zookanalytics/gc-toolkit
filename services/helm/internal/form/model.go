@@ -1379,8 +1379,9 @@ func (m *Model) showPage(p screen) tea.Cmd {
 
 // The seats `conversations` lists, by the verb that opens each.
 const (
-	poSeat       = "po"
-	mechanikSeat = "mechanik"
+	poSeat         = "po"
+	mechanikSeat   = "mechanik"
+	postmasterSeat = "postmaster"
 )
 
 // seats are the People page's rows: the seats the city's read lists, in its
@@ -1435,15 +1436,17 @@ func (m *Model) rigNamed(name string) (Rig, bool) {
 }
 
 // seatWhere is what Enter on s opens and what the People page says of it, and
-// whether Enter opens it: mechanik, and a rig's po while its rig is not
-// suspended, since Gas City starts no session in a suspended rig. Gas City's
-// attach carries no message, so the line says the sitting's purpose is given in
-// the sitting.
+// whether Enter opens it: mechanik, the postmaster, and a rig's po while its
+// rig is not suspended, since Gas City starts no session in a suspended rig.
+// Gas City's attach carries no message, so the line says the sitting's purpose
+// is given in the sitting.
 func (m *Model) seatWhere(s Seat) (string, standing) {
 	const how = ", which attaches to its session, starting it first when it is not running. The attach carries no message, so give the sitting its purpose once you are in it."
 	switch s.Name {
 	case mechanikSeat:
 		return "mechanik, the city's standing conversation: Enter runs gc-helm mechanik" + how, settled
+	case postmasterSeat:
+		return "the postmaster, who works through your mailbox with you: Enter runs gc-helm postmaster" + how, settled
 	case poSeat:
 		r, ok := m.rigNamed(s.Rig)
 		switch {
