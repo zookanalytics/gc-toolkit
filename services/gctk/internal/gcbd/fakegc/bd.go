@@ -573,8 +573,8 @@ func (c *Call) update(s, d string, args []string) error {
 		return c.fail(1, "gc: simulated update refusal for "+id)
 	}
 	var sets, unsets, addLabels, removeLabels, setLabels []string
-	var note, asg, newstatus, desc, prio, parent, ifAssignee, ifStatus string
-	noteSet, asgSet, descSet, ifAssigneeSet, ifStatusSet, labelsSet := false, false, false, false, false, false
+	var note, asg, newstatus, desc, title, prio, parent, ifAssignee, ifStatus string
+	noteSet, asgSet, descSet, titleSet, ifAssigneeSet, ifStatusSet, labelsSet := false, false, false, false, false, false, false
 	value := func(i *int) string {
 		*i++
 		if *i < len(args) {
@@ -585,6 +585,10 @@ func (c *Call) update(s, d string, args []string) error {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case strings.HasPrefix(a, "--title="):
+			title, titleSet = strings.TrimPrefix(a, "--title="), true
+		case a == "--title":
+			title, titleSet = value(&i), true
 		case strings.HasPrefix(a, "--description="):
 			desc, descSet = strings.TrimPrefix(a, "--description="), true
 		case a == "--description" || a == "-d":
@@ -636,6 +640,9 @@ func (c *Call) update(s, d string, args []string) error {
 		case strings.HasPrefix(a, "--set-labels="):
 			setLabels, labelsSet = append(setLabels, strings.Split(strings.TrimPrefix(a, "--set-labels="), ",")...), true
 		}
+	}
+	if titleSet && strings.TrimSpace(title) == "" {
+		return c.fail(1, "Error: title cannot be empty")
 	}
 	if listed(c.getenv("STUB_CLOSE_FAIL"), id) && newstatus == "closed" {
 		return c.fail(1, "gc: simulated close refusal for "+id)
@@ -744,6 +751,9 @@ func (c *Call) update(s, d string, args []string) error {
 		}
 		if descSet && kept("description") {
 			o.Set("description", desc)
+		}
+		if titleSet {
+			o.Set("title", title)
 		}
 		if labelsSet || len(addLabels) > 0 || len(removeLabels) > 0 {
 			var labels []string
