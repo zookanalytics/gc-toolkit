@@ -301,18 +301,26 @@ func TestASweepsDeadlineReadsAsAnOrdersTimeout(t *testing.T) {
 	}
 }
 
-// A rig whose proactive pool cannot take a reaction is skipped before the
-// store is read, and a sweep in no rig fails before anything is read.
-func TestASweepSkipsARigWhosePoolCannotTakeAReaction(t *testing.T) {
+// The sweep asks whether the rig's proactive pool can take a reaction only once
+// a candidate remains. A pass that finds none never reads the roster and says
+// it slung none, a pool that cannot take a reaction skips the rig once a
+// candidate remains, and a sweep in no rig fails before anything is read.
+func TestTheSweepAsksAboutItsPoolOnlyOnceACandidateRemains(t *testing.T) {
 	w := newWorld(t)
-	w.ready(input("tk-a", nil))
 	w.rt.Roster = w.rt.Roster[:3]
-	w.store.ReadyErr = errors.New("the ready read was made")
+	for _, dryRun := range []bool{false, true} {
+		lines, summary, err := w.sweep(dryRun, time.Minute)
+		if err != nil || len(lines) > 0 || strings.Contains(summary, "no sweep") || slices.Contains(w.rt.Reads(), "roster") {
+			t.Errorf("(SWEEP-NOCANDIDATE) dry run %v: %v, %q, %v, with the reads %v", dryRun, lines, summary, err, w.rt.Reads())
+		}
+	}
+	w.ready(input("tk-a", nil))
 	lines, summary, err := w.sweep(false, time.Minute)
-	if err != nil || len(lines) > 0 || !strings.Contains(summary, "no sweep in this rig: no agent is registered at gc-toolkit/gc-toolkit.proactive") {
+	if err != nil || len(lines) > 0 || len(w.slings()) > 0 || !strings.Contains(summary, "no sweep in this rig: no agent is registered at gc-toolkit/gc-toolkit.proactive") {
 		t.Errorf("(SWEEP-DELIVERABLE) %v, %q, %v", lines, summary, err)
 	}
 	w.r.Rig = ""
+	w.store.ReadyErr = errors.New("the ready read was made")
 	if _, _, err := w.sweep(false, time.Minute); !errors.Is(err, ErrNoRig) || len(w.slings()) > 0 {
 		t.Errorf("(SWEEP-FAILCLOSED) a sweep in no rig: %v", err)
 	}

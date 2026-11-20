@@ -170,14 +170,15 @@ with a description that is no workflow root, scope, spec or step, no standing
 record, feedback pattern or review lane, carries no headline, no work marker
 and no parent, has no route or arm, and carries no hold:mayor or hold:external.
 It drops every bead a live run works, and a run map that does not read drops
-nothing, which it says. Each sling applies sling's refusals again.
+nothing, which it says. Only once a candidate remains does it ask whether the
+rig's proactive pool can take a reaction, and a pool that cannot skips the
+rig. Each sling applies sling's refusals again.
 
 A slung run waits for a pool slot at no cost, so the sweep has no cap. It
 starts no sling once less of its deadline is left than its slowest sling took,
 each figure taken in whole seconds as its upper bound, and the next sweep takes
 the rest. The deadline is GC_PROACTIVE_SWEEP_TIMEOUT, seconds alone or with an
-s, m or h suffix, 300s when unset. A rig whose proactive pool cannot take a
-reaction is skipped.
+s, m or h suffix, 300s when unset.
 
 Each candidate gets one JSON line on stdout: its id, title, priority and
 outcome, which is slung, refused (with the refusal's code and why), failed

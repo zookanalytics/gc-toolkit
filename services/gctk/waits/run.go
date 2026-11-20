@@ -10,15 +10,17 @@ import (
 // The run link: which bead a workflow run works. assets/scripts/run-lib.sh is
 // its one definition, and this copies the part of it that reads every live run,
 // its map verb, and the part that reads the runs that work one bead, its runs
-// verb, which TestRunsAgreeWithRunLibFixture holds to that file's fixture. Gas
-// City pours a graph.v2 run over an input convoy: the root names the convoy in
-// the key inputConvoyKey declares, and the convoy tracks the bead the run
-// works. A classic molecule names no convoy and records its bead in its issue
-// variable, issueVarKey. So a run works the one bead its input convoy tracks,
-// or, when its root names no convoy, the bead its issue variable names. A convoy
-// that tracks no bead, or more than one, names none, and so does a convoy the
-// store does not return. A root whose issue variable names a bead its convoy
-// does not track names none either. A run is live until its root closes.
+// verb, which TestRunsAgreeWithRunLibFixture holds to that file's fixture.
+// LiveRunsOf reads the runs verb's answer from live roots alone, which
+// run-lib.sh has no verb for. Gas City pours a graph.v2 run over an input
+// convoy: the root names the convoy in the key inputConvoyKey declares, and the
+// convoy tracks the bead the run works. A classic molecule names no convoy and
+// records its bead in its issue variable, issueVarKey. So a run works the one
+// bead its input convoy tracks, or, when its root names no convoy, the bead its
+// issue variable names. A convoy that tracks no bead, or more than one, names
+// none, and so does a convoy the store does not return. A root whose issue
+// variable names a bead its convoy does not track names none either. A run is
+// live until its root closes.
 
 // tracks is the type of the edge a convoy tracks a bead by.
 const tracks = "tracks"
@@ -77,6 +79,30 @@ func RunsOf(l *ledger.Ledger, bead string) ([]Run, error) {
 	if err != nil {
 		return nil, err
 	}
+	return runsWorking(l, bead, up, func(s ledger.Selection) ledger.Selection { return s.WithClosed() })
+}
+
+// LiveRunsOf reads the live runs that work bead, in root order, as RunsOf reads
+// them but from live roots alone, so its cost does not grow with the closed
+// beads the store holds. up is the beads with a tracks edge onto bead, as
+// l.Dependents reads them, which a caller that asks its own question of them
+// reads once for both. It names each live run RunsOf names, except one whose
+// root the store's listing of live beads leaves out: bd leaves out a pinned
+// bead, by its status or by its pinned flag, and a bead whose status the store
+// adds as a done or frozen one. A read that fails returns its
+// *ledger.ReadError.
+func LiveRunsOf(l *ledger.Ledger, bead string, up []*ledger.Record) ([]Run, error) {
+	runs, err := runsWorking(l, bead, up, func(s ledger.Selection) ledger.Selection { return s })
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(runs, func(r Run) bool { return !r.Live }), nil
+}
+
+// runsWorking is the runs that work bead, in root order, over up, the beads
+// that track it, reading the roots each convoy among up has poured over it and
+// the roots that record bead as their issue, each through roots.
+func runsWorking(l *ledger.Ledger, bead string, up []*ledger.Record, roots func(ledger.Selection) ledger.Selection) ([]Run, error) {
 	var rows []*ledger.Record
 	seen := map[string]bool{}
 	for _, c := range up {
@@ -84,13 +110,13 @@ func RunsOf(l *ledger.Ledger, bead string) ([]Run, error) {
 			continue
 		}
 		seen[c.ID] = true
-		poured, err := l.Find(ledger.Matching(inputConvoyKey, c.ID).WithClosed())
+		poured, err := l.Find(roots(ledger.Matching(inputConvoyKey, c.ID)))
 		if err != nil {
 			return nil, err
 		}
 		rows = append(rows, poured...)
 	}
-	recorded, err := l.Find(ledger.Matching(issueVarKey, bead).WithClosed())
+	recorded, err := l.Find(roots(ledger.Matching(issueVarKey, bead)))
 	if err != nil {
 		return nil, err
 	}

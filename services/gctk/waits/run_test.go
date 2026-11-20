@@ -93,6 +93,47 @@ func TestRunsAgreeWithRunLibFixture(t *testing.T) {
 	}
 }
 
+// LiveRunsOf names, for the bead of each runs case of the fixture, the live
+// runs RunsOf names for it, and finds them among live roots alone, so a closed
+// root is never read. The fixture holds a finished run beside a live one,
+// which RunsOf names and LiveRunsOf leaves out.
+func TestLiveRunsOfNamesTheLiveRunsRunsOfNames(t *testing.T) {
+	s, fx := fixtureStore(t)
+	l := ledger.New(s)
+	finished := 0
+	for _, c := range fx.Cases {
+		if c.Verb != "runs" {
+			continue
+		}
+		all, err := RunsOf(l, c.Arg)
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		up, err := l.Dependents(c.Arg, tracks)
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		before := len(s.Finds())
+		live, err := LiveRunsOf(l, c.Arg, up)
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		want := slices.DeleteFunc(slices.Clone(all), func(r Run) bool { return !r.Live })
+		finished += len(all) - len(want)
+		if !slices.Equal(live, want) {
+			t.Errorf("%s: LiveRunsOf reads %+v, and the live runs RunsOf names are %+v", c.Name, live, want)
+		}
+		for _, q := range s.Finds()[before:] {
+			if q.Closed && (q.Key == inputConvoyKey.Name() || q.Key == issueVarKey.Name()) {
+				t.Errorf("%s: LiveRunsOf read closed roots (%+v)", c.Name, q)
+			}
+		}
+	}
+	if finished == 0 {
+		t.Fatal("no runs case of the fixture names a finished run, so nothing tells the live form from RunsOf")
+	}
+}
+
 // A bead the store does not hold has no runs to read: RunsOf fails, as
 // run-lib.sh's runs verb fails on bd's refusal to resolve it, rather than
 // answer none.
