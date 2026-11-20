@@ -515,10 +515,9 @@ first. Either way the change is a decision on the record, not a drift.
 Each entry is a place where what is built falls short of the sections above,
 why a reader must know it, and the work that retires it.
 
-- **`gc-helm.sh` still carries the write verbs.** They run as shell, and gctk
-  reaches two of them through the script. The board member (tk-1tfzr71.24)
-  moves the steering and record verbs into gctk, and tk-ssm8qns.15 moves the
-  conversation verbs.
+- **`gc-helm.sh` still carries the conversation verbs.** open, engage,
+  attach, dismiss and handback run as shell, and gctk reaches open and the
+  read-only resolve through the script. tk-ssm8qns.15 moves them into gctk.
 - **The merge cadence still admits work on a pending record.** It files work
   for a PR on the pending record beside the landing order
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
