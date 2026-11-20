@@ -317,8 +317,11 @@ Take the case that fits the ruling:
   it, or sign off without `--accept` and with `--leave <the recommendation's
   gate>`. That gate then stays on the operator's page as a question, and once
   the other gate clears, the sitting that answers the question takes the
-  recommendation with `--accept`. A `first-reaction` gate on an epic's member
-  asks about the member's recommendation, which this case does not take.
+  recommendation with `--accept`. Tell the operator that this is their next
+  step: once the other gate clears, Start the conversation on that question
+  and rule there to take the recommendation. A `first-reaction` gate on an
+  epic's member asks about the member's recommendation, which this case does
+  not take.
 - **The work will not go on, and a human gate holds the subject.** Stand the
   subject down first, with the gate's `await_id` as the key:
   `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.

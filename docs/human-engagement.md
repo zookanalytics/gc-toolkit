@@ -624,7 +624,8 @@ its dispositions. On the two that put the subject to the operator, a ruling or
 a recommend, it files a human gate on the subject under the key
 `first-reaction`, which reaches the operator on the board. A ruling is
 Discuss-only. A recommend also records the formula it recommends as
-`gc.recommended_formula`, so the row offers Accept beside Discuss. When the
+`gc.recommended_formula`, which the sitting the operator starts on the gate
+takes when they rule to ([Accept](#accept)). When the
 reaction judges the action clear and reversible, it routes the subject, holds
 it, or hands it to a validating closer, and puts nothing to the operator. A
 capture that is not a member of an epic is not routed: it waits, held, for the
@@ -1203,7 +1204,12 @@ ruling that changes the branch files a rework through the sign-off.
 A first reaction's recommend exit puts its recommendation to the operator as a
 human gate under the key `first-reaction` and records the formula as
 `gc.recommended_formula` on the bead. Accept is the operator's answer to that
-gate alone. The board offers it while all three hold:
+gate alone, and `gctk reaction accept` is its one writer. The operator takes a
+recommendation in a sitting: the board shows the gate as a question, Start the
+conversation opens a sitting on it, and when the operator rules to take the
+recommendation, the sitting's sign-off runs Accept (below). An agent carrying
+out the operator's approval runs the same command (the `work` skill). Accept
+takes the recommendation only while all three hold:
 
 1. the bead carries `gc.recommended_formula`;
 2. the recommendation's gate is open and unassigned, or closed with an
@@ -1215,13 +1221,16 @@ gates, and each gate's close does something of its own: a `ruled:` close
 releases a needs-you finding, and any close releases what waits on the gate.
 It waits for the others because a formula sling reads no `blocks` edge, so an
 Accept that slung while another gate stayed open would start the work before
-that gate was cleared. While another gate blocks the bead, the row offers
-Discuss and names the gates that withhold Accept (`accept_withheld`), and a
-sitting answers them. A live sitting does not withhold Accept; Accept warns
-when one tracks the bead or replies to the recommendation's gate, and that
-sitting's sign-off later reports the gate already cleared. A conversation that
-holds an open PR's merge withholds no Accept either: it is no human gate, and
-it holds only the merge, which no dispatch reaches.
+that gate was cleared. While another gate blocks the bead, a sitting that
+rules to take the recommendation answers the other gate in the same ruling, or
+signs off with `--leave` on the recommendation's gate. The board then keeps
+showing that gate as a question, and once the other gate clears, the sitting
+the operator starts on it takes the recommendation. A live sitting does not
+stop Accept; Accept warns when one tracks the bead or replies to the
+recommendation's gate, and that sitting's sign-off later reports the gate
+already cleared. A conversation that holds an open PR's merge does not stop
+Accept either: it is no human gate, and it holds only the merge, which no
+dispatch reaches.
 
 `gctk reaction accept` runs under the bead's acceptance lock, a `flock` on one
 file per bead under `<city>/.gc/runtime/packs/gc-toolkit`, from before its live
@@ -1237,21 +1246,21 @@ slings the formula titled
 another reached first stands, and Accept slings nothing. A gate filed in the
 meantime, or a sling that poured no root, reopens the recommendation's gate. A
 run that stopped after its resolve leaves an unfinished acceptance, which the
-board keeps owed and the next Accept finishes under the same token, slinging
-only when no root carries the token. That sling carries the vars the
-acceptance recorded, whoever finishes it: a run given no var slings them, and
+next Accept finishes under the same token, slinging only when no root carries
+the token. That sling carries the vars the acceptance recorded, whoever
+finishes it: a run given no var slings them, and
 a run given vars other than the recorded ones dispatches nothing. The lock's
 warrant is in [warrants.md](warrants.md).
 
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate
 out of its `ruled:` answers and runs `gctk reaction accept` once the ruling's
-other writes have landed. Under the lock, that run finishes an acceptance the
-board's Accept left unfinished instead of sending the formula again, and a
-board Accept that runs after the sitting's finds the recommendation
-dispatched. Gas City's launch lock refuses a second pour only while the first
-root is live, so a sling of the sitting's own would pour the formula again
-once the stopped Accept's root had finished.
+other writes have landed. Under the lock, that run finishes an acceptance an
+earlier Accept left unfinished instead of sending the formula again, and an
+Accept that runs after the sitting's finds the recommendation dispatched. Gas
+City's launch lock refuses a second pour only while the first root is live, so
+a sling of the sitting's own would pour the formula again once the stopped
+Accept's root had finished.
 A var the ruling settles for the dispatch, such as a design convoy's
 `design_gated` ([design-convoy.md](design-convoy.md)), rides the sign-off's
 `--var` to Accept's sling. The sign-off refuses `--accept`, writing nothing,
