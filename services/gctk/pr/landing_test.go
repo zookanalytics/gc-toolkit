@@ -2003,12 +2003,16 @@ func TestARecordWriteWaitsWhileAnActHoldsTheLockAndLandsAfterItsLastWrite(t *tes
 // A publication at a new head holds the lock across its two writes. An act
 // that starts between them waits for the lock, reads the whole record,
 // blocked and assigned to nobody, at the new head, and decides it on its own
-// read of the PR, so it sends nothing back and merges nothing.
+// read of the PR, so it sends nothing back and merges nothing: the new head has
+// no review result, so the act pours its review run.
 func TestAnActWaitsWhileARecordWriteHoldsTheLockThenDecidesOnTheWholeRecord(t *testing.T) {
 	d := newLand(t)
+	d.l.Refinery = boundRefinery
+	runs := &pours{store: d.store}
+	d.l.Runs = runs
 	d.md["merge_result"], d.md["observed_pr_head_sha"] = record.HeadChanged, other
 	delete(d.md, "pr_reconcile_pending")
-	d.put("open", refinery)
+	d.put("open", boundRefinery)
 	d.refresh(t)
 	d.pr.Facts.HeadRefOid = other // the refinery validated a new head and pushed it
 	d.co.descends[other] = []string{head}
@@ -2036,8 +2040,11 @@ func TestAnActWaitsWhileARecordWriteHoldsTheLockThenDecidesOnTheWholeRecord(t *t
 	if err := <-ran; err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Action != pr.ActChecked || len(d.github.Asks()) != 0 {
-		t.Fatalf("the run did %+v with asks %v, want the whole record at the new head, checked", out, asks(d.github))
+	if len(out) != 1 || out[0].Action != pr.ActPoured || len(d.github.Asks()) != 0 {
+		t.Fatalf("the run did %+v with asks %v, want the whole record at the new head, poured", out, asks(d.github))
+	}
+	if runs.count() != 1 || runs.vars[0]["head"] != other {
+		t.Fatalf("the run poured %v, want one run at the new head %s", runs.vars, other)
 	}
 }
 

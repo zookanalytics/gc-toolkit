@@ -60,7 +60,9 @@ const pourReserve = 10 * time.Second
 // or why none is poured. It returns false when the bead is owed no run, so the
 // caller reports the evaluator's answer. ans is the evaluator's answer at the
 // validated head, on the act's own read of the PR, and asks the asks on the
-// bead.
+// bead. A run owed is held off, as checked, only while a run, a gate or
+// another writer holds the branch, and a read that did not answer, or a pour
+// this run cannot make, is a retry (ActChecked).
 func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 	var takeable []string
 	for _, a := range asks {
@@ -77,6 +79,9 @@ func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 		why = "ask " + strings.Join(takeable, ", ") + " is open, and nothing holds it"
 	}
 	checked := func(detail string) (plan, bool) { return none(s, ActChecked, detail), true }
+	retry := func(detail string) (plan, bool) {
+		return none(s, ActRetry, detail+"; the next run decides again"), true
+	}
 	if len(s.runs) > 0 {
 		return checked("review run " + strings.Join(s.runs, ", ") + " is attached, and the bead waits on it: " + why)
 	}
@@ -85,25 +90,25 @@ func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 	}
 	writers, err := u.writers(s)
 	if err != nil {
-		return checked("no review run is poured, because the beads on " + s.branch + " did not read; the next run reads them: " + err.Error())
+		return retry("no review run is poured, because the beads on " + s.branch + " did not read: " + err.Error())
 	}
 	if len(writers) > 0 {
 		return checked(fmt.Sprintf("no review run is poured while %s works %s: %s", strings.Join(writers, ", "), s.branch, why))
 	}
 	failed, err := u.failedRuns(s)
 	if err != nil {
-		return checked("no review run is poured, because how its earlier runs ended did not read; the next run reads it: " + err.Error())
+		return retry("no review run is poured, because how its earlier runs ended did not read: " + err.Error())
 	}
 	if len(failed) == 2 {
 		return doing(func(ctx context.Context, c carriedOut) RunOutcome { return u.runFailed(ctx, s, failed, c.note) }), true
 	}
 	vars, err := reviewVars(u.Refinery)
 	if err != nil {
-		return checked("no review run is poured: " + err.Error())
+		return retry("no review run is poured: " + err.Error())
 	}
 	vars["pr_bead"], vars["head"], vars["target"], vars["branch"] = s.id, s.rec.Head, s.rec.Target, s.branch
 	if u.Runs == nil {
-		return checked("no review run is poured, because nothing pours one here: " + why)
+		return retry("no review run is poured, because nothing pours one here: " + why)
 	}
 	return doing(func(ctx context.Context, c carriedOut) RunOutcome {
 		if left, ok := ctx.Deadline(); ok && time.Until(left) < pourReserve {

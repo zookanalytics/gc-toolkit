@@ -231,22 +231,23 @@ func TestTheOrderReadiesADraftOnlyOnceItsOwnReadFindsItADraftAtThePassedHead(t *
 }
 
 // The order readies no draft whose record is not pending at its head: a result
-// that passed at another head, a result at its head that did not pass, a head
-// the refinery has not validated, or a review run still attached to the bead.
+// that passed at another head or a result at its head that did not pass, for
+// which it pours a review run instead, a head the refinery has not validated,
+// or a review run still attached to the bead.
 func TestTheOrderReadiesNoDraftWhoseRecordIsNotPendingAtItsPassedHead(t *testing.T) {
-	d := newCycle(t)
+	d := newAdmit(t)
 	d.pr.Facts.IsDraft = true
 	d.edit(t, func(b *fake.Bead) {
 		b.Metadata["review_results"] = `[{"head":"` + other + `","target":"main","passed":true}]`
 	})
-	is(t, d.once(t), pr.ActChecked)
+	is(t, d.once(t), pr.ActPoured)
 
-	g := newCycle(t)
+	g := newAdmit(t)
 	g.pr.Facts.IsDraft = true
 	g.edit(t, func(b *fake.Bead) {
 		b.Metadata["review_results"] = `[{"head":"` + head + `","target":"main","passed":false,"run":"tk-run0"}]`
 	})
-	is(t, g.once(t), pr.ActChecked)
+	is(t, g.once(t), pr.ActPoured)
 
 	e := newCycle(t)
 	e.pr.Facts.IsDraft = true
@@ -265,7 +266,7 @@ func TestTheOrderReadiesNoDraftWhoseRecordIsNotPendingAtItsPassedHead(t *testing
 	})
 	f.store.List(bead, "tk-run")
 	is(t, f.once(t), pr.ActChecked)
-	for _, w := range []*land{d, g, e, f} {
+	for _, w := range []*land{d.land, g.land, e, f} {
 		if slices.ContainsFunc(w.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MarkReady" }) {
 			t.Fatalf("a draft not pending at its passed head was marked ready: %v", asks(w.github))
 		}

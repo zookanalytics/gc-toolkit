@@ -231,8 +231,9 @@ exit: 0 every record and every PR's labels were decided, and every act the
       1 usage
       2 the listing did not answer, or a record or a PR's labels could not be
         decided or its act did not complete: a store read or write failed, a
-        call GitHub refused or did not answer, a fetch failed, the labels'
-        writer did not exit 0, or the act was stopped`
+        call GitHub refused or did not answer, a fetch failed, a review run
+        the record is owed did not pour, the labels' writer did not exit 0, or
+        the act was stopped`
 
 func newPRRecordCmd(stdout, stderr io.Writer) *cobra.Command {
 	var url, head, target, refinery, db string

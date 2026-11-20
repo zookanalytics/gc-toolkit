@@ -278,7 +278,10 @@ type RunOutcome struct {
 const (
 	// ActChecked: the record owes no act, and the run wrote nothing on the bead:
 	// the PR stands as the record says, or the disposition writer holds a
-	// retired PR's close for now, and the next run hands it over again.
+	// retired PR's close for now, and the next run hands it over again. A run
+	// keeps the digest of what a decision that owed no act read (one), and
+	// decides the record again only once that changes, so a decision a failed
+	// read left unmade is ActRetry, never this.
 	ActChecked = "checked"
 	// ActRequested: the evaluator found the PR ready on the run's own read of
 	// GitHub, and the run asked GitHub to merge it, or to add it to its base's
