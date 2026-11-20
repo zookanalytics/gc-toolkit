@@ -203,17 +203,26 @@ So the two jobs are separate:
 
 | | script | when |
 |---|---|---|
-| build | `assets/scripts/gc-build.sh helm` | the `helm-build` order, every 5m |
+| build | `assets/scripts/gc-build.sh helm` | the `helm-build` order, while a build or a restart is owed |
 | start | `assets/scripts/gc-helm-svc.sh` | the supervisor, on demand |
 
 `gc-build.sh` is the pack's one out-of-band builder. The `gctk-build` order runs
 it as `gc-build.sh gctk`, which builds the merge cadence's binary the same way,
 without the restart described below.
 
+Both orders are condition orders. On each pass the order dispatcher runs
+`gc-build.sh <component> --due`, which reads the checkout and the record and
+asks gc nothing, and the order runs only when it answers that a run is owed and
+due. A run is owed while the binary is missing or was built from a revision
+other than the checkout's, and for helm while a publish waits for its restart.
+It is due on the first pass after the checkout moves, and otherwise five
+minutes after the last run, so a build or a restart that failed is tried again
+every five minutes until it succeeds. The script's check states the rule.
+
 `gc-build.sh helm` rebuilds when a source is newer than the binary, an
 ordinary `find -newer` dependency, the same question `make` asks. It also
 rebuilds when the build-status record names a revision other than the one the
-tick sees, since deleting a file makes nothing newer. It publishes by atomic
+run sees, since deleting a file makes nothing newer. It publishes by atomic
 rename so a failed link can never truncate a serving binary, and in `--deploy`
 mode restarts the service onto what it published. Build and restart are one
 step on purpose: a new binary that nothing restarts onto is the other half of
@@ -225,10 +234,10 @@ after it, all three inert in the served board.
 `<state_root>/restart-pending`, and only a restart that returns success clears
 it; the next `--deploy` run restarts even though the binary is by then current.
 Without that record the same inert state returns by a different road: a restart
-that fails once leaves a binary newer than every source, so nothing is ever
-stale again, every later tick exits on "is up to date" without reaching the
-restart, and the old process serves the old inode until someone edits a source
-file. The same record is what carries a hand-run build (below) to the service.
+that fails once leaves a binary built from the checkout's revision, so nothing
+is ever stale again, the order's check owes no run, and the old process serves
+the old inode until a commit moves its sources. The same record is what carries
+a hand-run build (below) to the service.
 
 To build by hand — after editing Go sources or rebuilding `web/dist` — run:
 
@@ -238,10 +247,10 @@ gc service restart helm                    # serve it now, rather than waiting
 ```
 
 The `gc service restart` there is only to see it immediately — the build records
-the publish either way, so the next `helm-build` tick would restart onto it
-within 5 minutes. A restart run by hand does not clear that record (only the
-build's own restart does), so it costs one redundant restart on the following
-tick; `rm <state_root>/restart-pending` skips it. Recognising a hand restart
+the publish either way, so the `helm-build` order restarts onto it five minutes
+after the build. A restart run by hand does not clear that record (only the
+build's own restart does), so it costs that one redundant restart;
+`rm <state_root>/restart-pending` skips it. Recognising a hand restart
 would mean probing whether the running process is on the new inode, which is
 exactly the bespoke liveness machinery this split exists to avoid.
 

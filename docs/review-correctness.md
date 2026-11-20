@@ -221,8 +221,8 @@ changed. No suite builds or runs helm-svc. So on a Go diff the review runs
 commands it changes.
 
 - **Live at the next build, with no fallback.** The `gctk-build` and
-  `helm-build` orders run `assets/scripts/gc-build.sh` every five minutes, so
-  each binary is rebuilt from the rig checkout soon after a change reaches it.
+  `helm-build` orders run `assets/scripts/gc-build.sh`, which rebuilds each
+  binary from the rig checkout on the first pass after a change reaches it.
   `gctk merge` lands the pull requests the merge cadence merges, and every
   merged record is a `gctk lifecycle` transition. The bridges `merge.sh` and
   `lifecycle.sh` have no shell fallback, so a gctk defect reaches every landing
