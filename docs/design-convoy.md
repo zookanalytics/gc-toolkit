@@ -27,8 +27,7 @@ branch and land, is the `work` skill's effort recipe
 (`skills/work/integration-effort.md`). How a summary task writes its PR summary
 is the polecat doctrine's (`template-fragments/polecat-doctrine.template.md`).
 The merge rule the gates apply is the pack's approval contract, which the
-evaluator in `gctk`'s pr domain decides for the landing order, and which
-`gctk merge` applies on a rig still on the old path
+evaluator in `gctk`'s pr domain decides for the landing order
 ([refinery-merge-cadence.md](refinery-merge-cadence.md)); this page says how the
 pattern meets that rule and does not define it.
 
@@ -125,11 +124,10 @@ the subject's PR into the default branch both pass through it. The pattern's
 two gates are the two approvals that decide what moves next.
 
 The rule runs in the default branch's `gctk`, the binary the `gctk-build` order
-builds from the deployed pack: the landing order's `gctk pr reconcile`, or
-`gctk merge` on a rig still on the old path. It gates PRs onto an integration
-branch as well. An integration branch's own copy of `services/gctk` can predate
-the rule. Neither the landing order nor the merge cadence runs a build of that
-copy, and an effort that changes nothing under `services/gctk` leaves the
+builds from the deployed pack: the landing order's `gctk pr reconcile`. It
+gates PRs onto an integration branch as well. An integration branch's own copy
+of `services/gctk` can predate the rule. The landing order runs no build of
+that copy, and an effort that changes nothing under `services/gctk` leaves the
 default branch's version in place when its PR merges.
 
 **Gate 1, the design checkpoint** (design-gated only). The design child is a
@@ -151,8 +149,7 @@ line, because the PR's title is composed from the subject's. Once it closes,
 nothing the subject waits on is open. The refinery takes the subject, brings
 its branch current with the default branch, and publishes the PR from the
 integration branch into the default branch, with the summary task's account as
-its `## Summary`. On a rig still on the old path it parks the subject for the
-merge cadence, which opens the PR. The same rule holds that PR until an
+its `## Summary`. The same rule holds that PR until an
 operator's approval stands on it, so the operator reviews the whole unit, design
 and implementation together, before the default branch moves.
 

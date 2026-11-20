@@ -81,7 +81,6 @@ it, the bead stays blocked, and so does any work that waits on it.
 | `pull_request_legacy_closed_unverified` | The bead was closed while it still waited on its PR, with no merge confirmed, so the city reopened it. | Check whether the PR merged. If it did, close the bead as landed. If not, send the work back or drop it. |
 | `pull_request_merged_close_refused` | The PR merged, but the bead could not be closed, for example because work inside it is still open. | Clear what stops the close, then close the bead as landed. |
 
-Two older values also appear. `merged` marks work that landed without a PR,
-or through the older way of merging. `pull_request` marks an open PR on a rig
-that still merges the older way. [state-machine.md](state-machine.md) lists
-every value with the code that writes it.
+One more value appears. `merged` marks work that landed without a PR, pushed
+straight onto its target. [state-machine.md](state-machine.md) lists every
+value with the code that writes it.

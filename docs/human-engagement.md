@@ -240,9 +240,8 @@ session carries `human`. A sitting starts only when the operator engages.
 A conversation on an open PR holds the PR's merge until it closes. The subject
 counts as an open PR when it is the PR's anchor, not closed, or a bead whose
 `anchor_bead` names that anchor, such as the PR's review, rework or
-supplement. An anchor counts only while its `merge_result` is `pull_request`,
-or on the pending record `pull_request_pending` or
-`pull_request_head_changed`. The hold is bd's own: the anchor depends on the
+supplement. An anchor counts only while its `merge_result` is
+`pull_request_pending` or `pull_request_head_changed`. The hold is bd's own: the anchor depends on the
 conversation through a `blocks` edge, so bd counts the anchor blocked while
 the conversation is open and lets it go once the conversation closes.
 

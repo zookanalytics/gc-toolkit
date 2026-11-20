@@ -362,10 +362,8 @@ no warrant.
 - **Covers.** The `pr.machine`, `pr.machine_cause` and `pr.machine_reason`
   keys: `[machine_axis]` in `lifecycle/lifecycle.toml`, with its `machines`
   and `causes` lists, and the keys' entry in its `[metadata.pr_round_trip]`
-  table. Their writers: `recordMachine`, `recordBlocked` and `handleBlocked`
-  in `services/gctk/internal/cli/merge.go`, which `assets/scripts/merge.sh`
-  runs, and the "record the pass's own verdict on the anchor" section of
-  `assets/scripts/gate-ensure.sh`. The readers of the causes: package
+  table. Their writer: the "record the pass's own verdict on the anchor"
+  section of `assets/scripts/gate-ensure.sh`, which records `pr.machine` alone. The readers of the causes: package
   `services/gctk/prstatus`, and the helm board's machine reads in
   `services/helm/internal/board/derive.go`.
 - **Stands in for.** A merge-readiness verdict kept on the bead whose pull
@@ -414,8 +412,7 @@ no warrant.
 
 - **Covers.** The `status_label_clear_owed` key, in the
   `[metadata.pr_status_label]` table of `lifecycle/lifecycle.toml`. Its
-  writers: `clearStatusLabel` in `services/gctk/internal/cli/merge.go`, and
-  `clear_status_label` in `assets/scripts/pr-facts.sh`. Its reader: the
+  writer: `clear_status_label` in `assets/scripts/pr-facts.sh`. Its reader: the
   "retry the status: label clears that terminal records still owe" section of
   `assets/scripts/pr-facts.sh`.
 - **Stands in for.** A retry of a failed write to an outside service, kept
@@ -501,10 +498,8 @@ no warrant.
 ## Unanswered review threads
 
 - **Covers.** The `pr.unanswered_threads` key, in the
-  `[metadata.pr_round_trip]` table of `lifecycle/lifecycle.toml`. Its writer:
-  `recordUnansweredThreads` and `unansweredThreads` in
-  `services/gctk/internal/cli/merge.go`, which `assets/scripts/merge.sh` runs.
-  The definition it counts by: `gc_thread_awaits_answer` in
+  `[metadata.pr_round_trip]` table of `lifecycle/lifecycle.toml`, which nothing
+  writes. The definition it counts by: `gc_thread_awaits_answer` in
   `assets/scripts/pr-post.sh`, which reads a thread's posts through
   `live_comments` in `assets/scripts/review-dismissal.sh` and sets aside a post
   carrying the reaction the write-back in `assets/scripts/pr-facts.sh` marks a
