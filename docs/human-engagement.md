@@ -1281,7 +1281,7 @@ instead ([The sitting](#the-sitting)), which checks it once that work lands.
 
 **Routed work is wider than the board's disposition-due.** The board derives
 "blocker landed — dispose or resume" from the `blocks` edges
-`gc-helm takeaway --waiting-on` writes. Routed work filed as a child of the
+`gctk bead takeaway --waiting-on` writes. Routed work filed as a child of the
 subject cannot carry that edge, because bd refuses a `blocks` edge from a
 parent onto its own descendant
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-parent-cannot-be-blocked-by-its-own-descendant)).
@@ -1299,8 +1299,8 @@ decomposes an epic subject is the one exception: it is the epic's member, and
 containment carries the wait. Routed work already filed as a child stays where
 it is, and both readers handle it.
 
-**Where prose alone is correct.** `gc-helm.sh takeaway` writes prose with no
-edge at two call sites, and both pass `--no-wait`, which stamps
+**Where prose alone is correct.** `gctk bead takeaway` writes prose with no
+edge where nothing waits, and each such call passes `--no-wait`, which stamps
 `gc.takeaway_settled`: `lifecycle/lifecycle.toml` `[holds]` reads a takeaway
 as a hold unless its writer stamped that key beside it.
 
@@ -1407,14 +1407,14 @@ clock off rests on different ground, that a thread the operator is reading
 must not end without them.
 
 *The size of that trace:* a takeaway is capped at **140 characters**, which
-`gc-helm takeaway` enforces by refusing a longer text rather than trimming it.
+`gctk bead takeaway` enforces by refusing a longer text rather than trimming it.
 Whatever does not fit is detail, and detail belongs in the subject's notes or
 the thread.
 
 *The limit of a written trace:* a takeaway is one string, frozen when it is
 written. That is enough for a reap, because the record survives, and not
 enough for a wait, because nothing in the city re-reads prose. So a routed wait
-is also written as a `blocks` edge, `gc-helm takeaway <subject> "…"
+is also written as a `blocks` edge, `gctk bead takeaway <subject> "…"
 --waiting-on <work-bead>`, and the board re-derives on every render whether the
 blocker has closed, promoting the row to "blocker landed — dispose or resume"
 when it has. A wait whose work has already landed on the subject's own branch
@@ -1753,9 +1753,11 @@ operator's *own* unsent words.
   anchor kinds reaches the `/helm` answer and not the page. A new tile field
   also owes the model's TypeScript mirror, `web/src/contract.ts`, which
   `services/helm/web/contract_parity_test.go` holds equal to the Go contract.
-  `gc-helm.sh` keeps the write verbs (`open`, `engage`, `react`, `takeaway`,
-  `dismiss`, `accept`, `park`, `priority`) that have no Go equivalent, and
-  helm-svc's POST routes run `open`, `engage`, `accept` and `dismiss`.
+  `gc-helm.sh` keeps the write verbs (`open`, `engage`, `dismiss`, `accept`,
+  `park`, `priority`) that have no Go equivalent, and helm-svc's POST routes
+  run `open`, `engage`, `accept` and `dismiss`. A bead's headline is
+  `gctk bead takeaway`'s, and the operator's intake slings a first reaction
+  through `gctk reaction sling`.
 
 ## What upstream does not ship (the pack's actual seam)
 

@@ -464,7 +464,7 @@ sitting to discover it was done. Roughly 40% of the reserved parked budget was
 going to already-terminal rows.
 
 So the wait is recorded as a **`blocks` edge** —
-`gc-helm takeaway <subject> "…" --waiting-on <work-bead>` writes it beside the
+`gctk bead takeaway <subject> "…" --waiting-on <work-bead>` writes it beside the
 prose — and the board re-derives, per render, whether it has been discharged:
 
 | `waiting_on` | `waiting_on_open` | row |
@@ -1930,7 +1930,7 @@ too: `humanGated` keys the human-gate rules off `gc.routed_to`, and
 - **The takeaway-driven NEEDS sentence** — an anchor carrying `gc.takeaway`
   spends it as its NEEDS. This is the DATA half of `tk-x55wt`; that bead's
   remaining scope is the web tile's presentation. The sentence is bounded at
-  **140 characters**, enforced by `gc-helm.sh takeaway` at write time (a longer
+  **140 characters**, enforced by `gctk bead takeaway` at write time (a longer
   text is refused, not trimmed — only the author knows which clause is the
   headline). `--json` always carries the whole string, in `needs` and in
   `takeaway`. It is a bound on PROSE only: NEEDS never holds an
@@ -1959,8 +1959,8 @@ that adds a third sanctioned backend to.
 
 **Still deferred** (and *why*):
 
-- **Retiring `gc-helm.sh`.** Its `open`, `engage`, `react`, `takeaway`,
-  `dismiss` and `accept` verbs have no Go equivalent, so the script stays. Retirement is a
+- **Retiring `gc-helm.sh`.** Its `open`, `engage`, `dismiss` and `accept`
+  verbs have no Go equivalent, so the script stays. Retirement is a
   follow-up once the board view is proven at parity in daily use.
 - **A cache for the JSON read.** `helm-svc board --json` reads each rig it
   prints on every run. A cache would re-introduce a staleness surface, which
