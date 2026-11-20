@@ -1,0 +1,15 @@
+{
+  "doctor": {
+    "ran": true,
+    "started": "2026-11-16T12:00:00Z",
+    "finished": "2026-11-16T12:03:00Z",
+    "late": false,
+    "completed": true,
+    "measured": "2026-11-16T12:00:00Z",
+    "count": 0,
+    "failing": [],
+    "not_measured": [],
+    "accepted": [],
+    "monitors": []
+  }
+}

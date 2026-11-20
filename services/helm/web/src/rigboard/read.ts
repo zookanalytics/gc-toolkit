@@ -1,8 +1,10 @@
-// The page's reads of the helm service: the city's rigs, and one rig's document
-// (internal/server/rigboard.go). Both are document-relative: the page is served
+// The page's reads of the helm service: the city's rigs, one rig's document
+// (internal/server/rigboard.go) and the city's document
+// (internal/server/citypage.go). Each is document-relative: the page is served
 // under a runtime-city-named prefix (/v0/city/<city>/svc/helm/), so an absolute
 // '/helm/...' would address the supervisor root and 404.
 
+import type { Response as CityResponse } from '../cityboard/document.gen';
 import type { Response as RigResponse, Rigs } from './document.gen';
 
 /** A read the service refused, or one that never reached it (status 0). */
@@ -59,6 +61,11 @@ export function readRig(rig: string, signal: AbortSignal): Promise<RigResponse> 
   return readJSON<RigResponse>(`helm/rigs/${encodeURIComponent(rig)}`, signal);
 }
 
+/** GET <mount>/helm/city: the city's document and the time it was read. */
+export function readCity(signal: AbortSignal): Promise<CityResponse> {
+  return readJSON<CityResponse>('helm/city', signal);
+}
+
 /** The rig the address names (?rig=<name>), or null when it names none. */
 export function rigFromAddress(search: string): string | null {
   const rig = new URLSearchParams(search).get('rig')?.trim() ?? '';
@@ -68,4 +75,12 @@ export function rigFromAddress(search: string): string | null {
 /** The address of one rig's page, relative to the page itself. */
 export function rigAddress(rig: string): string {
   return `?rig=${encodeURIComponent(rig)}`;
+}
+
+/** The address of the city's page, relative to the page itself. */
+export const CITY_ADDRESS = '?city';
+
+/** Whether the address names the city's page (?city). */
+export function cityFromAddress(search: string): boolean {
+  return new URLSearchParams(search).has('city');
 }

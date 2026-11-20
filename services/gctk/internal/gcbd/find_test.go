@@ -51,9 +51,10 @@ func findCalls(t *testing.T, log string) []string {
 	return strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
 }
 
-// Each query is one `gc bd list` that reads every type a listing hides unless
-// asked, wisps, gates, infrastructure beads and templates, with no row limit,
-// and reads closed beads only when asked.
+// Each query is one `gc bd list` with no row limit that reads every type a
+// listing hides unless asked, wisps, gates, infrastructure beads and templates,
+// unless it asks for only what the listing shows, and reads closed beads only
+// when asked.
 func TestFindAsksTheListing(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -72,6 +73,10 @@ func TestFindAsksTheListing(t *testing.T) {
 			"bd list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --all --parent tk-e"},
 		{"the beads of one issue type, closed ones included", Query{Type: "epic", Closed: true},
 			"bd list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --all --type epic"},
+		{"one assignee's open beads that the listing shows", Query{Assignee: "tools/gc-toolkit.refinery", Statuses: []string{"open"}, Listed: true},
+			"bd list --json --limit 0 --assignee tools/gc-toolkit.refinery --status open"},
+		{"the beads in two statuses that the listing shows", Query{Every: true, Statuses: []string{"open", "in_progress"}, Listed: true},
+			"bd list --json --limit 0 --status open,in_progress"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			log := findStub(t, `[]`)
@@ -152,6 +157,26 @@ func TestFindReadsTheRowsFields(t *testing.T) {
 		!rows[3].InEphemeralPlane() || !rows[3].Template() {
 		t.Errorf("the ephemeral plane reads %v %v %v, templates %v %v %v", b.InEphemeralPlane(), rows[2].InEphemeralPlane(),
 			rows[3].InEphemeralPlane(), b.Template(), rows[2].Template(), rows[3].Template())
+	}
+}
+
+// A row bd's listing shows when asked for nothing more is outside the
+// ephemeral plane, no template, and of no type the listing hides: a gate, or an
+// agent, role or message bead, whatever the type's case.
+func TestListedByDefaultLeavesOutWhatTheListingHides(t *testing.T) {
+	findStub(t, `[{"id":"w-1","issue_type":"task"},{"id":"w-2"},{"id":"w-3","issue_type":"task","ephemeral":true},{"id":"w-4","issue_type":"task","no_history":true},{"id":"w-5","issue_type":"molecule","is_template":true},{"id":"w-6","issue_type":"Gate"},{"id":"w-7","issue_type":"agent"},{"id":"w-8","issue_type":"role"},{"id":"w-9","issue_type":"message"}]`)
+	rows, err := (&Client{bin: "gc"}).Find(Query{Every: true})
+	if err != nil || len(rows) != 9 {
+		t.Fatalf("Find = %v, %v", rows, err)
+	}
+	var listed []string
+	for _, r := range rows {
+		if r.ListedByDefault() {
+			listed = append(listed, r.ID)
+		}
+	}
+	if !slices.Equal(listed, []string{"w-1", "w-2"}) {
+		t.Errorf("listed by default: %v", listed)
 	}
 }
 

@@ -148,13 +148,13 @@ func TestEpicUnweighedListsWhatASyncAcrossMidnightDidNotRead(t *testing.T) {
 	}
 }
 
-// unweighedStub answers `gc rig list --json` with $STUB_RIGS and exit
-// $STUB_RIGS_RC, and `gc bd ... list` with $STUB_ROWS and exit $STUB_LIST_RC,
-// and logs each call's argv to $STUB_LOG.
+// unweighedStub answers `gc config show --json` with $STUB_CONFIG and exit
+// $STUB_CONFIG_RC, and `gc bd ... list` with $STUB_ROWS and exit
+// $STUB_LIST_RC, and logs each call's argv to $STUB_LOG.
 const unweighedStub = `#!/bin/sh
 printf '%s\n' "$*" >> "$STUB_LOG"
 case "$1 $2" in
-"rig list") printf '%s' "$STUB_RIGS"; exit "${STUB_RIGS_RC:-0}" ;;
+"config show") printf '%s' "$STUB_CONFIG"; exit "${STUB_CONFIG_RC:-0}" ;;
 esac
 for a in "$@"; do
   case "$a" in list) printf '%s' "$STUB_ROWS"; exit "${STUB_LIST_RC:-0}" ;; esac
@@ -174,16 +174,16 @@ func stubUnweighed(t *testing.T, rows string) string {
 	log := filepath.Join(bin, "calls")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("STUB_LOG", log)
-	t.Setenv("STUB_RIGS", `{"rigs":[{"name":"gc-toolkit","prefix":"tk","path":"/rigs/gc-toolkit"}]}`)
-	t.Setenv("STUB_RIGS_RC", "0")
+	t.Setenv("STUB_CONFIG", `{"city_path":"/city","config":{"Workspace":{"Name":"city","Prefix":"hq"},"Rigs":[{"Name":"gc-toolkit","Prefix":"tk","Path":"/rigs/gc-toolkit"}]}}`)
+	t.Setenv("STUB_CONFIG_RC", "0")
 	t.Setenv("STUB_ROWS", rows)
 	t.Setenv("STUB_LIST_RC", "0")
 	t.Setenv("GC_NO_API", "1")
 	return log
 }
 
-// --rig reads the store gc rig list names for the rig, with bd's --db on the
-// read, which lists the store's epics, closed ones included.
+// --rig reads the store the city's config names for the rig, with bd's --db on
+// the read, which lists the store's epics, closed ones included.
 func TestEpicUnweighedReadsTheStoreOfTheRigNamed(t *testing.T) {
 	log := stubUnweighed(t, `[{"id":"tk-e","status":"closed","issue_type":"epic","closed_at":"2026-11-14T00:00:00Z","close_reason":"held","metadata":{"epic_hypothesis":"h"}}]`)
 	pinUnweighedClock(t, func() time.Time { return readAt })
@@ -197,28 +197,28 @@ func TestEpicUnweighedReadsTheStoreOfTheRigNamed(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(calls) != 2 || calls[0] != "rig list --json" || !strings.HasPrefix(calls[1], "bd --db /rigs/gc-toolkit/.beads list ") ||
+	if len(calls) != 2 || calls[0] != "config show --json" || !strings.HasPrefix(calls[1], "bd --db /rigs/gc-toolkit/.beads list ") ||
 		!strings.Contains(calls[1], " --all") || !strings.Contains(calls[1], " --type epic") {
-		t.Errorf("calls = %q; want the rig list, then one list of the rig's epics in its store", calls)
+		t.Errorf("calls = %q; want the config read, then one list of the rig's epics in its store", calls)
 	}
 }
 
-// A rig gc rig list does not name is a usage error, and a rig list or an epic
-// list that fails is a store that did not answer: each prints nothing on
-// stdout.
+// A rig the city's config does not name is a usage error, and a config read or
+// an epic list that fails is a store that did not answer: each prints nothing
+// on stdout.
 func TestEpicUnweighedRefusesARigItCannotRead(t *testing.T) {
 	for _, tc := range []struct {
-		name, rig, rigsRC, listRC string
-		code                      int
-		says                      string
+		name, rig, configRC, listRC string
+		code                        int
+		says                        string
 	}{
-		{"a rig gc rig list does not name", "nowhere", "0", "0", unweighedExitUsage, `names no rig "nowhere"`},
-		{"a rig list that fails", "gc-toolkit", "1", "0", unweighedExitNoStore, "did not resolve"},
+		{"a rig the city's config does not name", "nowhere", "0", "0", unweighedExitUsage, `names no rig "nowhere"`},
+		{"a config read that fails", "gc-toolkit", "1", "0", unweighedExitNoStore, "did not resolve"},
 		{"an epic list that fails", "gc-toolkit", "0", "1", unweighedExitNoStore, "did not read"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stubUnweighed(t, `[]`)
-			t.Setenv("STUB_RIGS_RC", tc.rigsRC)
+			t.Setenv("STUB_CONFIG_RC", tc.configRC)
 			t.Setenv("STUB_LIST_RC", tc.listRC)
 			var out, errb bytes.Buffer
 			code := Run([]string{"epic", "unweighed", "--rig", tc.rig}, "test", &out, &errb)

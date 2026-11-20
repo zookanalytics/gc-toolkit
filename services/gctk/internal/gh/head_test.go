@@ -3,8 +3,11 @@ package gh
 import (
 	"errors"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -101,5 +104,66 @@ func TestABoundedReadEndsAtItsLimit(t *testing.T) {
 	}
 	if took := time.Since(start); took > 10*time.Second {
 		t.Fatalf("the read ended %s after it started", took)
+	}
+}
+
+// A bounded client's gh leads its own group, so the SIGTERM or the Ctrl-C that
+// reaches this process's group does not reach it. The read passes the signal
+// on, ending the processes gh started, then exits with the status the signal
+// gives.
+func TestABoundedReadPassesAStopSignalOnToItsGroup(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
+		t.Run(sig.String(), func(t *testing.T) {
+			bin := t.TempDir()
+			pidFile := filepath.Join(bin, "child")
+			stub := "#!/bin/sh\nsleep 30 &\necho $! > '" + pidFile + "'\nwait\n"
+			if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(stub), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			exited := make(chan int, 1)
+			restore := exitProcess
+			exitProcess = func(code int) { exited <- code }
+			t.Cleanup(func() { exitProcess = restore })
+			// The test's own relay, so a read that does not take the signal fails
+			// this test rather than ending the test binary.
+			held := make(chan os.Signal, 1)
+			signal.Notify(held, sig)
+			t.Cleanup(func() { signal.Stop(held) })
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				_, _ = NewBounded("github.com", time.Minute).DefaultBranch("o/r")
+			}()
+			pid := 0
+			for end := time.Now().Add(5 * time.Second); pid == 0; time.Sleep(20 * time.Millisecond) {
+				raw, _ := os.ReadFile(pidFile)
+				pid, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
+				if pid == 0 && time.Now().After(end) {
+					t.Fatal("the stub gh never started its child")
+				}
+			}
+			if err := syscall.Kill(os.Getpid(), sig); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case code := <-exited:
+				if want := 128 + int(sig); code != want {
+					t.Errorf("a relayed %v exited %d, want %d", sig, code, want)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("the read did not exit on the %v this process received", sig)
+			}
+			<-done
+			for end := time.Now().Add(3 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+				if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+					break
+				}
+				if time.Now().After(end) {
+					t.Fatalf("the process gh started, %d, outlived the %v this process received", pid, sig)
+				}
+			}
+		})
 	}
 }

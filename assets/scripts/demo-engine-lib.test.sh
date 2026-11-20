@@ -137,9 +137,10 @@ TMPD="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/demo-engine-lib-test.XXXXXX")" && pwd -
 API_PID=""; API_SOCK=""; APP_PID=""
 trap '[ -z "$API_PID" ] || kill "$API_PID" 2>/dev/null; [ -z "$APP_PID" ] || kill "$APP_PID" 2>/dev/null; rm -rf "$TMPD" ${API_SOCK:+"$API_SOCK"}' EXIT
 
-# Only the tools the two captures call. env -i keeps everything else off PATH.
+# Only the tools the two captures and the library call. env -i keeps everything
+# else off PATH.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
-for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat od awk env readlink git; do
+for c in bash sed tr head tail dirname mkdir mktemp mv rm tee wc cat od awk env readlink git; do
   p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
   ln -s "$p" "$FARM/$c"
 done
@@ -318,21 +319,27 @@ chmod +x "$ENGINE_STUB"
 # gctk answers `rig serve --check` with a copy running on $COPY_PORT, and with
 # no copy when COPY_PORT is unset, logging each call and where it ran. The
 # copy's app is where gctk reports a copy that answers on its port, at its
-# loopback URL, or at $COPY_APP_URL, the URL a serve command printed. A start
-# reports that copy as one it ran, and a stop reports it stopped.
+# loopback URL, or at $COPY_APP_URL, the URL a serve command printed. Its report
+# says its serve command runs inside the sandbox, or as $COPY_SANDBOXED says:
+# false for one that runs as an ordinary process, and none for a report with no
+# sandboxed key, as a gctk from before that key gives. A start reports that
+# copy as one it ran, or as one it found running when COPY_STARTED is false,
+# and a stop reports it stopped.
 GCTK_STUB="$TMPD/gctk"
 cat >"$GCTK_STUB" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${CALLLOG:?}"
 case "$*" in "rig serve --stop") printf '{"state":"stopped","checkout":"%s"}\n' "$(pwd)"; exit 0 ;; esac
+sandboxed=",\"sandboxed\":${COPY_SANDBOXED:-true}"; [ "${COPY_SANDBOXED:-}" != none ] || sandboxed=""
 if [ "${1:-} ${2:-} ${3:-}" = "rig serve --command" ] && [ -n "${COPY_PORT:-}" ]; then
-  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s","started":true}\n' \
-    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}"
+  started=',"started":true'; [ "${COPY_STARTED:-true}" = true ] || started=""
+  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s"%s%s}\n' \
+    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}" "$sandboxed" "$started"
   exit 0
 fi
 if [ "$*" = "rig serve --check" ] && [ -n "${COPY_PORT:-}" ]; then
-  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s","address":""}\n' \
-    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}"
+  printf '{"state":"running","checkout":"%s","port":%s,"app_url":"%s","address":""%s}\n' \
+    "$(pwd)" "$COPY_PORT" "${COPY_APP_URL:-http://127.0.0.1:$COPY_PORT/}" "$sandboxed"
   exit 0
 fi
 printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"
@@ -798,6 +805,16 @@ local_refused() {
   has "$3" "$(err)" "($1) and why a capture may not reach that server"
   not_run "$1"
 }
+# copy_refused <cap> <case> <url> <checkout> <how> <why>: the capture just run
+# was refused the copy that gctk rig serve runs from the checkout, whose app the
+# URL is and whose report says <how> it runs, because a capture from the
+# checkout keeps the sandbox for <why>, naming what ends the copy, and it never
+# ran.
+copy_refused() {
+  eq "$RC" 1 "($1) $2 exits 1"
+  has "--base-url $3 is the app of a copy that gctk rig serve runs from $4$5. A capture from $4 keeps the sandbox now, because it lies in $6, and a copy keeps the reach it started with, so the capture refuses the copy: gctk rig serve --stop, run from $4, ends it, and the next copy starts inside the sandbox" "$(err)" "($1) it says the copy does not run as a capture from its checkout now asks, and why"
+  not_run "$1"
+}
 echo "# LOCAL-APP: mol-rig-demo declares app_reads_city with the default \"false\""
 FORMULA="$(cd "$HERE/../../formulas" && pwd)/mol-rig-demo.toml"
 eq "$(awk '/^\[/ { s = ($0 == "[vars.app_reads_city]"); next } s && /^default[ \t]*=/ { sub(/^default[ \t]*=[ \t]*/, ""); print; exit }' "$FORMULA")" '"false"' \
@@ -852,6 +869,41 @@ for cap in video screenshot; do
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 COPY_APP_URL="$IOS_APP" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
   local_refused "$cap" "the port of a copy whose app is on a simulator, where another server listens" "process 4243, which listens on port 5181, works in a worktree of $RIGB, for which city.toml sets app_reads_city = \"true\""
   hasnt "is a copy that gctk rig serve runs" "$(err)" "($cap) it takes that server for no copy"
+
+  echo "# ($cap) COPY-RECORD: a copy keeps the reach it started with, so once its rig keeps the sandbox a capture takes it only when its report says it runs inside, whether --base-url names it or --serve finds it, and leaves a copy it found running"
+  # The copy started while city.toml set beta to "false", so its report says it
+  # runs as an ordinary process. LOCAL_ENV sets beta to "true".
+  BETA_FALSE=(RIG_VARS='{"beta":{"app_reads_city":"false"}}')
+  PLAIN_COPY=(GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 COPY_SANDBOXED=false COPY_STARTED=false LISTENERS="5181 4243 $BWT")
+  BETA_TRUE="the repository of $RIGB, for which city.toml sets app_reads_city = \"true\""
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${BETA_FALSE[@]}" "${PLAIN_COPY[@]}" -- --base-url http://127.0.0.1:5181/
+  eq "$RC" 0 "($cap) a copy whose report says it runs as an ordinary process captures while its rig reads \"false\""
+  no_sandbox "$cap" "that capture" "$RIGB"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" -- --base-url http://127.0.0.1:5181/
+  copy_refused "$cap" "the same copy, which --base-url names once city.toml sets its rig to \"true\"," http://127.0.0.1:5181/ "$BWT" " as an ordinary process, as its report says" "$BETA_TRUE"
+  hasnt "gctk rig serve --stop" "$(calls)" "($cap) and leaves the copy running"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${BETA_FALSE[@]}" "${PLAIN_COPY[@]}" -- --serve "node serve.mjs" --cwd "$BWT"
+  eq "$RC" 0 "($cap) --serve finds that copy running and captures it while its rig reads \"false\""
+  no_sandbox "$cap" "that capture" "$RIGB"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" -- --serve "node serve.mjs" --cwd "$BWT"
+  copy_refused "$cap" "the same copy, which --serve finds running once its rig is set to \"true\"," http://127.0.0.1:5181/ "$BWT" " as an ordinary process, as its report says" "$BETA_TRUE"
+  has "gctk rig serve --command node serve.mjs (in $BWT)" "$(calls)" "($cap) the start found it running"
+  hasnt "gctk rig serve --stop" "$(calls)" "($cap) and the capture leaves it running"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" COPY_PORT=5193 COPY_APP_URL="$IOS_APP" FREE_PORT="$(printf '50301\n50302\n50303')" -- --serve "node serve.mjs" --cwd "$BWT"
+  copy_refused "$cap" "a copy whose app is on a simulator, which --serve finds running once its rig is set to \"true\"," "$IOS_APP" "$BWT" " as an ordinary process, as its report says" "$BETA_TRUE"
+  hasnt "gctk rig serve --stop" "$(calls)" "($cap) and leaves that copy running"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" COPY_STARTED=true -- --serve "node serve.mjs" --cwd "$BWT"
+  copy_refused "$cap" "a copy the capture started itself, whose report says it runs as an ordinary process," http://127.0.0.1:5181/ "$BWT" " as an ordinary process, as its report says" "$BETA_TRUE"
+  has "gctk rig serve --stop (in $BWT)" "$(calls)" "($cap) and the capture stops the copy it started"
+
+  echo "# ($cap) COPY-RECORD: a report that does not say, and a setting that does not read, keep the refusal"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" COPY_SANDBOXED=none -- --base-url http://127.0.0.1:5181/
+  copy_refused "$cap" "a copy whose report has no sandboxed key, as a gctk from before it gives," http://127.0.0.1:5181/ "$BWT" ", and its report does not say that it runs inside the sandbox" "$BETA_TRUE"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" "${PLAIN_COPY[@]}" COPY_SANDBOXED=none "${BETA_FALSE[@]}" -- --base-url http://127.0.0.1:5181/
+  eq "$RC" 0 "($cap) that copy captures while its rig reads \"false\""
+  no_sandbox "$cap" "that capture" "$RIGB"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5180 COPY_SANDBOXED=false COPY_STARTED=false FORMULA_RC=1 LISTENERS="5180 4242 $RWT" -- --base-url http://127.0.0.1:5180/
+  copy_refused "$cap" "a copy of a rig whose app_reads_city does not read at the capture," http://127.0.0.1:5180/ "$RWT" " as an ordinary process, as its report says" "the repository of $RIGA, whose app_reads_city did not read, because gc formula show mol-rig-demo --rig alpha answered nothing jq could read, so it counts as \"true\""
 
   echo "# ($cap) LOCAL-APP: any value but \"false\", and a read that fails, counts as \"true\""
   for v in yes True ''; do
@@ -977,6 +1029,16 @@ copy_cli "${LOCAL_ENV[@]}" "${COPY_IOS[@]}" -- "$RWT" --cwd "$RWT"
 eq "$RC" 0 "(copy) the same call, with the copy in that worktree of the rig whose app_reads_city is \"false\", captures"
 no_sandbox copy "that capture" "$RIGA"
 
+echo "# COPY-RECORD: a run that keeps the sandbox for another directory takes a copy of a rig whose app_reads_city is \"false\" that runs as an ordinary process, which a start would run so again"
+copy_cli "${LOCAL_ENV[@]}" COPY_PORT=5180 COPY_SANDBOXED=false LISTENERS="5180 4242 $RWT" -- "$RWT" --cwd "$BWT"
+eq "$RC" 0 "(copy) a copy's port, in that rig's worktree, captures with a --cwd in a worktree of a rig set to \"true\""
+has "--base-url http://127.0.0.1:5180/ is a copy that gctk rig serve runs from $RWT, which lies in the repository of $RIGA, whose app_reads_city is \"false\", so the copy need not run inside the sandbox" "$(err)" "(copy) it says the copy runs with no sandbox, and why that stands"
+in_sandbox copy "that capture"
+has "(allow network-outbound (remote ip \"localhost:5180\"))" "$(profile)" "(copy) the sandbox opens the copy's port"
+copy_cli "${LOCAL_ENV[@]}" "${COPY_IOS[@]}" COPY_SANDBOXED=false -- "$RWT" --cwd "$BWT"
+eq "$RC" 0 "(copy) so does an iOS app that copy brought up"
+in_sandbox copy "that capture"
+
 echo "# SANDBOXED: demo_engine_sandboxed runs a command inside the capture's sandbox, with the one loopback port it names open, for a rig that keeps it"
 cat >"$TMPD/sandboxed.sh" <<'SH'
 . "$PACK_SCRIPTS/demo-engine-lib.sh" || exit 1
@@ -1006,6 +1068,11 @@ has '(deny network-outbound (remote ip "localhost:*"))' "$(profile)" "(sandboxed
 has "(allow file-read-data file-write* (subpath \"$BWT\"))" "$(profile)" "(sandboxed) the directory is read and written, as its rig worktree"
 has "(deny file-read-data file-write* (subpath \"$RIGB\"))" "$(profile)" "(sandboxed) and the rig's checkout stays denied"
 eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$SANDBOX_ENV")" 0 "(sandboxed) the command runs with none of the variables that point at the city"
+REC="$TMPD/copy-record"; mkdir -p "$REC"
+sandboxed "${LOCAL_ENV[@]}" DEMO_ENGINE_SANDBOX_RECORD="$REC/sandboxed" -- 5197 "$BWT" bash -c 'echo ran in the sandbox'
+eq "$RC" 0 "(sandboxed) a command whose caller names a record runs"
+eq "$(cat "$REC/sandboxed" 2>/dev/null)" true "(sandboxed) the record says it runs inside the sandbox"
+hasnt "DEMO_ENGINE_SANDBOX_RECORD=" "$(cat "$SANDBOX_ENV")" "(sandboxed) and the command never learns where the record is"
 
 echo "# PLAIN: demo_engine_sandboxed runs a command from a worktree of a rig whose app_reads_city is \"false\" as an ordinary process"
 sandboxed "${LOCAL_ENV[@]}" GC_SESSION_ID=s1 -- 5197 "$RWT" bash -c "echo ran with no sandbox; env >'$TMPD/plain.env'"
@@ -1015,6 +1082,10 @@ ok "(plain) and no sandbox-exec runs it" "[ ! -e '$SANDBOX_PROFILE' ]"
 has "the command runs as an ordinary process, with no sandbox, because $RWT lies in the repository of $RIGA, whose app_reads_city is \"false\"" "$(err)" "(plain) it says why"
 eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$TMPD/plain.env")" 0 "(plain) the command runs with none of the variables that point at the city"
 has "CALLLOG=" "$(cat "$TMPD/plain.env")" "(plain) and with the rest of the environment"
+rm -f "$REC/sandboxed"
+sandboxed "${LOCAL_ENV[@]}" DEMO_ENGINE_SANDBOX_RECORD="$REC/sandboxed" -- 5197 "$RWT" bash -c "env >'$TMPD/plain.env'"
+eq "$(cat "$REC/sandboxed" 2>/dev/null)" false "(plain) the record a caller names says the command runs as an ordinary process"
+hasnt "DEMO_ENGINE_SANDBOX_RECORD=" "$(cat "$TMPD/plain.env")" "(plain) and the command never learns where the record is"
 for keep in "a rig set to \"true\"|$BWT|" "a rig whose app_reads_city is 'yes'|$RWT|RIG_VARS={\"alpha\":{\"app_reads_city\":\"yes\"}}" \
     "a rig whose app_reads_city does not read|$RWT|FORMULA_RC=1" "the city's own repository|$HQWT|" "no rig's repository|$WORK|"; do
   IFS='|' read -r what dir extra <<<"$keep"
@@ -1053,6 +1124,14 @@ eq "$RC" 1 "(sandboxed) a directory that does not exist is refused"
 sandboxed "${CITY_ENV[@]}" -- 5197 "$TMPD" true
 eq "$RC" 1 "(sandboxed) a directory that holds the city's is refused"
 has "$TMPD holds " "$(err)" "(sandboxed) and it names what the directory holds"
+rm -f "$REC/sandboxed"
+sandboxed "${CITY_ENV[@]}" DEMO_ENGINE_SANDBOX_RECORD="$REC/sandboxed" -- 5197 "$TMPD" true
+eq "$RC" 1 "(sandboxed) a refused run whose caller names a record exits 1"
+ok "(sandboxed) and writes no record" "[ ! -e '$REC/sandboxed' ]"
+sandboxed "${LOCAL_ENV[@]}" DEMO_ENGINE_SANDBOX_RECORD="$TMPD/no-such-dir/sandboxed" -- 5197 "$BWT" bash -c "echo ran >'$TMPD/unrecorded.ran'"
+eq "$RC" 1 "(sandboxed) a record that cannot be written exits 1"
+has "could not be written, so the command does not run" "$(err)" "(sandboxed) and says why"
+ok "(sandboxed) and the command never runs" "[ ! -e '$TMPD/unrecorded.ran' ]"
 STUB_PATH="$NOSBX" sandboxed "${CITY_ENV[@]}" -- 5197 "$RWT" true
 eq "$RC" 1 "(sandboxed) a host with no sandbox runs nothing"
 
