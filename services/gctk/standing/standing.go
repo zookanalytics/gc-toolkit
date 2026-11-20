@@ -171,8 +171,23 @@ func Read(ids []string, s Store) (*Reading, error) {
 	}
 	sort.Strings(open)
 	open = slices.Compact(open)
+	// An open conversation that tracks an open decision is itself the ask while
+	// that decision waits on work of its own first, which what holds the
+	// decision tells, so each decision a conversation named tracks is read too,
+	// whether or not it was named.
+	held := slices.Clone(open)
+	for _, id := range open {
+		if r.kinds[id] != KindConversation {
+			continue
+		}
+		if subj, _, ok := conversation.Shape(conversationEdges(r.beads[id])); ok && r.openDecision(subj) {
+			held = append(held, subj)
+		}
+	}
+	sort.Strings(held)
+	held = slices.Compact(held)
 	var err error
-	if r.holds, r.unread, err = s.Holds(open); err != nil {
+	if r.holds, r.unread, err = s.Holds(held); err != nil {
 		return nil, fmt.Errorf("read what holds the beads: %w", err)
 	}
 
