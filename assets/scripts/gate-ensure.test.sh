@@ -278,12 +278,11 @@ eq "$(meta "$rid" priority_shift)" "-1" "the review is born carrying the PR-fini
 eq "$(bparents "$rid")" "" "…with no parent, so no hold on an epic reaches it"
 eq "$(bpoured "$rid")" "1" "…and is slung at its anchor's priority less one (A1 reads at bd's default P2)"
 
-echo "# a review and a validation pass are slung at their rank: P1 under a P2 epic, P0 once the PR is approved"
+echo "# a review is slung at its rank: P1 under a P2 epic"
 # Each anchor sits under the P2 epic EP2, its own stored priority stale, its
 # posture in the shape pr-facts.sh stores it. A review of a PR that is not
-# approved is slung one level sooner than its anchor; a review or a validation
-# pass of an approved PR at P0. A rank that compared the whole stored posture
-# with approved would sling the approved PR's work at P1.
+# approved is slung one level sooner than its anchor. The approved rank counts
+# only an anchor on the pending record, which this arm does not visit.
 EP2='{"id":"EP2","status":"open","assignee":"","notes":"","issue_type":"epic","priority":2,"metadata":{}}'
 under_ep2() { # <anchor-json> <posture>, read at the PR's head
   printf '%s' "$1" | jq -c --arg p "$2" '.metadata.pr_posture = $p | .metadata.pr_head_oid = ($p | split("@")[1]) | .priority = 0
@@ -296,11 +295,7 @@ store "[$EP2, $(under_ep2 "$(anchor RK1 pull_request correctness "" polecat/rk1)
 oid rk1 > "$GH_DIR/head_polecat_rk1"; oid rk2 > "$GH_DIR/head_polecat_rk2"; oid rk3 > "$GH_DIR/head_polecat_rk3"
 out=$(run_val)
 rk1=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "RK1" and (.metadata.task_kind // "") == "review") | .id' "$STUB_STORE")
-rk2=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "RK2" and (.metadata.task_kind // "") == "review") | .id' "$STUB_STORE")
 eq "$(bpoured "$rk1")" "1" "a review of a PR that is not approved is slung at P1 under a P2 epic"
-eq "$(bpoured "$rk2")" "0" "a review of an approved PR is slung at P0"
-eq "$(bpoured vp-rk3)" "0" "a validation pass of an approved PR is slung at P0"
-has "$out" "settled vp-rk3 at P0: anchor RK3 has an approved PR, shift -1 aside" "…the settle naming why"
 
 echo "# a review that does not settle at its priority is not slung, and the stranded arm slings it next pass"
 printf '#!/usr/bin/env bash\necho "queue-priority: settle: could not take the priority lock" >&2\nexit 1\n' > "$TMP/qp-fail"

@@ -26,8 +26,8 @@
 # the witness both act on a released bead that still carries a session pin.
 #
 # The bead the summary and a retitle belong on is the anchor: the open bead that
-# carries a merge_result for this branch, which pr-open.sh, the refinery and
-# merge.sh read. On fresh work that is this bead. A convoy's rebuild child, a rework that
+# carries a merge_result for this branch, which the refinery reads. On fresh
+# work that is this bead. A convoy's rebuild child, a rework that
 # answers no review and no ruling, has the convoy it names, as merge-push resolves
 # it. A rework child's metadata.anchor_bead answers when the branch list cannot.
 # The summary and a retitle go onto the anchor in one write, `gctk pr summary`,

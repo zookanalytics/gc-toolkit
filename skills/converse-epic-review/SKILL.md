@@ -95,7 +95,7 @@ Then read or run what the epic has of these:
 - each landed Delivery's `Aim:` line, against what its landing showed;
 - the epic's other open work: each open Delivery, each member under the epic
   itself, and each PR in flight under either, a member at `merge_result`
-  `pull_request`, `pull_request_pending` or `pull_request_head_changed`.
+  `pull_request_pending` or `pull_request_head_changed`.
 
 A checkpoint reads every Delivery landed by now and closes them all under its
 one ruling.

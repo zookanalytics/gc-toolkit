@@ -2,17 +2,17 @@
 # Hermetic test for assets/scripts/pr-dispose.sh — the sanctioned path that
 # records a deliberate PR-close disposition on the open anchor and closes the
 # PR, so the PR's closer consummates the terminal close through bead-rehome.sh.
-# Covers: the marker stamped on an OPEN pull_request anchor; the marker stamped
-# and the PR closed on an anchor on the pending record, pending or at a changed
-# head, with the landing order named as its closer, and a closed anchor or an
-# exception of that record refused;
+# Covers: the marker stamped and the PR closed on an anchor on the pending
+# record, pending or at a changed head, with the landing order named as its
+# closer, and a closed anchor, an exception of that record or a value off it
+# refused;
 # --no-close-pr stamping only; the PR closed through gh when the anchor is open,
 # after a closing comment posted through pr-post.sh with the city's mark, which
 # gates the close; gh view, comment and close pinned to the anchor's own pr_url
 # repo, never the checkout origin; a --pr that contradicts the pr_url refused; the live PR identity
 # certified against the anchor before closing; idempotent no-op on an
-# already-disposed anchor; refusal on an anchor past the pull_request state
-# (named bead-rehome as the direct verb); refusal on an anchor with no parseable
+# already-disposed anchor; refusal on an anchor off the pending record (named
+# bead-rehome as the direct verb); refusal on an anchor with no parseable
 # pr_url; a marker the store refuses, which closes no PR; the successor store carried
 # through when given and cleared when omitted; the close-mode failures that
 # record the marker but exit non-zero (gh missing, an unreadable state, a
@@ -106,12 +106,12 @@ release_lock() { echo go > "$TMP/go"; wait "$HOLDER" 2>/dev/null || true; }
 # gh calls follow the anchor's pr_url, not the checkout origin.
 anchor() { # id num [extra-metadata] [pr_url-override]
   prurl="${4:-https://github.com/zook/gc-toolkit/pull/$2}"
-  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"%s","branch":"polecat/%s"%s}}' \
+  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request_pending","pr_number":"%s","pr_url":"%s","branch":"polecat/%s"%s}}' \
     "$1" "$2" "$prurl" "$1" "${3:-}"
 }
 succ() { printf '{"id":"%s","status":"open","title":"successor","notes":"","metadata":{}}' "$1"; }
 
-echo "# an OPEN pull_request anchor: the marker is stamped (--no-close-pr)"
+echo "# an anchor on the pending record: the marker is stamped (--no-close-pr)"
 store "[$(anchor A1 70), $(succ S1)]"
 out=$("$SUT" --anchor A1 --successor S1 --kind duplicate --no-close-pr 2>&1); rc=$?
 eq "$rc" 0 "exits 0"
@@ -153,11 +153,11 @@ has "$out" "already disposed" "says it is already disposed"
 eq "$(meta A4 'gc.pr_close_disposition_kind')" "<absent>" "no marker written over a disposed anchor"
 hasnt "$(cat "$STUB_GH_LOG")" "pr close" "no PR close on an already-disposed anchor"
 
-echo "# an anchor past the pull_request state is refused, naming bead-rehome"
+echo "# an anchor off the pending record is refused, naming bead-rehome"
 store "[{\"id\":\"A5\",\"status\":\"open\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"abandoned\",\"pr_number\":\"74\"}}, $(succ S5)]"
 out=$("$SUT" --anchor A5 --successor S5 --kind not-needed 2>&1); rc=$?
 eq "$rc" 1 "exits 1"
-has "$out" "bead-rehome.sh --origin A5" "names the direct disposition verb for a non-pull_request anchor"
+has "$out" "bead-rehome.sh --origin A5" "names the direct disposition verb for an anchor off the pending record"
 eq "$(meta A5 'gc.pr_close_disposition_kind')" "<absent>" "no marker stamped on the refused anchor"
 
 echo "# an anchor on the pending record: the marker is stamped and the PR closed, for the landing order"
@@ -269,8 +269,8 @@ eq "$(cat "$STUB_FD_LOG")" "" "no gc call holds the lock's descriptor"
 has "$(cat "$LOCK.probe" 2>/dev/null)" "pr close: lock free" "the PR is closed with the lock free"
 hasnt "$(cat "$LOCK.probe" 2>/dev/null)" "held" "…and every gh call finds it free"
 
-echo "# a pull_request anchor with no parseable pr_url is refused before stamping"
-store "[{\"id\":\"A6\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"pull_request\",\"pr_number\":\"80\"}}, $(succ S6)]"
+echo "# an anchor with no parseable pr_url is refused before stamping"
+store "[{\"id\":\"A6\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"pull_request_pending\",\"pr_number\":\"80\"}}, $(succ S6)]"
 : > "$STUB_GH_LOG"
 out=$("$SUT" --anchor A6 --successor S6 --kind duplicate 2>&1); rc=$?
 eq "$rc" 1 "exits 1"

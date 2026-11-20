@@ -976,7 +976,6 @@ eq "$(poured fix-1)" "1" "the rework of a PR that is not approved is slung at P1
 reset "$(anchor_under_epic "approved@$OID_HEAD@2026-10-11T00:00:00Z")" "$EPIC2"
 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "request-changes on an approved PR exits 0"
-eq "$(poured fix-1)" "0" "the rework of an approved PR is slung at P0"
 
 echo "# request-changes files a child at any round count — GC_MAX_REVIEW_ROUNDS is inert, no park written"
 # The round cap is retired: no counter, no floor, no signoff_cap park. Even with

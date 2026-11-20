@@ -23,8 +23,8 @@
 # into rework (docs/gh-origin-guard.md, "Posts carry the city's mark").
 #
 # What it sees: the command an agent types into Bash. A `gh` call made inside a
-# script the agent runs is invisible here, and pr-open.sh and pr-facts.sh
-# already pin --repo to an origin they resolve themselves. This guards reach by
+# script the agent runs is invisible here, and pr-facts.sh already pins --repo
+# to an origin it resolves itself. This guards reach by
 # accident; it is not a sandbox and a determined bypass stays available.
 #
 # Contract:
