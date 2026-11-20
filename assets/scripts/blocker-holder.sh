@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 # blocker-holder.sh — whether an automated actor holds the live blockers an
-# anchor's merge waits on. The writers of the anchor's machine verdict, the
-# merge pass (gctk merge) and gate-ensure.sh, each ask this script when a live
-# blocker holds the anchor, so they reach one answer. It prints one line:
+# anchor's merge waits on. gate-ensure.sh, the writer of the anchor's machine
+# verdict, asks it when a live blocker holds the anchor. It prints one line:
 #   actor <bead> <how>   an automated actor holds this live blocker, so the merge
 #                        waits on work the city is doing (progressing)
 #   stuck <bead>...      no automated actor holds any live blocker, and these are
 #                        not human gates, so nothing the city runs will clear
-#                        them. The merge pass records blocked, cause blocker,
-#                        for the first that no open human gate holds
-#                        (prstatus.HoldingGates)
+#                        them
 #   none                 no live blocker, or only blockers a person holds
 #
 # A person holds a human gate, by bd-lib.sh's rule (human_gate): the gate is the
@@ -61,7 +58,7 @@ scrub() { tr -d '\000-\037'; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-# The store every read here goes to: the ambient one, as the merge pass's own
+# The store every read here goes to: the ambient one, as its caller's own
 # reads.
 holder_bd() { gc bd "$@"; }
 

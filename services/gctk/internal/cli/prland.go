@@ -431,8 +431,8 @@ func cityMark(rt gascity.Runtime) (string, error) {
 
 // checkout is the rig's clone through the git adapter. A fetch that a SIGTERM
 // or SIGINT to this process stopped, once the signal reached git's group, ends
-// this process with the status that signal gives, as gitIn does, since the
-// order runner or a terminal asked it to stop.
+// this process with the status that signal gives, since the order runner or a
+// terminal asked it to stop.
 type checkout struct{ dir string }
 
 func (c checkout) OriginURL() (string, error)             { return git.OriginURL(c.dir) }
@@ -448,7 +448,7 @@ func (c checkout) FetchBranch(ctx context.Context, branch string) error {
 	err := git.FetchBranch(ctx, c.dir, branch)
 	var stopped *git.Interrupted
 	if errors.As(err, &stopped) {
-		exitProcess(128 + int(stopped.Signal))
+		os.Exit(128 + int(stopped.Signal))
 	}
 	return err
 }
@@ -487,8 +487,8 @@ func (a seedAudit) Stale(commit string) ([]string, error) {
 		return nil, fmt.Errorf("no file for the stale pages: %w", err)
 	}
 	list := f.Name()
-	f.Close()
-	defer os.Remove(list)
+	_ = f.Close()
+	defer func() { _ = os.Remove(list) }()
 	res := a.rt.Script("render-seed-audit.sh", "--root", a.dir, "--check-merge", commit, commit, "--base-stale-out", list)
 	if why := res.Failure(); why != "" {
 		return nil, fmt.Errorf("render-seed-audit.sh: %s", why)

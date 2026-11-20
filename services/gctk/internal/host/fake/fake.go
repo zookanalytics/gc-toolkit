@@ -294,7 +294,7 @@ func (p *Process) Start(s host.Spec) (host.Child, error) {
 	defer m.mu.Unlock()
 	if p.ended {
 		if file != nil {
-			file.Close()
+			_ = file.Close()
 		}
 		return nil, fmt.Errorf("process %d has ended: %w", p.pid, syscall.ESRCH)
 	}
@@ -475,7 +475,7 @@ func (m *Machine) end(q *Process, status int) {
 		close(q.relayed)
 	}
 	if q.file != nil {
-		q.file.Close()
+		_ = q.file.Close()
 	}
 	for port, pids := range m.listens {
 		m.listens[port] = slices.DeleteFunc(pids, func(pid int) bool { return pid == q.pid })

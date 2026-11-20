@@ -503,9 +503,9 @@ fi
 
 # A build is owed and nothing can perform it: that is a failed build, recorded
 # like any other so the board's PACK row reports it, and $BIN is not touched. A
-# city that never gets a gctk binary refuses every lifecycle transition, every
-# merge pass and every epic the work skill files, since lifecycle.sh, merge.sh
-# and epic.sh have nothing else to exec, and a city that has one keeps it.
+# city that never gets a gctk binary refuses every lifecycle transition and
+# every epic the work skill files, since lifecycle.sh and epic.sh have nothing
+# else to exec, and a city that has one keeps it.
 if ! command -v "$GO" >/dev/null 2>&1; then
     echo "$ME: BUILD FAILED: no Go toolchain ($GO) to build $ROOT/$DIR; set GC_GO_BIN. $BIN left unchanged" >&2
     write_status failed

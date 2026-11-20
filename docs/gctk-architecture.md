@@ -46,7 +46,7 @@ The board's UX is the Helm UX epic's. Gas City's own behavior is in
   rule for a wait edge: bd reports success for an edge that holds nothing, so
   the ledger checks the target first.
 - **Debt is stated with its retirement.** It names what it compensates for and
-  what retires it. The model is `lifecycle` and `merge` in
+  what retires it. The model is `pr record` and `pr reconcile` in
   [the re-implementation register](#the-re-implementation-register).
 - **A warrant is cited only when [warrants.md](warrants.md) holds it.** A pack
   noun missing from that page has no warrant. A warrant whose member has not
@@ -123,7 +123,7 @@ bead.
 | `gctk review checks` | hook, order | which checks gate a change at a commit, with the rig's index laid over the pack's | Gas City's formula check loop runs a check script and iterates, and holds no review checks. The check index and its rig overlay are the feature. The review formula's steps read it at the reviewed commit, a lane for its own row and triage for the whole index, and the merge cadence reads it for the lanes a change needs before it dispatches them or lands the change. The loop's shape is the review-lane member's design. |
 | `gctk review guidance <check>` | hook | the rig's guidance for a check at the reviewed commit, or the guidance a change edits | Part of the check index: a rig's guidance, read at the commit under review rather than the one checked out. |
 | `gctk review passed <run>` | hook | whether an iteration of a review run passed: the loop's pass-or-iterate check, and with `--record` the run's result for the head and target it judged, with the asks it answered closed, at the iteration that ends the loop | The check script that a review formula's check loop runs after each round. It holds the pass rule over the lanes, their findings and rulings and the asks open on the bead, which the loop itself cannot, and reads only the store, since a check runs with no `gh`. Gas City's PR review and its PR monitor keep their reports per head SHA and record no pass on the bead that owns a PR, and a formula has no script step, so the check records the result as it ends the loop ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#the-check-script-and-the-result-unit-1)). The result is the one the pr domain's evaluator counts, written under the store's record lock, and each ask closes with the work record Gas City's close reads. |
-| `gctk review ask <bead> --reason <text>` | agent, hook | ask for a change on a PR's branch, or for a check at its next head | Gas City's PR monitor files a repair bead that is routed and poured as it is filed, a writer of its own ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#asks-unit-1-unit-4)). An ask is a task bd files with its `blocks` edge onto the PR's bead in one create and no route, so the review run is the branch's one writer. The verb refuses a bead that owns no PR on the record and a check the index does not declare, and finds an ask of the same source and reason, open or closed, before it files. |
+| `gctk review ask <bead> --reason <text>` | agent, hook | ask for a change on a PR's branch, or for a check at its next head | Gas City's PR monitor files a repair bead that is routed and poured as it is filed, a writer of its own ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#asks-unit-1-unit-4)). An ask is a task bd files with its `blocks` edge onto the PR's bead in one create and no route, so the review run is the branch's one writer. An ask that waits on other beads (`--waiting-on`) carries its own `blocks` edge onto each in that same create, bd's `--deps blocked-by`, so no landing pass reads it clear before it waits ([the search](../specs/tk-h0sherg/gas-city-search.md)). The verb refuses a bead that owns no PR on the record and a check the index does not declare, and finds an ask of the same source and reason, open or closed, before it files, refusing one that does not wait on each bead the call names. The ledger's rule for a wait edge refuses the create, with nothing filed, when the ask's edge onto the bead or onto a bead it waits on would hold nothing: a bead of another id prefix than the store gives the ask, or one the store does not hold. |
 | `gctk review step <bead>` | hook | what a review run's step judges: the iteration it runs in, the head that iteration judges and the change triage reads there, and for triage's read whether the run must stop | Gas City records a step's iteration (`gc.attempt`) and the vars a run was poured with, and says neither which head a later iteration of a check loop judges nor what changed since the last head that passed. The verb derives both from the steps' outputs and the results on the bead, and its `--stands` form stops a run whose vars do not name the bead's record, or whose PR is no longer at the head the iteration judges, with no result. |
 | `gctk review output <bead> --file <path>` | hook | check the output a run's step wrote, before the step writes it | Gas City keeps a step's `gc.output_json` as written, and reads it only for a fan-out's items, so a slip shows only once the pass rule reads the output as not written, which spends an attempt, or a fan-out cannot read a triage output's checks, which stops the run. The verb checks the output in the run's shape and against the run's facts, and carries the guidance-edit guard on a correctness approve. The write stays native. |
 | `gctk review comment <run>` | hook | the head's one comment: every lane's verdict there, its findings and how the round ruled each | Gas City's PR review posts one lane's report per head SHA and runs no loop ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#the-runs-formulas-unit-3)), and nothing renders a loop's lanes and rulings. The comment carries every lane's verdict at the head, approvals included, and each point's answer as what the head carries for it. The post goes through `pr-post.sh`, the city's one writer of posts. |
@@ -140,7 +140,7 @@ bead.
 | `gctk session progress` | order | find each pool seat that prints but has written nothing for three hours, and record them as one `gc-toolkit.seat-progress.stalled` event | Gas City's work ladder paces only a quiet pool seat, and nothing in Gas City reads a session's own writes ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-session-progress)). The verb judges each busy pool seat by its newest write as the identity its claim is assigned to, in the claim's store and the city's, from no earlier than its last wake, and writes no bead. |
 | `gctk refinery stuck` | order | find each refinery handoff that has sat unprepared past four hours with nothing holding it, and record them as one `gc-toolkit.refinery-queue.stuck` event | Gas Town's check-refinery nudges the refinery and mails a report of the queue, and doctor's `pool-idle-routed-work` reads the routed work a pool leaves, not a refinery's assigned queue ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-refinery-stuck-and-gctk-mail-finding)). The verb reads each rig's queue at the identity of the refinery `gc agent list` names for that rig, asks `bead holds` what holds each handoff past the bound, and writes no bead. |
 | `gctk version` | hook | the revision this binary was built from | The build stamps one hash over gctk's inputs, services/gctk and the root go.mod and go.sum, so a doctor check can tell whether the deployed binary is the one the checkout builds. |
-| `gctk lifecycle`, `gctk merge` | hook | the old merge path's anchor state machine and merge rule | Debt, in [the re-implementation register](#the-re-implementation-register). |
+| `gctk lifecycle transition <bead> --to <value>` | hook | write a bead's `merge_result` outside the pending record, with the work record a landing writes | Gas City's `bd update` writes the fields. The verb composes into that one update what `lifecycle.sh`'s callers share: the landing's work record (`gc.work_outcome`, `gc.work_commit`, `gc.work_branch`), the route and takeaway checks, and the dated-key rule. It checks no edge between values, and the doctor checks the beads after the write. |
 
 What each noun owns:
 
@@ -214,7 +214,7 @@ What gets a verb:
   stays in the review formula's step text.
 - **The commands gctk holds keep their place.** `epic`, `rig`, `session` and
   `version` stand on their own rows, `pr status` is the pr noun's status verb,
-  and `lifecycle` and `merge` sit in the tree with their own flag parsing.
+  and `lifecycle` sits in the tree with its own flag parsing.
 
 ## The rule that names a verb
 
@@ -315,15 +315,6 @@ Where gctk parallels Gas City's logic, it states why it is re-implemented, keeps
 the goal of staying in step with upstream, and carries the divergence risk as a
 stated burden.
 
-- **`lifecycle` and `merge`.** They carry the anchor state machine and the old
-  merge path's merge rule. The machine checks each write `lifecycle.sh` makes,
-  the refinery's direct landing among them, and `merge` lands the PRs of a rig
-  not yet cut over onto the pending record. Gas Town's refinery checks no
-  transition and leaves the merge to a person. Neither gains anything new, and
-  once every rig has cut over, the old merge path's retirement (tk-1tfzr71.70)
-  deletes both and leaves `lifecycle.sh` a plain write of the value. The risk is
-  two paths at once: until the last rig cuts over, a change to how a PR lands
-  has two places to reach.
 - **`pr record` and `pr reconcile`.** They write Gas Town's pending-through-merge
   record, with its values and their meanings
   (`gastown/commands/pr-merge-reconcile` in gascity-packs at 7f86098c04ea). They
@@ -444,10 +435,17 @@ Nothing outside it parses a metadata value or spells a key's name.
   only its coordination writes, such as a claim, against that. The ledger takes
   the cost bd takes for every other write: the rare record lost that way reads
   as never written.
-- **A wait edge is written only onto a bead its store holds.** bd accepts an
-  edge onto an id its store does not hold and reports success, and the edge
-  holds nothing. So the ledger reads the target in the bead's own store first,
-  and refuses the write when the store does not hold it.
+- **A wait edge is written only onto a bead of its own prefix that its store
+  holds.** bd accepts an edge onto an id its store does not hold and reports
+  success, and the edge holds nothing. bd also keeps an edge between beads of
+  two id prefixes as one into another store, which holds nothing even when this
+  store holds the far bead. So the ledger refuses, with nothing written, a wait
+  edge onto a bead of another prefix, then reads the target in the bead's own
+  store and refuses one the store does not hold. A filing (`Create`) checks
+  the edge from each bead it blocks and the edge onto each bead it waits on
+  against the prefix the store gives the new bead, and `AddBlocker` checks the
+  blocker against the bead that waits on it. Its refusal is `ErrNotHeld`, which
+  a caller tells from any other failure.
 - **The key registry is generated from the declarations.** It is
   `services/gctk/key-registry.json`, and a test fails when it is stale. Each
   entry names its key, its owner, its type, its aliases and, for a pack noun,
@@ -556,10 +554,10 @@ marks read (tk-ssm8qns.6).
 The adapter's own tests drive it through a stub `gc` on `PATH`, so they pin the
 questions it asks. A marked bead that the stub listing leaves out gets a read
 error, and a bead with a `waits-for` edge of its own gets the `waits-for` error
-whether the stub listing names it or not. Its acceptance test runs the bd the
-city runs against a scratch store, so it pins the answer that bd gives for each
-kind of wait, each gate included, and the beads it marks blocked. The domains'
-tests run on the fake.
+whether the stub listing names it or not. Its acceptance tests run the bd the
+city runs against a scratch store, so they pin the answer that bd gives for
+each kind of wait, each gate included, the beads it marks blocked, and the
+prefix its create mints an id from. The domains' tests run on the fake.
 
 The host adapter's own tests start real processes, so they pin what its fake
 stands in for: a group that ends whole, a start that leads a session of its own
@@ -730,10 +728,12 @@ why a reader must know it, and the work that retires it.
   launch that waits on its input bead retires the arm, and a migration of its
   readers built now would be rebuilt then. The operator ruled this exception in
   conversation tk-au9jrqt. It retires with the arm.
-- **`lifecycle` and `merge` reach git, GitHub, the store and the pack's
-  scripts themselves.** They retire whole with the old merge path
-  (tk-1tfzr71.70, [the register](#the-re-implementation-register)), so they get
-  no layering work.
+- **`lifecycle` writes the store through its adapter, around the ledger.** It
+  is the plain write `lifecycle.sh` execs for the direct landing
+  (`direct-merge-push.sh`), `pr-facts.sh` and `gate-ensure.sh`, which name the
+  keys it writes, so no domain declares them. tk-ssm8qns.16, which puts the
+  other commands that read the store around the ledger behind it, carries this
+  one too.
 - **Shell still reads and clears the recommendation `reaction` owns.**
   `gc.recommended_formula` is declared in `reaction`, whose `recommend` exit is
   its one setter, but `gc-helm.sh accept` and

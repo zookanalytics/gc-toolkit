@@ -373,8 +373,7 @@ func decideOver(b side, read *GitHubRead, why string) Answer {
 			Detail: fmt.Sprintf("the PR's head %s is not the head the refinery validated, %s", read.Head, b.rec.Head)})
 	}
 	// GitHub reads a failing or pending required check as BLOCKED, so UNSTABLE
-	// leaves only checks the base does not require, which hold no merge, as the
-	// old merge pass also proceeds on it.
+	// leaves only checks the base does not require, which hold no merge.
 	if read.MergeState != "CLEAN" && read.MergeState != "UNSTABLE" {
 		front = append(front, Condition{Kind: KindMergeState, Value: read.MergeState,
 			Detail: fmt.Sprintf("GitHub reports the PR's merge state %s, not CLEAN or UNSTABLE", read.MergeState)})

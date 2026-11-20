@@ -236,7 +236,7 @@ func (g *GitHub) ask(method, id, head string, take func(*PR)) error {
 		return g.OnMerge(method, p, head)
 	}
 	if p.Facts.HeadRefOid != head {
-		return fmt.Errorf("github: Head branch was modified. Review and try the merge again.")
+		return fmt.Errorf("github: Head branch was modified. Review and try the merge again")
 	}
 	take(p)
 	return nil

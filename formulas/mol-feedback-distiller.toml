@@ -250,11 +250,13 @@ veto — over-promotion evidence. File ONE observation per veto
 deduped on that provenance and category against the full observation
 surface (all live statuses + closed) BEFORE filing; an unreadable dedup
 surface skips the sweep rather than risking duplicates. Find vetoes
-through the PRs of CLOSED prompt-update beads carrying
-`merge_result=pull_request` (the pipeline closes the bead when the PR
-opens): a PR now CLOSED = vetoed, MERGED =
-adopted, OPEN = in flight. Skip cleanly when gh or the repo slug is
-unavailable. Vetoes filed this sweep are judged by the NEXT gate-opening
+through the PRs of prompt-update beads that did not land: a bead at
+`merge_result=pull_request_closed_unmerged`, which the landing order
+records for a PR closed without merging, and a CLOSED bead still at
+`pull_request_pending` or `pull_request_head_changed`, which a
+disposition closed while its PR was open. A PR now CLOSED = vetoed,
+MERGED = adopted, OPEN = in flight. Skip cleanly when gh or the repo
+slug is unavailable. Vetoes filed this sweep are judged by the NEXT gate-opening
 run.
 
 Then close this step (non-terminal: the same session then takes the next step

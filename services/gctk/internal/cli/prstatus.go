@@ -205,8 +205,7 @@ func (s gcbdStore) Anchored(ids []string, statuses []string) (map[string][]prsta
 	return out, nil
 }
 
-// Blockers reads the `blocks` edges of every id in one client.Blockers. It is
-// also the read the merge pass walks to the gates that hold its blockers.
+// Blockers reads the `blocks` edges of every id in one client.Blockers.
 func (s gcbdStore) Blockers(ids []string) (map[string][]prstatus.Blocker, error) {
 	edges, ok := s.client.Blockers(ids)
 	if !ok {

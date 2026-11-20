@@ -89,6 +89,7 @@ func TestAnActThatTitlesTheBeadTitlesItInTheSameWrite(t *testing.T) {
 // and the edge from each bead it blocks, so it lands whole or not at all.
 func TestAFilingIsOneCreateCarryingItsKeysAndEdges(t *testing.T) {
 	s := fake.New()
+	s.IDPrefix = "b"
 	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
 	l := New(s)
 	f := l.File("withdraw the approvals", "task")
@@ -117,6 +118,7 @@ func TestAFilingIsOneCreateCarryingItsKeysAndEdges(t *testing.T) {
 // in the create's one --deps list after the beads it blocks, and no wait.
 func TestAFilingFoundFromABeadCarriesItsDiscoveredFromEdge(t *testing.T) {
 	s := fake.New()
+	s.IDPrefix = "b"
 	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
 	s.Put(fake.Bead{ID: "src", Status: "closed"})
 	l := New(s)
@@ -133,6 +135,78 @@ func TestAFilingFoundFromABeadCarriesItsDiscoveredFromEdge(t *testing.T) {
 	row, _ := s.Row(id)
 	if len(row.Edges) != 1 || row.Edges[0].Type != "discovered-from" || row.Edges[0].ID != "src" {
 		t.Fatalf("the new bead's edges are %+v, want only its discovered-from edge onto src", row.Edges)
+	}
+}
+
+// A bead a filing waits on is the new bead's own blocks edge onto it, in the
+// create's one --deps list after the beads it blocks, so the new bead lands
+// with its wait or not at all, and no update follows.
+func TestAFilingThatWaitsOnABeadCarriesTheWaitInItsCreate(t *testing.T) {
+	s := fake.New()
+	s.IDPrefix = "b"
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "b-2", Status: "open"})
+	s.Put(fake.Bead{ID: "src", Status: "closed"})
+	l := New(s)
+	f := l.File("ask", "task")
+	f.Blocks("b-1")
+	f.BlockedBy("b-2")
+	f.From("src")
+	id, err := l.Create(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"-t", "task", "--deps", "blocks:b-1,blocked-by:b-2,discovered-from:src"}; !slices.Equal(s.Creates()[0].Args, want) {
+		t.Fatalf("the create carried %q, want %q", s.Creates()[0].Args, want)
+	}
+	row, _ := s.Row(id)
+	if !slices.ContainsFunc(row.Edges, func(e gcbd.Edge) bool { return e.Type == gcbd.EdgeBlocks && e.ID == "b-2" }) {
+		t.Fatalf("the new bead's edges are %+v, without its blocks edge onto b-2", row.Edges)
+	}
+	if len(s.Writes()) != 0 {
+		t.Fatalf("a filing wrote an update: %+v", s.Writes())
+	}
+}
+
+// A filing whose wait edge would hold nothing files nothing, whether it waits
+// on the bead or blocks it, and its error is ErrNotHeld and names that bead
+// alone: a bead the store does not hold, and a bead the store holds that
+// carries another id prefix than the one the store gives the new bead, which bd
+// keeps as an edge into another store.
+func TestAFilingWhoseWaitEdgeWouldHoldNothingFilesNothing(t *testing.T) {
+	for _, c := range []struct {
+		name, far, why string
+		blocks         bool
+	}{
+		{"a wait on a bead the store does not hold", "b-gone", "the store holds no bead b-gone", false},
+		{"a wait on a bead of another prefix that the store holds", "rb-held", "rb-held does not carry the id prefix b,", false},
+		{"a block of a bead of another prefix that the store holds", "rb-held", "rb-held does not carry the id prefix b,", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := fake.New()
+			s.IDPrefix = "b"
+			s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+			s.Put(fake.Bead{ID: "b-2", Status: "open"})
+			s.Put(fake.Bead{ID: "rb-held", Status: "open"})
+			l := New(s)
+			f := l.File("ask", "task")
+			f.Blocks("b-1")
+			f.BlockedBy("b-2")
+			if c.blocks {
+				f.Blocks(c.far)
+			} else {
+				f.BlockedBy(c.far)
+			}
+			_, err := l.Create(f)
+			var refused *NotHeld
+			if !errors.Is(err, ErrNotHeld) || !errors.As(err, &refused) || !strings.Contains(err.Error(), c.why) ||
+				strings.Contains(err.Error(), "b-1") || strings.Contains(err.Error(), "b-2") {
+				t.Fatalf("the filing = %v; want ErrNotHeld naming %s alone, saying %q", err, c.far, c.why)
+			}
+			if len(s.Creates())+len(s.Writes()) != 0 {
+				t.Fatalf("a refused filing wrote: creates %+v, writes %+v", s.Creates(), s.Writes())
+			}
+		})
 	}
 }
 
@@ -551,10 +625,10 @@ func TestWithinEndsTheStoresCallsWithItsContext(t *testing.T) {
 	}
 }
 
-// A blocker is written as the bead's blocks edge onto it, only once a read finds
-// it in the store: a bead the store does not hold, as an id outside its prefix,
-// gets no edge and an error that is ErrNotHeld, and a read or an edge write
-// that fails writes nothing and fails.
+// A blocker is written as the bead's blocks edge onto it, only once it carries
+// the bead's id prefix and a read finds it in the store: a bead the store does
+// not hold gets no edge and an error that is ErrNotHeld, and a read or an edge
+// write that fails writes nothing and fails.
 func TestABlockerIsWrittenOnlyOntoABeadTheStoreHolds(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
@@ -567,8 +641,8 @@ func TestABlockerIsWrittenOnlyOntoABeadTheStoreHolds(t *testing.T) {
 	if want := []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "b-2", Title: "the run", Status: "open"}}; !slices.Equal(b.Edges, want) || b.Status != "blocked" {
 		t.Fatalf("the bead stands %s with edges %+v, want blocked with %+v", b.Status, b.Edges, want)
 	}
-	if err := l.AddBlocker("b-1", "zz-elsewhere"); !errors.Is(err, ErrNotHeld) {
-		t.Errorf("an edge onto a bead the store does not hold = %v, want ErrNotHeld", err)
+	if err := l.AddBlocker("b-1", "b-elsewhere"); !errors.Is(err, ErrNotHeld) || !strings.Contains(err.Error(), "holds no bead b-elsewhere") {
+		t.Errorf("an edge onto a bead the store does not hold = %v, want ErrNotHeld naming it", err)
 	}
 	s.FindErr = errors.New("dolt timeout")
 	if err := l.AddBlocker("b-1", "b-2"); err == nil || errors.Is(err, ErrNotHeld) {
@@ -580,5 +654,22 @@ func TestABlockerIsWrittenOnlyOntoABeadTheStoreHolds(t *testing.T) {
 	}
 	if b, _ := s.Row("b-1"); len(b.Edges) != 1 {
 		t.Errorf("a refused or unread edge was written: %+v", b.Edges)
+	}
+}
+
+// A blocker of another id prefix than the bead's gets no edge, even when the
+// store holds it, because bd keeps an edge between two prefixes as one into
+// another store: the error is ErrNotHeld and names the blocker and the prefix.
+func TestABlockerOfAnotherPrefixIsRefused(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "rb-held", Status: "open"})
+	l := New(s)
+	err := l.AddBlocker("b-1", "rb-held")
+	if !errors.Is(err, ErrNotHeld) || !strings.Contains(err.Error(), "rb-held does not carry the id prefix b,") {
+		t.Fatalf("an edge onto rb-held from b-1 = %v; want ErrNotHeld naming rb-held and the prefix b", err)
+	}
+	if len(s.Writes()) != 0 {
+		t.Fatalf("a refused edge was written: %+v", s.Writes())
 	}
 }

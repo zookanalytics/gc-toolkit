@@ -30,7 +30,6 @@
 #     tracks no bead or whose alias names another bead is no conversation and
 #     holds it, the beads that hold it not reading exits 1, and a bead nothing
 #     holds reads no other bead;
-#   - a bead the old path's cadence drives is left, and named;
 #   - no work exits 3, and a read that does not answer exits 1.
 set -uo pipefail
 
@@ -273,15 +272,6 @@ fresh
 work a polecat/a
 run
 hasnt "$(logged gc)" "--id" "with nothing holding the bead, no bead is read by id"
-
-echo "# a bead the old path's cadence drives is left and named"
-fresh
-work cad polecat/c '{"merge_result":"pull_request"}'
-work gate polecat/g '{"merge_result":"pre_open_gate"}'
-run
-eq "$RC" 3 "neither is taken (exit 3)"
-has "$ERR" "cad(pull_request)" "the pull_request bead is named"
-has "$ERR" "gate(pre_open_gate)" "the pre_open_gate bead is named"
 
 echo "# no work, and reads that do not answer"
 fresh

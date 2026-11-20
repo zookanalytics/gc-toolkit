@@ -31,17 +31,14 @@
 #   - pr-facts.sh, which calls reconcile for each open PR its full pass's paced
 #     walk reaches, after a posture value it changes and after it routes a
 #     feedback batch, and clear when it records a merge or a close.
-#   - gctk merge, which calls clear when it merges.
-#   - pr-open.sh, which calls reconcile at its create, its adoption and its
-#     draft-to-ready arm.
 #   - signoff.sh, which calls reconcile after a verdict.
-# A clear pr-facts.sh or gctk merge makes that does not land is recorded on the
-# anchor as status_label_clear_owed, and pr-facts.sh's full pass retries it. A
+# A clear pr-facts.sh makes that does not land is recorded on the anchor as
+# status_label_clear_owed, and its full pass retries it. A
 # write the landing order or the net makes that does not land records nothing,
 # and their next run finds the same difference.
 #
 # Every GitHub write is pinned to a repository the caller resolved (--repo), the
-# same origin-pinning pr-open.sh and pr-facts.sh already apply; gh-origin-guard.sh
+# same origin-pinning pr-facts.sh already applies; gh-origin-guard.sh
 # guards agent-typed gh, not a script's own calls.
 #
 # Verbs:
@@ -128,7 +125,7 @@ command -v jq >/dev/null 2>&1 || { warn "jq not found; nothing done"; exit 0; }
 
 # --- repository identity --------------------------------------------------
 
-# Resolve host/owner-name the way pr-open.sh does, so a self-resolved origin and
+# Resolve host/owner-name the way pr-facts.sh does, so a self-resolved origin and
 # a caller-passed --repo pin the same repository. host is kept: dropping it lets
 # another forge with the same owner/name read as ours.
 resolve_origin() { # sets ORIGIN_HOST, ORIGIN_REPO, ORIGIN_REPO_Q from --repo or git

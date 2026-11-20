@@ -211,13 +211,13 @@ func (w *Write) args() []string {
 }
 
 // Filing is the filing of one new bead: its title, its type, its description,
-// every key it carries, the beads it blocks and the bead it was found from,
-// made in one create, so the bead lands with its keys and its edges or not at
-// all.
+// every key it carries, the beads it blocks, the beads it waits on and the bead
+// it was found from, made in one create, so the bead lands with its keys and
+// its edges or not at all.
 type Filing struct {
 	title, typ, description string
 	keys                    map[string]string
-	blocks                  []string
+	blocks, blockedBy       []string
 	from                    string
 	err                     error
 }
@@ -231,8 +231,15 @@ func (l *Ledger) File(title, issueType string) *Filing {
 func (f *Filing) Description(text string) { f.description = text }
 
 // Blocks makes the new bead block each bead named, by a blocks edge from that
-// bead onto it, written in the create itself.
+// bead onto it, written in the create itself. Create refuses the filing when
+// such an edge would hold nothing.
 func (f *Filing) Blocks(ids ...string) { f.blocks = append(f.blocks, ids...) }
+
+// BlockedBy makes the new bead wait on each bead named, by its own blocks edge
+// onto that bead, written in the create itself, so no read finds the new bead
+// without its wait. Create refuses the filing when such an edge would hold
+// nothing.
+func (f *Filing) BlockedBy(ids ...string) { f.blockedBy = append(f.blockedBy, ids...) }
 
 // From records the bead the new one was found from, by the new bead's own
 // discovered-from edge onto it, which is no wait and holds nothing.
@@ -247,8 +254,8 @@ func (f *Filing) fail(err error) {
 }
 
 // args is the create's arguments: the type, the description, the keys as one
-// JSON object, then the beads the new one blocks and the bead it was found
-// from, as one --deps list.
+// JSON object, then the beads the new one blocks, the beads it waits on and the
+// bead it was found from, as one --deps list.
 func (f *Filing) args() ([]string, error) {
 	args := []string{"-t", f.typ}
 	if f.description != "" {
@@ -261,9 +268,12 @@ func (f *Filing) args() ([]string, error) {
 		}
 		args = append(args, "--metadata", string(raw))
 	}
-	deps := make([]string, 0, len(f.blocks)+1)
+	deps := make([]string, 0, len(f.blocks)+len(f.blockedBy)+1)
 	for _, id := range f.blocks {
 		deps = append(deps, "blocks:"+id)
+	}
+	for _, id := range f.blockedBy {
+		deps = append(deps, "blocked-by:"+id)
 	}
 	if f.from != "" {
 		deps = append(deps, "discovered-from:"+f.from)
@@ -275,10 +285,14 @@ func (f *Filing) args() ([]string, error) {
 }
 
 // Create files f as one create and returns the new bead's id. A filing a Set
-// refused, or one with no title or type, files nothing. A create the store
-// failed may still have filed the bead, as gcbd.Store.Create says, so its
-// error says that whether it did is unknown, and the caller finds the bead
-// before it files again.
+// refused, or one with no title or type, files nothing. So does a filing whose
+// wait edge would hold nothing, the edge from a bead it blocks or the edge onto
+// a bead it waits on, and its error is a *NotHeld. For a filing with such
+// edges, Create first reads the prefix the store gives a bead it files, then
+// every bead the edges name in one read, and a read that fails files nothing
+// and returns its error. A create the store failed may still have filed the
+// bead, as gcbd.Store.Create says, so its error says that whether it did is
+// unknown, and the caller finds the bead before it files again.
 func (l *Ledger) Create(f *Filing) (string, error) {
 	if f.err != nil {
 		return "", f.err
@@ -290,6 +304,21 @@ func (l *Ledger) Create(f *Filing) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("ledger: the filing of %q did not encode: %w", f.title, err)
 	}
+	var far []string
+	for _, id := range slices.Concat(f.blocks, f.blockedBy) {
+		if !slices.Contains(far, id) {
+			far = append(far, id)
+		}
+	}
+	if len(far) > 0 {
+		prefix, err := l.store.Prefix()
+		if err != nil {
+			return "", fmt.Errorf("ledger: the filing of %q files nothing: %w", f.title, err)
+		}
+		if err := l.holds(prefix, far); err != nil {
+			return "", fmt.Errorf("ledger: the filing of %q files nothing: %w", f.title, err)
+		}
+	}
 	id, err := l.store.Create(f.title, args...)
 	if err != nil {
 		return "", fmt.Errorf("ledger: the filing of %q may not have landed: %w", f.title, err)
@@ -297,22 +326,87 @@ func (l *Ledger) Create(f *Filing) (string, error) {
 	return id, nil
 }
 
-// ErrNotHeld is the error of an edge AddBlocker refused because the store does
-// not hold the bead it would wait on.
-var ErrNotHeld = errors.New("the store does not hold the bead")
+// ErrNotHeld is the error of a wait edge the ledger refused, with nothing
+// written, because the edge would hold nothing. A *NotHeld says why.
+var ErrNotHeld = errors.New("the edge would hold nothing")
 
-// AddBlocker makes blocker hold the bead id, by a blocks edge from id onto it,
-// once a read finds blocker in the store, since bd adds an edge onto an id
-// outside its own prefix, which holds nothing. It refuses with an error that is
-// ErrNotHeld when the store does not hold blocker. A read that fails returns
-// its *ReadError, and an edge write that exits non-zero has failed.
-func (l *Ledger) AddBlocker(id, blocker string) error {
-	rows, err := l.Find(ByID(blocker).WithClosed())
+// NotHeld is a wait edge the ledger refused, with nothing written, because it
+// would hold nothing, and its message names the beads at the edge's far end
+// and why. Either they do not carry the id prefix of the bead at the edge's
+// other end, and bd keeps an edge between beads of two prefixes as one into
+// another store, which holds nothing even when this store holds both
+// (IsExternalDepTarget), or the store does not hold them, and an edge onto a
+// bead its store does not hold holds nothing. It is ErrNotHeld.
+type NotHeld struct {
+	ids     []string
+	prefix  string
+	foreign bool
+}
+
+func (e *NotHeld) Error() string {
+	ids := strings.Join(e.ids, " or ")
+	if e.foreign {
+		return ids + " does not carry the id prefix " + e.prefix + ", and bd keeps an edge between beads of two id " +
+			"prefixes as one into another store, which holds nothing even when this store holds the bead"
+	}
+	return "the store holds no bead " + ids + ", and an edge onto a bead the store does not hold holds nothing"
+}
+
+// Unwrap makes a *NotHeld ErrNotHeld.
+func (e *NotHeld) Unwrap() error { return ErrNotHeld }
+
+// holds is nil when an edge between a bead of id prefix prefix and each bead
+// of ids would hold: each carries prefix, and the store holds it, read in one
+// Find. Otherwise it is the *NotHeld that names the beads that do not, those
+// of another prefix ahead of any read. A read that fails returns its error.
+func (l *Ledger) holds(prefix string, ids []string) error {
+	var foreign []string
+	for _, id := range ids {
+		if prefixOf(id) != prefixOf(prefix+"-") {
+			foreign = append(foreign, id)
+		}
+	}
+	if len(foreign) > 0 {
+		return &NotHeld{ids: foreign, prefix: prefix, foreign: true}
+	}
+	rows, err := l.Find(ByID(ids...).WithClosed())
 	if err != nil {
 		return err
 	}
-	if len(rows) == 0 {
-		return fmt.Errorf("ledger: no edge from %s onto %s: %w", id, blocker, ErrNotHeld)
+	var missing []string
+	for _, id := range ids {
+		if !slices.ContainsFunc(rows, func(r *Record) bool { return r.ID == id }) {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		return &NotHeld{ids: missing}
+	}
+	return nil
+}
+
+// prefixOf is the prefix by which bd tells whether an edge between two beads
+// stays in one store: the bead id up to its first dash, the dash included, or
+// "" for an id with none (ExtractPrefix). So a store prefix that holds a dash,
+// such as a-b, mints ids that bd reads by its first part, a-.
+func prefixOf(id string) string {
+	if i := strings.Index(id, "-"); i >= 0 {
+		return id[:i+1]
+	}
+	return ""
+}
+
+// AddBlocker makes blocker hold the bead id, by a blocks edge from id onto it,
+// once blocker carries id's prefix and a read finds it in the store. It refuses
+// with a *NotHeld, which is ErrNotHeld, when the edge would hold nothing. A
+// read that fails returns its *ReadError, and an edge write that exits
+// non-zero has failed.
+func (l *Ledger) AddBlocker(id, blocker string) error {
+	if err := l.holds(strings.TrimSuffix(prefixOf(id), "-"), []string{blocker}); err != nil {
+		if errors.Is(err, ErrNotHeld) {
+			return fmt.Errorf("ledger: no edge from %s onto %s: %w", id, blocker, err)
+		}
+		return err
 	}
 	if out, err := l.store.AddEdge(id, blocker, EdgeBlocks); err != nil {
 		if out = strings.TrimSpace(out); out != "" {

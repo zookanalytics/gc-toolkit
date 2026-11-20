@@ -49,7 +49,7 @@ func (a *SupervisorAPI) JSON(ctx context.Context, out any, path string, query ur
 	if err != nil {
 		return false, fmt.Errorf("GET %s: %w", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
 		return false, nil
 	}
