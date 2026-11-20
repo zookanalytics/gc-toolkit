@@ -19,6 +19,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // `gctk merge` is arm 2 of the merge cadence, THE single writer of merged
@@ -2020,7 +2021,7 @@ func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead)
 // row tells it ([conversation.IsCandidate]).
 func holderLabel(b *gcbd.Bead) string {
 	kind := "unclosed rework/review bead"
-	if prstatus.IsHumanGate(b.IssueTypeString(), b.AwaitType) {
+	if person.IsHumanGate(b.IssueTypeString(), b.AwaitType) {
 		kind = "open human gate"
 	} else if conversation.IsCandidate(b.IssueTypeString(), b.AssigneeString(), b.ID) {
 		kind = "open conversation"

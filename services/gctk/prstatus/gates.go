@@ -6,44 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
-
-// Blocker is the far end of one `blocks` edge, in the fields [Holding] and
-// [IsPersonBlocker] read of it. A [Store] fills it from its own read, and passes
-// the status and the issue type as they read, in any case. AwaitID is the key a
-// gate was filed under, which tells a gate a review run's failure filed
-// ([IsMachineGate]). Assignee is the far bead's assignee as it reads, which
-// tells a conversation by its row ([conversation.IsCandidate]). ClosedAt is when
-// it closed, "" while it is live. Metadata is the far bead's metadata whole,
-// each value as [Row.Metadata] renders it, so the definition decides which keys
-// it reads: the facts a merge anchor records about its own PR, and the vars a
-// review run was poured with.
-type Blocker struct {
-	ID        string
-	Title     string
-	Status    string
-	IssueType string
-	AwaitType string
-	AwaitID   string
-	Assignee  string
-	ClosedAt  string
-	Metadata  map[string]string
-}
-
-// open reports whether the blocker still blocks: any status but closed, a
-// blocker with no status included. It is the rule a human gate is read open by
-// (HUMAN_GATE_JQ in assets/scripts/bd-lib.sh) and the one the label's blocker
-// read applies.
-func (b Blocker) open() bool { return !strings.EqualFold(b.Status, "closed") }
-
-// IsHumanGate reports whether a bead of this issue type and await type is a
-// human gate: Gas City's native bead for a wait a person must clear. It is the
-// one reader rule bd_human_gates applies in assets/scripts/bd-lib.sh.
-func IsHumanGate(issueType, awaitType string) bool {
-	return strings.EqualFold(issueType, "gate") && awaitType == "human"
-}
 
 // machineGates are the keys of the human gates a review run's failure files:
 // the landing order's, once the last two runs at a PR's head ended without a
@@ -55,55 +20,9 @@ var machineGates = []string{"review-run-failed", "review-loop-exhausted"}
 // IsMachineGate reports whether a blocker is a human gate a review run's
 // failure filed ([machineGates]). It holds the PR as any gate does, and reads
 // as the machine's fault, never as a person's hold or a ruling owed.
-func IsMachineGate(b Blocker) bool {
-	return IsHumanGate(b.IssueType, b.AwaitType) && slices.Contains(machineGates, b.AwaitID)
+func IsMachineGate(b person.Blocker) bool {
+	return person.IsHumanGate(b.IssueType, b.AwaitType) && slices.Contains(machineGates, b.AwaitID)
 }
-
-// IsPersonBlocker reports whether a blocker is a person's to clear and not a
-// human gate: a live decision or conversation. A conversation on an open PR
-// holds the PR's merge through the anchor's `blocks` edge onto it, and a
-// blocker reads as one by its row ([conversation.IsCandidate]): a task in the
-// operator's queue or held by a sitting, which a person's ruling or dismissal
-// closes. No automated actor will clear either, so each holds a PR as held:
-// blocked. A human gate is never one, because held: gate is what counts it,
-// and a route marks no blocker as a person's. A blocker with no status reads
-// open, and only a closed one is not live. The helm board asks it of any bead's
-// blockers, for the rows that ask a person for something. It reads the row
-// alone, so it cannot tell one that waits on work of its own first, which no
-// person owes a move on while that work is out: [Holding] tells one once it has
-// read the blocker's own edges ([Stays]).
-func IsPersonBlocker(b Blocker) bool {
-	if !b.open() || IsHumanGate(b.IssueType, b.AwaitType) {
-		return false
-	}
-	return strings.EqualFold(b.IssueType, "decision") ||
-		conversation.IsCandidate(strings.ToLower(b.IssueType), b.Assignee, b.ID)
-}
-
-// Stays reports whether a blocker that [IsPersonBlocker] reads as a person's
-// waits on work of its own first, by its own `blocks` edges (own), so no person
-// owes a move on it while that work is out. One is a conversation its sitting
-// stays in ([conversation.Staying]), whose open edges are the stay's, one onto
-// each bead of the work it sent. The other is an open decision with an open
-// edge onto work, a bead that is no gate: a ruling that sends work leaves its
-// decision open with an edge onto that work, which the decision's validating
-// closer checks once the work lands (converse-signoff.sh's --waiting-on). A
-// decision whose open edges are only onto gates is a person's to clear. The
-// helm board's rig read asks it of a row too, with the row's own waits, so the
-// row and its pull request's held reading agree.
-func Stays(b Blocker, own []Blocker) bool {
-	if !b.open() {
-		return false
-	}
-	if strings.EqualFold(b.IssueType, "decision") {
-		return slices.ContainsFunc(own, isWork)
-	}
-	return conversation.IsCandidate(strings.ToLower(b.IssueType), b.Assignee, b.ID) &&
-		conversation.Staying(b.Status, b.Assignee, slices.ContainsFunc(own, Blocker.open))
-}
-
-// isWork reports whether a blocker is work: an open bead that is no gate.
-func isWork(b Blocker) bool { return b.open() && !strings.EqualFold(b.IssueType, "gate") }
 
 // mergeResultPullRequest is the merge_result of a merge anchor whose pull
 // request is open on the old record. On Gas Town's pending record an open pull
@@ -117,7 +36,7 @@ const mergeResultPullRequest = "pull_request"
 // onto an open bead that is neither a human gate nor a person's to clear counts
 // as work in flight on it, because the city moves that bead before the anchor's
 // next move, so a pull request the city is changing or landing is no person's
-// move. A blocker that waits on work of its own first ([Stays]), which edges
+// move. A blocker that waits on work of its own first ([person.Stays]), which edges
 // gives the edges of, counts among the facts' Staying, so the anchor reads
 // working while it does.
 // Its gates and the beads a person owes count for nothing here: the walk reaches
@@ -125,7 +44,7 @@ const mergeResultPullRequest = "pull_request"
 // person's move is needs-attention, and needs-review once the pull request is
 // open, where the move is a review. A pre-open anchor has no pull request to
 // review yet, and a bead with no merge_result is no merge anchor.
-func awaitsPerson(b Blocker, own []Blocker, edges map[string][]Blocker) bool {
+func awaitsPerson(b person.Blocker, own []person.Blocker, edges map[string][]person.Blocker) bool {
 	result := b.Metadata["merge_result"]
 	if result == "" {
 		return false
@@ -133,10 +52,10 @@ func awaitsPerson(b Blocker, own []Blocker, edges map[string][]Blocker) bool {
 	f := RowFacts(b.Metadata)
 	for _, e := range own {
 		switch {
-		case !e.open() || IsHumanGate(e.IssueType, e.AwaitType):
-		case Stays(e, edges[e.ID]):
+		case !e.Open() || person.IsHumanGate(e.IssueType, e.AwaitType):
+		case person.Stays(e, edges[e.ID]):
 			f.Staying = append(f.Staying, e)
-		case !IsPersonBlocker(e):
+		case !person.Clears(e):
 			f.InFlightCount++
 		}
 	}
@@ -170,7 +89,7 @@ func awaitsPerson(b Blocker, own []Blocker, edges map[string][]Blocker) bool {
 // that bead's blockers, open and closed, and no edge of another type. It returns
 // an error when any of those beads did not read, because a bead whose edges
 // nothing read proves nothing about what holds it.
-type ReadBlockers func(ids []string) (map[string][]Blocker, error)
+type ReadBlockers func(ids []string) (map[string][]person.Blocker, error)
 
 // walkDepth and walkBeads bound each root's walk, the same whatever else the call
 // walks. A walk reads once per level, so walkDepth bounds its reads, and walkBeads
@@ -187,28 +106,28 @@ var ErrWalkBound = errors.New("the blocks edges run past the walk's bound")
 
 // Holds is what the walk from one bead finds holding it that only a person
 // moves, each nearest first, and the beads that hold it while they wait on work
-// of their own first ([Stays]).
+// of their own first ([person.Stays]).
 type Holds struct {
 	// Gates is every open human gate the walk reaches, in the order it reaches
 	// them.
-	Gates []Blocker
+	Gates []person.Blocker
 	// Owed is every other open bead the walk reaches that a person owes the next
-	// move on: a blocker a person has to clear ([IsPersonBlocker]), such as a
+	// move on: a blocker a person has to clear ([person.Clears]), such as a
 	// conversation that holds a pull request's merge, or a merge anchor whose own
 	// state is a person's to move ([awaitsPerson]), such as another pull request
 	// that waits on a review. A merge anchor is weighed once
 	// the walk has read its own edges, so it comes after the other beads at its
 	// depth.
-	Owed []Blocker
-	// Staying is every bead the walk reaches that [IsPersonBlocker] reads as a
-	// person's and that waits on work of its own first ([Stays]): a
+	Owed []person.Blocker
+	// Staying is every bead the walk reaches that [person.Clears] reads as a
+	// person's and that waits on work of its own first ([person.Stays]): a
 	// conversation its sitting stays in, or a decision a ruling left waiting on
 	// the work it sent. Until that work closes no person owes a move on it, so
 	// it is in neither Gates nor Owed. It still holds what waits on it, such as
 	// a pull request's merge, and the walk follows its edges as any other's, so
 	// what holds that work counts on its own. Once the work closes, the same
 	// bead is among Owed.
-	Staying []Blocker
+	Staying []person.Blocker
 }
 
 // Holding returns, for each root, what holds it that only a person moves
@@ -222,7 +141,7 @@ type Holds struct {
 // It reads only the edges read returns. A conversation tracks its bead and
 // blocks nothing but an open PR's anchor, whose merge it holds, so it counts
 // only there. A decision or a conversation counts as a bead a person owes, or
-// as staying while it waits on work of its own first ([Stays]), which only its
+// as staying while it waits on work of its own first ([person.Stays]), which only its
 // own edges tell, a level further on. So what the walk reaches is decided once
 // it has read every edge it reached, in the order it reached each. An edge onto
 // a closed blocker is not followed, so nothing behind it holds anything. A bead
@@ -249,11 +168,11 @@ func Holding(roots []string, read ReadBlockers) (map[string]Holds, error) {
 	for _, r := range roots {
 		if !named[r] {
 			named[r] = true
-			walks = append(walks, &holdWalk{root: r, seen: map[string]bool{r: true}, weigh: map[string]Blocker{}, level: []string{r}})
+			walks = append(walks, &holdWalk{root: r, seen: map[string]bool{r: true}, weigh: map[string]person.Blocker{}, level: []string{r}})
 		}
 	}
 	holds := make(map[string]Holds, len(walks))
-	edges := make(map[string][]Blocker)
+	edges := make(map[string][]person.Blocker)
 	var past []string
 	for depth := 0; len(walks) > 0; depth++ {
 		var unread []string
@@ -298,12 +217,12 @@ func Holding(roots []string, read ReadBlockers) (map[string]Holds, error) {
 // HoldingGates returns, for each root, the open human gates that hold it: the
 // [Holds.Gates] of [Holding], with its bound and its errors. The merge pass asks
 // it for the blockers it would otherwise call stuck.
-func HoldingGates(roots []string, read ReadBlockers) (map[string][]Blocker, error) {
+func HoldingGates(roots []string, read ReadBlockers) (map[string][]person.Blocker, error) {
 	holds, err := Holding(roots, read)
 	if holds == nil {
 		return nil, err
 	}
-	gates := make(map[string][]Blocker, len(holds))
+	gates := make(map[string][]person.Blocker, len(holds))
 	for root, h := range holds {
 		gates[root] = h.Gates
 	}
@@ -317,9 +236,9 @@ func HoldingGates(roots []string, read ReadBlockers) (map[string][]Blocker, erro
 type holdWalk struct {
 	root  string
 	seen  map[string]bool
-	weigh map[string]Blocker
+	weigh map[string]person.Blocker
 	level []string
-	found []Blocker
+	found []person.Blocker
 	holds Holds
 }
 
@@ -328,7 +247,7 @@ type holdWalk struct {
 // each open human gate and finding each blocker a person has to clear, once each.
 // The whole level's anchors are found before any of its edges is followed, so
 // no bead of the next level is found ahead of an anchor of this one.
-func (w *holdWalk) step(edges map[string][]Blocker) {
+func (w *holdWalk) step(edges map[string][]person.Blocker) {
 	for _, id := range w.level {
 		if b, ok := w.weigh[id]; ok {
 			w.found = append(w.found, b)
@@ -337,15 +256,15 @@ func (w *holdWalk) step(edges map[string][]Blocker) {
 	var next []string
 	for _, id := range w.level {
 		for _, b := range edges[id] {
-			if !b.open() || w.seen[b.ID] {
+			if !b.Open() || w.seen[b.ID] {
 				continue
 			}
 			w.seen[b.ID] = true
 			next = append(next, b.ID)
 			switch {
-			case IsHumanGate(b.IssueType, b.AwaitType):
+			case person.IsHumanGate(b.IssueType, b.AwaitType):
 				w.holds.Gates = append(w.holds.Gates, b)
-			case IsPersonBlocker(b):
+			case person.Clears(b):
 				w.found = append(w.found, b)
 			case b.Metadata["merge_result"] != "":
 				w.weigh[b.ID] = b
@@ -358,12 +277,12 @@ func (w *holdWalk) step(edges map[string][]Blocker) {
 // settle decides each bead the walk found, in the order it found them, once
 // the walk has read the edges of every bead it reached. A merge anchor is owed
 // when its own state is a person's to move ([awaitsPerson]). A blocker a person
-// has to clear is owed, unless it waits on work of its own first ([Stays]),
+// has to clear is owed, unless it waits on work of its own first ([person.Stays]),
 // which is staying instead. Each can need edges the walk reads after it found
 // the bead: a blocker's own, read a level after the walk reached it, and those
 // of a blocker an anchor waits on, read a level after the anchor's own. The
 // walk has read them all once it ends.
-func (w *holdWalk) settle(edges map[string][]Blocker) {
+func (w *holdWalk) settle(edges map[string][]person.Blocker) {
 	for _, b := range w.found {
 		_, anchor := w.weigh[b.ID]
 		switch {
@@ -371,7 +290,7 @@ func (w *holdWalk) settle(edges map[string][]Blocker) {
 			if awaitsPerson(b, edges[b.ID], edges) {
 				w.holds.Owed = append(w.holds.Owed, b)
 			}
-		case Stays(b, edges[b.ID]):
+		case person.Stays(b, edges[b.ID]):
 			w.holds.Staying = append(w.holds.Staying, b)
 		default:
 			w.holds.Owed = append(w.holds.Owed, b)

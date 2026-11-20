@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // Render returns where a PR on Gas Town's pending record stands, in the status
@@ -140,7 +141,7 @@ func RenderHeld(a pr.Answer, f Facts) []Hold { return holdsOf(RenderReasons(a, f
 func threadsHeld(a pr.Answer, f Facts) int {
 	persons := slices.Concat(f.Gates, f.Owed, f.Staying)
 	person := func(id string) bool {
-		return slices.ContainsFunc(persons, func(b Blocker) bool { return b.ID == id })
+		return slices.ContainsFunc(persons, func(b person.Blocker) bool { return b.ID == id })
 	}
 	n := 0
 	for _, c := range a.Conditions {

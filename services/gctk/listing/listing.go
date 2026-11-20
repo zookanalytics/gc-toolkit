@@ -25,6 +25,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -76,7 +77,7 @@ type Bead struct {
 	// it ([waits.IsRootOrStep]).
 	Run bool
 	// PersonBlocker is true for a bead only a person clears and that is no
-	// human gate ([prstatus.IsPersonBlocker]).
+	// human gate ([person.Clears]).
 	PersonBlocker bool
 }
 
@@ -181,7 +182,7 @@ func beadOf(r *ledger.Record) (Bead, error) {
 			RulingReason: text(epicRulingReasonKey, r), RulingAt: text(epicRulingAtKey, r),
 		},
 		Handback: text(handbackKey, r), HandbackAt: text(handbackAtKey, r),
-		Run: waits.IsRootOrStep(r), PersonBlocker: prstatus.IsPersonBlocker(blockerOf(r))}
+		Run: waits.IsRootOrStep(r), PersonBlocker: person.Clears(blockerOf(r))}
 	for _, e := range edges {
 		b.Edges = append(b.Edges, Edge{ID: e.ID, Type: e.Type})
 	}
@@ -335,7 +336,7 @@ func (ls *Listing) Anchored(ids []string, statuses []string) (map[string][]prsta
 // for each bead named, the far bead of each of its blocks edges. An edge onto a
 // bead the store does not hold is one into another store, which holds
 // nothing.
-func (ls *Listing) Blockers(ids []string) (map[string][]prstatus.Blocker, error) {
+func (ls *Listing) Blockers(ids []string) (map[string][]person.Blocker, error) {
 	recs, err := ls.byID(ids)
 	if err != nil {
 		return nil, err
@@ -356,9 +357,9 @@ func (ls *Listing) Blockers(ids []string) (map[string][]prstatus.Blocker, error)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string][]prstatus.Blocker, len(ids))
+	out := make(map[string][]person.Blocker, len(ids))
 	for _, id := range ids {
-		out[id] = []prstatus.Blocker{}
+		out[id] = []person.Blocker{}
 		f, _ := blocksOf(recs[id]) // decoded above
 		for _, x := range f {
 			if fr, ok := farRecs[x]; ok {
@@ -398,7 +399,7 @@ func blocksOf(r *ledger.Record) ([]string, error) {
 }
 
 // blockerOf is r in the fields prstatus reads of a blocker.
-func blockerOf(r *ledger.Record) prstatus.Blocker {
-	return prstatus.Blocker{ID: r.ID, Title: r.Title(), Status: r.Status(), IssueType: r.IssueType(),
+func blockerOf(r *ledger.Record) person.Blocker {
+	return person.Blocker{ID: r.ID, Title: r.Title(), Status: r.Status(), IssueType: r.IssueType(),
 		AwaitType: r.AwaitType(), Assignee: r.Assignee(), Metadata: r.Rendered()}
 }

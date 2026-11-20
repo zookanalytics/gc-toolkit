@@ -51,7 +51,7 @@ import (
 // distinction too. Dependencies keeps its JSON shape as well, so a row shape no
 // reader expects still decodes the bead, and so does IssueType, which
 // IssueTypeString reads as jq's tostring. IssueType, AwaitType and AwaitID are
-// the fields that make a bead a human gate (prstatus.IsHumanGate); `gc bd dep list`
+// the fields that make a bead a human gate (person.IsHumanGate); `gc bd dep list`
 // carries them on each far bead's row, and bd leaves a field out of a row when
 // its value is empty. DependencyType is the edge a `gc bd show` row's
 // dependency was reached by, and is empty on any other row. Description,

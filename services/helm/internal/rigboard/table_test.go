@@ -8,6 +8,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -22,14 +23,14 @@ func TestTableRows(t *testing.T) {
 	blockedOn := func(ws ...waits.Wait) *waits.Holds {
 		return &waits.Holds{ID: "tk-w", Status: waits.Blocked, Waits: ws}
 	}
-	humanGate := prstatus.Blocker{ID: "tk-g", Title: "a question", Status: "open", IssueType: "gate", AwaitType: "human"}
-	conv := func(assignee string) prstatus.Blocker {
-		return prstatus.Blocker{ID: "tk-c", Title: "talk", Status: "open", IssueType: "task", Assignee: assignee}
+	humanGate := person.Blocker{ID: "tk-g", Title: "a question", Status: "open", IssueType: "gate", AwaitType: "human"}
+	conv := func(assignee string) person.Blocker {
+		return person.Blocker{ID: "tk-c", Title: "talk", Status: "open", IssueType: "task", Assignee: assignee}
 	}
-	decision := prstatus.Blocker{ID: "tk-d", Title: "pick one", Status: "open", IssueType: "decision"}
+	decision := person.Blocker{ID: "tk-d", Title: "pick one", Status: "open", IssueType: "decision"}
 	// A merge anchor whose pull request waits on a person's review, as
 	// prstatus.Holding names it among the beads a person owes.
-	owesReview := prstatus.Blocker{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
+	owesReview := person.Blocker{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
 		Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "7"}}
 	prWait := waits.Wait{ID: "tk-pr", Type: "blocks", Title: "land the change", Status: "open", IssueType: "task"}
 	// Where queue placed the bead: in a place the city takes as things stand,
@@ -54,36 +55,36 @@ func TestTableRows(t *testing.T) {
 			out: outAsk, group: GroupWaitingOnYou, signal: "Routed to you"},
 		{name: "an own human gate waits on your answer",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(gateWait),
-				holding: &prstatus.Holds{Gates: []prstatus.Blocker{humanGate}}},
+				holding: &prstatus.Holds{Gates: []person.Blocker{humanGate}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on your answer"},
 		{name: "an own conversation in your queue waits for you",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(waits.Wait{ID: "tk-c", Type: "blocks", Status: "open", IssueType: "task"}),
-				holding: &prstatus.Holds{Owed: []prstatus.Blocker{conv("human")}}},
+				holding: &prstatus.Holds{Owed: []person.Blocker{conv("human")}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "Conversation waits for you"},
 		{name: "an own conversation a sitting holds is in conversation",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(waits.Wait{ID: "tk-c", Type: "blocks", Status: "open", IssueType: "task"}),
-				holding: &prstatus.Holds{Owed: []prstatus.Blocker{conv("gc-toolkit/gc-toolkit.tk-c")}}},
+				holding: &prstatus.Holds{Owed: []person.Blocker{conv("gc-toolkit/gc-toolkit.tk-c")}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "In conversation"},
 		{name: "an own decision waits on your answer, as a question does",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(waits.Wait{ID: "tk-d", Type: "blocks", Status: "open", IssueType: "decision"}),
-				holding: &prstatus.Holds{Owed: []prstatus.Blocker{decision}}},
+				holding: &prstatus.Holds{Owed: []person.Blocker{decision}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on your answer"},
 		{name: "a bead behind another bead's pull request names that bead, never its words",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(prWait),
-				holding: &prstatus.Holds{Owed: []prstatus.Blocker{owesReview}}},
+				holding: &prstatus.Holds{Owed: []person.Blocker{owesReview}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on tk-pr"},
 		{name: "a bead behind a pull request and other work names each wait",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(workWait, prWait),
-				holding: &prstatus.Holds{Owed: []prstatus.Blocker{owesReview}}},
+				holding: &prstatus.Holds{Owed: []person.Blocker{owesReview}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on tk-other, tk-pr"},
 		{name: "a person's move further along names the wait and ends on what Holding returned first",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(workWait),
-				holding: &prstatus.Holds{Gates: []prstatus.Blocker{humanGate}, Owed: []prstatus.Blocker{decision}}},
+				holding: &prstatus.Holds{Gates: []person.Blocker{humanGate}, Owed: []person.Blocker{decision}}},
 			out: outEndsOnYou, group: GroupWaitingOnYou, signal: "Waits on tk-other", line3: []string{"tk-g"}},
 		{name: "a held bead's ancestor gate a person answers is further along",
 			in: tableInput{b: work, kind: KindWork,
 				holds:   &waits.Holds{ID: "tk-w", Status: waits.Held, Waits: []waits.Wait{{ID: "tk-g", Type: "blocks", Status: "open", IssueType: "gate", AwaitType: "human", Ancestor: "tk-e"}}},
-				holding: &prstatus.Holds{Gates: []prstatus.Blocker{humanGate}}},
+				holding: &prstatus.Holds{Gates: []person.Blocker{humanGate}}},
 			out: outEndsOnYou, group: GroupWaitingOnYou, signal: "Waits on tk-g", line3: []string{"tk-g"}},
 		{name: "a gate no person answers holds it",
 			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait, parkWait), holding: &prstatus.Holds{}},

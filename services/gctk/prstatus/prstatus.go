@@ -67,6 +67,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // State is a PR anchor's status value: the live, mutually-exclusive `status:`
@@ -163,7 +165,7 @@ type Facts struct {
 	// reads as a hold, as merge_hold and rebase_hold do, whatever work is in
 	// flight. A conversation is no human gate, so it is never among them: one
 	// that holds the anchor's merge is among Owed.
-	Gates []Blocker
+	Gates []person.Blocker
 	// Owed are the beads other than human gates that a person owes the next move
 	// on, on the anchor's own blockers or behind a bead it waits on, nearest
 	// first, as [Holding] reads them ([Holds.Owed]): a decision, a conversation
@@ -171,7 +173,7 @@ type Facts struct {
 	// own state is a person's to move, such as a PR waiting on a review that a
 	// rework of this one waits for. No automated actor will move any of them, so
 	// each holds the PR.
-	Owed []Blocker
+	Owed []person.Blocker
 	// Staying are the beads a person would owe that the PR waits on, on its own
 	// blockers or behind a bead it waits on, while each waits on work of its own
 	// first, as [Holding] reads them ([Holds.Staying]): a conversation whose
@@ -179,7 +181,7 @@ type Facts struct {
 	// the work it sent. Each holds the merge until that work closes, so the PR
 	// waits on that work first and is no person's move yet, approved or not.
 	// Once the work closes, the bead is among Owed.
-	Staying []Blocker
+	Staying []person.Blocker
 	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
 	// read before the first '@', and the oid after it is the head the posture
 	// was read at, the current head as far as the city knows.
@@ -237,7 +239,7 @@ type Run struct {
 const reviewFormula = "mol-pr-review"
 
 // runsOf is the review runs among an anchor's blockers.
-func runsOf(blockers []Blocker) []Run {
+func runsOf(blockers []person.Blocker) []Run {
 	var out []Run
 	for _, b := range blockers {
 		if b.Metadata["gc.kind"] != "workflow" || b.Metadata["gc.formula_name"] != reviewFormula {
@@ -371,7 +373,7 @@ type Reason struct {
 
 // gateReason is the reason a human gate holds the PR: a person's hold, or the
 // machine's fault for a gate a review run's failure filed.
-func gateReason(g Blocker) Reason {
+func gateReason(g person.Blocker) Reason {
 	if IsMachineGate(g) {
 		return Reason{ID: g.ID, Title: g.Title}
 	}

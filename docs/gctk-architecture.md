@@ -764,10 +764,8 @@ why a reader must know it, and the work that retires it.
   `table.go` and `build.go`), and `assets/scripts/bead-context.sh` decides
   again, in jq, whether a bead advances, so the board and an agent's read of a
   bead disagree where [the contract](#the-bead-stands-contract) settles them.
-  The rules about one bead sit in `prstatus`, and `pr` keeps its own copy of
-  the rule for a human gate. The effort that builds the design
-  (tk-ssm8qns.27) moves each onto `standing` and `standing/person` and deletes
-  the copies.
+  The effort that builds the design (tk-ssm8qns.27) moves each onto
+  `standing` and deletes the copies.
 - **`epic create`, `session title` and `rig`'s checks start processes outside
   an adapter.** `epic create` files the epic with its own `gc bd create`,
   `session title` runs `gc session rename` and `gc session submit`, and the

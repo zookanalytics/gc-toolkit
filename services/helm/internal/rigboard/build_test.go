@@ -9,6 +9,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus/fixture"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -39,7 +40,7 @@ func graph() *gathered {
 	}
 	wq := waits.Wait{ID: "tk-q", Type: "blocks", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
 	wpark := waits.Wait{ID: "tk-park", Type: "blocks", Title: "parked", Status: "open", IssueType: "gate"}
-	q := prstatus.Blocker{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
+	q := person.Blocker{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
 	clear := func(id string) waits.Holds { return waits.Holds{ID: id, Status: waits.Clear} }
 	armed := &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}
 	return &gathered{
@@ -56,9 +57,9 @@ func graph() *gathered {
 		},
 		unread: map[string]error{},
 		holding: map[string]prstatus.Holds{
-			"tk-a.1.1":  {Gates: []prstatus.Blocker{q}},
-			"tk-b.1":    {Gates: []prstatus.Blocker{q}},
-			"tk-b.2":    {Gates: []prstatus.Blocker{q}},
+			"tk-a.1.1":  {Gates: []person.Blocker{q}},
+			"tk-b.1":    {Gates: []person.Blocker{q}},
+			"tk-b.2":    {Gates: []person.Blocker{q}},
 			"tk-loose":  {},
 			"tk-loose2": {},
 		},
@@ -382,10 +383,10 @@ func TestNeedOrder(t *testing.T) {
 	wait := func(id, issueType, awaitType string) waits.Wait {
 		return waits.Wait{ID: id, Type: "blocks", Status: "open", IssueType: issueType, AwaitType: awaitType}
 	}
-	gate := func(id string) prstatus.Blocker {
-		return prstatus.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
+	gate := func(id string) person.Blocker {
+		return person.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
 	}
-	pr := prstatus.Blocker{ID: "tk-pr", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}}
+	pr := person.Blocker{ID: "tk-pr", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}}
 	g := &gathered{rig: "gc-toolkit",
 		open: []bead{
 			{ID: "tk-e", Title: "Epic", Status: "open", Priority: 1, IssueType: "epic", Epic: listing.Epic{Hypothesis: "it works"}, CreatedAt: "2026-01-01"},
@@ -410,9 +411,9 @@ func TestNeedOrder(t *testing.T) {
 		unread: map[string]error{},
 		holding: map[string]prstatus.Holds{
 			"tk-pr": {},
-			"tk-w1": {Owed: []prstatus.Blocker{pr}},
-			"tk-w2": {Gates: []prstatus.Blocker{gate("tk-g1")}},
-			"tk-w3": {Gates: []prstatus.Blocker{gate("tk-g2")}},
+			"tk-w1": {Owed: []person.Blocker{pr}},
+			"tk-w2": {Gates: []person.Blocker{gate("tk-g1")}},
+			"tk-w3": {Gates: []person.Blocker{gate("tk-g2")}},
 		},
 		unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{"tk-pr": {}}, noFacts: map[string]bool{},
 	}
@@ -489,7 +490,7 @@ func TestWorkUnderTwoParents(t *testing.T) {
 				Edges: []listing.Edge{parent("tk-e1"), parent("tk-e2"), {ID: "tk-q", Type: "blocks"}}, CreatedAt: "2026-01-03"},
 		}, nil, map[string]waits.Holds{"tk-e1": clear("tk-e1"), "tk-e2": clear("tk-e2"), "tk-q": clear("tk-q"),
 			"tk-w": {ID: "tk-w", Status: waits.Blocked, Waits: []waits.Wait{wq}}})
-		g.holding["tk-w"] = prstatus.Holds{Gates: []prstatus.Blocker{{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}}}
+		g.holding["tk-w"] = prstatus.Holds{Gates: []person.Blocker{{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}}}
 		doc := boardOf(t, g)
 		for _, e := range []string{"tk-e1", "tk-e2"} {
 			x := entry(doc, e)
@@ -592,9 +593,9 @@ func TestAConversationAnsweringTwoQuestions(t *testing.T) {
 	for _, id := range []string{"tk-q2", "tk-c"} {
 		g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}
 	}
-	conv := prstatus.Blocker{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}
+	conv := person.Blocker{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}
 	g.holds["tk-b.3"] = waits.Holds{ID: "tk-b.3", Status: waits.Blocked, Waits: []waits.Wait{{ID: "tk-c", Type: "blocks", Status: "open", IssueType: "task"}}}
-	g.holding["tk-b.3"] = prstatus.Holds{Owed: []prstatus.Blocker{conv}}
+	g.holding["tk-b.3"] = prstatus.Holds{Owed: []person.Blocker{conv}}
 	for range 20 {
 		doc := boardOf(t, g)
 		if !slices.Contains(doc.Rows["tk-q"].Holds, "tk-b.3") || slices.Contains(doc.Rows["tk-q2"].Holds, "tk-b.3") {
@@ -765,8 +766,8 @@ func TestADecisionThatWaitsOnItsWork(t *testing.T) {
 			if c.holds.Status == waits.Blocked {
 				var owed prstatus.Holds
 				for _, w := range c.holds.Waits {
-					if prstatus.IsHumanGate(w.IssueType, w.AwaitType) {
-						owed.Gates = append(owed.Gates, prstatus.Blocker{ID: w.ID, Title: w.Title, Status: w.Status, IssueType: w.IssueType, AwaitType: w.AwaitType})
+					if person.IsHumanGate(w.IssueType, w.AwaitType) {
+						owed.Gates = append(owed.Gates, person.Blocker{ID: w.ID, Title: w.Title, Status: w.Status, IssueType: w.IssueType, AwaitType: w.AwaitType})
 					}
 				}
 				g.holding["tk-d"] = owed
@@ -936,7 +937,7 @@ func TestWorkThatWaitsOnADecisionsConversation(t *testing.T) {
 	}
 	g.holds["tk-w"] = waits.Holds{ID: "tk-w", Status: waits.Blocked,
 		Waits: []waits.Wait{{ID: "tk-c", Type: "blocks", Title: "talk it through", Status: "open", IssueType: "task"}}}
-	g.holding["tk-w"] = prstatus.Holds{Owed: []prstatus.Blocker{{ID: "tk-c", Title: "talk it through", Status: "open", IssueType: "task", Assignee: "human"}}}
+	g.holding["tk-w"] = prstatus.Holds{Owed: []person.Blocker{{ID: "tk-c", Title: "talk it through", Status: "open", IssueType: "task", Assignee: "human"}}}
 	doc := boardOf(t, g)
 	if got := doc.Rows["tk-d"].Holds; !slices.Equal(got, []string{"tk-w"}) {
 		t.Errorf("tk-d holds %v, want the work behind its conversation", got)
@@ -1018,8 +1019,8 @@ func TestNeedsThatCount(t *testing.T) {
 	question := func(id string) waits.Wait {
 		return waits.Wait{ID: id, Type: "blocks", Status: "open", IssueType: "gate", AwaitType: "human"}
 	}
-	gate := func(id string) prstatus.Blocker {
-		return prstatus.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
+	gate := func(id string) person.Blocker {
+		return person.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
 	}
 	blocked := func(id string, ws ...waits.Wait) waits.Holds {
 		return waits.Holds{ID: id, Status: waits.Blocked, Waits: ws}
@@ -1076,12 +1077,12 @@ func TestNeedsThatCount(t *testing.T) {
 		unread: map[string]error{},
 		holding: map[string]prstatus.Holds{
 			"tk-pe": {}, "tk-pf": {}, "tk-pq": {},
-			"tk-wb":    {Owed: []prstatus.Blocker{{ID: "tk-pr2", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}}}},
-			"tk-wp":    {Gates: []prstatus.Blocker{gate("tk-qp")}},
-			"tk-desk":  {Gates: []prstatus.Blocker{gate("tk-qd")}},
-			"tk-wf":    {Gates: []prstatus.Blocker{gate("tk-qf")}},
-			"tk-desk2": {Gates: []prstatus.Blocker{gate("tk-qf")}},
-			"tk-ws":    {Gates: []prstatus.Blocker{gate("tk-qs")}},
+			"tk-wb":    {Owed: []person.Blocker{{ID: "tk-pr2", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}}}},
+			"tk-wp":    {Gates: []person.Blocker{gate("tk-qp")}},
+			"tk-desk":  {Gates: []person.Blocker{gate("tk-qd")}},
+			"tk-wf":    {Gates: []person.Blocker{gate("tk-qf")}},
+			"tk-desk2": {Gates: []person.Blocker{gate("tk-qf")}},
+			"tk-ws":    {Gates: []person.Blocker{gate("tk-qs")}},
 		},
 		unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{"tk-pr": {}, "tk-pr2": {}}, noFacts: map[string]bool{},
 	}

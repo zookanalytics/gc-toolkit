@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -172,7 +172,7 @@ func openWork(live []bead) []string {
 
 func (ix *index) openHumanGate(id string) bool {
 	b, ok := ix.beads[id]
-	return ok && isOpen(b) && prstatus.IsHumanGate(b.IssueType, b.AwaitType)
+	return ok && isOpen(b) && person.IsHumanGate(b.IssueType, b.AwaitType)
 }
 
 func (ix *index) openDecision(id string) bool {

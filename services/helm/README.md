@@ -1497,7 +1497,7 @@ document never mixes two reads of a bead:
 
 | Reader | What the read takes from it |
 |---|---|
-| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), or a row of the store's ephemeral plane; every bead that records a hand-back (`Listing.HandedBack`) |
+| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`person.Clears`, in `services/gctk/standing/person`), or a row of the store's ephemeral plane; every bead that records a hand-back (`Listing.HandedBack`) |
 | `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
 | `services/gctk/prstatus` (`Holding` over `Listing.Blockers`, and `Stays`) | what a person owes on a bead through its `blocks` edges, and whether a conversation or a decision waits on work of its own first, which is no person's move until that work closes |
 | `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | each open pull request's facts, and where one on the old record stands and what holds it |

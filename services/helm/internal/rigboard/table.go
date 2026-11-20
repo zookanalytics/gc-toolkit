@@ -8,6 +8,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -153,7 +154,7 @@ func conversationWords(assignee string) string { return string(conversationKind(
 // too, so a row and the count read a gate one way.
 func gateHold(h waits.Holds) *waits.Wait {
 	for i, w := range h.Waits {
-		if strings.EqualFold(w.IssueType, "gate") && !prstatus.IsHumanGate(w.IssueType, w.AwaitType) {
+		if strings.EqualFold(w.IssueType, "gate") && !person.IsHumanGate(w.IssueType, w.AwaitType) {
 			return &h.Waits[i]
 		}
 	}
@@ -161,20 +162,20 @@ func gateHold(h waits.Holds) *waits.Wait {
 }
 
 // staying reports whether a conversation's or a decision's row waits on work of
-// its own first (prstatus.Stays): a conversation its sitting stays in, or a
+// its own first (person.Stays): a conversation its sitting stays in, or a
 // decision a ruling left waiting on the work it sent. Its own waits are the
 // ones waits names behind a blocked status, which are each the bead's own.
 // prstatus reads a bead a pull request waits on by the same rule, so the bead's
 // row and its pull request's agree on whether the operator owes a move.
 func staying(b bead, h waits.Holds) bool {
-	var own []prstatus.Blocker
+	var own []person.Blocker
 	if h.Status == waits.Blocked {
 		for _, w := range h.Waits {
-			own = append(own, prstatus.Blocker{ID: w.ID, Title: w.Title, Status: w.Status, IssueType: w.IssueType,
+			own = append(own, person.Blocker{ID: w.ID, Title: w.Title, Status: w.Status, IssueType: w.IssueType,
 				AwaitType: w.AwaitType})
 		}
 	}
-	return prstatus.Stays(prstatus.Blocker{ID: b.ID, Title: b.Title, Status: b.Status, IssueType: b.IssueType,
+	return person.Stays(person.Blocker{ID: b.ID, Title: b.Title, Status: b.Status, IssueType: b.IssueType,
 		AwaitType: b.AwaitType, Assignee: b.Assignee}, own)
 }
 
@@ -333,7 +334,7 @@ func joinIDs(refs []Ref) string {
 //     is no person's move.
 //   - Pull request: a bead whose pull request reads needs-review or
 //     needs-attention, in those words.
-//   - Routed to you: any other open bead prstatus.IsPersonBlocker counts, as
+//   - Routed to you: any other open bead person.Clears counts, as
 //     the listing answers it for the bead.
 //   - Ruling: an epic with members and none open, or a landed Delivery.
 //
@@ -347,7 +348,7 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 	}
 	switch k {
 	case KindGate:
-		if !prstatus.IsHumanGate(b.IssueType, b.AwaitType) {
+		if !person.IsHumanGate(b.IssueType, b.AwaitType) {
 			return nil
 		}
 		return questionAsk(answeredBy, answeredByAssignee)
