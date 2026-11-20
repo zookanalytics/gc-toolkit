@@ -116,6 +116,11 @@ harness_init() {
   # it names (the fake's doc.go). Unset, the rig list names no rig and no hook
   # runs.
   export STUB_RIGS="" STUB_HOOK_AT="" STUB_HOOK=""
+  # The config `gc config show` prints, the program the fake runs after each
+  # write that lands, and the text of the call after which every list fails
+  # (the fake's doc.go). Unset, the config names no agent, no program runs and
+  # no list fails.
+  export STUB_CONFIG="" STUB_AFTER_WRITE="" STUB_LIST_FAIL_AFTER=""
   { echo '[]' > "$STUB_STORE" && echo '[]' > "$STUB_COMMENTS" && : > "$STUB_DEPS" && : > "$STUB_KV" && : > "$STUB_GC_LOG" && : > "$STUB_GH_LOG" \
       && : > "$STUB_SESSION_LOG"; } || {
     echo "harness_init: the store files under $TMP could not be written; not running" >&2; exit 2; }

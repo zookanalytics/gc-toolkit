@@ -57,7 +57,9 @@
 //   - agent list and convoy list print the file STUB_AGENTS or STUB_CONVOYS
 //     names, an empty list when that file cannot be read, and nothing when
 //     the setting names none. rig list prints the file STUB_RIGS names, and a
-//     list of no rig when the setting names none.
+//     list of no rig when the setting names none. config show prints the file
+//     STUB_CONFIG names, and a config that names no agent when the setting
+//     names none or that file cannot be read.
 //   - hook current prints the bead STUB_HOOK_CURRENT names, which stands for
 //     the claim gc stamps on the calling session's bead: the id alone under
 //     --id-only, and otherwise followed by the session that claimed it, in gc's
@@ -73,12 +75,12 @@
 //     routes instead, writing gc.routed_to.
 //   - gc-toolkit scripts-dir prints STUB_PACK's assets/scripts.
 //   - bd where, show, list, update, create, close, dep (list, add, add --file,
-//     remove, --blocks), kv (get, set, clear), gate (list, resolve), comment,
-//     comments, blocked, ready, statuses, the built-in statuses bd prints for
-//     a store with no custom status, and sql, which answers the one query gctk
-//     reads beside blocked: the ids bd's blocked rule marks. A --db pin and a
-//     --rig ahead of the verb pick the store (route), and an --actor ahead of
-//     it is the actor the call writes as.
+//     remove, --blocks), kv (get, set, clear, list), gate (list, resolve),
+//     comment, comments, set-state, blocked, ready, statuses, the built-in
+//     statuses bd prints for a store with no custom status, and sql, which
+//     answers the one query gctk reads beside blocked: the ids bd's blocked
+//     rule marks. A --db pin and a --rig ahead of the verb pick the store
+//     (route), and an --actor ahead of it is the actor the call writes as.
 //
 // Each keeps bd's rule where the contract test pins one: a listing carries
 // each bead's edges, selects a parent's children by --parent and hides a
@@ -90,9 +92,12 @@
 // records closed_at and its reason; a blocks edge between a bead and its
 // own ancestor is refused either way; a create --dry-run answers the row it
 // would file and writes nothing, its created_by the actor bd resolves
-// (--actor, BEADS_ACTOR, BD_ACTOR, git's user.name, USER, then unknown); and in
-// a rig's store a create's dependency onto a bead with another prefix is kept
-// without the bead, as bd keeps one onto another store.
+// (--actor, BEADS_ACTOR, BD_ACTOR, git's user.name, USER, then unknown); in a
+// rig's store a create's dependency onto a bead with another prefix is kept
+// without the bead, as bd keeps one onto another store; and a set-state that
+// changes a bead's <dimension>:<value> label swaps the dimension's label and
+// files a closed event bead, the bead's child, while one to the value the
+// bead holds writes nothing.
 //
 // # The settings
 //
@@ -106,7 +111,9 @@
 //   - STUB_SHOW_FAIL_ON and STUB_LIST_FAIL_ON fail a show or a list whose
 //     arguments carry that text. STUB_LIST_PARTIAL makes such a list print []
 //     and fail; STUB_LIST_TRAILING makes it print a line that is not JSON
-//     after its answer.
+//     after its answer. STUB_LIST_FAIL_AFTER fails every list once a call
+//     whose arguments carry that text is in STUB_GC_LOG, as a store that goes
+//     down after a write.
 //   - STUB_LIST_OBJECT makes a list answer an error object at exit 0 in place
 //     of its array: every list when set to 1, and otherwise those whose
 //     arguments carry the text.
@@ -139,6 +146,14 @@
 //     arguments carry the text STUB_HOOK_AT names, with the call's arguments
 //     (Call.hook). It can land another writer's change between two of a
 //     script's calls, and its exit status, when not 0, fails the call.
+//   - STUB_AFTER_WRITE names a program run after each bd call that writes the
+//     store has landed (an update, a create that is not a dry run, a close, a
+//     comment, a dep add or remove, or a gate resolve), with the call's
+//     arguments (Call.afterWrite). It can run another process, such as the
+//     deferred-dispatch order's pass, at each moment a script's write leaves,
+//     and its own writes do not run it again. It starts with the store
+//     settings the call found, not those of the rig store the call was
+//     routed to, so its own calls are routed as another process's are.
 //   - STUB_CREATE_GARBAGE answers a create that landed with a line that is
 //     not JSON.
 //   - STUB_SESSION_LIST_RC, STUB_DELETE_SOURCE_RC and STUB_REOPEN_SOURCE_RC

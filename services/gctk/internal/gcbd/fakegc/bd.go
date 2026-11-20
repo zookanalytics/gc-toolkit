@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func (c *Call) bd(s, d string, args []string) error {
+func (c *Call) bd(s, d string, args []string) (err error) {
 	db, args := takeDB(args)
 	rigName := ""
 	for {
@@ -31,6 +31,7 @@ func (c *Call) bd(s, d string, args []string) error {
 		break
 	}
 	verb, args := shift(args)
+	unrouted := c.Env
 	st := c.route(c.defaultStore(s, d), db, rigName, subject(verb, args))
 	c.use(st)
 	s, d = st.beads, st.deps
@@ -45,6 +46,14 @@ func (c *Call) bd(s, d string, args []string) error {
 		c.out(Compact(o) + "\n")
 		return nil
 	}
+	defer func() {
+		if err == nil && writes(verb, args) {
+			// The program is a process of its own, so it starts with the store
+			// settings the call found, not the files of the store it was routed to.
+			c.Env = unrouted
+			err = c.afterWrite()
+		}
+	}()
 	switch verb {
 	case "show":
 		return c.show(s, d, args)
@@ -75,6 +84,8 @@ func (c *Call) bd(s, d string, args []string) error {
 	case "statuses":
 		c.out(builtInStatuses + "\n")
 		return nil
+	case "set-state":
+		return c.setState(s, d, args)
 	}
 	return c.fail(2, "gc bd stub: unsupported '"+verb+"'")
 }
@@ -91,6 +102,23 @@ const builtInStatuses = `{"built_in_statuses":[` +
 	`{"category":"frozen","description":"Persistent, stays open indefinitely","icon":"📌","name":"pinned"},` +
 	`{"category":"wip","description":"Attached to an agent's hook","icon":"◇","name":"hooked"}` +
 	`],"schema_version":1}`
+
+// writes reports whether a bd verb, with the arguments after it, writes the
+// store: an update, a create that is not a dry run, a close, a comment, a dep
+// add or remove, or a gate resolve.
+func writes(verb string, args []string) bool {
+	switch verb {
+	case "update", "close", "comment":
+		return true
+	case "create":
+		return !slices.Contains(args, "--dry-run")
+	case "dep":
+		return first(args) != "list"
+	case "gate":
+		return first(args) == "resolve"
+	}
+	return false
+}
 
 // withEnv is env with each NAME=value in set in place of any value env gives
 // NAME.
@@ -303,6 +331,15 @@ func (c *Call) list(s, d string, args []string) error {
 	}
 	if on := c.getenv("STUB_LIST_FAIL_ON"); on != "" && strings.Contains(strings.Join(args, " "), on) {
 		return c.fail(1, "gc: simulated list failure")
+	}
+	if after := c.getenv("STUB_LIST_FAIL_AFTER"); after != "" {
+		down, err := c.made(after)
+		if err != nil {
+			return err
+		}
+		if down {
+			return c.fail(1, "gc: simulated list failure")
+		}
 	}
 	spaced := " " + strings.Join(args, " ") + " "
 	if p := c.getenv("STUB_LIST_PARTIAL"); p != "" && strings.Contains(spaced, p) {
@@ -1130,13 +1167,15 @@ func (c *Call) kv(args []string) error {
 	if err != nil {
 		return err
 	}
-	verb := ""
+	verb, asJSON := "", false
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; {
 		case a == "--db":
 			i++
-		case strings.HasPrefix(a, "--db=") || a == "--json":
+		case strings.HasPrefix(a, "--db="):
+		case a == "--json":
+			asJSON = true
 		case verb == "":
 			verb = a
 		default:
@@ -1194,6 +1233,45 @@ func (c *Call) kv(args []string) error {
 			b.WriteString(key + "=" + val + "\n")
 		}
 		return replaceFile(path, b.String())
+	case "list":
+		// Every key and its value, by key, as one object under --json that
+		// carries bd's schema_version beside them, and otherwise as bd's
+		// table.
+		lines, err := readLines(path)
+		if err != nil {
+			return err
+		}
+		vals := map[string]string{}
+		var keys []string
+		for _, l := range lines {
+			k, v, ok := strings.Cut(l, "=")
+			if !ok || k == "" {
+				continue
+			}
+			if _, seen := vals[k]; !seen {
+				keys = append(keys, k)
+			}
+			vals[k] = v
+		}
+		slices.Sort(keys)
+		if asJSON {
+			o := NewObject()
+			for _, k := range keys {
+				o.Set(k, vals[k])
+			}
+			o.Set("schema_version", Number("1"))
+			c.out(Compact(o) + "\n")
+			return nil
+		}
+		if len(keys) == 0 {
+			c.out("No key-value pairs set\n")
+			return nil
+		}
+		c.out("\nKey-Value Store:\n")
+		for _, k := range keys {
+			c.out("  " + k + " = " + vals[k] + "\n")
+		}
+		return nil
 	}
 	return c.fail(2, "gc bd stub: unsupported 'kv "+verb+"'")
 }

@@ -160,6 +160,26 @@ func TestEdgeAndRecordReaders(t *testing.T) {
 	}
 }
 
+func TestAfterWriteStartsWithTheSettingsTheCallFound(t *testing.T) {
+	f := rigFixture(t)
+	fired := filepath.Join(f.dir, "fired")
+	prog := filepath.Join(f.dir, "after.sh")
+	f.write("after.sh", "#!/bin/sh\nprintf '%s|%s\\n' \"$STUB_STORE\" \"$STUB_DEPS\" >> \""+fired+"\"\n")
+	if err := os.Chmod(prog, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.run([]string{"STUB_AFTER_WRITE=" + prog}, "bd", "update", "al-1", "--set-metadata", "via=after"); r.status != 0 {
+		t.Fatalf("an update routed to alpha: %+v", r)
+	}
+	if got := f.wroteTo("al-1", "after"); got != "alpha" {
+		t.Fatalf("the update landed in %q, want alpha", got)
+	}
+	want := filepath.Join(f.dir, "beads.json") + "|" + filepath.Join(f.dir, "deps.txt") + "\n"
+	if got := f.file("fired"); got != want {
+		t.Errorf("the program started with the settings %q, want the ones the call found, %q", got, want)
+	}
+}
+
 func TestADryRunCreatePreviewsTheRowAndWritesNothing(t *testing.T) {
 	f := newFixture(t, `[]`, "")
 	bin := filepath.Join(f.dir, "bin")

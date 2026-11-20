@@ -34,7 +34,7 @@ type step struct {
 	stdin    string
 	settings []string
 	actor    string
-	answer   string // "", "exit", "rows", "edges", "listed-edges", "texts", "json", "preview", "null-or-ids" or "count:<title>"
+	answer   string // "", "exit", "rows", "edges", "listed-edges", "texts", "labels", "json", "preview", "null-or-ids" or "count:<title>"
 }
 
 type contractCase struct {
@@ -175,6 +175,21 @@ func contractCases() []contractCase {
 			{args: []string{"kv", "get", "ct-key", "--json"}, answer: "json"},
 			{args: []string{"kv", "clear", "ct-key"}},
 			{args: []string{"kv", "get", "ct-key", "--json"}, answer: "json"},
+		}},
+		{name: "kv list answers every key and its value", steps: []step{
+			{args: []string{"kv", "set", "ct-list-b", "2"}},
+			{args: []string{"kv", "set", "ct-list-a", "1"}},
+			{args: []string{"kv", "list", "--json"}, answer: "json"},
+		}},
+		{name: "set-state swaps the dimension's label and records each change as a closed child event", beads: []string{"a"}, state: []string{"a"}, steps: []step{
+			{args: []string{"set-state", "{a}", "situation=active", "--reason", "seen"}},
+			{args: []string{"set-state", "{a}", "situation=active"}},
+			{args: []string{"set-state", "{a}", "situation=cleared", "--reason", "fixed"}},
+			{args: []string{"show", "{a}", "--json"}, answer: "labels"},
+			{args: []string{"list", "--parent", "{a}", "--all", "--json"}, answer: "count:State change: situation → active"},
+			{args: []string{"list", "--parent", "{a}", "--all", "--json"}, answer: "count:State change: situation → cleared"},
+			{args: []string{"set-state", "ct-missing", "situation=active"}},
+			{args: []string{"set-state", "{a}", "situation"}},
 		}},
 		{name: "close refuses a bead another actor holds and update does not", beads: []string{"x", "y"}, state: []string{"x", "y"}, steps: []step{
 			{args: []string{"update", "{x}", "{y}", "--assignee", "bob"}},
@@ -383,6 +398,15 @@ func (s side) call(t *testing.T, st step, args []string, nm map[string]string) o
 			texts = append(texts, fmt.Sprint(r.(map[string]any)["text"]))
 		}
 		o.answer = texts
+	case st.answer == "labels":
+		var labels []string
+		for _, r := range asList(v) {
+			for _, l := range asList(r.(map[string]any)["labels"]) {
+				labels = append(labels, fmt.Sprint(l))
+			}
+		}
+		sort.Strings(labels)
+		o.answer = labels
 	case st.answer == "json":
 		m, _ := v.(map[string]any)
 		delete(m, "hint")

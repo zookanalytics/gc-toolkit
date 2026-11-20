@@ -62,7 +62,7 @@ func (c *city) open(_ context.Context, db string) (*ledger.Ledger, error) {
 func (c *city) progress(t *testing.T) Outcome {
 	t.Helper()
 	p := &Progress{City: c, Open: c.open, Now: func() time.Time { return t0 }}
-	return p.Run()
+	return p.Run(context.Background())
 }
 
 // seat is a pool seat's listed session and its session bead in the city store.
@@ -361,5 +361,31 @@ func TestASuspendedRigIsNotRead(t *testing.T) {
 	out := c.progress(t)
 	if len(out.Failures) > 0 || !reflect.DeepEqual(stalledIDs(out.Record), []string{"hq-1@tk-1"}) {
 		t.Fatalf("outcome %+v", out)
+	}
+}
+
+// emitUnderContext is a city whose event, like the gc call that records it,
+// does not run once its context has ended.
+type emitUnderContext struct{ *city }
+
+func (c emitUnderContext) Emit(ctx context.Context, e gascity.Emit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.city.Emit(ctx, e)
+}
+
+// The event runs under the look's context, so a look stopped before its event
+// records none. The fake's reads take no context, so the look still finds a
+// seat to name.
+func TestALookWhoseContextEndedRecordsNoEvent(t *testing.T) {
+	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
+	c.seat(busy("hq-1"), pool(4*time.Hour))
+	c.claim(tools, "tk-1", "in_progress", "hq-1", "hq-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	out := (&Progress{City: emitUnderContext{c}, Open: c.open, Now: func() time.Time { return t0 }}).Run(ctx)
+	if len(out.Record.Stalled) != 1 || out.Recorded || len(c.Emitted()) != 0 {
+		t.Fatalf("stalled %+v, recorded %v, emitted %+v", out.Record.Stalled, out.Recorded, c.Emitted())
 	}
 }
