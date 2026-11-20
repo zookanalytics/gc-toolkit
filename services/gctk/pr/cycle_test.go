@@ -470,6 +470,45 @@ func TestAWithdrawalWaitsWhileAnApprovalItWouldDismissCarriesUnroutedComments(t 
 	}
 }
 
+// The saved read applied the definition of feedback to each inline comment as
+// the PR watch read it, so a dismissal waits on the act's own read of the PR's
+// review threads. A read of them that does not answer dismisses nothing and
+// leaves the withdrawal for the next run, and a comment edited into feedback
+// since the watch's read keeps the withdrawal open until the intake routes it.
+func TestADismissalWaitsOnTheActsOwnReadOfTheReviewThreads(t *testing.T) {
+	d := newCycle(t)
+	d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 300, Author: "operator", Body: "a note, not for review",
+		CreatedAt: "2026-11-12T01:00:00Z", Review: &gh.CommentReview{ID: 100, State: "APPROVED", SubmittedAt: "2026-11-12T01:00:00Z"}}}}}
+	d.rule.notFeedback[300] = true
+	id := d.withdraw(t, head)
+	d.refresh(t)
+	dismissed := func() bool {
+		return slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "DismissReview" })
+	}
+	d.github.Fail["ReviewThreads"] = errors.New("gh: error connecting to api.github.com")
+	o := d.run(t)
+	is(t, o, pr.ActRetry)
+	if dismissed() || status(t, d, id) != "open" {
+		t.Fatalf("over a read of the threads that did not answer, the withdrawal is %s with asks %v: %s",
+			status(t, d, id), asks(d.github), o.Detail)
+	}
+	delete(d.github.Fail, "ReviewThreads")
+	d.pr.Threads[0].Comments[0].Body = "rename this"
+	delete(d.rule.notFeedback, 300)
+	o = d.run(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "inline comment 300") || dismissed() || status(t, d, id) != "open" {
+		t.Fatalf("over a comment edited into feedback since the watch's read, the withdrawal is %s with asks %v: %s",
+			status(t, d, id), asks(d.github), o.Detail)
+	}
+	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
+	d.run(t)
+	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed"}) {
+		t.Fatalf("once routed, the withdrawal is %s and the reviews %v", status(t, d, id), states(d.pr))
+	}
+}
+
 // A withdrawal holds the PR until no approval that stands was given on a commit
 // without its head: a dismissal GitHub did not answer and a read of the clone's
 // history that did not answer each leave the withdrawal open for the next run,

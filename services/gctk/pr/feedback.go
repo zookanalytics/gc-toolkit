@@ -109,29 +109,35 @@ func feedbackOf(rule Feedback, self, since string, reviews []gh.Review, threads 
 }
 
 // approvals is each review among reviews that approves and has not been
-// dismissed, whoever gave it, in id order, with the newest of the inline
-// comments it carries among threads that inline, the feedback ids of the
-// inline comments, names. The definition reads an inline comment alone, so
-// the comments a dismissal of the review would retire unread are those, past
-// the comment watermark (unrouted).
+// dismissed, whoever gave it, in id order, with the newest feedback comment it
+// carries among threads (newestCarried). The definition reads an inline comment
+// alone, so the comments a dismissal of the review would retire unread are
+// those, past the comment watermark (unrouted).
 func approvals(reviews []gh.Review, threads []gh.Thread, inline []int64) []Approval {
 	out := []Approval{}
 	for _, v := range reviews {
 		if v.State != "APPROVED" {
 			continue
 		}
-		a := Approval{ID: v.ID, Author: v.Author, Commit: v.Commit}
-		for _, t := range threads {
-			for _, c := range t.Comments {
-				if c.Review != nil && c.Review.ID == v.ID && c.ID > a.Inline && slices.Contains(inline, c.ID) {
-					a.Inline = c.ID
-				}
-			}
-		}
-		out = append(out, a)
+		out = append(out, Approval{ID: v.ID, Author: v.Author, Commit: v.Commit, Inline: newestCarried(v.ID, threads, inline)})
 	}
 	slices.SortFunc(out, func(a, b Approval) int { return cmp.Compare(a.ID, b.ID) })
 	return out
+}
+
+// newestCarried is the newest of the inline comments review carries among
+// threads that inline, the feedback ids of the inline comments, names, or 0
+// when it carries none.
+func newestCarried(review int64, threads []gh.Thread, inline []int64) int64 {
+	var top int64
+	for _, t := range threads {
+		for _, c := range t.Comments {
+			if c.Review != nil && c.Review.ID == review && c.ID > top && slices.Contains(inline, c.ID) {
+				top = c.ID
+			}
+		}
+	}
+	return top
 }
 
 // unhandled is one condition for each id space whose newest feedback the
@@ -161,8 +167,8 @@ func unhandled(rc receipts, n NewestFeedback) []Condition {
 // the definition, carried by the approval, and newer than the comment
 // watermark and the mark the threads have answered through. It is the rule a
 // dismisser waits by (unrouted_comment_ids in
-// assets/scripts/review-dismissal.sh), over the newest such comment the saved
-// read keeps for each approval.
+// assets/scripts/review-dismissal.sh), over the newest such comment each
+// approval keeps: the saved read's, or the act's own read's (readUnrouted).
 func unrouted(rc receipts, targets []Approval) []int64 {
 	floor := max(rc.comment, rc.commentAnswered)
 	var out []int64

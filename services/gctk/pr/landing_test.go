@@ -1480,8 +1480,9 @@ func TestAPRMergedIntoAnotherBaseIsNotLanded(t *testing.T) {
 // the act's own writes. An exception the saved read finds a closed PR owes is
 // recorded on the act's own read of the PR, which must find it closed too, a
 // draft is marked ready on the act's own read of the PR, which must find it a
-// draft at the passed head, and a withdrawal closes on the act's own read of
-// the PR's reviews.
+// draft at the passed head, and a withdrawal dismisses an approval on the act's
+// own read of the PR's review threads and closes on its own read of the PR's
+// reviews.
 func TestEachActButTheMergeDecidesFromTheSavedRead(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -1497,7 +1498,7 @@ func TestEachActButTheMergeDecidesFromTheSavedRead(t *testing.T) {
 		{"a withdrawn approval's dismissal", func(d *land) {
 			d.pr.Reviews = []gh.Review{approved(100, "operator", older), approved(101, "reviewer", head)}
 			d.pr.Facts.HeadRefOid = later
-		}, pr.ActRequeued, []string{"Reviews"}, []string{"DismissReview 100 "}},
+		}, pr.ActRequeued, []string{"ReviewThreads", "Reviews"}, []string{"DismissReview 100 "}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d := newCycle(t)

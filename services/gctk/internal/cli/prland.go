@@ -79,8 +79,8 @@ ruling's disposition, an open or blocked bead only while it is assigned to
 nobody or to the refinery. It reads the store once and decides each record
 from the store and the read the one-PR update (gctk pr refresh) saved on its
 bead, reading GitHub only for a merge, an exception, a draft's ready
-transition or a withdrawal's close, each confirmed on the act's own read of
-the PR:
+transition or a withdrawal's dismissals and close, each confirmed on the act's
+own read of the PR:
 
   - open at the head the refinery validated: a draft whose review result
     passed at that head and target, with no review run attached and no ask a
@@ -134,7 +134,8 @@ difference stays on the bead, and the next run acts on it.
 Before any of these, while the PR is open, it carries out each open
 withdrawal filed on the bead (gctk pr withdraw), from the approvals the saved
 read holds: it waits while an approval it would dismiss carries an inline
-comment the intake has not routed, dismisses each approval that stands on a
+comment the intake has not routed, on the saved read and then on the act's
+own read of the PR's review threads, dismisses each approval that stands on a
 commit that does not contain the withdrawal's head in the clone's history,
 with the withdrawal's reason and the city's mark, and closes the withdrawal
 once the act's own read of the PR's reviews shows none standing past the ones
@@ -142,8 +143,9 @@ it dismissed, since the saved read can lack an approval given since the PR
 watch read it. Before it dismisses any,
 it fetches the PR's branch into the clone, and a commit the clone still does
 not hold contains no head. When GitHub refuses a dismissal, it files a human
-gate on the bead keyed approval-withdraw-refused. A dismissal or a read of
-the reviews GitHub does not answer, a fetch that fails, or an approval the
+gate on the bead keyed approval-withdraw-refused. A dismissal, or a read of
+the review threads or the reviews, that GitHub does not answer, a fetch that
+fails, or an approval the
 act's own read shows standing that the saved read lacks, leaves the
 withdrawal for the next run, and the
 record keeps its marker while a withdrawal is open, its changed head sent back

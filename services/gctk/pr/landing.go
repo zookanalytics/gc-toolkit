@@ -24,9 +24,11 @@ import (
 // store and the read the one-PR update (refresh.go) saved on its bead, and
 // reads GitHub only on an act's own read of the PR. A merge is decided again on
 // that read and pinned to the head it judged. An exception and a draft's ready
-// transition are made only once that read shows what the saved read did, and a
-// withdrawal closes only once the act's own read of the PR's reviews shows no
-// approval standing without its head. It closes a bead once the merge commit is
+// transition are made only once that read shows what the saved read did. A
+// withdrawal dismisses an approval only once the act's own read of the PR's
+// review threads shows no feedback on it that the intake has not routed, and
+// closes only once the act's own read of the PR's reviews shows no approval
+// standing without its head. It closes a bead once the merge commit is
 // on the target, hands a changed head to the refinery
 // and sees that the refinery hears of it, keeps the exceptions blocked behind a
 // human gate, marks a draft ready and carries out an approval's withdrawal,

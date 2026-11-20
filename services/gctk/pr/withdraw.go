@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
@@ -18,7 +19,8 @@ import (
 // withdraw_head, so the evaluator holds the PR from the moment it is filed. The
 // landing order carries it out from the approvals the one-PR update saved on
 // the bead (specs/tk-1tfzr71.149/design.md, section 5). It waits while an
-// approval it would dismiss carries feedback the intake has not routed,
+// approval it would dismiss carries feedback the intake has not routed, on the
+// saved read and then on the act's own read of the PR's review threads,
 // dismisses each approval that stands on a commit that does not contain the
 // head, and closes the withdrawal once the act's own read of the PR's reviews
 // shows none standing past the ones it dismissed. It files a human gate on the
@@ -370,6 +372,51 @@ func commentReceipts(r *ledger.Record) (receipts, error) {
 	return rc, rerr
 }
 
+// readUnrouted is the inline comments that dismissing targets would retire
+// before the intake routes them, as unrouted reads them, on the act's own read
+// of the PR's review threads. The saved read applied the definition of feedback
+// to each comment's text as the PR watch read it, and a comment edited since,
+// or a definition the rig's checkout changed since, can be feedback now that
+// was not then.
+func (u *run) readUnrouted(s state, host string, hub Hub, number int, targets []Approval) ([]int64, error) {
+	threads, err := hub.ReviewThreads(s.rec.Repo, number)
+	if err != nil {
+		return nil, err
+	}
+	var carried []feedback.Comment
+	for _, t := range threads {
+		for _, c := range t.Comments {
+			if c.Review != nil && slices.ContainsFunc(targets, func(a Approval) bool { return a.ID == c.Review.ID }) {
+				carried = append(carried, commentOf(c))
+			}
+		}
+	}
+	if len(carried) == 0 {
+		return nil, nil
+	}
+	rule, err := u.rule()
+	if err != nil {
+		return nil, err
+	}
+	self, err := u.login(host, hub)
+	if err != nil {
+		return nil, err
+	}
+	inline, err := rule.Comments(self, s.since, carried)
+	if err != nil {
+		return nil, err
+	}
+	rc, err := commentReceipts(s.row)
+	if err != nil {
+		return nil, err
+	}
+	now := slices.Clone(targets)
+	for i := range now {
+		now[i].Inline = newestCarried(now[i].ID, threads, inline)
+	}
+	return unrouted(rc, now), nil
+}
+
 // carrying decides the open withdrawals on the record s read, from saved: an
 // account of the ones that wait, whether any owes a close or a dismissal,
 // which makes the record owe an act, and whether a wait is a read that did not
@@ -472,9 +519,11 @@ func (u *run) carry(ctx context.Context, s state, saved *SavedRead) carriedOut {
 
 // carryOne carries out withdrawal w, past the approvals gone, which this act
 // dismissed for an earlier withdrawal and which it adds to: it dismisses the
-// approvals judge finds in conv, and closes w only once the act's own read of
-// the PR's reviews shows none standing without its head. It returns its
-// account, whether w is still open, and whether a step did not complete.
+// approvals judge finds in conv once the act's own read of the PR's review
+// threads shows none of them carrying feedback the intake has not routed, and
+// closes w only once the act's own read of the PR's reviews shows none
+// standing without its head. It returns its account, whether w is still open,
+// and whether a step did not complete.
 func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, conv *SavedConversation, w withdrawal, gone map[int64]bool) (string, bool, bool) {
 	at := fmt.Sprintf("withdrawal %s for %s", w.id, short(w.head))
 	waits := func(why string, failed bool) (string, bool, bool) {
@@ -496,6 +545,16 @@ func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, co
 	hub := u.Hub(ctx, host)
 	var dismissed []Approval
 	if len(v.dismiss) > 0 {
+		unread, err := u.readUnrouted(s, host, hub, p.Number, v.dismiss)
+		if err != nil {
+			return waits("the act's own read of the PR's review threads did not answer, and no approval is dismissed "+
+				"without it: "+err.Error(), true)
+		}
+		if len(unread) > 0 {
+			return waits(fmt.Sprintf("the act's own read of the review threads shows inline comment %s, on an approval "+
+				"to dismiss, as feedback the intake has not routed, and a dismissal would retire it unread",
+				joinIDs(unread)), false)
+		}
 		mark, err := u.cityMark()
 		if err != nil {
 			return waits("the city's mark did not read, and no dismissal goes without it: "+err.Error(), true)
