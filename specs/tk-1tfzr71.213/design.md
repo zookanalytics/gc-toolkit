@@ -236,7 +236,7 @@ and `go test ./...` pass, and `go.mod` names neither
 | takeaway | gctk's `reaction dispose`, `converse-signoff.sh`, `stand-down.sh`, five skills | gctk command | One guarded update, wait edges, a disarm, run cancels, a nudge and a sling: a composition. gctk stops shelling out to it. |
 | park | the Product Owner's prompt, `converse-epic-review` | gctk command | It refuses work in flight, whose merge and close an open park gate would hold, and reuses an open park gate with the same title. |
 | place | the Product Owner's prompt, `backlog-refinement`, `work` | gctk command | Six writes in order, from unsetting the route to the sling or the arm. |
-| accept | `converse-signoff.sh`, `work` | gctk command, in the reaction domain | The lock, the disarm, the gate's answer with its read-back, the sling, the hold's lift and the recommendation's clear. |
+| accept | `converse-signoff.sh`, `work` | gctk command, in the reaction domain | The lock, the disarm, the gate's answer and the read of which answer the gate took, the sling, the hold's lift and the recommendation's clear. |
 | priority | the Product Owner's prompt, `converse-epic-review` | the callers run `queue-priority.sh move` | The verb finds the bead's store and runs that script, which finds the store itself (`resolve_db`). |
 | react | `operator-intake.sh` | the caller runs `gctk reaction sling` | The verb is that one call, with its exit codes renumbered. |
 | resolve, dismiss, handback | `operator-intake.sh`; `tmux-dismiss-sitting.sh` (your prefix+X) and `converse-hold`; the converse prompt | tk-ssm8qns.15 | resolve is the subject resolver open and engage use, and dismiss and handback share their sitting and comment helpers, so one port keeps one copy of each. |
@@ -268,6 +268,20 @@ replacement in the same unit that removes the verb. The carried constraints:
   the city's `gc` does not yet carry the end of the bead-by-bead pour
   (gc-3znzo8), the search treats a fenced root, and a root left open with
   `molecule_failed`, as unfinished, as deferred dispatch's start does.
+- Accept keeps the first answer to the recommendation's gate standing. After
+  its resolve it reads which answer the gate took, and it dispatches nothing
+  when that answer is another's. No bd write tells this by its exit. bd's
+  `gate resolve` prints the same line and exits 0 whether it closed the gate or
+  found it closed (`gateResolveCmd` in `cmd/bd/gate.go` and
+  `runGateResolveProxiedServer` in `cmd/bd/gate_proxied_server.go`, beads
+  v1.3.4). An update guarded by `--if-status` refuses a closed gate, but it
+  writes no close reason, and every reader takes a gate's answer from its
+  resolve reason (`docs/architecture.md`). So the read settles a race and does
+  not confirm a write. The rework brief that applied the ruling of 2026-11-08,
+  which made a write's exit decide, kept such reads beside a guarded write's
+  exit 13 (item 4 of that brief, in tk-1tfzr71.11's notes). The ledger rule in
+  `docs/gctk-architecture.md` names no such read, so unit 4 says there that a
+  read settling a race is not a read-back.
 - The warrants whose Covers lines name a moved verb change with it: Priority
   following names the priority verb, and Accept's lock names accept's lock.
 - The `BEADS_DIR` pins in the verbs tk-ssm8qns.15 moves travel with them:
