@@ -44,7 +44,9 @@ func newWorld(t *testing.T) *world {
 	w := &world{t: t, store: fake.New()}
 	w.store.Put(fake.Bead{ID: "tk-epic", Title: "the epic", Status: "open", IssueType: "epic", Priority: 1})
 	w.store.Put(fake.Bead{ID: "tk-new", Title: "new work", Status: "open", IssueType: "task", Priority: 2, Labels: []string{"hold:mayor"}})
-	w.store.OnWrite = func(kind, id string, args []string) { w.add(strings.ToUpper(kind) + " " + id + " " + strings.Join(args, " ")) }
+	w.store.OnWrite = func(kind, id string, args []string) {
+		w.add(strings.ToUpper(kind) + " " + id + " " + strings.Join(args, " "))
+	}
 	w.rt = &rtfake.Runtime{
 		Roster: []gascity.Agent{
 			{QualifiedName: pool, Name: "polecat", Dir: "gc-toolkit", Scope: "rig"},

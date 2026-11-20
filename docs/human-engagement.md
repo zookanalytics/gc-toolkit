@@ -1223,14 +1223,15 @@ sitting's sign-off later reports the gate already cleared. A conversation that
 holds an open PR's merge withholds no Accept either: it is no human gate, and
 it holds only the merge, which no dispatch reaches.
 
-`gc-helm.sh accept` runs under the bead's acceptance lock, a `flock` on one
+`gctk reaction accept` runs under the bead's acceptance lock, a `flock` on one
 file per bead under `<city>/.gc/runtime/packs/gc-toolkit`, from before its live
 read of the three conditions to its last write, and refuses, writing nothing,
 while another Accept holds it. On an open gate it records the acceptance's
 dispatch input on the gate (`gc.acceptance`: its token, the formula and each
 var), resolves the gate with `ruled: accepted <formula> accept:<token>` once
-that write has exited 0, reads its own answer back to tell it from one another
-reached first, reads that no other open human gate blocks the bead, slings the
+that write has exited 0, reads which answer the gate took to tell its own from
+one another reached first, reads that no other open human gate blocks the bead,
+slings the
 formula titled
 `<formula> accept:<token>`, and records the dispatch by stripping
 `gc.recommended_formula` beside `gc.recommended_formula_dispatched`. An answer
@@ -1239,13 +1240,13 @@ meantime, or a sling that poured no root, reopens the recommendation's gate. A
 run that stopped after its resolve leaves an unfinished acceptance, which the
 board keeps owed and the next Accept finishes under the same token, slinging
 only when no root carries the token. That sling carries the vars the
-acceptance recorded, whoever finishes it: the board's Accept passes none, and
+acceptance recorded, whoever finishes it: a run given no var slings them, and
 a run given vars other than the recorded ones dispatches nothing. The lock's
 warrant is in [warrants.md](warrants.md).
 
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate
-out of its `ruled:` answers and runs `gc-helm.sh accept` once the ruling's other
+out of its `ruled:` answers and runs `gctk reaction accept` once the ruling's other
 writes have landed. Under the lock, that run finishes an acceptance the
 board's Accept left unfinished instead of sending the formula again, and a
 board Accept that runs after the sitting's finds the recommendation
@@ -1754,8 +1755,11 @@ operator's *own* unsent words.
   the model's TypeScript mirror, `web/src/contract.ts`, which
   `services/helm/web/contract_parity_test.go` holds equal to the Go contract.
   `gc-helm.sh` keeps the write verbs (`open`, `engage`, `react`, `takeaway`,
-  `dismiss`, `accept`, `park`, `priority`) that have no Go equivalent, and
-  helm-svc's POST routes run `open`, `engage`, `accept` and `dismiss`.
+  `dismiss`) that have no Go equivalent, gctk holds the steering moves
+  (`gctk bead park`, `gctk bead place`, `gctk reaction accept`), and a priority
+  move is `queue-priority.sh move`. helm-svc's POST routes run `open`, `engage`
+  and `dismiss`, and its `accept` route, which the page no longer calls, goes
+  with the old board.
 
 ## What upstream does not ship (the pack's actual seam)
 

@@ -48,7 +48,9 @@ func newAcceptWorld(t *testing.T) *acceptWorld {
 		Edges:    []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "tk-g1", Status: "open"}}})
 	w.store.Put(fake.Bead{ID: "tk-g1", Title: "take mol-fix?", Status: "open", IssueType: "gate", AwaitType: "human",
 		AwaitID: GateKey, CreatedAt: "2026-11-20T01:00:00Z"})
-	w.store.OnWrite = func(kind, id string, args []string) { w.add(strings.ToUpper(kind) + " " + id + " " + strings.Join(args, " ")) }
+	w.store.OnWrite = func(kind, id string, args []string) {
+		w.add(strings.ToUpper(kind) + " " + id + " " + strings.Join(args, " "))
+	}
 	w.rt = &rtfake.Runtime{Root: t.TempDir()}
 	w.rt.OnSling = func(s gascity.Sling) gascity.SlingResult {
 		w.add("SLING " + s.Bead + " --on " + s.Formula + " --title " + s.Title + " --rig " + s.Rig + " target=" + s.Target + " vars=" + strings.Join(s.Vars, ","))

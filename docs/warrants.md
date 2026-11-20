@@ -214,9 +214,9 @@ no warrant.
 
 ## Priority following
 
-- **Covers.** `assets/scripts/queue-priority.sh`,
-  `assets/scripts/priority-lib.sh`, `orders/queue-priority.toml`, the
-  `priority_shift` key, the `priority` verb of `assets/scripts/gc-helm.sh`, and
+- **Covers.** `assets/scripts/queue-priority.sh`, whose `move` is the
+  operator's priority move, `assets/scripts/priority-lib.sh`,
+  `orders/queue-priority.toml`, the `priority_shift` key, and
   [steering.md](steering.md#priority).
 - **Stands in for.** A claim priority derived from the bead a bead follows, such
   as its epic.
@@ -233,10 +233,11 @@ no warrant.
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main 8e7d91b583 and
-  `gastownhall/beads` main 8cdfa796a (`BuildReadyWorkOrder` in
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b1194
+  (`readySortPriority` in `internal/beads/query.go`, `BeadPriorityOverride` in
+  `internal/sling/sling.go`) and bd 1.3.4 (`BuildReadyWorkOrder` in
   `internal/storage/sqlbuild/ready.go` orders the priority policy by the bead's
-  own priority), with bd 1.3.4 (7ef2fd05e).
+  own priority).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 
@@ -278,25 +279,24 @@ no warrant.
 
 ## Accept's lock
 
-- **Covers.** The acceptance lock of `assets/scripts/gc-helm.sh` accept: one
-  `flock` file per bead, `accept-<rig>-<bead>.lock`, under the city's
-  `.gc/runtime/packs/gc-toolkit`, held from Accept's live read to its last
-  write.
+- **Covers.** The acceptance lock of `gctk reaction accept`,
+  `services/gctk/reaction/accept_lock.go`: one `flock` file per bead,
+  `accept-<bead>.lock`, under the city's `.gc/runtime/packs/gc-toolkit`, held
+  from Accept's live read to its last write.
 - **Stands in for.** A launch that pours once per acceptance across a finished
   run: a `gc sling` that refuses a second root under a caller's key whatever
   the first root's status.
 - **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
   <formula>` launches under a per-bead lock and refuses a second launch of the
   formula at the bead, exiting 3, only while a root an earlier launch poured is
-  live (`internal/sling/sling_core.go`, the lock at 676 and the check at 702,
-  `checkLegacySourceWorkflowConflict`, which reads the live roots at 2026; the
-  terminal-root skip in `internal/sling/sling_attachment.go` 321;
-  and `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
-  `internal/sling/sling_test.go` 3975-4027). Once that root has closed, the next
+  live (`withGraphV2SourceWorkflowLock` in `internal/sling/sling_core.go`, and
+  `checkLegacySourceWorkflowConflict` there, which reads the live roots; the
+  terminal-root skip of `liveConvoyTrackedWorkflowRoots` in
+  `internal/sling/sling_attachment.go`). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
-  by a key, and `--scope-kind` with `--scope-ref` names a city or rig scope, not
-  a caller's key (`cmd/gc/cmd_sling.go` 148-169).
-- **Verified.** 2026-11-08, at `gastownhall/gascity` main c7a45437f.
+  by a key, and `--scope-kind` with `--scope-ref` names a logical workflow
+  scope, not a caller's key (`cmd/gc/cmd_sling.go`).
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b1194.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
@@ -739,7 +739,7 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-17, at `gastownhall/gascity` main f715d7b92d, with
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b1194, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The

@@ -200,8 +200,9 @@ kind = "proxy_process"
 ```
 
 The launcher `exec`s a prebuilt binary; the `helm-build` order keeps it built.
-Write verbs (takeaway / open / react) stay in `assets/scripts/gc-helm.sh`. The
-board is the service's web page, and `helm-svc board --json` prints its rows for
+Write verbs (takeaway / open / react) stay in `assets/scripts/gc-helm.sh`, and
+the steering moves are gctk's: `gctk bead park`, `gctk bead place` and
+`gctk reaction accept`. The board is the service's web page, and `helm-svc board --json` prints its rows for
 agents. See
 [`services/helm/README.md`](../services/helm/README.md).
 
