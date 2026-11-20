@@ -28,6 +28,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -158,7 +159,7 @@ func serve() {
 // store reads among them, and waits for each to return, while Shutdown closes
 // the listener and gives every open request up to shutdownGrace to finish. It
 // logs whether every open request finished within the grace, and returns an
-// error only when serving failed before ctx ended.
+// error only when serving failed for a reason other than the stop.
 func serveUntil(ctx context.Context, hs *http.Server, ln net.Listener, srv *server.Server) error {
 	served := make(chan error, 1)
 	go func() { served <- hs.Serve(ln) }()
@@ -180,7 +181,9 @@ func serveUntil(ctx context.Context, hs *http.Server, ln net.Listener, srv *serv
 	} else {
 		log.Print("shut down cleanly")
 	}
-	<-served
+	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
 	return nil
 }
 

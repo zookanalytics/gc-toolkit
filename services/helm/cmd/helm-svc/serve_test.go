@@ -44,7 +44,9 @@ func startServing(t *testing.T, srv *server.Server) (addr string, stop func(), s
 	}()
 	t.Cleanup(func() {
 		cancel()
-		<-out
+		if err := <-out; err != nil {
+			t.Errorf("serveUntil returned %v, want nil", err)
+		}
 	})
 	return "http://" + ln.Addr().String(), cancel, out
 }
@@ -100,7 +102,7 @@ func fetch(req *http.Request) string {
 	if err != nil {
 		return "no answer: " + err.Error()
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	return fmt.Sprintf("%d %s", resp.StatusCode, body)
 }
