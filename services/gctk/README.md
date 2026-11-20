@@ -211,6 +211,12 @@ listing/             one pass's read of a store for the helm board: every live b
                      prstatus's and the pr evaluator's answers from the same rows
 waits/               what holds a bead, from one snapshot: the rule by where the work is, the
                      in-flight test, the run link's copy and the keys it reads, read-only
+standing/            where a bead stands and whose move it is: its group in the helm board's
+                     words, the rule that placed it, its ask and the beads that rule names,
+                     from waits', prstatus's and queue's answers, read through the Store a
+                     listing implements
+standing/person/     the rules about one bead: a human gate, a bead only a person clears, and
+                     one that waits on work of its own first
 review/              the review domain: the check index and a rig's guidance at a commit; the
                      shape a review run's steps write, the loop's pass rule over it, the run's
                      result in review_results, and the asks a run works, in review_checks

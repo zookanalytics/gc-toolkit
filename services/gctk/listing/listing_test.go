@@ -81,7 +81,7 @@ func TestListingDecodesEachLiveBead(t *testing.T) {
 	story := by["tk-e.2"]
 	if story.MergeResult != "pull_request" || story.PRNumber != "12" || story.PRURL != "https://example.test/pull/12" ||
 		story.RoutedTo != "gc-toolkit/gc-toolkit.polecat" || story.Priority != 2 || !slices.Equal(story.Labels, []string{"hold:mayor"}) ||
-		!slices.Equal(story.Edges, []Edge{{ID: "tk-e", Type: "parent-child"}, {ID: "tk-q", Type: "blocks"}}) || story.Run || story.PersonBlocker {
+		!slices.Equal(story.Edges, []Edge{{ID: "tk-e", Type: "parent-child"}, {ID: "tk-q", Type: "blocks"}}) || story.Run {
 		t.Errorf("the story reads %+v", story)
 	}
 	if e := by["tk-e"].Epic; e.Hypothesis != "it works" || e.Handle != "the board" || e.Ruling != "continue" {
@@ -95,10 +95,6 @@ func TestListingDecodesEachLiveBead(t *testing.T) {
 	}
 	if !by["tk-wisp-1"].EphemeralPlane || by["tk-e.2"].EphemeralPlane {
 		t.Errorf("the ephemeral plane reads %v for the wisp and %v for the story", by["tk-wisp-1"].EphemeralPlane, by["tk-e.2"].EphemeralPlane)
-	}
-	if !by["tk-decide"].PersonBlocker || by["tk-ask"].PersonBlocker || by["tk-q"].PersonBlocker {
-		t.Errorf("a person's to clear reads %v for a decision, %v for work routed to human and %v for a human gate",
-			by["tk-decide"].PersonBlocker, by["tk-ask"].PersonBlocker, by["tk-q"].PersonBlocker)
 	}
 	if q := by["tk-q"]; q.AwaitType != "human" || q.Assignee != "human" || q.Description != "which way?\nthe whole question" {
 		t.Errorf("the gate reads %+v", q)

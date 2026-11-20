@@ -76,9 +76,6 @@ type Bead struct {
 	// Run is true for one of a run's own beads, its root or a step poured under
 	// it ([waits.IsRootOrStep]).
 	Run bool
-	// PersonBlocker is true for a bead only a person clears and that is no
-	// human gate ([person.Clears]).
-	PersonBlocker bool
 }
 
 // Edge is one of a bead's own edges: the far bead and the edge's type.
@@ -103,9 +100,12 @@ type Epic struct {
 type Listing struct {
 	pass *ledger.Ledger
 	live []*ledger.Record
-	// beads is each bead decoded, by id.
-	mu    sync.Mutex
-	beads map[string]Bead
+	// beads is each bead decoded, by id, and closed each parent's closed beads
+	// as closedUnder read them, which the store answers only by a read of its
+	// own.
+	mu     sync.Mutex
+	beads  map[string]Bead
+	closed map[string][]Bead
 }
 
 // Read lists the store at db, a store's .beads directory, once: every live
@@ -123,7 +123,7 @@ func Read(ctx context.Context, db string) (*Listing, error) {
 
 // read lists every live bead through a pass over l.
 func read(l *ledger.Ledger) (*Listing, error) {
-	ls := &Listing{pass: l.Pass(), beads: map[string]Bead{}}
+	ls := &Listing{pass: l.Pass(), beads: map[string]Bead{}, closed: map[string][]Bead{}}
 	live, err := ls.pass.Find(ledger.Every())
 	if err != nil {
 		return nil, err
@@ -182,7 +182,7 @@ func beadOf(r *ledger.Record) (Bead, error) {
 			RulingReason: text(epicRulingReasonKey, r), RulingAt: text(epicRulingAtKey, r),
 		},
 		Handback: text(handbackKey, r), HandbackAt: text(handbackAtKey, r),
-		Run: waits.IsRootOrStep(r), PersonBlocker: person.Clears(blockerOf(r))}
+		Run: waits.IsRootOrStep(r)}
 	for _, e := range edges {
 		b.Edges = append(b.Edges, Edge{ID: e.ID, Type: e.Type})
 	}
@@ -233,6 +233,12 @@ func (ls *Listing) ClosedUnder(parents []string) ([]Bead, error) {
 }
 
 func (ls *Listing) closedUnder(parent string) ([]Bead, error) {
+	ls.mu.Lock()
+	kept, ok := ls.closed[parent]
+	ls.mu.Unlock()
+	if ok {
+		return kept, nil
+	}
 	recs, err := ls.pass.Find(ledger.Under(parent).WithClosed())
 	if err != nil {
 		return nil, fmt.Errorf("list the closed beads under %s: %w", parent, err)
@@ -255,6 +261,9 @@ func (ls *Listing) closedUnder(parent string) ([]Bead, error) {
 		}
 		out = append(out, b)
 	}
+	ls.mu.Lock()
+	ls.closed[parent] = out
+	ls.mu.Unlock()
 	return out, nil
 }
 

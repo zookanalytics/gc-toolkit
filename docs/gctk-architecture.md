@@ -759,13 +759,12 @@ why a reader must know it, and the work that retires it.
   counts as its human gates the ones whose rows name it and the ones among its
   blockers that are not closed. The board member (tk-1tfzr71.24) retires that
   read or writes the warrant it stands on.
-- **A bead's standing is decided outside `standing`.** The helm board's rig
-  read decides each row's group itself (`services/helm/internal/rigboard`,
-  `table.go` and `build.go`), and `assets/scripts/bead-context.sh` decides
-  again, in jq, whether a bead advances, so the board and an agent's read of a
-  bead disagree where [the contract](#the-bead-stands-contract) settles them.
-  The effort that builds the design (tk-ssm8qns.27) moves each onto
-  `standing` and deletes the copies.
+- **A bead's standing is decided outside `standing`.**
+  `assets/scripts/bead-context.sh` decides again, in jq, whether a bead
+  advances, so an agent's read of a bead and the board's disagree where
+  [the contract](#the-bead-stands-contract) settles them. The effort that
+  builds the design (tk-ssm8qns.27) moves it onto `standing` and deletes the
+  copy.
 - **`epic create`, `session title` and `rig`'s checks start processes outside
   an adapter.** `epic create` files the epic with its own `gc bd create`,
   `session title` runs `gc session rename` and `gc session submit`, and the
