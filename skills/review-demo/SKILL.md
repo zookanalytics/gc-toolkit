@@ -171,9 +171,9 @@ reports whether the `gh` it needs is present.
   claim exists only where it is deployed. Such a change alters the app's build
   or hosting configuration, or the environment it is deployed with, or rests on
   a live outside service whose real response is the point of the change. Record
-  nothing else from a preview. It runs on the deployment's own data and live
-  services, so its scenes can change between captures, and each capture can
-  spend money on live calls. Record a preview only once it is built from
+  from a preview in no other case. It runs on the deployment's own data and
+  live services, so its scenes can change between captures, and each capture
+  can spend money on live calls. Record a preview only once it is built from
   `<reviewed_oid>`. Where the host records previews as GitHub deployments,
   `gh api "repos/<owner>/<repo>/deployments?sha=<reviewed_oid>"` lists that
   commit's deployments, in the repository `<review_pr_url>` names. A

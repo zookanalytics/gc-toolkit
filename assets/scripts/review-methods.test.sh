@@ -585,7 +585,7 @@ hasF "$TMP/demo.produce" 'The app target is the reviewed worktree served on this
   "a capture's app target is the reviewed worktree served on this host"
 hasF "$TMP/demo.produce" 'is the app target instead for a rig with no way to run its app on this host, and for a change whose claim exists only where it is deployed.' \
   "…and the draft's deployed preview only for a rig that cannot run its app here or a change whose claim exists only where it is deployed"
-hasF "$TMP/demo.produce" 'Record nothing else from a preview.' "…and for nothing else"
+hasF "$TMP/demo.produce" 'Record from a preview in no other case.' "…and in no other case"
 hasF "$TMP/demo.produce" 'Record a preview only once it is built from `<reviewed_oid>`.' "…and only once the preview is built from the reviewed commit"
 hasF "$TMP/demo.reads" 'and its deployed preview where the app target under `video` records from it.' \
   "the demo method reads the draft's preview only where the app target records from it"
