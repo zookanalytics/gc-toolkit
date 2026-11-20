@@ -78,12 +78,14 @@ carry the marker pr_reconcile_pending, and the beads on the record that carry a
 ruling's disposition, an open or blocked bead only while it is assigned to
 nobody or to the refinery. It reads the store once and decides each record
 from the store and the read the one-PR update (gctk pr refresh) saved on its
-bead, reading GitHub only for a merge, an exception or a withdrawal's close,
-each confirmed on the act's own read of the PR:
+bead, reading GitHub only for a merge, an exception, a draft's ready
+transition or a withdrawal's close, each confirmed on the act's own read of
+the PR:
 
   - open at the head the refinery validated: a draft whose review result
     passed at that head and target, with no review run attached and no ask a
-    run can take open, is marked ready, without waiting for CI; otherwise the
+    run can take open, is marked ready, without waiting for CI, once the act's
+    own read of the PR finds it a draft at that head and target; otherwise the
     evaluator decides over the saved read whether it is ready, and a ready one
     is merged on the merge's own read of GitHub, made in its act and decided
     again, with the head that read judged pinned, or added to its base's merge

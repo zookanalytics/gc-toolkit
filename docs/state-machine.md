@@ -459,7 +459,8 @@ gate keyed `approval-withdraw-refused`.
 **The draft.** Each city writer returns the PR to draft before it pushes onto
 the branch (`gctk pr draft`), and the landing order marks a draft ready once a
 run has passed at the head the refinery validated, with no run attached and no
-ask a run can take open. A draft holds nothing on its own: a human gate, an open
+ask a run can take open, and once its own read of the PR finds the draft at
+that head. A draft holds nothing on its own: a human gate, an open
 ask or `merge_hold` still holds the PR the order readied.
 
 What the *reviewer* did short of a verdict is posture, not a check: see

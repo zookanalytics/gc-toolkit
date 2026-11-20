@@ -166,9 +166,9 @@ func TestADraftTakesOnlyAnOpenPRTheBeadOwns(t *testing.T) {
 }
 
 // The order readies a draft whose passed result names its validated head and
-// target, with no review run attached, whoever returned it to draft, and does
-// not wait for CI: the next run reads the PR again and merges it once it is
-// ready.
+// target, with no review run attached, whoever returned it to draft, once the
+// act's own read of the PR finds it a draft there, and does not wait for CI:
+// the next run reads the PR again and merges it once it is ready.
 func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Facts.IsDraft = true
@@ -178,7 +178,9 @@ func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) 
 		t.Fatalf("asked %v, the PR a draft %v", got, d.pr.Facts.IsDraft)
 	}
 	savesNothingOfGitHub(t, d)
-	readsNoGitHub(t, d)
+	if got := d.runReads(); !slices.Equal(got, []string{"PullRequest"}) {
+		t.Fatalf("the ready transition read GitHub %v, want the act's own read of the PR", got)
+	}
 	o := d.once(t)
 	is(t, o, pr.ActChecked)
 	if !strings.Contains(o.Detail, "check-pending") {
@@ -187,6 +189,48 @@ func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) 
 	savesNothingOfGitHub(t, d)
 	d.pr.Suites = map[string][]gh.CheckSuite{head: {{ID: 1, Runs: []gh.CheckRun{passed("test")}}}}
 	is(t, d.once(t), pr.ActRequested)
+}
+
+// A head pushed onto a draft after the PR watch read it is not marked ready on
+// the passed result of the head the watch saved: the act's own read of the PR
+// finds the new head, so the act does nothing, and the record waits for the
+// watch's next read, which sends the new head to the refinery with the PR still
+// a draft. A PR the act's own read finds ready already, or closed, is left as it
+// stands, and a read that does not answer leaves it to the next run.
+func TestTheOrderReadiesADraftOnlyOnceItsOwnReadFindsItADraftAtThePassedHead(t *testing.T) {
+	d := newCycle(t)
+	d.pr.Facts.IsDraft = true
+	d.refresh(t)
+	d.pr.Facts.HeadRefOid = later
+	o := d.run(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "the act's own read of the PR finds its head at 3333333") ||
+		slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MarkReady" }) {
+		t.Fatalf("a head pushed after the watch's read was marked ready, or said %q: %v", o.Detail, asks(d.github))
+	}
+	is(t, d.once(t), pr.ActRequeued)
+	if !d.pr.Facts.IsDraft {
+		t.Fatalf("the PR was marked ready at a head no review passed")
+	}
+
+	for _, c := range []struct {
+		name string
+		set  func(*land)
+		want string
+	}{
+		{"ready already", func(e *land) { e.pr.Facts.IsDraft = false }, pr.ActChecked},
+		{"closed", func(e *land) { e.pr.Facts.State = "CLOSED" }, pr.ActChecked},
+		{"unread", func(e *land) { e.github.Fail["PullRequest"] = errors.New("gh: error connecting to api.github.com") }, pr.ActRetry},
+	} {
+		e := newCycle(t)
+		e.pr.Facts.IsDraft = true
+		e.refresh(t)
+		c.set(e)
+		is(t, e.run(t), c.want)
+		if slices.ContainsFunc(e.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MarkReady" }) {
+			t.Fatalf("a PR its own read found %s was marked ready", c.name)
+		}
+	}
 }
 
 // The order readies no draft whose record is not pending at its head: a result

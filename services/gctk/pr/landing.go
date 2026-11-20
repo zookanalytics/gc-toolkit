@@ -22,12 +22,12 @@ import (
 // refinery publishes a PR's pending record with Record, and the landing order's
 // runs act on each record with Reconcile. A run decides every record from the
 // store and the read the one-PR update (refresh.go) saved on its bead, and
-// reads GitHub only for a merge, which it decides again on its own read of the
-// PR and pins to the head it judged, for an exception, which it records only
-// once its own read of the PR shows what the saved read did, and for a
-// withdrawal's close, which it makes only once its own read of the PR's reviews
-// shows no approval standing without the withdrawal's head. It closes a bead
-// once the merge commit is on the target, hands a changed head to the refinery
+// reads GitHub only on an act's own read of the PR. A merge is decided again on
+// that read and pinned to the head it judged. An exception and a draft's ready
+// transition are made only once that read shows what the saved read did, and a
+// withdrawal closes only once the act's own read of the PR's reviews shows no
+// approval standing without its head. It closes a bead once the merge commit is
+// on the target, hands a changed head to the refinery
 // and sees that the refinery hears of it, keeps the exceptions blocked behind a
 // human gate, marks a draft ready and carries out an approval's withdrawal,
 // each from the saved read. A bead's assignee says who works it now (Gas City's
@@ -1427,8 +1427,8 @@ func (u *run) decideAtHead(s state, saved *SavedRead) plan {
 			return none(s, ActRetry, "the review results did not read; the next run decides again: "+err.Error())
 		}
 		if readyBar(s, p, results, asks) == "" {
-			return u.withCarry(s, saved, doing(func(ctx context.Context, c carriedOut) RunOutcome {
-				host, _, _, _ := record.ParseURL(s.rec.URL)
+			host, _, number, _ := record.ParseURL(s.rec.URL)
+			ready := doing(func(ctx context.Context, c carriedOut) RunOutcome {
 				if err := u.Hub(ctx, host).MarkReady(p.ID); err != nil {
 					return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(fmt.Sprintf("the ready transition at %s "+
 						"was refused or not answered, and the next run decides again from the draft flag the PR watch "+
@@ -1437,7 +1437,8 @@ func (u *run) decideAtHead(s state, saved *SavedRead) plan {
 				return RunOutcome{Bead: s.id, Action: ActReadied, Detail: withNote(fmt.Sprintf("marked ready at %s, without "+
 					"waiting for CI: a passed result names the head, and no review run is attached and no ask a run can "+
 					"take is open; the next run decides again", p.Head), c.note)}
-			}))
+			})
+			return u.withCarry(s, saved, u.confirmed(s, host, number, draftAt(p), ready))
 		}
 	}
 	ans, err := FromStore(s.reads, s.id)
@@ -1536,26 +1537,47 @@ func withNote(detail, note string) string {
 	return detail + "; " + note
 }
 
-// confirmed holds the exception p records, which keeps the work behind a
-// person, until the act's own read of the PR shows what the saved read did:
-// unlike says what the read shows instead, and is empty when it shows the same.
-// The saved read can be older than the record, as when a PR is reopened and
-// published again before the PR watch reads it, so an act whose read shows
-// otherwise records nothing, and the record waits for the PR watch's next read.
-// A read that does not answer leaves the record to the next run.
+// confirmed holds the act p makes, which no later run decides again, until the
+// act's own read of the PR shows what the saved read did: unlike says what the
+// read shows instead, and is empty when it shows the same. An exception keeps
+// the work behind a person, and a ready transition puts the PR before one. The
+// saved read can be older than the record, as when a PR is reopened and
+// published again before the PR watch reads it, or older than the PR, as when a
+// head is pushed onto a draft after the watch read it, so an act whose read
+// shows otherwise does nothing, and the record waits for the PR watch's next
+// read. A read that does not answer leaves the record to the next run.
 func (u *run) confirmed(s state, host string, number int, unlike func(*gh.PullRequest) string, p plan) plan {
 	return doing(func(ctx context.Context, c carriedOut) RunOutcome {
 		now, err := u.Hub(ctx, host).PullRequest(s.rec.Repo, number)
 		if err != nil {
-			return RunOutcome{Bead: s.id, Action: ActRetry, Detail: "the act's own read of the PR, on which its exception " +
-				"is recorded, did not answer, so nothing was recorded; the next run decides again: " + err.Error()}
+			return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote("the act's own read of the PR did not answer, "+
+				"so the act did nothing; the next run decides again: "+err.Error(), c.note)}
 		}
 		if why := unlike(now); why != "" {
-			return RunOutcome{Bead: s.id, Action: ActChecked, Detail: "the act's own read of the PR " + why +
-				", unlike the saved read, so nothing was recorded, and the record waits for the PR watch's next read"}
+			return RunOutcome{Bead: s.id, Action: ActChecked, Detail: withNote("the act's own read of the PR "+why+
+				", unlike the saved read, so the act did nothing, and the record waits for the PR watch's next read", c.note)}
 		}
 		return p.act(ctx, c)
 	})
+}
+
+// draftAt is the check confirmed makes of the ready transition the saved read p
+// owes: the act's own read finds the PR open, a draft, at the head and into the
+// base p shows, which the passed review result names.
+func draftAt(p *SavedPR) func(*gh.PullRequest) string {
+	return func(now *gh.PullRequest) string {
+		switch {
+		case now.State != "OPEN":
+			return "finds it " + strings.ToLower(now.State)
+		case !now.IsDraft:
+			return "finds it ready already"
+		case now.HeadRefOid != p.Head:
+			return "finds its head at " + short(now.HeadRefOid)
+		case now.BaseRefName != p.Base:
+			return "finds it into " + now.BaseRefName
+		}
+		return ""
+	}
 }
 
 // inState is the check confirmed makes of an exception the PR's state owes:

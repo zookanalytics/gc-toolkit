@@ -6,7 +6,8 @@
 # (orders/pr-poll.toml and orders/pr-compare.toml), and reads GitHub only on an
 # act's own read of the PR: for a merge, which it decides again on that read and
 # pins to the head it judged, or adds to its base's merge queue with it, for an
-# exception, and for a withdrawal's close. Its bead closes once the
+# exception, for a draft's ready transition, and for a withdrawal's close. Its
+# bead closes once the
 # merge commit is on the freshly fetched target. A PR open at another head goes
 # back to the refinery, which a run wakes and nudges for it when only a
 # conversation or an ask holds the PR's bead, and the exceptions stay blocked
