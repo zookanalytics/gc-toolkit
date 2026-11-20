@@ -16,7 +16,9 @@ import (
 // instead of to the stub. The daemon-path tests below build a Client pointed at
 // a fake server directly, so GC_NO_API does not reach them.
 func TestMain(m *testing.M) {
-	os.Setenv("GC_NO_API", "1")
+	if err := os.Setenv("GC_NO_API", "1"); err != nil {
+		panic(err)
+	}
 	os.Exit(m.Run())
 }
 
