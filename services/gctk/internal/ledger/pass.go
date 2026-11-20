@@ -56,6 +56,12 @@ func (p *pass) Update(id string, args ...string) (string, error) { return "", er
 
 func (p *pass) AddEdge(id, target, typ string) (string, error) { return "", errPassWrite }
 
+func (p *pass) Unrelate(id, other string) (string, error) { return "", errPassWrite }
+
+func (p *pass) ResolveGate(id, reason string) (string, error) { return "", errPassWrite }
+
+func (p *pass) Reopen(id, reason string) (string, error) { return "", errPassWrite }
+
 func (p *pass) Create(title string, args ...string) (string, error) { return "", errPassWrite }
 
 func (p *pass) SetState(id, dimension, value, reason string) error { return errPassWrite }

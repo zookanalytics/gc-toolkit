@@ -26,6 +26,9 @@ const (
 	EdgeParentChild       = gcbd.EdgeParentChild
 )
 
+// EdgeRelatesTo is bd's relates-to link, which holds neither bead.
+const EdgeRelatesTo = gcbd.EdgeRelatesTo
+
 // Record is one bead as a pass read it. A domain reads its keys through the
 // Keys it declared, and its status, type and edges through the methods here.
 type Record struct {

@@ -7,10 +7,13 @@
 // decide them: intake's (docs/steering.md), an emergency's confirmation on the
 // default branch, the form each named agent takes its work in, and whether a
 // route or a hand-off reaches someone, which `gctk reaction deliverable` asks of
-// the rig's proactive pool. It asks waits what holds a bead and which runs work
-// it, the arm to arm one, the arm's record and the PR record what a bead
-// carries, conversation which tasks are conversations, and prstatus which beads
-// are human gates, and no domain asks it.
+// the rig's proactive pool. It also holds `gctk reaction accept`, the
+// operator's acceptance of the recommendation a recommend exit leaves, under
+// the acceptance lock it runs in (accept.go). It asks waits what holds a bead
+// and which runs work it, the arm to arm one, remove its arm and read whether
+// a pour finished, the arm's record and the PR record what a bead carries,
+// conversation which tasks are conversations, and prstatus which beads are
+// human gates, and no domain asks it.
 //
 // A reaction disposes its subject and never closes it. Each exit orders its
 // writes so that the write which dispatches, holds or gates the subject comes
@@ -35,9 +38,9 @@ var recommendedFormulaKey = ledger.Declare("gc.recommended_formula", ledger.Stri
 	"The execution formula a first reaction's recommend exit puts to the operator: the board offers Accept, "+
 		"which slings that formula at the bead, beside the exit's human gate. gctk reaction dispose sets it once "+
 		"the gate is filed and clears it before any exit acts, so no recommendation is older than the newest "+
-		"first-reaction gate. gc-helm.sh accept and converse-invalidate-recommendation.sh clear it, and "+
-		"converse-signoff.sh reads it, in shell (docs/gctk-architecture.md, Debt). Absent or empty, the bead "+
-		"carries no recommendation.")
+		"first-reaction gate. gctk reaction accept clears it in the write that records its dispatch. "+
+		"converse-invalidate-recommendation.sh clears it and converse-signoff.sh reads it, in shell "+
+		"(docs/gctk-architecture.md, Debt). Absent or empty, the bead carries no recommendation.")
 
 // The keys the dispose reads and does not write. No domain owns them yet.
 var anchorKey = ledger.ReadOnly("anchor_bead", ledger.String,
@@ -81,8 +84,13 @@ type Reactions struct {
 	Ledger  *ledger.Ledger
 	Runtime gascity.Runtime
 	GitHub  GitHub
-	// Arm arms a bead, as `gctk bead arm` does.
-	Arm func(arm.Request) (string, error)
+	// Arm arms a bead, as `gctk bead arm` does, and Disarm removes its arm, as
+	// `gctk bead disarm` does.
+	Arm    func(arm.Request) (string, error)
+	Disarm func(id, reason string) (string, error)
+	// Sessions reads the city's live sessions, which an acceptance warns of
+	// when one holds a conversation on its bead, nil to warn of none.
+	Sessions func() ([]gascity.Session, error)
 	// Rig is the rig the caller runs in, GC_RIG, empty when it names none.
 	Rig string
 	// DB is the store the caller named, a store's .beads directory, which a

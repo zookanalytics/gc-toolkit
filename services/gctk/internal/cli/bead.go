@@ -93,9 +93,11 @@ func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	holds.Flags().StringVar(&db, "db", "", "the store to read, a store's .beads directory")
-	return group("bead", "what holds a bead, and its arm",
-		"A bead's waits, what holds it, read from the store, and the arm that starts it by itself once nothing does.",
-		holds, newBeadArmCmd(stdout, stderr), newBeadDisarmCmd(stdout, stderr), newBeadStartArmedCmd(stdout, stderr))
+	return group("bead", "what holds a bead, its arm, its park and its placement",
+		"A bead's waits, what holds it, read from the store, the arm that starts it by itself once nothing does, "+
+			"the park that holds everything under it that has not started, and the placement of a bead held for one.",
+		holds, newBeadArmCmd(stdout, stderr), newBeadDisarmCmd(stdout, stderr), newBeadStartArmedCmd(stdout, stderr),
+		newBeadParkCmd(stdout, stderr), newBeadPlaceCmd(stdout, stderr))
 }
 
 const beadArmLong = `Arms the bead: it starts by itself once nothing holds it, poured on the

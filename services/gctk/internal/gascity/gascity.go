@@ -63,12 +63,16 @@ type Runtime interface {
 }
 
 // Sling is one `gc sling <target> <bead> --on <formula> --title <title>`,
-// with gc's --rig when Rig names one and no --title when Title is empty. A
+// with no <target> when Target is empty, which pours the formula on the bead
+// and leaves each step to the route the formula gives it, gc's --rig when Rig
+// names one, no --title when Title is empty, and a
+// --var for each of Vars, each a <key>=<value> the formula's pour takes. A
 // sling with NoFormula set pours nothing and files no convoy (`gc sling <target>
 // <bead> --no-formula --no-convoy`): it routes the bead to the target's own
 // name, which a named session's hook serves.
 type Sling struct {
 	Rig, Target, Bead, Formula, Title string
+	Vars                              []string
 	NoFormula                         bool
 }
 
@@ -165,13 +169,19 @@ func (c *City) Sling(s Sling) SlingResult {
 	if s.Rig != "" {
 		args = append(args, "--rig", s.Rig)
 	}
-	args = append(args, s.Target, s.Bead)
+	if s.Target != "" {
+		args = append(args, s.Target)
+	}
+	args = append(args, s.Bead)
 	if s.NoFormula {
 		args = append(args, "--no-formula", "--no-convoy")
 	} else {
 		args = append(args, "--on", s.Formula)
 		if s.Title != "" {
 			args = append(args, "--title", s.Title)
+		}
+		for _, v := range s.Vars {
+			args = append(args, "--var", v)
 		}
 	}
 	r := c.run(c.bin, args...)

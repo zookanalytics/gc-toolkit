@@ -114,6 +114,19 @@ type Store struct {
 	// update stamps nothing, and a test names a close time itself.
 	CloseTime string
 
+	// UnrelateErr fails every unrelate, ResolveErr every gate resolve and
+	// ReopenErr every reopen.
+	UnrelateErr, ResolveErr, ReopenErr error
+
+	// BeforeResolve, when set, runs ahead of each gate resolve, outside the
+	// store's lock, so a test can land another answer on the gate first, or
+	// refuse the resolve with the error it returns.
+	BeforeResolve func(id, reason string) error
+
+	unrelates []Edge
+	resolves  []Close
+	reopens   []Close
+
 	// WorkRecordGate, when set, refuses an update that closes a plain task bead
 	// as Gas City's work-record gate refuses it under GC_WORK_RECORD_ENFORCE,
 	// which gc bd runs before it hands bd the update, so it is the door's rule
@@ -379,12 +392,13 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 }
 
 // Update applies one update's --set-metadata, --unset-metadata, --status,
-// --assignee, --append-notes, --title and --priority to the row, and records
-// it. An argument that is no flag names another bead the update writes the same
-// way, as bd's update takes each bead it writes, and each is recorded as a write
-// of its own. A bead the store does not hold refuses the write, as bd does.
-// --if-status and --if-assignee are bd's guards: an update whose guard no
-// longer holds writes nothing and fails with an error that is gcbd.ErrGuard.
+// --assignee, --append-notes, --title, --priority, --remove-label,
+// --description and --parent to the row, and records it. An argument that is no
+// flag names another bead the update writes the same way, as bd's update takes
+// each bead it writes, and each is recorded as a write of its own. A bead the
+// store does not hold refuses the write, as bd does. --if-status and
+// --if-assignee are bd's guards: an update whose guard no longer holds writes
+// nothing and fails with an error that is gcbd.ErrGuard.
 func (s *Store) Update(id string, args ...string) (string, error) {
 	if s.BeforeUpdate != nil {
 		if err := s.BeforeUpdate(id, slices.Clone(args)); err != nil {
@@ -508,6 +522,16 @@ func (s *Store) update(id string, args []string) (Bead, error) {
 			b.Notes += value
 		case "--title":
 			b.Title = value
+		case "--remove-label":
+			b.Labels = slices.DeleteFunc(slices.Clone(b.Labels), func(l string) bool { return l == value })
+		case "--description":
+			b.Description = value
+		case "--parent":
+			edges, err := s.parented(b, value)
+			if err != nil {
+				return Bead{}, err
+			}
+			b.Edges = edges
 		case "--priority":
 			p, err := strconv.Atoi(strings.TrimPrefix(strings.ToUpper(value), "P"))
 			if err != nil || p < 0 || p > 4 {
