@@ -404,14 +404,12 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render through gctk's shared readers over the ledger, from Gas City's
   `human` mailbox, and from Gas City's event log, which holds doctor's runs and
-  each monitor order's last good run. It reads no store of its own, and
-  `helm-svc board --json` prints the page's document for agents. The write
+  each monitor order's last good run. It reads no store of its own. The write
   verbs are gctk commands, which skills, prompts and the board's write routes
   call. The board's one write that gctk does not carry is archiving a mailbox
   message, which Gas City's mail performs. Accept clears a first reaction's
-  recommendation gate and nothing else, under the bead's acceptance lock, and
-  refuses while another human gate blocks the bead. The po's
-  backlog refinement works the queue, every bead `hold:mayor` holds in any
+  recommendation gate and nothing else, under the bead's acceptance lock. The
+  po's backlog refinement works the queue, every bead `hold:mayor` holds in any
   spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
   works without the board: it spends no state, so it can never be wrong for
   longer than one render.
@@ -530,8 +528,7 @@ why a reader must know it, and the work that retires it.
   the beads library, and phase a PR on the pending record by the old path's
   rule, so their answer can differ from the page's and from the PR's status
   label, and the library needs cgo and ICU to build. The board member
-  (tk-1tfzr71.24) has the command print the page's document and retires that
-  reader.
+  (tk-1tfzr71.24) retires that reader.
 - **`gc-helm.sh` still carries the write verbs.** They run as shell, and gctk
   reaches two of them through the script. The board member (tk-1tfzr71.24)
   moves the steering and record verbs into gctk, and tk-ssm8qns.15 moves the
