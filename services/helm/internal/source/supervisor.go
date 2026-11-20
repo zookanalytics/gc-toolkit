@@ -124,7 +124,7 @@ func readSupervisorPort(path string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	inSection := false
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
@@ -247,7 +247,7 @@ func (s *SupervisorSource) getJSON(ctx context.Context, path string, out any) er
 	if err != nil {
 		return fmt.Errorf("GET %s: %w", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusServiceUnavailable {
 		return fmt.Errorf("GET %s: 503 (all backends failed)", path)
 	}

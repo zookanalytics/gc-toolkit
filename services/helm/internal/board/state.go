@@ -364,8 +364,7 @@ func subtreeStates(anchors []Anchor, f Facts) map[string]string {
 	memo := make(map[string]string, len(byID))
 	onPath := map[string]bool{}
 	var classify func(Child) string
-	var subtree func(string) string
-	subtree = func(id string) string {
+	subtree := func(id string) string {
 		if s, ok := memo[id]; ok {
 			return s
 		}
