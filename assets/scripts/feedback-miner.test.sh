@@ -24,9 +24,9 @@ ln -sf "$REAL_GIT" "$BIN/git"
 
 # ago <days>, ago_h <hours> — a time that long before now, as GitHub writes one;
 # day <days> — the day it falls on.
-ago() { (TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T\n' "$((EPOCHSECONDS - $1 * 86400))"); }
-ago_h() { (TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T\n' "$((EPOCHSECONDS - $1 * 3600))"); }
-day() { (TZ=UTC; printf '%(%Y-%m-%d)T\n' "$((EPOCHSECONDS - $1 * 86400))"); }
+ago() { TZ=UTC printf '%(%Y-%m-%dT%H:%M:%SZ)T\n' "$((EPOCHSECONDS - $1 * 86400))"; }
+ago_h() { TZ=UTC printf '%(%Y-%m-%dT%H:%M:%SZ)T\n' "$((EPOCHSECONDS - $1 * 3600))"; }
+day() { TZ=UTC printf '%(%Y-%m-%d)T\n' "$((EPOCHSECONDS - $1 * 86400))"; }
 
 FIX="$TMP/fix"
 mkdir -p "$FIX"
