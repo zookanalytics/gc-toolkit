@@ -214,7 +214,8 @@ yet. Each remaining difference names its reason and what ends it:
 - **A cheap question watches every PR, and an update reads one.** A pass asks
   GitHub whether each PR the city owns moved, in one request for each 50 PRs in
   a repository, and reads and saves a PR only when one of its signs moved, or
-  when the net, which reads every PR in full every 10 minutes, finds it differs
+  when the net, which reads every PR in full every 10 minutes at the order
+  budget the city sets, finds it differs
   from the read saved on its bead. Gas Town's command reads each pending PR by
   its URL at each find-work and writes the check on the record each time. The
   city's readers of GitHub share one allowance, and a pass whose cost follows

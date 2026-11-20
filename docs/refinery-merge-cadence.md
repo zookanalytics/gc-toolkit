@@ -854,6 +854,16 @@ differs from the read saved on its bead, which catches the changes no cheap
 sign shows, and clears the city's labels off the PRs no live bead owns (the
 net, below).
 
+These two orders and the landing order run at their set intervals, `pr-poll`
+every 2 minutes, `pr-compare` every 10 and `pr-reconcile` every minute, only
+while the city's order budget lets each clock-driven order start at its own
+interval. Gas City's orders lane starts at most `[orders]
+max_dispatches_per_tick` of them a 30-second pass, 4 by default, and the
+city's clock-driven orders, these three among them, need more than 4 a pass,
+so the city's `city.toml` sets the budget to 16 and holds the old refinery
+pass, `refinery-reconcile`, at 5 minutes until the GitHub intake retires it.
+Under a smaller budget each order starts later than its interval.
+
 A PR is owned when a live bead names it as its own and is no other bead's
 child: an anchor names it in `pr_url` beside a `merge_result`, and a bead the
 refinery sent back to the pool names it in `existing_pr`. A bead whose
@@ -999,7 +1009,11 @@ disposition on it too, with or without the marker. It takes an open or
 blocked bead only while it is assigned to nobody or to the refinery, and
 writes nothing to a bead someone else works. It reads GitHub
 only for a merge and for an exception, so it reads no record's PR to decide and
-takes no count of records. It takes the records that owe an act in a shuffled order, so a record
+takes no count of records. It reads the store three times whatever its
+records: the marked records, every live bead, and in one read the closed beads
+their blocks edges name. Measured on 2026-11-20, a run with nothing to act on
+took 1.9 to 2 seconds on the gc-toolkit rig's store, with 15 records and 871
+live beads, at a load average of 18. It takes the records that owe an act in a shuffled order, so a record
 whose act is slow or keeps failing holds no other back, starts no act more than
 45 seconds into the run, and stops each act at 30 seconds with whatever GitHub
 call, fetch, store read or write, human gate's filing or refinery's wake it is
