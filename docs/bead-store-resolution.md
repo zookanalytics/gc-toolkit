@@ -253,7 +253,7 @@ bead is itself what a person owes, and otherwise the rule that names it.
 | `members` | is an epic or a Delivery with no members at all |
 | `gate` | is a gate that is no human gate |
 | `not-scheduled` | is work no pool or agent takes as things stand: no arm, route, assignee or live run moves it, or a dispatch hold such as `hold:mayor` holds it |
-| `unread` | could not be read, has no standing of its own that another bead speaks for, waits on itself through the beads it waits on, or is a `waits-for` wait the store cannot judge yet |
+| `unread` | could not be read, has no standing of its own and no bead that speaks for it, waits on itself through the beads it waits on, or is a `waits-for` wait the store cannot judge yet |
 
 So a queued bead is stuck on what stops the first of its waits that does not
 advance, and an epic or a Delivery on what stops the first of its open members:
