@@ -1,7 +1,10 @@
 package gcbd
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -210,6 +213,40 @@ func TestStoreAcceptance(t *testing.T) {
 	}
 	if rows, err := c.Rows([]string{run, second}); err != nil || len(rows) != 2 || rows[0].PriorityInt() != 1 || rows[1].PriorityInt() != 1 {
 		t.Errorf("adapter: the beads read %+v (%v), want both at P1", rows, err)
+	}
+}
+
+// The prefix the adapter reads is the one bd's create mints an id from, in a
+// store whose config.yaml names another prefix, which bd's where names instead.
+func TestStoreAcceptanceTheCreatesPrefix(t *testing.T) {
+	if !gcbdtest.Asked() {
+		t.Skip("the store acceptance test runs the city's bd on a scratch store; GCTK_STORE_ACCEPTANCE=1 runs it")
+	}
+	s := gcbdtest.New(t, "pb")
+	yaml, err := os.OpenFile(filepath.Join(s.DB(), "config.yaml"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := yaml.WriteString("issue-prefix: rb\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var where struct {
+		Prefix string `json:"prefix"`
+	}
+	if err := json.Unmarshal([]byte(s.Run("where", "--json")), &where); err != nil || where.Prefix != "rb" {
+		t.Fatalf("bd where names the prefix %q (%v); want rb, the one config.yaml names", where.Prefix, err)
+	}
+	minted := s.Create("minted")
+	if !strings.HasPrefix(minted, "pb-") {
+		t.Fatalf("bd's create minted %s; want an id of the store's setting pb", minted)
+	}
+
+	s.Enter(t, "")
+	if p, err := (&Client{bin: "gc"}).In(s.DB()).Prefix(); err != nil || p != "pb" {
+		t.Errorf("adapter: Prefix() = %q, %v; want pb, the prefix of %s", p, err, minted)
 	}
 }
 
