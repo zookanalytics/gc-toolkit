@@ -34,7 +34,7 @@ type step struct {
 	stdin    string
 	settings []string
 	actor    string
-	answer   string // "", "exit", "rows", "edges", "listed-edges", "texts", "labels", "json", "preview", "null-or-ids" or "count:<title>"
+	answer   string // "", "exit", "rows", "edges", "listed-edges", "shown-edges", "dependents", "texts", "labels", "json", "preview", "null-or-ids" or "count:<title>"
 }
 
 type contractCase struct {
@@ -154,6 +154,21 @@ func contractCases() []contractCase {
 			{args: []string{"dep", "add", "--file", "-"}, stdin: `{"from":"{c}","to":"{b}","type":"blocks"}` + "\n" + `{"from":"{a}","to":"{b}","type":"blocks"}` + "\n"},
 			{args: []string{"dep", "add", "--file", "-"}, stdin: `{"from":"{c}","to":"{a}","type":"blocks"}` + "\n"},
 		}},
+		{name: "a show leaves out an edge onto a bead its store does not hold, and a listing keeps it", beads: []string{"a", "b"}, steps: []step{
+			{args: []string{"dep", "add", "{a}", "{b}", "--type=blocks"}},
+			{args: []string{"dep", "add", "{a}", "zz-gone", "--type=blocks"}},
+			{args: []string{"show", "{a}", "--json"}, answer: "shown-edges"},
+			{args: []string{"list", "--id", "{a}", "--json"}, answer: "listed-edges"},
+		}},
+		{name: "a show carries its dependents only when asked, and no key when it has none", beads: []string{"s", "w1", "w2"},
+			more: [][]string{{"kid", "--parent", "{s}"}}, steps: []step{
+				{args: []string{"dep", "add", "{w1}", "{s}", "--type=blocks"}},
+				{args: []string{"dep", "add", "{w2}", "{s}", "--type=until"}},
+				{args: []string{"close", "{w2}"}},
+				{args: []string{"show", "{s}", "--brief-deps", "--include-dependents", "--json"}, answer: "dependents"},
+				{args: []string{"show", "{s}", "--json"}, answer: "dependents"},
+				{args: []string{"show", "{w1}", "--include-dependents", "--json"}, answer: "dependents"},
+			}},
 		{name: "show answers each bead with its edges, and bd's error for one it does not hold", beads: []string{"a", "b"}, state: []string{"a", "b"}, steps: []step{
 			{args: []string{"dep", "add", "{a}", "{b}", "--type=blocks"}},
 			{args: []string{"show", "{a}", "{b}", "--json"}, answer: "rows"},
@@ -203,12 +218,16 @@ func contractCases() []contractCase {
 			{args: []string{"show", "{a}", "ct-nope", "--json"}, answer: "rows"},
 			{args: []string{"show", "ct-nope", "{a}", "--json"}, answer: "rows"},
 		}},
-		{name: "a list with no status leaves out closed beads", beads: []string{"a", "b"}, steps: []step{
-			{args: []string{"close", "{b}"}},
-			{args: []string{"list", "--json"}, answer: "null-or-ids"},
-			{args: []string{"list", "--all", "--json"}, answer: "null-or-ids"},
-			{args: []string{"list", "--status=closed", "--json"}, answer: "null-or-ids"},
-		}},
+		{name: "a list with no status leaves out closed and pinned beads", beads: []string{"a", "b", "p"},
+			more: [][]string{{"kid", "--parent", "{p}"}, {"pinkid", "--parent", "{p}"}}, steps: []step{
+				{args: []string{"close", "{b}"}},
+				{args: []string{"update", "{pinkid}", "--status=pinned"}},
+				{args: []string{"list", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--all", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--status=closed", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--parent", "{p}", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--parent", "{p}", "--all", "--json"}, answer: "null-or-ids"},
+			}},
 		{name: "an update reads --status in either spelling and refuses a key with no value", beads: []string{"a", "b"}, state: []string{"a", "b"}, steps: []step{
 			{args: []string{"update", "{a}", "--status", "in_progress"}},
 			{args: []string{"update", "{b}", "--set-metadata", "k=v", "--set-metadata", "novalue"}},
@@ -400,6 +419,34 @@ func (s side) call(t *testing.T, st step, args []string, nm map[string]string) o
 		}
 		sort.Strings(edges)
 		o.answer = edges
+	case st.answer == "shown-edges":
+		var edges []string
+		for _, r := range asList(v) {
+			m := r.(map[string]any)
+			for _, d := range asList(m["dependencies"]) {
+				e := d.(map[string]any)
+				edges = append(edges, fmt.Sprintf("%s->%s:%v", nameOf(nm, m["id"]), nameOf(nm, e["id"]), e["dependency_type"]))
+			}
+		}
+		sort.Strings(edges)
+		o.answer = edges
+	case st.answer == "dependents":
+		var rows []string
+		for _, r := range asList(v) {
+			m := r.(map[string]any)
+			on, has := m["dependents"]
+			if !has {
+				rows = append(rows, nameOf(nm, m["id"])+": no dependents key")
+				continue
+			}
+			for _, d := range asList(on) {
+				e := d.(map[string]any)
+				rows = append(rows, fmt.Sprintf("%s<-%s:%v %v %v %v %v", nameOf(nm, m["id"]), nameOf(nm, e["id"]), e["dependency_type"],
+					e["title"], e["status"], e["priority"], e["issue_type"]))
+			}
+		}
+		sort.Strings(rows)
+		o.answer = rows
 	case st.answer == "texts":
 		var texts []string
 		for _, r := range asList(v) {

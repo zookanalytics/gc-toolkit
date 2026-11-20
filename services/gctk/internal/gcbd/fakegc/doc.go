@@ -91,7 +91,13 @@
 // Each keeps bd's rule where the contract test pins one: a listing carries
 // each bead's edges, selects a parent's children by --parent and hides a
 // template, an agent, role or message bead and a wisp unless it asks for that
-// kind; blocked and ready follow bd's blocked rule over blocks,
+// kind, and one that asks for neither --all nor --status leaves out closed and
+// pinned beads; a show leaves out an edge onto a bead the store does not
+// hold, one into another store, which a listing keeps, and under
+// --include-dependents carries the beads with an edge onto the bead, in the
+// store's order, each cut to its id, title, status, priority and type and the
+// edge's type, with no dependents key when there are none; blocked and ready
+// follow bd's blocked rule over blocks,
 // conditional-blocks, waits-for and parent-child edges, and ready leaves out
 // the types bd's ready work leaves out; an update's --if-assignee or
 // --if-status that no longer holds writes nothing and exits 13; an update
@@ -146,7 +152,8 @@
 //     an --if-* guard has held. STUB_ENFORCE_CLOSE_OWNER refuses a close of a
 //     bead assigned to anyone but BEADS_ACTOR, unless the close passes --force.
 //   - STUB_SHOW_NOTICE leads a show's answer with the notice a read from
-//     another rig's store carries.
+//     another rig's store carries. STUB_SHOW_RAW_CONTROL prints each control
+//     character in a show's answer as its raw byte, where bd escapes it.
 //     STUB_SHOW_HOOK names a program run with the id before each show answers,
 //     so a test can land another writer's change between two reads.
 //   - STUB_HOOK names a program run before the fake answers each call whose
