@@ -95,8 +95,9 @@ harness_init() {
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
   # STUB_SHOW_NOTICE: when set to a rig name, `gc bd show` leads its stdout with a
   # `gc bd: answering from the rig "<name>" store` notice line, the contaminant a
-  # real read can carry. Unset leaves the JSON clean.
-  export STUB_SHOW_NOTICE=""
+  # real read can carry. Unset leaves the JSON clean. STUB_SHOW_RAW_CONTROL, when
+  # set, makes a show print each control character in its answer as a raw byte.
+  export STUB_SHOW_NOTICE="" STUB_SHOW_RAW_CONTROL=""
   export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE="" STUB_DEP_ADD_FAIL="" STUB_KV_FAIL=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
@@ -205,14 +206,25 @@ bparents() { "$HARNESS_FAKE_GC" --harness-read parents "$1"; }
 notes() { "$HARNESS_FAKE_GC" --harness-read notes "$1"; }
 # A field of a bead's row (bfield <id> <name>), the beads its edges of a type
 # point at (bedges <id> <type>), the beads with such an edge onto it (bonto <id>
-# <type>), its comments, a line each (bcomments <id>), and the ids of the beads
-# whose fields hold given values (bids [<name>=<value>...]). Each answer's form
-# is in fakegc's read.go.
+# <type>), the type of its edge onto another bead (bedge <id> <other>), all the
+# store holds on it, to compare before and after a run (brecord <id>), its
+# comments, a line each (bcomments <id>), and the ids of the beads whose fields
+# hold given values (bids [<name>=<value>...]). Each reads the store a gc call
+# naming the bead acts in, and each answer's form is in fakegc's read.go.
 bfield() { "$HARNESS_FAKE_GC" --harness-read field "$1" "$2"; }
 bedges() { "$HARNESS_FAKE_GC" --harness-read edges "$1" "$2"; }
 bonto() { "$HARNESS_FAKE_GC" --harness-read onto "$1" "$2"; }
+bedge() { "$HARNESS_FAKE_GC" --harness-read edge "$1" "$2"; }
+brecord() { "$HARNESS_FAKE_GC" --harness-read record "$1"; }
 bcomments() { "$HARNESS_FAKE_GC" --harness-read comments "$1"; }
 bids() { "$HARNESS_FAKE_GC" --harness-read ids "$@"; }
+# harness_store <dir> — give a directory an empty store of its own, as a rig's
+# <path>/.beads holds one, which the fake routes a call to (fakegc's route.go).
+# A failed write is a suite that does not run.
+harness_store() {
+  { mkdir -p "$1" && echo '[]' > "$1/beads.json" && : > "$1/deps.txt" && : > "$1/kv.txt" && echo '[]' > "$1/comments.json"; } || {
+    echo "harness_store: no store could be written in $1; not running" >&2; exit 2; }
+}
 # The fixture writers set the state a case starts from, as `store` does for the
 # whole store, without a line in STUB_GC_LOG: brow <id> [<setting>...] puts a
 # row in place of any under the id, bset <id> <setting>... writes to it, and

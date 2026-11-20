@@ -186,6 +186,7 @@ func TestFindThatFailsIsAReadError(t *testing.T) {
 	for _, tc := range []struct{ name, list, rc string }{
 		{"the listing exits non-zero", `{"error":"dolt timeout"}`, "1"},
 		{"the listing is not an array", `{"error":"dolt timeout"}`, "0"},
+		{"the listing is blank", "  ", "0"},
 		{"a row has no id", `[{"status":"open"}]`, "0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

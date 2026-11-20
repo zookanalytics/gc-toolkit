@@ -310,10 +310,18 @@ ask: an open task with no assignee, neither of Gas City's routes
 (`gc.routed_to`, `gc.execution_routed_to`) and no `task_kind`, that blocks the
 bead by its own edge, names the branch, and may name checks in
 `review_checks`. `gctk review ask` files one, and finds an ask of the same
-source and reason first, open or closed, so a re-run files nothing. The
-refinery's requeue of a PR on the record, `pr-facts.sh`'s conflict, red-check
-and feedback arms, a sitting's send-back, and a must-fix point a sitting or the
-mechanik puts on another open PR each file one. A run takes an ask only while
+source and reason first, open or closed, so a re-run files nothing. An ask
+that must wait for other work, as a sitting's send-back that waits for another
+PR does, carries its own `blocks` edge onto each bead it waits on from the
+create that files it (`--waiting-on`), so no pass reads it clear before it
+waits. Each such bead carries the PR bead's id prefix, which is the one its
+store gives the ask, and is held by its store, since bd keeps an edge between
+beads of two prefixes as one into
+another store, which holds nothing even when this store holds the bead, and a
+re-run that names a wait the ask it finds lacks is refused. The refinery's requeue of a PR on the record,
+`pr-facts.sh`'s conflict, red-check and feedback arms, a sitting's send-back,
+and a must-fix point a sitting or the mechanik puts on another open PR each
+file one. A run takes an ask only while
 `gctk bead holds` reads it clear, so an ask that waits on other work starts no
 round and spends no attempt, and holds the PR by its own edge until a run takes
 it. The loop's check closes each ask the run answered as it records the result,

@@ -6,16 +6,19 @@
 # pull_request_head_changed) has one worker on its branch, its review run
 # (specs/tk-1tfzr71.108/design.md, section 1), so the ruling goes to the run as
 # an ask (`gctk review ask`): the ruling as its reason, the conversation as its
-# source, and the checks the ruling names (--check), which the run picks at the
-# first head it judges once it can take the ask. The run applies the ruling as
-# ruled and triages the head its fix pushes. A re-run of the same ruling finds
-# the ask the first filed, open or closed, by its source and reason, and files
-# nothing. A ruling whose change the sitting makes itself, on the branch with
-# the operator, goes through `gctk pr push` instead (docs/authority-map.md).
+# source, the checks the ruling names (--check), which the run picks at the
+# first head it judges once it can take the ask, and each bead the ruling waits
+# for (--waiting-on), which holds the ask from the create that files it until
+# that bead closes. The run applies the ruling as ruled and triages the head its
+# fix pushes. A re-run of the same ruling finds the ask the first filed, open or
+# closed, by its source and reason, and files nothing. A ruling whose change the
+# sitting makes itself, on the branch with the operator, goes through
+# `gctk pr push` instead (docs/authority-map.md).
 #
 # Usage:
 #   converse-rework.sh --anchor <anchor-bead> --ruling-bead <conversation> \
-#     --ruling "<the ruling, one line>" [--check <check>]...
+#     --ruling "<the ruling, one line>" [--check <check>]... \
+#     [--waiting-on <bead>]...
 #   The anchor must be an open PR: live in the store, at merge_result
 #   pull_request_pending or pull_request_head_changed on the pending record,
 #   carrying no disposition (gc.pr_close_disposition_kind or a duplicates or
@@ -24,6 +27,9 @@
 #   --ruling-bead is the conversation the ruling was reached in.
 #   --check names a check the ruling sends back, once per check, from the
 #   check index.
+#   --waiting-on names a bead the ruling's ask waits on, once per bead, such as
+#   the anchor of another PR that must land first, carrying the anchor's id
+#   prefix.
 # Output: "<ask> ask <filed|found>".
 # Exit: 0 once the ask stands, filed or found, and 2 when it was refused or did
 #   not answer. A refusal here, before the ask is filed, exits 2 with nothing
@@ -43,13 +49,14 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 DIE_STATUS=2
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-ANCHOR=""; RULING_BEAD=""; RULING=""; CHECKS=()
+ANCHOR=""; RULING_BEAD=""; RULING=""; CHECKS=(); WAITS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --anchor)      shift; [ $# -gt 0 ] || die "--anchor needs a value"; ANCHOR="$1" ;;
     --ruling-bead) shift; [ $# -gt 0 ] || die "--ruling-bead needs a value"; RULING_BEAD="$1" ;;
     --ruling)      shift; [ $# -gt 0 ] || die "--ruling needs a value"; RULING="$1" ;;
     --check)       shift; [ $# -gt 0 ] || die "--check needs a check's name"; CHECKS+=("$1") ;;
+    --waiting-on)  shift; [ -n "${1:-}" ] || die "--waiting-on needs a bead id"; WAITS+=("$1") ;;
     -h|--help)     sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)             die "unknown argument '$1'" ;;
   esac
@@ -103,11 +110,17 @@ REASON="operator ruling (conversation $RULING_BEAD): $RULING"
 
 ASK_ARGS=(review ask "$ANCHOR" --reason "$REASON" --source "$RULING_BEAD")
 for c in "${CHECKS[@]+"${CHECKS[@]}"}"; do ASK_ARGS+=(--check "$c"); done
+for w in "${WAITS[@]+"${WAITS[@]}"}"; do ASK_ARGS+=(--waiting-on "$w"); done
 # The checks --check names are read from the pack's check index beside the
 # pack's scripts directory, this script's own, whatever binding the rig imports
 # the pack under.
-ASK_OUT=$(GCTK_SCRIPTS_DIR="$SCRIPT_DIR" "$GCTK" "${ASK_ARGS[@]}" 2>&1) \
-  || die "the ask that carries the ruling to $ANCHOR's review run did not stand ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' ')); a re-run finds one that landed"
+ASK_OUT=$(GCTK_SCRIPTS_DIR="$SCRIPT_DIR" "$GCTK" "${ASK_ARGS[@]}" 2>&1); rc=$?
+case "$rc" in
+  0) ;;
+  1) die "gctk review ask did not take the arguments of the ask that would carry the ruling to $ANCHOR's review run, and filed nothing ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' '))" ;;
+  3) die "gctk review ask refused the ask that would carry the ruling to $ANCHOR's review run and filed nothing ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' '))" ;;
+  *) die "the ask that carries the ruling to $ANCHOR's review run did not stand ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' ')); a re-run finds one that landed" ;;
+esac
 read -r ASK HOW _ <<< "$(printf '%s\n' "$ASK_OUT" | tail -n 1)"
 [ -n "$ASK" ] || die "gctk review ask named no ask for $ANCHOR; a re-run finds one that landed"
 echo "converse-rework: the ruling goes to the review run of $ANCHOR's PR as ask $ASK, which holds its merge; nothing is superseded, because the run triages the head its fix pushes" >&2

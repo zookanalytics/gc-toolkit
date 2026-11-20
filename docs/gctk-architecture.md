@@ -120,7 +120,7 @@ bead.
 | `gctk review checks` | hook, order | which checks gate a change at a commit, with the rig's index laid over the pack's | Gas City's formula check loop runs a check script and iterates, and holds no review checks. The check index and its rig overlay are the feature. The review formula's steps read it at the reviewed commit, a lane for its own row and triage for the whole index, and the merge cadence reads it for the lanes a change needs before it dispatches them or lands the change. The loop's shape is the review-lane member's design. |
 | `gctk review guidance <check>` | hook | the rig's guidance for a check at the reviewed commit, or the guidance a change edits | Part of the check index: a rig's guidance, read at the commit under review rather than the one checked out. |
 | `gctk review passed <run>` | hook | whether an iteration of a review run passed: the loop's pass-or-iterate check, and with `--record` the run's result for the head and target it judged, with the asks it answered closed, at the iteration that ends the loop | The check script that a review formula's check loop runs after each round. It holds the pass rule over the lanes, their findings and rulings and the asks open on the bead, which the loop itself cannot, and reads only the store, since a check runs with no `gh`. Gas City's PR review and its PR monitor keep their reports per head SHA and record no pass on the bead that owns a PR, and a formula has no script step, so the check records the result as it ends the loop ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#the-check-script-and-the-result-unit-1)). The result is the one the pr domain's evaluator counts, written under the store's record lock, and each ask closes with the work record Gas City's close reads. |
-| `gctk review ask <bead> --reason <text>` | agent, hook | ask for a change on a PR's branch, or for a check at its next head | Gas City's PR monitor files a repair bead that is routed and poured as it is filed, a writer of its own ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#asks-unit-1-unit-4)). An ask is a task bd files with its `blocks` edge onto the PR's bead in one create and no route, so the review run is the branch's one writer. The verb refuses a bead that owns no PR on the record and a check the index does not declare, and finds an ask of the same source and reason, open or closed, before it files. |
+| `gctk review ask <bead> --reason <text>` | agent, hook | ask for a change on a PR's branch, or for a check at its next head | Gas City's PR monitor files a repair bead that is routed and poured as it is filed, a writer of its own ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#asks-unit-1-unit-4)). An ask is a task bd files with its `blocks` edge onto the PR's bead in one create and no route, so the review run is the branch's one writer. An ask that waits on other beads (`--waiting-on`) carries its own `blocks` edge onto each in that same create, bd's `--deps blocked-by`, so no landing pass reads it clear before it waits ([the search](../specs/tk-h0sherg/gas-city-search.md)). The verb refuses a bead that owns no PR on the record and a check the index does not declare, and finds an ask of the same source and reason, open or closed, before it files, refusing one that does not wait on each bead the call names. The ledger's rule for a wait edge refuses the create, with nothing filed, when the ask's edge onto the bead or onto a bead it waits on would hold nothing: a bead of another id prefix than the store gives the ask, or one the store does not hold. |
 | `gctk review step <bead>` | hook | what a review run's step judges: the iteration it runs in, the head that iteration judges and the change triage reads there, and for triage's read whether the run must stop | Gas City records a step's iteration (`gc.attempt`) and the vars a run was poured with, and says neither which head a later iteration of a check loop judges nor what changed since the last head that passed. The verb derives both from the steps' outputs and the results on the bead, and its `--stands` form stops a run whose vars do not name the bead's record, or whose PR is no longer at the head the iteration judges, with no result. |
 | `gctk review output <bead> --file <path>` | hook | check the output a run's step wrote, before the step writes it | Gas City keeps a step's `gc.output_json` as written, and reads it only for a fan-out's items, so a slip shows only once the pass rule reads the output as not written, which spends an attempt, or a fan-out cannot read a triage output's checks, which stops the run. The verb checks the output in the run's shape and against the run's facts, and carries the guidance-edit guard on a correctness approve. The write stays native. |
 | `gctk review comment <run>` | hook | the head's one comment: every lane's verdict there, its findings and how the round ruled each | Gas City's PR review posts one lane's report per head SHA and runs no loop ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#the-runs-formulas-unit-3)), and nothing renders a loop's lanes and rulings. The comment carries every lane's verdict at the head, approvals included, and each point's answer as what the head carries for it. The post goes through `pr-post.sh`, the city's one writer of posts. |
@@ -430,10 +430,17 @@ Nothing outside it parses a metadata value or spells a key's name.
   only its coordination writes, such as a claim, against that. The ledger takes
   the cost bd takes for every other write: the rare record lost that way reads
   as never written.
-- **A wait edge is written only onto a bead its store holds.** bd accepts an
-  edge onto an id its store does not hold and reports success, and the edge
-  holds nothing. So the ledger reads the target in the bead's own store first,
-  and refuses the write when the store does not hold it.
+- **A wait edge is written only onto a bead of its own prefix that its store
+  holds.** bd accepts an edge onto an id its store does not hold and reports
+  success, and the edge holds nothing. bd also keeps an edge between beads of
+  two id prefixes as one into another store, which holds nothing even when this
+  store holds the far bead. So the ledger refuses, with nothing written, a wait
+  edge onto a bead of another prefix, then reads the target in the bead's own
+  store and refuses one the store does not hold. A filing (`Create`) checks
+  the edge from each bead it blocks and the edge onto each bead it waits on
+  against the prefix the store gives the new bead, and `AddBlocker` checks the
+  blocker against the bead that waits on it. Its refusal is `ErrNotHeld`, which
+  a caller tells from any other failure.
 - **The key registry is generated from the declarations.** It is
   `services/gctk/key-registry.json`, and a test fails when it is stale. Each
   entry names its key, its owner, its type, its aliases and, for a pack noun,
@@ -542,10 +549,10 @@ marks read (tk-ssm8qns.6).
 The adapter's own tests drive it through a stub `gc` on `PATH`, so they pin the
 questions it asks. A marked bead that the stub listing leaves out gets a read
 error, and a bead with a `waits-for` edge of its own gets the `waits-for` error
-whether the stub listing names it or not. Its acceptance test runs the bd the
-city runs against a scratch store, so it pins the answer that bd gives for each
-kind of wait, each gate included, and the beads it marks blocked. The domains'
-tests run on the fake.
+whether the stub listing names it or not. Its acceptance tests run the bd the
+city runs against a scratch store, so they pin the answer that bd gives for
+each kind of wait, each gate included, the beads it marks blocked, and the
+prefix its create mints an id from. The domains' tests run on the fake.
 
 The host adapter's own tests start real processes, so they pin what its fake
 stands in for: a group that ends whole, a start that leads a session of its own
