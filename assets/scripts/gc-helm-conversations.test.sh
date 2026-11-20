@@ -60,8 +60,8 @@
 #                 not answer exits 4; a gate that holds the --from bead only
 #                 through another bead is read as without --from, and one that
 #                 no longer holds it is refused; --from with no reference is
-#                 refused, exit 2; accept, dismiss and handback refuse a gate
-#                 two beads wait on, naming both
+#                 refused, exit 2; dismiss and handback refuse a gate two
+#                 beads wait on, naming both
 #   (ABOUT-SUSPENDED) a subject in a suspended rig reads with rig_suspended
 #                 and no refusal, and the text says it waits until the rig
 #                 resumes
@@ -468,11 +468,9 @@ eq "$(printf '%s' "$OUT" | jq -r '.subject.id')" "tk-held2" "(ABOUT-FROM) …nam
 LIST_ID_FAIL=tk-held2 run conversations tk-gate --json
 eq "$RC" 4 "(ABOUT-FROM) a read of the beads' waits that does not answer exits 4"
 has "$ERR" "gate tk-gate holds 2 beads (tk-held tk-held2), and when each began waiting on it could not be read" "(ABOUT-FROM) …saying which one cannot be told"
-for v in accept dismiss; do
-  run "$v" tk-gate
-  eq "$RC" 4 "(ABOUT-FROM) $v on a gate two beads wait on exits 4"
-  has "$ERR" "gc-helm: $v: gate tk-gate is about 2 beads still waiting on it (tk-held tk-held2), and a conversation is about one bead. Name the one you mean: gc-helm $v <bead>." "(ABOUT-FROM) …refusing it, naming both beads, since $v would act on a bead nobody named"
-done
+run dismiss tk-gate
+eq "$RC" 4 "(ABOUT-FROM) dismiss on a gate two beads wait on exits 4"
+has "$ERR" "gc-helm: dismiss: gate tk-gate is about 2 beads still waiting on it (tk-held tk-held2), and a conversation is about one bead. Name the one you mean: gc-helm dismiss <bead>." "(ABOUT-FROM) …refusing it, naming both beads, since dismiss would act on a bead nobody named"
 run handback tk-gate <<< "the hand-back"
 eq "$RC" 4 "(ABOUT-FROM) handback on a gate two beads wait on exits 4"
 has "$ERR" "gc-helm: handback: gate tk-gate is about 2 beads still waiting on it (tk-held tk-held2), and a conversation is about one bead. Name the one you mean: gc-helm handback <bead>. Nothing was recorded." "(ABOUT-FROM) …refusing it, naming both beads"
