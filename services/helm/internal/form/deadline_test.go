@@ -91,7 +91,9 @@ func realOpen(t *testing.T, timeout time.Duration) (Script, string) {
 	t.Setenv("TMPDIR", dir)
 	for _, k := range []string{"GC_CITY_PATH", "GC_CITY", "GC_CITY_ROOT", "GC_RIG", "BEADS_DIR", "GC_HELM_FIXTURE"} {
 		t.Setenv(k, "")
-		os.Unsetenv(k)
+		if err := os.Unsetenv(k); err != nil {
+			t.Fatal(err)
+		}
 	}
 	path, err := filepath.Abs("../../../../assets/scripts/gc-helm.sh")
 	if err != nil {

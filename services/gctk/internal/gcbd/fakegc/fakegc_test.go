@@ -218,7 +218,7 @@ func TestAStoreFailureIsLoud(t *testing.T) {
 	if err := os.Chmod(f.dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(f.dir, 0o700) })
+	t.Cleanup(func() { _ = os.Chmod(f.dir, 0o700) })
 	r = f.gc("bd", "update", "a", "--status=closed")
 	if r.status != exitStore || r.out != "" || !strings.Contains(r.err, "beads.json") {
 		t.Errorf("an unwritable store: %+v", r)
