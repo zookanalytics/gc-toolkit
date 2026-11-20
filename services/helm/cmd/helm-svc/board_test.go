@@ -165,7 +165,7 @@ func rigKeys(t *testing.T, out string) map[string][]string {
 // for it, which is what GET /helm/rigs/{rig} answers. Each read is handed the
 // rig's store as the rig list names it.
 func TestBoardPrintsEachRigsDocument(t *testing.T) {
-	c := newFakeCity(t, "gc-toolkit", "loomington")
+	c := newFakeCity(t, "rig-a", "rig-c")
 	code, out, errOut := c.run("--json")
 	if code != boardExitOK {
 		t.Fatalf("board --json exited %d, want %d:\n%s", code, boardExitOK, errOut)
@@ -185,7 +185,7 @@ func TestBoardPrintsEachRigsDocument(t *testing.T) {
 			t.Errorf("%s: the printed board is not the document the read built:\n got %+v\nwant %+v", r.Rig, *r.Board, want)
 		}
 	}
-	if want := []string{"gc-toolkit", "loomington"}; !slices.Equal(names, want) {
+	if want := []string{"rig-a", "rig-c"}; !slices.Equal(names, want) {
 		t.Errorf("rigs printed %v, want %v in the city's order", names, want)
 	}
 	for rig, keys := range rigKeys(t, out) {
@@ -194,8 +194,8 @@ func TestBoardPrintsEachRigsDocument(t *testing.T) {
 		}
 	}
 	wantReads := []rigboard.Rig{
-		{Name: "gc-toolkit", Store: filepath.Join(rigPath("gc-toolkit"), ".beads")},
-		{Name: "loomington", Store: filepath.Join(rigPath("loomington"), ".beads")},
+		{Name: "rig-a", Store: filepath.Join(rigPath("rig-a"), ".beads")},
+		{Name: "rig-c", Store: filepath.Join(rigPath("rig-c"), ".beads")},
 	}
 	if !slices.Equal(c.reads, wantReads) {
 		t.Errorf("reads = %v, want %v", c.reads, wantReads)
@@ -206,9 +206,9 @@ func TestBoardPrintsEachRigsDocument(t *testing.T) {
 // error in place of a board, never printed as a board with nothing on it. The
 // other rigs still print, and the exit says a read failed.
 func TestBoardNamesARigWhoseReadFailed(t *testing.T) {
-	c := newFakeCity(t, "gc-toolkit", "sprintshow", "loomington")
-	failure := errors.New("list the beads of sprintshow: gc bd: exit status 1: the store is locked")
-	c.fail["sprintshow"] = failure
+	c := newFakeCity(t, "rig-a", "rig-b", "rig-c")
+	failure := errors.New("list the beads of rig-b: gc bd: exit status 1: the store is locked")
+	c.fail["rig-b"] = failure
 	code, out, _ := c.run("--json")
 	if code != boardExitRead {
 		t.Errorf("board --json exited %d with a rig unread, want %d", code, boardExitRead)
@@ -217,7 +217,7 @@ func TestBoardNamesARigWhoseReadFailed(t *testing.T) {
 	if len(a.Rigs) != 3 {
 		t.Fatalf("want all three rigs named, got %d:\n%s", len(a.Rigs), out)
 	}
-	if got := a.Rigs[1]; got.Rig != "sprintshow" || got.Error != failure.Error() || got.Board != nil {
+	if got := a.Rigs[1]; got.Rig != "rig-b" || got.Error != failure.Error() || got.Board != nil {
 		t.Errorf("the unread rig must be named with its error alone, got %+v", got)
 	}
 	for _, i := range []int{0, 2} {
@@ -226,15 +226,15 @@ func TestBoardNamesARigWhoseReadFailed(t *testing.T) {
 		}
 	}
 	keys := rigKeys(t, out)
-	if want := []string{"error", "rig"}; !slices.Equal(keys["sprintshow"], want) {
-		t.Errorf("the unread rig's part has keys %v, want %v", keys["sprintshow"], want)
+	if want := []string{"error", "rig"}; !slices.Equal(keys["rig-b"], want) {
+		t.Errorf("the unread rig's part has keys %v, want %v", keys["rig-b"], want)
 	}
 }
 
 // TestBoardRigListFailureExitsThree: with no rig list there is nothing to name,
 // so nothing is printed, and stderr says why.
 func TestBoardRigListFailureExitsThree(t *testing.T) {
-	c := newFakeCity(t, "gc-toolkit")
+	c := newFakeCity(t, "rig-a")
 	c.listErr = errors.New("gc rig list --json: exit status 1: no city here")
 	code, out, errOut := c.run("--json")
 	if code != boardExitRead {
@@ -254,18 +254,18 @@ func TestBoardRigListFailureExitsThree(t *testing.T) {
 // TestBoardRigReadsOneRig: --rig reads and prints only the rig it names, in
 // either spelling of the flag.
 func TestBoardRigReadsOneRig(t *testing.T) {
-	for _, args := range [][]string{{"--json", "--rig", "sprintshow"}, {"--rig=sprintshow", "--json"}} {
-		c := newFakeCity(t, "gc-toolkit", "sprintshow", "loomington")
+	for _, args := range [][]string{{"--json", "--rig", "rig-b"}, {"--rig=rig-b", "--json"}} {
+		c := newFakeCity(t, "rig-a", "rig-b", "rig-c")
 		code, out, errOut := c.run(args...)
 		if code != boardExitOK {
 			t.Fatalf("board %v exited %d:\n%s", args, code, errOut)
 		}
-		if len(c.reads) != 1 || c.reads[0].Name != "sprintshow" {
-			t.Errorf("board %v read %v, want sprintshow alone", args, c.reads)
+		if len(c.reads) != 1 || c.reads[0].Name != "rig-b" {
+			t.Errorf("board %v read %v, want rig-b alone", args, c.reads)
 		}
 		a := decodeAnswer(t, out)
-		if len(a.Rigs) != 1 || a.Rigs[0].Rig != "sprintshow" || a.Rigs[0].Board == nil {
-			t.Errorf("board %v printed %+v, want sprintshow's board alone", args, a.Rigs)
+		if len(a.Rigs) != 1 || a.Rigs[0].Rig != "rig-b" || a.Rigs[0].Board == nil {
+			t.Errorf("board %v printed %+v, want rig-b's board alone", args, a.Rigs)
 		}
 	}
 }
@@ -273,15 +273,15 @@ func TestBoardRigReadsOneRig(t *testing.T) {
 // TestBoardRigTheCityDoesNotList: a rig the city does not list is the caller's
 // mistake, so it exits as a usage error, names the city's rigs and reads none.
 func TestBoardRigTheCityDoesNotList(t *testing.T) {
-	c := newFakeCity(t, "gc-toolkit", "loomington")
-	code, out, errOut := c.run("--json", "--rig=gc-tolkit")
+	c := newFakeCity(t, "rig-a", "rig-c")
+	code, out, errOut := c.run("--json", "--rig=rig-d")
 	if code != boardExitUsage {
 		t.Errorf("exited %d, want %d", code, boardExitUsage)
 	}
 	if out != "" {
 		t.Errorf("printed an answer for a rig the city does not list:\n%s", out)
 	}
-	for _, want := range []string{`"gc-tolkit"`, "gc-toolkit, loomington"} {
+	for _, want := range []string{`"rig-d"`, "rig-a, rig-c"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("stderr must name %s:\n%s", want, errOut)
 		}
@@ -303,7 +303,7 @@ func TestBoardTimeoutBoundsTheWholeRead(t *testing.T) {
 		{[]string{"--json", "--timeout", "7"}, 7 * time.Second},
 		{[]string{"--json"}, defaultBoardTimeout},
 	} {
-		c := newFakeCity(t, "gc-toolkit", "sprintshow", "loomington")
+		c := newFakeCity(t, "rig-a", "rig-b", "rig-c")
 		start := time.Now()
 		code, _, errOut := c.run(tc.args...)
 		end := time.Now()
@@ -326,8 +326,8 @@ func TestBoardTimeoutBoundsTheWholeRead(t *testing.T) {
 // TestBoardNamesAReadTheTimeoutEnded: a read the bound cuts short is named with
 // its error, and the rigs after it are not each given a bound of their own.
 func TestBoardNamesAReadTheTimeoutEnded(t *testing.T) {
-	c := newFakeCity(t, "gc-toolkit", "loomington")
-	c.slow["gc-toolkit"] = true
+	c := newFakeCity(t, "rig-a", "rig-c")
+	c.slow["rig-a"] = true
 	code, out, _ := c.run("--json", "--timeout=1")
 	if code != boardExitRead {
 		t.Errorf("exited %d, want %d", code, boardExitRead)
@@ -347,8 +347,8 @@ func TestBoardNamesAReadTheTimeoutEnded(t *testing.T) {
 // call without --json says where the board is and prints nothing. It answers
 // before the city is found or read.
 func TestBoardWithoutJSONNamesTheWebPage(t *testing.T) {
-	for _, args := range [][]string{nil, {"--rig=gc-toolkit"}, {"--timeout=5"}} {
-		c := newFakeCity(t, "gc-toolkit")
+	for _, args := range [][]string{nil, {"--rig=rig-a"}, {"--timeout=5"}} {
+		c := newFakeCity(t, "rig-a")
 		code, out, errOut := c.run(args...)
 		if code != boardExitUsage {
 			t.Errorf("board %v exited %d, want %d:\n%s", args, code, boardExitUsage, errOut)
@@ -372,7 +372,7 @@ func TestBoardWithoutJSONNamesTheWebPage(t *testing.T) {
 // flag.
 func TestBoardRefusesTheTileViewsFlags(t *testing.T) {
 	for _, args := range [][]string{{"--json", "--all"}, {"--json", "--limit=0"}, {"--json", "--limit", "5"}} {
-		c := newFakeCity(t, "gc-toolkit")
+		c := newFakeCity(t, "rig-a")
 		code, out, errOut := c.run(args...)
 		if code != boardExitUsage {
 			t.Errorf("board %v exited %d, want %d", args, code, boardExitUsage)
@@ -395,9 +395,9 @@ func TestBoardArgErrors(t *testing.T) {
 		{"--json", "--timeout"},
 		{"--json", "--timeout=-1"},
 		{"--json", "--timeout=soon"},
-		{"--json", "gc-toolkit"},
+		{"--json", "rig-a"},
 	} {
-		c := newFakeCity(t, "gc-toolkit")
+		c := newFakeCity(t, "rig-a")
 		code, out, errOut := c.run(args...)
 		if code != boardExitUsage {
 			t.Errorf("board %v exited %d, want %d", args, code, boardExitUsage)
@@ -414,7 +414,7 @@ func TestBoardArgErrors(t *testing.T) {
 // TestBoardHelpIsSuccess: an asked-for usage prints on stdout and exits 0.
 func TestBoardHelpIsSuccess(t *testing.T) {
 	for _, flag := range []string{"--help", "-h"} {
-		c := newFakeCity(t, "gc-toolkit")
+		c := newFakeCity(t, "rig-a")
 		code, out, _ := c.run(flag)
 		if code != boardExitOK || !strings.Contains(out, "helm-svc board --json") {
 			t.Errorf("board %s exited %d with stdout:\n%s", flag, code, out)
