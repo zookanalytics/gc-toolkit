@@ -213,6 +213,14 @@ func contractCases() []contractCase {
 			{args: []string{"update", "{a}", "--status", "in_progress"}},
 			{args: []string{"update", "{b}", "--set-metadata", "k=v", "--set-metadata", "novalue"}},
 		}},
+		{name: "an update writes the title it names, in either spelling, beside its other fields", beads: []string{"a", "b"}, state: []string{"a", "b"}, steps: []step{
+			{args: []string{"update", "{a}", "--title", "ct-retitled", "--set-metadata", "pr_summary=s"}},
+			{args: []string{"update", "{b}", "--title=ct-retitled-too"}},
+			{args: []string{"update", "{b}", "--title", ""}},
+			{args: []string{"update", "{b}", "--title", "  ", "--set-metadata", "k=v"}},
+			{args: []string{"list", "--all", "--json"}, answer: "count:ct-retitled"},
+			{args: []string{"list", "--all", "--json"}, answer: "count:ct-retitled-too"},
+		}},
 		{name: "a dep add that names no type adds a blocks edge", beads: []string{"a", "b"}, state: []string{"a"}, steps: []step{
 			{args: []string{"dep", "add", "{a}", "{b}"}},
 		}},

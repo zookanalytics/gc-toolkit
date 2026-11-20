@@ -71,8 +71,11 @@ the branch beside it with the operator, pushing under the lease
 (`converse-edit`). A send-back there that the sitting does not make itself is an
 ask the run takes, never a rework child or a supplement. The sign-off's
 `--rework` files it, with
-`--check <check>` once for each check the ruling sends back, and nothing returns
-to unreviewed, because the run triages the head its fix pushes. A must-fix point
+`--check <check>` once for each check the ruling sends back, and
+`--rework-waiting-on <bead>` once for each bead the send-back waits for, such
+as the anchor of a PR that must land first, which the ask carries from the
+create that files it. Nothing returns to unreviewed, because the run triages
+the head its fix pushes. A must-fix point
 on such a PR that no sitting rules, such as one a sitting or the mechanik finds
 on another open PR, is an ask of its own on that PR's bead. It holds that PR's
 merge from the moment it is filed, and the first run that can take it rules it
@@ -85,12 +88,17 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 "$GCTK" review ask <the anchor of the PR> --reason "<what must change, why, and what done looks like>" --source <the bead the point came from>
 ```
 
-Add `--check <check>` for each check the point sends back. Exit 0 prints
-`<ask> filed`, or `<ask> found` for an ask of the same source and reason, open
-or closed. Exit 3 refuses an anchor that owns no PR on the pending record,
-which takes the rework or the supplement here instead, and a check the index
-does not declare. Exit 2 is a read that did not answer, and the next call finds
-an ask that landed.
+Add `--check <check>` for each check the point sends back, and
+`--waiting-on <bead>` for each bead of the anchor's id prefix that must close
+before the run takes the point, such as the anchor of a PR it must land after.
+Exit 0 prints `<ask> filed`, or `<ask> found` for an ask of the same source and
+reason, open or closed. Exit 3 refuses an anchor that owns no PR on the pending
+record, which takes the rework or the supplement here instead, one that does
+not carry the id prefix its store gives the ask, a check the
+index does not declare, a `--waiting-on` bead of another id prefix or one the
+anchor's store does not hold, and a call that finds an ask of the same source
+and reason that does not wait on every `--waiting-on` bead. Exit 2 is a read
+that did not answer, and the next call finds an ask that landed.
 
 Scope found while a PR on the old path is open, with no ruling behind it, rides
 a supplement bead instead. A supplement is PR-finishing work, and its create sets up
