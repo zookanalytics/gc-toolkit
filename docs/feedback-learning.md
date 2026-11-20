@@ -161,15 +161,16 @@ neither its use lines nor what Claude Code rewrites in its front matter when an
 agent saves it counts as a change, and neither does an edit to its front
 matter alone. Due notes join the pending observations, count toward the
 cadence gate, and are judged oldest first, at most `memory_notes_per_run` a
-run. The judge reads each note by the operator's three questions, as the
-rubric's memory section says. It drops a note that holds nothing worth
-keeping, once what the note shows is carried to where it goes. It sets a note
-on the feedback pattern its lesson joins, or on the bead in another rig's store
-that carries its fix, or keeps it until a date it chooses. A note it cannot
-substantiate either way stays, and a line in it asks its users to record the
-days they use it, one dated line a day, for the judge's next look. A decision
-that does not ask again takes that line out, and the use lines stay as the
-note's dated record.
+run. The judge gives each due note one outcome by the rubric's memory section,
+whose tests are the operator's three questions as
+`specs/tk-zlot608.2/design.md` quotes them. It drops a note that holds nothing
+worth keeping, once what the note shows is carried to where it goes. It sets a
+note on the feedback pattern its lesson joins, or on the bead in another rig's
+store that carries its fix, or keeps it until a date it chooses. A note it
+cannot substantiate either way stays, and a line in it asks its users to record
+the days they use it, one dated line a day, for the judge's next look. A
+decision that does not ask again takes that line out, and the use lines stay as
+the note's dated record.
 
 A note on a pattern leaves once the pattern closes and a fix it spawned has
 landed on its repository's default branch. When the pattern closes with no fix
