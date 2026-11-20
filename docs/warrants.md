@@ -449,7 +449,7 @@ no warrant.
   `services/gctk/pr/read.go`, which `answerFromStore` in
   `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
   `PRAnswers` in `services/gctk/listing/pr.go` calls for the rig board, from
-  `services/helm/internal/rigboard/gather.go`.
+  `Read` in `services/gctk/standing/standing.go`, which the board's read asks.
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
   of reading GitHub. The facts are the PR's state, draft flag, head and merge
@@ -480,17 +480,20 @@ no warrant.
     merge commit (`gh pr view` in `gastown/commands/pr-merge-reconcile/run.sh`
     180-181), and writes only its record's own keys, such as `pr_state`,
     `observed_pr_head_sha` and `pr_reconcile_error`. No pack keeps GitHub's
-    checks, reviews or merge state for a PR on a bead. The review keys packs
-    write are about the reviews their own runs make or ask for, such as the
-    `gascity` pack's `gc.github.review_outcome`.
+    reviews or merge state for a PR on a bead, or its checks on the bead that
+    owns the PR: the `pr-review` pack's `mol-pr-ci-diagnose` notes counts of a
+    PR's checks from `gh pr checks` on its own run's root, with no required
+    flag and no head (`pr-review/formulas/mol-pr-ci-diagnose.formula.toml`).
+    The review keys packs write are about the reviews their own runs make or
+    ask for, such as the `gascity` pack's `gc.github.review_outcome`.
   - In `gastownhall/beads`, `bd github sync` reads and writes issues, their
     sub-issues and blocking links, and their labels through bd's GitHub client
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
-- **Verified.** 2026-11-18, at `gastownhall/gascity` main 03f6fe825c,
-  `gastownhall/gascity-packs` main 8ed128846fc5, and `gastownhall/beads` main
-  ae13ad8bcf48.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main 4963923250,
+  `gastownhall/gascity-packs` main 23d007dac5d4, and `gastownhall/beads` main
+  3a274fbf8f76.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
   request's reviews, the required checks at its head and its review threads,
   where a reader of the PR's own bead finds them, for example once its PR
