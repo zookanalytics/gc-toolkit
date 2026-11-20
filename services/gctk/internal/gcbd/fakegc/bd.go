@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func (c *Call) bd(s, d string, args []string) error {
+func (c *Call) bd(s, d string, args []string) (err error) {
 	for {
 		switch {
 		case first(args) == "--db":
@@ -34,6 +34,11 @@ func (c *Call) bd(s, d string, args []string) error {
 		return nil
 	}
 	verb, args := shift(args)
+	defer func() {
+		if err == nil && writes(verb, args) {
+			err = c.afterWrite()
+		}
+	}()
 	switch verb {
 	case "show":
 		return c.show(s, d, args)
@@ -63,6 +68,21 @@ func (c *Call) bd(s, d string, args []string) error {
 		return c.comments(s, args)
 	}
 	return c.fail(2, "gc bd stub: unsupported '"+verb+"'")
+}
+
+// writes reports whether a bd verb, with the arguments after it, writes the
+// store: an update, a create, a close, a comment, a dep add or remove, or a
+// gate resolve.
+func writes(verb string, args []string) bool {
+	switch verb {
+	case "update", "create", "close", "comment":
+		return true
+	case "dep":
+		return first(args) != "list"
+	case "gate":
+		return first(args) == "resolve"
+	}
+	return false
 }
 
 // withEnv is env with each NAME=value in set in place of any value env gives
@@ -276,6 +296,15 @@ func (c *Call) list(s, d string, args []string) error {
 	}
 	if on := c.getenv("STUB_LIST_FAIL_ON"); on != "" && strings.Contains(strings.Join(args, " "), on) {
 		return c.fail(1, "gc: simulated list failure")
+	}
+	if after := c.getenv("STUB_LIST_FAIL_AFTER"); after != "" {
+		down, err := c.made(after)
+		if err != nil {
+			return err
+		}
+		if down {
+			return c.fail(1, "gc: simulated list failure")
+		}
 	}
 	spaced := " " + strings.Join(args, " ") + " "
 	if p := c.getenv("STUB_LIST_PARTIAL"); p != "" && strings.Contains(spaced, p) {
