@@ -28,6 +28,21 @@
 // and a line on stderr naming the file. Writes to one store take turns under
 // a lock on its directory.
 //
+// # A store per rig
+//
+// Those files are the default store. A store of its own sits in a directory,
+// as a rig's store sits in <path>/.beads, and keeps the same files there as
+// beads.json, deps.txt, kv.txt and comments.json. A rig in the rig list
+// STUB_RIGS names keeps its store in its path's .beads. A call acts in the
+// store gc and bd would take it to (route): the store a --db pin names,
+// wherever in the call it stands, as bd reads that flag; else the rig gc's
+// --rig names; else the rig whose prefix the call's subject carries, the first
+// bead id a by-id verb names, by the longest prefix; else the rig GC_RIG names;
+// else the default store. A pin or a rig whose directory holds no beads.json
+// has no store here and is passed over, so a suite that keeps one store keeps
+// every rig's beads in it. A sling routes by its --rig and its bead, and the
+// harness's readers and writers by the bead's id, else GC_RIG.
+//
 // Every call appends its arguments to STUB_GC_LOG, one line each, and a
 // session call appends "gc session <args>" to STUB_SESSION_LOG. A call led by
 // --harness-read is the harness's own read of what a bead carries
@@ -67,10 +82,11 @@
 //   - gc-toolkit scripts-dir prints STUB_PACK's assets/scripts.
 //   - bd where, show, list, update, create, close, dep (list, add, add --file,
 //     remove, --blocks), kv (get, set, clear, list), gate (list, resolve),
-//     comment, comments, set-state, blocked, ready and sql, which answers the
-//     one query gctk reads beside blocked: the ids bd's blocked rule marks. A
-//     --db pin ahead of the verb is dropped, since the fake serves one store,
-//     and an --actor ahead of it is the actor the call writes as.
+//     comment, comments, set-state, blocked, ready, statuses, the built-in
+//     statuses bd prints for a store with no custom status, and sql, which
+//     answers the one query gctk reads beside blocked: the ids bd's blocked
+//     rule marks. A --db pin and a --rig ahead of the verb pick the store
+//     (route), and an --actor ahead of it is the actor the call writes as.
 //
 // Each keeps bd's rule where the contract test pins one: a listing carries
 // each bead's edges, selects a parent's children by --parent and hides a
@@ -81,10 +97,14 @@
 // --if-status that no longer holds writes nothing and exits 13; an update
 // writes the title it names, and one whose title is blank writes nothing and
 // exits 1; a close records closed_at and its reason; a blocks edge between a
-// bead and its own ancestor is refused either way; and a set-state that
-// changes a bead's <dimension>:<value> label swaps the dimension's label and
-// files a closed event bead, the bead's child, while one to the value the
-// bead holds writes nothing.
+// bead and its own ancestor is refused either way; a create --dry-run answers
+// the row it would file and writes nothing, its created_by the actor bd
+// resolves (--actor, BEADS_ACTOR, BD_ACTOR, git's user.name, USER, then
+// unknown); in a rig's store a create's dependency onto a bead with another
+// prefix is kept without the bead, as bd keeps one onto another store; and a
+// set-state that changes a bead's <dimension>:<value> label swaps the
+// dimension's label and files a closed event bead, the bead's child, while one
+// to the value the bead holds writes nothing.
 //
 // # The settings
 //
@@ -108,10 +128,11 @@
 //     a dep list, for every one when set to 1 and otherwise for those whose
 //     arguments carry the text.
 //   - STUB_UPDATE_FAIL, STUB_CLOSE_FAIL, STUB_DEP_FAIL, STUB_DEP_ADD_FAIL,
-//     STUB_GATE_RESOLVE_FAIL and STUB_GATE_RESOLVE_NOOP name ids, blank
-//     separated. A write naming one is refused, or for NOOP reports success
-//     and writes nothing. STUB_CLOSE_FAIL refuses a close, and an update only
-//     when it sets the status closed.
+//     STUB_DEP_ADD_NOOP, STUB_GATE_RESOLVE_FAIL and STUB_GATE_RESOLVE_NOOP name
+//     ids, blank separated. A write naming one is refused, or for a NOOP
+//     reports success and writes nothing. STUB_CLOSE_FAIL refuses a close, and
+//     an update only when it sets the status closed. A dep add is named by the
+//     bead it adds the edge from.
 //   - STUB_FAIL_ON fails any call whose arguments, joined by blanks, carry
 //     that text, at exit 1 with nothing answered or written. STUB_UPDATE_FAIL_ON
 //     and STUB_DEP_ADD_FAIL_ON do the same to an update or a dep add alone.
@@ -119,9 +140,11 @@
 //     the keys it names, as a write that reported success and half-landed.
 //     The keys are metadata keys or the fields status, assignee, priority,
 //     parent and description.
-//   - STUB_ENFORCE_BLOCKS refuses to close a bead while a bead that blocks it
-//     is not closed. STUB_ENFORCE_CLOSE_OWNER refuses a close of a bead
-//     assigned to anyone but BEADS_ACTOR, unless the close passes --force.
+//   - STUB_ENFORCE_BLOCKS keeps bd's checked close, by close or by an update
+//     that sets the status closed: it refuses one while a bead that blocks the
+//     bead is neither closed nor pinned, or a child of it is not closed, once
+//     an --if-* guard has held. STUB_ENFORCE_CLOSE_OWNER refuses a close of a
+//     bead assigned to anyone but BEADS_ACTOR, unless the close passes --force.
 //   - STUB_SHOW_NOTICE leads a show's answer with the notice a read from
 //     another rig's store carries.
 //     STUB_SHOW_HOOK names a program run with the id before each show answers,
@@ -131,11 +154,13 @@
 //     (Call.hook). It can land another writer's change between two of a
 //     script's calls, and its exit status, when not 0, fails the call.
 //   - STUB_AFTER_WRITE names a program run after each bd call that writes the
-//     store has landed (an update, a create, a close, a comment, a dep add or
-//     remove, or a gate resolve), with the call's arguments (Call.afterWrite).
-//     It can run another process, such as the deferred-dispatch order's pass,
-//     at each moment a script's write leaves, and its own writes do not run it
-//     again.
+//     store has landed (an update, a create that is not a dry run, a close, a
+//     comment, a dep add or remove, or a gate resolve), with the call's
+//     arguments (Call.afterWrite). It can run another process, such as the
+//     deferred-dispatch order's pass, at each moment a script's write leaves,
+//     and its own writes do not run it again. It starts with the store
+//     settings the call found, not those of the rig store the call was
+//     routed to, so its own calls are routed as another process's are.
 //   - STUB_CREATE_GARBAGE answers a create that landed with a line that is
 //     not JSON.
 //   - STUB_SESSION_LIST_RC, STUB_DELETE_SOURCE_RC and STUB_REOPEN_SOURCE_RC
@@ -150,5 +175,8 @@
 // A dep add onto a bead the store does not hold stores the edge, where bd
 // refuses an edge onto a missing bead of its own store, because the fixtures
 // of pr-facts.test.sh add edges onto beads they never filed. A create mints the
-// id new-<N>, for the store's Nth row, and answers {"id": ...} alone.
+// id new-<N>, for its store's Nth row, a rig's store included, where bd mints
+// under the store's prefix, and answers {"id": ...} alone. gc routes a by-id
+// call by its subjects' prefix only while every subject names one store, and
+// the fake reads the first subject alone.
 package main
