@@ -1,6 +1,6 @@
 ---
 name: Design — the board reads only the shared readers, and gc-helm's verbs move into gctk
-description: The design record for tk-1tfzr71.213, the design child of initiative tk-1tfzr71.24, read at main 790e32ee5 and Gas City upstream main bfe7a19cc2. It retires the tile board with its own store reader, which ends the ICU helper; has `helm-svc board --json` print the page's document; turns the work queue's "Not scheduled" list into the row of ready work no queue holds; moves gc-helm.sh's steering and record verbs into gctk and leaves its conversation verbs to tk-ssm8qns.15; keeps the takeaway fields until a bead of their own decides them; and runs the build orders only while a build is owed. Read it to approve the design at its gate, or to build one of the units it defines.
+description: The design record for tk-1tfzr71.213, the design child of initiative tk-1tfzr71.24, read at main 790e32ee5 and Gas City upstream main bfe7a19cc2. It retires the tile board with its own store reader, which ends the ICU helper; has `helm-svc board --json` print the page's document; turns the work queue's "Not scheduled" list into the row of ready work no queue holds; moves gc-helm.sh's steering and record verbs into gctk and leaves its conversation verbs to tk-ssm8qns.15; keeps the takeaway fields until a bead of their own decides them; and runs the build orders only while a build or a restart is owed. Read it to approve the design at its gate, or to build one of the units it defines.
 ---
 
 # Design: the board reads only the shared readers, and gc-helm's verbs move into gctk
@@ -76,14 +76,16 @@ probe the library. Approving this design makes these changes.
    instead, the scan reads the bead's first-reaction run, and the three checks
    change, which about doubles this member's reach into code it otherwise leaves
    alone.
-6. **The build orders run only while a build is owed.** helm's and gctk's build
-   orders become condition orders: each pass asks `gc-build.sh` whether the
-   binary is missing or was built from a revision other than the checkout's, and
-   runs the build only then (section 8). Gain: no run and no run record on the
+6. **The build orders run only while a build or a restart is owed.** helm's and
+   gctk's build orders become condition orders: each pass asks `gc-build.sh`
+   whether the binary is missing or was built from a revision other than the
+   checkout's, or whether helm's new binary still waits for its restart, and runs
+   the order only then (section 8). Gain: no run and no run record on the
    passes where nothing is owed, today one every five minutes or so for each,
    and two orders leave the four-per-pass dispatch budget the city's other
-   clock-driven orders share. A build that fails is still tried again every five
-   minutes until it succeeds, as today, so a failure that clears needs no one.
+   clock-driven orders share. A build or a restart that fails is still tried
+   again every five minutes until it succeeds, as today, so a failure that
+   clears needs no one.
    Cost: a cheap check every pass. No Gas City primitive rebuilds a service when
    its source changes. gctk's order is this design's addition to the contract,
    which names only helm's.
@@ -332,14 +334,17 @@ cooldown, and `orders/gctk-build.toml` runs `gc-build.sh gctk --deploy` the same
 way. `gc-build.sh` already builds only when the binary is missing or its
 source has changed, so most runs build nothing.
 
-Unit 5 gives `gc-build.sh` a mode that only answers whether a build is owed, and
-makes each order a condition order whose check is that mode. A build is owed
-when the binary is missing or was built from a revision other than the
-checkout's. It is due at once when the checkout's revision is not the one the
-last run saw, and otherwise five minutes after that run, today's pace. So a
-build that failed for a reason that clears, such as a download that did not
-answer, is tried again until it succeeds with no one acting, and a failed build
-is not tried on every pass, a city's first build included. Each run's record,
+Unit 5 gives `gc-build.sh` a mode that only answers whether a run is owed, and
+makes each order a condition order whose check is that mode. A run is owed when
+a build is owed or, for helm, a published binary still waits for the restart
+that puts it into service, which the script's `restart-pending` marker records
+until a restart succeeds. A build is owed when the binary is missing or was
+built from a revision other than the checkout's. An owed run is due at once when
+the checkout's revision is not the one the last run saw, and otherwise five
+minutes after that run, today's pace. So a build or a restart that failed for a
+reason that clears, such as a download that did not answer, is tried again
+until it succeeds with no one acting, and a failed one is not tried on every
+pass, a city's first build included. Each run's record,
 `build-status.json`, holds the revision it saw and the time it ran. A person
 runs the order to try it sooner. The script stays a script because it builds
 gctk's own binary, which gctk cannot hold.
@@ -412,7 +417,7 @@ the city working.
 | 2. The old board retires | Everything section 1 lists; the beads requirement and the ICU helper with every use (section 4); "Assigned to you"; the two Debt entries; the warrants that name the old board's reads (Machine axis, Unanswered review threads); the deletion plan's row for the parity test; `lifecycle.test.sh`'s machine-axis check; the text section 5 gives it; the comparison of section 9 | unit 1 |
 | 3. Ready work no queue holds | `queue`'s answer and the "Not scheduled" list over it (section 2), with tests for each item of the patrols design's section 8 list | unit 1 |
 | 4. The verbs | takeaway, park, place and accept as gctk commands; react's and priority's callers; the callers, tests, warrants and text of section 5 | nothing |
-| 5. The build orders | `gc-build.sh`'s owed-build mode and the two condition orders (section 8) | unit 2: until the library goes, its probe needs a run when the source has not moved |
+| 5. The build orders | `gc-build.sh`'s owed-run mode and the two condition orders (section 8) | unit 2: until the library goes, its probe needs a run when the source has not moved |
 
 Unit 4 is the largest, and its implementer may split it into a bead for
 takeaway and one for the rest, each removing its verbs and moving their
