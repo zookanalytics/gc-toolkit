@@ -1,0 +1,13 @@
+# seat-progress-detect — every 30 minutes, record each pool seat that prints but
+# has written nothing for three hours as one gc-toolkit.seat-progress.stalled
+# event, writing no bead (specs/tk-1tfzr71.158/design.md, section 2). The verb's
+# 90-second read deadline and 20-second event bound end inside the 120s
+# timeout, as services/gctk/session's test holds. Tune from city.toml
+# [[orders.overrides]].
+[order]
+description = "Record each pool seat that prints but has written nothing for three hours as one gc-toolkit.seat-progress.stalled event"
+trigger = "cooldown"
+interval = "30m"
+timeout = "120s"
+exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" session progress"
+scope = "city"

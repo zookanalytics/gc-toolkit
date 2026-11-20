@@ -25,11 +25,6 @@ type Call struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
-	// Exec replaces the process with the program at path, as a shell's exec
-	// does. The gc program sets it to syscall.Exec; with none set, the program
-	// runs as a child and the call exits with its status.
-	Exec func(path string, argv, env []string) error
-
 	// Stall holds the call for d with SIGTERM ignored, as a stalled gc
 	// command holds its lock. With none set, the process ignores SIGTERM and
 	// sleeps.
@@ -98,10 +93,12 @@ func run(c *Call) error {
 	if len(c.Args) > 0 && c.Args[0] == readFlag {
 		return harnessRead(c, c.Args[1:])
 	}
-	all := c.Args
+	if len(c.Args) > 0 && c.Args[0] == writeFlag {
+		return harnessWrite(c, c.Args[1:])
+	}
 	asBd := c.Name == "bd"
 	if asBd {
-		all = append([]string{"bd"}, all...)
+		c.Args = append([]string{"bd"}, c.Args...)
 	}
 	s, err := c.required("STUB_STORE")
 	if err != nil {
@@ -115,19 +112,33 @@ func run(c *Call) error {
 	if err != nil {
 		return err
 	}
-	if err := appendFile(logPath, strings.Join(all, " ")+"\n"); err != nil {
+	if err := appendFile(logPath, strings.Join(c.Args, " ")+"\n"); err != nil {
 		return err
 	}
 	if !asBd && c.getenv("STUB_GC_FAIL") != "" {
 		return c.fail(1, "gc: simulated failure of every gc call")
 	}
-	sub, args := shift(all)
+	if c.carries("STUB_FAIL_ON") {
+		return c.fail(1, "gc: simulated failure of a call that carries '"+c.getenv("STUB_FAIL_ON")+"'")
+	}
+	if err := c.hook(); err != nil {
+		return err
+	}
+	sub, args := shift(c.Args)
 	switch sub {
 	case "agent":
 		if first(args) == "list" {
 			return c.catOr(c.getenv("STUB_AGENTS"), `{"agents":[]}`)
 		}
 		return nil
+	case "rig":
+		if first(args) == "list" {
+			if c.getenv("STUB_RIGS") == "" {
+				c.out(`{"rigs":[]}` + "\n")
+				return nil
+			}
+			return c.catOr(c.getenv("STUB_RIGS"), `{"rigs":[]}`)
+		}
 	case "convoy":
 		if first(args) == "list" {
 			return c.catOr(c.getenv("STUB_CONVOYS"), `{"convoys":[]}`)
@@ -157,6 +168,38 @@ func run(c *Call) error {
 		return nil
 	}
 	return c.fail(2, "gc stub: unsupported '"+sub+"'")
+}
+
+// hook runs the program STUB_HOOK names before the fake answers a call whose
+// arguments carry the text STUB_HOOK_AT names, so a test can land another
+// writer's change between two of a script's calls, or fail a call the n-th
+// time it is made. The program gets the call's arguments as its own, and an
+// environment without either setting, so its own gc calls do not run it
+// again. Its output goes to the call's stderr. The call goes on when it exits
+// 0, and otherwise fails with its exit status and answers nothing.
+func (c *Call) hook() error {
+	at, prog := c.getenv("STUB_HOOK_AT"), c.getenv("STUB_HOOK")
+	if at == "" || prog == "" || !strings.Contains(strings.Join(c.Args, " "), at) {
+		return nil
+	}
+	env, stdin := c.Env, c.Stdin
+	c.Env, c.Stdin = withEnv(env, "STUB_HOOK_AT=", "STUB_HOOK="), strings.NewReader("")
+	status, err := c.spawn(c.Stderr, append([]string{prog}, c.Args...)...)
+	c.Env, c.Stdin = env, stdin
+	if err != nil {
+		return c.fail(status, "fake gc: the hook "+prog+": "+err.Error())
+	}
+	if status != 0 {
+		return exit(status)
+	}
+	return nil
+}
+
+// carries reports whether the setting names a text the call's arguments carry,
+// as a fault matched by text reads it.
+func (c *Call) carries(setting string) bool {
+	on := c.getenv(setting)
+	return on != "" && strings.Contains(strings.Join(c.Args, " "), on)
 }
 
 func shift(args []string) (string, []string) {
@@ -567,23 +610,4 @@ func lookPath(name, pathEnv string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s: command not found", name)
-}
-
-// handOff ends the call by running path with argv and env in its place, as
-// the stub's exec does.
-func (c *Call) handOff(path string, argv, env []string) error {
-	if c.Exec != nil {
-		if err := c.Exec(path, argv, env); err != nil {
-			return c.fail(126, "fake gc: exec "+path+": "+err.Error())
-		}
-		return nil
-	}
-	saved := c.Env
-	c.Env = env
-	status, err := c.spawn(c.Stdout, append([]string{path}, argv[1:]...)...)
-	c.Env = saved
-	if err != nil {
-		return c.fail(status, "fake gc: "+err.Error())
-	}
-	return exit(status)
 }

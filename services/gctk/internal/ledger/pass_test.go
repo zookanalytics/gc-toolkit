@@ -71,6 +71,48 @@ func TestPassAnswersLiveSelectionsFromItsListing(t *testing.T) {
 	}
 }
 
+// A narrowed read asks the store for its own selection, so it never stands in
+// for a read of every live bead, and once the pass holds every live bead it
+// answers an assignee's, a status's and the listing's beads from those rows.
+func TestPassNarrowsByAssigneeStatusAndListing(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "h", Status: "open", IssueType: "task", Assignee: "rig/refinery"})
+	s.Put(fake.Bead{ID: "o", Status: "open", IssueType: "task"})
+	s.Put(fake.Bead{ID: "p", Status: "in_progress", IssueType: "task", Assignee: "rig/refinery"})
+	s.Put(fake.Bead{ID: "w", Status: "open", IssueType: "task", Assignee: "rig/refinery", Ephemeral: true})
+	l := New(s).Pass()
+	work := Every().InStatus("open", "in_progress").Listed()
+	got, err := l.Find(work)
+	if err != nil || !slices.Equal(recordIDs(got), []string{"h", "o", "p"}) {
+		t.Fatalf("the open and in-progress listed beads = %v, %v; want h, o and p", recordIDs(got), err)
+	}
+	if finds := s.Finds(); len(finds) != 1 || !finds[0].Every || !finds[0].Listed || len(finds[0].Statuses) != 2 {
+		t.Errorf("the reads = %+v; want one, of the narrowed selection", finds)
+	}
+	all, err := l.Find(Every())
+	if err != nil || !slices.Equal(recordIDs(all), []string{"h", "o", "p", "w"}) || len(s.Finds()) != 2 {
+		t.Fatalf("every live bead = %v, %v after %d reads; want each, read afresh", recordIDs(all), err, len(s.Finds()))
+	}
+	reads := len(s.Finds())
+	for _, tc := range []struct {
+		name string
+		sel  Selection
+		want []string
+	}{
+		{"one assignee's open listed beads", Assigned("rig/refinery").InStatus("open").Listed(), []string{"h"}},
+		{"the open and in-progress listed beads", work, []string{"h", "o", "p"}},
+		{"one assignee's beads in every plane", Assigned("rig/refinery"), []string{"h", "p", "w"}},
+	} {
+		got, err := l.Find(tc.sel)
+		if err != nil || !slices.Equal(recordIDs(got), tc.want) {
+			t.Errorf("%s = %v, %v; want %v", tc.name, recordIDs(got), err, tc.want)
+		}
+	}
+	if n := len(s.Finds()) - reads; n != 0 {
+		t.Errorf("the narrowed selections read the store %d times once it held every live bead, want none", n)
+	}
+}
+
 // Every read of a bead through a pass answers with the row it kept first, so
 // a write that lands between two reads changes neither: not a read by id, not
 // a parent's beads, and not a snapshot.
