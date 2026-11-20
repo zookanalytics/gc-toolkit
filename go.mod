@@ -8,6 +8,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.5
 	github.com/atotto/clipboard v0.1.4
 	github.com/gzuidhof/tygo v0.2.21
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/spf13/cobra v1.10.2
 	github.com/steveyegge/beads v1.2.2-0.20260825072917-62d211937bd3
 	golang.org/x/sync v0.24.0
@@ -131,7 +132,6 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/olebedev/when v1.1.0 // indirect
 	github.com/oracle/oci-go-sdk/v65 v65.55.0 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect

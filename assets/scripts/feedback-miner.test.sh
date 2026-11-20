@@ -1,30 +1,35 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/feedback-miner.sh, the mechanical half of
 # mol-feedback-miner. Stub gh serves a repository's PR listings and review
-# streams from fixtures, stub gc serves a JSON observation store and records
-# what it files, and a git fixture gives the checkout an origin of ours and an
-# upstream of someone else's. No network, no live city.
+# streams from fixtures, the compiled fake gc (test-harness.sh) serves the
+# store and records each call, and a git fixture gives the checkout an origin
+# of ours and an upstream of someone else's. No network, no live city.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/feedback-miner.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-feedback-miner-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# shellcheck source=assets/scripts/test-harness.sh
+. "$HERE/test-harness.sh"
+# The checkout fixture and the miner run the real git, which harness_init puts
+# a stub in front of.
+REAL_GIT="$(command -v git)" || { echo "git is required for this test" >&2; exit 1; }
+# The flag files through the real patrol-finding.sh beside the miner, which asks
+# the gctk built from this checkout what a held finding still waits on.
+harness_build_gctk
+harness_init
+ln -sf "$REAL_GIT" "$BIN/git"
+[ -n "${GCTK_BUILT:-}" ] || { echo "$PASS passed, $FAIL failed"; exit 1; }
 
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
-eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
-# Substring tests, newlines included: a multi-line needle must match whole.
-has()   { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2')" ;; esac; }
-hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
+# ago <days>, ago_h <hours> — a time that long before now, as GitHub writes one;
+# day <days> — the day it falls on.
+ago() { TZ=UTC printf '%(%Y-%m-%dT%H:%M:%SZ)T\n' "$((EPOCHSECONDS - $1 * 86400))"; }
+ago_h() { TZ=UTC printf '%(%Y-%m-%dT%H:%M:%SZ)T\n' "$((EPOCHSECONDS - $1 * 3600))"; }
+day() { TZ=UTC printf '%(%Y-%m-%d)T\n' "$((EPOCHSECONDS - $1 * 86400))"; }
 
-ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 * 86400 ))" '$t | todate'; }
-ago_h() { jq -nr --argjson t "$(( $(date -u +%s) - $1 * 3600 ))" '$t | todate'; }
-day() { jq -nr --argjson t "$(( $(date -u +%s) - $1 * 86400 ))" '$t | strftime("%Y-%m-%d")'; }
-
-FIX="$TMP/fix"; STORE="$TMP/store"; BIN="$TMP/bin"
-mkdir -p "$FIX" "$STORE" "$BIN"
+FIX="$TMP/fix"
+mkdir -p "$FIX"
 
 # --- the checkout: origin is ours, upstream is a third party's ----------------
 CO="$TMP/checkout"
@@ -50,8 +55,10 @@ default_branch "$CO"
 # gh's own resolution order with no default set: a bare `gh repo view` answers
 # for upstream. The PR listing is the GraphQL pullRequests connection, newest
 # update first, served STUB_PAGE nodes at a time (default 100) from the
-# owner's fixture; its cursor is the offset.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'STUB'
+# owner's fixture, one node a line, each opening with its updatedAt so that a
+# reverse sort puts the newest first; its cursor is the offset. A review
+# stream's fixture is one object a line.
+{ _stub_shebang; cat; } > "$BIN/gh" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "$STUB_LOG/gh.log"
 case "${1:-} ${2:-}" in
@@ -71,11 +78,12 @@ case "${1:-} ${2:-}" in
         *) shift ;;
       esac
     done
-    f="$STUB_FIX/prs.$owner.json"; [ -f "$f" ] || f="$STUB_FIX/empty.json"
-    jq --argjson off "$cursor" --argjson size "${STUB_PAGE:-100}" '
-      sort_by(.updatedAt) | reverse | . as $all
-      | {data: {repository: {pullRequests: {nodes: $all[$off:($off + $size)],
-         pageInfo: {hasNextPage: (($off + $size) < ($all | length)), endCursor: (($off + $size) | tostring)}}}}}' "$f"
+    size="${STUB_PAGE:-100}"; all=()
+    [ -f "$STUB_FIX/prs.$owner.jsonl" ] && mapfile -t all < <(LC_ALL=C sort -r "$STUB_FIX/prs.$owner.jsonl")
+    nodes=("${all[@]:cursor:size}")
+    more=false; [ $((cursor + size)) -lt "${#all[@]}" ] && more=true
+    printf '{"data":{"repository":{"pullRequests":{"nodes":[%s],"pageInfo":{"hasNextPage":%s,"endCursor":"%s"}}}}}\n' \
+      "$(IFS=,; printf '%s' "${nodes[*]}")" "$more" "$((cursor + size))"
     exit 0 ;;
 esac
 if [ "${1:-}" = api ]; then
@@ -87,7 +95,7 @@ if [ "${1:-}" = api ]; then
     *) echo "stub gh: no fixture for $path" >&2; exit 1 ;;
   esac
   [ -f "$STUB_FIX/$n.fail" ] && { echo "HTTP 502" >&2; exit 1; }
-  [ -f "$STUB_FIX/$n.$s.json" ] && jq -c '.[]' "$STUB_FIX/$n.$s.json"
+  [ -f "$STUB_FIX/$n.$s.jsonl" ] && cat "$STUB_FIX/$n.$s.jsonl"
   exit 0
 fi
 echo "stub gh: unexpected call: $*" >&2
@@ -95,149 +103,22 @@ exit 1
 STUB
 chmod +x "$BIN/gh"
 
-# --- stub gc ---------------------------------------------------------------------
-# `bd list -l observation` reads the store, recording the rig it read;
-# `--has-metadata-key pr_provenance_since` reads the anchors. The findings live
-# in findings.json and serve the real patrol-finding.sh as bd does: a listing
-# filtered by `--metadata-field` and `--status` (every status but closed by
-# default, all with --all) that records the rig it read, `show`, and `update`
-# with --set-metadata and --append-notes, an append joining notes with a
-# newline. `bd create --title` files a finding, and a create with a positional
-# title files an observation, so a later listing sees it; each records the rig
-# it filed in. `bd kv get|set|list` serve the key-value table from kv.json, a
-# get printing {found, key, value} and exiting 1 for an unset key and a list
-# printing the whole table with schema_version, as bd does, each recording the
-# rig it ran in. A read the gctk under test makes, for the real patrol-finding.sh
-# asking what a held finding still waits on, answers from the same findings
-# through the seam holds-store.stub.sh keeps, and is not logged.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
-set -u
-if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
-  shift
-  HOLDS_STORE="$STUB_STORE/findings.json" exec "${HOLDS_STUB:?}" answer "$@"
-fi
-printf '%s\n' "$*" >> "$STUB_LOG/gc.log"
-[ "${1:-}" = bd ] || { echo "stub gc: unexpected call: $*" >&2; exit 1; }
-shift
-FINDINGS="$STUB_STORE/findings.json"
-case "${1:-}" in
-  list)
-    case " $* " in
-      *" --has-metadata-key pr_provenance_since "*) cat "$STUB_STORE/anchors.json"; exit 0 ;;
-      *" -l observation "*)
-        printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/obs-list.rig"
-        [ -n "${STUB_OBS_BROKEN:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
-        cat "$STUB_STORE/obs.json"; exit 0 ;;
-      *" --metadata-field finding."*)
-        printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/findings.rig"
-        [ -n "${STUB_FINDINGS_BROKEN:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
-        shift
-        statuses=open,in_progress,blocked,deferred,hooked,pinned; fields='[]'
-        while [ $# -gt 0 ]; do
-          case "$1" in
-            --all) statuses=all ;;
-            --status=*) statuses="${1#--status=}" ;;
-            --status) shift; statuses="${1:-}" ;;
-            --metadata-field) shift; fields=$(jq -c --arg f "${1:-}" '. + [$f]' <<< "$fields") ;;
-          esac
-          shift
-        done
-        jq --arg st "$statuses" --argjson fields "$fields" '
-          ($fields | map(capture("^(?<k>[^=]*)=(?<v>.*)$"))) as $want
-          | [ .[] | select($st == "all" or (.status as $s | $st | split(",") | index([$s]) != null))
-                  | select(. as $b | all($want[]; (($b.metadata // {})[.k] // "" | tostring) == .v)) ]' "$FINDINGS"
-        exit 0 ;;
-    esac ;;
-  show)
-    row=$(jq -c --arg id "${2:-}" '[.[] | select(.id == $id)]' "$FINDINGS")
-    [ "$(jq 'length' <<< "$row")" != 0 ] || { echo '{"error":"no issue found"}'; exit 1; }
-    printf '%s\n' "$row"
-    exit 0 ;;
-  update)
-    id="${2:-}"; shift 2
-    work="$FINDINGS.upd"; cp "$FINDINGS" "$work"
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --set-metadata)
-          jq --arg id "$id" --arg k "${2%%=*}" --arg v "${2#*=}" 'map(if .id == $id then .metadata[$k] = $v else . end)' \
-            "$work" > "$work.n" && mv "$work.n" "$work"
-          shift 2 ;;
-        --append-notes)
-          if [ -n "${STUB_NOTE_FAIL:-}" ]; then
-            case "$2" in *"$STUB_NOTE_FAIL"*) rm -f "$work"; echo "bd: update refused" >&2; exit 1 ;; esac
-          fi
-          jq --arg id "$id" --arg n "$2" 'map(if .id == $id then .notes = (if (.notes // "") == "" then $n else .notes + "\n" + $n end) else . end)' \
-            "$work" > "$work.n" && mv "$work.n" "$work"
-          shift 2 ;;
-        *) shift ;;
-      esac
-    done
-    mv "$work" "$FINDINGS"
-    exit 0 ;;
-  create)
-    shift
-    finding=""
-    for a in "$@"; do [ "$a" = --title ] && finding=1; done
-    if [ -n "$finding" ]; then
-      title=""; body=""; meta='{}'; typ=task; prio=""
-      while [ $# -gt 0 ]; do
-        case "$1" in
-          --title) title="$2"; shift 2 ;;
-          -d) body="$2"; shift 2 ;;
-          -t) typ="$2"; shift 2 ;;
-          --metadata) meta="$2"; shift 2 ;;
-          --priority) prio="$2"; shift 2 ;;
-          *) shift ;;
-        esac
-      done
-      printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/finding.rig"
-      n=$(( $(jq 'length' "$FINDINGS") + 1 ))
-      jq --arg id "tk-find$n" --arg t "$title" --arg d "$body" --arg ty "$typ" --arg p "$prio" --argjson m "$meta" \
-        '. + [{id: $id, status: "open", title: $t, description: $d, issue_type: $ty, priority: $p, notes: "", metadata: $m}]' \
-        "$FINDINGS" > "$FINDINGS.next" && mv "$FINDINGS.next" "$FINDINGS"
-      printf '{"id":"tk-find%s"}\n' "$n"
-      exit 0
-    fi
-    title="$1"; shift; body=""; meta='{}'; labels=(); status=open
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        -d) body="$2"; shift 2 ;;
-        --metadata) meta="$2"; shift 2 ;;
-        -l) labels+=("$2"); shift 2 ;;
-        --status=*) status="${1#--status=}"; shift ;;
-        *) shift ;;
-      esac
-    done
-    [ -n "${STUB_CREATE_FAIL:-}" ] && { echo '{"error":"create refused"}'; exit 1; }
-    printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/obs.rig"
-    n=$(( $(jq 'length' "$STUB_STORE/obs.json") + 1 ))
-    id="tk-obs$n"
-    jq --arg id "$id" --arg t "$title" --arg d "$body" --argjson m "$meta" --arg s "$status" \
-       --arg l "$(printf '%s,' "${labels[@]}")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '. + [{id: $id, title: $t, description: $d, status: $s, created_at: $at,
-             labels: ($l | split(",") | map(select(. != ""))), metadata: $m}]' \
-      "$STUB_STORE/obs.json" > "$STUB_STORE/obs.next" && mv "$STUB_STORE/obs.next" "$STUB_STORE/obs.json"
-    # STUB_CREATE_LOST: bd files the observation but its answer is lost.
-    [ -n "${STUB_CREATE_LOST:-}" ] && { echo '{}'; exit 0; }
-    printf '{"id":"%s"}\n' "$id"
-    exit 0 ;;
-  kv)
-    printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/kv.rig"
-    [ -n "${STUB_KV_BROKEN:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
-    f="$STUB_STORE/kv.json"; [ -f "$f" ] || echo '{}' > "$f"
-    case "${2:-}" in
-      get) jq -c --arg k "${3:-}" '{found: has($k), key: $k, schema_version: 1, value: (.[$k] // "")}' "$f"
-           jq -e --arg k "${3:-}" 'has($k)' "$f" >/dev/null; exit $? ;;
-      set) [ -n "${STUB_KV_SET_FAIL:-}" ] && { echo "bd: write refused" >&2; exit 1; }
-           jq --arg k "${3:-}" --arg v "${4:-}" '.[$k] = $v' "$f" > "$f.next" && mv "$f.next" "$f"
-           exit 0 ;;
-      list) jq -c '. + {schema_version: 1}' "$f"; exit 0 ;;
-    esac ;;
-esac
-echo "stub gc: unexpected call: bd $*" >&2
-exit 1
-STUB
-chmod +x "$BIN/gc"
+# --- the rig of a call --------------------------------------------------------
+# Once rigs_on names it, the fake runs this hook before each bd call, recording
+# the rig the call ran under as "[<GC_RIG>] <arguments>" in $RIG_LOG. rig_of
+# <text> is the rig of the last such call whose arguments carry the text.
+export RIG_LOG="$TMP/rig.log"
+cat > "$BIN/rig-hook" <<'HOOK'
+#!/bin/sh
+printf '[%s] %s\n' "${GC_RIG:-}" "$*" >> "$RIG_LOG"
+HOOK
+chmod +x "$BIN/rig-hook"
+rigs_on() { : > "$RIG_LOG"; export STUB_HOOK_AT="bd " STUB_HOOK="$BIN/rig-hook"; }
+rig_of() {
+  local l r=""
+  while IFS= read -r l; do case "$l" in *"$1"*) r=${l%%]*}; r=${r#\[} ;; esac; done < "$RIG_LOG"
+  printf '%s\n' "$r"
+}
 
 # jq stand-in, put on PATH for one sweep only: it plays a sweep worker killed
 # while it writes PR STUB_KILL_PR's posts, by printing part of a line and then
@@ -277,13 +158,8 @@ exec "$REAL_JQ" "$@"
 STUB
 chmod +x "$FAULTBIN/cat" "$FAULTBIN/jq"
 
-export PATH="$BIN:$PATH"
-export STUB_LOG="$TMP" STUB_FIX="$FIX" STUB_STORE="$STORE"
-# The flag files through the real patrol-finding.sh beside the miner, which asks
-# the gctk built from this checkout what a held finding still waits on.
+export STUB_LOG="$TMP" STUB_FIX="$FIX"
 unset GC_PATROL_FINDING_TOOL GC_BD_LIB GC_FINDING_DEFAULT_RIG
-export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
-GCTK_BUILT="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so a held finding's waits cannot be read"; exit 1; }
 # gctk's reaction verbs stand in for the real patrol-finding.sh's first
 # reaction: the pool takes one, and each call is recorded. Every other verb is
 # the build's.
@@ -294,7 +170,7 @@ if [ "\${1:-}" = reaction ]; then
   printf '%s\\n' "\$*" >> "\$STUB_LOG/proactive.log"
   exit 0
 fi
-exec "$GCTK_BUILT" "\$@"
+exec "$GCTK_BIN" "\$@"
 STUB
 chmod +x "$BIN/gctk"
 export GCTK_BIN="$BIN/gctk"
@@ -314,31 +190,37 @@ CUT=$(ago 2)
 # comment two hours ago, so it lists early and is read, though it closed before
 # every window.
 # Upstream lists PR 99, which a run that lets gh pick the repository would read.
-jq -n --arg r "$(ago_h 1)" --arg o "$(ago 10)" --arg a "$(ago 40)" --arg u "$(ago_h 2)" '[
-  {number: 11, title: "Fix the frobnicator", closedAt: $r, mergedAt: $r, updatedAt: $r},
-  {number: 12, title: "Old change", closedAt: $o, mergedAt: $o, updatedAt: $o},
-  {number: 13, title: "Ancient change", closedAt: $a, mergedAt: null, updatedAt: $a},
-  {number: 14, title: "Ancient but busy", closedAt: $a, mergedAt: $a, updatedAt: $u}]' > "$FIX/prs.ours.json"
-jq -n --arg r "$(ago_h 1)" '[{number: 99, title: "Someone else", closedAt: $r, mergedAt: $r, updatedAt: $r}]' > "$FIX/prs.them.json"
-echo '[]' > "$FIX/empty.json"
-
-user() { jq -nc --arg l "$1" --arg t "${2:-User}" '{login: $l, type: $t}'; }
+# The fixtures' JSON, written in bash: a user, a review, an inline comment and a
+# conversation comment, each one line, and a node of the PR listing, which
+# opens with its updatedAt.
+user() { printf '{"login":%s,"type":%s}' "$(json_str "$1")" "$(json_str "${2:-User}")"; }
 review() { # id login type state body submitted_at
-  jq -nc --argjson id "$1" --argjson u "$(user "$2" "$3")" --arg st "$4" --arg b "$5" --arg at "$6" \
-    '{id: $id, user: $u, state: $st, body: $b, submitted_at: $at,
-      html_url: ("https://github.com/ours/repo/pull/11#pullrequestreview-" + ($id | tostring))}'
+  printf '{"id":%s,"user":%s,"state":%s,"body":%s,"submitted_at":%s,"html_url":"https://github.com/ours/repo/pull/11#pullrequestreview-%s"}\n' \
+    "$1" "$(user "$2" "$3")" "$(json_str "$4")" "$(json_str "$5")" "$(json_str "$6")" "$1"
 }
 inline() { # id login review_id body created_at [reply_to]
-  jq -nc --argjson id "$1" --argjson u "$(user "$2")" --argjson r "$3" --arg b "$4" --arg at "$5" --arg rt "${6:-}" \
-    '{id: $id, user: $u, pull_request_review_id: $r, body: $b, created_at: $at, path: "lib/frob.sh", line: 7,
-      in_reply_to_id: (if $rt == "" then null else ($rt | tonumber) end),
-      html_url: ("https://github.com/ours/repo/pull/11#discussion_r" + ($id | tostring))}'
+  printf '{"id":%s,"user":%s,"pull_request_review_id":%s,"body":%s,"created_at":%s,"path":"lib/frob.sh","line":7,"in_reply_to_id":%s,"html_url":"https://github.com/ours/repo/pull/11#discussion_r%s"}\n' \
+    "$1" "$(user "$2")" "$3" "$(json_str "$4")" "$(json_str "$5")" "${6:-null}" "$1"
 }
 issue() { # id login type body created_at [pr]
-  jq -nc --argjson id "$1" --argjson u "$(user "$2" "$3")" --arg b "$4" --arg at "$5" --arg pr "${6:-11}" \
-    '{id: $id, user: $u, body: $b, created_at: $at,
-      html_url: ("https://github.com/ours/repo/pull/" + $pr + "#issuecomment-" + ($id | tostring))}'
+  printf '{"id":%s,"user":%s,"body":%s,"created_at":%s,"html_url":"https://github.com/ours/repo/pull/%s#issuecomment-%s"}\n' \
+    "$1" "$(user "$2" "$3")" "$(json_str "$4")" "$(json_str "$5")" "${6:-11}" "$1"
 }
+pr_node() { # number title closedAt mergedAt updatedAt; a mergedAt of null is none
+  local merged=null
+  [ "$4" = null ] || merged=$(json_str "$4")
+  printf '{"updatedAt":%s,"number":%s,"title":%s,"closedAt":%s,"mergedAt":%s}\n' \
+    "$(json_str "$5")" "$1" "$(json_str "$2")" "$(json_str "$3")" "$merged"
+}
+
+R1=$(ago_h 1) O10=$(ago 10) A40=$(ago 40) U2=$(ago_h 2)
+{
+  pr_node 11 "Fix the frobnicator" "$R1" "$R1" "$R1"
+  pr_node 12 "Old change" "$O10" "$O10" "$O10"
+  pr_node 13 "Ancient change" "$A40" null "$A40"
+  pr_node 14 "Ancient but busy" "$A40" "$A40" "$U2"
+} > "$FIX/prs.ours.jsonl"
+pr_node 99 "Someone else" "$R1" "$R1" "$R1" > "$FIX/prs.them.jsonl"
 
 LONG=$(printf 'The quoted text runs long. %.0s' $(seq 1 120))
 {
@@ -354,7 +236,7 @@ $MARK" "$(ago_h 4)"
   review 108 johnzook User COMMENTED "$LONG" "$(ago_h 2)"
   review 109 johnzook User COMMENTED "<!-- gc:no-review -->
 FYI: the preview is up, nothing to change." "$(ago_h 2)"
-} | jq -s . > "$FIX/11.reviews.json"
+} > "$FIX/11.reviews.jsonl"
 {
   inline 201 johnzook 101 "This loop never terminates on empty input." "$(ago_h 5)"
   inline 202 city-bot 102 "✅ Fixed in abc1234 (tk-x).
@@ -363,7 +245,7 @@ $MARK" "$(ago_h 4)" 201
   inline 203 city-bot 103 "**The guard reads the wrong variable.** It checks \$a where \$b is meant." "$(ago_h 3)"
   inline 204 johnzook 101 "<!-- gc:no-review -->
 Context only, nothing to change." "$(ago_h 5)"
-} | jq -s . > "$FIX/11.inline.json"
+} > "$FIX/11.inline.jsonl"
 {
   issue 301 city-bot User "Pre-open signoff (comment-only — not an approval): VERDICT: approve" "$(ago 3)"
   issue 302 "vercel[bot]" Bot "[vc]: #dkbu2MRiHxbtC
@@ -374,41 +256,85 @@ The latest updates on your projects." "$(ago_h 3)"
 [vc]: # is mentioned here, not at the top." "$(ago_h 2)"
   issue 306 "previewbot[bot]" Bot "<!-- gc:no-review -->
 Schema diff: no changes." "$(ago_h 2)"
-} | jq -s . > "$FIX/11.issue.json"
-issue 401 johnzook User "Old feedback from last week." "$(ago 10)" 12 | jq -s . > "$FIX/12.issue.json"
+} > "$FIX/11.issue.jsonl"
+issue 401 johnzook User "Old feedback from last week." "$(ago 10)" 12 > "$FIX/12.issue.jsonl"
 # PR 12's city post is a review body.
-issue 402 city-bot User "Triage: approve. $MARK" "$(ago 10)" 12 \
-  | jq -s '[.[] | . + {state: "COMMENTED", submitted_at: .created_at}]' > "$FIX/12.reviews.json"
-echo '[]' > "$FIX/12.inline.json"
+R402_AT=$(ago 10)
+R402=$(issue 402 city-bot User "Triage: approve. $MARK" "$R402_AT" 12)
+printf '%s,"state":"COMMENTED","submitted_at":%s}\n' "${R402%\}}" "$(json_str "$R402_AT")" > "$FIX/12.reviews.jsonl"
+: > "$FIX/12.inline.jsonl"
 
 # PR 11's anchor began expecting the mark two days ago: review 104 is after the
-# cutover, issue 301 three days ago before it.
-jq -n --arg c "$CUT" '[{id: "tk-anchor11", metadata: {pr_number: 11, pr_provenance_since: $c}}]' > "$STORE/anchors.json"
-echo '[]' > "$STORE/obs.json"
-echo '[]' > "$STORE/findings.json"
-echo '{}' > "$STORE/kv.json"
+# cutover, issue 301 three days ago before it. An anchor no longer listed is one
+# whose pr_provenance_since the case removes.
+anchor() { brow "$1" "metadata:={\"pr_number\":$2,\"pr_provenance_since\":$(json_str "$CUT")}"; }
+anchor tk-anchor11 11
 KV_KEY="feedback_miner.outside_since.ours_repo"
-kv_day() { jq -r --arg k "$KV_KEY" '.[$k] // ""' "$STORE/kv.json"; }
-updated_on() { jq -r --argjson n "$1" '.[] | select(.number == $n) | .updatedAt[0:10]' "$FIX/prs.ours.json"; }
-kv_put() { jq --arg k "$KV_KEY" --arg v "$1" '.[$k] = $v' "$STORE/kv.json" > "$STORE/kv.next" && mv "$STORE/kv.next" "$STORE/kv.json"; }
+# kv <key> — the value the kv store holds under the key, or nothing.
+kv() {
+  local l
+  while IFS= read -r l; do case "$l" in "$1="*) printf '%s\n' "${l#"$1="}"; return 0 ;; esac; done < "$STUB_KV"
+}
+kv_day() { kv "$KV_KEY"; }
+kv_put() {
+  local l rest=""
+  while IFS= read -r l; do case "$l" in "$KV_KEY="*) ;; *) rest+="$l"$'\n' ;; esac; done < "$STUB_KV"
+  printf '%s%s=%s\n' "$rest" "$KV_KEY" "$1" > "$STUB_KV"
+}
+updated_on() {
+  local l
+  while IFS= read -r l; do
+    case "$l" in *"\"number\":$1,"*) l=$(json_get "$l" updatedAt); printf '%s\n' "${l:0:10}"; return 0 ;; esac
+  done < "$FIX/prs.ours.jsonl"
+}
 
 key() { printf 'pr:ours/repo#%s:%s:%s' "$1" "$2" "$3"; }
-class_of() { jq -r --arg k "$1" 'select(.key == $k) | .class' "$W/sweep.jsonl"; }
-field_of() { jq -r --arg k "$1" --arg f "$2" 'select(.key == $k) | .[$f] | tostring' "$W/sweep.jsonl"; }
+# field_of <key> <field> — a field of the sweep's line for a post: a string's
+# text as the line writes it, and any other value as written. class_of <key> is
+# its class.
+field_of() {
+  local l r
+  [ -f "$W/sweep.jsonl" ] || return 0
+  while IFS= read -r l; do
+    case "$l" in
+      *"\"key\":\"$1\""*)
+        r=${l#*\""$2"\":}
+        [ "$r" = "$l" ] && return 0
+        case "$r" in \"*) r=${r#\"}; printf '%s\n' "${r%%\"*}" ;; *) printf '%s\n' "${r%%[,\}]*}" ;; esac
+        return 0 ;;
+    esac
+  done < "$W/sweep.jsonl"
+}
+class_of() { field_of "$1" class; }
 fresh_dir() { W="$TMP/work.$1"; rm -rf "$W"; mkdir -p "$W"; : > "$TMP/gh.log"; : > "$TMP/gc.log"; }
-# The findings store: how many findings, one finding's field, and the record
-# of an unmarked post the flag named.
-findings_n() { jq 'length' "$STORE/findings.json"; }
-f_field() { jq -r --arg id "$1" ".[] | select(.id == \$id) | $2 // \"\" | tostring" "$STORE/findings.json"; }
-# set_status <status> [<id>]: one finding's status, or every finding's.
-set_status() { jq --arg s "$1" --arg id "${2:-}" 'map(if $id == "" or .id == $id then . + {status: $s} else . end)' "$STORE/findings.json" > "$STORE/findings.next" && mv "$STORE/findings.next" "$STORE/findings.json"; }
-post_record() { jq -r --arg k "feedback_miner.unmarked_post.$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')" '.[$k] // ""' "$STORE/kv.json"; }
+# The findings: how many the flag's key holds, and the id of the n-th one filed,
+# in the order the store holds them.
+findings_n() { local ids; ids=$(bids metadata.finding.key=unmarked-city-post); set -- $ids; echo $#; }
+finding() {
+  local n="$1" ids
+  ids=$(bids metadata.finding.key=unmarked-city-post); set -- $ids
+  [ "$n" -le $# ] 2>/dev/null && printf '%s\n' "${!n}"
+}
+# set_status <status> [<n>]: the n-th finding's status, or every finding's. A
+# closed one carries the close time bd stamps.
+set_status() {
+  local f ids
+  local -a stamp=()
+  [ "$1" = closed ] && stamp=(closed_at=2026-01-01T00:00:00Z)
+  if [ -n "${2:-}" ]; then ids=$(finding "$2"); else ids=$(bids metadata.finding.key=unmarked-city-post); fi
+  for f in $ids; do bset "$f" "status=$1" "${stamp[@]}"; done
+}
+post_record() { kv "feedback_miner.unmarked_post.$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"; }
+# The observations: the id of the one the store records on a post, and the
+# labels a row carries, comma-joined. obs_reset retires every observation, so
+# the miner, which reads only rows whose task_kind is observation, sees none.
+obs_of() { bids metadata.task_kind=observation "metadata.obs.provenance=$1"; }
+obs_n() { local ids; ids=$(obs_of "$1"); set -- $ids; echo $#; }
+labels_of() { local l; l=$(bfield "$1" labels); l=${l#[}; l=${l%]}; printf '%s\n' "${l//\"/}"; }
+obs_reset() { local id; for id in $(bids metadata.task_kind=observation); do bset "$id" metadata.task_kind=retired; done; }
 # add_review <id> <body>: an unmarked review under the city's login on PR 11,
 # posted an hour ago, after the PR's cutover.
-add_review() {
-  review "$1" city-bot User COMMENTED "$2" "$(ago_h 1)" \
-    | jq -s --slurpfile old "$FIX/11.reviews.json" '$old[0] + .' > "$FIX/11.reviews.next" && mv "$FIX/11.reviews.next" "$FIX/11.reviews.json"
-}
+add_review() { review "$1" city-bot User COMMENTED "$2" "$(ago_h 1)" >> "$FIX/11.reviews.jsonl"; }
 
 echo "── identity: the slug is origin's, never what gh picks by itself ──"
 eq "$(gh repo view --json nameWithOwner -q .nameWithOwner)" "them/repo" \
@@ -423,11 +349,11 @@ default_branch "$CO"
 
 echo "── sweep, first run: no outside capture day recorded yet, so it back-fills ──"
 fresh_dir a
-OUT=$("$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
+OUT=$(rigs_on; "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(3) the first sweep exits 0"
 has "$OUT" "still owes a read of every PR updated since $(day 30), so the sweep reads back to then" "(4) the first sweep says it back-fills"
 eq "$(kv_day)" "$(day 30)" "(4a) it records the back-fill's start as the outside capture's day, under origin's repository"
-eq "$(cat "$TMP/kv.rig")" "fixture-rig" "(4b) in the store of the rig it sweeps"
+eq "$(rig_of 'bd kv')" "fixture-rig" "(4b) in the store of the rig it sweeps"
 eq "$(grep -c '^api graphql' "$TMP/gh.log")" "1" "(5) one page lists every PR the window can hold"
 eq "$(grep '^api graphql' "$TMP/gh.log" | grep -c -- '-f owner=ours -f name=repo')" "1" "(6) the PR listing names origin's repository"
 eq "$(grep '^api repos/' "$TMP/gh.log" | grep -vc '^api repos/ours/repo/')" "0" "(7) every stream read names origin's repository"
@@ -458,7 +384,7 @@ eq "$(class_of "$(key 11 comment 303)")" "" "(24) a whitespace-only comment is n
 eq "$(class_of "$(key 12 comment 401)")" "outside" "(25) a back-fill PR's outside comment is read"
 eq "$(field_of "$(key 12 comment 401)" in_window)" "false" "(26) a back-fill PR is outside the standing window"
 eq "$(field_of "$(key 11 comment 201)" in_window)" "true" "(27) a recent PR is inside the standing window"
-eq "$(field_of "$(key 11 comment 201)" at)" "$(jq -r '.[] | select(.id == 101) | .submitted_at' "$FIX/11.reviews.json")" \
+eq "$(field_of "$(key 11 comment 201)" at)" "$(json_get "$(grep '^{"id":101,' "$FIX/11.reviews.jsonl")" submitted_at)" \
    "(28) an inline comment is dated by the submission of the review that carries it"
 eq "$(field_of "$(key 11 comment 202)" reply_to)" "201" "(29) a reply records the comment it answers"
 
@@ -486,15 +412,15 @@ ROWS_EOF
 ); RC=$?
 eq "$RC" "0" "(38) filing outside rows exits 0"
 has "$OUT" "filed 3, skipped 0" "(39) all three are filed"
-OBS=$(jq -c --arg k "$(key 11 comment 201)" '.[] | select(.metadata["obs.provenance"] == $k)' "$STORE/obs.json")
-eq "$(jq -r '.metadata["obs.category"]' <<< "$OBS")" "outside-review" "(40) the outside capture files under outside-review"
-eq "$(jq -r '.metadata["obs.source"]' <<< "$OBS")" "miner" "(41) its source is the miner"
-eq "$(jq -r '.metadata.task_kind' <<< "$OBS")" "observation" "(42) it is an observation"
-eq "$(jq -r '.status' <<< "$OBS")" "closed" "(43) it is closed at creation"
-eq "$(jq -r '.labels | join(",")' <<< "$OBS")" "learning,observation" "(44) it carries both labels"
-eq "$(jq -r '.metadata["obs.scope"]' <<< "$OBS")" "repo:fixture-rig" "(45) its scope defaults to the rig"
-eq "$(jq -r '.title' <<< "$OBS")" "obs: The loop never ends on empty input. (pr:ours/repo#11)" "(46) its title is the statement and the PR"
-BODY=$(jq -r '.description' <<< "$OBS")
+OBS=$(obs_of "$(key 11 comment 201)")
+eq "$(meta "$OBS" obs.category)" "outside-review" "(40) the outside capture files under outside-review"
+eq "$(meta "$OBS" obs.source)" "miner" "(41) its source is the miner"
+eq "$(meta "$OBS" task_kind)" "observation" "(42) it is an observation"
+eq "$(bstatus "$OBS")" "closed" "(43) it is closed at creation"
+eq "$(labels_of "$OBS")" "learning,observation" "(44) it carries both labels"
+eq "$(meta "$OBS" obs.scope)" "repo:fixture-rig" "(45) its scope defaults to the rig"
+eq "$(bfield "$OBS" title)" "obs: The loop never ends on empty input. (pr:ours/repo#11)" "(46) its title is the statement and the PR"
+BODY=$(bfield "$OBS" description)
 has "$BODY" "## Statement
 The loop never ends on empty input." "(47) the body opens with the statement"
 has "$BODY" "> This loop never terminates on empty input.
@@ -502,16 +428,16 @@ has "$BODY" "> This loop never terminates on empty input.
 has "$BODY" "PR #11, \"Fix the frobnicator\": an inline comment on \`lib/frob.sh\`, line 7. The PR added the loop." \
     "(49) the context names the PR, the locus and the row's context"
 hasnt "$BODY" "## Proposed norm" "(50) the outside capture proposes no norm"
-LONG_BODY=$(jq -r --arg k "$(key 11 review 108)" '.[] | select(.metadata["obs.provenance"] == $k) | .description' "$STORE/obs.json")
+LONG_BODY=$(bfield "$(obs_of "$(key 11 review 108)")" description)
 has "$LONG_BODY" " …
 — johnzook" "(51) a long quote is cut, and the link carries the rest"
-eq "$(jq -r --arg k "$(key 11 review 108)" '.[] | select(.metadata["obs.provenance"] == $k) | .metadata["obs.directive"]' "$STORE/obs.json")" \
+eq "$(meta "$(obs_of "$(key 11 review 108)")" obs.directive)" \
    "standing" "(52) the row's directive is kept"
-eq "$(jq -r --arg k "$(key 11 review 108)" '.[] | select(.metadata["obs.provenance"] == $k) | .metadata["obs.correction"] // "absent"' "$STORE/obs.json")" \
+eq "$(meta "$(obs_of "$(key 11 review 108)")" obs.correction)" \
    "keep-reviews-short" "(52a) a row's correction is filed as obs.correction"
-eq "$(jq -r --arg k "$(key 11 review 108)" '.[] | select(.metadata["obs.provenance"] == $k) | .metadata["obs.category"]' "$STORE/obs.json")" \
+eq "$(meta "$(obs_of "$(key 11 review 108)")" obs.category)" \
    "outside-review" "(52b) under the outside capture's category still"
-eq "$(jq -r '.metadata | has("obs.correction")' <<< "$OBS")" "false" "(52c) and a row with no correction files none"
+eq "$(meta "$OBS" obs.correction)" "<absent>" "(52c) and a row with no correction files none"
 
 CREATES=$(grep -c '^bd create' "$TMP/gc.log")
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
@@ -534,7 +460,7 @@ OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 ROWS_EOF
 )
 has "$OUT" "already filed under outside-review by an earlier row of this call" "(56) a second row on one post in one call is skipped"
-eq "$(jq --arg k "$(key 11 comment 304)" '[.[] | select(.metadata["obs.provenance"] == $k)] | length' "$STORE/obs.json")" "1" \
+eq "$(obs_n "$(key 11 comment 304)")" "1" \
    "(57) one observation per outside post"
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 11 comment 305)", "statement": "The query interpolates the user's input into SQL; bind it as a parameter.", "directive": "diff"}
@@ -544,8 +470,7 @@ has "$OUT" "filed 1, skipped 0" "(57a) an app account's conversation comment tha
 
 echo "── file: refused rows ──"
 # This call runs in a shell whose GC_RIG names another rig.
-rm -f "$TMP/obs.rig" "$TMP/obs-list.rig"
-OUT=$(GC_RIG=another-rig "$SUT" file --dir "$W" <<ROWS_EOF 2>&1
+OUT=$(rigs_on; GC_RIG=another-rig "$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "pr:ours/repo#11:comment:999", "statement": "No such post."}
 {"key": "$(key 11 comment 302)", "statement": "A deploy preview."}
 {"key": "$(key 11 review 105)", "statement": ""}
@@ -567,8 +492,8 @@ has "$OUT" "correction must be a lowercase slug" "(63a) a correction that is not
 has "$OUT" "correction names the standing correction the post makes, not outside-review" "(63b) as is outside-review as a correction"
 has "$OUT" "a city post names its correction in its category; leave correction out" "(63c) and a correction on a city post"
 has "$OUT" "filed 1," "(64) the valid row in the same call is still filed"
-eq "$(cat "$TMP/obs-list.rig" 2>/dev/null)" "fixture-rig" "(64a) file dedups against the swept rig's store, whatever GC_RIG its shell carries"
-eq "$(cat "$TMP/obs.rig" 2>/dev/null)" "fixture-rig" "(64b) and files the observation there"
+eq "$(rig_of 'list -l observation')" "fixture-rig" "(64a) file dedups against the swept rig's store, whatever GC_RIG its shell carries"
+eq "$(rig_of 'bd create')" "fixture-rig" "(64b) and files the observation there"
 
 echo "── file: the standing-behavior capture on the city's posts ──"
 OUT=$("$SUT" file --dir "$W" --max-standing 1 <<ROWS_EOF 2>&1
@@ -577,9 +502,9 @@ OUT=$("$SUT" file --dir "$W" --max-standing 1 <<ROWS_EOF 2>&1
 ROWS_EOF
 )
 has "$OUT" "dropped for the 1-per-run standing cap" "(65) --max-standing drops the row past the cap"
-STD=$(jq -c --arg k "$(key 11 review 104)" '.[] | select(.metadata["obs.provenance"] == $k)' "$STORE/obs.json")
-eq "$(jq -r '.metadata["obs.category"]' <<< "$STD")" "verdict-names-commit" "(66) a standing capture files under its own category"
-has "$(jq -r '.description' <<< "$STD")" "## Proposed norm
+STD=$(obs_of "$(key 11 review 104)")
+eq "$(meta "$STD" obs.category)" "verdict-names-commit" "(66) a standing capture files under its own category"
+has "$(bfield "$STD" description)" "## Proposed norm
 Name the reviewed commit in every verdict." "(67) a standing capture carries its proposed norm"
 OUT=$("$SUT" file --dir "$W" --max-standing 1 <<ROWS_EOF 2>&1
 {"key": "$(key 11 comment 301)", "statement": "Still over the cap.", "category": "second-point", "norm": "Do it."}
@@ -605,11 +530,11 @@ eq "$(kv_day)" "$(updated_on 12)" "(70c) and moves the day to the oldest last up
 {"key": "$(key 11 comment 203)", "statement": "The guard reads the wrong variable.", "directive": "diff"}
 {"key": "$(key 12 comment 401)", "statement": "Old feedback from last week.", "directive": "diff"}
 ROWS_EOF
-OUT=$(GC_RIG=another-rig "$SUT" advance --dir "$W" 2>&1); RC=$?
+OUT=$(rigs_on; GC_RIG=another-rig "$SUT" advance --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(70d) advance exits 0 once every outside post is recorded"
 has "$OUT" "moves to $(day 0): every PR the sweep listed read, and the store records every outside post it found" "(70e) and moves the day to the sweep's"
 eq "$(kv_day)" "$(day 0)" "(70f) the store holds the new day"
-eq "$(cat "$TMP/kv.rig")" "fixture-rig" "(70g) in the swept rig's store"
+eq "$(rig_of 'bd kv')" "fixture-rig" "(70g) in the swept rig's store"
 kv_put "$(day -1)"
 OUT=$("$SUT" advance --dir "$W" 2>&1)
 has "$OUT" "so something moved it after the sweep and this run leaves it" "(70h) a day that moved after the sweep read it is left alone"
@@ -617,17 +542,17 @@ eq "$(kv_day)" "$(day -1)" "(70i) as it stands"
 kv_put "$(day 0)"
 
 echo "── flag: the real patrol-finding.sh files the finding ──"
-OUT=$("$SUT" flag --dir "$W" 2>&1); RC=$?
+OUT=$(rigs_on; "$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(71) flag exits 0"
 eq "$(findings_n)" "1" "(71a) it files one finding"
-eq "$(f_field tk-find1 '.metadata["finding.key"]')" "unmarked-city-post" "(72) the finding is keyed on the situation"
-eq "$(f_field tk-find1 '.metadata["finding.scope"]')" "miner-findings" "(73) it is filed in the miner's scope"
-has "$(f_field tk-find1 .description)" "- https://github.com/ours/repo/pull/11#pullrequestreview-104 (posted" "(74) it names the flagged post"
-hasnt "$(f_field tk-find1 .description)" "#issuecomment-301" "(75) it leaves out the post from before the cutover"
-eq "$(cat "$TMP/finding.rig" 2>/dev/null)" "fixture-rig" "(76) it lands in the swept rig's store"
-eq "$(post_record "$(key 11 review 104)")" "named in tk-find1" "(76d) the store records the post with the finding that names it"
-has "$(cat "$TMP/proactive.log" 2>/dev/null)" "sling tk-find1" "(76e) the finding goes to its first reaction"
-has "$OUT" "named 1 unmarked city post(s) in tk-find1" "(76f) flag says where it named the post"
+eq "$(meta "$(finding 1)" finding.key)" "unmarked-city-post" "(72) the finding is keyed on the situation"
+eq "$(meta "$(finding 1)" finding.scope)" "miner-findings" "(73) it is filed in the miner's scope"
+has "$(bfield "$(finding 1)" description)" "- https://github.com/ours/repo/pull/11#pullrequestreview-104 (posted" "(74) it names the flagged post"
+hasnt "$(bfield "$(finding 1)" description)" "#issuecomment-301" "(75) it leaves out the post from before the cutover"
+eq "$(rig_of 'bd create')" "fixture-rig" "(76) it lands in the swept rig's store"
+eq "$(post_record "$(key 11 review 104)")" "named in $(finding 1)" "(76d) the store records the post with the finding that names it"
+has "$(cat "$TMP/proactive.log" 2>/dev/null)" "sling $(finding 1)" "(76e) the finding goes to its first reaction"
+has "$OUT" "named 1 unmarked city post(s) in $(finding 1)" "(76f) flag says where it named the post"
 
 echo "── sweep, a paged listing stops at the first PR updated before the window ──"
 fresh_dir p
@@ -644,9 +569,12 @@ echo "── sweep, a back-fill cut short and resumed four days later ──"
 # than the window.
 fresh_dir r
 kv_put "$(day 34)"
-cp "$STORE/obs.json" "$STORE/obs.keep"
-jq --arg old "$(ago 4)" --arg k "$(key 12 comment 401)" 'map(select(.metadata["obs.provenance"] != $k) | . + {created_at: $old})' \
-  "$STORE/obs.keep" > "$STORE/obs.json"
+cp "$STUB_STORE" "$TMP/store.keep"
+OLD=$(ago 4)
+for id in $(bids metadata.task_kind=observation); do
+  if [ "$(meta "$id" obs.provenance)" = "$(key 12 comment 401)" ]; then bset "$id" metadata.task_kind=retired
+  else bset "$id" "created_at=$OLD"; fi
+done
 OUT=$("$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1)
 has "$OUT" "still owes a read of every PR updated since $(day 34), so the sweep reads back to then" \
     "(77a) a resumed back-fill reads back to its recorded start, however old its observations"
@@ -655,7 +583,7 @@ OUT=$("$SUT" advance --dir "$W" 2>&1)
 has "$OUT" "moves to $(updated_on 12): 1 PR(s) still owe a read (#12): 0 did not read, and 1 outside post(s) are not recorded yet" \
     "(77c) and the day keeps that PR in reach until its post is recorded"
 eq "$(kv_day)" "$(updated_on 12)" "(77d) the store holds the day that PR was last updated"
-mv "$STORE/obs.keep" "$STORE/obs.json"
+cp "$TMP/store.keep" "$STUB_STORE"
 OUT=$("$SUT" advance --dir "$W" 2>&1)
 has "$OUT" "moves to $(day 0): every PR the sweep listed read" "(77e) once the store records it, the day moves to the sweep's"
 
@@ -665,120 +593,118 @@ OUT=$("$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1)
 hasnt "$OUT" "so the sweep reads back to then" "(78) a sweep after a finished run reads the standing window"
 eq "$(class_of "$(key 12 comment 401)")" "" "(79) the back-fill PR is out of the window"
 eq "$(field_of "$(key 11 comment 201)" captured)" "true" "(80) a post recorded by an earlier run reads as captured"
-has "$("$SUT" show --dir "$W" --city)" "already recorded on this post: tk-obs" "(81) show names what is already recorded on a post"
+has "$("$SUT" show --dir "$W" --city)" "already recorded on this post: new-" "(81) show names what is already recorded on a post"
 has "$("$SUT" show --dir "$W" --outside)" "== corrections outside posts already name, to reuse when one fits: keep-reviews-short (1) ==" \
     "(81a) a later run's show lists the corrections the store records"
-OUT=$(GC_RIG=another-rig "$SUT" flag --dir "$W" 2>&1); RC=$?
+OUT=$(rigs_on; GC_RIG=another-rig "$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(82) a flag whose posts a finding already names exits 0"
 has "$OUT" "already named in a finding under unmarked-city-post" "(82a) and says so"
-eq "$(f_field tk-find1 '.metadata["finding.occurrences"]')" "1" "(82b) a post the store records as named is not raised again"
-eq "$(cat "$TMP/kv.rig" 2>/dev/null)" "fixture-rig" "(82c) the record is read in the swept rig's store"
+eq "$(meta "$(finding 1)" finding.occurrences)" "1" "(82b) a post the store records as named is not raised again"
+eq "$(rig_of 'bd kv')" "fixture-rig" "(82c) the record is read in the swept rig's store"
 set_status closed
 "$SUT" flag --dir "$W" >/dev/null 2>&1
 eq "$(findings_n)" "1" "(82d) nor once its finding is closed, where a raise would file a recurrence of it"
-STUB_KV_BROKEN=1 "$SUT" flag --dir "$W" >/dev/null 2>&1; RC=$?
+STUB_KV_FAIL=1 "$SUT" flag --dir "$W" >/dev/null 2>&1; RC=$?
 eq "$RC" "1" "(82e) a record that does not read stops the flag"
 eq "$(findings_n)" "1" "(82f) and it raises nothing"
 # A new unmarked post: review 10, whose link is a prefix of review 104's.
-cp "$FIX/11.reviews.json" "$FIX/11.reviews.keep"
+cp "$FIX/11.reviews.jsonl" "$FIX/11.reviews.keep"
 add_review 10 "Another notice a city writer posted without the mark."
 fresh_dir n
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 "$SUT" flag --dir "$W" >/dev/null 2>&1
 eq "$(findings_n)" "2" "(82g) a post no finding names yet is raised, though its link is a prefix of a named one"
-has "$(f_field tk-find2 .description)" "- https://github.com/ours/repo/pull/11#pullrequestreview-10 (posted" "(82g2) the new finding names it"
-hasnt "$(f_field tk-find2 .description)" "pullrequestreview-104" "(82h) and only it"
-eq "$(f_field tk-find2 '.metadata["finding.recurrence_of"]')" "tk-find1" \
+has "$(bfield "$(finding 2)" description)" "- https://github.com/ours/repo/pull/11#pullrequestreview-10 (posted" "(82g2) the new finding names it"
+hasnt "$(bfield "$(finding 2)" description)" "pullrequestreview-104" "(82h) and only it"
+eq "$(meta "$(finding 2)" finding.recurrence_of)" "$(finding 1)" \
    "(82h2) a post first flagged after the finding closed files a new one that names the closed one"
 
 echo "── flag: a post flagged while its finding is open joins that finding, once ──"
-# tk-find2 is open. Review 9 is posted while it is.
+# The second finding is open. Review 9 is posted while it is.
 add_review 9 "A third notice a city writer posted without the mark."
 fresh_dir s
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 OUT=$("$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(82s1) a raise while the finding is open exits 0"
 eq "$(findings_n)" "2" "(82s2) it files no new finding"
-eq "$(f_field tk-find2 '.metadata["finding.occurrences"]')" "2" "(82s3) the finding writer counts it on the open finding"
-has "$(f_field tk-find2 .notes)" "- https://github.com/ours/repo/pull/11#pullrequestreview-9 (posted" \
+eq "$(meta "$(finding 2)" finding.occurrences)" "2" "(82s3) the finding writer counts it on the open finding"
+has "$(notes "$(finding 2)")" "- https://github.com/ours/repo/pull/11#pullrequestreview-9 (posted" \
     "(82s4) whose notes name the new post whole, past the 200 characters the writer notes"
-hasnt "$(f_field tk-find2 .notes)" "#pullrequestreview-10 (posted" "(82s5) and only the new post"
-eq "$(post_record "$(key 11 review 9)")" "named in tk-find2" "(82s6) the store records it with the open finding"
-has "$OUT" "named 1 unmarked city post(s) in tk-find2" "(82s7) flag says where it named the post"
+hasnt "$(notes "$(finding 2)")" "#pullrequestreview-10 (posted" "(82s5) and only the new post"
+eq "$(post_record "$(key 11 review 9)")" "named in $(finding 2)" "(82s6) the store records it with the open finding"
+has "$OUT" "named 1 unmarked city post(s) in $(finding 2)" "(82s7) flag says where it named the post"
 OUT=$("$SUT" flag --dir "$W" 2>&1)
 has "$OUT" "already named in a finding under unmarked-city-post" "(82s8) the same scan again raises nothing"
-eq "$(f_field tk-find2 '.metadata["finding.occurrences"]')" "2" "(82s9) so the open finding counts no third occurrence"
+eq "$(meta "$(finding 2)" finding.occurrences)" "2" "(82s9) so the open finding counts no third occurrence"
 set_status closed
 "$SUT" flag --dir "$W" >/dev/null 2>&1
 eq "$(findings_n)" "2" "(82s10) and once it closes, no new finding is filed as its recurrence"
-# The rest of the section raises onto tk-find2, open again.
-set_status open tk-find2
+# The rest of the section raises onto the second finding, open again.
+set_status open 2
 # A note that does not land records nothing, so the next run names the post.
 add_review 8 "A fourth notice."
 fresh_dir s2
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
-OUT=$(STUB_NOTE_FAIL="more unmarked city post(s)" "$SUT" flag --dir "$W" 2>&1); RC=$?
+OUT=$(STUB_UPDATE_FAIL_ON="more unmarked city post(s)" "$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(82s11) a raise whose note does not land exits 1"
 eq "$(post_record "$(key 11 review 8)")" "" "(82s12) and records nothing"
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-has "$(f_field tk-find2 .notes)" "- https://github.com/ours/repo/pull/11#pullrequestreview-8 (posted" "(82s13) the next run names the post"
-eq "$(post_record "$(key 11 review 8)")" "named in tk-find2" "(82s14) and records it"
+has "$(notes "$(finding 2)")" "- https://github.com/ours/repo/pull/11#pullrequestreview-8 (posted" "(82s13) the next run names the post"
+eq "$(post_record "$(key 11 review 8)")" "named in $(finding 2)" "(82s14) and records it"
 # A record that does not land leaves the post to the next run, not lost.
 add_review 7 "A fifth notice."
 fresh_dir s3
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
-OUT=$(STUB_KV_SET_FAIL=1 "$SUT" flag --dir "$W" 2>&1); RC=$?
+OUT=$(STUB_FAIL_ON="kv set" "$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(82s15) a raise whose record does not land exits 1"
 has "$OUT" "the store refused the record of them, so the next run raises them again" "(82s16) and says so"
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-eq "$(post_record "$(key 11 review 7)")" "named in tk-find2" "(82s17) the next run records it"
+eq "$(post_record "$(key 11 review 7)")" "named in $(finding 2)" "(82s17) the next run records it"
 # Findings that do not read stop a raise before it starts.
 add_review 6 "A sixth notice."
 fresh_dir s4
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
-OCC=$(f_field tk-find2 '.metadata["finding.occurrences"]')
-OUT=$(STUB_FINDINGS_BROKEN=1 "$SUT" flag --dir "$W" 2>&1); RC=$?
+OCC=$(meta "$(finding 2)" finding.occurrences)
+OUT=$(STUB_LIST_FAIL_ON=finding.key= "$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(82s18) findings that do not read stop the flag"
-eq "$(f_field tk-find2 '.metadata["finding.occurrences"]')" "$OCC" "(82s19) before anything is raised"
+eq "$(meta "$(finding 2)" finding.occurrences)" "$OCC" "(82s19) before anything is raised"
 eq "$(post_record "$(key 11 review 6)")" "" "(82s20) or recorded"
 # A finding held at blocked with nothing open to wait on takes no raise: the
 # writer files a new finding beside it, and the flag names the post there.
-set_status blocked tk-find2
+set_status blocked 2
 OUT=$("$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(82s21) a raise beside a finding held at blocked exits 0"
-eq "$(f_field tk-find3 '.metadata["finding.recurrence_of"]')" "tk-find2" "(82s22) the writer files a new finding beside the held one"
-has "$(f_field tk-find3 .description)" "- https://github.com/ours/repo/pull/11#pullrequestreview-6 (posted" "(82s23) which names the post"
-hasnt "$(f_field tk-find2 .notes)" "#pullrequestreview-6 (posted" "(82s24) and the held finding's notes do not"
-eq "$(post_record "$(key 11 review 6)")" "named in tk-find3" "(82s25) the store records the post with the new finding"
-mv "$FIX/11.reviews.keep" "$FIX/11.reviews.json"
+eq "$(meta "$(finding 3)" finding.recurrence_of)" "$(finding 2)" "(82s22) the writer files a new finding beside the held one"
+has "$(bfield "$(finding 3)" description)" "- https://github.com/ours/repo/pull/11#pullrequestreview-6 (posted" "(82s23) which names the post"
+hasnt "$(notes "$(finding 2)")" "#pullrequestreview-6 (posted" "(82s24) and the held finding's notes do not"
+eq "$(post_record "$(key 11 review 6)")" "named in $(finding 3)" "(82s25) the store records the post with the new finding"
+mv "$FIX/11.reviews.keep" "$FIX/11.reviews.jsonl"
 
 echo "── flag: one raise names every new post, however many ──"
 set_status closed
-cp "$FIX/prs.ours.json" "$FIX/prs.ours.keep"; cp "$STORE/anchors.json" "$STORE/anchors.keep"
-jq --arg r "$(ago_h 1)" '. + [{number: 16, title: "A busy writer", closedAt: $r, mergedAt: $r, updatedAt: $r}]' \
-  "$FIX/prs.ours.keep" > "$FIX/prs.ours.json"
-jq --arg c "$CUT" '. + [{id: "tk-anchor16", metadata: {pr_number: 16, pr_provenance_since: $c}}]' "$STORE/anchors.keep" > "$STORE/anchors.json"
-for i in $(seq 1 25); do review $((600 + i)) city-bot User COMMENTED "Unmarked notice $i." "$(ago_h 1)"; done | jq -s . > "$FIX/16.reviews.json"
-echo '[]' > "$FIX/16.inline.json"; echo '[]' > "$FIX/16.issue.json"
+cp "$FIX/prs.ours.jsonl" "$FIX/prs.ours.keep"
+R=$(ago_h 1); pr_node 16 "A busy writer" "$R" "$R" "$R" >> "$FIX/prs.ours.jsonl"
+anchor tk-anchor16 16
+for i in $(seq 1 25); do review $((600 + i)) city-bot User COMMENTED "Unmarked notice $i." "$(ago_h 1)"; done > "$FIX/16.reviews.jsonl"
+: > "$FIX/16.inline.jsonl"; : > "$FIX/16.issue.jsonl"
 fresh_dir t
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 OUT=$("$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(82t1) a raise of 25 posts exits 0"
-eq "$(f_field tk-find4 .description | grep -c '^- https://github.com/ours/repo/pull/11#pullrequestreview-6[0-9][0-9] (posted')" "25" \
+eq "$(bfield "$(finding 4)" description | grep -c '^- https://github.com/ours/repo/pull/11#pullrequestreview-6[0-9][0-9] (posted')" "25" \
    "(82t2) the new finding names all 25"
-eq "$(jq '[keys[] | select(startswith("feedback_miner.unmarked_post.pr_ours_repo_16_"))] | length' "$STORE/kv.json")" "25" \
+eq "$(grep -c '^feedback_miner\.unmarked_post\.pr_ours_repo_16_' "$STUB_KV")" "25" \
    "(82t3) and the store records all 25"
-mv "$FIX/prs.ours.keep" "$FIX/prs.ours.json"; mv "$STORE/anchors.keep" "$STORE/anchors.json"
-rm -f "$FIX/16.reviews.json" "$FIX/16.inline.json" "$FIX/16.issue.json"
+mv "$FIX/prs.ours.keep" "$FIX/prs.ours.jsonl"; bunset tk-anchor16 metadata.pr_provenance_since
+rm -f "$FIX/16.reviews.jsonl" "$FIX/16.inline.jsonl" "$FIX/16.issue.jsonl"
 
 echo "── the /code-review signature: its footer or its heading, in the post's own body ──"
 # PR 17's posts are all unmarked, under the city's login, and after the PR's
 # cutover. Reviews 703 to 706 have empty bodies: each carries one standalone
 # inline comment, the way `gh api .../pulls/<n>/comments` posts one.
-cp "$FIX/prs.ours.json" "$FIX/prs.ours.keep"; cp "$STORE/anchors.json" "$STORE/anchors.keep"
-jq --arg r "$(ago_h 1)" '. + [{number: 17, title: "Signatures", closedAt: $r, mergedAt: $r, updatedAt: $r}]' \
-  "$FIX/prs.ours.keep" > "$FIX/prs.ours.json"
-jq --arg c "$CUT" '. + [{id: "tk-anchor17", metadata: {pr_number: 17, pr_provenance_since: $c}}]' "$STORE/anchors.keep" > "$STORE/anchors.json"
+cp "$FIX/prs.ours.jsonl" "$FIX/prs.ours.keep"
+R=$(ago_h 1); pr_node 17 "Signatures" "$R" "$R" "$R" >> "$FIX/prs.ours.jsonl"
+anchor tk-anchor17 17
 {
   review 701 city-bot User COMMENTED "Code review gates: correctness PASS, arch PASS." "$(ago_h 1)"
   review 702 city-bot User COMMENTED "### Code review
@@ -789,7 +715,7 @@ Found 1 issue:
 
 🤖 Generated with [Claude Code](https://claude.ai/code)" "$(ago_h 1)"
   for r in 703 704 705 706; do review "$r" city-bot User COMMENTED "" "$(ago_h 1)"; done
-} | jq -s . > "$FIX/17.reviews.json"
+} > "$FIX/17.reviews.jsonl"
 {
   inline 801 city-bot 703 "**Must fix: the guard reads the wrong variable.**
 
@@ -799,10 +725,10 @@ _Generated by [Claude Code](https://claude.ai/code)_" "$(ago_h 1)"
   inline 803 city-bot 705 "Fixed in abc1234. The comment it answers ended:
 > _Generated by [Claude Code](https://claude.ai/code)_" "$(ago_h 1)"
   inline 804 city-bot 706 "Code review: 1 finding. The cache is never cleared." "$(ago_h 1)"
-} | jq -s . > "$FIX/17.inline.json"
+} > "$FIX/17.inline.jsonl"
 issue 811 city-bot User "One more point on the latest head: the retry has no backoff.
 
-_Generated by [Claude Code](https://claude.ai/code)_" "$(ago_h 1)" 17 | jq -s . > "$FIX/17.issue.json"
+_Generated by [Claude Code](https://claude.ai/code)_" "$(ago_h 1)" 17 > "$FIX/17.issue.jsonl"
 fresh_dir sig
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 17 comment 801)")" "outside" "(82u1) a standalone inline comment signed by its own footer is outside"
@@ -814,8 +740,8 @@ eq "$(class_of "$(key 17 review 701)")" "city" "(82u6) a city post that opens wi
 eq "$(field_of "$(key 17 review 701)" flag)" "true" "(82u7) so it is flagged when it lacks the mark"
 eq "$(class_of "$(key 17 comment 802)")" "city" "(82u8) a city post whose first line only mentions Claude Code is the city's"
 eq "$(class_of "$(key 17 comment 803)")" "city" "(82u9) and a city post quoting the footer is not signed by it"
-mv "$FIX/prs.ours.keep" "$FIX/prs.ours.json"; mv "$STORE/anchors.keep" "$STORE/anchors.json"
-rm -f "$FIX/17.reviews.json" "$FIX/17.inline.json" "$FIX/17.issue.json"
+mv "$FIX/prs.ours.keep" "$FIX/prs.ours.jsonl"; bunset tk-anchor17 metadata.pr_provenance_since
+rm -f "$FIX/17.reviews.jsonl" "$FIX/17.inline.jsonl" "$FIX/17.issue.jsonl"
 
 echo "── sweep, an outside capture day that is not a date, or does not read ──"
 fresh_dir g
@@ -825,13 +751,13 @@ eq "$RC" "0" "(82i) a recorded day that is not a date does not stop the sweep"
 has "$OUT" "which is not a date, so the capture starts again" "(82j) it says the capture starts again"
 eq "$(kv_day)" "$(day 30)" "(82k) and records the back-fill's start"
 fresh_dir g2
-OUT=$(STUB_KV_BROKEN=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
+OUT=$(STUB_KV_FAIL=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(82l) a day that does not read stops the sweep"
 has "$OUT" "did not read, so which PRs the capture owes is unknown" "(82m) and says why"
 eq "$(grep -c '^api graphql' "$TMP/gh.log")" "0" "(82n) before it lists a PR"
 fresh_dir g3
-echo '{}' > "$STORE/kv.json"
-STUB_KV_SET_FAIL=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1; RC=$?
+: > "$STUB_KV"
+STUB_FAIL_ON="kv set" "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1; RC=$?
 eq "$RC" "1" "(82o) a first run that cannot record its start stops"
 eq "$(grep -c '^api graphql' "$TMP/gh.log")" "0" "(82p) before it lists a PR"
 kv_put "$(day 0)"
@@ -860,7 +786,15 @@ OUT=$(PATH="$KILLBIN:$PATH" STUB_KILL_PR=11 "$SUT" sweep --checkout "$CO" --days
 has "$OUT" "did not read, left for the next run: 11" "(85c) a worker killed while it writes a PR's posts leaves that PR unread"
 "$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 11 review 101)")" "outside" "(85d) so a resumed sweep into the same dir reads it again"
-jq -s 'length' "$W/sweep.jsonl" >/dev/null 2>&1; eq "$?" "0" "(85e) and every line of the resumed sweep parses"
+# A whole line is one post: it opens with the post's key, closes its object,
+# and opens no second post, as a cut line joined to the next line does. A last
+# line with no newline is read too.
+WHOLE=0
+while IFS= read -r l || [ -n "$l" ]; do
+  case "$l" in '{"key":"'*'}') ;; *) WHOLE=1 ;; esac
+  case "${l#\{}" in *'{"key":'*) WHOLE=1 ;; esac
+done < "$W/sweep.jsonl"
+eq "$WHOLE" "0" "(85e) and every line of the resumed sweep is one whole post"
 # A sweep cut short before it finished writes no read.txt.
 rm -f "$W/read.txt"
 kv_put "$(day 30)"
@@ -875,7 +809,7 @@ fresh_dir u
 read_list() { [ -f "$W/read.txt" ] && echo written || echo none; }
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 eq "$(read_list)" "written" "(85m) a sweep that finishes writes read.txt"
-STUB_KV_BROKEN=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+STUB_KV_FAIL=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 eq "$(read_list)" "none" "(85n) a sweep that stops partway in the same dir removes it"
 "$SUT" advance --dir "$W" >/dev/null 2>&1; eq "$?" "1" "(85o) so advance refuses to move the day"
 eq "$(kv_day)" "$(day 30)" "(85p) which stays where it was"
@@ -923,7 +857,7 @@ has "$OUT" "moves to $(updated_on 12): 1 PR(s) still owe a read (#12): 1 did not
 eq "$(kv_day)" "$(updated_on 12)" "(85z2) so the day holds at its last update"
 kv_put "$(day 0)"
 fresh_dir d
-OUT=$(STUB_OBS_BROKEN=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
+OUT=$(STUB_LIST_FAIL_ON="-l observation" "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(86) an unreadable observation store stops the sweep"
 has "$OUT" "nothing can be deduped" "(87) and says why"
 eq "$(grep -c '^api graphql' "$TMP/gh.log")" "0" "(88) it lists no PR before it can dedup"
@@ -931,8 +865,8 @@ eq "$(grep -c '^api graphql' "$TMP/gh.log")" "0" "(88) it lists no PR before it 
 echo "── sweep, an outside post on a PR that closed before the capture day ──"
 # PR 14 closed 40 days ago. The capture's day is five days back, past that
 # close, and a comment two hours ago updated the PR.
-issue 901 johnzook User "A late point on an old change." "$(ago_h 2)" 14 | jq -s . > "$FIX/14.issue.json"
-cp "$STORE/obs.json" "$STORE/obs.keep"
+issue 901 johnzook User "A late point on an old change." "$(ago_h 2)" 14 > "$FIX/14.issue.jsonl"
+cp "$STUB_STORE" "$TMP/store.keep"
 fresh_dir v
 kv_put "$(day 5)"
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
@@ -948,14 +882,14 @@ ROWS_EOF
 OUT=$("$SUT" advance --dir "$W" 2>&1)
 has "$OUT" "every PR the sweep listed read, and the store records every outside post it found" "(88e) once the post is recorded, the run owes nothing"
 eq "$(kv_day)" "$(day 0)" "(88f) and the day is the sweep's"
-rm -f "$FIX/14.issue.json"
-mv "$STORE/obs.keep" "$STORE/obs.json"
+rm -f "$FIX/14.issue.jsonl"
+cp "$TMP/store.keep" "$STUB_STORE"
 kv_put "$(day 0)"
 
 echo "── summary ──"
 fresh_dir e
-echo '[]' > "$STORE/obs.json"
-echo '{}' > "$STORE/kv.json"
+obs_reset
+: > "$STUB_KV"
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 "$SUT" show --dir "$W" --outside >/dev/null
 "$SUT" file --dir "$W" >/dev/null 2>&1 <<ROWS_EOF
@@ -973,9 +907,8 @@ has "$("$SUT" summary --dir "$W")" "outside posts: 8 read, 0 recorded before thi
     "(90a) a post this run filed, filed again, is still counted once, as filed now"
 # Another writer records review 101 after the sweep read the store.
 store_obs() { # <id> <post key> <category>
-  jq --arg id "$1" --arg k "$2" --arg c "$3" '. + [{id: $id, title: "obs: recorded elsewhere", status: "closed",
-      labels: ["learning", "observation"], metadata: {task_kind: "observation", "obs.provenance": $k, "obs.category": $c}}]' \
-    "$STORE/obs.json" > "$STORE/obs.next" && mv "$STORE/obs.next" "$STORE/obs.json"
+  brow "$1" status=closed "title=obs: recorded elsewhere" 'labels:=["learning","observation"]' \
+    "metadata:={\"task_kind\":\"observation\",\"obs.provenance\":$(json_str "$2"),\"obs.category\":$(json_str "$3")}"
 }
 store_obs tk-other1 "$(key 11 review 101)" outside-review
 # Every outside post here was printed whole by the run's first show call, so a
@@ -991,7 +924,7 @@ hasnt "$("$SUT" show --dir "$W" --outside --limit 50)" "$(key 11 review 101)" "(
 has "$("$SUT" summary --dir "$W")" "outside posts: 8 read, 1 recorded before this run, 1 filed now, 6 left unrecorded" \
     "(90e) the summary counts it as recorded, not as filed now"
 # A create whose observation landed but whose answer was lost.
-OUT=$(STUB_CREATE_LOST=1 "$SUT" file --dir "$W" <<ROWS_EOF 2>&1
+OUT=$(STUB_CREATE_GARBAGE=1 "$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 11 review 105)", "statement": "Copilot found a possible null dereference."}
 ROWS_EOF
 ); RC=$?
@@ -1014,18 +947,17 @@ has "$("$SUT" show --dir "$W" --city)" "already recorded on this post: tk-other2
 echo "── show prints every post whole, and a long one in parts ──"
 # PR 15 joins the fixture for this section: a review whose point sits past
 # character 2,000, and a conversation comment longer than one call's budget.
-cp "$FIX/prs.ours.json" "$FIX/prs.ours.keep"
-jq --arg r "$(ago_h 1)" '. + [{number: 15, title: "A long review", closedAt: $r, mergedAt: $r, updatedAt: $r}]' \
-  "$FIX/prs.ours.keep" > "$FIX/prs.ours.json"
+cp "$FIX/prs.ours.jsonl" "$FIX/prs.ours.keep"
+R=$(ago_h 1); pr_node 15 "A long review" "$R" "$R" "$R" >> "$FIX/prs.ours.jsonl"
 TAIL_REVIEW="$(printf 'A sentence that fills the long review out. %.0s' $(seq 1 60))TAIL_FINDING: the retry loop never backs off."
 HUGE="$(printf 'Paragraph %05d of the huge comment, padded out to sixty characters.\n' $(seq 1 600))LAST_POINT: drop the cache."
-review 501 johnzook User COMMENTED "$TAIL_REVIEW" "$(ago_h 1)" | jq -s . > "$FIX/15.reviews.json"
-echo '[]' > "$FIX/15.inline.json"
-issue 502 johnzook User "$HUGE" "$(ago 0)" 15 | jq -s . > "$FIX/15.issue.json"
-slice() { jq -rn --arg s "$1" --argjson a "$2" --argjson b "$3" '$s[$a:$b]'; }
-HUGE_LEN=$(jq -rn --arg s "$HUGE" '$s | length')
+review 501 johnzook User COMMENTED "$TAIL_REVIEW" "$(ago_h 1)" > "$FIX/15.reviews.jsonl"
+: > "$FIX/15.inline.jsonl"
+issue 502 johnzook User "$HUGE" "$(ago 0)" 15 > "$FIX/15.issue.jsonl"
+slice() { printf '%s' "${1:$2:$(( $3 - $2 ))}"; }
+HUGE_LEN=${#HUGE}
 fresh_dir l
-echo '[]' > "$STORE/obs.json"
+obs_reset
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 15 review 501)", "statement": "Filed unread."}
@@ -1077,12 +1009,12 @@ eq "$(printf '%s' "$SEEN" | grep . | sort | uniq -d | grep -c . || true)" "0" "(
 if [ "$CALLS" -gt 2 ]; then ok "(105) a call stops before the post that would take it past --max-chars"
 else bad "(105) a call stops before the post that would take it past --max-chars (took $CALLS call(s))"; fi
 "$SUT" show --dir "$W" --outside --max-chars 0 >/dev/null 2>&1; eq "$?" "2" "(106) --max-chars must be a positive integer"
-mv "$FIX/prs.ours.keep" "$FIX/prs.ours.json"
-rm -f "$FIX/15.reviews.json" "$FIX/15.inline.json" "$FIX/15.issue.json"
+mv "$FIX/prs.ours.keep" "$FIX/prs.ours.jsonl"
+rm -f "$FIX/15.reviews.jsonl" "$FIX/15.inline.jsonl" "$FIX/15.issue.jsonl"
 
 echo "── show counts each correction once per observation ──"
 fresh_dir z
-echo '[]' > "$STORE/obs.json"
+obs_reset
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 "$SUT" show --dir "$W" --outside >/dev/null
 "$SUT" file --dir "$W" >/dev/null 2>&1 <<ROWS_EOF

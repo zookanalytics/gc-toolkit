@@ -17,13 +17,13 @@ import (
 )
 
 // stubLoggingGC puts a gc on PATH that logs each call, answers the rig list
-// with rigs and the store gc resolves here with $STUB_WHERE, and returns the
-// log's path.
+// with rigs, the city's config with $STUB_CONFIG and the store gc resolves here
+// with $STUB_WHERE, and returns the log's path.
 func stubLoggingGC(t *testing.T, rigs string) string {
 	t.Helper()
 	bin := t.TempDir()
 	log := filepath.Join(bin, "log")
-	stub := "#!/bin/sh\necho \"$*\" >> '" + log + "'\ncase \"$1 $2\" in \"rig list\") printf '%s' \"$STUB_RIGS\" ;; \"bd where\") printf '%s' \"$STUB_WHERE\" ;; esac\nexit 0\n"
+	stub := "#!/bin/sh\necho \"$*\" >> '" + log + "'\ncase \"$1 $2\" in \"rig list\") printf '%s' \"$STUB_RIGS\" ;; \"config show\") printf '%s' \"$STUB_CONFIG\" ;; \"bd where\") printf '%s' \"$STUB_WHERE\" ;; esac\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestReactionDisposeRefusesUsageBeforeAnyCall(t *testing.T) {
 // With no --db, a check, a sling and a dispose read their subject from the
 // store gc routes it to, as every gctk verb that names a bead does: when gc
 // resolves another store here, the store of the rig whose prefix is the longest
-// that begins the subject's id.
+// that begins the subject's id, from the city's config.
 func TestReactionVerbsReadTheStoreGcRoutesTheSubjectTo(t *testing.T) {
 	dir := t.TempDir()
 	short, long := filepath.Join(dir, "tk", ".beads"), filepath.Join(dir, "tk-x", ".beads")
@@ -69,6 +69,8 @@ func TestReactionVerbsReadTheStoreGcRoutesTheSubjectTo(t *testing.T) {
 		}
 	}
 	log := stubLoggingGC(t, `{"rigs":[{"name":"town","prefix":"hq","path":"`+dir+`","hq":true},{"name":"tk","prefix":"tk","path":"`+filepath.Dir(short)+`"},{"name":"tk-x","prefix":"tk-x","path":"`+filepath.Dir(long)+`"}]}`)
+	t.Setenv("STUB_CONFIG", `{"city_path":"`+dir+`","config":{"Workspace":{"Name":"town","Prefix":"hq"},"Rigs":[`+
+		`{"Name":"tk","Prefix":"tk","Path":"`+filepath.Dir(short)+`"},{"Name":"tk-x","Prefix":"tk-x","Path":"`+filepath.Dir(long)+`"}]}}`)
 	t.Setenv("STUB_WHERE", `{"path":"`+filepath.Join(dir, ".beads")+`","prefix":"hq"}`)
 	t.Setenv("GC_RIG", "gc-toolkit")
 	for name, args := range map[string][]string{

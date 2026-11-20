@@ -8,11 +8,17 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 )
+
+// exitProcess ends this process. A variable so a test can watch the exit a
+// relayed signal makes instead of taking it.
+var exitProcess = os.Exit
 
 // NewBounded returns a client for host whose every call to the gh on PATH ends
 // once limit passes, with gh's whole process group, as a read that did not
@@ -21,16 +27,54 @@ func NewBounded(host string, limit time.Duration) *Client {
 	return &Client{host: host, run: func(args ...string) ([]byte, error) { return ghWithin(limit, args...) }}
 }
 
+// ghWithin runs gh in a process group it leads, and kills that whole group once
+// limit passes. Its own group also puts gh out of reach of a signal sent to
+// this process's group, which is how a terminal delivers Ctrl-C. So a SIGTERM
+// or SIGINT that reaches this process during the call kills gh's group too, and
+// this process then exits with the status that signal gives, writing nothing
+// more. A signal this process inherited as ignored stays ignored.
 func ghWithin(limit time.Duration, args ...string) ([]byte, error) {
+	stop := make(chan os.Signal, 1)
+	for _, s := range []os.Signal{syscall.SIGTERM, syscall.SIGINT} {
+		if !signal.Ignored(s) {
+			signal.Notify(stop, s)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", args...)
+	run, end := context.WithCancel(ctx)
+	defer end()
+	var got os.Signal
+	relayed := make(chan struct{})
+	go func() {
+		defer close(relayed)
+		select {
+		case got = <-stop:
+			end()
+		case <-run.Done():
+		}
+	}()
+	cmd := exec.CommandContext(run, "gh", args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 2 * time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	end()
+	<-relayed
+	// A signal that arrived as gh finished is still this process's to take.
+	signal.Stop(stop)
+	if got == nil {
+		select {
+		case got = <-stop:
+		default:
+		}
+	}
+	if got != nil {
+		exitProcess(128 + int(got.(syscall.Signal)))
+		return nil, fmt.Errorf("gh: this process was sent %v", got)
+	}
 	switch {
 	case ctx.Err() != nil:
 		return nil, fmt.Errorf("gh: GitHub did not answer within %s", limit)
