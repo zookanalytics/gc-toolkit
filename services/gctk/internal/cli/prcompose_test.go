@@ -10,12 +10,13 @@ import (
 )
 
 // composeStub answers the reads a composition makes: `bd where` with
-// $STUB_WHERE, the store gc resolves for the caller, `rig list` with
-// $STUB_RIGS, the stores and their prefixes, and `bd list` with the rows each
-// --metadata-field k=v keeps. A list's rows come from $STUB_ROWS, or, when
-// $STUB_STORES maps each store's .beads directory to its rows, from the store
-// the call names, as gc picks it: the one bd's --db names, else the one whose
-// prefix begins the first id --id names, else the caller's. $STUB_LIST_FAIL
+// $STUB_WHERE, the store gc resolves for the caller, `config show` with
+// $STUB_CONFIG, the city's config, which names the stores and their prefixes,
+// and `bd list` with the rows each --metadata-field k=v keeps. A list's rows
+// come from $STUB_ROWS, or, when $STUB_STORES maps each store's .beads
+// directory to its rows, from the store the call names, as gc picks it: the
+// one bd's --db names, else the one whose prefix in $STUB_RIGS begins the
+// first id --id names, else the caller's. $STUB_LIST_FAIL
 // fails every list, $STUB_WHERE_FAIL the where, and $STUB_LOG, when set, logs
 // each call as the store it names, "-" for none, and its verb.
 const composeStub = `#!/bin/sh
@@ -24,7 +25,7 @@ if [ "$1" = bd ] && [ "$2" = --db ]; then db="$3"; shift 3; set -- bd "$@"; fi
 [ -z "$STUB_LOG" ] || printf '%s %s %s\n' "$db" "$1" "$2" >> "$STUB_LOG"
 case "$1 $2" in
   "bd where") [ -z "$STUB_WHERE_FAIL" ] || { echo "no store here" >&2; exit 1; }; printf '%s\n' "$STUB_WHERE"; exit 0 ;;
-  "rig list") printf '%s\n' "$STUB_RIGS"; exit 0 ;;
+  "config show") printf '%s\n' "$STUB_CONFIG"; exit 0 ;;
   "bd list") ;;
   *) echo unsupported >&2; exit 2 ;;
 esac
@@ -61,6 +62,7 @@ func stubCompose(t *testing.T, rows string) {
 	t.Setenv("STUB_STORES", "")
 	t.Setenv("STUB_WHERE", `{"path":"/rig/.beads","prefix":"tk"}`)
 	t.Setenv("STUB_RIGS", `{"rigs":[{"name":"rig","prefix":"tk","path":"/rig"}]}`)
+	t.Setenv("STUB_CONFIG", `{"city_path":"/city","config":{"Workspace":{"Name":"city","Prefix":"hq"},"Rigs":[{"Name":"rig","Prefix":"tk","Path":"/rig"}]}}`)
 	t.Setenv("STUB_LIST_FAIL", "")
 	t.Setenv("STUB_WHERE_FAIL", "")
 	t.Setenv("STUB_LOG", "")
@@ -174,6 +176,7 @@ func TestPRComposeReadsTheBeadsOwnStore(t *testing.T) {
 	stubCompose(t, "")
 	t.Setenv("STUB_WHERE", `{"path":"/city/.beads","prefix":"hq"}`)
 	t.Setenv("STUB_RIGS", `{"rigs":[{"name":"city","prefix":"hq","path":"/city"},{"name":"rig","prefix":"tk","path":"/rig"}]}`)
+	t.Setenv("STUB_CONFIG", `{"city_path":"/city","config":{"Workspace":{"Name":"city","Prefix":"hq"},"Rigs":[{"Name":"rig","Prefix":"tk","Path":"/rig"}]}}`)
 	t.Setenv("STUB_STORES", `{"/rig/.beads":[`+composeAnchor+`,`+
 		`{"id":"tk-b","title":"Rider","status":"closed","created_at":"2026-02-01T00:00:00Z","metadata":{"fold_target":"polecat/tk-a"}}],`+
 		`"/city/.beads":[{"id":"hq-x","title":"Another store's bead","status":"closed","created_at":"2026-02-02T00:00:00Z",`+

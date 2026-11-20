@@ -40,6 +40,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
+
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/daemon"
 )
@@ -301,39 +304,146 @@ func (c *Client) Where() (path, prefix string, err error) {
 	return where.Path, where.Prefix, nil
 }
 
-// listedRig is one rig `gc rig list --json` names, the city among them: its
-// name, its bead prefix, and the path its .beads directory sits under.
-type listedRig struct {
-	Name   string `json:"name"`
-	Prefix string `json:"prefix"`
-	Path   string `json:"path"`
+// configuredRig is one store the city's config names, a rig's or the city's
+// own: its name, its bead prefix, and the folder its .beads directory sits
+// under.
+type configuredRig struct {
+	Name   string `json:"Name"`
+	Prefix string `json:"Prefix"`
+	Path   string `json:"Path"`
 }
 
-// rigs is each rig `gc rig list --json` names, the city among them. A listing
-// that fails or does not decode returns a *ReadError, which names id when the
-// listing was read to route one.
-func (c *Client) rigs(id string) ([]listedRig, error) {
+// rigs is each store the city's config names, as `gc config show --json`
+// prints it from the city's files: the city's own store, in the folder the
+// config is read from, under the city's name and prefix, then each rig's under
+// its [[rigs]] entry. The city's name and prefix are the ones .gc/site.toml
+// binds, where it binds them, and otherwise [workspace]'s ([siteIdentity]). A
+// rig folder the config gives as a relative path is under the city's folder,
+// as Gas City's resolveRigPaths (cmd/gc/beads_provider_lifecycle.go at
+// gastownhall/gascity f5302d1dcf) takes it, so no store's folder depends on
+// the directory the caller runs in. A prefix the config leaves unset is the one
+// Gas City derives from the name ([derivedPrefix]), as Rig.EffectivePrefix and
+// EffectiveHQPrefix do. A config or site binding that does not read or decode
+// returns a *ReadError, which names id when the config was read to route one.
+func (c *Client) rigs(id string) ([]configuredRig, error) {
 	var stderr bytes.Buffer
-	cmd := c.command("rig", "list", "--json")
+	cmd := c.command("config", "show", "--json")
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, &ReadError{ID: id, Reason: "gc rig list did not name the stores: " + failure(out, stderr.String())}
+		return nil, &ReadError{ID: id, Reason: "gc config show did not name the stores: " + failure(out, stderr.String())}
 	}
-	var list struct {
-		Rigs []listedRig `json:"rigs"`
+	var shown struct {
+		CityPath string `json:"city_path"`
+		Config   *struct {
+			Workspace configuredRig   `json:"Workspace"`
+			Rigs      []configuredRig `json:"Rigs"`
+		} `json:"config"`
 	}
-	if err := json.Unmarshal(Scrub(out), &list); err != nil {
-		return nil, &ReadError{ID: id, Reason: "gc rig list did not decode: " + err.Error()}
+	if err := json.Unmarshal(Scrub(out), &shown); err != nil {
+		return nil, &ReadError{ID: id, Reason: "gc config show did not decode: " + err.Error()}
 	}
-	return list.Rigs, nil
+	if shown.Config == nil {
+		return nil, &ReadError{ID: id, Reason: "gc config show printed no config"}
+	}
+	city := shown.Config.Workspace
+	city.Path = shown.CityPath
+	name, prefix, err := siteIdentity(shown.CityPath)
+	if err != nil {
+		return nil, &ReadError{ID: id, Reason: "the city's site binding did not read: " + err.Error()}
+	}
+	if name != "" {
+		city.Name = name
+	}
+	if prefix != "" {
+		city.Prefix = prefix
+	}
+	rigs := append([]configuredRig{city}, shown.Config.Rigs...)
+	for i := range rigs {
+		if strings.TrimSpace(rigs[i].Path) != "" && !filepath.IsAbs(rigs[i].Path) {
+			rigs[i].Path = filepath.Join(shown.CityPath, rigs[i].Path)
+		}
+		if rigs[i].Prefix == "" {
+			rigs[i].Prefix = derivedPrefix(rigs[i].Name)
+		}
+	}
+	return rigs, nil
+}
+
+// siteIdentity is the city's name and prefix that .gc/site.toml under cityPath
+// binds, each empty where it binds none, as both are in a city with no such
+// file. Gas City takes each ahead of the one city.toml's [workspace] sets
+// (applyWorkspaceIdentityBinding in internal/config/site_binding.go at
+// gastownhall/gascity f5302d1dcf), but `gc config show` prints one that
+// city.toml still sets, a place Gas City warns is legacy, in place of the bound
+// one (configForDisplay in cmd/gc/cmd_config.go).
+func siteIdentity(cityPath string) (name, prefix string, err error) {
+	raw, err := os.ReadFile(filepath.Join(cityPath, ".gc", "site.toml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	var site struct {
+		Name   string `toml:"workspace_name"`
+		Prefix string `toml:"workspace_prefix"`
+	}
+	if err := toml.Unmarshal(raw, &site); err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(site.Name), strings.TrimSpace(site.Prefix), nil
+}
+
+// derivedPrefix is the bead prefix Gas City derives from a rig's or the city's
+// name when the config sets none (DeriveBeadsPrefix and splitCompoundWord in
+// internal/config/config.go at gastownhall/gascity f5302d1dcf). It drops a -py
+// or -go suffix and splits the name at each - and _, or, when that leaves one
+// word, wherever a capital follows a character that is not one. Two or more
+// parts give the first letter of each, and one gives the name itself when it
+// is three letters or fewer and its first two otherwise, all lowercased.
+func derivedPrefix(name string) string {
+	name = strings.TrimSuffix(name, "-py")
+	name = strings.TrimSuffix(name, "-go")
+	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' })
+	if len(parts) == 1 {
+		parts = splitCompound(parts[0])
+	}
+	if len(parts) >= 2 {
+		var b strings.Builder
+		for _, p := range parts {
+			if p != "" {
+				b.WriteByte(p[0])
+			}
+		}
+		return strings.ToLower(b.String())
+	}
+	if len(name) <= 3 {
+		return strings.ToLower(name)
+	}
+	return strings.ToLower(name[:2])
+}
+
+// splitCompound splits a word wherever a capital follows a character that is
+// not one, so "GasCity" is "Gas" and "City".
+func splitCompound(word string) []string {
+	runes := []rune(word)
+	var parts []string
+	start := 0
+	for i := 1; i < len(runes); i++ {
+		if unicode.IsUpper(runes[i]) && !unicode.IsUpper(runes[i-1]) {
+			parts = append(parts, string(runes[start:i]))
+			start = i
+		}
+	}
+	return append(parts, string(runes[start:]))
 }
 
 // StoreOf names the store whose bead prefix begins id, the longest such prefix
-// when several do, from the stores `gc rig list --json` names, the city's
-// among them: the store gc routes a read of id to when the read names no
-// store. ok is false when no store's prefix begins id. A listing that fails
-// or does not decode returns a *ReadError.
+// when several do, from the stores the city's config names ([Client.rigs]),
+// the city's among them: the store gc routes a read of id to when the read
+// names no store. ok is false when no store's prefix begins id. A config that
+// does not read or decode returns a *ReadError.
 func (c *Client) StoreOf(id string) (path string, ok bool, err error) {
 	rigs, err := c.rigs(id)
 	if err != nil {
@@ -351,10 +461,11 @@ func (c *Client) StoreOf(id string) (path string, ok bool, err error) {
 	return path, ok, nil
 }
 
-// RigStore names the store of the rig called name, from the stores `gc rig list
-// --json` names, the city's among them: the rig's .beads directory, which a read
-// pinned there names with bd's --db. ok is false when no rig has that name. A
-// listing that fails or does not decode returns a *ReadError.
+// RigStore names the store of the rig called name, from the stores the city's
+// config names ([Client.rigs]), the city's among them: the rig's .beads
+// directory, which a read pinned there names with bd's --db. ok is false when
+// no rig has that name. A config that does not read or decode returns a
+// *ReadError.
 func (c *Client) RigStore(name string) (path string, ok bool, err error) {
 	rigs, err := c.rigs("")
 	if err != nil {
@@ -372,11 +483,11 @@ func (c *Client) RigStore(name string) (path string, ok bool, err error) {
 // it answers from the store gc routes the first bead to: the store gc resolves
 // for this process when no bead is named or its prefix begins the first id,
 // else the store whose prefix does ([Client.StoreOf]). The resolved store
-// answers when no store's prefix begins the id, and when the stores do not
-// list, since a read there finds only the beads that store holds: a bead it
-// does not hold is one its read cannot answer, never another store's. Only a
-// read about a bead in another store than the one resolved here pays for the
-// listing of stores.
+// answers when no store's prefix begins the id, and when the city's config
+// does not read, since a read there finds only the beads that store holds: a
+// bead it does not hold is one its read cannot answer, never another store's.
+// Only a read about a bead in another store than the one resolved here reads
+// the city's config.
 func (c *Client) Route(ids ...string) (string, error) {
 	path, prefix, err := c.Where()
 	if err != nil {

@@ -49,12 +49,13 @@ With nothing to list it prints the time and one line that says so. When the
 store does not answer it prints nothing on stdout and says so on stderr, since
 a list it could not read is not an empty one.
 
---rig names the rig whose epics it reads, as gc rig list names it. Without it
+--rig names the rig whose epics it reads, as the city's config names it (gc
+config show). Without it
 the command reads the store gc resolves for this session (gc bd where).
 
 exit: 0 listed, or nothing to list
       1 the store did not answer, so what closed or shifted is unknown
-      2 usage, or a rig gc rig list does not name`
+      2 usage, or a rig the city's config does not name`
 
 // The exit codes epicUnweighedLong states.
 const (
@@ -101,7 +102,7 @@ func epicUnweighedOpen(rig string, stderr io.Writer) (*ledger.Ledger, int) {
 			fmt.Fprintf(stderr, "gctk epic unweighed: the rig's store did not resolve (%v), so what closed or shifted is unknown: run it again before you weigh any change\n", err)
 			return nil, unweighedExitNoStore
 		case !ok:
-			fmt.Fprintf(stderr, "gctk epic unweighed: gc rig list names no rig %q: give --rig a rig it names\n", rig)
+			fmt.Fprintf(stderr, "gctk epic unweighed: the city's config names no rig %q: give --rig a rig it names\n", rig)
 			return nil, unweighedExitUsage
 		}
 		db = path

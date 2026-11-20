@@ -67,7 +67,7 @@ func (c *city) open(_ context.Context, db string) (*ledger.Ledger, error) {
 
 func (c *city) look(t *testing.T) Outcome {
 	t.Helper()
-	return (&Queue{City: c, Open: c.open, Now: func() time.Time { return t0 }}).Run()
+	return (&Queue{City: c, Open: c.open, Now: func() time.Time { return t0 }}).Run(context.Background())
 }
 
 // handoff puts an open task assigned to the refinery that carries a branch and
@@ -250,7 +250,7 @@ func TestTheQueueReadIsBoundedAndKeepsItsBudget(t *testing.T) {
 			}
 			return ledger.New(s), nil
 		}
-		out := (&Queue{City: c, Open: open, Now: func() time.Time { return t0 }}).Run()
+		out := (&Queue{City: c, Open: open, Now: func() time.Time { return t0 }}).Run(context.Background())
 		if len(out.Failures) > 0 || !reflect.DeepEqual(stuckIDs(out.Record), []string{"tk-stuck"}) {
 			t.Fatalf("with %d unrelated rows of each kind: failures %v, stuck %v", noise, out.Failures, stuckIDs(out.Record))
 		}
@@ -421,5 +421,30 @@ func TestASuspendedRigIsNotRead(t *testing.T) {
 	out := c.look(t)
 	if len(out.Failures) > 0 || !reflect.DeepEqual(stuckIDs(out.Record), []string{"tk-stuck"}) {
 		t.Fatalf("outcome %+v", out)
+	}
+}
+
+// emitUnderContext is a city whose event, like the gc call that records it,
+// does not run once its context has ended.
+type emitUnderContext struct{ *city }
+
+func (c emitUnderContext) Emit(ctx context.Context, e gascity.Emit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.city.Emit(ctx, e)
+}
+
+// The event runs under the look's context, so a look stopped before its event
+// records none. The fake's reads take no context, so the look still finds a
+// handoff to name.
+func TestALookWhoseContextEndedRecordsNoEvent(t *testing.T) {
+	c := newCity()
+	c.handoff("tk-stuck", 5*time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	out := (&Queue{City: emitUnderContext{c}, Open: c.open, Now: func() time.Time { return t0 }}).Run(ctx)
+	if len(out.Record.Stuck) != 1 || out.Recorded || len(c.Emitted()) != 0 {
+		t.Fatalf("stuck %+v, recorded %v, emitted %+v", out.Record.Stuck, out.Recorded, c.Emitted())
 	}
 }
