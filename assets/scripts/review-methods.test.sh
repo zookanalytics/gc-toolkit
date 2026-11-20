@@ -129,9 +129,11 @@
 #   - The demo method records the reviewed commit served on this host. It
 #     records from the draft's deployed preview, and reads the preview, only
 #     for a rig that cannot run its app on this host or a change whose claim
-#     exists only where it is deployed, and only while the preview serves the
-#     reviewed commit, which a GitHub deployment shows by its most recent
-#     status, never by an earlier one. Its verdict says what a clip or a
+#     exists only where it is deployed, and only from an address that serves
+#     the reviewed commit: one the host gives that commit's deployment alone,
+#     or one whose app reports the commit. A GitHub deployment's most recent
+#     status, never an earlier one, says whether it is up, and no status says
+#     which commit its address serves. Its verdict says what a clip or a
 #     screenshot was recorded from, and for a preview, why.
 #
 # Hermetic: reads this checkout and a scratch git repository; no gc, store or
@@ -587,9 +589,14 @@ hasF "$TMP/demo.produce" 'The app target is the reviewed worktree served on this
 hasF "$TMP/demo.produce" 'is the app target instead for a rig with no way to run its app on this host, and for a change whose claim exists only where it is deployed.' \
   "…and the draft's deployed preview only for a rig that cannot run its app here or a change whose claim exists only where it is deployed"
 hasF "$TMP/demo.produce" 'Record from a preview in no other case.' "…and in no other case"
-hasF "$TMP/demo.produce" 'Record a preview only while it serves `<reviewed_oid>`.' "…and only while the preview serves the reviewed commit"
-hasF "$TMP/demo.produce" "deployment's state is its most recent status, \`gh api \"repos/<owner>/<repo>/deployments/<id>/statuses\" --jq 'max_by(.id)'\` with its \`id\`. While that status reads \`success\`, its \`environment_url\` is the preview's address." \
-  "…which a GitHub deployment shows while its most recent status, not an earlier one, reads success"
+hasF "$TMP/demo.produce" "Record a preview only from an address that serves \`<reviewed_oid>\`: one the host gives that commit's deployment alone, as the host's documentation or the rig's guidance says, or one whose app reports that commit." \
+  "…and only from an address the host gives the reviewed commit's deployment alone, or whose app reports that commit"
+hasF "$TMP/demo.produce" "An address the host moves to each new deployment, such as a branch's or a pull request's, can serve a later commit, so with neither there is no preview of \`<reviewed_oid>\` to record." \
+  "…since an address a later deployment can take over shows no preview of the reviewed commit"
+hasF "$TMP/demo.produce" "deployment's state is its most recent status, \`gh api \"repos/<owner>/<repo>/deployments/<id>/statuses\" --jq 'max_by(.id)'\` with its \`id\`. Record from it only while that status reads \`success\`, which says the deployment is up at the status's \`environment_url\`, not which commit that address serves now." \
+  "…and a GitHub deployment's most recent status, not an earlier one, says it is up, never which commit its address serves"
+hasF "$DEMO" 'the reviewed commit may have no preview the capture can record' \
+  "…and a capture with no preview of the reviewed commit to record is the note, which never blocks"
 hasF "$TMP/demo.reads" 'and its deployed preview where the app target under `video` records from it.' \
   "the demo method reads the draft's preview only where the app target records from it"
 hasF "$TMP/verdict.demo" "and what it was recorded from: the reviewed commit served on this host, or the draft's preview and why." \

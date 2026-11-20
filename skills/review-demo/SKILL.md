@@ -173,17 +173,20 @@ reports whether the `gh` it needs is present.
   a live outside service whose real response is the point of the change. Record
   from a preview in no other case. It runs on the deployment's own data and
   live services, so its scenes can change between captures, and each capture
-  can spend money on live calls. Record a preview only while it serves
-  `<reviewed_oid>`. Where the host records previews as GitHub deployments,
+  can spend money on live calls. Record a preview only from an address that
+  serves `<reviewed_oid>`: one the host gives that commit's deployment alone,
+  as the host's documentation or the rig's guidance says, or one whose app
+  reports that commit. An address the host moves to each new deployment, such
+  as a branch's or a pull request's, can serve a later commit, so with neither
+  there is no preview of `<reviewed_oid>` to record. Where the host records
+  previews as GitHub deployments,
   `gh api "repos/<owner>/<repo>/deployments?sha=<reviewed_oid>"` lists that
   commit's deployments, in the repository `<review_pr_url>` names. A
   deployment's state is its most recent status,
   `gh api "repos/<owner>/<repo>/deployments/<id>/statuses" --jq 'max_by(.id)'`
-  with its `id`. While that status reads `success`, its `environment_url` is
-  the preview's address. In any other state, such as `inactive`, which a
-  deployment can take once a later deployment to its environment succeeds, the
-  address may serve another commit, so an earlier `success` shows no preview of
-  `<reviewed_oid>` to record.
+  with its `id`. Record from it only while that status reads `success`, which
+  says the deployment is up at the status's `environment_url`, not which
+  commit that address serves now.
 
   A terminal script, one that declares `**Terminal:**`, brings up no app: give it
   `--cwd <worktree>`, the root its shell starts in on every demo path. When the
@@ -409,10 +412,10 @@ or it was already there. Request changes, and name where the demo shows it as
 the evidence.
 
 A capture that cannot run for a reason outside the change is not a finding. The
-capture toolchain may not resolve, the rig may have no app to serve, a preview
-the capture needs may not serve the reviewed commit, the surface may show only
-what live state produces, or the capture tools may be unable to reach a required
-state. Each of those is the note below, and it never blocks.
+capture toolchain may not resolve, the rig may have no app to serve, the
+reviewed commit may have no preview the capture can record, the surface may
+show only what live state produces, or the capture tools may be unable to reach
+a required state. Each of those is the note below, and it never blocks.
 
 ## The verdict
 
