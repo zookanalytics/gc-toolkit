@@ -34,17 +34,25 @@ import (
 //     on the work it sent (staying), then reads "Waits on <id>", naming each
 //     wait, in Group Queued: it is a person's move again once that work
 //     closes.
-//  6. waits says it is in flight. With an open pull request: "Pull request
+//  6. queue's order lists it as ready work that nothing sends anywhere
+//     (queue.Ordered's NotScheduled): "Not scheduled", whatever stamps its row
+//     carries, so the row and the list give one answer. Or the order names it
+//     waiting outside the city (queue.Place's Outside): "Waits outside the
+//     city". Or nothing sends it and it is held for the Product Owner's
+//     placement, as queue reads that hold (queue.ForProductOwner): "Waits for
+//     the Product Owner". Group Not moving.
+//  7. waits says it is in flight. With an open pull request: "Pull request
 //     #<n>", with where it stands. Otherwise "In flight", with its assignee.
 //     Group Queued.
-//  7. The city takes it as things stand, as its place in queue's order says
-//     (queue.Place): it is armed, routed to a pool or assigned to an agent,
-//     and no dispatch hold holds it. "Queued" when nothing holds it, and
+//  8. Something sends it, as its place in queue's order says (queue.Place): a
+//     live run works it, or it is armed, routed to a pool or assigned to an
+//     agent and no dispatch hold holds it. "Queued" when nothing holds it, and
 //     "Waits on <id>" naming each wait when one does. Group Queued.
-//  8. Otherwise: "Not scheduled", with line 3 naming each wait when one holds
-//     it. Group Not moving.
+//  9. Otherwise nothing sends it and the store does not serve it as ready:
+//     "Waits on <id>" naming each wait, or "Not ready" when it waits on
+//     nothing waits names. Group Not moving.
 //
-// Rows 6 to 8 apply only to a piece of work: an epic, a Delivery, a gate, a
+// Rows 6 to 9 apply only to a piece of work: an epic, a Delivery, a gate, a
 // decision and a conversation are never sent to a pool. A bead a reader could
 // not answer reads "unread" and sits in no group.
 
@@ -106,6 +114,9 @@ const (
 	outQueued
 	outQueuedBehind
 	outNotScheduled
+	outOutside
+	outForProductOwner
+	outUnsent
 )
 
 // verdict is the table's answer for one row.
@@ -194,8 +205,10 @@ type tableInput struct {
 	facts    *prFacts
 	prUnread bool
 	// place is the row's place in queue's order, nil when queue placed it
-	// nowhere.
-	place *queue.Place
+	// nowhere, and notScheduled is true when the order lists it as ready work
+	// that nothing sends anywhere.
+	place        *queue.Place
+	notScheduled bool
 }
 
 func table(in tableInput) verdict {
@@ -236,6 +249,15 @@ func table(in tableInput) verdict {
 	if in.kind != KindWork {
 		return verdict{out: outNone}
 	}
+	if in.notScheduled {
+		return verdict{out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled"}
+	}
+	if in.place != nil && in.place.Outside {
+		return verdict{out: outOutside, group: GroupNotMoving, signal: "Waits outside the city"}
+	}
+	if in.place != nil && !in.place.Scheduled && queue.ForProductOwner(b.Labels) {
+		return verdict{out: outForProductOwner, group: GroupNotMoving, signal: "Waits for the Product Owner"}
+	}
 	if h.InFlight != "" {
 		if in.facts != nil && b.PRNumber != "" {
 			return verdict{out: outPullRequest, group: GroupQueued, signal: "Pull request #" + b.PRNumber,
@@ -253,7 +275,10 @@ func table(in tableInput) verdict {
 		}
 		return verdict{out: outQueuedBehind, group: GroupQueued, signal: "Waits on " + joinIDs(waitRefs)}
 	}
-	return verdict{out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled", line3: waitRefs}
+	if len(waitRefs) == 0 {
+		return verdict{out: outUnsent, group: GroupNotMoving, signal: "Not ready"}
+	}
+	return verdict{out: outUnsent, group: GroupNotMoving, signal: "Waits on " + joinIDs(waitRefs)}
 }
 
 // holdingVerdict is row 3: what Holding names for the row, through one of its
