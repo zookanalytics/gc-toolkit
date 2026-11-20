@@ -52,6 +52,11 @@ func TestClears(t *testing.T) {
 		{"routed to human", Blocker{ID: "d", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.routed_to": "human"}}, false},
 		{"a human gate", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human"}, false},
 		{"a timer gate", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "timer"}, false},
+		{"a bug in your queue", Blocker{ID: "b", Status: "open", IssueType: "bug", Assignee: "human"}, true},
+		{"an epic in your queue", Blocker{ID: "e", Status: "open", IssueType: "epic", Assignee: "human"}, true},
+		{"a human gate in your queue", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human", Assignee: "human"}, false},
+		{"closed in your queue", Blocker{ID: "b", Status: "closed", IssueType: "bug", Assignee: "human"}, false},
+		{"assigned to an agent", Blocker{ID: "b", Status: "open", IssueType: "bug", Assignee: "gc-toolkit.mechanik"}, false},
 		{"a merge anchor waiting on a review", Blocker{ID: "b", Title: "pr b", Status: "open", IssueType: "task",
 			Metadata: map[string]string{"merge_result": "pull_request", "pr_posture": "review_required@h@t"}}, false},
 	} {

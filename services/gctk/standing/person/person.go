@@ -47,19 +47,21 @@ func IsHumanGate(issueType, awaitType string) bool {
 }
 
 // Clears reports whether only a person clears a bead that is no human gate: a
-// live decision or conversation. A conversation reads as one by its row
+// live decision or conversation, or any bead assigned to `human`, the
+// operator's queue. A conversation reads as one by its row
 // ([conversation.IsCandidate]): a task in the operator's queue or held by a
 // sitting, which a person's ruling or dismissal closes. No automated actor
-// clears either. A human gate is never one, because the human-gate rule counts
-// it on its own, and a route marks no bead as a person's. A bead with no status
-// reads open, and only a closed one is not live. It reads the row alone, so it
-// cannot tell one that waits on work of its own first, which no person owes a
-// move on while that work is out: [Stays] tells that from the bead's own edges.
+// clears any of them. A human gate is never one, because the human-gate rule
+// counts it on its own, and a route marks no bead as a person's. A bead with no
+// status reads open, and only a closed one is not live. It reads the row alone,
+// so it cannot tell one that waits on work of its own first, which no person
+// owes a move on while that work is out: [Stays] tells that from the bead's own
+// edges.
 func Clears(b Blocker) bool {
 	if !b.Open() || IsHumanGate(b.IssueType, b.AwaitType) {
 		return false
 	}
-	return strings.EqualFold(b.IssueType, "decision") ||
+	return strings.EqualFold(b.IssueType, "decision") || b.Assignee == "human" ||
 		conversation.IsCandidate(strings.ToLower(b.IssueType), b.Assignee, b.ID)
 }
 

@@ -512,3 +512,17 @@ func TestHoldingGatesIsHoldingsGates(t *testing.T) {
 		t.Errorf("gates of b = %v (%v), want an answer with none", ids, answered)
 	}
 }
+
+// A bead in the operator's queue is a person's to clear whatever its type, so
+// a pull request that waits on one owes it, as it owes a decision.
+func TestHoldingOwesABeadInYourQueue(t *testing.T) {
+	queued := person.Blocker{ID: "b", Title: "look at this", Status: "open", IssueType: "bug", Assignee: "human"}
+	g := &graph{edges: map[string][]person.Blocker{"a": {queued}}}
+	holds, err := Holding([]string{"a"}, g.read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owed := holds["a"].Owed; len(owed) != 1 || owed[0].ID != "b" {
+		t.Errorf("a owes %+v, want the bead in your queue", owed)
+	}
+}
