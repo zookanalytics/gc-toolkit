@@ -286,12 +286,14 @@ func (p *Places) Place(req Request) (Placed, error) {
 	// sends it to another pool or on another formula. The arm verb judges an
 	// arm for this pool that names another formula, since an arm that names
 	// none pours the pool's default: on an armed bead it writes nothing, and
-	// succeeds only when the two pour the same formula. An arm for the
+	// succeeds only when the two pour the same formula. An arm whose stored
+	// record does not decode reads as naming no formula, and the start slings no
+	// such arm, so it goes to the arm verb too, which refuses it. An arm for the
 	// validating closer is a wait on another bead, which the closer checks once
 	// that bead lands, so its refusal names the lift that lets the closer run.
 	var keptArm *record.Arm
 	if dispatched == "" && armed != nil {
-		same := armed.Target == pool && armed.Formula() == req.Formula
+		same := armed.Malformed() == "" && armed.Target == pool && armed.Formula() == req.Formula
 		said := ""
 		if !same && armed.Target == pool {
 			if _, err := p.Arm(arm.Request{ID: req.Bead, Target: pool, Formula: req.Formula, Reason: "placed" + under(req)}); err == nil {

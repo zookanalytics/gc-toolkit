@@ -467,6 +467,26 @@ func TestPlaceKeepsAnArmForTheSamePlacement(t *testing.T) {
 	}
 }
 
+// An arm whose record does not decode reads as naming no formula, as an arm for
+// the pool's default does, so the arm verb judges it, and its refusal stops the
+// placement with the hold on and nothing written or slung.
+func TestPlaceSendsAnArmTheStartCannotReadToTheArmVerb(t *testing.T) {
+	w := newWorld(t)
+	w.store.Put(fake.Bead{ID: "tk-new", Status: "open", IssueType: "task", Labels: []string{"hold:mayor"},
+		Metadata: map[string]string{"gc.dispatch_when_ready": pool, "gc.dispatch_when_ready_armed_at": "t", "gc.dispatch_when_ready_args": `["--var","x=y"]`}})
+	w.armErr = errors.New("refused: tk-new carries an arm the start cannot read (its sling arguments name no formula alone). Disarm it, then arm it again")
+	_, err := w.p.Place(Request{Bead: "tk-new", Standalone: true})
+	if !Refused(err) || !strings.Contains(err.Error(), "cannot read") || !strings.Contains(err.Error(), "gctk bead disarm tk-new --db /rig/.beads") {
+		t.Fatalf("Place = %v, want the arm verb's refusal and the disarm named", err)
+	}
+	if len(w.arms) != 1 || len(w.store.Writes())+len(w.rt.Slings())+len(w.rt.Scripts()) != 0 {
+		t.Errorf("arms %+v, log %v; want the arm verb asked once and nothing written, slung or run", w.arms, w.lines())
+	}
+	if !slices.Contains(w.row("tk-new").Labels, "hold:mayor") {
+		t.Errorf("the hold was lifted")
+	}
+}
+
 // gc sling's exit 3 says a live run of the formula already works the bead, and
 // the placement finishes its lift.
 func TestPlaceTakesALiveRunsRefusalAsTheDispatch(t *testing.T) {
