@@ -82,15 +82,10 @@ eq "$(printf '%s\n' "$DUMP" | sed -n 's/^takeaway_max //p')" \
    "$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)" \
    "the takeaway cap matches gc-helm.sh's TAKEAWAY_MAX"
 
-# The machine axis is declared here and spent by the helm board, which mirrors
-# it as Go constants. One meaning, two lists: a value added on one side only
-# renders as `unknown` on every row carrying it, which is the answer that tells
-# the operator to stop looking.
+# The machine axis is declared here and read by the shared prstatus package,
+# whose knownMachine switch is held to this list below.
 TOML_MACHINES=$(sed -n 's/^machines = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | tr -s ' ' | sed 's/^ *//;s/ *$//')
 [ -n "$TOML_MACHINES" ] && ok "machine axis declared in lifecycle.toml" || bad "machines = [...] missing from lifecycle.toml"
-GO_MACHINES=$(sed -n 's/^[[:space:]]*Machine[A-Za-z]*[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-  "$ROOT/services/helm/internal/board/derive.go" | tr '\n' ' ' | sed 's/ *$//')
-eq "$GO_MACHINES" "$TOML_MACHINES" "machine axis values match lifecycle.toml"
 
 # The blocked causes are declared here and mirrored as Go constants in the shared
 # prstatus package, which gctk merge writes them from and the status: label and

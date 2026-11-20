@@ -1,6 +1,6 @@
 // Headers the Helm board's write POSTs carry.
 //
-// A board write (open, accept, engage, dismiss) reaches helm-svc through the
+// A board write (open, engage) reaches helm-svc through the
 // supervisor's /svc/<name>/ reverse proxy, which guards mutations to a private
 // workspace-service with a CSRF check: a request without the X-GC-Request header
 // is refused at the supervisor with 403 "csrf: X-GC-Request header required" and
