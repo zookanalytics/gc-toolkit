@@ -17,6 +17,7 @@ through `gc bd` and the supervisor's API.
 | `bead holds` | what holds each bead named, from one read of the store: one status (blocked, held, unjudged or clear) with the waits behind it and whether each is the bead's own or an ancestor's, its own pending waits and when the last landed, why it is in flight, its arm, and its wait edges into another store, one JSON object per line, read from the store `--db` names or the one gc routes the first bead to | `gctk bead holds --help`, `internal/cli/bead.go`, `waits` |
 | `bead arm`, `bead disarm` | arm a bead to start by itself once nothing holds it, on a formula through a pool, or remove its arm, each in one write under the bead's dispatch lock | `gctk bead arm --help`, `gctk bead disarm --help`, `arm` |
 | `bead start-armed` | the deferred-dispatch order's pass: retire the arm of each closed or delivered bead, and start each armed bead the pool's own serve rule would serve and nothing bd cannot judge holds, exactly once, printing one JSON line per arm; `--dry-run` writes nothing | `gctk bead start-armed --help`, `arm`, [docs/deferred-dispatch.md](../../docs/deferred-dispatch.md) |
+| `doctor run` | the doctor order's run: `gc doctor --json` under a deadline, never with `--fix`, recorded as one `gc-toolkit.doctor.ran` event whose payload names each failing check with the time it first failed and its streak, each check the run did not measure, each the accepted file accepts, and each monitor order's last good run; a run that did not complete carries the previous run's lists and exits 1 | `gctk doctor run --help`, `internal/cli/doctor.go`, `doctor` |
 | `epic create` | filing an epic with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic create --help`, `internal/cli/epic.go` |
 | `epic unweighed` | the time it read a rig's epics, which a portfolio sync marks each epic it weighs with, then each close and each latest shift of those epics that no sync has weighed, oldest first, one line each, from one read of the rig's epics, and a read that stops and says so when the store does not answer | `gctk epic unweighed --help`, `internal/cli/epic_unweighed.go`, `epic` |
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go`, `internal/lifecycle` |
@@ -29,11 +30,17 @@ through `gc bd` and the supervisor's API.
 | `pr draft` | the PR a bead owns returned to draft before a writer of the city pushes onto it, read from its draft flag first and converted only when it is ready, so a round's later pushes change nothing | `gctk pr draft --help`, `internal/cli/prcycle.go`, `pr` |
 | `pr withdraw` | the withdrawal of the approvals a material change leaves behind: a bead that blocks the bead that owns the PR and names the head, which the landing order carries out by dismissing each approval given on a commit that does not contain it | `gctk pr withdraw --help`, `internal/cli/prcycle.go`, `pr` |
 | `pr push` | a converse sitting's push of its checkout's commits onto the branch of the PR a bead owns, once it proves that its conversation holds the PR and that the checkout's origin is the PR's repository: the PR returned to draft first, then the checkout's HEAD pushed under the lease through the pack's `branch-push.sh`, beside any review run that works the branch; `--check` proves the holding and changes nothing | `gctk pr push --help`, `internal/cli/prpush.go`, `pr` |
+| `reaction check`, `reaction sling` | whether a bead may take a first reaction: the refusals of a bead whose next move is someone's (its kind, its status, an assignee, a route or an arm, a dispatch hold, an open conversation, a live run, an open human gate), each with its exit code; the check is the reaction's own first act and writes nothing, and the sling then slings a run of `mol-first-reaction` through the rig's proactive pool | `gctk reaction check --help`, `gctk reaction sling --help`, `internal/cli/reaction.go`, `reaction` |
+| `reaction sweep` | the proactive order's pass: one ready read of the rig's store by priority, the raw input among it, less each bead a live run works, slung a first reaction each until the sweep's deadline, one JSON line per candidate; `--dry-run` slings nothing | `gctk reaction sweep --help`, `internal/cli/reaction.go`, `reaction` |
+| `reaction deliverable` | whether the rig's proactive pool can take a first reaction now, by the city's roster | `gctk reaction deliverable --help`, `internal/cli/reaction.go`, `reaction` |
+| `reaction dispose` | one exit of a first reaction on its subject, its writes in their order: a release to a pool or a hand-off to the named agent whose work it is, a hold on what it waits for, a validating closer now or once the beads that end its job land, or a human gate for the operator, with or without an action Accept runs; intake holds what it does not admit for placement | `gctk reaction dispose --help`, `internal/cli/reaction.go`, `reaction` |
+| `refinery stuck` | the refinery-queue-detect order's look: each open handoff assigned to a rig's refinery that carries a branch and no merge_result, has gone four hours without a write, and that nothing holds by `bead holds`, recorded as one `gc-toolkit.refinery-queue.stuck` event when it finds one; a rig whose queue does not read is left out and the run exits 1 | `gctk refinery stuck --help`, `internal/cli/refinery.go`, `refinery` |
 | `review checks`, `review guidance` | the check index at a commit, with the rig's index laid over the pack's: every row, one check's row, or the checks of a check_set that gate a transition; and the rig's guidance for a check at the reviewed commit, or the guidance a change edits | `gctk review checks --help`, `gctk review guidance --help`, `internal/cli/review.go`, `review` |
 | `review passed`, `review ask` | a review run's loop check, which passes an iteration on what the run's steps wrote and the asks open on the bead, and with `--record`, at the iteration that ends the loop, writes the run's result for the head and target it judged, in review_results under the store's record lock, with the asks it answered closed; and an ask on the bead that owns a PR, filed once per source and reason | `gctk review passed --help`, `gctk review ask --help`, `internal/cli/review.go`, `review` |
 | `review step`, `review output`, `review comment` | for a review run's steps: what a step judges (its run, the PR, the iteration, the head that iteration judges and the change triage reads there), with `--stands`, triage's refusal of a run whose vars do not name the record or whose PR moved; the check of the output a step wrote, printed as the store keeps it, with the guidance-edit guard on a correctness approve; and the head's one comment, each lane's verdict with its findings and rulings | `gctk review step --help`, `gctk review output --help`, `gctk review comment --help`, `internal/cli/reviewrun.go`, `review` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit, and running a copy of its UI from a checkout for a demo capture or a person | `gctk rig --help`, `internal/cli/rig.go`, `internal/cli/rig_serve.go`, `internal/rig` |
-| `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session --help`, `internal/cli/session.go` |
+| `session title` | giving a session a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session title --help`, `internal/cli/session.go` |
+| `session progress` | the seat-progress-detect order's look: each busy pool seat whose claim it holds under the identity its writes carry, and that has written nothing to the claim's store or the city's for three hours since it last woke, recorded as one `gc-toolkit.seat-progress.stalled` event when it finds one | `gctk session progress --help`, `internal/cli/session_progress.go`, `session` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
 
 Logic gctk does not hold runs as shell scripts. Among them are the rest of the
@@ -123,9 +130,9 @@ records the design and its measured cost.
 
 `serve` runs a copy of the rig's UI from the checkout it is called in: the serve
 command its caller passes, with bash at the checkout's top, on a free loopback
-port it is given as `$PORT`, inside the sandbox that
-`assets/scripts/demo-engine-lib.sh` defines for a demo capture, which
-`GCTK_SCRIPTS_DIR` names. The copy is up once it answers on that port, or once
+port it is given as `$PORT`, through `assets/scripts/demo-engine-lib.sh`, which
+`GCTK_SCRIPTS_DIR` names, and which runs it inside the sandbox it defines for a
+demo capture when the rig keeps that sandbox. The copy is up once it answers on that port, or once
 the command prints the URL of the app it brought up, such as an iOS app on a
 simulator, and the report's `app_url` says where its app is. A demo capture's
 `--serve` starts one with no address and points the engine at its `app_url`. The
@@ -177,6 +184,8 @@ internal/gascity/fake/  the runtime adapter's fake, which records each call and 
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, the store's listing, and its blocked set
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
+internal/gcbd/fakegc/  the compiled fake gc, which answers gc's command line from a store in
+                     files for the shell suites, and its contract test against the city's bd
 internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/gh/         the GitHub adapter: one `gh api` call per read, paged to its end
@@ -205,6 +214,10 @@ waits/               what holds a bead, from one snapshot: the rule by where the
 review/              the review domain: the check index and a rig's guidance at a commit; the
                      shape a review run's steps write, the loop's pass rule over it, the run's
                      result in review_results, and the asks a run works, in review_checks
+reaction/            a bead's first reaction: each exit's writes in their order, intake's rule,
+                     an emergency's check of the default branch, the form a named agent takes
+                     a bead in, whether a pool or an agent would take one, and the
+                     recommendation key, which it owns
 queue/               the order work is expected to land in, for the helm board: bd graph's
                      execution layers over waits' answers, then the pool's claim order,
                      each bead's row and waits read through the Store a listing implements
@@ -214,9 +227,10 @@ key-registry.json    every declared key, generated from the declarations
 ## Running the tests
 
 ```bash
-cd services/gctk && go test ./...          # every package
+cd services/gctk && go test ./...          # every gctk package
 cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write key-registry.json again
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd ./arm -run TestStoreAcceptance -v   # the city's bd on a scratch store
+cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd/fakegc -run TestContract -v   # the fake gc against the city's bd
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
 bash assets/scripts/merge.test.sh          # merge through its bridge
 bash assets/scripts/epic.test.sh           # epic through its bridge

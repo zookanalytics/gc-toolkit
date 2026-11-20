@@ -300,7 +300,9 @@ reviewer sees the moment it goes wrong.
 Preferred over `convention` whenever the failure is visible in a diff: one
 dimension reaches every agent's version of the mistake through the reviewer,
 where a bullet reaches only the role whose fragment renders it. An amendment
-is one dimension sharpened or added. Its anchor goes in the ledger beside the
+is one dimension sharpened or added, as a rule a reviewer of any repository
+would apply. An amendment replaces text where it can, so the method stays
+concise. Its anchor goes in the ledger beside the
 method, `skills/review-correctness/rubric-ledger.md`, not beside the
 dimension: a reviewer reads the whole method file, where an HTML comment is
 noise.

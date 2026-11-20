@@ -33,13 +33,14 @@ declares.
   of the formulas among them and runs shellcheck, go vet and gofmt over the
   whole tracked tree. It runs the suites
   `tools/run-tests.sh --affected origin/main` selects, by the rules in that
-  script's header, and stamps the head that passed on its work bead as
-  `self_review_passed_sha`. When the anchor's stamp names the reviewed commit,
-  the method runs no suite.
+  script's header, through `gctk rig`, which records the result at the commit
+  it ran at. When that record at the reviewed commit is a pass, the method runs
+  no suite.
 - The refinery runs the same `lint_command` at merge, and no tests.
 - CI runs the whole `*.test.sh` suite on Linux and on macOS
-  (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
-  merge waits on the checks main's ruleset requires.
+  (`.github/workflows/tests.yml`), and scans for known vulnerabilities in what
+  the code calls (`.github/workflows/govulncheck.yml`). Every merge waits on
+  the checks main's ruleset requires.
 
 ## Pack content every rig runs
 
@@ -51,7 +52,7 @@ scripts, orders, doctor checks and hooks, its services,
 directories include `skills/`, `formulas/`, `agents/`, `template-fragments/`,
 `assets/scripts/`, `orders/`, `doctor/`, `overlays/` and `services/`, and a
 file outside them is pack content when pack content runs it, as pack scripts
-run `tools/gc-proactive.sh`. A skill's description and a formula's step prose
+run `tools/gc-bd-universe.sh`. A skill's description and a formula's step prose
 are pack content as much as a script is. `review-checks.toml` is both the
 pack's check index and gc-toolkit's own, so a row changed there changes that
 check for every rig.
@@ -204,16 +205,16 @@ each file needing it carries as a copy.
 
 ## The Go services
 
-`tools/lint.sh` runs `go vet ./...` in each module and `gofmt -l` over every
-tracked Go file, at the self-review and at merge. Vet type-checks test files
-and runs none of them, and no gate runs `go test`. CI's whole suite drives gctk
-end to end, because each suite whose scripts reach `lifecycle.sh` or
-`merge.sh` builds gctk from the checkout (`harness_build_gctk` in
-`assets/scripts/test-harness.sh`). `merge.test.sh` and `lifecycle.test.sh`
+`tools/lint.sh` runs `go vet ./...` over the repository's one Go module and
+`gofmt -l` over every tracked Go file, at the self-review and at merge. Vet
+type-checks test files and runs none of them, and no gate runs `go test`. CI's
+whole suite drives gctk end to end, because each suite whose scripts reach
+`lifecycle.sh` or `merge.sh` builds gctk from the checkout (`harness_build_gctk`
+in `assets/scripts/test-harness.sh`). `merge.test.sh` and `lifecycle.test.sh`
 name none of gctk's `.go` files, so the affected subset leaves them out of a
 gctk change, and no suite it selects for a Go change builds the code that
 changed. No suite builds or runs helm-svc. So on a Go diff the review runs
-`go test ./...` in each module the diff touches, and for gctk the suites of the
+`go test ./...` from the repository root, and for gctk the suites of the
 commands it changes. On the host helm compiles only with ICU's cgo flags, so
 its tests run with `CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags`
 in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.

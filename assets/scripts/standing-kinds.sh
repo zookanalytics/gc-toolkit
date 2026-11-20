@@ -7,13 +7,15 @@
 #
 # Sourced (never executed) by the readers that tell a standing record from
 # work or input: the liveness sweep, its precheck and its claim-time re-check
-# (liveness-sweep.sh, liveness-sweep-precheck.sh, liveness-recheck.sh), the
-# proactive scan and sling (tools/gc-proactive.sh), and the doctor checks
-# check-blocked-work-armed and check-hq-marooned-work. The sweep and its
-# precheck read the list through their shared classifier
-# (liveness-classify.sh). One definition, no copies: a kind added here is
-# dropped by every one of them at once, and standing-kinds.test.sh fails when a
-# reader stops sourcing this file or carries a list of its own.
+# (liveness-sweep.sh, liveness-sweep-precheck.sh, liveness-recheck.sh), and
+# the doctor checks check-blocked-work-armed and check-hq-marooned-work. The
+# sweep and its precheck read the list through their shared classifier
+# (liveness-classify.sh). One definition: a kind added here is dropped by every
+# one of them at once, and standing-kinds.test.sh fails when a reader stops
+# sourcing this file or carries a list of its own. The first reaction's check,
+# sling and sweep (gctk reaction) read a Go copy, standingKinds in
+# services/gctk/reaction, whose test reads this definition through jq, so a
+# kind added here fails that test until the copy names it too.
 #
 # Usage follows the in-variable jq convention: prepend the defs to a jq
 # program, e.g.

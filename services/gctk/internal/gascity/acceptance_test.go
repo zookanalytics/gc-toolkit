@@ -7,12 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/gcbdtest"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
 // The runtime adapter's city acceptance test pours the pack's review run with
@@ -22,12 +20,10 @@ import (
 //
 //	GCTK_CITY_ACCEPTANCE=1 go test ./internal/gascity -run TestCityAcceptance -v
 
-// A review run poured with --attach onto a bead assigned to nobody, as a PR's
-// bead is while it waits on the pending record, is handed out at its first
-// claim, while the same run poured with --attach onto a bead an agent outside
-// the run is assigned is retired there, unclaimed. A review run poured for that
-// assigned bead is handed out at its first claim when Cook pours it and the
-// bead gets its blocks edge onto the root.
+// A review run Cook attaches to a bead assigned to nobody, as the landing order
+// pours a PR's run while the bead waits on the pending record, is handed out at
+// its first claim, while the same run Cook attaches to a bead an agent outside
+// the run is assigned is retired there, unclaimed.
 func TestCityAcceptance(t *testing.T) {
 	if os.Getenv("GCTK_CITY_ACCEPTANCE") != "1" {
 		t.Skip("the city acceptance test runs the city's gc on a scratch city; GCTK_CITY_ACCEPTANCE=1 runs it")
@@ -80,56 +76,34 @@ func TestCityAcceptance(t *testing.T) {
 	vars := map[string]string{"pr_bead": bead, "head": "0123456789abcdef0123456789abcdef01234567", "target": "main",
 		"branch": "polecat/" + bead, "review_target": "reviewer", "repair_target": "repairer", "binding_prefix": "gc-toolkit."}
 
-	attach := func(bead string, vars map[string]string) []string {
-		args := []string{"formula", "cook", "mol-pr-review", "--attach", bead, "--json"}
-		for _, name := range slices.Sorted(maps.Keys(vars)) {
-			args = append(args, "--var", name+"="+vars[name])
+	pour := func(bead string, vars map[string]string) string {
+		t.Helper()
+		res := New().In(city).Cook(Cook{Formula: "mol-pr-review", Bead: bead, Vars: vars})
+		if res.Code != 0 || res.Root == "" {
+			t.Fatalf("the cook attached to %s answered %+v", bead, res)
 		}
-		return args
+		return res.Root
 	}
 
-	// The pour --attach makes onto a bead assigned to nobody is handed out at
-	// its first claim. Its steps go to a pool of their own, so no other case's
-	// claim takes them.
+	// The pour onto a bead assigned to nobody is handed out at its first claim.
+	// Its steps go to a pool of their own, so the control's claim does not take
+	// them.
 	decode(t, gc(t, city, "bd", "create", "a waiting PR's bead", "--json"), &created)
 	waiting := created.ID
 	wvars := maps.Clone(vars)
 	wvars["pr_bead"], wvars["branch"], wvars["review_target"] = waiting, "polecat/"+waiting, "waiting-reviewer"
-	root, beads := cooked(gc(t, city, attach(waiting, wvars)...))
-	if said, c := claimAs(t, city, "waiting-reviewer"); c.Action != "work" || c.Root != root || !slices.Contains(beads, c.Bead) ||
-		status(t, city, root) == "closed" {
+	root := pour(waiting, wvars)
+	if said, c := claimAs(t, city, "waiting-reviewer"); c.Action != "work" || c.Root != root || status(t, city, root) == "closed" {
 		t.Fatalf("the run attached to a bead assigned to nobody was not handed out at its first claim: %+v, %s is %s: %s",
 			c, root, status(t, city, root), said)
 	}
 
-	// The control: the pour --attach makes onto a bead an agent outside the run
-	// is assigned is retired at its first claim.
-	attached, _ := cooked(gc(t, city, attach(bead, vars)...))
+	// The control: the pour onto a bead an agent outside the run is assigned is
+	// retired at its first claim.
+	attached := pour(bead, vars)
 	if said, c := claimAs(t, city, "reviewer"); c.Action != "drain" || !strings.Contains(said, "skipped") || status(t, city, attached) != "closed" {
-		t.Fatalf("the run poured with --attach was not retired at its first claim: %+v, %s is %s: %s", c, attached, status(t, city, attached), said)
-	}
-
-	// The pour Cook makes, ranked and attached as the landing order makes it.
-	res := New().In(city).Cook(Cook{Formula: "mol-pr-review", Vars: vars})
-	if res.Code != 0 || res.Root == "" || !slices.Contains(res.Beads, res.Root) || len(res.Beads) < 2 {
-		t.Fatalf("the cook answered %+v", res)
-	}
-	l, err := ledger.Open(filepath.Join(city, ".beads"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := l.Prioritize(1, res.Beads...); err != nil {
-		t.Fatal(err)
-	}
-	if err := l.AddBlocker(bead, res.Root); err != nil {
-		t.Fatal(err)
-	}
-	said, c := claimAs(t, city, "reviewer")
-	if c.Action != "work" || c.Root != res.Root || !slices.Contains(res.Beads, c.Bead) {
-		t.Fatalf("the run Cook poured was not handed out at its first claim: %+v: %s", c, said)
-	}
-	if status(t, city, res.Root) == "closed" {
-		t.Fatalf("the claim retired the run Cook poured: %s", said)
+		t.Fatalf("the run attached to a bead an outside agent is assigned was not retired at its first claim: %+v, %s is %s: %s",
+			c, attached, status(t, city, attached), said)
 	}
 }
 

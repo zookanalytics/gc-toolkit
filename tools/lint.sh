@@ -99,6 +99,40 @@ if [ ! -x "$WARRANTS_TOUCHED" ]; then
   exit 2
 fi
 
+# ── The tracked files ────────────────────────────────────────────────────────
+# lint.sh keeps its files in a directory of its own, which every exit removes:
+# the listing of the tracked files, and the output of each shell-lint call.
+if ! lint_tmp="$(mktemp -d "${TMPDIR:-/tmp}/lint.XXXXXX")"; then
+  echo "$PROG: cannot make a directory for the lint's files" >&2
+  exit 2
+fi
+trap 'rm -rf "$lint_tmp"' EXIT
+
+# The shell lint, go vet and gofmt each take their files from this one listing.
+# It is written to a file and read back from it, and both steps are checked. A
+# listing that failed, or one that could not be read, would yield an empty
+# list, which reads like a tree with no shell, no module and no Go in it and
+# skips those checks. A `<<<` here-string would hide the failed read
+# (docs/review-correctness.md, Loop input). The listing ends each path with a
+# NUL and names it as it is: git's default listing quotes a path that holds a
+# double quote, a backslash or a control character, and no file is found under
+# the quoted name, so the file would drop out of its check unchecked.
+if ! git ls-files -z >"$lint_tmp/listing"; then
+  echo "$PROG: cannot enumerate tracked files under $ROOT" >&2
+  exit 2
+fi
+# Each path is kept as ./<path>. A bare name that begins with a dash would reach
+# a linter as an option: the shell-lint runner reads --help as its help option
+# and exits 0 without linting anything, and gofmt stops on -x.go as a flag it
+# does not define, before it checks any file.
+tracked=()
+while IFS= read -r -d '' f; do
+  if [ -n "$f" ]; then tracked+=("./$f"); fi
+done <"$lint_tmp/listing" || {
+  echo "$PROG: cannot read the listing of tracked files" >&2
+  exit 2
+}
+
 fail=0
 summary=()
 
@@ -133,36 +167,10 @@ is_shell_file() {
   return 1
 }
 
-# The shell lint keeps its files in a directory of its own, which every exit
-# removes: the tracked listing, and the output of each runner call.
-if ! shell_tmp="$(mktemp -d "${TMPDIR:-/tmp}/lint-shell.XXXXXX")"; then
-  echo "$PROG: cannot make a directory for the shell lint's files" >&2
-  exit 2
-fi
-trap 'rm -rf "$shell_tmp"' EXIT
-
-# The listing is written to a file and read back from it, and both steps are
-# checked. A listing that failed, or one that could not be read, would yield
-# an empty list, which reads like a tree with no shell in it and skips the
-# check. A `<<<` here-string would hide the failed read (docs/review-correctness.md,
-# Loop input). The listing ends each path with a NUL and names it as it is:
-# git's default listing quotes a path that holds a double quote, a backslash or
-# a control character, and no file is found under the quoted name, so the file
-# would drop out of the lint unchecked.
-if ! git ls-files -z >"$shell_tmp/listing"; then
-  echo "$PROG: cannot enumerate tracked files under $ROOT" >&2
-  exit 2
-fi
 shell_files=()
-# Each file is kept as ./<path>. A bare name that begins with a dash, such as
-# --help, would reach the runner and shellcheck as an option, and the runner's
-# help option exits 0 without linting anything.
-while IFS= read -r -d '' f; do
-  if [ -n "$f" ] && is_shell_file "$f"; then shell_files+=("./$f"); fi
-done <"$shell_tmp/listing" || {
-  echo "$PROG: cannot read the listing of tracked files" >&2
-  exit 2
-}
+for f in ${tracked[@]+"${tracked[@]}"}; do
+  if is_shell_file "$f"; then shell_files+=("$f"); fi
+done
 
 # cores — the host's core count, as tools/run-tests.sh reads it: the first that
 # nproc, getconf or sysctl reports, since stock macOS has no nproc. A count no
@@ -189,7 +197,7 @@ else
   for ((c = 0; c < calls; c++)); do
     share=()
     for ((i = c; i < ${#shell_files[@]}; i += calls)); do share+=("${shell_files[i]}"); done
-    "$SHELLCHECK_RUN" "${share[@]}" >"$shell_tmp/$c.out" 2>"$shell_tmp/$c.err" &
+    "$SHELLCHECK_RUN" "${share[@]}" >"$lint_tmp/$c.out" 2>"$lint_tmp/$c.err" &
     pids+=("$!")
   done
   # The summary names the first failing call's exit. An exit 3 says the runner
@@ -200,14 +208,14 @@ else
     rc=0; wait "${pids[c]}" || rc=$?
     [ "$rc" -ne 0 ] || continue
     if [ "$rc" -eq 3 ]; then
-      if [ "$no_runner" -eq 0 ] && [ -s "$shell_tmp/$c.err" ]; then
-        printf '%s\n' "$(<"$shell_tmp/$c.err")" >&2
+      if [ "$no_runner" -eq 0 ] && [ -s "$lint_tmp/$c.err" ]; then
+        printf '%s\n' "$(<"$lint_tmp/$c.err")" >&2
       fi
       no_runner=1
       continue
     fi
-    [ ! -s "$shell_tmp/$c.out" ] || printf '%s\n' "$(<"$shell_tmp/$c.out")"
-    [ ! -s "$shell_tmp/$c.err" ] || printf '%s\n' "$(<"$shell_tmp/$c.err")" >&2
+    [ ! -s "$lint_tmp/$c.out" ] || printf '%s\n' "$(<"$lint_tmp/$c.out")"
+    [ ! -s "$lint_tmp/$c.err" ] || printf '%s\n' "$(<"$lint_tmp/$c.err")" >&2
     [ "$shell_rc" -ne 0 ] || shell_rc=$rc
   done
   if [ "$no_runner" -eq 1 ]; then
@@ -237,14 +245,15 @@ else
 fi
 
 # ── Go: go vet ./... in every module ─────────────────────────────────────────
-# A go.mod basename test keeps paths like `cargo.mod` out of the module list,
-# which the `*go.mod` pathspec would otherwise match.
+# A module is the directory of a tracked go.mod, named from the repo root, with
+# `.` for the root itself. Its name can drop the listing's ./ because a command
+# sees it only as part of "$ROOT/<module>", the directory vet runs in.
 modules=()
-while IFS= read -r gomod; do
-  [ -n "$gomod" ] || continue
-  [ "$(basename "$gomod")" = go.mod ] || continue
-  modules+=("$(dirname "$gomod")")
-done < <(git ls-files '*go.mod')
+for f in ${tracked[@]+"${tracked[@]}"}; do
+  case "$f" in
+    */go.mod) m=${f%/go.mod}; modules+=("${m#./}") ;;
+  esac
+done
 
 if [ "${#modules[@]}" -eq 0 ]; then
   summary+=("go: no go.mod modules found — skipped")
@@ -269,19 +278,10 @@ else
 fi
 
 # ── Gofmt: gofmt -l over every tracked Go file ───────────────────────────────
-# The listing is checked before it is read. A git ls-files that failed would
-# yield an empty list, which reads exactly like a tree with no Go in it and
-# skips the check. core.quotePath=false keeps a non-ASCII path unquoted so gofmt
-# can open it; a path git still quotes cannot be opened, and gofmt fails on it
-# loudly rather than the file dropping out unchecked.
-if ! go_listing="$(git -c core.quotePath=false ls-files -- '*.go')"; then
-  echo "$PROG: cannot enumerate tracked Go files under $ROOT" >&2
-  exit 2
-fi
 go_files=()
-while IFS= read -r f; do
-  [ -n "$f" ] && go_files+=("$f")
-done <<<"$go_listing"
+for f in ${tracked[@]+"${tracked[@]}"}; do
+  case "$f" in *.go) go_files+=("$f") ;; esac
+done
 
 if [ "${#go_files[@]}" -eq 0 ]; then
   summary+=("gofmt: no tracked Go files — skipped")
@@ -290,19 +290,25 @@ elif ! command -v gofmt >/dev/null 2>&1; then
   summary+=("gofmt: FAIL — 'gofmt' not on PATH; ${#go_files[@]} Go file(s) unchecked; fail-closed, treated as a finding")
 else
   # A non-zero exit means gofmt could not read or parse a file. That fails the
-  # check on its own, whatever the listing holds.
+  # check on its own, whatever gofmt lists.
   if unformatted="$(gofmt -l "${go_files[@]}")"; then rc=0; else rc=$?; fi
-  listed=0
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    listed=$((listed + 1))
+  # gofmt's list is split into its lines in memory, so no input that could
+  # fail stands between the list and the report (docs/review-correctness.md,
+  # Loop input). Globbing is off while it splits, so no name is expanded.
+  set -f
+  IFS=$'\n'
+  # shellcheck disable=SC2206  # the split on IFS, newlines alone, is the intent
+  listed=($unformatted)
+  IFS=$' \t\n'
+  set +f
+  for f in ${listed[@]+"${listed[@]}"}; do
     summary+=("gofmt: FAIL — $f is not gofmt-clean; gofmt -d $f shows the rewrite")
-  done <<<"$unformatted"
+  done
   if [ "$rc" -ne 0 ]; then
     fail=1
     summary+=("gofmt: FAIL — gofmt exit $rc; a Go file could not be read or parsed")
   fi
-  if [ "$listed" -gt 0 ]; then
+  if [ "${#listed[@]}" -gt 0 ]; then
     fail=1
   elif [ "$rc" -eq 0 ]; then
     summary+=("gofmt: ${#go_files[@]} Go file(s) clean")

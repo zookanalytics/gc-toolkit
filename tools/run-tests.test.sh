@@ -51,6 +51,10 @@
 #     those outside both prefixes, while the same file run directly gets them
 #     all; the gc binary GC_BIN names reaches a file as RUN_TESTS_GC_BIN, in
 #     place of one the caller exported, and with no GC_BIN a file gets none;
+#   - a run with files that source the shared harness builds the fake gc once
+#     and hands each file its path as RUN_TESTS_FAKE_GC, in place of one the
+#     caller exported; a run with none builds nothing, and a build that fails
+#     is named and hands on nothing;
 #   - with no -j and no TEST_JOBS the wave runs half the cores, at least one,
 #     counted by nproc, else getconf, else sysctl, and capped at the run count;
 #     TEST_JOBS and -j each override that default;
@@ -606,6 +610,45 @@ names="$(cat "$STATE/names")"
 has "$names" "GC_CITY_PATH" "the same file run directly sees the session's GC_* variables"
 has "$names" "BEADS_DIR" "…and its BEADS_* ones"
 eq "$(grep '^gc-bin=' "$STATE/env")" "gc-bin=/caller/gc" "…and the caller's own RUN_TESTS_GC_BIN"
+
+echo "── fake gc: one build for a run's harness files ──"
+# A go ahead of the real one on PATH records each build and writes a stand-in
+# binary where -o names, or fails when STUB_GO_FAIL is set. The fixture tree
+# gets the fake's package directory, which the runner builds from.
+mkdir -p "$TMP/gobin" "$REPO/services/gctk/internal/gcbd/fakegc"
+cat > "$TMP/gobin/go" <<'F'
+#!/bin/sh
+echo "$*" >> "$RUNTESTS_FIXTURE_STATE/go-calls"
+[ -z "${STUB_GO_FAIL:-}" ] || { echo "stub go: the build failed" >&2; exit 1; }
+out=""; prev=""; for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+printf '#!/bin/sh\n' > "$out" && chmod +x "$out"
+F
+chmod +x "$TMP/gobin/go"
+for n in a b; do
+  cat > "$FIX/harness-$n.test.sh" <<'F'
+#!/usr/bin/env bash
+# A suite on the harness sources assets/scripts/test-harness.sh here.
+S="$RUNTESTS_FIXTURE_STATE"
+if [ -n "${RUN_TESTS_FAKE_GC:-}" ] && [ -x "$RUN_TESTS_FAKE_GC" ]; then echo built >> "$S/fake-gc"; else echo "${RUN_TESTS_FAKE_GC-unset}" >> "$S/fake-gc"; fi
+F
+done
+reset_state
+OUT="$(PATH="$TMP/gobin:$PATH" RUN_TESTS_FAKE_GC=/caller/gc RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 30 "$FIX/harness-a.test.sh" "$FIX/harness-b.test.sh" "$FIX/pass.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a run with two harness files passes"
+eq "$(wc -l < "$STATE/go-calls" | tr -d ' ')" "1" "…and builds the fake gc once"
+has "$(cat "$STATE/go-calls")" "build -buildvcs=false -o" "…with go build"
+eq "$(sort "$STATE/fake-gc" | tr '\n' ' ')" "built built " "…and each harness file gets the build, in place of the caller's"
+reset_state
+OUT="$(PATH="$TMP/gobin:$PATH" RUN_TESTS_FAKE_GC=/caller/gc RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 30 "$FIX/env.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a run with no harness file passes"
+if [ -e "$STATE/go-calls" ]; then bad "…and builds nothing" "$(cat "$STATE/go-calls")"; else ok "…and builds nothing"; fi
+reset_state
+OUT="$(PATH="$TMP/gobin:$PATH" STUB_GO_FAIL=1 RUN_TESTS_FAKE_GC=/caller/gc RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 30 "$FIX/harness-a.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a run whose build fails still runs its files"
+has "$OUT" "the fake gc did not build" "…and says the build failed"
+has "$OUT" "stub go: the build failed" "…with the compiler's message"
+eq "$(cat "$STATE/fake-gc")" "unset" "…and hands on no fake gc, not even the caller's"
+rm -rf "$REPO/services"
 
 echo "── jobs: the default is half the cores, at least one ──"
 # The runner counts cores with nproc, then getconf, then sysctl. Stubs ahead of

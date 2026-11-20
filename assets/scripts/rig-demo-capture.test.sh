@@ -119,7 +119,9 @@ NODE
 # one that another caller started as this start ran when COPY_FOUND is set, or
 # fails as a copy that did not answer when COPY_FAIL is set, or as a checkout
 # whose copy runs another command when COPY_OTHER is set, and --stop ends it. A
-# running copy's app_url is COPY_APP, or its loopback URL when that is empty.
+# running copy's app_url is COPY_APP, or its loopback URL when that is empty,
+# and its report says its serve command runs inside the sandbox, as a capture
+# that keeps the sandbox asks of a copy.
 # lsof names the copy's process as the one listening on its port, working in the
 # checkout it was started from. Each logs to $RUNLOG. git and jq read the
 # checkout and the copy's report.
@@ -129,7 +131,7 @@ printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${RUNLOG:?}"
 case "$*" in
   "rig serve --check")
     if [ -n "${COPY_RUNNING:-}" ] || [ -s "${COPY_STATE:?}" ]; then
-      printf '{"state":"running","checkout":"%s","port":50200,"app_url":"%s","address":""}\n' "$(pwd)" "${COPY_APP:-http://127.0.0.1:50200/}"; exit 0
+      printf '{"state":"running","checkout":"%s","port":50200,"app_url":"%s","address":"","sandboxed":true}\n' "$(pwd)" "${COPY_APP:-http://127.0.0.1:50200/}"; exit 0
     fi
     printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"; exit 3 ;;
   "rig serve --command "*)
@@ -141,10 +143,10 @@ case "$*" in
     fi
     if [ -n "${COPY_RUNNING:-}" ] || [ -n "${COPY_FOUND:-}" ]; then
       [ -n "${COPY_RUNNING:-}" ] || pwd >"$COPY_STATE"
-      printf '{"state":"running","checkout":"%s","port":50200,"app_url":"%s","address":""}\n' "$(pwd)" "${COPY_APP:-http://127.0.0.1:50200/}"; exit 0
+      printf '{"state":"running","checkout":"%s","port":50200,"app_url":"%s","address":"","sandboxed":true}\n' "$(pwd)" "${COPY_APP:-http://127.0.0.1:50200/}"; exit 0
     fi
     pwd >"$COPY_STATE"
-    printf '{"state":"running","checkout":"%s","port":50200,"app_url":"%s","address":"","started":true}\n' "$(pwd)" "${COPY_APP:-http://127.0.0.1:50200/}"; exit 0 ;;
+    printf '{"state":"running","checkout":"%s","port":50200,"app_url":"%s","address":"","sandboxed":true,"started":true}\n' "$(pwd)" "${COPY_APP:-http://127.0.0.1:50200/}"; exit 0 ;;
   "rig serve --stop") : >"$COPY_STATE"; printf '{"state":"stopped","checkout":"%s"}\n' "$(pwd)"; exit 0 ;;
 esac
 exit 2

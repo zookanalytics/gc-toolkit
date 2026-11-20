@@ -7,12 +7,13 @@
 #             empty, absent, near-miss or ordinary task_kind
 #   (READERS) every reader of the standing kinds sources this file and applies
 #             $STANDING_KINDS_JQ
-#   (NO-COPY) no other file in the pack carries a standing-kinds list of its own
+#   (NO-COPY) no other file in the pack carries a standing-kinds list of its own,
+#             but the Go copy standing-kinds.sh names, which its own test holds
+#             to this definition
 # A reader with a private list drifts silently: it keeps excluding the kinds it
 # copied and misses every kind added later. The behavioral half lives beside
-# each reader (tools/gc-proactive.test.sh, liveness-recheck.test.sh,
-# liveness-sweep-precheck.test.sh, doctor/check-blocked-work-armed/run.test.sh),
-# each driven by this list.
+# each reader (liveness-recheck.test.sh, liveness-sweep-precheck.test.sh,
+# doctor/check-blocked-work-armed/run.test.sh), each driven by this list.
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree
@@ -56,8 +57,7 @@ for case in '{"metadata":{"task_kind":""}}' '{"metadata":{}}' '{}' \
 done
 
 echo "# every reader sources the one definition"
-READERS="tools/gc-proactive.sh
-assets/scripts/liveness-sweep.sh
+READERS="assets/scripts/liveness-sweep.sh
 assets/scripts/liveness-sweep-precheck.sh
 assets/scripts/liveness-recheck.sh
 doctor/check-blocked-work-armed/run.sh

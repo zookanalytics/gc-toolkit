@@ -88,8 +88,8 @@ type Spec struct {
 	// process group of its own, which outlives this process. Without it the
 	// process joins this process's group.
 	Session bool
-	// Sandbox, when set, runs the process inside the sandbox a demo capture
-	// runs in, from Dir, which it needs.
+	// Sandbox, when set, runs the process from Dir, which it needs, as the
+	// pack's demo capture runs one.
 	Sandbox *Sandbox
 }
 
@@ -102,11 +102,13 @@ type Ender interface {
 	End()
 }
 
-// Sandbox is the sandbox the pack's demo capture runs a command in, which
-// demo_engine_sandboxed in Lib composes: the process reads and writes its
-// working directory, reaches no loopback port but Port, signals no process
-// outside the sandbox, and gets none of the variables that point a command at
-// the city.
+// Sandbox is how the pack's demo capture runs a command, which
+// demo_engine_sandboxed in Lib decides by the rig that holds the process's
+// directory. For a rig whose app reads the city the process runs inside the
+// capture's sandbox, where it reads and writes its working directory, reaches
+// no loopback port but Port and signals no process outside the sandbox. For
+// any other rig it runs as an ordinary process. Either way it gets none of the
+// variables that point a command at the city.
 type Sandbox struct {
 	// Lib is the file that defines it, the pack's demo-engine-lib.sh.
 	Lib string
@@ -114,7 +116,14 @@ type Sandbox struct {
 	Port int
 	// Prog is the name the sandbox's messages start with.
 	Prog string
+	// Record, when set, is the file where demo_engine_sandboxed writes whether
+	// the process runs inside the sandbox, true or false, before the process
+	// starts.
+	Record string
 }
+
+// sandboxRecordVar names Sandbox.Record to demo_engine_sandboxed.
+const sandboxRecordVar = "DEMO_ENGINE_SANDBOX_RECORD"
 
 // Child is a process Start started.
 type Child interface {
@@ -169,6 +178,9 @@ func (local) Start(s Spec) (Child, error) {
 		}
 		argv = append([]string{"bash", "-c", sandboxed, b.Prog, b.Lib, strconv.Itoa(b.Port), s.Dir}, argv...)
 		env = append(slices.Clone(env), "PROG="+b.Prog)
+		if b.Record != "" {
+			env = append(env, sandboxRecordVar+"="+b.Record)
+		}
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = s.Dir

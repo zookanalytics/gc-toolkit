@@ -106,6 +106,7 @@ render's byte and token counts.
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; an agent records the problem as an upstream finding, set aside with nothing drafted and nothing asked, and the operator takes findings up from one list when ready
 - [docs/not-for-review.md](docs/not-for-review.md) — the pull-request comments the city never reads as review feedback: the no-review mark, and the third-party markers a rig declares
 - [docs/built-once-target.md](docs/built-once-target.md) — the shape the pack would have if built once and where its weight is, subsystem by subsystem beside its measured size, the removals in the order they land, and the rules every change follows
+- [docs/testing.md](docs/testing.md) — where a behavior is tested, what stands in for gc and each other outside system in a test, and the contract test that holds the compiled fake gc to the bd the city runs
 
 ## Related
 

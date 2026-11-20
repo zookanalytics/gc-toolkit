@@ -47,6 +47,10 @@
 #                blocked parent. It lists the bead's own live blockers, its live
 #                waits-for spawners among them, or else its blocked parent, and
 #                leaves out a bead with neither.
+#         dep    `dep list <id> --direction=up --type <type>`: each row with
+#                an edge of that type onto <id>, in the dependents shape, its
+#                own fields and the edge's type and none of its edges; a bead
+#                no row has is bd's refusal to resolve it
 #         sql    the ids the store marks blocked, the beads `blocked` judges so
 #         where  the store gc resolves, $HOLDS_WHERE or /stub/.beads, which
 #                gctk pins every read to when the script names none
@@ -196,6 +200,24 @@ case "$verb" in
     ;;
   where)
     jq -nc --arg p "${HOLDS_WHERE:-/stub/.beads}" '{path: $p, prefix: "stub", schema_version: 1}'
+    ;;
+  dep)
+    [ "${1:-}" = list ] || { echo "holds-store.stub.sh: gctk reads no 'dep ${1:-}'" >&2; exit 2; }
+    id="${2:-}"; type=""; up=""
+    shift 2 || true
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --direction=up) up=1 ;;
+        --type) shift; type="${1:-}" ;;
+        --type=*) type="${1#--type=}" ;;
+      esac
+      shift || true
+    done
+    [ -n "$up" ] && [ -n "$type" ] || { echo "holds-store.stub.sh: gctk reads dependents up one edge type" >&2; exit 2; }
+    jq -e --arg id "$id" 'any(.[]; .id == $id)' "$store" >/dev/null 2>&1 \
+      || { printf '{"error":"resolving %s: no issue found matching %s","schema_version":1}\n' "$id" "$id"; exit 1; }
+    jq -c --rawfile d "$deps" --arg id "$id" --arg type "$type" "$EDGES"'
+      rows($d) | [ .[] | select(any(._edges[]; .type == $type and .id == $id)) | del(._edges) | . + {dependency_type: $type} ]' "$store"
     ;;
   ready)
     if [ -n "${HOLDS_READY:-}" ]; then printf '%s\n' "$HOLDS_READY"; exit 0; fi

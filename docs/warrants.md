@@ -443,9 +443,9 @@ no warrant.
 
 - **Covers.** The `pr_github_read` key, declared as `githubReadKey` in
   `services/gctk/pr/read.go`. Its writer is the landing order: `blocked`,
-  `requeued` and `decide` in `services/gctk/pr/landing.go`, and `admit`,
-  `runFailed` and `runOutside` in `services/gctk/pr/admit.go`, save the read that
-  `observe` in `services/gctk/pr/read.go` makes. Its reader is `FromStore` in
+  `requeued` and `decide` in `services/gctk/pr/landing.go`, and `admit` and
+  `runFailed` in `services/gctk/pr/admit.go`, save the read that `observe` in
+  `services/gctk/pr/read.go` makes. Its reader is `FromStore` in
   `services/gctk/pr/read.go`, which `answerFromStore` in
   `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
   `PRAnswers` in `services/gctk/listing/pr.go` calls for the rig board, from
@@ -488,9 +488,9 @@ no warrant.
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
-- **Verified.** 2026-11-18, at `gastownhall/gascity` main 5b7728de34,
-  `gastownhall/gascity-packs` main 0f07496d2fa4, and `gastownhall/beads` main
-  a6b7cd769437.
+- **Verified.** 2026-11-18, at `gastownhall/gascity` main 03f6fe825c,
+  `gastownhall/gascity-packs` main 8ed128846fc5, and `gastownhall/beads` main
+  ae13ad8bcf48.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
   request's reviews, the required checks at its head and its review threads,
   where a reader of the PR's own bead finds them, for example once its PR
@@ -739,7 +739,7 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-14, at `gastownhall/gascity` main 420b7bb65f, with
+- **Verified.** 2026-11-17, at `gastownhall/gascity` main f715d7b92d, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
@@ -786,8 +786,38 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-18, at `gastownhall/gascity` main f932d43b1c70,
+- **Verified.** 2026-11-19, at `gastownhall/gascity` main 7b5614ac70d1,
   `gastownhall/beads` main 2549ece6e05e and `gastownhall/gascity-packs` main
-  8ed128846fc5.
+  b3e779f03aec.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
+
+## Patrol findings
+
+- **Covers.** `assets/scripts/patrol-finding.sh`, the one writer of a patrol
+  finding, and the finding's keys in the `[metadata.patrol_findings]` table of
+  `lifecycle/lifecycle.toml`.
+- **Stands in for.** A keyed problem record: one record per situation a patrol
+  or an order observes, which a report of the same situation finds again by
+  its key and counts as a recurrence, and which stays until the problem is
+  resolved.
+- **Evidence.** In `gastownhall/gascity`, nothing keeps current state per
+  problem key:
+  - `gc mail send --dedup` suppresses a send while an unarchived message with
+    the same key is in the same mailbox, and once that message is archived the
+    next send alerts again (`newMailSendCmd`'s `--dedup` in
+    `cmd/gc/cmd_mail.go`).
+  - Core's `escalate.sh` keys an incident only to throttle its mail: with
+    `--incident-key` an unchanged incident is not sent again inside a reminder
+    window, `--resolve-incident` forgets it, and the state it keeps under
+    `.gc/incidents` is best-effort
+    (`internal/bootstrap/packs/core/assets/scripts/escalate.sh`).
+  - `gc event emit` appends one event to the city's log and keeps no state per
+    key (`cmd/gc/cmd_event_emit.go`).
+  - A doctor result needs no such record, because the doctor order records
+    each run as one event, whose newest is what doctor found last
+    ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)).
+    So this entry covers the patrol finding alone.
+- **Verified.** 2026-11-16, at `gastownhall/gascity` main c7eb6d2f43.
+- **Retires when.** Gas City ships a keyed problem record: one record per key,
+  which a recurrence finds and updates and which stays until it is resolved.

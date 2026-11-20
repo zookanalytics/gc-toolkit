@@ -186,7 +186,12 @@ Choose by what the learning *is*:
   over `convention` for anything a reader could catch: one rubric dimension
   reaches every agent's version of the mistake through the reviewer, where a
   bullet only reaches the one role whose fragment renders it. An amendment
-  is one dimension sharpened or added, never a checklist bolted on.
+  is one dimension sharpened or added, never a checklist bolted on. Word it as
+  the rule a reviewer of any repository would apply, never as one pull
+  request's case. An amendment replaces text where it can, so the method
+  stays concise. A defect class
+  particular to one repository is not an amendment: it goes in that
+  repository's `docs/review-correctness.md`, through an engineering bead.
 - **`convention`** when the behavior must be carried *into* the turn by one
   role and no reviewer sees the moment it goes wrong — a claiming rule, a
   handoff, the choice to ask a person.

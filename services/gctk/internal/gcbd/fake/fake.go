@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -26,14 +27,15 @@ import (
 // a listing does. ClosedAt is when a closed bead closed. An edge carries the far
 // bead's fields as a show row reports them, so a closed row that names no close
 // time takes the one an edge onto it names. Assignee, AwaitType, AwaitID,
-// Description, Priority, Labels, CreatedAt, CloseReason and Notes are the row's
-// own fields a listing carries, and an update's --append-notes adds a line to
-// Notes. Ephemeral and Template put the row in the ephemeral plane or make it a
-// template.
+// Description, Priority, Labels, CreatedAt, UpdatedAt, CloseReason and Notes
+// are the row's own fields a listing carries, and an update's --append-notes
+// adds a line to Notes. Ephemeral and Template put the row in the ephemeral
+// plane or make it a template.
 type Bead struct {
 	ID, Title, Status, IssueType, ClosedAt string
 	Assignee, AwaitType, Description       string
 	AwaitID, CreatedAt, CloseReason, Notes string
+	UpdatedAt                              string
 	Priority                               int
 	Labels                                 []string
 	Ephemeral, Template                    bool
@@ -45,6 +47,18 @@ type Bead struct {
 type Write struct {
 	ID   string
 	Args []string
+}
+
+// State is one set-state the store took: the bead, the dimension, its value
+// and the reason.
+type State struct {
+	ID, Dimension, Value, Reason string
+}
+
+// Edge is one edge write the store took: the bead, the bead the edge is onto,
+// and the edge's type.
+type Edge struct {
+	ID, Far, Type string
 }
 
 // Create is one create the store took: the bead it filed, its title and the
@@ -65,11 +79,26 @@ type Store struct {
 	ready   map[string]bool
 	writes  []Write
 	creates []Create
+	states  []State
+	added   []Edge
+	// lastWrites is the newest write the store records under each actor,
+	// which SetLastWrite sets.
+	lastWrites map[string]time.Time
+	// lastWriteReads is the actors each LastWrites read named.
+	lastWriteReads [][]string
 
-	// RowsErr, BlockedErr, FindErr and ReadyErr fail the matching read when
-	// set, UpdateErr fails every update, EdgeErr every edge added and CreateErr
-	// every create.
-	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr, EdgeErr, CreateErr error
+	// RowsErr, BlockedErr, FindErr, ReadyErr, LastWritesErr and DependentsErr
+	// fail the matching read when set, ReadyErr failing ReadyIDs too.
+	// UpdateErr fails every update, CreateErr every create, StateErr every
+	// set-state and EdgeErr every edge write.
+	RowsErr, BlockedErr, FindErr, ReadyErr, LastWritesErr, UpdateErr, CreateErr error
+	StateErr, EdgeErr, DependentsErr                                            error
+
+	// OnWrite, when set, runs after each write the store takes, outside the
+	// store's lock: its kind (update, create, set-state or dep-add), the bead
+	// it wrote, and its arguments. A test that asks which write came first
+	// across the store and the runtime logs both into one list.
+	OnWrite func(kind, id string, args []string)
 
 	// OnFind, when set, runs before each find the store takes, outside the
 	// store's lock, and fails nothing. A test lands another actor's write in it.
@@ -118,26 +147,31 @@ func (s *Store) MakeReady(ids ...string) {
 	}
 }
 
-// Ready returns, in id order, the row of each bead MakeReady named that q
-// selects, in a listing's shape: an open bead that carries q's key, unassigned
-// when q asks, of no type q leaves out and with no label q leaves out, each
-// compared exactly, as bd's flags compare them.
+// Ready returns the row of each bead MakeReady named that q selects, in a
+// listing's shape: an open bead that carries q's key, or any open bead when q
+// selects every bead, unassigned when q asks, of no type q leaves out and with
+// no label q leaves out, each compared exactly, as bd's flags compare them. The
+// rows come in id order, or by priority, the lowest number first, when q asks.
 func (s *Store) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ReadyErr != nil {
 		return nil, s.ReadyErr
 	}
-	if q.HasKey == "" {
-		return nil, &gcbd.ReadError{Reason: "the fake store takes no ready read that names no key"}
+	if (q.HasKey == "") == !q.Every {
+		return nil, &gcbd.ReadError{Reason: "the fake store takes a ready read that names a key or every bead, one of the two"}
+	}
+	ids := slices.Sorted(maps.Keys(s.rows))
+	if q.ByPriority {
+		slices.SortStableFunc(ids, func(a, b string) int { return s.rows[a].Priority - s.rows[b].Priority })
 	}
 	var out []gcbd.Bead
-	for _, id := range slices.Sorted(maps.Keys(s.rows)) {
+	for _, id := range ids {
 		b := s.rows[id]
 		if !s.ready[id] || !strings.EqualFold(b.Status, "open") {
 			continue
 		}
-		if _, held := b.Metadata[q.HasKey]; !held {
+		if _, held := b.Metadata[q.HasKey]; q.HasKey != "" && !held {
 			continue
 		}
 		if q.Unassigned && b.Assignee != "" {
@@ -240,8 +274,11 @@ func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
 // Find returns, in id order, the row of each bead q selects, in a listing's
 // shape: every edge, with the far bead's id and the edge's type alone. A bead q
 // names that the store does not hold is left out, as a listing leaves it out.
-// A parent selects the beads whose own parent-child edge names it, and a type
-// the beads whose issue type is that one exactly.
+// A parent selects the beads whose own parent-child edge names it, a type the
+// beads whose issue type is that one exactly, an assignee the beads assigned
+// to it exactly, and statuses the beads whose status is one of them. Listed
+// leaves out each row bd's listing hides unless asked
+// ([gcbd.Bead.ListedByDefault]).
 func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 	if s.OnFind != nil {
 		s.OnFind(q)
@@ -252,7 +289,8 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 	if s.FindErr != nil {
 		return nil, s.FindErr
 	}
-	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && q.Type == "" && !q.Every {
+	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && q.Type == "" &&
+		q.Assignee == "" && len(q.Statuses) == 0 && !q.Every {
 		return nil, &gcbd.ReadError{Reason: "the fake store takes no find that selects no beads"}
 	}
 	ids := slices.Sorted(maps.Keys(s.rows))
@@ -282,7 +320,43 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 		if q.Type != "" && b.IssueType != q.Type {
 			continue
 		}
-		out = append(out, s.listing(b))
+		if q.Assignee != "" && b.Assignee != q.Assignee {
+			continue
+		}
+		if len(q.Statuses) > 0 && !slices.Contains(q.Statuses, b.Status) {
+			continue
+		}
+		row := s.listing(b)
+		if q.Listed && !row.ListedByDefault() {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+// Dependents returns, in id order, the row of each bead with an edge of type
+// typ onto id, closed ones among them, as a dependents read gives it: the
+// bead's own fields with the edge's type, and none of its edges. An id the
+// store does not hold fails the read, as bd fails to resolve it.
+func (s *Store) Dependents(id, typ string) ([]gcbd.Bead, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.DependentsErr != nil {
+		return nil, s.DependentsErr
+	}
+	if _, held := s.rows[id]; !held {
+		return nil, &gcbd.ReadError{ID: id, Reason: "the fake store holds no bead " + id}
+	}
+	var out []gcbd.Bead
+	for _, dep := range slices.Sorted(maps.Keys(s.rows)) {
+		b := s.rows[dep]
+		if !slices.ContainsFunc(b.Edges, func(e gcbd.Edge) bool { return e.Type == typ && e.ID == id }) {
+			continue
+		}
+		row := bead(b, nil)
+		row.DependencyType = typ
+		out = append(out, row)
 	}
 	return out, nil
 }
@@ -346,13 +420,19 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 		s.rows[id] = rows[id]
 		s.writes = append(s.writes, Write{ID: id, Args: slices.Clone(flags)})
 	}
+	for _, id := range ids {
+		s.wrote("update", id, flags)
+	}
 	return "", nil
 }
 
 // AddEdge adds an edge of type typ from id onto target to id's row, with
-// target's title and status when the store holds it. A bead id the store does
-// not hold refuses the edge. An edge onto a target the store does not hold is
-// added all the same, as bd adds one onto an id outside its own prefix.
+// target's title and status when the store holds it, as bd's dep add does: an
+// edge of the same type already there is left single, and one of another type
+// onto target refuses the write, since bd keeps one edge type per pair of
+// beads. A bead id the store does not hold refuses the edge. An edge onto a
+// target the store does not hold is added all the same, as bd adds one onto an
+// id outside its own prefix.
 func (s *Store) AddEdge(id, target, typ string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -363,12 +443,25 @@ func (s *Store) AddEdge(id, target, typ string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("fake store: no bead %s", id)
 	}
+	for _, e := range b.Edges {
+		if e.ID != target {
+			continue
+		}
+		if e.Type != typ {
+			return "", fmt.Errorf("fake store: %s already has an edge onto %s of type %q", id, target, e.Type)
+		}
+		s.added = append(s.added, Edge{ID: id, Far: target, Type: typ})
+		s.wrote("dep-add", id, []string{target, "--type", typ})
+		return "", nil
+	}
 	e := gcbd.Edge{Type: typ, ID: target}
 	if far, held := s.rows[target]; held {
 		e.Title, e.Status = far.Title, far.Status
 	}
 	b.Edges = append(slices.Clone(b.Edges), e)
 	s.rows[id] = b
+	s.added = append(s.added, Edge{ID: id, Far: target, Type: typ})
+	s.wrote("dep-add", id, []string{target, "--type", typ})
 	return "", nil
 }
 
@@ -439,6 +532,69 @@ func (s *Store) update(id string, args []string) (Bead, error) {
 		}
 	}
 	return b, nil
+}
+
+// wrote runs OnWrite, once the store's lock is released, for a write it took.
+// Its caller holds the lock.
+func (s *Store) wrote(kind, id string, args []string) {
+	if s.OnWrite == nil {
+		return
+	}
+	on, args := s.OnWrite, slices.Clone(args)
+	s.mu.Unlock()
+	defer s.mu.Lock()
+	on(kind, id, args)
+}
+
+// ReadyIDs returns, in id order, each bead MakeReady named that is open, as
+// bd's brief ready set names it.
+func (s *Store) ReadyIDs() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ReadyErr != nil {
+		return nil, s.ReadyErr
+	}
+	var out []string
+	for _, id := range slices.Sorted(maps.Keys(s.rows)) {
+		if s.ready[id] && strings.EqualFold(s.rows[id].Status, "open") {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+// SetState makes dimension:value the bead's one label for dimension, as bd's
+// set-state does, and records it. A bead the store does not hold refuses it.
+func (s *Store) SetState(id, dimension, value, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.StateErr != nil {
+		return s.StateErr
+	}
+	b, ok := s.rows[id]
+	if !ok {
+		return fmt.Errorf("fake store: no bead %s", id)
+	}
+	labels := slices.DeleteFunc(slices.Clone(b.Labels), func(l string) bool { return strings.HasPrefix(l, dimension+":") })
+	b.Labels = append(labels, dimension+":"+value)
+	s.rows[id] = b
+	s.states = append(s.states, State{ID: id, Dimension: dimension, Value: value, Reason: reason})
+	s.wrote("set-state", id, []string{dimension + "=" + value, "--reason", reason})
+	return nil
+}
+
+// States returns every set-state the store took, in order.
+func (s *Store) States() []State {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.states)
+}
+
+// EdgeWrites returns every edge write the store took, in order.
+func (s *Store) EdgeWrites() []Edge {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.added)
 }
 
 // closesStatus reports whether an update's arguments move the bead to closed.
@@ -568,6 +724,7 @@ func (s *Store) Create(title string, args ...string) (string, error) {
 	}
 	s.rows[id] = b
 	s.creates = append(s.creates, Create{ID: id, Title: title, Args: slices.Clone(args)})
+	s.wrote("create", id, args)
 	return id, nil
 }
 
@@ -645,6 +802,9 @@ func bead(b Bead, deps []any) gcbd.Bead {
 	}
 	if b.CreatedAt != "" {
 		out.CreatedAt = b.CreatedAt
+	}
+	if b.UpdatedAt != "" {
+		out.UpdatedAt = b.UpdatedAt
 	}
 	if b.CloseReason != "" {
 		out.CloseReason = b.CloseReason

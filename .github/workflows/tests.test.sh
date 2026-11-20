@@ -35,9 +35,9 @@
 # outside a job's steps and would put every job in one group.
 #
 # The Go checks, go on Linux and go-macos on macOS, each run `go vet ./... &&
-# go test ./...` in both Go modules, so every Go test runs on both platforms.
-# No job runs go test on a list of packages, because a list keeps a check only
-# for the packages it names.
+# go test ./...` from the repository root, which is one Go module, so every Go
+# test runs on both platforms. No job runs go test on a list of packages,
+# because a list keeps a check only for the packages it names.
 #
 # go-macos's tool check names each tool whose absence makes a Go test skip
 # rather than fail: lsof (internal/host in gctk), flock (the pr package's lock
@@ -226,10 +226,8 @@ step_rows() {
 }
 steps="$(step_rows)"
 for j in go go-macos; do
-    for m in services/gctk services/helm; do
-        awk -F'\t' -v j="$j" -v m="$m" '$1 == j && $2 == m && index($3, "go vet ./... && go test ./...") { f = 1 } END { exit !f }' <<<"$steps" \
-            || note "job '$j' must run 'go vet ./... && go test ./...' in $m, so every Go test runs on both platforms"
-    done
+    awk -F'\t' -v j="$j" '$1 == j && $2 == "" && index($3, "go vet ./... && go test ./...") { f = 1 } END { exit !f }' <<<"$steps" \
+        || note "job '$j' must run 'go vet ./... && go test ./...' from the repository root, so every Go test runs on both platforms"
 done
 tool_check="$(awk -F'\t' '$1 == "go-macos" && index($3, "command -v") { print $3 }' <<<"$steps")"
 for t in lsof flock bash jq; do
@@ -245,7 +243,7 @@ package_lists="$(awk -F'\t' '{
     }
 }' <<<"$steps" | sort -u | paste -sd, -)"
 [ -z "$package_lists" ] \
-    || note "job(s) $package_lists run go test on a list of packages; a Go check runs go test ./... over its module"
+    || note "job(s) $package_lists run go test on a list of packages; a Go check runs go test ./... over the module"
 
 if [ "$fail" -ne 0 ]; then
     echo "tests.test.sh: FAILED" >&2

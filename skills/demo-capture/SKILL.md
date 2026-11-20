@@ -21,11 +21,14 @@ The pack's `demo-engine-lib.sh` resolves the engine, and the pack's own
 captures source it too. It uses the local `sprintshow` rig checkout when the
 city has one and the published npm package otherwise. It holds Node to the
 engine's floor of 22.18, installs a checkout's dependencies on first use, and
-provisions the browser. It runs the engine inside a sandbox from which the
-live city cannot be reached, so a server the capture starts and a page it loads
-read none of the city's stores, configuration or API; the library's header says
-what the sandbox denies and what it refuses. Source it from the pack gc loaded
-and resolve the engine once. A video also needs ffmpeg, which the library
+provisions the browser. For a rig whose app reads the city it runs the engine
+inside a sandbox from which the live city cannot be reached, so a server the
+capture starts and a page it loads read none of the city's stores,
+configuration or API. A capture of any other rig runs as an ordinary process.
+[The rig's start command](#the-rigs-start-command) says how to tell which a rig
+gets, and the library's header says what the sandbox denies and what it
+refuses. Source the library from the pack gc loaded and resolve the engine
+once. A video also needs ffmpeg, which the library
 leaves to the capture that assembles one:
 
 ```bash
@@ -42,10 +45,11 @@ leaves to the capture that assembles one:
 front of this skill's name: `gc-toolkit` in `gc-toolkit.demo-capture`.
 `gc skill list` prints it in this skill's FROM column.
 
-`demo_engine_cli <command> <arguments...>` runs the engine's CLI inside the
-sandbox, in the current directory, so relative demo-script and `--serve-dir`
-paths resolve as written. An app that reads the city fails there, so point the
-capture at an app that serves fixture data.
+`demo_engine_cli <command> <arguments...>` runs the engine's CLI in the current
+directory, so relative demo-script and `--serve-dir` paths resolve as written.
+It runs inside the sandbox unless what the run captures lies only in rigs whose
+`app_reads_city` is `"false"`. An app that reads the city fails in the sandbox,
+so point the capture at an app that serves fixture data.
 Each tool call starts a fresh shell, which has neither the library nor the
 engine it chose. So each engine command below runs after sourcing the library
 again and calling `demo_engine_find`, which finds the same engine and installs
@@ -106,7 +110,20 @@ names its app as the guide's `## Bring the app up` says, with `--serve-dir` or
 
 The command runs as a copy that `gctk rig serve` runs, with bash at the top of
 the checkout it is started from, such as a worktree at the commit a capture
-shows, inside the capture's sandbox. The copy gets a free loopback port of its
+shows. A rig keeps the capture's sandbox, for its copy and for every capture of
+it, when `city.toml` sets its `app_reads_city` to anything but `"false"`, as a
+city does for a rig whose app reads the city. A setting that does not read
+keeps it too, and so does the rig that holds this pack's source, whatever its
+setting says. Any other rig's copy and captures run as ordinary processes,
+with the reach the rig's own tests have on this host. This prints `false` for a
+rig whose captures run with no sandbox:
+
+```bash
+gc formula show mol-rig-demo --rig <rig> --json | jq -r '[.vars[]? | select(.name == "app_reads_city")][0] | .rig_default // .default'
+```
+
+[The capture sandbox](../../docs/demo-capture-sandbox.md) says what the sandbox
+denies and what it lets through. The copy gets a free loopback port of its
 own as `$PORT`. It is up once it answers there, or once the command prints the
 URL of the app it brought up on a line of its standard output, in the engine's
 form, as `ios-simulator://<device UDID>/<bundle id>` names an iOS app it
@@ -120,12 +137,13 @@ reports it. So the command:
   or prints its app's URL once the app is ready, with its other output on its
   standard error;
 - hard-codes no port, because each run gets a port of its own;
-- serves the app on fixture data, because the sandbox keeps the live city out
-  of reach. An iOS app runs on a simulator, which the system's simulator
-  service starts outside the sandbox, so the command gives it fixture data
-  itself;
-- builds with its toolchain's own sandboxes turned off, because none can start
-  inside the capture's, which still holds the build. An Xcode build passes
+- serves the app on fixture data, so a capture shows what its commit does on
+  data it brings. In the sandbox the live city is out of reach anyway. An iOS
+  app runs on a simulator, which the system's simulator service starts outside
+  any sandbox, so the command gives it fixture data itself;
+- for a rig that keeps the sandbox, builds with its toolchain's own sandboxes
+  turned off, because none can start inside the capture's, which still holds
+  the build. An Xcode build passes
   `-IDEPackageSupportDisableManifestSandbox=YES` for Swift packages and
   `'OTHER_SWIFT_FLAGS=$(inherited) -disable-sandbox'` for Swift macros;
 - is up within ten minutes, as long as a start waits before it stops the copy,
@@ -162,24 +180,29 @@ terminal instead of a page, so it brings up no app, and the engine refuses an
 app target or a `--port` for it.
 
 An app a command serves, such as a dev server, runs as a copy that
-`gctk rig serve` runs from a checkout, inside the same sandbox, and the engine
-captures the copy's app where the copy reports it. `rig-demo-capture.sh` and
-`demo-screenshot.sh page` do that for `--serve "<command>" --cwd <checkout>`:
-they start the copy, capture it and stop it. The engine's own `--serve` is
-refused, because the sandbox cannot vouch for the server it would start.
+`gctk rig serve` runs from a checkout, in the sandbox when the rig keeps it,
+and the engine captures the copy's app where the copy reports it.
+`rig-demo-capture.sh` and `demo-screenshot.sh page` do that for
+`--serve "<command>" --cwd <checkout>`: they start the copy, capture it and
+stop it. The engine's own `--serve` is refused, so every app a command serves
+runs as a copy.
 
 A `--base-url` on this host works for a copy that `gctk rig serve` runs, and for
 a rig's own app running in a worktree of that rig, unless `city.toml` sets
-`app_reads_city = "true"` for the rig. Otherwise the capture refuses the URL and
-says why. Then serve the app as a copy or with `--serve-dir`, or capture a
-deployed preview.
+`app_reads_city = "true"` for the rig. A capture of a copy of a rig that keeps
+the sandbox runs inside it, and takes the copy only when the copy runs inside it
+too, which a copy started before the rig kept the sandbox does not. A capture of
+any other copy or rig's app runs with no sandbox. Otherwise the capture refuses
+the URL and says why. Then serve the app as a copy or with `--serve-dir`, or
+capture a deployed preview.
 
 A script that declares `**Platform:** iOS` drives an iOS app on a simulator,
 named by its `ios-simulator://<device UDID>/<bundle id>` URL as `--base-url`,
 or brought up by a rig's start command. Its capture provisions the Appium the
-engine drives the app with, and opens three loopback ports, which the engine
-gets as `--port`, for the servers it drives the app through. The app itself
-runs outside the sandbox, where the system's simulator service starts it.
+engine drives the app with, and picks three free loopback ports, which the
+engine gets as `--port` for the servers it drives the app through and a capture
+in the sandbox opens. The app itself runs outside any sandbox, where the
+system's simulator service starts it.
 
 Two capture modes come from one script:
 
@@ -226,9 +249,9 @@ scenario into a script (a ready one, or one written from a bead with
 closes the bead it was poured on. `gc formula show mol-rig-demo` prints the
 pour line and every input. A pour names at most one app target (`serve_dir`,
 `serve_cmd`, or `base_url`), and a page script whose pour names none takes the
-rig's start command. The sandbox refuses a rig's own checkout, so the app runs
-from a detached worktree of it at its HEAD, which holds only what the rig
-commits.
+rig's start command. The app runs from a detached worktree of the rig at its
+HEAD, which holds only what the rig commits, and which the sandbox of a rig
+that keeps it allows where it refuses the rig's own checkout.
 The `demo` review check makes the call inside the review
 instead of pouring the mol (`gc-toolkit.review-demo`).
 
@@ -238,9 +261,9 @@ To show what a PR changes, draft a script from its bead, adapt the draft to the
 rig's guide, lint it, capture it, and attach the clip to the PR. The script and
 the clip are working files, and neither is committed.
 
-1. **Work from a worktree at the PR's head.** The capture's sandbox refuses a
-   rig's own checkout, so make a worktree outside it, at the commit the PR
-   heads:
+1. **Work from a worktree at the PR's head.** The clip shows the commit the
+   capture runs from, and the sandbox of a rig that keeps it refuses the rig's
+   own checkout, so make a worktree outside it, at the commit the PR heads:
 
    ```bash
    git -C <checkout> worktree add --detach <worktree> <pr-head>
@@ -312,7 +335,7 @@ When the session is demo-gated and carries the `playwright` MCP server (the
 browser itself: screenshot each
 step into a captures directory with a `manifest.json`, then hand the frames to
 the engine to assemble. This is the Gas City path, where the agent already
-holds the browser. That browser is the session's own, outside the sandbox the
+holds the browser. That browser is the session's own, outside any sandbox the
 engine runs in, so it reaches whatever the session reaches, the live city
 included. Point it only at an app that serves fixture data.
 
