@@ -159,10 +159,10 @@ case "$(printf '%s' "$WORK_JSON" | jq -r '.[0].status // ""' 2>/dev/null)" in
 esac
 WORK_MR=$(row_meta "$WORK_JSON" merge_result)
 case "$WORK_MR" in
-  # An open PR, on the old record or on the pending record, retires through the
-  # writer that records its disposition and then closes it, which the PR's
-  # closer, pr-facts or the landing order, carries out once the PR reads closed.
-  pull_request|pull_request_pending|pull_request_head_changed)
+  # An open PR on the pending record retires through the writer that records its
+  # disposition and then closes it, which the landing order carries out once the
+  # PR reads closed.
+  pull_request_pending|pull_request_head_changed)
     refuse "$WORK owns an open PR ($WORK_MR), which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off." ;;
 esac
 

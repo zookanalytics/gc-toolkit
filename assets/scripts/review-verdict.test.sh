@@ -18,8 +18,7 @@
 #   (NO-COPY) no other file in the pack carries a jq definition of the rule
 # A reader with a private copy drifts silently: the merge gate and the arm that
 # brings a branch current would then disagree about which PRs are approved. The
-# behavioral half lives beside each reader (pr-facts.test.sh), and
-# merge.test.sh holds gctk merge's own statement of the rule to this one.
+# behavioral half lives beside each reader (pr-facts.test.sh).
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree

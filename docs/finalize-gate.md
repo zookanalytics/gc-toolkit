@@ -1,12 +1,13 @@
 ---
 name: finalize-gate
-description: The precondition set that decides whether a bead may be finalized — its PR merged or the bead closed — with the human-gate clause that holds finalization while an open human gate blocks that bead, and the epic-ruling clause that holds an epic other than a Delivery until it is ruled closed.
+description: The precondition set that decides whether a bead may be finalized, which is closed for good, with the human-gate clause that holds finalization while an open human gate blocks that bead, and the epic-ruling clause that holds an epic other than a Delivery until it is ruled closed.
 ---
 
 # The finalize gate
 
-Finalizing a bead is the terminal, hard-to-reverse act on it: merging its PR, or
-closing the bead. `assets/scripts/finalize-gate.sh` is the one place that
+Finalizing a bead is the terminal, hard-to-reverse act on it: closing the bead
+with its successor, or closing an epic's Delivery or the epic itself at its
+review. `assets/scripts/finalize-gate.sh` is the one place that
 answers, for a single bead, whether every precondition for that act holds. It is
 a composable SET of clauses run in order; the first to refuse stops the set and
 names why.
@@ -19,7 +20,7 @@ caller invokes it, its fail-closed contract, and the finalize paths that call it
 **Boundaries.** What a human gate is, who files one and how a person clears it
 belong to `docs/human-engagement.md` and `assets/scripts/human-gate.sh`. The
 read of a bead's human gates is defined once, as `bd_human_gates` in
-`assets/scripts/bd-lib.sh`. The merge cadence's other arms live in
+`assets/scripts/bd-lib.sh`. The orders around a PR's merge live in
 `docs/refinery-merge-cadence.md`, and the lifecycle state machine in
 `docs/state-machine.md`.
 
@@ -44,14 +45,14 @@ reach, open and closed alike:
 - the gate keeps the rows whose `issue_type` is `gate` and whose `await_type` is
   `human`, and holds while any of them is in a status other than closed.
 
-bd already refuses an unforced close of a bead an open gate blocks, and the merge
-holds on a live blocker of the anchor. The clause states the same hold as an
+bd already refuses an unforced close of a bead an open gate blocks, and the
+landing order's evaluator holds a PR's merge on each wait of its bead. The clause states the same hold as an
 explicit precondition, because a close path that passes `--force` skips bd's
 refusal. A gate blocks only the beads whose edges reach it, so the clause holds
 this bead alone and never reads its children. A conversation is no human gate,
 so it holds nothing here: one on an open PR blocks the PR's anchor until it
-closes, and bd's refusal and gctk merge's hold on a live blocker hold the merge
-on it. No `tracks` edge holds anything here.
+closes, so bd's refusal holds the anchor's close and the evaluator's wait holds
+its merge. No `tracks` edge holds anything here.
 
 ### The caller's own report
 
@@ -85,9 +86,8 @@ the bead itself (`gc bd show`), whose row also carries its parent's type, so
 that one read runs for every finalize, epic or not. The `--except-key` exception
 excepts a human gate, so it never releases an epic this clause holds.
 
-`merge.sh` finalizes merge anchors, and `bead-rehome.sh` asks the gate about
-the bead as its disposition will leave it, so neither reaches an undisposed
-epic. A review of an epic
+`bead-rehome.sh` asks the gate about the bead as its disposition will leave
+it, so it never reaches an undisposed epic. A review of an epic
 ([`converse-epic-review`](../skills/converse-epic-review/SKILL.md)) runs the
 gate on each Delivery it closes and, once it has recorded the close ruling, on
 the epic. A bare `gc bd close` runs no gate, and the doctor invariant I15
@@ -113,11 +113,6 @@ below exists to see a gate filed after the first check.
 
 ## Where it is wired
 
-- **Merge** — `assets/scripts/merge.sh`. The merge arm runs the gate as an ordered
-  validation before the squash-merge, and re-asserts it at the terminal re-read
-  immediately before the merge. A gate is filed without moving the PR head, so
-  `--match-head-commit` does not catch one raised between validation and the
-  merge; the terminal re-assert does.
 - **Close** — `assets/scripts/bead-rehome.sh`. The sanctioned close-with-successor
   path runs the gate before it writes anything, so a hold leaves the bead as it
   was, open and unclosed, the same shape a refused close leaves. The release is
@@ -143,9 +138,10 @@ below exists to see a gate filed after the first check.
   report again under the same key. A run that stops between steps leaves a
   state the next run completes, because a resolved gate stays resolved.
 
-`assets/scripts/lifecycle.sh` closes only into `merged`, and on the merge path
-that close is the bookkeeping that runs after the irreversible merge — so the
-merge is gated before it happens, in `merge.sh`, not at that close.
+`assets/scripts/lifecycle.sh` closes a bead only at a direct landing, the
+record that follows the irreversible push, and the landing order closes a merge
+anchor only once its PR has merged. A PR's merge is held before it happens, by
+the evaluator's read of the bead's waits, not at that close.
 
 ## Composability
 

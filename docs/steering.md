@@ -353,12 +353,14 @@ A park leaves work in flight running:
 - PR-finishing work, such as a review rework, a merge-in, a red-check fix or a
   validation pass, carries `anchor_bead` and a `blocks` edge to its anchor,
   never a parent edge.
-- An anchor under a parked epic still merges and closes. `merge.sh` reads the
-  anchor's own blockers, its children and the beads that name its PR, never its
-  parent. bd refuses a close only for open children or a live direct blocker.
+- An anchor under a parked epic still merges and closes. The landing order's
+  evaluator reads the anchor's own waits and the beads that name it as their
+  `anchor_bead`, never its parent. bd refuses a close only for open children or
+  a live direct blocker.
 
 That is why `park` refuses a bead in flight. The bead's own edge would be a live
-direct blocker, so `merge.sh` would hold its merge and bd would refuse its close.
+direct blocker, so the evaluator would hold its merge and bd would refuse its
+close.
 Parking its parent instead holds the rest of the parent's work and leaves the PR
 landing.
 
@@ -551,7 +553,6 @@ are the scripts that make it claimable:
 - `pr-facts.sh` routes the merge-in of an approved PR that conflicts, the fix
   for a red required check, and the comment rework. On a PR on the pending
   record it files each as an ask instead.
-- `pre-open-rebase.sh` routes the merge-in before a PR exists.
 - On the old review path, `rework-child.sh` slings the rework that a review
   verdict or an operator ruling asks for.
 - `refinery-requeue.sh` slings the rework the refinery sends back on the branch
@@ -580,8 +581,8 @@ birth the shift is its own input, which `queue-priority.sh move --shift` may
 have set.
 
 **Reading the approval.** For the rank, a PR is approved when its anchor owns
-an open PR, resting in `pull_request` or at `pull_request_pending` or
-`pull_request_head_changed` on the pending record, and the posture
+an open PR, at `pull_request_pending` or `pull_request_head_changed` on the
+pending record, and the posture
 `pr-facts.sh` records there, `pr_posture`, reads `approved` at the PR head
 `pr-facts.sh` last read, `pr_head_oid`. The
 posture is a dated key stored as `<posture>@<oid>@<since>`
@@ -589,22 +590,20 @@ posture is a dated key stored as `<posture>@<oid>@<since>`
 the part before the first `@` and compares the `<oid>` after it with
 `pr_head_oid`. An approval recorded at any other head is for code the PR no
 longer carries, so it ranks nothing at P0. An anchor that rests anywhere else
-has no open PR to be approved, whatever posture an earlier PR left on it, and
-leaving `pull_request` clears `pr_head_oid`, so an anchor that returns counts no
-approval until `pr-facts.sh` has read its PR again. The pending record's
-writers clear neither key, so an anchor that leaves the record's open values
-for an exception and comes back keeps the posture its earlier head was read at
-until `pr-facts.sh` reads the PR again. The posture is not the approval rule
-`merge.sh` lands on (`review-verdict.sh`), nor the evaluator's, which the
-landing order merges on: an unanswered review comment outranks an approval in
+has no open PR to be approved, whatever posture an earlier PR left on it. The
+pending record's writers clear neither key, so an anchor that leaves the
+record's open values for an exception and comes back keeps the posture its
+earlier head was read at until `pr-facts.sh` reads the PR again. The posture is
+not `review-verdict.sh`'s approval rule, nor the evaluator's, which the landing
+order merges on: an unanswered review comment outranks an approval in
 the posture, and a PR whose base requires no approving review reports no review
 decision, so either ranks as not approved.
 
 **Where it is written.** Each creator runs `queue-priority.sh settle` on a child
 before it makes the child claimable, in the order [Settle](#settle) gives.
 `rework-child.sh`, `gate-ensure.sh` and `refinery-requeue.sh` then sling the
-child, and the pour copies its priority. `pr-facts.sh` and `pre-open-rebase.sh`
-then route it, in a write that carries no priority. A child whose priority does
+child, and the pour copies its priority. `pr-facts.sh` then routes it, in a
+write that carries no priority. A child whose priority does
 not settle is neither slung nor routed, and the creator's retry settles it: the
 next pass of the cadence arm, or the caller of `rework-child.sh` running it
 again. `refinery-requeue.sh` has no retry that runs on its own. Its retry would
@@ -622,9 +621,7 @@ workflows. The anchor's
 `pr_finishing_settled` records the rank all of that work last settled at,
 `approved` or `unapproved`, and reads `unsettled` while a re-rank is owed. The
 write that moves the rank marks the record `unsettled` in the same update: the
-posture and head write in `pr-facts.sh`, and every transition out of
-`pull_request`, through the lifecycle writer's `exit_sets`
-([state-machine.md](state-machine.md#the-machine)). Every pass of `pr-facts.sh`
+posture and head write in `pr-facts.sh`. Every pass of `pr-facts.sh`
 compares the record of each anchor it reads as owning an open PR with the rank
 the priority function gives that anchor, one on a draft PR included: it records a
 draft's head though it reads no posture for it. Every full pass does the same
@@ -633,10 +630,9 @@ writer moved it there. While the two differ, the pass settles the work, and it
 records the rank only once every bead of it has settled. A record naming the
 other rank turns `unsettled` before the first settle. So a settle that fails, or a pass that
 stops partway, leaves a record that a later pass settles again and that no
-return to the other rank reads as settled. `pr-facts.sh` settles the work of an
-anchor it moves out of `pull_request` in the pass that moves it, and the next
-full pass settles an anchor that another writer moved, such as the landing
-order's move of a PR into one of the record's exceptions. A finding carries
+return to the other rank reads as settled. The next full pass settles an
+anchor that another writer moved, such as the landing order's move of a PR into
+one of the record's exceptions. A finding carries
 `anchor_bead` too, but no pool claims
 it, so that settle leaves it as it is.
 

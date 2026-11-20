@@ -11,9 +11,8 @@
 // disposition and takes the headline alone, and any other change leaves the
 // bead with whoever holds it now. A claim a live session holds is never taken.
 // The verb asks waits what holds the bead and which runs work it, the pr record
-// where its PR stands and which branch its work is on, lifecycle which anchors
-// the merge cadence drives, prstatus which beads are human gates, and the arm
-// to remove its arm. The reaction's dispose writes each exit's headline through
+// where its PR stands and which branch its work is on, prstatus which beads are
+// human gates, and the arm to remove its arm. The reaction's dispose writes each exit's headline through
 // it, and its sweep asks it whether a bead carries a headline.
 package takeaway
 
@@ -35,10 +34,9 @@ import (
 )
 
 // The takeaway's keys, which this package writes, each in the one update that
-// writes the headline. gctk lifecycle's --takeaway also writes them itself
-// until the old merge path retires, and shell still reads them
-// (docs/gctk-architecture.md, Debt), so they stay registered in
-// lifecycle/lifecycle.toml too.
+// writes the headline. gctk lifecycle's --takeaway also writes them itself, for
+// pr-facts.sh, and shell still reads them (docs/gctk-architecture.md, Debt), so
+// they stay registered in lifecycle/lifecycle.toml too.
 var (
 	textKey = ledger.Declare("gc.takeaway", ledger.String,
 		"A bead's headline: the one line, at most lifecycle.TakeawayMax codepoints, that its handling concluded, "+
@@ -272,16 +270,9 @@ func (r *take) guardRelease() error {
 		return refuse("--release on %s, whose PR waits on the pending record (%s). The landing order works that bead while it is assigned to nobody, so a release would not stop it. To hold the PR for a person, file a human gate on %s: %s --subject %s --key <key> --message '<what the person decides>'. To end the PR, retire it: %s --anchor %s --successor <bead> --kind <kind> --note '<why>', or --retire on a sitting's sign-off. Re-run without --release to land the headline alone. Nothing was written.",
 			r.bead, r.mergeResult, r.bead, r.t.script("human-gate.sh"), r.bead, r.t.script("pr-dispose.sh"), r.bead)
 	}
-	// The merge cadence drives an anchor in a detached state, which rests
-	// unrouted and unassigned, and work on its branch goes to a child, so a
-	// route or an assignee would offer the anchor itself as fresh work.
+	// Sending a held bead on is a placement, and Gas City serves no bead a hold
+	// label holds, so the release lifts the bead's hold:mayor.
 	if r.req.Route != "" || r.req.Assign != "" {
-		if lifecycle.IsDetachedState(r.mergeResult) {
-			return refuse("%s on %s, whose merge_result is %s. The merge cadence drives an anchor in that state, which rests unrouted and unassigned (lifecycle/lifecycle.toml detached_states), and work on its branch goes to a child (the prs skill), so it is not sent to a pool or an agent. Re-run with --release alone, which still lands the headline and the release. Nothing was written.",
-				r.flagged(), r.bead, r.mergeResult)
-		}
-		// Sending a held bead on is a placement, and Gas City serves no bead a
-		// hold label holds, so the release lifts the bead's hold:mayor.
 		r.holds = gascity.Spellings(r.anchor.Labels(), "hold:mayor")
 	}
 	// A release that parks the bead for a person states its disposition: the
@@ -750,14 +741,6 @@ func (r *take) closedSkip(rec *ledger.Record, when string) string {
 		}
 	}
 	return fmt.Sprintf("%s %s%s: its disposition stands, so the release writes no reopen, no unassign and no route clear, and the run beneath it is still ended", r.bead, when, successor)
-}
-
-// flagged is the flag and its value that name where a release sends the bead.
-func (r *take) flagged() string {
-	if r.req.Route != "" {
-		return "--route " + r.req.Route
-	}
-	return "--assign " + r.req.Assign
 }
 
 // destination is where a release sends the bead, as a phrase, empty for

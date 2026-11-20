@@ -8,11 +8,11 @@
 #   . "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh" >&2; exit 1; }
 #   gctk_require <subcommand> "$@"
 #
-# gctk_require execs `gctk <subcommand> "$@"` (lifecycle.sh, merge.sh, epic.sh).
-# When there is no binary to run, it names what is missing and exits 1, so it
-# never returns. GCTK_BIN=none names no binary and is refused like a missing
-# one. A script that reads a command's answer and goes on (pr-open.sh,
-# refinery-publish.sh) asks gctk_path for the binary instead.
+# gctk_require execs `gctk <subcommand> "$@"` (lifecycle.sh, epic.sh,
+# pr-reconcile.sh). When there is no binary to run, it names what is missing
+# and exits 1, so it never returns. GCTK_BIN=none names no binary and is
+# refused like a missing one. A script that reads a command's answer and goes
+# on (refinery-publish.sh) asks gctk_path for the binary instead.
 #
 # Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
 # GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
@@ -31,10 +31,10 @@
 # doctor/check-cadence-live reports that lag instead.
 #
 # The exec exports GCTK_SCRIPTS_DIR as this file's directory, which is the
-# sibling scripts' directory: a subcommand that shells out to them (merge runs
-# lane-state.sh, finalize-gate.sh, human-gate.sh, record-failure-cap.sh and
-# render-seed-audit.sh) finds them there, and `gctk review checks` reads the
-# pack's check index two directories above it.
+# sibling scripts' directory: a subcommand that shells out to them (`gctk pr
+# reconcile` runs bead-rehome.sh, human-gate.sh and render-seed-audit.sh)
+# finds them there, and `gctk review checks` reads the pack's check index two
+# directories above it.
 
 _gctk_resolve_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 

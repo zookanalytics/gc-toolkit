@@ -21,7 +21,7 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esa
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
 
 # Build gctk from THIS checkout, for a suite whose scripts reach lifecycle.sh or
-# merge.sh. Each execs its gctk subcommand and has no other implementation, so
+# epic.sh. Each execs its gctk subcommand and has no other implementation, so
 # such a suite needs a binary, and the one it needs is built from the tree under
 # test.
 # Call this BEFORE harness_init: the stub git harness_init puts on PATH answers
@@ -35,11 +35,11 @@ harness_build_gctk() {
   local mod
   mod="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../services/gctk" && pwd)"
   if ! command -v go >/dev/null 2>&1; then
-    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh, merge.sh and epic.sh had nothing to exec in this suite"
+    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh and epic.sh had nothing to exec in this suite"
   elif ( cd "$mod" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
     GCTK_BUILT="$TMP/gctk"
   else
-    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh, merge.sh and epic.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh and epic.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
   fi
 }
 
@@ -60,7 +60,7 @@ harness_init() {
   # scripts resolve a deployed `gctk` from the ambient city otherwise, and these
   # suites run from a tree INSIDE a live city, so left alone a suite would test
   # whichever binary that city last built. A suite that built nothing reaches no
-  # binary at all: lifecycle.sh, merge.sh and epic.sh refuse under
+  # binary at all: lifecycle.sh and epic.sh refuse under
   # GCTK_BIN=none, and pr-status-label.sh derives nothing. The pin names a
   # scratch city of the suite's own as gctk's city when nothing names one, for
   # the lock the arm's verbs take under the city's runtime directory: the sweep
@@ -560,7 +560,7 @@ case "$sub" in
               | if $rx then . else del(.reactionGroups) end);'
       case "$gqquery" in
         *pullRequests\(states:OPEN*)
-          # merge.sh's visit-order read: every open PR, served as one page from
+          # pr-facts.sh's posture read: every open PR, served as one page from
           # open_prs.json (a list of PR nodes). No fixture is an empty list, in
           # which every anchor's PR has left the open list.
           [ -z "${STUB_OPEN_PRS_FAIL:-}" ] || exit 1
@@ -941,8 +941,8 @@ set -u
 case "$*" in
   *"remote get-url origin"*) echo "${STUB_ORIGIN_URL:-}" ;;
   *"symbolic-ref"*) echo "origin/${STUB_ORIGIN_HEAD:-main}" ;;
-  # The checkout a merge pass runs over. Empty by default, which is a host with
-  # no repository under it and therefore no committed artifact to keep current.
+  # The checkout's top level. Empty by default, which is a host with no
+  # repository under it and therefore no committed artifact to keep current.
   *"rev-parse --show-toplevel"*) printf '%s\n' "${STUB_TOPLEVEL:-}" ;;
   *"rev-parse --verify --quiet"*) printf '%s\n' "${STUB_FETCHED_HEAD:-}" ;;
   # A rig's not-for-review.toml as its default branch carries it, served from

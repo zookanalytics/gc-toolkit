@@ -291,13 +291,13 @@ printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
 # because the data plane is a binary a build order publishes. Nothing in arms 1
 # and 2 can see that, nor a binary that was never published at all.
 #
-# lifecycle.sh and merge.sh exec the binary and have no other implementation,
-# so a missing one is an error: every lifecycle transition and every merge pass
-# is refused until one lands.
+# lifecycle.sh and epic.sh exec the binary and have no other implementation,
+# so a missing one is an error: every lifecycle write and every epic the work
+# skill files is refused until one lands.
 OUT=$(GCTK_BIN="$TMP/no-such-gctk" run_check); RC=$?
-eq "$RC" "2" "no deployed binary is an ERROR — lifecycle.sh and merge.sh have nothing else to exec"
+eq "$RC" "2" "no deployed binary is an ERROR — lifecycle.sh and epic.sh have nothing else to exec"
 has "$OUT" "no binary at $TMP/no-such-gctk" "the finding names where the binary should be"
-has "$OUT" "every lifecycle transition and every merge pass is refused" "…what stops without it"
+has "$OUT" "every lifecycle write and every epic the work skill files is refused" "…what stops without it"
 has "$OUT" "gctk-build" "…and the order that publishes it"
 
 gctk_stub "$PACK_REV"

@@ -142,7 +142,7 @@ eq "$("$SUT" derive --anchor tk-a)" "needs-review" "posture commented, no rework
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "working" "a draft the city opened, not yet readied => working"
 
-# needs-review — once pr-open.sh records draft_readied, the draft is up for review.
+# needs-review — once draft_readied is recorded, the draft is up for review.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123","draft_readied":"abc123"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a readied draft with nothing in flight => needs-review"
 

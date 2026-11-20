@@ -1538,7 +1538,7 @@ grep -q 'tk-rework' <<< "$ERR" && grep -q 'tk-gone' <<< "$ERR" \
 # (RESOLVE-PR-DEFERRED) a PR whose anchor sits in a NON-OPEN live state (deferred)
 # resolves too. The resolver's status set must be the pack's live-PR set
 # (open,in_progress,blocked,deferred,hooked,pinned), which pr-facts.sh defines
-# as LIVE_STATUSES and gctk merge as mergeLiveStatuses. FAKE_DEFERRED_ROWS is
+# as LIVE_STATUSES. FAKE_DEFERRED_ROWS is
 # visible only to a query carrying `deferred`, so a resolver searching
 # open,in_progress,blocked alone finds nothing here and exits 4.
 FAKE_PR_ROWS='[]'

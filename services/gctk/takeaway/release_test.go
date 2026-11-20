@@ -347,32 +347,6 @@ func TestAReleaseThatCannotReadTheStatusWritesNothing(t *testing.T) {
 	}
 }
 
-// The merge cadence drives an anchor in a detached state, and work on its
-// branch goes to a child, so a route or an assignment is refused there before
-// anything is written, and a release alone still lands (DETACHED).
-func TestADetachedAnchorIsNotSentOn(t *testing.T) {
-	for name, c := range map[string]struct {
-		mr  string
-		req Request
-	}{
-		"route":  {"pull_request", Request{Bead: "tk-a", Text: "routed", Release: true, Route: pool}},
-		"assign": {"pre_open_gate", Request{Bead: "tk-a", Text: "assigned", Release: true, Assign: "gc-toolkit.mechanik", NoWait: true}},
-	} {
-		w := newWorld(t)
-		w.put(fake.Bead{ID: "tk-a", Title: "the bead", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": c.mr}})
-		code, _, err := w.take(c.req)
-		if code != 2 || len(w.log) != 0 {
-			t.Errorf("(DETACHED %s) exits %d with %q written, want 2 and nothing", name, code, w.log)
-		}
-		has(t, errText(err), "merge_result is "+c.mr, "(DETACHED) the refusal")
-	}
-	w := newWorld(t)
-	w.put(fake.Bead{ID: "tk-a", Title: "the bead", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}})
-	if code, _, err := w.take(Request{Bead: "tk-a", Text: "stopped", Release: true, NoWait: true}); code != 0 || w.row("tk-a").Status != "open" {
-		t.Errorf("(DETACHED) a release alone exits %d (%v)", code, err)
-	}
-}
-
 // A bead whose PR waits on the pending record is worked by the landing order
 // while it is assigned to nobody, so a release would not stop it, and it is
 // refused before anything is written, naming what does: a human gate on the

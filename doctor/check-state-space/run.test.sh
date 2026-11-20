@@ -11,23 +11,10 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 
-mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/alpha" "$TMP/pack/lifecycle"
+mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/alpha" "$TMP/pack"
 cat > "$TMP/rigs.json" <<EOF
 {"rigs":[{"name":"alpha","path":"$TMP/alpha","suspended":false}]}
 EOF
-cat > "$TMP/pack/lifecycle/lifecycle.toml" <<'EOF'
-[machine]
-states = [
-  "unanchored",
-  "pre_open_gate",
-  "pull_request",
-  "merged",
-  "abandoned",
-]
-closed_states = ["merged"]
-detached_states = ["pre_open_gate"]
-EOF
-
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "rig list") rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
@@ -45,9 +32,8 @@ scrub() { tr -d '\000-\037'; }
 # Honor the filters the check relies on: --db, --status (comma list),
 # --has-metadata-key, and --include-gates, without which bd leaves gate rows
 # out. A stub that ignored --status would let an in_progress fixture reach the
-# --status=open scan, so the detached-CLAIMED probe (which reads only the
-# non-open statuses) could never be told apart from the open scan, and dropping
-# the --status flag from either query would still pass this test.
+# --status=open scan, so dropping the --status flag from a query would still
+# pass this test.
 db=""; status=""; haskey=""; gates=""; prev=""
 for a in "$@"; do
   case "$prev" in
@@ -81,10 +67,11 @@ run_check() { RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2
 store() { printf '%s' "$1" > "$TMP/stores/alpha.json"; }
 
 # --- 1. clean store -----------------------------------------------------
-store '[{"id":"a-1","status":"open","metadata":{"merge_result":"pull_request"}},
+store '[{"id":"a-1","status":"open","metadata":{"merge_result":"blocked"}},
+        {"id":"a-1b","status":"open","metadata":{"merge_result":"refused_false_completion"}},
         {"id":"a-2","status":"open","metadata":{}}]'
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "declared states on open beads pass"
+eq "$RC" "0" "the values the pack writes on open beads pass"
 has "$OUT" "OK:" "the pass message is the OK line"
 
 # --- 2. undeclared merge_result -----------------------------------------
@@ -93,8 +80,17 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "an undeclared merge_result value is an ERROR"
 has "$OUT" "a-3" "the finding names the bead"
 has "$OUT" "exploded" "the finding quotes the unknown value"
-has "$OUT" "pre_open_gate" "the finding lists the declared enum (read from lifecycle.toml)"
-hasnt "$OUT" "refused_false_completion" "the enum came from lifecycle.toml, not the builtin fallback"
+has "$OUT" "refused_false_completion" "the finding lists the values the pack writes"
+has "$OUT" "pull_request_pending" "…the pending record's among them"
+
+# --- 2b. the old path's values -------------------------------------------
+# No writer gives an open bead the old path's values any more, so one that
+# carries one is drift like any other unknown value.
+for v in pre_open_gate pull_request abandoned retargeted; do
+  store "[{\"id\":\"a-old\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"$v\"}}]"
+  OUT=$(run_check); RC=$?
+  eq "$RC" "2" "merge_result=$v on an open bead is an ERROR"
+done
 
 # --- 3. closed-only state on an OPEN bead --------------------------------
 store '[{"id":"a-4","status":"open","metadata":{"merge_result":"merged"}}]'
@@ -138,11 +134,6 @@ store '[{"id":"a-8","status":"open","metadata":{"merge_result":""}}]'
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an empty merge_result is the absent (unanchored) value, not a finding"
 
-# --- 6. builtin fallback when lifecycle.toml is missing -------------------
-store '[{"id":"a-9","status":"open","metadata":{"merge_result":"refused_false_completion"}}]'
-OUT=$(GC_PACK_DIR="$TMP/nopack" RIGS_JSON="$TMP/rigs.json" bash "$CHECK" 2>&1); RC=$?
-eq "$RC" "0" "with no lifecycle.toml the builtin enum accepts the plan's states"
-
 # --- 7. fail-CLOSED arms --------------------------------------------------
 store '[]'
 OUT=$(RIGS_RC=1 run_check); RC=$?
@@ -172,81 +163,6 @@ store '[{"id":"a-11","status":"open","metadata":{"merge_result":"bogus"}}]'
 OUT=$(RIGS_JSON="$TMP/rigs-susp.json" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "0" "a suspended rig is skipped rather than probed"
 has "$OUT" "suspended" "the skip is noted, not silent"
-
-# --- 10. a detached state is neither routed nor held ----------------------
-store '[{"id":"a-12","status":"open","assignee":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"alpha/gc-toolkit.polecat"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "2" "a route on a detached state is an ERROR"
-has "$OUT" "a-12" "it names the bead"
-has "$OUT" "alpha/gc-toolkit.polecat" "it quotes the route that made it pool demand"
-has "$OUT" "detached_states" "it names the declaration the bead violates"
-
-store '[{"id":"a-13","status":"open","assignee":"alpha/gc-toolkit.polecat-1","metadata":{"merge_result":"pre_open_gate"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "2" "an assignee on a detached state is an ERROR"
-has "$OUT" "alpha/gc-toolkit.polecat-1" "it quotes the holder"
-
-store '[{"id":"a-14","status":"open","assignee":"alpha/holder","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"alpha/pool"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "2" "both fields set is an ERROR"
-eq "$(printf '%s' "$OUT" | grep -c 'a-14')" "2" "each violated field is reported separately"
-
-store '[{"id":"a-15","status":"open","assignee":"","metadata":{"merge_result":"abandoned","gc.routed_to":"alpha/pool"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "a route on a NON-detached state is not this rule's finding"
-
-store '[{"id":"a-18","status":"open","assignee":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"human"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "2" "a human route on a detached state is a finding, as any route is"
-has "$OUT" 'gc.routed_to="human"' "it quotes the route"
-OUT=$(GC_PACK_DIR="$TMP/nopack" RIGS_JSON="$TMP/rigs.json" bash "$CHECK" 2>&1); RC=$?
-eq "$RC" "2" "…under the builtin declaration too, which carries no park route"
-
-# --- 11. the detached set is read from lifecycle.toml ---------------------
-# The fixture declares pre_open_gate alone; the builtin fallback also carries
-# pull_request. One bead separates a read declaration from the fallback.
-store '[{"id":"a-16","status":"open","assignee":"","metadata":{"merge_result":"pull_request","gc.routed_to":"alpha/pool"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "a state lifecycle.toml does NOT declare detached is not held to the rule"
-OUT=$(GC_PACK_DIR="$TMP/nopack" RIGS_JSON="$TMP/rigs.json" bash "$CHECK" 2>&1); RC=$?
-eq "$RC" "2" "the same bead IS a finding under the builtin detached set"
-has "$OUT" "a-16" "the fallback arm names the bead"
-
-# --- 12. a detached anchor claimed into a non-open status ------------------
-# The open scan and every cadence reader enumerate --status=open, so this bead
-# is invisible to all of them; the non-open backstop probe is what reports it.
-store '[{"id":"a-19","status":"in_progress","assignee":"","metadata":{"merge_result":"pre_open_gate"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "2" "an in_progress detached anchor is an ERROR"
-has "$OUT" "a-19" "it names the claimed anchor the open scan cannot see"
-has "$OUT" "status=in_progress" "it names the status that hid it"
-has "$OUT" "dropped out of the pipeline" "it explains the cadence invisibility"
-
-# blocked is equally invisible: the invariant is status=open, not merely
-# not-in_progress. (pre_open_gate is the detached state the fixture's
-# lifecycle.toml declares.)
-store '[{"id":"a-21","status":"blocked","assignee":"","metadata":{"merge_result":"pre_open_gate"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "2" "a detached anchor held at status=blocked is flagged too"
-has "$OUT" "status=blocked" "the finding names the holding status"
-
-# An OPEN detached anchor at rest is the correct state; the non-open probe must
-# not re-report it. --has-metadata-key merge_result with no --status returns every
-# non-closed status, open included, so the probe's --status scoping is what keeps
-# the open resting state (already covered by the open scan) off the non-open
-# findings. Drop --status from the probe and this case flips to a false
-# status=open, not open finding.
-store '[{"id":"a-22","status":"open","assignee":"","metadata":{"merge_result":"pre_open_gate"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "an open detached anchor at rest is not re-flagged by the non-open probe"
-
-# --- 13. ordinary in-flight work is NOT a detached-state finding -----------
-# A polecat's own work bead is in_progress and carries branch but no
-# merge_result; the --has-metadata-key filter keeps the backstop off it, so an
-# empty assignee is never read as an orphan here.
-store '[{"id":"a-20","status":"in_progress","assignee":"","metadata":{"branch":"polecat/x"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "an in_progress bead with no merge_result is ordinary work, not a finding"
 
 # --- 14. disk pressure must not forge an all-clear ------------------------
 # bash backs a `<<<` here-string with a temp file; under disk pressure that file

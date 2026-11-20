@@ -698,8 +698,8 @@ resolve_live_subject() {
 # and the PR is ambiguous only when those are two different anchors. An
 # anchor_bead must name a bead live in a store the search read, so a live
 # rework of a closed anchor refuses, naming both.
-# The status set is the pack's live-PR set (LIVE_STATUSES in pr-facts.sh,
-# mergeLiveStatuses in gctk merge): an anchor is live in deferred/hooked/pinned
+# The status set is the pack's live-PR set (LIVE_STATUSES in pr-facts.sh): an
+# anchor is live in deferred/hooked/pinned
 # too, so a narrower query would fail to resolve a PR whose bead sits in one of
 # those states. The number's uniqueness holds only across EVERY live store, so
 # any rig the search cannot fully read refuses the whole resolution (exit 4)
@@ -730,8 +730,8 @@ PR_ANCHORS=""
 pr_reference_anchors() {
     _pr_num="$1"; _pr_url="$2"
     # The URL pins the repo. A browser copy can be a PR subpage (…/pull/615/files)
-    # or carry a query string, but pr-open.sh stores and merge.sh compares the
-    # canonical …/pull/<number> form, so canonicalize the paste before matching.
+    # or carry a query string, but a PR's record stores the canonical
+    # …/pull/<number> form, so canonicalize the paste before matching.
     _pr_url=$(printf '%s' "$_pr_url" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##')
     _pr_hits=""; _pr_live=""
     _pr_paths=$(printf '%s' "$RIGS" | jq -r '.[].path // ""' 2>/dev/null) || _pr_paths=""
@@ -1116,13 +1116,14 @@ conversation_reply() {
 # `blocks` edge, so bd counts the anchor blocked while the conversation is open
 # and lets it go once the conversation closes, by whatever route it closes, the
 # sign-off, a dismiss, the premise re-check's moot or benign close or a close by
-# hand, with nothing to release. The merge pass holds a PR while an open bead
-# blocks its anchor. open adds the edge to a conversation it files or finds
-# waiting in the operator's queue, and engage adds it whenever it starts a
-# sitting, so a conversation filed before its PR opened, or one whose sitting
-# lifted the hold, holds the merge again once it is engaged. A sitting that is
-# helping the PR land, or whose conversation has nothing to do with whether it
-# lands, lifts it with `gc bd dep remove <anchor> <conversation>`
+# hand, with nothing to release. The landing order's evaluator holds a PR's
+# merge while an open bead blocks its anchor. open adds the edge to a
+# conversation it files or finds waiting in the operator's queue, and engage
+# adds it whenever it starts a sitting, so a conversation filed before its PR
+# opened, or one whose sitting lifted the hold, holds the merge again once it
+# is engaged. A sitting that is helping the PR land, or whose conversation has
+# nothing to do with whether it lands, lifts it with
+# `gc bd dep remove <anchor> <conversation>`
 # (skills/converse-hold), and the lift stands for that sitting: open, completing
 # a conversation a sitting has taken, leaves the hold as that sitting left it.
 # The edge holds only the anchor: a review, a rework or a supplement is a bead
@@ -1143,8 +1144,8 @@ subject_anchor() {
 
 # conversation_pr_anchor <subject-row> — the anchor whose merge a conversation
 # about the subject holds: subject_anchor's, when that anchor is an open PR
-# (merge_result pull_request, or pull_request_pending or
-# pull_request_head_changed on the pending record, and not closed). Prints
+# (merge_result pull_request_pending or pull_request_head_changed on the
+# pending record, and not closed). Prints
 # nothing when the subject is no open PR and no bead of one. Returns 1 when the
 # anchor its anchor_bead names does not read, because a PR whose state cannot
 # be read could be one the conversation must hold.
@@ -1160,7 +1161,7 @@ conversation_pr_anchor() {
     fi
     printf '%s' "$_cpa_row" | jq -r '
         if (((.metadata // {}).merge_result // "") as $mr
-              | $mr == "pull_request" or $mr == "pull_request_pending" or $mr == "pull_request_head_changed")
+              | $mr == "pull_request_pending" or $mr == "pull_request_head_changed")
            and ((.status // "") | tostring | ascii_downcase) != "closed"
         then (.id // "") | tostring else empty end' 2>/dev/null || true
 }

@@ -24,8 +24,9 @@ in its own shell, records its result on the subject so a resume is idempotent,
 and closes its own step bead through assets/scripts/claim-close.sh.
 
 Every PR the effort produces merges only with a standing APPROVED review from an
-account other than the city's, which counts until it is dismissed: merge.sh
-enforces that as a universal rule, so no check_set token arms it. design_gated
+account that can push to the repository, which counts until it is dismissed:
+the landing order's evaluator holds every PR to that rule, so no check_set
+token arms it. design_gated
 (var, default true) chooses when implementation starts. Gated: the design child
 is a stage, slung --merge mr, whose PR into the integration branch is the design
 gate, and the implementation child is armed behind the design child's closure, so
@@ -37,7 +38,7 @@ operator first reviews them as one unit.
 
 Variables:
   {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
-  {{design_gated}}: true (default): the design child is a stage, slung --merge mr, whose PR into the integration branch is the design gate, and the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when that PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch with no PR of their own, so the subject's PR is the one the operator reviews. Every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. The operator settles it in the sitting whose sign-off takes the recommendation with --accept, and --accept --var design_gated=false selects all-in-one, a var the sign-off hands to Accept's sling. An Accept given no var takes the default, unless it finishes an acceptance an earlier run left unfinished, whose sling carries the var that acceptance recorded. (default=true)
+  {{design_gated}}: true (default): the design child is a stage, slung --merge mr, whose PR into the integration branch is the design gate, and the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when that PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch with no PR of their own, so the subject's PR is the one the operator reviews. Every PR needs a standing APPROVED review from an account that can push to the repository, which counts until it is dismissed (the landing order's approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. The operator settles it in the sitting whose sign-off takes the recommendation with --accept, and --accept --var design_gated=false selects all-in-one, a var the sign-off hands to Accept's sling. An Accept given no var takes the default, unless it finishes an acceptance an earlier run left unfinished, whose sling carries the var that acceptance recorded. (default=true)
 
 Steps (7):
   ├── mol-design-convoy.load-context: Read the initiative and resolve the gate shape

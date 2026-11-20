@@ -36,9 +36,7 @@
 # block and calls gc-bd-watch.sh the work skill's way, and that the mechanik's
 # prompt calls
 # gc-bd-watch.sh and human-gate.sh under the binding it is rendered with, so
-# each render reaches the pack's own copies. It pins the prs
-# skill's supplement command: filed in the PR's rig, holding the anchor's merge,
-# and slung only once its create names it. It pins that a formula's own
+# each render reaches the pack's own copies. It pins that a formula's own
 # description, not a doc, says which work
 # the formula fits. It pins that a problem in software the rig does not own goes
 # through the external-issue skill, which alone holds that path's commands and
@@ -778,17 +776,6 @@ have "…but takes a design-convoy recommendation through Accept" \
 have "…and hands any other effort to the mechanik" 'Any other effort goes to the mechanik' "$WORK_JOINED"
 lacks "the work skill claims no scope the recipe's push breaks" 'nothing here changes a repo.' "$WORK_JOINED" \
     "the effort recipe pushes the effort's branch"
-# A supplement goes to the PR's own rig, because a pool reads only its rig's
-# store, and the anchor waits on it, because the merge holds on what blocks the
-# anchor and never on a bead that only names the PR's branch. The hold rides the
-# create, and the sling runs only once the create names the supplement.
-have "the prs skill files a supplement in the PR's rig" 'SUP=$(gc bd --rig <rig> create' "$PRS_SKILL"
-have "…as a child of the anchor" '"anchor_bead":"<anchor>"' "$PRS_SKILL"
-have "…born joined to the anchor and holding its merge" '--deps related:<anchor>,blocks:<anchor>' "$PRS_SKILL"
-have "…and slings only once the create names the supplement" '&& [ -n "$SUP" ]' "$PRS_SKILL"
-have "…then slings it" '&& gc sling <rig>/<pool> "$SUP"' "$PRS_SKILL"
-have "…whose target is the PR's base, the integration branch for a stage's PR" "the integration branch for a stage's PR" "$PRS_SKILL"
-have "…one at a time on a branch" 'Send one supplement at a time' "$PRS_SKILL"
 # fenced_block <file> <marker> — the fenced bash block that holds <marker>, with
 # the fence's own indent taken off each of its lines.
 fenced_block() {

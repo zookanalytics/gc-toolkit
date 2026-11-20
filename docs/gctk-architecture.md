@@ -46,7 +46,7 @@ The board's UX is the Helm UX epic's. Gas City's own behavior is in
   rule for a wait edge: bd reports success for an edge that holds nothing, so
   the ledger checks the target first.
 - **Debt is stated with its retirement.** It names what it compensates for and
-  what retires it. The model is `lifecycle` and `merge` in
+  what retires it. The model is `pr record` and `pr reconcile` in
   [the re-implementation register](#the-re-implementation-register).
 - **A warrant is cited only when [warrants.md](warrants.md) holds it.** A pack
   noun missing from that page has no warrant. A warrant whose member has not
@@ -141,7 +141,7 @@ bead.
 | `gctk session progress` | order | find each pool seat that prints but has written nothing for three hours, and record them as one `gc-toolkit.seat-progress.stalled` event | Gas City's work ladder paces only a quiet pool seat, and nothing in Gas City reads a session's own writes ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-session-progress)). The verb judges each busy pool seat by its newest write as the identity its claim is assigned to, in the claim's store and the city's, from no earlier than its last wake, and writes no bead. |
 | `gctk refinery stuck` | order | find each refinery handoff that has sat unprepared past four hours with nothing holding it, and record them as one `gc-toolkit.refinery-queue.stuck` event | Gas Town's check-refinery nudges the refinery and mails a report of the queue, and doctor's `pool-idle-routed-work` reads the routed work a pool leaves, not a refinery's assigned queue ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-refinery-stuck-and-gctk-mail-finding)). The verb reads each rig's queue at the identity of the refinery `gc agent list` names for that rig, asks `bead holds` what holds each handoff past the bound, and writes no bead. |
 | `gctk version` | hook | the revision this binary was built from | The build stamps one hash over gctk's inputs, services/gctk and the root go.mod and go.sum, so a doctor check can tell whether the deployed binary is the one the checkout builds. |
-| `gctk lifecycle`, `gctk merge` | hook | the old merge path's anchor state machine and merge rule | Debt, in [the re-implementation register](#the-re-implementation-register). |
+| `gctk lifecycle transition <bead> --to <value>` | hook | write a bead's `merge_result` outside the pending record, with the work record a landing writes | Gas City's `bd update` writes the fields. The verb composes into that one update what `lifecycle.sh`'s callers share: the landing's work record (`gc.work_outcome`, `gc.work_commit`, `gc.work_branch`), the route and takeaway checks, and the dated-key rule. It checks no edge between values, and the doctor checks the beads after the write. |
 
 What each noun owns:
 
@@ -222,7 +222,7 @@ What gets a verb:
   stays in the review formula's step text.
 - **The commands gctk holds keep their place.** `epic`, `rig`, `session` and
   `version` stand on their own rows, `pr status` is the pr noun's status verb,
-  and `lifecycle` and `merge` sit in the tree with their own flag parsing.
+  and `lifecycle` sits in the tree with its own flag parsing.
 
 ## The rule that names a verb
 
@@ -323,15 +323,6 @@ Where gctk parallels Gas City's logic, it states why it is re-implemented, keeps
 the goal of staying in step with upstream, and carries the divergence risk as a
 stated burden.
 
-- **`lifecycle` and `merge`.** They carry the anchor state machine and the old
-  merge path's merge rule. The machine checks each write `lifecycle.sh` makes,
-  the refinery's direct landing among them, and `merge` lands the PRs of a rig
-  not yet cut over onto the pending record. Gas Town's refinery checks no
-  transition and leaves the merge to a person. Neither gains anything new, and
-  once every rig has cut over, the old merge path's retirement (tk-1tfzr71.70)
-  deletes both and leaves `lifecycle.sh` a plain write of the value. The risk is
-  two paths at once: until the last rig cuts over, a change to how a PR lands
-  has two places to reach.
 - **`pr record` and `pr reconcile`.** They write Gas Town's pending-through-merge
   record, with its values and their meanings
   (`gastown/commands/pr-merge-reconcile` in gascity-packs at 7f86098c04ea). They
@@ -732,10 +723,12 @@ why a reader must know it, and the work that retires it.
   launch that waits on its input bead retires the arm, and a migration of its
   readers built now would be rebuilt then. The operator ruled this exception in
   conversation tk-au9jrqt. It retires with the arm.
-- **`lifecycle` and `merge` reach git, GitHub, the store and the pack's
-  scripts themselves.** They retire whole with the old merge path
-  (tk-1tfzr71.70, [the register](#the-re-implementation-register)), so they get
-  no layering work.
+- **`lifecycle` writes the store through its adapter, around the ledger.** It
+  is the plain write `lifecycle.sh` execs for the direct landing
+  (`direct-merge-push.sh`), `pr-facts.sh` and `gate-ensure.sh`, which name the
+  keys it writes, so no domain declares them. tk-ssm8qns.16, which puts the
+  other commands that read the store around the ledger behind it, carries this
+  one too.
 - **Shell still reads and clears the recommendation `reaction` owns.**
   `gc.recommended_formula` is declared in `reaction`, whose `recommend` exit is
   its one setter and whose accept clears it, but
@@ -754,9 +747,8 @@ why a reader must know it, and the work that retires it.
   the headline as a hold marker through `lifecycle/lifecycle.toml`'s `[holds]`,
   and the liveness recheck, which tk-1tfzr71.174 retires. The keys are also
   written by `gctk lifecycle --takeaway`, for `pr-facts.sh`, which the
-  GitHub-intake member (tk-1tfzr71.21) retires, and the verb itself retires
-  with the old merge path ([the register](#the-re-implementation-register)).
-  So the keys stay registered in `lifecycle/lifecycle.toml`. tk-1tfzr71.216
+  GitHub-intake member (tk-1tfzr71.21) retires. So the keys stay registered in
+  `lifecycle/lifecycle.toml`. tk-1tfzr71.216
   decides whether the keys retire onto the bead's notes or stay with a warrant,
   and that decision moves these reads onto the domain or retires them with the
   keys.

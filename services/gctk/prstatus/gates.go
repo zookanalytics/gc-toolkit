@@ -144,10 +144,10 @@ func awaitsPerson(b Blocker, own []Blocker, edges map[string][]Blocker) bool {
 	// The walk reads no GitHub, so a pull request on Gas Town's pending record
 	// is weighed by its row as well, less the old record's facts, which no pass
 	// writes on a bead on this one and which [Render] does not read for the PR
-	// itself: the merge pass's verdict and thread count, and pr-open.sh's draft
-	// markers. Its review is a person's move only at the validated head, and
-	// only once pr-facts.sh has recorded a posture, which it does not read while
-	// the pull request is a draft, the city's work.
+	// itself: the machine verdict and thread count, and the draft markers. Its
+	// review is a person's move only at the validated head, and only once
+	// pr-facts.sh has recorded a posture, which it does not read while the pull
+	// request is a draft, the city's work.
 	onRecord := record.OnRecord(result)
 	if onRecord {
 		f.PRMachine, f.PRMachineCause, f.PRMachineReason, f.PRUnansweredThreads = "", "", "", ""
@@ -293,21 +293,6 @@ func Holding(roots []string, read ReadBlockers) (map[string]Holds, error) {
 		return holds, fmt.Errorf("%w: %s", ErrWalkBound, strings.Join(past, " "))
 	}
 	return holds, nil
-}
-
-// HoldingGates returns, for each root, the open human gates that hold it: the
-// [Holds.Gates] of [Holding], with its bound and its errors. The merge pass asks
-// it for the blockers it would otherwise call stuck.
-func HoldingGates(roots []string, read ReadBlockers) (map[string][]Blocker, error) {
-	holds, err := Holding(roots, read)
-	if holds == nil {
-		return nil, err
-	}
-	gates := make(map[string][]Blocker, len(holds))
-	for root, h := range holds {
-		gates[root] = h.Gates
-	}
-	return gates, err
 }
 
 // holdWalk is one root's walk: the beads it has reached, the merge anchors among

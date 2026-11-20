@@ -323,7 +323,7 @@ eq "$RC" 0 "…a re-run finds it closed"
 has "$OUT" "already closed" "…and says so"
 
 # --- refusals --------------------------------------------------------------------
-for mr in pull_request pull_request_pending pull_request_head_changed; do
+for mr in pull_request_pending pull_request_head_changed; do
   fresh; bset tk-w "metadata.merge_result=$mr"
   refused "an open PR at $mr" tk-w --key polecat-x --ruling "x"
   has "$OUT" "pr-dispose.sh" "an open PR at $mr: it names the writer that retires one"

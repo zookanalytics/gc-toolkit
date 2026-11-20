@@ -1,3 +1,5 @@
+// Package lifecycle holds a bead's headline: the one line a takeaway and a park
+// gate's title are, and the cap gctk's writers hold it to.
 package lifecycle
 
 import (
@@ -6,6 +8,13 @@ import (
 	"strings"
 	"unicode/utf8"
 )
+
+// TakeawayMax caps a headline in codepoints: a takeaway and a park gate's title,
+// each one line read at a glance. Headline applies it for gctk's writers, and
+// `gctk lifecycle --takeaway` applies it too. assets/scripts/gc-helm.sh carries
+// its own copy, TAKEAWAY_MAX, for the conversation titles it writes, and
+// lifecycle.test.sh holds both to 140.
+const TakeawayMax = 140
 
 // ErrNoHeadline is Headline's refusal of a text that holds nothing but space.
 var ErrNoHeadline = errors.New("the headline is empty")

@@ -2,9 +2,8 @@
 # pr-dispose — record a deliberate PR-close disposition on the open anchor, then
 # close the PR, so the PR's closer consummates the terminal close through
 # bead-rehome.sh instead of filing a human gate that re-asks a decision already
-# made. The closer is the refinery's pr-facts.sh for an anchor at
-# merge_result=pull_request, and the landing order (gctk pr reconcile) for one
-# on Gas Town's pending record, pull_request_pending or
+# made. The closer is the landing order (gctk pr reconcile), which reads an
+# anchor on Gas Town's pending record, pull_request_pending or
 # pull_request_head_changed.
 #
 # It stamps three metadata keys naming the intended bead-rehome invocation —
@@ -30,8 +29,7 @@
 # holds the lock. It waits up to $PR_RECORD_LOCK_WAIT_SECS (300) for the lock,
 # and a lock that does not come writes nothing. --dry-run takes no lock.
 #
-# The anchor must own an open PR that a closer reads: OPEN at
-# merge_result=pull_request, the state pr-facts enumerates, or not closed on the
+# The anchor must own an open PR that the closer reads: not closed on the
 # pending record, which the landing order reads while the refinery holds the
 # anchor. An anchor already disposed (its duplicates or supersedes edge names a
 # successor) is a no-op; an anchor past that state (abandoned, merged, an
@@ -94,13 +92,12 @@ usage: pr-dispose.sh --anchor <bead-id> --successor <bead-id>
                      [--pr <num>] [--no-close-pr] [--dry-run]
 
 Records a deliberate supersede/not-planned PR-close disposition on the open
-anchor and closes the PR; the PR's closer then closes the anchor through
-bead-rehome.sh instead of filing a human gate: pr-facts.sh at
-merge_result=pull_request, the landing order on the pending record. The read
+anchor and closes the PR; the PR's closer, the landing order, then closes the
+anchor through bead-rehome.sh instead of filing a human gate. The read
 of the anchor and the stamp hold the store's record lock, waiting up to
 $PR_RECORD_LOCK_WAIT_SECS (300) while the landing order holds it.
 
-  --anchor          the open work bead the PR gates (merge_result=pull_request,
+  --anchor          the open work bead the PR gates (merge_result
                     pull_request_pending or pull_request_head_changed)
   --successor       the carrier of the work, or (not-needed) the evidence
   --kind            the bead-rehome kind the disposition maps to
@@ -175,18 +172,16 @@ if [ -n "$A_PRIOR" ]; then
   echo "$PROG: $ANCHOR already names $A_PRIOR as its successor — already disposed, nothing to do"
   exit 0
 fi
-# The marker only means something on a state its closer reads: an OPEN
-# pull_request anchor, which pr-facts enumerates, or an anchor on the pending
-# record that is not closed, which the landing order reads. Past that, neither
-# will see it, so refuse and name the direct verb rather than stamp a marker
-# nothing consummates.
+# The marker only means something on a state its closer reads: an anchor on the
+# pending record that is not closed, which the landing order reads. Past that,
+# it will not see it, so refuse and name the direct verb rather than stamp a
+# marker nothing consummates.
 CLOSER=""
 case "$A_MR" in
-  pull_request) [ "$A_STATUS" != open ] || CLOSER="pr-facts" ;;
   pull_request_pending|pull_request_head_changed) [ "$A_STATUS" = closed ] || CLOSER="the landing order" ;;
 esac
 if [ -z "$CLOSER" ]; then
-  die "$ANCHOR is status='$A_STATUS' merge_result='${A_MR:-unset}', not an anchor whose open PR a closer consummates: OPEN at pull_request, or not closed at pull_request_pending or pull_request_head_changed. Dispose an anchor past that state directly: bead-rehome.sh --origin $ANCHOR --successor $SUCCESSOR --kind $KIND" 1
+  die "$ANCHOR is status='$A_STATUS' merge_result='${A_MR:-unset}', not an anchor whose open PR a closer consummates: not closed at pull_request_pending or pull_request_head_changed. Dispose an anchor past that state directly: bead-rehome.sh --origin $ANCHOR --successor $SUCCESSOR --kind $KIND" 1
 fi
 # The PR repository AND number both come from the anchor's own pr_url. A bare
 # PR number names a different pull request per repository per host, and this

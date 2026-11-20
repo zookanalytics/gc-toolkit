@@ -157,8 +157,7 @@ const (
 
 	// A merge request pinned to the head the caller judged: GitHub merges, or
 	// adds the PR to its base's merge queue, only while the PR's head is that
-	// commit (expectedHeadOid). The merge squashes, as gctk merge's
-	// `gh pr merge --squash --match-head-commit` does.
+	// commit (expectedHeadOid). The merge squashes.
 	mergeMutation = `mutation($id:ID!,$head:GitObjectID!){
   mergePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:SQUASH}){pullRequest{number}}}`
 

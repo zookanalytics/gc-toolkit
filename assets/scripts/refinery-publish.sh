@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# refinery-publish.sh — the refinery's mr step on a rig on the new path
-# (pending_through_merge): publish the prepared head on its PR and record the
-# PR as pending until its merge is verified.
+# refinery-publish.sh — the refinery's mr step: publish the prepared head on
+# its PR and record the PR as pending until its merge is verified.
 #
 #   refinery-publish.sh --bead <id>
 #

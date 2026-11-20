@@ -1,7 +1,6 @@
 # refinery-reconcile — the merge cadence, controller-owned. Runs the arms
-# (pr-facts --posture-only, merge, pr-open, pr-facts --route-comments-only,
-# pre-open-rebase, gate-ensure, pr-facts, review-sweep, scaffolding-sweep)
-# once per tick. The
+# (pr-facts --posture-only, pr-facts --route-comments-only, gate-ensure,
+# pr-facts, review-sweep, scaffolding-sweep) once per tick. The
 # dispatcher's open-tracking gate keys on
 # ScopedName() (refinery-reconcile:rig:<rig>) and is the first half of
 # single-flight — never set no_work_gate, that flag opts out of exactly that
@@ -20,7 +19,7 @@
 # runner from GC_RIG.
 # Tune the interval from city.toml [[orders.overrides]], not here.
 [order]
-description = "Refinery merge cadence: land approved PRs, open pre-open PRs, ensure checks, record external PR facts"
+description = "Refinery merge cadence: record PR postures, route PR feedback, ensure checks, record external PR facts"
 trigger = "cooldown"
 interval = "60s"
 timeout = "600s"

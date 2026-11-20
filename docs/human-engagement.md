@@ -237,9 +237,8 @@ session carries `human`. A sitting starts only when the operator engages.
 A conversation on an open PR holds the PR's merge until it closes. The subject
 counts as an open PR when it is the PR's anchor, not closed, or a bead whose
 `anchor_bead` names that anchor, such as the PR's review, rework or
-supplement. An anchor counts only while its `merge_result` is `pull_request`,
-or on the pending record `pull_request_pending` or
-`pull_request_head_changed`. The hold is bd's own: the anchor depends on the
+supplement. An anchor counts only while its `merge_result` is
+`pull_request_pending` or `pull_request_head_changed`. The hold is bd's own: the anchor depends on the
 conversation through a `blocks` edge, so bd counts the anchor blocked while
 the conversation is open and lets it go once the conversation closes.
 
@@ -252,21 +251,20 @@ the conversation is open and lets it go once the conversation closes.
   since the sitting started. bd takes an edge it already holds as a no-op. A
   read of the anchor that does not answer files nothing, and an edge the store
   refuses is reported with its repair.
-- **While the conversation is open, the PR is held.** The merge pass holds a
-  PR while an open bead blocks its anchor. The PR reads `needs-attention` with
-  `held: blocked`, naming the conversation, by the one definition its labels,
-  the board and engage read
+- **While the conversation is open, the PR is held.** The landing order's
+  evaluator reads the edge as a wait of the bead's own, which holds the merge.
+  The PR reads `needs-attention` with `held: blocked`, naming the
+  conversation, by the one definition its labels, the board and engage read
   ([state-machine.md](state-machine.md#the-status-label-github-projection)): a
   conversation is a bead a person owes the next move on. The edge holds only
   the merge. Reviews, reworks and supplements keep running, because each is a
-  bead the anchor waits on, which the edge does not block. On the pending
-  record the landing order's evaluator reads the edge as a wait of the bead's
-  own, which holds the merge. The landing order pours the PR's review runs, and
-  the refinery's find-work takes the PR's bead at a new head, as each would with
-  no conversation, whether the conversation waits in the operator's queue or a
-  sitting holds it. Gas City gives the refinery no turn for a bead the
-  conversation holds, so the landing order wakes and nudges the refinery for the
-  new head ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
+  bead the anchor waits on, which the edge does not block. The landing order
+  pours the PR's review runs, and the refinery's find-work takes the PR's bead
+  at a new head, as each would with no conversation, whether the conversation
+  waits in the operator's queue or a sitting holds it. Gas City gives the
+  refinery no turn for a bead the conversation holds, so the landing order
+  wakes and nudges the refinery for the new head
+  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 - **Every close frees the merge.** The sign-off, a dismiss, the premise
   re-check's moot or benign close and a close by hand each end the hold with
   the close itself, and nothing writes a release. A close that does not land
@@ -880,11 +878,11 @@ durable trace in one order every time:
 
 1. what a ruling does to an open PR it reaches, the subject, the PR whose
    merge the conversation holds or a PR that a gate it answers releases: its
-   rework, through `converse-rework.sh`, with
-   the conversation as the rework child's `source_ruling_bead`, so a ruling
-   that changes what the PR's branch must contain becomes work the refinery
-   lands; or its retirement, through `pr-dispose.sh`, which records the
-   disposition and closes the PR;
+   rework, through `converse-rework.sh`, as an ask sourced by the
+   conversation, which holds the PR's merge until the review run that answers
+   it records its result, so a ruling that changes what the PR's branch must
+   contain becomes work on that branch; or its retirement, through
+   `pr-dispose.sh`, which records the disposition and closes the PR;
 2. the subject's headline;
 3. `ruled: <the ruling>` on each open gate the conversation replies to that the
    ruling answers, each read back, with an earlier answer reported;
@@ -1036,18 +1034,17 @@ text and what the operator wants, the sitting settles them with the operator
 item by item, reading the operator's guidance for its intent and pushing back
 where it disagrees. The document then changes in one of two ways. The operator
 can rule that the sitting edit it with them (*A sitting's change*, below), on
-an open PR's branch too when the PR is on the pending record, or the sitting
-sends one rework that carries the decisions, which is also how a document on an
-open PR the old path reviews changes.
+an open PR's branch too, or the sitting sends one rework that carries the
+decisions.
 The big picture between sittings is the subject's notes: the dated rulings and
 the newest `## Current state` block. That block with no open question left is
 the scaffold.
 It names only what changes, by section or once for the whole document, and gives
 each change its direction and substance, with exact words only where the wording
 itself was settled. Its first lines are the rules the worker follows for what the
-block leaves open, the wording included. The ruling's line names the block,
-`converse-rework.sh` files the rework on the ordinary lane and `mol-polecat-work`
-runs it, so the loop needs no formula, key or script of its own. With no PR open,
+block leaves open, the wording included. The ruling's line names the block. On
+an open PR, `converse-rework.sh` files the rework as an ask the PR's review run
+takes, so the loop needs no formula, key or script of its own. With no PR open,
 the work is sent as a sign-off sends any other, and its bead names the block. The
 `gc-toolkit.converse-iterate-document` skill holds the steps and the block's form.
 
@@ -1064,10 +1061,10 @@ no reaction would spend their attention for nothing, and a pool does it as well
 without them. Whatever the ruling, a sitting holds one change in flight per
 conversation and changes only its own rig's repository, the rig its
 conversation is filed in, because the hold below is a `blocks` edge, which holds
-only within one store. It never edits in its home, edits the branch of an
-open PR the old path reviews, cuts an integration effort's branch, pushes to a
-target branch, merges, or forces a push. The `gc-toolkit.converse-edit` skill
-carries a change from the ruling to the refinery.
+only within one store. It never edits in its home, cuts an integration
+effort's branch, pushes to a target branch, merges, or forces a push. The
+`gc-toolkit.converse-edit` skill carries a change from the ruling to the
+refinery.
 
 **The change is a bead the sitting files**, in its own rig's store, with its
 target in the create: the rig's default branch, or the integration branch of an
@@ -1192,9 +1189,7 @@ and its push, which starts the PR's CI before the edit's review. The sitting
 rewrites the PR's summary to cover the edit and answers the PR with
 `--no-rework` at the sign-off. The refinery validates the head the sitting
 left, and the landing order pours a review run there, which repairs what it
-rules must-fix with no send-back to the sitting. On the old path the branch's
-writer is the PR's rework child, on which the review machinery keys, so a
-ruling that changes the branch files a rework through the sign-off.
+rules must-fix with no send-back to the sitting.
 
 ## Accept
 

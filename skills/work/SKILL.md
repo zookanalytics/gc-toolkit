@@ -384,10 +384,8 @@ GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead takeaway <bead> "<wh
   itself should go, close it instead (below).
 
 When the work already has an open pull request, retire the pull request instead
-of stopping the bead, and send more work on its branch to a rework child, both
-through the prs skill. The release refuses `--route` and `--assign` on an
-anchor whose `merge_result` is `pull_request` or `pre_open_gate`, because the
-merge cadence drives it.
+of stopping the bead, and send more work on its branch as an ask on the pull
+request, both through the prs skill.
 
 ## Close a bead that needs no work
 
