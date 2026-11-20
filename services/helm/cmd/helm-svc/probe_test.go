@@ -97,8 +97,8 @@ func TestProbeHelpIsSuccess(t *testing.T) {
 // The board and the probe must not drift on what "this binary cannot read the
 // city" means: a gate switching on 3 has to get the same answer from either.
 func TestProbeAndBoardShareTheUnreadableCode(t *testing.T) {
-	if probeExitUnreadable != boardExitGather {
-		t.Errorf("probe exits %d where board exits %d", probeExitUnreadable, boardExitGather)
+	if probeExitUnreadable != boardExitRead {
+		t.Errorf("probe exits %d where board exits %d", probeExitUnreadable, boardExitRead)
 	}
 	if probeExitUsage != boardExitUsage || probeExitOK != boardExitOK {
 		t.Error("probe and board disagree on the usage/success codes")

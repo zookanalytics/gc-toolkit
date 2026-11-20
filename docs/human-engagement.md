@@ -1746,12 +1746,12 @@ operator's *own* unsent words.
   expected to land. The Epics tab shows both for each epic and each
   Delivery, and the Needs you and Work queue tabs show them across the rig,
   each object drawn and ordered one way wherever it appears.
-  `helm-svc board --json` prints the board model's rows for agents, and the
-  sidecar's `/helm` answer serves the same model. Both run the one
-  `internal/source` gather and the one `internal/board` derivation, so a
-  change to the gather, the ranking or the anchor kinds reaches the JSON and
-  the `/helm` answer together, and not the page. A new tile field also owes
-  the model's TypeScript mirror, `web/src/contract.ts`, which
+  `helm-svc board --json` prints each rig's document for agents, from the
+  reader behind the page's answer. The sidecar's `/helm` answer serves
+  the board model's rows from the one `internal/source` gather and the one
+  `internal/board` derivation, so a change to the gather, the ranking or the
+  anchor kinds reaches the `/helm` answer and not the page. A new tile field
+  also owes the model's TypeScript mirror, `web/src/contract.ts`, which
   `services/helm/web/contract_parity_test.go` holds equal to the Go contract.
   `gc-helm.sh` keeps the write verbs (`open`, `engage`, `react`, `takeaway`,
   `dismiss`, `accept`, `park`, `priority`) that have no Go equivalent, and

@@ -5,9 +5,8 @@
 #
 # The board itself is helm-svc's web page (services/helm). Its rig read is
 # proven by services/helm/internal/rigboard, its page by services/helm/web
-# (src/rigboard/Board.test.tsx), and the rows `helm-svc board --json` prints by
-# services/helm/internal/board (derive_test.go) and services/helm/cmd/helm-svc
-# (main_test.go); none of it is driven from here.
+# (src/rigboard/Board.test.tsx), and what `helm-svc board --json` prints by
+# services/helm/cmd/helm-svc (board_test.go); none of it is driven from here.
 #
 # What this fixture locks down:
 #
