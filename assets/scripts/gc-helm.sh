@@ -254,9 +254,7 @@ route, the form an agent that finds its work by listing the beads assigned to
 it takes (docs/deferred-dispatch.md). Either one also
 lifts the bead's hold:mayor in the release's write, because sending a held bead
 on is a placement, and Gas City serves no bead a hold label holds, assigned or
-not. Both are refused on an anchor whose merge_result is pre_open_gate or
-pull_request, since the merge cadence drives it and work on its branch goes to
-a child. --release itself is refused, with nothing written, on a bead whose PR
+not. --release itself is refused, with nothing written, on a bead whose PR
 waits on the pending record (pull_request_pending or
 pull_request_head_changed): the landing order works that bead while it is
 assigned to nobody, so a release would not stop it, and the refusal names what
@@ -2821,8 +2819,8 @@ subject_anchor() {
 
 # conversation_pr_anchor <subject-row> — the anchor whose merge a conversation
 # about the subject holds: subject_anchor's, when that anchor is an open PR
-# (merge_result pull_request, or pull_request_pending or
-# pull_request_head_changed on the pending record, and not closed). Prints
+# (merge_result pull_request_pending or pull_request_head_changed on the
+# pending record, and not closed). Prints
 # nothing when the subject is no open PR and no bead of one. Returns 1 when the
 # anchor its anchor_bead names does not read, because a PR whose state cannot
 # be read could be one the conversation must hold.
@@ -2838,7 +2836,7 @@ conversation_pr_anchor() {
     fi
     printf '%s' "$_cpa_row" | jq -r '
         if (((.metadata // {}).merge_result // "") as $mr
-              | $mr == "pull_request" or $mr == "pull_request_pending" or $mr == "pull_request_head_changed")
+              | $mr == "pull_request_pending" or $mr == "pull_request_head_changed")
            and ((.status // "") | tostring | ascii_downcase) != "closed"
         then (.id // "") | tostring else empty end' 2>/dev/null || true
 }

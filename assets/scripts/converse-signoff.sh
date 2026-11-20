@@ -182,8 +182,8 @@
 #     it.
 #   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
 #     does to an already-published PR it reaches: the subject when it owns an
-#     open PR (merge_result pull_request, or pull_request_pending or
-#     pull_request_head_changed on the pending record), the PR whose merge this
+#     open PR (merge_result pull_request_pending or pull_request_head_changed
+#     on the pending record), the PR whose merge this
 #     conversation holds, the anchor that depends on the conversation through a
 #     blocks edge, and each bead owning an open PR that a human gate the ruling
 #     answers releases, while the gate is open or once this ruling's own answer
@@ -204,8 +204,8 @@
 #     and before every other write, and when it does not complete nothing else
 #     is written. A re-run of the same ruling with the same answer acts on the
 #     PR the record names, the one --pr-anchor named or the ruling reached
-#     then, even once it has closed, as a retired PR's anchor closes when its
-#     closer, pr-facts or the landing order, consummates its disposition; a PR
+#     then, even once it has closed, as a retired PR's anchor closes when the
+#     landing order consummates its disposition; a PR
 #     that reads closed has nothing left for the rework or the retirement to
 #     do, so the re-run goes on without it.
 #     The record also names the child a --rework filed, written once
@@ -218,11 +218,9 @@
 #     that no recorded answer names stands, since that attempt may have filed
 #     it.
 #   --check <check> (with --rework, repeatable) names a check the ruling sends
-#     back, from the check index. On Gas Town's pending record the rework is an
-#     ask the PR's review run takes, which carries the checks, and the run
-#     picks each at the first head it judges once it can take the ask. On the
-#     old path every lane returns to unreviewed, so converse-rework.sh refuses
-#     a check there.
+#     back, from the check index. The rework is an ask the PR's review run
+#     takes, which carries the checks, and the run picks each at the first head
+#     it judges once it can take the ask.
 #   --pr-anchor <bead> names the PR --rework or --retire acts on when the
 #     ruling reaches more than one, which it requires; every other one the
 #     ruling reaches stands. A conversation owns one live rework child, so a
@@ -643,11 +641,11 @@ fi
 PR_ANCHORS=()
 GATE_WAITERS='{}'
 # open_pr_row <row> — 0 when the row's bead owns an open PR: merge_result
-# pull_request, or pull_request_pending or pull_request_head_changed on Gas
-# Town's pending record.
+# pull_request_pending or pull_request_head_changed on Gas Town's pending
+# record.
 open_pr_row() {
   case "$(printf '%s' "$1" | jq -r '.metadata.merge_result // ""' 2>/dev/null)" in
-    pull_request|pull_request_pending|pull_request_head_changed) return 0 ;;
+    pull_request_pending|pull_request_head_changed) return 0 ;;
   esac
   return 1
 }

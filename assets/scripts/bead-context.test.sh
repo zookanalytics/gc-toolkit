@@ -72,8 +72,7 @@ bead "$R_TK" tk-anchor <<'J'
  "description":"subject body prose the read must never surface",
  "notes":"## Current state\noperational notes the read must never surface",
  "metadata":{"task_kind":"rework","gc.routed_to":"","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
-   "merge_result":"pull_request","pr_number":"9","branch":"polecat/tk-anchor","merged_target":"main","target":"main",
-   "pr.machine":"progressing@a1b2c3@2026-09-02T22:00:00Z",
+   "merge_result":"pull_request_head_changed","pr_number":"9","branch":"polecat/tk-anchor","merged_target":"main","target":"main",
    "gc.first_reaction":"ruling","gc.first_reaction_at":"2026-09-02T22:23:04Z",
    "gc.first_reaction_reason":"scope and control flow unresolved","gc.first_reaction_target":"tk-frt",
    "gc.origin":"operator","gc.takeaway":"held pending the opening contract","gc.takeaway_settled":1},
@@ -178,7 +177,7 @@ J
 # alias that names its own id, as one on an open PR holds the PR's merge. It is a
 # person's, so it reads stuck, not advancing.
 bead "$R_TK" tk-convheld <<'J'
-{"id":"tk-convheld","title":"held by a conversation","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request"},
+{"id":"tk-convheld","title":"held by a conversation","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request_pending"},
  "dependencies":[{"id":"tk-cv","dependency_type":"blocks","status":"in_progress","title":"should this land as built?"}]}
 J
 bead "$R_TK" tk-cv <<'J'
@@ -312,18 +311,15 @@ blk "$R_TK" tk-w-stopper open '{}' tk-w-hidden
 blk "$R_TK" tk-w-hidden open "$POOL"
 
 # Merge anchors read their recorded merge axis, not their empty route.
-blk "$R_TK" tk-w-anchors open '{}' tk-a-approval tk-a-progress tk-a-preopen tk-a-approved \
-  tk-a-hold tk-a-blocked tk-a-stale tk-a-noaxis tk-a-humanstate \
+blk "$R_TK" tk-w-anchors open '{}' tk-a-approval tk-a-progress tk-a-approved \
+  tk-a-hold tk-a-noaxis tk-a-humanstate \
   tk-a-rpend tk-a-rreview tk-a-rnopost tk-a-rhead tk-a-rhold
 AX='@h1@2026-10-01T00:00:00Z'
-blk "$R_TK" tk-a-approval open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required$AX\"}"
-blk "$R_TK" tk-a-progress open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"progressing$AX\",\"pr_posture\":\"changes_requested$AX\"}"
-blk "$R_TK" tk-a-preopen open "{\"merge_result\":\"pre_open_gate\",\"pr.machine\":\"settled$AX\"}"
-blk "$R_TK" tk-a-approved open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"approved$AX\"}"
-blk "$R_TK" tk-a-hold open "{\"merge_result\":\"pre_open_gate\",\"merge_hold\":\"true\",\"pr.machine\":\"settled$AX\"}"
-blk "$R_TK" tk-a-blocked open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"blocked$AX\"}"
-blk "$R_TK" tk-a-stale open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required@h0@2026-09-30T00:00:00Z\"}"
-blk "$R_TK" tk-a-noaxis open '{"merge_result":"pre_open_gate"}'
+blk "$R_TK" tk-a-approval blocked "{\"merge_result\":\"pull_request_pending\",\"pr_posture\":\"review_required$AX\"}"
+blk "$R_TK" tk-a-progress open "{\"merge_result\":\"pull_request_head_changed\"}"
+blk "$R_TK" tk-a-approved blocked "{\"merge_result\":\"pull_request_pending\",\"pr_posture\":\"approved$AX\"}"
+blk "$R_TK" tk-a-hold blocked "{\"merge_result\":\"pull_request_pending\",\"merge_hold\":\"true\",\"pr_posture\":\"approved$AX\"}"
+blk "$R_TK" tk-a-noaxis blocked '{"merge_result":"pull_request_pending"}'
 blk "$R_TK" tk-a-humanstate open '{"merge_result":"abandoned","gc.takeaway":"PR#9 was closed without merging"}'
 # The pending record: no merge axis is ever written there, and a pending bead is
 # blocked by the record itself while it waits on the merge.
@@ -385,7 +381,7 @@ pour "$R_TK" tk-r-work tk-r-root in_progress
 pour "$R_TK" tk-r-ended tk-r-eroot closed
 # A merge anchor a live review run works is still judged as an anchor. tk-r-sub
 # waits on it, on tk-r-work and on tk-r-ended.
-blk "$R_TK" tk-r-anchor open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required$AX\"}"
+blk "$R_TK" tk-r-anchor blocked "{\"merge_result\":\"pull_request_pending\",\"pr_posture\":\"review_required$AX\"}"
 pour "$R_TK" tk-r-anchor tk-r-aroot in_progress
 blk "$R_TK" tk-r-sub open '{}' tk-r-work tk-r-ended tk-r-anchor
 # Live runs two deep over an orphan no run works: the walk reads on below the
@@ -436,8 +432,8 @@ J
 
 # tk-epic: the horizon fixture. Its direct children (found by the reverse
 # parent-child listing, never its own edges) cover every advance state: an open
-# pool-routed and an in-progress child advance, as do tk-anchor — a merge anchor
-# whose recorded machine axis is progressing — and tk-kid-rework, a rework bead
+# pool-routed and an in-progress child advance, as do tk-anchor — a PR whose new
+# head the refinery validates — and tk-kid-rework, a rework bead
 # whose pour cleared its route, machine work rather than a human gate. A child
 # in the operator's queue is stuck, and so is tk-kid-armed: armed, so it takes
 # its blocker's verdict, and its blocker is the human gate tk-hg. Three children sit
@@ -751,7 +747,7 @@ eq "$(jr .subject.priority)"                 1                 "subject.priority
 eq "$(jr .subject.task_kind)"                rework            "subject.task_kind"
 eq "$(jr .subject.routed_to)"                ""                "subject.routed_to preserves the empty (cleared) route"
 eq "$(jr .subject.execution_routed_to)"      gc-toolkit/gc-toolkit.polecat "subject.execution_routed_to"
-eq "$(jr .subject.anchor.merge_result)"      pull_request      "anchor.merge_result present when the bead carries one"
+eq "$(jr .subject.anchor.merge_result)"      pull_request_head_changed      "anchor.merge_result present when the bead carries one"
 eq "$(jr .subject.anchor.pr_number)"         9                 "anchor.pr_number"
 eq "$(jr .subject.anchor.branch)"            polecat/tk-anchor "anchor.branch"
 eq "$(jr .subject.anchor.merged_target)"     main              "anchor.merged_target"
@@ -944,14 +940,11 @@ eq "$(logcount 'list --id.*tk-w-hidden')" 0 "  ... and the walk never reads what
 # Merge anchors: the recorded merge axis, not the route the merge cadence clears.
 : > "$FAKE_GC_LOG"
 run tk-w-anchors --frontier --json
-eq "$(blkr tk-a-approval)" "stuck tk-a-approval approval" "a settled PR waiting on review is stuck on the operator's approval"
-eq "$(blkr tk-a-progress)" "advancing - -" "a progressing anchor advances, a requested change being worked"
-eq "$(blkr tk-a-preopen)" "advancing - -" "a settled anchor before its PR opens advances: the PR-open pass publishes it"
-eq "$(blkr tk-a-approved)" "advancing - -" "a settled, approved PR advances to the merge pass"
+eq "$(blkr tk-a-approval)" "stuck tk-a-approval approval" "a PR waiting on review is stuck on the operator's approval"
+eq "$(blkr tk-a-progress)" "advancing - -" "a PR whose new head the refinery validates advances"
+eq "$(blkr tk-a-approved)" "advancing - -" "an approved PR advances to its merge"
 eq "$(blkr tk-a-hold)" "stuck tk-a-hold merge-hold" "an operator merge hold is stuck"
-eq "$(blkr tk-a-blocked)" "stuck tk-a-blocked merge-blocked" "an anchor its machine axis records blocked is stuck"
-eq "$(blkr tk-a-stale)" "stuck tk-a-stale unread" "a posture read at another head than the axis is unread, so stuck"
-eq "$(blkr tk-a-noaxis)" "stuck tk-a-noaxis unread" "an anchor with no recorded axis is unread, so stuck"
+eq "$(blkr tk-a-noaxis)" "stuck tk-a-noaxis unread" "a PR with no posture recorded is unread, so stuck"
 eq "$(blkr tk-a-humanstate)" "stuck tk-a-humanstate human" "an anchor parked in a human state is stuck on a person"
 eq "$(blkr tk-a-rpend)" "advancing - -" "an approved PR on the pending record advances to the landing order, though its bead is blocked"
 eq "$(blkr tk-a-rreview)" "stuck tk-a-rreview approval" "a PR on the pending record waiting on review is stuck on the operator's approval"
