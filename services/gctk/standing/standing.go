@@ -177,6 +177,19 @@ func Read(ids []string, s Store) (*Reading, error) {
 	}
 	r.index()
 
+	// The beads asked about are gathered before the work is placed, so the
+	// reads that place it answer from the rows their gathering read.
+	var level []string
+	for _, id := range ids {
+		if _, ok := r.beads[id]; ok && !slices.Contains(level, id) {
+			level = append(level, id)
+		}
+	}
+	sort.Strings(level)
+	if err := r.gather(level, s); err != nil {
+		return nil, err
+	}
+
 	runs, err := s.LiveRuns()
 	if err != nil {
 		return nil, fmt.Errorf("read the live runs: %w", err)
@@ -202,19 +215,12 @@ func Read(ids []string, s Store) (*Reading, error) {
 		}
 	}
 
-	var level []string
-	for _, id := range ids {
-		if _, ok := r.beads[id]; ok && !slices.Contains(level, id) {
-			level = append(level, id)
-		}
-	}
-	sort.Strings(level)
 	for len(level) > 0 {
+		r.answer(level)
+		level = r.reach(level)
 		if err := r.gather(level, s); err != nil {
 			return nil, err
 		}
-		r.answer(level)
-		level = r.reach(level)
 	}
 	r.advanceAll()
 	return r, nil
