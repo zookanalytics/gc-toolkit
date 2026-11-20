@@ -87,7 +87,9 @@ A shell suite reaches it through the shared harness,
    `$STUB_DEPS`, and a fault, such as a failed list or a refused update, as a
    `STUB_*` setting. Another writer's change that lands between two of the
    script's calls is a program the fake runs before the call it names
-   (`STUB_HOOK_AT` and `STUB_HOOK`).
+   (`STUB_HOOK_AT` and `STUB_HOOK`), and another process that runs at each
+   moment a write leaves, such as the deferred-dispatch order's pass, is a
+   program the fake runs after each write that lands (`STUB_AFTER_WRITE`).
 3. Run the script under test.
 4. Assert on the state that results, through the harness's readers (`meta`,
    `bstatus`, `bassignee`, `bprio`, `bpoured`, `bparents`, `notes`, `bfield`,
