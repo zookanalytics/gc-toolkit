@@ -77,6 +77,7 @@ flowchart LR
   RUN -->|repair push| BR
   ORD -->|every 60s| CAD
   ORD -->|landing order: one run per head| RUN
+  ORD -.->|landing order: its own read of each PR it decides| PR
   ORD -->|landing order: ready, merge request| PR
   ORD -->|landing order: record, then close| LEDGER
   ORD -->|landing order: labels that differ from the store's| PR
@@ -184,11 +185,10 @@ performer; the full transition table with writers is
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
    head.
-8. **Merge.** The landing order acts from the beads. It has GitHub merge each
-   PR on the pending record at the head the refinery validated, once the
-   evaluator reads the PR ready over the read the PR watch saved and again over
-   the merge's own read of GitHub, and closes the bead once the merge commit is
-   on the target
+8. **Merge.** The landing order decides each PR on the pending record on its
+   own read of GitHub. It has GitHub merge one at the head the refinery
+   validated once the evaluator reads it ready on that read, and closes the
+   bead once the merge commit is on the target
    ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 9. **Close propagates.** `closed` is the one signal waiting parties key on
    ([lifecycle-composition.md](lifecycle-composition.md)). A landing closes a
@@ -494,8 +494,14 @@ first. Either way the change is a decision on the record, not a drift.
   GitHub read the one-PR update saved on the PR's bead and the store as it is
   at the read. The board says for each rig when GitHub was last asked. Every
   reader of GitHub draws on one API allowance.
-- **An act no later run decides again is made only on its own fresh read of
-  GitHub,** as the merge is, and the saved GitHub read grants no such act. The
+- **GitHub's data serves three uses, and only a real-time decision acts.** The
+  PR watch asks GitHub which PRs the city owns have changed, and its one-PR
+  update saves each changed PR's read on its bead. That saved read is a cache
+  for the displays. The landing order decides every act that depends on
+  GitHub's state on its own read of GitHub, made in the act, together with the
+  store's record of what the city did, and the watch's output only chooses which
+  records a run decides. A stale saved read or a change the watch has not seen
+  yet delays a decision or shows an old screen, and causes no act. The
   evaluator's answer is computed at each read and stored nowhere.
 - **A review, a hold or a change of base that arrives after the landing
   order's read is not part of its decision to merge,** even when GitHub carries
@@ -503,8 +509,13 @@ first. Either way the change is a decision on the record, not a drift.
 - **The landing order is the one path that admits work on a pending record.**
 - **Every PR the city owns is watched, and one update is the only way GitHub's
   side of a PR reaches its bead.**
-- **The landing order acts from the beads,** and keeps the labels of each PR
-  the city owns equal to what the store derives.
+- **The landing order decides a record again only once its PR moved or its
+  bead changed** since a run decided it with no act owed, so a run in which
+  nothing changed asks GitHub nothing. The digest it keeps on the bead of what
+  that decision read is no landing state: it changes whether a run decides the
+  record, never what the decision is, and a record whose digest is missing or
+  wrong is decided again. It keeps the labels of each PR the city owns equal to
+  what the store derives.
 - **An approval stands across a push until triage reads the change as
   material.**
 - **No city push rewrites or overwrites a PR's commits,** so the PR keeps the
