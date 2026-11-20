@@ -66,6 +66,8 @@ func (c *Call) bd(s, d string, args []string) (err error) {
 		return c.comment(s, args)
 	case "comments":
 		return c.comments(s, args)
+	case "set-state":
+		return c.setState(s, d, args)
 	}
 	return c.fail(2, "gc bd stub: unsupported '"+verb+"'")
 }
@@ -1066,13 +1068,15 @@ func (c *Call) kv(args []string) error {
 	if err != nil {
 		return err
 	}
-	verb := ""
+	verb, asJSON := "", false
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; {
 		case a == "--db":
 			i++
-		case strings.HasPrefix(a, "--db=") || a == "--json":
+		case strings.HasPrefix(a, "--db="):
+		case a == "--json":
+			asJSON = true
 		case verb == "":
 			verb = a
 		default:
@@ -1130,6 +1134,45 @@ func (c *Call) kv(args []string) error {
 			b.WriteString(key + "=" + val + "\n")
 		}
 		return replaceFile(path, b.String())
+	case "list":
+		// Every key and its value, by key, as one object under --json that
+		// carries bd's schema_version beside them, and otherwise as bd's
+		// table.
+		lines, err := readLines(path)
+		if err != nil {
+			return err
+		}
+		vals := map[string]string{}
+		var keys []string
+		for _, l := range lines {
+			k, v, ok := strings.Cut(l, "=")
+			if !ok || k == "" {
+				continue
+			}
+			if _, seen := vals[k]; !seen {
+				keys = append(keys, k)
+			}
+			vals[k] = v
+		}
+		slices.Sort(keys)
+		if asJSON {
+			o := NewObject()
+			for _, k := range keys {
+				o.Set(k, vals[k])
+			}
+			o.Set("schema_version", Number("1"))
+			c.out(Compact(o) + "\n")
+			return nil
+		}
+		if len(keys) == 0 {
+			c.out("No key-value pairs set\n")
+			return nil
+		}
+		c.out("\nKey-Value Store:\n")
+		for _, k := range keys {
+			c.out("  " + k + " = " + vals[k] + "\n")
+		}
+		return nil
 	}
 	return c.fail(2, "gc bd stub: unsupported 'kv "+verb+"'")
 }

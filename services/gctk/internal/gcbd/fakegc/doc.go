@@ -60,11 +60,11 @@
 //     routes instead, writing gc.routed_to.
 //   - gc-toolkit scripts-dir prints STUB_PACK's assets/scripts.
 //   - bd where, show, list, update, create, close, dep (list, add, add --file,
-//     remove, --blocks), kv (get, set, clear), gate (list, resolve), comment,
-//     comments, blocked, ready and sql, which answers the one query gctk reads
-//     beside blocked: the ids bd's blocked rule marks. A --db pin ahead of the
-//     verb is dropped, since the fake serves one store, and an --actor ahead
-//     of it is the actor the call writes as.
+//     remove, --blocks), kv (get, set, clear, list), gate (list, resolve),
+//     comment, comments, set-state, blocked, ready and sql, which answers the
+//     one query gctk reads beside blocked: the ids bd's blocked rule marks. A
+//     --db pin ahead of the verb is dropped, since the fake serves one store,
+//     and an --actor ahead of it is the actor the call writes as.
 //
 // Each keeps bd's rule where the contract test pins one: a listing carries
 // each bead's edges, selects a parent's children by --parent and hides a
@@ -73,8 +73,11 @@
 // conditional-blocks, waits-for and parent-child edges, and ready leaves out
 // the types bd's ready work leaves out; an update's --if-assignee or
 // --if-status that no longer holds writes nothing and exits 13; a close
-// records closed_at and its reason; and a blocks edge between a bead and its
-// own ancestor is refused either way.
+// records closed_at and its reason; a blocks edge between a bead and its
+// own ancestor is refused either way; and a set-state that changes a bead's
+// <dimension>:<value> label swaps the dimension's label and files a closed
+// event bead, the bead's child, while one to the value the bead holds writes
+// nothing.
 //
 // # The settings
 //
