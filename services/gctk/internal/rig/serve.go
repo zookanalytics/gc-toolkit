@@ -733,7 +733,7 @@ func (r copyRec) startLeader() (string, string) {
 	if err != nil {
 		return "no-state", fmt.Sprintf("the copy's log could not be opened: %v", err)
 	}
-	defer logf.Close()
+	defer func() { _ = logf.Close() }()
 	leader, err := r.h.Start(host.Spec{Argv: argv, Out: logf, Session: true})
 	if err != nil {
 		return "not-started", fmt.Sprintf("the copy's leader did not start: %v", err)
@@ -913,7 +913,7 @@ func Lead(h host.Host, dir string) int {
 	if err != nil {
 		return end(1)
 	}
-	defer logf.Close()
+	defer func() { _ = logf.Close() }()
 	// The serve command writes through a relay the leader copies into the
 	// log, so the sandbox never has to grant a write to the record. A serve
 	// command whose leader is gone dies at its next write. The leader reads its
@@ -972,7 +972,7 @@ func leadPublish(rec copyRec, port, gen int) {
 	if err != nil {
 		return
 	}
-	defer logf.Close()
+	defer func() { _ = logf.Close() }()
 	pub, err := rec.h.Start(host.Spec{
 		Argv: []string{"bash", "-c", rec.read("publish_command")},
 		Dir:  rec.read("checkout"),

@@ -101,6 +101,7 @@ bead.
 | `gctk bead start-armed` | order | start each armed bead that nothing holds any more, exactly once, and retire the arm of a bead that closed or whose work another path delivered | Gas City slings only when asked. Its `cascade-nudge-on-blocker-close` order nudges the assignees of a closed bead's dependents and slings nothing ([warrants.md](warrants.md#deferred-dispatch-residual)). The start selects by `bd ready` with the flags Gas City renders for a pool's routed demand, so it sends what the pool would serve, and holds back the `waits-for` edges and waits into another store that bd cannot judge. It sends each arm once from Gas City's own records: `gc sling`'s exit 3 when a live workflow works the bead, and the token `arm:<bead>@<armed at>` on the root each start pours, which a start searches after an earlier attempt, so a pour whose run has ended is not made again. A root Gas City left unfinished is neither, so the start asks a person about it. Each start runs under the bead's dispatch lock, which `arm` and `disarm` take too, and the retire of a delivered bead covers the run another path poured, which carries no token ([deferred-dispatch.md](deferred-dispatch.md#exactly-once)). |
 | `gctk bead park <bead> ("<text>" [--body <text>] \| --waiting-on <bead>)` | agent | hold everything under a bead that has not started behind one blocker that says why, and leave work in flight running | bd's defer holds the bead itself, and its children only while a date it names is in the future, and releases on that date or a person's undefer, never on a condition, and never one bead alone ([the search](../specs/tk-1tfzr71.226/gas-city-search.md#park-bds-deferred-status-and-its-gates)). A park composes bd's own gate: it files a plain gate titled with why the bead is parked and what releases it, born with its `blocks` edge, so bd holds the whole subtree, and closing the gate releases it. It adds what bd does not: it refuses a bead in flight, whose own edge would hold its merge and its close, finds the gate an earlier park filed under the same title, and says what the park holds and what it leaves running. |
 | `gctk bead place <bead> (--under <parent> [--shift <±n>] \| --standalone) [--route <rig>/<pool>] [--on <formula>]` | agent | place a bead held for placement: its parent or none, its dispatch, then the lift of its `hold:mayor` | `gc sling` reads no hold, so a sling leaves `hold:mayor` on, and no write of Gas City's both dispatches a bead and lifts its hold ([the search](../specs/tk-1tfzr71.226/gas-city-search.md#place-gc-sling-and-the-deferred-dispatch-arm)). The verb makes the native writes in one order, each taking its exit: the route's clear, the parent, the priority, the sling or, while a wait holds the bead, the arm, then the lift with its note in one write, so a dispatch that fails leaves the bead in the queue, and a run again after a stop finishes the placement without a second run. |
+| `gctk bead takeaway <bead> <text> [--waiting-on <bead>]... [--no-wait] [--release]` | agent, hook | record the one line a bead's handling concluded and whether anything still waits on it, and with `--release` stop the bead, or send it on to a pool (`--route`) or a named agent (`--assign`) | No bd field or Gas City key holds a one-line conclusion with its writer, and no primitive takes a bead out of play whole ([the search](../specs/tk-1tfzr71.220/gas-city-search.md)). bd's guarded update, Gas City's run cancel through `run-cancel.sh`, `gc sling --no-formula`, the immediate nudge and the session list each cover one part, and the verb composes them in the order that keeps a stop safe: the arm removed first, then the headline and the release in one update guarded on the status and the assignee it read, the wait edges, the run's end, then the sling. A refused guard is read again to settle which change it met: a bead closed since keeps its disposition and takes the headline alone, and any other change leaves the bead with whoever holds it now, with nothing written. A claim a live session holds is never taken, and its holder is asked to give the bead back. Each wait is a `blocks` edge, and a headline with neither a wait nor `--no-wait` reads as a hold on prose ([component-model.md](component-model.md), I1). |
 | `gctk priority shift <bead> <±n>` | agent | raise or lower a bead against what it follows, and re-rank the queue, in one act | The native surface writes only an absolute priority, which carries no intent term, so the next settle reads it as drift and overwrites it. The stored shift is that term ([steering.md](steering.md#the-rule)). Its callers are sittings and the po. |
 | `gctk priority settle <bead>` | hook | give a bead the priority of what it follows before anything claims or pours it | A pour copies a bead's priority once, so the bead carries its derived priority before the pour. The pack's own writers run it before they make a bead claimable: filing follow-up work, a sling, a release, and a placement. |
 | `gctk priority reconcile` | order | re-settle the queued beads after raw writes no writer saw | The backstop of the shape the pack ships, ported and never replaced: the settle in the pack's writers, a rig-scoped pass every fifteen minutes that reads the queue and never the whole store, one lock per store, and the stored shift ([steering.md](steering.md#the-pass)). |
@@ -144,9 +145,14 @@ bead.
 
 What each noun owns:
 
-- **`bead`:** the arm record on a bead armed to start by itself. A park and a
-  placement write only native state: a gate with its `blocks` edge, and a
-  parent, a dispatch and a label's lift.
+- **`bead`:** the arm record on a bead armed to start by itself, and a bead's
+  takeaway: the headline its handling concluded, who wrote it and when, and
+  whether anything still waits on it, which the `takeaway` package declares.
+  The takeaway's keys stand on design decision 5 of
+  [the board's design](../specs/tk-1tfzr71.213/design.md) until tk-1tfzr71.216
+  decides whether they retire onto the bead's notes or stay with a warrant.
+  A park and a placement write only native state: a gate with its `blocks`
+  edge, and a parent, a dispatch and a label's lift.
 - **`priority`:** the derivation, which is a bead's shift and the computed bd
   priority of every bead that follows another, its poured workflow's included.
   The field itself is bd's. The derivation is a feature: work takes the
@@ -496,7 +502,7 @@ and CI runs those tests on every PR.
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
-| runtime | Gas City | `gc` (sling, config, session, rig, agent, doctor, events and event emit, runtime), the supervisor API (runs, sessions), the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh`, the priority writer, `queue-priority.sh`, the subject resolver, `gc-helm.sh resolve`, the seed audit's, `render-seed-audit.sh` and `seed-audit-reaudit.sh`, and the disposition writer, `bead-rehome.sh`, run as the actor a close needs | recorded responses |
+| runtime | Gas City | `gc` (sling, config, session, rig, agent, doctor, events and event emit, runtime), the supervisor API (runs, sessions), the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh`, the priority writer, `queue-priority.sh`, the subject resolver, `gc-helm.sh resolve`, the seed audit's, `render-seed-audit.sh` and `seed-audit-reaudit.sh`, the disposition writer, `bead-rehome.sh`, run as the actor a close needs, and the run's end, `run-cancel.sh`, which calls the supervisor's run cancel | recorded responses |
 | host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start as a demo capture runs one, inside its sandbox for a rig whose app reads the city | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
 
 The store's rules are the store's own. The store adapter asks the store whether
@@ -745,3 +751,18 @@ why a reader must know it, and the work that retires it.
   `lifecycle/lifecycle.toml`. The board's own read of it is under the board's
   entry above. tk-ssm8qns.23 moves those reads and clears onto the domain, and
   the keys' entries in `lifecycle/lifecycle.toml` go with the last of them.
+- **Shell still reads the takeaway's keys.** `gc.takeaway` and the keys beside
+  it are declared in `takeaway`, whose `bead takeaway` writes them, but shell
+  reads them itself, spelling each key, against rules 1 and 6:
+  `bead-context.sh`, the `converse-recheck-premise` skill's close,
+  `doctor/check-claim-advancing` and `doctor/check-root-advancing`, which count
+  a headline as a hold on purpose, `doctor/check-wait-is-an-edge`, which reads
+  the headline as a hold marker through `lifecycle/lifecycle.toml`'s `[holds]`,
+  and the liveness recheck, which tk-1tfzr71.174 retires. The keys are also
+  written by `gctk lifecycle --takeaway`, for `pr-facts.sh`, which the
+  GitHub-intake member (tk-1tfzr71.21) retires, and the verb itself retires
+  with the old merge path ([the register](#the-re-implementation-register)).
+  So the keys stay registered in `lifecycle/lifecycle.toml`. The board's own
+  read of them is under the board's entry above. tk-1tfzr71.216 decides whether
+  the keys retire onto the bead's notes or stay with a warrant, and that
+  decision moves these reads onto the domain or retires them with the keys.

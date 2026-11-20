@@ -368,18 +368,26 @@
   {
     "name": "gc.takeaway",
     "type": "string",
-    "readers": [
-      "reaction"
-    ],
-    "doc": "The headline gc-helm.sh takeaway writes, which every exit of a first reaction leaves. The sweep passes over a bead that carries one, as one already triaged."
+    "owner": "takeaway",
+    "doc": "A bead's headline: the one line, at most lifecycle.TakeawayMax codepoints, that its handling concluded, which gctk bead takeaway writes and every exit of a first reaction and every sitting's sign-off leaves. The first reaction's sweep passes over a bead that carries one, as one already triaged. Absent, nothing has concluded on the bead."
+  },
+  {
+    "name": "gc.takeaway_at",
+    "type": "string",
+    "owner": "takeaway",
+    "doc": "When the bead's headline was written, RFC 3339 UTC to the second, in the update that writes it."
   },
   {
     "name": "gc.takeaway_by",
     "type": "string",
-    "readers": [
-      "reaction"
-    ],
-    "doc": "Who wrote a bead's headline, which gc-helm.sh takeaway writes with it. The sweep passes over a bead that carries one, as one already triaged."
+    "owner": "takeaway",
+    "doc": "Who wrote the bead's headline, such as host, proactive or converse, in the update that writes it. The first reaction's sweep passes over a bead that carries one, as one already triaged."
+  },
+  {
+    "name": "gc.takeaway_settled",
+    "type": "string",
+    "owner": "takeaway",
+    "doc": "1 when the writer of the bead's headline said nothing waits on the bead, and empty when it named a wait or said neither, written with every headline so no earlier headline's answer stands for a later one. lifecycle/lifecycle.toml [holds] pairs it with gc.takeaway, so a headline left with neither an edge nor this mark reads as a hold on prose."
   },
   {
     "name": "gc.var.branch",

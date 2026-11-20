@@ -18,6 +18,7 @@ through `gc bd` and the supervisor's API.
 | `bead arm`, `bead disarm` | arm a bead to start by itself once nothing holds it, on a formula through a pool, or remove its arm, each in one write under the bead's dispatch lock | `gctk bead arm --help`, `gctk bead disarm --help`, `arm` |
 | `bead start-armed` | the deferred-dispatch order's pass: retire the arm of each closed or delivered bead, and start each armed bead the pool's own serve rule would serve and nothing bd cannot judge holds, exactly once, printing one JSON line per arm; `--dry-run` writes nothing | `gctk bead start-armed --help`, `arm`, [docs/deferred-dispatch.md](../../docs/deferred-dispatch.md) |
 | `bead park`, `bead place` | the operator's steering moves on a bead: a park, which holds everything under it that has not started behind a gate it files, born with its `blocks` edge, or behind a bead that exists, and refuses a bead in flight; and a placement, which gives a bead `hold:mayor` holds its parent or none, settles its priority, slings it or arms it while a wait holds it, and lifts the hold, each write taking its exit | `gctk bead park --help`, `gctk bead place --help`, `internal/cli/bead_steer.go`, `park`, `place`, [docs/steering.md](../../docs/steering.md) |
+| `bead takeaway` | a bead's headline, the one line its handling concluded, with who wrote it, when, and whether anything still waits on it, in one update: each wait a `blocks` edge, or `--no-wait`'s settled mark. With `--release` its arm is removed first, then the same update reopens the bead, guarded on the status and the assignee it read, and assigns it to nobody or to the agent `--assign` names, each run beneath it ends, and `--route` slings it to a pool. The store is the one `--db` names or the one gc routes the bead to | `gctk bead takeaway --help`, `internal/cli/beadtakeaway.go`, `takeaway` |
 | `doctor run` | the doctor order's run: `gc doctor --json` under a deadline, never with `--fix`, recorded as one `gc-toolkit.doctor.ran` event whose payload names each failing check with the time it first failed and its streak, each check the run did not measure, each the accepted file accepts, and each monitor order's last good run; a run that did not complete carries the previous run's lists and exits 1 | `gctk doctor run --help`, `internal/cli/doctor.go`, `doctor` |
 | `epic create` | filing an epic with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic create --help`, `internal/cli/epic.go` |
 | `epic unweighed` | the time it read a rig's epics, which a portfolio sync marks each epic it weighs with, then each close and each latest shift of those epics that no sync has weighed, oldest first, one line each, from one read of the rig's epics, and a read that stops and says so when the store does not answer | `gctk epic unweighed --help`, `internal/cli/epic_unweighed.go`, `epic` |
@@ -181,7 +182,8 @@ internal/host/       the host adapter: the processes gctk starts and signals, th
                      table, and the loopback ports and their listeners
 internal/host/fake/  the host adapter's in-memory fake, for the domains' tests
 internal/gascity/    the runtime adapter: gc sling, an agent's default formula from the city's
-                     config, the city's root, and the pack's scripts that ask a person
+                     config, the city's root, the pack's scripts that ask a person, and the
+                     one that ends a run
 internal/gascity/fake/  the runtime adapter's fake, which records each call and answers as a test says
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, the store's listing, and its blocked set
@@ -216,6 +218,8 @@ waits/               what holds a bead, from one snapshot: the rule by where the
 review/              the review domain: the check index and a rig's guidance at a commit; the
                      shape a review run's steps write, the loop's pass rule over it, the run's
                      result in review_results, and the asks a run works, in review_checks
+takeaway/            a bead's takeaway: its headline and the keys beside it, which it owns,
+                     its wait edges, and the release that stops the bead or sends it on
 reaction/            a bead's first reaction: each exit's writes in their order, intake's rule,
                      an emergency's check of the default branch, the form a named agent takes
                      a bead in, whether a pool or an agent would take one, and the

@@ -247,7 +247,7 @@ lift names the lift by hand, which dispatches nothing, rather than a re-run.
 
 A hold also lifts these ways:
 
-- `gc-helm.sh takeaway --release` with `--route` or `--assign` lifts it in
+- `gctk bead takeaway --release` with `--route` or `--assign` lifts it in
   the release write, ahead of the sling or beside the assignee, and
   `gctk reaction accept` lifts it in the write that sends the bead on, because
   sending a held bead on is a placement and Gas City serves no bead a hold

@@ -193,6 +193,21 @@ func (w *Write) Parent(parent string) { w.parent = &parent }
 // the act that takes a route away clears it here.
 func (w *Write) Unroute() { w.unset("gc.routed_to") }
 
+// Release takes the bead back from the pool and the session it was last sent
+// to, in the same write: its route, gc.routed_to, is set empty, and the route a
+// pour stamps, gc.execution_routed_to, and the session pins its last executor
+// left, gc.session_name and gc.session_id, are removed. The keys are Gas City's
+// (lifecycle/lifecycle.toml, [metadata.runtime_owned]), which no domain
+// declares, so the act that releases a bead clears them here. A route left
+// behind offers the bead to its pool again, and a session pin left behind is
+// the owner Gas City's orphan recovery resolves the bead to.
+func (w *Write) Release() {
+	w.set("gc.routed_to", "")
+	for _, pin := range []string{"gc.execution_routed_to", "gc.session_name", "gc.session_id"} {
+		w.unset(pin)
+	}
+}
+
 // Guard makes the write land only while the bead still has status and assignee,
 // "" for unassigned, which bd checks in the write's own transaction. A write
 // whose guard no longer holds writes nothing, and Commit returns an error that

@@ -11,9 +11,10 @@
 // operator's acceptance of the recommendation a recommend exit leaves, under
 // the acceptance lock it runs in (accept.go). It asks waits what holds a bead
 // and which runs work it, the arm to arm one, remove its arm and read whether
-// a pour finished, the arm's record and the PR record what a bead carries,
-// conversation which tasks are conversations, and prstatus which beads are
-// human gates, and no domain asks it.
+// a pour finished, the takeaway to write each exit's headline with its release
+// and whether a bead carries one, the arm's record and the PR record what a
+// bead carries, conversation which tasks are conversations, and prstatus which
+// beads are human gates, and no domain asks it.
 //
 // A reaction disposes its subject and never closes it. Each exit orders its
 // writes so that the write which dispatches, holds or gates the subject comes
@@ -30,6 +31,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 )
 
 // recommendedFormulaKey is the action a recommend exit leaves for the
@@ -88,6 +90,10 @@ type Reactions struct {
 	// `gctk bead disarm` does.
 	Arm    func(arm.Request) (string, error)
 	Disarm func(id, reason string) (string, error)
+	// Takeaway writes a bead's headline, and with a release takes the bead out
+	// of play or sends it on, as `gctk bead takeaway` does, and says what
+	// landed.
+	Takeaway func(takeaway.Request) (string, error)
 	// Sessions reads the city's live sessions, which an acceptance warns of
 	// when one holds a conversation on its bead, nil to warn of none.
 	Sessions func() ([]gascity.Session, error)

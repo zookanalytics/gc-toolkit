@@ -189,7 +189,7 @@ func TestFakeOutputLandsUntilTheProcessEnds(t *testing.T) {
 			t.Fatal(err)
 		}
 		c, err := m.Caller().Start(host.Spec{Argv: []string{"writer"}, Out: f, Relay: true})
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -36,11 +36,9 @@
 # reads its dry run. The first reaction's check, sling and sweep (gctk reaction)
 # read no row here either: they ask the arm's record and the runtime adapter's
 # dispatch hold (services/gctk/internal/gascity/hold.go).
-# gc-helm.sh sources it for takeaway, which lifts `hold:mayor` when it sends a
-# bead on by removing the spellings dispatch_hold_spellings names. gctk bead
-# place and gctk reaction accept read no row here: they ask the runtime
-# adapter's dispatch hold and its spellings (services/gctk/internal/gascity/
-# hold.go) and the arm's record.
+# gctk bead place, gctk reaction accept and gctk bead takeaway, which lift
+# `hold:mayor` when they send a bead on, read no row here: they take its
+# spellings from the runtime adapter (services/gctk/internal/gascity/hold.go).
 # One definition, no copies: a key or a label added here is read by every one
 # of them at once, and dispatch-path.test.sh fails when a reader stops sourcing
 # this file or tests the keys or the labels itself.

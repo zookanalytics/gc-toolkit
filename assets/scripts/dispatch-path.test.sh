@@ -130,14 +130,14 @@ for r in doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.s
     sources "$r"; asks "$r" has_dispatch_path
 done
 for r in assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck.sh \
-         assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh assets/scripts/gc-helm.sh; do
+         assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
     sources "$r"
 done
 for r in doctor/check-blocked-work-armed/run.sh assets/scripts/liveness-classify.sh \
          assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
     asks "$r" has_dispatch_hold
 done
-asks assets/scripts/gc-helm.sh dispatch_hold_spellings
+asks doctor/check-po-queue-only/run.sh dispatch_hold_spellings
 
 echo "# no private copies"
 # A copy is a jq def of the keys or the predicate, or one file that tests both

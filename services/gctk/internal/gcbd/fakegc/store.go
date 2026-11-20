@@ -74,11 +74,11 @@ func replaceFile(path, data string) error {
 	_, werr := f.WriteString(data)
 	cerr := f.Close()
 	if err := errors.Join(werr, cerr); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return &storeError{path, err}
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return &storeError{path, err}
 	}
 	return nil
@@ -121,12 +121,12 @@ func lockDir(path string) (func(), error) {
 		return nil, &storeError{dir, err}
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, &storeError{dir, err}
 	}
 	return func() {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
+		_ = f.Close()
 	}, nil
 }
 
