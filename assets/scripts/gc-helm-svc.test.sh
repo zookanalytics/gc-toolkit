@@ -65,6 +65,11 @@
 #   (FAILKEEP)    a failed build leaves the previous binary untouched, exits 1
 #   (TOOLLESS)    a build owed with no Go toolchain is a failed build, recorded
 #                 as one, and the serving binary is left untouched
+#   (RELEASE)     the build runs the Go release go.mod's go line names, through
+#                 GOTOOLCHAIN, whichever go starts it
+#   (TOOLCHAIN)   a toolchain line in go.mod names the release over the go line
+#   (NORELEASE)   a go.mod that names no release is a failed build, the same
+#                 way, and the toolchain is never started
 #   (ATOMIC)      the binary is published by rename, never built in place
 #   (STAGE)       the failed build's staging file does not survive
 #   (SWEEPSTAGE)  old stranded staging files are reclaimed; fresh ones are not
@@ -254,7 +259,7 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
     # The builder sources its icu4c cgo flags from beside itself.
     cp "$HERE/icu4c-cgo.sh" "$ROOT/assets/scripts/icu4c-cgo.sh"
     echo 'package main' > "$ROOT/services/helm/cmd/helm-svc/main.go"
-    printf 'module example.invalid/fixture\n' > "$ROOT/go.mod"
+    printf 'module example.invalid/fixture\n\ngo 1.22.0\n' > "$ROOT/go.mod"
     printf 'example.invalid/dep v1.0.0 h1:one=\n' > "$ROOT/go.sum"
     # The REAL `gc service list --json` reports `service_name`, not `name`, and
     # carries `city_path` + a relative `state_root`. An earlier stub here said
@@ -264,10 +269,11 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
     printf '{"city_path":"%s","services":[{"service_name":"helm","state_root":".gc/services/helm"}]}' \
         "$STATE_CITY" > "$SERVICES"
 
-    # Stub toolchain: records the scratch and cgo env it was handed, leaks a
-    # go-link dir into it the way a killed linker does, then fails or writes a
-    # stand-in binary. `go build -o` produces an executable; mktemp staged
-    # $BIN_TMP 0600, so the chmod is what keeps the -x check downstream honest.
+    # Stub toolchain: records the scratch, cgo and toolchain env it was handed,
+    # leaks a go-link dir into it the way a killed linker does, then fails or
+    # writes a stand-in binary. `go build -o` produces an executable; mktemp
+    # staged $BIN_TMP 0600, so the chmod is what keeps the -x check downstream
+    # honest.
     cat > "$GOBIN" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -279,8 +285,8 @@ if [ "${1:-}" = "version" ] && [ "${2:-}" = "-m" ]; then
         "${STUB_BEADS_VERSION:-v0.0.0-stub}"
     exit 0
 fi
-printf 'TMPDIR=%s\nGOTMPDIR=%s\nCGO_CPPFLAGS=%s\nCGO_LDFLAGS=%s\n' "${TMPDIR:-}" "${GOTMPDIR:-}" \
-    "${CGO_CPPFLAGS:-}" "${CGO_LDFLAGS:-}" > "$STUB_RECORD"
+printf 'TMPDIR=%s\nGOTMPDIR=%s\nCGO_CPPFLAGS=%s\nCGO_LDFLAGS=%s\nGOTOOLCHAIN=%s\n' "${TMPDIR:-}" \
+    "${GOTMPDIR:-}" "${CGO_CPPFLAGS:-}" "${CGO_LDFLAGS:-}" "${GOTOOLCHAIN:-}" > "$STUB_RECORD"
 mkdir -p "$GOTMPDIR/go-link-stub"
 head -c 4096 /dev/zero > "$GOTMPDIR/go-link-stub/obj"
 if [ -n "${STUB_GO_FAIL:-}" ]; then
@@ -767,6 +773,42 @@ eq "$(status_field last_build_rc)" "1" "(TOOLLESS) and so does the record the bo
 eq "$(cksum < "$STATE/bin/helm-svc")" "$SUM_BEFORE" "(TOOLLESS) the serving binary is left exactly as it was"
 hasnt "$(cat "$GCLOG" 2>/dev/null || true)" "service restart" "(TOOLLESS) and nothing is restarted"
 
+# --- case: the build runs the Go release go.mod names --------------------------
+# GOTOOLCHAIN naming a release makes whichever go starts the build run that
+# release. The fixture's go.mod names go 1.22.0 on its go line.
+fixture
+run_build
+eq "$RC" 0 "(RELEASE) the build exits 0"
+eq "$(sed -n 's/^GOTOOLCHAIN=//p' "$RECORD")" "go1.22.0" \
+   "(RELEASE) the toolchain is handed GOTOOLCHAIN naming the release on go.mod's go line"
+has "$OUT" "with go1.22.0" "(RELEASE) and the build says which release it runs"
+
+# --- case: a toolchain line names the release over the go line ------------------
+# CI's setup-go reads go.mod's toolchain line before its go line, so the build
+# takes the same one.
+fixture
+printf 'module example.invalid/fixture\n\ngo 1.22.0\n\ntoolchain go1.22.5\n' > "$ROOT/go.mod"
+run_build
+eq "$RC" 0 "(TOOLCHAIN) the build exits 0"
+eq "$(sed -n 's/^GOTOOLCHAIN=//p' "$RECORD")" "go1.22.5" \
+   "(TOOLCHAIN) the toolchain is handed the release on go.mod's toolchain line"
+
+# --- case: a go.mod that names no release is a failed build ---------------------
+# A go line that names a language version, not a release, leaves the build no
+# release to run, so it fails the way a build with no toolchain does.
+fixture
+cache_binary
+touch_source
+SUM_BEFORE="$(cksum < "$STATE/bin/helm-svc")"
+printf 'module example.invalid/fixture\n\ngo 1.22\n' > "$ROOT/go.mod"
+run_build --deploy
+eq "$RC" 1 "(NORELEASE) a build owed with no release named in go.mod fails, under --deploy too"
+has "$ERR" "names no Go release" "(NORELEASE) and says what is missing"
+eq "$(status_kind)" "failed" "(NORELEASE) build-status reports the failed build"
+eq "$(status_field last_build_rc)" "1" "(NORELEASE) and so does the record the board reads"
+absent "$RECORD" "(NORELEASE) the toolchain is never started"
+eq "$(cksum < "$STATE/bin/helm-svc")" "$SUM_BEFORE" "(NORELEASE) the serving binary is left exactly as it was"
+
 # --- case: the 2,677 stranded staging files are reclaimed ---------------------
 # One per killed start, laid down by the inline-build era between 08-19 and
 # 08-22. mktemp publishes the name before the build writes a byte, so a kill in
@@ -1177,7 +1219,7 @@ BUMP_REV1="$(commit_fixture "$ROOT" || true)"
 run_build
 eq "$RC" 0 "(DEPBUMP) the first build exits 0"
 rm -f "$RECORD"
-printf 'module example.invalid/fixture\n\nrequire example.invalid/dep v1.0.1\n' > "$ROOT/go.mod"
+printf 'module example.invalid/fixture\n\ngo 1.22.0\n\nrequire example.invalid/dep v1.0.1\n' > "$ROOT/go.mod"
 printf 'example.invalid/dep v1.0.1 h1:two=\n' > "$ROOT/go.sum"
 BUMP_REV2="$(commit_fixture "$ROOT" || true)"
 age_mins "$ROOT/go.mod" 60

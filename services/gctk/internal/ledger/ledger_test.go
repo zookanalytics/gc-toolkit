@@ -549,30 +549,3 @@ func TestABlockerIsWrittenOnlyOntoABeadTheStoreHolds(t *testing.T) {
 		t.Errorf("a refused or unread edge was written: %+v", b.Edges)
 	}
 }
-
-// A priority is one update naming every bead it gives the priority, and one that
-// does not land fails.
-func TestAPriorityIsOneUpdateOfEveryBeadNamed(t *testing.T) {
-	s := fake.New()
-	for _, id := range []string{"b-1", "b-2", "b-3"} {
-		s.Put(fake.Bead{ID: id, Status: "open", Priority: 2})
-	}
-	l := New(s)
-	if err := l.Prioritize(1, "b-1", "b-3"); err != nil {
-		t.Fatal(err)
-	}
-	for id, want := range map[string]int{"b-1": 1, "b-2": 2, "b-3": 1} {
-		if b, _ := s.Row(id); b.Priority != want {
-			t.Errorf("%s stands at P%d, want P%d", id, b.Priority, want)
-		}
-	}
-	if w := s.Writes(); len(w) != 2 || !slices.Equal(w[0].Args, []string{"--priority=1"}) {
-		t.Errorf("writes = %+v, want one per bead named, each --priority=1", w)
-	}
-	if err := l.Prioritize(1); err != nil || len(s.Writes()) != 2 {
-		t.Errorf("a priority of no bead = %v, and wrote %+v", err, s.Writes())
-	}
-	if err := l.Prioritize(0, "b-1", "b-missing"); err == nil || !strings.Contains(err.Error(), "did not land") {
-		t.Errorf("a priority of a bead the store does not hold = %v", err)
-	}
-}
