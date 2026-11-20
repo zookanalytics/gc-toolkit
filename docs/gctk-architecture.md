@@ -725,10 +725,9 @@ why a reader must know it, and the work that retires it.
   tk-ssm8qns.16 puts them behind the ledger and the adapters.
 - **Readers outside the `bead` domain read the arm's keys.** The arm's record
   (`services/gctk/arm/record`) declares the arm's keys and is their one writer,
-  but the scripts, doctor checks, skills and the helm board that read an arm
-  still read its keys themselves, `dispatch-path.sh`'s dispatch path,
-  `check-po-queue-only` and the board's `selfStart` among them, against rules 1
-  and 6. The arm is a residual under its warrant
+  but the scripts, doctor checks and skills that read an arm still read its
+  keys themselves, `dispatch-path.sh`'s dispatch path and `check-po-queue-only`
+  among them, against rules 1 and 6. The arm is a residual under its warrant
   ([warrants.md](warrants.md#deferred-dispatch-residual)): Gas City's fix for a
   launch that waits on its input bead retires the arm, and a migration of its
   readers built now would be rebuilt then. The operator ruled this exception in
@@ -743,9 +742,9 @@ why a reader must know it, and the work that retires it.
   `converse-invalidate-recommendation.sh` clears it and `converse-signoff.sh`
   reads it and `gc.recommended_formula_dispatched`, each spelling the keys,
   against rules 1 and 6, so the keys stay registered in
-  `lifecycle/lifecycle.toml`. The board's own read of it is under the board's
-  entry above. tk-ssm8qns.23 moves those reads and clears onto the domain, and
-  the keys' entries in `lifecycle/lifecycle.toml` go with the last of them.
+  `lifecycle/lifecycle.toml`. tk-ssm8qns.23 moves those reads and clears onto
+  the domain, and the keys' entries in `lifecycle/lifecycle.toml` go with the
+  last of them.
 - **Shell still reads the takeaway's keys.** `gc.takeaway` and the keys beside
   it are declared in `takeaway`, whose `bead takeaway` writes them, but shell
   reads them itself, spelling each key, against rules 1 and 6:
@@ -757,7 +756,7 @@ why a reader must know it, and the work that retires it.
   written by `gctk lifecycle --takeaway`, for `pr-facts.sh`, which the
   GitHub-intake member (tk-1tfzr71.21) retires, and the verb itself retires
   with the old merge path ([the register](#the-re-implementation-register)).
-  So the keys stay registered in `lifecycle/lifecycle.toml`. The board's own
-  read of them is under the board's entry above. tk-1tfzr71.216 decides whether
-  the keys retire onto the bead's notes or stay with a warrant, and that
-  decision moves these reads onto the domain or retires them with the keys.
+  So the keys stay registered in `lifecycle/lifecycle.toml`. tk-1tfzr71.216
+  decides whether the keys retire onto the bead's notes or stay with a warrant,
+  and that decision moves these reads onto the domain or retires them with the
+  keys.
