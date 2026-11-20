@@ -55,15 +55,14 @@ not call gctk yet, and it goes away once they do. A bridge is not a contract
 gctk keeps: matching a script's flags and output byte for byte is not a goal,
 and neither are tests that pin usage text. `assets/scripts/lifecycle.sh` execs
 `gctk lifecycle`, and `assets/scripts/epic.sh` execs `gctk epic` for the work
-skill, whose examples
-call every writer through the pack command. Each finds the binary through
-`assets/scripts/gctk-resolve.sh`, which states the resolution chain, and none
-has a shell fallback. With no binary to run, a bridge refuses the call with
-exit 1 and names the `gctk-build` order that publishes the binary. The merge
-cadence reads a refused transition as a failed one and a refused merge pass as
-`merge rc=1`, and retries both on its next pass. A fresh city has no binary
-until that order's first build, and a city whose build failed keeps serving the
-last good binary.
+skill, whose examples call every writer through the pack command. Each finds
+the binary through `assets/scripts/gctk-resolve.sh`, which states the
+resolution chain, and none has a shell fallback. With no binary to run, a
+bridge refuses the call with exit 1 and names the `gctk-build` order that
+publishes the binary. A caller reads a refused write as a failed one: the merge
+cadence's arms try it again on their next pass, and the refinery's direct
+landing on its next patrol. A fresh city has no binary until that order's first
+build, and a city whose build failed keeps serving the last good binary.
 
 `assets/scripts/pr-status-label.sh` writes the `status:` and `held:` labels in
 shell and takes their values from `gctk pr status`. It resolves the

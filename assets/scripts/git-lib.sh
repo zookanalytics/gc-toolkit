@@ -23,7 +23,7 @@
 # that bounds its calls redefines it after sourcing this file, as
 # liveness-sweep.sh does with its per-call timeout.
 #
-# Callers: gate-ensure.sh, signoff.sh, converse-rework.sh, liveness-sweep.sh.
+# Callers: gate-ensure.sh, signoff.sh, liveness-sweep.sh.
 # Test: git-lib.test.sh.
 
 git_remote_run() { "$@"; }

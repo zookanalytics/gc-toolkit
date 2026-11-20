@@ -42,12 +42,12 @@
 // GitHub's state itself. It does not read GitHub's merge state:
 // GitHub reports BLOCKED for a required check still running as it does for a
 // wedge, and the pr domain's evaluator, which reads each required check, is
-// what tells the two apart. It does not consult GitHub's review posture directly — the working
-// -> needs-review flip rests on that live work, which closes as it
-// hands back, so a sticky changes_requested never traps the value in working
-// after the set empties. Nor does it read GitHub's draft flag: a draft the city
-// opened is known by its markers, and a draft someone else made reads like any
-// other PR.
+// what tells the two apart. It does not consult GitHub's review posture
+// directly — the working -> needs-review flip rests on that live work, which
+// closes as it hands back, so a sticky changes_requested never traps the value
+// in working after the set empties. Nor does it read GitHub's draft flag: a
+// draft the city opened is known by its markers, and a draft someone else made
+// reads like any other PR.
 //
 // A PR on Gas Town's pending record ([pr.OnRecord]) stands where the pr
 // domain's evaluator says, in the same vocabulary: [Render], [RenderHeld] and
@@ -157,12 +157,11 @@ type Facts struct {
 	// Gates are the open human gates that hold the anchor, on the anchor itself
 	// or behind a bead it waits on, nearest first, as [Holding] reads them
 	// ([Holds.Gates]). Only a person clears a human gate. While one stands the
-	// merge is refused, whether by the gate on the anchor, through the merge
-	// pass's blocker probe and its finalize gate (assets/scripts/finalize-gate.sh),
-	// or by the open blocker the gate holds, through that same probe. So a gate
-	// reads as a hold, as merge_hold and rebase_hold do, whatever work is in
-	// flight. A conversation is no human gate, so it is never among them: one
-	// that holds the anchor's merge is among Owed.
+	// merge is refused: the landing order's evaluator holds a PR's merge on each
+	// open wait of its bead, the gate on the anchor or the open blocker the gate
+	// holds. So a gate reads as a hold, as merge_hold and rebase_hold do,
+	// whatever work is in flight. A conversation is no human gate, so it is
+	// never among them: one that holds the anchor's merge is among Owed.
 	Gates []Blocker
 	// Owed are the beads other than human gates that a person owes the next move
 	// on, on the anchor's own blockers or behind a bead it waits on, nearest

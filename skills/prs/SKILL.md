@@ -133,8 +133,8 @@ The anchor must own an open PR: not closed, at `merge_result`
 that ruled the work out, such as the conversation where it was decided. Under
 `duplicate`, `folded`, `re-homed` and `fixed-upstream` it is the bead that
 carries the work now. Never close the PR by hand first: a PR closed with no
-disposition recorded reads as abandoned, and the reconcile or the landing order
-files a human gate on the anchor asking whether to rework it or close it.
+disposition recorded reads as abandoned, and the landing order files a human
+gate on the anchor asking whether to rework it or close it.
 
 Every open bead that blocks the anchor holds its close: an open human gate on
 the anchor (`docs/finalize-gate.md`), the sitting's own conversation and a

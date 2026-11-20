@@ -127,7 +127,8 @@ FAILED=""
 NOTED=""
 
 # Two passes writing one rig's anchors at once is the failure this cadence must
-# never produce, and the controller's open-tracking gate does not prevent it: the watchdog closes tracking beads at 2m, well inside the order's timeout,
+# never produce, and the controller's open-tracking gate does not prevent it:
+# the watchdog closes tracking beads at 2m, well inside the order's timeout,
 # and an un-gated tracking bead is a second dispatch. bd-lib.sh's pass lock
 # depends on no bead surviving. The driver holds it, and each arm runs through
 # pass_child, from a subshell that holds it until the arm exits, so the lock is
@@ -175,11 +176,12 @@ esac
 [ -n "$LOG_SINK" ] && printf '=== %s rig=%s refinery=%s\n' "$TICK" "$RIG" "$AGENT" >> "$LOG_SINK"
 
 # Per-pass bd_list cache (assets/scripts/bd-lib.sh). The arms re-issue the same
-# `gc bd list` many times a pass, and each call is seconds of server wait. GC_RECONCILE_BD_CACHE points bd_list at a directory it
-# serves a repeat from; run_pass clears it before every arm so no arm reads
-# another's rows, and it is removed at END. A killed pass leaves it behind, so
-# setup is rm-then-create. A cache dir that cannot be made leaves the pass
-# uncached (the cache is an optimization, never a correctness input).
+# `gc bd list` many times a pass, and each call is seconds of server wait.
+# GC_RECONCILE_BD_CACHE points bd_list at a directory it serves a repeat from;
+# run_pass clears it before every arm so no arm reads another's rows, and it is
+# removed at END. A killed pass leaves it behind, so setup is rm-then-create. A
+# cache dir that cannot be made leaves the pass uncached (the cache is an
+# optimization, never a correctness input).
 CACHE_DIR="$STATE_DIR/cache"
 rm -rf "$CACHE_DIR" 2>/dev/null || true
 if mkdir -p "$CACHE_DIR" 2>/dev/null; then

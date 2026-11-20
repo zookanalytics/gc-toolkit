@@ -84,8 +84,9 @@ printf '#!/bin/sh\nexit 1\n' > "$BIN/gh"
 # --- the pack the sign-off and the premise re-check run from --------------------
 # The real scripts these writers are, linked beside the stand-ins for the PR's
 # rework, its retirement and the visit's PR comment, which log what they do to
-# the fake's call log. converse-rework.sh files a rework child that blocks the
-# anchor, as rework-child.sh does, and pr-dispose.sh records the disposition.
+# the fake's call log. The converse-rework.sh stand-in files a task that blocks
+# the anchor, as the ask `gctk review ask` files does, and pr-dispose.sh
+# records the disposition.
 P="$TMP/pack/assets/scripts"
 cat > "$P/converse-rework.sh" <<'R'
 #!/usr/bin/env bash
@@ -94,7 +95,7 @@ _a=""; _p=""; for a in "$@"; do [ "$_p" = "--anchor" ] && _a="$a"; _p="$a"; done
 _c=$(gc bd create -t task --title "rework $_a" --metadata "{\"task_kind\":\"rework\",\"anchor_bead\":\"$_a\"}" --json)
 _c=${_c#*\"id\":\"}; _c=${_c%%\"*}
 gc bd dep add "$_a" "$_c" --type blocks >/dev/null
-echo "$_c gc-toolkit/gc-toolkit.polecat filed"
+echo "$_c ask filed"
 R
 cat > "$P/pr-dispose.sh" <<'D'
 #!/usr/bin/env bash
@@ -223,7 +224,7 @@ lands_before() {
     _lb=$(grep -n -F -- "$2" "$CALLS" | head -1 | cut -d: -f1)
     [ -n "$_la" ] && [ -n "$_lb" ] && [ "$_la" -lt "$_lb" ]
 }
-# rework_of <anchor> — the rework child the stand-in filed against the anchor.
+# rework_of <anchor> — the rework the stand-in filed against the anchor.
 rework_of() { local r; r=$(bids metadata.task_kind=rework "metadata.anchor_bead=$1"); printf '%s' "${r%%$'\n'*}"; }
 
 echo "# opening a conversation on an open PR's anchor holds the PR's merge"

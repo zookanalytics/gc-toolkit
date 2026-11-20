@@ -2792,13 +2792,14 @@ conversation_reply() {
 # `blocks` edge, so bd counts the anchor blocked while the conversation is open
 # and lets it go once the conversation closes, by whatever route it closes, the
 # sign-off, a dismiss, the premise re-check's moot or benign close or a close by
-# hand, with nothing to release. The merge pass holds a PR while an open bead
-# blocks its anchor. open adds the edge to a conversation it files or finds
-# waiting in the operator's queue, and engage adds it whenever it starts a
-# sitting, so a conversation filed before its PR opened, or one whose sitting
-# lifted the hold, holds the merge again once it is engaged. A sitting that is
-# helping the PR land, or whose conversation has nothing to do with whether it
-# lands, lifts it with `gc bd dep remove <anchor> <conversation>`
+# hand, with nothing to release. The landing order's evaluator holds a PR's
+# merge while an open bead blocks its anchor. open adds the edge to a
+# conversation it files or finds waiting in the operator's queue, and engage
+# adds it whenever it starts a sitting, so a conversation filed before its PR
+# opened, or one whose sitting lifted the hold, holds the merge again once it
+# is engaged. A sitting that is helping the PR land, or whose conversation has
+# nothing to do with whether it lands, lifts it with
+# `gc bd dep remove <anchor> <conversation>`
 # (skills/converse-hold), and the lift stands for that sitting: open, completing
 # a conversation a sitting has taken, leaves the hold as that sitting left it.
 # The edge holds only the anchor: a review, a rework or a supplement is a bead
