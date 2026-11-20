@@ -1013,7 +1013,9 @@ blocks edges name, what holds each ask on it, the evaluator's own waits and the
 work anchored to it, and the other open work on its branch. After a decision
 that owes no act, the run keeps the digest of those on the bead
 (`pr_landing_digest`), and a later run passes over the record, with no read of
-GitHub and no write, until the digest of what it reads differs.
+GitHub and no write, until the digest of what it reads differs. The digest
+decides only whether a run decides a record, never what it decides, so a
+digest that is missing or wrong only has the record decided again.
 
 Each due record's act reads the record again under the record lock and
 decides it there, by the evaluator's rule as `gctk pr status` applies it. Where

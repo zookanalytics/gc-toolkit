@@ -511,11 +511,8 @@ first. Either way the change is a decision on the record, not a drift.
   side of a PR reaches its bead.**
 - **The landing order decides a record again only once its PR moved or its
   bead changed** since a run decided it with no act owed, so a run in which
-  nothing changed asks GitHub nothing. The digest it keeps on the bead of what
-  that decision read is no landing state: it changes whether a run decides the
-  record, never what the decision is, and a record whose digest is missing or
-  wrong is decided again. It keeps the labels of each PR the city owns equal to
-  what the store derives.
+  nothing changed asks GitHub nothing. It keeps the labels of each PR the city
+  owns equal to what the store derives.
 - **An approval stands across a push until triage reads the change as
   material.**
 - **No city push rewrites or overwrites a PR's commits,** so the PR keeps the
