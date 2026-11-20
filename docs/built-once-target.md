@@ -127,11 +127,11 @@ finding on a PR stays a record the operator rules on.
 The pack's own refinery lands a branch directly or publishes it as a PR, and
 Gas Town's pending-through-merge record keeps the work's bead open until the
 merge is verified on the target. The pack adds one approval contract for every PR the
-city opens, on any target, in one evaluator of the PR's readiness. The merge
-runs it on a fresh read of GitHub, and every display runs it on the GitHub read
-the PR watch saves on the PR's bead when the PR moves. The pack also adds a
-merge request
-pinned to the head the evaluator judged, the PR's managed summary and title,
+city opens, on any target, in one evaluator of the PR's readiness. The landing
+order runs it on its own read of GitHub for every decision that depends on
+GitHub, and every display runs it on the GitHub read the PR watch saves on the
+PR's bead when the PR moves. The pack also adds a merge request pinned to the
+head the evaluator judged, the PR's managed summary and title,
 and the step that takes a GitHub event to the bead that owns it.
 
 The trade: the pack's transition machine, its second copy of the approval
@@ -225,7 +225,10 @@ yet. Each remaining difference names its reason and what ends it:
   `pr_state` is the PR's state as that read found it, so a landing's evidence is
   its merge commit and its time. A read or an act that fails is recorded by no
   key, where Gas Town writes `pr_reconcile_error`, because the next pass finds
-  the same difference and acts on it. No end is planned.
+  the same difference and acts on it. The landing order reads GitHub only for a
+  record whose PR moved or whose bead changed, which it tells by a digest of
+  what its last decision read that it keeps on the bead, and decides it on its
+  own read. No end is planned.
 - **find-work reads waits.** It skips a bead something holds or whose branch
   another open bead works on, and takes a rework child before its anchor. Gas
   Town takes any bead assigned to the refinery. Two writers on one branch would

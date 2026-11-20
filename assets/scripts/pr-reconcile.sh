@@ -3,10 +3,10 @@
 # records and the labels of the PRs its beads own, for orders/pr-reconcile.toml.
 #   pr-reconcile.sh [gctk pr reconcile's flags]
 #
-# `gctk pr reconcile` (services/gctk/internal/cli/prland.go) is the run: it acts
-# from the beads on each PR the refinery recorded as pending, merges a ready one
-# on its own read with its head pinned, and closes its bead once the merge
-# commit is on the target, and it writes each owned PR's status: and held:
+# `gctk pr reconcile` (services/gctk/internal/cli/prland.go) is the run: it
+# decides each PR the refinery recorded as pending on its own read once the PR
+# moved or its bead changed, merges a ready one with its head pinned, and closes
+# its bead once the merge commit is on the target, and it writes each owned PR's status: and held:
 # labels where they differ from what the store derives. This script names the
 # refinery the run acts for, which the order's environment does not carry: the
 # agent the roster places in $GC_RIG under the name refinery (resolve-route.sh),

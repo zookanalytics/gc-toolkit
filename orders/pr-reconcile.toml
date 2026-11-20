@@ -1,15 +1,15 @@
 # pr-reconcile — the landing order (specs/tk-1tfzr71.66/design.md, section 4,
 # and specs/tk-1tfzr71.149/design.md, sections 5 and 6). The refinery records
 # each PR it publishes as pending on the bead that owns it (gctk pr record), and
-# this order acts on those records from the beads: a run decides each record
-# from the store and the read the one-PR update saved on its bead
-# (orders/pr-poll.toml and orders/pr-compare.toml), and reads GitHub only on an
-# act's own read of the PR: for a merge, which it decides again on that read and
-# pins to the head it judged, or adds to its base's merge queue with it, for an
-# exception, for a draft's ready transition, and for a withdrawal's dismissals
-# and close. Its
-# bead closes once the
-# merge commit is on the freshly fetched target. A PR open at another head goes
+# this order decides each of those records on its own read of the PR, made in
+# the act: a merge pinned to the head that read judged, or added to its base's
+# merge queue with it, an exception, a draft's ready transition, and a
+# withdrawal's dismissals and close. A run decides a record only once its PR
+# moved or its bead changed since a run decided it with no act owed, which it
+# tells from the store, the read the one-PR update saves for orders/pr-poll.toml
+# and orders/pr-compare.toml among it, so a run in which nothing changed asks
+# GitHub nothing. Its bead closes once the merge commit is on the freshly
+# fetched target. A PR open at another head goes
 # back to the refinery, which a run wakes and nudges for it when only a
 # conversation or an ask holds the PR's bead, and the exceptions stay blocked
 # behind a human gate. A PR a ruling retired (pr-dispose.sh) is never merged,
@@ -27,8 +27,9 @@
 # beads own, on the pending record or not, equal to what the store derives
 # (specs/tk-1tfzr71.149/design.md, section 9): it compares the labels the
 # one-PR update saved on the PR's bead with the ones gctk pr status derives,
-# none once the PR merged or closed, and has pr-status-label.sh write them only
-# where they differ. A label write is an act like the others, and one that does
+# none once the PR merged or closed, and where they differ it reads the PR
+# itself and has pr-status-label.sh, which reads the PR's labels itself, write
+# them. A label write is an act like the others, and one that does
 # not land records nothing, so the next run writes it again.
 #
 # Exec, not a formula: a run reads records and writes guarded updates, with no
@@ -47,13 +48,13 @@
 # webhook fires skips Gas City's gates and each event would start a run of its
 # own.
 #
-# Every minute, because a run reads no record's PR to decide: it decides every
-# record from the beads and takes no --count. A change on the store's side that
-# no writer announces, such as a gate a person clears, reaches its act at the
-# next run, and a change a cheap sign shows reaches it within about four
+# Every minute, because a run reads GitHub only for the records that changed:
+# it reads the store once and takes no --count. A change on the store's side
+# that no writer announces, such as a gate a person clears, reaches its act at
+# the next run, and a change a cheap sign shows reaches it within about four
 # minutes at the most, the PR watch's two and each run's start at the next lane
 # pass included (specs/tk-1tfzr71.149/design.md, section 6). A run takes the
-# records that owe an act in a shuffled order, starts none more than 45 seconds
+# records that changed in a shuffled order, starts none more than 45 seconds
 # in, and stops each at 30 seconds with whatever GitHub call, fetch, store read
 # or write, human gate's filing or refinery's wake it is making: a fetch gets a
 # SIGTERM to git's process group, so git removes the lock files it holds in the
@@ -62,15 +63,15 @@
 # run this order never reads, so an act starts a pour only while 10 seconds of
 # its 30 remain, and no disposition writer, since a stop after its close and
 # before it ends the bead's branch would leave that branch. An act
-# that fails or is stopped records nothing on the bead: its difference stays,
-# the next run acts on it, and the run exits 2, so Gas City's run record holds
+# that fails or is stopped records nothing on the bead: the record stays due,
+# the next run decides it again, and the run exits 2, so Gas City's run record holds
 # the failure. `timeout` holds the 45 seconds of starting acts, the last act's
 # 30 seconds and its fetch's 5, the listing and the seed audit's check, which
 # starts only inside the 45 seconds; gctk's cli test asserts the bounds sit
 # below it. A pour or a disposition writer that runs past its act's 30 seconds
 # is ended only by `timeout`. Tune from city.toml [[orders.overrides]].
 [order]
-description = "Landing order: act from the beads on each PR the refinery recorded as pending, merge a ready one on its own read with its head pinned, close its bead once the merge commit is on the target, and keep each owned PR's labels equal to what the store derives"
+description = "Landing order: decide each PR the refinery recorded as pending on its own read once it moved or its bead changed, merge a ready one with its head pinned, close its bead once the merge commit is on the target, and keep each owned PR's labels equal to what the store derives"
 trigger = "cooldown"
 interval = "1m"
 timeout = "120s"

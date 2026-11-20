@@ -852,7 +852,9 @@ a rig-scoped cooldown exec order with a 180-second timeout, which runs
 reads each of those PRs in full every 10 minutes and saves each one that
 differs from the read saved on its bead, which catches the changes no cheap
 sign shows, and clears the city's labels off the PRs no live bead owns (the
-net, below).
+net, below). The read they save is the displays', and the landing order reads
+it only to choose which records to decide, each on its own read of GitHub
+([The landing order](#the-landing-order)).
 
 These two orders and the landing order run at their set intervals, `pr-poll`
 every 2 minutes, `pr-compare` every 10 and `pr-reconcile` every minute, only
@@ -998,21 +1000,40 @@ has no record to read. Its records are the pending ones, so on a rig still on
 the old path it finds none, and keeps only the labels of the PRs the rig's
 beads own ([The labels](#the-landing-order), below).
 
-A run acts from the beads. It lists the beads that carry the marker
-`pr_reconcile_pending`, and every live bead, in one pass over the store, and
-decides each record from the store and the read the one-PR update saved on its
-bead ([The PR watch](#the-pr-watch)), by the evaluator's rule as `gctk pr
-status` applies it. It decides each bead on the record with a ruling's
-disposition on it too, with or without the marker. It takes an open or
-blocked bead only while it is assigned to nobody or to the refinery, and
-writes nothing to a bead someone else works. It reads GitHub
-only for a merge, an exception, a draft's ready transition and a withdrawal's
-dismissals and close, each on the act's own read, so it reads no record's PR
-to decide and takes no count of records. It reads the store three times whatever its
-records: the marked records, every live bead, and in one read the closed beads
-their blocks edges name. Measured on 2026-11-20, a run with nothing to act on
-took 1.9 to 2 seconds on the gc-toolkit rig's store, with 15 records and 871
-live beads, at a load average of 18. It takes the records that owe an act in a shuffled order, so a record
+A run decides each record on its own read of GitHub, once the record has
+changed. It lists the beads that carry the marker `pr_reconcile_pending`, and
+every live bead, in one pass over the store. It takes each record, and each
+bead on the record with a ruling's disposition on it too, with or without the
+marker, an open or blocked one only while it is assigned to nobody or to the
+refinery, and writes nothing to a bead someone else works. A record is due
+unless a run decided it with no act owed and nothing that decision read of the
+store has changed since: the bead's status, assignee and metadata, the read the
+PR watch saved among them ([The PR watch](#the-pr-watch)), each bead its
+blocks edges name, what holds each ask on it, the evaluator's own waits and the
+work anchored to it, and the other open work on its branch. After a decision
+that owes no act, the run keeps the digest of those on the bead
+(`pr_landing_digest`), and a later run passes over the record, with no read of
+GitHub and no write, until the digest of what it reads differs.
+
+Each due record's act reads the record again under the record lock and
+decides it there, by the evaluator's rule as `gctk pr status` applies it. Where
+the decision depends on GitHub, it decides on its own read, made in the act:
+the PR's own facts first, then the evaluator's reads of its checks, reviews,
+review threads and comments through that read, and a withdrawal's reads of the
+reviews and the review threads. A decision that rests on the store alone, such
+as clearing the marker of a bead closed on a verified merge, reads nothing of
+GitHub. The run decides nothing from the read the PR watch saved, so a read
+that is out of date, or a change the watch has not seen yet, delays a decision
+and causes no act.
+
+So a run reads the store six times whatever its records: the marked records,
+every live bead, in one read the closed beads their blocks edges name, the
+store's blocked set, and the closed beads the waits name. It reads GitHub only
+for the records that are due, and for each the reads its decision needs.
+Measured on 2026-11-20, a run with nothing to act on and every record's digest
+current took 2.9 to 3.5 seconds on the gc-toolkit rig's store, with 10 records
+and 896 live beads, at a load average of 16 to 18, and read GitHub not at all.
+It takes the due records in a shuffled order, so a record
 whose act is slow or keeps failing holds no other back, starts no act more than
 45 seconds into the run, and stops each act at 30 seconds with whatever GitHub
 call, fetch, store read or write, human gate's filing or refinery's wake it is
@@ -1027,36 +1048,32 @@ calls fit inside, and otherwise leaves it to the next run. The disposition
 writer a retired PR's bead goes to once the act frees the lock ends the bead's
 branch on the git remote once its close lands, and a stop between the two
 would leave the branch of a closed bead that no run reads again.
-Each act reads its record again under the record lock and decides again from
-that read. An act that does not complete records nothing on the bead: its
-difference stays, the next run acts on it, and the run exits 2. A run saves
-none of what it reads, since GitHub's side of a PR reaches its bead only
-through the PR watch, and a record that owes no act gets no write.
+An act that does not complete keeps no digest: the record stays due, the next
+run decides it again, and the run exits 2. A run saves none of what it reads
+of GitHub, since GitHub's side of a PR reaches its bead only through the PR
+watch, and a record that owes no act gets one write, its digest, when the
+store has changed since a run last kept one.
 
 | The PR | The run |
 |---|---|
-| open at the head the refinery validated | marks a draft ready, without waiting for CI, once a review result passed at that head and target, no review run is attached and no ask a run can take is open. It marks it only once the act's own read of the PR finds it a draft at that head and target, since a head pushed after the PR watch's read would otherwise be put before a reviewer on the passed result of the head before it. Otherwise it asks the evaluator over the saved read whether the PR is ready. A ready one gets the merge's own read of GitHub, made in its act, on which the evaluator decides again, and GitHub is asked to squash-merge it only while its head is the head that read judged (`mergePullRequest` with `expectedHeadOid`), or to add it to its base's merge queue with that head where the base requires one. One that is not ready gets a review run when no review result passed at that head and target, or an ask nothing holds is open on the bead (below). The next run decides again from the read the PR watch saves next |
-| open at another head | records the bead open, as `pull_request_head_changed`, and hands the head to the refinery in the write that assigns it the bead, once no withdrawal and no review run holds the head. While only conversations and asks hold the bead, it wakes the refinery after that write and clears the marker only once the wake lands (below). The refinery validates the new head and records it pending again. When it will not land the head as it stands, such as on a conflict with the target, it files the reason as an ask and then records the PR pending at the head its prep read (`refinery-requeue.sh`), so the ask holds the merge before the head is pending, a later run pours the review run that answers it, and its find-work leaves the ask alone. The saved read can be older than the refinery's record, since the refinery pushes a head before it records it and validates whatever its prep fetched, a branch a person rewrote included, so the act fetches the PR's branch before it sends anything back. A tip at the saved head confirms the read, and the bead goes back at it. When the tip contains the validated head, in the history the rig's clone holds, nothing is sent back until the PR watch reads the PR again. Any other tip goes back as the head the branch holds, and a fetch or a read that fails sends nothing back until the next run. The refinery's prep takes the branch as it fetches it, so a reset head is the one it validates (`refinery-prep.sh`) |
+| open at the head the refinery validated | marks a draft ready, without waiting for CI, once a review result passed at that head and target, no review run is attached and no ask a run can take is open. Otherwise the evaluator decides on the act's read whether the PR is ready, and GitHub is asked to squash-merge a ready one only while its head is the head that read judged (`mergePullRequest` with `expectedHeadOid`), or to add it to its base's merge queue with that head where the base requires one. One that is not ready gets a review run when no review result passed at that head and target, or an ask nothing holds is open on the bead (below). After a request, the next run decides again on its own read |
+| open at another head | records the bead open, as `pull_request_head_changed`, and hands the head to the refinery in the write that assigns it the bead, once no withdrawal and no review run holds the head. While only conversations and asks hold the bead, it wakes the refinery after that write and clears the marker only once the wake lands (below). The refinery validates the new head and records it pending again. When it will not land the head as it stands, such as on a conflict with the target, it files the reason as an ask and then records the PR pending at the head its prep read (`refinery-requeue.sh`), so the ask holds the merge before the head is pending, a later run pours the review run that answers it, and its find-work leaves the ask alone. GitHub's answer can lag a push, and the refinery pushes a head before it records it and validates whatever its prep fetched, a branch a person rewrote included, so the act fetches the PR's branch before it sends anything back. A tip at the head GitHub gives confirms it, and the bead goes back at it. When the tip contains the validated head, in the history the rig's clone holds, GitHub's answer lags the branch: nothing is sent back, and the next run decides again. Any other tip goes back as the head the branch holds, and a fetch or a read that fails sends nothing back until the next run. The refinery's prep takes the branch as it fetches it, so a reset head is the one it validates (`refinery-prep.sh`) |
 | merged at the validated head, with the merge commit on the freshly fetched target | records `mr_merged` and closes the bead; when bd refuses that close, for an open child or a live blocker, records the exception `pull_request_merged_close_refused` with the merge's evidence, and files its human gate |
-| closed unmerged, merged at another head, or no longer the PR the record names | records the exception, keeps the bead blocked and files a human gate keyed by its value. A close, a merge record's PR found open, or a PR no longer the record's is recorded only once the act's own read of the PR shows it too, since the saved read can be older than the record, as for a PR reopened and published again before the PR watch read it: otherwise the act records nothing, and the record waits for the watch's next read |
-| retired by a ruling, whose bead carries the disposition `pr-dispose.sh` records under the record lock before it closes the PR | requests no merge, pours no review run and marks nothing ready while the PR is open. Once the saved read finds the PR closed and no review run is attached, an act closes the asks and the withdrawals still open on the bead, then, with the record lock free, closes the bead onto the ruling's successor through `bead-rehome.sh`, run as the refinery ([state-machine.md](state-machine.md#disposition)). The script closes it only while it still has the status and assignee the act read under the lock and still records the ruling the act read, so a bead reassigned or ruled again once the lock is free goes to the next run, which reads it again. A close the script holds, such as one the ruling's open conversation holds, waits for the next run, which hands it over again, and fails no run. A retired PR that merged all the same lands as any other |
-| no read of the PR saved on the bead, or a read of another PR | nothing, until the PR watch saves the PR's read |
-| an act that did not complete: a request GitHub refused or did not answer, a fetch that failed, a merge commit not yet on the target, or an act stopped at its 30 seconds | records nothing: the difference stays on the bead, the next run acts on it, and the run exits 2, so Gas City's run record holds the failure |
+| closed unmerged, merged at another head, or no longer the PR the record names | records the exception, keeps the bead blocked and files a human gate keyed by its value |
+| retired by a ruling, whose bead carries the disposition `pr-dispose.sh` records under the record lock before it closes the PR | requests no merge, pours no review run and marks nothing ready while the PR is open. Once the act's read finds the PR closed and no review run is attached, an act closes the asks and the withdrawals still open on the bead, then, with the record lock free, closes the bead onto the ruling's successor through `bead-rehome.sh`, run as the refinery ([state-machine.md](state-machine.md#disposition)). The script closes it only while it still has the status and assignee the act read under the lock and still records the ruling the act read, so a bead reassigned or ruled again once the lock is free goes to the next run, which reads it again. A close the script holds, such as one the ruling's open conversation holds, waits for the next run, which hands it over again, and fails no run. A retired PR that merged all the same lands as any other |
+| the same as when a run decided it with no act owed, with nothing changed in the store since | nothing: the run reads none of it from GitHub and writes nothing |
+| an act that did not complete: a read or a request GitHub refused or did not answer, a fetch that failed, a merge commit not yet on the target, or an act stopped at its 30 seconds | keeps no digest: the record stays due, the next run decides it again, and the run exits 2, so Gas City's run record holds the failure |
 
 **Withdrawals come first.** While the PR is open, a run first carries out each
 open withdrawal on the bead, which a review run's triage files when it rules a
-head material (`gctk pr withdraw`), from the approvals the saved read holds. It
+head material (`gctk pr withdraw`), on its own read of the PR's reviews. It
 waits while an approval it would dismiss carries an inline comment the intake
-has not routed, on the saved read and then on the act's own read of the PR's
-review threads, since a comment edited after the PR watch's read can be
-feedback the saved read does not show. It dismisses each approval that stands
-on a commit that does not contain the withdrawal's head in the history the rig's clone holds, with
-the withdrawal's reason and the city's mark, and closes the withdrawal once the
-act's own read of the PR's reviews shows none standing past the ones it
-dismissed. The saved read can lack an approval given since the PR watch read
-it, which a closed withdrawal would leave standing, so an approval only the
-act's own read shows keeps the withdrawal open until a later run dismisses it
-from the watch's next read. Before it dismisses any, it
+has not routed, on its read of the PR's review threads. It dismisses each
+approval that stands on a commit that does not contain the withdrawal's head
+in the history the rig's clone holds, with the withdrawal's reason and the
+city's mark, reads the reviews again, and closes the withdrawal once none
+stands past the ones it dismissed, so an approval given during the act keeps
+the withdrawal open for the next run. Before it dismisses any, it
 fetches the PR's branch into the clone, so an approved commit someone pushed
 from outside the city is judged by its own history. A commit the clone still
 does not hold, such as one a force-push left behind, contains no head, so its
@@ -1185,10 +1202,10 @@ each owned PR whose bead holds the PR watch's read of it, it compares the labels
 of the writer's that the read saved with the ones the store derives, as `gctk
 pr status` derives them over the run's own listing: the PR's status and held
 values while it is open, and none once it merged or closed. Where they differ,
-it has the labels' one writer, `pr-status-label.sh`, write them, `reconcile` on
-an open PR and `clear` on one that merged or closed, handing it every label the
-read saved as the ones the PR shows, so the writer reads the PR's labels itself
-only when it shows none. A label write is an act among the others: it takes its
+it reads the PR's state itself and has the labels' one writer,
+`pr-status-label.sh`, write them on that read, `reconcile` on an open PR and
+`clear` on one that merged or closed, handing it no labels, so the writer
+reads the PR's labels itself. A label write is an act among the others: it takes its
 place in the shuffled order, starts inside the 45 seconds, stops at 30, takes
 no lock and writes nothing on the bead. A write that does not land records
 nothing, so the next run finds the same difference and writes it again. A PR

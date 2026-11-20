@@ -1225,8 +1225,8 @@ sequenceDiagram
   R->>L: gctk pr record — pull_request_pending, blocked, assigned to nobody
   W->>G: ask whether the PR moved; read what moved
   W->>L: gctk pr refresh — save GitHub's side of the PR on the bead
-  O->>L: decide from the bead and its saved read: the evaluator finds it ready
-  O->>G: the merge's own read of the PR; the evaluator decides again
+  O->>L: the bead changed since a run last decided it, so the run decides it
+  O->>G: the act's own read of the PR; the evaluator finds it ready
   O->>G: mergePullRequest, pinned to the head that read judged (expectedHeadOid)
   W->>L: gctk pr refresh — save the PR merged, with its merge commit
   O->>L: mr_merged + close, once the merge commit is on the fetched target
@@ -1693,7 +1693,7 @@ record to its last write of it, so a merge an act requests comes before the
 marker, never after it. The landing order reads such an anchor's record
 whatever its own `pr_reconcile_pending`, so a changed head it had handed to the
 refinery is read too, while the anchor is assigned to nobody or to the
-refinery. Once the saved read finds the PR CLOSED and no review run is
+refinery. Once the act's own read finds the PR CLOSED and no review run is
 attached to the anchor, it closes the asks and the approval withdrawals
 still open on the anchor, which nothing takes once the PR is closed, and then,
 with the record lock free, runs `bead-rehome.sh` as the refinery. It names the status and assignee it read the anchor under and the
