@@ -21,3 +21,16 @@ func IsDispatchHold(label string) bool {
 
 // HasDispatchHold reports whether labels carry a dispatch hold.
 func HasDispatchHold(labels []string) bool { return slices.ContainsFunc(labels, IsDispatchHold) }
+
+// Spellings is each label among labels that reads as hold, trimmed and in any
+// case, as written, in order. bd removes a label only by its exact text, so a
+// writer that lifts a hold removes each spelling the bead carries.
+func Spellings(labels []string, hold string) []string {
+	var out []string
+	for _, l := range labels {
+		if strings.EqualFold(strings.TrimSpace(l), hold) && !slices.Contains(out, l) {
+			out = append(out, l)
+		}
+	}
+	return out
+}

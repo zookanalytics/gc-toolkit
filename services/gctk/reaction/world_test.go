@@ -17,6 +17,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 )
 
 // root is the root of the reaction's run, which --run names.
@@ -38,10 +39,10 @@ type world struct {
 	log  []string
 	said []string
 
-	// Each fails its act when set: the takeaway (gc-helm.sh exits 4), a gate's
-	// filing, a sling, a nudge and an arm.
-	helmFails, gateFails, slingFails, nudgeFails bool
-	armErr                                       error
+	// Each fails its act when set: the takeaway, a gate's filing, a sling, a
+	// nudge and an arm.
+	takeawayFails, gateFails, slingFails, nudgeFails bool
+	armErr                                           error
 	// slingCode is the exit a sling answers, 3 being a live run of the
 	// formula.
 	slingCode int
@@ -125,6 +126,7 @@ func newWorld(t *testing.T) *world {
 		Now: func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) },
 		Log: func(line string) { w.mu.Lock(); w.said = append(w.said, line); w.mu.Unlock() },
 	}
+	w.r.Takeaway = w.takeaway
 	w.r.Arm = func(req arm.Request) (string, error) {
 		line := "ARM " + req.ID + " --target " + req.Target
 		if req.Formula != "" {
@@ -167,21 +169,39 @@ func (w *world) add(line string) {
 	w.log = append(w.log, line)
 }
 
-// script answers gc-helm.sh and human-gate.sh. gc-helm.sh takeaway's release
-// makes its subject ready as its waits land (released). human-gate.sh files a
-// gate under its key that blocks its subject, its message's first line as its
-// title and the whole message as its description, and prints its id, or finds
-// the open gate under the key and prints that; --retract closes the open gates
-// under the key.
+// takeaway logs the takeaway as its command's flags would read, and a
+// release makes its subject ready as its waits land (released).
+func (w *world) takeaway(req takeaway.Request) (string, error) {
+	line := "TAKEAWAY " + req.Bead + " " + req.Text + " --by " + req.By
+	if req.Release {
+		line += " --release"
+	}
+	for _, id := range req.WaitingOn {
+		line += " --waiting-on " + id
+	}
+	if req.Route != "" {
+		line += " --route " + req.Route
+	}
+	if req.Assign != "" {
+		line += " --assign " + req.Assign
+	}
+	if req.NoWait {
+		line += " --no-wait"
+	}
+	w.add(line)
+	if w.takeawayFails {
+		return "", errors.New("could not write the headline on tk-sub (the store refused it), so nothing after it was written")
+	}
+	w.released(req)
+	return "takeaway set on " + req.Bead, nil
+}
+
+// script answers human-gate.sh, which files a gate under its key that blocks
+// its subject, its message's first line as its title and the whole message as
+// its description, and prints its id, or finds the open gate under the key and
+// prints that; --retract closes the open gates under the key.
 func (w *world) script(c rtfake.Call) gascity.Result {
 	switch c.Name {
-	case "gc-helm.sh":
-		w.add("HELM " + strings.Join(c.Args, " "))
-		if w.helmFails {
-			return gascity.Result{Code: 4, Output: "gc-helm: could not update 'tk-sub': the store refused it"}
-		}
-		w.released(c.Args)
-		return gascity.Result{}
 	case "human-gate.sh":
 		w.add("GATE " + strings.Join(c.Args, " "))
 		subject, key, message, retract := flagValue(c.Args, "--subject"), flagValue(c.Args, "--key"), flagValue(c.Args, "--message"), slices.Contains(c.Args, "--retract")
@@ -215,22 +235,17 @@ func (w *world) script(c rtfake.Call) gascity.Result {
 // release waits on has closed, as bd's ready set reads the subject once those
 // wait edges land. A subject waitingWorld starts unready so reads ready only
 // after its release.
-func (w *world) released(args []string) {
-	if len(args) < 2 || args[0] != "takeaway" || !slices.Contains(args, "--release") {
+func (w *world) released(req takeaway.Request) {
+	if !req.Release {
 		return
 	}
-	waits := 0
-	for i, a := range args {
-		if a != "--waiting-on" || i+1 == len(args) {
-			continue
-		}
-		if b, ok := w.store.Row(args[i+1]); !ok || !strings.EqualFold(b.Status, "closed") {
+	for _, id := range req.WaitingOn {
+		if b, ok := w.store.Row(id); !ok || !strings.EqualFold(b.Status, "closed") {
 			return
 		}
-		waits++
 	}
-	if waits > 0 {
-		w.store.MakeReady(args[1])
+	if len(req.WaitingOn) > 0 {
+		w.store.MakeReady(req.Bead)
 	}
 }
 

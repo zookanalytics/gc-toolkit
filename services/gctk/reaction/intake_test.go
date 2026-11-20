@@ -30,11 +30,11 @@ func TestIntakeHoldsAnUnplacedSubject(t *testing.T) {
 		!strings.HasPrefix(states[0].Reason, "Held for placement instead of reaching gc-toolkit/gc-toolkit.polecat: tk-sub has no parent epic and is not PR-finishing work") {
 		t.Fatalf("(INTAKE) the holds were %+v", states)
 	}
-	w.has("HELM takeaway tk-sub ready to build once placed --by proactive --release --no-wait", "(INTAKE) released with no route, nothing waiting")
+	w.has("TAKEAWAY tk-sub ready to build once placed --by proactive --release --no-wait", "(INTAKE) released with no route, nothing waiting")
 	w.hasnt("--route", "(INTAKE) no pool is offered it")
 	w.has("## Intake (first reaction, 2026-11-16T12:00:00Z)", "(INTAKE) it is noted")
 	w.has("gc beads list --label hold:mayor lists it", "(INTAKENOTE) the note names the queue's read")
-	w.before("HELM takeaway", "## Intake (first reaction", "(INTAKEORDER) the release first")
+	w.before("TAKEAWAY", "## Intake (first reaction", "(INTAKEORDER) the release first")
 	w.before("## Intake (first reaction", "SET-STATE", "(INTAKEORDER) then the note")
 	if wr := w.writes(); !strings.HasPrefix(wr[len(wr)-1], "SET-STATE tk-sub hold=mayor") {
 		t.Errorf("(INTAKEORDER) the last write was %q, want the hold", wr[len(wr)-1])
@@ -69,7 +69,7 @@ func TestIntakeHoldsAnUnplacedSubject(t *testing.T) {
 	code, out, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
 	wantCode(t, code, 4, err, "(INTAKEMARK) a hold the store refuses")
 	errHas(t, err, "the hold:mayor label did not", "(INTAKEMARK) naming the refused write")
-	w.has("HELM takeaway tk-sub", "(INTAKEMARK) after the release, which stands")
+	w.has("TAKEAWAY tk-sub", "(INTAKEMARK) after the release, which stands")
 	if out != "" {
 		t.Errorf("(INTAKEMARK) the exit reported %q", out)
 	}
@@ -77,7 +77,7 @@ func TestIntakeHoldsAnUnplacedSubject(t *testing.T) {
 	w.reset()
 	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
 	wantCode(t, code, 0, err, "(INTAKEMARK) the re-run")
-	w.before("HELM takeaway", "SET-STATE tk-sub hold=mayor", "(INTAKEMARK) releasing again, then holding")
+	w.before("TAKEAWAY", "SET-STATE tk-sub hold=mayor", "(INTAKEMARK) releasing again, then holding")
 
 	w = newWorld(t)
 	unplaced(w)
@@ -94,10 +94,10 @@ func TestIntakeHoldsAnUnplacedSubject(t *testing.T) {
 
 	w = newWorld(t)
 	unplaced(w)
-	w.helmFails = true
+	w.takeawayFails = true
 	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
 	wantCode(t, code, 4, err, "(INTAKESTAMP) a held subject whose release the store refuses")
-	errHas(t, err, "gc-helm.sh takeaway failed on tk-sub", "(INTAKESTAMP) naming the release")
+	errHas(t, err, "the takeaway on tk-sub stopped", "(INTAKESTAMP) naming the release")
 	w.hasnt("SET-STATE", "(INTAKESTAMP) before the hold")
 
 	w = newWorld(t)
@@ -107,7 +107,7 @@ func TestIntakeHoldsAnUnplacedSubject(t *testing.T) {
 	wantCode(t, code, 0, err, "(INTAKEBLK) an unplaced blocked subject")
 	w.has("SET-STATE tk-sub hold=mayor", "(INTAKEBLK) held for placement")
 	w.has("--release --waiting-on tk-blk1", "(INTAKEBLK) its wait still an edge")
-	w.before("HELM takeaway", "SET-STATE", "(INTAKEBLK) the hold after the wait")
+	w.before("TAKEAWAY", "SET-STATE", "(INTAKEBLK) the hold after the wait")
 	w.hasnt("ARM ", "(INTAKEBLK) no dispatch armed")
 	if slices.Contains(w.rt.Reads(), "roster") {
 		t.Errorf("(INTAKEBLK) the then-route was probed: %q", w.rt.Reads())
@@ -132,7 +132,7 @@ func TestAnEmergencyIsCheckedNotAsserted(t *testing.T) {
 	wantCode(t, code, 0, err, "(EMERG) a confirmed emergency's actionable exit")
 	w.has("UPDATE tk-sub --priority 0 --append-notes ## Intake (first reaction, 2026-11-16T12:00:00Z)\nRouted to gc-toolkit/gc-toolkit.polecat at P0 as an emergency: main of zook/repo at abcdef123456 is red: test-macos (failure).",
 		"(EMERG) P0 is written, with a note naming the head and the failing check")
-	w.before("--priority 0", "HELM takeaway", "(EMERG) before the route")
+	w.before("--priority 0", "TAKEAWAY", "(EMERG) before the route")
 	w.has("--release --route gc-toolkit/gc-toolkit.polecat --no-wait", "(EMERG) the bead is routed")
 	w.hasnt("SET-STATE", "(EMERG) unheld")
 	if out != "tk-sub disposed as actionable (gc-toolkit/gc-toolkit.polecat at P0)" {
@@ -239,7 +239,7 @@ func TestAnEmergencyIsCheckedNotAsserted(t *testing.T) {
 	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--emergency", "test-macos", "--run", root)
 	wantCode(t, code, 4, err, "(EMERGPRIO) a P0 the store refuses")
 	errHas(t, err, "could not write priority P0 on tk-sub", "(EMERGPRIO) naming the write")
-	w.hasnt("HELM takeaway", "(EMERGPRIO) before the route")
+	w.hasnt("TAKEAWAY", "(EMERGPRIO) before the route")
 
 	w = newWorld(t)
 	unplaced(w)

@@ -22,3 +22,15 @@ func TestADispatchHoldIsGasCitysHoldLabelInAnyCase(t *testing.T) {
 		t.Error("a caller's change to the hold labels reached the rule")
 	}
 }
+
+// A hold's spellings are the labels that read as it, each as the bead carries
+// it, so a lift can remove each by its exact text.
+func TestAHoldsSpellingsAreTheLabelsThatReadAsIt(t *testing.T) {
+	got := Spellings([]string{"learning", "hold:mayor", " Hold:Mayor", "hold:external", "hold:mayor"}, "hold:mayor")
+	if len(got) != 2 || got[0] != "hold:mayor" || got[1] != " Hold:Mayor" {
+		t.Fatalf("Spellings = %q, want the two spellings of hold:mayor as written", got)
+	}
+	if got := Spellings([]string{"learning"}, "hold:mayor"); got != nil {
+		t.Fatalf("Spellings of a bead with no hold = %q, want none", got)
+	}
+}
