@@ -587,17 +587,18 @@ no warrant.
     `mol-adopt-pr` and `mol-pr-merge-only` formulas. Gas Town's
     refinery patrol and its `pr-merge-reconcile` read a PR through the pulls
     API and none of its reviews (`gastown/formulas/mol-refinery-patrol.toml`
-    and `gastown/commands/pr-merge-reconcile/run.sh`), at packs main and at the
-    pin Gas City bundles. The approvals the `gascity` and `gastown` packs
+    and `gastown/commands/pr-merge-reconcile/run.sh`) at packs main, and the
+    patrol does the same at the pin Gas City bundles, which carries no
+    `pr-merge-reconcile`. The approvals the `gascity` and `gastown` packs
     record are review workflows' verdicts on beads
     (`gascity/assets/scripts/checks/implementation-review-approved.sh` and
     `gastown/assets/scripts/checks/adopt-pr-review-approved.sh`), not GitHub
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-18, at `gastownhall/gascity` main 5b7728de34, with
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
-  main 0f07496d2fa4.
+  main 132914b3e42e.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
   a head, or keeps a write to GitHub that a later pass carries out. The
   withdrawal then moves onto that operation.
@@ -645,9 +646,9 @@ no warrant.
     and never the role key `task_kind` that a rework child carries. The search
     is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-15, at `gastownhall/gascity` main 294079d53f57, with
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
-  main 0f07496d2fa4.
+  main 132914b3e42e.
 - **Retires when.** Gas City files a request for a pull request's branch that
   the run already attached to the PR's bead works, with no pool to claim it,
   such as a PR monitor that hands its repair to that run. The ask then moves
