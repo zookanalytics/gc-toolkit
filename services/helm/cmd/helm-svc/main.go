@@ -28,7 +28,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -50,7 +49,9 @@ import (
 // GC_HELM_CACHE_TTL (seconds, or a Go duration like "30s").
 const defaultCacheTTL = 45 * time.Second
 
-// shutdownGrace is kept under the proxy_process SIGTERM→SIGKILL window (2s).
+// shutdownGrace is how long a stop gives open requests to finish. Gas City's
+// proxy_process stops the board with a SIGTERM to its process group and kills
+// what is left of the group 2 seconds later, so the grace ends before that.
 const shutdownGrace = 1500 * time.Millisecond
 
 // defaultProbeTimeout bounds the startup readability probe in [selectSource];
@@ -141,23 +142,46 @@ func serve() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	// proxy_process stops us with SIGTERM (then SIGKILL after 2s); shut down the
-	// HTTP server cleanly within the grace window.
+	// proxy_process stops the board with a SIGTERM, and a terminal's Ctrl-C
+	// sends a SIGINT. Either one ends ctx, and serveUntil then stops the board.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	go func() {
-		<-ctx.Done()
-		log.Print("signal received, shutting down")
-		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-		defer cancel()
-		_ = httpServer.Shutdown(shutCtx)
-	}()
 
 	log.Printf("serving Helm board on %s (cache ttl %s)", socket, ttl)
-	if err := httpServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := serveUntil(ctx, httpServer, ln, srv); err != nil {
 		log.Fatalf("serve: %v", err)
 	}
-	log.Print("shut down cleanly")
+}
+
+// serveUntil serves the board on ln until ctx ends, then stops it and returns
+// once the stop is done. srv.StopGathers ends every gather in flight, a rig's
+// store reads among them, and waits for each to return, while Shutdown closes
+// the listener and gives every open request up to shutdownGrace to finish. It
+// logs whether every open request finished within the grace, and returns an
+// error only when serving failed before ctx ended.
+func serveUntil(ctx context.Context, hs *http.Server, ln net.Listener, srv *server.Server) error {
+	served := make(chan error, 1)
+	go func() { served <- hs.Serve(ln) }()
+	select {
+	case err := <-served:
+		srv.StopGathers()
+		return err
+	case <-ctx.Done():
+	}
+
+	log.Print("signal received, shutting down")
+	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	drained := make(chan error, 1)
+	go func() { drained <- hs.Shutdown(drainCtx) }()
+	srv.StopGathers()
+	if err := <-drained; err != nil {
+		log.Printf("shut down with requests still open after %s: %v", shutdownGrace, err)
+	} else {
+		log.Print("shut down cleanly")
+	}
+	<-served
+	return nil
 }
 
 // spaHandler builds the embedded single-page app's handler, or returns nil to
