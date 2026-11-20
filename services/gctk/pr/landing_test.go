@@ -791,7 +791,91 @@ func TestAClosedUnmergedPRStaysBlockedBehindAGate(t *testing.T) {
 	if b.Status != "blocked" || !slices.Equal(d.gates.list(), []string{bead + " " + record.ClosedUnmerged}) {
 		t.Fatalf("a closed PR left the bead %s with gates %v", b.Status, d.gates.list())
 	}
-	readsNoGitHub(t, d)
+	if got := d.runReads(); !slices.Equal(got, []string{"PullRequest"}) {
+		t.Fatalf("the exception was recorded on the reads %v, want the act's own read of the PR", got)
+	}
+}
+
+// An exception the saved read decides holds the work behind a person, so the
+// act records it only once its own read of the PR finds the PR as the saved
+// read did. A PR the watch read closed that a person reopened, whose work the
+// refinery published again before the watch read it, gets no exception and no
+// gate and keeps its marker, and once the watch reads it the record stands
+// pending.
+func TestARepublishedPRIsNotExceptedOnAClosedReadFromBeforeIt(t *testing.T) {
+	d := newLand(t)
+	d.pr.Facts.State = "CLOSED"
+	d.refresh(t)
+	d.edit(t, func(b *fake.Bead) { b.Status, b.Assignee = "open", refinery })
+	d.pr.Facts.State = "OPEN"
+	if err := d.l.Record(bead, publication(head)); err != nil {
+		t.Fatal(err)
+	}
+	o := d.run(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "the act's own read of the PR finds it open") {
+		t.Fatalf("the run says %q", o.Detail)
+	}
+	if ws, g := d.runWrites(), d.gates.list(); len(ws) != 0 || len(g) != 0 {
+		t.Fatalf("the run wrote %+v and filed %v", ws, g)
+	}
+	meta(t, d.row(t), map[string]string{"merge_result": record.Pending, "pr_reconcile_pending": "true"})
+	is(t, d.once(t), pr.ActRequested)
+}
+
+// A PR the saved read finds on another base than the record's target, which
+// the act's own read finds on the record's target, as after a base the
+// refinery's publication followed and the watch has not read since, is no
+// exception: nothing is recorded and no gate is filed.
+func TestAPRTheSavedReadFindsRetargetedIsExceptedOnlyOnTheActsOwnRead(t *testing.T) {
+	d := newLand(t)
+	d.pr.Facts.BaseRefName = "release"
+	d.refresh(t)
+	d.pr.Facts.BaseRefName = "main"
+	o := d.run(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "finds the PR the record names") {
+		t.Fatalf("the run says %q", o.Detail)
+	}
+	if ws, g := d.runWrites(), d.gates.list(); len(ws) != 0 || len(g) != 0 {
+		t.Fatalf("the run wrote %+v and filed %v", ws, g)
+	}
+	d.pr.Facts.BaseRefName = "release"
+	is(t, d.run(t), pr.ActExcepted)
+	if g := d.gates.list(); !slices.Equal(g, []string{bead + " " + record.Invalid}) {
+		t.Fatalf("gates filed %v", g)
+	}
+}
+
+// A record of a merge on a bead the saved read finds open is a contradiction
+// only once the act's own read finds the PR open too: a merge that landed after
+// the watch's read records nothing.
+func TestAMergedRecordsContradictionIsRecordedOnTheActsOwnRead(t *testing.T) {
+	for _, c := range []struct {
+		name, state, action string
+		gates               []string
+	}{
+		{"the PR still open", "OPEN", pr.ActExcepted, []string{bead + " " + record.EvidenceContradiction}},
+		{"the PR merged since the watch read it", "MERGED", pr.ActChecked, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newLand(t)
+			for k, v := range map[string]string{"merge_result": record.Merged, "merged_sha": merged,
+				"pr_merged_at": "2026-11-12T08:30:00Z"} {
+				d.md[k] = v
+			}
+			d.put("blocked", "")
+			d.refresh(t)
+			d.pr.Facts.State = c.state
+			is(t, d.run(t), c.action)
+			if g := d.gates.list(); !slices.Equal(g, c.gates) {
+				t.Fatalf("gates filed %v, want %v", g, c.gates)
+			}
+			if got := d.runReads(); !slices.Equal(got, []string{"PullRequest"}) {
+				t.Fatalf("the act read %v, want its own read of the PR", got)
+			}
+		})
+	}
 }
 
 func mergedOnGitHub(d *land, h string) {
@@ -1392,24 +1476,26 @@ func TestAPRMergedIntoAnotherBaseIsNotLanded(t *testing.T) {
 // --- the landing order acts from the beads -------------------------------------
 
 // Every act but the merge decides from the saved read and the store: a run
-// reads no GitHub for a landing, a send-back, an exception's gate, a draft
-// marked ready or a withdrawn approval's dismissal, and the only calls it makes
-// are the act's own writes.
-func TestEachActButTheMergeDecidesFromTheSavedReadWithNoGitHubRead(t *testing.T) {
+// reads no GitHub for a landing, a send-back, a draft marked ready or a
+// withdrawn approval's dismissal, and the only calls it makes are the act's own
+// writes. An exception the saved read finds a closed PR owes is recorded on the
+// act's own read of the PR, which must find it closed too.
+func TestEachActButTheMergeDecidesFromTheSavedRead(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		set    func(*land)
 		action string
+		reads  []string
 		asked  []string
 	}{
-		{"a landing", func(d *land) { mergedOnGitHub(d, head) }, pr.ActLanded, nil},
-		{"a send-back", func(d *land) { d.pr.Facts.HeadRefOid = other }, pr.ActRequeued, nil},
-		{"an exception's gate", func(d *land) { d.pr.Facts.State = "CLOSED" }, pr.ActExcepted, nil},
-		{"a draft marked ready", func(d *land) { d.pr.Facts.IsDraft = true }, pr.ActReadied, []string{"MarkReady PR_7 "}},
+		{"a landing", func(d *land) { mergedOnGitHub(d, head) }, pr.ActLanded, nil, nil},
+		{"a send-back", func(d *land) { d.pr.Facts.HeadRefOid = other }, pr.ActRequeued, nil, nil},
+		{"an exception's gate", func(d *land) { d.pr.Facts.State = "CLOSED" }, pr.ActExcepted, []string{"PullRequest"}, nil},
+		{"a draft marked ready", func(d *land) { d.pr.Facts.IsDraft = true }, pr.ActReadied, nil, []string{"MarkReady PR_7 "}},
 		{"a withdrawn approval's dismissal", func(d *land) {
 			d.pr.Reviews = []gh.Review{approved(100, "operator", older), approved(101, "reviewer", head)}
 			d.pr.Facts.HeadRefOid = later
-		}, pr.ActRequeued, []string{"DismissReview 100 "}},
+		}, pr.ActRequeued, nil, []string{"DismissReview 100 "}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d := newCycle(t)
@@ -1418,7 +1504,9 @@ func TestEachActButTheMergeDecidesFromTheSavedReadWithNoGitHubRead(t *testing.T)
 				d.withdraw(t, head)
 			}
 			is(t, d.once(t), c.action)
-			readsNoGitHub(t, d)
+			if got := d.runReads(); !slices.Equal(got, c.reads) {
+				t.Fatalf("the act read GitHub %v, want %v", got, c.reads)
+			}
 			if got := asks(d.github); !slices.Equal(got, c.asked) {
 				t.Fatalf("the act asked GitHub %v, want %v", got, c.asked)
 			}

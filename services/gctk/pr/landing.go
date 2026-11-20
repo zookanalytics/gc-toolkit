@@ -23,7 +23,8 @@ import (
 // runs act on each record with Reconcile. A run decides every record from the
 // store and the read the one-PR update (refresh.go) saved on its bead, and
 // reads GitHub only for a merge, which it decides again on its own read of the
-// PR and pins to the head it judged. It closes a bead once the merge commit is
+// PR and pins to the head it judged, and for an exception, which it records
+// only once its own read of the PR shows what the saved read did. It closes a bead once the merge commit is
 // on the target, hands a changed head to the refinery and sees that the
 // refinery hears of it, keeps the exceptions blocked behind a human gate, marks
 // a draft ready and carries out an approval's withdrawal, each from the saved
@@ -1052,7 +1053,8 @@ func (u *run) decideRequeued(s state) plan {
 		return none(s, ActRetry, why+"; the next run decides again")
 	}
 	if ids := identity(saved.PR, s, number); len(ids) > 0 {
-		return u.invalid(s, "the PR on GitHub is not the one the record names: "+strings.Join(ids, ", "))
+		return u.confirmed(s, host, number, notTheRecords(s, number),
+			u.invalid(s, "the PR on GitHub is not the one the record names: "+strings.Join(ids, ", ")))
 	}
 	switch saved.PR.State {
 	case "OPEN":
@@ -1078,10 +1080,11 @@ func (u *run) decideRequeued(s state) plan {
 			return u.handOver(ctx, s, ActSettled, withNote("its changed head waits on the refinery's validation", c.note))
 		}))
 	case "CLOSED":
-		return u.excepting(s, record.ClosedUnmerged, "Pull request "+r.URL+" closed without merging.",
+		return u.confirmed(s, host, number, inState("CLOSED"), u.excepting(s, record.ClosedUnmerged,
+			"Pull request "+r.URL+" closed without merging.",
 			fmt.Sprintf("Pull request %s closed without merging while a withdrawal of its approvals was open, so %s stays "+
 				"blocked, and what waits on it stays held. Decide what becomes of the work: reopen the pull request and "+
-				"send %s back to the refinery, or stand the work down.", r.URL, s.id, s.id))
+				"send %s back to the refinery, or stand the work down.", r.URL, s.id, s.id)))
 	case "MERGED":
 		return u.decideMerged(s, saved.PR)
 	}
@@ -1130,7 +1133,8 @@ func (u *run) decideBlocked(s state) plan {
 	}
 	p := saved.PR
 	if ids := identity(p, s, number); len(ids) > 0 {
-		return u.invalid(s, "the PR on GitHub is not the one the record names: "+strings.Join(ids, ", "))
+		return u.confirmed(s, host, number, notTheRecords(s, number),
+			u.invalid(s, "the PR on GitHub is not the one the record names: "+strings.Join(ids, ", ")))
 	}
 	if !record.IsObjectID(p.Head) {
 		return u.invalid(s, fmt.Sprintf("GitHub names the PR's head %q, which is no commit id", p.Head))
@@ -1138,17 +1142,19 @@ func (u *run) decideBlocked(s state) plan {
 	switch p.State {
 	case "OPEN":
 		if r.Result == record.Merged {
-			return u.contradiction(s, fmt.Sprintf("%s recorded a merge at %s, and GitHub reports the PR open", s.id, r.MergedSHA))
+			return u.confirmed(s, host, number, inState("OPEN"),
+				u.contradiction(s, fmt.Sprintf("%s recorded a merge at %s, and GitHub reports the PR open", s.id, r.MergedSHA)))
 		}
 		if p.Head != r.Head {
 			return u.decideHeadChanged(s, saved)
 		}
 		return u.decideAtHead(s, saved)
 	case "CLOSED":
-		return u.excepting(s, record.ClosedUnmerged, "Pull request "+r.URL+" closed without merging.",
+		return u.confirmed(s, host, number, inState("CLOSED"), u.excepting(s, record.ClosedUnmerged,
+			"Pull request "+r.URL+" closed without merging.",
 			fmt.Sprintf("Pull request %s closed without merging, so %s stays blocked, and what waits on it stays "+
 				"held. Decide what becomes of the work: reopen the pull request and send %s back to the refinery, "+
-				"or stand the work down.", r.URL, s.id, s.id))
+				"or stand the work down.", r.URL, s.id, s.id)))
 	case "MERGED":
 		return u.decideMerged(s, p)
 	}
@@ -1175,7 +1181,8 @@ func (u *run) decideDisposed(s state) plan {
 		return none(s, ActRetry, why+"; the next run decides again")
 	}
 	if ids := identity(saved.PR, s, number); len(ids) > 0 {
-		return u.invalid(s, "the PR on GitHub is not the one the record names: "+strings.Join(ids, ", "))
+		return u.confirmed(s, host, number, notTheRecords(s, number),
+			u.invalid(s, "the PR on GitHub is not the one the record names: "+strings.Join(ids, ", ")))
 	}
 	switch saved.PR.State {
 	case "OPEN":
@@ -1505,6 +1512,50 @@ func withNote(detail, note string) string {
 		return detail
 	}
 	return detail + "; " + note
+}
+
+// confirmed holds the exception p records, which keeps the work behind a
+// person, until the act's own read of the PR shows what the saved read did:
+// unlike says what the read shows instead, and is empty when it shows the same.
+// The saved read can be older than the record, as when a PR is reopened and
+// published again before the PR watch reads it, so an act whose read shows
+// otherwise records nothing, and the record waits for the PR watch's next read.
+// A read that does not answer leaves the record to the next run.
+func (u *run) confirmed(s state, host string, number int, unlike func(*gh.PullRequest) string, p plan) plan {
+	return doing(func(ctx context.Context, c carriedOut) RunOutcome {
+		now, err := u.Hub(ctx, host).PullRequest(s.rec.Repo, number)
+		if err != nil {
+			return RunOutcome{Bead: s.id, Action: ActRetry, Detail: "the act's own read of the PR, on which its exception " +
+				"is recorded, did not answer, so nothing was recorded; the next run decides again: " + err.Error()}
+		}
+		if why := unlike(now); why != "" {
+			return RunOutcome{Bead: s.id, Action: ActChecked, Detail: "the act's own read of the PR " + why +
+				", unlike the saved read, so nothing was recorded, and the record waits for the PR watch's next read"}
+		}
+		return p.act(ctx, c)
+	})
+}
+
+// inState is the check confirmed makes of an exception the PR's state owes:
+// the act's own read finds the PR in want.
+func inState(want string) func(*gh.PullRequest) string {
+	return func(p *gh.PullRequest) string {
+		if p.State == want {
+			return ""
+		}
+		return "finds it " + strings.ToLower(p.State)
+	}
+}
+
+// notTheRecords is the check confirmed makes of an exception for a PR that is
+// not the one the record s read names: the act's own read finds it so too.
+func notTheRecords(s state, number int) func(*gh.PullRequest) string {
+	return func(p *gh.PullRequest) string {
+		if len(identityGaps(p, s.rec.URL, number, s.rec.Repo, s.branch, s.rec.Target)) > 0 {
+			return ""
+		}
+		return "finds the PR the record names"
+	}
 }
 
 // decideMerged decides a PR the saved read finds merged. A merge of the
