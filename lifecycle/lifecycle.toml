@@ -1,175 +1,7 @@
-# lifecycle.toml — the declared state space of the anchor lifecycle.
-# The anchor state is `status` x `merge_result`. This file is the single source
-# of truth: gctk lifecycle, which assets/scripts/lifecycle.sh execs, carries the
-# executable copy (services/gctk/internal/lifecycle), and lifecycle.test.sh fails
-# on drift.
+# lifecycle.toml — the pack's declared state: the gates, holds, posture and
+# machine axis an anchor carries, and every metadata key the pack writes.
 # Every metadata key the pack writes is enumerated in [metadata]; a key not
 # listed here is not pack state (docs/component-model.md §2-§3).
-
-[machine]
-# "unanchored" = merge_result ABSENT: not (or no longer) a merge anchor.
-states = [
-  "unanchored",
-  "pre_open_gate",
-  "pull_request",
-  "merged",
-  "abandoned",
-  "retargeted",
-  "blocked",
-  "refused_false_completion",
-]
-# States the merge cadence drives and no queue offers, so an anchor in one rests
-# both unrouted and unheld. lifecycle.sh writes the two halves in the same
-# atomic update: it clears gc.routed_to unless --route or --keep-route is given,
-# and it clears the assignee unless --assignee is given, at status=open only. A
-# pool route on one of these is demand for work already in the merge queue, and
-# the claim it invites moves the anchor out of `--status=open`, where merge.sh
-# and pr-facts.sh both stop seeing it. An assignee is the same anchor still
-# sitting in the refinery's own find-work queue, which flags a
-# merge_result-bearing bead it finds there and does not take it. The assignee
-# clear stops at status=open because bd refuses to take a live claim and drops
-# the whole update with it, and because a live claim is a hold to escalate
-# rather than one to overwrite.
-detached_states = ["pre_open_gate", "pull_request"]
-# States whose legal status is closed; every other declared state is open.
-# lifecycle.sh enforces the pairing both ways: --close is accepted only into a
-# closed state, and a transition into a closed state must carry --close.
-# Entering `merged` additionally requires a non-empty --set merged_sha: its
-# meaning is "landed; merged_sha recorded", so it cannot be entered without the
-# landing that defines it. The same write records the work record that landing
-# gives (gc.work_outcome, gc.work_commit, gc.work_branch; see
-# [metadata.runtime_owned]).
-closed_states = ["merged"]
-# What leaving a state writes, as <state>:<key>=<value>. A transition from that
-# state into another open state sets the key to the value in the same atomic
-# update, unless the caller writes the key itself, so no writer of such a
-# transition can leave the key behind. A transition into a closed state writes
-# none of them: the anchor's life ends there.
-# The rank of an anchor's PR-finishing work is approved only while the anchor
-# rests in pull_request (assets/scripts/priority-lib.sh), so leaving it marks
-# pr_finishing_settled unsettled, and pr-facts.sh settles that work at the rank
-# it then follows ([metadata.pr_posture]). Leaving it also clears pr_head_oid,
-# the PR head pr-facts.sh last read, so an anchor that returns counts no
-# approval until pr-facts.sh has read its PR again.
-exit_sets = ["pull_request:pr_finishing_settled=unsettled", "pull_request:pr_head_oid="]
-
-# Legal status x merge_result combinations.
-[states.unanchored]
-status = "open|closed"
-meaning = "no merge_result recorded; not a merge anchor (or rejected back to the pool)"
-
-[states.pre_open_gate]
-status = "open"
-meaning = "branch pushed, checks armed, no PR yet"
-
-[states.pull_request]
-status = "open"
-meaning = "PR open, awaiting checks + merge"
-
-[states.merged]
-status = "closed"
-meaning = "landed; merged_sha recorded"
-
-[states.abandoned]
-status = "open"
-meaning = "PR closed unmerged externally; a human gate parks it for a person"
-
-[states.retargeted]
-status = "open"
-meaning = "PR base moved externally; a human gate parks it for a person"
-
-[states.blocked]
-status = "open"
-meaning = "parked by the refinery behind a human gate: a target or branch origin does not carry, a strategy it does not land, or a PR it cannot take; still the refinery's, so clearing the gate hands it back"
-
-[states.refused_false_completion]
-status = "open"
-meaning = "the zero-diff check found no change on the branch; parked by the refinery behind a human gate and still the refinery's, so clearing the gate hands it back"
-
-# Transitions. Every edge names its writer. The lifecycle writer performs the
-# write, gctk lifecycle, which lifecycle.sh execs and gctk merge runs in-process,
-# on every edge but the two into a refinery park, which the park writes itself
-# with one gc bd update guarded on the assignee.
-# A self-edge (from == to) is always legal: an idempotent re-record.
-[[transition]]
-from = "unanchored"
-to = "pre_open_gate"
-writer = "assets/scripts/refinery-land.sh, the refinery's merge-push step on a rig whose pending_through_merge is unset (via lifecycle.sh)"
-
-[[transition]]
-from = "unanchored"
-to = "pull_request"
-writer = "assets/scripts/refinery-land.sh, the refinery's merge-push step on a rig whose pending_through_merge is unset, for a bead that records an open PR (via lifecycle.sh)"
-
-[[transition]]
-from = "unanchored"
-to = "merged"
-writer = "assets/scripts/direct-merge-push.sh, which the refinery's merge-push step runs for the direct strategy (via lifecycle.sh): FF push verified, record + close in one call"
-
-[[transition]]
-from = "unanchored"
-to = "blocked"
-writer = "the refinery's parks, a guarded gc bd update after the park's human gate: refinery-prep.sh (a target or branch origin does not carry), refinery-land.sh (an unsupported strategy) and refinery-publish.sh (a recorded PR it cannot reuse, or one another account opened)"
-
-[[transition]]
-from = "unanchored"
-to = "refused_false_completion"
-writer = "refinery-land.sh's park, a guarded gc bd update after its human gate (the zero-diff check found no change on the branch)"
-
-[[transition]]
-from = "pre_open_gate"
-to = "pull_request"
-writer = "assets/scripts/pr-open.sh"
-
-[[transition]]
-from = "pre_open_gate"
-to = "unanchored"
-writer = "the move of a parked bead to the refinery at its rig's cutover (via lifecycle.sh; specs/tk-1tfzr71.66/design.md, section 10). signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
-
-[[transition]]
-from = "pull_request"
-to = "merged"
-writer = "assets/scripts/merge.sh; assets/scripts/pr-facts.sh (out-of-band merge record)"
-
-[[transition]]
-from = "pull_request"
-to = "abandoned"
-writer = "assets/scripts/pr-facts.sh"
-
-[[transition]]
-from = "pull_request"
-to = "retargeted"
-writer = "assets/scripts/pr-facts.sh"
-
-[[transition]]
-from = "pull_request"
-to = "unanchored"
-writer = "human. The refinery's find-work leaves a bead at pull_request to the merge cadence, and signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
-
-[[transition]]
-from = "abandoned"
-to = "unanchored"
-writer = "human"
-
-[[transition]]
-from = "retargeted"
-to = "pull_request"
-writer = "human (base repaired; re-engage the merge queue)"
-
-[[transition]]
-from = "retargeted"
-to = "unanchored"
-writer = "human"
-
-[[transition]]
-from = "blocked"
-to = "unanchored"
-writer = "human; or refinery-land.sh, for a bead its gate's clearing handed back, before a direct landing records it merged or, on a rig whose pending_through_merge is unset, before the old path parks it again (via lifecycle.sh); or refinery-requeue.sh, a guarded gc bd update that sends such a bead back to the pool when its prep conflicts or its gate fails"
-
-[[transition]]
-from = "refused_false_completion"
-to = "unanchored"
-writer = "human; or refinery-land.sh, for a bead its gate's clearing handed back, before a direct landing records it merged or, on a rig whose pending_through_merge is unset, before the old path parks it again (via lifecycle.sh); or refinery-requeue.sh, a guarded gc bd update that sends such a bead back to the pool when its prep conflicts or its gate fails"
 
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by
@@ -1153,8 +985,7 @@ keys = [
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
 # carry their mechanics in [posture] above (pr_posture is also a [dated_keys]
-# key). pr-facts.sh is the sole writer of this group, apart from the writes
-# [machine] exit_sets makes on leaving pull_request.
+# key). pr-facts.sh is the sole writer of this group.
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_issue_comment_watermark", "pr_comment_disposition",
@@ -1200,9 +1031,9 @@ keys = [
   # unsettled says a re-rank is owed: the rank that work follows moved, or a
   # settle began and did not finish. The rank is the priority function's: approved
   # while the anchor rests in pull_request with an approved posture, unapproved
-  # anywhere else. A posture write that moves the rank and every transition out
-  # of pull_request ([machine] exit_sets) mark the record unsettled in the same
-  # write, so no reader takes the work for settled at a rank it has left. Every
+  # anywhere else. A posture write that moves the rank marks the record
+  # unsettled in the same write, so no reader takes the work for settled at a
+  # rank it has left. Every
   # pass of pr-facts.sh compares the record of each anchor it reads in
   # pull_request with that rank, and every full pass compares the record of each
   # live anchor resting elsewhere. While the two differ, it settles that work
@@ -1216,10 +1047,8 @@ keys = [
   # posture's write, or in a write of its own for a draft PR, whose posture it
   # does not read. The priority function counts an approved posture only when the
   # posture's oid is this head (prio_pr_approved in priority-lib.sh), so an
-  # approval read at an earlier head ranks no PR-finishing work at P0. Leaving
-  # pull_request clears it to empty ([machine] exit_sets), so an anchor that
-  # returns counts no approval until a pass has read its PR. Absent or empty
-  # means no pass has read the PR since the anchor entered pull_request.
+  # approval read at an earlier head ranks no PR-finishing work at P0. Absent or
+  # empty means no pass has read the PR.
   "pr_head_oid",
 ]
 
