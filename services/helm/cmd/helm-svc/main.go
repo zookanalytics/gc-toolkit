@@ -1,13 +1,15 @@
-// Command helm-svc has TWO entry points over ONE board, plus a check on itself:
+// Command helm-svc has TWO entry points that share ONE rig board, plus a check
+// on itself:
 //
 //	helm-svc               the Attention Canvas backend sidecar (default; `serve`)
-//	helm-svc board --json  the board's rows as JSON, for agents and tooling
+//	helm-svc board --json  each rig's board document as JSON, for agents and tooling
 //	helm-svc probe         can THIS binary read the city's bead stores? (see probe.go)
 //
-// They share the gather (internal/source) and the ranking (internal/board)
-// rather than reimplementing either, so the rows `board --json` prints are the
-// rows the sidecar's GET /helm serves. Keeping them in one binary also keeps
-// them from going stale independently — see the comment atop board.go.
+// They share the rig board's reader (internal/rigboard) rather than
+// reimplementing it, so the document `board --json` prints for a rig is the
+// one the sidecar's GET /helm/rigs/{rig} serves. Keeping them in one binary
+// also keeps them from going stale independently — see the comment atop
+// board.go.
 //
 // As the sidecar, it runs as a
 // Gas City `proxy_process` workspace-service: the supervisor spawns it, hands it
@@ -99,13 +101,14 @@ func main() {
 
 const topUsage = `Usage:
   helm-svc [serve]               run the Attention Canvas backend sidecar (needs GC_SERVICE_SOCKET)
-  helm-svc board --json [flags]  print the cross-rig attention board's rows as JSON
+  helm-svc board --json [flags]  print each rig's board document as JSON
   helm-svc probe [flags]         report whether this binary can read the city's bead stores
   helm-svc form --helm <script>  the terminal conversation form gc-helm.sh engage and attach open
 
-The sidecar's /helm answer and "board --json" share one gather and one
-ranking. Run "helm-svc board --help" for the board's flags, or "helm-svc probe
---help" for the readability check.
+"board --json" prints, for each rig, the document the sidecar's
+/helm/rigs/{rig} answer serves, from the same reader. Run "helm-svc board
+--help" for the board's flags, or "helm-svc probe --help" for the readability
+check.
 `
 
 func serve() {
