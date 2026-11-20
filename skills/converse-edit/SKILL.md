@@ -45,30 +45,22 @@ Whatever the ruling, you never:
 - push to a target branch, merge, or force a push: the hand-off pushes the
   change's own branch, an open PR's push goes onto that PR's branch, and the
   refinery lands each;
-- edit the branch of an open PR the old path reviews, which takes a rework
-  (below);
 - cut an integration effort's branch, which stays the mechanik's recipe or
   `mol-design-convoy`'s step.
 
 ## An open PR's branch
 
 A ruling that changes what an open PR's branch must contain is made on that
-branch when the PR is on the pending record. `PR` from here on is the bead that
-owns the PR: the subject when it owns one, else the bead its `anchor_bead`
-names. Read where it stands:
+branch. `PR` from here on is the bead that owns the PR: the subject when it
+owns one, else the bead its `anchor_bead` names. Read where it stands:
 
 ```bash
 gc bd show "$PR" --json | jq -r '.[0].metadata.merge_result // ""'
 ```
 
-- `pull_request_pending` or `pull_request_head_changed`: the PR is on the
-  pending record, and you edit its branch with the operator, as this section
-  says.
-- `pull_request`: the old path's review lanes key on the PR's rework child,
-  which a polecat runs, so the ruling sends a rework through the sign-off's
-  `--rework` (the converse-settle step). When more than one call stands between
-  the PR's text and what the operator wants, settle them in the thread first
-  (the `converse-iterate-document` step).
+`pull_request_pending` or `pull_request_head_changed` says the PR is open on
+the pending record, and you edit its branch with the operator, as this section
+says.
 
 The edit is this conversation's change in flight, and the PR's bead carries
 it, so you file no bead and make no subject wait on one. Set `CHANGE` to

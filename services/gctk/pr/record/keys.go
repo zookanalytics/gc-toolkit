@@ -28,7 +28,8 @@ var (
 			Pending+", "+HeadChanged+", "+Merged+", "+Incomplete+" or one of the exceptions, "+Invalid+", "+
 			ClosedUnmerged+", "+MergedUnvalidatedHead+", "+EvidenceContradiction+", "+LegacyClosed+" and "+CloseRefused+
 			", each of which keeps the bead blocked behind a human gate keyed by its value. Absent, the bead "+
-			"has not landed and owns no open PR. The old path's values are lifecycle/lifecycle.toml's [states]. "+
+			"has not landed and owns no open PR. Outside the record it reads merged for a direct landing, and "+
+			"blocked or refused_false_completion for the refinery's park. "+
 			"A PR's composition reads a bead on its branch that carries one as the branch's anchor, and one "+
 			"that reads merged, or "+Merged+", "+CloseRefused+" or "+MergedUnvalidatedHead+", as having landed "+
 			"its work on its merged_target.")

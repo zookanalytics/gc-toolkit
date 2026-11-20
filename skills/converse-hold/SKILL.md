@@ -37,7 +37,7 @@ The gates the conversation replies to stay open and owed until the sign-off
 answers them. Nothing is written to them now.
 
 **On an open PR, the merge waits for this conversation.** The subject may be an
-open PR's anchor (`merge_result` `pull_request`, `pull_request_pending` or
+open PR's anchor (`merge_result` `pull_request_pending` or
 `pull_request_head_changed`, and not closed), or a bead whose `anchor_bead`
 names one, such as its review or rework. Then the anchor depends on this
 conversation through a `blocks` edge, which bd lets go once the

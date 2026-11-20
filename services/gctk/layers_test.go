@@ -54,7 +54,6 @@ var pkgLayer = map[string]struct {
 	"internal/gh":            {adapter, "github"},
 	"internal/gh/fake":       {adapter, "github"},
 	"internal/ledger":        {layer: theLedger},
-	"internal/lifecycle":     {layer: domain},
 	"internal/rig":           {layer: domain},
 	"arm":                    {layer: domain},
 	"arm/record":             {layer: domain},
