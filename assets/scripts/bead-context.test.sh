@@ -60,8 +60,8 @@ bead() { cat > "$1/.beads/$2.json"; }   # bead <store-repo> <id>  (object on std
 # state, first_reaction, origin, a settled takeaway, task_kind and routing. Its
 # edges (D) are the parent tk-epic, two relates deps in each spelling, and a
 # reverse `tracks` edge from a conversation (tk-conv, below). Its blocks are all closed — one
-# same-store (embedded status), one FOREIGN in the otherrig store (no embedded
-# status, the cross-store fold) — so its frontier verdict is ready. It also
+# same-store (embedded status), one FOREIGN in the otherrig store (an edge into
+# another store, which holds nothing) — so its frontier verdict is ready. It also
 # carries a description and notes; the read returns its title but never that body.
 bead "$R_TK" tk-anchor <<'J'
 {"id":"tk-anchor","title":"rich anchor","status":"open","issue_type":"task","priority":1,
@@ -678,7 +678,7 @@ kid() { jr "[.horizon.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuc
 
 JQF='has("frontier")'  runj tk-anchor;             eq "$JQ" false "frontier is absent by default (opt-in)"
 run tk-anchor --frontier --json
-eq "$(jr .frontier.verdict)"                ready  "all blocks-blockers closed (one cross-store) reads ready"
+eq "$(jr .frontier.verdict)"                ready  "all blocks-blockers closed (one in another store) reads ready"
 eq "$(jr .frontier.blockers.closed)"        1      "the same-store closed blocker is counted"
 eq "$(jr '.frontier.foreign | join(",")')"  or-far "  ... and the edge into another store holds nothing, listed as foreign"
 eq "$(jr .frontier.blockers.open)"          0      "no open blocker"
@@ -708,6 +708,13 @@ GCTK_BIN="$TMP/gctk-holds-only" run tk-adv --frontier --json
 eq "$(jr '.frontier | "\(.verdict) \(.holds)"')" "stuck blocked" "a subject gctk bead stands does not answer fails the verdict closed"
 has "$(jr .frontier.unread)" "gctk bead stands" "  ... and says which read did not answer"
 eq "$(blkr tk-routed)" "stuck tk-routed unread" "  ... and each wait it names reads stuck on itself, unread"
+GCTK_BIN="$TMP/gctk-holds-only" run tk-anchor --frontier --json
+eq "$(jr '.frontier | "\(.verdict) \(.holds) \(.unread // "-")"')" "ready clear -" \
+  "  ... while a subject nothing holds is ready by gctk bead holds alone"
+
+# gctk bead stands gives a closed bead no frontier, and nothing holds one.
+run tk-design --frontier --json
+eq "$(jr '.frontier | "\(.verdict) \(.holds) \(.unread // "-")"')" "ready clear -" "a closed subject nothing holds reads ready"
 
 run tk-stuck --frontier --json
 eq "$(jr .frontier.verdict)"           stuck                   "work nobody routes as the blocker leaves the subject stuck"

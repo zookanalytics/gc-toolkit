@@ -341,17 +341,20 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
   NAMED='def named($id; $a): if ($a.advance // "") == "advancing" then {advance: "advancing"}
       else {advance: "stuck", stuck_on: ($a.stuck_on // {id: $id, why: "unread"})} end;'
 
-  # B. The frontier: the subject's own, with each wait holds names read as the
-  # verdict reads it. A read of what holds it that did not answer, or a subject
-  # stands did not answer, is stuck, and says why.
+  # B. The frontier. It is ready when holds answers that nothing holds the
+  # subject, a closed subject included, whose stands line carries no frontier.
+  # Otherwise it is the subject's frontier as stands reads it, with each wait
+  # holds names read as the verdict reads it. A read of what holds it that did
+  # not answer, or a held subject stands did not answer, is stuck, and says why.
   if [ -n "$WANT_FRONTIER" ]; then
     FRONTIER_JSON=$(printf '%s\n%s\n%s\n' "$SUBJ" "$STANDS" "$HOLDS" | jq -sc --arg serr "$STANDS_ERR" "$NAMED"'
       .[0] as $s | .[2] as $h | (.[1][$s.id] // {}) as $line | ($line.frontier // null) as $f
       | [$h.waits[]?] as $waits
       | (if $h.status == "unread" then $h.error
+         elif $h.status == "clear" then null
          elif $f == null then ($line.error // (if $serr != "" then $serr else "gctk bead stands gave no frontier" end))
          else null end) as $unread
-      | {verdict: (if $unread != null then "stuck" else $f.verdict end),
+      | {verdict: (if $unread != null then "stuck" elif $h.status == "clear" then "ready" else $f.verdict end),
          holds: $h.status,
          blockers: {open: ($waits | length),
                     closed: ([$s.dependencies[]? | select(.dependency_type == "blocks" and .status == "closed")] | length)},
