@@ -256,8 +256,9 @@ const stopGrace = 2 * time.Second
 // output, so a stop that killed gc alone would leave bd reading the store and
 // the call waiting on it. A call that has not started by then does not start.
 // A SIGTERM or SIGINT this process is sent during a call kills the call's group
-// too, and then ends this process ([call]). The supervisor-API read is not a
-// forked call and keeps its own timeout.
+// too, and then ends this process, unless something else ends the process
+// first ([call]). The supervisor-API read is not a forked call and keeps its
+// own timeout.
 func (c *Client) WithContext(ctx context.Context) *Client {
 	p := *c
 	p.ctx = ctx

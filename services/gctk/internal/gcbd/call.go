@@ -21,6 +21,13 @@ var exitProcess = os.Exit
 // process during the call kills the call's group, and this process then exits
 // with the status that signal gives, writing nothing more. A signal this
 // process inherited as ignored stays ignored.
+//
+// The kill comes before the exit only while nothing else ends this process
+// first. Calls that run at once each take the signal, and the first of them to
+// return exits, which can be before another call's kill is sent. A process
+// with a stop handler of its own, such as a server's, can likewise return from
+// main before any call's kill is sent. A group not yet killed when the process
+// ends runs on until its command finishes.
 type call struct {
 	*exec.Cmd
 	// run is the call's own context, under the client's, and cancel ends it,
