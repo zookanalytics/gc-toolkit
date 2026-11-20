@@ -15,7 +15,7 @@
 # the live bead that owns the work by metadata and the graph, never a title; an
 # unresolvable or ambiguous reference is refused and nothing is filed.
 # Callers: operator-intake.sh (resolve, open), helm-svc's POST routes
-# via GC_HELM_OPEN_TOOL (open, engage, accept, dismiss — open's stderr/stdout
+# via GC_HELM_OPEN_TOOL (open, engage — open's stderr/stdout
 # sentences are parsed by services/helm/internal/server, guarded by
 # open_parity_test.go), converse (handback), operators by hand (park,
 # priority, place), and helm-svc's conversation form on the operator's
