@@ -53,7 +53,8 @@ exit: 0 parked
       4 a read or a write did not land, and the message says what did`
 
 func newBeadParkCmd(stdout, stderr io.Writer) *cobra.Command {
-	var db, body, waitingOn string
+	var db, body string
+	var waitingOn []string
 	cmd := &cobra.Command{
 		Use:   `park <bead> ("<text>" [--body <text>] | --waiting-on <bead>) [--db <path>]`,
 		Short: "hold everything under a bead that has not started, behind a gate or a bead, and leave work in flight running",
@@ -61,7 +62,7 @@ func newBeadParkCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(c *cobra.Command, args []string) error {
 			const prog = "gctk bead park"
-			req := park.Request{Bead: strings.TrimSpace(args[0]), Body: body, BodySet: c.Flags().Changed("body"), WaitingOn: waitingOn}
+			req := park.Request{Bead: strings.TrimSpace(args[0]), Body: body, BodySet: c.Flags().Changed("body")}
 			if len(args) == 2 {
 				req.Text = args[1]
 				if strings.TrimSpace(req.Text) == "" {
@@ -69,8 +70,14 @@ func newBeadParkCmd(stdout, stderr io.Writer) *cobra.Command {
 					return exit(2)
 				}
 			}
-			if c.Flags().Changed("waiting-on") && strings.TrimSpace(waitingOn) == "" {
-				return errors.New("--waiting-on requires a bead id")
+			if len(waitingOn) > 1 {
+				fmt.Fprintf(stderr, "%s: --waiting-on names one bead to wait on, and this call names %s. Park once per bead. Nothing was written\n", prog, strings.Join(waitingOn, " and "))
+				return exit(2)
+			}
+			if len(waitingOn) == 1 {
+				if req.WaitingOn = waitingOn[0]; strings.TrimSpace(req.WaitingOn) == "" {
+					return errors.New("--waiting-on requires a bead id")
+				}
 			}
 			if _, err := park.Validate(req); err != nil {
 				fmt.Fprintf(stderr, "%s: %v\n", prog, err)
@@ -104,7 +111,7 @@ func newBeadParkCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&body, "body", "", "the description of the gate the text form files")
-	cmd.Flags().StringVar(&waitingOn, "waiting-on", "", "park the bead behind this bead, filing no gate")
+	cmd.Flags().StringArrayVar(&waitingOn, "waiting-on", nil, "park the bead behind this bead, filing no gate")
 	cmd.Flags().StringVar(&db, "db", "", "the store, a store's .beads directory")
 	return cmd
 }

@@ -38,8 +38,9 @@ func TestBeadPlaceOfABeadNoRigHolds(t *testing.T) {
 	}
 }
 
-// A park's two forms are one call's choice: both or neither exit 2, and so does
-// an empty text, before Gas City or the store is asked anything.
+// A park's two forms are one call's choice: both or neither exit 2, and so do
+// an empty text and a second bead to wait on, before Gas City or the store is
+// asked anything.
 func TestBeadParkRefusesItsForms(t *testing.T) {
 	log := stubLoggingGC(t, `{"rigs":[]}`)
 	defer func() {
@@ -56,6 +57,7 @@ func TestBeadParkRefusesItsForms(t *testing.T) {
 		"an empty text":         {[]string{"bead", "park", "tk-e", "  "}, "one-line headline"},
 		"a body for no gate":    {[]string{"bead", "park", "tk-e", "--waiting-on", "tk-x", "--body", "b"}, "--body describes the gate"},
 		"an empty --waiting-on": {[]string{"bead", "park", "tk-e", "--waiting-on", " "}, "--waiting-on requires a bead id"},
+		"two beads to wait on":  {[]string{"bead", "park", "tk-e", "--waiting-on", "tk-x", "--waiting-on", "tk-y"}, "this call names tk-x and tk-y"},
 	} {
 		var out, errb bytes.Buffer
 		if code := Run(tc.args, "test", &out, &errb); code != 2 || !strings.Contains(errb.String(), tc.want) {
