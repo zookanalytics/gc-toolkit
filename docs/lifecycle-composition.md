@@ -97,26 +97,18 @@ moment it needs the answer. It does not read a status field that something else
 was supposed to have updated.
 
 This is the clause that carries the most weight, because it is what makes the
-rule robust against the rest of the system being imperfect. The board derives
-`disposition_due` per render — parked, with a non-empty waiting set, all of
-whose members have closed (`assets/scripts/gc-helm.sh`, mirrored in
-`services/helm/internal/board/derive.go`). Nothing is stored, so nothing has to
-be cleared later, and no cleanup path can be missed.
+rule robust against the rest of the system being imperfect. The board asks the
+question at every read: what holds a bead comes from the store's blocked set
+and the blockers it names (`services/gctk/waits`), so a bead whose blockers
+have all closed stops reading "Waits on" them at its next read and reads as
+work to send, "Queued" when the city takes it and "Not scheduled" when nothing
+does (the row table in `services/helm/internal/rigboard/table.go`). Nothing is
+stored, so nothing has to be cleared later, and no cleanup path can be missed.
 
-The same edges answer the same question for the two human-gated kinds, and there
-the answer points the other way: a `decision` or `gc.routed_to=human` row whose
-takeaway is recorded and whose waits have all landed stands DOWN out of the
-attention band rather than up out of the parked floor, reading "ruled — close or
-extend" (`tk-b3rga`, *Until it is answered* in `services/helm/README.md`). One
-bead can be gathered under both readings, so `disposition_due` yields to the
-stand-down on a human-gated subject: the two would otherwise band the same bead
-two ways and the louder row would win the dedup.
-
-Concretely: `tk-puh9d` (open since 2026-08-02) is the defect that a bead's
-stored `blocked` status never auto-clears when its dependencies close. The edge
-is right there and nothing re-derives from it. The board is unaffected by that
-bug — not because it was fixed, but because the board never reads the stored
-status in the first place. A re-derived answer routes around a stale stored one.
+The same edges answer the same question for a person's side of the work, and
+there the answer points the other way: a decision a ruling left waiting on the
+work it sent, and a conversation its sitting stays in, read "Waits on" that
+work while it is open, and are a person's move again once it closes.
 
 **The join point is the bead closing, not the PR merging.** This is what makes
 the PR lifecycle composable at all: the refinery is the single writer of merged
@@ -139,14 +131,14 @@ invites closing a subject whose work is still in flight.
 
 ### 3. Completion propagates as a push, not a colour change
 
-Deriving the answer is not the same as delivering it. A board that turns a row
-`ELEVATED` has computed the right thing and told nobody; it still depends on a
-human opening the board and noticing. That is the operator's attention being
+Deriving the answer is not the same as delivering it. A board that moves a row
+has computed the right thing and told nobody; it still depends on a human
+opening the board and noticing. That is the operator's attention being
 spent on discovery, which is the thing the pack exists to avoid.
 
 So the terminal clause of the rule: when a subject's waiting set fully closes,
 something must **open a conversation** on the subject in the operator's queue,
-rather than only re-banding the row.
+rather than only moving the row.
 
 The intended shape is `tk-2cyxo` (in flight):
 
@@ -174,10 +166,10 @@ the work — not later. Getting this wrong is the most common way a subject goes
 dark.
 
 - **Routed work filed as a `parent-child` CHILD of the subject** propagates by
-  roll-up: the parent is banded by its open children rather than by the parked
-  floor, because "wants nothing" is false while open work hangs under it.
+  roll-up: on the board, an epic or a Delivery is not done while a member is
+  open, because "wants nothing" is false while open work hangs under it.
 - **Routed work filed as an independent bead** propagates by the `blocks` edge
-  of clause 1 and the `disposition_due` derivation of clause 2.
+  of clause 1 and the re-derivation of clause 2.
 
 These are not interchangeable, and the reason is a hard constraint rather than a
 convention: `bd` refuses a `blocks` edge from a parent to its own descendant
@@ -212,10 +204,6 @@ overturned its own commissioning premise sat in a merged file for 4h19m before
 the operator found it by eye — nothing in the system had noticed
 (`tk-16f29`, the operator-origin bead reporting the seam failing on the very
 audit that produced this document).
-
-One caveat applies to every fix in this class: the shell board and
-`services/helm/` are separate implementations of the same derivation, so a fix
-to one does not reach the other. Any change to shared derivation lands in both.
 
 ## The test for new work
 

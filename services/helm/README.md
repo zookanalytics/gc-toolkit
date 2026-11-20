@@ -195,9 +195,9 @@ warm one under a second. A cold build started by the launcher loses that race,
 and `waitReady` then calls `stopProcessGroup()`, killing the build along with
 the start.
 
-Killed starts are visible on disk: on 2026-08-22 this service's `bin/` held **2,677**
-zero-byte `.helm-svc.build.XXXXXX` staging files laid down over three days, one
-per killed start, each a `mktemp` that never reached its `mv`.
+Killed starts are visible on disk: on 2026-08-22 this service's `bin/` held
+**2,677** zero-byte `.helm-svc.build.XXXXXX` staging files laid down over three
+days, one per killed start, each a `mktemp` that never reached its `mv`.
 
 So the two jobs are separate:
 
@@ -213,11 +213,11 @@ without the restart described below.
 `gc-build.sh helm` rebuilds when a source is newer than the binary, an
 ordinary `find -newer` dependency, the same question `make` asks. It also
 rebuilds when the build-status record names a revision other than the one the
-tick sees, since deleting a file makes nothing newer. It publishes by atomic rename so a failed link can never truncate a
-serving binary, and in
-`--deploy` mode restarts the service onto what it published. Build and restart
-are one step on purpose: a new binary that nothing restarts onto is the other
-half of the defect. On 2026-08-22 the helm process had been up 14h55m on a
+tick sees, since deleting a file makes nothing newer. It publishes by atomic
+rename so a failed link can never truncate a serving binary, and in `--deploy`
+mode restarts the service onto what it published. Build and restart are one
+step on purpose: a new binary that nothing restarts onto is the other half of
+the defect. On 2026-08-22 the helm process had been up 14h55m on a
 binary built at 02:40 while three commits touching `services/helm` had landed
 after it, all three inert in the served board.
 
@@ -722,12 +722,12 @@ Discovery env:
 ## The board on fixture data (`helm-fixture`)
 
 `cmd/helm-fixture` serves the app this commit embeds with no city behind it.
-`GET /helm/rigs` and `GET /helm/rigs/{rig}` answer one rig's document, `GET /helm/city` answers the
-city's document, and `POST /helm/<verb>` answers a canned answer, so nothing it
-serves reads or writes a city. It is
-gc-toolkit's declared `ui_serve_command`, so a demo capture of the board serves
-it as its `--serve` command (`docs/review-demo.md`), and a sitting's live copy
-of the board runs it too, each as a copy that `gctk rig serve` runs.
+`GET /helm/rigs` and `GET /helm/rigs/{rig}` answer one rig's document,
+`GET /helm/city` answers the city's document, and `POST /helm/<verb>` answers a
+canned answer, so nothing it serves reads or writes a city. It is gc-toolkit's
+declared `ui_serve_command`, so a demo capture of the board serves it as its
+`--serve` command (`docs/review-demo.md`), and a sitting's live copy of the
+board runs it too, each as a copy that `gctk rig serve` runs.
 
 ```bash
 cd services/helm

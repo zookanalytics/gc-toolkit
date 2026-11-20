@@ -255,12 +255,6 @@ commands it changes.
   leaves a ref lock in the rig checkout that fails every later fetch there, so
   a stop sends the group SIGTERM before anything harder. gctk's other
   subprocesses, `gctk merge`'s git calls among them, stay in its own group.
-- **A derivation key follows the sling's shapes.** `Facts.Inflight` is keyed by
-  an input convoy's tracked member, which in the common sling shape is the
-  anchor's own bead, so a roll-up over children alone shows live work as
-  stranded (`TestAnchorOwnWorkflowCounts` in `internal/board`). A derivation
-  change is checked against each shape a key takes: the anchor itself, a
-  child, and a review or rework bead.
 
 ## The helm web app
 

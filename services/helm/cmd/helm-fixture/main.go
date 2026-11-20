@@ -1,12 +1,12 @@
 // Command helm-fixture serves the Helm board on fixture data: the app this
 // commit embeds, one rig's document read from a file at the rig board's routes,
 // the city's document read from a file at the city page's route, and canned
-// answers for the write verbs (see package fixture). The serve command the rig declares runs it, and a demo
-// capture of the board passes that command to demo-screenshot.sh as its --serve
-// command, as docs/review-demo.md shows, so the capture shows the board the
-// reviewed commit builds and never reaches the live city. The capture serves it
-// as a copy that `gctk rig serve` runs, and a sitting's live copy of the board
-// runs the same command through the same verb.
+// answers for the write verbs (see package fixture). The serve command the rig
+// declares runs it, and a demo capture of the board passes that command to
+// demo-screenshot.sh as its --serve command, as docs/review-demo.md shows, so
+// the capture shows the board the reviewed commit builds and never reaches the
+// live city. The capture serves it as a copy that `gctk rig serve` runs, and a
+// sitting's live copy of the board runs the same command through the same verb.
 //
 // It is a command of its own rather than a helm-svc subcommand. helm-svc reads
 // the city through gc and writes through gc-helm.sh, while this command imports

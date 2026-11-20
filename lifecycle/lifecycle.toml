@@ -1326,9 +1326,8 @@ keys = [
 #   before any exit acts, each write taking its exit. gc-helm.sh
 #   `accept` unsets it in the write that records its dispatch, and
 #   converse-invalidate-recommendation.sh unsets it when a sitting judges the
-#   recommendation no longer valid. The board's Accept derivation
-#   (services/helm/internal/board/derive.go), gc-helm.sh `accept` and
-#   converse-invalidate-recommendation.sh all read it as a non-empty value, so
+#   recommendation no longer valid. gc-helm.sh `accept` and
+#   converse-invalidate-recommendation.sh both read it as a non-empty value, so
 #   absent and empty both mean no live recommendation, and the subject offers
 #   Discuss only. A formula name that `gc formula show` resolves.
 # gc.recommended_formula_dispatched — the formula gc-helm.sh `accept` slung,

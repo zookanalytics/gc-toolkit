@@ -13,12 +13,12 @@
 # The scan's parts, for the reasons govulncheck.yml's comments give: the job
 # runs on macOS; setup-go takes the Go release from go.mod and names none of its
 # own; and govulncheck is installed at a release the workflow names. The scan
-# runs over ./... from the repository root,
-# and no flag picks its output, its level or its mode. govulncheck exits 3 on a
-# finding only in text output and only at the level it scans (TextHandler.Flush
-# in golang.org/x/vuln's internal/scan/text.go), so -format or -json would pass
-# whatever it found, and -scan module would fail on a vulnerability no release
-# fixes in a module the code only requires. Neither the job nor a step
+# runs over ./... from the repository root, and no flag picks its output, its
+# level or its mode. govulncheck exits 3 on a finding only in text output and
+# only at the level it scans (TextHandler.Flush in golang.org/x/vuln's
+# internal/scan/text.go), so -format or -json would pass whatever it found, and
+# -scan module would fail on a vulnerability no release fixes in a module the
+# code only requires. Neither the job nor a step
 # continues on error, and the scan's line runs nothing after it, so the scan's
 # exit is the check's.
 #

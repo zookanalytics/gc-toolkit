@@ -43,8 +43,9 @@
 # GC_<C>_GOTMP (Go scratch root, default /var/tmp/gotmp), GC_<C>_GC_BIN (the gc
 # to call), GC_<C>_ORIGIN_FETCH_TTL (seconds between origin fetches for
 # behind_main, default 1800; 0 leans on reconcile-rig-checkouts' fetch). helm
-# only: GC_HELM_SERVICE_NAME. GC_SERVICE_STATE_ROOT is not read: the supervisor sets it for whichever service spawned the caller, so
-# an inherited one would publish this component into another one's state root.
+# only: GC_HELM_SERVICE_NAME. GC_SERVICE_STATE_ROOT is not read: the supervisor
+# sets it for whichever service spawned the caller, so an inherited one would
+# publish this component into another one's state root.
 # Callers: orders/helm-build, orders/gctk-build.
 set -euo pipefail
 
