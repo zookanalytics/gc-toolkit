@@ -38,8 +38,9 @@ declares.
   no suite.
 - The refinery runs the same `lint_command` at merge, and no tests.
 - CI runs the whole `*.test.sh` suite on Linux and on macOS
-  (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
-  merge waits on the checks main's ruleset requires.
+  (`.github/workflows/tests.yml`), and scans for known vulnerabilities in what
+  the code calls (`.github/workflows/govulncheck.yml`). Every merge waits on
+  the checks main's ruleset requires.
 
 ## Pack content every rig runs
 

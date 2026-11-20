@@ -56,14 +56,6 @@ var withdrawHeadKey = ledger.Declare("withdraw_head", ledger.String,
 		"contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is "+
 		"filed, and never cleared.")
 
-// A review run the landing order poured whose root the bead's store does not
-// hold, which this domain owns: the order records it while the gate that asks
-// a person about the run has not filed.
-var outsideRunKey = ledger.Declare("review_run_outside_store", ledger.String,
-	"The root of a review run the landing order poured for the bead, whose store does not hold the root, set "+
-		"while the human gate keyed review-run-outside-store that asks a person about the run has not filed. While "+
-		"it is set, the order files that gate for the run in place of a pour, and it clears once the gate files.")
-
 // The runtime's stamps on a workflow root, which tell the landing order that a
 // review run is attached to the bead that owns a PR: a live root of the review
 // formula that a blocks edge of the bead names.
@@ -80,11 +72,4 @@ var (
 	runTargetVar = ledger.ReadOnly("gc.var.target", ledger.String,
 		"A review run's target var, which Gas City stamps on its root at the pour: the target its result is "+
 			"for. The order counts a closed run for the record's target toward its re-offer.")
-	runPRBeadVar = ledger.ReadOnly("gc.var.pr_bead", ledger.String,
-		"Gas City stamps it on a review run's root at the pour. Before it decides anything of the bead's record, "+
-			"the landing order gives the bead it names its blocks edge onto each run, live or ended, that names the "+
-			"bead and has no such edge, as a pour that stopped before its edge landed leaves it, so the run holds "+
-			"the bead as an attached run does.")
-	runShadowVar = ledger.ReadOnly("gc.var.shadow", ledger.String,
-		"The landing order attaches no shadow run to the bead it names.")
 )

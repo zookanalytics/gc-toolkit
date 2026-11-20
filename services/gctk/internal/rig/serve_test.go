@@ -1087,6 +1087,11 @@ func TestServeTheLockHoldsAcrossTheRemovalOfItsFile(t *testing.T) {
 			next()
 		}()
 		time.Sleep(time.Second)
+		// A second is a whole number of lockPoll, so the second call's poll
+		// wakes at this same instant. Wait until it has tried the lock and gone
+		// back to sleep, so the release and the later call both come while it
+		// waits, as the checks below expect.
+		synctest.Wait()
 		// The release removes the file the second call waits on, and a call
 		// that comes before the second tries it again makes the file anew.
 		release()
