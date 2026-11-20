@@ -1328,9 +1328,11 @@ shows that kind alone, and a second click shows every kind again. The needs
 that do not count, those about parked work or work held for the Product Owner,
 fold beneath the rest under Parked or unprioritized, closed until opened. The
 Work queue is the work in the
-order it is expected to land, with the work nobody has scheduled after it,
-folded under Not scheduled. Work that carries hold:mayor waits for the Product
-Owner: the Unprioritized page lists it, and neither view lists it or counts it.
+order it is expected to land, with the ready work nothing sends anywhere
+after it, folded under Not scheduled. Work that waits on other work stays in
+the queue, and its row names what it waits on. Work that carries hold:mayor
+waits for the Product Owner: the Unprioritized page lists it, and neither view
+lists it or counts it.
 The Epics page shows both for each epic and each
 Delivery, over the work each holds nearest, with its closed work folded beneath,
 and each line leads with how many needs hold it. The Needs you and Work queue
@@ -1495,7 +1497,7 @@ document never mixes two reads of a bead:
 | `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | each open pull request's facts, and where one on the old record stands and what holds it |
 | `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it: the evaluator's answer over the listing's rows and the GitHub read the landing order saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to, so a decision it tracks and a gate it replies to read its state |
-| `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows and waits' answers, and whether the city takes each piece as things stand |
+| `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows, waits' answers, the store's ready set and the live runs, and which of it is the ready work nothing sends anywhere |
 
 The listing reads the store's ephemeral plane and its templates because waits
 reads every run, and a row is a bead bd's own listing shows: the board leaves
@@ -1515,13 +1517,17 @@ order of the rig's open work, naming the work and handing over the listing, and
 every Work queue view lists its rows in that one order. Nothing sits above what
 it waits on: bd graph's execution layers put what can go now first, and each
 layer goes in the order the pool claims ready work,
-priority, then oldest, then id. Work nobody has scheduled comes after the queue.
-So does work that one of Gas City's hold labels keeps from dispatch, unless it
-is in flight, and so does work that waits on either. Work held for the Product
-Owner is placed with the rest, so the work behind it comes after the queue, and
-then no view lists it. A need sorts by the first bead it holds in that order,
-or by its own place when it is work itself, so the top need holds up the front
-of the queue. `specs/tk-yhquh93.13/gas-city-search.md` cites the rules the
+priority, then oldest, then id. The ready work nothing sends anywhere comes
+after the queue, under Not scheduled: each piece the store's ready set serves
+that no hold, route, assignee, arm or live run sends, among them a placed piece
+whose run ended with it open. A piece counts as worked only while a live run
+works it, by waits' run link, so no stamp a pour or a run left on its row
+stands for one. Work that waits on other work stays in the queue behind what
+it waits on. Work held hold:external reads "Waits outside the city". Work held
+for the Product Owner reads "Waits for the Product Owner": it is placed with
+the rest, and then no view lists it. A need sorts by the first bead it holds in
+that order, or by its own place when it is work itself, so the top need holds
+up the front of the queue. `specs/tk-yhquh93.13/gas-city-search.md` cites the rules the
 order composes, and `specs/tk-yhquh93.13/board-views.md` records the board's
 two views.
 
