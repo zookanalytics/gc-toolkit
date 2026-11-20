@@ -334,11 +334,11 @@ source has changed, so most runs build nothing.
 
 Unit 5 gives `gc-build.sh` a mode that only answers whether a build is owed, and
 makes each order a condition order whose check is that mode. A build is owed
-when the binary is missing, or when the checkout's source revision differs from
-the one the binary was built from and from the last revision a build was tried
-for, so a failed build is not tried again on every pass. A person runs the order
-to try it again sooner. The script stays a script because it builds gctk's own
-binary, which gctk cannot hold.
+when the binary is missing or was built from a revision other than the
+checkout's, and no build has been tried for the checkout's revision. So a failed
+build is not tried again on every pass, a city's first build included. A person
+runs the order to try it again sooner. The script stays a script because it
+builds gctk's own binary, which gctk cannot hold.
 
 The Gas City search, at upstream bfe7a19cc2:
 
