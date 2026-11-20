@@ -309,14 +309,14 @@ Take the case that fits the ruling:
   subject, and sign off with `--ruled yes --no-wait --accept`. Send nothing
   yourself: the sign-off hands that gate to `gctk reaction accept`, the one
   writer that dispatches a recommendation, which dispatches the formula once
-  under the subject's acceptance lock. A var the operator settles rides beside `--accept` as
-  `--var <key>=<value>`. The sign-off refuses `--accept`, writing nothing,
-  while a gate the ruling does not answer still holds the subject. Then either
-  answer that gate in the same ruling once the operator rules on it, or sign
-  off without `--accept` and with `--leave` on the recommendation's gate, and
-  the board offers Accept once the other gate clears. A `first-reaction` gate
-  on an epic's member asks about the member's recommendation, which this case
-  does not take.
+  under the subject's acceptance lock. A var the operator settles rides beside
+  `--accept` as `--var <key>=<value>`. The sign-off refuses `--accept`, writing
+  nothing, while a gate the ruling does not answer still holds the subject.
+  Then either answer that gate in the same ruling once the operator rules on
+  it, or sign off without `--accept` and with `--leave` on the recommendation's
+  gate, and the board offers Accept once the other gate clears. A
+  `first-reaction` gate on an epic's member asks about the member's
+  recommendation, which this case does not take.
 - **The work will not go on, and a human gate holds the subject.** Stand the
   subject down first, with the gate's `await_id` as the key:
   `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.

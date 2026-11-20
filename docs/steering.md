@@ -584,8 +584,8 @@ is born one level sooner than its anchor. Its priority is:
   and P0 for an anchor at P1 or P0.
 
 A child adopted or re-routed later keeps the shift it carries, because after its
-birth the shift is its own input, which `queue-priority.sh move --shift` may have
-set.
+birth the shift is its own input, which `queue-priority.sh move --shift` may
+have set.
 
 **Reading the approval.** For the rank, a PR is approved when its anchor owns
 an open PR, resting in `pull_request` or at `pull_request_pending` or

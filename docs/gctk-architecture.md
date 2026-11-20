@@ -185,10 +185,10 @@ What each noun owns:
 - **`reaction`:** the recommendation a first reaction's `recommend` exit leaves
   for the operator's Accept, in `gc.recommended_formula`, and an acceptance's
   record: its dispatch input on the recommendation's gate, in `gc.acceptance`,
-  and the dispatch it made, in `gc.recommended_formula_dispatched`. A reaction itself is a
-  Gas City run of `mol-first-reaction`, and each record its exits leave has
-  another owner: the human gate and the hold label are Gas City's, the headline
-  is the takeaway's, and the arm is `bead`'s.
+  and the dispatch it made, in `gc.recommended_formula_dispatched`. A reaction
+  itself is a Gas City run of `mol-first-reaction`, and each record its exits
+  leave has another owner: the human gate and the hold label are Gas City's,
+  the headline is the takeaway's, and the arm is `bead`'s.
 - **`doctor`:** the record of each doctor run, the `gc-toolkit.doctor.ran` event,
   which `doctor run` alone records, and the shape of its payload. The accepted
   file it reads, `doctor/accepted.toml`, is config in the pack, and a PR the

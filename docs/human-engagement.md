@@ -1231,8 +1231,7 @@ dispatch input on the gate (`gc.acceptance`: its token, the formula and each
 var), resolves the gate with `ruled: accepted <formula> accept:<token>` once
 that write has exited 0, reads which answer the gate took to tell its own from
 one another reached first, reads that no other open human gate blocks the bead,
-slings the
-formula titled
+slings the formula titled
 `<formula> accept:<token>`, and records the dispatch by stripping
 `gc.recommended_formula` beside `gc.recommended_formula_dispatched`. An answer
 another reached first stands, and Accept slings nothing. A gate filed in the
@@ -1246,8 +1245,8 @@ warrant is in [warrants.md](warrants.md).
 
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate
-out of its `ruled:` answers and runs `gctk reaction accept` once the ruling's other
-writes have landed. Under the lock, that run finishes an acceptance the
+out of its `ruled:` answers and runs `gctk reaction accept` once the ruling's
+other writes have landed. Under the lock, that run finishes an acceptance the
 board's Accept left unfinished instead of sending the formula again, and a
 board Accept that runs after the sitting's finds the recommendation
 dispatched. Gas City's launch lock refuses a second pour only while the first

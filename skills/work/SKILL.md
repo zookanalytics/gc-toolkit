@@ -302,10 +302,10 @@ GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" reaction accept <bead>
 ```
 - **In a sitting:** pass `--accept` on the sign-off, or on the `--answer` call
   of a turn that does not sign off. It answers the recommendation's gate
-  through `gctk reaction accept` after the ruling's other writes succeed, including
-  its answer to every other gate (the converse-settle step). Pass a var
-  the operator settles for the dispatch beside it as `--var <key>=<value>`; the
-  formula's own description names the vars it takes.
+  through `gctk reaction accept` after the ruling's other writes succeed,
+  including its answer to every other gate (the converse-settle step). Pass a
+  var the operator settles for the dispatch beside it as `--var <key>=<value>`;
+  the formula's own description names the vars it takes.
 
 Never send a recommended formula with a sling of your own. Accept holds a lock
 on the bead while it clears the recommendation's gate and nothing else, sends
