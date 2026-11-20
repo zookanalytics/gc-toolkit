@@ -105,8 +105,10 @@ type Reading struct {
 	answeredBy map[string]string
 	// gathered is each open bead whose facts the read gathered.
 	gathered map[string]bool
-	holds    map[string]waits.Holds
-	unread   map[string]error
+	// indexed is true once the read has indexed the beads it met first.
+	indexed bool
+	holds   map[string]waits.Holds
+	unread  map[string]error
 	// stays is whether each conversation and decision whose holds were read
 	// waits on work of its own first.
 	stays     map[string]bool
@@ -144,16 +146,8 @@ func Read(ids []string, s Store) (*Reading, error) {
 		noFacts: map[string]bool{}, worked: map[string]string{}, through: map[string]string{},
 		advances: map[string]Advance{}}
 	live := s.Every()
-	add := func(b Bead) {
-		if _, dup := r.beads[b.ID]; !dup && Stands(b) {
-			r.beads[b.ID] = b
-		}
-		if b.Anchor != "" && !Stands(b) {
-			r.through[b.ID] = b.Anchor
-		}
-	}
 	for _, b := range live {
-		add(b)
+		r.keep(b)
 	}
 	var missing []string
 	for _, id := range ids {
@@ -177,25 +171,8 @@ func Read(ids []string, s Store) (*Reading, error) {
 					"a run's root or step, a row of the store's ephemeral plane and a template molecule each " +
 					"speak through another bead"
 			default:
-				add(b)
+				r.keep(b)
 			}
-		}
-	}
-	// An epic's closed members tell whether it waits for a ruling.
-	var epics []string
-	for id, b := range r.beads {
-		if issueType(b) == "epic" && isOpen(b) {
-			epics = append(epics, id)
-		}
-	}
-	if len(epics) > 0 {
-		sort.Strings(epics)
-		closed, err := s.ClosedBeneath(epics)
-		if err != nil {
-			return nil, fmt.Errorf("read the closed members of the epics: %w", err)
-		}
-		for _, b := range closed {
-			add(b)
 		}
 	}
 	r.index()
@@ -259,6 +236,27 @@ func (r *Reading) gather(ids []string, s Store) error {
 		return nil
 	}
 	sort.Strings(open)
+	// An epic or a Delivery with no open member waits for a ruling while it has
+	// members, which only its closed members tell. One with an open member
+	// waits on that member whatever closed beside it, so its closed members are
+	// not read.
+	var bare []string
+	for _, id := range open {
+		if k := r.kinds[id]; k == KindEpic || k == KindDelivery {
+			if _, live := r.members(id); len(live) == 0 {
+				bare = append(bare, id)
+			}
+		}
+	}
+	if len(bare) > 0 {
+		closed, err := s.ClosedBeneath(bare)
+		if err != nil {
+			return fmt.Errorf("read the closed members of the epics: %w", err)
+		}
+		for _, b := range closed {
+			r.keep(b)
+		}
+	}
 	// An open conversation that tracks an open decision is itself the ask while
 	// that decision waits on work of its own first, which what holds the
 	// decision tells, so each decision a conversation named tracks is read too,
@@ -361,9 +359,31 @@ func (r *Reading) gather(ids []string, s Store) error {
 	return nil
 }
 
+// keep keeps a bead the read met, once: one with a standing of its own among
+// the beads it answers from, and for one with none the anchor that speaks for
+// it. A bead kept once the read is indexed joins the index.
+func (r *Reading) keep(b Bead) {
+	if b.Anchor != "" && !Stands(b) {
+		r.through[b.ID] = b.Anchor
+	}
+	if _, dup := r.beads[b.ID]; dup || !Stands(b) {
+		return
+	}
+	r.beads[b.ID] = b
+	if !r.indexed {
+		return
+	}
+	r.kinds[b.ID] = r.kindOf(b)
+	for _, p := range edgesOf(b, "parent-child") {
+		r.children[p] = append(r.children[p], b.ID)
+		sort.Strings(r.children[p])
+	}
+}
+
 // index reads what each bead is, the children of each, and which conversation
 // answers each question.
 func (r *Reading) index() {
+	defer func() { r.indexed = true }()
 	ids := make([]string, 0, len(r.beads))
 	for id := range r.beads {
 		ids = append(ids, id)

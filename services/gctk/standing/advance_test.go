@@ -18,6 +18,8 @@ type graph struct {
 	blocks map[string][]person.Blocker
 	closed []Bead
 	runs   []waits.Run
+	// beneath records the parents each read of closed members names.
+	beneath *[][]string
 }
 
 // graphOf builds a graph: each bead waits on the beads waitsOn names, and
@@ -55,6 +57,9 @@ func (g graph) Blockers(ids []string) (map[string][]person.Blocker, error) {
 }
 
 func (g graph) ClosedBeneath(parents []string) ([]Bead, error) {
+	if g.beneath != nil {
+		*g.beneath = append(*g.beneath, slices.Clone(parents))
+	}
 	var out []Bead
 	for _, b := range g.closed {
 		if slices.ContainsFunc(edgesOf(b, "parent-child"), func(p string) bool { return slices.Contains(parents, p) }) {
@@ -353,5 +358,33 @@ func TestTheFrontierReadsEachWait(t *testing.T) {
 	}}
 	if f, ok := r.Frontier("tk-x"); !ok || !reflect.DeepEqual(f, want) {
 		t.Errorf("Frontier(tk-x) = %+v, %v, want %+v", f, ok, want)
+	}
+}
+
+// TestClosedMembersAreReadForAnEpicWithNoOpenMember: an epic with an open
+// member waits on that member whatever closed beside it, so a read of closed
+// members names only the epics answered that have no open member.
+func TestClosedMembersAreReadForAnEpicWithNoOpenMember(t *testing.T) {
+	member := Bead{ID: "tk-m", Status: "open", IssueType: "task", Assignee: "gc-toolkit.polecat",
+		Edges: []Edge{{ID: "tk-busy", Type: "parent-child"}}}
+	g := graphOf([]Bead{
+		{ID: "tk-busy", Status: "open", IssueType: "epic", Hypothesis: "it helps"}, member,
+		{ID: "tk-done", Status: "open", IssueType: "epic", Hypothesis: "it helped"},
+		{ID: "tk-idle", Status: "open", IssueType: "epic", Hypothesis: "not asked"},
+	}, nil, Bead{ID: "tk-c", Status: "closed", IssueType: "task", Edges: []Edge{{ID: "tk-done", Type: "parent-child"}}})
+	var beneath [][]string
+	g.beneath = &beneath
+	r, err := Read([]string{"tk-busy", "tk-done"}, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(beneath, [][]string{{"tk-done"}}) {
+		t.Errorf("closed members were read beneath %v, want [[tk-done]]", beneath)
+	}
+	if a, _ := r.Answer("tk-done"); a.Ask != AskRuling {
+		t.Errorf("Answer(tk-done) = %+v, want the ruling its closed member leaves it waiting for", a)
+	}
+	if a, _ := r.Answer("tk-busy"); a.Rule != RuleMembers {
+		t.Errorf("Answer(tk-busy) = %+v, want members", a)
 	}
 }
