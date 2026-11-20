@@ -881,10 +881,9 @@ not read keeps the signs saved on its bead, the next pass asks again, and the
 pass exits 2.
 
 **The one-PR update.** For each PR whose signs differ from the ones saved on its
-bead, or whose bead holds no read, one not current for it, or a withdrawal
-filed after its conversation was read, the pass runs the one-PR update,
-`gctk pr refresh`, starting none more than 90 seconds in. The update reads only
-what moved:
+bead, or whose bead holds no read or one not current for it, the pass runs the
+one-PR update, `gctk pr refresh`, starting none more than 90 seconds in. The
+update reads only what moved:
 
 | What moved | What it reads |
 |---|---|
@@ -894,7 +893,6 @@ what moved:
 | the head, or the checks' rollup, total or counts | the PR's own facts with the required check runs at the head, in one request |
 | the comment, review or dismissed count | the conversation, in one request, and the PR's own facts, whose merge state reviews move |
 | nothing, but the bead holds no read or one not current for it | everything |
-| nothing, but a withdrawal open on the bead was filed after its conversation was read | the conversation, since the landing order carries a withdrawal out only from a conversation read after its filing, and a filing moves no sign |
 
 It saves what it read on the bead as `pr_github_read`, in four parts: the PR,
 its checks, its conversation and its labels. Each part keeps the instant its
@@ -1008,8 +1006,8 @@ status` applies it. It decides each bead on the record with a ruling's
 disposition on it too, with or without the marker. It takes an open or
 blocked bead only while it is assigned to nobody or to the refinery, and
 writes nothing to a bead someone else works. It reads GitHub
-only for a merge and for an exception, so it reads no record's PR to decide and
-takes no count of records. It reads the store three times whatever its
+only for a merge, an exception and a withdrawal's close, each on the act's own
+read, so it reads no record's PR to decide and takes no count of records. It reads the store three times whatever its
 records: the marked records, every live bead, and in one read the closed beads
 their blocks edges name. Measured on 2026-11-20, a run with nothing to act on
 took 1.9 to 2 seconds on the gc-toolkit rig's store, with 15 records and 871
@@ -1047,20 +1045,22 @@ through the PR watch, and a record that owes no act gets no write.
 **Withdrawals come first.** While the PR is open, a run first carries out each
 open withdrawal on the bead, which a review run's triage files when it rules a
 head material (`gctk pr withdraw`), from the approvals the saved read holds. It
-waits until the saved conversation was read after the withdrawal was filed,
-since a read sent before can lack an approval given since, and the PR watch
-reads it again for the withdrawal. It waits while an approval it would dismiss
-carries an inline comment the intake has not routed. It dismisses each approval that stands on a commit that does
+waits while an approval it would dismiss carries an inline comment the intake
+has not routed. It dismisses each approval that stands on a commit that does
 not contain the withdrawal's head in the history the rig's clone holds, with
-the withdrawal's reason and the city's mark, and closes the withdrawal once
-GitHub has dismissed each, or once none stands. Before it dismisses any, it
+the withdrawal's reason and the city's mark, and closes the withdrawal once the
+act's own read of the PR's reviews shows none standing past the ones it
+dismissed. The saved read can lack an approval given since the PR watch read
+it, which a closed withdrawal would leave standing, so an approval only the
+act's own read shows keeps the withdrawal open until a later run dismisses it
+from the watch's next read. Before it dismisses any, it
 fetches the PR's branch into the clone, so an approved commit someone pushed
 from outside the city is judged by its own history. A commit the clone still
 does not hold, such as one a force-push left behind, contains no head, so its
 approval is dismissed. When GitHub refuses a dismissal, it files a human gate
-on the bead keyed `approval-withdraw-refused`. A dismissal GitHub does not
-answer, a fetch that fails, or a read of the clone's history that does not
-answer, leaves the withdrawal for the next run. A withdrawal holds the bead
+on the bead keyed `approval-withdraw-refused`. A dismissal or a read of the
+reviews GitHub does not answer, a fetch that fails, or a read of the clone's
+history that does not answer, leaves the withdrawal for the next run. A withdrawal holds the bead
 from the refinery until it is carried out, so a changed head stays assigned to
 nobody and keeps its marker while one is open, and the order still reads it.
 

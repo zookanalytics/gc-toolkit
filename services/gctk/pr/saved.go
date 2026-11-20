@@ -286,10 +286,8 @@ func sameRuns(a, b []RequiredRun) bool {
 
 // owned is a live bead that owns a PR, as the PR watch reads it: the bead, its
 // status and assignee, the PR's URL, host, repository and number, its pending
-// record, branch and provenance instant, the read saved on it, nil when it
-// holds none or one that does not decode, the beads its blocks edges name, and
-// when the latest withdrawal open among them was filed, "" when none is open
-// (withdrawnOn).
+// record, branch and provenance instant, and the read saved on it, nil when it
+// holds none or one that does not decode.
 type owned struct {
 	id, status, assignee string
 	url, host, repo      string
@@ -297,25 +295,6 @@ type owned struct {
 	rec                  record.Record
 	branch, since        string
 	saved                *SavedRead
-	blocks               []string
-	withdrawn            string
-}
-
-// due is the parts of the read saved on o that the signs s, read just now, say
-// are stale (moved), and the conversation too when a withdrawal open on the
-// bead was filed after the saved conversation was read, since the landing
-// order carries a withdrawal out only from a conversation read after it was
-// filed (judge), and the filing moves no sign. A withdrawal whose creation
-// time does not read makes nothing due, since no read can follow it.
-func (o owned) due(s gh.Signs) parts {
-	p := moved(o.saved, s, o.stale())
-	if o.withdrawn == "" || o.saved == nil || o.saved.Conversation == nil {
-		return p
-	}
-	if after, err := readAfterFiling(o.saved.Conversation.ReadAt, o.withdrawn); err == nil && !after {
-		p.conversation = true
-	}
-	return p
 }
 
 // stale says why the saved read is not current for the bead, and is empty when

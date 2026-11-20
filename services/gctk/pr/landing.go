@@ -23,15 +23,18 @@ import (
 // runs act on each record with Reconcile. A run decides every record from the
 // store and the read the one-PR update (refresh.go) saved on its bead, and
 // reads GitHub only for a merge, which it decides again on its own read of the
-// PR and pins to the head it judged, and for an exception, which it records
-// only once its own read of the PR shows what the saved read did. It closes a bead once the merge commit is
-// on the target, hands a changed head to the refinery and sees that the
-// refinery hears of it, keeps the exceptions blocked behind a human gate, marks
-// a draft ready and carries out an approval's withdrawal, each from the saved
-// read. A bead's assignee says who works it now (Gas City's delivery of work to
-// a session): the refinery while it validates a head, and nobody while the PR
-// waits. A run works a bead assigned to nobody or to the refinery, and leaves
-// one assigned to anyone else to that assignee. A ruling that retires a PR
+// PR and pins to the head it judged, for an exception, which it records only
+// once its own read of the PR shows what the saved read did, and for a
+// withdrawal's close, which it makes only once its own read of the PR's reviews
+// shows no approval standing without the withdrawal's head. It closes a bead
+// once the merge commit is on the target, hands a changed head to the refinery
+// and sees that the refinery hears of it, keeps the exceptions blocked behind a
+// human gate, marks a draft ready and carries out an approval's withdrawal,
+// each from the saved read. A bead's assignee says who works it now (Gas City's
+// delivery of work to a session): the refinery while it validates a head, and
+// nobody while the PR waits. A run works a bead assigned to nobody or to the
+// refinery, and leaves one assigned to anyone else to that assignee. A ruling
+// that retires a PR
 // records its disposition on the bead under the record lock and then closes
 // the PR (pr-dispose.sh). A run requests no merge of a PR whose bead carries
 // it, and once the saved read finds the PR closed the bead goes to the

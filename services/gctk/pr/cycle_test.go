@@ -1,7 +1,6 @@
 package pr_test
 
 import (
-	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -457,118 +456,76 @@ func TestAWithdrawalHoldsThePRUntilNoApprovalWithoutItsHeadStands(t *testing.T) 
 	is(t, d.once(t), pr.ActRequested)
 }
 
-// A withdrawal is carried out only from a conversation read sent after it was
-// filed. An approval of a commit without its head, given after the PR watch's
-// last read and before the filing, is missing from that read, so the withdrawal
-// waits rather than closing over it, even when bd's creation time, given to the
-// second, names the second the read was sent in. Once the watch reads the
-// conversation again, the approval is dismissed and the withdrawal closes.
-func TestAWithdrawalWaitsForAConversationReadSentAfterItWasFiled(t *testing.T) {
-	d := newCycle(t)
-	d.pr.Reviews = nil
-	d.refresh(t)
-	d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
-	id := d.withdraw(t, head)
-	var saved struct {
-		Conversation struct {
-			ReadAt string `json:"read_at"`
-		} `json:"conversation"`
-	}
-	if err := json.Unmarshal([]byte(d.row(t).Metadata["pr_github_read"]), &saved); err != nil {
-		t.Fatal(err)
-	}
-	read, err := time.Parse(time.RFC3339Nano, saved.Conversation.ReadAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := d.store.Row(id)
-	b.CreatedAt = read.Truncate(time.Second).Format(time.RFC3339)
-	d.store.Put(b)
-	o := d.run(t)
-	if status(t, d, id) != "open" || !slices.Equal(states(d.pr), []string{"approved"}) ||
-		!strings.Contains(o.Detail, "before the withdrawal was filed") {
-		t.Fatalf("over a conversation read before its filing, the withdrawal is %s with reviews %v: %s",
-			status(t, d, id), states(d.pr), o.Detail)
-	}
-	d.once(t)
-	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed"}) {
-		t.Fatalf("once the watch read the conversation again, the withdrawal is %s with reviews %v",
-			status(t, d, id), states(d.pr))
-	}
-}
-
-// Filing a withdrawal moves no sign on GitHub, so each way the PR watch reads a
-// PR reads the conversation again when a withdrawal open on the bead was filed
-// after it was read, and saves the new read's instant over the same facts. The
-// landing order then carries the withdrawal out, and the next pass reads
-// nothing again.
-func TestThePRWatchReadsTheConversationAgainForAWithdrawalFiledAfterIt(t *testing.T) {
+// A withdrawal closes only once the act's own read of the PR's reviews shows no
+// approval standing on a commit without its head. An approval given after the
+// PR watch's last read is missing from the saved conversation, whether it was
+// given before the withdrawal was filed or after, so the withdrawal stays open
+// over it and holds the PR. Once the watch has read the conversation again,
+// the approval is dismissed and the withdrawal closes, and with no approval
+// standing the PR is not merged.
+func TestAWithdrawalClosesOnlyOnTheActsOwnReadOfTheReviews(t *testing.T) {
 	for _, c := range []struct {
 		name string
-		pass func(d *land) error
+		file func(t *testing.T, d *land) string
 	}{
-		{"the cheap question", func(d *land) error { _, err := d.watch.Poll(pr.PassOptions{}); return err }},
-		{"the net", func(d *land) error { _, err := d.watch.Compare(pr.PassOptions{}); return err }},
-		{"the one-PR update called alone", func(d *land) error { _, err := d.watch.Refresh(prURL); return err }},
+		{"an approval given before the filing", func(t *testing.T, d *land) string {
+			d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
+			return d.withdraw(t, head)
+		}},
+		{"an approval given after the filing", func(t *testing.T, d *land) string {
+			id := d.withdraw(t, head)
+			d.refresh(t)
+			d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
+			return id
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d := newCycle(t)
-			d.pr.Reviews = []gh.Review{approved(101, "reviewer", head)}
+			d.pr.Reviews = nil
 			d.refresh(t)
-			id := d.withdraw(t, head)
-			d.run(t)
-			if status(t, d, id) != "open" {
-				t.Fatalf("over a conversation read before its filing, the withdrawal is %s", status(t, d, id))
+			id := c.file(t, d)
+			o := d.run(t)
+			if status(t, d, id) != "open" || !slices.Equal(states(d.pr), []string{"approved"}) ||
+				!strings.Contains(o.Detail, "review 100 (operator) standing") {
+				t.Fatalf("over an approval the saved conversation lacks, the withdrawal is %s with reviews %v: %s",
+					status(t, d, id), states(d.pr), o.Detail)
 			}
-			writes := len(d.store.Writes())
-			if err := c.pass(d); err != nil {
-				t.Fatal(err)
+			if got := d.runReads(); !slices.Equal(got, []string{"Reviews"}) {
+				t.Fatalf("the act read GitHub %v, want its own read of the reviews", got)
 			}
-			if len(d.store.Writes()) != writes+1 {
-				t.Fatalf("the pass after the filing wrote %v", d.store.Writes()[writes:])
-			}
-			d.run(t)
-			if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"approved"}) {
-				t.Fatalf("after the watch read the conversation again, the withdrawal is %s with reviews %v",
+			d.once(t)
+			if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed"}) {
+				t.Fatalf("once the watch read the conversation again, the withdrawal is %s with reviews %v",
 					status(t, d, id), states(d.pr))
 			}
-			writes = len(d.store.Writes())
-			if err := c.pass(d); err != nil {
-				t.Fatal(err)
-			}
-			if len(d.store.Writes()) != writes {
-				t.Fatalf("a pass with nothing to read again wrote %v", d.store.Writes()[writes:])
+			d.store.Unlist(bead)
+			if o := d.once(t); o.Action == pr.ActRequested {
+				t.Fatalf("the PR was merged with no approval standing: %s", o.Detail)
 			}
 		})
 	}
 }
 
-// With two withdrawals open on the bead, the PR watch reads the conversation
-// again until its read follows the later filing, though a read it made between
-// the two filings follows the earlier one, in whichever order the bead's edges
-// list the two.
-func TestThePRWatchReadsTheConversationAgainForTheLaterOfTwoWithdrawals(t *testing.T) {
-	for _, reversed := range []bool{false, true} {
-		d := newCycle(t)
-		d.pr.Reviews = []gh.Review{approved(101, "reviewer", later)}
-		d.refresh(t)
-		d.withdraw(t, head)
-		pass := func(what string) {
-			t.Helper()
-			writes := len(d.store.Writes())
-			if _, err := d.watch.Poll(pr.PassOptions{}); err != nil {
-				t.Fatal(err)
-			}
-			if len(d.store.Writes()) != writes+1 {
-				t.Fatalf("with the edges reversed %v, the pass after %s wrote %v", reversed, what, d.store.Writes()[writes:])
-			}
-		}
-		pass("the first filing")
-		d.withdraw(t, later)
-		if reversed {
-			d.edit(t, func(b *fake.Bead) { slices.Reverse(b.Edges) })
-		}
-		pass("the second filing")
+// A filing moves no sign on GitHub, and the PR watch reads nothing again for
+// it. A withdrawal over a conversation the watch read before its filing closes
+// at the first run when the act's own read of the reviews shows no approval
+// standing on a commit without its head.
+func TestAWithdrawalOverAnEarlierReadClosesOnceTheActsOwnReadShowsNoneStanding(t *testing.T) {
+	d := newCycle(t)
+	d.pr.Reviews = []gh.Review{approved(101, "reviewer", head)}
+	d.refresh(t)
+	id := d.withdraw(t, head)
+	writes := len(d.store.Writes())
+	if _, err := d.watch.Poll(pr.PassOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.store.Writes()) != writes {
+		t.Fatalf("the pass after the filing, with nothing moved, wrote %v", d.store.Writes()[writes:])
+	}
+	d.run(t)
+	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"approved"}) {
+		t.Fatalf("with no approval standing without its head, the withdrawal is %s with reviews %v",
+			status(t, d, id), states(d.pr))
 	}
 }
 

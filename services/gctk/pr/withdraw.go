@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -21,9 +20,9 @@ import (
 // the bead (specs/tk-1tfzr71.149/design.md, section 5). It waits while an
 // approval it would dismiss carries feedback the intake has not routed,
 // dismisses each approval that stands on a commit that does not contain the
-// head, and closes the withdrawal once GitHub has dismissed each one, or once
-// none stands. It files a human gate on the bead when GitHub refuses a
-// dismissal.
+// head, and closes the withdrawal once the act's own read of the PR's reviews
+// shows none standing past the ones it dismissed. It files a human gate on the
+// bead when GitHub refuses a dismissal.
 //
 // A withdrawal holds the bead from the refinery as any wait does, so the
 // record stays marked while one is open, and the order reads it on every run
@@ -175,12 +174,10 @@ func withdrawTitle(number, head string) string {
 }
 
 // withdrawal is a withdrawal filed on a bead: its own bead, the head it names,
-// the reason its dismissals give, when it was filed, and whether it is still
-// open.
+// the reason its dismissals give, and whether it is still open.
 type withdrawal struct {
 	id, head, reason string
 	status, assignee string
-	created          string
 	open             bool
 }
 
@@ -236,7 +233,7 @@ func withdrawalsIn(rows []*ledger.Record) ([]withdrawal, error) {
 			continue
 		}
 		all = append(all, dated{withdrawal{id: b.ID, head: strings.TrimSpace(h), reason: strings.TrimSpace(b.Description()),
-			status: b.Status(), assignee: b.Assignee(), created: b.CreatedAt(), open: b.Status() != "closed"}, b.CreatedAt()})
+			status: b.Status(), assignee: b.Assignee(), open: b.Status() != "closed"}, b.CreatedAt()})
 	}
 	slices.SortStableFunc(all, func(a, b dated) int {
 		if c := strings.Compare(a.created, b.created); c != 0 {
@@ -301,61 +298,15 @@ func conversationFor(s state, saved *SavedRead) (*SavedConversation, string) {
 	}
 }
 
-// readAfterFiling reports whether a read sent at readAt was sent after a bead
-// created at filed was filed. bd's listing gives a bead's creation time to the
-// second, so a read sent within that second may precede the filing, and only
-// one sent from the next second on follows it. A read instant that does not read as one
-// follows nothing, and a creation time that does not read is an error.
-func readAfterFiling(readAt, filed string) (bool, error) {
-	f, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(filed))
-	if err != nil {
-		return false, fmt.Errorf("its creation time %q does not read as a time", filed)
-	}
-	r, err := time.Parse(time.RFC3339Nano, readAt)
-	if err != nil {
-		return false, nil
-	}
-	return !r.Before(f.Add(time.Second)), nil
-}
-
 // judge decides withdrawal w from the approvals conv saved, past the ones
-// gone, which this act dismissed for an earlier withdrawal. An approval stands
-// on a commit that does not contain the head unless its commit is the head, or
-// descends from it in the clone's history (Checkout.Contains). A commit the
-// clone does not hold once the act has fetched the PR's branch (carryOne), such
-// as one a force-push left behind, is not shown to contain the head, and
-// neither is an approval that names no commit, so each is dismissed, which errs
-// toward a dismissal: otherwise a commit no one holds would keep the withdrawal
-// waiting on every run, with no one asked. An approval of the head, or of any
-// later head of the branch, contains it, since every push onto a PR's branch on
-// the record is a fast-forward. w waits for a conversation read sent after it
-// was filed, which the PR watch makes (owned.due): a read sent before can lack
-// an approval given since, which a close would leave standing.
+// gone, which this act dismissed for an earlier withdrawal: the ones that stand
+// on a commit without the head (withoutHead) to dismiss, or a close when none
+// does, which carryOne makes only once the act's own read of the PR's reviews
+// shows none either.
 func (u *run) judge(s state, conv *SavedConversation, w withdrawal, gone map[int64]bool) verdict {
-	switch after, err := readAfterFiling(conv.ReadAt, w.created); {
-	case err != nil:
-		return verdict{wait: "whether the saved conversation was read after the withdrawal was filed did not read: " +
-			err.Error(), failed: true}
-	case !after:
-		return verdict{wait: fmt.Sprintf("the saved conversation was read at %s, before the withdrawal was filed at %s, "+
-			"so it can lack an approval given since, and the PR watch reads it again", conv.ReadAt, w.created)}
-	}
-	var targets []Approval
-	for _, a := range conv.Approvals {
-		if gone[a.ID] {
-			continue
-		}
-		if a.Commit != "" {
-			in, err := u.holds(a.Commit, w.head)
-			if err != nil {
-				return verdict{wait: fmt.Sprintf("whether approved commit %s contains the head did not read: %v", short(a.Commit), err),
-					failed: true}
-			}
-			if in {
-				continue
-			}
-		}
-		targets = append(targets, a)
+	targets, err := u.withoutHead(conv.Approvals, w.head, gone)
+	if err != nil {
+		return verdict{wait: err.Error(), failed: true}
 	}
 	if len(targets) == 0 {
 		return verdict{close: true}
@@ -371,6 +322,37 @@ func (u *run) judge(s state, conv *SavedConversation, w withdrawal, gone map[int
 			"routed, and a dismissal would retire it unread", joinIDs(unread))}
 	}
 	return verdict{dismiss: targets}
+}
+
+// withoutHead is each of approvals, past the ones gone, that stands on a commit
+// that does not contain head. A commit contains the head when it is the head, or
+// descends from it in the clone's history (Checkout.Contains). A commit the
+// clone does not hold once the act has fetched the PR's branch (carryOne), such
+// as one a force-push left behind, is not shown to contain the head, and neither
+// is an approval that names no commit, so each stands without it, which errs
+// toward a dismissal: otherwise a commit no one holds would keep the withdrawal
+// waiting on every run, with no one asked. An approval of the head, or of any
+// later head of the branch, contains it, since every push onto a PR's branch on
+// the record is a fast-forward. A read of the history that does not answer is
+// an error.
+func (u *run) withoutHead(approvals []Approval, head string, gone map[int64]bool) ([]Approval, error) {
+	var out []Approval
+	for _, a := range approvals {
+		if gone[a.ID] {
+			continue
+		}
+		if a.Commit != "" {
+			in, err := u.holds(a.Commit, head)
+			if err != nil {
+				return nil, fmt.Errorf("whether approved commit %s contains the head did not read: %v", short(a.Commit), err)
+			}
+			if in {
+				continue
+			}
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }
 
 // commentReceipts are the bead's receipts of the inline comments the intake
@@ -489,7 +471,9 @@ func (u *run) carry(ctx context.Context, s state, saved *SavedRead) carriedOut {
 }
 
 // carryOne carries out withdrawal w, past the approvals gone, which this act
-// dismissed for an earlier withdrawal and which it adds to. It returns its
+// dismissed for an earlier withdrawal and which it adds to: it dismisses the
+// approvals judge finds in conv, and closes w only once the act's own read of
+// the PR's reviews shows none standing without its head. It returns its
 // account, whether w is still open, and whether a step did not complete.
 func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, conv *SavedConversation, w withdrawal, gone map[int64]bool) (string, bool, bool) {
 	at := fmt.Sprintf("withdrawal %s for %s", w.id, short(w.head))
@@ -509,6 +493,7 @@ func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, co
 	if v.wait != "" {
 		return waits(v.wait, v.failed)
 	}
+	hub := u.Hub(ctx, host)
 	var dismissed []Approval
 	if len(v.dismiss) > 0 {
 		mark, err := u.cityMark()
@@ -519,7 +504,6 @@ func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, co
 		if message == "" {
 			message = fmt.Sprintf("Triage ruled head %s a material change, so this approval does not cover the code that will land.", short(w.head))
 		}
-		hub := u.Hub(ctx, host)
 		var refused, unanswered []Approval
 		var why string
 		for _, a := range v.dismiss {
@@ -552,6 +536,29 @@ func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, co
 		if len(unanswered) > 0 {
 			return waits(fmt.Sprintf("the dismissal of %s was not answered", approvalNames(unanswered)), true)
 		}
+	}
+	// The saved conversation can lack an approval given since the PR watch
+	// read it, and a closed withdrawal dismisses nothing more, so the close
+	// waits on the act's own read of the reviews.
+	reviews, err := hub.Reviews(s.rec.Repo, p.Number)
+	if err != nil {
+		return waits("the act's own read of the PR's reviews did not answer, and the withdrawal closes only on it: "+
+			err.Error(), true)
+	}
+	var live []Approval
+	for _, r := range reviews {
+		if r.State == "APPROVED" {
+			live = append(live, Approval{ID: r.ID, Author: r.Author, Commit: r.Commit})
+		}
+	}
+	left, err := u.withoutHead(live, w.head, gone)
+	if err != nil {
+		return waits(err.Error(), true)
+	}
+	if len(left) > 0 {
+		return waits(fmt.Sprintf("the act's own read of the reviews shows %s standing on a commit without the head, "+
+			"which the read the PR watch saved does not hold yet, and a later run dismisses it from the watch's next read",
+			approvalNames(left)), false)
 	}
 	note := fmt.Sprintf("The landing order carried out this withdrawal (%s): ", u.stamp())
 	if len(dismissed) == 0 {

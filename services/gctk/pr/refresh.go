@@ -113,53 +113,7 @@ func (u *watchRun) feedback() (Feedback, error) {
 }
 
 // owners lists the live beads that own a PR, by the PR's URL (ownersIn).
-func (w Watcher) owners() (map[string][]owned, error) {
-	all, err := ownersIn(w.Ledger)
-	if err != nil {
-		return nil, err
-	}
-	if err := withdrawnOn(w.Ledger, all); err != nil {
-		return nil, err
-	}
-	return all, nil
-}
-
-// withdrawnOn sets on each owner in all when the latest withdrawal open on its
-// bead was filed, from one listing, read through l, of the live beads the
-// owners' blocks edges name. A bead whose withdraw_head does not decode is no
-// withdrawal the watch can read, and the landing order reports it.
-func withdrawnOn(l *ledger.Ledger, all map[string][]owned) error {
-	var ids []string
-	for _, owners := range all {
-		for _, o := range owners {
-			ids = append(ids, o.blocks...)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	slices.Sort(ids)
-	rows, err := l.Find(ledger.ByID(slices.Compact(ids)...))
-	if err != nil {
-		return err
-	}
-	filed := map[string]string{}
-	for _, r := range rows {
-		if _, ok, err := withdrawHeadKey.Get(r); err == nil && ok {
-			filed[r.ID] = r.CreatedAt()
-		}
-	}
-	for _, owners := range all {
-		for i := range owners {
-			for _, id := range owners[i].blocks {
-				if at, ok := filed[id]; ok && (owners[i].withdrawn == "" || after(at, owners[i].withdrawn)) {
-					owners[i].withdrawn = at
-				}
-			}
-		}
-	}
-	return nil
-}
+func (w Watcher) owners() (map[string][]owned, error) { return ownersIn(w.Ledger) }
 
 // ownersIn lists the live beads that own a PR, by the PR's URL, read through l.
 // A bead owns a PR when it names it as its own and is no other bead's child: an
@@ -223,13 +177,6 @@ func ownerOf(r *ledger.Record) (owned, bool) {
 	if saved, _, err := githubReadKey.Get(r); err == nil {
 		o.saved = saved
 	}
-	if edges, err := r.Edges(); err == nil {
-		for _, e := range edges {
-			if e.Type == ledger.EdgeBlocks {
-				o.blocks = append(o.blocks, e.ID)
-			}
-		}
-	}
 	return o, true
 }
 
@@ -282,7 +229,7 @@ func (w Watcher) Refresh(url string) (Refreshed, error) {
 	if !ok {
 		return Refreshed{URL: url, Bead: o.id}, errors.New("GitHub returned no signs for the PR")
 	}
-	return u.update(o, hub, s, at, o.due(s))
+	return u.update(o, hub, s, at, moved(o.saved, s, o.stale()))
 }
 
 // update is the one-PR update over the parts due names, with the signs s, which
@@ -503,7 +450,7 @@ func (w Watcher) Poll(o PassOptions) (PassReport, error) {
 			case !ok:
 				failed[ow.number] = errors.New("GitHub returned no signs for it")
 			default:
-				read[ow.number] = sighting{signs: s, due: ow.due(s)}
+				read[ow.number] = sighting{signs: s, due: moved(ow.saved, s, ow.stale())}
 			}
 		}
 		return read, failed
@@ -534,7 +481,7 @@ func (w Watcher) Compare(o PassOptions) (PassReport, error) {
 			case !ok:
 				failed[ow.number] = errors.New("GitHub returned no full read of it")
 			default:
-				due := ow.due(f.Signs).plus(differs(ow.saved, f))
+				due := moved(ow.saved, f.Signs, ow.stale()).plus(differs(ow.saved, f))
 				read[ow.number] = sighting{signs: f.Signs, due: due}
 			}
 		}

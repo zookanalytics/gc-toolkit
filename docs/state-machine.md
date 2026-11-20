@@ -450,9 +450,10 @@ the head in `withdraw_head`, before it writes its output, which
 `gctk review output` refuses until that withdrawal is filed. The landing order
 carries it out once the intake has routed the comments an approval it would
 dismiss carries. It dismisses each
-approval given on a commit that does not contain the head, by GitHub's compare
-of the two, with the reason and the city's mark, reads the reviews again, and
-closes the withdrawal once none stands. A dismissal GitHub refuses files a human
+approval given on a commit that does not contain the head, in the history the
+rig's clone holds once it fetches the PR's branch, with the reason and the
+city's mark, reads the reviews again, and closes the withdrawal once none
+stands. A dismissal GitHub refuses files a human
 gate keyed `approval-withdraw-refused`.
 
 **The draft.** Each city writer returns the PR to draft before it pushes onto

@@ -54,8 +54,7 @@ which it prints, exiting 0.
 It reads the PR's cheap signs first, one request, and then only the parts
 the signs say moved: the PR's own facts, with the required check runs at its
 head when the head or the checks moved, its conversation when a comment,
-review or dismissed count or when GitHub last changed the PR moved, or when a
-withdrawal open on the bead was filed after the conversation was read, and its
+review or dismissed count or when GitHub last changed the PR moved, and its
 labels, which are their own signs. A read that is missing a part, or is not
 current for the bead, is read whole. Under the store's record lock it reads
 the bead again and writes once, guarded on the status and assignee it read,
@@ -75,9 +74,8 @@ exit: 0 saved, unchanged, or no live bead owns the PR
 const prPollLong = `One pass of the PR watch over the store's live beads: it lists the PRs they
 own, asks GitHub for each one's cheap signs in one request for each 50 PRs in
 a repository, and runs the one-PR update (gctk pr refresh) for each PR whose
-signs moved from the ones saved on its bead, or whose bead holds no read, one
-not current for it, or a withdrawal filed after its conversation was read. It
-starts no update more than 90 seconds in. A pass in
+signs moved from the ones saved on its bead, or whose bead holds no read, or
+one not current for it. It starts no update more than 90 seconds in. A pass in
 which nothing moved writes no bead.
 
 The signs are the PR's state and draft flag, its head, its base and the base's
@@ -99,8 +97,7 @@ const prCompareLong = `One pass of the net over the store's live beads: it lists
 reads each in full in one request for each 10 PRs in a repository, and runs
 the one-PR update (gctk pr refresh) for each PR whose read differs from the
 read saved on its bead, over each part that differs or whose cheap signs
-moved, and over the conversation when a withdrawal on the bead was filed after
-it was read. It starts no update more than 3 minutes in. A pass in which nothing
+moved. It starts no update more than 3 minutes in. A pass in which nothing
 differs writes no bead.
 
 The full read is the cheap signs gctk pr poll reads and the facts no sign
