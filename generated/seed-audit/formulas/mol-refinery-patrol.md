@@ -18,21 +18,17 @@ scripts at shell runtime, since formula bodies get no {{.ConfigDir}}:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/<script>"`.
 
 The merge strategy is the bead's `merge_strategy`: `direct` lands by a
-fast-forward push, and `mr` publishes a pull request. On a rig whose
-`pending_through_merge` formula var is "true", the PR's bead stays open on Gas
-Town's pending-through-merge record until the landing order (orders/
-pr-reconcile.toml) verifies its merge; on any other rig the merge cadence
-(the refinery-reconcile order) opens and merges it. Neither is yours to run:
+fast-forward push, and `mr` publishes a pull request. The PR's bead stays open
+on Gas Town's pending-through-merge record until the landing order (orders/
+pr-reconcile.toml) verifies its merge, which is not yours to run:
 docs/refinery-merge-cadence.md.
 
 Variables:
   {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol sends a bead back to the polecat pool, and an empty prefix names <rig>/polecat instead of <rig>/gc-toolkit.polecat, which no pool claims. (default=gc-toolkit.)
   {{build_command}}: Build command. Empty = skip. (default=)
-  {{check_set}}: The merge cadence's gating check set, stamped on a bead the old path parks for the cadence: a comma list of checks, each a lane that must derive green before merge.sh lands the PR. 'none' is stamped as itself, and an empty value recovers this default. Read only while pending_through_merge is unset. (default=correctness,triage)
   {{default_merge_strategy}}: The strategy for a bead that names none: 'direct' lands by a fast-forward push, 'mr' publishes a PR. Whatever this says, a bead that would land direct on the rig's default branch takes mr, so the default branch takes work only through a PR (docs/warrants.md). The merge-push step reads the rig's value, else this default. (default=direct)
   {{delete_merged_branches}}: Delete a branch from origin once its direct landing is recorded. (default=true)
   {{lint_command}}: Lint command. Empty = skip. (default=)
-  {{pending_through_merge}}: Whether the rig is on the new path: 'true' has the merge-push step publish an mr bead's PR and record it pending until the landing order verifies its merge. Any other value keeps the old path, where the bead parks for the merge cadence. A rig sets it in its [rigs.formula_vars] at its cutover, and the merge-push step reads the rig's value. (default=false)
   {{rig_name}}: Rig this patrol serves; injected by the pour and forwarded by next-iteration. Declared so the {{rig_name}} token in the pour command resolves. (default=)
   {{run_tests}}: Whether the gate runs test_command. (default=true)
   {{setup_command}}: Setup/install command. Empty = skip. (default=)

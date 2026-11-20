@@ -385,7 +385,7 @@ has " $(down_blockers tk-kd) " " tk-blk " "dep <blocker> --blocks <blocked> land
 mk_sut_dir "$TMP/sut" "$HERE/lifecycle.sh"
 [ -f "$TMP/sut/bd-lib.sh" ] && ok "mk_sut_dir copies bd-lib.sh beside the SUT" || bad "mk_sut_dir left bd-lib.sh out"
 [ -f "$TMP/sut/gctk-resolve.sh" ] && ok "mk_sut_dir copies gctk-resolve.sh beside the SUT" || bad "mk_sut_dir left gctk-resolve.sh out"
-out="$(GCTK_BIN=none "$TMP/sut/lifecycle.sh" state tk-blk 2>&1)"
+out="$(GCTK_BIN=none "$TMP/sut/lifecycle.sh" transition tk-blk --to merged 2>&1)"
 hasnt "$out" "cannot source gctk-resolve.sh" "a copied lifecycle.sh sources gctk-resolve.sh from its private dir"
 # A script that asks how a bead is dispatched, such as gc-helm.sh, sources
 # dispatch-path.sh by sibling path, so its copy sources from the private dir.
