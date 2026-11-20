@@ -2185,6 +2185,33 @@ func TestABeadAssignedToAnotherIsLeftToItsAssignee(t *testing.T) {
 	})
 }
 
+// A run reads the store as often whatever the number of records it decides:
+// the marked records, every live bead, and in one read the closed beads their
+// blocks edges name, such as a review run that ended, which the read of every
+// live bead does not hold.
+func TestARunsReadsDoNotGrowWithItsRecords(t *testing.T) {
+	finds := func(n int) int {
+		d := newLand(t)
+		for i := range n {
+			id, run := fmt.Sprintf("tk-w%d", i), fmt.Sprintf("tk-r%d", i)
+			md := maps.Clone(d.md)
+			md["branch"] = "polecat/" + id
+			d.store.Put(fake.Bead{ID: run, Title: "a review run", Status: "closed"})
+			d.store.Put(fake.Bead{ID: id, Title: "waiting work", Status: "blocked", Metadata: md,
+				Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: run, Title: "a review run", Status: "closed"}}})
+		}
+		count := 0
+		d.store.OnFind = func(gcbd.Query) { count++ }
+		if out := d.reconcile(t, pr.Options{}); len(out) != n+1 {
+			t.Fatalf("a run of %d records decided %+v", n+1, out)
+		}
+		return count
+	}
+	if one, five := finds(1), finds(4); one != five {
+		t.Fatalf("a run of two records read the store %d times, and one of five %d", one, five)
+	}
+}
+
 // Beads on the record that agents other than the refinery are assigned are
 // left out of a run's pass, since a run writes nothing to them: each run
 // decides the waiting bead beside them alone, and leaves the held beads as

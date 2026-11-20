@@ -193,6 +193,19 @@ func (l Landing) blockers(r *ledger.Record, closed bool) ([]*ledger.Record, erro
 
 // blockersIn is blockers, read through l.
 func blockersIn(l *ledger.Ledger, r *ledger.Record, closed bool) ([]*ledger.Record, error) {
+	ids, err := blockerIDs(r)
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	sel := ledger.ByID(ids...)
+	if closed {
+		sel = sel.WithClosed()
+	}
+	return l.Find(sel)
+}
+
+// blockerIDs is each bead r's blocks edges name, once.
+func blockerIDs(r *ledger.Record) ([]string, error) {
 	edges, err := r.Edges()
 	if err != nil {
 		return nil, &ledger.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}
@@ -203,14 +216,7 @@ func blockersIn(l *ledger.Ledger, r *ledger.Record, closed bool) ([]*ledger.Reco
 			ids = append(ids, e.ID)
 		}
 	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	sel := ledger.ByID(ids...)
-	if closed {
-		sel = sel.WithClosed()
-	}
-	return l.Find(sel)
+	return ids, nil
 }
 
 // withdrawalsIn is each withdrawal among rows, the beads that carry

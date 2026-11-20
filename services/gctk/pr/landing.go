@@ -771,6 +771,25 @@ func (u *run) plan() ([]plan, error) {
 		}
 		due = append(due, r)
 	}
+	// Each record's state reads the beads its blocks edges name, closed ones
+	// among them, which the pass's read of every live bead does not hold. One
+	// read here holds them for every record the run decides, so a run's reads
+	// do not grow with its records. A read that fails here leaves each record's
+	// state to read its own, and to say so when that fails too.
+	var named []string
+	for _, r := range due {
+		if s := r.Status(); (s == "open" || s == "blocked") && u.mayWork(r) {
+			ids, _ := blockerIDs(r)
+			for _, id := range ids {
+				if !slices.Contains(named, id) {
+					named = append(named, id)
+				}
+			}
+		}
+	}
+	if len(named) > 0 {
+		_, _ = pass.Find(ledger.ByID(named...).WithClosed())
+	}
 	var out []plan
 	for _, r := range due {
 		p := u.decideRow(pass, r)
