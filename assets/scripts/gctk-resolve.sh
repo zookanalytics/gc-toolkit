@@ -28,7 +28,7 @@
 # The binary is not compared against this checkout. There is no other
 # implementation to prefer, so refusing a binary the build order has not yet
 # replaced would turn the order's lag into a refusal of every call.
-# doctor/check-cadence-live and the board's PACK row report that lag instead.
+# doctor/check-cadence-live reports that lag instead.
 #
 # The exec exports GCTK_SCRIPTS_DIR as this file's directory, which is the
 # sibling scripts' directory: a subcommand that shells out to them (merge runs

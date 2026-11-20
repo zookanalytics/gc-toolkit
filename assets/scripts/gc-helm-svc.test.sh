@@ -15,12 +15,6 @@
 # that the launcher cannot build, and that the builder still does everything the
 # launcher used to do correctly.
 #
-# THE READABILITY GATE. `find -newer` cannot see a binary going
-# stale against its DEPENDENCY: what helm-svc can read is fixed by the beads
-# library it embedded, and the store's schema moves under it on a `bd` upgrade.
-# The gate also asks `helm-svc probe`, spends `ok` only on a passing one, and
-# refuses to rebuild a binary whose library a rebuild would not move.
-#
 # THE SCRATCH BOUNDING (inherited). The build pointed TMPDIR/GOTMPDIR
 # at a shared /var/tmp/gotmp that nothing ever emptied; one post-reboot rebuild
 # storm stranded 222 dirs (33G) and filled the root fs. Each invocation now
@@ -29,8 +23,8 @@
 #
 # These run the REAL scripts — copied into a throwaway rig tree, because they
 # derive the repository root from their own path — with a stub toolchain on
-# GC_GO_BIN, a stub gc on GC_HELM_GC_BIN, stub uname and brew first on PATH,
-# and GC_HELM_GOTMP pointed at scratch under $TMPDIR. No live city, no network,
+# GC_GO_BIN, a stub gc on GC_HELM_GC_BIN, and GC_HELM_GOTMP pointed at scratch
+# under $TMPDIR. No live city, no network,
 # no real /var/tmp/gotmp. Covered:
 #
 #   launcher (gc-helm-svc.sh)
@@ -46,22 +40,6 @@
 #   (CURRENT)     up-to-date binary -> no toolchain call, exit 0
 #   (GOMOD)       a go.mod-only change still counts as newer
 #   (DEPMOD)      a change in services/gctk, which helm-svc imports, forces a rebuild
-#   (ICU)         on macOS the build's cgo is pointed at Homebrew's keg-only icu4c
-#   (ICUKEEP)     CGO flags already set are kept, with the keg's appended
-#   (NOICU)       a prefix with no icu4c installed under it adds nothing, and says so
-#   (ICUOFF)      off macOS brew is never asked and CGO flags pass through
-#   (ICUTICK)     a tick with nothing to build never asks brew
-#
-#   readability — the second staleness axis
-#   (READABLE)    a current binary that can read the stores reports ok, builds nothing
-#   (SKEW)        sources unchanged + store schema moved -> it REBUILDS
-#   (STUCK)       a rebuild that cannot fix it never writes ok, and exits non-zero
-#   (NOLOOP)      and the next tick does not rebuild the same binary again
-#   (BUMP)        moving the pinned library re-arms the rebuild
-#   (RECOVER)     a store that comes back restores ok and clears the record
-#   (LISTCITY)    the city_path in `gc service list` is enough to probe against
-#   (UNPROBED)    no city to probe against is reported as such, never as ok
-#   (FAILSTATUS)  a failed build still reports failed, not unreadable
 #   (FAILKEEP)    a failed build leaves the previous binary untouched, exits 1
 #   (TOOLLESS)    a build owed with no Go toolchain is a failed build, recorded
 #                 as one, and the serving binary is left untouched
@@ -97,13 +75,8 @@
 #   (RETRY)       a failed restart is retried on the NEXT run, even though the
 #                 binary is by then current — and stops once it is serving
 #   (HANDBUILT)   a hand-run build's binary is restarted onto by the next tick
-#   (DEADEND)     a build that cannot read the stores is never restarted onto,
-#                 and the record the board reads says so — every other field on
-#                 it reads healthy
-#   (CONDEMNED)   nor is a pending restart carried out onto one, and that
-#                 record says so too
 #
-#   build-status record (what the board's PACK rows read)
+#   build-status record
 #   (STATUS)      a successful build records source_rev == binary_rev, rc 0
 #   (STATUSFAIL)  a FAILED build moves source_rev, keeps the last good
 #                 binary_rev and built_at, and records the non-zero rc — the
@@ -203,30 +176,6 @@ DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 99999) + 7 ))
 # A gc that is not there, so the service listing is unavailable.
 NO_SUCH_GC="$TMP/no-such-gc"
 
-# The host is a fixture too. The builder adds Homebrew's icu4c to cgo only on
-# macOS, so every case runs against a stub uname and a stub brew placed ahead of
-# the real ones on PATH, and sees the same host on any platform. STUB_HOST_OS
-# names the host (Linux when unset), STUB_ICU_PREFIX is what
-# `brew --prefix icu4c` prints (nothing when unset), and STUB_BREW_LOG records
-# every brew call.
-HOST_BIN="$TMP/host-bin"
-mkdir -p "$HOST_BIN"
-cat > "$HOST_BIN/uname" <<'STUB'
-#!/usr/bin/env bash
-echo "${STUB_HOST_OS:-Linux}"
-STUB
-cat > "$HOST_BIN/brew" <<'STUB'
-#!/usr/bin/env bash
-if [ -n "${STUB_BREW_LOG:-}" ]; then printf '%s\n' "$*" >> "$STUB_BREW_LOG"; fi
-if [ "$*" = "--prefix icu4c" ] && [ -n "${STUB_ICU_PREFIX:-}" ]; then
-    printf '%s\n' "$STUB_ICU_PREFIX"
-    exit 0
-fi
-exit 1
-STUB
-chmod +x "$HOST_BIN/uname" "$HOST_BIN/brew"
-export PATH="$HOST_BIN:$PATH"
-
 # Backdate an entry past a sweep threshold. The sweep stats the entry itself, so
 # fill it BEFORE calling this — writing inside afterwards refreshes the
 # directory mtime and un-ages it. GNU and BSD touch both read a UTC ISO-8601
@@ -240,24 +189,17 @@ age_mins() { age_secs "$1" $(( $2 * 60 )); }     # <path> <minutes>
 # --- fixture ------------------------------------------------------------------
 CASE=0
 FAIL_BUILD=""
-fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
+fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
     CASE=$((CASE + 1))
-    # Reset per case so one case's skew cannot leak into the next. CITY empty
-    # means "no city to probe"; HOST_OS empty means the stub uname's Linux.
-    CITY=""; PROBE_FAIL_BUILT=""; PROBE_FAIL_CACHED=""; BEADS_VERSION="v0.0.0-stub"
-    HOST_OS=""; ICU_PREFIX=""; CGO_CPPFLAGS_IN=""; CGO_LDFLAGS_IN=""
     local base="$TMP/case$CASE"
     ROOT="$base/root"; GOTMP="$base/gotmp"; STATE="$base/state"
     STATE_CITY="$base/city"
     RECORD="$base/go-env"; GOBIN="$base/bin/go"
     GCBIN="$base/bin/gc"; GCLOG="$base/gc-calls"; SERVICES="$base/services.json"
-    BREWLOG="$base/brew-calls"
     mkdir -p "$ROOT/assets/scripts" "$ROOT/services/helm/cmd/helm-svc" \
              "$GOTMP" "$STATE" "$base/bin" "$STATE_CITY/.gc/services/helm"
     cp "$SVC" "$ROOT/assets/scripts/gc-helm-svc.sh"
     cp "$BUILD" "$ROOT/assets/scripts/gc-build.sh"
-    # The builder sources its icu4c cgo flags from beside itself.
-    cp "$HERE/icu4c-cgo.sh" "$ROOT/assets/scripts/icu4c-cgo.sh"
     echo 'package main' > "$ROOT/services/helm/cmd/helm-svc/main.go"
     printf 'module example.invalid/fixture\n\ngo 1.22.0\n' > "$ROOT/go.mod"
     printf 'example.invalid/dep v1.0.0 h1:one=\n' > "$ROOT/go.sum"
@@ -269,7 +211,7 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
     printf '{"city_path":"%s","services":[{"service_name":"helm","state_root":".gc/services/helm"}]}' \
         "$STATE_CITY" > "$SERVICES"
 
-    # Stub toolchain: records the scratch, cgo and toolchain env it was handed,
+    # Stub toolchain: records the scratch and toolchain env it was handed,
     # leaks a go-link dir into it the way a killed linker does, then fails or
     # writes a stand-in binary. `go build -o` produces an executable; mktemp
     # staged $BIN_TMP 0600, so the chmod is what keeps the -x check downstream
@@ -277,16 +219,8 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
     cat > "$GOBIN" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-# `go version -m <binary>` is a read, not a build, so it must answer before the
-# build-scratch machinery below: recording it would make every readability check
-# look like a compile.
-if [ "${1:-}" = "version" ] && [ "${2:-}" = "-m" ]; then
-    printf '\tpath\thelm-svc\n\tdep\tgithub.com/steveyegge/beads\t%s\th1:stub=\n' \
-        "${STUB_BEADS_VERSION:-v0.0.0-stub}"
-    exit 0
-fi
-printf 'TMPDIR=%s\nGOTMPDIR=%s\nCGO_CPPFLAGS=%s\nCGO_LDFLAGS=%s\nGOTOOLCHAIN=%s\n' "${TMPDIR:-}" \
-    "${GOTMPDIR:-}" "${CGO_CPPFLAGS:-}" "${CGO_LDFLAGS:-}" "${GOTOOLCHAIN:-}" > "$STUB_RECORD"
+printf 'TMPDIR=%s\nGOTMPDIR=%s\nGOTOOLCHAIN=%s\n' "${TMPDIR:-}" \
+    "${GOTMPDIR:-}" "${GOTOOLCHAIN:-}" > "$STUB_RECORD"
 mkdir -p "$GOTMPDIR/go-link-stub"
 head -c 4096 /dev/zero > "$GOTMPDIR/go-link-stub/obj"
 if [ -n "${STUB_GO_FAIL:-}" ]; then
@@ -302,14 +236,6 @@ done
 printf '%s\n' "$out" >> "$STUB_RECORD.out"
 cat > "$out" <<'BUILT'
 #!/bin/sh
-if [ "$1" = "probe" ]; then
-    if [ -n "${STUB_PROBE_FAIL_BUILT:-}" ]; then
-        echo "helm-svc probe: cannot read the city's bead stores: no rig bead store could be read: rig gc-toolkit: $STUB_PROBE_FAIL_BUILT" >&2
-        exit 3
-    fi
-    echo "helm-svc probe: bead stores are readable"
-    exit 0
-fi
 echo "helm-svc-stub ran: $*"
 BUILT
 chmod +x "$out"
@@ -340,14 +266,6 @@ cache_binary() { # plant a previously-built binary
     mkdir -p "$STATE/bin"
     cat > "$STATE/bin/helm-svc" <<'CACHED'
 #!/bin/sh
-if [ "$1" = "probe" ]; then
-    if [ -n "${STUB_PROBE_FAIL_CACHED:-}" ]; then
-        echo "helm-svc probe: cannot read the city's bead stores: no rig bead store could be read: rig gc-toolkit: $STUB_PROBE_FAIL_CACHED" >&2
-        exit 3
-    fi
-    echo "helm-svc probe: bead stores are readable"
-    exit 0
-fi
 echo "cached-binary ran: $*"
 CACHED
     chmod +x "$STATE/bin/helm-svc"
@@ -397,13 +315,6 @@ run_build() { # -> OUT ERR RC
     OUT="$(STUB_RECORD="$RECORD" STUB_GO_FAIL="$FAIL_BUILD" \
            STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" \
            STUB_GC_LIST_FAIL="${LIST_FAIL:-}" STUB_GC_RESTART_FAIL="${RESTART_FAIL:-}" \
-           STUB_PROBE_FAIL_BUILT="${PROBE_FAIL_BUILT:-}" \
-           STUB_PROBE_FAIL_CACHED="${PROBE_FAIL_CACHED:-}" \
-           STUB_BEADS_VERSION="${BEADS_VERSION:-v0.0.0-stub}" \
-           STUB_HOST_OS="${HOST_OS:-}" STUB_ICU_PREFIX="${ICU_PREFIX:-}" \
-           STUB_BREW_LOG="$BREWLOG" \
-           CGO_CPPFLAGS="${CGO_CPPFLAGS_IN:-}" CGO_LDFLAGS="${CGO_LDFLAGS_IN:-}" \
-           GC_HELM_CITY_PATH="${CITY:-}" \
            GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_HELM_STATE_ROOT="$STATE" \
            GC_HELM_GC_BIN="$GCBIN" \
            bash "$ROOT/assets/scripts/gc-build.sh" helm "$@" 2>"$err")"
@@ -424,8 +335,6 @@ run_svc() { # -> OUT ERR RC
 }
 
 run_dir_of() { sed -n 's/^GOTMPDIR=//p' "$RECORD"; }
-# CGO_CPPFLAGS or CGO_LDFLAGS, as the toolchain saw it.
-cgo_of() { sed -n "s/^$1=//p" "$RECORD"; }
 
 # ==============================================================================
 # LAUNCHER — gc-helm-svc.sh must exec and never build
@@ -557,190 +466,6 @@ run_build
 eq "$RC" 0 "(DEPMOD) exits 0"
 present "$RECORD" "(DEPMOD) a services/gctk source change forces a helm rebuild"
 
-# --- case: on macOS, cgo is pointed at Homebrew's keg-only icu4c --------------
-# helm-svc links ICU through Dolt's go-icu-regex. Homebrew installs icu4c
-# keg-only, on no default search path, and the order's environment carries no
-# CGO flags, so without this every macOS build stops at 'unicode/regex.h' and no
-# binary is ever published.
-fixture
-HOST_OS=Darwin
-ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
-mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
-run_build
-eq "$RC" 0 "(ICU) exits 0"
-eq "$(cgo_of CGO_CPPFLAGS)" "-I$ICU_PREFIX/include" "(ICU) cgo is handed the keg's headers"
-eq "$(cgo_of CGO_LDFLAGS)" "-L$ICU_PREFIX/lib" "(ICU) and its libraries"
-eq "$(cat "$BREWLOG" 2>/dev/null)" "--prefix icu4c" "(ICU) brew is asked for icu4c's prefix, once"
-has "$OUT" "icu4c at $ICU_PREFIX" "(ICU) the log names the icu4c the build used"
-
-# --- case: CGO flags already set are kept -------------------------------------
-fixture
-HOST_OS=Darwin
-ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
-mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
-CGO_CPPFLAGS_IN="-DFROM_ENV"
-CGO_LDFLAGS_IN="-L/from/env"
-run_build
-eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV -I$ICU_PREFIX/include" \
-   "(ICUKEEP) CGO_CPPFLAGS keeps its value, with the keg's headers after it"
-eq "$(cgo_of CGO_LDFLAGS)" "-L/from/env -L$ICU_PREFIX/lib" \
-   "(ICUKEEP) and CGO_LDFLAGS keeps its value, with the keg's libraries after it"
-
-# --- case: brew names a prefix, but icu4c is not installed under it -----------
-# brew prints a formula's prefix whether or not the formula is installed, so the
-# prefix alone proves nothing; an include/ under it is what does.
-fixture
-HOST_OS=Darwin
-ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
-run_build
-eq "$(cgo_of CGO_CPPFLAGS)" "" "(NOICU) no include path is added for a keg that is not there"
-eq "$(cgo_of CGO_LDFLAGS)" "" "(NOICU) nor a library path"
-has "$ERR" "brew install icu4c" "(NOICU) the log names the missing prerequisite"
-
-# --- case: off macOS nothing is added, and brew is never asked ----------------
-# The system libicu is on the default search path there, so a Homebrew icu4c on
-# the host must not displace it.
-fixture
-ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
-mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
-CGO_CPPFLAGS_IN="-DFROM_ENV"
-run_build
-eq "$RC" 0 "(ICUOFF) exits 0"
-present "$RECORD" "(ICUOFF) setup: the build ran"
-eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV" "(ICUOFF) CGO_CPPFLAGS passes through untouched"
-eq "$(cgo_of CGO_LDFLAGS)" "" "(ICUOFF) and no library path is added"
-absent "$BREWLOG" "(ICUOFF) brew is never asked"
-
-# --- case: a tick with nothing to build never asks brew -----------------------
-fixture
-cache_binary                                        # newer than main.go -> current
-HOST_OS=Darwin
-ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
-mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
-run_build
-eq "$RC" 0 "(ICUTICK) exits 0"
-absent "$RECORD" "(ICUTICK) setup: the binary is current, so nothing builds"
-absent "$BREWLOG" "(ICUTICK) and brew is never asked"
-
-# ==============================================================================
-# READABILITY — the second staleness axis
-# ==============================================================================
-SKEW_MSG="schema version mismatch: database is at v66, binary knows up to v65 (1 migration ahead)"
-
-status_kind() { cut -d' ' -f1 "$STATE/build-status" 2>/dev/null || echo "<no build-status>"; }
-build_count() { grep -c '^' "$RECORD.out" 2>/dev/null || echo 0; }
-
-# --- case: a current binary that CAN read reports ok and builds nothing -------
-fixture
-cache_binary
-CITY="$STATE_CITY"
-run_build
-eq "$RC" 0 "(READABLE) exits 0"
-has "$OUT" "up to date" "(READABLE) still the up-to-date path"
-has "$OUT" "can read the city" "(READABLE) and says the readability was checked"
-absent "$RECORD" "(READABLE) a passing probe builds nothing"
-eq "$(status_kind)" "ok" "(READABLE) build-status is ok"
-
-# --- case: sources unchanged, store schema moved -> REBUILD -------------------
-fixture
-cache_binary                                        # newer than main.go -> current
-CITY="$STATE_CITY"
-PROBE_FAIL_CACHED="$SKEW_MSG"
-run_build
-eq "$RC" 0 "(SKEW) exits 0 after rebuilding"
-has "$OUT" "cannot read the city's bead stores" "(SKEW) says what the mtime check could not see"
-present "$RECORD" "(SKEW) the toolchain WAS invoked — sources unchanged, store moved"
-eq "$(status_kind)" "ok" "(SKEW) the rebuilt binary reads, so ok is earned"
-absent "$STATE/probe-failed" "(SKEW) and nothing is latched"
-
-# --- case: a rebuild that cannot fix it must not report ok --------------------
-# The pin, not the sources, is what is stale, so the binary that comes out of
-# the build is as blind as the one that went in.
-fixture
-cache_binary
-CITY="$STATE_CITY"
-PROBE_FAIL_CACHED="$SKEW_MSG"
-PROBE_FAIL_BUILT="$SKEW_MSG"
-run_build
-eq "$RC" 1 "(STUCK) exits non-zero — the third green light goes red"
-eq "$(build_count)" "1" "(STUCK) it did try the rebuild"
-eq "$(status_kind)" "unreadable" "(STUCK) build-status CANNOT read ok while the board fails"
-has "$(cat "$STATE/build-status")" "schema version mismatch" "(STUCK) and carries the reason"
-has "$ERR" "CANNOT READ" "(STUCK) reported on stderr too"
-present "$STATE/probe-failed" "(STUCK) what was tried is recorded"
-
-# --- case: the next tick does not rebuild the same binary again ---------------
-# Same case, so the state the previous run left is the input to this one.
-run_build
-eq "$RC" 1 "(NOLOOP) still a failure"
-eq "$(build_count)" "1" "(NOLOOP) no second build — a rebuild loop is not a remedy"
-eq "$(status_kind)" "unreadable" "(NOLOOP) and it still refuses to say ok"
-has "$ERR" "go.mod" "(NOLOOP) it names the remedy it cannot perform itself"
-
-# --- case: a dependency bump re-arms the rebuild ------------------------------
-# The latch is keyed on the LIBRARY that failed, not on "we already tried". The
-# skew is left in place to isolate that one variable.
-BEADS_VERSION="v1.2.2-0.20260825072917-62d211937bd3"
-run_build
-eq "$RC" 1 "(BUMP) the skew is untouched, so it still fails"
-eq "$(build_count)" "2" "(BUMP) but a different library version is worth another build"
-eq "$(status_kind)" "unreadable" "(BUMP) and it says so"
-eq "$(cat "$STATE/probe-failed" 2>/dev/null || true)" "$BEADS_VERSION" \
-   "(BUMP) the latch now names what was tried"
-
-# --- case: recovery without a rebuild ----------------------------------------
-# The store can also come back on its own (the rig migrates back, or the skew
-# was a half-finished upgrade). The up-to-date path must notice.
-fixture
-cache_binary
-CITY="$STATE_CITY"
-PROBE_FAIL_CACHED="$SKEW_MSG"
-run_build
-eq "$(status_kind)" "ok" "(RECOVER) setup: rebuilt into a readable binary"
-PROBE_FAIL_BUILT="$SKEW_MSG"
-run_build
-eq "$(status_kind)" "unreadable" "(RECOVER) the store moves again and it says so"
-PROBE_FAIL_BUILT=""
-run_build
-eq "$RC" 0 "(RECOVER) exits 0 once it can read again"
-eq "$(status_kind)" "ok" "(RECOVER) ok returns"
-absent "$STATE/probe-failed" "(RECOVER) and the latch is gone"
-
-# --- case: no city to probe against is not a green light ----------------------
-# A run that cannot ask the question must not answer it with `ok`.
-fixture
-cache_binary
-LIST_FAIL=1
-run_build
-LIST_FAIL=""
-eq "$RC" 0 "(UNPROBED) a hand run still exits 0"
-has "$OUT" "unprobed" "(UNPROBED) and says the readability was not checked"
-eq "$(status_kind)" "unprobed" "(UNPROBED) build-status says so rather than ok"
-absent "$RECORD" "(UNPROBED) nothing is built on a question it cannot ask"
-
-# --- case: the city comes from the service listing when the env has none ------
-# A run whose environment names no city, such as a hand run from a shell outside
-# it, still probes against the city the listing reports.
-fixture
-cache_binary
-PROBE_FAIL_CACHED="$SKEW_MSG"
-run_build
-has "$OUT" "cannot read the city's bead stores" \
-    "(LISTCITY) the listing's city_path is enough to probe against"
-present "$RECORD" "(LISTCITY) so the gate still fires with no city in the environment"
-eq "$(status_kind)" "ok" "(LISTCITY) and reports on what it rebuilt"
-
-# --- case: a failed build's status is still the build failure -----------------
-fixture
-cache_binary
-touch_source
-CITY="$STATE_CITY"
-FAIL_BUILD=1
-run_build
-FAIL_BUILD=""
-eq "$RC" 1 "(FAILSTATUS) exits 1"
-eq "$(status_kind)" "failed" "(FAILSTATUS) a build that never produced a binary reports failed, not unreadable"
-
 # --- case: build fails -> previous binary untouched, non-zero -----------------
 fixture
 cache_binary
@@ -758,8 +483,8 @@ eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' 
 
 # --- case: a build owed with no Go toolchain is a failed build ----------------
 # Nothing can perform the build, so it is recorded the way any failed build is:
-# build-status says failed, the record the board reads carries the non-zero rc,
-# and the binary already serving is left exactly as it was.
+# the record carries the non-zero rc, and the binary already serving is left
+# exactly as it was.
 fixture
 cache_binary
 touch_source
@@ -768,8 +493,7 @@ GOBIN="$TMP/case$CASE/no-go"
 run_build --deploy
 eq "$RC" 1 "(TOOLLESS) a build owed with no Go toolchain fails, under --deploy too"
 has "$ERR" "no Go toolchain" "(TOOLLESS) and says what is missing"
-eq "$(status_kind)" "failed" "(TOOLLESS) build-status reports the failed build"
-eq "$(status_field last_build_rc)" "1" "(TOOLLESS) and so does the record the board reads"
+eq "$(status_field last_build_rc)" "1" "(TOOLLESS) the record reports the failed build"
 eq "$(cksum < "$STATE/bin/helm-svc")" "$SUM_BEFORE" "(TOOLLESS) the serving binary is left exactly as it was"
 hasnt "$(cat "$GCLOG" 2>/dev/null || true)" "service restart" "(TOOLLESS) and nothing is restarted"
 
@@ -804,8 +528,7 @@ printf 'module example.invalid/fixture\n\ngo 1.22\n' > "$ROOT/go.mod"
 run_build --deploy
 eq "$RC" 1 "(NORELEASE) a build owed with no release named in go.mod fails, under --deploy too"
 has "$ERR" "names no Go release" "(NORELEASE) and says what is missing"
-eq "$(status_kind)" "failed" "(NORELEASE) build-status reports the failed build"
-eq "$(status_field last_build_rc)" "1" "(NORELEASE) and so does the record the board reads"
+eq "$(status_field last_build_rc)" "1" "(NORELEASE) the record reports the failed build"
 absent "$RECORD" "(NORELEASE) the toolchain is never started"
 eq "$(cksum < "$STATE/bin/helm-svc")" "$SUM_BEFORE" "(NORELEASE) the serving binary is left exactly as it was"
 
@@ -1043,61 +766,13 @@ eq "$RC" 0 "(HANDBUILT) the next deploy tick exits 0"
 absent "$RECORD" "(HANDBUILT) with nothing left to build"
 has "$(cat "$GCLOG")" "service restart helm" "(HANDBUILT) and serves what the hand build left"
 
-# --- case: a deploy never restarts onto a binary it just condemned ------------
-# The gate exists to keep an unreadable binary out of service, so reporting one
-# must not be the step that puts it there. The restart stub is set to fail, so a
-# run that reached it could not go on to report the readability failure instead.
-fixture
-cache_binary
-touch_source
-CITY="$STATE_CITY"
-PROBE_FAIL_BUILT="$SKEW_MSG"
-RESTART_FAIL=1
-run_build --deploy
-RESTART_FAIL=""
-eq "$RC" 1 "(DEADEND) exits non-zero"
-eq "$(status_kind)" "unreadable" "(DEADEND) build-status says why"
-present "$RECORD" "(DEADEND) the build did happen"
-has "$ERR" "CANNOT READ" "(DEADEND) and the failure it reports is the unreadable one"
-hasnt "$(cat "$GCLOG")" "service restart" "(DEADEND) the service was not restarted onto it"
-absent "$STATE/restart-pending" "(DEADEND) and no later run is told to finish that restart"
-# The one-line file and the JSON record describe the same binary, and only the
-# JSON one reaches the board. Every other field here reads healthy — the build
-# exited 0, the revisions match, nothing is pending — so probe_status is the
-# only thing standing between a condemned binary and a NORMAL PACK row.
-eq "$(status_field probe_status)" "unreadable" "(DEADEND) the record the board reads says so too"
-has "$(status_field probe_detail)" "schema version mismatch" "(DEADEND) and carries the probe's reason"
-eq "$(status_field last_build_rc)" "0" "(DEADEND) the build itself did succeed — rc cannot carry this"
-eq "$(status_field source_rev)" "$(status_field binary_rev)" "(DEADEND) nor can the revision gap: they match"
-eq "$(status_field restart_pending)" "false" "(DEADEND) nor restart_pending"
-
-# --- case: nor is a restart the last run left pending -------------------------
-# The marker outlives the run that wrote it, and the up-to-date branch is the
-# only one a later run can reach. So the probe has to be asked there first, or
-# the retry serves what the probe would have condemned.
-fixture
-cache_binary
-CITY="$STATE_CITY"
-PROBE_FAIL_CACHED="$SKEW_MSG"
-printf '%s\n' "$BEADS_VERSION" > "$STATE/probe-failed"   # already tried: no rebuild left
-: > "$STATE/restart-pending"
-run_build --deploy
-eq "$RC" 1 "(CONDEMNED) exits non-zero"
-eq "$(status_kind)" "unreadable" "(CONDEMNED) build-status says why"
-absent "$RECORD" "(CONDEMNED) the latch means nothing is rebuilt"
-hasnt "$(cat "$GCLOG")" "service restart" "(CONDEMNED) and the pending restart is not run onto it"
-present "$STATE/restart-pending" "(CONDEMNED) the marker is kept for a binary that can serve"
-eq "$(status_field probe_status)" "unreadable" "(CONDEMNED) the board's record says the binary cannot read"
-has "$(status_field probe_detail)" "schema version mismatch" "(CONDEMNED) and carries the probe's reason"
-
 # ==============================================================================
-# BUILD-STATUS RECORD — the seam the board's PACK rows read
+# BUILD-STATUS RECORD — what the component serves against what the sources say
 # ==============================================================================
 #
 # Nothing in the running system builds this binary, so a helm-svc older than
 # services/helm serves a stale dashboard in silence. This record is the only
-# thing that can say so, and it is read by services/helm itself — which means a
-# record that lies is a board that lies.
+# thing that can say so, so a record that lies hides a stale board.
 
 # --- case: a successful build records what it built ---------------------------
 fixture
@@ -1113,8 +788,6 @@ eq "$(status_field source_rev)" "$REV_A" "(STATUS) source_rev is the revision th
 eq "$(status_field binary_rev)" "$REV_A" "(STATUS) a successful build makes binary_rev match it"
 eq "$(status_field restart_pending)" "true" "(STATUS) a hand build publishes without restarting, and says so"
 [ -n "$(status_field built_at)" ] && ok "(STATUS) built_at is stamped" || bad "(STATUS) built_at is empty"
-eq "$(status_field probe_status)" "ok" "(STATUS) the probe passed, and the record says which binary it passed for"
-eq "$(status_field probe_detail)" "" "(STATUS) with no reason to carry"
 [ -n "$(status_field checked_at)" ] && ok "(STATUS) checked_at is stamped" || bad "(STATUS) checked_at is empty"
 
 # --- case: a failed build keeps the last good binary in the record ------------
@@ -1159,8 +832,8 @@ eq "$(status_field binary_rev)" "$REV_C" "(STATUSNOOP) binary_rev still names th
 # `find -newer` can only test files that still exist. Delete a source and
 # nothing remaining has to be newer than the binary, so the mtime test alone
 # takes the no-op path and records the new revision for a binary built from the
-# old one — the board's PACK row then reads "current" exactly when the cadence
-# is serving the previous binary.
+# old one — the record then reads current exactly when the cadence is serving
+# the previous binary.
 fixture
 echo 'package main' > "$ROOT/services/helm/cmd/helm-svc/doomed.go"
 REV_D="$(commit_fixture "$ROOT" || true)"
@@ -1269,8 +942,8 @@ eq "$RC" 0 "(STATUSPEND) the retry tick exits 0"
 eq "$(status_field restart_pending)" "false" "(STATUSPEND) and the record clears once it is serving"
 
 # --- case: the record is published atomically ---------------------------------
-# A reader polls this file; catching it half-written would be a board that
-# reports a component it cannot parse.
+# A reader polls this file; catching it half-written would hand that reader a
+# record it cannot parse.
 fixture
 commit_fixture "$ROOT" >/dev/null 2>&1 || true
 run_build
@@ -1284,9 +957,9 @@ grep -q 'mv -f "$tmp" "$STATUS"' "$BUILD" \
     || bad "(STATUSTMP) the record is no longer published by rename"
 
 # --- case: a checkout behind origin/main is REPORTED, never rebuilt for it ----
-# The board read "helm: ok" while the served binary was three PRs behind main:
-# every staleness axis above keys on the LOCAL checkout, so a checkout parked
-# off-main keeps its binary current with THAT branch and reports a clean row.
+# Every staleness axis above keys on the LOCAL checkout, so a checkout parked
+# off-main keeps its binary current with THAT branch and records a clean row
+# while the served binary is behind main.
 # behind_main is the axis that sees the gap against main — and it must NOT feed
 # the rebuild decision, because a checkout may be off-main on purpose and the
 # SOURCE_REV identity is what decides a build.

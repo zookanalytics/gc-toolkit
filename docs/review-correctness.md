@@ -218,9 +218,7 @@ name none of gctk's `.go` files, so the affected subset leaves them out of a
 gctk change, and no suite it selects for a Go change builds the code that
 changed. No suite builds or runs helm-svc. So on a Go diff the review runs
 `go test ./...` from the repository root, and for gctk the suites of the
-commands it changes. On the host helm compiles only with ICU's cgo flags, so
-its tests run with `CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags`
-in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for the lint.
+commands it changes.
 
 - **Live at the next build, with no fallback.** The `gctk-build` and
   `helm-build` orders run `assets/scripts/gc-build.sh` every five minutes, so

@@ -24,36 +24,25 @@
 # -newer is blind to an input a commit deleted. The revision is one hash over
 # the binary's inputs at HEAD, the folders it compiles from and the module's
 # go.mod and go.sum, so a merge that touches none of them neither rebuilds nor
-# republishes. A helm binary is also stale when it cannot READ the stores it
-# serves: that is fixed by the beads library it embedded, while the store schema
-# moves under it on a `bd` upgrade, so `helm-svc probe` asks it, and ok is not
-# reported without it.
+# republishes.
 # Exit: 0 current or built, and for helm under --deploy serving · 1 the build
 # or the restart failed, including a build owed with no Go toolchain or with
 # no Go release named in go.mod (the previous binary is left exactly as it
-# was), or the published helm binary
-# cannot read the city's bead stores · 2 usage. A current binary needs no
-# toolchain.
+# was) · 2 usage. A current binary needs no toolchain.
 # Writes, under the component's state root <city>/.gc/services/<name>:
 #   bin/<binary>       the published binary
-#   build-status.json  the record the board's PACK rows read: source_rev
+#   build-status.json  the record of what the component serves: source_rev
 #                      against binary_rev, built_at, last_build_rc,
 #                      restart_pending, behind_main (commits behind
 #                      origin/<default> under the component's inputs,
-#                      report-only), checked_at, and for helm probe_status and
-#                      probe_detail
-#   build-status       helm only: `ok <ts>` built/current AND probed readable ·
-#                      `unreadable <ts> <why>` · `unprobed <ts>` no city to
-#                      probe against · `failed <ts>`
+#                      report-only) and checked_at
 # Env: GC_CITY_PATH / GC_CITY / GC_CITY_ROOT (the city), else the city_path
 # `gc service list --json` reports; GC_GO_BIN. Per component, with <C> one of
 # HELM and GCTK: GC_<C>_STATE_ROOT (the state root, overriding the city's),
 # GC_<C>_GOTMP (Go scratch root, default /var/tmp/gotmp), GC_<C>_GC_BIN (the gc
 # to call), GC_<C>_ORIGIN_FETCH_TTL (seconds between origin fetches for
 # behind_main, default 1800; 0 leans on reconcile-rig-checkouts' fetch). helm
-# only: GC_HELM_SERVICE_NAME, GC_HELM_CITY_PATH (the city to probe),
-# GC_HELM_BUILD_PROBE_TIMEOUT (seconds, default 60). GC_SERVICE_STATE_ROOT is
-# not read: the supervisor sets it for whichever service spawned the caller, so
+# only: GC_HELM_SERVICE_NAME. GC_SERVICE_STATE_ROOT is not read: the supervisor sets it for whichever service spawned the caller, so
 # an inherited one would publish this component into another one's state root.
 # Callers: orders/helm-build, orders/gctk-build.
 set -euo pipefail
@@ -87,35 +76,24 @@ done
 #            A service gates --deploy on the city running it, takes its state
 #            root from the city's service listing, and is restarted onto a
 #            published binary.
-#   PROBE    1: ask the binary (`<binary> probe`) whether it can read the city's
-#            bead stores before reporting it ok or putting it into service.
-#   ICU      1: the binary links ICU through a cgo package (Dolt's
-#            go-icu-regex), so on macOS the compile is pointed at Homebrew's
-#            keg-only icu4c.
 #   STAMP    1: stamp the binary's revision into it at link time, for the
 #            readers that compare the binary itself against the checkout.
-# PROBE_TIMEOUT is generous on purpose: a false "unreadable" turns a healthy
-# city red and buys a futile rebuild, so a cold Dolt open must be allowed to
-# finish.
 case "$COMPONENT" in
     helm)
         DIR=services/helm IMPORTS=(services/gctk) PKG=./cmd/helm-svc BIN_NAME=helm-svc
-        SERVICE="${GC_HELM_SERVICE_NAME:-helm}" PROBE=1 ICU=1 STAMP=0
+        SERVICE="${GC_HELM_SERVICE_NAME:-helm}" STAMP=0
         STATE_ROOT_ENV=GC_HELM_STATE_ROOT
         GOTMP="${GC_HELM_GOTMP:-/var/tmp/gotmp}"
         GC_BIN="${GC_HELM_GC_BIN:-gc}"
         FETCH_TTL="${GC_HELM_ORIGIN_FETCH_TTL:-1800}"
-        PROBE_CITY="${GC_HELM_CITY_PATH:-}"
-        PROBE_TIMEOUT="${GC_HELM_BUILD_PROBE_TIMEOUT:-60}"
         ;;
     gctk)
         DIR=services/gctk IMPORTS=() PKG=./cmd/gctk BIN_NAME=gctk
-        SERVICE="" PROBE=0 ICU=0 STAMP=1
+        SERVICE="" STAMP=1
         STATE_ROOT_ENV=GC_GCTK_STATE_ROOT
         GOTMP="${GC_GCTK_GOTMP:-/var/tmp/gotmp}"
         GC_BIN="${GC_GCTK_GC_BIN:-gc}"
         FETCH_TTL="${GC_GCTK_ORIGIN_FETCH_TTL:-1800}"
-        PROBE_CITY="" PROBE_TIMEOUT=0
         ;;
     "") echo "gc-build: name the component to build" >&2; usage; exit 2 ;;
     *)  echo "gc-build: unknown component: $COMPONENT" >&2; usage; exit 2 ;;
@@ -124,10 +102,6 @@ ME="gc-build $COMPONENT"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-if [ "$ICU" -eq 1 ]; then
-    # shellcheck source=icu4c-cgo.sh
-    . "$HERE/icu4c-cgo.sh" || { echo "$ME: cannot source icu4c-cgo.sh from $HERE" >&2; exit 1; }
-fi
 
 # The binary's inputs, relative to ROOT, the module root: go.mod and go.sum,
 # which pin every dependency the binary compiles, and the folders it compiles
@@ -227,11 +201,10 @@ fi
 # binary's inputs, REPORT-ONLY. Everything above keys on the LOCAL checkout:
 # SOURCE_REV lists HEAD's inputs, newer_than_binary scans HEAD's files.
 # So a checkout parked off-main (another branch, or one not fast-forwarded)
-# keeps its binary current with THAT branch — source_rev == binary_rev, a clean
-# probe — while what it serves is behind main. Nothing above can see that, so the
-# PACK row would read a false "ok". This counts the commits origin/<default>
-# carries under the binary's inputs that HEAD lacks, and the board bands a
-# nonzero count as drift.
+# keeps its binary current with THAT branch — source_rev == binary_rev — while
+# what it serves is behind main. Nothing above can see that, so the record
+# would read a false "current". This counts the commits origin/<default>
+# carries under the binary's inputs that HEAD lacks.
 #
 # It NEVER feeds need_build. A checkout may be off-main on purpose, and a rebuild
 # on every unrelated main merge is exactly what the SOURCE_REV identity exists
@@ -268,20 +241,6 @@ if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     BEHIND_MAIN="$_behind"
 fi
 
-# What the probe said about the binary this run reports on, in one variable:
-# write_record reads it rather than taking it as an argument, so a path that
-# condemns a binary cannot record it as current by omitting one. It stays empty
-# for a component that does not probe, and that component's record carries no
-# probe fields. "unprobed" is the answer for a run that resolved no city to ask
-# about. The probe is handed its city explicitly, so it answers for the city this
-# run resolved rather than for whatever its own environment names.
-PROBE_KIND=""
-PROBE_DETAIL=""
-if [ "$PROBE" -eq 1 ]; then
-    PROBE_KIND=unprobed
-    [ -n "$PROBE_CITY" ] || PROBE_CITY="$CITY_ROOT"
-fi
-
 # A field of the previous record, or empty. A build that failed keeps the last
 # good binary serving, so its built_at and binary_rev must survive the failure
 # that did not replace them.
@@ -291,10 +250,8 @@ prev_field() { # <key>
 }
 
 # build-status.json — what this component is SERVING versus what the sources
-# say, written where the board reads it (services/helm reads every
-# .gc/services/*/build-status.json into the PACK rows). Nothing else can answer
-# it: every caller execs a prebuilt binary, so one older than its sources serves
-# in silence.
+# say. Nothing else can answer it: every caller execs a prebuilt binary, so one
+# older than its sources serves in silence.
 #
 # Every run that reaches a build decision writes one, the no-op tick included:
 # checked_at is what says the build order itself is still running, and it is the
@@ -309,31 +266,18 @@ write_record() { # <last_build_rc> <binary_rev> <built_at>
     if jq -n --arg component "$STATE_NAME" --arg built_at "$bat" \
         --arg source_rev "$SOURCE_REV" --arg binary_rev "$brev" \
         --argjson last_build_rc "$rc" --argjson restart_pending "$pending" \
-        --arg probe_status "$PROBE_KIND" --arg probe_detail "$PROBE_DETAIL" \
         --argjson behind_main "$BEHIND_MAIN" \
         --arg checked_at "$(date -u +%FT%TZ)" \
         '{component: $component, built_at: $built_at, source_rev: $source_rev,
           binary_rev: $binary_rev, last_build_rc: $last_build_rc,
-          restart_pending: $restart_pending, probe_status: $probe_status,
-          probe_detail: $probe_detail, behind_main: $behind_main,
-          checked_at: $checked_at}
-         | if $probe_status == "" then del(.probe_status, .probe_detail) else . end' \
+          restart_pending: $restart_pending, behind_main: $behind_main,
+          checked_at: $checked_at}' \
         > "$tmp" 2>/dev/null; then
         mv -f "$tmp" "$STATUS" 2>/dev/null || rm -f -- "$tmp" 2>/dev/null
     else
         rm -f -- "$tmp" 2>/dev/null
     fi
     return 0
-}
-
-# build-status — a probing component's one-line readability status, beside the
-# record.
-write_status() { # <kind> [detail]
-    local line
-    [ "$PROBE" -eq 1 ] || return 0
-    line="$1 $(date -u +%FT%TZ)"
-    if [ -n "${2:-}" ]; then line="$line $2"; fi
-    printf '%s\n' "$line" > "$STATE_ROOT/build-status" 2>/dev/null || true
 }
 
 # Go toolchain: override, PATH, then the conventional system install. It is
@@ -357,33 +301,6 @@ go_release() {
         fi
     done < "$1"
     printf '%s\n' "${toolchain_line:-$go_line}"
-}
-
-# A rebuild changes what a binary can read only if the embedded beads library
-# moves, which is what separates "retry the build" from "the pin is the problem".
-BEADS_MODULE="github.com/steveyegge/beads"
-PROBE_LATCH="$STATE_ROOT/probe-failed"
-
-# probe_binary <path> — 0 readable, 1 not, with the reason in PROBE_DETAIL.
-# A binary too old to know the verb answers non-zero too, which is the right
-# answer: it predates the check and is worth rebuilding.
-probe_binary() {
-    local out=""
-    PROBE_DETAIL=""
-    if out="$(GC_HELM_CITY_PATH="$PROBE_CITY" "$1" probe --timeout="$PROBE_TIMEOUT" 2>&1)"; then
-        return 0
-    fi
-    # One line, bounded: build-status is a single-line file and the live
-    # schema-skew message names every rig in the city.
-    PROBE_DETAIL="$(printf '%s' "$out" | tr '\n\t' '  ' | sed 's/  */ /g; s/^ *//; s/ *$//' | cut -c1-300)"
-    [ -n "$PROBE_DETAIL" ] || PROBE_DETAIL="the probe produced no diagnostic"
-    return 1
-}
-
-embedded_beads() { # <binary> — the pinned library version, or "unknown"
-    local v=""
-    v="$("$GO" version -m "$1" 2>/dev/null | awk -v m="$BEADS_MODULE" '$1 == "dep" && $2 == m { print $3; exit }' || true)"
-    printf '%s' "${v:-unknown}"
 }
 
 # Build inputs: *.go, go.mod/go.sum (explicit — `-name '*.go'` misses them, and
@@ -452,63 +369,27 @@ if [ "$need_build" -eq 0 ]; then
     CURRENT_REV="$SOURCE_REV"
     [ -n "$CURRENT_REV" ] || CURRENT_REV="$(prev_field binary_rev)"
 
-    # Current in revision terms proves nothing about the store. Ask the binary
-    # BEFORE any restart: nothing may be put into service on a binary this run
-    # has already condemned.
-    if [ "$PROBE" -eq 1 ] && [ -n "$PROBE_CITY" ]; then
-        if probe_binary "$BIN"; then PROBE_KIND=ok; else PROBE_KIND=unreadable; fi
-    fi
-
-    if [ "$PROBE_KIND" != "unreadable" ]; then
-        # Current is not serving: an unrestarted publish leaves its marker, and
-        # this branch is the only one a later run can reach.
-        if [ -n "$SERVICE" ] && [ "$DEPLOY" -eq 1 ] && [ -e "$RESTART_PENDING" ]; then
-            echo "$ME: $BIN is up to date but not yet serving; retrying the restart"
-            if ! restart_service; then
-                write_record 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
-                exit 1
-            fi
+    # Current is not serving: an unrestarted publish leaves its marker, and this
+    # branch is the only one a later run can reach.
+    if [ -n "$SERVICE" ] && [ "$DEPLOY" -eq 1 ] && [ -e "$RESTART_PENDING" ]; then
+        echo "$ME: $BIN is up to date but not yet serving; retrying the restart"
+        if ! restart_service; then
+            write_record 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
+            exit 1
         fi
-        case "$PROBE_KIND" in
-            ok)
-                echo "$ME: $BIN is up to date and can read the city's bead stores"
-                write_status ok
-                rm -f -- "$PROBE_LATCH" 2>/dev/null || true
-                ;;
-            unprobed)
-                echo "$ME: $BIN is up to date (no city resolved; readability unprobed)"
-                write_status unprobed
-                ;;
-            *)
-                echo "$ME: $BIN is up to date"
-                ;;
-        esac
-        write_record 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
-        exit 0
     fi
-
-    # Rebuilding is the remedy only while it can produce a different binary;
-    # once it has been tried against this exact library version, repeating it
-    # every five minutes buries the remedy it cannot perform itself.
-    EMBEDDED="$(embedded_beads "$BIN")"
-    if [ "$(cat "$PROBE_LATCH" 2>/dev/null || true)" = "$EMBEDDED" ]; then
-        echo "$ME: $BIN CANNOT READ the city's bead stores, and a rebuild would embed the same $BEADS_MODULE $EMBEDDED; bump it in $ROOT/go.mod. Detail: $PROBE_DETAIL" >&2
-        write_status unreadable "$PROBE_DETAIL"
-        write_record 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
-        exit 1
-    fi
-    echo "$ME: $BIN cannot read the city's bead stores; rebuilding. Detail: $PROBE_DETAIL"
-    need_build=1
+    echo "$ME: $BIN is up to date"
+    write_record 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
+    exit 0
 fi
 
 # A build is owed and nothing can perform it: that is a failed build, recorded
-# like any other so the board's PACK row reports it, and $BIN is not touched. A
+# like any other, and $BIN is not touched. A
 # city that never gets a gctk binary refuses every lifecycle transition, every
 # merge pass and every epic the work skill files, since lifecycle.sh, merge.sh
 # and epic.sh have nothing else to exec, and a city that has one keeps it.
 if ! command -v "$GO" >/dev/null 2>&1; then
     echo "$ME: BUILD FAILED: no Go toolchain ($GO) to build $ROOT/$DIR; set GC_GO_BIN. $BIN left unchanged" >&2
-    write_status failed
     write_record 1 "$(prev_field binary_rev)" "$(prev_field built_at)"
     exit 1
 fi
@@ -521,7 +402,6 @@ fi
 GO_RELEASE="$(go_release "$ROOT/go.mod")"
 if [ -z "$GO_RELEASE" ]; then
     echo "$ME: BUILD FAILED: $ROOT/go.mod names no Go release, on a go line such as 'go 1.27.4' or a toolchain line, to build $ROOT/$DIR with. $BIN left unchanged" >&2
-    write_status failed
     write_record 1 "$(prev_field binary_rev)" "$(prev_field built_at)"
     exit 1
 fi
@@ -567,17 +447,6 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
-# The compile's cgo flags: the caller's own, and for a component that links ICU,
-# Homebrew's keg-only icu4c after them on macOS (icu4c-cgo.sh). Worked out only
-# when a build is owed, so a tick with nothing to build never asks brew.
-BUILD_CGO_CPPFLAGS="${CGO_CPPFLAGS:-}"
-BUILD_CGO_LDFLAGS="${CGO_LDFLAGS:-}"
-if [ "$ICU" -eq 1 ]; then
-    icu4c_cgo_flags "$ME"
-    BUILD_CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS"
-    BUILD_CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS"
-fi
-
 # A stamping component's binary carries the revision it was built from
 # (`gctk version`), stamped as SOURCE_REV, so doctor/check-cadence-live
 # compares the identity the build records against the checkout rather than a
@@ -596,7 +465,6 @@ BIN_TMP=""
 echo "$ME: building $ROOT/$DIR -> $BIN with $GO_RELEASE"
 if BIN_TMP="$(mktemp "$BIN_DIR/.$BIN_NAME.build.XXXXXX" 2>/dev/null)"; then
     if ( cd "$ROOT/$DIR" && TMPDIR="$GOTMP_RUN" GOTMPDIR="$GOTMP_RUN" GOTOOLCHAIN="$GO_RELEASE" \
-            CGO_CPPFLAGS="$BUILD_CGO_CPPFLAGS" CGO_LDFLAGS="$BUILD_CGO_LDFLAGS" \
             "$GO" build ${GO_BUILD_FLAGS[@]+"${GO_BUILD_FLAGS[@]}"} -o "$BIN_TMP" "$PKG" ) \
         && chmod +x "$BIN_TMP" && mv -f "$BIN_TMP" "$BIN"; then
         build_ok=1
@@ -610,40 +478,12 @@ if [ "$build_ok" -eq 0 ]; then
     # is what is still serving — only source_rev moves, and the gap between the
     # two is the whole signal.
     echo "$ME: BUILD FAILED; $BIN left unchanged" >&2
-    write_status failed
     write_record 1 "$(prev_field binary_rev)" "$(prev_field built_at)"
     exit 1
 fi
 
 BUILT_AT="$(date -u +%FT%TZ)"
 echo "$ME: built $BIN"
-
-# A compiling binary is not a working one: a probing component writes ok only
-# behind a passing probe, so nothing downstream can read build-status as a
-# healthy board while the gather it reports on cannot run.
-if [ "$PROBE" -eq 1 ]; then
-    PROBE_KIND=unprobed
-    if [ -n "$PROBE_CITY" ]; then
-        if probe_binary "$BIN"; then
-            PROBE_KIND=ok
-            rm -f -- "$PROBE_LATCH" 2>/dev/null || true
-        else
-            PROBE_KIND=unreadable
-            # What was just tried, so the next tick can tell a retry from a loop.
-            printf '%s\n' "$(embedded_beads "$BIN")" > "$PROBE_LATCH" 2>/dev/null || true
-        fi
-    fi
-    write_status "$PROBE_KIND" "$PROBE_DETAIL"
-
-    # Stop before the restart, not after it: a condemned binary must not be
-    # marked for restart either, or the next run's pending-restart branch serves
-    # it.
-    if [ "$PROBE_KIND" = "unreadable" ]; then
-        echo "$ME: the binary just built CANNOT READ the city's bead stores; the board will not render. The service is left on the binary it is already running. Detail: $PROBE_DETAIL" >&2
-        write_record 0 "$SOURCE_REV" "$BUILT_AT"
-        exit 1
-    fi
-fi
 
 # For a service, build and restart are one step: a binary nothing restarts onto
 # is inert. Record the unfinished half BEFORE the restart, so whatever stops

@@ -19,9 +19,8 @@
 #   (STAMP)    the binary is stamped with the revision its record names, the
 #              identity `gctk version` reports
 #   (COMMAND)  gctk is a command, not a service: --deploy restarts nothing, the
-#              record carries restart_pending false and no probe fields, no
-#              readability status or restart marker is written, and with the
-#              city in the environment gc is never asked
+#              record carries restart_pending false, no restart marker is
+#              written, and with the city in the environment gc is never asked
 #   (BEHIND)   a checkout behind origin/main under services/gctk records the
 #              gap, and is never rebuilt for it
 #   (LISTCITY) with no city in the environment, the listing's city_path places
@@ -157,7 +156,7 @@ eq "$RC" "2" "(USAGE) an unknown argument exits 2"
 run --deploy
 eq "$RC" "1" "(TOOLLESS) a build owed with no Go toolchain fails the order, under --deploy too"
 has "$OUT" "no Go toolchain" "(TOOLLESS) …and says what is missing"
-eq "$(field last_build_rc)" "1" "(TOOLLESS) …recording last_build_rc=1 for the board's PACK row"
+eq "$(field last_build_rc)" "1" "(TOOLLESS) …recording last_build_rc=1"
 eq "$(field binary_rev)" "" "(TOOLLESS) …with no binary_rev, because nothing has ever built"
 [ ! -e "$STATE/bin/gctk" ] && ok "(TOOLLESS) …and it publishes nothing" \
                           || bad "(TOOLLESS) a binary appeared with no toolchain to build it"
@@ -215,12 +214,8 @@ grep -qxF -- "-X main.sourceRev=$REV" "$GOLOG" \
   && ok "(STAMP) the build stamps the revision it records, for \`gctk version\`" \
   || bad "(STAMP) no '-X main.sourceRev=$REV' in the build's arguments: $(tr '\n' ' ' < "$GOLOG")"
 
-# --- (COMMAND) no service, so no restart and no probe --------------------------
+# --- (COMMAND) no service, so no restart ---------------------------------------
 eq "$(field restart_pending)" "false" "(COMMAND) the record says nothing is pending"
-eq "$(jq -r 'has("probe_status") or has("probe_detail")' "$STATE/build-status.json")" "false" \
-   "(COMMAND) …and carries no probe fields, since nothing probes gctk"
-[ ! -e "$STATE/build-status" ] && ok "(COMMAND) no readability status is written" \
-                               || bad "(COMMAND) a build-status readability file appeared"
 [ ! -e "$STATE/restart-pending" ] && ok "(COMMAND) no restart marker is written" \
                                   || bad "(COMMAND) a restart-pending marker appeared for a command"
 [ ! -s "$GCLOG" ] && ok "(COMMAND) with its city in the environment, gc is never asked" \

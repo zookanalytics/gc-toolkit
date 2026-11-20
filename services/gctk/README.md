@@ -164,8 +164,8 @@ writes. It publishes the binary under `<city>/.gc/services/gctk`, and nothing
 builds in a caller's path, so a gctk change goes live when the order next
 publishes it, while a script edit is live from the working tree at once. The
 bridges run whatever binary the order last published.
-`doctor/check-cadence-live` and the board's PACK rows report a deployed binary
-built from sources other than the checkout's.
+`doctor/check-cadence-live` reports a deployed binary built from sources other
+than the checkout's.
 
 ## Layout
 
