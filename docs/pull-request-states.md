@@ -47,7 +47,7 @@ than one can show at once, and any of them makes the status
 |---|---|---|
 | `held: gate` | A question the city asked a person, about the PR or about work the PR waits on. | Answer the question on the board. |
 | `held: review` | Review comments that wait for the city's answer, with no work under way to answer them. | Resolve the threads that are done, and decide what the city should do about the rest. |
-| `held: blocked` | Something else only a person can move: a decision, an open conversation about the PR, or another PR it waits on that is itself waiting on a person. | Make the decision, close the conversation, or move the other PR. |
+| `held: blocked` | Something else only a person can move: a decision, an open conversation about the PR, a bead in your queue (assigned to `human`), or another PR it waits on that is itself waiting on a person. | Make the decision, close the conversation, act on the bead in your queue, or move the other PR. |
 
 A PR can also read `needs-attention` with no `held:` label, for example when
 a required check failed, the branch conflicts with its base, or merges are

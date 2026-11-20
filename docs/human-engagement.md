@@ -914,7 +914,7 @@ label holds the subject. Each of these writes lands before any gate is
 answered, and one that does not land stops the sign-off. While the work is
 out, a decision subject is no question of the operator's: the board's row
 reads it as waiting on that work, in Queued, and a pull request it holds reads
-`working` (`prstatus.Stays`). Once the work closes, the deferred-dispatch pass
+`working` (`person.Stays`). Once the work closes, the deferred-dispatch pass
 slings the closer, which checks the brief against what landed and closes the
 subject or puts it to the operator. No closer is
 armed for a subject that something else sends on once its wait clears: its own
