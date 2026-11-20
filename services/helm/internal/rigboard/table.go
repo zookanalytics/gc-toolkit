@@ -148,7 +148,7 @@ func conversationWords(assignee string) string { return string(conversationKind(
 // gateHold is the first wait behind a bead's status, its own or an ancestor's,
 // on a gate that is no human gate, and nil when none is. Row 4 reads such a
 // wait as "Held by a gate", and a Needs you view reads it as a park
-// (docs/steering.md, "A park"), whose gate gc-helm.sh park files with no await
+// (docs/steering.md, "A park"), whose gate gctk bead park files with no await
 // type. A gate of a type bd closes by itself, such as a timer, reads as one
 // too, so a row and the count read a gate one way.
 func gateHold(h waits.Holds) *waits.Wait {

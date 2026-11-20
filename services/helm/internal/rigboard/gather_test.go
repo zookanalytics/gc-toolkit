@@ -102,7 +102,7 @@ func TestReadPlacesWorkUnderEveryEpicItSitsUnder(t *testing.T) {
 
 // TestReadFoldsNeedsAboutParkedWork reads, through the read itself, the needs
 // a park leaves out of the count. Epic tk-pe waits on park gate tk-park, which
-// carries no await type, as gc-helm.sh park files one, and its only member has
+// carries no await type, as gctk bead park files one, and its only member has
 // closed, so it asks for a ruling. Question tk-q2 waits on the park itself, and
 // question tk-q holds only tk-w, which waits on the park too. Question tk-q3
 // holds only decision tk-d2, which waits on the park too, so both fold, and the

@@ -307,9 +307,9 @@ Take the case that fits the ruling:
 - **The subject takes its recommendation.** Reply to the recommendation's gate,
   which is the human gate under the key `first-reaction` that blocks the
   subject, and sign off with `--ruled yes --no-wait --accept`. Send nothing
-  yourself: the sign-off hands that gate to `gc-helm.sh accept`, the writer the
-  board's Accept runs, which dispatches the formula once under the subject's
-  acceptance lock. A var the operator settles rides beside `--accept` as
+  yourself: the sign-off hands that gate to `gctk reaction accept`, the one
+  writer that dispatches a recommendation, which dispatches the formula once
+  under the subject's acceptance lock. A var the operator settles rides beside `--accept` as
   `--var <key>=<value>`. The sign-off refuses `--accept`, writing nothing,
   while a gate the ruling does not answer still holds the subject. Then either
   answer that gate in the same ruling once the operator rules on it, or sign

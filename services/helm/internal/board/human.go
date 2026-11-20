@@ -69,7 +69,7 @@ const (
 )
 
 // acceptAnswer is an Accept's answer on the recommendation's gate: the close
-// reason `ruled: accepted <formula> accept:<token>` gc-helm.sh accept resolves
+// reason `ruled: accepted <formula> accept:<token>` gctk reaction accept resolves
 // the gate with, and finishes an acceptance under.
 var acceptAnswer = regexp.MustCompile(`^ruled: accepted ([^ ]+) accept:[0-9a-f]+$`)
 
