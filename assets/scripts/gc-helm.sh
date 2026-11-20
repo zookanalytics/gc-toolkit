@@ -312,11 +312,6 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=work-outcome.sh
 . "${GC_WORK_OUTCOME_LIB:-$SCRIPT_DIR/work-outcome.sh}" \
     || { echo "$PROG: cannot source work-outcome.sh from $SCRIPT_DIR" >&2; exit 3; }
-# The one reader of a run's link to the bead it works: the release finds the
-# runs beneath an anchor. Exposes run_lib and $RUN_JQ.
-# shellcheck source=run-lib.sh
-. "${GC_RUN_LIB:-$SCRIPT_DIR/run-lib.sh}" \
-    || { echo "$PROG: cannot source run-lib.sh from $SCRIPT_DIR" >&2; exit 3; }
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
 # from what `gc session new converse-<model>` resolves. Both are overridable so
