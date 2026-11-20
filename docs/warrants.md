@@ -289,14 +289,14 @@ no warrant.
   <formula>` launches under a per-bead lock and refuses a second launch of the
   formula at the bead, exiting 3, only while a root an earlier launch poured is
   live (`internal/sling/sling_core.go`, the lock at 676 and the check at 702,
-  `checkLegacySourceWorkflowConflict`, which reads the live roots at 2026; the
+  `checkLegacySourceWorkflowConflict`, which reads the live roots at 2030; the
   terminal-root skip in `internal/sling/sling_attachment.go` 321;
   and `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
-  `internal/sling/sling_test.go` 3975-4027). Once that root has closed, the next
+  `internal/sling/sling_test.go` 3987-4039). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
   by a key, and `--scope-kind` with `--scope-ref` names a city or rig scope, not
   a caller's key (`cmd/gc/cmd_sling.go` 148-169).
-- **Verified.** 2026-11-08, at `gastownhall/gascity` main c7a45437f.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
@@ -373,8 +373,8 @@ no warrant.
 - **Evidence.**
   - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor
     classifies an open PR from its draft flag, its merge state and its check
-    rollup alone, so every `BLOCKED` PR is `blocked` and actionable, a
-    required check still running included (`classifyPullRequest` in
+    rollup alone, so a `BLOCKED` PR that is no draft and has no failed check
+    is `blocked` and actionable, a required check still running included (`classifyPullRequest` in
     `internal/githubmonitor/monitor.go`). It reads no branch rule, review
     thread or approval, and it records its class on a repair bead it files
     (`ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go`), not on the bead
@@ -401,9 +401,9 @@ no warrant.
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-13, at `gastownhall/gascity` main cb9105579667,
-  `gastownhall/gascity-packs` main 1f6d8e41c5b0, and `gastownhall/beads` main
-  526c1c877e26.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475,
+  `gastownhall/gascity-packs` main aa55b477d4c2, and `gastownhall/beads` main
+  3a274fbf8f76.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -540,9 +540,9 @@ no warrant.
     findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
     or answer. Neither keeps a record of the thread.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-13, at `gastownhall/gascity` main cb9105579667 with
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475 with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
-  main 1f6d8e41c5b0, and `gastownhall/beads` main 526c1c877e26.
+  main aa55b477d4c2, and `gastownhall/beads` main 3a274fbf8f76.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
@@ -737,7 +737,7 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-17, at `gastownhall/gascity` main f715d7b92d, with
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
