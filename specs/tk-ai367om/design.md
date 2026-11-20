@@ -58,10 +58,12 @@ run:
    it before it wakes the sitting, and that pass is the one that would request
    the merge. It marks the PR ready as it does today, so CI runs and GitHub
    requests your review while the sitting reads, as you ruled on 2026-11-16.
-3. **The sitting always comes back to you.** It compares the result with what
-   you agreed, posts what it found on the PR and in its hand-back, and waits
-   for you, even when everything matches. What it finds is advice, never one of
-   the PR's checks.
+3. **The sitting always comes back to you, with a short summary and its
+   recommendation.** It checks the result against each item you agreed, and
+   says on the PR and in its hand-back which items are covered. It closes with
+   where that leaves you: every item is covered and you can approve when you
+   are comfortable, or which item still needs your word. It waits for you
+   either way. What it says is advice, never one of the PR's checks.
 4. **You send the work back, settle it, or end the conversation.** Sending it
    back is a new stay, so the sitting comes back at the end of the next round.
    Settling releases the PR. Leaving the terminal neither approves the work nor
@@ -119,8 +121,9 @@ is for.
    Before the second, it puts C's hold on the PR (section 4).
 5. **The wake.** C is ready once its gate has closed, and Gas City wakes the
    sitting for it.
-6. **The return.** The sitting compares, posts, and holds for the operator,
-   whatever it found (section 5).
+6. **The return.** The sitting checks each agreed item, posts a short summary
+   with its recommendation, and holds for the operator, whatever it found
+   (section 5).
 7. **Settling.** On the operator's ruling the sitting lifts the hold. It then
    ends the conversation, or promises and stays for another piece (section 7).
 8. **A store the landing order does not read.** There the stay is today's stay,
@@ -154,6 +157,11 @@ stall check read. So no hold is written while the sitting sleeps on.
   The stay's call then finds the conversation's open gate and leaves the
   conversation open. A call that finds none, and sends nothing itself, refuses
   and names this command.
+
+In either form the sitting writes what was agreed as a list of items the return
+can check, in the work's brief or, for a send-back, in the order its ruling
+sends (`converse-settle`, "Send the work"). `--stay` still takes the one line
+the entry prints as `AGREED`.
 
 Once the operator detaches, Gas City sleeps the sitting after its template's
 idle window (`sleep_after_idle`, ten minutes for the converse templates),
@@ -443,12 +451,25 @@ The sitting takes the return up when its entry reads `returned`, in this order:
    The sitting then records no line, and says in the thread what stopped it.
 3. **Read the result** at the PR's head, which is the head the round ended at,
    with the review run's account of each round since the head it last read.
-4. **Compare it with what was agreed**, the thread and `AGREED`, as the return
-   compares today.
-5. **Post what it found** on the PR through `pr-post.sh comment` and in its
-   hand-back: where the work matches what was agreed and where it departs, as
-   advice. When it finds that the work matches, it says so.
-6. **Wait for the operator.** The hold stands until they rule.
+4. **Check it against what was agreed, item by item.** The items are the ones
+   the stay recorded in the work's brief or in the send-back's order, with the
+   thread and `AGREED` beside them.
+5. **Post a short summary with its recommendation**, on the PR through
+   `pr-post.sh comment` and in its hand-back. The summary names what was
+   discussed, lists each agreed item with whether it is covered and how the
+   sitting checked it, and closes with one of three lines, so the operator can
+   tell at a glance which it is:
+   - every item is covered, the sitting sees nothing left to discuss, and the
+     operator can approve when they are comfortable, or raise anything else;
+   - some items are covered, and it names each one that still needs the
+     operator's word, with the question;
+   - the work departs from what was agreed in a way the operator has to rule
+     on.
+
+   The summary is advice in the sitting's own voice. It claims no more than
+   the sitting checked, and it is not one of the PR's checks.
+6. **Wait for the operator.** The hold stands until they rule, whichever line
+   the summary closed with.
 
 A restart after step 2 reads the `holding:` line that stands, and a restart
 before it reads `returned` again, because the closed gate stays in the store. A
@@ -605,10 +626,12 @@ back, by section 3's table, with section 10's rows:
   On an entry that reads `returned`, the prompt runs the return.
 - **`converse-stay`**: the stay's two forms, the sitting's own
   `gctk gate return`, a stay that stopped short and its re-run, the return's
-  steps, a ruling made on a visit, settling and ending.
-- **`converse-settle`**: send, then the promise of the piece the sitting sent,
-  then the stay; what the sitting tells the operator about other work it sent;
-  and a stay on the conversation's own subject.
+  steps with its summary and the three lines it closes with, a ruling made on
+  a visit, settling and ending.
+- **`converse-settle`**: send, with what was agreed written as a list of items
+  the return can check, then the promise of the piece the sitting sent, then
+  the stay; what the sitting tells the operator about other work it sent; and
+  a stay on the conversation's own subject.
 - **`converse-hold`**: the hold of a returned exchange, recorded in one write
   guarded on the claim the entry took, and the lift of the PR's merge hold only
   on the operator's settlement.
@@ -732,7 +755,7 @@ nothing they add runs.
 |---|---|---|---|
 | 1. The return gate (gctk) | The package `services/gctk/gate`: the return gate's await type and title, the rule for who closes a gate of each await type and the human-gate rule, the gate's filing, and its close with its reason. The verb `gctk gate return <conversation> --on <bead>`, which files the gate with one `bd gate create`, finds the open one for that bead, and makes each refusal of section 2. In the landing order's pass, at the end of a round on a draft or on a PR that is ready already, with no ask open on the bead: for each open return gate whose await id is the bead, the hold when its conversation is open or in progress, then the gate's close, before the ready transition or the evaluator's read, and again at the read before a merge request; and in every pass, the close of an open return gate whose bead has closed. The main board's `heldByPerson`, the rig board's `gateHold` and `parked`, `prstatus.IsHumanGate` and the pr domain's `isHumanGate` read the definition. `docs/gctk-architecture.md` gains the verb's row, the `gate` noun and the order's new step, and `docs/warrants.md` the return gate's warrant. Tests: the gate the verb files and the one it finds; each refusal; the hold and the close for new work, for a rework and for the subject; a send-back the run answers with no push closes the gate on a ready PR, and an approval from an earlier round does not merge it; an ask that something holds keeps the gate open; a gate filed after its round ended closes on the next pass; no merge is requested while an open return gate names the bead; a due gate past the first 50 open gates in the store is closed; a gate whose conversation has closed closes with no hold; a write that does not land ends that PR's pass and is retried; a PR in its base's merge queue is left to GitHub; a gate whose bead has closed closes; the boards read a conversation that waits on its return gate as queued, and a park as a person's. | this rewrite (tk-1gsaloy) | unit 2, once tk-ps47p6p brings the branch current |
 | 2. The stay carries its gate, and the entry reads it (scripts) | `converse-signoff.sh --stay` on the review path: after the send its ruling makes and the waits its call writes, the return gate through `gctk gate return` on the bead that send reached, when the conversation has no open return gate; an open gate the sitting filed kept; a call that sends nothing refused before any write when the conversation has no open gate, with a message that says when a gate of the conversation's has closed since, so the work is back; no edge from the conversation onto a `--waiting-on` bead and no wait on the ruling's ask; the second `staying:` line naming the gate; a stay on the subject and on the PR whose merge the conversation holds; `--accept` beside `--stay`. In a store the landing order does not read, the stay as it is today. `converse-entry.sh`: `waiting` while the gate the newest `staying:` line names is open and `returned` once it has closed; `WORK` as that gate's await id; a claimed conversation that waits on an open return gate with no `staying:` or `holding:` line read as `interrupted`, a stay the sitting has promised and not yet made. Tests, one per row of section 3 and of section 10: what the sign-off writes, the gate it files after its own send, a promised gate kept, the refusal with no gate, a stop at each point of the call and the re-run that finishes it, the entry before and after the gate closes, a restart between the promise and the stay, and the old path's refusals. | unit 1 and tk-ps47p6p | unit 3, once tk-imuvm2j brings the branch current |
-| 3. The words | The converse prompt's "End or stay?" and its handling of a return; `converse-stay`, `converse-settle` and `converse-hold` (section 11); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; the skill-needs pins of the table and of each example's call through the real parsers, among them the stay's call in each form, the sitting's `gctk gate return`, and a ruling made on a visit; the return's hold write, guarded on the claim the entry took; the stay's Debt entry in `docs/architecture.md`, narrowed to a store the landing order does not read. | unit 2 and tk-imuvm2j | the landing |
+| 3. The words | The converse prompt's "End or stay?" and its handling of a return, with the return's summary of each agreed item and the three lines it closes with; `converse-stay`, `converse-settle` and `converse-hold` (section 11); `docs/human-engagement.md`; the sentence in `docs/product-goals.md`; the skill-needs pins of the table and of each example's call through the real parsers, among them the stay's call in each form, the sitting's `gctk gate return`, and a ruling made on a visit; the return's hold write, guarded on the claim the entry took; the stay's Debt entry in `docs/architecture.md`, narrowed to a store the landing order does not read. | unit 2 and tk-imuvm2j | the landing |
 
 The initiative's "Done when" asks for a test of each row of the table. Units 1
 and 2 hold the rows in their suites, and unit 3 pins them in the words.
@@ -755,7 +778,9 @@ are epic tk-uipsrmt's, which is held for prioritization and blocks nothing here.
   tk-jj483vu before unit 1, which has closed, tk-ps47p6p once unit 1 lands, and
   tk-imuvm2j once unit 2 lands. Main carries the rule that new pack code is
   written in Go, in gctk, and since PR #1563 the sign-off's
-  `--rework-waiting-on` (section 3).
+  `--rework-waiting-on` (section 3). Since PR #1615 main carries no old merge
+  path, so once the branch is brought current, section 10 is left with the
+  city's own store.
 - The human gates that held unit 1 (tk-p5pkn4k, key `stay-wake-probe`) and
   unit 3 (tk-50kk1fa, key `gas-city-keeps-waits`) are answered by the ruling of
   2026-11-18, and no gate replaces them.

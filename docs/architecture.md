@@ -374,14 +374,15 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   and closes that work's return gate. A sitting stays for one piece of work at
   a time. A visit to the sitting and a fresh context for it leave the store
   alone, so the return outlasts both. On each return the
-  sitting compares the work with what was agreed, tells the operator where it
-  matches and where it departs, and waits for the operator, even when it finds
-  that the work matches. The PR does not merge until the operator settles
+  sitting checks the work against each item that was agreed, tells the operator
+  which items are covered and where the work departs, with its recommendation,
+  and waits for the operator, even when every item is covered. The PR does not merge until the operator settles
   that exchange. Settling releases the hold, and leaving the terminal neither
   approves the work nor cancels the return. The board shows a conversation its
   sitting stays in, and the pull request whose merge it holds, as waiting on
-  that work, not as asks of the operator. The sitting passes and fails
-  nothing: the work's own checks give the verdicts, and the
+  that work, not as asks of the operator. The sitting's recommendation is
+  advice. It passes and fails nothing: the work's own checks give the verdicts,
+  and the
   subject closes as it would after a hand-off, such as through the validating
   closer the stay armed (`mol-validate-close`,
   [component-model.md](component-model.md#4-where-each-component-sits)). A
