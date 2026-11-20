@@ -63,8 +63,8 @@ the store names it with bd's own --db flag. Without it the command reads the
 store gc routes a read of the first bead to, as gc routes a read that names
 a bead and no store: the store gc resolves from the working directory and the
 environment (gc bd where) when its prefix begins that bead's id, else the
-store whose prefix does (gc rig list), and the resolved store when no store's
-prefix begins it or the stores do not list. Every read names that one store,
+store whose prefix does (gc config show), and the resolved store when no
+store's prefix begins it or the city's config does not read. Every read names that one store,
 so no read that names a bead is routed to another, and a bead named in
 another store is one this store does not hold.
 

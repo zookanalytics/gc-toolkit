@@ -49,7 +49,11 @@ func newSessionProgressCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			p := &session.Progress{City: gascity.New(), Open: ledger.OpenStore, Now: time.Now}
-			out := p.Run()
+			ctx, release := stopOnSignal()
+			out := p.Run(ctx)
+			if sig := release(); sig != 0 {
+				return exit(128 + int(sig))
+			}
 			if out.Record == nil {
 				return reportLook("session progress", nil, "", false, false, out.Failures, stdout, stderr)
 			}
