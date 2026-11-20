@@ -854,8 +854,9 @@ echo "# a sitting hands its change off under --held-by"
 # a blocks edge onto the conversation tk-conv, which the sitting's hook names.
 SIT_META='{"target":"main"}'
 # The conversation's blocks edge onto the change is a dep row, which the hand-off's
-# `gc bd dep remove tk-w tk-conv` takes away.
-sit_edge() { printf 'tk-conv|blocks|tk-w\n' >> "$STUB_DEPS"; }
+# `gc bd dep remove tk-w tk-conv` takes away. The conversation is a bead of the
+# store, since a show leaves out an edge onto a bead its store does not hold.
+sit_edge() { brow tk-conv "title=should this land?" status=in_progress; printf 'tk-conv|blocks|tk-w\n' >> "$STUB_DEPS"; }
 sit() { # [<VAR=value>...]
   submit STUB_HOOK_CURRENT=tk-conv "$@" -- --bead tk-w --held-by tk-conv --notes "Handed off from the sitting." \
     --summary-file "$SUM" --title "feat: the change"
