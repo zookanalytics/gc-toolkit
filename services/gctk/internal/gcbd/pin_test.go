@@ -70,9 +70,10 @@ func TestInKeepsAStoreTheCallNames(t *testing.T) {
 	}
 }
 
-// routeStub puts a `gc` on PATH that answers `bd where` from $STUB_WHERE and
-// `config show --json` from $STUB_CONFIG, each at its own exit code, logs every
-// call, and answers no other, `rig list` among them.
+// routeStub puts a `gc` on PATH that answers `bd where`, pinned to a store or
+// not, from $STUB_WHERE, `bd config get issue_prefix` pinned to a store from
+// $STUB_PREFIX and `config show --json` from $STUB_CONFIG, each at its own exit
+// code, logs every call, and answers no other, `rig list` among them.
 func routeStub(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -80,7 +81,8 @@ func routeStub(t *testing.T) string {
 	stub := `#!/bin/sh
 printf '%s\n' "$*" >> "$STUB_LOG"
 case "$*" in
-"bd where --json") printf '%s\n' "$STUB_WHERE"; exit "${STUB_WHERE_RC:-0}" ;;
+"bd where --json"|"bd --db "*" where --json") printf '%s\n' "$STUB_WHERE"; exit "${STUB_WHERE_RC:-0}" ;;
+"bd --db "*" config get issue_prefix --json") printf '%s\n' "$STUB_PREFIX"; exit "${STUB_PREFIX_RC:-0}" ;;
 "config show --json") printf '%s\n' "$STUB_CONFIG"; exit "${STUB_CONFIG_RC:-0}" ;;
 esac
 echo "stub gc: no answer for $*" >&2
@@ -112,6 +114,38 @@ func TestWhereNamesTheResolvedStore(t *testing.T) {
 		var re *ReadError
 		if _, _, err := c.Where(); !errors.As(err, &re) {
 			t.Errorf("Where() on %s = %v; want a *ReadError", tc.reply, err)
+		}
+	}
+}
+
+// Prefix is the store's issue_prefix setting, read pinned to the store the
+// client reads, and not the prefix bd where names from config.yaml. It drops
+// the trailing dash bd's create drops, and a read that fails or names no
+// prefix fails.
+func TestPrefixReadsTheStoresIssuePrefix(t *testing.T) {
+	log := routeStub(t)
+	c := (&Client{bin: "gc"}).In("/rig/.beads")
+	t.Setenv("STUB_WHERE", `{"path":"/rig/.beads","prefix":"rb"}`)
+	t.Setenv("STUB_PREFIX", `{"key":"issue_prefix","schema_version":1,"value":"tk"}`)
+	if p, err := c.Prefix(); err != nil || p != "tk" {
+		t.Errorf("Prefix() = %q, %v; want tk, the store's setting", p, err)
+	}
+	if got := findCalls(t, log); !slices.Equal(got, []string{"bd --db /rig/.beads config get issue_prefix --json"}) {
+		t.Errorf("calls = %q, want one read of the setting pinned to the store", got)
+	}
+	t.Setenv("STUB_PREFIX", `{"key":"issue_prefix","schema_version":1,"value":"tk-"}`)
+	if p, err := c.Prefix(); err != nil || p != "tk" {
+		t.Errorf("Prefix() on the setting tk- = %q, %v; want tk", p, err)
+	}
+	for _, tc := range []struct{ reply, rc string }{
+		{`{"key":"issue_prefix","schema_version":1,"value":""}`, "0"},
+		{`{"error":"no beads database found","schema_version":1}`, "1"},
+	} {
+		t.Setenv("STUB_PREFIX", tc.reply)
+		t.Setenv("STUB_PREFIX_RC", tc.rc)
+		var re *ReadError
+		if _, err := c.Prefix(); !errors.As(err, &re) {
+			t.Errorf("Prefix() on %s = %v; want a *ReadError", tc.reply, err)
 		}
 	}
 }

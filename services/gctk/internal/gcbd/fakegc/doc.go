@@ -60,6 +60,12 @@
 //     list of no rig when the setting names none. config show prints the file
 //     STUB_CONFIG names, and a config that names no agent when the setting
 //     names none or that file cannot be read.
+//   - convoy status <id> --json answers the convoy's members from the store,
+//     as gc reads them: the beads that name it as their parent, then the
+//     beads its tracks edges point at, sorted by created_at and then id, with
+//     a tracks edge onto a bead the store does not hold kept as a dangling
+//     track. A bead that is no convoy, or one the store does not hold, fails
+//     it at exit 1.
 //   - hook current prints the bead STUB_HOOK_CURRENT names, which stands for
 //     the claim gc stamps on the calling session's bead: the id alone under
 //     --id-only, and otherwise followed by the session that claimed it, in gc's
@@ -88,16 +94,17 @@
 // kind; blocked and ready follow bd's blocked rule over blocks,
 // conditional-blocks, waits-for and parent-child edges, and ready leaves out
 // the types bd's ready work leaves out; an update's --if-assignee or
-// --if-status that no longer holds writes nothing and exits 13; a close
-// records closed_at and its reason; a blocks edge between a bead and its
-// own ancestor is refused either way; a create --dry-run answers the row it
-// would file and writes nothing, its created_by the actor bd resolves
-// (--actor, BEADS_ACTOR, BD_ACTOR, git's user.name, USER, then unknown); in a
-// rig's store a create's dependency onto a bead with another prefix is kept
-// without the bead, as bd keeps one onto another store; and a set-state that
-// changes a bead's <dimension>:<value> label swaps the dimension's label and
-// files a closed event bead, the bead's child, while one to the value the
-// bead holds writes nothing.
+// --if-status that no longer holds writes nothing and exits 13; an update
+// writes the title it names, and one whose title is blank writes nothing and
+// exits 1; a close records closed_at and its reason; a blocks edge between a
+// bead and its own ancestor is refused either way; a create --dry-run answers
+// the row it would file and writes nothing, its created_by the actor bd
+// resolves (--actor, BEADS_ACTOR, BD_ACTOR, git's user.name, USER, then
+// unknown); in a rig's store a create's dependency onto a bead with another
+// prefix is kept without the bead, as bd keeps one onto another store; and a
+// set-state that changes a bead's <dimension>:<value> label swaps the
+// dimension's label and files a closed event bead, the bead's child, while one
+// to the value the bead holds writes nothing.
 //
 // # The settings
 //
