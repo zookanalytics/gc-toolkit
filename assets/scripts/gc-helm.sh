@@ -59,7 +59,6 @@ scrub() { tr -d '\000-\037'; }
 
 PROG="gc-helm"
 TAKEAWAY_MAX=140                            # hard cap on a takeaway headline, in CODEPOINTS
-DETACHED_STATES="pre_open_gate pull_request" # lifecycle.toml detached_states: the merge cadence drives these anchors
 FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replaces `gc rig list`
 
 usage() {
@@ -1019,8 +1018,8 @@ resolve_live_subject() {
 # and the PR is ambiguous only when those are two different anchors. An
 # anchor_bead must name a bead live in a store the search read, so a live
 # rework of a closed anchor refuses, naming both.
-# The status set is the pack's live-PR set (LIVE_STATUSES in pr-facts.sh,
-# mergeLiveStatuses in gctk merge): an anchor is live in deferred/hooked/pinned
+# The status set is the pack's live-PR set (LIVE_STATUSES in pr-facts.sh): an
+# anchor is live in deferred/hooked/pinned
 # too, so a narrower query would fail to resolve a PR whose bead sits in one of
 # those states. The number's uniqueness holds only across EVERY live store, so
 # any rig the search cannot fully read refuses the whole resolution (exit 4)
@@ -1051,8 +1050,8 @@ PR_ANCHORS=""
 pr_reference_anchors() {
     _pr_num="$1"; _pr_url="$2"
     # The URL pins the repo. A browser copy can be a PR subpage (…/pull/615/files)
-    # or carry a query string, but pr-open.sh stores and merge.sh compares the
-    # canonical …/pull/<number> form, so canonicalize the paste before matching.
+    # or carry a query string, but a PR's record stores the canonical
+    # …/pull/<number> form, so canonicalize the paste before matching.
     _pr_url=$(printf '%s' "$_pr_url" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##')
     _pr_hits=""; _pr_live=""
     _pr_paths=$(printf '%s' "$RIGS" | jq -r '.[].path // ""' 2>/dev/null) || _pr_paths=""
@@ -1345,18 +1344,15 @@ takeaway_nudge_holder() {
 # guard is skipped: the caller has named the waits, and the hook offers the
 # bead only once bd reports it ready, so every open blocker gates the hand-off,
 # named or not.
-# Both are refused on an anchor whose merge_result is a detached state
-# (lifecycle.toml detached_states): the merge cadence drives it and work on its
-# branch goes to a child, so a route or an assignee would offer the anchor
-# itself as fresh work.
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb. One wait is written as no edge: a LANDED rider — a bead that
 # both rode the SUBJECT's own branch and has already put its work there, proven
 # by a post-push state (closed, or handed off to the refinery). Its deliverable
 # is in the subject's own head, so the subject's merge is what carries it, and
-# an edge would gate that merge on work that merges WITH it — the blocker
-# merge.sh's dep-edge lane holds on with no release, a PR wedged forever. Same
+# an edge would gate that merge on work that merges WITH it — a wait the
+# landing order's evaluator holds the merge on with no release, a PR wedged
+# forever. Same
 # branch WITHOUT that proof is not this case: metadata.branch is set at
 # workspace-setup, before the wait pushes, so a still-open same-branch wait may
 # not be on the branch yet, and its edge stands so the subject cannot merge past
@@ -1503,21 +1499,6 @@ cmd_takeaway() {
         esac
     fi
 
-    # An anchor in a detached state rests unrouted and unassigned while the merge
-    # cadence drives it (lifecycle.toml detached_states), and work on its branch
-    # goes to a child (the prs skill). A route or an assignee would offer the
-    # anchor itself as fresh work, and a claim on it would move it out of the
-    # open, unassigned state merge.sh and pr-facts.sh read anchors in. Refused
-    # before anything is written, so a re-run without either lands the headline
-    # and the release.
-    if [ -n "$release_park" ] && [ -n "$route$assign" ] && [ -n "$anchor_mr" ]; then
-        case " $DETACHED_STATES " in
-            *" $anchor_mr "*)
-                echo "$PROG: takeaway: ${route:+--route '$route'}${assign:+--assign '$assign'} on $bead, whose merge_result is $anchor_mr. The merge cadence drives an anchor in that state, which rests unrouted and unassigned (lifecycle.toml detached_states), and work on its branch goes to a child (the prs skill), so it is not sent to a pool or an agent. Re-run with --release alone, which still lands the headline and the release. Nothing was written." >&2
-                exit 2 ;;
-        esac
-    fi
-
     # A release that sends the bead on, to a pool or to a named agent, is a
     # placement, so its write lifts the bead's hold:mayor. Gas City serves no bead
     # a hold label holds, assigned or not, so the route or the assignee would
@@ -1568,8 +1549,9 @@ cmd_takeaway() {
     # riders. A landed rider both rode <bead>'s OWN branch and has already put
     # its work there, so <bead>'s own merge is what carries it
     # (docs/human-engagement.md, "How a held sitting ends"): an edge would
-    # gate <bead>'s merge on work that merges WITH it — the deadlock merge.sh's
-    # dep-edge lane holds on with no release — while asserting a pending wait
+    # gate <bead>'s merge on work that merges WITH it — a wait the landing
+    # order's evaluator holds the merge on with no release — while asserting a
+    # pending wait
     # that does not exist. Both halves are required. metadata.branch is set at
     # workspace-setup, before the wait implements, pushes or hands off, so
     # equality proves the wait MEANS to ride this branch, not that its work is
@@ -1903,8 +1885,8 @@ EOF
 # - a bead in flight: someone has claimed it (in_progress or hooked, bd's claim
 #   statuses), it carries branch, merge_result or rejection_reason, or a
 #   workflow poured for it has passed load-context. Its own edge would be a
-#   live direct blocker: merge.sh holds an anchor's merge on any open blocker
-#   of its own, and bd refuses to close a bead that has one. Parking its parent
+#   live direct blocker: the landing order's evaluator holds an anchor's merge
+#   on any open wait of its own, and bd refuses to close a bead that has one. Parking its parent
 #   holds the parent's unstarted work and leaves this bead's PR landing.
 # - a bead to wait on that is closed, lives in another store, or sits under
 #   the bead: each edge would hold nothing, or bd refuses it.
@@ -2086,7 +2068,7 @@ cmd_park() {
               else ([ (.dependencies // [])[]? | select(type == "object")
                       | select(((.dependency_type // .type // "") | tostring) == "parent-child")
                       | ((.id // .depends_on_id // "") | tostring) ] | map(select(. != "")) | .[0] // "") end' 2>/dev/null || true)
-        echo "$PROG: park: $bead is in flight ($self_why). Its own edge would be a live direct blocker: merge.sh holds an anchor's merge on any open blocker of its own, and bd refuses to close a bead that has one.${parent:+ Park $parent instead, which holds what under it has not started and leaves $bead running.} Nothing was written." >&2
+        echo "$PROG: park: $bead is in flight ($self_why). Its own edge would be a live direct blocker: the landing order's evaluator holds an anchor's merge on any open wait of its own, and bd refuses to close a bead that has one.${parent:+ Park $parent instead, which holds what under it has not started and leaves $bead running.} Nothing was written." >&2
         exit 2
     fi
 

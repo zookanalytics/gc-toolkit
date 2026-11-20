@@ -152,9 +152,8 @@ scrub() { tr -d '\000-\037'; }
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The composable "may this bead be finalized?" precondition set, asked before
 # anything is written. An open human gate that blocks the origin holds its
-# close, a pinned one included, which bd's own close does not count, the same
-# precondition merge.sh applies to a merge (docs/finalize-gate.md). Overridable
-# for a test.
+# close, a pinned one included, which bd's own close does not count
+# (docs/finalize-gate.md). Overridable for a test.
 FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
 # Ends the retired branch on the git remote once the close has landed.
 # Overridable for a test.

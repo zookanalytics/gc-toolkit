@@ -36,13 +36,13 @@
 // next move on that its `blocks` edges reach, the pr-facts.sh posture, the merge
 // cadence's machine verdict with its blocked cause and the sentence that names
 // it, the merge cadence's count of review threads waiting on the city's answer,
-// the draft-stage markers pr-open.sh records (opened_as_draft, draft_readied),
+// the draft-stage markers (opened_as_draft, draft_readied),
 // and the anchor's in-flight set — any live bead carrying anchor_bead, the same
 // membership test pr-facts.sh applies in its own arms. The rule reads none of
 // GitHub's state itself. It does not read GitHub's merge state:
 // GitHub reports BLOCKED for a required check still running as it does for a
-// wedge, and the merge pass, which reads the branch's rules, is what tells the
-// two apart. It does not consult GitHub's review posture directly — the working
+// wedge, and the pr domain's evaluator, which reads each required check, is
+// what tells the two apart. It does not consult GitHub's review posture directly — the working
 // -> needs-review flip rests on that live work, which closes as it
 // hands back, so a sticky changes_requested never traps the value in working
 // after the set empties. Nor does it read GitHub's draft flag: a draft the city
@@ -106,8 +106,8 @@ const (
 
 // The blocked causes: the value pr.machine_cause carries beside a blocked
 // machine verdict, declared as [machine_axis] causes in lifecycle/lifecycle.toml.
-// gctk merge writes them, and the status: label and the helm board read them
-// here rather than parsing the pr.machine_reason sentence.
+// The status: label and the helm board read them here rather than parsing the
+// pr.machine_reason sentence.
 const (
 	CauseReviewThreads = "review-threads" // a required review thread is unresolved
 	CauseCheckFailed   = "check-failed"   // a required check failed at the head
@@ -205,13 +205,11 @@ type Facts struct {
 	// review, one the city marked handled with its THUMBS_UP, or one a
 	// dismissal retired, neither asks nor answers.
 	PRUnansweredThreads string
-	// OpenedAsDraft is metadata.opened_as_draft: the head oid pr-open.sh opened
-	// or adopted the PR as a draft at, recorded only on a draft whose ready flip
-	// the refinery owns.
+	// OpenedAsDraft is metadata.opened_as_draft: the head oid the PR was opened
+	// or adopted as a draft at, on a draft whose ready flip the city owes.
 	OpenedAsDraft string
-	// DraftReadied is metadata.draft_readied: the head oid pr-open.sh read that
-	// draft ready at, either the head it flipped it at or the head it found it
-	// already ready at.
+	// DraftReadied is metadata.draft_readied: the head oid that draft was read
+	// ready at.
 	DraftReadied string
 	// InFlightCount is the size of the anchor's in-flight set: every bead
 	// carrying anchor_bead, any task_kind, at one of [InFlightStatuses] (a
@@ -474,8 +472,8 @@ func knownCause(v string) bool {
 	return false
 }
 
-// knownCount is a thread count as gctk merge records it, digits alone, plus no
-// count recorded yet.
+// knownCount is a thread count as pr.unanswered_threads records it, digits
+// alone, plus no count recorded yet.
 func knownCount(v string) bool {
 	for _, c := range v {
 		if c < '0' || c > '9' {
@@ -485,10 +483,10 @@ func knownCount(v string) bool {
 	return true
 }
 
-// isSet is the truthiness rule pr-facts.sh, pr-open.sh and pr-status-label.sh
-// share, applied to the value as `(v // "") | tostring` renders it: null and
-// false already arrive empty, and the string spellings of an unset flag are
-// treated as unset too, so a hold means the same thing everywhere.
+// isSet is the truthiness rule pr-facts.sh and pr-status-label.sh share,
+// applied to the value as `(v // "") | tostring` renders it: null and false
+// already arrive empty, and the string spellings of an unset flag are treated as
+// unset too, so a hold means the same thing everywhere.
 func isSet(v string) bool {
 	switch v {
 	case "", "false", "False", "FALSE", "0", "null":
@@ -500,8 +498,7 @@ func isSet(v string) bool {
 // inDraftStage is the open-as-draft stage: the city opened the PR as a draft and
 // has not yet read it ready, so it still owes the checks that flip it and the
 // flip itself. The test is presence, not truthiness, because both markers are
-// oids: it is the prefilter pr-open.sh's draft-to-ready arm runs and the stage
-// test gate-ensure.sh dispatches on.
+// oids: it is the stage test gate-ensure.sh dispatches on.
 func inDraftStage(openedAsDraft, draftReadied string) bool {
 	return openedAsDraft != "" && draftReadied == ""
 }

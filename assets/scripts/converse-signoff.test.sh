@@ -481,8 +481,8 @@ run_signoff() {
     set -e
 }
 writes() { grep -c -E "$WRITES" "$CALLS" || true; }
-# merge_held <bead> — "held" while the real finalize gate refuses the bead, the
-# check merge.sh makes for an open human gate before it lands a PR.
+# merge_held <bead> — "held" while the real finalize gate refuses the bead, as it
+# does while an open human gate holds it.
 merge_held() {
     if (cd "$TMP/cwd" && bash "$HERE/finalize-gate.sh" check "$1" >/dev/null 2>&1); then echo released; else echo held; fi
 }

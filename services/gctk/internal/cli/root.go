@@ -97,7 +97,6 @@ form gctk <noun> <verb>, called by an agent, a hook or an order
 		newDoctorCmd(stdout, stderr),
 		newEpicCmd(stdout, stderr),
 		newLifecycleCmd(stdout, stderr),
-		newMergeCmd(stdout, stderr),
 		newPRCmd(stdout, stderr),
 		newReactionCmd(stdout, stderr),
 		newRefineryCmd(stdout, stderr),
@@ -150,20 +149,6 @@ parses its own verbs and flags: gctk lifecycle with no verb prints them.`,
 		DisableFlagParsing: true,
 		RunE: func(_ *cobra.Command, args []string) error {
 			return exit(Lifecycle(args, stdout, stderr))
-		},
-	}
-}
-
-func newMergeCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
-		Use:   "merge",
-		Short: "the merge cadence's arm 2, the single writer of merged truth",
-		Long: `The merge cadence's arm 2, the single writer of merged truth, which
-assets/scripts/merge.sh hands its calls to. It reads its own flags, --deadline
-and --cursor, which pace one pass.`,
-		DisableFlagParsing: true,
-		RunE: func(_ *cobra.Command, args []string) error {
-			return exit(Merge(args, stdout, stderr))
 		},
 	}
 }
