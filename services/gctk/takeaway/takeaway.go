@@ -481,7 +481,7 @@ func (r *take) write() (string, error) {
 			return "", fmt.Errorf("%s changed after the release read it, so bd refused its guarded write and nothing was written: it showed status %s%s, and %s. The release takes it from no one who holds it now, so no wait was wired and no run was ended. Re-run to decide again on what it shows now",
 				r.bead, r.status, under(r.assignee), shows)
 		}
-		r.park, release, r.holds = false, false, nil
+		r.park, r.holds = false, nil
 		t.say("%s", r.closedSkip(now, "closed after the release read it"))
 		err = t.Ledger.Commit(r.update(at, false))
 	}
