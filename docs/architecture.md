@@ -366,20 +366,18 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   A stay comes back at the operator's next decision about its work, never
   after it. For work with no PR, the return is due when the work closes. For
   work on a PR, whether it opens one or reworks the PR under discussion, the
-  next decision is the approval, in every round. The sitting comes back
+  next decision is the approval. The sitting comes back
   through its own task: while the work is out, its conversation waits in the
   store on a return gate, and Gas City sleeps the sitting and wakes it with its
   thread when the return is due. When a round ends at the head the refinery
   validated, the landing order puts the conversation's hold on the PR's merge
-  and closes that work's return gate. A sitting that stays for several pieces
-  of work comes back once each is ready for the operator or has closed. A
-  visit to the sitting and a fresh context for it
-  leave the store alone, so the return outlasts both. On each return the
+  and closes that work's return gate. A sitting stays for one piece of work at
+  a time. A visit to the sitting and a fresh context for it leave the store
+  alone, so the return outlasts both. On each return the
   sitting compares the work with what was agreed, tells the operator where it
   matches and where it departs, and waits for the operator, even when it finds
   that the work matches. The PR does not merge until the operator settles
-  that exchange. Settling releases the hold and leaves the conversation
-  available until its subject closes, and leaving the terminal neither
+  that exchange. Settling releases the hold, and leaving the terminal neither
   approves the work nor cancels the return. The board shows a conversation its
   sitting stays in, and the pull request whose merge it holds, as waiting on
   that work, not as asks of the operator. The sitting passes and fails
