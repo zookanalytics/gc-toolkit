@@ -1597,6 +1597,38 @@ func TestACheckOfAPRNotReadyWritesItsDigestAlone(t *testing.T) {
 	is(t, d.once(t), pr.ActRequested)
 }
 
+// GitHub moves no sign the PR watch reads when it computes a merge state, so a
+// decision on one it had not computed keeps no digest, and the run after it
+// decides the record again though neither watch pass saved anything: here the
+// watch saved CLEAN, the act's own read found UNKNOWN, and GitHub then computed
+// CLEAN again.
+func TestAMergeStateGitHubHadNotComputedIsDecidedAgainByTheNextRun(t *testing.T) {
+	d := newLand(t)
+	d.refresh(t)
+	d.pr.Facts.MergeStateStatus = "UNKNOWN"
+	o := d.run(t)
+	is(t, o, pr.ActRetry)
+	if !strings.Contains(o.Detail, "has not computed the PR's merge state") {
+		t.Fatalf("the uncomputed merge state says %q", o.Detail)
+	}
+	if ws := d.runWrites(); len(ws) != 0 || len(d.github.Asks()) != 0 {
+		t.Fatalf("a decision on an uncomputed merge state wrote %+v and asked %v", ws, asks(d.github))
+	}
+	d.pr.Facts.MergeStateStatus = "CLEAN"
+	for name, pass := range map[string]func(pr.PassOptions) (pr.PassReport, error){
+		"Poll": d.watch.Poll, "Compare": d.watch.Compare,
+	} {
+		report, err := pass(pr.PassOptions{})
+		if err != nil || len(report.Updates) != 0 || len(report.Failed) != 0 {
+			t.Fatalf("%s over a merge state computed as the watch saved it: %+v, %v", name, report, err)
+		}
+	}
+	is(t, d.run(t), pr.ActRequested)
+	if len(d.github.Asks()) != 1 {
+		t.Fatalf("the run after the computed merge state asked %v, want one merge request", asks(d.github))
+	}
+}
+
 // An act that did not complete records nothing: no key says it failed, its
 // difference stays on the bead, and the next run acts on it again.
 func TestAnActThatDidNotCompleteWritesNothingAndTheNextRunActs(t *testing.T) {

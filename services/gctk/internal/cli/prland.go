@@ -129,10 +129,11 @@ takes the store's record lock, waiting no longer than its 30 seconds while
 another writer holds it, reads its record again under it, decides it from that
 read and its own read of the PR, and writes guarded on the status and assignee
 it read there. An act that did not complete, such as a read or a request
-GitHub refused or did not answer, a store read or a fetch that failed, a merge
-commit not yet on the target or an act that was stopped, records nothing and
-keeps no digest: its difference stays on the bead, and the next run decides
-it again.
+GitHub refused or did not answer, a merge state GitHub had not computed yet
+(UNKNOWN), which moves no sign the one-PR update reads once it is computed, a
+store read or a fetch that failed, a merge commit not yet on the target or an
+act that was stopped, records nothing and keeps no digest: its difference
+stays on the bead, and the next run decides it again.
 
 Before any of these, while the PR is open, it carries out each open
 withdrawal filed on the bead (gctk pr withdraw), on the act's own read of the

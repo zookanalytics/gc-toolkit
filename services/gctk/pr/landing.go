@@ -281,7 +281,8 @@ const (
 	// retired PR's close for now, and the next run hands it over again. A run
 	// keeps the digest of what a decision that owed no act read (one), and
 	// decides the record again only once that changes, so a decision a failed
-	// read left unmade is ActRetry, never this.
+	// read, or a merge state GitHub had not computed, left unmade is ActRetry,
+	// never this.
 	ActChecked = "checked"
 	// ActRequested: the evaluator found the PR ready on the run's own read of
 	// GitHub, and the run asked GitHub to merge it, or to add it to its base's
@@ -311,9 +312,10 @@ const (
 	// ActExcepted: an exception, filed as a human gate, keeps the bead blocked.
 	ActExcepted = "excepted"
 	// ActRetry: the record's act did not complete, or the run could not decide
-	// it: a call GitHub refused or did not answer, a fetch, a read, a filing or
-	// a label write that failed, or an act stopped at its bound. Nothing records
-	// it, the difference stays on the bead, and the next run acts on it again.
+	// it: a call GitHub refused or did not answer, a merge state GitHub had not
+	// computed, a fetch, a read, a filing or a label write that failed, or an
+	// act stopped at its bound. Nothing records it, the difference stays on the
+	// bead, and the next run acts on it again.
 	ActRetry = "retry"
 	// ActLabeled: the status: and held: labels the PR shows differ from the
 	// ones the store derives, and the run had the labels' writer write them:
@@ -1495,8 +1497,10 @@ func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carri
 // Otherwise the evaluator decides on the act's own read whether the PR is
 // ready, reading the rest of GitHub's side through it (readHub). One it finds
 // not ready is owed a review run when it has no passed result at the head or an
-// ask a run can take is open, which the run pours (admit). One it finds ready
-// is merged, pinned to the head the evaluator judged (merge).
+// ask a run can take is open, which the run pours (admit), and is otherwise
+// decided again by the next run while GitHub has not computed its merge state.
+// One it finds ready is merged, pinned to the head the evaluator judged
+// (merge).
 func (u *run) decideAtHead(ctx context.Context, s state, f fresh) plan {
 	p := f.pr
 	if p.InMergeQueue {
@@ -1545,7 +1549,17 @@ func (u *run) decideAtHead(ctx context.Context, s state, f fresh) plan {
 		for _, c := range ans.Conditions {
 			not = append(not, string(c.Kind))
 		}
-		return u.withCarry(s, f, none(s, ActChecked, "not ready: "+strings.Join(slices.Compact(not), ", ")))
+		held := "not ready: " + strings.Join(slices.Compact(not), ", ")
+		// GitHub moves no sign the PR watch reads when it computes a merge
+		// state, so a digest kept on one it had not computed could outlast the
+		// state it was kept on.
+		if slices.ContainsFunc(ans.Conditions, func(c Condition) bool {
+			return c.Kind == KindMergeState && c.Value == "UNKNOWN"
+		}) {
+			return u.withCarry(s, f, none(s, ActRetry, held+"; GitHub has not computed the PR's merge state yet, "+
+				"so the next run decides again"))
+		}
+		return u.withCarry(s, f, none(s, ActChecked, held))
 	}
 	return u.withCarry(s, f, doing(func(ctx context.Context, c carriedOut) RunOutcome { return u.merge(s, f, ans, c) }))
 }
