@@ -287,10 +287,6 @@ const (
 	// assigned after the run listed it, and a later run works it once the
 	// assignee is gone.
 	ActAssigned = "assigned"
-	// ActUnassigned: the bead waits on its PR's merge, blocked and pending, and
-	// the refinery was still assigned it, so the run assigned it to nobody and
-	// wrote nothing else. The next run works it as a waiting bead.
-	ActUnassigned = "unassigned"
 	// ActSettled: no further run is owed, and the run cleared the marker.
 	ActSettled = "settled"
 	// ActBlocked: the publication's second write had landed on a bead still
@@ -626,8 +622,6 @@ func (u *run) one(id string) (RunOutcome, error) {
 	switch {
 	case s.status == "closed":
 		return u.closed(s), nil
-	case s.status == "blocked" && rec.Result == record.Pending && s.assignee == u.Refinery:
-		return u.unassign(s), nil
 	case !u.mayWork(r):
 		return RunOutcome{Bead: id, Action: ActAssigned, Detail: fmt.Sprintf("assigned to %s, who works it now, so "+
 			"nothing is written, no merge is requested and no review run is poured; a later run works it once the "+
@@ -643,27 +637,16 @@ func (u *run) one(id string) (RunOutcome, error) {
 	if err == nil {
 		s.runs, err = runsIn(rows)
 	}
-	var strays []*ledger.Record
-	if err == nil {
-		strays, err = u.unattached(s)
-	}
 	if err != nil {
 		return RunOutcome{Bead: id, Action: ActFailed, Detail: "what holds the bead did not read: " + err.Error()}, nil
 	}
-	note, out, ok := u.attach(&s, strays)
-	if !ok {
-		return out, nil
-	}
 	switch {
 	case ruled && record.OnRecord(rec.Result):
-		out = u.disposed(s, d)
+		return u.disposed(s, d), nil
 	case s.status == "open":
-		out = u.open(s)
-	default:
-		out = u.blocked(s)
+		return u.open(s), nil
 	}
-	out.Detail = withNote(out.Detail, note)
-	return out, nil
+	return u.blocked(s), nil
 }
 
 // commit makes w, guarded on what the run read, and names the outcome: done
@@ -678,18 +661,6 @@ func (u *run) commit(s state, w *ledger.Write, done RunOutcome) RunOutcome {
 		return RunOutcome{Bead: s.id, Action: ActFailed, Detail: done.Detail + ", but the write did not land: " + err.Error()}
 	}
 	return done
-}
-
-// unassign assigns to nobody a bead that waits on its PR's merge, blocked and
-// pending, while the refinery is still assigned it, and writes nothing else.
-// Publish assigns a bead it blocks to nobody, so the refinery's assignment on
-// such a bead is one no publication of the record leaves, and the next run works
-// the bead as a waiting one.
-func (u *run) unassign(s state) RunOutcome {
-	w := u.Ledger.Write(s.id)
-	w.Assignee("")
-	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActUnassigned, Detail: "it waits on its PR's merge, and " +
-		"the refinery was still assigned it, so it is assigned to nobody; the next run works it"})
 }
 
 // closed handles a closed bead that still carries the marker. One closed on a
