@@ -513,7 +513,7 @@ no warrant.
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
     read at `gastownhall/gascity` main 9a4b1e718.
 - **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475,
-  `gastownhall/gascity-packs` main 132914b3e42e, and `gastownhall/beads` main
+  `gastownhall/gascity-packs` main aa55b477d4c2, and `gastownhall/beads` main
   3a274fbf8f76.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
   request's reviews, the required checks at its head and its review threads,

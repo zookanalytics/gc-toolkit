@@ -40,11 +40,11 @@ const runYield = 200 * time.Millisecond
 // The run's bounds (specs/tk-1tfzr71.149/design.md, section 5): no act starts
 // more than actWindow into a run, and each act is stopped at actStop, with
 // whatever it is making of the calls pr.Options names, and waits for the
-// record lock no longer. A run decides from the store and reads no record's PR
-// to decide, so it takes every record that owes an act, in a shuffled order,
-// and a slow act holds the next one back by actStop at most, unless it started
-// a review run's pour (pr's pourReserve) or handed a retired PR's bead to the
-// disposition writer, the two calls the stop does not end (pr.Options).
+// record lock no longer. A run reads GitHub only in the acts of the records it
+// decides, so it takes every record due, in a shuffled order, and a slow act
+// holds the next one back by actStop at most, unless it started a review run's
+// pour (pr's pourReserve) or handed a retired PR's bead to the disposition
+// writer, the two calls the stop does not end (pr.Options).
 const (
 	actWindow = 45 * time.Second
 	actStop   = 30 * time.Second
@@ -76,42 +76,44 @@ exit: 0 recorded
 const prReconcileLong = `One run of the landing order over the store's pending records: the beads that
 carry the marker pr_reconcile_pending, and the beads on the record that carry a
 ruling's disposition, an open or blocked bead only while it is assigned to
-nobody or to the refinery. It reads the store once and decides each record
-from the store and the read the one-PR update (gctk pr refresh) saved on its
-bead, reading GitHub only for a merge, an exception, a draft's ready
-transition or a withdrawal's dismissals and close, each confirmed on the act's
-own read of the PR:
+nobody or to the refinery. It reads the store once, and decides a record only
+once its PR moved or its bead changed since a run decided it with no act owed.
+After such a decision it keeps on the bead the digest of what the decision read
+of the store (pr_landing_digest), the read the one-PR update (gctk pr refresh)
+saved on the bead among it, and a later run passes over the record, with no
+read of GitHub and no write, until the digest of what it reads differs. A
+digest that is missing or wrong has the record decided again.
 
-  - open at the head the refinery validated: a draft whose review result
-    passed at that head and target, with no review run attached and no ask a
-    run can take open, is marked ready, without waiting for CI, once the act's
-    own read of the PR finds it a draft at that head and target; otherwise the
-    evaluator decides over the saved read whether it is ready, and a ready one
-    is merged on the merge's own read of GitHub, made in its act and decided
-    again, with the head that read judged pinned, or added to its base's merge
-    queue with it where the base requires one; one that is not ready is owed
-    a review run when no review result passed at that head and target, or an
-    ask that nothing holds is open on the bead (gctk review ask), and the run
-    pours it below
+It decides a record on its own read of the PR, made in the act, wherever the
+decision depends on GitHub, and on the store alone where it does not, such as
+clearing the marker of a bead closed on a verified merge. The read the one-PR
+update saved only chooses the records a run decides, so a saved read that is
+out of date delays a decision and causes no act on the record:
+
+  - open at the head the refinery validated: one in its base's merge queue
+    owes nothing; a draft whose review result passed at that head and target,
+    with no review run attached and no ask a run can take open, is marked
+    ready, without waiting for CI; otherwise the evaluator decides on the
+    act's read whether it is ready, and a ready one is merged with the head
+    that read judged pinned, or added to its base's merge queue with it where
+    the base requires one; one that is not ready is owed a review run when no
+    review result passed at that head and target, or an ask that nothing
+    holds is open on the bead (gctk review ask), and the run pours it below
   - open at another head: open, as pull_request_head_changed, and handed to
     the refinery in the write that assigns it the bead, unless something
-    the order owes holds the head (below). The act fetches the PR's branch
-    first. A tip at the saved head goes back at it. A tip that contains the
-    validated head in the clone's history says the read was made before the
-    refinery recorded its head, so nothing is sent back until the PR watch
-    reads the PR again. Any other tip goes back as the head the branch holds,
-    and a fetch or a read that fails sends nothing back until the next run
+    the order owes holds the head (below). GitHub's answer can lag a push, so
+    the act fetches the PR's branch first. A tip at the head GitHub gives goes
+    back at it. A tip that contains the validated head in the clone's history
+    says GitHub's answer lags the branch, so nothing is sent back, and the
+    next run decides again. Any other tip goes back as the head the branch
+    holds, and a fetch or a read that fails sends nothing back until the next
+    run
   - merged at the validated head, with the merge commit on the freshly fetched
     target: mr_merged, and the bead closes
   - closed unmerged, merged at another head, or no longer the PR the record
-    names: an exception, kept blocked behind a human gate keyed by its value.
-    A close, a merge record's PR still open, or a PR no longer the record's is
-    recorded only once the act's own read of the PR shows it too, since the
-    saved read can be older than the record, and otherwise nothing is
-    recorded until the PR watch reads the PR again
-  - no read of the PR saved on the bead: nothing, until the PR watch saves one
+    names: an exception, kept blocked behind a human gate keyed by its value
 
-The records that owe an act are taken in a shuffled order. No act starts more
+The records it decides are taken in a shuffled order. No act starts more
 than 45 seconds into the run, and each act is stopped at 30 seconds, with
 whatever GitHub call, fetch, store read or write, human gate's filing or
 refinery's wake it is making: a fetch gets a SIGTERM to git's process group,
@@ -124,33 +126,32 @@ end. The disposition writer a retired PR's bead goes to once the act frees the
 lock ends the bead's branch once its close lands, and a stop between the two
 would leave the branch of a closed bead that no run reads again. Each act
 takes the store's record lock, waiting no longer than its 30 seconds while
-another writer holds it, reads
-its record again under it, decides again from that read, and writes guarded on
-the status and assignee it read there. An act that did not complete, such as a
-request GitHub refused or did not answer, a fetch that failed, a merge commit
-not yet on the target or an act that was stopped, records nothing: its
-difference stays on the bead, and the next run acts on it.
+another writer holds it, reads its record again under it, decides it from that
+read and its own read of the PR, and writes guarded on the status and assignee
+it read there. An act that did not complete, such as a read or a request
+GitHub refused or did not answer, a store read or a fetch that failed, a merge
+commit not yet on the target or an act that was stopped, records nothing and
+keeps no digest: its difference stays on the bead, and the next run decides
+it again.
 
 Before any of these, while the PR is open, it carries out each open
-withdrawal filed on the bead (gctk pr withdraw), from the approvals the saved
-read holds: it waits while an approval it would dismiss carries an inline
-comment the intake has not routed, on the saved read and then on the act's
-own read of the PR's review threads, dismisses each approval that stands on a
-commit that does not contain the withdrawal's head in the clone's history,
-with the withdrawal's reason and the city's mark, and closes the withdrawal
-once the act's own read of the PR's reviews shows none standing past the ones
-it dismissed, since the saved read can lack an approval given since the PR
-watch read it. Before it dismisses any,
-it fetches the PR's branch into the clone, and a commit the clone still does
-not hold contains no head. When GitHub refuses a dismissal, it files a human
-gate on the bead keyed approval-withdraw-refused. A dismissal, or a read of
-the review threads or the reviews, that GitHub does not answer, a fetch that
-fails, or an approval the
-act's own read shows standing that the saved read lacks, leaves the
-withdrawal for the next run, and the
-record keeps its marker while a withdrawal is open, its changed head sent back
-to the refinery included, since the withdrawal holds the bead from the
-refinery until it is carried out.
+withdrawal filed on the bead (gctk pr withdraw), on the act's own read of the
+PR's reviews: it waits while an approval it would dismiss carries an inline
+comment the intake has not routed, on the act's own read of the PR's review
+threads, dismisses each approval that stands on a commit that does not
+contain the withdrawal's head in the clone's history, with the withdrawal's
+reason and the city's mark, reads the reviews again, and closes the
+withdrawal once none stands past the ones it dismissed, so an approval given
+during the act keeps the withdrawal open for the next run. Before it
+dismisses any, it fetches the PR's branch into the clone, and a commit the
+clone still does not hold contains no head. When GitHub refuses a dismissal,
+it files a human gate on the bead keyed approval-withdraw-refused. A
+dismissal, or a read of the review threads or the reviews, that GitHub does
+not answer, a fetch that fails, or a read of the clone's history that does
+not answer, leaves the withdrawal for the next run, and the record keeps its
+marker while a withdrawal is open, its changed head sent back to the
+refinery included, since the withdrawal holds the bead from the refinery
+until it is carried out.
 
 A changed head goes to the refinery once no withdrawal is open on the bead and
 no review run is attached to it, in the write that assigns the bead to the
@@ -167,8 +168,8 @@ A PR a ruling retired is decided apart from these: its bead carries the
 disposition pr-dispose.sh records before it closes the PR, under the record
 lock, so an act reads the disposition or has made its last write of the record
 before the disposition lands. The run requests no merge for such a PR, pours no
-review run, marks nothing ready and carries out no withdrawal. Once the saved
-read finds the PR closed and no review run is attached, an act closes the
+review run, marks nothing ready and carries out no withdrawal. Once the act's
+own read finds the PR closed and no review run is attached, an act closes the
 withdrawals and asks still open on the bead, and the bead closes onto the
 ruling's successor through bead-rehome.sh, run as the refinery once the record
 lock is free. The script closes it only while it still has the status and
@@ -194,19 +195,21 @@ review-run-failed gate closed, it files a human gate on the bead keyed
 review-run-failed instead, naming both runs and how each ended.
 
 The run saves none of what it reads of GitHub: the one-PR update is the one
-writer of pr_github_read, pr_state and pr_last_checked_at.
+writer of pr_github_read, pr_state and pr_last_checked_at. A record that owes
+no act gets one write, its digest.
 
 It keeps each PR's status: and held: labels equal to what the store derives,
 for every PR the store's live beads own, on the pending record or not. For
 each owned PR whose bead holds a read of it, it compares the labels of the
 writer's that the read saved with the ones the store derives, as gctk pr
 status derives them: the PR's status and held values while it is open, and
-none once it merged or closed. Where they differ, it has the labels' one
-writer, pr-status-label.sh, write them, reconcile on an open PR and clear on
-one that merged or closed, passing every label the read saved as the ones the
-PR shows. A label write takes its place among the acts in the shuffled order,
-under the same 45 and 30 seconds, and writes nothing on the bead, so one that
-does not land leaves the difference for the next run, which writes it again.
+none once it merged or closed. Where they differ, it reads the PR's state
+itself and has the labels' one writer, pr-status-label.sh, write them on that
+read, reconcile on an open PR and clear on one that merged or closed, handing
+it no labels, so the writer reads the PR's labels itself. A label write takes
+its place among the acts in the shuffled order, under the same 45 and 30
+seconds, and writes nothing on the bead, so one that does not land leaves the
+difference for the next run, which writes it again.
 
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the act fetched it, once the lock is free and inside the

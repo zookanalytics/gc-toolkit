@@ -16,10 +16,9 @@ import (
 // The GitHub read is GitHub's side of the bead's PR at one head, which observe
 // makes live, and which the read the one-PR update saves on the bead holds in
 // its parts (saved.go). decide is the rule over the two, and reads nothing.
-// Ready composes the bead's side, observe and decide for the merge, and
-// FromStore composes the bead's side, the saved read and decide for a display
-// and for the landing order's decision to merge, so the two list the same
-// conditions in the same order.
+// Ready composes the bead's side, observe and decide for the landing order's
+// decision, and FromStore composes the bead's side, the saved read and decide
+// for a display, so the two list the same conditions in the same order.
 
 // GitHubRead is GitHub's side of a PR at one head, reduced to what the rule
 // reads: when it was read, the provenance instant the definition of feedback
@@ -86,21 +85,23 @@ var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
 		"to the comment's thread, absent when there is none. labels: names, every label, which are their own signs. The update writes a part only "+
 		"when its read was sent after the saved part's: the whole part when it differs, and its read_at alone "+
 		"when it holds the same, so a read sent before it is never saved after it. A read that fails saves "+
-		"nothing. It holds no answer. The pr evaluator decides over it, for a display and for the landing "+
-		"order, which acts from it, as current only while it holds the pr, "+
-		"checks and conversation parts, the checks at the PR's head, names the record's repository and "+
-		"number, its head is the head the store holds (observed_pr_head_sha on a changed head, pr_head_sha "+
-		"otherwise) and its since is the bead's pr_provenance_since. Absent or not current, GitHub's side of "+
-		"the PR reads as unread.",
+		"nothing. It holds no answer. The pr evaluator decides over it for a display, the PR's status: and "+
+		"held: labels among them, as current only while it holds the pr, checks and conversation parts, the "+
+		"checks at the PR's head, names the record's repository and number, its head is the head the store "+
+		"holds (observed_pr_head_sha on a changed head, pr_head_sha otherwise) and its since is the bead's "+
+		"pr_provenance_since. Absent or not current, GitHub's side of the PR reads as unread. The landing "+
+		"order decides no record from it, since it decides each on its own read of GitHub: a change to it "+
+		"only makes the record due, through the digest the order keeps on the bead (pr_landing_digest). The "+
+		"order's label comparison reads the labels it saved, and labels that differ from the derived ones make "+
+		"a label write due, which reads the PR's state itself.",
 	ledger.Warrant("saved-github-read"))
 
 // FromStore answers what Ready answers for the bead's PR, over the read the
 // one-PR update saved on the bead in place of a live one: it reads the bead's
 // side through l and decides. It reads no GitHub and loads no definition of
-// feedback, so it is a display's question, and the landing order's, which
-// merges only once the merge's own read through Ready answers the same. A read
-// of the store that fails, or a saved read that does not decode, returns its
-// error and no answer.
+// feedback, so it is a display's question, and the landing order decides
+// through Ready, on its own read. A read of the store that fails, or a saved
+// read that does not decode, returns its error and no answer.
 func FromStore(l *ledger.Ledger, bead string) (Answer, error) {
 	b, r, err := readSide(l.Pass(), bead)
 	if err != nil {
