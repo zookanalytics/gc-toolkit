@@ -49,13 +49,8 @@ linters:
     rules:
       # Code the deletion schedule in docs/built-once-target.md retires gets no
       # new work (AGENTS.md), so its findings wait for the code to go, and the
-      # change that removes the code removes its rule. The schedule retires
-      # `gctk merge` with the old merge path, and the board's embedded store
-      # reader with its second data plane.
-      - path: services/gctk/internal/cli/merge\.go
-        linters:
-          - errcheck
-        text: 'Error return value of `(f\.Close|os\.Remove)` is not checked'
+      # change that removes the code removes its rule. The schedule retires the
+      # board's embedded store reader with its second data plane.
       - path: services/helm/internal/source/beads\.go
         linters:
           - errcheck
