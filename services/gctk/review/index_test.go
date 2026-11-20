@@ -302,12 +302,12 @@ func TestGuidanceAndTheGuidanceAChangeEdits(t *testing.T) {
 	clone := filepath.Join(t.TempDir(), "clone")
 	run(t, origin, "clone", "-q", origin, clone)
 	run(t, clone, "checkout", "-q", "-b", "work")
-	at := commit(t, clone, map[string]string{
+	commit(t, clone, map[string]string{
 		"docs/review-arch.md": "ARCH-GUIDANCE-MARK\n\n", "review-checks.toml": "[checks.ux]\nphase = \"merge\"\n",
 		"src/main.go": "package main\n",
 	})
 	run(t, clone, "mv", "docs/review-pm.md", "docs/pm-notes.md")
-	at = commit(t, clone, nil)
+	at := commit(t, clone, nil)
 	src := review.IndexSources{Repos: review.Repos(clone)}
 
 	text, err := review.Guidance(src, "ARCH", at)

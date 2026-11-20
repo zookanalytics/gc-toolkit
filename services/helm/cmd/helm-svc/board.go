@@ -138,7 +138,7 @@ func parseBoardArgs(args []string) (boardOpts, error) {
 			}
 			o.timeout = time.Duration(n) * time.Second
 		case "-h", "--help":
-			return o, flagHelp
+			return o, errHelp
 		default:
 			return o, fmt.Errorf("unknown flag %q", arg)
 		}
@@ -146,14 +146,14 @@ func parseBoardArgs(args []string) (boardOpts, error) {
 	return o, nil
 }
 
-// flagHelp is the sentinel for an explicit --help, which is a success.
-var flagHelp = fmt.Errorf("help requested")
+// errHelp is the sentinel for an explicit --help, which is a success.
+var errHelp = fmt.Errorf("help requested")
 
 // runBoard is the `board` entry point. It returns a process exit code rather
 // than calling os.Exit so it stays testable.
 func runBoard(args []string, stdout, stderr io.Writer) int {
 	opts, err := parseBoardArgs(args)
-	if err == flagHelp {
+	if err == errHelp {
 		fmt.Fprint(stdout, boardUsage)
 		return boardExitOK
 	}

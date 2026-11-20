@@ -49,14 +49,6 @@ func act(t *testing.T, lines map[string]arm.Line, id, action, kase, says string)
 	}
 }
 
-func (w *world) slungBeads() []string {
-	var out []string
-	for _, s := range w.rt.Slings() {
-		out = append(out, s.Bead)
-	}
-	return out
-}
-
 func (w *world) attempts(id string) string {
 	v, _ := w.meta(id, "gc.dispatch_when_ready_fail_count")
 	return v
@@ -577,7 +569,7 @@ func TestADryRunWritesSlingsAndAsksNothing(t *testing.T) {
 	if err := os.Chmod(w.arms.Locks, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(w.arms.Locks, 0o700)
+	defer func() { _ = os.Chmod(w.arms.Locks, 0o700) }()
 	lines, sum := w.run(true)
 	act(t, lines, "closed", arm.ActRetire, "closed", "")
 	act(t, lines, "ready", arm.ActStart, "", "on mol-polecat-work")
@@ -636,7 +628,7 @@ func TestStartLeavesABeadAnotherCallHoldsLocked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}

@@ -172,7 +172,7 @@ func readOnly(t *testing.T, dir string) {
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 }
 
 func TestAPutTheStoreDoesNotTakeLeavesNoRecordOfTheResult(t *testing.T) {
@@ -259,7 +259,7 @@ func TestAnUnreadableStoreIsAnError(t *testing.T) {
 	if err := os.Chmod(dir, 0); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(dir, 0o755)
+	defer func() { _ = os.Chmod(dir, 0o755) }()
 	if _, err := s.Lookup(CheckTest, commitA, treeT); err == nil {
 		t.Fatal("a lookup that could not read the store reported no error")
 	}

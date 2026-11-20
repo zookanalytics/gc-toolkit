@@ -131,14 +131,16 @@ func TestStartPassesTheProcessNoOpenFileButItsOutput(t *testing.T) {
 	}
 	pid := c.Pid()
 	t.Cleanup(func() { _ = h.SignalGroup(pid, syscall.SIGKILL); c.Wait() })
-	out.Close()
+	_ = out.Close()
 	// Closed with no unlock, the lock ends once no open file of it is left.
-	held.Close()
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
+	}
 	other, err := os.OpenFile(lockPath, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer other.Close()
+	defer func() { _ = other.Close() }()
 	if err := syscall.Flock(int(other.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Errorf("the lock its caller held outlives the caller's file while the process runs: %v", err)
 	}
@@ -234,7 +236,7 @@ func TestListenersAreTheProcessesLoopbackReachesOnThePort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	port := l.Addr().(*net.TCPAddr).Port
 	if !h.Answers(port) {
 		t.Errorf("port %d, which this process listens on, does not answer", port)
@@ -256,7 +258,7 @@ func TestListenersAreTheProcessesLoopbackReachesOnThePort(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer o.Close()
+		defer func() { _ = o.Close() }()
 		op := o.Addr().(*net.TCPAddr).Port
 		if pids, err := h.Listeners(op); err != nil || len(pids) != 0 {
 			t.Errorf("a listener on %s only: Listeners %v, %v; want it left out", o.Addr(), pids, err)

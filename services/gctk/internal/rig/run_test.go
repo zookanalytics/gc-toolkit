@@ -81,7 +81,7 @@ func TestRunHandsAFileToTheCommandAsItIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	// The command leaves a child holding its stdout. Handed the file itself,
 	// the run ends when the command does, not when the child does.
 	dir := t.TempDir()

@@ -53,17 +53,17 @@ func Lock(dir string, wait time.Duration) (release func(), err error) {
 			break
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("record lock: %s: %w", path, err)
 		}
 		if !time.Now().Before(deadline) {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("record lock: %s after %s: %w", path, wait, ErrLockWait)
 		}
 		time.Sleep(lockPoll)
 	}
 	return func() {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
+		_ = f.Close()
 	}, nil
 }
