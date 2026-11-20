@@ -129,9 +129,10 @@
 #   - The demo method records the reviewed commit served on this host. It
 #     records from the draft's deployed preview, and reads the preview, only
 #     for a rig that cannot run its app on this host or a change whose claim
-#     exists only where it is deployed, and only once the preview is built
-#     from the reviewed commit. Its verdict says what a clip or a screenshot
-#     was recorded from, and for a preview, why.
+#     exists only where it is deployed, and only while the preview serves the
+#     reviewed commit, which a GitHub deployment shows by its most recent
+#     status, never by an earlier one. Its verdict says what a clip or a
+#     screenshot was recorded from, and for a preview, why.
 #
 # Hermetic: reads this checkout and a scratch git repository; no gc, store or
 # network.
@@ -586,7 +587,9 @@ hasF "$TMP/demo.produce" 'The app target is the reviewed worktree served on this
 hasF "$TMP/demo.produce" 'is the app target instead for a rig with no way to run its app on this host, and for a change whose claim exists only where it is deployed.' \
   "…and the draft's deployed preview only for a rig that cannot run its app here or a change whose claim exists only where it is deployed"
 hasF "$TMP/demo.produce" 'Record from a preview in no other case.' "…and in no other case"
-hasF "$TMP/demo.produce" 'Record a preview only once it is built from `<reviewed_oid>`.' "…and only once the preview is built from the reviewed commit"
+hasF "$TMP/demo.produce" 'Record a preview only while it serves `<reviewed_oid>`.' "…and only while the preview serves the reviewed commit"
+hasF "$TMP/demo.produce" "deployment's state is its most recent status, \`gh api \"repos/<owner>/<repo>/deployments/<id>/statuses\" --jq 'max_by(.id)'\` with its \`id\`. While that status reads \`success\`, its \`environment_url\` is the preview's address." \
+  "…which a GitHub deployment shows while its most recent status, not an earlier one, reads success"
 hasF "$TMP/demo.reads" 'and its deployed preview where the app target under `video` records from it.' \
   "the demo method reads the draft's preview only where the app target records from it"
 hasF "$TMP/verdict.demo" "and what it was recorded from: the reviewed commit served on this host, or the draft's preview and why." \
