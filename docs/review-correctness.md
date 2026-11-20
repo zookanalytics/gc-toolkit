@@ -229,11 +229,11 @@ commands it changes.
   in the city.
 - **One meaning, several lists.** `lifecycle/lifecycle.toml` declares the
   anchor states and the machine axis. gctk carries the states as a typed table
-  and helm carries the machine values as Go constants in
-  `internal/board/derive.go`, and `lifecycle.test.sh` holds both to the TOML.
-  No test holds the machine values the writers record to it (`recordMachine`
-  in gctk's `internal/cli/merge.go`, `assets/scripts/gate-ensure.sh`), and a
-  recorded value helm does not know renders as `unknown` on the board.
+  and the machine values in `knownMachine` in `services/gctk/prstatus`, and
+  `lifecycle.test.sh` holds both to the TOML. No test holds the machine values
+  the writers record to it (`recordMachine` in gctk's `internal/cli/merge.go`,
+  `assets/scripts/gate-ensure.sh`), and a recorded value prstatus does not know
+  reads as needs-attention.
 - **A port reads what its script read.** gctk reads bead fields the way jq
   does. `Bead.Meta` in `internal/gcbd/gcbd.go` stringifies a scalar as
   `(v // "") | tostring` would, so a metadata number reads as its digits, and
@@ -255,15 +255,6 @@ commands it changes.
   leaves a ref lock in the rig checkout that fails every later fetch there, so
   a stop sends the group SIGTERM before anything harder. gctk's other
   subprocesses, `gctk merge`'s git calls among them, stay in its own group.
-- **The board's gather loads the shared store.** helm-svc's gather reads every
-  rig's store on a cache miss. A full-row read pulls the heavy text columns out
-  of the Dolt store the city's agents share, and a round trip per epic or
-  convoy made under the board's lock serializes every board request behind one
-  slow gather. `internal/source/beads_test.go` pins which reads take the lite
-  projection and that edges, conversations and pull requests cost no read per row,
-  and `internal/server/server_test.go` pins that concurrent misses share one
-  gather, run outside the board's lock. So a gather change is read for a new
-  per-row call or a heavy column.
 - **A derivation key follows the sling's shapes.** `Facts.Inflight` is keyed by
   an input convoy's tracked member, which in the common sling shape is the
   anchor's own bead, so a roll-up over children alone shows live work as
@@ -287,13 +278,6 @@ then checks that `git status --porcelain -- dist` prints nothing.
   `src/rigboard/document.gen.ts` is generated from its Go types by
   `go test ./internal/rigboard -run TestPageTypesAreCurrent -update`, which
   fails without `-update` when the file is stale. Nobody writes it by hand.
-- **The contract is a hand-written mirror.** `src/contract.ts` mirrors the Go
-  wire structs of the `/helm` answer by hand, because the board's `/svc/`
-  surface is not in the supervisor's OpenAPI document. No page code reads it.
-  `web/contract_parity_test.go` compares the two in both directions, and
-  `src/contract.fixture.ts` fails `npm run build` when the committed wire
-  sample stops matching the type. `go test ./web -run TestBoardFixture -update`
-  regenerates the sample. Neither check runs in a gate.
 - **Writes carry `X-GC-Request`.** The supervisor proxies helm-svc and refuses
   a mutation without that header, with a 403 that never reaches helm-svc.
   Every write client takes `SVC_WRITE_HEADERS` from `src/svcWrite.ts`, and

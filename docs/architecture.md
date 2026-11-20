@@ -523,11 +523,6 @@ why a reader must know it, and the work that retires it.
   bead moves the rig onto the pending record, along with a sitting's
   retirement of one (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which
   waits on every cutover, deletes the old path once no open bead is on it.
-- **The tile board still reads the store itself.** The `/helm` route derives
-  its rows from each store through an embedded copy of the beads library, and
-  phases a PR on the pending record by the old path's rule, so its answer can
-  differ from the page's and from the PR's status label, and the library needs
-  cgo and ICU to build. The board member (tk-1tfzr71.24) retires that reader.
 - **`gc-helm.sh` still carries the write verbs.** They run as shell, and gctk
   reaches two of them through the script. The board member (tk-1tfzr71.24)
   moves the steering and record verbs into gctk, and tk-ssm8qns.15 moves the

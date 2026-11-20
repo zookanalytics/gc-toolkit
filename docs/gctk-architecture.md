@@ -689,18 +689,6 @@ why a reader must know it, and the work that retires it.
   feedback applies. The move of the city's PR posts into gctk (tk-ssm8qns.8)
   brings the definition into the pr domain, whose post verb owns it, and the
   adapter goes.
-- **The `/helm` board reads the store itself.** Its source
-  (`services/helm/internal/source`) reads each rig's store through the
-  embedded beads library or the supervisor's API and decodes the rows and keys
-  it shows, and only what holds a bead, where a PR stands and
-  the shape of a conversation come from the domains. One render therefore holds two reads of the store, so
-  the board renders a domain's answer, or that the answer is missing, and
-  never derives its own from its rows. Human gates are where it still does.
-  An open gate's own row marks each bead it names as held by a person, and
-  parks one whose blockers carry no record of the gate's wait. A bead's phase
-  counts as its human gates the ones whose rows name it and the ones among its
-  blockers that are not closed. The board member (tk-1tfzr71.24) retires that
-  read or writes the warrant it stands on.
 - **`epic create`, `session title` and `rig`'s checks start processes outside
   an adapter.** `epic create` files the epic with its own `gc bd create`,
   `session title` runs `gc session rename` and `gc session submit`, and the

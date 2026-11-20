@@ -365,9 +365,8 @@ no warrant.
   table. Their writers: `recordMachine`, `recordBlocked` and `handleBlocked`
   in `services/gctk/internal/cli/merge.go`, which `assets/scripts/merge.sh`
   runs, and the "record the pass's own verdict on the anchor" section of
-  `assets/scripts/gate-ensure.sh`. The readers of the causes: package
-  `services/gctk/prstatus`, and the helm board's machine reads in
-  `services/helm/internal/board/derive.go`.
+  `assets/scripts/gate-ensure.sh`. The reader of the causes: package
+  `services/gctk/prstatus`.
 - **Stands in for.** A merge-readiness verdict kept on the bead whose pull
   request it is, which tells a block no automated actor will clear from a wait
   the city is acting on, with the block's cause as a value a reader keys on.
@@ -511,8 +510,7 @@ no warrant.
   handled post with (`WB_RESOLVED_REACTION`). Its reader is package
   `services/gctk/prstatus`: `RowFacts` reads it off the anchor and
   `unansweredFeedback` decides from it. `prstatus.Read` gathers it for
-  `gctk pr status` in `services/gctk/internal/cli/prstatus.go` and for the
-  helm board's beads source in `services/helm/internal/source/beads.go`.
+  `gctk pr status` in `services/gctk/internal/cli/prstatus.go`.
 - **Stands in for.** A record of a pull request's review threads kept on the
   bead whose pull request it is, which says whether review feedback still
   waits on an answer.
