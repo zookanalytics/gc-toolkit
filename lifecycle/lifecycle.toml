@@ -218,7 +218,7 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 #
 # gc.takeaway is stamped by every sign-off, the one that settled its subject as
 # much as the one that parked it for a person, and only the writer knows which
-# it was — `gc-helm.sh takeaway --no-wait` says so by stamping
+# it was — `gctk bead takeaway --no-wait` says so by stamping
 # gc.takeaway_settled beside the headline, and a takeaway without it is a hold.
 # Every writer of gc.takeaway writes gc.takeaway_settled in the same statement,
 # empty unless it means settled, so a stamp cannot inherit the disposition of
@@ -1508,9 +1508,11 @@ keys = [
   "gc.ruling_consequence",
 ]
 # The gc.takeaway family carries its mechanics in the comment above and in
-# [holds] (settled_keys): gc-helm.sh, signoff.sh
-# and lifecycle.sh write the takeaway (gc.takeaway_by records which), and
-# gc.takeaway_settled is `1` when nothing waits and empty for a live wait.
+# [holds] (settled_keys): gctk bead takeaway and lifecycle.sh write the takeaway
+# (gc.takeaway_by records which), and gc.takeaway_settled is `1` when nothing
+# waits and empty for a live wait. The takeaway package
+# (services/gctk/takeaway) declares the family, and it stays registered here
+# while shell still reads it (docs/gctk-architecture.md, Debt).
 # gc.hold_demand — RETIRED. On a converse hold's VISIT, it named the demand the
 #   hold filed. A hold now files a human gate, and its conversation's replies-to
 #   edge names the gate, so nothing writes or reads the key, and

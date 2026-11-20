@@ -1867,15 +1867,15 @@ many_prs() {
         _i=$((_i + 1))
     done
 }
-# under_cap <label> <text> — within the cap gc-helm.sh takeaway refuses past. The
-# suite stubs that writer, so the number is read from the real one.
-TAKEAWAY_CAP=$(sed -n 's/^TAKEAWAY_MAX=\([0-9][0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)
+# under_cap <label> <text> — within the cap gctk bead takeaway refuses past. The
+# suite stubs that writer, so the number is read from the constant it applies.
+TAKEAWAY_CAP=$(sed -n 's/^const TakeawayMax = \([0-9][0-9]*\).*/\1/p' "$HERE/../../services/gctk/internal/lifecycle/machine.go" | head -1)
 under_cap() { [ "${#2}" -le "${TAKEAWAY_CAP:?}" ] && ok "$1" || bad "$1 (${#2} chars, the cap is $TAKEAWAY_CAP: $2)"; }
 many_prs 12
 run_signoff --conversation tk-conv --outcome x "${RULED[@]}" --no-rework
 eq "$RC" 0 "(APPROVE-MANY) a ruling that leaves twelve unapproved PRs standing signs off"
 eq "$(meta tk-anc gc.takeaway)" "x; 12 PRs still need your Approve on GitHub" "(APPROVE-MANY) …counting them in the headline"
-under_cap "(APPROVE-MANY) …which stays under gc-helm.sh's cap" "$(meta tk-anc gc.takeaway)"
+under_cap "(APPROVE-MANY) …which stays under the headline's cap" "$(meta tk-anc gc.takeaway)"
 eq "$(printf '%s\n' "$OUT" | grep -c "still needs the operator's Approve review")" 12 "(APPROVE-MANY) …and the sitting is told of each"
 has "$OUT" "PR #1000 still needs the operator's Approve review" "(APPROVE-MANY) the sitting is told of the first"
 has "$OUT" "PR #1011 still needs the operator's Approve review" "(APPROVE-MANY) …and of the last"

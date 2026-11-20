@@ -34,7 +34,7 @@ set -uo pipefail
 PROG="human-gate"
 
 # A gate's title is what the board's NEEDS cell shows for it, read at a glance,
-# so it is capped at the headline cap gc-helm.sh takeaway enforces. The full
+# so it is capped at the headline cap gctk bead takeaway enforces. The full
 # message is the gate's description, so an over-cap first line is cut with an
 # ellipsis, not refused.
 TITLE_MAX=140
