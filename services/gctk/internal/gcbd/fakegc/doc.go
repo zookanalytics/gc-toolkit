@@ -43,6 +43,12 @@
 //     names, an empty list when that file cannot be read, and nothing when
 //     the setting names none. rig list prints the file STUB_RIGS names, and a
 //     list of no rig when the setting names none.
+//   - convoy status <id> --json answers the convoy's members from the store,
+//     as gc reads them: the beads that name it as their parent, then the
+//     beads its tracks edges point at, sorted by created_at and then id, with
+//     a tracks edge onto a bead the store does not hold kept as a dangling
+//     track. A bead that is no convoy, or one the store does not hold, fails
+//     it at exit 1.
 //   - hook current prints the bead STUB_HOOK_CURRENT names, which stands for
 //     the claim gc stamps on the calling session's bead: the id alone under
 //     --id-only, and otherwise followed by the session that claimed it, in gc's
@@ -70,9 +76,10 @@
 // kind; blocked and ready follow bd's blocked rule over blocks,
 // conditional-blocks, waits-for and parent-child edges, and ready leaves out
 // the types bd's ready work leaves out; an update's --if-assignee or
-// --if-status that no longer holds writes nothing and exits 13; a close
-// records closed_at and its reason; and a blocks edge between a bead and its
-// own ancestor is refused either way.
+// --if-status that no longer holds writes nothing and exits 13; an update
+// writes the title it names, and one whose title is blank writes nothing and
+// exits 1; a close records closed_at and its reason; and a blocks edge between
+// a bead and its own ancestor is refused either way.
 //
 // # The settings
 //
