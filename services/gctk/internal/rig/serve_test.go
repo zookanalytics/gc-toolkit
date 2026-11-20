@@ -34,7 +34,10 @@ import (
 //     "app-cr" prints it with a carriage return alone after it, "app-at-eof"
 //     prints it with no line end and closes its standard output, each running
 //     on without listening, "app-on-stderr" prints it on its standard error
-//     only, and any other listens on its sandbox's port until it ends;
+//     only, and any other listens on its sandbox's port until it ends, having
+//     first written where its sandbox's Record names whether it runs inside
+//     the sandbox, as demo_engine_sandboxed does: "plain" writes false,
+//     "unrecorded" writes nothing, and any other writes true;
 //   - a publish command, any other `bash -c`, by its mode, "publish <mode>":
 //     ok stays running; again-once refuses its first run as Tailscale does
 //     while another client changes the serve config; taken-first refuses the
@@ -149,8 +152,19 @@ func (f *serveFixture) serveProgram(command string) fake.Program {
 			return 0
 		}
 	}
+	inside := map[string]string{"plain": "false", "unrecorded": ""}
+	record, ok := inside[command]
+	if !ok {
+		record = "true"
+	}
 	return func(p *fake.Process) int {
 		s := p.Spec()
+		if record != "" && s.Sandbox.Record != "" {
+			if err := os.WriteFile(s.Sandbox.Record, []byte(record+"\n"), 0o644); err != nil {
+				fmt.Fprintln(p.Out(), err)
+				return 1
+			}
+		}
 		p.Listen(s.Sandbox.Port)
 		f.mu.Lock()
 		f.served = append(f.served, fmt.Sprintf("%s %d", s.Dir, s.Sandbox.Port))
@@ -419,7 +433,8 @@ func TestServeRunsTheCommandInTheSandboxFromTheCheckoutOnAPortOfItsOwn(t *testin
 			t.Fatalf("%d serve commands started, want 1", len(serves))
 		}
 		s := serves[0].Spec
-		want := host.Sandbox{Lib: filepath.Join(f.scripts, SandboxLib), Port: r.Port, Prog: "gctk rig serve"}
+		want := host.Sandbox{Lib: filepath.Join(f.scripts, SandboxLib), Port: r.Port, Prog: "gctk rig serve",
+			Record: filepath.Join(f.rec(f.repo).dir, "sandboxed")}
 		if *s.Sandbox != want || s.Dir != f.repo || !slices.Equal(s.Argv, []string{"bash", "-c", "serve"}) ||
 			!slices.Contains(s.Env, "PORT="+strconv.Itoa(r.Port)) || !s.Relay {
 			t.Errorf("the serve command started as %+v in sandbox %+v, want bash -c serve from %s, PORT=%d, relayed, in %+v",
@@ -512,6 +527,49 @@ func TestServeRunsTheCommandInTheSandboxFromTheCheckoutOnAPortOfItsOwn(t *testin
 			t.Errorf("stopping one checkout's copy left the other's %s", c.State)
 		}
 		f.copies.Stop(f.repo2)
+	})
+}
+
+// A running copy's report says how its serve command runs as the command's own
+// run recorded it, true or false, on a start that ran it, one that found it
+// and a check, and says nothing when the record holds neither.
+func TestServeReportsWhetherTheServeCommandRunsInsideTheSandboxAsItsRecordSays(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		for _, c := range []struct {
+			command, record, want string
+		}{
+			{"serve", "", `"sandboxed":true`},
+			{"plain", "", `"sandboxed":false`},
+			{"unrecorded", "", ""},
+			{"unrecorded", "yes", ""},
+		} {
+			r := f.copies.Serve(f.repo, f.opts(c.command))
+			mustRun(t, r)
+			if c.record != "" {
+				if err := f.rec(f.repo).write("sandboxed", c.record); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reps := []Report{f.copies.Serve(f.repo, f.opts(c.command)), f.copies.Check(f.repo)}
+			if c.record == "" {
+				reps = append(reps, r)
+			}
+			for i, rep := range reps {
+				raw, err := json.Marshal(rep)
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch {
+				case c.want != "" && !strings.Contains(string(raw), c.want):
+					t.Errorf("%s, record %q, report %d: %s, want %s", c.command, c.record, i, raw, c.want)
+				case c.want == "" && strings.Contains(string(raw), `"sandboxed"`):
+					t.Errorf("%s, record %q, report %d: %s, want no sandboxed key", c.command, c.record, i, raw)
+				}
+			}
+			if s := f.copies.Stop(f.repo); s.State != CopyStopped {
+				t.Fatalf("stop = %s (%s), want stopped", s.State, s.Detail)
+			}
+		}
 	})
 }
 
@@ -1029,6 +1087,11 @@ func TestServeTheLockHoldsAcrossTheRemovalOfItsFile(t *testing.T) {
 			next()
 		}()
 		time.Sleep(time.Second)
+		// A second is a whole number of lockPoll, so the second call's poll
+		// wakes at this same instant. Wait until it has tried the lock and gone
+		// back to sleep, so the release and the later call both come while it
+		// waits, as the checks below expect.
+		synctest.Wait()
 		// The release removes the file the second call waits on, and a call
 		// that comes before the second tries it again makes the file anew.
 		release()

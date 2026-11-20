@@ -2,8 +2,9 @@
 // show the board a commit builds with no city behind it.
 //
 // It serves the embedded app, a board answer read from a file at the board's own
-// path, one rig's document read from a file at the rig board's routes, and a
-// canned answer for each write verb, and nothing else. It gathers no bead state
+// path, one rig's document read from a file at the rig board's routes, the
+// city's document read from a file at the city page's route, and a canned answer
+// for each write verb, and nothing else. It gathers no bead state
 // and runs no write tool, so nothing it serves reads or writes a city.
 // cmd/helm-fixture is its command, and that command's tests hold its import graph
 // to this package, the app's package and the standard library.
@@ -53,6 +54,13 @@ type rigAnswer struct {
 	Board  json.RawMessage `json:"board"`
 }
 
+// cityAnswer mirrors the body of helm-svc's city page route (cityboard.Response,
+// internal/server/citypage.go), which the page reads.
+type cityAnswer struct {
+	ReadAt string          `json:"read_at"`
+	City   json.RawMessage `json:"city"`
+}
+
 // Handler returns the fixture's routes.
 //
 //   - /helm answers board, in the place helm-svc answers the board it computes,
@@ -62,6 +70,9 @@ type rigAnswer struct {
 //     the fixture started as its read time, in the places helm-svc answers the
 //     rig board. Any other rig answers 404, as helm-svc answers a rig the city
 //     does not list.
+//   - GET /helm/city answers city, the city's document, with the time the
+//     fixture started as its read time, in the place helm-svc answers the city
+//     page.
 //   - POST /helm/<verb> answers with that verb's canned answer. A verb with none
 //     answers 503 with reason "unavailable", as helm-svc answers a write when it
 //     has no write tool, so the app shows its refusal and nothing runs.
@@ -70,7 +81,7 @@ type rigAnswer struct {
 //
 // Any other segment after /helm/ is a verb, so a verb the service adds later is
 // served here too, refused until it has an answer.
-func Handler(board, rig []byte, answers map[string]Answer, spa http.Handler) (http.Handler, error) {
+func Handler(board, rig, city []byte, answers map[string]Answer, spa http.Handler) (http.Handler, error) {
 	if !json.Valid(board) {
 		return nil, fmt.Errorf("the board answer is not JSON")
 	}
@@ -85,6 +96,15 @@ func Handler(board, rig []byte, answers map[string]Answer, spa http.Handler) (ht
 	}
 	if doc.Rig == "" {
 		return nil, fmt.Errorf("the rig document names no rig")
+	}
+	var cityDoc struct {
+		Doctor json.RawMessage `json:"doctor"`
+	}
+	if err := json.Unmarshal(city, &cityDoc); err != nil {
+		return nil, fmt.Errorf("the city document is not a JSON object: %w", err)
+	}
+	if len(cityDoc.Doctor) == 0 || string(cityDoc.Doctor) == "null" {
+		return nil, fmt.Errorf("the city document holds no doctor run")
 	}
 	if spa == nil {
 		return nil, fmt.Errorf("no app handler")
@@ -104,6 +124,9 @@ func Handler(board, rig []byte, answers map[string]Answer, spa http.Handler) (ht
 			return
 		}
 		writeJSON(w, http.StatusOK, rigAnswer{ReadAt: readAt, Board: rig})
+	})
+	mux.HandleFunc("GET /helm/city", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, cityAnswer{ReadAt: readAt, City: city})
 	})
 	mux.HandleFunc("/helm/", func(w http.ResponseWriter, r *http.Request) {
 		verb := strings.TrimPrefix(r.URL.Path, "/helm/")

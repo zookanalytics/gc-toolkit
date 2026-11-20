@@ -59,6 +59,10 @@ type Server struct {
 	// rigBoard serves the rig board's routes, GET /helm/rigs and
 	// GET /helm/rigs/{rig}; nil leaves them answering 503 (see rigboard.go).
 	rigBoard *rigBoard
+
+	// cityPage serves the city page's route, GET /helm/city; nil leaves it
+	// answering 503 (see citypage.go).
+	cityPage *cityPage
 }
 
 // An Option configures a Server at construction.
@@ -115,7 +119,8 @@ func New(src source.Source, ttl time.Duration, opts ...Option) *Server {
 // Handler returns the HTTP routes: GET /helm (and bare /) serve the board;
 // GET /healthz is the liveness probe (no gather); POST /helm/{open,accept,engage,
 // dismiss} are the write routes (see actuate.go); GET /helm/rigs and
-// GET /helm/rigs/{rig} serve the rig board (see rigboard.go). With [WithSPA]
+// GET /helm/rigs/{rig} serve the rig board (see rigboard.go); GET /helm/city
+// serves the city page (see citypage.go). With [WithSPA]
 // the bare mount also serves the app shell to browsers, and its assets beneath.
 //
 // Each write route is registered as its own exact pattern, which ServeMux prefers
@@ -131,6 +136,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/helm/dismiss", s.handleDismiss)
 	mux.HandleFunc("GET /helm/rigs", s.handleRigs)
 	mux.HandleFunc("GET /helm/rigs/{rig}", s.handleRig)
+	mux.HandleFunc("GET /helm/city", s.handleCity)
 	mux.HandleFunc("/", s.handleRoot)
 	return mux
 }

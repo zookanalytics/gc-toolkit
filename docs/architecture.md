@@ -42,6 +42,7 @@ flowchart LR
   OP([operator])
   subgraph city["Gas City runtime — not this repo"]
     LEDGER[(bead ledger<br/>Dolt)]
+    EVT[(event log)]
     POOL[pools + routing]
     ORD[order runner]
   end
@@ -83,6 +84,7 @@ flowchart LR
   BR --> PR
   PR -->|GitHub merges| BR
   HELM -.->|derives per render| LEDGER
+  HELM -.->|order runs| EVT
   DOC -.->|asserts| LEDGER
   DOC -.->|asserts| FORM
 ```
@@ -155,9 +157,11 @@ performer; the full transition table with writers is
 5. **Hand off.** Push, verify the push landed, then one atomic `gc bd update`
    carries the handoff — target, refinery assignee, cleared route (branch was
    stamped at workspace-setup). All-or-nothing: a dead session mid-handoff
-   leaves either the pre-handoff state (witness orphan recovery re-routes it)
-   or the complete post-handoff state, never a half. The bead carries no
-   landing record yet, and the refinery writes its first.
+   leaves either the pre-handoff state (Gas City's release, by the controller
+   or core's orphan sweep, frees the dead session's claim and keeps the route
+   the bead carries, so the pool offers the work again) or the complete
+   post-handoff state, never a half. The bead carries no landing record yet,
+   and the refinery writes its first.
 6. **Land.** The refinery takes each bead handed to it through Gas Town's
    refinery flow. A `direct` bead lands on its target with no PR. For an `mr`
    bead the refinery opens the PR as a draft, or updates the PR the bead owns,
@@ -210,13 +214,10 @@ conversation holds the PR's merge, and the head it left takes steps 6 to 8 as
 any other head does.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a `gc` build that moves the text the seed
-audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
-the cadence), or the landing order for a PR on the pending record, records PR
-events and files a human gate, the witness patrol
-recovers work orphaned by dead sessions,
-`witness-nudge.sh` gives a witness whose patrol pass stopped its next turn,
-`boot-health.sh` detects a wedged deacon (report-only by design),
+`gc` build that moves the text the seed audit renders — are handled by these
+reactive paths: `pr-facts.sh` (an arm of the cadence), or the landing order for
+a PR on the pending record, records PR events and files a human gate, a pack
+order runs `gc doctor` and records each run, which the board shows,
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
 edit no writer saw, and `seed-audit-reaudit.sh`, which a landing on the default
 branch calls, slings the one re-render of the default branch's
@@ -224,10 +225,13 @@ branch calls, slings the one re-render of the default branch's
 healer category: writers complete their own transitions, so nothing
 reconstructs pack-written state after the fact.
 
-Gas City's controller recovers a pool seat that holds work and either goes
-quiet or is refused by its provider for a rate limit. It does not act on a pool
-seat that keeps printing while its work stands still, and the witness patrol
-files a finding on that seat. No part of the pack kills a stuck session.
+A session dying is Gas City's to recover. Its controller and core's orphan
+sweep release the dead session's claim, and the session that next claims the
+work resumes in the worktree the bead records. The controller also recovers a
+pool seat that holds work and either goes quiet or is refused by its provider
+for a rate limit. It does not act on a pool seat that keeps printing while its
+work stands still, and a pack order files a finding on that seat. No pack order
+releases a dead session's claim, and no part of the pack kills a stuck session.
 
 ## What the pack supplies and what a rig supplies
 
@@ -333,10 +337,11 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   disposable.
 - **A human gate is a wait for a person.** Two channels carry a signal, and
   which applies depends on who can answer it. Mail is the agent-to-agent
-  pathway: a worker mails the witness, which unblocks what it can and promotes
-  what needs a person. A human gate is the human engagement: Gas City's native
-  gate (`await_type=human`) on the bead that waits, which any pack, formula or
-  person files natively or through `human-gate.sh`. The helper files nothing
+  pathway: a worker mails the witness, the mail wakes it, and it unblocks what
+  it can and promotes what needs a person. A human gate is the human
+  engagement: Gas City's native gate (`await_type=human`) on the bead that
+  waits, which any pack, formula or person files natively or through
+  `human-gate.sh`. The helper files nothing
   while an open gate under the call's situation key already blocks the bead,
   though two writers in the same instant can each file one, because bd keeps
   no idempotency at create. Each gate blocks that
@@ -397,15 +402,18 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   and re-ranks the work that follows it, workflows already poured included
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
-  per render from the ledger. `gc-helm.sh` carries the write verbs open,
-  engage, react, takeaway, dismiss, accept, park, priority and place, and the
-  read-only verb resolve. Accept clears a first reaction's recommendation gate
-  and nothing else, under the bead's acceptance lock, and is offered only while
-  no other human gate blocks the bead. The po's backlog refinement works the
-  queue, every bead `hold:mayor` holds in any spelling
-  ([steering.md](steering.md#the-queue-the-po-works)). Everything works without
-  the board: it spends no state, so it can never be wrong for longer than one
-  render.
+  per render from the ledger, from Gas City's `human` mailbox, and from Gas
+  City's event log, which holds doctor's runs and each monitor order's last
+  good run. `gc-helm.sh` carries the write verbs open, engage, react, takeaway,
+  dismiss, accept, park, priority and place, and the read-only verb resolve.
+  The board's one write that `gc-helm.sh` does not carry is archiving a
+  mailbox message, which Gas City's mail performs. Accept clears a first
+  reaction's recommendation gate and nothing else, under the bead's acceptance
+  lock, and is offered only while no other human gate blocks the bead. The po's
+  backlog refinement works the queue, every bead `hold:mayor` holds in any
+  spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
+  works without the board: it spends no state, so it can never be wrong for
+  longer than one render.
 
 The discipline throughout is *agents earn every interaction*: prep done before
 the operator arrives, the choice framed, every surface branded so the operator
@@ -526,6 +534,15 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
+- **The witness still patrols, and the deacon still runs `gc doctor`.** Until
+  the patrols member's second landing, the witness's hourly loop salvages,
+  checks pool seats and the refinery's queue in its session, and returns a dead
+  session's work to the pool beside Gas City's release, and the deacon runs
+  `gc doctor` and files each failure as a patrol finding for a first reaction.
+  The second landing of tk-1tfzr71.19 retires both.
+- **The board lists no mailbox yet.** It neither reads Gas City's `human`
+  mailbox nor archives a message in it, so no message there reaches the
+  operator on the board. The inbox bead that tk-1tfzr71.159 files retires it.
 - **The distiller reads no memory notes yet.** A note stays in its memory
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
@@ -541,9 +558,3 @@ why a reader must know it, and the work that retires it.
   moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)
   deletes the old path once every rig has moved and the GitHub intake
   (tk-1tfzr71.21) has landed.
-- **A copy started before the city's configuration named its rig keeps the
-  live city in reach.** A copy keeps the reach it started with, so the
-  decision on a copy of a rig's UI does not hold for it. A capture of the rig
-  takes such a copy as it takes any other, and its demo can then show the live
-  city's data. The work that has that capture refuse such a copy (tk-3abs56p)
-  retires this.

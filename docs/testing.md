@@ -82,13 +82,18 @@ A shell suite reaches it through the shared harness,
 
 1. Source the harness and call `harness_init`, which puts the fake on PATH as
    `gc`, beneath it the test floor, and exports the settings the fake reads.
-2. Set the state the case starts from: rows with `store`, edges as lines in
+2. Set the state the case starts from: rows with `store`, or a row at a time
+   with the fixture writers `brow`, `bset` and `bunset`, edges as lines in
    `$STUB_DEPS`, and a fault, such as a failed list or a refused update, as a
-   `STUB_*` setting.
+   `STUB_*` setting. Another writer's change that lands between two of the
+   script's calls is a program the fake runs before the call it names
+   (`STUB_HOOK_AT` and `STUB_HOOK`).
 3. Run the script under test.
 4. Assert on the state that results, through the harness's readers (`meta`,
-   `bstatus`, `bassignee`, `bprio`, `bpoured`, `bparents` and `notes`), and on
-   the calls the script made, in `$STUB_GC_LOG`.
+   `bstatus`, `bassignee`, `bprio`, `bpoured`, `bparents`, `notes`, `bfield`,
+   `bedges`, `bonto`, `bcomments` and `bids`), on the calls the script made, in
+   `$STUB_GC_LOG`, and on a JSON answer the script printed, through
+   `json_get`, `json_get_strs` and `json_get_ids`, which read it in bash.
 
 A test sets state and asserts on state and calls. It does not script a canned
 answer for each call. A store file the fake cannot read or write ends the call

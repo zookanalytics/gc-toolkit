@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -209,6 +210,43 @@ func TestTheRefinerysWakeWakesThenNudgesThroughTheRuntime(t *testing.T) {
 	}}
 	if err := (wakes{rt: rt}).Wake("rig/gc-toolkit.refinery", "m"); err == nil || !strings.Contains(err.Error(), "gc session nudge rig/gc-toolkit.refinery") {
 		t.Fatalf("a nudge that did not land answered %v", err)
+	}
+}
+
+// The landing order pours a review run through the runtime adapter's cook,
+// attached to the bead that owns the PR, with its vars, and answers with the
+// root the cook named. A cook that did not exit 0, or that named no root, is an
+// error that says why.
+func TestAReviewRunIsPouredAttachedToItsBeadThroughTheRuntime(t *testing.T) {
+	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/gc-toolkit.refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := l.Runs.(runs); !ok {
+		t.Fatalf("the landing order pours through %T, not the runtime", l.Runs)
+	}
+	rt := &gcfake.Runtime{}
+	vars := map[string]string{"pr_bead": "tk-1", "head": validated, "target": "main"}
+	root, err := runs{rt: rt}.Pour("mol-pr-review", "tk-1", vars)
+	if err != nil || root != "cooked-1" {
+		t.Fatalf("the pour answered %q, %v", root, err)
+	}
+	if got := rt.Cooks(); len(got) != 1 || got[0].Formula != "mol-pr-review" || got[0].Bead != "tk-1" || !maps.Equal(got[0].Vars, vars) {
+		t.Fatalf("cooked %+v, want mol-pr-review attached to tk-1 with its vars", got)
+	}
+
+	rt = &gcfake.Runtime{OnCook: func(gascity.Cook) gascity.CookResult {
+		return gascity.CookResult{Result: gascity.Result{Code: 1, Output: "gc formula cook: attach bead tk-1: not found"}}
+	}}
+	if _, err := (runs{rt: rt}).Pour("mol-pr-review", "tk-1", vars); err == nil ||
+		!strings.Contains(err.Error(), "gc formula cook mol-pr-review --attach tk-1: exit 1") {
+		t.Fatalf("a cook that did not exit 0 answered %v", err)
+	}
+	rt = &gcfake.Runtime{OnCook: func(gascity.Cook) gascity.CookResult {
+		return gascity.CookResult{Result: gascity.Result{Output: "Root: tk-other"}}
+	}}
+	if _, err := (runs{rt: rt}).Pour("mol-pr-review", "tk-1", vars); err == nil || !strings.Contains(err.Error(), "named no root") {
+		t.Fatalf("a cook that named no root answered %v", err)
 	}
 }
 
