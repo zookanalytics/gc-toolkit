@@ -55,7 +55,11 @@ func newRefineryStuckCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			q := &refinery.Queue{City: gascity.New(), Open: ledger.OpenStore, Now: time.Now}
-			out := q.Run()
+			ctx, release := stopOnSignal()
+			out := q.Run(ctx)
+			if sig := release(); sig != 0 {
+				return exit(128 + int(sig))
+			}
 			if out.Record == nil {
 				return reportLook("refinery stuck", nil, "", false, false, out.Failures, stdout, stderr)
 			}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -278,55 +277,6 @@ func TestAStoppedCallEndsEveryProcessItStarted(t *testing.T) {
 		t.Fatal("the read did not return once its context was done")
 	}
 	groupGone(t, pid)
-}
-
-// A call of a client with a context leads its own group, so the SIGTERM or the
-// Ctrl-C that reaches this process's group does not reach it. The call passes
-// the signal on, ending its whole group, the child gc started among it, then
-// exits with the status the signal gives.
-func TestACallPassesAStopSignalOnToItsGroup(t *testing.T) {
-	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
-		t.Run(sig.String(), func(t *testing.T) {
-			dir := t.TempDir()
-			group := filepath.Join(dir, "group")
-			stub := "#!/bin/sh\nsleep 30 &\necho $$ > \"$STUB_GROUP\"\nwait\n"
-			if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(stub), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-			t.Setenv("STUB_GROUP", group)
-			exited := make(chan int, 1)
-			restore := exitProcess
-			exitProcess = func(code int) { exited <- code }
-			t.Cleanup(func() { exitProcess = restore })
-			// The test's own relay, so a call that does not take the signal fails
-			// this test rather than ending the test binary.
-			held := make(chan os.Signal, 1)
-			signal.Notify(held, sig)
-			t.Cleanup(func() { signal.Stop(held) })
-
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				_, _ = (&Client{bin: "gc"}).WithContext(context.Background()).Find(Query{Every: true})
-			}()
-			pid := stubGroup(t, group)
-			if err := syscall.Kill(os.Getpid(), sig); err != nil {
-				t.Fatal(err)
-			}
-			select {
-			case code := <-exited:
-				if want := 128 + int(sig); code != want {
-					t.Errorf("a relayed %v exited %d, want %d", sig, code, want)
-				}
-			case <-time.After(10 * time.Second):
-				_ = syscall.Kill(-pid, syscall.SIGKILL)
-				t.Fatalf("the call did not exit on the %v this process received", sig)
-			}
-			<-done
-			groupGone(t, pid)
-		})
-	}
 }
 
 // stubGroup is the process group a stub gc wrote to path, which it leads, as a

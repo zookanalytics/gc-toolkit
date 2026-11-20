@@ -119,9 +119,10 @@ type Queue struct {
 // ([waits.Holds]), and the close of the last wait that held it is Bound old
 // too. A rig list or an agent list that does not read judges nothing. A rig
 // whose queue does not read, or what holds a handoff past the bound, is left
-// out of the record and fails the run.
-func (q *Queue) Run() Outcome {
-	ctx, cancel := context.WithTimeout(context.Background(), Deadline)
+// out of the record and fails the run. Its store reads and its event end when
+// ctx does.
+func (q *Queue) Run(ctx context.Context) Outcome {
+	reads, cancel := context.WithTimeout(ctx, Deadline)
 	defer cancel()
 	now := q.Now().UTC().Truncate(time.Second)
 	rigs, err := q.City.Rigs()
@@ -147,7 +148,7 @@ func (q *Queue) Run() Outcome {
 			rec.Unread = append(rec.Unread, Unread{Rig: rig.Name, Why: "gc agent list names no agent " + Role + " in the rig, so no queue address resolves"})
 			continue
 		}
-		stuck, err := q.rig(ctx, rig, refineries, now)
+		stuck, err := q.rig(reads, rig, refineries, now)
 		if err != nil {
 			rec.Unread = append(rec.Unread, Unread{Rig: rig.Name, Why: err.Error()})
 			continue
@@ -164,8 +165,8 @@ func (q *Queue) Run() Outcome {
 	}
 	payload, err := json.Marshal(rec)
 	if err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), CallBound)
-		err = q.City.Emit(ctx, gascity.Emit{Type: EventType, Actor: Actor, Message: rec.Summary(), Payload: payload})
+		emit, cancel := context.WithTimeout(ctx, CallBound)
+		err = q.City.Emit(emit, gascity.Emit{Type: EventType, Actor: Actor, Message: rec.Summary(), Payload: payload})
 		cancel()
 	}
 	if err != nil {
