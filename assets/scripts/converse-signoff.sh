@@ -18,8 +18,8 @@
 #      conversation before it acts, so a re-run of the same ruling acts on the
 #      same PR even once that PR has closed. The rework is recorded there too
 #      once it is filed, so a re-run once it has closed files no second one;
-#   2. writes the subject's headline through gc-helm.sh takeaway, and stops
-#      when takeaway refuses it, then, when the ruling leaves the subject
+#   2. writes the subject's headline through gctk bead takeaway, and stops
+#      when the takeaway refuses it, then, when the ruling leaves the subject
 #      waiting on work, its close brief and the arm of its validating closer,
 #      and lifts a hold:mayor that would keep that arm from sending it;
 #   3. resolves each open gate the conversation replies to with
@@ -976,7 +976,8 @@ if [ -n "$CLOSER_WAITS" ]; then
 fi
 [ -z "$CLOSE_BRIEF" ] || [ -n "$CLOSER_RIG" ] \
   || die "--close-brief is the claim $SUBJECT's validating closer checks once the work it waits on lands, and none of --waiting-on${WAIT_IDS:+ ($WAIT_IDS)} is work in $SUBJECT's own store that it waits on, a bead that is no gate and no member of $SUBJECT, so no closer is armed; nothing was written. Drop --close-brief"
-HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
+[ -x "$GCTK" ] || stopped "no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is), so the subject's headline cannot be written; nothing was written"
+HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so an Accept cannot be taken; nothing was written"
 
 # pr_status <bead> — what `gctk pr status` says of the PR the bead owns, as one
 # line of words: the status; then `owed` when its conditions name a missing
@@ -1262,9 +1263,9 @@ fi
 # flag as its own argument, and nothing when it is empty. Its waits are the
 # call's own, less each member of the subject a stay waits on through the
 # conversation alone, and with none left it says --no-wait, as an epic's
-# sign-off on its own decomposition does. An explicit --no-wait stays, so
+# sign-off on its own decomposition does. An explicit --no-wait stays, so the
 # takeaway still refuses it beside a wait. The resolves, the release and the
-# close below cannot be undone, so they wait on takeaway's exit.
+# close below cannot be undone, so they wait on the takeaway's exit.
 HEADLINE_WAIT=("${WAIT[@]+"${WAIT[@]}"}")
 if [ -n "$MEMBER_WAITS" ]; then
   HEADLINE_WAIT=()
@@ -1274,8 +1275,8 @@ if [ -n "$MEMBER_WAITS" ]; then
   case " ${WAIT[*]} " in *" --no-wait "*) HEADLINE_WAIT+=(--no-wait) ;; esac
   [ "${#HEADLINE_WAIT[@]}" -gt 0 ] || HEADLINE_WAIT=(--no-wait)
 fi
-"$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${HEADLINE_WAIT[@]+"${HEADLINE_WAIT[@]}"}" \
-  || stopped "gc-helm.sh takeaway did not finish on $SUBJECT, and its message above says which write it could not make${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
+"$GCTK" bead takeaway "$SUBJECT" "$OUTCOME" --by converse "${HEADLINE_WAIT[@]+"${HEADLINE_WAIT[@]}"}" \
+  || stopped "gctk bead takeaway did not finish on $SUBJECT, and its message above says which write it could not make${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
 # The subject's validating closer, once the headline's edges hold the subject
 # on the work: first the close brief the closer checks, then its arm, then the
 # lift of a hold that would keep the arm from sending it, all in the subject's

@@ -503,6 +503,45 @@ func TestAWriteAssignsTheBeadInItsOneUpdate(t *testing.T) {
 	}
 }
 
+// A release clears Gas City's route and session pins, and a label removal takes
+// the label by its exact text, in the one update that carries the act's other
+// changes.
+func TestAReleaseAndALabelRemovalRideTheOneUpdate(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "in_progress", Assignee: "rig/polecat-1", Labels: []string{"hold:mayor", " Hold:Mayor", "keep"},
+		Metadata: map[string]string{"gc.routed_to": "rig/polecat", "gc.execution_routed_to": "rig/polecat",
+			"gc.session_name": "polecat-1", "gc.session_id": "s-1"}})
+	l := New(s)
+	w := l.Write("b-1")
+	w.Guard("in_progress", "rig/polecat-1")
+	w.Status("open")
+	w.Assignee("")
+	w.Release()
+	w.RemoveLabel("hold:mayor")
+	w.RemoveLabel(" Hold:Mayor")
+	w.RemoveLabel("hold:mayor")
+	testText.Set(w, "released")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--if-status=in_progress", "--if-assignee=rig/polecat-1", "--status=open", "--assignee=",
+		"--set-metadata", "gc.routed_to=", "--set-metadata", "test.ledger.text=released",
+		"--unset-metadata", "gc.execution_routed_to", "--unset-metadata", "gc.session_name", "--unset-metadata", "gc.session_id",
+		"--remove-label", "hold:mayor", "--remove-label", " Hold:Mayor"}
+	if got := s.Writes(); len(got) != 1 || !slices.Equal(got[0].Args, want) {
+		t.Fatalf("the writes are %q, want one update %q", got, want)
+	}
+	b, _ := s.Row("b-1")
+	if !slices.Equal(b.Labels, []string{"keep"}) || b.Metadata["gc.routed_to"] != "" || b.Metadata["gc.session_id"] != "" {
+		t.Fatalf("the bead keeps labels %q and metadata %v", b.Labels, b.Metadata)
+	}
+	w = l.Write("b-1")
+	w.RemoveLabel("keep")
+	if err := l.Commit(w); err != nil {
+		t.Fatalf("a write that removes a label alone carries a change: %v", err)
+	}
+}
+
 // A key's reading face reads the key and names it, and offers no write.
 func TestAViewReadsItsKey(t *testing.T) {
 	s := fake.New()

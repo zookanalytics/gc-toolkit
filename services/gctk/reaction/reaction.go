@@ -8,9 +8,10 @@
 // default branch, the form each named agent takes its work in, and whether a
 // route or a hand-off reaches someone, which `gctk reaction deliverable` asks of
 // the rig's proactive pool. It asks waits what holds a bead and which runs work
-// it, the arm to arm one, the arm's record and the PR record what a bead
-// carries, conversation which tasks are conversations, and prstatus which beads
-// are human gates, and no domain asks it.
+// it, the arm to arm one, the takeaway to write each exit's headline with its
+// release and whether a bead carries one, the arm's record and the PR record
+// what a bead carries, conversation which tasks are conversations, and prstatus
+// which beads are human gates, and no domain asks it.
 //
 // A reaction disposes its subject and never closes it. Each exit orders its
 // writes so that the write which dispatches, holds or gates the subject comes
@@ -27,6 +28,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 )
 
 // recommendedFormulaKey is the action a recommend exit leaves for the
@@ -83,6 +85,10 @@ type Reactions struct {
 	GitHub  GitHub
 	// Arm arms a bead, as `gctk bead arm` does.
 	Arm func(arm.Request) (string, error)
+	// Takeaway writes a bead's headline, and with a release takes the bead out
+	// of play or sends it on, as `gctk bead takeaway` does, and says what
+	// landed.
+	Takeaway func(takeaway.Request) (string, error)
 	// Rig is the rig the caller runs in, GC_RIG, empty when it names none.
 	Rig string
 	// DB is the store the caller named, a store's .beads directory, which a

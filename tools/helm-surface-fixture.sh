@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # helm-surface-fixture.sh — hermetic assertions for the gc-helm.sh operator
-# surface: the WRITE verbs (open, react, takeaway) and the contract that the
-# operator's entry point is this runnable script, not a `gc helm` subcommand.
+# surface: the open verb's dispatch and the contract that the operator's entry
+# point is this runnable script, not a `gc helm` subcommand.
 #
 # The board itself is helm-svc's web page (services/helm). Its rig read is
 # proven by services/helm/internal/rigboard, its page by services/helm/web
@@ -10,16 +10,14 @@
 #
 # What this fixture locks down:
 #
-#   • verb dispatch + validation — open/react/takeaway routing and the
-#     fail-closed arg checks that reject a call before it reaches Dolt;
+#   • verb dispatch + validation — open's routing and the fail-closed arg
+#     checks that reject a call before it reaches Dolt;
 #   • the operator-surface contract — the script prints its own usage, and no
 #     operator-facing surface file advertises a phantom `gc helm` CLI.
 #
 # HERMETIC BY DESIGN. The write verbs resolve a rig through the tool's
 # GC_HELM_FIXTURE hook (a canned rigs.json under a temp dir), so these
-# assertions write NOTHING to Dolt and need no live city. An OPT-IN takeaway round-trip (GC_HELM_SMOKE_BEAD=<id>)
-# exercises the live write path on a bead the operator chooses — the fixture
-# never invents or closes a bead of its own.
+# assertions write NOTHING to Dolt and need no live city.
 #
 # Run:   tools/helm-surface-fixture.sh
 # Exit:  0 iff every hermetic assertion passes.
@@ -54,31 +52,6 @@ echo "── hermetic: verb dispatch + fail-closed validation ──"
 has  "help lists the open verb"  "open"  "$("$TOOL" help 2>&1 || true)"
 ec=0; "$TOOL" open 2>/dev/null || ec=$?;            eq "open with no bead errors (exit 2)"        "2" "$ec"
 ec=0; "$TOOL" bogus-verb 2>/dev/null || ec=$?;      eq "unknown verb errors (exit 2)"             "2" "$ec"
-# takeaway: a thin metadata-writer verb; bead-id AND text
-# are BOTH required — missing either fails closed (exit 2). Whitespace-only text
-# counts as missing (it collapses to empty before the check).
-ec=0; "$TOOL" takeaway 2>/dev/null || ec=$?;        eq "takeaway with no bead errors (exit 2)"    "2" "$ec"
-ec=0; "$TOOL" takeaway tk-x 2>/dev/null || ec=$?;   eq "takeaway with no text errors (exit 2)"    "2" "$ec"
-ec=0; "$TOOL" takeaway tk-x "   " 2>/dev/null || ec=$?; eq "takeaway with whitespace-only text errors (exit 2)" "2" "$ec"
-has  "help lists the takeaway verb" "takeaway"           "$("$TOOL" help 2>&1 || true)"
-has  "usage documents takeaway"     "takeaway <bead-id>" "$("$TOOL" --help 2>&1 || true)"
-# --release is a recognized boolean flag on takeaway. Probe it WITHOUT a bead so
-# the parse-level error (missing bead-id) proves the flag was consumed — not
-# rejected as unknown — and no Dolt write is reached. The usage advertises it.
-REL_OUT="$("$TOOL" takeaway --release 2>&1 || true)"
-has    "takeaway --release is a recognized flag (not unknown)" "needs <bead-id>" "$REL_OUT"
-absent "takeaway --release is not rejected as unknown"         "unknown flag"    "$REL_OUT"
-has    "usage documents the takeaway --release flag"           "--release"       "$("$TOOL" --help 2>&1 || true)"
-# The retired --note flag is now an UNKNOWN flag (takeaway is takeaway-only).
-NOTE_OUT="$("$TOOL" takeaway tk-x sometext --note whatever 2>&1 || true)"
-has    "the retired takeaway --note flag is now rejected as unknown" "unknown flag" "$NOTE_OUT"
-
-echo "── hermetic: react's dispatch ──"
-# Dispatch + fail-closed validation for react, a front door over
-# `gctk reaction sling`, whose own tests prove the sling.
-ec=0; "$TOOL" react 2>/dev/null || ec=$?;  eq "react with no bead errors (exit 2)" "2" "$ec"
-has "help lists the react verb"  "react"            "$("$TOOL" help 2>&1 || true)"
-has "usage documents react"      "react <bead-id>"  "$("$TOOL" --help 2>&1 || true)"
 
 echo "── contract: operator surface is the runnable script, not a phantom gc subcommand ──"
 # The regression this guards (PR #100 review): the docs/prompt advertised a
@@ -115,60 +88,6 @@ for f in "${SURFACE_FILES[@]}"; do
 done
 eq "every operator surface file the scan names exists" "" "$missing"
 absent "no operator surface file advertises a phantom 'gc helm' CLI" "gc helm" "$phantom"
-
-# ---------------------------------------------------------------------------
-# Best-effort LIVE smokes (skipped cleanly when no city / gc is reachable).
-# ---------------------------------------------------------------------------
-# Opt-in: a takeaway + takeaway --release round-trip on
-# an operator-chosen bead. The fixture never invents or closes a bead — it writes
-# only to the bead the operator named, and every leg self-cleans (the unset
-# undoes takeaway; the --release leg captures and restores the
-# bead's prior lifecycle fields and unsets the headline it wrote).
-if [ -n "${GC_HELM_SMOKE_BEAD:-}" ]; then
-    echo "── live (opt-in): takeaway + takeaway --release round-trip on $GC_HELM_SMOKE_BEAD ──"
-    bead="$GC_HELM_SMOKE_BEAD"
-    # takeaway: write the headline, read back the THREE metadata fields, then
-    # unset them (the clean-up leg — takeaway has no inverse verb).
-    "$TOOL" takeaway "$bead" "helm-surface-fixture smoke takeaway" --by host >/dev/null 2>&1 \
-        && ok "takeaway $bead" || bad "takeaway $bead" "exit 0" "non-zero"
-    eq "bead now carries the gc.takeaway headline" "helm-surface-fixture smoke takeaway" \
-        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.takeaway"] // ""')"
-    eq "bead now carries gc.takeaway_by=host" "host" \
-        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.takeaway_by"] // ""')"
-    eq "bead now carries a non-empty gc.takeaway_at stamp" "true" \
-        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '(.[0].metadata["gc.takeaway_at"] // "") != ""')"
-    gc bd update "$bead" --unset-metadata gc.takeaway --unset-metadata gc.takeaway_at --unset-metadata gc.takeaway_by >/dev/null 2>&1 \
-        && ok "unset the smoke takeaway (cleanup)" || bad "unset the smoke takeaway" "exit 0" "non-zero"
-    eq "bead no longer carries gc.takeaway" "" \
-        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.takeaway"] // ""')"
-    # --release leg: ONE call stamps the takeaway AND releases the bead (reopen,
-    # unassign, clear route). Capture the prior lifecycle fields so
-    # we can restore them — unlike the takeaway-only leg above, --release mutates
-    # status/assignee/route.
-    PRIOR_STATUS="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].status // "open"')"
-    PRIOR_ASSIGNEE="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].assignee // ""')"
-    PRIOR_ROUTE="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.routed_to"] // ""')"
-    "$TOOL" takeaway "$bead" "helm-surface-fixture release smoke" --by proactive --release --no-wait >/dev/null 2>&1 \
-        && ok "takeaway --release $bead" || bad "takeaway --release $bead" "exit 0" "non-zero"
-    RELJSON="$(gc bd show "$bead" --json 2>/dev/null)"
-    eq "release stamps the gc.takeaway headline"      "helm-surface-fixture release smoke" \
-        "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.takeaway"] // ""')"
-    eq "release attributes the takeaway to proactive" "proactive" \
-        "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.takeaway_by"] // ""')"
-    eq "release reopens the bead (status=open)"       "open" \
-        "$(printf '%s' "$RELJSON" | jq -r '.[0].status // ""')"
-    eq "release clears the assignee"                  "" \
-        "$(printf '%s' "$RELJSON" | jq -r '.[0].assignee // ""')"
-    eq "release clears the pool route (gc.routed_to)" "" \
-        "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.routed_to"] // ""')"
-    # Restore the prior lifecycle fields + unset the smoke takeaway.
-    gc bd update "$bead" --status="$PRIOR_STATUS" --assignee="$PRIOR_ASSIGNEE" \
-        --set-metadata gc.routed_to="$PRIOR_ROUTE" \
-        --unset-metadata gc.takeaway --unset-metadata gc.takeaway_at --unset-metadata gc.takeaway_by >/dev/null 2>&1 \
-        && ok "restore lifecycle + unset the release smoke (cleanup)" || bad "restore the release smoke" "exit 0" "non-zero"
-else
-    printf '  skip  live takeaway round-trip (set GC_HELM_SMOKE_BEAD=<id> to run)\n'
-fi
 
 echo ""
 echo "helm-surface-fixture: $PASS passed, $FAIL failed"

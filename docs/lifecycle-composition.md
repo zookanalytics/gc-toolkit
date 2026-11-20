@@ -64,9 +64,9 @@ subjects, one genuinely blocked and one entirely finished, produce
 mechanically identical rows if the only difference between them is prose. The
 board cannot tell them apart, so it shows both as wanting nothing, forever.
 
-The mechanism: `gc-helm takeaway <bead> "<text>" --waiting-on <work-bead>`,
+The mechanism: `gctk bead takeaway <bead> "<text>" --waiting-on <work-bead>`,
 repeatable, writes a `blocks` edge beside the takeaway string
-(`assets/scripts/gc-helm.sh`, `takeaway`). The prose still gets written — it is
+(`services/gctk/takeaway`). The prose still gets written — it is
 the durable record of what the sitting concluded, and it is never cleared. The
 edge is what makes the wait *machine-answerable*.
 
