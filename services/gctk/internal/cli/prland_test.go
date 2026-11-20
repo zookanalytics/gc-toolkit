@@ -17,7 +17,7 @@ import (
 )
 
 // The record's two commands run through the store stub the bead holds tests
-// use, which answers `bd where`, `bd list` and `rig list`, and has no answer
+// use, which answers `bd where`, `bd list` and `config show`, and has no answer
 // for an update, so a command that writes where it must not fails here. The
 // domain's rules are pr's own tests, on the fakes.
 
