@@ -34,7 +34,7 @@ type step struct {
 	stdin    string
 	settings []string
 	actor    string
-	answer   string // "", "rows", "edges", "json", "null-or-ids" or "count:<title>"
+	answer   string // "", "rows", "edges", "listed-edges", "texts", "json", "null-or-ids" or "count:<title>"
 }
 
 type contractCase struct {
@@ -207,6 +207,56 @@ func contractCases() []contractCase {
 			{args: []string{"close", "{k}"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}},
 			{args: []string{"update", "{j}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}},
 		}},
+		{name: "a listing carries each bead's edges, and --parent selects a bead's children", beads: []string{"p", "n"},
+			more: [][]string{{"c", "--parent", "{p}"}}, steps: []step{
+				{args: []string{"dep", "add", "{c}", "{n}", "--type=tracks"}},
+				{args: []string{"list", "--json"}, answer: "listed-edges"},
+				{args: []string{"list", "--parent", "{p}", "--json"}, answer: "null-or-ids"},
+			}},
+		{name: "blocked, the marks and ready keep bd's rule", beads: []string{"a", "b", "e", "x", "k", "done"},
+			more: [][]string{{"c", "--parent", "{e}"}, {"g", "-t", "gate"}, {"keyed", "--metadata", `{"key":"1"}`}}, steps: []step{
+				{args: []string{"dep", "add", "{a}", "{b}", "--type=blocks"}},
+				{args: []string{"dep", "add", "{e}", "{x}", "--type=blocks"}},
+				{args: []string{"dep", "add", "{k}", "{done}", "--type=blocks"}},
+				{args: []string{"close", "{done}"}},
+				{args: []string{"blocked", "--json"}, answer: "null-or-ids"},
+				{args: []string{"sql", "--json", "SELECT id FROM issues WHERE is_blocked = 1 AND status <> 'closed' AND status <> 'pinned' " +
+					"UNION ALL SELECT id FROM wisps WHERE is_blocked = 1 AND status <> 'closed' AND status <> 'pinned'"}, answer: "null-or-ids"},
+				{args: []string{"ready", "--json", "--limit", "0"}, answer: "null-or-ids"},
+				{args: []string{"ready", "--has-metadata-key", "key", "--json", "--limit", "0"}, answer: "null-or-ids"},
+			}},
+		{name: "a guard that no longer holds writes nothing", beads: []string{"a"}, state: []string{"a"}, steps: []step{
+			{args: []string{"update", "{a}", "--assignee", "bob"}},
+			{args: []string{"update", "{a}", "--if-assignee", "carol", "--assignee", "dan"}},
+			{args: []string{"update", "{a}", "--if-status", "closed", "--assignee", "dan"}},
+			{args: []string{"update", "{a}", "--if-assignee", "bob", "--if-status", "open", "--assignee", "eve"}},
+		}},
+		{name: "a listing hides infrastructure beads and wisps unless it asks for them", beads: []string{"t"},
+			more: [][]string{{"m", "-t", "message"}, {"w", "--ephemeral"}}, steps: []step{
+				{args: []string{"list", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--id", "{t},{m},{w}", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--id", "{t},{m},{w}", "--include-infra", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--id", "{t},{m},{w}", "--include-ephemeral", "--json"}, answer: "null-or-ids"},
+			}},
+		{name: "a blocks edge across a parent chain is refused either way", beads: []string{"p", "x"},
+			more: [][]string{{"c", "--parent", "{p}"}, {"g", "--parent", "{c}"}}, state: []string{"g", "p"}, steps: []step{
+				{args: []string{"dep", "add", "{g}", "{p}", "--type", "blocks"}},
+				{args: []string{"dep", "add", "{p}", "{g}", "--type", "blocks"}},
+				{args: []string{"dep", "add", "{x}", "{p}", "--type", "blocks"}},
+			}},
+		{name: "a create reads its title from --title, after its other flags", steps: []step{
+			{args: []string{"create", "-t", "task", "--title", "ct-flagged", "-d", "the body", "--assignee", "bob", "--json"}},
+			{args: []string{"list", "--all", "--json"}, answer: "count:ct-flagged"},
+		}},
+		{name: "comments are kept per bead, and a bead the store does not hold takes none", beads: []string{"a", "b"}, steps: []step{
+			{args: []string{"comments", "{a}", "--json"}, answer: "texts"},
+			{args: []string{"comment", "{a}", "first"}},
+			{args: []string{"comment", "{b}", "other"}},
+			{args: []string{"comment", "{a}", "second"}},
+			{args: []string{"comments", "{a}", "--json"}, answer: "texts"},
+			{args: []string{"comment", "ct-nope", "x"}},
+			{args: []string{"comments", "ct-nope", "--json"}, answer: "json"},
+		}},
 	}
 }
 
@@ -278,6 +328,26 @@ func (s side) call(t *testing.T, st step, args []string, nm map[string]string) o
 		}
 		sort.Strings(edges)
 		o.answer = edges
+	case st.answer == "listed-edges":
+		var edges []string
+		for _, r := range asList(v) {
+			m := r.(map[string]any)
+			if _, named := nm[fmt.Sprint(m["id"])]; !named {
+				continue
+			}
+			for _, d := range asList(m["dependencies"]) {
+				e := d.(map[string]any)
+				edges = append(edges, fmt.Sprintf("%s->%s:%v", nameOf(nm, e["issue_id"]), nameOf(nm, e["depends_on_id"]), e["type"]))
+			}
+		}
+		sort.Strings(edges)
+		o.answer = edges
+	case st.answer == "texts":
+		var texts []string
+		for _, r := range asList(v) {
+			texts = append(texts, fmt.Sprint(r.(map[string]any)["text"]))
+		}
+		o.answer = texts
 	case st.answer == "json":
 		m, _ := v.(map[string]any)
 		delete(m, "hint")
@@ -413,7 +483,7 @@ func newFakeSide(t *testing.T) *fakeSide {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("the fake gc did not build: %v\n%s", err, out)
 	}
-	files := map[string]string{"beads.json": "[]", "deps.txt": "", "kv.txt": "", "gc.log": "", "session.log": ""}
+	files := map[string]string{"beads.json": "[]", "deps.txt": "", "kv.txt": "", "gc.log": "", "session.log": "", "comments.json": "[]"}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
@@ -423,7 +493,7 @@ func newFakeSide(t *testing.T) *fakeSide {
 		"PATH=" + filepath.Dir(bin) + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"STUB_STORE=" + filepath.Join(dir, "beads.json"), "STUB_DEPS=" + filepath.Join(dir, "deps.txt"),
 		"STUB_KV=" + filepath.Join(dir, "kv.txt"), "STUB_GC_LOG=" + filepath.Join(dir, "gc.log"),
-		"STUB_SESSION_LOG=" + filepath.Join(dir, "session.log"),
+		"STUB_SESSION_LOG=" + filepath.Join(dir, "session.log"), "STUB_COMMENTS=" + filepath.Join(dir, "comments.json"),
 	}}
 	f.self = f
 	return f

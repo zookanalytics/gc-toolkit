@@ -1,6 +1,6 @@
 // The rig board's page. One rig a page, with the rig in the address
-// (?rig=<name>); with no rig there, the page lists the city's rigs as links.
-// Nothing rolls up across rigs.
+// (?rig=<name>); with no rig there, the page lists the city's rigs as links,
+// and ?city is the city's page (src/cityboard). Nothing rolls up across rigs.
 //
 // The page reads one document per rig (GET <mount>/helm/rigs/{rig}), which
 // decides every group, signal, count, ask, section and order, and lays it out
@@ -9,19 +9,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActuateError, engage } from '../actuate/client';
+import { CityPage } from '../cityboard/CityPage';
 import type { NeedKind, Response as RigResponse } from './document.gen';
 import { EpicsPage, MatchesPage, NeedsYouPage, UnprioritizedPage, WorkQueuePage } from './pages';
 import { SidePanel } from './Panel';
-import { READ_TIMEOUT_MS, readRigs, rigAddress, rigFromAddress } from './read';
+import { CITY_ADDRESS, READ_TIMEOUT_MS, cityFromAddress, readRigs, rigAddress, rigFromAddress } from './read';
 import { Note } from './rows';
 import { useCopy } from './useCopy';
 import { useRigDocument, type RigDocumentState } from './useRigDocument';
 import { ViewContext, type PanelState, type View } from './view';
 
-/** The page the address names: a rig's board, or the city's rigs. */
+/** The page the address names: a rig's board, the city's page, or the city's
+ *  rigs. */
 export function Page() {
   const rig = rigFromAddress(window.location.search);
-  return rig === null ? <RigList /> : <RigBoard rig={rig} />;
+  if (rig !== null) return <RigBoard rig={rig} />;
+  return cityFromAddress(window.location.search) ? <CityPage /> : <RigList />;
 }
 
 type Tab = 'epics' | 'needs' | 'queue' | 'desk';
@@ -71,6 +74,12 @@ function RigList() {
     <div className="page">
       <header className="bar">
         <Brand />
+        <nav aria-label="City and rigs" className="rig-nav">
+          <a href={CITY_ADDRESS} title="What doctor found in its last run">
+            City
+          </a>
+          <span className="rig-current">Rigs</span>
+        </nav>
       </header>
       <main className="main">
         {state.failure !== undefined && (
@@ -191,6 +200,9 @@ function RigBoard({ rig }: { rig: string }) {
       <header className="bar">
         <Brand />
         <nav aria-label="Rig" className="rig-nav">
+          <a href={CITY_ADDRESS} title="What doctor found in its last run">
+            City
+          </a>
           <a href="./" title="All of the city's rigs">
             Rigs
           </a>

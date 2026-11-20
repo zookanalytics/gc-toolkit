@@ -1,7 +1,8 @@
 // Command helm-fixture serves the Helm board on fixture data: the app this
 // commit embeds, a board answer read from a file, one rig's document read from a
-// file at the rig board's routes, and canned answers for the write verbs (see
-// package fixture). The serve command the rig declares runs it, and a demo
+// file at the rig board's routes, the city's document read from a file at the
+// city page's route, and canned answers for the write verbs (see package
+// fixture). The serve command the rig declares runs it, and a demo
 // capture of the board passes that command to demo-screenshot.sh as its --serve
 // command, as docs/review-demo.md shows, so the capture shows the board the
 // reviewed commit builds and never reaches the live city. The capture serves it
@@ -17,7 +18,7 @@
 //
 // Usage:
 //
-//	helm-fixture [--board <file>] [--rig-board <file>] [--answers <dir>] [--addr <host:port>]
+//	helm-fixture [--board <file>] [--rig-board <file>] [--city <file>] [--answers <dir>] [--addr <host:port>]
 //
 // Exit: 0 after a clean shutdown on SIGTERM or SIGINT, 1 when the fixture cannot
 // start or serve, 2 bad arguments.
@@ -48,6 +49,10 @@ const defaultBoard = "web/src/board.fixture.json"
 // gc-toolkit fixture, which TestFixtureBoard holds, relative to services/helm.
 const defaultRigBoard = "internal/rigboard/testdata/gc-toolkit.board.json"
 
+// defaultCity is the document the city's read builds from a live city's newest
+// doctor run, which TestTheLiveRunsPage holds, relative to the module root.
+const defaultCity = "internal/cityboard/testdata/city.json"
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
@@ -65,6 +70,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 		"the board answer to serve at /helm, in the shape web/src/contract.ts names")
 	rigBoard := flags.String("rig-board", defaultRigBoard,
 		"one rig's document to serve at /helm/rigs/{rig}, in the shape web/src/rigboard/document.gen.ts names")
+	cityDoc := flags.String("city", defaultCity,
+		"the city's document to serve at /helm/city, in the shape web/src/cityboard/document.gen.ts names")
 	answersDir := flags.String("answers", "",
 		"a directory of canned write answers: <verb>.json answers that verb with 200, <verb>.<status>.json with that status")
 	addr := flags.String("addr", "",
@@ -109,6 +116,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 		logger.Printf("read the rig document: %v", err)
 		return 1
 	}
+	city, err := os.ReadFile(*cityDoc)
+	if err != nil {
+		logger.Printf("read the city document: %v", err)
+		return 1
+	}
 	answers := map[string]fixture.Answer{}
 	if *answersDir != "" {
 		if answers, err = fixture.LoadAnswers(*answersDir); err != nil {
@@ -121,9 +133,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 		logger.Printf("the embedded app: %v", err)
 		return 1
 	}
-	h, err := fixture.Handler(body, rig, answers, spa)
+	h, err := fixture.Handler(body, rig, city, answers, spa)
 	if err != nil {
-		logger.Printf("%s, %s: %v", *board, *rigBoard, err)
+		logger.Printf("%s, %s, %s: %v", *board, *rigBoard, *cityDoc, err)
 		return 1
 	}
 
@@ -135,7 +147,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
-	logger.Printf("serving %s and %s with %d canned answer(s) on http://%s", *board, *rigBoard, len(answers), ln.Addr())
+	logger.Printf("serving %s, %s and %s with %d canned answer(s) on http://%s", *board, *rigBoard, *cityDoc, len(answers), ln.Addr())
 	if ready != nil {
 		ready <- ln.Addr().String()
 	}

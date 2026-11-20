@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -20,6 +21,7 @@ var (
 	testText   = Declare("test.ledger.text", String, "a plain value", Alias("test.ledger.old_text"))
 	testRecord = Declare("test.ledger.record", JSON[record](), "a JSON value")
 	testShell  = ReadOnly("test.ledger.shell", String, "a key shell writes")
+	testFlag   = Declare("test.ledger.flag", JSON[bool](), "a JSON flag")
 )
 
 func TestOneActIsOneWrite(t *testing.T) {
@@ -252,6 +254,48 @@ func TestAKeyReadsItsAliasAndClearsBoth(t *testing.T) {
 	want := []string{"--unset-metadata", "test.ledger.text", "--unset-metadata", "test.ledger.old_text"}
 	if got := s.Writes()[0].Args; !slices.Equal(got, want) {
 		t.Errorf("clear = %q, want %q", got, want)
+	}
+}
+
+// rowOf is the record of a bead row whose metadata is the JSON object given,
+// each value typed as bd stores it, decoded as the store adapter decodes a row.
+func rowOf(t *testing.T, metadata string) *Record {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(`{"id":"b-1","status":"open","metadata":` + metadata + `}`))
+	dec.UseNumber()
+	var b gcbd.Bead
+	if err := dec.Decode(&b); err != nil {
+		t.Fatal(err)
+	}
+	return records([]gcbd.Bead{b})[0]
+}
+
+// A String key reads a row as the pack's scripts read one, `(.metadata[k] //
+// "")`. A stored JSON false holds no value, as a null holds none, so a current
+// spelling that holds false gives way to its alias. A string "false" keeps its
+// text, and true and a number read as their JSON text. A JSON key decodes a
+// stored false, so a JSON flag holds false.
+func TestAStringKeyReadsAStoredFalseAsNoValue(t *testing.T) {
+	for _, c := range []struct {
+		stored, want string
+		held         bool
+	}{
+		{`false`, "", false},
+		{`null`, "", false},
+		{`"false"`, "false", true},
+		{`true`, "true", true},
+		{`0`, "0", true},
+	} {
+		got, held, err := testShell.Get(rowOf(t, `{"test.ledger.shell":`+c.stored+`}`))
+		if got != c.want || held != c.held || err != nil {
+			t.Errorf("a key holding %s read %q, %v, %v; want %q, %v", c.stored, got, held, err, c.want, c.held)
+		}
+	}
+	if got, held, err := testText.Get(rowOf(t, `{"test.ledger.text":false,"test.ledger.old_text":"older"}`)); got != "older" || !held || err != nil {
+		t.Errorf("a current spelling holding false read %q, %v, %v; want its alias's value", got, held, err)
+	}
+	if got, held, err := testFlag.Get(rowOf(t, `{"test.ledger.flag":false}`)); got || !held || err != nil {
+		t.Errorf("a JSON flag holding false read %v, %v, %v; want false, held", got, held, err)
 	}
 }
 
@@ -594,32 +638,5 @@ func TestABlockerOfAnotherPrefixIsRefused(t *testing.T) {
 	}
 	if len(s.Writes()) != 0 {
 		t.Fatalf("a refused edge was written: %+v", s.Writes())
-	}
-}
-
-// A priority is one update naming every bead it gives the priority, and one that
-// does not land fails.
-func TestAPriorityIsOneUpdateOfEveryBeadNamed(t *testing.T) {
-	s := fake.New()
-	for _, id := range []string{"b-1", "b-2", "b-3"} {
-		s.Put(fake.Bead{ID: id, Status: "open", Priority: 2})
-	}
-	l := New(s)
-	if err := l.Prioritize(1, "b-1", "b-3"); err != nil {
-		t.Fatal(err)
-	}
-	for id, want := range map[string]int{"b-1": 1, "b-2": 2, "b-3": 1} {
-		if b, _ := s.Row(id); b.Priority != want {
-			t.Errorf("%s stands at P%d, want P%d", id, b.Priority, want)
-		}
-	}
-	if w := s.Writes(); len(w) != 2 || !slices.Equal(w[0].Args, []string{"--priority=1"}) {
-		t.Errorf("writes = %+v, want one per bead named, each --priority=1", w)
-	}
-	if err := l.Prioritize(1); err != nil || len(s.Writes()) != 2 {
-		t.Errorf("a priority of no bead = %v, and wrote %+v", err, s.Writes())
-	}
-	if err := l.Prioritize(0, "b-1", "b-missing"); err == nil || !strings.Contains(err.Error(), "did not land") {
-		t.Errorf("a priority of a bead the store does not hold = %v", err)
 	}
 }

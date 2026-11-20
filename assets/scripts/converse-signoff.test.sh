@@ -161,12 +161,12 @@
 #             real cap; a host with no timeout tool makes no status read; a PR
 #             the ruling reworks or retires is not named
 #
-# Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
-# file-backed store, linked into a stub pack beside the libraries it sources and
+# Runs the REAL converse-signoff.sh over the compiled fake gc of
+# test-harness.sh, linked into a stub pack beside the libraries it sources and
 # stub pack scripts, from a cwd outside any checkout. The sign-off finds every
 # script it runs beside itself, so no real pack script is reached. Whether a gate still holds the
 # anchor's merge is read by the REAL finalize-gate.sh over the same store, the
-# rig of a PR the ruling acts on by the REAL bead-store.sh over the stub's rig
+# rig of a PR the ruling acts on by the REAL bead-store.sh over the fake's rig
 # list, and the rig whose pool runs the subject's validating closer by the REAL
 # rig-map.sh over the same list: rig-a carries the prefix tk, rig-b the prefix
 # rb, and the city's own row the prefix hq.
@@ -177,246 +177,44 @@ SCRIPT="$HERE/converse-signoff.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-signoff-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
-eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
-has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
-hasnt(){ case "$1" in *"$2"*) bad "$3 (unexpected '$2' in: $1)" ;; *) ok "$3" ;; esac; }
+# The shared harness: the compiled fake gc over one store, which logs every
+# call to $STUB_GC_LOG.
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"
+harness_init
 
 [ -f "$SCRIPT" ] && ok "converse-signoff.sh present" || bad "converse-signoff.sh missing at $SCRIPT"
 
-mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
+# ST holds what the stand-ins below read and record beside the store.
+ST="$TMP/state"
+mkdir -p "$ST" "$TMP/rig/assets/scripts" "$TMP/cwd"
 
-# --- gc stub ------------------------------------------------------------------
-# One JSON file per bead under $STORE/b/<id>.json, its edges as deps
-# [{type, on}] on the bead the edge starts from. Every write is appended to
-# $CALLS. A guarded update whose --if-assignee or --if-status misses exits 13
-# and writes nothing, as bd does. `bd list` leaves out a gate, a template, an
-# agent, role or message bead and a wisp unless the call asks for that kind, as
-# bd does. A `bd list` with --metadata-field <key>=<value> answers each bead
-# whose metadata carries it, open ones alone unless --all or --status asks for
-# more, as bd does. Hooks: LIST_DOWN fails `bd list`;
-# LIST_DOWN_ID=<id> fails a `bd list` whose --id names that bead;
-# LIST_META_DOWN fails a `bd list` by --metadata-field;
-# SHOW_DOWN=<id> fails `bd show` of that bead; SHOW_DOWN_SECOND=<id> answers the
-# first `bd show` of that bead and fails the next; DEP_UP_DOWN=<gate> fails the
-# listing of the beads that wait on that gate; GATE_STUCK=<gate> makes its
-# resolve change nothing; EARLIER_ANSWER=<reason> closes the gate with that
-# reason inside the resolve call, before the sign-off's own answer;
-# CLOSE_REFUSED=<id> refuses that bead's close, forced or not; and
-# REFUSE_UPDATE_MATCH=<text> refuses an update whose arguments carry that text.
-# An appended note follows the notes before it on a line of its own, as bd
-# joins them, and a removed label goes only by its exact text, as bd removes
-# it. A dep add onto a bead its source already has an edge onto, of another
-# type, is refused, because bd keeps one edge from a bead onto another. A
-# blocks or conditional-blocks edge between a bead and its own ancestor or
-# descendant, over every parent-child edge at any depth, is refused, as bd's
-# CheckBlockingHierarchyInTx refuses it. The hook DEP_ADD_REFUSED=<id> refuses
-# every dep add from that bead. A bead's comments are kept in
-# $STORE/b/<id>.comments.json, and each one added is logged.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
-B="$STORE/b"
-# The store's reads and writes start no cat or basename: $(<file) and read are
-# bash's own.
-row() { [ -f "$B/$1.json" ] || return 1; local _row; _row=$(<"$B/$1.json"); printf '%s\n' "$_row"; }
-put() { local _in=""; IFS= read -r -d '' _in; printf '%s' "$_in" > "$B/$1.json.tmp" && mv "$B/$1.json.tmp" "$B/$1.json"; }
-log() { printf '%s\n' "$*" >> "$CALLS"; }
-all_ids() { for f in "$B"/*.json; do [ -f "$f" ] && { f=${f##*/}; printf '%s\n' "${f%.json}"; }; done; }
-show_rows() { row "$1" | jq -c '[. + {dependencies: [ .deps[] | {id: .on, dependency_type: .type} ]} | del(.deps)]'; }
-list_rows() { row "$1" | jq -c '[. + {dependencies: [ .deps[] as $d | {issue_id: .id, depends_on_id: $d.on, type: $d.type} ]} | del(.deps)]'; }
-# ancestors <id> — every bead above <id> over its parent-child edges, each once,
-# between spaces.
-ancestors() {
-  local frontier="$1" seen=" " next n p
-  while [ -n "$frontier" ]; do
-    next=""
-    for n in $frontier; do
-      for p in $(row "$n" 2>/dev/null | jq -r '.deps[]? | select(.type == "parent-child") | .on'); do
-        case "$seen" in *" $p "*) ;; *) seen="$seen$p "; next="$next $p" ;; esac
-      done
-    done
-    frontier="$next"
-  done
-  printf '%s' "$seen"
-}
-case "$1 ${2:-}" in
-  "rig list")
-    jq -n --arg a "$RIG_A" --arg b "$RIG_B" --arg c "$CITY_ROOT" '{rigs: [{name: "the-city", prefix: "hq", path: $c, hq: true},
-                                                    {name: "rig-a", prefix: "tk", path: $a, hq: false},
-                                                    {name: "rig-b", prefix: "rb", path: $b, hq: false}]}' ;;
-  "bd show")
-    [ -n "${SHOW_DOWN:-}" ] && [ "$3" = "$SHOW_DOWN" ] && { echo "bd show: data plane down" >&2; exit 1; }
-    if [ -n "${SHOW_DOWN_SECOND:-}" ] && [ "$3" = "$SHOW_DOWN_SECOND" ]; then
-        [ -f "$STORE/shown-$3" ] && { echo "bd show: data plane down" >&2; exit 1; }
-        : > "$STORE/shown-$3"
-    fi
-    if [ -f "$B/$3.json" ]; then show_rows "$3"
-    else printf '{"error":"no issues found matching the provided IDs"}\n'; exit 1; fi ;;
-  "bd list")
-    [ -n "${LIST_DOWN:-}" ] && { echo "bd list: data plane down" >&2; exit 1; }
-    _id=""; _mf=""; _st=""; _all=""; _p=""
-    for a in "$@"; do
-      [ "$_p" = "--id" ] && _id="$a"; [ "$_p" = "--metadata-field" ] && _mf="$a"; [ "$_p" = "--status" ] && _st="$a"
-      case "$a" in --all) _all=1 ;; --status=*) _st="${a#--status=}" ;; esac
-      _p="$a"
-    done
-    case ",$_id," in *",${LIST_DOWN_ID:-}",*) [ -z "${LIST_DOWN_ID:-}" ] || { echo "bd list: data plane down" >&2; exit 1; } ;; esac
-    if [ -n "$_id" ]; then
-      for i in $(printf '%s' "$_id" | tr ',' ' '); do [ ! -f "$B/$i.json" ] || list_rows "$i"; done \
-        | jq -sc --arg a " $* " 'def asked($f): $a | contains(" --include-" + $f + " ");
-            add // [] | [ .[] | select(((.issue_type // "") != "gate" or asked("gates"))
-              and (((.is_template // false) | tostring) != "true" or asked("templates"))
-              and (((.issue_type // "") | IN("agent", "role", "message") | not) or asked("infra"))
-              and (((.ephemeral // false) | tostring) != "true" or asked("ephemeral") or asked("infra"))) ]'
-    elif [ -n "$_mf" ]; then
-      [ -n "${LIST_META_DOWN:-}" ] && { echo "bd list: data plane down" >&2; exit 1; }
-      for i in $(all_ids); do case "$i" in *.comments) ;; *) list_rows "$i" ;; esac; done \
-        | jq -sc --arg k "${_mf%%=*}" --arg v "${_mf#*=}" --arg all "$_all" --arg st "$_st" '
-            add // [] | [ .[] | select((((.metadata // {})[$k] // "") | tostring) == $v)
-                  | select($all == "1" or ((.status // "") as $s
-                      | if $st == "" then $s != "closed" else any(($st | split(","))[]; . == $s) end)) ]'
-    else printf '[]\n'; fi ;;
-  "bd dep")
-    case "$3" in
-      list)
-        _who="$4"; _ty=""; _up=0; _p=""
-        for a in "$@"; do case "$a" in --direction=up) _up=1 ;; esac; [ "$_p" = "--type" ] && _ty="$a"; _p="$a"; done
-        [ "$_up" = 1 ] && [ -n "${DEP_UP_DOWN:-}" ] && [ "$_who" = "$DEP_UP_DOWN" ] && { echo "bd dep list: data plane down" >&2; exit 1; }
-        if [ "$_up" = 1 ]; then
-          # One jq reads every bead file. A comments file holds an array, and
-          # is no bead.
-          _files=("$B"/*.json)
-          if [ -f "${_files[0]}" ]; then
-            jq -sc --arg w "$_who" --arg t "$_ty" '[ .[] | objects | select(any((.deps // [])[]; .type == $t and .on == $w))
-              | . + {dependency_type: $t} | del(.deps) ]' "${_files[@]}"
-          else printf '[]\n'; fi
-        else
-          for o in $(row "$_who" | jq -r --arg t "$_ty" '.deps[] | select(.type == $t) | .on'); do
-            row "$o" | jq -c --arg t "$_ty" '. + {dependency_type: $t} | del(.deps)'
-          done | jq -sc '.'
-        fi ;;
-      add)
-        log "$*"
-        [ -n "${DEP_ADD_REFUSED:-}" ] && [ "$4" = "$DEP_ADD_REFUSED" ] && { echo "Error adding dependency: the store refused it" >&2; exit 1; }
-        _ty=blocks; _p=""; for a in "$@"; do [ "$_p" = "--type" ] && _ty="$a"; _p="$a"; done
-        _had=$(row "$4" | jq -r --arg on "$5" '[ .deps[]? | select(.on == $on) | .type ] | first // ""')
-        if [ -n "$_had" ] && [ "$_had" != "$_ty" ]; then
-          echo "Error: dependency $4 -> $5 already exists with type \"$_had\" (requested \"$_ty\"); remove it first with 'bd dep remove' then re-add" >&2
-          exit 1
-        fi
-        if [ "$_ty" = blocks ] || [ "$_ty" = conditional-blocks ]; then
-          case "$(ancestors "$4")" in *" $5 "*)
-            echo "Error adding dependency: $4 cannot be blocked by its ancestor $5: $5 cannot close until its descendants finish, so the gate would never clear" >&2; exit 1 ;; esac
-          case "$(ancestors "$5")" in *" $4 "*)
-            echo "Error adding dependency: $4 cannot be blocked by its descendant $5: blocked status cascades to descendants, so $5 would inherit the block and never close" >&2; exit 1 ;; esac
-        fi ;;
-      *) log "$*" ;;
-    esac ;;
-  "bd comments") if [ -f "$B/$3.comments.json" ]; then printf '%s\n' "$(<"$B/$3.comments.json")"; else printf '[]\n'; fi ;;
-  "bd comment")
-    log "$*"
-    _c='[]'; [ -f "$B/$3.comments.json" ] && _c=$(<"$B/$3.comments.json")
-    printf '%s' "$_c" | jq -c --arg t "$4" '. + [{text: $t}]' > "$B/$3.comments.json" ;;
-  "bd gate")
-    _g="$4"; _r=""; _p=""; for a in "$@"; do [ "$_p" = "--reason" ] && _r="$a"; _p="$a"; done
-    log "$*"
-    [ "${GATE_STUCK:-}" = "$_g" ] && exit 0
-    if [ -n "${EARLIER_ANSWER:-}" ] && [ "$(row "$_g" | jq -r .status)" != closed ]; then
-      row "$_g" | jq --arg r "$EARLIER_ANSWER" '.status = "closed" | .close_reason = $r' | put "$_g"
-    fi
-    if [ "$(row "$_g" | jq -r .status)" != closed ]; then
-      row "$_g" | jq --arg r "$_r" '.status = "closed" | .close_reason = $r' | put "$_g"
-    fi ;;
-  "bd close")
-    log "$*"
-    [ "${CLOSE_REFUSED:-}" = "$3" ] && { echo "Error closing $3: the store refused it" >&2; exit 1; }
-    _id="$3"; _r=""; _force=""; _p=""
-    for a in "$@"; do [ "$_p" = "--reason" ] && _r="$a"; [ "$a" = "--force" ] && _force=1; _p="$a"; done
-    row "$_id" | jq --arg r "$_r" '.status = "closed" | .close_reason = $r' | put "$_id" ;;
-  "bd update")
-    log "$*"
-    if [ -n "${REFUSE_UPDATE_MATCH:-}" ]; then
-      case " $* " in *"$REFUSE_UPDATE_MATCH"*) echo "Error updating $3: the store refused it" >&2; exit 1 ;; esac
-    fi
-    _id="$3"; shift 3
-    _r=$(row "$_id")
-    _ifa_set=0; _ifa=""; _ifs_set=0; _ifs=""
-    _args=("$@")
-    _i=0
-    while [ "$_i" -lt "${#_args[@]}" ]; do
-      [ "${_args[$_i]}" = "--if-assignee" ] && { _ifa_set=1; _ifa="${_args[$((_i + 1))]}"; }
-      [ "${_args[$_i]}" = "--if-status" ] && { _ifs_set=1; _ifs="${_args[$((_i + 1))]}"; }
-      _i=$((_i + 1))
-    done
-    # A guard the bead does not meet refuses the update (13), and a bead that
-    # is not there meets only a guard that asks for nothing.
-    if [ -z "$_r" ]; then
-      { [ "$_ifa_set" = 1 ] && [ -n "$_ifa" ]; } && exit 13
-      { [ "$_ifs_set" = 1 ] && [ -n "$_ifs" ]; } && exit 13
-    fi
-    # Each flag becomes one operation, in the order given, and one jq checks
-    # the guards and lands them all. The -- after --args keeps a value that
-    # begins with a dash, such as -s or a note that opens with ---, from
-    # reading as one of jq's options.
-    _ops=()
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --set-metadata) _ops+=(set "${2%%=*}" "${2#*=}"); shift 2 ;;
-        --assignee)     _ops+=(assignee "$2" ""); shift 2 ;;
-        --status)       _ops+=(status "$2" ""); shift 2 ;;
-        --append-notes) _ops+=(note "$2" ""); shift 2 ;;
-        --unset-metadata) _ops+=(unset "$2" ""); shift 2 ;;
-        --remove-label) _ops+=(unlabel "$2" ""); shift 2 ;;
-        *) shift ;;
-      esac
-    done
-    if [ -n "$_r" ]; then
-      _r=$(printf '%s' "$_r" | jq --argjson ifa_set "$_ifa_set" --arg ifa "$_ifa" --argjson ifs_set "$_ifs_set" --arg ifs "$_ifs" '
-        if ($ifa_set == 1 and ((.assignee // "") | tostring) != $ifa)
-           or ($ifs_set == 1 and ((.status // "") | tostring) != $ifs) then halt_error(13) else . end
-        | reduce ([ $ARGS.positional | range(0; length; 3) as $i | .[$i:$i + 3] ][]) as [$op, $a, $b] (.;
-            if $op == "set" then .metadata[$a] = $b
-            elif $op == "assignee" then .assignee = $a
-            elif $op == "status" then .status = $a
-            elif $op == "note" then .notes = (if (.notes // "") == "" then $a else .notes + "\n" + $a end)
-            elif $op == "unset" then del(.metadata[$a])
-            elif $op == "unlabel" then .labels = ((.labels // []) - [$a])
-            else . end)' --args -- ${_ops[@]+"${_ops[@]}"} 2>/dev/null)
-      [ "$?" = 13 ] && exit 13
-    fi
-    printf '%s' "$_r" | put "$_id" ;;
-esac
-exit 0
-GC
-chmod +x "$TMP/bin/gc"
+# CALLS is the fake's log, to which the stand-ins append what they do. WRITES
+# matches the lines of it that write, which are what a case counts and reads:
+# the store's writes, and the stand-ins' own lines.
+CALLS="$STUB_GC_LOG"
+WRITES='^(bd (create|update|close|comment|dep (add|remove)|gate )|gctk |gc-helm |converse-rework|pr-dispose|pr-sitting-comment)'
+export CALLS WRITES ST
 
 # --- gh stub ------------------------------------------------------------------
-# `api ... user` names the city's login, and a PR's reviews come from
-# $STORE/reviews-<n>.json, one value per line as --jq '.[]' prints them. Every
-# call is logged to $GH_CALLS with how many writes came before it. GH_DOWN fails
-# every call, GH_USER_DOWN=<code> makes the login read exit with that code and
-# print nothing, and GH_REVIEWS_DOWN fails the review list alone.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
-printf 'writes=%s %s\n' "$(grep -c '' "$CALLS" 2>/dev/null)" "$*" >> "$GH_CALLS"
+# `api ... user` names the city's login. Every call is logged to $GH_CALLS with
+# how many writes came before it. GH_DOWN fails every call, and GH_USER_DOWN=<code>
+# makes the login read exit with that code and print nothing.
+{ _stub_shebang; cat; } > "$BIN/gh" <<'GH'
+printf 'writes=%s %s\n' "$(grep -c -E "$WRITES" "$CALLS" 2>/dev/null)" "$*" >> "$GH_CALLS"
 [ -n "${GH_DOWN:-}" ] && { echo "gh: network down" >&2; exit 1; }
 case "$*" in
   *" user "*)
     [ -n "${GH_USER_DOWN:-}" ] && exit "$GH_USER_DOWN"
     echo city-bot ;;
-  *"/pulls/"*"/reviews"*)
-    [ -n "${GH_REVIEWS_DOWN:-}" ] && { echo "gh: HTTP 502" >&2; exit 1; }
-    _n=$(printf '%s' "$*" | sed -n 's#.*/pulls/\([0-9][0-9]*\)/reviews.*#\1#p')
-    [ -f "$STORE/reviews-$_n.json" ] && jq -c '.[]' "$STORE/reviews-$_n.json" ;;
 esac
 exit 0
 GH
-chmod +x "$TMP/bin/gh"
 
 # --- gctk stub -----------------------------------------------------------------
-# `pr status <bead> --json` answers the status $STORE/status-<bead> holds, or
+# `pr status <bead> --json` answers the status $ST/status-<bead> holds, or
 # needs-review when none is set, and the conditions array
-# $STORE/conditions-<bead> holds, as a PR on the pending record carries them,
+# $ST/conditions-<bead> holds, as a PR on the pending record carries them,
 # with no conditions key when none is set, as on the old record. Every call is
 # logged to $GCTK_CALLS with how many writes came before it, and GCTK_DOWN fails
 # every call.
@@ -429,13 +227,13 @@ chmod +x "$TMP/bin/gh"
 # the arm write nothing and exit 1, as a refused arm does. The arm and the
 # disarm each append the note the real ones append, so a case sees the notes
 # that follow a close brief in a real store.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gctk" <<'GCTK'
-printf 'writes=%s %s\n' "$(grep -c '' "$CALLS" 2>/dev/null)" "$*" >> "$GCTK_CALLS"
+{ _stub_shebang; cat; } > "$BIN/gctk" <<'GCTK'
+printf 'writes=%s %s\n' "$(grep -c -E "$WRITES" "$CALLS" 2>/dev/null)" "$*" >> "$GCTK_CALLS"
 [ -n "${GCTK_DOWN:-}" ] && { echo "gctk: could not read the store" >&2; exit 2; }
 case "${1:-} ${2:-}" in
   "pr status")
-    _s=needs-review; [ -f "$STORE/status-$3" ] && _s=$(cat "$STORE/status-$3")
-    _c=""; [ -f "$STORE/conditions-$3" ] && _c=",\"conditions\":$(cat "$STORE/conditions-$3")"
+    _s=needs-review; [ -f "$ST/status-$3" ] && _s=$(<"$ST/status-$3")
+    _c=""; [ -f "$ST/conditions-$3" ] && _c=",\"conditions\":$(<"$ST/conditions-$3")"
     printf '{"status":"%s","held":[],"reasons":[]%s}\n' "$_s" "$_c" ;;
   "bead disarm")
     printf 'gctk %s\n' "$*" >> "$CALLS"
@@ -452,7 +250,7 @@ case "${1:-} ${2:-}" in
       [ "$_p" = "--reason" ] && _r="$x"
       _p="$x"
     done
-    _j=$(jq -nc --arg f "$_f" 'if $f == "" then [] else ["--on", $f] end')
+    _j='[]'; [ -z "$_f" ] || _j="[\"--on\",\"$_f\"]"
     gc bd update "$3" --set-metadata "gc.dispatch_when_ready=$_t" \
       --set-metadata "gc.dispatch_when_ready_args=$_j" \
       --append-notes "deferred-dispatch: dispatch armed by test at 2026-11-09T12:00:00Z, for $_t on $_f, because $_r. The deferred-dispatch order starts it once nothing holds this bead, and no agent keeps it in context." >/dev/null
@@ -460,17 +258,16 @@ case "${1:-} ${2:-}" in
   *) printf 'gctk %s\n' "$*" >> "$CALLS"; echo "gctk fake: unsupported '$*'" >&2; exit 2 ;;
 esac
 GCTK
-chmod +x "$TMP/bin/gctk"
 
 # --- timeout stub -------------------------------------------------------------
 # Runs what it is given, so a suite never waits on a real bound, and logs its
-# arguments to $STORE/timeout-args. GCTK_STALL stands for a status read that never
+# arguments to $ST/timeout-args. GCTK_STALL stands for a status read that never
 # answers, as GH_STALL=<text> stands for a connection that
 # never answers the gh call whose arguments hold <text>: under the bound it runs
 # out of time, as timeout reports it, and with no bound it answers as usual, which
 # is how (APPROVE-STALL) tells the two apart.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/timeout" <<'T'
-printf '%s\n' "$*" >> "$STORE/timeout-args"
+{ _stub_shebang; cat; } > "$BIN/timeout" <<'T'
+printf '%s\n' "$*" >> "$ST/timeout-args"
 while :; do
   case "${1:-}" in
     --foreground) shift ;;
@@ -485,7 +282,43 @@ fi
 [ -n "${GCTK_STALL:-}" ] && [ "${1:-}" = "${GCTK_BIN:-}" ] && exit 124
 exec "$@"
 T
-chmod +x "$TMP/bin/timeout"
+chmod +x "$BIN/gh" "$BIN/gctk" "$BIN/timeout"
+
+# --- the hooks a case lands another writer's change through --------------------
+# Each runs before the fake answers the call STUB_HOOK_AT names (the fake's
+# doc.go), and writes the store through the fixture writers, which log nothing.
+# earlier-answer closes the gate a resolve names with EARLIER_ANSWER as its
+# reason, an answer that reached the gate inside the resolve call, before the
+# sign-off's own. before-update changes the conversation between the sign-off's
+# read and its write: STEAL_BEFORE_UPDATE gives it to another sitting,
+# DISMISS_BEFORE_UPDATE closes it as a dismiss does, keeping its holder, and
+# RETURN_BEFORE_UPDATE puts it back in the operator's queue. second-fails lets
+# the first call it hooks through and fails each one after it, and
+# list-id-fails fails a listing whose --id names LIST_DOWN_ID.
+{ _stub_shebang; cat; } > "$TMP/earlier-answer" <<'E'
+gc --harness-write set "$4" status=closed "close_reason=$EARLIER_ANSWER"
+E
+{ _stub_shebang; cat; } > "$TMP/before-update" <<'U'
+if [ -n "${STEAL_BEFORE_UPDATE:-}" ]; then gc --harness-write set "$3" assignee=gc-toolkit/gc-toolkit.c-tk-conv; fi
+if [ -n "${DISMISS_BEFORE_UPDATE:-}" ]; then gc --harness-write set "$3" status=closed "close_reason=dismissed by the operator"; fi
+if [ -n "${RETURN_BEFORE_UPDATE:-}" ]; then gc --harness-write set "$3" assignee=human status=open; fi
+exit 0
+U
+{ _stub_shebang; cat; } > "$TMP/second-fails" <<'F'
+[ -e "$ST/hooked" ] && { echo "bd show: data plane down" >&2; exit 1; }
+: > "$ST/hooked"
+F
+{ _stub_shebang; cat; } > "$TMP/list-id-fails" <<'L'
+_p=""
+for a in "$@"; do
+  if [ "$_p" = --id ]; then
+    case ",$a," in *",$LIST_DOWN_ID,"*) echo "bd list: data plane down" >&2; exit 1 ;; esac
+  fi
+  _p="$a"
+done
+exit 0
+L
+chmod +x "$TMP/earlier-answer" "$TMP/before-update" "$TMP/second-fails" "$TMP/list-id-fails"
 
 # --- stub pack scripts at the rig root the sign-off searches first ------------
 # gc-helm.sh's accept leaves the store as Accept's writer would, per
@@ -497,7 +330,6 @@ S="$TMP/rig/assets/scripts"
 cat > "$S/gc-helm.sh" <<'H'
 #!/usr/bin/env bash
 printf 'gc-helm %s\n' "$*" >> "$CALLS"
-B="$STORE/b"
 case "$1" in
   takeaway)
     [ -n "${TAKEAWAY_FAIL:-}" ] && { echo "takeaway refused" >&2; exit 2; }
@@ -514,19 +346,20 @@ case "$1" in
     done
     [ -z "$_miss" ] || exit 4 ;;
   accept)
-    _s="$2"; _f=$(jq -r '.metadata["gc.recommended_formula"] // ""' "$B/$_s.json")
+    _s="$2"; _f=$(gc --harness-read meta "$_s" gc.recommended_formula); [ "$_f" != "<absent>" ] || _f=""
     _rec=""
-    for g in $(jq -r '.deps[] | select(.type == "blocks") | .on' "$B/$_s.json"); do
-      jq -e '.await_id == "first-reaction" and .status != "closed"' "$B/$g.json" >/dev/null 2>&1 && _rec="$_rec $g"
+    for g in $(gc --harness-read edges "$_s" blocks); do
+      [ "$(gc --harness-read field "$g" await_id)" = first-reaction ] && [ "$(gc --harness-read status "$g")" != closed ] && _rec="$_rec $g"
     done
-    close_rec() { for g in $_rec; do jq --arg r "$1" '.status = "closed" | .close_reason = $r' "$B/$g.json" > "$B/x" && mv "$B/x" "$B/$g.json"; done; }
+    close_rec() { for g in $_rec; do gc --harness-write set "$g" status=closed "close_reason=$1"; done; }
     case "${ACCEPT_DOES:-take}" in
       refuse) echo "gc-helm.sh: accept: another Accept on $_s holds its acceptance lock (pid 7), so this one refuses and writes nothing." >&2; exit 4 ;;
       other)  close_rec "moot: the reaction withdrew its recommendation"
               echo "gc-helm.sh: accept: another answer reached $_s's recommendation gate first" >&2; exit 4 ;;
       dispatched) echo "gc-helm.sh: accept: $_s carries no gc.recommended_formula: its recommendation was dispatched. Nothing to accept; nothing dispatched." >&2; exit 2 ;;
       *) close_rec "ruled: accepted $_f accept:0123456789abcdef"
-         jq --arg f "$_f" '.metadata["gc.recommended_formula_dispatched"] = $f | del(.metadata["gc.recommended_formula"])' "$B/$_s.json" > "$B/x" && mv "$B/x" "$B/$_s.json"
+         gc --harness-write set "$_s" "metadata.gc.recommended_formula_dispatched=$_f"
+         gc --harness-write unset "$_s" metadata.gc.recommended_formula
          echo "gc-helm.sh: accept: dispatched $_f at $_s (acceptance 0123456789abcdef)" ;;
     esac ;;
 esac
@@ -544,20 +377,26 @@ printf 'converse-rework ran in GC_RIG=%s GC_RIG_ROOT=%s PWD=%s\n' "${GC_RIG:-}" 
 [ -n "${REWORK_FAIL:-}" ] && { echo "rework refused: anchor has no branch"; exit 2; }
 _child="${REWORK_CHILD:-tk-child}"
 _a=""; _r=""; _p=""; for x in "$@"; do [ "$_p" = "--anchor" ] && _a="$x"; [ "$_p" = "--ruling-bead" ] && _r="$x"; _p="$x"; done
+_held=$(gc --harness-read status "$_child")
 if [ -n "${REWORK_ASK:-}" ]; then
   # On the pending record the writer files an ask instead: a task naming the
   # conversation as its source through a discovered-from edge, and waiting on
   # each --waiting-on bead by its own blocks edge, onto the id trimmed as gctk
   # review ask trims it.
-  _w='[]'; _p=""; for x in "$@"; do [ "$_p" = "--waiting-on" ] && _w=$(jq -c --arg w "$x" '. + [{type:"blocks", on:($w | gsub("^\\s+|\\s+$"; ""))}]' <<< "$_w"); _p="$x"; done
-  [ -f "$STORE/b/$_child.json" ] || jq -n --arg id "$_child" --arg a "$_a" --arg r "$_r" --argjson w "$_w" '{id:$id, title:"Review ask: the ruling", issue_type:"task",
-      status:"open", assignee:"", metadata:{branch:"polecat/anc"}, deps:([{type:"discovered-from", on:$r}] + $w)}' > "$STORE/b/$_child.json"
+  if [ "$_held" = "<absent>" ]; then
+    gc --harness-write row "$_child" "title=Review ask: the ruling" issue_type=task status=open assignee= 'metadata:={"branch":"polecat/anc"}'
+    printf '%s|discovered-from|%s\n' "$_child" "$_r" >> "$STUB_DEPS"
+    _p=""; for x in "$@"; do
+      [ "$_p" = "--waiting-on" ] && printf '%s|blocks|%s\n' "$(jq -rn --arg w "$x" '$w | gsub("^\\s+|\\s+$"; "")')" "$_child" >> "$STUB_DEPS"
+      _p="$x"
+    done
+  fi
   echo "$_child ask filed"
   exit 0
 fi
-if [ -z "${REWORK_NO_CHILD:-}" ] && [ ! -f "$STORE/b/$_child.json" ]; then
-  jq -n --arg id "$_child" --arg a "$_a" --arg r "$_r" '{id:$id, title:("Rework " + $a), issue_type:"task", status:"open", assignee:"",
-      metadata:{task_kind:"rework", anchor_bead:$a, source_ruling_bead:$r}, deps:[]}' > "$STORE/b/$_child.json"
+if [ -z "${REWORK_NO_CHILD:-}" ] && [ "$_held" = "<absent>" ]; then
+  gc --harness-write row "$_child" "title=Rework $_a" issue_type=task status=open assignee= \
+    metadata.task_kind=rework "metadata.anchor_bead=$_a" "metadata.source_ruling_bead=$_r"
 fi
 echo "$_child gc-toolkit/gc-toolkit.polecat filed"
 R
@@ -586,25 +425,42 @@ SCRIPT="$S/converse-signoff.sh"
 
 mkdir -p "$TMP/rig-a" "$TMP/rig-b" "$TMP/city"
 RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"; CITY_ROOT="$(cd "$TMP/city" && pwd -P)"
-export PATH="$TMP/bin:$PATH" STORE="$TMP/store" CALLS="$TMP/calls" GH_CALLS="$TMP/gh-calls" GCTK_CALLS="$TMP/gctk-calls" GCTK_BIN="$TMP/bin/gctk" GC_RIG_ROOT="$TMP/rig" RIG_A RIG_B CITY_ROOT
-unset GC_CITY_PATH 2>/dev/null || true
+STUB_RIGS="$TMP/rigs.json"
+printf '{"rigs":[{"name":"the-city","prefix":"hq","path":"%s","hq":true},{"name":"rig-a","prefix":"tk","path":"%s","hq":false},{"name":"rig-b","prefix":"rb","path":"%s","hq":false}]}\n' \
+    "$CITY_ROOT" "$RIG_A" "$RIG_B" > "$STUB_RIGS"
+GH_CALLS="$TMP/gh-calls" GCTK_CALLS="$TMP/gctk-calls" GCTK_BIN="$BIN/gctk" GC_RIG_ROOT="$TMP/rig"
+export STUB_RIGS GH_CALLS GCTK_CALLS GCTK_BIN GC_RIG_ROOT RIG_A RIG_B CITY_ROOT
 
 # --- fixtures -----------------------------------------------------------------
-fresh() { rm -rf "$STORE"; mkdir -p "$STORE/b"; : > "$CALLS"; : > "$GH_CALLS"; : > "$GCTK_CALLS"; }
-# bead <id> [type] [status] [assignee]
-bead() {
-    jq -n --arg id "$1" --arg t "${2:-task}" --arg s "${3:-open}" --arg a "${4:-}" '{id:$id, title:("the bead " + $id), issue_type:$t,
-        status:$s, assignee:$a, metadata:{}, deps:[]}' > "$STORE/b/$1.json"
+# A bead's edge is a dep row: `edge <id> <type> <on>` is <id>'s edge onto <on>.
+fresh() {
+    store '[]'; : > "$STUB_DEPS"; echo '[]' > "$STUB_COMMENTS"
+    : > "$CALLS"; : > "$GH_CALLS"; : > "$GCTK_CALLS"; rm -rf "$ST"; mkdir -p "$ST"
 }
+# bead <id> [type] [status] [assignee]
+bead() { brow "$1" "title=the bead $1" "issue_type=${2:-task}" "status=${3:-open}" "assignee=${4:-}" 'metadata:={}'; }
 # gate <id> <key> — an open human gate.
-gate() { bead "$1" gate open ""; jq --arg k "$2" '.await_type = "human" | .await_id = $k' "$STORE/b/$1.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$1.json"; }
-edge() { jq --arg t "$2" --arg o "$3" '.deps += [{type:$t, on:$o}]' "$STORE/b/$1.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$1.json"; }
-setf() { jq --arg k "$2" --arg v "$3" '.[$k] = $v' "$STORE/b/$1.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$1.json"; }
-setm() { jq --arg k "$2" --arg v "$3" '.metadata[$k] = $v' "$STORE/b/$1.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$1.json"; }
-field() { jq -r --arg k "$2" '.[$k] // "" | tostring' "$STORE/b/$1.json" 2>/dev/null; }
+gate() { brow "$1" "title=the bead $1" issue_type=gate status=open assignee= 'metadata:={}' await_type=human "await_id=$2"; }
+edge() {
+    if [ "$2" = blocks ]; then printf '%s|blocks|%s\n' "$3" "$1" >> "$STUB_DEPS"
+    else printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$STUB_DEPS"; fi
+}
+setf() { bset "$1" "$2=$3"; }
+setm() { bset "$1" "metadata.$2=$3"; }
+field() { local v; v=$(bfield "$1" "$2"); [ "$v" = "<absent>" ] || printf '%s' "$v"; }
 # acts <id> — the bead's comments, which on a conversation are its actions.
-acts() { jq -r '[.[].text] | join("|")' "$STORE/b/$1.comments.json" 2>/dev/null; }
-meta()  { jq -r --arg k "$2" '.metadata[$k] // ""' "$STORE/b/$1.json" 2>/dev/null; }
+acts() { local a; a=$(bcomments "$1"); printf '%s' "${a//$'\n'/|}"; }
+# meta <id> <key> — a metadata value, empty when the bead carries none.
+meta() { local v; v=$("$HARNESS_FAKE_GC" --harness-read meta "$1" "$2"); [ "$v" = "<absent>" ] || printf '%s' "$v"; }
+# calls — the lines of the call log that write, in order, and nth_write <n> the
+# n-th of them.
+calls() { grep -E "$WRITES" "$CALLS" || true; }
+nth_write() {
+    local c i=1
+    c=$(calls)
+    while [ "$i" -lt "$1" ]; do c=${c#*$'\n'}; i=$((i + 1)); done
+    printf '%s' "${c%%$'\n'*}"
+}
 # conv <id> <subject> [assignee] — a conversation a sitting holds.
 conv() { bead "$1" task in_progress "${3:-gc-toolkit/gc-toolkit.$1}"; edge "$1" tracks "$2"; }
 # The acceptance case's anchor: a recommendation's gate and a review gate, and
@@ -630,12 +486,15 @@ run_signoff() {
     OUT="$(cd "$TMP/cwd" && bash "$SCRIPT" "$@" 2>&1)"; RC=$?
     set -e
 }
-writes() { grep -c '' "$CALLS" 2>/dev/null || true; }
+writes() { grep -c -E "$WRITES" "$CALLS" || true; }
 # merge_held <bead> — "held" while the real finalize gate refuses the bead, the
 # check merge.sh makes for an open human gate before it lands a PR.
 merge_held() {
     if (cd "$TMP/cwd" && bash "$HERE/finalize-gate.sh" check "$1" >/dev/null 2>&1); then echo released; else echo held; fi
 }
+# consequence <ruling> — the record gc.ruling_consequence keeps for the ruling
+# on tk-conv, a flat object, as the sign-off writes it.
+consequence() { local m r; m=$(meta tk-conv gc.ruling_consequence); r=${m#*\""$1"\":\{}; [ "$r" = "$m" ] || printf '{%s}' "${r%%\}*}"; }
 RULED=(--ruled yes --ruling "fix the retry before the merge" --no-wait)
 RETIRED=(--ruled yes --ruling "the work moved to the new design" --no-wait)
 ANSWERED=(--ruling "fix the retry before the merge" --outcome "ruled on the review; the rollout is still open")
@@ -659,7 +518,7 @@ eq "$(writes)" 0 "(USAGE) …and nothing is written"
 acceptance; run_signoff --conversation tk-anc --outcome x "${RULED[@]}"
 eq "$RC" 2 "(NOT-CONV) a bead that is no conversation exits 2"
 eq "$(writes)" 0 "(NOT-CONV) …writing nothing"
-acceptance; LIST_DOWN=1 run_signoff --conversation tk-conv --outcome x "${RULED[@]}"
+acceptance; STUB_LIST_FAIL=1 run_signoff --conversation tk-conv --outcome x "${RULED[@]}"
 eq "$RC" 1 "(UNREAD) a conversation that does not read stops the sign-off"
 has "$OUT" "NOT SIGNED OFF" "(UNREAD) …saying not to post the sign-off"
 eq "$(writes)" 0 "(UNREAD) …and writes nothing"
@@ -672,7 +531,7 @@ run_signoff --conversation tk-conv --outcome "review settled: fix the retry firs
 eq "$RC" 0 "(ONLY-REPLIED) the sign-off exits 0"
 eq "$(field tk-rev status)/$(field tk-rev close_reason)" "closed/ruled: fix the retry before the merge" "(ONLY-REPLIED) the review gate it replies to is resolved with ruled: <ruling>"
 eq "$(field tk-rec status)" "open" "(ONLY-REPLIED) the recommendation's gate, which it does not reply to, stays open"
-hasnt "$(cat "$CALLS")" "gate resolve tk-rec" "(ONLY-REPLIED) …and is never resolved"
+hasnt "$(calls)" "gate resolve tk-rec" "(ONLY-REPLIED) …and is never resolved"
 eq "$(meta tk-anc gc.takeaway)" "review settled: fix the retry first" "(ONLY-REPLIED) the subject carries the headline"
 eq "$(field tk-conv status)" "closed" "(ONLY-REPLIED) the conversation is closed"
 eq "$(field tk-conv close_reason)" "review settled: fix the retry first" "(ONLY-REPLIED) …with the headline as its close reason"
@@ -681,15 +540,15 @@ has "$OUT" "resolved gate tk-rev" "(ONLY-REPLIED) the resolve is reported"
 has "$OUT" "it held tk-anc" "(ONLY-REPLIED) …with the bead it released"
 eq "$(acts tk-conv)" "Ruled: fix the retry before the merge" "(ONLY-REPLIED) the ruling, the answer the gate now carries, is the one action recorded on the conversation"
 eq "$(grep '^pr-sitting-comment' "$CALLS")" "pr-sitting-comment refresh --sitting tk-conv" "(ONLY-REPLIED) the visit's comment on the PR is drawn again from the conversation, with no text of the sign-off's own"
-case "$(cat "$CALLS")" in
+case "$(calls)" in
   *"gc-helm takeaway"*"gate resolve tk-rev"*"bd comment tk-conv Ruled: "*"bd close tk-conv"*"pr-sitting-comment refresh"*) ok "(ORDER) headline, then the gate and the ruling it carries, then the close, then the comment drawn again" ;;
-  *) bad "(ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
+  *) bad "(ORDER) the writes ran out of order: $(calls)" ;;
 esac
 acceptance
 run_signoff --conversation tk-conv --outcome "ruled — fix the retry first" "${RULED[@]}"
 eq "$(meta tk-anc gc.takeaway)" "ruled — fix the retry first" "(LABEL) the headline keeps the label the settle skill's form opens it with"
 hasnt "$(acts tk-conv)" "fix the retry first" "(LABEL) …and the headline, the subject's, is none of the visit's actions"
-SIGNED="$(cat "$CALLS")"
+SIGNED="$(calls)"
 run_signoff --conversation tk-conv --outcome "review settled: fix the retry first" "${RULED[@]}"
 eq "$RC" 0 "(RERUN) a re-run of a finished sign-off exits 0"
 has "$OUT" "gate tk-rev was already cleared before this sign-off" "(RERUN) …finding its gate already answered"
@@ -697,12 +556,12 @@ eq "$(grep -c '^bd close' "$CALLS")" "$(printf '%s\n' "$SIGNED" | grep -c '^bd c
 eq "$(acts tk-conv)" "Ruled: fix the retry before the merge" "(RERUN) …and recording its ruling no second time"
 
 echo "# an answer that reached the gate first stands"
-acceptance; edge tk-conv replies-to tk-rec; jq '.status = "closed" | .close_reason = "ruled: accepted mol-fix accept:0123456789abcdef"' "$STORE/b/tk-rec.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-rec.json"
+acceptance; edge tk-conv replies-to tk-rec; bset tk-rec status=closed "close_reason=ruled: accepted mol-fix accept:0123456789abcdef"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 0 "(ALREADY) a gate Accept cleared before the sign-off does not stop it"
 has "$OUT" 'gate tk-rec was already cleared before this sign-off: "ruled: accepted mol-fix accept:0123456789abcdef"' "(ALREADY) …which reports the gate was already cleared"
 eq "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:0123456789abcdef" "(ALREADY) …and the gate keeps Accept's answer"
-acceptance; EARLIER_ANSWER="moot: the finding was withdrawn" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+acceptance; STUB_HOOK_AT="gate resolve" STUB_HOOK="$TMP/earlier-answer" EARLIER_ANSWER="moot: the finding was withdrawn" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 0 "(EARLIER) an answer that reaches the gate inside the sign-off's resolve exits 0"
 has "$OUT" 'another answer reached gate tk-rev first: "moot: the finding was withdrawn"' "(EARLIER) …reporting that answer"
 eq "$(field tk-rev close_reason)" "moot: the finding was withdrawn" "(EARLIER) …which stands"
@@ -717,7 +576,7 @@ has "$OUT" "it held tk-anc tk-kid" "(SHARED) …releasing both beads, read from 
 eq "$(meta tk-anc gc.takeaway)" "merge main in, keep the branch" "(SHARED) the headline is on the anchor"
 eq "$(meta tk-kid gc.takeaway)" "" "(SHARED) …and the child's headline is unchanged"
 eq "$(field tk-kid notes)" "" "(SHARED) …as are its notes: it reads the answer in the gate's resolve reason"
-hasnt "$(cat "$CALLS")" "update tk-kid" "(SHARED) …the child is never written"
+hasnt "$(calls)" "update tk-kid" "(SHARED) …the child is never written"
 
 echo "# a member's gate answered from the epic's sitting"
 fresh; bead tk-epic epic; bead tk-mem; edge tk-mem parent-child tk-epic; gate tk-mg design-choice; edge tk-mem blocks tk-mg
@@ -726,7 +585,7 @@ run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[
 eq "$RC" 0 "(EPIC) the epic's sign-off exits 0"
 eq "$(field tk-mg status)" "closed" "(EPIC) the member's gate is resolved"
 eq "$(meta tk-epic gc.takeaway)" "the epic takes option B" "(EPIC) the record and headline go on the epic"
-hasnt "$(cat "$CALLS")" "update tk-mem" "(EPIC) …and the member is never written"
+hasnt "$(calls)" "update tk-mem" "(EPIC) …and the member is never written"
 
 echo "# an open PR a gate releases: a member's PR answered from the epic's sitting"
 # The member is an open PR behind its own gate, which only the epic's
@@ -748,11 +607,11 @@ eq "$(writes)" 0 "(EPIC-PR) …writing nothing"
 eq "$(merge_held tk-mem)" held "(EPIC-PR) …so the gate still holds the member's merge"
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
 eq "$RC" 0 "(EPIC-PR-REWORK) --rework exits 0"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-mem --ruling-bead tk-conv --ruling fix the retry before the merge" "(EPIC-PR-REWORK) the rework is filed on the member's PR, sourced by the epic's conversation"
-hasnt "$(cat "$CALLS")" "converse-rework --anchor tk-epic" "(EPIC-PR-REWORK) …never on the epic"
-case "$(cat "$CALLS")" in
+has "$(calls)" "converse-rework --anchor tk-mem --ruling-bead tk-conv --ruling fix the retry before the merge" "(EPIC-PR-REWORK) the rework is filed on the member's PR, sourced by the epic's conversation"
+hasnt "$(calls)" "converse-rework --anchor tk-epic" "(EPIC-PR-REWORK) …never on the epic"
+case "$(calls)" in
   *"converse-rework --anchor tk-mem"*"gate resolve tk-mg"*) ok "(EPIC-PR-REWORK) …before the member's gate is resolved" ;;
-  *) bad "(EPIC-PR-REWORK) the gate was resolved before the rework was filed: $(cat "$CALLS")" ;;
+  *) bad "(EPIC-PR-REWORK) the gate was resolved before the rework was filed: $(calls)" ;;
 esac
 eq "$(meta tk-epic gc.takeaway)" "the epic takes option B" "(EPIC-PR-REWORK) the record and headline stay on the epic"
 eq "$(meta tk-mem gc.takeaway)" "" "(EPIC-PR-REWORK) …and the member carries none"
@@ -761,17 +620,17 @@ eq "$(grep '^pr-sitting-comment' "$CALLS")" "pr-sitting-comment refresh --sittin
 epic_pr
 run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(EPIC-PR-RETIRE) --retire exits 0"
-case "$(cat "$CALLS")" in
+case "$(calls)" in
   *"pr-dispose --anchor tk-mem --successor tk-conv --kind not-needed"*"gate resolve tk-mg"*) ok "(EPIC-PR-RETIRE) the member's PR is retired before its gate is resolved" ;;
-  *) bad "(EPIC-PR-RETIRE) the member's PR was not retired before its gate: $(cat "$CALLS")" ;;
+  *) bad "(EPIC-PR-RETIRE) the member's PR was not retired before its gate: $(calls)" ;;
 esac
-hasnt "$(cat "$CALLS")" "pr-dispose --anchor tk-epic" "(EPIC-PR-RETIRE) …and the epic is never disposed"
+hasnt "$(calls)" "pr-dispose --anchor tk-epic" "(EPIC-PR-RETIRE) …and the epic is never disposed"
 epic_pr
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --no-rework
 eq "$RC" 0 "(EPIC-PR-NO-REWORK) --no-rework exits 0"
 has "$OUT" "the ruling leaves the branch of tk-mem as it stands" "(EPIC-PR-NO-REWORK) the member's branch is said to stand"
 eq "$(acts tk-conv)" "Ruled: fix the retry before the merge" "(EPIC-PR-NO-REWORK) …and the ruling is the only action recorded"
-hasnt "$(cat "$CALLS")" "converse-rework" "(EPIC-PR-NO-REWORK) …and nothing is filed"
+hasnt "$(calls)" "converse-rework" "(EPIC-PR-NO-REWORK) …and nothing is filed"
 epic_pr
 run_signoff --conversation tk-conv --answer tk-mg "${ANSWERED[@]}"
 eq "$RC" 2 "(EPIC-PR-ANSWER) an answer on a turn that does not sign off, releasing a member's open PR and saying nothing of it, exits 2"
@@ -779,9 +638,9 @@ eq "$(writes)" 0 "(EPIC-PR-ANSWER) …writing nothing"
 eq "$(merge_held tk-mem)" held "(EPIC-PR-ANSWER) …so the gate still holds the member's merge"
 run_signoff --conversation tk-conv --answer tk-mg "${ANSWERED[@]}" --rework
 eq "$RC" 0 "(EPIC-PR-ANSWER) the answer with --rework exits 0"
-case "$(cat "$CALLS")" in
+case "$(calls)" in
   *"converse-rework --anchor tk-mem --ruling-bead tk-conv"*"gate resolve tk-mg"*) ok "(EPIC-PR-ANSWER) the member's rework is filed before its gate is resolved" ;;
-  *) bad "(EPIC-PR-ANSWER) the gate was resolved before the member's rework: $(cat "$CALLS")" ;;
+  *) bad "(EPIC-PR-ANSWER) the gate was resolved before the member's rework: $(calls)" ;;
 esac
 eq "$(field tk-conv status)" "in_progress" "(EPIC-PR-ANSWER) the conversation stays open"
 # An attempt that files the member's rework and resolves its gate, then stops
@@ -789,18 +648,18 @@ eq "$(field tk-conv status)" "in_progress" "(EPIC-PR-ANSWER) the conversation st
 # then reads closed with this ruling's answer, and the re-run must still reach
 # the member's PR, where the real converse-rework.sh adopts the child the first
 # attempt filed, rather than fall back to the epic, which it refuses.
-epic_pr; CLOSE_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+epic_pr; STUB_CLOSE_FAIL=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
 eq "$RC" 1 "(EPIC-PR-RERUN) a sign-off whose close does not land stops short"
 eq "$(field tk-mg status)" "closed" "(EPIC-PR-RERUN) …after resolving the member's gate"
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
 eq "$RC" 0 "(EPIC-PR-RERUN) the re-run exits 0"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-mem --ruling-bead tk-conv" "(EPIC-PR-RERUN) …sending the rework to the member's PR again"
-hasnt "$(cat "$CALLS")" "converse-rework --anchor tk-epic" "(EPIC-PR-RERUN) …never to the epic"
+has "$(calls)" "converse-rework --anchor tk-mem --ruling-bead tk-conv" "(EPIC-PR-RERUN) …sending the rework to the member's PR again"
+hasnt "$(calls)" "converse-rework --anchor tk-epic" "(EPIC-PR-RERUN) …never to the epic"
 eq "$(field tk-conv status)" "closed" "(EPIC-PR-RERUN) …and closes the conversation"
 # A re-run that says nothing of the PR still reaches it through the gate this
 # ruling's answer closed, so it is asked what the ruling does to that PR.
-epic_pr; CLOSE_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+epic_pr; STUB_CLOSE_FAIL=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
 eq "$RC" 2 "(EPIC-PR-RERUN) a re-run saying nothing of the PR exits 2"
 has "$OUT" "reaches tk-mem, each an open PR" "(EPIC-PR-RERUN) …naming the member's PR"
@@ -852,21 +711,21 @@ eq "$RC" 2 "(SHARED-PR) --pr-anchor naming no open PR the ruling reaches exits 2
 eq "$(writes)" 0 "(SHARED-PR) …writing nothing"
 run_signoff --conversation tk-conv --outcome "the approach stands; fix the retry" "${RULED[@]}" --rework --pr-anchor tk-anc
 eq "$RC" 0 "(SHARED-PR) --rework --pr-anchor naming the subject's PR exits 0"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(SHARED-PR) the rework is filed on the PR it names"
-hasnt "$(cat "$CALLS")" "converse-rework --anchor tk-pr2" "(SHARED-PR) …and on no other"
-case "$(cat "$CALLS")" in
+has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(SHARED-PR) the rework is filed on the PR it names"
+hasnt "$(calls)" "converse-rework --anchor tk-pr2" "(SHARED-PR) …and on no other"
+case "$(calls)" in
   *"converse-rework --anchor tk-anc"*"gate resolve tk-sg"*) ok "(SHARED-PR) …before the shared gate is resolved" ;;
-  *) bad "(SHARED-PR) the shared gate was resolved before the rework: $(cat "$CALLS")" ;;
+  *) bad "(SHARED-PR) the shared gate was resolved before the rework: $(calls)" ;;
 esac
 has "$OUT" "the ruling leaves the branch of tk-pr2 as it stands" "(SHARED-PR) the other PR stands under the ruling"
 eq "$(acts tk-conv)" "Sent the PR of tk-anc back for rework.|Ruled: fix the retry before the merge" "(SHARED-PR) the conversation records the PR it sent back, named by its anchor where it records no number, then the ruling"
 eq "$(meta tk-pr2 gc.takeaway)" "" "(SHARED-PR) the headline stays off the other PR"
-shared_pr; CLOSE_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
+shared_pr; STUB_CLOSE_FAIL=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
 eq "$RC" 1 "(SHARED-PR-RERUN) a sign-off whose close does not land, after resolving the shared gate, stops short"
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
 eq "$RC" 0 "(SHARED-PR-RERUN) the re-run with the same --pr-anchor exits 0, the gate it already answered still reaching that PR"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-pr2 --ruling-bead tk-conv" "(SHARED-PR-RERUN) …and sends the rework to the PR it names again"
+has "$(calls)" "converse-rework --anchor tk-pr2 --ruling-bead tk-conv" "(SHARED-PR-RERUN) …and sends the rework to the PR it names again"
 has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(SHARED-PR-RERUN) …with the subject's PR standing, as the first attempt said"
 fresh; bead tk-anc; bead tk-pr2; setm tk-pr2 merge_result pull_request
 gate tk-sg approach; edge tk-anc blocks tk-sg; edge tk-pr2 blocks tk-sg
@@ -877,16 +736,16 @@ eq "$(writes)" 0 "(SHARED-OTHER-PR) …writing nothing"
 eq "$(merge_held tk-pr2)" held "(SHARED-OTHER-PR) …so the gate still holds that PR's merge"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --retire duplicate --successor tk-anc
 eq "$RC" 0 "(SHARED-OTHER-PR) --retire on that ruling exits 0"
-has "$(cat "$CALLS")" "pr-dispose --anchor tk-pr2 --successor tk-anc --kind duplicate" "(SHARED-OTHER-PR) …retiring the one open PR the ruling reaches"
+has "$(calls)" "pr-dispose --anchor tk-pr2 --successor tk-anc --kind duplicate" "(SHARED-OTHER-PR) …retiring the one open PR the ruling reaches"
 
 echo "# a re-run acts on the PR its ruling recorded, even once that PR's retirement has closed it"
 # A record of the PR the store refuses stops the sign-off before it acts on the
 # PR, with nothing else written.
-epic_pr; REFUSE_UPDATE_MATCH='gc.ruling_consequence=' run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
+epic_pr; STUB_UPDATE_FAIL_ON='gc.ruling_consequence=' run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 1 "(RECORD-REFUSED) a record of the PR the store refuses stops the sign-off"
 has "$OUT" "could not be recorded on conversation tk-conv" "(RECORD-REFUSED) …saying so"
-hasnt "$(cat "$CALLS")" "pr-dispose" "(RECORD-REFUSED) …before the retirement acts"
-hasnt "$(cat "$CALLS")" "gate resolve" "(RECORD-REFUSED) …and before any gate is answered"
+hasnt "$(calls)" "pr-dispose" "(RECORD-REFUSED) …before the retirement acts"
+hasnt "$(calls)" "gate resolve" "(RECORD-REFUSED) …and before any gate is answered"
 
 # An attempt that retires the member's PR and answers its gate, then stops
 # because the conversation's close does not land, asks for a re-run. pr-facts
@@ -894,31 +753,31 @@ hasnt "$(cat "$CALLS")" "gate resolve" "(RECORD-REFUSED) …and before any gate 
 # then no open PR the ruling reaches. The re-run takes the PR from the record
 # the first attempt wrote on the conversation, finds it closed and goes on,
 # rather than falling back to the epic, which pr-dispose.sh refuses.
-epic_pr; CLOSE_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
+epic_pr; STUB_CLOSE_FAIL=tk-conv run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 1 "(RETIRED-RERUN) a sign-off that retired the member's PR, and whose close does not land, stops short"
-eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: the work moved to the new design"]')" '{"act":"retire","anchor":"tk-mem"}' "(RECORD) the conversation records the PR its ruling's --retire acts on, under the ruling's answer"
-case "$(cat "$CALLS")" in
+eq "$(consequence "ruled: the work moved to the new design")" '{"act":"retire","anchor":"tk-mem"}' "(RECORD) the conversation records the PR its ruling's --retire acts on, under the ruling's answer"
+case "$(calls)" in
   *"bd update tk-conv --set-metadata gc.ruling_consequence="*"pr-dispose --anchor tk-mem"*) ok "(RECORD) …before the retirement acts" ;;
-  *) bad "(RECORD) the record should precede the retirement: $(cat "$CALLS")" ;;
+  *) bad "(RECORD) the record should precede the retirement: $(calls)" ;;
 esac
 setf tk-mem status closed; edge tk-mem supersedes tk-conv
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(RETIRED-RERUN) the re-run exits 0 though the retired member has closed since"
 has "$OUT" "tk-mem, the PR an earlier attempt of this ruling recorded for its --retire, reads closed" "(RETIRED-RERUN) …finding the PR its ruling retired closed"
-hasnt "$(cat "$CALLS")" "pr-dispose" "(RETIRED-RERUN) …disposing nothing again, and never the epic"
+hasnt "$(calls)" "pr-dispose" "(RETIRED-RERUN) …disposing nothing again, and never the epic"
 eq "$(field tk-conv status)" "closed" "(RETIRED-RERUN) …and closing the conversation"
-shared_pr; CLOSE_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
+shared_pr; STUB_CLOSE_FAIL=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
 eq "$RC" 1 "(RETIRED-RERUN-PICK) a sign-off that retired the PR --pr-anchor names, and whose close does not land, stops short"
 setf tk-pr2 status closed; edge tk-pr2 duplicates tk-anc
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
 eq "$RC" 0 "(RETIRED-RERUN-PICK) the re-run with the same --pr-anchor exits 0, the PR it names recovered from the record once closed"
-hasnt "$(cat "$CALLS")" "pr-dispose" "(RETIRED-RERUN-PICK) …disposing nothing again"
+hasnt "$(calls)" "pr-dispose" "(RETIRED-RERUN-PICK) …disposing nothing again"
 has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(RETIRED-RERUN-PICK) …and the subject's PR still stands under the ruling"
 epic_pr; REWORK_FAIL=1 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
 eq "$RC" 1 "(RECORD-OTHER-ANSWER) a rework that does not file stops the sign-off"
-eq "$(meta tk-conv gc.ruling_consequence | jq -r '.["ruled: fix the retry before the merge"].anchor')" "tk-mem" "(RECORD-OTHER-ANSWER) …after recording the PR it acted on"
+eq "$(json_get "$(consequence "ruled: fix the retry before the merge")" anchor)" "tk-mem" "(RECORD-OTHER-ANSWER) …after recording the PR it acted on"
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --no-rework
 eq "$RC" 0 "(RECORD-OTHER-ANSWER) a re-run that answers --no-rework instead is not bound by the record, and exits 0"
 has "$OUT" "the ruling leaves the branch of tk-mem as it stands" "(RECORD-OTHER-ANSWER) …the member's branch standing"
@@ -934,14 +793,14 @@ rig_pr() {
 }
 rig_pr; run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
 eq "$RC" 0 "(RIG-REWORK) a ruling whose gate in rig-b releases rig-b's open PR, with --rework, exits 0"
-has "$(cat "$CALLS")" "converse-rework --anchor rb-mem --ruling-bead tk-conv" "(RIG-REWORK) the rework is filed on rig-b's PR, the rig-a conversation its provenance"
-has "$(cat "$CALLS")" "converse-rework ran in GC_RIG=rig-b GC_RIG_ROOT=$RIG_B PWD=$RIG_B" "(RIG-REWORK) …and runs in rig-b: its store, its rig root and its checkout"
+has "$(calls)" "converse-rework --anchor rb-mem --ruling-bead tk-conv" "(RIG-REWORK) the rework is filed on rig-b's PR, the rig-a conversation its provenance"
+has "$(calls)" "converse-rework ran in GC_RIG=rig-b GC_RIG_ROOT=$RIG_B PWD=$RIG_B" "(RIG-REWORK) …and runs in rig-b: its store, its rig root and its checkout"
 eq "$(meta tk-epic gc.takeaway)" "the epic takes option B" "(RIG-REWORK) the headline stays on the epic in rig-a"
 eq "$(field rb-mg status)" "closed" "(RIG-REWORK) …and the gate in rig-b is answered after the rework"
 rig_pr; run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(RIG-RETIRE) the same ruling with --retire exits 0"
-has "$(cat "$CALLS")" "pr-dispose --anchor rb-mem --successor tk-conv --kind not-needed" "(RIG-RETIRE) rig-b's PR is retired, the rig-a conversation its evidence"
-has "$(cat "$CALLS")" "pr-dispose ran in GC_RIG=rig-b GC_RIG_ROOT=$RIG_B PWD=$RIG_B" "(RIG-RETIRE) …in rig-b"
+has "$(calls)" "pr-dispose --anchor rb-mem --successor tk-conv --kind not-needed" "(RIG-RETIRE) rig-b's PR is retired, the rig-a conversation its evidence"
+has "$(calls)" "pr-dispose ran in GC_RIG=rig-b GC_RIG_ROOT=$RIG_B PWD=$RIG_B" "(RIG-RETIRE) …in rig-b"
 fresh; bead tk-epic epic; bead zz-mem; setm zz-mem merge_result pull_request
 gate tk-mg design-choice; edge zz-mem blocks tk-mg
 conv tk-conv tk-epic; edge tk-conv replies-to tk-mg
@@ -952,11 +811,11 @@ eq "$(writes)" 0 "(RIG-UNRESOLVED) …before any write"
 eq "$(field tk-mg status)" "open" "(RIG-UNRESOLVED) …so the gate still holds the PR's merge"
 
 echo "# what a gate releases is read before any write"
-epic_pr; DEP_UP_DOWN=tk-mg run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+epic_pr; STUB_FAIL_ON="dep list tk-mg --direction=up" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(RELEASED-UNREAD) a gate whose waiting beads do not read stops the sign-off"
 has "$OUT" "NOT SIGNED OFF" "(RELEASED-UNREAD) …saying not to post the sign-off"
 eq "$(writes)" 0 "(RELEASED-UNREAD) …and writes nothing"
-epic_pr; SHOW_DOWN=tk-mem run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+epic_pr; STUB_SHOW_FAIL_ON=tk-mem run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 1 "(RELEASED-UNREAD) a bead the gate releases whose row does not read stops the sign-off"
 eq "$(writes)" 0 "(RELEASED-UNREAD) …and writes nothing"
 eq "$(field tk-mg status)" "open" "(RELEASED-UNREAD) …leaving the gate open"
@@ -967,13 +826,13 @@ run_signoff --conversation tk-conv --outcome "settled the review, not the rollou
 eq "$RC" 0 "(LEAVE) a sign-off that leaves one gate exits 0"
 eq "$(field tk-rev status)" "closed" "(LEAVE) the gate the ruling answers is resolved"
 eq "$(field tk-two status)" "open" "(LEAVE) the gate it leaves stays open"
-eq "$(jq -r '[.deps[] | select(.type == "replies-to") | .on] | join(" ")' "$STORE/b/tk-conv.json")" "tk-rev tk-two" "(LEAVE) …and its reply stays"
+eq "$(bedges tk-conv replies-to)" "tk-rev tk-two" "(LEAVE) …and its reply stays"
 
 echo "# a gate that does not close, or a headline that does not land, stops the sign-off"
-acceptance; GATE_STUCK=tk-rev run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+acceptance; STUB_GATE_RESOLVE_NOOP=tk-rev run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 1 "(UNCLOSED) a gate that does not close exits 1"
 eq "$(field tk-conv status)" "in_progress" "(UNCLOSED) …and the conversation stays open for the re-run"
-hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(UNCLOSED) …with no reminder update"
+hasnt "$(calls)" "pr-sitting-comment" "(UNCLOSED) …with no reminder update"
 acceptance; TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 1 "(HEADLINE) a headline that does not land exits 1"
 eq "$(field tk-rev status)" "open" "(HEADLINE) …before any gate is resolved"
@@ -984,13 +843,13 @@ eq "$(field tk-conv status)" "in_progress" "(HEADLINE) …or the conversation cl
 acceptance
 setm tk-anc gc.takeaway "the sitting before this one parked it"
 mv "$S/gc-helm.sh" "$TMP/gc-helm.stub"; ln -s "$HERE/gc-helm.sh" "$S/gc-helm.sh"
-REFUSE_UPDATE_MATCH='gc.takeaway=settled' TMPDIR="$TMP" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+STUB_UPDATE_FAIL_ON='gc.takeaway=settled' TMPDIR="$TMP" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 rm -f "$S/gc-helm.sh"; mv "$TMP/gc-helm.stub" "$S/gc-helm.sh"
 eq "$RC" 1 "(HEADLINE-REFUSED) a headline update the store refuses stops the sign-off"
 has "$OUT" "could not update 'tk-anc'" "(HEADLINE-REFUSED) …after the real takeaway says so"
-hasnt "$(cat "$CALLS")" "gate resolve" "(HEADLINE-REFUSED) …so no gate is resolved"
+hasnt "$(calls)" "gate resolve" "(HEADLINE-REFUSED) …so no gate is resolved"
 eq "$(field tk-rev status)" "open" "(HEADLINE-REFUSED) …the gate stays open and owed"
-hasnt "$(cat "$CALLS")" "bd close tk-conv" "(HEADLINE-REFUSED) …and the conversation is not closed"
+hasnt "$(calls)" "bd close tk-conv" "(HEADLINE-REFUSED) …and the conversation is not closed"
 eq "$(meta tk-anc gc.takeaway)" "the sitting before this one parked it" "(HEADLINE-REFUSED) …while the subject still carries the earlier headline"
 
 echo "# a ruling on an armed subject leaves its arm to send it"
@@ -998,7 +857,7 @@ acceptance; setm tk-anc gc.dispatch_when_ready gc-toolkit/gc-toolkit.polecat
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 0 "(ARMED) the sign-off on an armed subject exits 0"
 eq "$(field tk-rev status)" "closed" "(ARMED) …resolving the gate, which is what lets the arm send the subject"
-hasnt "$(cat "$CALLS")" "gc.routed_to" "(ARMED) …writing no route"
+hasnt "$(calls)" "gc.routed_to" "(ARMED) …writing no route"
 eq "$(meta tk-anc gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat" "(ARMED) …and leaving the arm"
 
 echo "# a ruling that leaves the subject waiting on work arms its validating closer"
@@ -1015,17 +874,16 @@ CLOSER_ARGS='["--on","mol-validate-close"]'
 briefs() { field "$1" notes | grep -c '## Close brief' || true; }
 # labelled <id> <label>... — the bead carries these labels.
 # labels <id> — the bead's labels, as a JSON array.
-labelled() { local id="$1"; shift; jq '.labels = $ARGS.positional' "$STORE/b/$id.json" --args "$@" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$id.json"; }
-labels() { jq -c '.labels // []' "$STORE/b/$1.json" 2>/dev/null; }
+labelled() { local id="$1" j; shift; j=$(printf '"%s",' "$@"); bset "$id" "labels:=[${j%,}]"; }
+labels() { local l; l=$(field "$1" labels); printf '%s' "${l:-[]}"; }
 # latest <id> — the bead's latest close brief, its last `## Close brief (`
 # heading and all that follows it, which the validating closer checks.
 latest() { field "$1" notes | awk '/^## Close brief \(/ { s = ""; on = 1 } on { s = s $0 "\n" } END { printf "%s", s }'; }
 # sent_closer — the deferred-dispatch pass has sent the subject's closer: it
 # retired the arm with the note the real pass appends.
 sent_closer() {
-    jq 'del(.metadata["gc.dispatch_when_ready"], .metadata["gc.dispatch_when_ready_args"])
-        | .notes = ((.notes // "") + "\ndeferred-dispatch: dispatch record cleared at 2026-11-09T13:00:00Z — dispatched to rig-a/gc-toolkit.polecat by the deferred-dispatch reconcile pass")' \
-        "$STORE/b/tk-sub.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-sub.json"
+    bunset tk-sub metadata.gc.dispatch_when_ready metadata.gc.dispatch_when_ready_args
+    bset tk-sub "notes=$(field tk-sub notes)"$'\n'"deferred-dispatch: dispatch record cleared at 2026-11-09T13:00:00Z — dispatched to rig-a/gc-toolkit.polecat by the deferred-dispatch reconcile pass"
 }
 closer_case
 run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}"
@@ -1042,10 +900,10 @@ eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(CLOSER) …to s
 has "$(grep '^gctk bead arm' "$CALLS")" "--db $RIG_A/.beads" "(CLOSER) …in its own rig's store"
 eq "$(field tk-g status)/$(field tk-conv status)" "closed/closed" "(CLOSER) the ruling answers the gate and closes the conversation"
 has "$(acts tk-conv)" "Arranged the check that closes this once the work it waits on lands." "(CLOSER) the arm is one of the visit's actions"
-hasnt "$(cat "$CALLS")" "--remove-label" "(CLOSER) …and a subject that carries no hold has no label removed"
-case "$(cat "$CALLS")" in
+hasnt "$(calls)" "--remove-label" "(CLOSER) …and a subject that carries no hold has no label removed"
+case "$(calls)" in
   *"gc-helm takeaway tk-sub"*"--waiting-on tk-work"*"## Close brief"*"gctk bead arm tk-sub"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-ORDER) the headline and its edge, then the brief, then the arm, then the gate and the close" ;;
-  *) bad "(CLOSER-ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
+  *) bad "(CLOSER-ORDER) the writes ran out of order: $(calls)" ;;
 esac
 ARMS=$(grep -c '^gctk bead arm' "$CALLS" || true)
 run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
@@ -1061,9 +919,9 @@ eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(CLOSER-ANSWER) 
 eq "$(field tk-g status)/$(field tk-conv status)" "closed/in_progress" "(CLOSER-ANSWER) …answering the gate and leaving the conversation open"
 
 closer_case
-REFUSE_UPDATE_MATCH='## Close brief' run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
+STUB_UPDATE_FAIL_ON='## Close brief' run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 1 "(CLOSER-BRIEF-REFUSED) a close brief the store refuses stops the sign-off"
-hasnt "$(cat "$CALLS")" "gctk bead arm" "(CLOSER-BRIEF-REFUSED) …before the arm"
+hasnt "$(calls)" "gctk bead arm" "(CLOSER-BRIEF-REFUSED) …before the arm"
 eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-BRIEF-REFUSED) …with the gate and the conversation still open"
 closer_case
 ARM_FAIL=1 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
@@ -1074,7 +932,7 @@ run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BR
 eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-ARM-FAILS) the re-run arms the closer and signs off"
 eq "$(briefs tk-sub)" 1 "(CLOSER-ARM-FAILS) …keeping the one brief the first attempt wrote"
 closer_case
-SHOW_DOWN=tk-work run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
+STUB_SHOW_FAIL_ON=tk-work run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 1 "(CLOSER-UNREAD) a wait that does not read stops the sign-off"
 eq "$(writes)" 0 "(CLOSER-UNREAD) …before any write"
 closer_case
@@ -1107,7 +965,7 @@ and check that the dialog keeps its size"
 run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC/$(briefs tk-sub)" "0/2" "(CLOSER-BRIEF-LATEST) a latest brief that only begins with this one is not this one, so the brief is appended"
 closer_case
-GATE_STUCK=tk-g run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+STUB_GATE_RESOLVE_NOOP=tk-g run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 1 "(CLOSER-RERUN-ARMED) a gate that does not close stops the sign-off after the brief and the arm"
 has "$(field tk-sub notes)" "$BRIEF
 deferred-dispatch: dispatch armed by" "(CLOSER-RERUN-ARMED) …whose note follows the brief"
@@ -1146,12 +1004,12 @@ eq "$(labels tk-sub)" '["learning"]' "(CLOSER-HOLD) …lifting each spelling of 
 eq "$(grep -c -e '--remove-label' "$CALLS")" 1 "(CLOSER-HOLD) …in one write"
 has "$(grep -e '--remove-label' "$CALLS")" "--db $RIG_A/.beads" "(CLOSER-HOLD) …in its own rig's store"
 has "$OUT" "lifted hold:mayor from tk-sub" "(CLOSER-HOLD) …saying so"
-case "$(cat "$CALLS")" in
+case "$(calls)" in
   *"gctk bead arm tk-sub"*"--remove-label hold:mayor --remove-label Hold:Mayor"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-HOLD) …after the arm and before any gate is answered" ;;
-  *) bad "(CLOSER-HOLD) the lift ran out of order: $(cat "$CALLS")" ;;
+  *) bad "(CLOSER-HOLD) the lift ran out of order: $(calls)" ;;
 esac
 closer_case; labelled tk-sub Hold:Mayor
-REFUSE_UPDATE_MATCH='--remove-label' run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+STUB_UPDATE_FAIL_ON='--remove-label' run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 1 "(CLOSER-HOLD-REFUSED) a lift the store refuses stops the sign-off"
 has "$OUT" "NOT SIGNED OFF" "(CLOSER-HOLD-REFUSED) …saying not to post the sign-off"
 has "$OUT" "gc bd update tk-sub --db $(printf '%q' "$RIG_A/.beads") --remove-label Hold:Mayor" "(CLOSER-HOLD-REFUSED) …and naming the lift by hand"
@@ -1165,7 +1023,7 @@ eq "$(briefs tk-sub)/$(grep -c '^gctk bead arm' "$CALLS")" "1/$ARMS" "(CLOSER-HO
 eq "$(field tk-g status)/$(field tk-conv status)" "closed/closed" "(CLOSER-HOLD-REFUSED) …then answering the gate and closing the conversation"
 # The labels are read again once the arm stands, the subject's second read.
 closer_case; labelled tk-sub hold:mayor
-SHOW_DOWN_SECOND=tk-sub run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+STUB_HOOK_AT="show tk-sub" STUB_HOOK="$TMP/second-fails" run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 1 "(CLOSER-HOLD-UNREAD) labels that do not read once the arm stands stop the sign-off"
 has "$OUT" "tk-sub's labels could not be read" "(CLOSER-HOLD-UNREAD) …saying the labels did not read"
 eq "$(labels tk-sub)/$(field tk-g status)/$(field tk-conv status)" '["hold:mayor"]/open/in_progress' "(CLOSER-HOLD-UNREAD) …with the hold on and every gate open"
@@ -1191,7 +1049,7 @@ run_signoff --conversation tk-conv --outcome "ruled — builds once tk-work land
 eq "$RC" 0 "(CLOSER-ELSEWHERE) a subject armed to another dispatch signs off with no brief"
 has "$OUT" "no validating closer is armed for tk-sub: it has a dispatch path (gc.dispatch_when_ready=rig-a/gc-toolkit.polecat)" "(CLOSER-ELSEWHERE) …saying why no closer is armed"
 eq "$(meta tk-sub gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "(CLOSER-ELSEWHERE) …and leaving that arm as it is"
-hasnt "$(cat "$CALLS")" "gctk bead arm" "(CLOSER-ELSEWHERE) …arming nothing"
+hasnt "$(calls)" "gctk bead arm" "(CLOSER-ELSEWHERE) …arming nothing"
 closer_case; setm tk-sub gc.dispatch_when_ready rig-a/gc-toolkit.polecat; setm tk-sub gc.dispatch_when_ready_args '["--on","mol-polecat-work"]'
 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC/$(writes)" "2/0" "(CLOSER-ELSEWHERE) …and a --close-brief there exits 2, writing nothing"
@@ -1231,10 +1089,10 @@ eq "$RC" 2 "(OPEN-PR) a ruled sign-off on an open PR with neither --rework nor -
 eq "$(writes)" 0 "(OPEN-PR) …writing nothing"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK) --rework exits 0"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry before the merge" "(REWORK) the rework is filed with the conversation as its source ruling bead"
-has "$(head -1 "$CALLS")" "bd update tk-conv --set-metadata gc.ruling_consequence=" "(REWORK) the PR it acts on is recorded on the conversation first"
-has "$(sed -n 2p "$CALLS")" "converse-rework --anchor tk-anc" "(REWORK) …then the rework runs, before every other write"
-has "$(cat "$CALLS")" "converse-rework ran in GC_RIG=rig-a GC_RIG_ROOT=$RIG_A PWD=$RIG_A" "(REWORK) …in the rig of the PR it acts on"
+has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry before the merge" "(REWORK) the rework is filed with the conversation as its source ruling bead"
+has "$(nth_write 1)" "bd update tk-conv --set-metadata gc.ruling_consequence=" "(REWORK) the PR it acts on is recorded on the conversation first"
+has "$(nth_write 2)" "converse-rework --anchor tk-anc" "(REWORK) …then the rework runs, before every other write"
+has "$(calls)" "converse-rework ran in GC_RIG=rig-a GC_RIG_ROOT=$RIG_A PWD=$RIG_A" "(REWORK) …in the rig of the PR it acts on"
 eq "$(acts tk-conv)" "Sent PR #41 back for rework.|Ruled: fix the retry before the merge" "(REWORK) …and the conversation records the PR it sent back, then the ruling"
 # The same sign-off run again once the rework has landed and the PR merged: the
 # record names the PR, which reads closed, so nothing acts on it again, and the
@@ -1244,8 +1102,8 @@ setf tk-anc status closed; setm tk-anc merge_result merged
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK-RETRY) the same sign-off, run again once the PR has merged, exits 0"
 has "$OUT" "tk-anc, the PR an earlier attempt of this ruling recorded for its --rework, reads closed" "(REWORK-RETRY) …finding the PR closed"
-hasnt "$(cat "$CALLS")" "converse-rework" "(REWORK-RETRY) …filing no second rework"
-hasnt "$(cat "$CALLS")" "bd comment " "(REWORK-RETRY) …recording no action again"
+hasnt "$(calls)" "converse-rework" "(REWORK-RETRY) …filing no second rework"
+hasnt "$(calls)" "bd comment " "(REWORK-RETRY) …recording no action again"
 eq "$(acts tk-conv)" "Sent PR #41 back for rework.|Ruled: fix the retry before the merge" "(REWORK-RETRY) …so the conversation still lists the rework among its actions"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "refresh --sitting tk-conv" "(REWORK-RETRY) …and the comment is drawn again from it"
 # The record names the rework once it is filed. A sign-off that stops after
@@ -1254,26 +1112,26 @@ has "$(grep '^pr-sitting-comment' "$CALLS")" "refresh --sitting tk-conv" "(REWOR
 acceptance; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
 TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-CLOSED) a sign-off that stops after its rework is filed exits 1"
-eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: fix the retry before the merge"]')" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-CLOSED) …with the rework recorded under its ruling"
+eq "$(consequence "ruled: fix the retry before the merge")" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-CLOSED) …with the rework recorded under its ruling"
 setf tk-child status closed
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK-CLOSED) the same sign-off, run once its rework has closed, exits 0"
-hasnt "$(cat "$CALLS")" "converse-rework" "(REWORK-CLOSED) …filing no second rework and superseding no review"
+hasnt "$(calls)" "converse-rework" "(REWORK-CLOSED) …filing no second rework and superseding no review"
 eq "$(acts tk-conv)" "Sent PR #41 back for rework.|Ruled: fix the retry before the merge" "(REWORK-CLOSED) …recording the rework once"
 eq "$(field tk-conv status)" "closed" "(REWORK-CLOSED) …and closing the conversation"
 # A record the store refuses stops the sign-off before the headline.
 acceptance; setm tk-anc merge_result pull_request
-REFUSE_UPDATE_MATCH='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+STUB_UPDATE_FAIL_ON='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-RECORD-REFUSED) a rework whose record the store refuses exits 1"
 has "$OUT" "the store refused its record on conversation tk-conv" "(REWORK-RECORD-REFUSED) …saying so"
-hasnt "$(cat "$CALLS")" "gc-helm takeaway" "(REWORK-RECORD-REFUSED) …with no headline written"
+hasnt "$(calls)" "gc-helm takeaway" "(REWORK-RECORD-REFUSED) …with no headline written"
 eq "$(field tk-rev status)" "open" "(REWORK-RECORD-REFUSED) …and no gate resolved"
 # A recorded rework that does not read stops a re-run before any write.
 acceptance; setm tk-anc merge_result pull_request
 TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 : > "$CALLS"
-SHOW_DOWN=tk-child run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+STUB_SHOW_FAIL_ON=tk-child run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-RECORD-UNREAD) a re-run whose recorded rework does not read exits 1"
 has "$OUT" "could not be read to tell whether it has closed" "(REWORK-RECORD-UNREAD) …saying so"
 eq "$(writes)" 0 "(REWORK-RECORD-UNREAD) …writing nothing"
@@ -1283,16 +1141,16 @@ eq "$(writes)" 0 "(REWORK-RECORD-UNREAD) …writing nothing"
 # the writer would file a second one, so the re-run is refused before any
 # write, and the sitting holds.
 acceptance; setm tk-anc merge_result pull_request
-REFUSE_UPDATE_MATCH='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+STUB_UPDATE_FAIL_ON='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-WINDOW) an attempt whose rework's record the store refuses exits 1"
-eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: fix the retry before the merge"]')" '{"act":"rework","anchor":"tk-anc"}' "(REWORK-WINDOW) …leaving the record naming the PR and no rework"
+eq "$(consequence "ruled: fix the retry before the merge")" '{"act":"rework","anchor":"tk-anc"}' "(REWORK-WINDOW) …leaving the record naming the PR and no rework"
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK-WINDOW-OPEN) the same sign-off, run while that rework is open, exits 0"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REWORK-WINDOW-OPEN) …sending the ruling to the writer, which adopts the open rework"
-eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: fix the retry before the merge"]')" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-WINDOW-OPEN) …and recording it"
+has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REWORK-WINDOW-OPEN) …sending the ruling to the writer, which adopts the open rework"
+eq "$(consequence "ruled: fix the retry before the merge")" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-WINDOW-OPEN) …and recording it"
 acceptance; setm tk-anc merge_result pull_request
-REFUSE_UPDATE_MATCH='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+STUB_UPDATE_FAIL_ON='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 setf tk-child status closed
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
@@ -1302,10 +1160,10 @@ has "$OUT" "hold instead (converse-hold)" "(REWORK-WINDOW-CLOSED) …and sending
 eq "$(writes)" 0 "(REWORK-WINDOW-CLOSED) …filing no second rework and writing nothing"
 eq "$(field tk-conv status)" "in_progress" "(REWORK-WINDOW-CLOSED) …so the conversation stays held"
 # The same refusal for a stay, before its first write.
-REFUSE_UPDATE_MATCH='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry before the merge" --rework --no-wait --stay "the retry backs off"
+STUB_UPDATE_FAIL_ON='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry before the merge" --rework --no-wait --stay "the retry backs off"
 eq "$RC/$(writes)" "2/0" "(REWORK-WINDOW-STAY) a stay re-run over that closed rework is refused, writing nothing, its staying: line included"
 # A read of the conversation's reworks that fails stops the re-run.
-LIST_META_DOWN=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+STUB_LIST_FAIL_ON=--metadata-field run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC/$(writes)" "1/0" "(REWORK-WINDOW-UNREAD) a re-run whose reworks do not read stops, writing nothing"
 has "$OUT" "could not be read, to tell whether an earlier attempt of this ruling filed one on tk-anc" "(REWORK-WINDOW-UNREAD) …saying so"
 # A closed rework another ruling's record names, or one on another PR, is no
@@ -1316,19 +1174,19 @@ bead tk-else task closed; setm tk-else task_kind rework; setm tk-else anchor_bea
 setm tk-conv gc.ruling_consequence '{"ruled: an earlier ruling":{"act":"rework","anchor":"tk-anc","child":"tk-old"},"ruled: fix the retry before the merge":{"act":"rework","anchor":"tk-anc"}}'
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK-WINDOW-NAMED) a re-run beside a closed rework another ruling records, and one on another PR, exits 0"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REWORK-WINDOW-NAMED) …filing its rework"
+has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REWORK-WINDOW-NAMED) …filing its rework"
 acceptance; setm tk-anc merge_result pull_request
 bead tk-old task closed; setm tk-old task_kind rework; setm tk-old anchor_bead tk-anc; setm tk-old source_ruling_bead tk-conv
 bead tk-child task open; setm tk-child task_kind rework; setm tk-child anchor_bead tk-anc; setm tk-child source_ruling_bead tk-conv
 setm tk-conv gc.ruling_consequence '{"ruled: fix the retry before the merge":{"act":"rework","anchor":"tk-anc"}}'
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK-WINDOW-LIVE) a re-run with an open rework beside a closed one no record names exits 0"
-eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: fix the retry before the merge"]')" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-WINDOW-LIVE) …adopting and recording the open one"
+eq "$(consequence "ruled: fix the retry before the merge")" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-WINDOW-LIVE) …adopting and recording the open one"
 acceptance; setm tk-anc merge_result pull_request
 REWORK_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-FAIL) a rework that does not file exits 1"
 has "$OUT" "REWORK NOT COMPLETE on tk-anc" "(REWORK-FAIL) …saying so"
-hasnt "$(cat "$CALLS")" "gc-helm takeaway" "(REWORK-FAIL) …with no headline written"
+hasnt "$(calls)" "gc-helm takeaway" "(REWORK-FAIL) …with no headline written"
 eq "$(field tk-rev status)" "open" "(REWORK-FAIL) …no gate resolved"
 eq "$(field tk-conv status)" "in_progress" "(REWORK-FAIL) …and the conversation open"
 acceptance; setm tk-anc merge_result pull_request
@@ -1352,9 +1210,9 @@ has "$OUT" "this ruling reaches tk-anc, each an open PR, as its subject, as the 
 eq "$(writes)" 0 "(HELD-PR) …writing nothing"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(HELD-PR) --rework exits 0"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(HELD-PR) …filing the rework against the PR's anchor"
+has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(HELD-PR) …filing the rework against the PR's anchor"
 eq "$(field tk-conv status)" "closed" "(HELD-PR) …and closing the conversation, whose close frees the merge"
-hasnt "$(cat "$CALLS")" "bd dep remove" "(HELD-PR) …with no write to the edge"
+hasnt "$(calls)" "bd dep remove" "(HELD-PR) …with no write to the edge"
 held_review
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 0 "(HELD-PR-LIFTED) once a sitting lifted the hold, the ruling reaches no PR through it and exits 0"
@@ -1395,18 +1253,18 @@ RETIRE_FAIL=1 run_signoff --conversation tk-conv --outcome "retired" "${RETIRED[
 eq "$RC" 1 "(RETIRE-FAIL) a retirement that leaves the PR open exits 1"
 has "$OUT" "RETIREMENT NOT COMPLETE on tk-anc" "(RETIRE-FAIL) …saying so"
 has "$OUT" "NOT SIGNED OFF" "(RETIRE-FAIL) …and that the sign-off is not to be posted"
-hasnt "$(cat "$CALLS")" "gc-helm takeaway" "(RETIRE-FAIL) …with no headline written"
+hasnt "$(calls)" "gc-helm takeaway" "(RETIRE-FAIL) …with no headline written"
 eq "$(field tk-rev status)" "open" "(RETIRE-FAIL) …no gate resolved"
 eq "$(merge_held tk-anc)" held "(RETIRE-FAIL) …so the real finalize gate still holds the open PR's merge"
 eq "$(field tk-conv status)" "in_progress" "(RETIRE-FAIL) …and the conversation stays open for the re-run"
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "retired: the work moved" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(RETIRE) the re-run's --retire exits 0"
-has "$(cat "$CALLS")" "pr-dispose --anchor tk-anc --successor tk-conv --kind not-needed --note the work moved to the new design" "(RETIRE) the PR is retired as not-needed, with the conversation as the evidence and the ruling as the note"
-has "$(head -1 "$CALLS")" "pr-dispose" "(RETIRE) …before every other write"
-case "$(cat "$CALLS")" in
+has "$(calls)" "pr-dispose --anchor tk-anc --successor tk-conv --kind not-needed --note the work moved to the new design" "(RETIRE) the PR is retired as not-needed, with the conversation as the evidence and the ruling as the note"
+has "$(nth_write 1)" "pr-dispose" "(RETIRE) …before every other write"
+case "$(calls)" in
   *"pr-dispose"*"gate resolve tk-rev"*) ok "(RETIRE) …so the PR is closed before the gate that held its merge is resolved" ;;
-  *) bad "(RETIRE) the gate was resolved before the PR was retired: $(cat "$CALLS")" ;;
+  *) bad "(RETIRE) the gate was resolved before the PR was retired: $(calls)" ;;
 esac
 eq "$(merge_held tk-anc)" released "(RETIRE) the gate releases the merge only after the PR is closed"
 eq "$(field tk-conv status)" "closed" "(RETIRE) the conversation is closed"
@@ -1419,13 +1277,13 @@ setf tk-anc status closed; edge tk-anc supersedes tk-conv
 run_signoff --conversation tk-conv --outcome "retired: the work moved" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(RETIRE-RETRY) the same sign-off, run again once the retirement has closed the PR, exits 0"
 has "$OUT" "tk-anc, the PR an earlier attempt of this ruling recorded for its --retire, reads closed" "(RETIRE-RETRY) …finding the PR closed"
-hasnt "$(cat "$CALLS")" "pr-dispose" "(RETIRE-RETRY) …disposing nothing again"
-hasnt "$(cat "$CALLS")" "bd comment " "(RETIRE-RETRY) …recording no action again"
+hasnt "$(calls)" "pr-dispose" "(RETIRE-RETRY) …disposing nothing again"
+hasnt "$(calls)" "bd comment " "(RETIRE-RETRY) …recording no action again"
 eq "$(acts tk-conv)" "Retired the PR of tk-anc.|Ruled: the work moved to the new design" "(RETIRE-RETRY) …so the conversation still lists the retirement among its actions"
 open_pr
 run_signoff --conversation tk-conv --outcome "retired: a duplicate" "${RETIRED[@]}" --retire duplicate --successor tk-new
 eq "$RC" 0 "(RETIRE-SUCCESSOR) --retire duplicate --successor exits 0"
-has "$(cat "$CALLS")" "pr-dispose --anchor tk-anc --successor tk-new --kind duplicate" "(RETIRE-SUCCESSOR) …naming the bead that carries the work as the successor"
+has "$(calls)" "pr-dispose --anchor tk-anc --successor tk-new --kind duplicate" "(RETIRE-SUCCESSOR) …naming the bead that carries the work as the successor"
 
 echo "# a ruling on a turn that does not sign off: the gates it names, after what it does to the PR"
 acceptance; gate tk-two later-question; edge tk-anc blocks tk-two; edge tk-conv replies-to tk-two
@@ -1444,12 +1302,12 @@ eq "$(field tk-rev status)/$(field tk-rev close_reason)" "closed/ruled: fix the 
 eq "$(field tk-two status)" "open" "(ANSWER) the other gate the conversation replies to stays open"
 eq "$(field tk-conv status)/$(field tk-conv assignee)" "in_progress/gc-toolkit/gc-toolkit.tk-conv" "(ANSWER) the conversation stays open under its sitting"
 eq "$(meta tk-anc gc.takeaway)" "ruled on the review; the rollout is still open" "(ANSWER) the headline is written"
-case "$(cat "$CALLS")" in
+case "$(calls)" in
   *"gc-helm takeaway"*"gate resolve tk-rev"*) ok "(ANSWER) …before the gate" ;;
-  *) bad "(ANSWER) the gate was resolved before the headline: $(cat "$CALLS")" ;;
+  *) bad "(ANSWER) the gate was resolved before the headline: $(calls)" ;;
 esac
-hasnt "$(cat "$CALLS")" "bd close" "(ANSWER) nothing is closed"
-hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(ANSWER) …and the comment, which shows an open visit no actions, is left for the sign-off"
+hasnt "$(calls)" "bd close" "(ANSWER) nothing is closed"
+hasnt "$(calls)" "pr-sitting-comment" "(ANSWER) …and the comment, which shows an open visit no actions, is left for the sign-off"
 eq "$(acts tk-conv)" "Ruled: fix the retry before the merge" "(ANSWER) the ruling is recorded among the visit's actions"
 has "$OUT" "ANSWERED tk-rev for conversation tk-conv on tk-anc" "(ANSWER) the answer is reported"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
@@ -1499,9 +1357,9 @@ eq "$(merge_held tk-anc)" held "(ANSWER-REWORK-FAIL) …so the real finalize gat
 : > "$CALLS"
 run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}" --rework
 eq "$RC" 0 "(ANSWER-REWORK) the re-run, whose rework files, exits 0"
-case "$(cat "$CALLS")" in
+case "$(calls)" in
   *"converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry before the merge"*"gate resolve tk-rev"*) ok "(ANSWER-REWORK) the rework is filed before the gate is resolved" ;;
-  *) bad "(ANSWER-REWORK) the gate was resolved before the rework was filed: $(cat "$CALLS")" ;;
+  *) bad "(ANSWER-REWORK) the gate was resolved before the rework was filed: $(calls)" ;;
 esac
 eq "$(merge_held tk-anc)" released "(ANSWER-REWORK) …and only then does the gate release the merge"
 eq "$(field tk-conv status)" "in_progress" "(ANSWER-REWORK) the conversation stays open"
@@ -1513,9 +1371,9 @@ eq "$(merge_held tk-anc)" held "(ANSWER-RETIRE-FAIL) …so the real finalize gat
 : > "$CALLS"
 run_signoff --conversation tk-conv --answer tk-rev --ruling "the work moved" --outcome "retired" --retire not-needed
 eq "$RC" 0 "(ANSWER-RETIRE) the re-run, whose retirement completes, exits 0"
-case "$(cat "$CALLS")" in
+case "$(calls)" in
   *"pr-dispose --anchor tk-anc --successor tk-conv --kind not-needed"*"gate resolve tk-rev"*) ok "(ANSWER-RETIRE) the PR is retired before the gate is resolved" ;;
-  *) bad "(ANSWER-RETIRE) the gate was resolved before the PR was retired: $(cat "$CALLS")" ;;
+  *) bad "(ANSWER-RETIRE) the gate was resolved before the PR was retired: $(calls)" ;;
 esac
 eq "$(merge_held tk-anc)" released "(ANSWER-RETIRE) …and only then does the gate release the merge"
 
@@ -1549,7 +1407,7 @@ eq "$(merge_held tk-anc)" released "(REVIEW-PR) …and only then is the merge re
 review_pr
 run_signoff --conversation tk-conv --answer tk-dg "${REVIEWED[@]}" --rework
 eq "$RC/$(field tk-dg status)/$(field tk-rev status)" "0/closed/open" "(REVIEW-PR-REWORK) the first call files the subject's rework and resolves only the Delivery's gate"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REVIEW-PR-REWORK) …the rework acting on the subject's PR"
+has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REVIEW-PR-REWORK) …the rework acting on the subject's PR"
 run_signoff --conversation tk-conv --ruled yes "${REVIEWED[@]}" --rework
 eq "$RC/$(field tk-rev status)" "0/closed" "(REVIEW-PR-REWORK) the sign-off resolves the subject's gate"
 has "$OUT" "an earlier attempt of this ruling recorded tk-anc as the PR its --rework acts on" "(REVIEW-PR-REWORK) …acting on the PR the first call recorded"
@@ -1557,9 +1415,9 @@ CLOSED=(--ruling "close: the hypothesis held, and PR #52 is not needed" --outcom
 review_pr
 run_signoff --conversation tk-conv --answer tk-dg "${CLOSED[@]}"
 eq "$RC/$(field tk-dg status)/$(field tk-rev status)" "0/closed/open" "(REVIEW-PR-RETIRE) the first call retires the subject's PR and resolves only the Delivery's gate"
-case "$(cat "$CALLS")" in
+case "$(calls)" in
   *"pr-dispose --anchor tk-anc --successor tk-conv --kind not-needed"*"gate resolve tk-dg"*) ok "(REVIEW-PR-RETIRE) …retiring the PR before the gate is resolved" ;;
-  *) bad "(REVIEW-PR-RETIRE) the gate was resolved before the PR was retired: $(cat "$CALLS")" ;;
+  *) bad "(REVIEW-PR-RETIRE) the gate was resolved before the PR was retired: $(calls)" ;;
 esac
 run_signoff --conversation tk-conv --answer tk-rev "${CLOSED[@]}"
 eq "$RC/$(field tk-rev status)" "0/closed" "(REVIEW-PR-RETIRE) the close's own call on the subject's gate, under the same ruling, resolves it"
@@ -1569,7 +1427,7 @@ setf tk-anc status closed; edge tk-anc supersedes tk-conv
 run_signoff --conversation tk-conv --ruled yes "${CLOSED[@]}"
 eq "$RC/$(field tk-conv status)" "0/closed" "(REVIEW-PR-RETIRE) the sign-off exits 0 once the retired PR's bead has closed"
 has "$OUT" "tk-anc, the PR an earlier attempt of this ruling recorded for its --retire, reads closed" "(REVIEW-PR-RETIRE) …finding the PR its ruling retired closed"
-hasnt "$(cat "$CALLS")" "pr-dispose" "(REVIEW-PR-RETIRE) …and disposing nothing again"
+hasnt "$(calls)" "pr-dispose" "(REVIEW-PR-RETIRE) …and disposing nothing again"
 # A PR in flight beside the subject is retired on a call of its own, under its
 # own ruling. That call reaches the subject's open PR too and leaves it
 # standing, so the writer adds the subject's Approve clause to its outcome.
@@ -1578,7 +1436,7 @@ edge tk-pr3 parent-child tk-epic; gate tk-g3 epic-review.tk-pr3; edge tk-pr3 blo
 run_signoff --conversation tk-conv --answer tk-g3 --ruling "close: the hypothesis held; it retires PR #53 (tk-pr3)" \
     --pr-anchor tk-pr3 --retire not-needed --outcome "the epic is closed" --no-wait
 eq "$RC/$(field tk-g3 status)/$(field tk-rev status)" "0/closed/open" "(REVIEW-PR-OTHER) another PR retired on its own call resolves only that PR's gate"
-has "$(cat "$CALLS")" "pr-dispose --anchor tk-pr3 --successor tk-conv --kind not-needed" "(REVIEW-PR-OTHER) …retiring the PR it names"
+has "$(calls)" "pr-dispose --anchor tk-pr3 --successor tk-conv --kind not-needed" "(REVIEW-PR-OTHER) …retiring the PR it names"
 has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(REVIEW-PR-OTHER) …and leaving the subject's PR standing"
 eq "$(meta tk-anc gc.takeaway)" "the epic is closed; PR #52 still needs your Approve on GitHub" "(REVIEW-PR-OTHER) …so the headline carries the subject's Approve clause after the outcome"
 
@@ -1587,33 +1445,17 @@ acceptance; run_signoff --conversation tk-conv --outcome "cut short: the rollout
 eq "$RC" 0 "(CUT-SHORT) a cut-short sign-off exits 0"
 eq "$(meta tk-anc gc.takeaway)" "cut short: the rollout question is still owed" "(CUT-SHORT) the headline is written"
 eq "$(field tk-rev status)" "open" "(CUT-SHORT) the gate stays open and owed"
-eq "$(jq -r '[.deps[] | select(.type == "replies-to") | .on] | join(" ")' "$STORE/b/tk-conv.json")" "tk-rev" "(CUT-SHORT) …with its reply in place for the next sitting"
+eq "$(bedges tk-conv replies-to)" "tk-rev" "(CUT-SHORT) …with its reply in place for the next sitting"
 eq "$(field tk-conv assignee)/$(field tk-conv status)" "human/open" "(CUT-SHORT) the conversation is back in the operator's queue"
-has "$(cat "$CALLS")" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --if-status in_progress --assignee human --status open" "(CUT-SHORT) …by one write guarded on the sitting that held it and the status it read"
-hasnt "$(cat "$CALLS")" "bd close" "(CUT-SHORT) …and nothing is closed"
-hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(CUT-SHORT) the visit's comment is left as it is, since the conversation is open"
-hasnt "$(cat "$CALLS")" "bd comment " "(CUT-SHORT) …and no action is recorded"
+has "$(calls)" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --if-status in_progress --assignee human --status open" "(CUT-SHORT) …by one write guarded on the sitting that held it and the status it read"
+hasnt "$(calls)" "bd close" "(CUT-SHORT) …and nothing is closed"
+hasnt "$(calls)" "pr-sitting-comment" "(CUT-SHORT) the visit's comment is left as it is, since the conversation is open"
+hasnt "$(calls)" "bd comment " "(CUT-SHORT) …and no action is recorded"
 # The guard misses when another writer reached the conversation first: model it
 # by changing the conversation between the sign-off's read and its write. Another
 # sitting taking it changes the holder. A dismiss closes it and keeps the
 # holder, so only the status guard sees it.
-cp "$TMP/bin/gc" "$TMP/bin/gc.real"
-cat > "$TMP/bin/gc" <<'G2'
-#!/usr/bin/env bash
-if [ "$1 $2 $3" = "bd update tk-conv" ]; then
-  if [ -n "${STEAL_BEFORE_UPDATE:-}" ]; then
-    jq '.assignee = "gc-toolkit/gc-toolkit.c-tk-conv"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
-  fi
-  if [ -n "${DISMISS_BEFORE_UPDATE:-}" ]; then
-    jq '.status = "closed" | .close_reason = "dismissed by the operator"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
-  fi
-  if [ -n "${RETURN_BEFORE_UPDATE:-}" ]; then
-    jq '.assignee = "human" | .status = "open"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
-  fi
-fi
-exec "$(dirname "$0")/gc.real" "$@"
-G2
-chmod +x "$TMP/bin/gc"
+export STUB_HOOK_AT="bd update tk-conv" STUB_HOOK="$TMP/before-update"
 acceptance
 STEAL_BEFORE_UPDATE=1 run_signoff --conversation tk-conv --outcome "cut short" --ruled no
 eq "$RC" 1 "(CUT-SHORT-RACE) a hand-back whose guard misses exits 1"
@@ -1623,14 +1465,14 @@ DISMISS_BEFORE_UPDATE=1 run_signoff --conversation tk-conv --outcome "cut short"
 eq "$RC" 0 "(CUT-SHORT-DISMISS) a dismiss that lands between the sign-off's read and its hand-back exits 0"
 eq "$(field tk-conv status)/$(field tk-conv assignee)" "closed/gc-toolkit/gc-toolkit.tk-conv" "(CUT-SHORT-DISMISS) …and the dismissed conversation stays closed, not reopened into the operator's queue"
 has "$OUT" "was closed while this sign-off ran" "(CUT-SHORT-DISMISS) …saying so"
-hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(CUT-SHORT-DISMISS) …leaving the comment the dismiss drew"
+hasnt "$(calls)" "pr-sitting-comment" "(CUT-SHORT-DISMISS) …leaving the comment the dismiss drew"
 eq "$(field tk-rev status)" "open" "(CUT-SHORT-DISMISS) the gate stays open and owed"
 acceptance
 RETURN_BEFORE_UPDATE=1 run_signoff --conversation tk-conv --outcome "cut short" --ruled no
 eq "$RC" 0 "(CUT-SHORT-RETURNED) a conversation another writer put back in the queue between the sign-off's read and its hand-back exits 0"
 eq "$(field tk-conv assignee)/$(field tk-conv status)" "human/open" "(CUT-SHORT-RETURNED) …and stays in the operator's queue"
 has "$OUT" "(back in the operator's queue)" "(CUT-SHORT-RETURNED) …which the sign-off reports"
-mv "$TMP/bin/gc.real" "$TMP/bin/gc"
+STUB_HOOK_AT="" STUB_HOOK=""
 # A conversation that already reads closed has ended: a dismiss or an earlier
 # sign-off closed it, and bd's close kept its assignee, so the guarded hand-back
 # would reopen it into the operator's queue.
@@ -1638,8 +1480,8 @@ acceptance; setf tk-conv status closed
 run_signoff --conversation tk-conv --outcome "cut short" --ruled no
 eq "$RC" 0 "(CUT-SHORT-CLOSED) a cut-short sign-off on a closed conversation exits 0"
 eq "$(field tk-conv status)" "closed" "(CUT-SHORT-CLOSED) …and the conversation stays closed"
-hasnt "$(cat "$CALLS")" "bd update tk-conv" "(CUT-SHORT-CLOSED) …with no hand-back written"
-hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(CUT-SHORT-CLOSED) …leaving the comment its closer drew"
+hasnt "$(calls)" "bd update tk-conv" "(CUT-SHORT-CLOSED) …with no hand-back written"
+hasnt "$(calls)" "pr-sitting-comment" "(CUT-SHORT-CLOSED) …leaving the comment its closer drew"
 eq "$(field tk-rev status)" "open" "(CUT-SHORT-CLOSED) the gate stays open and owed"
 
 # recommend — tk-anc recommends mol-fix through tk-rec, the gate a first
@@ -1655,19 +1497,19 @@ TAKE=(--ruled yes --ruling "take the reaction's mol-fix" --no-wait --accept)
 echo "# a ruling that takes the recommendation hands its gate to Accept's writer"
 recommend; run_signoff --conversation tk-conv --outcome "took the reaction's mol-fix" "${TAKE[@]}"
 eq "$RC" 0 "(ACCEPT) a sign-off that takes the recommendation exits 0"
-has "$(cat "$CALLS")" "gc-helm accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix" "(ACCEPT) …running Accept's writer on the subject, naming its own conversation"
-hasnt "$(cat "$CALLS")" "gate resolve tk-rec" "(ACCEPT) …and never resolving the recommendation's gate itself"
+has "$(calls)" "gc-helm accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix" "(ACCEPT) …running Accept's writer on the subject, naming its own conversation"
+hasnt "$(calls)" "gate resolve tk-rec" "(ACCEPT) …and never resolving the recommendation's gate itself"
 eq "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:0123456789abcdef" "(ACCEPT) the gate carries Accept's answer"
 eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(ACCEPT) …and the dispatch is recorded"
 eq "$(field tk-conv status)" "closed" "(ACCEPT) the conversation closes"
-eq "$(jq -r '[.deps[] | select(.type == "replies-to") | .on] | join(" ")' "$STORE/b/tk-conv.json")" "tk-rec" "(ACCEPT) …keeping its reply onto the gate it took up"
+eq "$(bedges tk-conv replies-to)" "tk-rec" "(ACCEPT) …keeping its reply onto the gate it took up"
 has "$OUT" "took the recommendation: mol-fix at tk-anc, through Accept" "(ACCEPT) the take is reported"
 eq "$(acts tk-conv)" "Ruled: take the reaction's mol-fix|Took the recommendation and started its work." "(ACCEPT) …and the conversation records the ruling, then the recommendation taken"
-case "$(cat "$CALLS")" in
+case "$(calls)" in
   *"gc-helm takeaway"*"gc-helm accept"*"bd close tk-conv"*) ok "(ACCEPT-ORDER) headline, then the acceptance, then the close" ;;
-  *) bad "(ACCEPT-ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
+  *) bad "(ACCEPT-ORDER) the writes ran out of order: $(calls)" ;;
 esac
-TAKEN="$(cat "$CALLS")"
+TAKEN="$(calls)"
 ACCEPT_DOES=dispatched run_signoff --conversation tk-conv --outcome "took the reaction's mol-fix" "${TAKE[@]}"
 eq "$RC" 0 "(ACCEPT-RERUN) a re-run of a sign-off that took the recommendation exits 0"
 has "$OUT" "the recommendation was already taken" "(ACCEPT-RERUN) …finding it already taken"
@@ -1679,9 +1521,9 @@ recommend; gate tk-rev review-needs-you.tk-find; edge tk-anc blocks tk-rev; edge
 run_signoff --conversation tk-conv --outcome "fix the retry; mol-fix is taken" "${TAKE[@]}"
 eq "$RC" 0 "(ACCEPT-BESIDE) a ruling on both gates that takes the recommendation exits 0"
 eq "$(field tk-rev close_reason)" "ruled: take the reaction's mol-fix" "(ACCEPT-BESIDE) the review gate is answered with the ruling"
-case "$(cat "$CALLS")" in
+case "$(calls)" in
   *"gate resolve tk-rev"*"gc-helm accept tk-anc"*) ok "(ACCEPT-BESIDE) …before Accept's writer runs, so no other gate holds the bead when it dispatches" ;;
-  *) bad "(ACCEPT-BESIDE) Accept ran before the review gate was answered: $(cat "$CALLS")" ;;
+  *) bad "(ACCEPT-BESIDE) Accept ran before the review gate was answered: $(calls)" ;;
 esac
 eq "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:0123456789abcdef" "(ACCEPT-BESIDE) the recommendation's gate carries Accept's answer"
 
@@ -1696,7 +1538,7 @@ run_signoff --conversation tk-conv --outcome x "${TAKE[@]}"
 eq "$RC" 2 "(ACCEPT-NO-REPLY) --accept from a conversation that does not reply to the recommendation's gate exits 2"
 has "$OUT" "first-reaction" "(ACCEPT-NO-REPLY) …naming the gate it must reply to"
 eq "$(writes)" 0 "(ACCEPT-NO-REPLY) …writing nothing"
-recommend; jq 'del(.metadata["gc.recommended_formula"])' "$STORE/b/tk-anc.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-anc.json"
+recommend; bunset tk-anc metadata.gc.recommended_formula
 run_signoff --conversation tk-conv --outcome x "${TAKE[@]}"
 eq "$RC" 2 "(ACCEPT-NONE) --accept on a subject that carries no recommendation exits 2"
 eq "$(writes)" 0 "(ACCEPT-NONE) …writing nothing"
@@ -1739,7 +1581,7 @@ edge tk-conv replies-to tk-rec2
 run_signoff --conversation tk-conv --outcome "took the reaction's mol-fix" "${TAKE[@]}"
 eq "$RC" 0 "(ACCEPT-TWINS) a ruling that answers both gates under the key takes the recommendation"
 eq "$(field tk-rec status)/$(field tk-rec2 status)" "closed/closed" "(ACCEPT-TWINS) …through Accept, which answers both"
-hasnt "$(cat "$CALLS")" "gate resolve tk-rec" "(ACCEPT-TWINS) …and the sign-off resolves neither itself"
+hasnt "$(calls)" "gate resolve tk-rec" "(ACCEPT-TWINS) …and the sign-off resolves neither itself"
 
 echo "# --accept on a turn that does not sign off"
 recommend; run_signoff --conversation tk-conv --answer tk-rec --ruling "take the reaction's mol-fix" --outcome "mol-fix is taken; the rollout is still open" --no-wait --accept
@@ -1763,7 +1605,7 @@ eq "$(acts tk-conv)" "Ruled: take the reaction's mol-fix" "(ACCEPT-FIRST) …and
 echo "# --var hands Accept's writer a var the ruling settled for the dispatch"
 recommend; run_signoff --conversation tk-conv --outcome "mol-fix is taken all-in-one" "${TAKE[@]}" --var design_gated=false
 eq "$RC" 0 "(ACCEPT-VAR) a take that settles a var for the dispatch exits 0"
-has "$(cat "$CALLS")" "gc-helm accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix --var design_gated=false" "(ACCEPT-VAR) …passing it to Accept's writer"
+has "$(calls)" "gc-helm accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix --var design_gated=false" "(ACCEPT-VAR) …passing it to Accept's writer"
 ACCEPT_DOES=dispatched run_signoff --conversation tk-conv --outcome "mol-fix is taken all-in-one" "${TAKE[@]}" --var design_gated=false
 eq "$RC" 0 "(ACCEPT-VAR) a re-run once the dispatch is made exits 0"
 has "$OUT" "keeps the vars it was made with, so the --var given here does not reach it" "(ACCEPT-VAR) …saying the dispatch already made keeps its own vars"
@@ -1781,8 +1623,8 @@ echo "# a ruling is not an approval: a PR it leaves standing with none says so"
 # status carries; with none set, it carries no conditions key, as a status on
 # the old record does, which does not say whether an approval stands.
 pr_at() { setm "$1" pr_number "$2"; setm "$1" pr_url "https://github.com/acme/widgets/pull/$2"; }
-pr_status() { printf '%s' "$2" > "$STORE/status-$1"; }
-pr_conditions() { printf '%s' "$2" > "$STORE/conditions-$1"; }
+pr_status() { printf '%s' "$2" > "$ST/status-$1"; }
+pr_conditions() { printf '%s' "$2" > "$ST/conditions-$1"; }
 # said <label> <owed|landed> — what a sign-off outcome "design approved" on PR #77
 # wrote and printed: the Approve still owed, or nothing of it.
 said() {
@@ -1813,7 +1655,7 @@ esac
 eq "$(field tk-rev status)" "closed" "(APPROVE-OWED) the ruling still answers the gate"
 has "$(cat "$GCTK_CALLS")" "pr status tk-anc --json" "(APPROVE-OWED) the status is read for the PR's anchor"
 eq "$(grep -cv '^writes=0 ' "$GCTK_CALLS" || true)" 0 "(APPROVE-OWED) …before the first write"
-has "$(cat "$STORE/timeout-args")" "-k 5 20 $GCTK_BIN pr status tk-anc --json" "(APPROVE-OWED) the read gives up after 20 seconds"
+has "$(cat "$ST/timeout-args")" "-k 5 20 $GCTK_BIN pr status tk-anc --json" "(APPROVE-OWED) the read gives up after 20 seconds"
 run_signoff "${STAND[@]}"
 eq "$RC" 0 "(APPROVE-RERUN) a re-run exits 0"
 said "(APPROVE-RERUN)" owed
@@ -1860,7 +1702,7 @@ approval_owed='{"kind":"approval","detail":"no approval stands from an account t
 requested() { printf '{"kind":"changes-requested","value":"%s","detail":"%s requests changes, and the request stands"}' "$1" "$1"; }
 pending_pr '[]'; pr_status tk-anc merging
 run_signoff "${STAND[@]}"
-MERGING_WRITES=$(cat "$CALLS")
+MERGING_WRITES=$(calls)
 # vetoed <label> <login> — what a sign-off on PR #77 wrote and printed when its
 # status names an approval standing beside <login>'s request for changes.
 vetoed() {
@@ -1872,7 +1714,7 @@ vetoed() {
     has "$OUT" "An approval stands on PR #77, and a request for changes from $2 holds its merge until $2 approves or the request is dismissed. This ruling does neither." "$1 …but names whose request holds the merge and what clears it"
     has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "$1 …with the PR's link"
     eq "$(field tk-rev status)" "closed" "$1 the ruling still answers the gate"
-    eq "$(cat "$CALLS")" "$MERGING_WRITES" "$1 …writing what a sign-off on a PR that asks for no Approve writes"
+    eq "$(calls)" "$MERGING_WRITES" "$1 …writing what a sign-off on a PR that asks for no Approve writes"
 }
 pending_pr "[$(requested maintainer)]"
 run_signoff "${STAND[@]}"
@@ -1926,8 +1768,8 @@ mkdir -p "$TMP/no-timeout"
 for _t in basename bash cat cut date dirname env grep head jq mkdir mktemp mv rm sed sort tail tr; do
     command -v "$_t" >/dev/null 2>&1 && ln -sf "$(command -v "$_t")" "$TMP/no-timeout/$_t"
 done
-ln -sf "$TMP/bin/gc" "$TMP/no-timeout/gc"
-ln -sf "$TMP/bin/gh" "$TMP/no-timeout/gh"
+ln -sf "$BIN/gc" "$TMP/no-timeout/gc"
+ln -sf "$BIN/gh" "$TMP/no-timeout/gh"
 open_pr; pr_at tk-anc 77; pr_status tk-anc merging
 PATH="$TMP/no-timeout" run_signoff "${STAND[@]}"
 eq "$RC" 0 "(APPROVE-NO-TIMEOUT) a host with no timeout tool still signs off"
@@ -1936,13 +1778,13 @@ has "$OUT" "The status of PR #77 could not be read" "(APPROVE-NO-TIMEOUT) …so 
 eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-NO-TIMEOUT) …and counts as needing one"
 eq "$(field tk-rev status)" "closed" "(APPROVE-NO-TIMEOUT) …and the ruling answers the gate"
 eq "$(field tk-conv status)" "closed" "(APPROVE-NO-TIMEOUT) …and the conversation closes"
-ln -sf "$TMP/bin/timeout" "$TMP/no-timeout/gtimeout"
+ln -sf "$BIN/timeout" "$TMP/no-timeout/gtimeout"
 open_pr; pr_at tk-anc 77; pr_status tk-anc merging
 PATH="$TMP/no-timeout" run_signoff "${STAND[@]}"
 said "(APPROVE-GTIMEOUT) a host with gtimeout alone reads through it:" landed
 
 open_pr; pr_at tk-anc 77
-SHOW_DOWN_SECOND=tk-anc run_signoff "${STAND[@]}"
+STUB_HOOK_AT="show tk-anc" STUB_HOOK="$TMP/second-fails" run_signoff "${STAND[@]}"
 eq "$RC" 1 "(APPROVE-ROW-UNREAD) a PR left standing whose row does not read stops the sign-off"
 has "$OUT" "NOT SIGNED OFF" "(APPROVE-ROW-UNREAD) …saying not to post the sign-off"
 eq "$(writes)" 0 "(APPROVE-ROW-UNREAD) …and writes nothing"
@@ -2070,18 +1912,18 @@ eq "$RC" 0 "(STAY) a stay exits 0"
 eq "$(field tk-g status)" "closed" "(STAY) …answering the gate, as a sign-off does"
 eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(STAY) …arming the subject's validating closer, as a sign-off does"
 eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolkit.tk-conv" "(STAY) …leaving the conversation open under its sitting"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-work --type blocks" "(STAY) …waiting on the work through a blocks edge"
+has "$(calls)" "bd dep add tk-conv tk-work --type blocks" "(STAY) …waiting on the work through a blocks edge"
 has "$(field tk-conv notes)" "staying: the dialog keeps what is typed (waits on tk-work)" "(STAY) …with the staying: line the entry reads"
-hasnt "$(cat "$CALLS")" "bd close tk-conv" "(STAY) …closing nothing"
-hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(STAY) …and drawing no PR comment as if it had closed"
+hasnt "$(calls)" "bd close tk-conv" "(STAY) …closing nothing"
+hasnt "$(calls)" "pr-sitting-comment" "(STAY) …and drawing no PR comment as if it had closed"
 has "$(acts tk-conv)" "Kept this conversation open until the work it sent lands" "(STAY) the stay is one of the visit's actions"
 has "$OUT" "STAYING conversation tk-conv on tk-sub" "(STAY) …and it says so"
 has "$OUT" "Run the entry now: it reads waiting while that work is out, and returned once it has closed" "(STAY) …sending the sitting to its entry, which reads where the work stands"
 hasnt "$OUT" "wakes with this thread" "(STAY) …and promising no wake, which a sitting that is up never gets"
-eq "$(head -n 1 "$CALLS")" "bd update tk-conv --append-notes staying: the dialog keeps what is typed" "(STAY-ORDER) the stay records itself before any other write, naming no work yet"
-case "$(cat "$CALLS")" in
+eq "$(nth_write 1)" "bd update tk-conv --append-notes staying: the dialog keeps what is typed" "(STAY-ORDER) the stay records itself before any other write, naming no work yet"
+case "$(calls)" in
   *"--append-notes staying: the dialog keeps what is typed"*"gate resolve tk-g"*"--append-notes staying: the dialog keeps what is typed (waits on tk-work)"*"bd dep add tk-conv tk-work"*"--status open"*) ok "(STAY-ORDER) …then the gate, then the line that names the work, then the edge, then the status" ;;
-  *) bad "(STAY-ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
+  *) bad "(STAY-ORDER) the writes ran out of order: $(calls)" ;;
 esac
 eq "$(field tk-conv notes | grep '^staying:' | tr '\n' '|')" "staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work)|" "(STAY-LINES-TWO) …leaving the stay's two lines in its notes, the second newest"
 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
@@ -2105,7 +1947,7 @@ eq "$(briefs tk-sub)" 1 "(STAY-RETURN) …and writes no second brief"
 closer_case; setf tk-work status closed
 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 0 "(STAY-WORK-CLOSED) a stay whose work has closed already exits 0"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-work --type blocks" "(STAY-WORK-CLOSED) …waiting on that work"
+has "$(calls)" "bd dep add tk-conv tk-work --type blocks" "(STAY-WORK-CLOSED) …waiting on that work"
 eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolkit.tk-conv" "(STAY-WORK-CLOSED) …leaving the conversation open under its sitting, ready at once"
 has "$OUT" "Run the entry now" "(STAY-WORK-CLOSED) …and sending the sitting to its entry"
 hasnt "$OUT" "wakes with this thread" "(STAY-WORK-CLOSED) …never promising a wake that cannot come"
@@ -2115,7 +1957,7 @@ hasnt "$OUT" "wakes with this thread" "(STAY-WORK-CLOSED) …never promising a w
 closer_case
 TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 1 "(STAY-WORK-CLOSED-RERUN) a stay that stops at its headline exits 1"
-hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-WORK-CLOSED-RERUN) …before any edge"
+hasnt "$(calls)" "bd dep add tk-conv" "(STAY-WORK-CLOSED-RERUN) …before any edge"
 setf tk-work status closed
 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 0 "(STAY-WORK-CLOSED-RERUN) the same call, run once its work has closed, exits 0"
@@ -2132,34 +1974,25 @@ bead tk-work2
 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work and tk-work2" --ruled yes --ruling "build the fix" --waiting-on tk-work --waiting-on tk-work2 --close-brief "$BRIEF" --stay "the dialog keeps what is typed"
 eq "$RC" 0 "(STAY-MORE) a second stay with more work exits 0"
 eq "$(field tk-conv notes | grep '^staying:' | tr '\n' '|')" "staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work)|staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work, tk-work2)|" "(STAY-MORE) …recording itself again, then naming all its work"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-work2 --type blocks" "(STAY-MORE) …and waiting on the new work"
+has "$(calls)" "bd dep add tk-conv tk-work2 --type blocks" "(STAY-MORE) …and waiting on the new work"
 
 # A stay can run on a conversation that already reads open under its sitting,
 # as a second stay from a sitting woken early does, and the operator can dismiss
 # it while the call runs. A dismiss closes the conversation and keeps its
 # holder, and here it lands just before the stay's first write to it.
 closer_case; setf tk-conv status open
-cp "$TMP/bin/gc" "$TMP/bin/gc.real"
-cat > "$TMP/bin/gc" <<'G3'
-#!/usr/bin/env bash
-if [ "$1 $2 $3" = "bd update tk-conv" ] && [ -n "${DISMISS_BEFORE_UPDATE:-}" ]; then
-  jq '.status = "closed" | .close_reason = "dismissed by the operator"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
-fi
-exec "$(dirname "$0")/gc.real" "$@"
-G3
-chmod +x "$TMP/bin/gc"
-DISMISS_BEFORE_UPDATE=1 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
-mv "$TMP/bin/gc.real" "$TMP/bin/gc"
+STUB_HOOK_AT="bd update tk-conv" STUB_HOOK="$TMP/before-update" DISMISS_BEFORE_UPDATE=1 \
+    run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 1 "(STAY-DISMISS) a stay on an open conversation that a dismiss closes while it runs exits 1"
 has "$OUT" "was closed while this call ran, by a dismiss or another sign-off, so nothing stays" "(STAY-DISMISS) …saying the dismiss closed it"
 hasnt "$OUT" "STAYING conversation" "(STAY-DISMISS) …reporting no stay"
-has "$(cat "$CALLS")" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --if-status open --status open" "(STAY-DISMISS) …through the write guarded on the holder and the open status it read"
+has "$(calls)" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --if-status open --status open" "(STAY-DISMISS) …through the write guarded on the holder and the open status it read"
 eq "$(field tk-conv status)" "closed" "(STAY-DISMISS) …and the conversation stays closed"
 
 open_pr; bead tk-child; setm tk-child source_ruling_bead tk-conv
 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
 eq "$RC" 0 "(STAY-REWORK) a stay on a ruling that reworks the PR exits 0"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK) …waiting on the rework the call filed"
+has "$(calls)" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK) …waiting on the rework the call filed"
 has "$(field tk-conv notes)" "(waits on tk-child)" "(STAY-REWORK) …which its staying: line names"
 eq "$(field tk-conv status)" "open" "(STAY-REWORK) …with the conversation open"
 has "$OUT" "Run the entry now" "(STAY-REWORK) …and its sitting sent to its entry"
@@ -2179,8 +2012,8 @@ eq "$(field tk-conv status)" "closed" "(STAY-REWORK-RETURN) …and closing the c
 open_pr; setm tk-anc merge_result pull_request_pending
 REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --check arch --no-wait --stay "the retry backs off"
 eq "$RC" 0 "(STAY-REWORK-ASK) a stay on a ruling that sends a PR on the record back exits 0"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry --check arch" "(STAY-REWORK-ASK) …passing the checks the ruling names"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-ask --type blocks" "(STAY-REWORK-ASK) …and waiting on the ask, read as this conversation's rework by its discovered-from edge"
+has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry --check arch" "(STAY-REWORK-ASK) …passing the checks the ruling names"
+has "$(calls)" "bd dep add tk-conv tk-ask --type blocks" "(STAY-REWORK-ASK) …and waiting on the ask, read as this conversation's rework by its discovered-from edge"
 run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "fix the retry" --no-rework --check arch --no-wait
 eq "$RC" 2 "(CHECK-NEEDS-REWORK) --check without --rework is refused"
 # A ruling that sends the PR back once another PR lands names that PR's anchor
@@ -2231,7 +2064,7 @@ eq "$RC $(field tk-conv status)" "0 closed" "(REWORK-WAITS-TRIM) …and a re-run
 shared_pr; bead tk-child; setm tk-child source_ruling_bead tk-conv
 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --pr-anchor tk-anc --no-wait --stay "the retry backs off"
 eq "$RC" 0 "(STAY-REWORK-PICK) a rework stay on a ruling that reaches two open PRs, naming the one it reworks, exits 0"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK-PICK) …waiting on that PR's rework"
+has "$(calls)" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK-PICK) …waiting on that PR's rework"
 setf tk-child status closed
 REWORKS=$(grep -c '^converse-rework ' "$CALLS" || true)
 run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ruling "fix the retry" --no-rework --no-wait
@@ -2244,7 +2077,7 @@ open_pr
 REWORK_NO_CHILD=1 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
 eq "$RC" 1 "(STAY-REWORK-UNREAD) a rework child that does not read as this conversation's stops the stay"
 has "$OUT" "Sign off without --stay to end at the hand-off" "(STAY-REWORK-UNREAD) …naming the hand-off ending"
-hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-REWORK-UNREAD) …with no edge written"
+hasnt "$(calls)" "bd dep add tk-conv" "(STAY-REWORK-UNREAD) …with no edge written"
 eq "$(field tk-conv status)" "in_progress" "(STAY-REWORK-UNREAD) …and the conversation still claimed"
 
 # A rework stay that stops after its rework is filed, before it names its work,
@@ -2254,7 +2087,7 @@ eq "$(field tk-conv status)" "in_progress" "(STAY-REWORK-UNREAD) …and the conv
 open_pr; setm tk-anc pr_number 41
 TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
 eq "$RC" 1 "(STAY-REWORK-RESTART) a rework stay that stops after its rework is filed exits 1"
-eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: fix the retry"]')" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(STAY-REWORK-RESTART) …with the rework recorded under its ruling"
+eq "$(consequence "ruled: fix the retry")" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(STAY-REWORK-RESTART) …with the rework recorded under its ruling"
 setf tk-child status closed
 REWORKS=$(grep -c '^converse-rework ' "$CALLS" || true)
 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
@@ -2262,7 +2095,7 @@ eq "$RC" 0 "(STAY-REWORK-RESTART) the same call, run once that rework has closed
 has "$OUT" "tk-child, the rework an earlier attempt of this ruling filed on tk-anc, has closed" "(STAY-REWORK-RESTART) …finding the rework closed"
 eq "$(grep -c '^converse-rework ' "$CALLS" || true)" "$REWORKS" "(STAY-REWORK-RESTART) …filing no second rework and superseding no review"
 has "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "(waits on tk-child)" "(STAY-REWORK-RESTART) …naming the closed rework as its work"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK-RESTART) …waiting on it"
+has "$(calls)" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK-RESTART) …waiting on it"
 eq "$(field tk-conv status)" "open" "(STAY-REWORK-RESTART) …with the conversation open, ready at once for its return"
 has "$OUT" "Run the entry now" "(STAY-REWORK-RESTART) …and sending the sitting to its entry, which reads the closed rework as returned, since nothing will wake it"
 hasnt "$OUT" "wakes with this thread" "(STAY-REWORK-RESTART) …never promising a wake"
@@ -2283,8 +2116,8 @@ TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "staying — the re
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
 eq "$RC" 0 "(STAY-REWORK-RESTART-OPEN) the same call, run while its rework is open, exits 0"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(STAY-REWORK-RESTART-OPEN) …sending the rework again, which the writer adopts"
-hasnt "$(cat "$CALLS")" "gc.ruling_consequence=" "(STAY-REWORK-RESTART-OPEN) …with the record already naming it"
+has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(STAY-REWORK-RESTART-OPEN) …sending the rework again, which the writer adopts"
+hasnt "$(calls)" "gc.ruling_consequence=" "(STAY-REWORK-RESTART-OPEN) …with the record already naming it"
 
 # A second stay with the text of an earlier one is a call of its own: it
 # records itself again before its writes, so one that stops before it names
@@ -2298,7 +2131,7 @@ setf tk-child status closed; setf tk-conv status in_progress
 bead tk-child2; setm tk-child2 source_ruling_bead tk-conv
 REWORK_CHILD=tk-child2 TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "staying — the timeout is reworked" --ruled yes --ruling "fix the timeout too" --rework --no-wait --stay "the retry backs off"
 eq "$RC" 1 "(STAY-AGAIN-RETURNED) a second rework stay with the same text, stopped before it names its work, exits 1"
-has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the timeout too" "(STAY-AGAIN-RETURNED) …once it has filed its rework"
+has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the timeout too" "(STAY-AGAIN-RETURNED) …once it has filed its rework"
 eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the retry backs off" "(STAY-AGAIN-RETURNED) …leaving its own first line newest, not the earlier stay's line that names the returned rework"
 # Here the earlier stay's work is still out, and a sitting woken early stays
 # again with a rework beside it.
@@ -2353,12 +2186,12 @@ eq "$(field tk-conv status)" "closed" "(STAY-RETURN-CLOSED) …and closing the c
 # sitting's entry reads as a stay whose sign-off has not finished, whether its
 # work is open or has closed by the restart: here a gate does not close.
 closer_case
-GATE_STUCK=tk-g run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+STUB_GATE_RESOLVE_NOOP=tk-g run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 1 "(STAY-STOPS-SHORT) a stay that stops at a gate exits 1"
 eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the dialog keeps what is typed" "(STAY-STOPS-SHORT) …its first line already newest, though it stopped after the closer's arm"
 eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(STAY-STOPS-SHORT) …which the line came before"
 hasnt "$(field tk-conv notes)" "(waits on" "(STAY-STOPS-SHORT) …naming no work"
-hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-STOPS-SHORT) …with no edge written"
+hasnt "$(calls)" "bd dep add tk-conv" "(STAY-STOPS-SHORT) …with no edge written"
 eq "$(field tk-conv status)" "in_progress" "(STAY-STOPS-SHORT) …and the conversation still claimed"
 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 0 "(STAY-STOPS-SHORT) the re-run stays"
@@ -2366,7 +2199,7 @@ eq "$(field tk-conv notes | grep '^staying:' | tr '\n' '|')" "staying: the dialo
 # One that stops at its edge has named its work, which the entry checks the
 # edges and the work's status against.
 closer_case
-DEP_ADD_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+STUB_DEP_ADD_FAIL=tk-conv run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 1 "(STAY-EDGE-REFUSED) a stay whose edge the store refuses exits 1"
 has "$OUT" "its staying: line names the work" "(STAY-EDGE-REFUSED) …saying the line naming the work is written"
 eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the dialog keeps what is typed (waits on tk-work)" "(STAY-EDGE-REFUSED) …which is newest"
@@ -2376,7 +2209,7 @@ eq "$RC" 0 "(STAY-EDGE-REFUSED) the re-run stays"
 eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the dialog keeps what is typed (waits on tk-work)" "(STAY-EDGE-REFUSED) …naming the work again in its newest line"
 eq "$(field tk-conv status)" "open" "(STAY-EDGE-REFUSED) …and leaving the conversation open"
 closer_case
-REFUSE_UPDATE_MATCH="--append-notes staying:" run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+STUB_UPDATE_FAIL_ON="--append-notes staying:" run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 1 "(STAY-FIRST-REFUSED) a stay whose first line the store refuses exits 1"
 has "$OUT" "before its other writes; nothing was written" "(STAY-FIRST-REFUSED) …saying nothing was written"
 eq "$(writes)" 1 "(STAY-FIRST-REFUSED) …making no write after that one"
@@ -2458,14 +2291,14 @@ has "$OUT" "tk-sub already waits on tk-conv through tk-anc" "(STAY-HOLDS-MERGE-C
 eq "$(writes)" 0 "(STAY-HOLDS-MERGE-CHILD) …and writes nothing"
 # The walk's second level, which the walk above the work for the subject's
 # members does not read, is the one that does not read.
-LIST_DOWN_ID=tk-anc run_signoff "${FOLLOW[@]}" --waiting-on tk-follow
+STUB_HOOK_AT="list --id" STUB_HOOK="$TMP/list-id-fails" LIST_DOWN_ID=tk-anc run_signoff "${FOLLOW[@]}" --waiting-on tk-follow
 eq "$RC" 1 "(STAY-HOLDS-MERGE-UNREAD) a stay whose walk does not read exits 1"
 has "$OUT" "could not be read to tell whether one of them waits on conversation tk-conv" "(STAY-HOLDS-MERGE-UNREAD) …saying so"
 eq "$(writes)" 0 "(STAY-HOLDS-MERGE-UNREAD) …and writes nothing"
 bead tk-found; edge tk-found discovered-from tk-anc
 run_signoff "${FOLLOW[@]}" --waiting-on tk-found
 hasnt "$OUT" "already waits on" "(STAY-HOLDS-MERGE-OTHER-EDGE) a path through an edge bd's cycle check does not walk refuses nothing"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-found --type blocks" "(STAY-HOLDS-MERGE-OTHER-EDGE) …and the stay waits on that work"
+has "$(calls)" "bd dep add tk-conv tk-found --type blocks" "(STAY-HOLDS-MERGE-OTHER-EDGE) …and the stay waits on that work"
 # bd's cycle check walks a bead whatever its kind, and bd list leaves out
 # gates, templates, infrastructure beads and wisps unless the call asks for
 # them, so the walk asks for them all. A path to the conversation through a
@@ -2486,7 +2319,7 @@ done
 closer_case; gate tk-cleared cleared-gate; setf tk-cleared status closed; edge tk-work blocks tk-cleared
 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 0 "(STAY-WALK-GATE) a stay on work that waits on a cleared gate exits 0"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-work --type blocks" "(STAY-WALK-GATE) …and waits on that work"
+has "$(calls)" "bd dep add tk-conv tk-work --type blocks" "(STAY-WALK-GATE) …and waits on that work"
 closer_case; setf tk-conv assignee human; setf tk-conv status open
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF" --stay "x"
 eq "$RC" 2 "(STAY-QUEUED) a conversation in the operator's queue has no sitting to stay"
@@ -2511,9 +2344,9 @@ member_case
 : > "$CALLS"
 run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
 eq "$RC" 0 "(STAY-MEMBER) a stay on the epic's own member exits 0"
-has "$(cat "$CALLS")" "gc-helm takeaway tk-epic staying — waits on the first unit --by converse --no-wait" "(STAY-MEMBER) …its headline waiting on nothing, as an epic's sign-off on its decomposition does"
-hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-mem" "(STAY-MEMBER) …attempting no edge from the epic onto its member"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-mem --type blocks" "(STAY-MEMBER) …while the conversation waits on the member"
+has "$(calls)" "gc-helm takeaway tk-epic staying — waits on the first unit --by converse --no-wait" "(STAY-MEMBER) …its headline waiting on nothing, as an epic's sign-off on its decomposition does"
+hasnt "$(calls)" "bd dep add tk-epic tk-mem" "(STAY-MEMBER) …attempting no edge from the epic onto its member"
+has "$(calls)" "bd dep add tk-conv tk-mem --type blocks" "(STAY-MEMBER) …while the conversation waits on the member"
 has "$(field tk-conv notes)" "staying: the first unit lands the parser (waits on tk-mem)" "(STAY-MEMBER) …which its staying: line names"
 eq "$(meta tk-epic gc.dispatch_when_ready)" "" "(STAY-MEMBER) …arming no closer, since the epic's members carry its close"
 eq "$(field tk-g status)" "closed" "(STAY-MEMBER) …answering the gate"
@@ -2521,34 +2354,34 @@ eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolk
 run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
 eq "$RC" 0 "(STAY-MEMBER-RERUN) a re-run with the same flags exits 0"
 eq "$(grep -c -- '^gc-helm takeaway tk-epic .* --by converse --no-wait$' "$CALLS")" 2 "(STAY-MEMBER-RERUN) …giving the headline the same --no-wait"
-hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-RERUN) …and attempting no edge from the epic onto its member"
+hasnt "$(calls)" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-RERUN) …and attempting no edge from the epic onto its member"
 member_case
-DEP_ADD_REFUSED=tk-conv run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
+STUB_DEP_ADD_FAIL=tk-conv run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
 eq "$RC" 1 "(STAY-MEMBER-STOPS-SHORT) a stay on the member whose own edge the store refuses exits 1"
 eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the first unit lands the parser (waits on tk-mem)" "(STAY-MEMBER-STOPS-SHORT) …its newest line naming the member, which a recovery rebuilds --waiting-on from"
 run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
 eq "$RC" 0 "(STAY-MEMBER-STOPS-SHORT) the call rebuilt from that record stays"
-hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-STOPS-SHORT) …making the same split"
+hasnt "$(calls)" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-STOPS-SHORT) …making the same split"
 member_case; bead tk-unit; edge tk-unit parent-child tk-mem
 run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-unit
 eq "$RC" 0 "(STAY-MEMBER-DEEP) a stay on a member of the epic's member exits 0"
-has "$(cat "$CALLS")" "--by converse --no-wait" "(STAY-MEMBER-DEEP) …its headline waiting on nothing"
-hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-unit" "(STAY-MEMBER-DEEP) …attempting no edge from the epic onto it"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-unit --type blocks" "(STAY-MEMBER-DEEP) …while the conversation waits on it"
+has "$(calls)" "--by converse --no-wait" "(STAY-MEMBER-DEEP) …its headline waiting on nothing"
+hasnt "$(calls)" "bd dep add tk-epic tk-unit" "(STAY-MEMBER-DEEP) …attempting no edge from the epic onto it"
+has "$(calls)" "bd dep add tk-conv tk-unit --type blocks" "(STAY-MEMBER-DEEP) …while the conversation waits on it"
 member_case; bead tk-other; bead tk-unit; edge tk-unit parent-child tk-other; edge tk-unit parent-child tk-mem
 run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-unit
 eq "$RC" 0 "(STAY-MEMBER-PARENTS) a stay on a bead with two parents, one of them under the epic, exits 0"
-hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-unit" "(STAY-MEMBER-PARENTS) …walking every parent, not the first"
+hasnt "$(calls)" "bd dep add tk-epic tk-unit" "(STAY-MEMBER-PARENTS) …walking every parent, not the first"
 member_case; bead tk-dep
 run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem --waiting-on tk-dep
 eq "$RC" 0 "(STAY-MEMBER-BESIDE) a stay on the member and on independent work exits 0"
-has "$(cat "$CALLS")" "gc-helm takeaway tk-epic staying — waits on the first unit --by converse --waiting-on tk-dep" "(STAY-MEMBER-BESIDE) …the headline waiting on the independent work alone"
-has "$(cat "$CALLS")" "bd dep add tk-epic tk-dep --type blocks" "(STAY-MEMBER-BESIDE) …which the epic waits on"
-hasnt "$(cat "$CALLS")" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-BESIDE) …and not on its member"
+has "$(calls)" "gc-helm takeaway tk-epic staying — waits on the first unit --by converse --waiting-on tk-dep" "(STAY-MEMBER-BESIDE) …the headline waiting on the independent work alone"
+has "$(calls)" "bd dep add tk-epic tk-dep --type blocks" "(STAY-MEMBER-BESIDE) …which the epic waits on"
+hasnt "$(calls)" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-BESIDE) …and not on its member"
 has "$(field tk-conv notes)" "(waits on tk-mem, tk-dep)" "(STAY-MEMBER-BESIDE) …while the conversation waits on both"
 member_case; bead tk-dep
 run_signoff "${MEMBER_STAY[@]}" --no-wait --waiting-on tk-mem --waiting-on tk-dep
-has "$(cat "$CALLS")" "--by converse --waiting-on tk-dep --no-wait" "(STAY-MEMBER-NO-WAIT) an explicit --no-wait beside other work still reaches the headline, which refuses the two together"
+has "$(calls)" "--by converse --waiting-on tk-dep --no-wait" "(STAY-MEMBER-NO-WAIT) an explicit --no-wait beside other work still reaches the headline, which refuses the two together"
 member_case
 run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem --close-brief "$BRIEF"
 eq "$RC/$(writes)" "2/0" "(STAY-MEMBER-BRIEF) a --close-brief on a stay whose only work is the epic's member exits 2, writing nothing"
@@ -2562,10 +2395,10 @@ run_signoff --conversation tk-conv --outcome "staying — waits on the fix" --ru
 eq "$RC" 0 "(STAY-MEMBER-CLOSER) a stay on a child of the subject and on independent work exits 0"
 has "$(field tk-sub notes)" "## Close brief (held on tk-work, " "(STAY-MEMBER-CLOSER) …its brief held on the independent work alone"
 eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(STAY-MEMBER-CLOSER) …the closer armed for it"
-has "$(cat "$CALLS")" "--by converse --waiting-on tk-work" "(STAY-MEMBER-CLOSER) …and the headline waiting on it alone"
-hasnt "$(cat "$CALLS")" "bd dep add tk-sub tk-kid" "(STAY-MEMBER-CLOSER) …attempting no edge from the subject onto its child"
+has "$(calls)" "--by converse --waiting-on tk-work" "(STAY-MEMBER-CLOSER) …and the headline waiting on it alone"
+hasnt "$(calls)" "bd dep add tk-sub tk-kid" "(STAY-MEMBER-CLOSER) …attempting no edge from the subject onto its child"
 member_case
-LIST_DOWN_ID=tk-mem run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
+STUB_HOOK_AT="list --id" STUB_HOOK="$TMP/list-id-fails" LIST_DOWN_ID=tk-mem run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
 eq "$RC/$(writes)" "1/0" "(STAY-MEMBER-UNREAD) a stay whose walk above the member does not read stops, writing nothing"
 has "$OUT" "could not be read to tell whether it is a member of tk-epic" "(STAY-MEMBER-UNREAD) …saying so"
 # The ending sign-off is left as it was: its wait on the epic's own member
@@ -2573,7 +2406,7 @@ has "$OUT" "could not be read to tell whether it is a member of tk-epic" "(STAY-
 member_case
 run_signoff --conversation tk-conv --outcome "decomposed — the first unit is building" --ruled yes --ruling "file the parser as the first unit" --waiting-on tk-mem
 eq "$RC" 1 "(MEMBER-ENDING) an ending sign-off that waits on the epic's own member stops"
-has "$(cat "$CALLS")" "bd dep add tk-epic tk-mem --type blocks" "(MEMBER-ENDING) …at the headline's edge, which bd refuses"
+has "$(calls)" "bd dep add tk-epic tk-mem --type blocks" "(MEMBER-ENDING) …at the headline's edge, which bd refuses"
 eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(MEMBER-ENDING) …before any gate is answered or the conversation closes"
 
 echo
