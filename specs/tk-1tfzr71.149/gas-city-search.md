@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the PR watch, the one-PR update and the landing order that acts from the beads
-description: The Gas City, Gas Town, github pack, bd and GitHub primitives searched for the surface tk-1tfzr71.149's design adds, namely the cheap question and the net that read GitHub, the one-PR update that saves what it read on a PR's bead, the landing order that acts from the beads, the label writes made by comparison, and the board's line saying when GitHub was last asked. It says what each search found at a named upstream commit and why none covers the need. Read it when building or reviewing one of the design's units, or when the arch check asks for the search.
+description: The Gas City, Gas Town, github pack, bd and GitHub primitives searched for the surface tk-1tfzr71.149's design adds, namely the cheap question and the net that read GitHub, the one-PR update that saves what it read on a PR's bead, the landing order that acts from the beads, the label writes made by comparison, the board's line saying when GitHub was last asked, and the landing order's digest of what it last decided a record on. It says what each search found at a named upstream commit and why none covers the need. Read it when building or reviewing one of the design's units, or when the arch check asks for the search.
 ---
 
 # Gas City search for the PR watch, the one-PR update and the landing order that acts from the beads
@@ -226,6 +226,48 @@ labels, `assets/scripts/pr-status-label.sh`, through the `reconcile` and `clear`
 verbs it has, and the net calls `clear` for a PR no bead owns. They add no verb
 and no key, and retire none of the old path's callers, which their own beads
 retire (design, section 9).
+
+## The landing order's digest of what it last decided a record on (the three uses' rework)
+
+Read on 2026-11-20, for the rework the operator ruled in conversation
+tk-k2ebtki: the landing order decides each act that depends on GitHub on its
+own read, and uses the PR watch's output and the store only to choose which
+records to decide. The need: tell, with no read of GitHub, whether anything a
+record's last decision read has changed since, on GitHub through the read the
+watch saved or in the store, where the decision reads the bead, the beads its
+blocks edges name, what holds each ask on it, the work anchored to it and the
+other open work on its branch. A record whose decision owed no act and whose
+inputs have not changed is not decided again, and one whose act did not
+complete is decided again with nothing recording that it failed.
+
+- **bd's revision.** bd keeps a token per bead, `RowVersion` in
+  `internal/types/types.go` at `gastownhall/beads` tag v1.3.4, the build the
+  city runs (`bd version 1.3.4`). Its own doc says it is equality-only, that
+  its coverage is deliberately partial (claim, close, unclaim and the generic
+  update path, and not label-only or reopen writes), and that it is published
+  only on the detail view, as `revision` (`IssueDetails.Revision`). The
+  listing the ledger reads, `bd list --json`, carries no revision. Not
+  covered: it covers one bead's row, and a decision's inputs span other beads,
+  so a blocker that closes or a gate that clears an ask moves no revision of
+  the PR's bead. The order's own write would move it too.
+- **bd's `updated_at`.** Every write to a bead moves it, the order's own
+  included, and a change to another bead, such as a blocker's close, does not.
+  Not covered, for the same reasons.
+- **Gas City's event cursor.** An event order keeps one cursor over the event
+  log for the whole order, set to the log's head before its command runs, with
+  no filter on the payload (`checkEvent` and `dispatchExec`, above). Not
+  covered: it says that some event came, not which record's inputs changed, and
+  only writers that emit are seen (the section above on what runs each order).
+- **A queue of changed records.** None exists (above). Not covered.
+
+Conclusion: none covers it. The landing order keeps one key on the bead,
+`pr_landing_digest`, which only it writes and reads: the digest of what the
+decision read of the store, the saved read among it, written after a decision
+that owed no act. A run decides a record when the digest of what it reads now
+differs. An act that does not complete writes no digest, so the record stays
+due, and a decision whose act changed the record leaves a digest the next run
+finds different, so that run decides the record again. Nothing clears it,
+since a digest that matches nothing makes the record due.
 
 ## The board's line saying when GitHub was last asked (unit 5)
 

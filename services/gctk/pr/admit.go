@@ -59,7 +59,8 @@ const pourReserve = 10 * time.Second
 // gate that asks a person once two runs at its head ended without a result,
 // or why none is poured. It returns false when the bead is owed no run, so the
 // caller reports the evaluator's answer. ans is the evaluator's answer at the
-// validated head, over the saved read, and asks the asks on the bead.
+// validated head, on the act's own read of the PR, and asks the asks on the
+// bead.
 func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 	var takeable []string
 	for _, a := range asks {

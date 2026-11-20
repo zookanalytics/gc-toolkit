@@ -56,6 +56,17 @@ var withdrawHeadKey = ledger.Declare("withdraw_head", ledger.String,
 		"contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is "+
 		"filed, and never cleared.")
 
+// The landing order's digest of what it last decided a record on, which this
+// domain owns: the landing order alone writes it and reads it.
+var decidedKey = ledger.Declare("pr_landing_digest", ledger.String,
+	"The digest of the store as the landing order read it when it last decided a bead's pending record and owed "+
+		"no act: the bead's status, assignee and metadata but this key, the read the PR watch saved among them, each "+
+		"bead its blocks edges name, each ask on it with what holds it, the evaluator's waits and the work anchored "+
+		"to it, and the other open work on its branch. A run decides the record, on its own read of GitHub, only "+
+		"while the digest of the store as it reads it differs from this one, so a run in which nothing moved on "+
+		"GitHub and nothing changed in the store asks GitHub nothing. An act that does not complete leaves it as it "+
+		"is, and nothing clears it.")
+
 // The runtime's stamps on a workflow root, which tell the landing order that a
 // review run is attached to the bead that owns a PR: a live root of the review
 // formula that a blocks edge of the bead names.

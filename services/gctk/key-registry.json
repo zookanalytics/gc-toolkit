@@ -531,6 +531,12 @@
     "doc": "The highest conversation comment id the intake has routed. A value that is not a whole number reads as 0."
   },
   {
+    "name": "pr_landing_digest",
+    "type": "string",
+    "owner": "pr",
+    "doc": "The digest of the store as the landing order read it when it last decided a bead's pending record and owed no act: the bead's status, assignee and metadata but this key, the read the PR watch saved among them, each bead its blocks edges name, each ask on it with what holds it, the evaluator's waits and the work anchored to it, and the other open work on its branch. A run decides the record, on its own read of GitHub, only while the digest of the store as it reads it differs from this one, so a run in which nothing moved on GitHub and nothing changed in the store asks GitHub nothing. An act that does not complete leaves it as it is, and nothing clears it."
+  },
+  {
     "name": "pr_last_checked_at",
     "type": "string",
     "owner": "pr/record",

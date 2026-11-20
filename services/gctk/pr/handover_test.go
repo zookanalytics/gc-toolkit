@@ -142,8 +142,14 @@ func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {
 	is(t, o, pr.ActChecked)
 	says(t, o, "waits on review run tk-run1")
 	readsNoGitHub(t, d.land)
+	if w := d.runWrites(); !keptDigest(w) {
+		t.Fatalf("a run that found the head still waiting on its run wrote the bead %+v, want the digest of what it "+
+			"decided on alone", w)
+	}
+	is(t, d.run(t), pr.ActChecked)
+	readsNoGitHub(t, d.land)
 	if w := d.runWrites(); len(w) > 0 {
-		t.Fatalf("a run that found the head still waiting on its run wrote the bead: %+v", w)
+		t.Fatalf("a run in which nothing changed wrote the bead: %+v", w)
 	}
 	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "true"})
 	assignedTo(t, d.land, "")

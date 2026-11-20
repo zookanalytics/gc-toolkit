@@ -17,14 +17,13 @@ import (
 // triage rules a head of a PR a material change, it files a withdrawal with
 // Withdraw: a bead that blocks the bead that owns the PR and names the head in
 // withdraw_head, so the evaluator holds the PR from the moment it is filed. The
-// landing order carries it out from the approvals the one-PR update saved on
-// the bead (specs/tk-1tfzr71.149/design.md, section 5). It waits while an
-// approval it would dismiss carries feedback the intake has not routed, on the
-// saved read and then on the act's own read of the PR's review threads,
-// dismisses each approval that stands on a commit that does not contain the
-// head, and closes the withdrawal once the act's own read of the PR's reviews
-// shows none standing past the ones it dismissed. It files a human gate on the
-// bead when GitHub refuses a dismissal.
+// landing order carries it out on the act's own reads of the PR. It reads the
+// PR's reviews, waits while an approval it would dismiss carries feedback the
+// intake has not routed, on its read of the PR's review threads, dismisses each
+// approval that stands on a commit that does not contain the head, and closes
+// the withdrawal once its read of the reviews after the dismissals shows none
+// standing past the ones it dismissed. It files a human gate on the bead when
+// GitHub refuses a dismissal.
 //
 // A withdrawal holds the bead from the refinery as any wait does, so the
 // record stays marked while one is open, and the order reads it on every run
@@ -273,57 +272,16 @@ func runsIn(rows []*ledger.Record) ([]string, error) {
 	return out, nil
 }
 
-// verdict is what a withdrawal owes, as the saved read shows the PR: a close,
-// since no approval stands on a commit without its head, the approvals to
-// dismiss, or why it waits for a later run. failed says the wait is a read that
-// did not answer.
-type verdict struct {
-	close   bool
-	dismiss []Approval
-	wait    string
-	failed  bool
-}
-
-// conversationFor is the conversation part of saved, and why it is no read the
-// withdrawals can act on: none is saved, or it applied the definition of
-// feedback from another instant than the bead's, which the PR watch reads
-// again.
-func conversationFor(s state, saved *SavedRead) (*SavedConversation, string) {
-	switch c := saved.Conversation; {
-	case c == nil:
-		return nil, "no read of the PR's conversation is saved on the bead, and the PR watch saves one"
-	case c.Since != s.since:
-		return nil, fmt.Sprintf("the saved conversation applied the definition of feedback from %q, not from the "+
-			"bead's provenance instant %q, and the PR watch reads it again", c.Since, s.since)
-	default:
-		return c, ""
+// approvalsIn is each review among reviews that approves the PR and has not
+// been dismissed, whoever gave it.
+func approvalsIn(reviews []gh.Review) []Approval {
+	var out []Approval
+	for _, r := range reviews {
+		if r.State == "APPROVED" {
+			out = append(out, Approval{ID: r.ID, Author: r.Author, Commit: r.Commit})
+		}
 	}
-}
-
-// judge decides withdrawal w from the approvals conv saved, past the ones
-// gone, which this act dismissed for an earlier withdrawal: the ones that stand
-// on a commit without the head (withoutHead) to dismiss, or a close when none
-// does, which carryOne makes only once the act's own read of the PR's reviews
-// shows none either.
-func (u *run) judge(s state, conv *SavedConversation, w withdrawal, gone map[int64]bool) verdict {
-	targets, err := u.withoutHead(conv.Approvals, w.head, gone)
-	if err != nil {
-		return verdict{wait: err.Error(), failed: true}
-	}
-	if len(targets) == 0 {
-		return verdict{close: true}
-	}
-	// A dismissal retires the inline comments of the review it dismisses, so it
-	// waits while one of them is feedback the intake has not routed.
-	rc, err := commentReceipts(s.row)
-	if err != nil {
-		return verdict{wait: "the bead's comment receipts did not read: " + err.Error(), failed: true}
-	}
-	if unread := unrouted(rc, targets); len(unread) > 0 {
-		return verdict{wait: fmt.Sprintf("an approval to dismiss carries inline comment %s, which the intake has not "+
-			"routed, and a dismissal would retire it unread", joinIDs(unread))}
-	}
-	return verdict{dismiss: targets}
+	return out
 }
 
 // withoutHead is each of approvals, past the ones gone, that stands on a commit
@@ -374,10 +332,8 @@ func commentReceipts(r *ledger.Record) (receipts, error) {
 
 // readUnrouted is the inline comments that dismissing targets would retire
 // before the intake routes them, as unrouted reads them, on the act's own read
-// of the PR's review threads. The saved read applied the definition of feedback
-// to each comment's text as the PR watch read it, and a comment edited since,
-// or a definition the rig's checkout changed since, can be feedback now that
-// was not then.
+// of the PR's review threads, with the definition of feedback the run loaded
+// applied to each comment's text as that read gives it.
 func (u *run) readUnrouted(s state, host string, hub Hub, number int, targets []Approval) ([]int64, error) {
 	threads, err := hub.ReviewThreads(s.rec.Repo, number)
 	if err != nil {
@@ -417,63 +373,18 @@ func (u *run) readUnrouted(s state, host string, hub Hub, number int, targets []
 	return unrouted(rc, now), nil
 }
 
-// carrying decides the open withdrawals on the record s read, from saved: an
-// account of the ones that wait, whether any owes a close or a dismissal,
-// which makes the record owe an act, and whether a wait is a read that did not
-// answer.
-func (u *run) carrying(s state, saved *SavedRead) (string, bool, bool) {
-	var open []withdrawal
-	for _, w := range s.withdrawals {
-		if w.open {
-			open = append(open, w)
-		}
-	}
-	if len(open) == 0 {
-		return "", false, false
-	}
-	conv, why := conversationFor(s, saved)
-	if why != "" {
-		return fmt.Sprintf("%s waits for the next run: %s", names(open), why), false, false
-	}
-	gone := map[int64]bool{}
-	var said []string
-	acts, failed := false, false
-	for _, w := range open {
-		v := u.judge(s, conv, w, gone)
-		if v.wait != "" {
-			said = append(said, fmt.Sprintf("withdrawal %s for %s waits for the next run: %s", w.id, short(w.head), v.wait))
-			failed = failed || v.failed
-			continue
-		}
-		acts = true
-		for _, a := range v.dismiss {
-			gone[a.ID] = true
-		}
-	}
-	return strings.Join(said, "; "), acts, failed
-}
-
-// withCarry makes p carry out the record's open withdrawals first, from saved.
-// When p owes no act, the withdrawals that owe one are the record's act, and
-// their account rides p's outcome; when none owes one, p is what it was, with
-// the account of the ones that wait, and a retry when a wait is a read that did
-// not answer.
-func (u *run) withCarry(s state, saved *SavedRead, p plan) plan {
+// withCarry makes p carry out the record's open withdrawals first, on the act's
+// own reads of the PR f found. When p owes no act, the carry is the record's
+// act, and its account rides p's outcome, a retry when a step of it did not
+// complete.
+func (u *run) withCarry(s state, f fresh, p plan) plan {
 	if !withdrawing(s) {
 		return p
 	}
-	note, acts, failed := u.carrying(s, saved)
 	if p.act == nil {
-		if !acts {
-			p.out.Detail = withNote(p.out.Detail, note)
-			if failed && p.out.Action == ActChecked {
-				p.out.Action = ActRetry
-			}
-			return p
-		}
 		out := p.out
 		return doing(func(ctx context.Context, _ carriedOut) RunOutcome {
-			c := u.carry(ctx, s, saved)
+			c := u.carry(ctx, s, f)
 			o := out
 			o.Detail = withNote(o.Detail, c.note)
 			if c.failed {
@@ -483,13 +394,13 @@ func (u *run) withCarry(s state, saved *SavedRead, p plan) plan {
 		})
 	}
 	main := p.act
-	return doing(func(ctx context.Context, _ carriedOut) RunOutcome { return main(ctx, u.carry(ctx, s, saved)) })
+	return doing(func(ctx context.Context, _ carriedOut) RunOutcome { return main(ctx, u.carry(ctx, s, f)) })
 }
 
 // carry carries out each open withdrawal on the record s read, oldest first,
-// from the approvals saved holds. It returns its account, whether a withdrawal
-// is still open, and whether a step did not complete.
-func (u *run) carry(ctx context.Context, s state, saved *SavedRead) carriedOut {
+// on the act's own read of the PR's reviews. It returns its account, whether a
+// withdrawal is still open, and whether a step did not complete.
+func (u *run) carry(ctx context.Context, s state, f fresh) carriedOut {
 	var open []withdrawal
 	for _, w := range s.withdrawals {
 		if w.open {
@@ -499,16 +410,18 @@ func (u *run) carry(ctx context.Context, s state, saved *SavedRead) carriedOut {
 	if len(open) == 0 {
 		return carriedOut{}
 	}
-	conv, why := conversationFor(s, saved)
-	if why != "" {
-		return carriedOut{note: fmt.Sprintf("%s waits for the next run: %s", names(open), why), held: true}
+	reviews, err := f.hub.Reviews(s.rec.Repo, f.pr.Number)
+	if err != nil {
+		return carriedOut{note: fmt.Sprintf("%s waits for the next run: the act's own read of the PR's reviews did not "+
+			"answer: %v", names(open), err), held: true, failed: true}
 	}
-	host, _, _, _ := record.ParseURL(s.rec.URL)
 	gone := map[int64]bool{}
 	var out carriedOut
 	var said []string
 	for _, w := range open {
-		note, still, failed := u.carryOne(ctx, s, host, saved.PR, conv, w, gone)
+		var note string
+		var still, failed bool
+		note, still, failed, reviews = u.carryOne(ctx, s, f, w, reviews, gone)
 		said = append(said, note)
 		out.held = out.held || still
 		out.failed = out.failed || failed
@@ -517,35 +430,39 @@ func (u *run) carry(ctx context.Context, s state, saved *SavedRead) carriedOut {
 	return out
 }
 
-// carryOne carries out withdrawal w, past the approvals gone, which this act
-// dismissed for an earlier withdrawal and which it adds to: it dismisses the
-// approvals judge finds in conv once the act's own read of the PR's review
-// threads shows none of them carrying feedback the intake has not routed, and
-// closes w only once the act's own read of the PR's reviews shows none
-// standing without its head. It returns its account, whether w is still open,
-// and whether a step did not complete.
-func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, conv *SavedConversation, w withdrawal, gone map[int64]bool) (string, bool, bool) {
+// carryOne carries out withdrawal w with the PR's reviews as the act last read
+// them, past the approvals gone, which this act dismissed for an earlier
+// withdrawal and which it adds to. It dismisses each approval that stands on a
+// commit without the head once the act's own read of the PR's review threads
+// shows none of them carrying feedback the intake has not routed, reads the
+// reviews again, and closes w once none stands. It returns its account,
+// whether w is still open, whether a step did not complete, and the reviews as
+// it last read them.
+func (u *run) carryOne(ctx context.Context, s state, f fresh, w withdrawal, reviews []gh.Review, gone map[int64]bool) (string, bool, bool, []gh.Review) {
 	at := fmt.Sprintf("withdrawal %s for %s", w.id, short(w.head))
-	waits := func(why string, failed bool) (string, bool, bool) {
-		return at + " waits for the next run: " + why, true, failed
+	waits := func(why string, failed bool) (string, bool, bool, []gh.Review) {
+		return at + " waits for the next run: " + why, true, failed, reviews
 	}
-	v := u.judge(s, conv, w, gone)
-	if v.wait == "" && len(v.dismiss) > 0 && !u.fetched[s.branch] {
+	p := f.pr
+	targets, err := u.withoutHead(approvalsIn(reviews), w.head, gone)
+	if err != nil {
+		return waits(err.Error(), true)
+	}
+	if len(targets) > 0 && !u.fetched[s.branch] {
 		// An approved commit the clone has not fetched, such as one a person
 		// pushed onto the PR's branch, can contain the head, so the act fetches
 		// the branch before it dismisses any approval, and judges them again.
 		if err := u.fetchBranch(ctx, s.branch); err != nil {
 			return waits(fmt.Sprintf("origin/%s did not fetch, so no approval is dismissed: %v", s.branch, err), true)
 		}
-		v = u.judge(s, conv, w, gone)
+		if targets, err = u.withoutHead(approvalsIn(reviews), w.head, gone); err != nil {
+			return waits(err.Error(), true)
+		}
 	}
-	if v.wait != "" {
-		return waits(v.wait, v.failed)
-	}
-	hub := u.Hub(ctx, host)
-	var dismissed []Approval
-	if len(v.dismiss) > 0 {
-		unread, err := u.readUnrouted(s, host, hub, p.Number, v.dismiss)
+	if len(targets) > 0 {
+		// A dismissal retires the inline comments of the review it dismisses, so
+		// it waits while one of them is feedback the intake has not routed.
+		unread, err := u.readUnrouted(s, f.host, f.hub, p.Number, targets)
 		if err != nil {
 			return waits("the act's own read of the PR's review threads did not answer, and no approval is dismissed "+
 				"without it: "+err.Error(), true)
@@ -565,15 +482,14 @@ func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, co
 		}
 		var refused, unanswered []Approval
 		var why string
-		for _, a := range v.dismiss {
+		for _, a := range targets {
 			if ctx.Err() != nil {
 				unanswered = append(unanswered, a)
 				continue
 			}
-			switch err := hub.DismissReview(s.rec.Repo, p.Number, a.ID, message+"\n\n"+mark); {
+			switch err := f.hub.DismissReview(s.rec.Repo, p.Number, a.ID, message+"\n\n"+mark); {
 			case err == nil:
 				gone[a.ID] = true
-				dismissed = append(dismissed, a)
 			case gh.Refused(err):
 				refused = append(refused, a)
 				if why == "" {
@@ -590,41 +506,35 @@ func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, co
 					approvalNames(refused), withdrawRefusedKey, err), true)
 			}
 			return fmt.Sprintf("%s is held: GitHub refused to dismiss %s, and the gate %s asks a person", at,
-				approvalNames(refused), withdrawRefusedKey), true, false
+				approvalNames(refused), withdrawRefusedKey), true, false, reviews
 		}
 		if len(unanswered) > 0 {
 			return waits(fmt.Sprintf("the dismissal of %s was not answered", approvalNames(unanswered)), true)
 		}
-	}
-	// The saved conversation can lack an approval given since the PR watch
-	// read it, and a closed withdrawal dismisses nothing more, so the close
-	// waits on the act's own read of the reviews.
-	reviews, err := hub.Reviews(s.rec.Repo, p.Number)
-	if err != nil {
-		return waits("the act's own read of the PR's reviews did not answer, and the withdrawal closes only on it: "+
-			err.Error(), true)
-	}
-	var live []Approval
-	for _, r := range reviews {
-		if r.State == "APPROVED" {
-			live = append(live, Approval{ID: r.ID, Author: r.Author, Commit: r.Commit})
+		// An approval given since the act's first read is in no target, and a
+		// closed withdrawal dismisses nothing more, so the close waits on a read
+		// of the reviews made after the dismissals.
+		again, err := f.hub.Reviews(s.rec.Repo, p.Number)
+		if err != nil {
+			return waits("the act's read of the PR's reviews after its dismissals did not answer, and the withdrawal "+
+				"closes only on it: "+err.Error(), true)
+		}
+		reviews = again
+		left, err := u.withoutHead(approvalsIn(again), w.head, gone)
+		if err != nil {
+			return waits(err.Error(), true)
+		}
+		if len(left) > 0 {
+			return waits(fmt.Sprintf("the reviews read after the dismissals show %s standing on a commit without the "+
+				"head, and the next run dismisses it", approvalNames(left)), false)
 		}
 	}
-	left, err := u.withoutHead(live, w.head, gone)
-	if err != nil {
-		return waits(err.Error(), true)
-	}
-	if len(left) > 0 {
-		return waits(fmt.Sprintf("the act's own read of the reviews shows %s standing on a commit without the head, "+
-			"which the read the PR watch saved does not hold yet, and a later run dismisses it from the watch's next read",
-			approvalNames(left)), false)
-	}
 	note := fmt.Sprintf("The landing order carried out this withdrawal (%s): ", u.stamp())
-	if len(dismissed) == 0 {
+	if len(targets) == 0 {
 		note += fmt.Sprintf("no approval of PR #%d stood on a commit without %s.", p.Number, short(w.head))
 	} else {
 		note += fmt.Sprintf("it dismissed %s of PR #%d, and no other approval stood on a commit without %s.",
-			approvalNames(dismissed), p.Number, short(w.head))
+			approvalNames(targets), p.Number, short(w.head))
 	}
 	// A withdrawal is a plain task, whose close the runtime's work-record gate
 	// reads. Carrying it out ships no commit, so its record is no-op.
@@ -636,16 +546,17 @@ func (u *run) carryOne(ctx context.Context, s state, host string, p *SavedPR, co
 	if err := u.Ledger.Commit(cw); err != nil {
 		return waits("the withdrawal's close did not land: "+err.Error(), true)
 	}
-	if len(dismissed) == 0 {
-		return at + " closed: no approval stood on a commit without its head", false, false
+	if len(targets) == 0 {
+		return at + " closed: no approval stood on a commit without its head", false, false, reviews
 	}
-	return fmt.Sprintf("%s closed: dismissed %s", at, approvalNames(dismissed)), false, false
+	return fmt.Sprintf("%s closed: dismissed %s", at, approvalNames(targets)), false, false, reviews
 }
 
 // refusedWithdrawal is the message of the gate a refused dismissal files: what
 // GitHub refused, why triage withdrew the approvals, and how a person settles
 // it.
-func refusedWithdrawal(s state, p *SavedPR, w withdrawal, stuck []Approval, why string) string {
+func refusedWithdrawal(s state, p *gh.PullRequest, w withdrawal, stuck []Approval, why string) string {
+
 	reason := w.reason
 	if reason == "" {
 		reason = fmt.Sprintf("triage ruled head %s a material change", short(w.head))

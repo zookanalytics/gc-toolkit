@@ -193,22 +193,19 @@ func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) 
 
 // A head pushed onto a draft after the PR watch read it is not marked ready on
 // the passed result of the head the watch saved: the act's own read of the PR
-// finds the new head, so the act does nothing, and the record waits for the
-// watch's next read, which sends the new head to the refinery with the PR still
-// a draft. A PR the act's own read finds ready already, or closed, is left as it
-// stands, and a read that does not answer leaves it to the next run.
+// finds the new head, which goes to the refinery with the PR still a draft. A
+// PR the act's own read finds ready already is decided as a ready PR, one it
+// finds closed is the record's exception, and a read that does not answer
+// leaves it to the next run.
 func TestTheOrderReadiesADraftOnlyOnceItsOwnReadFindsItADraftAtThePassedHead(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Facts.IsDraft = true
 	d.refresh(t)
 	d.pr.Facts.HeadRefOid = later
-	o := d.run(t)
-	is(t, o, pr.ActChecked)
-	if !strings.Contains(o.Detail, "the act's own read of the PR finds its head at 3333333") ||
-		slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MarkReady" }) {
-		t.Fatalf("a head pushed after the watch's read was marked ready, or said %q: %v", o.Detail, asks(d.github))
+	is(t, d.run(t), pr.ActRequeued)
+	if slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MarkReady" }) {
+		t.Fatalf("a head pushed after the watch's read was marked ready: %v", asks(d.github))
 	}
-	is(t, d.once(t), pr.ActRequeued)
 	if !d.pr.Facts.IsDraft {
 		t.Fatalf("the PR was marked ready at a head no review passed")
 	}
@@ -218,8 +215,8 @@ func TestTheOrderReadiesADraftOnlyOnceItsOwnReadFindsItADraftAtThePassedHead(t *
 		set  func(*land)
 		want string
 	}{
-		{"ready already", func(e *land) { e.pr.Facts.IsDraft = false }, pr.ActChecked},
-		{"closed", func(e *land) { e.pr.Facts.State = "CLOSED" }, pr.ActChecked},
+		{"ready already", func(e *land) { e.pr.Facts.IsDraft = false }, pr.ActRequested},
+		{"closed", func(e *land) { e.pr.Facts.State = "CLOSED" }, pr.ActExcepted},
 		{"unread", func(e *land) { e.github.Fail["PullRequest"] = errors.New("gh: error connecting to api.github.com") }, pr.ActRetry},
 	} {
 		e := newCycle(t)
@@ -470,11 +467,11 @@ func TestAWithdrawalWaitsWhileAnApprovalItWouldDismissCarriesUnroutedComments(t 
 	}
 }
 
-// The saved read applied the definition of feedback to each inline comment as
-// the PR watch read it, so a dismissal waits on the act's own read of the PR's
-// review threads. A read of them that does not answer dismisses nothing and
-// leaves the withdrawal for the next run, and a comment edited into feedback
-// since the watch's read keeps the withdrawal open until the intake routes it.
+// A dismissal waits on the act's own read of the PR's review threads, with the
+// definition of feedback applied to each inline comment as that read gives it.
+// A read of them that does not answer dismisses nothing and leaves the
+// withdrawal for the next run, and a comment edited into feedback since the
+// watch's read keeps the withdrawal open until the intake routes it.
 func TestADismissalWaitsOnTheActsOwnReadOfTheReviewThreads(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
@@ -539,14 +536,12 @@ func TestAWithdrawalHoldsThePRUntilNoApprovalWithoutItsHeadStands(t *testing.T) 
 	is(t, d.once(t), pr.ActRequested)
 }
 
-// A withdrawal closes only once the act's own read of the PR's reviews shows no
-// approval standing on a commit without its head. An approval given after the
-// PR watch's last read is missing from the saved conversation, whether it was
-// given before the withdrawal was filed or after, so the withdrawal stays open
-// over it and holds the PR. Once the watch has read the conversation again,
-// the approval is dismissed and the withdrawal closes, and with no approval
-// standing the PR is not merged.
-func TestAWithdrawalClosesOnlyOnTheActsOwnReadOfTheReviews(t *testing.T) {
+// A withdrawal is carried out on the act's own read of the PR's reviews. An
+// approval given after the PR watch's last read is missing from the saved
+// conversation, whether it was given before the withdrawal was filed or after,
+// and the act dismisses it all the same and closes the withdrawal, so with no
+// approval standing the PR is not merged.
+func TestAWithdrawalDismissesAnApprovalTheSavedReadLacks(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		file func(t *testing.T, d *land) string
@@ -568,18 +563,15 @@ func TestAWithdrawalClosesOnlyOnTheActsOwnReadOfTheReviews(t *testing.T) {
 			d.refresh(t)
 			id := c.file(t, d)
 			o := d.run(t)
-			if status(t, d, id) != "open" || !slices.Equal(states(d.pr), []string{"approved"}) ||
-				!strings.Contains(o.Detail, "review 100 (operator) standing") {
+			if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed"}) ||
+				!strings.Contains(o.Detail, "closed: dismissed the approval review 100 (operator)") {
 				t.Fatalf("over an approval the saved conversation lacks, the withdrawal is %s with reviews %v: %s",
 					status(t, d, id), states(d.pr), o.Detail)
 			}
-			if got := d.runReads(); !slices.Equal(got, []string{"Reviews"}) {
-				t.Fatalf("the act read GitHub %v, want its own read of the reviews", got)
-			}
-			d.once(t)
-			if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed"}) {
-				t.Fatalf("once the watch read the conversation again, the withdrawal is %s with reviews %v",
-					status(t, d, id), states(d.pr))
+			if got := d.runReads(); len(got) < 4 || got[0] != "PullRequest" ||
+				!slices.Equal(got[len(got)-3:], []string{"Reviews", "ReviewThreads", "Reviews"}) {
+				t.Fatalf("the act read GitHub %v, want its own read of the PR first and the withdrawal's reads of the "+
+					"reviews, the threads and the reviews again last", got)
 			}
 			d.store.Unlist(bead)
 			if o := d.once(t); o.Action == pr.ActRequested {

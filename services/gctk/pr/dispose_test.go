@@ -112,7 +112,7 @@ func TestARetiredPRStillOpenIsNeverMerged(t *testing.T) {
 	if a := asks(d.github); len(a) != 0 {
 		t.Fatalf("a retired PR was asked of GitHub: %v", a)
 	}
-	readsNoGitHub(t, d)
+	readsThePR(t, d)
 	b := d.row(t)
 	if b.Status != "blocked" || len(r.asked()) != 0 {
 		t.Fatalf("an open retired PR left the bead %s and asked the writer %v", b.Status, r.asked())
@@ -123,6 +123,30 @@ func TestARetiredPRStillOpenIsNeverMerged(t *testing.T) {
 // Once the retired PR has closed, the bead goes to the disposition writer under
 // the ruling's kind and successor, with no gate filed, and once it has closed
 // no later run reads it.
+// A retired PR's close is decided on the run's own read of the PR: one the
+// watch saved closed that a person reopened before the run is not closed.
+func TestARetiredPRReopenedAfterTheWatchsReadIsNotClosed(t *testing.T) {
+	d, r := retired(t)
+	d.pr.Facts.State = "CLOSED"
+	d.refresh(t)
+	d.pr.Facts.State = "OPEN"
+	o := d.run(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "the PR's close finishes it") {
+		t.Fatalf("a PR its own read finds open says %q", o.Detail)
+	}
+	if a := r.asked(); len(a) != 0 {
+		t.Fatalf("the disposition writer was asked %v for a PR GitHub shows open", a)
+	}
+	if b := d.row(t); b.Status == "closed" {
+		t.Fatalf("a reopened retired PR's bead was closed")
+	}
+	if a := asks(d.github); len(a) != 0 {
+		t.Fatalf("a retired PR was asked of GitHub: %v", a)
+	}
+	readsThePR(t, d)
+}
+
 func TestARetiredPRThatClosedGoesToTheDispositionWriter(t *testing.T) {
 	d, r := retired(t)
 	d.edit(t, func(b *fake.Bead) { b.Metadata["gc.pr_close_disposition_successor_store"] = "rig:gc-toolkit" })
