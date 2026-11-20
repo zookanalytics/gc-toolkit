@@ -219,6 +219,13 @@ GH
 # logged to $GCTK_CALLS with how many writes came before it, and GCTK_DOWN fails
 # every call.
 #
+# `reaction accept` leaves the store as Accept's writer would, per ACCEPT_DOES:
+# take (the default) answers each open first-reaction gate on the subject with
+# an Accept's answer and records the dispatch; refuse writes nothing, as a run
+# refused at the lock does; other finds the gate answered first; dispatched
+# finds the recommendation already dispatched. It logs its call to $CALLS, with
+# the scripts directory it was given, which the sign-off names as its own.
+#
 # The sign-off never disarms. A sitting's own block does, through gctk bead
 # disarm, before an answer that sends the subject elsewhere, and (ANSWER-ROUTE)
 # runs that block from the continue step over this store. The sign-off arms the
@@ -255,6 +262,25 @@ case "${1:-} ${2:-}" in
       --set-metadata "gc.dispatch_when_ready_args=$_j" \
       --append-notes "deferred-dispatch: dispatch armed by test at 2026-11-09T12:00:00Z, for $_t on $_f, because $_r. The deferred-dispatch order starts it once nothing holds this bead, and no agent keeps it in context." >/dev/null
     echo "armed $3 for $_t on $_f" ;;
+  "reaction accept")
+    printf 'gctk %s\n' "$*" >> "$CALLS"
+    printf '%s\n' "${GCTK_SCRIPTS_DIR:-unset}" >> "$ST/accept-scripts-dir"
+    _s="$3"; _f=$(gc --harness-read meta "$_s" gc.recommended_formula); [ "$_f" != "<absent>" ] || _f=""
+    _rec=""
+    for g in $(gc --harness-read edges "$_s" blocks); do
+      [ "$(gc --harness-read field "$g" await_id)" = first-reaction ] && [ "$(gc --harness-read status "$g")" != closed ] && _rec="$_rec $g"
+    done
+    close_rec() { for g in $_rec; do gc --harness-write set "$g" status=closed "close_reason=$1"; done; }
+    case "${ACCEPT_DOES:-take}" in
+      refuse) echo "gctk reaction accept: another Accept on $_s holds its acceptance lock (pid 7), so this one refuses and writes nothing." >&2; exit 4 ;;
+      other)  close_rec "moot: the reaction withdrew its recommendation"
+              echo "gctk reaction accept: another answer reached $_s's recommendation gate first" >&2; exit 4 ;;
+      dispatched) echo "gctk reaction accept: $_s carries no gc.recommended_formula: its recommendation was dispatched. Nothing to accept; nothing dispatched." >&2; exit 2 ;;
+      *) close_rec "ruled: accepted $_f accept:0123456789abcdef"
+         gc --harness-write set "$_s" "metadata.gc.recommended_formula_dispatched=$_f"
+         gc --harness-write unset "$_s" metadata.gc.recommended_formula
+         echo "gctk reaction accept: dispatched $_f at $_s (acceptance 0123456789abcdef)" ;;
+    esac ;;
   *) printf 'gctk %s\n' "$*" >> "$CALLS"; echo "gctk fake: unsupported '$*'" >&2; exit 2 ;;
 esac
 GCTK
@@ -321,11 +347,6 @@ L
 chmod +x "$TMP/earlier-answer" "$TMP/before-update" "$TMP/second-fails" "$TMP/list-id-fails"
 
 # --- stub pack scripts at the rig root the sign-off searches first ------------
-# gc-helm.sh's accept leaves the store as Accept's writer would, per
-# ACCEPT_DOES: take (the default) answers each open first-reaction gate on the
-# subject with an Accept's answer and records the dispatch; refuse writes
-# nothing, as a run refused at the lock does; other finds the gate answered
-# first; dispatched finds the recommendation already dispatched.
 S="$TMP/rig/assets/scripts"
 cat > "$S/gc-helm.sh" <<'H'
 #!/usr/bin/env bash
@@ -345,23 +366,6 @@ case "$1" in
       _p="$a"
     done
     [ -z "$_miss" ] || exit 4 ;;
-  accept)
-    _s="$2"; _f=$(gc --harness-read meta "$_s" gc.recommended_formula); [ "$_f" != "<absent>" ] || _f=""
-    _rec=""
-    for g in $(gc --harness-read edges "$_s" blocks); do
-      [ "$(gc --harness-read field "$g" await_id)" = first-reaction ] && [ "$(gc --harness-read status "$g")" != closed ] && _rec="$_rec $g"
-    done
-    close_rec() { for g in $_rec; do gc --harness-write set "$g" status=closed "close_reason=$1"; done; }
-    case "${ACCEPT_DOES:-take}" in
-      refuse) echo "gc-helm.sh: accept: another Accept on $_s holds its acceptance lock (pid 7), so this one refuses and writes nothing." >&2; exit 4 ;;
-      other)  close_rec "moot: the reaction withdrew its recommendation"
-              echo "gc-helm.sh: accept: another answer reached $_s's recommendation gate first" >&2; exit 4 ;;
-      dispatched) echo "gc-helm.sh: accept: $_s carries no gc.recommended_formula: its recommendation was dispatched. Nothing to accept; nothing dispatched." >&2; exit 2 ;;
-      *) close_rec "ruled: accepted $_f accept:0123456789abcdef"
-         gc --harness-write set "$_s" "metadata.gc.recommended_formula_dispatched=$_f"
-         gc --harness-write unset "$_s" metadata.gc.recommended_formula
-         echo "gc-helm.sh: accept: dispatched $_f at $_s (acceptance 0123456789abcdef)" ;;
-    esac ;;
 esac
 exit 0
 H
@@ -1491,7 +1495,8 @@ TAKE=(--ruled yes --ruling "take the reaction's mol-fix" --no-wait --accept)
 echo "# a ruling that takes the recommendation hands its gate to Accept's writer"
 recommend; run_signoff --conversation tk-conv --outcome "took the reaction's mol-fix" "${TAKE[@]}"
 eq "$RC" 0 "(ACCEPT) a sign-off that takes the recommendation exits 0"
-has "$(calls)" "gc-helm accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix" "(ACCEPT) …running Accept's writer on the subject, naming its own conversation"
+has "$(calls)" "gctk reaction accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix" "(ACCEPT) …running Accept's writer on the subject, naming its own conversation"
+eq "$(cat "$ST/accept-scripts-dir" 2>/dev/null)" "$(dirname "$SCRIPT")" "(ACCEPT) …with the sign-off's own scripts directory, where gctk finds the pack's scripts"
 hasnt "$(calls)" "gate resolve tk-rec" "(ACCEPT) …and never resolving the recommendation's gate itself"
 eq "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:0123456789abcdef" "(ACCEPT) the gate carries Accept's answer"
 eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(ACCEPT) …and the dispatch is recorded"
@@ -1500,7 +1505,7 @@ eq "$(bedges tk-conv replies-to)" "tk-rec" "(ACCEPT) …keeping its reply onto t
 has "$OUT" "took the recommendation: mol-fix at tk-anc, through Accept" "(ACCEPT) the take is reported"
 eq "$(acts tk-conv)" "Ruled: take the reaction's mol-fix|Took the recommendation and started its work." "(ACCEPT) …and the conversation records the ruling, then the recommendation taken"
 case "$(calls)" in
-  *"gc-helm takeaway"*"gc-helm accept"*"bd close tk-conv"*) ok "(ACCEPT-ORDER) headline, then the acceptance, then the close" ;;
+  *"gc-helm takeaway"*"gctk reaction accept"*"bd close tk-conv"*) ok "(ACCEPT-ORDER) headline, then the acceptance, then the close" ;;
   *) bad "(ACCEPT-ORDER) the writes ran out of order: $(calls)" ;;
 esac
 TAKEN="$(calls)"
@@ -1516,7 +1521,7 @@ run_signoff --conversation tk-conv --outcome "fix the retry; mol-fix is taken" "
 eq "$RC" 0 "(ACCEPT-BESIDE) a ruling on both gates that takes the recommendation exits 0"
 eq "$(field tk-rev close_reason)" "ruled: take the reaction's mol-fix" "(ACCEPT-BESIDE) the review gate is answered with the ruling"
 case "$(calls)" in
-  *"gate resolve tk-rev"*"gc-helm accept tk-anc"*) ok "(ACCEPT-BESIDE) …before Accept's writer runs, so no other gate holds the bead when it dispatches" ;;
+  *"gate resolve tk-rev"*"gctk reaction accept tk-anc"*) ok "(ACCEPT-BESIDE) …before Accept's writer runs, so no other gate holds the bead when it dispatches" ;;
   *) bad "(ACCEPT-BESIDE) Accept ran before the review gate was answered: $(calls)" ;;
 esac
 eq "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:0123456789abcdef" "(ACCEPT-BESIDE) the recommendation's gate carries Accept's answer"
@@ -1599,7 +1604,7 @@ eq "$(acts tk-conv)" "Ruled: take the reaction's mol-fix" "(ACCEPT-FIRST) …and
 echo "# --var hands Accept's writer a var the ruling settled for the dispatch"
 recommend; run_signoff --conversation tk-conv --outcome "mol-fix is taken all-in-one" "${TAKE[@]}" --var design_gated=false
 eq "$RC" 0 "(ACCEPT-VAR) a take that settles a var for the dispatch exits 0"
-has "$(calls)" "gc-helm accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix --var design_gated=false" "(ACCEPT-VAR) …passing it to Accept's writer"
+has "$(calls)" "gctk reaction accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix --var design_gated=false" "(ACCEPT-VAR) …passing it to Accept's writer"
 ACCEPT_DOES=dispatched run_signoff --conversation tk-conv --outcome "mol-fix is taken all-in-one" "${TAKE[@]}" --var design_gated=false
 eq "$RC" 0 "(ACCEPT-VAR) a re-run once the dispatch is made exits 0"
 has "$OUT" "keeps the vars it was made with, so the --var given here does not reach it" "(ACCEPT-VAR) …saying the dispatch already made keeps its own vars"

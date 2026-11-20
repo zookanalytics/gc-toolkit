@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic tests for gc-helm.sh's takeaway verb (the board half lives in
-# services/helm; open, engage, accept and dismiss each have a suite of their
-# own, gc-helm-<verb>.test.sh). Runs the
+# services/helm; open, engage and dismiss each have a suite of their own,
+# gc-helm-<verb>.test.sh). Runs the
 # REAL script with a stubbed `gc` on PATH — no live city, Dolt, network, or
 # sessions. Covered:
 #   --release ends the run beneath the anchor through run-cancel.sh (gascity's
