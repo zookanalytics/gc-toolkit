@@ -121,9 +121,11 @@ func parseBoardArgs(args []string) (boardOpts, error) {
 			if err != nil {
 				return o, err
 			}
+			// A zero bound ends the read before gc can list a rig, so every
+			// call would exit as a failed read.
 			n, err := strconv.Atoi(v)
-			if err != nil || n < 0 {
-				return o, fmt.Errorf("--timeout must be a non-negative integer, got %q", v)
+			if err != nil || n <= 0 {
+				return o, fmt.Errorf("--timeout must be a positive integer, got %q", v)
 			}
 			o.timeout = time.Duration(n) * time.Second
 		case "-h", "--help":

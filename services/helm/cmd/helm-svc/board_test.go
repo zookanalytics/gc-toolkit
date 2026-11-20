@@ -393,6 +393,7 @@ func TestBoardArgErrors(t *testing.T) {
 		{"--json", "--rig"},
 		{"--json", "--rig="},
 		{"--json", "--timeout"},
+		{"--json", "--timeout=0"},
 		{"--json", "--timeout=-1"},
 		{"--json", "--timeout=soon"},
 		{"--json", "rig-a"},
