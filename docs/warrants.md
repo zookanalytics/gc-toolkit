@@ -402,9 +402,9 @@ no warrant.
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-13, at `gastownhall/gascity` main cb9105579667,
-  `gastownhall/gascity-packs` main 1f6d8e41c5b0, and `gastownhall/beads` main
-  526c1c877e26.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main 441dfd3e25bf,
+  `gastownhall/gascity-packs` main 132914b3e42e, and `gastownhall/beads` main
+  3a274fbf8f76.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -448,8 +448,9 @@ no warrant.
   `services/gctk/pr/read.go` makes. Its reader is `FromStore` in
   `services/gctk/pr/read.go`, which `answerFromStore` in
   `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
-  `PRAnswers` in `services/gctk/listing/pr.go` calls for the rig board, from
-  `Read` in `services/gctk/standing/standing.go`, which the board's read asks.
+  `PRAnswers` in `services/gctk/listing/pr.go` calls from `Read` in
+  `services/gctk/standing/standing.go`, which the rig board's read and
+  `gctk bead stands` ask.
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
   of reading GitHub. The facts are the PR's state, draft flag, head and merge
@@ -491,8 +492,8 @@ no warrant.
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main 4963923250,
-  `gastownhall/gascity-packs` main 23d007dac5d4, and `gastownhall/beads` main
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main 441dfd3e25bf,
+  `gastownhall/gascity-packs` main 132914b3e42e, and `gastownhall/beads` main
   3a274fbf8f76.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
   request's reviews, the required checks at its head and its review threads,
@@ -742,7 +743,7 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-17, at `gastownhall/gascity` main f715d7b92d, with
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main 441dfd3e25bf, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The

@@ -7,18 +7,18 @@
 # relates-to (both the `relates-to` and older `related` spellings), the reverse
 # `tracks` edges (a conversation about the bead), and the beads that wait on it
 # by a reverse `blocks` or `until` edge, open ones first and capped — each with
-# a count; the store that answered (E); and,
-# each behind its opt-in flag, the frontier verdict over {ready, advancing,
-# stuck} (B) and the direct-children epic-health snapshot (C). The advance enum,
-# the bead a live run works, the cross-store fold, the fail-closed unknown, the
-# status scope of the child listing, and the three `gc bd show --json` quirks
-# each get a case.
+# a count; the store that answered (E); and, each behind its opt-in flag, the
+# frontier verdict over {ready, advancing, stuck} (B) and the direct-children
+# epic-health snapshot (C). The frontier and each named bead's advance are the
+# answers of `gctk bead holds` and `gctk bead stands`, built from this checkout
+# and run over the fake stores, so the cases here hold the keys the script
+# composes from them and the readings its callers rely on, and standing's Go
+# tests hold each rule. The status scope of the child listing and the three
+# `gc bd show --json` quirks each get a case.
 #
 # `gc` is stubbed over a file-per-bead ledger under each fake rig; a direct `bd`
-# is the regression the stub fails on. run-lib.stub.sh answers the runs the
-# ledger's roots and convoys make by run-lib.sh's own rule, and run-lib.sh
-# itself reads them through the stubbed gc where a case checks the store a read
-# names. No live city, Dolt, or network.
+# is the regression the stub fails on. gctk's reads are answered from the same
+# files through holds-store.stub.sh. No live city, Dolt, or network.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,11 +48,8 @@ export FAKE_GC_LOG="$TMP/gc.log"; : > "$FAKE_GC_LOG"
 export FAKE_BD_LOG="$TMP/bd.log"; : > "$FAKE_BD_LOG"
 export STUB_ROOT="$TMP"
 export STUB_PREFACE=""
-# The runs the walk reads, from the file the fixtures below derive.
-export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" RUN_LIB_STUB_LOG="$TMP/runs.log"
-: > "$RUN_LIB_STUB_LOG"
-# The frontier reads what holds a bead through gctk bead holds, built from this
-# checkout and run over the fake stores.
+# The frontier and the horizon read gctk bead holds and gctk bead stands, built
+# from this checkout and run over the fake stores.
 export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
 GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no frontier can be read"; exit 1; }
 export GCTK_BIN
@@ -224,140 +221,70 @@ bead "$R_TK" tk-failclosed <<'J'
  "dependencies":[{"id":"zz-ghost","dependency_type":"blocks","title":"unplaceable blocker"}]}
 J
 
-# --- the transitive walk ----------------------------------------------------
-# blk <store-repo> <id> <status> <metadata-json> [blocker...]: a bead whose only
-# edges are open same-store blocks-deps (the status rides each edge, as a
-# --brief-deps read embeds it) — or, for a blocker in another store, no status.
-blk() {
-  local repo="$1" id="$2" st="$3" md="$4"; shift 4
-  local deps="" b
-  for b in "$@"; do
-    case "$b" in
-      tk-*) deps="$deps${deps:+,}{\"id\":\"$b\",\"dependency_type\":\"blocks\",\"status\":\"open\",\"title\":\"$b\"}" ;;
-      *)    deps="$deps${deps:+,}{\"id\":\"$b\",\"dependency_type\":\"blocks\",\"title\":\"$b\"}" ;;
-    esac
-  done
-  printf '{"id":"%s","title":"%s","status":"%s","issue_type":"task","metadata":%s,"dependencies":[%s]}\n' \
-    "$id" "$id" "$st" "$md" "$deps" > "$repo/.beads/$id.json"
-}
-POOL='{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}'
-ARMED='{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"}'
-
-# A routed blocker held by an orphan: one level reads it advancing, but nothing
-# will ever pick up what it waits on, so it is stuck and names the orphan.
-blk "$R_TK" tk-w-sub1 open '{}' tk-w-routed
-blk "$R_TK" tk-w-routed open "$POOL" tk-w-orphan
-blk "$R_TK" tk-w-orphan open '{}'
-# An armed bead takes its blockers' verdict: moving blockers advance it ...
-blk "$R_TK" tk-w-sub2 open '{}' tk-w-armed
-blk "$R_TK" tk-w-armed open "$ARMED" tk-w-mover
-blk "$R_TK" tk-w-mover open "$POOL"
-# ... and a human gate beneath it makes it stuck, naming the gate.
-blk "$R_TK" tk-w-sub3 open '{}' tk-w-armed2
-blk "$R_TK" tk-w-armed2 open "$ARMED" tk-w-gate
-bead "$R_TK" tk-w-gate <<'J'
-{"id":"tk-w-gate","title":"tk-w-gate","status":"open","issue_type":"gate",
- "await_type":"human","await_id":"ship-it","metadata":{}}
+# --- where a named bead stands ---------------------------------------------
+# The cases the shared answer reads apart from the classifier this script kept
+# before it asked gctk, each a wait of a subject or a child of an epic. tk-sent
+# is routed work a ruling or a sitting sent, and tk-unsent work nobody routes.
+bead "$R_TK" tk-sent <<'J'
+{"id":"tk-sent","title":"the work a ruling sent","status":"open","issue_type":"task",
+ "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 J
-# A cycle never drains: each routed bead waits on the other.
-blk "$R_TK" tk-w-sub4 open '{}' tk-w-cyc-a
-blk "$R_TK" tk-w-cyc-a open "$POOL" tk-w-cyc-b
-blk "$R_TK" tk-w-cyc-b open "$POOL" tk-w-cyc-a
-# A cross-store hop: the middle bead lives in otherrig, its orphan back in tk.
-blk "$R_TK" tk-w-sub6 open '{}' or-w-mid
-blk "$R_OR" or-w-mid open "$POOL" tk-w-far
-blk "$R_TK" tk-w-far open '{}'
-# A routed bead whose only blocker lives in another store: `gc bd show` leaves
-# that edge out, so only its list row shows the orphan it waits on.
-blk "$R_TK" tk-w-xs open '{}' tk-w-xmid
-blk "$R_TK" tk-w-xmid open "$POOL" or-w-leaf
-blk "$R_OR" or-w-leaf open '{}'
-# A routed chain three deep, for the bead budget.
-blk "$R_TK" tk-w-sub7 open '{}' tk-w-ch1
-blk "$R_TK" tk-w-ch1 open "$POOL" tk-w-ch2
-blk "$R_TK" tk-w-ch2 open "$POOL" tk-w-ch3
-blk "$R_TK" tk-w-ch3 open "$POOL"
-# A routed chain with a closed bead beside it: a closed row costs no budget.
-blk "$R_TK" tk-w-cl open '{}' tk-w-cl1
-blk "$R_TK" tk-w-cl1 open "$POOL" tk-w-clx tk-w-cl2
-blk "$R_TK" tk-w-clx closed '{}'
-blk "$R_TK" tk-w-cl2 open "$POOL" tk-w-cl3
-blk "$R_TK" tk-w-cl3 open "$POOL"
-# A routed blocker over four routed leaves: one level wider than a budget of
-# three, so the read has to stop inside the level.
-blk "$R_TK" tk-w-wide open '{}' tk-w-fan
-blk "$R_TK" tk-w-fan open "$POOL" tk-w-f1 tk-w-f2 tk-w-f3 tk-w-f4
-for i in 1 2 3 4; do blk "$R_TK" "tk-w-f$i" open "$POOL"; done
-# The same fan with a closed leaf first: its row hands its share of the budget
-# back, so the leaf the cut read left out is read next.
-blk "$R_TK" tk-w-refund open '{}' tk-w-rfan
-blk "$R_TK" tk-w-rfan open "$POOL" tk-w-rx tk-w-r1 tk-w-r2 tk-w-r3
-blk "$R_TK" tk-w-rx closed '{}'
-for i in 1 2 3; do blk "$R_TK" "tk-w-r$i" open "$POOL"; done
-# Routed chains six and seven deep, for the depth bound: six levels are read.
-blk "$R_TK" tk-w-six open '{}' tk-w-s1
-for i in 1 2 3 4 5; do blk "$R_TK" "tk-w-s$i" open "$POOL" "tk-w-s$((i + 1))"; done
-blk "$R_TK" tk-w-s6 open "$POOL"
-blk "$R_TK" tk-w-seven open '{}' tk-w-v1
-for i in 1 2 3 4 5 6; do blk "$R_TK" "tk-w-v$i" open "$POOL" "tk-w-v$((i + 1))"; done
-blk "$R_TK" tk-w-v7 open "$POOL"
-# A diamond: two routed blockers share one routed blocker, read once.
-blk "$R_TK" tk-w-sub8 open '{}' tk-w-d1 tk-w-d2
-blk "$R_TK" tk-w-d1 open "$POOL" tk-w-dshared
-blk "$R_TK" tk-w-d2 open "$POOL" tk-w-dshared
-blk "$R_TK" tk-w-dshared open "$POOL"
-# A stuck bead stops the walk on its branch: what it waits on is never read.
-blk "$R_TK" tk-w-sub9 open '{}' tk-w-stopper
-blk "$R_TK" tk-w-stopper open '{}' tk-w-hidden
-blk "$R_TK" tk-w-hidden open "$POOL"
-
-# Merge anchors read their recorded merge axis, not their empty route.
-blk "$R_TK" tk-w-anchors open '{}' tk-a-approval tk-a-progress tk-a-preopen tk-a-approved \
-  tk-a-hold tk-a-blocked tk-a-stale tk-a-noaxis tk-a-humanstate \
-  tk-a-rpend tk-a-rreview tk-a-rnopost tk-a-rhead tk-a-rhold
-AX='@h1@2026-10-01T00:00:00Z'
-blk "$R_TK" tk-a-approval open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required$AX\"}"
-blk "$R_TK" tk-a-progress open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"progressing$AX\",\"pr_posture\":\"changes_requested$AX\"}"
-blk "$R_TK" tk-a-preopen open "{\"merge_result\":\"pre_open_gate\",\"pr.machine\":\"settled$AX\"}"
-blk "$R_TK" tk-a-approved open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"approved$AX\"}"
-blk "$R_TK" tk-a-hold open "{\"merge_result\":\"pre_open_gate\",\"merge_hold\":\"true\",\"pr.machine\":\"settled$AX\"}"
-blk "$R_TK" tk-a-blocked open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"blocked$AX\"}"
-blk "$R_TK" tk-a-stale open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required@h0@2026-09-30T00:00:00Z\"}"
-blk "$R_TK" tk-a-noaxis open '{"merge_result":"pre_open_gate"}'
-blk "$R_TK" tk-a-humanstate open '{"merge_result":"abandoned","gc.takeaway":"PR#9 was closed without merging"}'
-# The pending record: no merge axis is ever written there, and a pending bead is
-# blocked by the record itself while it waits on the merge.
-blk "$R_TK" tk-a-rpend blocked "{\"merge_result\":\"pull_request_pending\",\"pr_posture\":\"approved$AX\"}"
-blk "$R_TK" tk-a-rreview blocked "{\"merge_result\":\"pull_request_pending\",\"pr_posture\":\"review_required$AX\"}"
-blk "$R_TK" tk-a-rnopost blocked '{"merge_result":"pull_request_pending"}'
-blk "$R_TK" tk-a-rhead open '{"merge_result":"pull_request_head_changed"}'
-blk "$R_TK" tk-a-rhold blocked "{\"merge_result\":\"pull_request_pending\",\"merge_hold\":\"true\",\"pr_posture\":\"approved$AX\"}"
-
-# A bead's own state, one rule per blocker.
-blk "$R_TK" tk-w-kinds open '{}' tk-k-blocked tk-k-validation tk-k-finding tk-k-needsyou \
-  tk-k-refinery tk-k-capped tk-k-hooked tk-k-deferred tk-k-gate tk-k-humanroute
-blk "$R_TK" tk-k-blocked blocked "$POOL"
-blk "$R_TK" tk-k-validation open '{"task_kind":"validation","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}'
-blk "$R_TK" tk-k-finding open '{"task_kind":"finding","finding.disposition":"must-fix"}'
-blk "$R_TK" tk-k-needsyou open '{"task_kind":"finding","finding.disposition":"needs-you"}'
-blk "$R_TK" tk-k-capped open '{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","gc.dispatch_when_ready_fail_count":"3"}'
-blk "$R_TK" tk-k-hooked hooked '{}'
-blk "$R_TK" tk-k-deferred deferred "$POOL"
-blk "$R_TK" tk-k-humanroute open '{"gc.routed_to":"human"}'
-bead "$R_TK" tk-k-gate <<'J'
-{"id":"tk-k-gate","title":"held by ruling","status":"open","issue_type":"gate",
- "await_type":"human","await_id":"which-way","metadata":{}}
+bead "$R_TK" tk-unsent <<'J'
+{"id":"tk-unsent","title":"work nobody routes","status":"open","issue_type":"task","metadata":{}}
 J
-bead "$R_TK" tk-k-refinery <<'J'
-{"id":"tk-k-refinery","title":"handed to the refinery","status":"open","issue_type":"task",
- "assignee":"gc-toolkit/gc-toolkit.refinery","metadata":{"gc.routed_to":""}}
+# A decision a ruling left waiting on the work it sent, which tk-ruled-wait
+# waits on, and one left waiting on work nobody routes.
+bead "$R_TK" tk-ruled <<'J'
+{"id":"tk-ruled","title":"a ruling's decision","status":"open","issue_type":"decision","metadata":{},
+ "dependencies":[{"id":"tk-sent","dependency_type":"blocks","status":"open","title":"the work a ruling sent"}]}
 J
-bead "$R_TK" tk-w-decides <<'J'
-{"id":"tk-w-decides","title":"held by a decision","status":"open","issue_type":"task","metadata":{},
- "dependencies":[{"id":"tk-k-decision","dependency_type":"blocks","status":"open","title":"a ruling"}]}
+bead "$R_TK" tk-ruled-wait <<'J'
+{"id":"tk-ruled-wait","title":"waits on the decision","status":"open","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-ruled","dependency_type":"blocks","status":"open","title":"a ruling's decision"}]}
 J
-bead "$R_TK" tk-k-decision <<'J'
-{"id":"tk-k-decision","title":"a ruling","status":"open","issue_type":"decision","metadata":{}}
+bead "$R_TK" tk-ruled2 <<'J'
+{"id":"tk-ruled2","title":"a ruling's decision behind unrouted work","status":"open","issue_type":"decision","metadata":{},
+ "dependencies":[{"id":"tk-unsent","dependency_type":"blocks","status":"open","title":"work nobody routes"}]}
+J
+# A conversation its sitting stays in, open under its alias and waiting on the
+# work it sent, which holds the bead it tracks.
+bead "$R_TK" tk-stayheld <<'J'
+{"id":"tk-stayheld","title":"held by a conversation its sitting stays in","status":"open","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-stay","dependency_type":"blocks","status":"open","title":"what the sitting sent"}]}
+J
+bead "$R_TK" tk-stay <<'J'
+{"id":"tk-stay","title":"what the sitting sent","status":"open","issue_type":"task",
+ "assignee":"gc-toolkit/converse-claude-opus.c-tk-stay","metadata":{},
+ "dependencies":[{"id":"tk-stayheld","dependency_type":"tracks","status":"open"},
+   {"id":"tk-sent","dependency_type":"blocks","status":"open","title":"the work a ruling sent"}]}
+J
+# Settled pull requests that wait on the operator's review: a posture of none,
+# and one of commented. tk-prwait waits on both.
+bead "$R_TK" tk-pr-none <<'J'
+{"id":"tk-pr-none","title":"a settled PR nobody reviewed","status":"open","issue_type":"task",
+ "metadata":{"merge_result":"pull_request","pr_number":"11","pr.machine":"settled@h1@2026-10-01T00:00:00Z","pr_posture":"none@h1@2026-10-01T00:00:00Z"}}
+J
+bead "$R_TK" tk-pr-commented <<'J'
+{"id":"tk-pr-commented","title":"a settled PR with comments","status":"open","issue_type":"task",
+ "metadata":{"merge_result":"pull_request","pr_number":"12","pr.machine":"settled@h1@2026-10-01T00:00:00Z","pr_posture":"commented@h1@2026-10-01T00:00:00Z"}}
+J
+bead "$R_TK" tk-prwait <<'J'
+{"id":"tk-prwait","title":"waits on two reviews","status":"open","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-pr-none","dependency_type":"blocks","status":"open","title":"a settled PR nobody reviewed"},
+   {"id":"tk-pr-commented","dependency_type":"blocks","status":"open","title":"a settled PR with comments"}]}
+J
+# Work nobody routes, behind which a human gate waits: the person's move is what
+# stops tk-chain.
+bead "$R_TK" tk-chain <<'J'
+{"id":"tk-chain","title":"waits on work behind a person","status":"open","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-norte","dependency_type":"blocks","status":"open","title":"unrouted, behind a gate"}]}
+J
+bead "$R_TK" tk-norte <<'J'
+{"id":"tk-norte","title":"unrouted, behind a gate","status":"open","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-hg2","dependency_type":"blocks","status":"open","title":"which way"}]}
+J
+bead "$R_TK" tk-hg2 <<'J'
+{"id":"tk-hg2","title":"which way","status":"open","issue_type":"gate","await_type":"human","metadata":{}}
 J
 
 # The bead a run works. pour <store-repo> <bead> <root> <root-status> writes a
@@ -383,72 +310,48 @@ for b in work ended; do
 done
 pour "$R_TK" tk-r-work tk-r-root in_progress
 pour "$R_TK" tk-r-ended tk-r-eroot closed
-# A merge anchor a live review run works is still judged as an anchor. tk-r-sub
-# waits on it, on tk-r-work and on tk-r-ended.
-blk "$R_TK" tk-r-anchor open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required$AX\"}"
-pour "$R_TK" tk-r-anchor tk-r-aroot in_progress
-blk "$R_TK" tk-r-sub open '{}' tk-r-work tk-r-ended tk-r-anchor
-# Live runs two deep over an orphan no run works: the walk reads on below the
-# bead a live run works.
-blk "$R_TK" tk-r-deep open '{}' tk-r-w2
-blk "$R_TK" tk-r-w2 open "$POURED" tk-r-w3
-blk "$R_TK" tk-r-w3 open "$POURED" tk-r-orphan
-blk "$R_TK" tk-r-orphan open '{}'
-pour "$R_TK" tk-r-w2 tk-r-root2 in_progress
-pour "$R_TK" tk-r-w3 tk-r-root3 in_progress
-# A routed chain whose sixth level, the last the walk reads, a live run works.
-blk "$R_TK" tk-r-six open '{}' tk-r-s1
-for i in 1 2 3 4 5; do blk "$R_TK" "tk-r-s$i" open "$POOL" "tk-r-s$((i + 1))"; done
-blk "$R_TK" tk-r-s6 open "$POURED"
-pour "$R_TK" tk-r-s6 tk-r-root6 in_progress
-# A routed bead over orphans in two stores, so the runs of both are read.
-blk "$R_TK" tk-r-two open '{}' tk-r-mid
-blk "$R_TK" tk-r-mid open "$POOL" tk-r-orphan or-r-orphan
-blk "$R_OR" or-r-orphan open '{}'
-# A design a live run works, and its build, armed behind it.
-printf '{"id":"tk-r-design","title":"a design in its run","status":"open","issue_type":"task","metadata":%s}\n' \
-  "$POURED" > "$R_TK/.beads/tk-r-design.json"
-pour "$R_TK" tk-r-design tk-r-droot in_progress
-bead "$R_TK" tk-r-impl <<'J'
-{"id":"tk-r-impl","title":"its build","status":"open","issue_type":"task","parent":"tk-r-design",
- "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"},
- "dependencies":[{"id":"tk-r-design","dependency_type":"blocks","status":"open","title":"a design in its run"}]}
+# A bead that waits on the root of the live run that works it, as a pull
+# request's anchor waits on its review run: the wait is its own work.
+printf '{"id":"tk-r-attached","title":"waits on the run that works it","status":"open","issue_type":"task","metadata":%s,"dependencies":[{"id":"tk-r-aroot","dependency_type":"blocks","status":"in_progress","title":"mol-polecat-work"}]}\n' \
+  "$POURED" > "$R_TK/.beads/tk-r-attached.json"
+pour "$R_TK" tk-r-attached tk-r-aroot in_progress
+
+# tk-outer: an epic whose members are an epic with a routed member, a Delivery
+# whose only member nobody routes, and routed work the Product Owner holds.
+bead "$R_TK" tk-outer <<'J'
+{"id":"tk-outer","title":"an outer epic","status":"open","issue_type":"epic","metadata":{"epic_hypothesis":"it helps"}}
 J
-# Two stores holding a bead of one id. A live run works gc-toolkit's tk-r-twin,
-# which tk-r-tsub waits on. The city store's tk-r-twin is an idle child of
-# hq-pin, beside a routed child waiting on an orphan in gc-toolkit's store, so
-# the runs of both stores are read.
-blk "$R_TK" tk-r-twin open "$POURED"
-pour "$R_TK" tk-r-twin tk-r-troot in_progress
-blk "$R_TK" tk-r-tsub open '{}' tk-r-twin
-blk "$R_TK" tk-r-lone open '{}'
-bead "$HQ" hq-pin <<'J'
-{"id":"hq-pin","title":"an epic in the city store","status":"open","issue_type":"epic","metadata":{}}
+bead "$R_TK" tk-inner <<'J'
+{"id":"tk-inner","title":"a child epic","status":"open","issue_type":"epic","parent":"tk-outer","metadata":{"epic_hypothesis":"it helps too"}}
 J
-bead "$HQ" tk-r-twin <<'J'
-{"id":"tk-r-twin","title":"an idle bead of that id","status":"open","issue_type":"task","parent":"hq-pin","metadata":{}}
+bead "$R_TK" tk-inner-kid <<'J'
+{"id":"tk-inner-kid","title":"the child epic's routed member","status":"open","issue_type":"task","parent":"tk-inner",
+ "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 J
-bead "$HQ" hq-pmid <<'J'
-{"id":"hq-pmid","title":"a routed bead over the orphan","status":"open","issue_type":"task","parent":"hq-pin",
- "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},
- "dependencies":[{"id":"tk-r-lone","dependency_type":"blocks","title":"tk-r-lone"}]}
+bead "$R_TK" tk-delivery <<'J'
+{"id":"tk-delivery","title":"a Delivery","status":"open","issue_type":"epic","parent":"tk-outer","metadata":{}}
+J
+bead "$R_TK" tk-delivery-kid <<'J'
+{"id":"tk-delivery-kid","title":"the Delivery's unrouted member","status":"open","issue_type":"task","parent":"tk-delivery","metadata":{}}
+J
+bead "$R_TK" tk-mayor <<'J'
+{"id":"tk-mayor","title":"routed work held for the Product Owner","status":"open","issue_type":"task","parent":"tk-outer",
+ "labels":["hold:mayor"],"metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 J
 
 # tk-epic: the horizon fixture. Its direct children (found by the reverse
-# parent-child listing, never its own edges) cover every advance state: an open
-# pool-routed and an in-progress child advance, as do tk-anchor — a merge anchor
-# whose recorded machine axis is progressing — and tk-kid-rework, a rework bead
-# whose pour cleared its route, machine work rather than a human gate. A child
-# in the operator's queue is stuck, and so is tk-kid-armed: armed, so it takes
-# its blocker's verdict, and its blocker is the human gate tk-hg. Three children sit
-# in statuses a default or --status listing can leave out: a hooked child
-# advances, a pinned one is a hold whatever its route, and one in a status its
-# store adds is unknown to the classifier, so it fails closed. One done child is
-# counted, never listed. tk-kid-event is the closed event `bd set-state` files
-# under a bead whose state changed, and it is neither counted nor listed. The
-# epic's own blocks are none, so its frontier verdict is ready. The plain
-# unrouted-stuck case is covered by tk-stuck in the frontier section above, off
-# the same shared classifier.
+# parent-child listing, never its own edges) cover the readings a horizon
+# shows: an open pool-routed child, an in-progress one and a hooked one advance.
+# tk-anchor, a pull request nothing reviewed and nothing works, waits on the
+# operator's review. A child in the operator's queue is a person's to move, and
+# tk-kid-armed, armed behind the human gate tk-hg, waits on that gate.
+# tk-kid-rework, a rework bead whose pour cleared its route, is work nobody
+# routes. Three children sit in statuses a default or --status listing can leave
+# out: a hooked child, a pinned one, and one in a status its store adds, which no
+# pool offers. One done child is counted, never listed. tk-kid-event is the
+# closed event `bd set-state` files under a bead whose state changed, and it is
+# neither counted nor listed. The epic's own blocks are none, so its frontier
+# verdict is ready.
 bead "$R_TK" tk-epic <<'J'
 {"id":"tk-epic","title":"the epic","status":"open","issue_type":"epic","priority":2,
  "metadata":{},
@@ -508,8 +411,7 @@ printf '{"id":"tk-nul","title":"nul","status":"open","issue_type":"task","notes"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # Only the surface bead-context.sh touches: rig list; bd show, with the bead's
-# dependents on --include-dependents; bd list --parent (children); bd list
-# --has-metadata-key (the roots run-lib.sh's map reads); bd dep list
+# dependents on --include-dependents; bd list --parent (children); bd dep list
 # --direction=up --type tracks (reverse trackers). Every call is logged so the
 # test can prove which store was asked, not just what came back.
 set -u
@@ -591,15 +493,12 @@ case "${1:-} ${2:-}" in
 esac
 [ "${1:-}" = bd ] || { echo "gc: unsupported ($*)" >&2; exit 1; }
 shift
-DB=""; SUB=""; SUB2=""; ID=""; IDS=(); LIST_IDS=""; GATES=""; PARENT=""; HASKEY=""; DIRECTION="down"; TYPE=""; STATUS=""; ALL=""; WITH_DEPENDENTS=""
+DB=""; SUB=""; SUB2=""; ID=""; IDS=(); PARENT=""; DIRECTION="down"; TYPE=""; STATUS=""; ALL=""; WITH_DEPENDENTS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --db)          DB="$2"; shift 2 ;;
     --parent)      PARENT="$2"; shift 2 ;;
-    --has-metadata-key) HASKEY="$2"; shift 2 ;;
     --all)         ALL=1; shift ;;
-    --id)          LIST_IDS="$2"; shift 2 ;;
-    --include-gates) GATES=1; shift ;;
     --include-dependents) WITH_DEPENDENTS=1; shift ;;
     --direction|--direction=*) case "$1" in *=*) DIRECTION="${1#*=}"; shift ;; *) DIRECTION="$2"; shift 2 ;; esac ;;
     -t|--type)     TYPE="$2"; shift 2 ;;
@@ -625,23 +524,6 @@ if [ "$SUB" = show ]; then
   serve "${FOUND[@]}"
 fi
 
-if [ "$SUB" = list ] && [ -n "$LIST_IDS" ]; then
-  # Rows by id, any status (the tool passes --all); like real bd, a missing id is
-  # left out rather than reported, and a gate is hidden without --include-gates.
-  IFS=, read -r -a WANT <<< "$LIST_IDS"
-  preface; printf '['; first=1
-  for id in "${WANT[@]}"; do
-    hit=""
-    for d in $(stores); do [ -f "$d/$id.json" ] && { hit="$d/$id.json"; break; }; done
-    [ -n "$hit" ] || continue
-    r=$(listrow < "$hit" 2>/dev/null) && [ -n "$r" ] || continue
-    [ -n "$GATES" ] || ! printf '%s' "$r" | jq -e '.issue_type == "gate"' >/dev/null 2>&1 || continue
-    [ "$first" = 1 ] || printf ','; first=0
-    printf '%s' "$r"
-  done
-  printf ']\n'; exit 0
-fi
-
 if [ "$SUB" = list ] && [ -n "$PARENT" ]; then
   # Children of $PARENT, scoped as real bd scopes them: --all returns every
   # status, a store's own included; --status returns only the statuses it names;
@@ -654,24 +536,6 @@ if [ "$SUB" = list ] && [ -n "$PARENT" ]; then
     for f in $(grep -laF "\"$PARENT\"" "$d"/*.json 2>/dev/null); do
       row=$(cat "$f")
       printf '%s' "$row" | jq -e --arg p "$PARENT" '.parent == $p' >/dev/null 2>&1 || continue
-      st=$(printf '%s' "$row" | jq -r '.status // ""')
-      if [ -z "$ALL" ]; then case ",$STATUS," in *",$st,"*) ;; *) continue ;; esac; fi
-      [ "$first" = 1 ] || printf ','; first=0
-      printf '%s' "$row" | listrow
-    done
-  done
-  printf ']\n'; exit 0
-fi
-
-if [ "$SUB" = list ] && [ -n "$HASKEY" ]; then
-  # Rows whose metadata carries $HASKEY, in the status scope of the children's
-  # listing above.
-  if [ -z "$ALL" ] && [ -z "$STATUS" ]; then STATUS="open,in_progress,blocked,deferred,hooked"; fi
-  preface; printf '['; first=1
-  for d in $(stores); do
-    for f in $(grep -laF "\"$HASKEY\"" "$d"/*.json 2>/dev/null); do
-      row=$(cat "$f")
-      printf '%s' "$row" | jq -e --arg k "$HASKEY" '(.metadata // {}) | has($k)' >/dev/null 2>&1 || continue
       st=$(printf '%s' "$row" | jq -r '.status // ""')
       if [ -z "$ALL" ]; then case ",$STATUS," in *",$st,"*) ;; *) continue ;; esac; fi
       [ "$first" = 1 ] || printf ','; first=0
@@ -710,17 +574,6 @@ exit 127
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH"
-
-# The runs the stores hold: run-lib.sh's own rule over every fixture row, each
-# file read as the fake gc reads one for gctk.
-RUN_DEFS=$(. "$HERE/run-lib.sh" && printf '%s' "$RUN_JQ")
-ROWS=()
-for f in "$R_TK"/.beads/*.json "$R_OR"/.beads/*.json "$HQ"/.beads/*.json; do
-  IFS= read -r -d '' row < "$f"
-  ROWS+=("$row")
-done
-jq -n -c "$RUN_DEFS"'[$ARGS.positional[] | fromjson? | objects] | run_rows' --args "${ROWS[@]}" > "$RUN_LIB_STUB_RUNS" \
-  || { echo "FAIL - the fixture rows gave no runs"; exit 1; }
 
 run()  { OUT=$("$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 runj() { run "$@" --json; JQ=$(printf '%s' "$OUT" | jq -r "$JQF" 2>/dev/null); }
@@ -820,6 +673,9 @@ has "$OUT" "$NO_EDGES" "a bead with no edge of any class reads (none)"
 # Default output carries no frontier; it is added only on --frontier. A frontier
 # run starts the gctk under test, which reads the store several times, so each
 # subject runs once and its assertions query that run's output.
+blkr() { jr "[.frontier.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuck_on.id // \"-\") \(.stuck_on.why // \"-\")\""; }
+kid() { jr "[.horizon.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuck_on.id // \"-\") \(.stuck_on.why // \"-\")\""; }
+
 JQF='has("frontier")'  runj tk-anchor;             eq "$JQ" false "frontier is absent by default (opt-in)"
 run tk-anchor --frontier --json
 eq "$(jr .frontier.verdict)"                ready  "all blocks-blockers closed (one cross-store) reads ready"
@@ -833,240 +689,86 @@ run tk-under --frontier --json
 eq "$(jr .frontier.verdict)" stuck "a member of a parked parent is held through it, so not ready"
 eq "$(jr .frontier.holds)"   held  "  ... holds=held"
 eq "$(jr '.frontier.open[0] | "\(.id) \(.ancestor)"')" "tk-pgate tk-parked" "  ... naming the parent's gate and the parent it sits on"
+eq "$(blkr tk-pgate)" "stuck tk-pgate question" "  ... a gate a person answers, a question"
 
 run tk-waiter --frontier --json
 eq "$(jr .frontier.verdict)" stuck    "a waits-for edge of its own is a wait the store cannot judge, so not ready"
 eq "$(jr .frontier.holds)"   unjudged "  ... holds=unjudged"
 eq "$(jr '.frontier.open[0] | "\(.id) \(.unjudged)"')" "tk-spawner true" "  ... and the spawner is listed as unjudged"
+eq "$(blkr tk-spawner)" "stuck tk-spawner unread" "  ... stuck on the wait it cannot judge, unread"
 
 GCTK_BIN="$TMP/no-gctk" run tk-anchor --frontier --json
 eq "$(jr '.frontier | "\(.verdict) \(.holds)"')" "stuck unread" "a read of what holds it that cannot run fails the verdict closed"
 has "$(jr .frontier.unread)" "no gctk binary at $TMP/no-gctk" "  ... and says why"
 
+# A gctk that answers what holds the subject and nothing about where it stands.
+{ printf '#!/bin/sh\n'; printf '[ "${2:-}" = stands ] && exit 1\nexec "%s" "$@"\n' "$GCTK_BIN"; } > "$TMP/gctk-holds-only"
+chmod +x "$TMP/gctk-holds-only"
+GCTK_BIN="$TMP/gctk-holds-only" run tk-adv --frontier --json
+eq "$(jr '.frontier | "\(.verdict) \(.holds)"')" "stuck blocked" "a subject gctk bead stands does not answer fails the verdict closed"
+has "$(jr .frontier.unread)" "gctk bead stands" "  ... and says which read did not answer"
+eq "$(blkr tk-routed)" "stuck tk-routed unread" "  ... and each wait it names reads stuck on itself, unread"
+
 run tk-stuck --frontier --json
-eq "$(jr .frontier.verdict)"           stuck                   "an open unrouted blocker is stuck, so the verdict is stuck"
+eq "$(jr .frontier.verdict)"           stuck                   "work nobody routes as the blocker leaves the subject stuck"
 eq "$(jr '.frontier.open[0].id')"      tk-op                   "  ... and the open blocker is named"
-eq "$(jr '.frontier.open[0].advance')" stuck                   "  ... advance=stuck"
+eq "$(blkr tk-op)"                     "stuck tk-op not-scheduled" "  ... stuck on itself, not scheduled"
 eq "$(jr '.frontier.open[0].title')"   "open unrouted blocker" "  ... with its title"
 
 run tk-adv --frontier --json
-eq "$(jr .frontier.verdict)"           advancing "an open pool-routed blocker is advancing"
-eq "$(jr '.frontier.open[0].advance')" advancing "  ... advance=advancing"
+eq "$(jr .frontier.verdict)" advancing "an open pool-routed blocker is advancing"
+eq "$(blkr tk-routed)" "advancing - -" "  ... advance=advancing, and no stuck_on"
+eq "$(jr '[.frontier.open[] | select(.advance == "advancing") | has("stuck_on")] | any')" false \
+  "an advancing wait carries no stuck_on key"
 
 run tk-humangate --frontier --json
-eq "$(jr .frontier.verdict)"           stuck "a human gate as the blocker is stuck, not advancing"
-eq "$(jr '.frontier.open[0].advance')" stuck "  ... advance=stuck for the human gate"
+eq "$(jr .frontier.verdict)" stuck "a human gate as the blocker is stuck, not advancing"
+eq "$(blkr tk-hg)" "stuck tk-hg question" "  ... the gate is a question a person owes"
 
 run tk-convheld --frontier --json
-eq "$(jr '.frontier.open[0] | "\(.id) \(.advance)"')" "tk-cv stuck" "a conversation its sitting holds is a person's, so stuck, not advancing"
+eq "$(blkr tk-cv)" "stuck tk-cv conversation" "a conversation its sitting holds is a person's, so stuck, not advancing"
 eq "$(jr .frontier.verdict)" stuck "  ... and so is the subject it holds"
 
 run tk-inreview --frontier --json
-eq "$(jr '.frontier.open[0].advance')" advancing "a review bead with a pour-cleared route is machine work, so advancing not stuck"
-eq "$(jr .frontier.verdict)"           advancing "  ... so a subject held only by a review in flight is advancing, not stuck"
+eq "$(blkr tk-rev)" "advancing - -" "a review of the subject's own pull request is its own work, so advancing"
+eq "$(jr .frontier.verdict)" advancing "  ... so a subject held only by its own review is advancing, not stuck"
+
+run tk-r-attached --frontier --json
+eq "$(blkr tk-r-aroot)" "advancing - -" "the root of the live run that works the subject is its own work"
+eq "$(jr .frontier.verdict)" advancing "  ... so a bead waiting on its own run is advancing"
 
 run tk-failclosed --frontier --json
 eq "$(jr .frontier.verdict)"               ready    "an edge onto a bead the store does not hold holds nothing, so the verdict is ready"
 eq "$(jr .frontier.blockers.open)"         0        "  ... counted as no open blocker"
 eq "$(jr '.frontier.foreign | join(",")')" zz-ghost "  ... and listed as foreign"
 
-# --- B2. The transitive walk --------------------------------------------------
-blkr() { jr "[.frontier.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuck_on.id // \"-\") \(.stuck_on.why // \"-\")\""; }
-kid() { jr "[.horizon.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuck_on.id // \"-\") \(.stuck_on.why // \"-\")\""; }
-logcount() { grep -c -- "$1" "$FAKE_GC_LOG" | tr -d ' '; }
+# A decision a ruling left waiting on the work it sent, and a conversation its
+# sitting stays in, advance while that work does.
+run tk-ruled-wait --frontier --json
+eq "$(blkr tk-ruled)" "advancing - -" "a decision a ruling left waiting on the work it sent advances while that work does"
+eq "$(jr .frontier.verdict)" advancing "  ... and so does what waits on it"
+run tk-ruled --frontier --json
+eq "$(jr .frontier.verdict)" advancing "  ... read as the subject, its own frontier advances with the work"
+run tk-ruled2 --frontier --json
+eq "$(blkr tk-unsent)" "stuck tk-unsent not-scheduled" "  ... and one waiting on work nobody routes is stuck on that work"
+run tk-stayheld --frontier --json
+eq "$(blkr tk-stay)" "advancing - -" "a conversation its sitting stays in advances while the work it sent does"
 
-run tk-w-sub1 --frontier --json
-eq "$(jr .frontier.verdict)" stuck "a routed blocker held by an orphan is stuck: the walk looks past one level"
-eq "$(blkr tk-w-routed)" "stuck tk-w-orphan unrouted" "  ... and stuck_on names the orphan beneath it, unrouted"
-
-run tk-w-sub2 --frontier --json
-eq "$(jr .frontier.verdict)" advancing "an armed blocker whose own blocker moves is advancing"
-eq "$(blkr tk-w-armed)" "advancing - -" "  ... it takes its blocker's verdict, and carries no stuck_on"
-
-run tk-w-sub3 --frontier --json
-eq "$(jr .frontier.verdict)" stuck "an armed blocker behind a human gate is stuck"
-eq "$(blkr tk-w-armed2)" "stuck tk-w-gate human" "  ... naming the gate, so it reads apart from an orphan"
-
-run tk-w-sub4 --frontier --json
-eq "$(jr .frontier.verdict)" stuck "a cycle of routed beads never drains, so it is stuck"
-eq "$(jr '.frontier.open[0].stuck_on.why')" cycle "  ... why=cycle"
-case "$(jr '.frontier.open[0].stuck_on.id')" in
-  tk-w-cyc-a|tk-w-cyc-b) ok "  ... naming a bead on the cycle" ;;
-  *) bad "  ... naming a bead on the cycle (got '$(jr '.frontier.open[0].stuck_on.id')')" ;;
-esac
-
-: > "$FAKE_GC_LOG"
-run tk-w-sub6 --frontier --json
-eq "$(jr .frontier.blockers.open)" 0 "a subject's only blocker, in another store, holds nothing"
-eq "$(jr '.frontier.foreign | join(",")')" or-w-mid "  ... and is listed as foreign, not walked"
-
-run tk-w-xs --frontier --json
-eq "$(blkr tk-w-xmid)" "stuck or-w-leaf unrouted" "a walked bead's blocker in another store is read off its list row"
-
-run tk-w-sub7 --frontier --json
-eq "$(jr .frontier.verdict)" advancing "a routed chain three deep advances under the default budget"
-run tk-w-sub7 --frontier --walk-budget 1 --json
-eq "$(blkr tk-w-ch1)" "stuck tk-w-ch3 budget" "a walk out of budget reads stuck, naming the bead it could not read"
-eq "$(jr .frontier.blockers.open)" 1 "  ... the subject's own blocker is read whatever the budget"
-
-run tk-w-cl --frontier --walk-budget 2 --json
-eq "$(jr .frontier.verdict)" advancing "the budget counts open beads met: a closed row beside the chain costs nothing"
-
-run tk-w-wide --frontier --walk-budget 4 --json
-eq "$(jr .frontier.verdict)" advancing "a level exactly as wide as the budget is read in full"
-: > "$FAKE_GC_LOG"
-run tk-w-wide --frontier --walk-budget 3 --json
-eq "$(blkr tk-w-fan)" "stuck tk-w-f4 budget" "a level wider than the budget has left reads stuck, naming the blocker past the budget"
-eq "$(logcount 'list --id tk-w-f1,tk-w-f2,tk-w-f3 ')" 1 "  ... the batch asks for only the three beads the budget covers"
-eq "$(logcount 'list --id.*tk-w-f4')" 0 "  ... and the fourth is never read"
-: > "$FAKE_GC_LOG"
-run tk-w-refund --frontier --walk-budget 3 --json
-eq "$(jr .frontier.verdict)" advancing "a closed row in a read the budget cut short hands its share of the budget back"
-eq "$(logcount 'list --id tk-w-r3 ')" 1 "  ... so the leaf the cut read left out is read next"
-
-run tk-w-six --frontier --json
-eq "$(jr .frontier.verdict)" advancing "a routed chain six deep is read to its end"
-run tk-w-seven --frontier --json
-eq "$(blkr tk-w-v1)" "stuck tk-w-v7 budget" "  ... a seventh level is past the depth bound, so it reads stuck"
-
-: > "$FAKE_GC_LOG"
-run tk-w-sub8 --frontier --json
-eq "$(jr .frontier.verdict)" advancing "a diamond of routed beads advances"
-eq "$(logcount 'list --id.*tk-w-dshared')" 1 "  ... and the shared blocker is read once"
-eq "$(logcount 'list --id tk-w-d1,tk-w-d2 ')" 1 \
-  "  ... the subject's waits in one batched read of their store"
-
-: > "$FAKE_GC_LOG"
-run tk-w-sub9 --frontier --json
-eq "$(blkr tk-w-stopper)" "stuck tk-w-stopper unrouted" "a stuck blocker names itself"
-eq "$(logcount 'list --id.*tk-w-hidden')" 0 "  ... and the walk never reads what a stuck bead waits on"
-
-# Merge anchors: the recorded merge axis, not the route the merge cadence clears.
-: > "$FAKE_GC_LOG"
-run tk-w-anchors --frontier --json
-eq "$(blkr tk-a-approval)" "stuck tk-a-approval approval" "a settled PR waiting on review is stuck on the operator's approval"
-eq "$(blkr tk-a-progress)" "advancing - -" "a progressing anchor advances, a requested change being worked"
-eq "$(blkr tk-a-preopen)" "advancing - -" "a settled anchor before its PR opens advances: the PR-open pass publishes it"
-eq "$(blkr tk-a-approved)" "advancing - -" "a settled, approved PR advances to the merge pass"
-eq "$(blkr tk-a-hold)" "stuck tk-a-hold merge-hold" "an operator merge hold is stuck"
-eq "$(blkr tk-a-blocked)" "stuck tk-a-blocked merge-blocked" "an anchor its machine axis records blocked is stuck"
-eq "$(blkr tk-a-stale)" "stuck tk-a-stale unread" "a posture read at another head than the axis is unread, so stuck"
-eq "$(blkr tk-a-noaxis)" "stuck tk-a-noaxis unread" "an anchor with no recorded axis is unread, so stuck"
-eq "$(blkr tk-a-humanstate)" "stuck tk-a-humanstate human" "an anchor parked in a human state is stuck on a person"
-eq "$(blkr tk-a-rpend)" "advancing - -" "an approved PR on the pending record advances to the landing order, though its bead is blocked"
-eq "$(blkr tk-a-rreview)" "stuck tk-a-rreview approval" "a PR on the pending record waiting on review is stuck on the operator's approval"
-eq "$(blkr tk-a-rnopost)" "stuck tk-a-rnopost unread" "a PR on the pending record with no recorded posture is unread, so stuck"
-eq "$(blkr tk-a-rhead)" "advancing - -" "a PR whose head moved advances: the refinery validates the new head"
-eq "$(blkr tk-a-rhold)" "stuck tk-a-rhold merge-hold" "an operator merge hold on the pending record is stuck"
-eq "$(logcount 'list --id')" 1 "  ... the same-store blockers cost one read"
-
-# A bead's own state, one rule per blocker.
-run tk-w-kinds --frontier --json
-eq "$(blkr tk-k-blocked)" "stuck tk-k-blocked held" "a routed bead whose status is blocked is held, not advancing"
-eq "$(blkr tk-k-deferred)" "stuck tk-k-deferred held" "a deferred bead is held"
-eq "$(blkr tk-k-validation)" "advancing - -" "a validation pass with a pour-cleared route is machine work"
-eq "$(blkr tk-k-finding)" "advancing - -" "a must-fix finding is machine work the review cycle owns"
-eq "$(blkr tk-k-needsyou)" "stuck tk-k-needsyou human" "a finding that needs the operator is stuck on a person"
-eq "$(blkr tk-k-refinery)" "advancing - -" "an open bead assigned to the refinery is in its queue"
-eq "$(blkr tk-k-capped)" "stuck tk-k-capped capped" "an armed dispatch at its sling-failure cap is stuck"
-eq "$(blkr tk-k-hooked)" "advancing - -" "a hooked bead is held by an agent, so advancing"
-eq "$(blkr tk-k-gate)" "stuck tk-k-gate human" "a human gate, which a bare listing hides and which carries no route, is read and stuck on a person"
-eq "$(blkr tk-k-humanroute)" "advancing - -" "a human route marks no person's hold: it reads as the route it is"
-
-run tk-w-decides --frontier --json
-eq "$(blkr tk-k-decision)" "stuck tk-k-decision human" "a decision is a person's to make"
-
-run tk-w-sub3 --frontier
-has "$OUT" "tk-w-armed2  tk-w-armed2 (open, stuck on tk-w-gate: human)" "the human block names the stuck leaf and why"
-run tk-w-sub9 --frontier
-has "$OUT" "(open, stuck: unrouted)" "  ... and a blocker that stops itself as just why"
-
-# --- B3. The bead a live run works -------------------------------------------
-maps() { grep -c '^map ' "$RUN_LIB_STUB_LOG" | tr -d ' '; }
-eq "$(jq -r '[.[] | select(.bead == "tk-r-ended")][0] | "\(.root) \(.live)"' "$RUN_LIB_STUB_RUNS")" "tk-r-eroot false" \
-  "the fixture's ended run is a run whose root closed"
-
-: > "$RUN_LIB_STUB_LOG"
-run tk-r-sub --frontier --json
-eq "$(blkr tk-r-work)" "advancing - -" "an open, unassigned, unrouted bead a live run works advances"
-eq "$(blkr tk-r-ended)" "stuck tk-r-ended unrouted" "  ... one whose run's root closed is unrouted"
-eq "$(blkr tk-r-anchor)" "stuck tk-r-anchor approval" "  ... and a merge anchor a live run works is judged as the anchor it is"
+# A settled pull request whose posture is none or commented waits on the
+# operator's review.
+run tk-prwait --frontier --json
+eq "$(blkr tk-pr-none)" "stuck tk-pr-none pull-request" "a settled PR with no review is stuck on itself, waiting on review"
+eq "$(blkr tk-pr-commented)" "stuck tk-pr-commented pull-request" "  ... and so is one with comments and no verdict"
 eq "$(jr .frontier.verdict)" stuck "  ... so the subject waiting on them is stuck"
-eq "$(maps)" 1 "  ... and the store holding them is asked for its runs once"
-run tk-r-ended --json
-eq "$(jr '.edges.tracked_by | map("\(.id) \(.status)") | join(",")')" "tk-r-eroot-cv open" \
-  "  ... though the ended run's input convoy is still open"
 
-: > "$RUN_LIB_STUB_LOG"
-run tk-r-deep --frontier --json
-eq "$(blkr tk-r-w2)" "stuck tk-r-orphan unrouted" "the walk reads on below a bead a live run works, to the orphan beneath"
-eq "$(maps)" 1 "  ... asking the store for its runs once across the levels"
-run tk-r-six --frontier --json
-eq "$(jr .frontier.verdict)" advancing "a bead a live run works on the last level the walk reads advances"
+# A person's move behind work nobody routes is what stops the bead.
+run tk-chain --frontier --json
+eq "$(blkr tk-norte)" "stuck tk-hg2 own-wait" "work nobody routes, behind a human gate, is stuck on the gate"
 
-: > "$RUN_LIB_STUB_LOG"
-run tk-r-two --frontier --json
-eq "$(jr .frontier.verdict)" stuck "orphans in two stores leave the routed bead over them stuck"
-eq "$(maps)" 2 "  ... and each store is asked for its runs"
-
-RUN_LIB_STUB_FAIL=map run tk-r-sub --frontier --json
-eq "$(blkr tk-r-work)" "stuck tk-r-work unknown" "a store whose runs do not read leaves a bead with no route unknown"
-eq "$(blkr tk-r-ended)" "stuck tk-r-ended unknown" "  ... whatever its run"
-
-: > "$RUN_LIB_STUB_LOG"
-run tk-adv --frontier --json
-run tk-r-work --frontier --json
-run hq-city --db "$HQ/.beads" --frontier --json
-eq "$(maps)" 0 "no runs are read when no walked bead reads unrouted, nor for a subject nothing waits on"
-
-: > "$RUN_LIB_STUB_LOG"
-run tk-r-design --frontier --horizon --json
-eq "$(kid tk-r-impl)" "advancing - -" "a child armed behind its subject advances while a live run works the subject"
-eq "$(maps)" 1 "  ... the subject's runs read because a walked bead waits on it"
-
-run tk-r-epic --horizon --json
-eq "$(jr '.horizon.children | "\(.open) \(.advancing) \(.stuck)"')" "2 1 1" \
-  "the epic-health snapshot counts the child a live run works as advancing"
-eq "$(kid tk-r-work)" "advancing - -" "  ... that child"
-eq "$(kid tk-r-ended)" "stuck tk-r-ended unrouted" "  ... and its sibling whose run ended as unrouted"
-
-# run-lib.sh's own map, read through the walk's reader over the fake gc: a
-# store's runs come from the --db its rows were read from.
-MAPREAD='list --has-metadata-key gc.input_convoy_id'
-: > "$FAKE_GC_LOG"
-GC_RUN_LIB="$HERE/run-lib.sh" run tk-r-sub --frontier --json
-eq "$(blkr tk-r-work) | $(blkr tk-r-ended)" "advancing - - | stuck tk-r-ended unrouted" \
-  "run-lib.sh's own map tells the bead a live run works from one whose run ended"
-eq "$(grep -cF -- "--db $R_TK/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "$MAPREAD" "$FAKE_GC_LOG")" "1 1" \
-  "  ... reading it once, from the store the rows were read from"
-: > "$FAKE_GC_LOG"
-GC_RUN_LIB="$HERE/run-lib.sh" run tk-r-two --frontier --json
-eq "$(grep -cF -- "--db $R_TK/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "--db $R_OR/.beads $MAPREAD" "$FAKE_GC_LOG")" "1 1" \
-  "  ... and, with orphans in two stores, each store's runs from that store"
-
-GC_RUN_LIB="$HERE/run-lib.sh" run tk-r-tsub --frontier --json
-eq "$(blkr tk-r-twin)" "advancing - -" "a live run in gc-toolkit's store works its tk-r-twin"
-: > "$FAKE_GC_LOG"
-GC_RUN_LIB="$HERE/run-lib.sh" run hq-pin --db "$HQ/.beads" --horizon --json
-eq "$(kid tk-r-twin) | $(kid hq-pmid)" "stuck tk-r-twin unrouted | stuck tk-r-lone unrouted" \
-  "  ... and leaves the city store's idle tk-r-twin unrouted, though gc-toolkit's runs were read in the same walk"
-eq "$(grep -cF -- "--db $HQ/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "--db $R_TK/.beads $MAPREAD" "$FAKE_GC_LOG")" "1 1" \
-  "  ... once each, each from its own store"
-
-# A roster that does not read places no store. A read by id still finds its
-# rows, since gc routes an id to the store that owns it, but a read of runs
-# names no bead, so gc would answer it from the caller's own store.
-: > "$FAKE_GC_LOG"
-FAKE_RIGS="$TMP/no-roster.json" GC_RUN_LIB="$HERE/run-lib.sh" run hq-pin --horizon --json
-eq "$(kid tk-r-twin) | $(kid hq-pmid)" "stuck tk-r-twin unknown | stuck tk-r-lone unknown" \
-  "with no roster, the city store's idle tk-r-twin and the orphan read unknown, never judged by another store's runs"
-eq "$(grep -cF -- "$MAPREAD" "$FAKE_GC_LOG")" 0 "  ... and no store's runs are read"
-: > "$FAKE_GC_LOG"
-FAKE_RIGS="$TMP/no-roster.json" GC_RUN_LIB="$HERE/run-lib.sh" run hq-pin --db "$HQ/.beads" --horizon --json
-eq "$(kid tk-r-twin) | $(kid hq-pmid)" "stuck tk-r-twin unrouted | stuck tk-r-lone unknown" \
-  "  ... while --db places the subject's store, whose runs read, and leaves unknown only the orphan whose store it cannot place"
-eq "$(grep -cF -- "--db $HQ/.beads $MAPREAD" "$FAKE_GC_LOG") $(grep -cF -- "$MAPREAD" "$FAKE_GC_LOG")" "1 1" \
-  "  ... reading the runs of the store --db names alone"
+run tk-stuck --frontier
+has "$OUT" "tk-op  open unrouted blocker (open, stuck: not-scheduled)" "the human block names a blocker that stops itself by just why"
+run tk-chain --frontier
+has "$OUT" "tk-norte  unrouted, behind a gate (open, stuck on tk-hg2: own-wait)" "  ... and one stopped beneath it by the bead and why"
 
 # --- C. Horizon (opt-in) ----------------------------------------------------
 JQF='has("horizon")'                 runj tk-epic;            eq "$JQ" false "horizon is absent by default (opt-in)"
@@ -1074,23 +776,33 @@ JQF='has("horizon")'                 runj tk-epic;            eq "$JQ" false "ho
 eq "$(jr .horizon.children.total)"     10 "every direct child is counted, in any status, and a bd set-state event is not a child"
 eq "$(jr .horizon.children.open)"      9  "  ... nine are open"
 eq "$(jr .horizon.children.closed)"    1  "  ... the done child is counted (the listing asks for every status), and the closed event is not"
-eq "$(jr .horizon.children.advancing)" 5  "  ... pool-routed, in-progress, hooked, a progressing anchor and a pour-cleared rework child advance"
-eq "$(jr .horizon.children.stuck)"     4  "  ... the operator-queued, armed-behind-the-gate, pinned and custom-status children are stuck"
+eq "$(jr .horizon.children.advancing)" 3  "  ... the pool-routed, in-progress and hooked children advance"
+eq "$(jr .horizon.children.stuck)"     6  "  ... the rest are stuck"
 eq "$(jr '.horizon.open | length')"    9  "open children are listed; the done one is not"
 eq "$(jr '[.horizon.open[].id] | index("tk-kid-done")')" null "the done child is never in the open list"
-eq "$(jr '[.horizon.open[]|select(.id=="tk-kid-pool")][0].advance')" advancing "a pool-routed open child advances"
-eq "$(jr '[.horizon.open[]|select(.id=="tk-kid-human")][0].advance')" stuck "an open child in the operator's queue is stuck"
-eq "$(kid tk-kid-human)" "stuck tk-kid-human human" "  ... and names itself, a person's to move"
-eq "$(kid tk-kid-rework)" "advancing - -" "a pour-cleared rework child advances, with no stuck_on"
-eq "$(kid tk-kid-armed)" "stuck tk-hg human" "an armed child takes its blocker's verdict: behind a human gate it is stuck, naming the gate"
+eq "$(kid tk-kid-pool)" "advancing - -" "a pool-routed open child advances"
+eq "$(kid tk-kid-prog)" "advancing - -" "an in-progress child advances"
 eq "$(kid tk-kid-hooked)" "advancing - -" "a hooked child is listed and advances: an agent holds it"
-eq "$(kid tk-kid-pinned)" "stuck tk-kid-pinned held" "a pinned child is listed and stuck on its hold, though it carries a route"
-eq "$(kid tk-kid-custom)" "stuck tk-kid-custom held" "a child in a status its store adds is listed, and fails closed as held"
+eq "$(kid tk-anchor)" "stuck tk-anchor pull-request" "a pull request nothing reviewed waits on the operator's review"
+eq "$(kid tk-kid-human)" "stuck tk-kid-human routed-to-you" "an open child in the operator's queue is a person's to move"
+eq "$(kid tk-kid-armed)" "stuck tk-hg own-wait" "an armed child behind a human gate is stuck on the gate"
+eq "$(kid tk-kid-rework)" "stuck tk-kid-rework not-scheduled" "a rework child whose route the pour cleared is work nobody routes"
+eq "$(kid tk-kid-pinned)" "stuck tk-kid-pinned status" "a pinned child is listed and stuck on its status, though it carries a route"
+eq "$(kid tk-kid-custom)" "stuck tk-kid-custom status" "a child in a status its store adds is listed, and stuck on that status"
 eq "$(jr '[.horizon.open[] | select(.id == "tk-kid-custom")][0].status')" in_review "  ... reporting the status as the store holds it"
-eq "$(logcount 'list --id.*tk-hg')" 1 "  ... read through the listing's list-shaped edge"
-eq "$(logcount 'list --id.*tk-kid-')" 0 "  ... while the children themselves cost no read: the listing carries their rows"
 eq "$(jr '[.horizon.open[] | select(.advance == "advancing") | has("stuck_on")] | any')" false \
   "an advancing child carries no stuck_on key"
+
+run tk-r-epic --horizon --json
+eq "$(jr '.horizon.children | "\(.open) \(.advancing) \(.stuck)"')" "2 1 1" \
+  "the epic-health snapshot counts the child a live run works as advancing"
+eq "$(kid tk-r-work)" "advancing - -" "  ... that child, from the run's start"
+eq "$(kid tk-r-ended)" "stuck tk-r-ended not-scheduled" "  ... and its sibling whose run ended is work nobody routes"
+
+run tk-outer --horizon --json
+eq "$(kid tk-inner)" "advancing - -" "a child epic advances while every open member does"
+eq "$(kid tk-delivery)" "stuck tk-delivery-kid not-scheduled" "a Delivery is stuck on what stops its first open member"
+eq "$(kid tk-mayor)" "stuck tk-mayor not-scheduled" "routed work held for the Product Owner is work nobody takes"
 
 # --- one call is enough: the opening's subject slice, verdict and snapshot --
 # The done-condition: with both dimensions opted in, ONE invocation yields the
@@ -1133,9 +845,6 @@ run --nope tk-anchor;      eq "$RC" 2 "an unknown flag is a usage error"
 runb tk-anchor --store;    eq "$RC" 2 "a --store with no value is a usage error, not a hang"
 has "$ERR" "needs a value" "  ... with a diagnostic"
 runb tk-anchor --db;       eq "$RC" 2 "a --db with no value is a usage error, not a hang"
-runb tk-anchor --walk-budget;   eq "$RC" 2 "a --walk-budget with no value is a usage error, not a hang"
-run tk-anchor --walk-budget 0;  eq "$RC" 2 "a zero --walk-budget is a usage error"
-run tk-anchor --walk-budget x;  eq "$RC" 2 "a non-numeric --walk-budget is a usage error"
 
 # --- the raw-bd regression guard: no probe ever bypassed gc bd --------------
 eq "$(wc -l < "$FAKE_BD_LOG" | tr -d ' ')" "0" \

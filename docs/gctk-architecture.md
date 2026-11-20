@@ -681,9 +681,16 @@ question for each row it draws. The answer is in the board's words.
   conversation answers. A queued bead is stuck on what stops the first of its
   waits that does not advance, and such an epic or Delivery on what stops the
   first of its open members that does not advance. Any other bead is stuck on
-  itself. A bead's frontier is `ready` when nothing holds it, as
-  `bead holds` answers, and otherwise `advancing` or `stuck` by the beads it
-  waits on.
+  itself. The word that says why is the ask of the bead that stops it when
+  that bead is itself the ask, and otherwise the rule that names that bead. A
+  wait on a bead with no standing of its own reads as the bead that speaks for
+  it, the anchor that work a merge anchor carries names or the bead a live run
+  works for the run's root, and a wait that is the waiting bead's own work
+  stops nothing. A `waits-for` wait, which the store cannot judge yet, a bead
+  the read cannot answer and a cycle of waits each read `unread`. A bead's
+  frontier is `ready` when nothing holds it, as `bead holds` answers, and
+  otherwise `advancing` or `stuck` by the beads it waits on, each read as the
+  bead's advance reads it.
 
 A bead only a person clears is an open decision, a conversation, or any bead
 assigned to `human`, the operator's queue. That rule, the rule for a human gate
@@ -759,12 +766,6 @@ why a reader must know it, and the work that retires it.
   counts as its human gates the ones whose rows name it and the ones among its
   blockers that are not closed. The board member (tk-1tfzr71.24) retires that
   read or writes the warrant it stands on.
-- **A bead's standing is decided outside `standing`.**
-  `assets/scripts/bead-context.sh` decides again, in jq, whether a bead
-  advances, so an agent's read of a bead and the board's disagree where
-  [the contract](#the-bead-stands-contract) settles them. The effort that
-  builds the design (tk-ssm8qns.27) moves it onto `standing` and deletes the
-  copy.
 - **`epic create`, `session title` and `rig`'s checks start processes outside
   an adapter.** `epic create` files the epic with its own `gc bd create`,
   `session title` runs `gc session rename` and `gc session submit`, and the
