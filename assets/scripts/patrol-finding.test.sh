@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/patrol-finding.sh — one durable bead per
 # distinct patrol finding, and a recurrence that lands on it instead of filing
-# another. Stubbed gc and gctk's reaction verbs; no live city, Dolt, or network.
+# another. The compiled fake gc (test-harness.sh) and stubbed gctk reaction
+# verbs; no live city, Dolt, or network.
 #
 # The load-bearing case is RECURRENCE. A human gate dedups only while it is
 # open, and a person answers each one before the next patrol sweep runs, so a
@@ -14,188 +15,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/patrol-finding.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-patrol-finding-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
-
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
-eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
-hasin() { grep -qF -- "$2" <<< "$1"; }
-has()   { if hasin "$1" "$2"; then ok "$3"; else bad "$3 (missing '$2')"; fi; }
-hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
-# Single-line needles only: grep -F reads an embedded newline as alternation,
-# so a multi-line needle passes on EITHER line. Count with grep -c instead.
-
-BIN="$TMP/bin"; mkdir -p "$BIN"
-
-# ── gc stub ──────────────────────────────────────────────────────────
-# A JSON bead store with the create/list/show/update/set-state/dep surface the
-# script uses. --metadata rides the create, exactly as bd merges it, because the
-# script's duplicate-recovery depends on the key being present on a bead whose
-# id the create did not return.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
-set -u
-STORE="${STUB_STORE:?}"; DEPS="${STUB_DEPS:?}"
-# A read the gctk under test makes answers from the same store and edges,
-# through the seam holds-store.stub.sh keeps, whose blocks rows read "A blocks
-# B" where these read "A depends on B". STUB_SHOW_FAIL fails it, as it fails a
-# show.
-if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = "bd" ]; then
-  shift
-  [ -z "${STUB_SHOW_FAIL:-}" ] || export HOLDS_FAIL=all
-  awk -F'|' -v OFS='|' '$2 == "blocks" { print $3, $2, $1; next } { print }' "$DEPS" > "$DEPS.holds"
-  HOLDS_STORE="$STORE" HOLDS_DEPS="$DEPS.holds" exec "${HOLDS_STUB:?}" answer "$@"
-fi
-printf '[%s] %s\n' "${GC_RIG:-<unset>}" "$*" >> "${STUB_GC_LOG:?}"
-[ "${1:-}" = "bd" ] || exit 0
-shift
-case "${1:-}" in
-  list)
-    [ -n "${STUB_LIST_FAIL:-}" ] && { echo "bd: down" >&2; exit 1; }
-    shift
-    fields=(); statuses=""; limit=0
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --status=*) statuses="${1#--status=}" ;;
-        --status) shift; statuses="${1:-}" ;;
-        --limit=*) limit="${1#--limit=}" ;;
-        --metadata-field) shift; fields+=("${1:-}") ;;
-        --metadata-field=*) fields+=("${1#--metadata-field=}") ;;
-      esac
-      shift || true
-    done
-    # STUB_LIST_FAIL_FIELD: only a listing that filters on this metadata field
-    # fails, so one lookup can be broken while the others still read.
-    for f in ${fields[@]+"${fields[@]}"}; do
-      [ -n "${STUB_LIST_FAIL_FIELD:-}" ] && [ "${f%%=*}" = "$STUB_LIST_FAIL_FIELD" ] \
-        && { echo "bd: down" >&2; exit 1; }
-    done
-    out=$(jq -c --arg st ",$statuses," \
-      '[ .[] | select((.status // "open") as $s | $st | contains("," + $s + ",")) ]' "$STORE")
-    for f in ${fields[@]+"${fields[@]}"}; do
-      k="${f%%=*}"; v="${f#*=}"
-      out=$(printf '%s' "$out" | jq -c --arg k "$k" --arg v "$v" \
-        '[ .[] | select(((.metadata // {})[$k] // "") == $v) ]')
-    done
-    # limit 0 is unbounded, as bd reads it.
-    case "$limit" in ''|0|*[!0-9]*) : ;; *) out=$(printf '%s' "$out" | jq -c --argjson n "$limit" '.[0:$n]') ;; esac
-    # bd list puts each bead's outgoing edges on its row as
-    # {issue_id, depends_on_id, type}, and leaves the key off a bead with none.
-    out=$(printf '%s' "$out" | jq -c --rawfile edges "$DEPS" '
-      [ $edges | split("\n")[] | select(. != "") | split("|")
-        | {issue_id: .[0], type: .[1], depends_on_id: .[2]} ] as $e
-      | map(.id as $id | [ $e[] | select(.issue_id == $id) ] as $mine
-            | if ($mine | length) > 0 then . + {dependencies: $mine} else . end)')
-    printf '%s\n' "$out" ;;
-  show)
-    [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "bd: down" >&2; exit 1; }
-    shift; id="${1:-}"
-    out=$(jq -c --arg id "$id" '[.[] | select(.id == $id)]' "$STORE")
-    if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
-      echo '{"error":"no issues found"}'
-    else printf '%s\n' "$out"; fi ;;
-  create)
-    [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "bd: refused" >&2; exit 1; }
-    shift
-    title=""; body=""; typ="task"; metajson="{}"; prio=""
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --title) shift; title="${1:-}" ;;
-        -d) shift; body="${1:-}" ;;
-        -t) shift; typ="${1:-}" ;;
-        --metadata) shift; metajson="${1:-\{\}}" ;;
-        --priority) shift; prio="${1:-}" ;;
-      esac
-      shift || true
-    done
-    n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
-    tmp=$(mktemp)
-    jq -c --arg id "fnd-$n" --arg t "$title" --arg d "$body" --arg ty "$typ" \
-          --arg p "$prio" --argjson m "$metajson" \
-      '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,
-             "issue_type":$ty,"priority":$p,"metadata":$m,"notes":""}]' \
-      "$STORE" > "$tmp" && mv "$tmp" "$STORE"
-    # STUB_CREATE_NO_ID: bd files the bead but answers with an empty id — the
-    # shape that makes a blind retry file the duplicate.
-    if [ -n "${STUB_CREATE_NO_ID:-}" ]; then printf '{"id":""}\n'; else printf '{"id":"fnd-%s"}\n' "$n"; fi ;;
-  update)
-    shift; id="${1:-}"; shift
-    [ -n "${STUB_UPD_FAIL:-}" ] && { echo "bd: update refused" >&2; exit 1; }
-    tmp=$(mktemp); cp "$STORE" "$tmp"
-    drops="${STUB_DROP_KEYS:-}"
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --set-metadata) shift; k="${1%%=*}"; v="${1#*=}"
-          case ",$drops," in *",$k,"*) ;; *)
-            jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
-              'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-          esac ;;
-        --unset-metadata) shift; k="${1:-}"
-          jq -c --arg id "$id" --arg k "$k" \
-            'map(if .id == $id then .metadata |= del(.[$k]) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-        --append-notes) shift; note="${1:-}"
-          jq -c --arg id "$id" --arg n "$note" \
-            'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
-            "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-        --status=*|--status)
-          if [ "$1" = "--status" ]; then shift; st="${1:-}"; else st="${1#--status=}"; fi
-          jq -c --arg id "$id" --arg s "$st" 'map(if .id == $id then .status = $s else . end)' \
-            "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-      esac
-      shift || true
-    done
-    mv "$tmp" "$STORE"; echo "updated $id" ;;
-  set-state)
-    # As bd's runSetState: a dimension already at the value writes nothing;
-    # otherwise one closed event bead under the subject records the change, and
-    # the dimension's label is swapped for the new one.
-    [ -n "${STUB_SET_STATE_FAIL:-}" ] && { echo "bd: set-state refused" >&2; exit 1; }
-    shift; id="${1:-}"; spec="${2:-}"; shift 2 || true
-    reason=""
-    while [ $# -gt 0 ]; do
-      case "$1" in --reason) shift; reason="${1:-}" ;; --reason=*) reason="${1#--reason=}" ;; esac
-      shift || true
-    done
-    dim="${spec%%=*}"; val="${spec#*=}"
-    old=$(jq -r --arg id "$id" --arg p "$dim:" \
-      '[.[] | select(.id == $id) | (.labels // [])[] | select(startswith($p))][0] // ""' "$STORE")
-    [ "$old" = "$dim:$val" ] && { echo "(no change: $dim already set to $val)"; exit 0; }
-    ev="evt-$(( $(jq '[.[] | select(.issue_type == "event")] | length' "$STORE") + 1 ))"
-    tmp=$(mktemp)
-    jq -c --arg id "$id" --arg ev "$ev" --arg dim "$dim" --arg val "$val" --arg old "$old" --arg r "$reason" \
-      'map(if .id == $id then .labels = ([(.labels // [])[] | select(. != $old)] + [$dim + ":" + $val]) else . end)
-       + [{"id":$ev,"status":"closed","issue_type":"event","priority":"4","metadata":{},"notes":"",
-           "title":("State change: " + $dim + " → " + $val),"description":$r}]' \
-      "$STORE" > "$tmp" && mv "$tmp" "$STORE"
-    printf '%s|parent-child|%s\n' "$ev" "$id" >> "$DEPS"
-    echo "Set $dim = $val on $id" ;;
-  close)
-    shift; id="${1:-}"
-    tmp=$(mktemp)
-    jq -c --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' "$STORE" > "$tmp" && mv "$tmp" "$STORE" ;;
-  dep)
-    shift
-    if [ "${1:-}" = "add" ]; then
-      a="${2:-}"; b="${3:-}"; ty=""
-      shift 3 || true
-      while [ $# -gt 0 ]; do
-        case "$1" in --type=*) ty="${1#--type=}" ;; --type) shift; ty="${1:-}" ;; esac
-        shift || true
-      done
-      printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$DEPS"
-    fi ;;
-  *) exit 0 ;;
-esac
-STUB
-chmod +x "$BIN/gc"
-
-export PATH="$BIN:$PATH"
-export STUB_STORE="$TMP/beads.json" STUB_DEPS="$TMP/deps.txt"
-export STUB_GC_LOG="$TMP/gc.log" STUB_PROACTIVE_LOG="$TMP/pro.log"
-export STUB_SEQ="$TMP/seq"
+# shellcheck source=assets/scripts/test-harness.sh
+. "$HERE/test-harness.sh"
 # What a held bead still waits on is the answer of gctk bead holds, built from
-# this checkout and run over the stub store.
-export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
-GCTK_BUILT="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no held bead can be read"; exit 1; }
+# this checkout and run over the fake's store.
+harness_build_gctk
+harness_init
+[ -n "${GCTK_BUILT:-}" ] || { echo "passed: $PASS  failed: $FAIL"; exit 1; }
+export STUB_PROACTIVE_LOG="$TMP/pro.log" RIG_LOG="$TMP/rig.log"
 
 # ── gctk's reaction verbs, stubbed ───────────────────────────────────
 # reaction deliverable answers per STUB_DELIVERABLE_RC; reaction sling logs
@@ -214,50 +41,76 @@ if [ "\${1:-}" = reaction ]; then
   esac
   exit 0
 fi
-exec "$GCTK_BUILT" "\$@"
+exec "$GCTK_BIN" "\$@"
 GCTK
 chmod +x "$BIN/gctk"
 export GCTK_BIN="$BIN/gctk"
 
+# The rig each bd create ran under, as "[<GC_RIG>] <arguments>" lines in
+# $RIG_LOG, written by the hook the fake runs before each create once rig_log_on
+# names it.
+cat > "$BIN/rig-hook" <<'HOOK'
+#!/bin/sh
+printf '[%s] %s\n' "${GC_RIG:-<unset>}" "$*" >> "$RIG_LOG"
+HOOK
+chmod +x "$BIN/rig-hook"
+rig_log_on() { export STUB_HOOK_AT="bd create" STUB_HOOK="$BIN/rig-hook"; }
+
 reset() {
-  echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_PROACTIVE_LOG"
-  printf '0' > "$STUB_SEQ"
-  export STUB_CREATE_FAIL="" STUB_UPD_FAIL="" STUB_LIST_FAIL="" STUB_LIST_FAIL_FIELD="" STUB_DROP_KEYS=""
-  export STUB_SHOW_FAIL="" STUB_SET_STATE_FAIL=""
-  export STUB_CREATE_NO_ID="" STUB_DELIVERABLE_RC=0 STUB_SLING_RC=0
+  store '[]'; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_PROACTIVE_LOG"; : > "$RIG_LOG"
+  export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE="" STUB_LIST_FAIL="" STUB_LIST_FAIL_ON=""
+  export STUB_SHOW_FAIL="" STUB_FAIL_ON="" STUB_HOOK_AT="" STUB_HOOK=""
+  export STUB_DELIVERABLE_RC=0 STUB_SLING_RC=0
   export GC_RIG="gc-toolkit"
 }
 
 # beads counts what a run filed; bd's set-state audit events are read by events.
-beads()  { jq '[.[] | select(.issue_type != "event")] | length' "$STUB_STORE"; }
+beads() {
+  local all events n
+  all=$(bids); events=$(bids issue_type=event)
+  set -- $all; n=$#
+  set -- $events
+  echo $((n - $#))
+}
 # state <id> <dimension> — the value of a bd state label, or <none>.
-state()  { jq -r --arg id "$1" --arg d "$2:" '[.[] | select(.id==$id) | (.labels // [])[] | select(startswith($d)) | ltrimstr($d)][0] // "<none>"' "$STUB_STORE"; }
-# events <id> — the audit events set-state filed under a bead, oldest first.
-events() { jq -c --arg id "$1" --rawfile edges "$STUB_DEPS" '
-             [ $edges | split("\n")[] | select(endswith("|parent-child|" + $id)) | split("|")[0] ] as $ev
-             | [ .[] | select(.id as $x | $ev | any(. == $x)) | {title, description} ]' "$STUB_STORE"; }
-bstatus() { jq -r --arg id "$1" '(.[] | select(.id==$id) | .status) // ""' "$STUB_STORE"; }
-meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id==$id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
-notes()  { jq -r --arg id "$1" '(.[] | select(.id==$id) | .notes) // ""' "$STUB_STORE"; }
-body()   { jq -r --arg id "$1" '(.[] | select(.id==$id) | .description) // ""' "$STUB_STORE"; }
-title()  { jq -r --arg id "$1" '(.[] | select(.id==$id) | .title) // ""' "$STUB_STORE"; }
-btype()  { jq -r --arg id "$1" '(.[] | select(.id==$id) | .issue_type) // ""' "$STUB_STORE"; }
-findings() { jq --arg k "$1" '[.[] | select(.metadata["finding.key"] == $k)] | length' "$STUB_STORE"; }
+state() {
+  local labels l IFS=,
+  labels=$(bfield "$1" labels); labels=${labels#[}; labels=${labels%]}
+  for l in $labels; do
+    l=${l#\"}; l=${l%\"}
+    case "$l" in "$2":*) printf '%s\n' "${l#"$2":}"; return 0 ;; esac
+  done
+  echo "<none>"
+}
+# events <id> — the reason each audit event set-state filed under a bead
+# carries, a line each.
+events() {
+  local e d
+  for e in $(bonto "$1" parent-child); do
+    [ "$(bfield "$e" issue_type)" = event ] || continue
+    d=$(bfield "$e" description)
+    printf '%s\n' "${d##*Reason: }"
+  done
+}
+body()  { bfield "$1" description; }
+title() { bfield "$1" title; }
+btype() { bfield "$1" issue_type; }
+findings() { local ids; ids=$(bids "metadata.finding.key=$1"); set -- $ids; echo $#; }
 # put_bead <id> <status> — a bead that is not a finding: the fix or the human
-# gate a held finding waits on, or the subject one is about.
+# gate a held finding waits on, or the subject one is about. A closed one
+# carries the close time bd stamps, which gctk's read of a hold requires.
 put_bead() {
-  local tmp
-  tmp=$(mktemp "$TMP/store.XXXXXX")
-  jq -c --arg id "$1" --arg s "$2" '. + [{"id":$id,"status":$s,"title":$id,"metadata":{}}]' \
-    "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+  if [ "$2" = closed ]; then brow "$1" "status=$2" "title=$1" 'metadata:={}' closed_at=2026-01-01T00:00:00Z
+  else brow "$1" "status=$2" "title=$1" 'metadata:={}'; fi
 }
 # hold <finding> <status> [<blocker>...] — park a finding bead at <status>,
-# waiting on each blocker through a `blocks` edge.
+# waiting on each blocker through a `blocks` edge, which the dep row writes
+# blocker first.
 hold() {
   local f="$1" st="$2" b
   shift 2
-  for b in "$@"; do gc bd dep add "$f" "$b" --type=blocks >/dev/null 2>&1; done
-  gc bd update "$f" --status="$st" >/dev/null 2>&1
+  for b in "$@"; do printf '%s|blocks|%s\n' "$b" "$f" >> "$STUB_DEPS"; done
+  bset "$f" "status=$st"
 }
 
 echo "# patrol-finding.sh"
@@ -269,29 +122,29 @@ OUT=$("$SUT" --key doctor-sweep-failed --scope deacon-findings \
 RC=$?
 eq "$RC" "0" "(first) exit 0"
 eq "$(beads)" "1" "(first) exactly one bead filed"
-eq "$(meta fnd-1 'finding.key')" "doctor-sweep-failed" "(first) finding.key rode the create"
-eq "$(meta fnd-1 'finding.scope')" "deacon-findings" "(first) finding.scope recorded"
-eq "$(meta fnd-1 'finding.occurrences')" "1" "(first) occurrences starts at 1"
-eq "$(meta fnd-1 'gc.proactive')" "<absent>" "(first) no scan opt-in is stamped: the scan reads every ready bead"
-eq "$(btype fnd-1)" "bug" "(first) default type is bug"
-has "$(body fnd-1)" "state=failed elapsed=612" "(first) the finding text is the bead body, verbatim"
-has "$OUT" "filed fnd-1" "(first) reports the bead it filed"
-eq "$(meta fnd-1 'finding.first_seen')" "$(meta fnd-1 'finding.last_seen')" "(first) first_seen == last_seen"
+eq "$(meta new-1 'finding.key')" "doctor-sweep-failed" "(first) finding.key rode the create"
+eq "$(meta new-1 'finding.scope')" "deacon-findings" "(first) finding.scope recorded"
+eq "$(meta new-1 'finding.occurrences')" "1" "(first) occurrences starts at 1"
+eq "$(meta new-1 'gc.proactive')" "<absent>" "(first) no scan opt-in is stamped: the scan reads every ready bead"
+eq "$(btype new-1)" "bug" "(first) default type is bug"
+has "$(body new-1)" "state=failed elapsed=612" "(first) the finding text is the bead body, verbatim"
+has "$OUT" "filed new-1" "(first) reports the bead it filed"
+eq "$(meta new-1 'finding.first_seen')" "$(meta new-1 'finding.last_seen')" "(first) first_seen == last_seen"
 
 # It reaches the reaction, and only after the bead verified.
-has "$(cat "$STUB_PROACTIVE_LOG")" "deliverable fnd-1" "(first) asks whether the pool can pick a reaction up on the bead"
-has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-1" "(first) slings the first reaction at the bead"
+has "$(cat "$STUB_PROACTIVE_LOG")" "deliverable new-1" "(first) asks whether the pool can pick a reaction up on the bead"
+has "$(cat "$STUB_PROACTIVE_LOG")" "sling new-1" "(first) slings the first reaction at the bead"
 hasnt "$(cat "$STUB_GC_LOG")" "visit:" "(first) no visit is filed on this path"
 
 # ── 2. the same finding, again — the case a human gate's dedup cannot hold ─
 OUT=$("$SUT" --key doctor-sweep-failed --scope deacon-findings \
         --title "doctor sweep failed" --message "state=failed elapsed=612 check=cadence" 2>&1)
 eq "$(beads)" "1" "(recur/same) still exactly one bead — no duplicate"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(recur/same) occurrence counted"
-eq "$(notes fnd-1)" "" "(recur/same) unchanged text appends no note"
+eq "$(meta new-1 'finding.occurrences')" "2" "(recur/same) occurrence counted"
+eq "$(notes new-1)" "" "(recur/same) unchanged text appends no note"
 has "$OUT" "already tracks" "(recur/same) says the finding is already tracked"
 has "$OUT" "text unchanged" "(recur/same) names why nothing was appended"
-eq "$(grep -c 'sling fnd-1' "$STUB_PROACTIVE_LOG")" "1" "(recur/same) does not re-sling a reaction it already slung"
+eq "$(grep -c 'sling new-1' "$STUB_PROACTIVE_LOG")" "1" "(recur/same) does not re-sling a reaction it already slung"
 
 # Twelve more ticks, as the measured day had.
 for _ in $(seq 1 12); do
@@ -299,14 +152,14 @@ for _ in $(seq 1 12); do
     --title "doctor sweep failed" --message "state=failed elapsed=612 check=cadence" >/dev/null 2>&1
 done
 eq "$(beads)" "1" "(recur/x14) fourteen ticks of one situation are one bead"
-eq "$(meta fnd-1 'finding.occurrences')" "14" "(recur/x14) all fourteen counted on it"
+eq "$(meta new-1 'finding.occurrences')" "14" "(recur/x14) all fourteen counted on it"
 
 # ── 3. the same finding, changed text ────────────────────────────────
 OUT=$("$SUT" --key doctor-sweep-failed --scope deacon-findings \
         --title "doctor sweep failed" --message "state=exceeded elapsed=1801 check=cadence" 2>&1)
 eq "$(beads)" "1" "(recur/changed) still one bead"
-eq "$(meta fnd-1 'finding.occurrences')" "15" "(recur/changed) occurrence counted"
-has "$(notes fnd-1)" "state=exceeded elapsed=1801" "(recur/changed) the new text is appended as a note"
+eq "$(meta new-1 'finding.occurrences')" "15" "(recur/changed) occurrence counted"
+has "$(notes new-1)" "state=exceeded elapsed=1801" "(recur/changed) the new text is appended as a note"
 has "$OUT" "changed text" "(recur/changed) says the text moved"
 has "$(cat "$STUB_GC_LOG")" "--append-notes" "(recur/changed) appends, never replaces"
 hasnt "$(cat "$STUB_GC_LOG")" " --notes " "(recur/changed) --notes would erase the dispatch body"
@@ -327,31 +180,31 @@ reset
 eq "$(beads)" "2" "(--about) one per-bead key over two beads is two findings"
 "$SUT" --key witness-salvage-refused --about tk-aaa --distinct --title "salvage refused" --message "no worktree" >/dev/null 2>&1
 eq "$(beads)" "2" "(--about) a repeat on the same bead files nothing new, --distinct or not"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(--about) the repeat is counted on the first subject's bead"
-eq "$(meta fnd-1 'finding.about')" "tk-aaa" "(--about) the subject is stamped"
-eq "$(cat "$STUB_DEPS")" "fnd-1|tracks|tk-aaa
-fnd-2|tracks|tk-bbb" "(--about) tracks edges, never parent-child"
+eq "$(meta new-1 'finding.occurrences')" "2" "(--about) the repeat is counted on the first subject's bead"
+eq "$(meta new-1 'finding.about')" "tk-aaa" "(--about) the subject is stamped"
+eq "$(cat "$STUB_DEPS")" "new-1|tracks|tk-aaa
+new-2|tracks|tk-bbb" "(--about) tracks edges, never parent-child"
 
 # A finding with no --about must not adopt an --about-scoped bead: finding.about
 # is ABSENT there, which the listing filter alone cannot express.
 "$SUT" --key witness-salvage-refused --distinct --title "salvage refused" --message "no worktree" >/dev/null 2>&1
 eq "$(beads)" "3" "(--about) a finding with no subject is its own situation"
-eq "$(meta fnd-3 'finding.about')" "<absent>" "(--about) and carries no subject stamp"
+eq "$(meta new-3 'finding.about')" "<absent>" "(--about) and carries no subject stamp"
 
 # ── 6. recurring after the bead was closed ───────────────────────────
 reset
 "$SUT" --key dolt-backup-gascity --title "manifest stale" --message "manifest is 30h old" >/dev/null 2>&1
-gc bd close fnd-1 >/dev/null 2>&1
+gc bd close new-1 >/dev/null 2>&1
 OUT=$("$SUT" --key dolt-backup-gascity --title "manifest stale" --message "manifest is 30h old" 2>&1)
 eq "$(beads)" "2" "(after close) a finding that fires again after its fix gets a new bead"
-eq "$(meta fnd-2 'finding.recurrence_of')" "fnd-1" "(after close) the new bead names the closed one"
-has "$(body fnd-2)" "fired again after fnd-1 was closed" "(after close) the body names the closed bead"
-has "$OUT" "recurrence of closed fnd-1" "(after close) reported"
+eq "$(meta new-2 'finding.recurrence_of')" "new-1" "(after close) the new bead names the closed one"
+has "$(body new-2)" "fired again after new-1 was closed" "(after close) the body names the closed bead"
+has "$OUT" "recurrence of closed new-1" "(after close) reported"
 # And it does not become a bead per tick: the new bead is open, so the next
 # sweep lands on it.
 "$SUT" --key dolt-backup-gascity --title "manifest stale" --message "manifest is 30h old" >/dev/null 2>&1
 eq "$(beads)" "2" "(after close) the recurrence-after-close files exactly one new bead"
-eq "$(meta fnd-2 'finding.occurrences')" "2" "(after close) later ticks land on the new bead"
+eq "$(meta new-2 'finding.occurrences')" "2" "(after close) later ticks land on the new bead"
 
 # ── 7. the pool cannot take a reaction ───────────────────────────────
 reset
@@ -359,7 +212,7 @@ export STUB_DELIVERABLE_RC=1
 OUT=$("$SUT" --key doctor-x --title "x" --message "x fired" 2>&1); RC=$?
 eq "$RC" "0" "(pool down) the filing still succeeds"
 eq "$(beads)" "1" "(pool down) the bead is filed"
-eq "$(meta fnd-1 'gc.proactive')" "<absent>" "(pool down) no scan opt-in is stamped: the next sweep reads it as a ready bead"
+eq "$(meta new-1 'gc.proactive')" "<absent>" "(pool down) no scan opt-in is stamped: the next sweep reads it as a ready bead"
 hasnt "$(cat "$STUB_PROACTIVE_LOG")" "sling" "(pool down) no sling into a pool that cannot claim it"
 has "$OUT" "waits for the next sweep" "(pool down) says how the reaction still happens"
 
@@ -368,7 +221,7 @@ export STUB_SLING_RC=1
 OUT=$("$SUT" --key doctor-y --title "y" --message "y fired" 2>&1); RC=$?
 eq "$RC" "0" "(sling fails) a failed reaction does not lose the finding"
 eq "$(beads)" "1" "(sling fails) the bead stands"
-has "$OUT" "sling on fnd-1 did not start a reaction" "(sling fails) reported"
+has "$OUT" "sling on new-1 did not start a reaction" "(sling fails) reported"
 
 # ── 8. --no-react ────────────────────────────────────────────────────
 reset
@@ -377,13 +230,14 @@ eq "$(beads)" "1" "(--no-react) the bead is filed"
 eq "$(cat "$STUB_PROACTIVE_LOG")" "" "(--no-react) nothing is slung"
 
 # ── 9. bd create answers with no id for a bead it did create ─────────
+# The fake's answer is a line that is not JSON, which the script reads as no id.
 reset
-export STUB_CREATE_NO_ID=1
+export STUB_CREATE_GARBAGE=1
 OUT=$("$SUT" --key doctor-noid --title "noid" --message "noid fired" 2>&1); RC=$?
 eq "$RC" "0" "(empty id) recovers"
 eq "$(beads)" "1" "(empty id) the bead is NOT filed twice"
 has "$OUT" "found by finding.key" "(empty id) says how it re-identified the bead"
-has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-1" "(empty id) the recovered bead still gets its reaction"
+has "$(cat "$STUB_PROACTIVE_LOG")" "sling new-1" "(empty id) the recovered bead still gets its reaction"
 
 # ── 10. the dedup lookup itself cannot be read — fail CLOSED ──────────
 # bd list exits non-zero (the store is momentarily unreadable) while bd create
@@ -391,14 +245,14 @@ has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-1" "(empty id) the recovered bead 
 # from "could not look"; reading the empty result as "none" files a fresh bead
 # for a key that may already be open — a duplicate produced during the very
 # store-read failure the dedup exists to survive. It must refuse before any
-# create runs. Regression: the fail-OPEN probe filed fnd-1 and exited 0.
+# create runs. Regression: the fail-OPEN probe filed new-1 and exited 0.
 reset
 export STUB_LIST_FAIL=1
 OUT=$("$SUT" --key doctor-unreadable --scope deacon-findings \
         --title "doctor sweep failed" --message "state=failed elapsed=612" 2>&1); RC=$?
 eq "$RC" "1" "(list fails) fails closed — not exit 0 — on an unreadable dedup probe"
 eq "$(beads)" "0" "(list fails) files NOTHING; no duplicate while the store is unreadable"
-hasnt "$OUT" "filed fnd" "(list fails) reports no filed bead"
+hasnt "$OUT" "filed new-" "(list fails) reports no filed bead"
 has "$OUT" "dedup lookup failed" "(list fails) says the lookup, not the finding, failed"
 has "$OUT" "refusing to file" "(list fails) says it refused"
 eq "$(cat "$STUB_PROACTIVE_LOG")" "" "(list fails) no reaction slung for a finding it would not file"
@@ -407,7 +261,7 @@ eq "$(cat "$STUB_PROACTIVE_LOG")" "" "(list fails) no reaction slung for a findi
 # whatever create would have done (the old create-returns-no-id case, which the
 # fail-open probe let reach create, now stops one step earlier).
 reset
-export STUB_LIST_FAIL=1 STUB_CREATE_NO_ID=1
+export STUB_LIST_FAIL=1 STUB_CREATE_GARBAGE=1
 OUT=$("$SUT" --key doctor-lost --title "lost" --message "lost fired" 2>&1); RC=$?
 eq "$RC" "1" "(list fails + create no-id) still fails closed at the dedup probe"
 eq "$(beads)" "0" "(list fails + create no-id) nothing filed — the guard precedes create"
@@ -437,22 +291,25 @@ eq "$RC" "2" "(usage) --title is required"
 
 # ── 12. the rig binds the store and the pool ─────────────────────────
 reset
+rig_log_on
 unset GC_RIG
 OUT=$("$SUT" --key doctor-rig --title "rig" --message "rig fired" 2>&1)
 has "$OUT" "GC_RIG unset" "(rig) an unset rig is named, not silently guessed"
-has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd create" "(rig) the default rig binds the store the bead lands in"
+has "$(cat "$RIG_LOG")" "[gc-toolkit] bd create" "(rig) the default rig binds the store the bead lands in"
 reset
+rig_log_on
 GC_RIG=other "$SUT" --key doctor-rig2 --title "rig2" --message "rig2 fired" >/dev/null 2>&1
-has "$(cat "$STUB_GC_LOG")" "[other] bd create" "(rig) an ambient GC_RIG is honored"
+has "$(cat "$RIG_LOG")" "[other] bd create" "(rig) an ambient GC_RIG is honored"
 reset
+rig_log_on
 GC_RIG=other "$SUT" --key doctor-rig3 --rig third --title "rig3" --message "rig3 fired" >/dev/null 2>&1
-has "$(cat "$STUB_GC_LOG")" "[third] bd create" "(rig) --rig outranks the ambient one"
+has "$(cat "$RIG_LOG")" "[third] bd create" "(rig) --rig outranks the ambient one"
 
 # ── 13. a long title is cut at a word boundary ───────────────────────
 reset
 LONG=$(printf 'alpha bravo charlie delta %.0s' $(seq 1 40))
 "$SUT" --key doctor-long --title "$LONG" --message "long fired" >/dev/null 2>&1
-T=$(title fnd-1)
+T=$(title new-1)
 if [ "${#T}" -le 201 ]; then ok "(title) cut under the cap"; else bad "(title) too long (${#T})"; fi
 hasnt "$T" "alph…" "(title) the cut lands on a word boundary, never mid-word"
 
@@ -474,12 +331,12 @@ eq "$(beads)" "0" "(dry-run) --distinct still files nothing"
 reset
 "$SUT" --check "gc-toolkit:check-step-terminal" --scope deacon-findings \
   --title "doctor gc-toolkit:check-step-terminal: I8 holds" --message "step-terminal I8" >/dev/null 2>&1
-eq "$(meta fnd-1 'finding.key')" "doctor-check-step-terminal" "(check) the <rig>: prefix is stripped to one canonical key"
+eq "$(meta new-1 'finding.key')" "doctor-check-step-terminal" "(check) the <rig>: prefix is stripped to one canonical key"
 
 # A bare check name (no `<rig>:` prefix) passes through unchanged.
 reset
 "$SUT" --check "fork-rate" --title "doctor fork-rate: high" --message "240 forks/s" >/dev/null 2>&1
-eq "$(meta fnd-1 'finding.key')" "doctor-fork-rate" "(check) a prefix-less name yields doctor-<name>"
+eq "$(meta new-1 'finding.key')" "doctor-fork-rate" "(check) a prefix-less name yields doctor-<name>"
 
 # One check is one bead: the derived key is stable, so a recurrence lands on the
 # open bead instead of filing another.
@@ -487,7 +344,7 @@ reset
 "$SUT" --check "gc-toolkit:check-step-terminal" --title "t" --message "first" >/dev/null 2>&1
 "$SUT" --check "gc-toolkit:check-step-terminal" --title "t" --message "first" >/dev/null 2>&1
 eq "$(beads)" "1" "(check) one check is one bead across recurrences"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(check) the recurrence counted on it"
+eq "$(meta new-1 'finding.occurrences')" "2" "(check) the recurrence counted on it"
 
 # --key and --check name the same slot; giving both is ambiguous and refused.
 reset
@@ -525,7 +382,7 @@ eq "$(beads)" "1" "(doctor-key) the doctor-sweep-failed sentinel is allowed"
 reset
 "$SUT" --check "gc-toolkit:pool-idle-routed-work" --scope deacon-findings --title t --message m >/dev/null 2>&1
 eq "$(beads)" "1" "(doctor-key) --check still files the canonical bead"
-eq "$(meta fnd-1 'finding.key')" "doctor-pool-idle-routed-work" "(doctor-key) --check yields doctor-<check>, prefix stripped"
+eq "$(meta new-1 'finding.key')" "doctor-pool-idle-routed-work" "(doctor-key) --check yields doctor-<check>, prefix stripped"
 
 # A non-doctor key that merely contains the rig name is not in the namespace.
 reset
@@ -539,21 +396,21 @@ eq "$(beads)" "1" "(doctor-key) a non-doctor key is unaffected"
 # closed bead as its predecessor.
 reset
 "$SUT" --key doctor-held --title "held" --message "held fired" >/dev/null 2>&1
-gc bd close fnd-1 >/dev/null 2>&1
+gc bd close new-1 >/dev/null 2>&1
 "$SUT" --key doctor-held --title "held" --message "held fired" >/dev/null 2>&1
 put_bead fix-1 open
-hold fnd-2 blocked fix-1
+hold new-2 blocked fix-1
 OUT=$("$SUT" --key doctor-held --title "held" --message "held fired" 2>&1); RC=$?
 eq "$RC" "0" "(held/waiting) exit 0"
 eq "$(findings doctor-held)" "2" "(held/waiting) no second bead beside the held one"
-eq "$(meta fnd-2 'finding.occurrences')" "2" "(held/waiting) the recurrence is counted on the held bead"
-has "$OUT" "fnd-2 already tracks" "(held/waiting) says the held bead tracks it"
-hasnt "$OUT" "fnd-1" "(held/waiting) the older closed bead is not named"
+eq "$(meta new-2 'finding.occurrences')" "2" "(held/waiting) the recurrence is counted on the held bead"
+has "$OUT" "new-2 already tracks" "(held/waiting) says the held bead tracks it"
+hasnt "$OUT" "new-1" "(held/waiting) the older closed bead is not named"
 eq "$(grep -c 'sling' "$STUB_PROACTIVE_LOG")" "2" "(held/waiting) no reaction is slung for a recurrence it absorbed"
 
 OUT=$("$SUT" --key doctor-held --title "held" --message "held fired, wider" 2>&1)
 eq "$(findings doctor-held)" "2" "(held/waiting) changed text files nothing new either"
-has "$(notes fnd-2)" "held fired, wider" "(held/waiting) the changed text is a note on the held bead"
+has "$(notes new-2)" "held fired, wider" "(held/waiting) the changed text is a note on the held bead"
 
 # The fix it waited on closes and the finding fires again. bd leaves the bead
 # at blocked, so nothing will act on it again: the recurrence is news, and its
@@ -562,56 +419,58 @@ gc bd close fix-1 >/dev/null 2>&1
 OUT=$("$SUT" --key doctor-held --title "held" --message "held fired, wider" 2>&1); RC=$?
 eq "$RC" "0" "(held/released) exit 0"
 eq "$(findings doctor-held)" "3" "(held/released) the recurrence after the wait ended files one new bead"
-eq "$(meta fnd-3 'finding.recurrence_of')" "fnd-2" "(held/released) the new bead names the held bead"
-has "$(body fnd-3)" "while fnd-2 was held at blocked" "(held/released) the body names the held bead"
-has "$(body fnd-3)" "(fix-1) had closed" "(held/released) and the blocker that closed"
-hasnt "$(body fnd-3)" "fnd-1" "(held/released) the older closed bead is not blamed"
-has "$OUT" "recurrence of fnd-2" "(held/released) reported"
-has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-3" "(held/released) the new bead gets its first reaction"
+eq "$(meta new-4 'finding.recurrence_of')" "new-2" "(held/released) the new bead names the held bead"
+has "$(body new-4)" "while new-2 was held at blocked" "(held/released) the body names the held bead"
+has "$(body new-4)" "(fix-1) had closed" "(held/released) and the blocker that closed"
+hasnt "$(body new-4)" "new-1" "(held/released) the older closed bead is not blamed"
+has "$OUT" "recurrence of new-2" "(held/released) reported"
+has "$(cat "$STUB_PROACTIVE_LOG")" "sling new-4" "(held/released) the new bead gets its first reaction"
 "$SUT" --key doctor-held --title "held" --message "held fired, wider" >/dev/null 2>&1
 eq "$(findings doctor-held)" "3" "(held/released) one new bead, not one per tick"
-eq "$(meta fnd-3 'finding.occurrences')" "2" "(held/released) later ticks land on the new bead"
+eq "$(meta new-4 'finding.occurrences')" "2" "(held/released) later ticks land on the new bead"
 
 # Waiting means ANY blocker still open, not just one of them closed.
 reset
 "$SUT" --key doctor-two-blockers --title t --message m >/dev/null 2>&1
 put_bead fix-a closed
 put_bead fix-b open
-hold fnd-1 blocked fix-a fix-b
+hold new-1 blocked fix-a fix-b
 "$SUT" --key doctor-two-blockers --title t --message m >/dev/null 2>&1
 eq "$(findings doctor-two-blockers)" "1" "(held/one of two open) still waiting, so no new bead"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(held/one of two open) the recurrence lands on it"
+eq "$(meta new-1 'finding.occurrences')" "2" "(held/one of two open) the recurrence lands on it"
 
 # An edge onto a bead the store does not hold points into another store and
 # holds nothing, as the store judges it, so the held bead waits on nothing and
 # the recurrence is news.
 reset
 "$SUT" --key doctor-dangling --title t --message m >/dev/null 2>&1
-hold fnd-1 blocked gone-1
+hold new-1 blocked gone-1
 "$SUT" --key doctor-dangling --title t --message m >/dev/null 2>&1
 eq "$(findings doctor-dangling)" "2" "(held/blocker the store does not hold) a new bead is filed"
-eq "$(meta fnd-1 'finding.occurrences')" "1" "(held/blocker the store does not hold) and the held bead keeps its count"
+eq "$(meta new-1 'finding.occurrences')" "1" "(held/blocker the store does not hold) and the held bead keeps its count"
 
 # A read of what the held bead waits on that does not answer proves nothing,
-# so the held bead may still be waiting and keeps the recurrence.
+# so the held bead may still be waiting and keeps the recurrence. Each read
+# gctk bead holds makes carries the store's --db pin, and none of the script's
+# own calls does.
 reset
 "$SUT" --key doctor-unread --title t --message m >/dev/null 2>&1
 put_bead fix-u open
-hold fnd-1 blocked fix-u
-STUB_SHOW_FAIL=1 "$SUT" --key doctor-unread --title t --message m >/dev/null 2>&1
+hold new-1 blocked fix-u
+STUB_SHOW_FAIL=1 STUB_FAIL_ON=--db "$SUT" --key doctor-unread --title t --message m >/dev/null 2>&1
 eq "$(findings doctor-unread)" "1" "(held/unread) no new bead"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(held/unread) the recurrence lands on it"
+eq "$(meta new-1 'finding.occurrences')" "2" "(held/unread) the recurrence lands on it"
 
 # A waits-for edge of the held bead's own is a wait the store cannot judge
 # yet, so the held bead may still be waiting and keeps the recurrence.
 reset
 "$SUT" --key doctor-waitsfor --title t --message m >/dev/null 2>&1
 put_bead spawn-1 closed
-jq -c 'map(if .id == "fnd-1" then .status = "blocked" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-printf 'fnd-1|waits-for|spawn-1\n' >> "$STUB_DEPS"
+bset new-1 status=blocked
+printf 'new-1|waits-for|spawn-1\n' >> "$STUB_DEPS"
 "$SUT" --key doctor-waitsfor --title t --message m >/dev/null 2>&1
 eq "$(findings doctor-waitsfor)" "1" "(held/waits-for) no new bead"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(held/waits-for) the recurrence lands on it"
+eq "$(meta new-1 'finding.occurrences')" "2" "(held/waits-for) the recurrence lands on it"
 
 # The tracks edge --about adds names the subject. It is not a wait, so an open
 # subject does not keep a held bead taking recurrences after its blocker closed.
@@ -619,34 +478,34 @@ reset
 put_bead tk-subj open
 "$SUT" --key witness-held --about tk-subj --title t --message m >/dev/null 2>&1
 put_bead fix-1 closed
-hold fnd-1 blocked fix-1
+hold new-2 blocked fix-1
 "$SUT" --key witness-held --about tk-subj --title t --message m >/dev/null 2>&1
 eq "$(findings witness-held)" "2" "(held/tracks edge) an open subject is not a wait"
-eq "$(meta fnd-2 'finding.recurrence_of')" "fnd-1" "(held/tracks edge) the recurrence names the held bead"
+eq "$(meta new-4 'finding.recurrence_of')" "new-2" "(held/tracks edge) the recurrence names the held bead"
 
 # A bead held at blocked with no edge waits on nothing, so nothing will release
 # it; the recurrence is news and says so.
 reset
 "$SUT" --key doctor-edgeless --title t --message m >/dev/null 2>&1
-hold fnd-1 blocked
+hold new-1 blocked
 OUT=$("$SUT" --key doctor-edgeless --title t --message m 2>&1)
 eq "$(findings doctor-edgeless)" "2" "(held/no edge) a new bead is filed"
-eq "$(meta fnd-2 'finding.recurrence_of')" "fnd-1" "(held/no edge) naming the held bead"
-has "$(body fnd-2)" "with no blocker to" "(held/no edge) the body says it waited on nothing"
-hasnt "$(body fnd-2)" "had closed" "(held/no edge) and claims no blocker closed"
+eq "$(meta new-2 'finding.recurrence_of')" "new-1" "(held/no edge) naming the held bead"
+has "$(body new-2)" "with no blocker to" "(held/no edge) the body says it waited on nothing"
+hasnt "$(body new-2)" "had closed" "(held/no edge) and claims no blocker closed"
 
 # Two held beads for one key: a recurrence goes to the one still waiting, even
 # when the one whose wait ended is listed first.
 reset
 "$SUT" --key doctor-two-held --title t --message m >/dev/null 2>&1
 put_bead fix-1 closed
-hold fnd-1 blocked fix-1
+hold new-1 blocked fix-1
 "$SUT" --key doctor-two-held --title t --message m >/dev/null 2>&1
 put_bead fix-2 open
-hold fnd-2 blocked fix-2
+hold new-3 blocked fix-2
 "$SUT" --key doctor-two-held --title t --message m >/dev/null 2>&1
 eq "$(findings doctor-two-held)" "2" "(two held) no third bead while one still waits"
-eq "$(meta fnd-2 'finding.occurrences')" "2" "(two held) the recurrence lands on the waiting one"
+eq "$(meta new-3 'finding.occurrences')" "2" "(two held) the recurrence lands on the waiting one"
 
 # ── 17. every other live status keeps its finding ────────────────────
 # deferred, hooked and pinned beads are as invisible to an open,in_progress
@@ -656,10 +515,10 @@ for st in in_progress deferred hooked pinned; do
   reset
   "$SUT" --key doctor-live --title t --message m >/dev/null 2>&1
   put_bead fix-1 closed
-  hold fnd-1 "$st" fix-1
+  hold new-1 "$st" fix-1
   "$SUT" --key doctor-live --title t --message m >/dev/null 2>&1
   eq "$(findings doctor-live)" "1" "(live/$st) no second bead"
-  eq "$(meta fnd-1 'finding.occurrences')" "2" "(live/$st) the recurrence lands on it"
+  eq "$(meta new-1 'finding.occurrences')" "2" "(live/$st) the recurrence lands on it"
 done
 
 # ── 18. one situation re-reported under another key or subject ───────
@@ -680,7 +539,7 @@ OUT=$("$SUT" --scope witness-findings --key witness-refinery-queue-malformed-gat
 eq "$RC" "3" "(sibling/subject) a new key over a live finding's subject exits 3"
 eq "$(beads)" "1" "(sibling/subject) and files nothing"
 has "$OUT" "refusing to file a new bead" "(sibling/subject) says it refused"
-has "$OUT" "fnd-1 [open] --key stale-malformed-gates --about tk-gate — $SIT" "(sibling/subject) lists the live finding with the key and subject to re-run with"
+has "$OUT" "new-1 [open] --key stale-malformed-gates --about tk-gate — $SIT" "(sibling/subject) lists the live finding with the key and subject to re-run with"
 has "$OUT" "--distinct" "(sibling/subject) names the override for a different situation"
 eq "$(grep -c 'sling' "$STUB_PROACTIVE_LOG")" "1" "(sibling/subject) a refused filing slings no reaction"
 
@@ -689,13 +548,13 @@ OUT=$("$SUT" --scope witness-findings --key stale-malformed-gates --about tk-gat
         --title "$SIT" --message "21 gates, still skipped" 2>&1); RC=$?
 eq "$RC" "0" "(sibling/re-run) the listed key and subject land"
 eq "$(beads)" "1" "(sibling/re-run) still one bead"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(sibling/re-run) counted as an occurrence on it"
+eq "$(meta new-1 'finding.occurrences')" "2" "(sibling/re-run) counted as an occurrence on it"
 
 # The key half: the same key over another subject, or over none.
 OUT=$("$SUT" --scope witness-findings --key stale-malformed-gates --about tk-handoff \
         --title "$SIT" --message "21 gates" 2>&1); RC=$?
 eq "$RC" "3" "(sibling/key) the live key over another subject exits 3"
-has "$OUT" "fnd-1 [open] --key stale-malformed-gates --about tk-gate" "(sibling/key) lists the finding holding the key"
+has "$OUT" "new-1 [open] --key stale-malformed-gates --about tk-gate" "(sibling/key) lists the finding holding the key"
 OUT=$("$SUT" --scope witness-findings --key stale-malformed-gates \
         --title "$SIT" --message "21 gates" 2>&1); RC=$?
 eq "$RC" "3" "(sibling/key) the live key with no subject exits 3"
@@ -706,7 +565,7 @@ OUT=$("$SUT" --scope witness-findings --key witness-salvage-refused --about tk-g
         --title "tk-gate salvage refused" --message "no worktree" 2>&1); RC=$?
 eq "$RC" "0" "(sibling/--distinct) exit 0"
 eq "$(beads)" "2" "(sibling/--distinct) files its own bead beside the live one"
-has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-2" "(sibling/--distinct) and slings its reaction"
+has "$(cat "$STUB_PROACTIVE_LOG")" "sling new-2" "(sibling/--distinct) and slings its reaction"
 
 # Only a live finding in the same scope is a sibling, and only one that shares
 # a half: another patrol's finding, a closed one, or one that shares neither key
@@ -719,8 +578,8 @@ OUT=$("$SUT" --scope witness-findings --key witness-crash-loop --about tk-other 
         --title "crash loop" --message "recovered twice" 2>&1); RC=$?
 eq "$RC" "0" "(sibling/neither half) a new key over a new subject files"
 eq "$(beads)" "4" "(sibling/neither half) as its own bead"
-gc bd close fnd-1 >/dev/null 2>&1
-gc bd close fnd-2 >/dev/null 2>&1
+gc bd close new-1 >/dev/null 2>&1
+gc bd close new-2 >/dev/null 2>&1
 OUT=$("$SUT" --scope witness-findings --key witness-legacy-gates --about tk-gate \
         --title "$SIT" --message "21 gates" 2>&1); RC=$?
 eq "$RC" "0" "(sibling/closed) a closed finding on the subject is no sibling"
@@ -738,26 +597,26 @@ eq "$(beads)" "2" "(sibling/no subject) both file"
 reset
 "$SUT" --scope witness-findings --key k-first --about tk-gate --title "$SIT" --message m >/dev/null 2>&1
 put_bead fix-1 open
-hold fnd-1 blocked fix-1
+hold new-1 blocked fix-1
 "$SUT" --scope witness-findings --key k-second --about tk-gate --distinct --title "$SIT" --message m >/dev/null 2>&1
 OUT=$("$SUT" --scope witness-findings --key k-third --about tk-gate --title "$SIT" --message m 2>&1); RC=$?
 eq "$RC" "3" "(sibling/held) a held sibling still refuses the filing"
-has "$OUT" "fnd-1 [blocked]" "(sibling/held) the held finding is listed"
-FIRST=$(printf '%s\n' "$OUT" | grep -m1 '^  fnd-' | sed 's/^  \(fnd-[0-9]*\).*/\1/')
-eq "$FIRST" "fnd-2" "(sibling/held) the unheld finding is listed first"
+has "$OUT" "new-1 [blocked]" "(sibling/held) the held finding is listed"
+FIRST=$(printf '%s\n' "$OUT" | grep -m1 '^  new-' | sed 's/^  \(new-[0-9]*\).*/\1/')
+eq "$FIRST" "new-3" "(sibling/held) the unheld finding is listed first"
 
 # The sibling lookup itself cannot be read: fail CLOSED, as the exact lookup
 # does, rather than read a failed listing as "no sibling" and file the twin.
 reset
 "$SUT" --scope witness-findings --key k-live --about tk-gate --title "$SIT" --message m >/dev/null 2>&1
-export STUB_LIST_FAIL_FIELD=finding.scope
+export STUB_LIST_FAIL_ON=finding.scope=
 OUT=$("$SUT" --scope witness-findings --key k-new --about tk-gate --title "$SIT" --message m 2>&1); RC=$?
 eq "$RC" "1" "(sibling/unreadable) fails closed on an unreadable sibling lookup"
 eq "$(beads)" "1" "(sibling/unreadable) files nothing"
 has "$OUT" "sibling lookup failed" "(sibling/unreadable) says the lookup failed"
 OUT=$("$SUT" --scope witness-findings --key k-live --about tk-gate --title "$SIT" --message m 2>&1); RC=$?
 eq "$RC" "0" "(sibling/unreadable) an exact repeat never reaches the sibling lookup"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(sibling/unreadable) and lands on its bead"
+eq "$(meta new-1 'finding.occurrences')" "2" "(sibling/unreadable) and lands on its bead"
 OUT=$("$SUT" --scope witness-findings --key k-other --about tk-gate --distinct --title "$SIT" --message m 2>&1); RC=$?
 eq "$RC" "0" "(sibling/unreadable) --distinct skips the lookup"
 eq "$(beads)" "2" "(sibling/unreadable) and files"
@@ -771,12 +630,12 @@ OUT=$("$SUT" --scope witness-findings --key witness-binding-prefix-empty --about
         --title "binding prefix empty" --message "wisp poured with an empty binding_prefix" 2>&1); RC=$?
 eq "$RC" "0" "(wisp) a wisp subject still files"
 has "$OUT" "tk-wisp-abc is a wisp" "(wisp) and says the subject was dropped"
-eq "$(meta fnd-1 'finding.about')" "<absent>" "(wisp) no finding.about is stamped"
+eq "$(meta new-1 'finding.about')" "<absent>" "(wisp) no finding.about is stamped"
 eq "$(cat "$STUB_DEPS")" "" "(wisp) no tracks edge to a bead about to vanish"
 "$SUT" --scope witness-findings --key witness-binding-prefix-empty --about tk-wisp-def \
   --title "binding prefix empty" --message "wisp poured with an empty binding_prefix" >/dev/null 2>&1
 eq "$(beads)" "1" "(wisp) the next pass's wisp lands on the same bead"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(wisp) as an occurrence"
+eq "$(meta new-1 'finding.occurrences')" "2" "(wisp) as an occurrence"
 OUT=$("$SUT" --key witness-binding-prefix-empty --about tk-wisp-ghi --title t --message m --dry-run 2>&1)
 hasnt "$OUT" "about=" "(wisp) a dry run shows no subject either"
 
@@ -785,20 +644,19 @@ hasnt "$OUT" "about=" "(wisp) a dry run shows no subject either"
 # and the array changes on nearly every pass. A JSON listing of live beads
 # carries each bead's whole row, so a recurrence notes only the head of the
 # new text, and the notes stop growing at 65536 bytes.
-# doctor_msg <n> -> a check's finding naming n sessions in its details.
+# doctor_msg <n> -> a check's finding naming n sessions in its details, as one
+# line of JSON.
 doctor_msg() {
-  jq -nc --argjson n "$1" '{name: "gc-toolkit:nudge-unconfirmed", status: "warning", severity: "advisory",
-    message: "\($n) session(s) have an unconfirmed nudge delivery",
-    details: [range(0; $n) | "session \"pool-\(.)\" has an unconfirmed startup nudge (attempt 5 of 5)"]}'
+  local i d=""
+  for ((i = 0; i < $1; i++)); do
+    d="$d${d:+,}\"session \\\"pool-$i\\\" has an unconfirmed startup nudge (attempt 5 of 5)\""
+  done
+  printf '{"name":"gc-toolkit:nudge-unconfirmed","status":"warning","severity":"advisory","message":"%s session(s) have an unconfirmed nudge delivery","details":[%s]}\n' "$1" "$d"
 }
 # set_notes <id> <file> — replace a bead's notes with the file's text.
-set_notes() {
-  local tmp
-  tmp=$(mktemp "$TMP/store.XXXXXX")
-  jq -c --arg id "$1" --rawfile n "$2" 'map(if .id == $id then .notes = $n else . end)' \
-    "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
-}
-notes_bytes() { jq -r --arg id "$1" '(.[] | select(.id==$id) | .notes // "") | utf8bytelength' "$STUB_STORE"; }
+set_notes() { bset "$1" "notes=$(<"$2")"; }
+# notes_bytes <id> -> the byte length of a bead's notes.
+notes_bytes() { (LC_ALL=C; n=$(notes "$1"); printf '%s\n' "${#n}"); }
 # longest_line <text> -> the byte length of its longest line.
 longest_line() { printf '%s\n' "$1" | LC_ALL=C awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }'; }
 # filler <bytes> -> a file of that many bytes of note text.
@@ -807,22 +665,22 @@ filler() { head -c "$1" < /dev/zero | tr '\0' 'x' > "$TMP/filler"; printf '%s' "
 reset
 "$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
   --title "doctor nudge-unconfirmed" --message "$(doctor_msg 300)" >/dev/null 2>&1
-has "$(body fnd-1)" "pool-299" "(bounded) the first text is the body, verbatim"
-has "$(body fnd-1)" "until the notes reach 65536 bytes" "(bounded) the body names the notes cap"
+has "$(body new-1)" "pool-299" "(bounded) the first text is the body, verbatim"
+has "$(body new-1)" "until the notes reach 65536 bytes" "(bounded) the body names the notes cap"
 for n in $(seq 301 312); do
   OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
           --title "doctor nudge-unconfirmed" --message "$(doctor_msg "$n")" 2>&1)
 done
-NOTES=$(notes fnd-1)
+NOTES=$(notes new-1)
 eq "$(beads)" "1" "(bounded) twelve changed recurrences are one bead"
-eq "$(meta fnd-1 'finding.occurrences')" "13" "(bounded) all counted on it"
+eq "$(meta new-1 'finding.occurrences')" "13" "(bounded) all counted on it"
 eq "$(grep -c 'finding recurred with changed text' <<< "$NOTES")" "12" "(bounded) one note per changed text"
 eq "$(printf '%s\n' "$NOTES" | wc -l | tr -d ' ')" "12" "(bounded) and each note is one line"
 L=$(longest_line "$NOTES")
 if [ "$L" -le 400 ]; then ok "(bounded) a note is at most 400 bytes (longest $L)"; else bad "(bounded) a note runs $L bytes"; fi
 hasnt "$NOTES" "pool-150" "(bounded) the details array is not noted"
 has "$NOTES" "312 session(s) have an unconfirmed nudge delivery" "(bounded) the head of the new text is"
-has "$(tail -n 1 <<< "$NOTES")" "digest $(meta fnd-1 'finding.digest'))" "(bounded) the last note names the digest finding.digest holds"
+has "$(tail -n 1 <<< "$NOTES")" "digest $(meta new-1 'finding.digest'))" "(bounded) the last note names the digest finding.digest holds"
 has "$OUT" "a one-line note of the changed text" "(bounded) says what it noted"
 
 # Notes just under the cap: the text keeps changing, and the notes never pass
@@ -831,18 +689,18 @@ has "$OUT" "a one-line note of the changed text" "(bounded) says what it noted"
 reset
 "$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
   --title "doctor nudge-unconfirmed" --message "$(doctor_msg 10)" >/dev/null 2>&1
-set_notes fnd-1 "$(filler 64000)"
+set_notes new-1 "$(filler 64000)"
 for n in $(seq 11 18); do
-  D_BEFORE=$(meta fnd-1 'finding.digest')
+  D_BEFORE=$(meta new-1 'finding.digest')
   OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
           --title "doctor nudge-unconfirmed" --message "$(doctor_msg "$n")" 2>&1)
 done
-NB=$(notes_bytes fnd-1)
+NB=$(notes_bytes new-1)
 if [ "$NB" -le 65536 ]; then ok "(cap) eight changed recurrences leave the notes under the cap ($NB bytes)"; else bad "(cap) the notes grew to $NB bytes, past the 65536-byte cap"; fi
-eq "$(grep -c 'and their text is not noted' <<< "$(notes fnd-1)")" "1" "(cap) the marker goes in once"
-has "$(tail -n 1 <<< "$(notes fnd-1)")" "and their text is not noted" "(cap) and nothing is noted after it"
-eq "$(meta fnd-1 'finding.occurrences')" "9" "(cap) every recurrence is still counted"
-if [ "$(meta fnd-1 'finding.digest')" != "$D_BEFORE" ]; then ok "(cap) finding.digest still moves with the text"; else bad "(cap) finding.digest stopped at $D_BEFORE"; fi
+eq "$(grep -c 'and their text is not noted' <<< "$(notes new-1)")" "1" "(cap) the marker goes in once"
+has "$(tail -n 1 <<< "$(notes new-1)")" "and their text is not noted" "(cap) and nothing is noted after it"
+eq "$(meta new-1 'finding.occurrences')" "9" "(cap) every recurrence is still counted"
+if [ "$(meta new-1 'finding.digest')" != "$D_BEFORE" ]; then ok "(cap) finding.digest still moves with the text"; else bad "(cap) finding.digest stopped at $D_BEFORE"; fi
 has "$OUT" "not noted, because the notes are at their 65536-byte cap" "(cap) says why the text was not noted"
 has "$(cat "$STUB_GC_LOG")" "--append-notes" "(cap) appends, never replaces"
 hasnt "$(cat "$STUB_GC_LOG")" " --notes " "(cap) --notes would erase the other writers' notes"
@@ -852,31 +710,31 @@ hasnt "$(cat "$STUB_GC_LOG")" " --notes " "(cap) --notes would erase the other w
 # back so the marker that says why still fits, and the marker goes in once.
 reset
 "$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
-set_notes fnd-1 "$(filler 65036)"
+set_notes new-1 "$(filler 65036)"
 "$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 11)" >/dev/null 2>&1
 "$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 12)" >/dev/null 2>&1
-eq "$(grep -c 'and their text is not noted' <<< "$(notes fnd-1)")" "1" "(cap/reserve) the marker goes in where a line alone would have fit"
-hasnt "$(notes fnd-1)" ", digest " "(cap/reserve) and no line goes in ahead of it"
-NB=$(notes_bytes fnd-1)
+eq "$(grep -c 'and their text is not noted' <<< "$(notes new-1)")" "1" "(cap/reserve) the marker goes in where a line alone would have fit"
+hasnt "$(notes new-1)" ", digest " "(cap/reserve) and no line goes in ahead of it"
+NB=$(notes_bytes new-1)
 if [ "$NB" -le 65536 ]; then ok "(cap/reserve) the notes stay under the cap ($NB bytes)"; else bad "(cap/reserve) the notes grew to $NB bytes"; fi
 
 # Notes already past the cap get nothing at all, not even the marker.
 reset
 "$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
-set_notes fnd-1 "$(filler 100000)"
+set_notes new-1 "$(filler 100000)"
 OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 11)" 2>&1); RC=$?
 eq "$RC" "0" "(past cap) exit 0"
-eq "$(notes_bytes fnd-1)" "100000" "(past cap) notes past the cap are left as they are"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(past cap) the recurrence is counted"
+eq "$(notes_bytes new-1)" "100000" "(past cap) notes past the cap are left as they are"
+eq "$(meta new-1 'finding.occurrences')" "2" "(past cap) the recurrence is counted"
 has "$OUT" "not noted" "(past cap) says the text was not noted"
 
 # Less room than the marker takes, as another writer's note can leave: nothing
 # goes in, not even the marker, and the notes stay under the cap.
 reset
 "$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
-set_notes fnd-1 "$(filler 65436)"
+set_notes new-1 "$(filler 65436)"
 OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 11)" 2>&1)
-eq "$(notes_bytes fnd-1)" "65436" "(no room) 100 bytes of room leave the notes as they are"
+eq "$(notes_bytes new-1)" "65436" "(no room) 100 bytes of room leave the notes as they are"
 has "$OUT" "not noted, because the notes are at their 65536-byte cap" "(no room) says the cap held the text back"
 
 # Notes that cannot be read get nothing appended.
@@ -886,7 +744,7 @@ export STUB_SHOW_FAIL=1
 OUT=$("$SUT" --key doctor-unread --title t --message "second" 2>&1); RC=$?
 export STUB_SHOW_FAIL=""
 eq "$RC" "0" "(unread) the recurrence is still recorded"
-eq "$(notes fnd-1)" "" "(unread) unreadable notes get nothing appended"
+eq "$(notes new-1)" "" "(unread) unreadable notes get nothing appended"
 has "$OUT" "notes could not be read" "(unread) says why the text was not noted"
 
 # The head is cut by character on one line, under any locale: a multi-byte
@@ -895,12 +753,12 @@ reset
 "$SUT" --key doctor-wide --title t --message "first" >/dev/null 2>&1
 WIDE=$(printf '中%.0s' $(seq 1 300))
 LC_ALL=C "$SUT" --key doctor-wide --title t --message "$WIDE" >/dev/null 2>&1
-HEAD=$(notes fnd-1 | sed 's/^[^)]*): //')
-eq "$(printf '%s' "$HEAD" | jq -Rr 'length')" "201" "(head) cut at 200 characters plus the ellipsis, under the C locale"
+HEAD=$(notes new-1 | sed 's/^[^)]*): //')
+eq "$(LC_ALL=C; printf '%s' "${#HEAD}")" "603" "(head) cut at 200 characters plus the ellipsis, three bytes each, under the C locale"
 eq "$HEAD" "$(printf '中%.0s' $(seq 1 200))…" "(head) and no character is split"
 "$SUT" --key doctor-wide --title t --message "$(printf 'line one\n\tline two\r\nline three')" >/dev/null 2>&1
-eq "$(notes fnd-1 | wc -l | tr -d ' ')" "2" "(head) a multi-line text is one note line"
-has "$(tail -n 1 <<< "$(notes fnd-1)")" "): line one line two line three" "(head) its whitespace squashed to single spaces"
+eq "$(notes new-1 | wc -l | tr -d ' ')" "2" "(head) a multi-line text is one note line"
+has "$(tail -n 1 <<< "$(notes new-1)")" "): line one line two line three" "(head) its whitespace squashed to single spaces"
 
 # ── 21. --cleared records that the situation ended ───────────────────
 # A caller that sees its situation end records it on the live bead as bd's
@@ -917,33 +775,33 @@ hasnt "$(cat "$STUB_GC_LOG")" "bd set-state" "(cleared/none) and sets no state"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "(cleared/none) and updates nothing"
 
 "$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T1" >/dev/null 2>&1
-DIGEST_1=$(meta fnd-1 'finding.digest')
-NOTES_1=$(notes fnd-1)
+DIGEST_1=$(meta new-1 'finding.digest')
+NOTES_1=$(notes new-1)
 OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --cleared --message "dc is patrolling again" 2>&1); RC=$?
 eq "$RC" "0" "(cleared) exit 0"
 eq "$(beads)" "1" "(cleared) it files no second finding"
-has "$OUT" "fnd-1 holds [deacon-cold.dc] — recorded that it cleared (situation=cleared)" "(cleared) says where it recorded the clear"
-eq "$(state fnd-1 situation)" "cleared" "(cleared) the bead's situation state is cleared"
-has "$(cat "$STUB_GC_LOG")" "bd set-state fnd-1 situation=cleared --reason dc is patrolling again" "(cleared) set with bd set-state, the message as its reason"
-eq "$(events fnd-1 | jq -r 'map(.description) | join(",")')" "dc is patrolling again" "(cleared) one audit event under the bead carries the reason"
-eq "$(bstatus fnd-1)" "open" "(cleared) the bead stays open"
-eq "$(meta fnd-1 'finding.occurrences')" "1" "(cleared) a clear is not an occurrence"
-eq "$(meta fnd-1 'finding.digest')" "$DIGEST_1" "(cleared) and leaves the digest alone"
-eq "$(notes fnd-1)" "$NOTES_1" "(cleared) and the notes"
+has "$OUT" "new-1 holds [deacon-cold.dc] — recorded that it cleared (situation=cleared)" "(cleared) says where it recorded the clear"
+eq "$(state new-1 situation)" "cleared" "(cleared) the bead's situation state is cleared"
+has "$(cat "$STUB_GC_LOG")" "bd set-state new-1 situation=cleared --reason dc is patrolling again" "(cleared) set with bd set-state, the message as its reason"
+eq "$(events new-1)" "dc is patrolling again" "(cleared) one audit event under the bead carries the reason"
+eq "$(bstatus new-1)" "open" "(cleared) the bead stays open"
+eq "$(meta new-1 'finding.occurrences')" "1" "(cleared) a clear is not an occurrence"
+eq "$(meta new-1 'finding.digest')" "$DIGEST_1" "(cleared) and leaves the digest alone"
+eq "$(notes new-1)" "$NOTES_1" "(cleared) and the notes"
 eq "$(grep -c 'sling' "$STUB_PROACTIVE_LOG")" "1" "(cleared) no reaction is slung for a clear"
 
 # The same report again: its text is unchanged, but the finding had cleared.
 OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T1" 2>&1); RC=$?
 eq "$RC" "0" "(cleared/return) exit 0"
 eq "$(beads)" "1" "(cleared/return) the return lands on the same bead"
-eq "$(state fnd-1 situation)" "active" "(cleared/return) its situation is active again"
-has "$(cat "$STUB_GC_LOG")" "bd set-state fnd-1 situation=active --reason reported again (occurrence 2)" "(cleared/return) set with bd set-state, naming the occurrence"
-eq "$(events fnd-1 | jq 'length')" "2" "(cleared/return) a second audit event records the return"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(cleared/return) the return is an occurrence"
-eq "$(notes fnd-1)" "$NOTES_1" "(cleared/return) its unchanged text adds no note"
+eq "$(state new-1 situation)" "active" "(cleared/return) its situation is active again"
+has "$(cat "$STUB_GC_LOG")" "bd set-state new-1 situation=active --reason reported again (occurrence 2)" "(cleared/return) set with bd set-state, naming the occurrence"
+eq "$(events new-1 | grep -c .)" "2" "(cleared/return) a second audit event records the return"
+eq "$(meta new-1 'finding.occurrences')" "2" "(cleared/return) the return is an occurrence"
+eq "$(notes new-1)" "$NOTES_1" "(cleared/return) its unchanged text adds no note"
 has "$OUT" "recorded occurrence 2, text unchanged; its situation had cleared and is active again" "(cleared/return) says what it recorded"
-SET_AT=$(grep -n 'bd set-state fnd-1 situation=active' "$STUB_GC_LOG" | head -n 1 | cut -d: -f1)
-UPD_AT=$(grep -n 'bd update fnd-1 --set-metadata finding.occurrences=2' "$STUB_GC_LOG" | head -n 1 | cut -d: -f1)
+SET_AT=$(grep -n 'bd set-state new-1 situation=active' "$STUB_GC_LOG" | head -n 1 | cut -d: -f1)
+UPD_AT=$(grep -n 'bd update new-1 --set-metadata finding.occurrences=2' "$STUB_GC_LOG" | head -n 1 | cut -d: -f1)
 if [ -n "$SET_AT" ] && [ -n "$UPD_AT" ] && [ "$SET_AT" -lt "$UPD_AT" ]; then
   ok "(cleared/return) the state goes back to active before the occurrence is counted"
 else bad "(cleared/return) set-state at log line '${SET_AT}', the occurrence update at '${UPD_AT}'"; fi
@@ -958,27 +816,27 @@ hasnt "$OUT" "active again" "(cleared/after) and calls it no return"
 # A return with changed text notes the text as any recurrence does.
 "$SUT" --key deacon-cold.dc --scope boot-health --cleared --message "dc is patrolling again" >/dev/null 2>&1
 "$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T2" >/dev/null 2>&1
-eq "$(state fnd-1 situation)" "active" "(cleared/changed) its situation is active again"
-eq "$(events fnd-1 | jq 'length')" "4" "(cleared/changed) each clear and each return is one event"
-has "$(tail -n 1 <<< "$(notes fnd-1)")" "finding recurred with changed text (occurrence 4" "(cleared/changed) the changed text is noted as a recurrence's"
-has "$(tail -n 1 <<< "$(notes fnd-1)")" "dc cold since T2" "(cleared/changed) carrying the new text"
-if [ "$(meta fnd-1 'finding.digest')" != "$DIGEST_1" ]; then ok "(cleared/changed) the digest moves with the text"; else bad "(cleared/changed) the digest stayed $DIGEST_1"; fi
+eq "$(state new-1 situation)" "active" "(cleared/changed) its situation is active again"
+eq "$(events new-1 | grep -c .)" "4" "(cleared/changed) each clear and each return is one event"
+has "$(tail -n 1 <<< "$(notes new-1)")" "finding recurred with changed text (occurrence 4" "(cleared/changed) the changed text is noted as a recurrence's"
+has "$(tail -n 1 <<< "$(notes new-1)")" "dc cold since T2" "(cleared/changed) carrying the new text"
+if [ "$(meta new-1 'finding.digest')" != "$DIGEST_1" ]; then ok "(cleared/changed) the digest moves with the text"; else bad "(cleared/changed) the digest stayed $DIGEST_1"; fi
 
 # The return cannot be recorded: nothing is counted, so the retry records both.
 reset
 "$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
 "$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" >/dev/null 2>&1
-export STUB_SET_STATE_FAIL=1
+export STUB_FAIL_ON=set-state
 OUT=$("$SUT" --key deacon-cold.dc --title t --message m 2>&1); RC=$?
-export STUB_SET_STATE_FAIL=""
+export STUB_FAIL_ON=""
 eq "$RC" "1" "(cleared/return-refused) a return that does not land exits 1"
-has "$OUT" "could not record on fnd-1 that [deacon-cold.dc] is active again" "(cleared/return-refused) and names the bead"
-eq "$(meta fnd-1 'finding.occurrences')" "1" "(cleared/return-refused) the occurrence is not counted"
-eq "$(state fnd-1 situation)" "cleared" "(cleared/return-refused) the state still reads cleared"
+has "$OUT" "could not record on new-1 that [deacon-cold.dc] is active again" "(cleared/return-refused) and names the bead"
+eq "$(meta new-1 'finding.occurrences')" "1" "(cleared/return-refused) the occurrence is not counted"
+eq "$(state new-1 situation)" "cleared" "(cleared/return-refused) the state still reads cleared"
 "$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1; RC=$?
 eq "$RC" "0" "(cleared/return-refused) the retry exits 0"
-eq "$(state fnd-1 situation)" "active" "(cleared/return-refused) and records the return"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(cleared/return-refused) and the occurrence, once"
+eq "$(state new-1 situation)" "active" "(cleared/return-refused) and records the return"
+eq "$(meta new-1 'finding.occurrences')" "2" "(cleared/return-refused) and the occurrence, once"
 
 # The bead's row cannot be shown: its state still reads from the keyed listing.
 reset
@@ -988,7 +846,7 @@ export STUB_SHOW_FAIL=1
 OUT=$("$SUT" --key deacon-cold.dc --title t --message m 2>&1); RC=$?
 export STUB_SHOW_FAIL=""
 eq "$RC" "0" "(cleared/show-fails) a return whose show fails exits 0"
-eq "$(state fnd-1 situation)" "active" "(cleared/show-fails) and its situation is active again"
+eq "$(state new-1 situation)" "active" "(cleared/show-fails) and its situation is active again"
 has "$OUT" "its situation had cleared and is active again" "(cleared/show-fails) and says so"
 
 # --cleared needs no --title, but it needs a key and a message.
@@ -1000,11 +858,11 @@ eq "$RC" "2" "(cleared/usage) no message is a usage error"
 # A closed bead is no live record, so a clear leaves it alone.
 reset
 "$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
-gc bd close fnd-1 >/dev/null 2>&1
+gc bd close new-1 >/dev/null 2>&1
 OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
 eq "$RC" "0" "(cleared/closed) exit 0"
 has "$OUT" "no clear to record" "(cleared/closed) a closed bead holds nothing to clear"
-eq "$(state fnd-1 situation)" "<none>" "(cleared/closed) and takes no state"
+eq "$(state new-1 situation)" "<none>" "(cleared/closed) and takes no state"
 
 # The lookup cannot be read: nothing proves where the clear belongs.
 reset
@@ -1013,46 +871,46 @@ export STUB_LIST_FAIL=1
 OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
 export STUB_LIST_FAIL=""
 eq "$RC" "1" "(cleared/unreadable) a failed lookup exits 1"
-eq "$(state fnd-1 situation)" "<none>" "(cleared/unreadable) and sets no state"
+eq "$(state new-1 situation)" "<none>" "(cleared/unreadable) and sets no state"
 
 # The write is refused: exit 1, so the caller tries again.
-export STUB_SET_STATE_FAIL=1
+export STUB_FAIL_ON=set-state
 OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
-export STUB_SET_STATE_FAIL=""
+export STUB_FAIL_ON=""
 eq "$RC" "1" "(cleared/refused) a refused write exits 1"
-has "$OUT" "could not record on fnd-1" "(cleared/refused) and names the bead"
+has "$OUT" "could not record on new-1" "(cleared/refused) and names the bead"
 
 # A held bead with nothing left to wait on is still the newest record.
 reset
 "$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
 put_bead fix-1 open
-hold fnd-1 blocked fix-1
+hold new-1 blocked fix-1
 gc bd close fix-1 >/dev/null 2>&1
 "$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" >/dev/null 2>&1
-eq "$(state fnd-1 situation)" "cleared" "(cleared/held) a held bead with nothing open takes the clear"
+eq "$(state new-1 situation)" "cleared" "(cleared/held) a held bead with nothing open takes the clear"
 eq "$(beads)" "2" "(cleared/held) and nothing is filed beside it"
 # A later report does not land on that bead. It files a new one beside it, and
 # the held bead keeps its state, because it has taken no report since.
 "$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
-eq "$(meta fnd-2 'finding.recurrence_of')" "fnd-1" "(cleared/held) a later report files a new bead naming the held one"
-eq "$(state fnd-2 situation)" "<none>" "(cleared/held) the new bead carries no state"
-eq "$(state fnd-1 situation)" "cleared" "(cleared/held) the held bead keeps its state"
+eq "$(meta new-4 'finding.recurrence_of')" "new-1" "(cleared/held) a later report files a new bead naming the held one"
+eq "$(state new-4 situation)" "<none>" "(cleared/held) the new bead carries no state"
+eq "$(state new-1 situation)" "cleared" "(cleared/held) the held bead keeps its state"
 
 # Notes at the cap: a clear writes no note, so it lands all the same.
 reset
 "$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
-set_notes fnd-1 "$(filler 65300)"
+set_notes new-1 "$(filler 65300)"
 OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
 eq "$RC" "0" "(cleared/cap) exit 0"
-eq "$(state fnd-1 situation)" "cleared" "(cleared/cap) the state lands"
-eq "$(notes_bytes fnd-1)" "65300" "(cleared/cap) the notes are left as they are"
+eq "$(state new-1 situation)" "cleared" "(cleared/cap) the state lands"
+eq "$(notes_bytes new-1)" "65300" "(cleared/cap) the notes are left as they are"
 
 # --dry-run writes nothing.
 reset
 "$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
 OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" --dry-run 2>&1)
 has "$OUT" "would record that [deacon-cold.dc] cleared" "(cleared/dry-run) says what it would record"
-eq "$(state fnd-1 situation)" "<none>" "(cleared/dry-run) and sets no state"
+eq "$(state new-1 situation)" "<none>" "(cleared/dry-run) and sets no state"
 hasnt "$(cat "$STUB_GC_LOG")" "bd set-state" "(cleared/dry-run) nor calls set-state"
 
 echo
