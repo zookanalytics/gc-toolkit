@@ -237,6 +237,9 @@ func (c *Call) depAdd(s, d string, args []string) error {
 	if listed(c.getenv("STUB_DEP_ADD_FAIL"), a) || c.carries("STUB_DEP_ADD_FAIL_ON") {
 		return c.fail(1, "Error: simulated refusal for "+a)
 	}
+	if listed(c.getenv("STUB_DEP_ADD_NOOP"), a) {
+		return nil
+	}
 	release, err := lockDir(d)
 	if err != nil {
 		return err

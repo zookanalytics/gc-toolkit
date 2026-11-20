@@ -27,6 +27,7 @@ func harnessWrite(c *Call, args []string) error {
 		return c.fail(2, "fake gc: "+writeFlag+" "+verb+" names no bead, or nothing to set")
 	}
 	id, settings := args[0], args[1:]
+	c.use(c.route(c.defaultStore(c.getenv("STUB_STORE"), c.getenv("STUB_DEPS")), "", "", id))
 	s, err := c.required("STUB_STORE")
 	if err != nil {
 		return err

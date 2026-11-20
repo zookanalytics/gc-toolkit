@@ -34,7 +34,7 @@ type step struct {
 	stdin    string
 	settings []string
 	actor    string
-	answer   string // "", "rows", "edges", "listed-edges", "texts", "labels", "json", "null-or-ids" or "count:<title>"
+	answer   string // "", "exit", "rows", "edges", "listed-edges", "texts", "labels", "json", "preview", "null-or-ids" or "count:<title>"
 }
 
 type contractCase struct {
@@ -271,6 +271,37 @@ func contractCases() []contractCase {
 			{args: []string{"create", "-t", "task", "--title", "ct-flagged", "-d", "the body", "--assignee", "bob", "--json"}},
 			{args: []string{"list", "--all", "--json"}, answer: "count:ct-flagged"},
 		}},
+		{name: "a dry-run create previews the row it would file, under the actor bd resolves, and writes nothing", steps: []step{
+			{args: []string{"create", "ct-preview", "--dry-run", "--json"}, answer: "preview"},
+			{args: []string{"create", "ct-preview", "--dry-run", "-p", "1", "-t", "bug", "--json"}, actor: "Named Actor", answer: "preview"},
+			{args: []string{"list", "--all", "--json"}, answer: "count:ct-preview"},
+		}},
+		{name: "statuses names each built-in status and its category", steps: []step{
+			{args: []string{"statuses", "--json"}, answer: "json"},
+		}},
+		{name: "an edge or a create dependency onto another prefix's bead is kept without the bead", beads: []string{"a"},
+			more: [][]string{{"x", "--deps", "related:zz-other"}}, steps: []step{
+				{args: []string{"dep", "add", "{a}", "zz-nope", "--type", "supersedes"}},
+				{args: []string{"list", "--id", "{a},{x}", "--json"}, answer: "listed-edges"},
+			}},
+		{name: "the checked close: a stale guard refuses first, a pinned blocker holds nothing, and a child that is not closed holds its parent",
+			beads: []string{"x", "pb", "y", "yb", "p", "p2", "pin"},
+			more:  [][]string{{"k", "--parent", "{p}"}, {"k2", "--parent", "{p2}"}},
+			state: []string{"x", "y", "p", "p2", "pin"},
+			steps: []step{
+				{args: []string{"update", "{pb}", "--status=pinned"}},
+				{args: []string{"dep", "add", "{x}", "{pb}", "--type", "blocks"}},
+				{args: []string{"update", "{x}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+				{args: []string{"dep", "add", "{y}", "{yb}", "--type", "blocks"}},
+				{args: []string{"update", "{y}", "--if-status=in_progress", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+				{args: []string{"update", "{y}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+				{args: []string{"update", "{k}", "--status=pinned"}},
+				{args: []string{"update", "{p}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+				{args: []string{"update", "{k2}", "--status=closed"}},
+				{args: []string{"update", "{p2}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+				{args: []string{"update", "{pin}", "--status=pinned"}},
+				{args: []string{"update", "{pin}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+			}},
 		{name: "comments are kept per bead, and a bead the store does not hold takes none", beads: []string{"a", "b"}, steps: []step{
 			{args: []string{"comments", "{a}", "--json"}, answer: "texts"},
 			{args: []string{"comment", "{a}", "first"}},
@@ -330,7 +361,11 @@ func (s side) call(t *testing.T, st step, args []string, nm map[string]string) o
 	st.stdin = stdin
 	out, errOut, status := s.self.run(st, args)
 	o := outcome{status: status, raw: out + errOut}
-	if st.answer == "" {
+	switch st.answer {
+	case "":
+		return o
+	case "exit":
+		o.answer = status
 		return o
 	}
 	v := decodeAny(t, out)
@@ -384,6 +419,13 @@ func (s side) call(t *testing.T, st step, args []string, nm map[string]string) o
 		m, _ := v.(map[string]any)
 		delete(m, "hint")
 		o.answer = m
+	case st.answer == "preview":
+		m, _ := v.(map[string]any)
+		kept := map[string]any{}
+		for _, k := range []string{"id", "title", "status", "issue_type", "priority", "created_by"} {
+			kept[k] = m[k]
+		}
+		o.answer = kept
 	case st.answer == "null-or-ids":
 		if v == nil {
 			o.answer = "null"
@@ -508,6 +550,9 @@ type fakeSide struct {
 	env      []string
 }
 
+// The fake's store is the store of a rig ct, whose prefix is the scratch
+// store's, so the fake tells a bead of its own prefix from another's as bd
+// does. Its environment is the test's, as bd's is, less the store settings.
 func newFakeSide(t *testing.T) *fakeSide {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "bin", "gc")
@@ -515,18 +560,34 @@ func newFakeSide(t *testing.T) *fakeSide {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("the fake gc did not build: %v\n%s", err, out)
 	}
-	files := map[string]string{"beads.json": "[]", "deps.txt": "", "kv.txt": "", "gc.log": "", "session.log": "", "comments.json": "[]"}
+	db := filepath.Join(dir, ".beads")
+	if err := os.MkdirAll(db, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{"beads.json": "[]", "deps.txt": "", "kv.txt": "", "comments.json": "[]"}
 	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(db, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, body := range map[string]string{"gc.log": "", "session.log": "", "rigs.json": `{"rigs":[{"name":"ct","prefix":"ct","path":"` + dir + `"}]}`} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	f := &fakeSide{bin: bin, dir: dir, env: []string{
-		"PATH=" + filepath.Dir(bin) + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"STUB_STORE=" + filepath.Join(dir, "beads.json"), "STUB_DEPS=" + filepath.Join(dir, "deps.txt"),
-		"STUB_KV=" + filepath.Join(dir, "kv.txt"), "STUB_GC_LOG=" + filepath.Join(dir, "gc.log"),
-		"STUB_SESSION_LOG=" + filepath.Join(dir, "session.log"), "STUB_COMMENTS=" + filepath.Join(dir, "comments.json"),
-	}}
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "BEADS_") && !strings.HasPrefix(kv, "GC_") && !strings.HasPrefix(kv, "STUB_") && !strings.HasPrefix(kv, "PATH=") {
+			env = append(env, kv)
+		}
+	}
+	f := &fakeSide{bin: bin, dir: dir, env: append(env,
+		"PATH="+filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"STUB_STORE="+filepath.Join(db, "beads.json"), "STUB_DEPS="+filepath.Join(db, "deps.txt"),
+		"STUB_KV="+filepath.Join(db, "kv.txt"), "STUB_GC_LOG="+filepath.Join(dir, "gc.log"),
+		"STUB_SESSION_LOG="+filepath.Join(dir, "session.log"), "STUB_COMMENTS="+filepath.Join(db, "comments.json"),
+		"STUB_RIGS="+filepath.Join(dir, "rigs.json"), "GC_RIG=ct",
+	)}
 	f.self = f
 	return f
 }
