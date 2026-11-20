@@ -602,7 +602,8 @@ operator's placement, and take these routes first:
 - A problem an open bead already carries is appended there as more evidence,
   and the pattern waits on that bead.
 - A problem in software no rig of the city owns becomes an upstream finding by
-  the `gc-toolkit.external-issue` skill, and the pattern waits on the finding.
+  the `gc-toolkit.external-issue` skill, and the pattern closes once the
+  finding is recorded, as [Fixes in code](#fixes-in-code) says.
 - A fix in another rig's repository is that rig's work. File it in that rig's
   store with the `gc-toolkit.work` skill, held for placement, or append it to
   the open bead there that carries it. The note waits on that bead and joins no
