@@ -406,6 +406,7 @@ func disposeReaction(d *reaction.Dispose, db string, stdout, stderr io.Writer) e
 		a.Locks = locks
 		return a.Arm(req)
 	}
+	r.Takeaway = takeaways(l, rt, db, r.Log).Take
 	done, err := r.Dispose(d)
 	var use *reaction.UsageError
 	switch {

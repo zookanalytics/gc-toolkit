@@ -298,12 +298,15 @@ chmod +x "$TMP/bin/gc"
 # --- gctk stub -----------------------------------------------------------------
 # The arm's verb. No bead here carries an arm, so a disarm writes nothing; it is
 # appended to $CALLS among the writes it comes before, and DISARM_RC fails it.
+# Its takeaway, which a sitting's sign-off calls, writes gc.takeaway alone,
+# through gc.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gctk" <<'GCTK'
 case "${1:-} ${2:-}" in
   "bead disarm")
     printf 'gctk bead disarm %s\n' "${3:-}" >> "$CALLS"
     [ -z "${DISARM_RC:-}" ] || { echo "gctk bead disarm: the arm on ${3:-} was not cleared: simulated" >&2; exit "$DISARM_RC"; }
     echo "${3:-} carries no arm, so nothing was written" ;;
+  "bead takeaway") gc bd update "${3:-}" --set-metadata "gc.takeaway=${4:-}" >/dev/null ;;
   *) echo "gctk stub: unsupported '$*'" >&2; exit 2 ;;
 esac
 GCTK
@@ -762,14 +765,13 @@ eq "$(field tk-rec status)" "open" "(SLING-REFUSED) …and the recommendation's 
 # The REAL converse-signoff.sh, taking the recommendation (--accept), runs the
 # REAL gc-helm.sh accept over the same store. The sign-off runs the pack
 # scripts beside it, so it runs as a link in a stub pack, where they stand in:
-# the headline writes gc.takeaway, and the writer of the visit's PR comment
-# does nothing.
+# gc-helm.sh runs the real accept, and the writer of the visit's PR comment
+# does nothing. gctk's stub above writes the headline.
 mkdir -p "$TMP/rig/assets/scripts" "$TMP/cwd"
 cat > "$TMP/rig/assets/scripts/gc-helm.sh" <<H
 #!/usr/bin/env bash
 case "\$1" in
   accept)   exec sh "$SCRIPT" "\$@" ;;
-  takeaway) gc bd update "\$2" --set-metadata "gc.takeaway=\$3" >/dev/null ;;
 esac
 H
 printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/rig/assets/scripts/pr-sitting-comment.sh"

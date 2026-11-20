@@ -321,7 +321,7 @@ to anyone else is that assignee's while they work it: the landing order writes
 nothing to it and requests no merge, the PR's status names who holds it, and
 the order works it again once the assignee is gone. A writer that takes a PR off
 the record says so in its own write: the refinery's send-back to the pool clears
-the marker in the write that reopens the bead, `gc-helm.sh takeaway --release`
+the marker in the write that reopens the bead, `gctk bead takeaway --release`
 refuses a bead on the record, and a ruling retires the PR.
 
 ## Checks

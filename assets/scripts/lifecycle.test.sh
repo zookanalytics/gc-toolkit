@@ -64,10 +64,6 @@ DUMP="$("$GCTK_BUILT" lifecycle --dump-machine 2>&1)"
 [ -n "$DUMP" ] && ok "machine dumped" || bad "gctk lifecycle --dump-machine produced nothing"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^states //p')" "$(toml_states)" "states match lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^detached_states //p')" "$(toml_detached)" "detached states match lifecycle.toml"
-# gc-helm.sh's takeaway refuses to send an anchor in one of them to a pool or an
-# agent, and it is sh, which reads no TOML, so it carries its own copy.
-eq "$(sed -n 's/^DETACHED_STATES="\([^"]*\)".*/\1/p' "$HERE/gc-helm.sh" | head -1)" "$(toml_detached)" \
-   "gc-helm.sh's DETACHED_STATES match lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^closed_states //p')" "$(toml_closed)" "closed states match lifecycle.toml"
 [ -n "$(toml_exit_sets)" ] && ok "exit sets declared in lifecycle.toml" || bad "exit_sets = [...] missing from lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^exit_sets //p')" "$(toml_exit_sets)" "exit sets match lifecycle.toml"
@@ -76,8 +72,9 @@ eq "$(printf '%s\n' "$DUMP" | sed -n 's/^transition //p' | sort)" "$(toml_edges)
 # neither side declares a park route.
 hasnt "$DUMP" "park_route" "the port declares no park route"
 eq "$(grep -c '^park_route' "$TOML" || true)" "0" "lifecycle.toml declares no park route"
-# The cap is not in lifecycle.toml. It is a rendering bound that the board's two
-# takeaway writers share, so the port's copy is held against gc-helm.sh's.
+# The cap is not in lifecycle.toml. It is a rendering bound that gctk's
+# takeaway and the one-line titles gc-helm.sh writes share, and gc-helm.sh is
+# sh, which reads no Go, so the port's copy is held against gc-helm.sh's.
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^takeaway_max //p')" \
    "$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)" \
    "the takeaway cap matches gc-helm.sh's TAKEAWAY_MAX"

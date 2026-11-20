@@ -47,7 +47,7 @@
 # to next retries the cancel, this session at its next claim included.
 #
 # Callers: decline.sh; mol-review's failed gather and mol-validate's decline
-# arms; orphan-dispose.sh (--ended); gc-helm.sh takeaway --release.
+# arms; orphan-dispose.sh (--ended); gctk bead takeaway --release.
 # exit: 0 the run is ended · 1 the run is not ended · 2 refused, nothing written
 set -uo pipefail
 

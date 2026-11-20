@@ -762,10 +762,10 @@ hold its import graph to the standard library, the app's package and
 
 ## Deferred
 
-- **Retiring `gc-helm.sh`.** Its `open`, `engage`, `react`, `takeaway`,
-  `dismiss` and `accept` verbs have no Go equivalent, so the script stays.
-  Retiring them is the decision recorded under "One board, and its verbs in
-  gc-helm.sh" in `docs/human-engagement.md`.
+- **Retiring `gc-helm.sh`.** Its `open`, `engage`, `dismiss` and `accept`
+  verbs have no Go equivalent, so the script stays. Retiring them is the
+  decision recorded under "One board, and its verbs in gc-helm.sh" in
+  `docs/human-engagement.md`.
 - **A cache for the JSON read.** `helm-svc board --json` reads each rig it
   prints on every run. A cache would re-introduce a staleness surface, which
   is the thing this epic exists to reduce, so it is deliberately not done.

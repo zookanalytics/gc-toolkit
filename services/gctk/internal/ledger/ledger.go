@@ -81,18 +81,20 @@ var ErrGuard = gcbd.ErrGuard
 
 // Write is one act on one bead: every key it sets or clears, the title it gives
 // the bead, the status it moves the bead to, the agent it assigns the bead to,
-// the note it appends and the guard it lands under, made in one update.
+// the labels it removes, the note it appends and the guard it lands under, made
+// in one update.
 type Write struct {
-	id       string
-	title    string
-	sets     []string // key=value, in the order set
-	unsets   []string
-	status   string
-	assignee *string
-	note     string
-	prio     *int
-	guard    *guard
-	err      error
+	id        string
+	title     string
+	sets      []string // key=value, in the order set
+	unsets    []string
+	labelsOff []string
+	status    string
+	assignee  *string
+	note      string
+	prio      *int
+	guard     *guard
+	err       error
 }
 
 // guard is the status and assignee a write lands under.
@@ -163,6 +165,30 @@ func (w *Write) WorkRecord(outcome, commit, branch string) {
 	}
 }
 
+// RemoveLabel removes label from the bead in the same write, by its exact text,
+// as bd removes one. A label is the row's own field, which no key declares, so
+// the act that removes one says what it means.
+func (w *Write) RemoveLabel(label string) {
+	if !slices.Contains(w.labelsOff, label) {
+		w.labelsOff = append(w.labelsOff, label)
+	}
+}
+
+// Release takes the bead back from the pool and the session it was last sent
+// to, in the same write: its route, gc.routed_to, is set empty, and the route a
+// pour stamps, gc.execution_routed_to, and the session pins its last executor
+// left, gc.session_name and gc.session_id, are removed. The keys are Gas City's
+// (lifecycle/lifecycle.toml, [metadata.runtime_owned]), which no domain
+// declares, so the act that releases a bead clears them here. A route left
+// behind offers the bead to its pool again, and a session pin left behind is
+// the owner Gas City's orphan recovery resolves the bead to.
+func (w *Write) Release() {
+	w.set("gc.routed_to", "")
+	for _, pin := range []string{"gc.execution_routed_to", "gc.session_name", "gc.session_id"} {
+		w.unset(pin)
+	}
+}
+
 // Guard makes the write land only while the bead still has status and assignee,
 // "" for unassigned, which bd checks in the write's own transaction. A write
 // whose guard no longer holds writes nothing, and Commit returns an error that
@@ -170,7 +196,7 @@ func (w *Write) WorkRecord(outcome, commit, branch string) {
 func (w *Write) Guard(status, assignee string) { w.guard = &guard{status: status, assignee: assignee} }
 
 // args is the update's arguments: the guard, the status, the assignee, the
-// title, every set, every removal, then the note.
+// title, every set, every removal, every label removed, then the note.
 func (w *Write) args() []string {
 	var args []string
 	if w.guard != nil {
@@ -193,6 +219,9 @@ func (w *Write) args() []string {
 	}
 	for _, u := range w.unsets {
 		args = append(args, "--unset-metadata", u)
+	}
+	for _, l := range w.labelsOff {
+		args = append(args, "--remove-label", l)
 	}
 	if w.note != "" {
 		args = append(args, "--append-notes", w.note)
@@ -321,7 +350,7 @@ func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
-	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" && w.prio == nil {
+	if len(w.sets)+len(w.unsets)+len(w.labelsOff) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" && w.prio == nil {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}
 	if out, err := l.store.Update(w.id, w.args()...); err != nil {

@@ -379,12 +379,13 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 }
 
 // Update applies one update's --set-metadata, --unset-metadata, --status,
-// --assignee, --append-notes, --title and --priority to the row, and records
-// it. An argument that is no flag names another bead the update writes the same
-// way, as bd's update takes each bead it writes, and each is recorded as a write
-// of its own. A bead the store does not hold refuses the write, as bd does.
-// --if-status and --if-assignee are bd's guards: an update whose guard no
-// longer holds writes nothing and fails with an error that is gcbd.ErrGuard.
+// --assignee, --append-notes, --title, --priority and --remove-label to the
+// row, and records it. An argument that is no flag names another bead the
+// update writes the same way, as bd's update takes each bead it writes, and
+// each is recorded as a write of its own. A bead the store does not hold
+// refuses the write, as bd does. --if-status and --if-assignee are bd's guards:
+// an update whose guard no longer holds writes nothing and fails with an error
+// that is gcbd.ErrGuard.
 func (s *Store) Update(id string, args ...string) (string, error) {
 	if s.BeforeUpdate != nil {
 		if err := s.BeforeUpdate(id, slices.Clone(args)); err != nil {
@@ -508,6 +509,8 @@ func (s *Store) update(id string, args []string) (Bead, error) {
 			b.Notes += value
 		case "--title":
 			b.Title = value
+		case "--remove-label":
+			b.Labels = slices.DeleteFunc(slices.Clone(b.Labels), func(l string) bool { return l == value })
 		case "--priority":
 			p, err := strconv.Atoi(strings.TrimPrefix(strings.ToUpper(value), "P"))
 			if err != nil || p < 0 || p > 4 {
