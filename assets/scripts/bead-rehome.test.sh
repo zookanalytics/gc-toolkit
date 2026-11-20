@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Hermetic test for bead-rehome.sh.
 #
-# Fakes `gc rig list --json` and `bd` (a file-per-bead ledger under each fake
-# rig's .beads/) on PATH. No dependency on the live city, Dolt, or the network.
+# Runs on the compiled fake gc of test-harness.sh, over a store per rig: alpha,
+# beta and, for the end-to-end case, gamma each keep a store in their .beads
+# directory, which bead-rehome.sh reaches through `gc bd --db`. No dependency on
+# the live city, Dolt, or the network.
 #
 # The invariants under test:
 #   (a) a disposition closes the origin and records its successor in bd's own
@@ -138,408 +140,83 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/bead-rehome.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bead-rehome-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+REAL_GIT="$(command -v git)" || { echo "git is required for this test" >&2; exit 1; }
 
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
-eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
-has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (got '$1', wanted substring '$2')" ;; esac; }
-hasnt() { case "$1" in *"$2"*) bad "$3 (got '$1', wanted no '$2')" ;; *) ok "$3" ;; esac; }
+# The shared harness: the compiled fake gc, a store per rig. bd's checked close
+# refuses a bead a live blocker or an open child holds, and so does the fake's
+# under STUB_ENFORCE_BLOCKS.
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"
+harness_init
+export STUB_ENFORCE_BLOCKS=1
+export BEADS_ACTOR="test__rehome-hq-0000"
+# The end-to-end case runs the real branch-end.sh, so git is the real one.
+printf '#!/bin/sh\nexec %s "$@"\n' "$REAL_GIT" > "$BIN/git"
+chmod +x "$BIN/git"
 
-# --- fake stores ------------------------------------------------------------
-mkdir -p "$TMP/rigs/alpha/.beads" "$TMP/rigs/beta/.beads" "$TMP/bin"
-cat > "$TMP/rigs.json" <<JSON
+# --- the stores ---------------------------------------------------------------
+# Each rig keeps its store in its .beads directory, the one `gc bd --db` names,
+# and a bead's id prefix names its rig.
+mkdir -p "$TMP/rigs/alpha" "$TMP/rigs/beta"
+harness_store "$TMP/rigs/alpha/.beads"; harness_store "$TMP/rigs/beta/.beads"
+export STUB_RIGS="$TMP/rigs.json"
+cat > "$STUB_RIGS" <<JSON
 {"rigs":[
   {"name":"alpha","path":"$TMP/rigs/alpha","prefix":"al","hq":false},
   {"name":"beta","path":"$TMP/rigs/beta","prefix":"bt","hq":true}
 ]}
 JSON
+ALPHA="$TMP/rigs/alpha/.beads"
 
-# A bead is a file of `key=value` lines: status, notes, m.<key> metadata, and
-# `dep.<other>=<type>` for each edge the bead carries from itself onto <other>,
-# the side `bd show` and `bd list` report in `.dependencies[]` and the side a
-# close consults. A gate also carries issue_type, await_type and await_id lines,
-# a bead with a person on it an assignee line, and a child a parent line.
-mkbead() { printf 'status=%s\n' "${2:-open}" > "$TMP/rigs/$1/.beads/$3"; }
-field()  { sed -n "s/^$2=//p" "$TMP/rigs/$1/.beads/$3" 2>/dev/null | tail -1; }
-# edge <rig> <bead> <other> — the type of the bead's edge onto <other>, or "".
-edge()   { field "$1" "dep.$3" "$2"; }
-
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
-# Only the surface bead-rehome.sh touches.
-case "$1 $2" in
-  "rig list") cat "$FAKE_RIGS_JSON" ;;
-  # The bd stub runs in this process rather than a second bash's.
-  "bd "*)    shift; export VIA_GC_BD=1; . "${0%/*}/bd" "$@"; exit ;;
-  *) exit 1 ;;
-esac
-GC
-
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
-# The writer reaches the store through `gc bd`; a direct `bd` is the regression
-# this guard catches, so only the gc stub above may run this one.
-[ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
-# Fake bd: --db <path>/.beads [--actor X] <list|show|update|dep|gate|statuses> ...
-set -euo pipefail
-DB=""; ACTOR_ARG=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --db) DB="$2"; shift 2 ;;
-    --actor) ACTOR_ARG="$2"; echo "$2" >> "$FAKE_ACTOR_LOG"; shift 2 ;;
-    *) break ;;
-  esac
-done
-sub="${1:-}"; shift || true
-[ -z "${FAKE_CALL_LOG:-}" ] || printf '%s %s\n' "$sub" "$*" >> "$FAKE_CALL_LOG"
-
-# The suite never empties a store, and most of its cases add beads to the same
-# one, so a read that started a process for each bead in a store would grow the
-# suite's time with the square of its cases. A read starts the same few
-# processes whatever the store holds.
-# val <file> <key> — the value on the bead's last `<key>=` line, or "", in VAL,
-# read by bash itself.
-val() {
-  local line
-  VAL=""
-  [ -f "$1" ] || return 0
+# depsfile <var> <id> — the dep rows of the store the id's prefix names.
+depsfile() {
+  local r
+  case "$2" in al-*) r=alpha ;; bt-*) r=beta ;; gm-*) r=gamma ;; *) r=none ;; esac
+  printf -v "$1" '%s' "$TMP/rigs/$r/.beads/deps.txt"
+}
+# dep <bead> <other> <type> — the bead's edge onto <other>, as the dep row its
+# store keeps: "<other>|blocks|<bead>" for a blocks edge, and
+# "<bead>|<type>|<other>" for any other.
+dep() {
+  local f; depsfile f "$1"
+  if [ "$3" = blocks ]; then printf '%s|blocks|%s\n' "$2" "$1" >> "$f"; else printf '%s|%s|%s\n' "$1" "$3" "$2" >> "$f"; fi
+}
+# mkbead <rig> <status> <id> — a bead in the rig's store with no edge of its
+# own: a row in place of any the id had, and none of its dep rows.
+mkbead() {
+  local f line kept="" a t b
+  depsfile f "$3"
   while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in "$2="*) VAL="${line#"$2="}" ;; esac
-  done < "$1"
+    IFS='|' read -r a t b <<< "$line"
+    if [ "$t" = blocks ]; then [ "$b" = "$3" ] && continue; else [ "$a" = "$3" ] && continue; fi
+    kept+="$line"$'\n'
+  done < "$f"
+  printf '%s' "$kept" > "$f"
+  brow "$3" "status=${2:-open}"
 }
-# The edges a bead carries, one {other, type} per line. The order is the one bd
-# keeps them in, the order they were added, which is the first a reader takes.
-edges_of() { # <file>
-  sed -n 's/^dep\.\([^=]*\)=\(.*\)$/\1 \2/p' "$1" 2>/dev/null
+# field <rig> <name> <id> — a field of the bead's row, or with an m. prefix a
+# metadata key, "" when it has none.
+field() {
+  local v
+  case "$2" in m.*) v=$(meta "$3" "${2#m.}") ;; *) v=$(bfield "$3" "$2") ;; esac
+  [ "$v" = "<absent>" ] && v=""
+  printf '%s' "$v"
 }
-# race_at <point> — run the script FAKE_RACE_<point> names, once per bead, while
-# this write waits: a second caller's whole run, made with this one paused there.
-# BEFORE_EDGE is just before a duplicates or supersedes edge is added, BEFORE_CLOSE
-# just before an update that closes, AFTER_CLOSE just after it, BEFORE_NOTE just
-# before an update that does not close, and BEFORE_TAKE_BACK just before a
-# duplicates or supersedes edge is removed.
-race_at() { # <point>
-  local v="FAKE_RACE_$1" s
-  s="${!v:-}"
-  [ -n "$s" ] && [ ! -e "$DB/.raced.$1.$id" ] || return 0
-  : > "$DB/.raced.$1.$id"
-  bash "$s" || true
+# edge <rig> <bead> <other> — the type of the bead's edge onto <other>, or "".
+edge() { bedge "$2" "$3"; }
+# notes_with <id> <text> — how many of the bead's notes carry the text.
+notes_with() {
+  local n=0 l
+  while IFS= read -r l; do case "$l" in *"$2"*) n=$((n + 1)) ;; esac; done < <(notes "$1")
+  echo "$n"
 }
-# rows <file>... — those beads' `bd list` rows, in the order given, built by one
-# jq: the far end of each edge by depends_on_id and its type as type, the last
-# status, assignee, issue_type and is_template line, every notes line, and the
-# m.<key> metadata. jq reads an argument that starts with a dash as one of its
-# options even after --args, so `--` ends its options before the values.
-rows() {
-  local f c args=()
-  for f in "$@"; do
-    c=""; IFS= read -r -d '' c < "$f" || true
-    args+=("${f##*/}" "$c")
-  done
-  jq -nc 'def last_of($ls; $k): [$ls[] | select(startswith($k + "=")) | .[($k | length) + 1:]] | .[-1] // "";
-    [ $ARGS.positional as $p | range(0; $p | length; 2) as $i
-      | ($p[$i + 1] | split("\n")) as $ls
-      | last_of($ls; "issue_type") as $it | last_of($ls; "assignee") as $as
-      | {id: $p[$i], status: last_of($ls; "status"), issue_type: (if $it == "" then "task" else $it end),
-         notes: ([$ls[] | select(startswith("notes=")) | .[6:] + " "] | add // ""),
-         metadata: ([$ls[] | select(startswith("m.")) | .[2:] | select(length > 0)
-           | split("=") | {key: .[0], value: (.[1:] | join("="))}] | from_entries),
-         dependencies: [$ls[] | select(startswith("dep.")) | .[4:] | (index("=") // 0) as $e | select($e > 0)
-           | {issue_id: $p[$i], depends_on_id: .[:$e], type: .[$e + 1:]}]}
-      | if $as != "" then .assignee = $as else . end
-      | if last_of($ls; "is_template") == "true" then .is_template = true else . end ]' \
-    --args -- ${args[@]+"${args[@]}"}
-}
-# The blockers still holding a bead, by the rule real bd applies: a blocks
-# edge counts unless the bead it names is closed or pinned.
-open_blockers() { # <file>
-  local o t bf st out=""
-  while read -r o t; do
-    [ "$t" = blocks ] || continue
-    st=""; bf="$DB/$o"
-    [ -f "$bf" ] && { val "$bf" status; st="$VAL"; }
-    case "$st" in closed|pinned) ;; *) out="$out $o" ;; esac
-  done < <(edges_of "$1")
-  printf '%s' "${out# }"
-}
-
-# `bd dep <verb> <id> <depends-on-id>` puts the verb where every other
-# subcommand puts the bead id, so it is parsed on its own.
-if [ "$sub" = "dep" ]; then
-  verb="${1:-}"; shift || true
-  id="${1:-}"; shift || true
-  # `bd dep list <id> --type blocks --json`: one row per `blocks` edge the bead
-  # carries onto a bead this store holds, the far bead's fields with the edge's
-  # dependency_type, a field whose value is empty left out as real bd leaves it
-  # out. FAKE_BD_DEP_LIST_FAIL makes that read fail. With --direction=up the rows
-  # are the beads in this store whose `blocks` edge names <id>, the beads that
-  # wait on it, and FAKE_BD_DEP_LIST_UP_FAIL makes that read fail, as
-  # FAKE_UP_FAIL_AFTER_CLOSE does from the moment a close lands.
-  if [ "$verb" = "list" ]; then
-    up=""
-    for a in "$@"; do case "$a" in --direction=up) up=1 ;; esac; done
-    if [ -n "$up" ]; then
-      { [ -z "${FAKE_BD_DEP_LIST_UP_FAIL:-}" ] && [ ! -e "$DB/.up-list-fails" ]; } || { echo "Error: simulated dep list failure" >&2; exit 1; }
-    else
-      [ -z "${FAKE_BD_DEP_LIST_FAIL:-}" ] || { echo "Error: simulated dep list failure" >&2; exit 1; }
-    fi
-    f="$DB/$id"
-    [ -f "$f" ] || { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1; }
-    fields=()
-    while read -r b t; do
-      [ "$t" = blocks ] || continue
-      bf="$DB/$b"
-      [ -f "$bf" ] || continue
-      fields+=("$b")
-      for k in status issue_type await_type await_id assignee; do val "$bf" "$k"; fields+=("$VAL"); done
-    done < <(if [ -n "$up" ]; then
-               # One awk reads the whole store, taking each edge line as
-               # edges_of does.
-               awk -v i="$id" '/^dep\.[^=]*=/ {
-                   s = substr($0, 5); e = index(s, "=")
-                   split(substr(s, 1, e - 1) " " substr(s, e + 1), f)
-                   if (f[1] == i && f[2] == "blocks") { w = FILENAME; sub(/.*\//, "", w); print w, "blocks" }
-                 }' "$DB"/*
-             else edges_of "$f"; fi)
-    jq -nc '[ $ARGS.positional as $p | range(0; $p | length; 6) as $i
-      | {id: $p[$i], status: $p[$i + 1], issue_type: (if $p[$i + 2] == "" then "task" else $p[$i + 2] end),
-         await_type: $p[$i + 3], await_id: $p[$i + 4], assignee: $p[$i + 5], dependency_type: "blocks"}
-      | with_entries(select(.value != "")) ]' --args -- ${fields[@]+"${fields[@]}"}
-    exit 0
-  fi
-  other="${1:-}"; shift || true
-  f="$DB/$id"
-  [ -f "$f" ] || { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1; }
-  case "$verb" in
-    add)
-      # bd keeps one edge per pair: a re-add of the same type changes nothing,
-      # and another type on the pair is refused. A target this store does not
-      # hold is kept unverified when its prefix names another store.
-      # FAKE_BD_DEP_ADD_FAIL refuses every add, FAKE_BD_DEP_ADD_REFUSE_FROM=<id>
-      # refuses an add from that bead as bd refuses one across a parent chain,
-      # and FAKE_BD_DEP_ADD_NOOP_FROM=<id> reports one from it that never
-      # persisted.
-      [ -z "${FAKE_BD_DEP_ADD_FAIL:-}" ] || { echo "Error: simulated dep add failure" >&2; exit 1; }
-      [ "${FAKE_BD_DEP_ADD_REFUSE_FROM:-}" != "$id" ] \
-        || { echo "Error: cannot add blocks dependency: $id and $other are in the same parent chain" >&2; exit 1; }
-      [ "${FAKE_BD_DEP_ADD_NOOP_FROM:-}" != "$id" ] || { echo "✓ Added dependency: $id depends on $other"; exit 0; }
-      type=blocks
-      while [ $# -gt 0 ]; do
-        case "$1" in --type|-t) type="$2"; shift 2 ;; --type=*) type="${1#--type=}"; shift ;; *) shift ;; esac
-      done
-      case "$type" in duplicates|supersedes) race_at BEFORE_EDGE ;; esac
-      cur=$(edges_of "$f" | awk -v o="$other" '$1 == o { print $2 }')
-      if [ -n "$cur" ] && [ "$cur" != "$type" ]; then
-        echo "Error: dependency $id -> $other already exists with type $cur" >&2; exit 1
-      fi
-      [ -n "$cur" ] || printf 'dep.%s=%s\n' "$other" "$type" >> "$f"
-      [ -z "${FAKE_DEP_LOG:-}" ] || printf '%s %s %s\n' "$id" "$other" "$type" >> "$FAKE_DEP_LOG"
-      case "$type" in duplicates|supersedes) [ -z "${FAKE_LIST_FAIL_AFTER_EDGE:-}" ] || : > "$DB/.list-id-fails" ;; esac ;;
-    # Real `bd dep remove` reports success for an edge that never existed.
-    # FAKE_BD_DEP_REMOVE_FAIL refuses a remove of a disposition edge.
-    remove)
-      case "$(edges_of "$f" | awk -v o="$other" '$1 == o { print $2 }')" in
-        duplicates|supersedes)
-          [ -z "${FAKE_BD_DEP_REMOVE_FAIL:-}" ] || { echo "Error: simulated dep remove failure" >&2; exit 1; }
-          race_at BEFORE_TAKE_BACK ;;
-      esac
-      awk -v p="dep.$other=" 'index($0, p) != 1' "$f" > "$DB/.removing.$id"
-      mv "$DB/.removing.$id" "$f"
-      echo "✓ removed dependency: $id -> $other" ;;
-    *)      exit 1 ;;
-  esac
-  exit 0
-fi
-
-# The status contract: the read branch-end.sh makes besides show and list, for
-# the end-to-end case.
-if [ "$sub" = "statuses" ]; then
-  printf '%s\n' '{"built_in_statuses":[{"name":"open","category":"active"},{"name":"in_progress","category":"wip"},{"name":"closed","category":"done"}]}'
-  exit 0
-fi
-if [ "$sub" = "list" ]; then
-  # --id lists the beads it names, closed ones only with --all. --parent lists
-  # the beads whose parent line names it, leaving out the closed and pinned ones
-  # as bd does. Otherwise --status filters and --metadata-field is bd's: split
-  # at the first `=`, every pair must match. FAKE_BD_LIST_PARENT_FAIL makes a
-  # --parent read fail, and FAKE_BD_LIST_ID_FAIL an --id read.
-  st=""; mf='[]'; parent=""; ids=""; all=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --status) st="$2"; shift 2 ;;
-      --status=*) st="${1#--status=}"; shift ;;
-      --parent) parent="$2"; shift 2 ;;
-      --id) ids="$2"; shift 2 ;;
-      --id=*) ids="${1#--id=}"; shift ;;
-      --all) all=1; shift ;;
-      --metadata-field)
-        mf=$(jq -cn --argjson m "$mf" --arg k "${2%%=*}" --arg v "${2#*=}" '$m + [{k: $k, v: $v}]')
-        shift 2 ;;
-      *) shift ;;
-    esac
-  done
-  if [ -n "$parent" ] && [ -n "${FAKE_BD_LIST_PARENT_FAIL:-}" ]; then
-    echo "Error: simulated list failure" >&2; exit 1
-  fi
-  if [ -n "$ids" ] && { [ -n "${FAKE_BD_LIST_ID_FAIL:-}" ] || [ -e "$DB/.list-id-fails" ]; }; then
-    echo "Error: simulated list failure" >&2; exit 1
-  fi
-  listed=()
-  for bf in "$DB"/*; do
-    [ -f "$bf" ] || continue
-    bid="${bf##*/}"
-    [ -z "$ids" ] || case ",$ids," in *",$bid,"*) ;; *) continue ;; esac
-    val "$bf" status; bs="$VAL"
-    if [ -n "$ids" ]; then
-      [ -n "$all" ] || [ "$bs" != closed ] || continue
-    elif [ -n "$parent" ]; then
-      val "$bf" parent; [ "$VAL" = "$parent" ] || continue
-      if [ -z "$st" ]; then
-        case "$bs" in closed|pinned) continue ;; esac
-      else
-        case ",$st," in *",$bs,"*) ;; *) continue ;; esac
-      fi
-    else
-      case ",$st," in *",$bs,"*) ;; *) continue ;; esac
-    fi
-    listed+=("$bf")
-  done
-  if [ "$mf" = '[]' ]; then rows ${listed[@]+"${listed[@]}"}; exit 0; fi
-  rows ${listed[@]+"${listed[@]}"} | jq -c --argjson mf "$mf" \
-    '[.[] | select(. as $row | all($mf[]; $row.metadata[.k] as $x | $x != null and ($x | tostring) == .v))]'
-  exit 0
-fi
-
-# `bd create --dry-run --json` previews the bead bd would create, created_by naming
-# the actor it runs as: --actor, or the one it defaults to, FAKE_BD_DEFAULT_ACTOR.
-# With neither the preview fails. A create that would write is the regression this
-# guard catches, since this writer files nothing.
-if [ "$sub" = "create" ]; then
-  case " $* " in *" --dry-run "*) ;; *) echo "stub bd: a create that writes" >&2; exit 127 ;; esac
-  [ -n "${ACTOR_ARG:-${FAKE_BD_DEFAULT_ACTOR:-}}" ] || { echo "Error: simulated preview failure" >&2; exit 1; }
-  jq -nc --arg a "${ACTOR_ARG:-$FAKE_BD_DEFAULT_ACTOR}" '{id: "", created_by: $a}'
-  exit 0
-fi
-
-# `bd gate resolve <id> --reason <r>` closes the gate with that reason. On a
-# gate already closed it changes nothing and still reports success, as bd does.
-# FAKE_BD_GATE_RESOLVE_REFUSE refuses the resolve.
-if [ "$sub" = "gate" ]; then
-  verb="${1:-}"; shift || true
-  id="${1:-}"; shift || true
-  f="$DB/$id"
-  [ "$verb" = "resolve" ] && [ -f "$f" ] || exit 1
-  [ -z "${FAKE_RESOLVE_LOG:-}" ] || printf '%s %s\n' "$id" "$*" >> "$FAKE_RESOLVE_LOG"
-  [ -z "${FAKE_BD_GATE_RESOLVE_REFUSE:-}" ] || { echo "Error resolving gate $id: the store refused it" >&2; exit 1; }
-  reason=""
-  while [ $# -gt 0 ]; do
-    case "$1" in --reason) reason="$2"; shift 2 ;; *) shift ;; esac
-  done
-  val "$f" status; [ "$VAL" = "closed" ] || printf 'status=closed\nreason=%s\n' "$reason" >> "$f"
-  echo "✓ Gate resolved: $id"
-  exit 0
-fi
-
-id="${1:-}"; shift || true
-f="$DB/$id"
-[ -f "$f" ] || { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1; }
-
-case "$sub" in
-  show)
-    # A show row: the far end of each edge onto a bead this store holds, by id,
-    # its type as dependency_type. An edge into another store is left out.
-    deps='[]'
-    while read -r o t; do
-      [ -f "$DB/$o" ] || continue
-      deps=$(jq -nc --argjson d "$deps" --arg o "$o" --arg t "$t" '$d + [{id: $o, dependency_type: $t}]')
-    done < <(edges_of "$f")
-    jq -nc --argjson rows "$(rows "$f")" --argjson deps "$deps" '[$rows[0] | .dependencies = $deps]'
-    ;;
-  update)
-    # FAKE_UPDATE_LOG, when set, gets each update's bead id and arguments.
-    [ -z "${FAKE_UPDATE_LOG:-}" ] || printf '%s %s\n' "$id" "$*" >> "$FAKE_UPDATE_LOG"
-    closing=""
-    for a in "$@"; do case "$a" in --status=closed) closing=1 ;; esac; done
-    # FAKE_BD_CLAIM_BEFORE_CLOSE="<status> <assignee>" lands another actor's
-    # write on the bead just before the first update that closes it is
-    # answered: a claim, an assignment, a status change or another close made
-    # after the caller read the bead.
-    if [ -n "$closing" ]; then race_at BEFORE_CLOSE; else race_at BEFORE_NOTE; fi
-    if [ -n "$closing" ] && [ -n "${FAKE_BD_CLAIM_BEFORE_CLOSE:-}" ] && [ ! -e "$DB/.claimed-before-close.$id" ]; then
-      : > "$DB/.claimed-before-close.$id"
-      printf 'status=%s\nassignee=%s\n' "${FAKE_BD_CLAIM_BEFORE_CLOSE%% *}" "${FAKE_BD_CLAIM_BEFORE_CLOSE#* }" >> "$f"
-    fi
-    # bd's --if-status and --if-assignee guards: the update lands only while the
-    # bead still has that status and that assignee ("" is unassigned), checked in
-    # the same write; a stale guard writes nothing and exits 13.
-    if_st="-"; if_as="-"; prev=""
-    for a in "$@"; do
-      case "$a" in
-        --if-status=*) if_st="${a#--if-status=}" ;;
-        --if-assignee=*) if_as="${a#--if-assignee=}" ;;
-      esac
-      case "$prev" in --if-status) if_st="$a" ;; --if-assignee) if_as="$a" ;; esac
-      prev="$a"
-    done
-    # FAKE_BD_NOTE_FAIL fails an update that does not close, as a store that does
-    # not answer fails it, which is not a guard's refusal.
-    [ -n "$closing" ] || [ -z "${FAKE_BD_NOTE_FAIL:-}" ] || { echo "Error: simulated update failure" >&2; exit 1; }
-    val "$f" status; cur_st="$VAL"
-    val "$f" assignee; cur_as="$VAL"
-    if { [ "$if_st" != "-" ] && [ "$if_st" != "$cur_st" ]; } || { [ "$if_as" != "-" ] && [ "$if_as" != "$cur_as" ]; }; then
-      echo "Error: precondition failed for $id: status/assignee changed" >&2
-      exit 13
-    fi
-    if [ -n "$closing" ]; then
-      # A move into closed is bd's checked close: it refuses a bead a live
-      # blocker or an open child holds, and with FAKE_BD_ENFORCE_CLOSE_GUARDS a
-      # template, a pinned bead and a bead assigned to anyone but the --actor.
-      # FAKE_BD_CLOSE_REFUSE refuses it outright.
-      [ -z "${FAKE_BD_CLOSE_REFUSE:-}" ] || { echo "cannot close issue assigned to other-agent (actor: someone-else)" >&2; exit 1; }
-      if [ -n "${FAKE_BD_ENFORCE_CLOSE_GUARDS:-}" ]; then
-        val "$f" is_template; [ "$VAL" != "true" ] \
-          || { echo "Error: cannot close template $id" >&2; exit 1; }
-        [ "$cur_st" != "pinned" ] \
-          || { echo "Error: cannot close pinned issue $id (use --force to override)" >&2; exit 1; }
-        [ -z "$cur_as" ] || [ "$cur_as" = "$ACTOR_ARG" ] \
-          || { echo "cannot close $id: assignee is \"$cur_as\", actor is \"$ACTOR_ARG\"; reclaim or use --force to override" >&2; exit 1; }
-      fi
-      BLOCKED=$(open_blockers "$f")
-      if [ -n "$BLOCKED" ]; then
-        echo "cannot close blocked issue: $id is blocked by [${BLOCKED// /, }] (use --force to override)" >&2
-        exit 1
-      fi
-      for cf in "$DB"/*; do
-        val "$cf" parent; [ "$VAL" = "$id" ] || continue
-        val "$cf" status
-        case "$VAL" in closed|pinned) ;; *)
-          echo "cannot close $id: it has open children (use --force to override)" >&2; exit 1 ;; esac
-      done
-    fi
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --set-metadata) printf 'm.%s\n' "$2" >> "$f"; shift 2 ;;
-        --unset-metadata) awk -v p="m.$2=" 'index($0, p) != 1' "$f" > "$f.unset"; mv "$f.unset" "$f"; shift 2 ;;
-        --append-notes) printf 'notes=%s\n' "$2" >> "$f"; shift 2 ;;
-        --status=*) printf 'status=%s\n' "${1#--status=}" >> "$f"; shift ;;
-        *) shift ;;
-      esac
-    done
-    if [ -n "$closing" ]; then
-      [ -z "${FAKE_UP_FAIL_AFTER_CLOSE:-}" ] || : > "$DB/.up-list-fails"
-      [ -z "${FAKE_LIST_FAIL_AFTER_CLOSE:-}" ] || : > "$DB/.list-id-fails"
-      race_at AFTER_CLOSE
-    fi
-    ;;
-  *) exit 1 ;;
-esac
-BD
-
-chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
-export PATH="$TMP/bin:$PATH"
-export FAKE_RIGS_JSON="$TMP/rigs.json"
-export FAKE_ACTOR_LOG="$TMP/actors.log"
-: > "$FAKE_ACTOR_LOG"
-export BEADS_ACTOR="test__rehome-hq-0000"
+# nometa <id> — the bead carries no metadata key.
+nometa() { case "$(bfield "$1" metadata)" in ""|"{}") return 0 ;; esac; return 1; }
+# A bead's whole record, its row and the dep rows naming it, to prove a refused
+# run wrote nothing.
+snap() { brecord "$2"; }
+# clear_calls — empty the fake's call log before a run whose calls a case reads.
+clear_calls() { : > "$STUB_GC_LOG"; }
 
 # The finalize gate is a sibling bead-rehome forks before any write. Stub it so
 # this suite tests the WIRING (a refusal holds the close and writes nothing)
@@ -555,20 +232,19 @@ export FG_LOG="$TMP/finalize-gate.log"; : > "$FG_LOG"
 # branch-end.sh is a sibling bead-rehome forks once the close reads back. Stub it
 # so this suite tests the wiring; its own logic is covered by branch-end.test.sh,
 # and case (aj) runs the real one end to end. Each call's argv, with the bead's
-# status as the stub finds it in the fake store, is appended to BE_LOG; BE_RC
+# status as the stub reads it in the fake's store, is appended to BE_LOG; BE_RC
 # picks its exit (0 ended, 3 kept, anything else not ended).
 BE_STUB="$TMP/bin/branch-end-stub.sh"
 cat > "$BE_STUB" <<'STUB'
 #!/usr/bin/env bash
-args="$*"; bead=""; rig=""
+args="$*"; bead=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --bead) bead="$2"; shift 2 ;;
-    --rig) rig="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
-st=$(sed -n 's/^status=//p' "${FAKE_RIGS_ROOT:?}/$rig/.beads/$bead" 2>/dev/null | tail -1)
+st=$(gc --harness-read status "$bead")
 printf '%s status-at-call=%s\n' "$args" "$st" >> "${BE_LOG:?}"
 case "${BE_RC:-0}" in
   0) echo "branch-end (stub): ended" ;;
@@ -578,7 +254,7 @@ esac
 exit "${BE_RC:-0}"
 STUB
 chmod +x "$BE_STUB"
-export GC_BRANCH_END_TOOL="$BE_STUB" BE_LOG="$TMP/branch-end.log" FAKE_RIGS_ROOT="$TMP/rigs"
+export GC_BRANCH_END_TOOL="$BE_STUB" BE_LOG="$TMP/branch-end.log"
 : > "$BE_LOG"
 
 run() { "$SCRIPT" "$@" >"$TMP/out" 2>"$TMP/err"; }
@@ -592,8 +268,93 @@ mkdir -p "$NOLOCK"
 printf '#!/bin/sh\nexit 0\n' > "$NOLOCK/flock"
 chmod +x "$NOLOCK/flock"
 export PR_RECORD_LOCK_WAIT_SECS=20
-# A bead's whole record, to prove a refused run wrote nothing.
-snap() { cat "$TMP/rigs/$1/.beads/$2"; }
+
+# --- races --------------------------------------------------------------------
+# A race lands another caller's write while one of the run's own writes waits:
+# the fake runs race.sh (STUB_HOOK) before each call that names the origin
+# (STUB_HOOK_AT), and race.sh runs the script a RACE_<point> setting names, once
+# per bead, at that point:
+#   BEFORE_EDGE       just before a duplicates or supersedes edge is added
+#   BEFORE_CLOSE      just before an update that closes
+#   AFTER_CLOSE       once a close of the bead landed, before the next call that
+#                     names it
+#   BEFORE_NOTE       just before an update that does not close
+#   BEFORE_TAKE_BACK  just before a duplicates or supersedes edge is removed
+# RACE_CLAIM_BEFORE_CLOSE="<status> <assignee>" lands another actor's write on
+# the bead just after the BEFORE_CLOSE point, before the first close is
+# answered. Three faults fail a call once a write landed: an --id list once a
+# duplicates or supersedes edge was added (RACE_FAIL_LIST_AFTER_EDGE) or a close
+# landed (RACE_FAIL_LIST_AFTER_CLOSE), and an up dep list once a close landed
+# (RACE_FAIL_UP_AFTER_CLOSE).
+RACE="$TMP/race.sh" RACE_DIR="$TMP/race"
+export RACE_DIR
+cat > "$RACE" <<'SH'
+#!/usr/bin/env bash
+set -u
+args=("$@"); i=0
+[ "${args[0]:-}" = bd ] && i=1
+while [ "${args[$i]:-}" = --db ] || [ "${args[$i]:-}" = --actor ]; do i=$((i + 2)); done
+verb="${args[$i]:-}"; rest=("${args[@]:$((i + 1))}")
+once() { # <point> <bead> <script>
+  [ -n "$3" ] && [ ! -e "$RACE_DIR/raced.$1.$2" ] || return 0
+  : > "$RACE_DIR/raced.$1.$2"
+  bash "$3" || true
+}
+closed=""
+if [ -e "$RACE_DIR/closing" ]; then
+  c=$(cat "$RACE_DIR/closing")
+  [ "$(gc --harness-read status "$c")" != closed ] || closed="$c"
+fi
+[ -z "$closed" ] || once AFTER_CLOSE "$closed" "${RACE_AFTER_CLOSE:-}"
+case "$verb ${rest[0]:-}" in
+  "list "*)
+    case " ${rest[*]} " in *" --id "*)
+      { [ -n "${RACE_FAIL_LIST_AFTER_EDGE:-}" ] && [ -e "$RACE_DIR/edge" ]; } \
+        || { [ -n "${RACE_FAIL_LIST_AFTER_CLOSE:-}" ] && [ -n "$closed" ]; } \
+        && { echo "Error: simulated list failure" >&2; exit 1; } ;;
+    esac ;;
+  "dep list")
+    case " ${rest[*]} " in *" --direction=up "*)
+      [ -n "${RACE_FAIL_UP_AFTER_CLOSE:-}" ] && [ -n "$closed" ] && { echo "Error: simulated dep list failure" >&2; exit 1; } ;;
+    esac ;;
+  "dep add")
+    t=blocks
+    for ((k = 3; k < ${#rest[@]}; k++)); do
+      case "${rest[$k]}" in --type|-t) t="${rest[$((k + 1))]:-}" ;; --type=*) t="${rest[$k]#--type=}" ;; esac
+    done
+    case "$t" in duplicates|supersedes)
+      : > "$RACE_DIR/edge"
+      once BEFORE_EDGE "${rest[1]:-}" "${RACE_BEFORE_EDGE:-}" ;;
+    esac ;;
+  "dep remove")
+    case " $(gc --harness-read edge "${rest[1]:-}" "${rest[2]:-}") " in *" duplicates "*|*" supersedes "*)
+      once BEFORE_TAKE_BACK "${rest[1]:-}" "${RACE_BEFORE_TAKE_BACK:-}" ;;
+    esac ;;
+  "update "*)
+    case " ${rest[*]} " in
+      *" --status=closed "*)
+        printf '%s' "${rest[0]}" > "$RACE_DIR/closing"
+        once BEFORE_CLOSE "${rest[0]}" "${RACE_BEFORE_CLOSE:-}"
+        if [ -n "${RACE_CLAIM_BEFORE_CLOSE:-}" ] && [ ! -e "$RACE_DIR/claimed.${rest[0]}" ]; then
+          : > "$RACE_DIR/claimed.${rest[0]}"
+          gc --harness-write set "${rest[0]}" "status=${RACE_CLAIM_BEFORE_CLOSE%% *}" "assignee=${RACE_CLAIM_BEFORE_CLOSE#* }"
+        fi ;;
+      *) once BEFORE_NOTE "${rest[0]}" "${RACE_BEFORE_NOTE:-}" ;;
+    esac ;;
+esac
+exit 0
+SH
+chmod +x "$RACE"
+# raced <origin> [<setting>=<value>...] -- <bead-rehome args...> — a run with
+# race.sh on every call that names the origin, at the points the settings name.
+raced() {
+  local o="$1" with=()
+  shift
+  while [ "$1" != -- ]; do with+=("$1"); shift; done
+  shift
+  rm -rf "$RACE_DIR"; mkdir -p "$RACE_DIR"
+  env STUB_HOOK_AT="$o" STUB_HOOK="$RACE" ${with[@]+"${with[@]}"} "$SCRIPT" "$@" >"$TMP/out" 2>"$TMP/err"
+}
 
 # --- (a) happy path: closed, the supersedes edge, a populated note ----------
 mkbead alpha open al-origin1
@@ -605,10 +366,10 @@ eq "$(edge alpha al-origin1 al-succ1)" supersedes "the origin's supersedes edge 
 NOTE=$(field alpha notes al-origin1)
 has "$NOTE" "re-homed to al-succ1 in rig:alpha" "the close's note names kind, successor and store"
 has "$NOTE" "operator ruling rb-a3ny" "the close's note carries the note"
-eq "$(grep -c '^m\.' "$TMP/rigs/alpha/.beads/al-origin1" || true)" 0 "no metadata key records the successor"
-eq "$(grep -c '^m\.' "$TMP/rigs/alpha/.beads/al-succ1" || true)" 0 "and the successor gains no back-pointer key"
+if nometa al-origin1; then ok "no metadata key records the successor"; else bad "no metadata key records the successor ($(bfield al-origin1 metadata))"; fi
+if nometa al-succ1; then ok "and the successor gains no back-pointer key"; else bad "and the successor gains no back-pointer key ($(bfield al-succ1 metadata))"; fi
 has "$(cat "$TMP/out")" "events" "output points at the events table for attribution"
-has "$(cat "$FAKE_ACTOR_LOG")" "test__rehome-hq-0000" "the actor is passed through for the audit trail"
+has "$(cat "$STUB_GC_LOG")" "--actor test__rehome-hq-0000 " "the actor is passed through for the audit trail"
 
 # --- (a2) a duplicate is recorded as a duplicate -----------------------------
 mkbead alpha open al-dup1
@@ -665,7 +426,7 @@ eq "$(snap alpha al-origin2)" "$BEFORE" "…and the origin is untouched"
 # --- (c) an edge that does not write closes nothing --------------------------
 mkbead alpha open al-origin3
 mkbead alpha open al-succ3
-rc=0; FAKE_BD_DEP_ADD_FAIL=1 run --origin al-origin3 --successor al-succ3 --kind re-homed || rc=$?
+rc=0; STUB_DEP_ADD_FAIL_ON="dep add" run --origin al-origin3 --successor al-succ3 --kind re-homed || rc=$?
 eq "$rc" 4 "an edge that does not write exits 4"
 eq "$(field alpha status al-origin3)" open "…and the bead is not closed, so no close stands without its successor"
 has "$(cat "$TMP/err")" "did not write" "…and says so"
@@ -681,17 +442,17 @@ eq "$(edge alpha al-origin3 al-succ3)" supersedes "…and records the edge"
 mkbead alpha open al-origin4
 mkbead alpha open al-succ4
 BEFORE=$(snap alpha al-origin4)
-rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-origin4 --successor al-succ4 --kind folded || rc=$?
+rc=0; STUB_CLOSE_FAIL=al-origin4 run --origin al-origin4 --successor al-succ4 --kind folded || rc=$?
 eq "$rc" 5 "a refused close exits 5"
 eq "$(snap alpha al-origin4)" "$BEFORE" "…and writes nothing: no edge, no note, no outcome"
-has "$(cat "$TMP/err")" "cannot close issue" "…bd's refusal is passed on"
+has "$(cat "$TMP/err")" "simulated close refusal for al-origin4" "…bd's refusal is passed on"
 has "$(cat "$TMP/err")" "nothing is recorded" "…and the writer says nothing is recorded"
 
 # --- (e) a different prior disposition is never overwritten ---------------
 mkbead alpha closed al-origin5
 mkbead alpha open al-other5
 mkbead alpha open al-succ5
-printf 'dep.al-other5=supersedes\n' >> "$TMP/rigs/alpha/.beads/al-origin5"
+dep al-origin5 al-other5 supersedes
 BEFORE=$(snap alpha al-origin5)
 rc=0; run --origin al-origin5 --successor al-succ5 --kind folded || rc=$?
 eq "$rc" 6 "an existing disposition onto another successor is refused"
@@ -699,14 +460,14 @@ eq "$(snap alpha al-origin5)" "$BEFORE" "…and the prior disposition is untouch
 # An edge of another kind on the same pair is not rewritten either.
 mkbead alpha open al-origin5b
 mkbead alpha open al-succ5b
-printf 'dep.al-succ5b=related\n' >> "$TMP/rigs/alpha/.beads/al-origin5b"
+dep al-origin5b al-succ5b related
 rc=0; run --origin al-origin5b --successor al-succ5b --kind folded || rc=$?
 eq "$rc" 6 "a related edge onto the successor is refused, since bd keeps one edge per pair"
 has "$(cat "$TMP/err")" "dep remove al-origin5b al-succ5b" "…and names the command that clears it"
 eq "$(field alpha status al-origin5b)" open "…and the origin is not closed"
 mkbead alpha closed al-origin5c
 mkbead alpha open al-succ5c
-printf 'dep.al-succ5c=duplicates\n' >> "$TMP/rigs/alpha/.beads/al-origin5c"
+dep al-origin5c al-succ5c duplicates
 rc=0; run --origin al-origin5c --successor al-succ5c --kind folded || rc=$?
 eq "$rc" 6 "a duplicate disposition is not rewritten as another kind"
 
@@ -721,7 +482,7 @@ for pair in "re-homed:re-homed to:supersedes" "folded:folded into:supersedes" "n
 done
 for pair in "fixed-upstream:fixed upstream by:supersedes" "duplicate:duplicate of:duplicates"; do
   kind="${pair%%:*}"; rest="${pair#*:}"; want="${rest%%:*}"; etype="${rest#*:}"
-  mkbead alpha open "al-k$kind"; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-k$kind"
+  mkbead alpha open "al-k$kind"; bset "al-k$kind" metadata.gc.work_outcome=no-op
   mkbead alpha closed "al-s$kind"
   rc=0; run --origin "al-k$kind" --successor "al-s$kind" --kind "$kind" || rc=$?
   eq "$rc" 0 "kind '$kind' is accepted with its evidence"
@@ -763,7 +524,7 @@ has "$(cat "$TMP/out")" "ALREADY closed" "the output says the close was left alo
 # A wait edge a forced close left behind gives way to the disposition's edge.
 mkbead alpha closed al-origin10w
 mkbead alpha open al-succ10w
-printf 'dep.al-succ10w=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin10w"
+dep al-origin10w al-succ10w blocks
 rc=0; run --origin al-origin10w --successor al-succ10w --kind folded || rc=$?
 eq "$rc" 0 "a closed bead still waiting on its successor is repaired"
 eq "$(edge alpha al-origin10w al-succ10w)" supersedes "…its wait edge gives way to the supersedes edge"
@@ -771,13 +532,13 @@ eq "$(edge alpha al-origin10w al-succ10w)" supersedes "…its wait edge gives wa
 # --- (k) the repair is idempotent: no duplicate note on a re-run ---------
 rc=0; run --origin al-origin10 --successor bt-succ10 --kind re-homed || rc=$?
 eq "$rc" 0 "re-running the repair succeeds"
-eq "$(grep -c '^notes=' "$TMP/rigs/alpha/.beads/al-origin10")" 1 "the disposition note is not duplicated"
+eq "$(notes_with al-origin10 "")" 1 "the disposition note is not duplicated"
 has "$(cat "$TMP/out")" "already records this disposition" "the re-run says it is a no-op"
 
 # --- (n) the wait edge to the successor does not refuse the disposition ---
 mkbead alpha open al-origin13
 mkbead alpha open al-succ13
-printf 'dep.al-succ13=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin13"
+dep al-origin13 al-succ13 blocks
 rc=0; run --origin al-origin13 --successor al-succ13 --kind folded --note "operator ruling" || rc=$?
 eq "$rc" 0 "a subject blocked by its own successor is still disposed"
 eq "$(field alpha status al-origin13)" closed "the close is not refused by the wait edge"
@@ -787,7 +548,7 @@ eq "$(edge alpha al-origin13 al-succ13)" supersedes "the wait edge gives way to 
 mkbead alpha open al-origin14
 mkbead alpha open al-succ14
 mkbead alpha open al-block14
-printf 'dep.al-succ14=blocks\ndep.al-block14=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin14"
+dep al-origin14 al-succ14 blocks; dep al-origin14 al-block14 blocks
 rc=0; run --origin al-origin14 --successor al-succ14 --kind folded || rc=$?
 eq "$rc" 5 "an unrelated blocker still refuses the close"
 eq "$(field alpha status al-origin14)" open "the bead is left open"
@@ -800,7 +561,7 @@ has "$(cat "$TMP/err")" "blocked by" "the refusal names the hold the caller must
 # are refused before anything is written, as `bd close` refuses them.
 mkbead alpha open al-owned
 mkbead alpha open al-osucc
-printf 'assignee=someone-else\n' >> "$TMP/rigs/alpha/.beads/al-owned"
+bset al-owned assignee=someone-else
 BEFORE=$(snap alpha al-owned)
 rc=0; run --origin al-owned --successor al-osucc --kind folded || rc=$?
 eq "$rc" 5 "an open bead assigned to someone else is refused"
@@ -824,7 +585,7 @@ has "$(cat "$TMP/out")" "dry run" "--dry-run says so"
 has "$(cat "$TMP/out")" "al-origin9 supersedes bt-succ9, in rig:alpha" "--dry-run names the edge it would record"
 mkbead alpha open al-origin15
 mkbead alpha open al-succ15
-printf 'dep.al-succ15=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin15"
+dep al-origin15 al-succ15 blocks
 rc=0; run --origin al-origin15 --successor al-succ15 --kind folded --dry-run || rc=$?
 eq "$rc" 0 "--dry-run succeeds over a wait edge"
 has "$(cat "$TMP/out")" "drop the 'blocked by al-succ15' wait edge" "--dry-run names the edge it would drop"
@@ -841,7 +602,7 @@ eq "$(field alpha m.gc.work_outcome al-task1)" "" "…and no gc.work_outcome"
 # --- (gate-b) unlanded work: refused under an evidence kind ---------------
 mkbead alpha open al-unlanded
 mkbead alpha closed al-usucc
-printf 'm.merge_result=pull_request\n' >> "$TMP/rigs/alpha/.beads/al-unlanded"
+bset al-unlanded metadata.merge_result=pull_request
 BEFORE=$(snap alpha al-unlanded)
 rc=0; run --origin al-unlanded --successor al-usucc --kind duplicate || rc=$?
 eq "$rc" 7 "unlanded work (merge_result set) refuses an evidence-kind close"
@@ -851,7 +612,7 @@ has "$(cat "$TMP/err")" "no work" "the refusal names the no-work requirement"
 # re-judge: the converse retire path disposes an in-flight anchor through it.
 mkbead alpha open al-retire
 mkbead beta  open bt-rtsucc
-printf 'm.merge_result=pull_request\n' >> "$TMP/rigs/alpha/.beads/al-retire"
+bset al-retire metadata.merge_result=pull_request
 rc=0; run --origin al-retire --successor bt-rtsucc --kind re-homed || rc=$?
 eq "$rc" 0 "a judgment kind (re-homed) disposes an in-flight anchor"
 eq "$(field alpha status al-retire)" closed "…and closes it"
@@ -859,14 +620,14 @@ eq "$(field alpha status al-retire)" closed "…and closes it"
 # already made.
 mkbead alpha open al-ruled
 mkbead alpha open al-rsucc
-printf 'm.merge_result=pull_request\nm.branch=polecat/al-ruled\nm.gc.pr_close_disposition_kind=duplicate\nm.gc.pr_close_disposition_successor=al-rsucc\n' >> "$TMP/rigs/alpha/.beads/al-ruled"
+bset al-ruled metadata.merge_result=pull_request metadata.branch=polecat/al-ruled metadata.gc.pr_close_disposition_kind=duplicate metadata.gc.pr_close_disposition_successor=al-rsucc
 rc=0; run --origin al-ruled --successor al-rsucc --kind duplicate || rc=$?
 eq "$rc" 0 "a pre-recorded PR-close disposition consummates under the recorded evidence kind"
 eq "$(field alpha status al-ruled)" closed "…and closes the anchor"
 # …but only the disposition it records: another successor is judged afresh.
 mkbead alpha open al-ruledx
 mkbead alpha closed al-rxsucc
-printf 'm.merge_result=pull_request\nm.gc.pr_close_disposition_kind=duplicate\nm.gc.pr_close_disposition_successor=al-other\n' >> "$TMP/rigs/alpha/.beads/al-ruledx"
+bset al-ruledx metadata.merge_result=pull_request metadata.gc.pr_close_disposition_kind=duplicate metadata.gc.pr_close_disposition_successor=al-other
 rc=0; run --origin al-ruledx --successor al-rxsucc --kind duplicate || rc=$?
 eq "$rc" 7 "a disposition record naming another successor is no ruling for this one"
 eq "$(field alpha status al-ruledx)" open "…and the anchor is left open"
@@ -874,63 +635,63 @@ eq "$(field alpha status al-ruledx)" open "…and the anchor is left open"
 # --- (gate-a) not a review/step/workflow bead ------------------------------
 mkbead alpha open al-merged
 mkbead beta  open bt-msucc
-printf 'm.merge_result=merged\n' >> "$TMP/rigs/alpha/.beads/al-merged"
+bset al-merged metadata.merge_result=merged
 rc=0; run --origin al-merged --successor bt-msucc --kind re-homed || rc=$?
 eq "$rc" 0 "merge_result=merged is landed work and may be disposed"
 mkbead alpha open al-review
 mkbead beta  open bt-rsucc
-printf 'm.task_kind=review\n' >> "$TMP/rigs/alpha/.beads/al-review"
+bset al-review metadata.task_kind=review
 rc=0; run --origin al-review --successor bt-rsucc --kind re-homed || rc=$?
 eq "$rc" 7 "a review bead is refused: its own machinery closes it"
 mkbead alpha open al-step
 mkbead beta  open bt-ssucc
-printf 'm.gc.step_ref=mol-x.load\n' >> "$TMP/rigs/alpha/.beads/al-step"
+bset al-step metadata.gc.step_ref=mol-x.load
 rc=0; run --origin al-step --successor bt-ssucc --kind re-homed || rc=$?
 eq "$rc" 7 "a step bead is refused"
 mkbead alpha open al-wf
 mkbead beta  open bt-wsucc
-printf 'm.gc.kind=workflow\n' >> "$TMP/rigs/alpha/.beads/al-wf"
+bset al-wf metadata.gc.kind=workflow
 rc=0; run --origin al-wf --successor bt-wsucc --kind re-homed || rc=$?
 eq "$rc" 7 "a workflow root is refused"
 
 # --- (gate-held) another actor holds it, but self may ---------------------
 mkbead alpha in_progress al-held
 mkbead beta  open bt-hsucc
-printf 'assignee=someone-else-hq-9999\n' >> "$TMP/rigs/alpha/.beads/al-held"
+bset al-held assignee=someone-else-hq-9999
 rc=0; run --origin al-held --successor bt-hsucc --kind re-homed || rc=$?
 eq "$rc" 7 "an origin in_progress under another actor is refused"
 has "$(cat "$TMP/err")" "in_progress under someone-else-hq-9999" "the refusal names the holder"
 mkbead alpha in_progress al-mine
 mkbead beta  open bt-msucc2
-printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$TMP/rigs/alpha/.beads/al-mine"
+bset al-mine "assignee=$BEADS_ACTOR"
 rc=0; run --origin al-mine --successor bt-msucc2 --kind re-homed || rc=$?
 eq "$rc" 0 "an origin this session holds is not treated as someone else's"
 
 # --- (gate-b) the evidence gates for fixed-upstream|duplicate -------------
-mkbead alpha open al-xstore; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-xstore"
+mkbead alpha open al-xstore; bset al-xstore metadata.gc.work_outcome=no-op
 mkbead beta closed bt-xsucc
 rc=0; run --origin al-xstore --successor bt-xsucc --kind duplicate || rc=$?
 eq "$rc" 7 "a duplicate close needs the successor in the same store"
 has "$(cat "$TMP/err")" "same store" "the refusal names the same-store requirement"
 # A fix upstream must have landed.
-mkbead alpha open al-openS; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-openS"
+mkbead alpha open al-openS; bset al-openS metadata.gc.work_outcome=no-op
 mkbead alpha open al-openSucc
 rc=0; run --origin al-openS --successor al-openSucc --kind fixed-upstream || rc=$?
 eq "$rc" 7 "a fixed-upstream close needs the fix closed or shipped"
-mkbead alpha open al-shipO; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-shipO"
-mkbead alpha open al-shipSucc; printf 'm.gc.work_outcome=shipped\n' >> "$TMP/rigs/alpha/.beads/al-shipSucc"
+mkbead alpha open al-shipO; bset al-shipO metadata.gc.work_outcome=no-op
+mkbead alpha open al-shipSucc; bset al-shipSucc metadata.gc.work_outcome=shipped
 rc=0; run --origin al-shipO --successor al-shipSucc --kind fixed-upstream || rc=$?
 eq "$rc" 0 "a shipped-but-open fix satisfies the evidence"
 # Origin must have done no work.
 mkbead alpha open al-didwork
 mkbead alpha closed al-dwSucc
-printf 'm.branch=polecat/al-didwork\n' >> "$TMP/rigs/alpha/.beads/al-didwork"
+bset al-didwork metadata.branch=polecat/al-didwork
 rc=0; run --origin al-didwork --successor al-dwSucc --kind duplicate || rc=$?
 eq "$rc" 7 "an origin with a work-product key and no no-op stamp is refused"
 has "$(cat "$TMP/err")" "no work" "the refusal names the no-work requirement"
 mkbead alpha open al-twin
 mkbead alpha closed al-twinSucc
-printf 'm.branch=polecat/al-twinSucc\nm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-twin"
+bset al-twin metadata.branch=polecat/al-twinSucc metadata.gc.work_outcome=no-op
 rc=0; run --origin al-twin --successor al-twinSucc --kind duplicate || rc=$?
 eq "$rc" 0 "work_outcome=no-op is accepted even with a work-product key present"
 eq "$(field alpha status al-twin)" closed "and the duplicate is closed"
@@ -943,17 +704,18 @@ mkbead alpha open al-wcanon
 mkbead alpha open al-waiter1
 mkbead alpha closed al-waiter2
 mkbead alpha open al-waiter3
-printf 'dep.al-wdup=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter1"
-printf 'dep.al-wdup=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter2"
-printf 'dep.al-wdup=blocks\ndep.al-wcanon=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter3"
-printf 'dep.al-wdup=blocks\n' >> "$TMP/rigs/alpha/.beads/al-wcanon"
+dep al-waiter1 al-wdup blocks
+dep al-waiter2 al-wdup blocks
+dep al-waiter3 al-wdup blocks; dep al-waiter3 al-wcanon blocks
+dep al-wcanon al-wdup blocks
 B3=$(snap alpha al-waiter3)
-rc=0; FAKE_CALL_LOG="$TMP/ar.calls" run --origin al-wdup --successor al-wcanon --kind duplicate || rc=$?
+clear_calls
+rc=0; run --origin al-wdup --successor al-wcanon --kind duplicate || rc=$?
 eq "$rc" 0 "a duplicate whose canonical is open closes at once"
 eq "$(field alpha status al-wdup)" closed "…the duplicate is closed"
 eq "$(edge alpha al-waiter1 al-wcanon)" blocks "…an open bead it blocked now waits on the canonical"
-CARRY_AT=$(grep -n '^dep add al-waiter1 al-wcanon' "$TMP/ar.calls" | head -1 | cut -d: -f1 || true)
-CLOSE_AT=$(grep -n '^update al-wdup .*--status=closed' "$TMP/ar.calls" | head -1 | cut -d: -f1 || true)
+CARRY_AT=$(grep -n ' dep add al-waiter1 al-wcanon ' "$STUB_GC_LOG" | head -1 | cut -d: -f1 || true)
+CLOSE_AT=$(grep -n ' update al-wdup .*--status=closed' "$STUB_GC_LOG" | head -1 | cut -d: -f1 || true)
 [ -n "$CARRY_AT" ] && [ -n "$CLOSE_AT" ] && [ "$CARRY_AT" -lt "$CLOSE_AT" ] \
     && ok "…its edge is written before the close" || bad "…its edge is written before the close (edge at '${CARRY_AT:-none}', close at '${CLOSE_AT:-none}')"
 eq "$(edge alpha al-waiter2 al-wcanon)" "" "…a closed bead it blocked gains no edge"
@@ -967,13 +729,13 @@ mkbead alpha open al-wdup2
 mkbead alpha closed al-wcanon2
 mkbead alpha open al-wdup3
 mkbead alpha open al-wcanon3
-printf 'm.gc.work_outcome=shipped\n' >> "$TMP/rigs/alpha/.beads/al-wcanon3"
+bset al-wcanon3 metadata.gc.work_outcome=shipped
 mkbead alpha open al-wre
 mkbead alpha open al-wresucc
 mkbead alpha closed al-wdup4
 mkbead alpha open al-wcanon4
 mkbead alpha open al-waiter4
-printf 'dep.al-wdup2=blocks\ndep.al-wdup3=blocks\ndep.al-wre=blocks\ndep.al-wdup4=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter4"
+dep al-waiter4 al-wdup2 blocks; dep al-waiter4 al-wdup3 blocks; dep al-waiter4 al-wre blocks; dep al-waiter4 al-wdup4 blocks
 rc=0; run --origin al-wdup2 --successor al-wcanon2 --kind duplicate || rc=$?
 eq "$rc/$(edge alpha al-waiter4 al-wcanon2)" "0/" "a duplicate of a closed canonical moves no wait"
 rc=0; run --origin al-wdup3 --successor al-wcanon3 --kind duplicate || rc=$?
@@ -989,8 +751,8 @@ mkbead alpha open al-wdup5
 mkbead alpha open al-wcanon5
 mkbead alpha open al-waiter5
 mkbead alpha open al-waiter6
-printf 'dep.al-wdup5=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter5"
-printf 'dep.al-wdup5=blocks\ndep.al-wcanon5=related\n' >> "$TMP/rigs/alpha/.beads/al-waiter6"
+dep al-waiter5 al-wdup5 blocks
+dep al-waiter6 al-wdup5 blocks; dep al-waiter6 al-wcanon5 related
 BD=$(snap alpha al-wdup5); B5=$(snap alpha al-waiter5); B6=$(snap alpha al-waiter6)
 rc=0; run --origin al-wdup5 --successor al-wcanon5 --kind duplicate || rc=$?
 eq "$rc" 5 "a waiter joined to the canonical by another edge type refuses the close"
@@ -1001,8 +763,8 @@ eq "$rc" 1 "--check refuses it too"
 mkbead alpha open al-wdup6
 mkbead beta  open bt-wcanon6
 mkbead alpha open al-waiter7
-printf 'm.merge_result=pull_request\nm.gc.pr_close_disposition_kind=duplicate\nm.gc.pr_close_disposition_successor=bt-wcanon6\nm.gc.pr_close_disposition_successor_store=rig:beta\n' >> "$TMP/rigs/alpha/.beads/al-wdup6"
-printf 'dep.al-wdup6=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter7"
+bset al-wdup6 metadata.merge_result=pull_request metadata.gc.pr_close_disposition_kind=duplicate metadata.gc.pr_close_disposition_successor=bt-wcanon6 metadata.gc.pr_close_disposition_successor_store=rig:beta
+dep al-waiter7 al-wdup6 blocks
 BD=$(snap alpha al-wdup6); B7=$(snap alpha al-waiter7)
 rc=0; run --origin al-wdup6 --successor bt-wcanon6 --kind duplicate || rc=$?
 eq "$rc" 5 "a ruled duplicate onto another store's canonical refuses while a bead waits on it"
@@ -1012,7 +774,7 @@ has "$(cat "$TMP/err")" "dep remove <bead> al-wdup6, then re-run" "…and it nam
 mkbead alpha open al-wdup7
 mkbead alpha open al-wcanon7
 BD=$(snap alpha al-wdup7)
-rc=0; FAKE_BD_DEP_LIST_UP_FAIL=1 run --origin al-wdup7 --successor al-wcanon7 --kind duplicate || rc=$?
+rc=0; STUB_FAIL_ON=--direction=up run --origin al-wdup7 --successor al-wcanon7 --kind duplicate || rc=$?
 eq "$rc/$(snap alpha al-wdup7)" "5/$BD" "a waiter read that fails refuses the close and writes nothing"
 has "$(cat "$TMP/err")" "did not read" "…and says the read failed"
 # What would refuse bd's close holds a duplicate before any waiter is written.
@@ -1020,8 +782,8 @@ mkbead alpha open al-wdup8
 mkbead alpha open al-wcanon8
 mkbead alpha open al-wblock8
 mkbead alpha open al-waiter8
-printf 'dep.al-wblock8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-wdup8"
-printf 'dep.al-wdup8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter8"
+dep al-wdup8 al-wblock8 blocks
+dep al-waiter8 al-wdup8 blocks
 B8=$(snap alpha al-waiter8)
 rc=0; run --origin al-wdup8 --successor al-wcanon8 --kind duplicate || rc=$?
 eq "$rc/$(field alpha status al-wdup8)" "5/open" "a duplicate another bead blocks is held"
@@ -1032,10 +794,10 @@ has "$(cat "$TMP/err")" "held by blocker(s) al-wblock8" "…and the refusal name
 mkbead alpha open al-wdup8g
 mkbead alpha open al-wcanon8g
 mkbead alpha open al-wgate8
-printf 'issue_type=gate\nawait_type=human\nawait_id=some-key\n' >> "$TMP/rigs/alpha/.beads/al-wgate8"
+bset al-wgate8 issue_type=gate await_type=human await_id=some-key
 mkbead alpha open al-waiter8g
-printf 'dep.al-wgate8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-wdup8g"
-printf 'dep.al-wdup8g=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter8g"
+dep al-wdup8g al-wgate8 blocks
+dep al-waiter8g al-wdup8g blocks
 B8=$(snap alpha al-waiter8g)
 rc=0; run --origin al-wdup8g --successor al-wcanon8g --kind duplicate || rc=$?
 eq "$rc/$(field alpha status al-wgate8)/$(snap alpha al-waiter8g)" "5/open/$B8" "…and so does a human gate, which stays open"
@@ -1045,19 +807,19 @@ mkbead alpha open al-wdup9
 mkbead alpha open al-wcanon9
 mkbead alpha open al-waiterA
 mkbead alpha open al-waiterB
-printf 'dep.al-wdup9=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiterA"
-printf 'dep.al-wdup9=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiterB"
-rc=0; FAKE_BD_DEP_ADD_REFUSE_FROM=al-waiterB run --origin al-wdup9 --successor al-wcanon9 --kind duplicate || rc=$?
+dep al-waiterA al-wdup9 blocks
+dep al-waiterB al-wdup9 blocks
+rc=0; STUB_DEP_ADD_FAIL=al-waiterB run --origin al-wdup9 --successor al-wcanon9 --kind duplicate || rc=$?
 eq "$rc" 5 "a waiter bd refuses the edge refuses the close"
 eq "$(field alpha status al-wdup9)/$(edge alpha al-wdup9 al-wcanon9)" "open/" "…the duplicate stays open with no edge"
 eq "$(edge alpha al-waiterA al-wcanon9)" blocks "…a waiter carried before it keeps its edge"
-has "$(cat "$TMP/err")" "same parent chain" "…bd's refusal is printed"
+has "$(cat "$TMP/err")" "simulated refusal for al-waiterB" "…bd's refusal is printed"
 has "$(cat "$TMP/err")" "al-waiterA keep the blocks edge onto al-wcanon9" "…and the edges that stay are named"
 # --check and the dry run name the waits that would move, and write nothing.
 mkbead alpha open al-wdup11
 mkbead alpha open al-wcanon11
 mkbead alpha open al-waiterD
-printf 'dep.al-wdup11=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiterD"
+dep al-waiterD al-wdup11 blocks
 BD=$(snap alpha al-wdup11); BW=$(snap alpha al-waiterD)
 rc=0; run --origin al-wdup11 --successor al-wcanon11 --kind duplicate --check || rc=$?
 eq "$rc" 0 "--check finds a duplicate with waiters eligible"
@@ -1087,7 +849,7 @@ eq "$rc" 0 "--check over an already-closed origin passes (repair path)"
 eq "$(edge alpha al-chkclosed bt-chkclosed)" "" "--check still writes nothing"
 
 # A bead that names the branch its work was pushed to.
-mkbranched() { mkbead "$1" "$2" "$3"; printf 'm.branch=polecat/%s\n' "$3" >> "$TMP/rigs/$1/.beads/$3"; }
+mkbranched() { mkbead "$1" "$2" "$3"; bset "$3" "metadata.branch=polecat/$3"; }
 
 # --- (ad) the retired bead's branch goes to branch-end, after the close ------
 mkbranched alpha open al-br1
@@ -1127,7 +889,7 @@ has "$(field alpha notes al-br3)" "kept for a live owner" "…and the bead recor
 mkbranched alpha open al-br4
 mkbead beta open bt-br4
 : > "$BE_LOG"
-rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-br4 --successor bt-br4 --kind folded || rc=$?
+rc=0; STUB_CLOSE_FAIL=al-br4 run --origin al-br4 --successor bt-br4 --kind folded || rc=$?
 eq "$rc" 5 "a refused close still exits 5"
 eq "$(cat "$BE_LOG")" "" "…and ends no branch"
 mkbranched alpha open al-br5
@@ -1157,7 +919,7 @@ eq "$rc" 0 "a repair over a bead that names a branch succeeds"
 eq "$(cat "$BE_LOG")" "--rig alpha --branch polecat/al-br8 --bead al-br8 status-at-call=closed" \
    "the repair hands the closed bead's branch to branch-end"
 rc=0; run --origin al-br8 --successor bt-br8 --kind re-homed || rc=$?
-eq "$(grep -c 'branch-end (stub): ended' "$TMP/rigs/alpha/.beads/al-br8")" 1 \
+eq "$(notes_with al-br8 'branch-end (stub): ended')" 1 \
    "a re-run that reaches the same outcome records it once"
 
 # --- (aj) end to end: the real branch-end.sh against a bare origin -----------
@@ -1174,8 +936,8 @@ export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
 git config --file "$GIT_CONFIG_GLOBAL" user.name T
 git config --file "$GIT_CONFIG_GLOBAL" user.email t@e.com
 GM="$TMP/rigs/gamma"; GM_BARE="$TMP/gamma-origin.git"
-mkdir -p "$GM/.beads"
-cat > "$TMP/rigs.json" <<JSON
+harness_store "$GM/.beads"
+cat > "$STUB_RIGS" <<JSON
 {"rigs":[
   {"name":"alpha","path":"$TMP/rigs/alpha","prefix":"al","hq":false},
   {"name":"beta","path":"$TMP/rigs/beta","prefix":"bt","hq":true},
@@ -1235,7 +997,7 @@ has "$(field gamma notes gm-e2e2)" "Branch polecat/gm-e2e2 is still on the git r
 
 # --- (ak) the command a WARN names survives a paste --------------------------
 mkbead alpha open al-br10
-printf 'm.branch=%s\n' 'polecat/al-br10;$(touch pwned)' >> "$TMP/rigs/alpha/.beads/al-br10"
+bset al-br10 'metadata.branch=polecat/al-br10;$(touch pwned)'
 mkbead beta open bt-br10
 rc=0; BE_RC=4 run --origin al-br10 --successor bt-br10 --kind re-homed || rc=$?
 eq "$rc" 0 "a retire whose branch name carries shell metacharacters succeeds"
@@ -1249,24 +1011,24 @@ if [ -e "$TMP/pwned" ]; then bad "…and runs nothing the branch name spells"; e
 # --- (al) the close lands only on the bead the gates judged ------------------
 mkbead alpha open al-judged
 mkbead beta  open bt-judged
-: > "$TMP/updates.log"
-rc=0; FAKE_UPDATE_LOG="$TMP/updates.log" run --origin al-judged --successor bt-judged --kind re-homed || rc=$?
+clear_calls
+rc=0; run --origin al-judged --successor bt-judged --kind re-homed || rc=$?
 eq "$rc" 0 "a bead nobody took since the gates read it is disposed"
-has "$(grep -F -- '--status=closed' "$TMP/updates.log")" "al-judged --if-status=open --if-assignee= --status=closed" \
+has "$(grep -F -- '--status=closed' "$STUB_GC_LOG")" "update al-judged --if-status=open --if-assignee= --status=closed" \
    "the close is conditional on the status and assignee the gates read"
 mkbead alpha in_progress al-judged-mine
-printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$TMP/rigs/alpha/.beads/al-judged-mine"
+bset al-judged-mine "assignee=$BEADS_ACTOR"
 mkbead beta  open bt-judged-mine
-: > "$TMP/updates.log"
-rc=0; FAKE_UPDATE_LOG="$TMP/updates.log" run --origin al-judged-mine --successor bt-judged-mine --kind re-homed || rc=$?
+clear_calls
+rc=0; run --origin al-judged-mine --successor bt-judged-mine --kind re-homed || rc=$?
 eq "$rc" 0 "a bead this session holds is disposed under its claim"
-has "$(grep -F -- '--status=closed' "$TMP/updates.log")" "--if-status=in_progress --if-assignee=$BEADS_ACTOR --status=closed" \
+has "$(grep -F -- '--status=closed' "$STUB_GC_LOG")" "--if-status=in_progress --if-assignee=$BEADS_ACTOR --status=closed" \
    "…with the close conditional on that claim"
 # Another actor claims the bead after the gates read it and before the close.
 mkbead alpha open al-taken
 mkbead alpha open al-tsucc
-printf 'dep.al-tsucc=blocks\n' >> "$TMP/rigs/alpha/.beads/al-taken"
-rc=0; FAKE_BD_CLAIM_BEFORE_CLOSE="in_progress deferred-dispatch" run --origin al-taken --successor al-tsucc --kind re-homed || rc=$?
+dep al-taken al-tsucc blocks
+rc=0; raced al-taken RACE_CLAIM_BEFORE_CLOSE="in_progress deferred-dispatch" -- --origin al-taken --successor al-tsucc --kind re-homed || rc=$?
 eq "$rc" 4 "a claim that lands between the gates and the close refuses the close (exit 4)"
 eq "$(field alpha status al-taken)/$(field alpha assignee al-taken)" "in_progress/deferred-dispatch" "…the claim stands"
 eq "$(edge alpha al-taken al-tsucc)" blocks "…the wait onto the successor is back, and no disposition edge is recorded"
@@ -1277,7 +1039,7 @@ has "$(cat "$TMP/err")" "nothing is recorded" "…and says nothing was written"
 # between this one's read and its own, so this one records nothing over it.
 mkbead alpha open al-race
 mkbead alpha open al-race-b
-rc=0; FAKE_BD_CLAIM_BEFORE_CLOSE="closed " run --origin al-race --successor al-race-b --kind re-homed || rc=$?
+rc=0; raced al-race RACE_CLAIM_BEFORE_CLOSE="closed " -- --origin al-race --successor al-race-b --kind re-homed || rc=$?
 eq "$rc" 4 "a close that lands between a second closer's read and its own refuses the second"
 eq "$(edge alpha al-race al-race-b)" "" "…and the second records no edge"
 eq "$(field alpha notes al-race)" "" "…and no note"
@@ -1298,11 +1060,11 @@ racer() {
 racer_rc() { cat "$TMP/racer.$1.rc" 2>/dev/null || printf 'did not run'; }
 mkbead alpha open al-ord
 mkbead alpha open al-ords
-: > "$TMP/calls.log"
-rc=0; FAKE_CALL_LOG="$TMP/calls.log" run --origin al-ord --successor al-ords --kind folded || rc=$?
+clear_calls
+rc=0; run --origin al-ord --successor al-ords --kind folded || rc=$?
 eq "$rc" 0 "a disposition lands"
-EDGE_AT=$(grep -n '^dep add al-ord al-ords' "$TMP/calls.log" | head -1 | cut -d: -f1 || true)
-CLOSE_AT=$(grep -n '^update al-ord .*--status=closed' "$TMP/calls.log" | head -1 | cut -d: -f1 || true)
+EDGE_AT=$(grep -n ' dep add al-ord al-ords ' "$STUB_GC_LOG" | head -1 | cut -d: -f1 || true)
+CLOSE_AT=$(grep -n ' update al-ord .*--status=closed' "$STUB_GC_LOG" | head -1 | cut -d: -f1 || true)
 if [ -n "$EDGE_AT" ] && [ -n "$CLOSE_AT" ] && [ "$EDGE_AT" -lt "$CLOSE_AT" ]; then
   ok "…its edge is written before its close"
 else
@@ -1313,7 +1075,7 @@ fi
 # A close with no edge on it was the opening for a second successor.
 mkbead alpha open al-ra; mkbead alpha open al-ra-1; mkbead alpha open al-ra-2
 R=$(racer ra --origin al-ra --successor al-ra-2 --kind folded)
-rc=0; FAKE_RACE_AFTER_CLOSE="$R" run --origin al-ra --successor al-ra-1 --kind folded || rc=$?
+rc=0; raced al-ra RACE_AFTER_CLOSE="$R" -- --origin al-ra --successor al-ra-1 --kind folded || rc=$?
 eq "$rc" 0 "(as) the first closer, paused just after its close, finishes"
 eq "$(racer_rc ra)" 6 "…a second caller that reads the closed origin in that pause refuses another successor"
 has "$(cat "$TMP/racer.ra.out")" "already names al-ra-1" "…and names the first one's choice"
@@ -1323,7 +1085,7 @@ eq "$(edge alpha al-ra al-ra-2)" "" "…and the second writes none"
 # The same, with the first paused between its edge and its close.
 mkbead alpha open al-rb; mkbead alpha open al-rb-1; mkbead alpha open al-rb-2
 R=$(racer rb --origin al-rb --successor al-rb-2 --kind folded)
-rc=0; FAKE_RACE_BEFORE_CLOSE="$R" run --origin al-rb --successor al-rb-1 --kind folded || rc=$?
+rc=0; raced al-rb RACE_BEFORE_CLOSE="$R" -- --origin al-rb --successor al-rb-1 --kind folded || rc=$?
 eq "$rc" 0 "(as) the first closer, paused between its edge and its close, finishes"
 eq "$(racer_rc rb)" 6 "…a second caller in that pause refuses another successor"
 eq "$(field alpha status al-rb)" closed "…the first close lands"
@@ -1334,30 +1096,30 @@ eq "$(edge alpha al-rb al-rb-2)" "" "…and the second writes none"
 # while the first is paused before its edge, so the first's write is the later one.
 mkbead alpha open al-rc; mkbead alpha open al-rc-1; mkbead alpha open al-rc-2
 R=$(racer rc --origin al-rc --successor al-rc-2 --kind folded)
-rc=0; FAKE_RACE_BEFORE_EDGE="$R" run --origin al-rc --successor al-rc-1 --kind folded || rc=$?
+rc=0; raced al-rc RACE_BEFORE_EDGE="$R" -- --origin al-rc --successor al-rc-1 --kind folded || rc=$?
 eq "$(racer_rc rc)" 0 "(as) of two callers that read the open origin first, the one that writes first disposes it"
 eq "$rc" 6 "…the later writer reads the other's edge beside its own, and stops"
 has "$(cat "$TMP/err")" "named al-rc-2 as the successor of al-rc" "…naming the other's choice"
 eq "$(edge alpha al-rc al-rc-1)" "" "…its own edge comes back off"
 eq "$(edge alpha al-rc al-rc-2)" supersedes "…the other's stands"
-eq "$(grep -c '^notes=' "$TMP/rigs/alpha/.beads/al-rc")" 1 "…and it writes no note"
+eq "$(notes_with al-rc "")" 1 "…and it writes no note"
 
 # Two repairs of one closed, unnamed origin, the same way.
 mkbead alpha closed al-rd; mkbead alpha open al-rd-1; mkbead alpha open al-rd-2
 R=$(racer rd --origin al-rd --successor al-rd-2 --kind folded)
-rc=0; FAKE_RACE_BEFORE_EDGE="$R" run --origin al-rd --successor al-rd-1 --kind folded || rc=$?
+rc=0; raced al-rd RACE_BEFORE_EDGE="$R" -- --origin al-rd --successor al-rd-1 --kind folded || rc=$?
 eq "$(racer_rc rd)" 0 "(as) of two repairs of a closed bead, the one that writes first records it"
 eq "$rc" 6 "…the later repair stops"
 eq "$(edge alpha al-rd al-rd-1)" "" "…its own edge comes back off"
 eq "$(edge alpha al-rd al-rd-2)" supersedes "…the other's stands"
-eq "$(grep -c '^notes=' "$TMP/rigs/alpha/.beads/al-rd")" 1 "…and it writes no note"
+eq "$(notes_with al-rd "")" 1 "…and it writes no note"
 
 # A person reopens a disposed bead. Its edge stays, so a second disposition still
 # has to reconcile with the first, and the first's call finishes it again.
 mkbead alpha open al-re; mkbead alpha open al-re-1; mkbead alpha open al-re-2
 rc=0; run --origin al-re --successor al-re-1 --kind folded || rc=$?
 eq "$rc" 0 "(as) a disposition lands"
-printf 'status=open\n' >> "$TMP/rigs/alpha/.beads/al-re"
+bset al-re status=open
 rc=0; run --origin al-re --successor al-re-2 --kind folded || rc=$?
 eq "$rc" 6 "…once the bead is reopened, another successor is still refused"
 eq "$(field alpha status al-re)" open "…and the bead stays open"
@@ -1369,9 +1131,9 @@ eq "$(edge alpha al-re al-re-1)" supersedes "…under its one edge"
 
 # A close naming this same successor beats this one's: the edge is its record too.
 mkbead alpha open al-rf; mkbead alpha open al-rf-1
-printf 'dep.al-rf-1=blocks\n' >> "$TMP/rigs/alpha/.beads/al-rf"
+dep al-rf al-rf-1 blocks
 R=$(racer rf --origin al-rf --successor al-rf-1 --kind folded)
-rc=0; FAKE_RACE_BEFORE_CLOSE="$R" run --origin al-rf --successor al-rf-1 --kind folded || rc=$?
+rc=0; raced al-rf RACE_BEFORE_CLOSE="$R" -- --origin al-rf --successor al-rf-1 --kind folded || rc=$?
 eq "$(racer_rc rf)" 0 "(as) a second caller naming the same successor closes the bead first"
 eq "$rc" 4 "…the first's close, beaten, exits 4"
 eq "$(edge alpha al-rf al-rf-1)" supersedes "…and the edge stays, since the close that landed is recorded by it"
@@ -1381,15 +1143,15 @@ has "$(cat "$TMP/out")" "already records this disposition" "…and says so"
 
 # Every disposition edge counts, not only the first a reader takes.
 mkbead alpha open al-rk; mkbead alpha open al-rk-1; mkbead alpha open al-rk-2
-printf 'dep.al-rk-1=supersedes\ndep.al-rk-2=supersedes\n' >> "$TMP/rigs/alpha/.beads/al-rk"
+dep al-rk al-rk-1 supersedes; dep al-rk al-rk-2 supersedes
 rc=0; run --origin al-rk --successor al-rk-1 --kind folded || rc=$?
 eq "$rc" 6 "(as) a bead naming two successors is refused under the first as well"
 eq "$(field alpha status al-rk)" open "…and is not closed"
 
 # A close that was refused takes back only what this run wrote.
 mkbead alpha open al-rg; mkbead alpha open al-rg-1
-printf 'dep.al-rg-1=supersedes\n' >> "$TMP/rigs/alpha/.beads/al-rg"
-rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-rg --successor al-rg-1 --kind folded || rc=$?
+dep al-rg al-rg-1 supersedes
+rc=0; STUB_CLOSE_FAIL=al-rg run --origin al-rg --successor al-rg-1 --kind folded || rc=$?
 eq "$rc" 5 "(as) a close refused over an edge an earlier run wrote exits 5"
 eq "$(edge alpha al-rg al-rg-1)" supersedes "…and leaves that edge"
 rc=0; run --origin al-rg --successor al-rg-1 --kind folded || rc=$?
@@ -1398,28 +1160,26 @@ eq "$(field alpha status al-rg)" closed "…and closes the bead"
 
 # An edge that does not come back off is said out loud, with what removes it.
 mkbead alpha open al-rh; mkbead alpha open al-rh-1
-rc=0; FAKE_BD_CLOSE_REFUSE=1 FAKE_BD_DEP_REMOVE_FAIL=1 run --origin al-rh --successor al-rh-1 --kind folded || rc=$?
+rc=0; STUB_CLOSE_FAIL=al-rh STUB_FAIL_ON="dep remove al-rh al-rh-1" run --origin al-rh --successor al-rh-1 --kind folded || rc=$?
 eq "$rc" 5 "(as) a refused close whose edge will not come off still exits 5"
 has "$(cat "$TMP/err")" "did not come back off" "…the WARN says the edge is still there"
 has "$(cat "$TMP/err")" "dep remove al-rh al-rh-1" "…and names what removes it"
 
 # The read-back decides before the close: unread, or missing, closes nothing.
 mkbead alpha open al-ri; mkbead alpha open al-ri-1
-rc=0; FAKE_LIST_FAIL_AFTER_EDGE=1 run --origin al-ri --successor al-ri-1 --kind folded || rc=$?
+rc=0; raced al-ri RACE_FAIL_LIST_AFTER_EDGE=1 -- --origin al-ri --successor al-ri-1 --kind folded || rc=$?
 eq "$rc" 4 "(as) an edge whose read-back does not answer exits 4"
-rm -f "$TMP/rigs/alpha/.beads/.list-id-fails"
 eq "$(field alpha status al-ri)" open "…the bead is not closed"
 eq "$(edge alpha al-ri al-ri-1)" "" "…and the edge comes back off"
 has "$(cat "$TMP/err")" "did not read back" "…and it says so"
 mkbead alpha open al-rj; mkbead alpha open al-rj-1
-rc=0; FAKE_BD_DEP_ADD_NOOP_FROM=al-rj run --origin al-rj --successor al-rj-1 --kind folded || rc=$?
+rc=0; STUB_DEP_ADD_NOOP=al-rj run --origin al-rj --successor al-rj-1 --kind folded || rc=$?
 eq "$rc" 4 "(as) an edge reported written that reads back absent exits 4"
 eq "$(field alpha status al-rj)" open "…and the bead is not closed"
 
 # --- (at) a take-back never strips a close naming the same successor ---------
 # Callers naming one successor share one edge. The first caller takes it back after
 # its close loses to a holder's claim, and the holder read it as standing.
-ALPHA="$TMP/rigs/alpha/.beads"
 await_rc() { # <file> — wait for a backgrounded run to record its exit
   local n=0
   until [ -e "$1" ] || [ "$n" -ge 2400 ]; do sleep 0.05; n=$((n + 1)); done
@@ -1433,9 +1193,9 @@ start_paused_holder() { # <name> <origin> <successor>
 until [ -e "$TMP/$n.release" ]; do sleep 0.05; done
 HOLD
   cat > "$TMP/$n.claim.sh" <<CLAIM
-printf 'status=in_progress\nassignee=holder-b\n' >> "$ALPHA/$o"
-rm -f "$ALPHA/.raced.BEFORE_CLOSE.$o"
-( export BEADS_ACTOR=holder-b FAKE_RACE_BEFORE_CLOSE="$TMP/$n.held.sh" PATH="$NOLOCK:\$PATH"
+gc --harness-write set "$o" status=in_progress assignee=holder-b
+rm -f "$RACE_DIR/raced.BEFORE_CLOSE.$o"
+( export BEADS_ACTOR=holder-b STUB_HOOK_AT="$o" STUB_HOOK="$RACE" RACE_BEFORE_CLOSE="$TMP/$n.held.sh" PATH="$NOLOCK:\$PATH"
   "$SCRIPT" --origin "$o" --successor "$su" --kind folded >"$TMP/$n.out" 2>&1
   echo \$? >"$TMP/$n.rc" ) >/dev/null 2>&1 </dev/null &
 until [ -e "$TMP/$n.reached" ]; do sleep 0.05; done
@@ -1444,7 +1204,7 @@ CLAIM
 }
 mkbead alpha open al-ta; mkbead alpha open al-ta-1
 H=$(start_paused_holder ta al-ta al-ta-1)
-rc=0; FAKE_RACE_BEFORE_CLOSE="$H" run --origin al-ta --successor al-ta-1 --kind folded || rc=$?
+rc=0; raced al-ta RACE_BEFORE_CLOSE="$H" -- --origin al-ta --successor al-ta-1 --kind folded || rc=$?
 eq "$rc" 4 "(at) a close that loses to a holder's claim exits 4"
 eq "$(field alpha status al-ta)/$(edge alpha al-ta al-ta-1)" "in_progress/" "…with the edge off and the holder's claim standing"
 : > "$TMP/ta.release"; await_rc "$TMP/ta.rc"
@@ -1455,78 +1215,85 @@ has "$(cat "$TMP/ta.out")" "its supersedes edge had gone, so it is back" "…and
 # The holder's whole run lands in the moment before the first caller's take-back, so
 # the holder's read after its close finds the edge and only the taker can restore it.
 mkbead alpha open al-tb; mkbead alpha open al-tb-1
-printf "printf 'status=in_progress\\\\nassignee=holder-b\\\\n' >> %q\n" "$ALPHA/al-tb" > "$TMP/tb.claim.sh"
+printf 'gc --harness-write set al-tb status=in_progress assignee=holder-b\n' > "$TMP/tb.claim.sh"
 R=$(racer tb --origin al-tb --successor al-tb-1 --kind folded)
 printf 'export BEADS_ACTOR=holder-b\nbash %q\n' "$R" > "$TMP/tb.holder.sh"
-rc=0; FAKE_RACE_BEFORE_CLOSE="$TMP/tb.claim.sh" FAKE_RACE_BEFORE_TAKE_BACK="$TMP/tb.holder.sh" run --origin al-tb --successor al-tb-1 --kind folded || rc=$?
+rc=0; raced al-tb RACE_BEFORE_CLOSE="$TMP/tb.claim.sh" RACE_BEFORE_TAKE_BACK="$TMP/tb.holder.sh" -- --origin al-tb --successor al-tb-1 --kind folded || rc=$?
 eq "$rc/$(racer_rc tb)" "4/0" "(at) a holder's whole run in the moment before a take-back: the first exits 4, the holder 0"
 eq "$(field alpha status al-tb)" closed "…the bead is closed"
 eq "$(edge alpha al-tb al-tb-1)" supersedes "…and the taker's read after its take-back puts the edge back"
 has "$(cat "$TMP/out")" "its supersedes edge had gone, so it is back" "…and says so"
 # The same two orders with a wait onto the successor the first caller dropped.
 mkbead alpha open al-tc; mkbead alpha open al-tc-1
-printf 'dep.al-tc-1=blocks\n' >> "$ALPHA/al-tc"
-printf "printf 'status=in_progress\\\\nassignee=holder-b\\\\n' >> %q\n" "$ALPHA/al-tc" > "$TMP/tc.claim.sh"
+dep al-tc al-tc-1 blocks
+printf 'gc --harness-write set al-tc status=in_progress assignee=holder-b\n' > "$TMP/tc.claim.sh"
 R=$(racer tc --origin al-tc --successor al-tc-1 --kind folded)
 printf 'export BEADS_ACTOR=holder-b\nbash %q\n' "$R" > "$TMP/tc.holder.sh"
-rc=0; FAKE_RACE_BEFORE_CLOSE="$TMP/tc.claim.sh" FAKE_RACE_BEFORE_TAKE_BACK="$TMP/tc.holder.sh" run --origin al-tc --successor al-tc-1 --kind folded || rc=$?
+rc=0; raced al-tc RACE_BEFORE_CLOSE="$TMP/tc.claim.sh" RACE_BEFORE_TAKE_BACK="$TMP/tc.holder.sh" -- --origin al-tc --successor al-tc-1 --kind folded || rc=$?
 eq "$rc/$(racer_rc tc)" "4/0" "(at) with a wait dropped first: the first exits 4, the holder 0"
 eq "$(field alpha status al-tc)/$(edge alpha al-tc al-tc-1)" "closed/supersedes" "…and the disposition's edge replaces the wait the take-back put back"
 mkbead alpha open al-td; mkbead alpha open al-td-1
-printf 'dep.al-td-1=blocks\n' >> "$ALPHA/al-td"
+dep al-td al-td-1 blocks
 H=$(start_paused_holder td al-td al-td-1)
-rc=0; FAKE_RACE_BEFORE_CLOSE="$H" run --origin al-td --successor al-td-1 --kind folded || rc=$?
+rc=0; raced al-td RACE_BEFORE_CLOSE="$H" -- --origin al-td --successor al-td-1 --kind folded || rc=$?
 eq "$rc/$(edge alpha al-td al-td-1)" "4/blocks" "(at) a holder paused across the take-back: the first exits 4 and its wait is back"
 : > "$TMP/td.release"; await_rc "$TMP/td.rc"
 eq "$(cat "$TMP/td.rc" 2>/dev/null)" 5 "…which refuses the holder's close, so nothing closes unrecorded"
 eq "$(field alpha status al-td)/$(edge alpha al-td al-td-1)" "in_progress/blocks" "…and the bead stays the holder's, waiting"
 # A close that lands and cannot prove or restore its edge stands, and says so.
 mkbead alpha open al-te; mkbead alpha open al-te-1
-rc=0; FAKE_LIST_FAIL_AFTER_CLOSE=1 run --origin al-te --successor al-te-1 --kind folded || rc=$?
-rm -f "$ALPHA/.list-id-fails"
+rc=0; raced al-te RACE_FAIL_LIST_AFTER_CLOSE=1 -- --origin al-te --successor al-te-1 --kind folded || rc=$?
 eq "$rc/$(field alpha status al-te)" "4/closed" "(at) a read after the close that does not answer: exit 4, the close stands"
 has "$(cat "$TMP/err")" "did not read after its edge changed" "…and it says so"
 rc=0; run --origin al-te --successor al-te-1 --kind folded || rc=$?
 eq "$rc" 0 "…the same call run again finds it recorded"
 mkbead alpha open al-tf; mkbead alpha open al-tf-1
-printf 'dep.al-tf-1=supersedes\n' >> "$ALPHA/al-tf"
-printf "sed -i.bak '/^dep.al-tf-1=/d' %q\n" "$ALPHA/al-tf" > "$TMP/tf.gone.sh"
-rc=0; FAKE_RACE_AFTER_CLOSE="$TMP/tf.gone.sh" FAKE_BD_DEP_ADD_FAIL=1 run --origin al-tf --successor al-tf-1 --kind folded || rc=$?
+dep al-tf al-tf-1 supersedes
+cat > "$TMP/tf.gone.sh" <<GONE
+sed -i.bak '/^al-tf|supersedes|al-tf-1\$/d' "$ALPHA/deps.txt"
+GONE
+rc=0; raced al-tf RACE_AFTER_CLOSE="$TMP/tf.gone.sh" STUB_DEP_ADD_FAIL_ON="dep add" -- --origin al-tf --successor al-tf-1 --kind folded || rc=$?
 eq "$rc/$(field alpha status al-tf)/$(edge alpha al-tf al-tf-1)" "4/closed/" "(at) an edge that cannot go back: exit 4, the close stands"
 has "$(cat "$TMP/err")" "the same call run again records it" "…and it names the re-run"
 rc=0; run --origin al-tf --successor al-tf-1 --kind folded || rc=$?
 eq "$rc/$(edge alpha al-tf al-tf-1)" "0/supersedes" "…which records it"
 mkbead alpha open al-tg; mkbead alpha open al-tg-1; mkbead alpha open al-tg-2
-printf 'dep.al-tg-1=supersedes\n' >> "$ALPHA/al-tg"
-printf "sed -i.bak '/^dep.al-tg-1=/d' %q\nprintf 'dep.al-tg-2=supersedes\\\\n' >> %q\n" "$ALPHA/al-tg" "$ALPHA/al-tg" > "$TMP/tg.other.sh"
-rc=0; FAKE_RACE_AFTER_CLOSE="$TMP/tg.other.sh" run --origin al-tg --successor al-tg-1 --kind folded || rc=$?
+dep al-tg al-tg-1 supersedes
+cat > "$TMP/tg.other.sh" <<OTHER
+sed -i.bak '/^al-tg|supersedes|al-tg-1\$/d' "$ALPHA/deps.txt"
+printf 'al-tg|supersedes|al-tg-2\n' >> "$ALPHA/deps.txt"
+OTHER
+rc=0; raced al-tg RACE_AFTER_CLOSE="$TMP/tg.other.sh" -- --origin al-tg --successor al-tg-1 --kind folded || rc=$?
 eq "$rc/$(edge alpha al-tg al-tg-1)/$(edge alpha al-tg al-tg-2)" "6//supersedes" "(at) another successor's edge in its place: exit 6 and no second edge"
 has "$(cat "$TMP/err")" "reconcile the two by hand" "…and it says what is owed"
 # A wait put back in the instant after a close's own read of it stands where the
 # edge goes. The WARN says so, and the repair path replaces it on the re-run.
 mkbead alpha open al-ti; mkbead alpha open al-ti-1
-printf 'dep.al-ti-1=supersedes\n' >> "$ALPHA/al-ti"
-printf "sed -i.bak '/^dep.al-ti-1=/d' %q\nprintf 'dep.al-ti-1=blocks\\\\n' >> %q\n" "$ALPHA/al-ti" "$ALPHA/al-ti" > "$TMP/ti.wait.sh"
-rc=0; FAKE_RACE_AFTER_CLOSE="$TMP/ti.wait.sh" run --origin al-ti --successor al-ti-1 --kind folded || rc=$?
+dep al-ti al-ti-1 supersedes
+cat > "$TMP/ti.wait.sh" <<WAIT
+sed -i.bak '/^al-ti|supersedes|al-ti-1\$/d' "$ALPHA/deps.txt"
+printf 'al-ti-1|blocks|al-ti\n' >> "$ALPHA/deps.txt"
+WAIT
+rc=0; raced al-ti RACE_AFTER_CLOSE="$TMP/ti.wait.sh" -- --origin al-ti --successor al-ti-1 --kind folded || rc=$?
 eq "$rc/$(field alpha status al-ti)/$(edge alpha al-ti al-ti-1)" "4/closed/blocks" "(at) a wait standing where the edge goes: exit 4, the close stands"
 has "$(cat "$TMP/err")" "the same call run again records it" "…and it names the re-run"
 rc=0; run --origin al-ti --successor al-ti-1 --kind folded || rc=$?
 eq "$rc/$(edge alpha al-ti al-ti-1)" "0/supersedes" "…whose repair replaces the wait with the edge"
 # A close that lands reads its edge in place and writes nothing more.
 mkbead alpha open al-th; mkbead alpha open al-th-1
-: > "$TMP/th.calls"
-rc=0; FAKE_CALL_LOG="$TMP/th.calls" run --origin al-th --successor al-th-1 --kind folded || rc=$?
-eq "$rc/$(grep -c '^dep add al-th al-th-1' "$TMP/th.calls")" "0/1" "(at) a close with its edge in place adds it once"
+clear_calls
+rc=0; run --origin al-th --successor al-th-1 --kind folded || rc=$?
+eq "$rc/$(grep -c ' dep add al-th al-th-1 ' "$STUB_GC_LOG")" "0/1" "(at) a close with its edge in place adds it once"
 hasnt "$(cat "$TMP/out")" "had gone" "…and reports nothing back"
 
 # --- (au) a repair records nothing on a bead reopened since its read ----------
 reopen_hook() { # <name> <origin> — a holder reopens and claims the origin
-  printf "printf 'status=in_progress\\\\nassignee=review-holder\\\\n' >> %q\n" "$ALPHA/$2" > "$TMP/$1.reopen.sh"
+  printf 'gc --harness-write set %q status=in_progress assignee=review-holder\n' "$2" > "$TMP/$1.reopen.sh"
   printf '%s' "$TMP/$1.reopen.sh"
 }
 mkbead alpha closed al-ua; mkbead alpha open al-ua-1
 H=$(reopen_hook ua al-ua)
-rc=0; FAKE_RACE_BEFORE_EDGE="$H" run --origin al-ua --successor al-ua-1 --kind folded || rc=$?
+rc=0; raced al-ua RACE_BEFORE_EDGE="$H" -- --origin al-ua --successor al-ua-1 --kind folded || rc=$?
 eq "$rc" 4 "(au) a reopen and a claim landing just before a repair's edge: exit 4"
 eq "$(field alpha status al-ua)/$(field alpha assignee al-ua)" "in_progress/review-holder" "…the reopen and the claim stand"
 eq "$(edge alpha al-ua al-ua-1)" "" "…the edge comes back off"
@@ -1534,58 +1301,58 @@ eq "$(field alpha notes al-ua)" "" "…and no note is written"
 has "$(cat "$TMP/err")" "under the status and assignee this run read (closed, unassigned)" "…and the refusal names the state it read"
 mkbead alpha closed al-ub; mkbead alpha open al-ub-1
 H=$(reopen_hook ub al-ub)
-rc=0; FAKE_RACE_BEFORE_NOTE="$H" run --origin al-ub --successor al-ub-1 --kind folded || rc=$?
+rc=0; raced al-ub RACE_BEFORE_NOTE="$H" -- --origin al-ub --successor al-ub-1 --kind folded || rc=$?
 eq "$rc" 4 "(au) one landing between the edge and the note: exit 4"
 eq "$(field alpha status al-ub)/$(edge alpha al-ub al-ub-1)/$(field alpha notes al-ub)" "in_progress//" "…the claim stands with no edge and no note"
 # A wait a forced close left behind comes back with the rest.
 mkbead alpha closed al-uc; mkbead alpha open al-uc-1
-printf 'dep.al-uc-1=blocks\n' >> "$ALPHA/al-uc"
+dep al-uc al-uc-1 blocks
 H=$(reopen_hook uc al-uc)
-rc=0; FAKE_RACE_BEFORE_NOTE="$H" run --origin al-uc --successor al-uc-1 --kind folded || rc=$?
+rc=0; raced al-uc RACE_BEFORE_NOTE="$H" -- --origin al-uc --successor al-uc-1 --kind folded || rc=$?
 eq "$rc/$(edge alpha al-uc al-uc-1)" "4/blocks" "(au) a repair that loses puts back the wait it replaced"
 # The control: a repair nothing raced records both.
 mkbead alpha closed al-ud; mkbead alpha open al-ud-1
-: > "$TMP/updates.log"
-rc=0; FAKE_UPDATE_LOG="$TMP/updates.log" run --origin al-ud --successor al-ud-1 --kind folded || rc=$?
+clear_calls
+rc=0; run --origin al-ud --successor al-ud-1 --kind folded || rc=$?
 eq "$rc/$(edge alpha al-ud al-ud-1)" "0/supersedes" "(au) a repair nothing raced records the edge"
 has "$(field alpha notes al-ud)" "Recorded after the close" "…and the note"
-has "$(cat "$TMP/updates.log")" "al-ud --if-status=closed --if-assignee= --append-notes" "…conditional on what it read"
+has "$(cat "$STUB_GC_LOG")" "update al-ud --if-status=closed --if-assignee= --append-notes" "…conditional on what it read"
 mkbead alpha closed al-ue; mkbead alpha open al-ue-1
-printf 'assignee=earlier-holder\n' >> "$ALPHA/al-ue"
-: > "$TMP/updates.log"
-rc=0; FAKE_UPDATE_LOG="$TMP/updates.log" run --origin al-ue --successor al-ue-1 --kind folded || rc=$?
+bset al-ue assignee=earlier-holder
+clear_calls
+rc=0; run --origin al-ue --successor al-ue-1 --kind folded || rc=$?
 eq "$rc/$(edge alpha al-ue al-ue-1)" "0/supersedes" "(au) a closed bead keeping an assignee is repaired"
-has "$(cat "$TMP/updates.log")" "al-ue --if-status=closed --if-assignee=earlier-holder --append-notes" "…under that same assignee"
+has "$(cat "$STUB_GC_LOG")" "update al-ue --if-status=closed --if-assignee=earlier-holder --append-notes" "…under that same assignee"
 # A note the store does not take cannot show the bead stayed closed. Nothing stays
 # recorded, and the same call does it again.
 mkbead alpha closed al-uf; mkbead alpha open al-uf-1
-rc=0; FAKE_BD_NOTE_FAIL=1 run --origin al-uf --successor al-uf-1 --kind folded || rc=$?
+rc=0; STUB_UPDATE_FAIL=al-uf run --origin al-uf --successor al-uf-1 --kind folded || rc=$?
 eq "$rc/$(edge alpha al-uf al-uf-1)/$(field alpha notes al-uf)" "4//" "(au) a note that does not write: exit 4, no edge and no note"
 rc=0; run --origin al-uf --successor al-uf-1 --kind folded || rc=$?
 eq "$rc/$(edge alpha al-uf al-uf-1)" "0/supersedes" "…and the same call run again records it"
 
 # --- (av) what comes to wait on a duplicate as it closes moves after the close --
 waits_on() { # <name> <waiter> <duplicate> — a hook that gives the waiter the edge
-  printf "printf 'dep.%s=blocks\\\\n' >> %q\n" "$3" "$ALPHA/$2" > "$TMP/$1.late.sh"
+  printf 'printf %%s %q >> %q\n' "$3|blocks|$2"$'\n' "$ALPHA/deps.txt" > "$TMP/$1.late.sh"
   printf '%s' "$TMP/$1.late.sh"
 }
 mkbead alpha open al-va; mkbead alpha open al-va-c; mkbead alpha open al-va-w; mkbead alpha open al-va-e
-printf 'dep.al-va=blocks\n' >> "$ALPHA/al-va-e"
+dep al-va-e al-va blocks
 H=$(waits_on va al-va-w al-va)
-rc=0; FAKE_RACE_BEFORE_CLOSE="$H" run --origin al-va --successor al-va-c --kind duplicate || rc=$?
+rc=0; raced al-va RACE_BEFORE_CLOSE="$H" -- --origin al-va --successor al-va-c --kind duplicate || rc=$?
 eq "$rc/$(field alpha status al-va)" "0/closed" "(av) a bead that comes to wait just before the close does not stop it"
 eq "$(edge alpha al-va-w al-va-c)" blocks "…and it waits on the canonical once the close has landed"
 eq "$(edge alpha al-va-e al-va-c)" blocks "…beside the one the first read moved"
 has "$(cat "$TMP/out")" "al-va-w came to wait on al-va as it closed, and wait on al-va-c now" "…and the output names it"
 mkbead alpha open al-vb; mkbead alpha open al-vb-c; mkbead alpha open al-vb-w
 H=$(waits_on vb al-vb-w al-vb)
-rc=0; FAKE_RACE_AFTER_CLOSE="$H" run --origin al-vb --successor al-vb-c --kind duplicate || rc=$?
+rc=0; raced al-vb RACE_AFTER_CLOSE="$H" -- --origin al-vb --successor al-vb-c --kind duplicate || rc=$?
 eq "$rc/$(edge alpha al-vb-w al-vb-c)" "0/blocks" "(av) one whose edge lands just after the close moves too"
 # A wait that cannot move is too late to refuse: the close stands, and says so.
 mkbead alpha open al-vc; mkbead alpha open al-vc-c; mkbead alpha open al-vc-w
-printf 'dep.al-vc-c=related\n' >> "$ALPHA/al-vc-w"
+dep al-vc-w al-vc-c related
 H=$(waits_on vc al-vc-w al-vc)
-rc=0; FAKE_RACE_BEFORE_CLOSE="$H" run --origin al-vc --successor al-vc-c --kind duplicate || rc=$?
+rc=0; raced al-vc RACE_BEFORE_CLOSE="$H" -- --origin al-vc --successor al-vc-c --kind duplicate || rc=$?
 eq "$rc/$(field alpha status al-vc)/$(edge alpha al-vc al-vc-c)" "4/closed/duplicates" "(av) a late waiter another edge type joins to the canonical: exit 4, the close stands"
 eq "$(edge alpha al-vc-w al-vc-c)" related "…and its edge is left as it is"
 has "$(cat "$TMP/err")" "al-vc-w by a 'related' edge" "…the WARN names it"
@@ -1593,64 +1360,63 @@ hasnt "$(cat "$TMP/err")" "re-run this close" "…and asks for no re-run, which 
 has "$(field alpha notes al-vc)" "did not all move to al-vc-c" "…and the bead's note records it"
 mkbead alpha open al-vd; mkbead alpha open al-vd-c; mkbead alpha open al-vd-w
 H=$(waits_on vd al-vd-w al-vd)
-rc=0; FAKE_RACE_BEFORE_CLOSE="$H" FAKE_BD_DEP_ADD_REFUSE_FROM=al-vd-w run --origin al-vd --successor al-vd-c --kind duplicate || rc=$?
+rc=0; raced al-vd RACE_BEFORE_CLOSE="$H" STUB_DEP_ADD_FAIL=al-vd-w -- --origin al-vd --successor al-vd-c --kind duplicate || rc=$?
 eq "$rc/$(field alpha status al-vd)" "4/closed" "(av) a late waiter bd refuses the edge: exit 4, the close stands"
 has "$(cat "$TMP/err")" "bd refused al-vd-w a blocks edge onto al-vd-c" "…the WARN names it"
 # One that cannot move does not hold back one that can.
 mkbead alpha open al-ve; mkbead alpha open al-ve-c; mkbead alpha open al-ve-w; mkbead alpha open al-ve-x
-printf 'dep.al-ve-c=related\n' >> "$ALPHA/al-ve-x"
-printf "printf 'dep.al-ve=blocks\\\\n' >> %q\nprintf 'dep.al-ve=blocks\\\\n' >> %q\n" "$ALPHA/al-ve-w" "$ALPHA/al-ve-x" > "$TMP/ve.late.sh"
-rc=0; FAKE_RACE_BEFORE_CLOSE="$TMP/ve.late.sh" run --origin al-ve --successor al-ve-c --kind duplicate || rc=$?
+dep al-ve-x al-ve-c related
+printf 'printf %%s %q >> %q\n' "al-ve|blocks|al-ve-w"$'\n'"al-ve|blocks|al-ve-x"$'\n' "$ALPHA/deps.txt" > "$TMP/ve.late.sh"
+rc=0; raced al-ve RACE_BEFORE_CLOSE="$TMP/ve.late.sh" -- --origin al-ve --successor al-ve-c --kind duplicate || rc=$?
 eq "$rc/$(edge alpha al-ve-w al-ve-c)/$(edge alpha al-ve-x al-ve-c)" "4/blocks/related" "(av) of two late waiters, the one that can move does"
 has "$(cat "$TMP/err")" "dep list al-ve --direction=up" "…and the WARN gives the read that lists them"
 mkbead alpha open al-vf; mkbead alpha open al-vf-c
-rc=0; FAKE_UP_FAIL_AFTER_CLOSE=1 run --origin al-vf --successor al-vf-c --kind duplicate || rc=$?
-rm -f "$ALPHA/.up-list-fails"
+rc=0; raced al-vf RACE_FAIL_UP_AFTER_CLOSE=1 -- --origin al-vf --successor al-vf-c --kind duplicate || rc=$?
 eq "$rc/$(field alpha status al-vf)" "4/closed" "(av) a second read that does not answer: exit 4, the close stands"
 has "$(cat "$TMP/err")" "did not read" "…and the WARN says so"
 # Only a duplicate of a canonical yet to deliver reads its waiters again.
 mkbead alpha open al-vg; mkbead alpha open al-vg-s; mkbead alpha open al-vg-w
 H=$(waits_on vg al-vg-w al-vg)
-: > "$TMP/vg.calls"
-rc=0; FAKE_RACE_BEFORE_CLOSE="$H" FAKE_CALL_LOG="$TMP/vg.calls" run --origin al-vg --successor al-vg-s --kind re-homed || rc=$?
+clear_calls
+rc=0; raced al-vg RACE_BEFORE_CLOSE="$H" -- --origin al-vg --successor al-vg-s --kind re-homed || rc=$?
 eq "$rc/$(edge alpha al-vg-w al-vg-s)" "0/" "(av) another kind moves no late wait"
-eq "$(grep -c -- '--direction=up' "$TMP/vg.calls" || true)" 0 "…and reads no waiters"
+eq "$(grep -c -- '--direction=up' "$STUB_GC_LOG" || true)" 0 "…and reads no waiters"
 mkbead alpha open al-vh; mkbead alpha closed al-vh-c; mkbead alpha open al-vh-w
 H=$(waits_on vh al-vh-w al-vh)
-: > "$TMP/vh.calls"
-rc=0; FAKE_RACE_BEFORE_CLOSE="$H" FAKE_CALL_LOG="$TMP/vh.calls" run --origin al-vh --successor al-vh-c --kind duplicate || rc=$?
+clear_calls
+rc=0; raced al-vh RACE_BEFORE_CLOSE="$H" -- --origin al-vh --successor al-vh-c --kind duplicate || rc=$?
 eq "$rc/$(edge alpha al-vh-w al-vh-c)" "0/" "(av) a canonical already delivered moves no late wait"
-eq "$(grep -c -- '--direction=up' "$TMP/vh.calls" || true)" 0 "…and reads no waiters"
+eq "$(grep -c -- '--direction=up' "$STUB_GC_LOG" || true)" 0 "…and reads no waiters"
 
 # --- (am) the retry withdraws its own gates before the close ---------------
 hgate() { # <id> <await_id> [<assignee>]: an open human gate in alpha
   mkbead alpha open "$1"
-  printf 'issue_type=gate\nawait_type=human\nawait_id=%s\n' "$2" >> "$TMP/rigs/alpha/.beads/$1"
-  [ -z "${3:-}" ] || printf 'assignee=%s\n' "$3" >> "$TMP/rigs/alpha/.beads/$1"
+  bset "$1" issue_type=gate await_type=human "await_id=$2"
+  [ -z "${3:-}" ] || bset "$1" "assignee=$3"
 }
 mkbead alpha open al-retry1
 mkbead beta  open bt-retry1
 hgate al-g1 pr-dispose-failed.9
 hgate al-g1b pr-dispose-failed.9
-printf 'dep.al-g1=blocks\ndep.al-g1b=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry1"
-: > "$TMP/resolves.log"
-rc=0; FAKE_RESOLVE_LOG="$TMP/resolves.log" run --origin al-retry1 --successor bt-retry1 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+dep al-retry1 al-g1 blocks; dep al-retry1 al-g1b blocks
+clear_calls
+rc=0; run --origin al-retry1 --successor bt-retry1 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 0 "a retry with its own gates open closes"
 eq "$(field alpha status al-retry1)" closed "…the origin is closed"
 eq "$(field alpha status al-g1)" closed "…its own gate is resolved"
 eq "$(field alpha status al-g1b)" closed "…and its twin under the key"
-has "$(field alpha reason al-g1)" "Withdrawn by bead-rehome.sh" "the gate's reason names the retry"
-case "$(field alpha reason al-g1)" in
-    ruled:*|moot:*|benign:*) bad "the gate's reason carries no outcome word (got '$(field alpha reason al-g1)')" ;;
+has "$(field alpha close_reason al-g1)" "Withdrawn by bead-rehome.sh" "the gate's reason names the retry"
+case "$(field alpha close_reason al-g1)" in
+    ruled:*|moot:*|benign:*) bad "the gate's reason carries no outcome word (got '$(field alpha close_reason al-g1)')" ;;
     *) ok "the gate's reason carries no outcome word" ;;
 esac
 has "$(cat "$TMP/out")" "withdrew the gate al-g1 [pr-dispose-failed.9] on al-retry1" "the withdrawal is reported"
-eq "$(grep -c . "$TMP/resolves.log")" 2 "each own gate is resolved once, before the close bd would refuse while they block"
+eq "$(grep -c ' gate resolve ' "$STUB_GC_LOG" || true)" 2 "each own gate is resolved once, before the close bd would refuse while they block"
 # A close with no --except-key resolves nothing: bd refuses the close a gate blocks.
 mkbead alpha open al-retry2
 mkbead beta  open bt-retry2
 hgate al-g2 pr-dispose-failed.9
-printf 'dep.al-g2=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry2"
+dep al-retry2 al-g2 blocks
 rc=0; run --origin al-retry2 --successor bt-retry2 --kind not-needed || rc=$?
 eq "$rc" 5 "without --except-key a gate blocking the origin refuses the close"
 eq "$(field alpha status al-g2)" open "…and is not resolved"
@@ -1660,9 +1426,9 @@ mkbead alpha open al-retry3
 mkbead alpha open al-retry3-1
 mkbead alpha open al-retry3-2
 hgate al-g3 pr-dispose-failed.9
-printf 'dep.al-g3=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry3"
+dep al-retry3 al-g3 blocks
 printf '%q ' gc bd --db "$TMP/rigs/alpha/.beads" dep add al-retry3 al-retry3-2 --type supersedes > "$TMP/racer.g3.sh"
-rc=0; FAKE_RACE_BEFORE_EDGE="$TMP/racer.g3.sh" run --origin al-retry3 --successor al-retry3-1 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+rc=0; raced al-retry3 RACE_BEFORE_EDGE="$TMP/racer.g3.sh" -- --origin al-retry3 --successor al-retry3-1 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 6 "(as) another caller's edge beside the retry's stops it"
 eq "$(field alpha status al-g3)" open "…before its own gate is resolved"
 eq "$(field alpha status al-retry3)" open "…and before the close"
@@ -1673,7 +1439,7 @@ mkbead alpha open al-retry3
 mkbead beta  open bt-retry3
 hgate al-g3 pr-dispose-failed.9
 mkbead alpha open al-work3
-printf 'dep.al-g3=blocks\ndep.al-work3=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry3"
+dep al-retry3 al-g3 blocks; dep al-retry3 al-work3 blocks
 BEFORE=$(snap alpha al-retry3)
 rc=0; run --origin al-retry3 --successor bt-retry3 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "another live blocker holds the retry"
@@ -1685,13 +1451,13 @@ mkbead beta  open bt-retry3c
 hgate al-g3c pr-dispose-failed.9
 mkbead alpha closed al-done3c
 mkbead alpha pinned al-pin3c
-printf 'dep.al-g3c=blocks\ndep.al-done3c=blocks\ndep.al-pin3c=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry3c"
+dep al-retry3c al-g3c blocks; dep al-retry3c al-done3c blocks; dep al-retry3c al-pin3c blocks
 rc=0; run --origin al-retry3c --successor bt-retry3c --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$(field alpha status al-g3c)" closed "a closed or pinned blocker beside its own gate does not hold the withdrawal"
 mkbead alpha open al-retry4
 mkbead beta  open bt-retry4
 hgate al-g4 pr-dispose-failed.9 operator
-printf 'dep.al-g4=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry4"
+dep al-retry4 al-g4 blocks
 rc=0; run --origin al-retry4 --successor bt-retry4 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "a gate under the key assigned to a person holds the retry"
 eq "$(field alpha status al-g4)" open "…and is not resolved"
@@ -1699,16 +1465,16 @@ mkbead alpha open al-retry4k
 mkbead beta  open bt-retry4k
 hgate al-g4k pr-dispose-failed.9
 hgate al-o4k another-question
-printf 'dep.al-g4k=blocks\ndep.al-o4k=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry4k"
+dep al-retry4k al-g4k blocks; dep al-retry4k al-o4k blocks
 rc=0; run --origin al-retry4k --successor bt-retry4k --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "a gate under another key holds the retry"
 eq "$(field alpha status al-g4k)/$(field alpha status al-o4k)" "open/open" "…and neither gate is resolved"
 mkbead alpha open al-retry5
 mkbead beta  open bt-retry5
 hgate al-g5 pr-dispose-failed.9
-printf 'dep.al-g5=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry5"
+dep al-retry5 al-g5 blocks
 mkbead alpha in_progress al-kid5
-printf 'parent=al-retry5\n' >> "$TMP/rigs/alpha/.beads/al-kid5"
+bset al-kid5 parent=al-retry5
 rc=0; run --origin al-retry5 --successor bt-retry5 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "an open child holds the retry"
 eq "$(field alpha status al-g5)" open "…the retry's own gate stays open"
@@ -1717,9 +1483,9 @@ has "$(cat "$TMP/err")" "open child al-kid5" "…and the refusal names the child
 check_held() { # <label> <origin> <text the refusal names> [env assignments...]
   local label="$1" origin="$2" text="$3" before after
   shift 3
-  before=$(cat "$TMP/rigs/alpha/.beads/$origin")
+  before=$(brecord "$origin")
   rc=0; env "$@" "$SCRIPT" --origin "$origin" --successor bt-check --kind not-needed --except-key pr-dispose-failed.9 --check >"$TMP/out" 2>"$TMP/err" || rc=$?
-  after=$(cat "$TMP/rigs/alpha/.beads/$origin")
+  after=$(brecord "$origin")
   eq "$rc" 1 "--check: $label refuses"
   has "$(cat "$TMP/err")" "$text" "--check: $label is named"
   eq "$after" "$before" "--check: $label writes nothing"
@@ -1727,7 +1493,7 @@ check_held() { # <label> <origin> <text the refusal names> [env assignments...]
 mkbead beta open bt-check
 mkbead alpha open al-check1
 hgate al-cg1 pr-dispose-failed.9
-printf 'dep.al-cg1=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check1"
+dep al-check1 al-cg1 blocks
 BEFORE=$(snap alpha al-check1)
 rc=0; "$SCRIPT" --origin al-check1 --successor bt-check --kind not-needed --except-key pr-dispose-failed.9 --check >"$TMP/out" 2>"$TMP/err" || rc=$?
 eq "$rc" 0 "--check: its own gates under the key leave the close eligible"
@@ -1735,26 +1501,26 @@ eq "$(field alpha status al-cg1)" open "--check: …and stay open"
 eq "$(snap alpha al-check1)" "$BEFORE" "--check: …and nothing is written"
 mkbead alpha open al-check2
 hgate al-cg2 another-question
-printf 'dep.al-cg2=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check2"
+dep al-check2 al-cg2 blocks
 check_held "a gate under another key" al-check2 "al-cg2"
 mkbead alpha open al-check3
 hgate al-cg3 pr-dispose-failed.9 operator
-printf 'dep.al-cg3=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check3"
+dep al-check3 al-cg3 blocks
 check_held "a gate a person is assigned" al-check3 "al-cg3"
 mkbead alpha open al-check4
 mkbead alpha open al-cw4
-printf 'dep.al-cw4=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check4"
+dep al-check4 al-cw4 blocks
 check_held "another live blocker" al-check4 "al-cw4"
 mkbead alpha open al-check5
 mkbead alpha in_progress al-ckid5
-printf 'parent=al-check5\n' >> "$TMP/rigs/alpha/.beads/al-ckid5"
+bset al-ckid5 parent=al-check5
 check_held "an open child" al-check5 "al-ckid5"
 mkbead alpha open al-check6
-printf 'assignee=someone-else\n' >> "$TMP/rigs/alpha/.beads/al-check6"
+bset al-check6 assignee=someone-else
 check_held "an assignee bd would refuse the close for" al-check6 "someone-else"
 mkbead alpha open al-check7
-check_held "a blocker read that fails" al-check7 "did not read" FAKE_BD_DEP_LIST_FAIL=1
-check_held "a child read that fails" al-check7 "did not read" FAKE_BD_LIST_PARENT_FAIL=1
+check_held "a blocker read that fails" al-check7 "did not read" "STUB_FAIL_ON=dep list al-check7 --type"
+check_held "a child read that fails" al-check7 "did not read" STUB_LIST_FAIL_ON=--parent
 mkbead alpha open al-check10
 : > "$FG_LOG"
 check_held "the finalize gate's refusal" al-check10 "held by open human gate" FG_VERDICT=hold
@@ -1762,31 +1528,31 @@ eq "$(cat "$FG_LOG")" "check al-check10 --except-key pr-dispose-failed.9 --as-di
 # The close drops a wait edge onto its successor, so --check holds nothing on it.
 mkbead alpha open al-check8
 mkbead alpha open al-succ8
-printf 'dep.al-succ8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check8"
+dep al-check8 al-succ8 blocks
 rc=0; "$SCRIPT" --origin al-check8 --successor al-succ8 --kind not-needed --except-key pr-dispose-failed.9 --check >"$TMP/out" 2>"$TMP/err" || rc=$?
 eq "$rc" 0 "--check: a wait edge onto the successor holds nothing"
 # Without the key, --check judges the evidence alone.
 mkbead alpha open al-check9
 hgate al-cg9 another-question
-printf 'dep.al-cg9=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check9"
+dep al-check9 al-cg9 blocks
 rc=0; "$SCRIPT" --origin al-check9 --successor bt-check --kind not-needed --check >"$TMP/out" 2>"$TMP/err" || rc=$?
 eq "$rc" 0 "--check: with no --except-key it reads no holds"
 # A read that fails proves nothing about what holds the close.
 mkbead alpha open al-retry6
 mkbead beta  open bt-retry6
 hgate al-g6 pr-dispose-failed.9
-printf 'dep.al-g6=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry6"
-rc=0; FAKE_BD_DEP_LIST_FAIL=1 run --origin al-retry6 --successor bt-retry6 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+dep al-retry6 al-g6 blocks
+rc=0; STUB_FAIL_ON="dep list al-retry6 --type" run --origin al-retry6 --successor bt-retry6 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "an unreadable blocker list holds the retry"
 eq "$(field alpha status al-g6)" open "…and resolves nothing"
-rc=0; FAKE_BD_LIST_PARENT_FAIL=1 run --origin al-retry6 --successor bt-retry6 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+rc=0; STUB_LIST_FAIL_ON=--parent run --origin al-retry6 --successor bt-retry6 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "an unreadable child list holds the retry"
 eq "$(field alpha status al-g6)/$(field alpha status al-retry6)" "open/open" "…and resolves and closes nothing"
 # The origin's own row that does not read holds everything.
 mkbead alpha open al-retry6r
 mkbead beta  open bt-retry6r
 BEFORE=$(snap alpha al-retry6r)
-rc=0; FAKE_BD_LIST_ID_FAIL=1 run --origin al-retry6r --successor bt-retry6r --kind not-needed || rc=$?
+rc=0; STUB_LIST_FAIL_ON=--id run --origin al-retry6r --successor bt-retry6r --kind not-needed || rc=$?
 eq "$rc" 3 "a row that does not read is refused as unknown"
 eq "$(snap alpha al-retry6r)" "$BEFORE" "…and nothing is written"
 
@@ -1794,16 +1560,16 @@ eq "$(snap alpha al-retry6r)" "$BEFORE" "…and nothing is written"
 mkbead alpha open al-retry7
 mkbead beta  open bt-retry7
 hgate al-g7 pr-dispose-failed.9
-printf 'dep.al-g7=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry7"
-rc=0; FAKE_BD_GATE_RESOLVE_REFUSE=1 run --origin al-retry7 --successor bt-retry7 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+dep al-retry7 al-g7 blocks
+rc=0; STUB_GATE_RESOLVE_FAIL=al-g7 run --origin al-retry7 --successor bt-retry7 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "a gate the store will not resolve holds the close"
 eq "$(field alpha status al-retry7)" open "…the origin stays open"
 has "$(cat "$TMP/err")" "the store refused the resolve of the gate al-g7" "…and the refusal names the gate"
 mkbead alpha open al-retry8
 mkbead beta  open bt-retry8
 hgate al-g8 pr-dispose-failed.9
-printf 'dep.al-g8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry8"
-rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-retry8 --successor bt-retry8 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+dep al-retry8 al-g8 blocks
+rc=0; STUB_CLOSE_FAIL=al-retry8 run --origin al-retry8 --successor bt-retry8 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "a close refused after the withdrawal exits 5"
 eq "$(field alpha status al-g8)/$(field alpha status al-retry8)" "closed/open" "…with the gate withdrawn and the origin open"
 rc=0; run --origin al-retry8 --successor bt-retry8 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
@@ -1819,107 +1585,103 @@ rc=0; run --origin al-retry9 --successor bt-retry9 --kind not-needed --dry-run |
 has "$(cat "$TMP/out")" "gates:     none (no --except-key)" "…and none without --except-key"
 
 # --- (aq) the close's own guards hold the retry before anything is resolved --
-export FAKE_BD_ENFORCE_CLOSE_GUARDS=1
 mkbead alpha open al-guard1
 mkbead beta  open bt-guard1
-printf 'assignee=someone-else\n' >> "$TMP/rigs/alpha/.beads/al-guard1"
+bset al-guard1 assignee=someone-else
 hgate al-gg1 pr-dispose-failed.9
-printf 'dep.al-gg1=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard1"
-: > "$TMP/resolves.log"
-rc=0; FAKE_RESOLVE_LOG="$TMP/resolves.log" run --origin al-guard1 --successor bt-guard1 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+dep al-guard1 al-gg1 blocks
+clear_calls
+rc=0; run --origin al-guard1 --successor bt-guard1 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "an open origin assigned to someone else holds the retry"
 eq "$(field alpha status al-gg1)" open "…its own gate stays open"
-eq "$(grep -c . "$TMP/resolves.log")" 0 "…with no resolve attempted"
+eq "$(grep -c ' gate resolve ' "$STUB_GC_LOG" || true)" 0 "…with no resolve attempted"
 eq "$(field alpha status al-guard1)" open "…the origin stays open"
 has "$(cat "$TMP/err")" "assigned to someone-else" "…and the refusal names the assignee"
 has "$(cat "$TMP/err")" "runs as $BEADS_ACTOR" "…and the actor the close runs as"
 mkbead alpha in_progress al-guard2
 mkbead beta  open bt-guard2
-printf 'assignee=test__rehome-session-name\n' >> "$TMP/rigs/alpha/.beads/al-guard2"
+bset al-guard2 assignee=test__rehome-session-name
 hgate al-gg2 pr-dispose-failed.9
-printf 'dep.al-gg2=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard2"
+dep al-guard2 al-gg2 blocks
 rc=0; GC_SESSION_NAME=test__rehome-session-name run --origin al-guard2 --successor bt-guard2 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "an origin this session holds under a name other than the actor holds the retry"
 eq "$(field alpha status al-gg2)/$(field alpha status al-guard2)" "open/in_progress" "…and resolves and closes nothing"
 mkbead alpha pinned al-guard3
 mkbead beta  open bt-guard3
 hgate al-gg3 pr-dispose-failed.9
-printf 'dep.al-gg3=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard3"
+dep al-guard3 al-gg3 blocks
 rc=0; run --origin al-guard3 --successor bt-guard3 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "a pinned origin holds the retry"
 eq "$(field alpha status al-gg3)" open "…its own gate stays open"
 has "$(cat "$TMP/err")" "pinned" "…and the refusal says why"
 mkbead alpha open al-guard4
 mkbead beta  open bt-guard4
-printf 'is_template=true\n' >> "$TMP/rigs/alpha/.beads/al-guard4"
+bset al-guard4 is_template:=true
 hgate al-gg4 pr-dispose-failed.9
-printf 'dep.al-gg4=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard4"
+dep al-guard4 al-gg4 blocks
 rc=0; run --origin al-guard4 --successor bt-guard4 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "a template holds the retry"
 eq "$(field alpha status al-gg4)" open "…its own gate stays open"
 has "$(cat "$TMP/err")" "template" "…and the refusal says why"
 mkbead alpha open al-guard5
 mkbead beta  open bt-guard5
-printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$TMP/rigs/alpha/.beads/al-guard5"
+bset al-guard5 "assignee=$BEADS_ACTOR"
 hgate al-gg5 pr-dispose-failed.9
-printf 'dep.al-gg5=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard5"
+dep al-guard5 al-gg5 blocks
 rc=0; run --origin al-guard5 --successor bt-guard5 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 0 "an origin assigned to exactly the actor closes"
 eq "$(field alpha status al-gg5)/$(field alpha status al-guard5)" "closed/closed" "…its own gate withdrawn first"
-unset FAKE_BD_ENFORCE_CLOSE_GUARDS
 
 # --- (aw) with no identity of its own the writer uses bd's default actor -------
-export FAKE_BD_ENFORCE_CLOSE_GUARDS=1
 no_identity() { env -u BEADS_ACTOR -u GC_SESSION_NAME -u GC_AGENT -u GC_SESSION_ID -u GC_ALIAS "$@" >"$TMP/out" 2>"$TMP/err"; }
 mkbead alpha open al-wa; mkbead alpha open al-wa-1
-printf 'assignee=Operator Name\n' >> "$ALPHA/al-wa"
-: > "$FAKE_ACTOR_LOG"
-rc=0; no_identity FAKE_BD_DEFAULT_ACTOR="Operator Name" "$SCRIPT" --origin al-wa --successor al-wa-1 --kind folded || rc=$?
+bset al-wa 'assignee=Operator Name'
+clear_calls
+rc=0; no_identity BD_ACTOR="Operator Name" "$SCRIPT" --origin al-wa --successor al-wa-1 --kind folded || rc=$?
 eq "$rc/$(field alpha status al-wa)" "0/closed" "(aw) an origin assigned to the actor bd defaults to closes"
-eq "$(tail -1 "$FAKE_ACTOR_LOG")" "Operator Name" "…and the writes run as that actor"
+has "$(grep -- ' --actor ' "$STUB_GC_LOG" | tail -1)" "--actor Operator Name " "…and the writes run as that actor"
 mkbead alpha open al-wb; mkbead alpha open al-wb-1
-printf 'assignee=someone-else\n' >> "$ALPHA/al-wb"
+bset al-wb assignee=someone-else
 BEFORE=$(snap alpha al-wb)
-rc=0; no_identity FAKE_BD_DEFAULT_ACTOR="Operator Name" "$SCRIPT" --origin al-wb --successor al-wb-1 --kind folded || rc=$?
+rc=0; no_identity BD_ACTOR="Operator Name" "$SCRIPT" --origin al-wb --successor al-wb-1 --kind folded || rc=$?
 eq "$rc/$(snap alpha al-wb)" "5/$BEFORE" "(aw) an origin assigned to anyone else is refused and nothing is written"
 has "$(cat "$TMP/err")" "assigned to someone-else" "…naming the assignee"
 has "$(cat "$TMP/err")" "runs as Operator Name" "…and the actor it read"
 mkbead alpha open al-wc; mkbead alpha open al-wc-1
-printf 'assignee=Operator Name\n' >> "$ALPHA/al-wc"
+bset al-wc 'assignee=Operator Name'
 BEFORE=$(snap alpha al-wc)
-rc=0; no_identity "$SCRIPT" --origin al-wc --successor al-wc-1 --kind folded || rc=$?
+rc=0; no_identity STUB_CREATE_FAIL=1 "$SCRIPT" --origin al-wc --successor al-wc-1 --kind folded || rc=$?
 eq "$rc/$(snap alpha al-wc)" "5/$BEFORE" "(aw) a preview that does not read holds an assigned origin"
 has "$(cat "$TMP/err")" "runs as the actor bd defaults to" "…and says which actor it could not name"
 mkbead alpha in_progress al-wd; mkbead alpha open al-wd-1
-printf 'assignee=Operator Name\n' >> "$ALPHA/al-wd"
-rc=0; no_identity FAKE_BD_DEFAULT_ACTOR="Operator Name" "$SCRIPT" --origin al-wd --successor al-wd-1 --kind folded || rc=$?
+bset al-wd 'assignee=Operator Name'
+rc=0; no_identity BD_ACTOR="Operator Name" "$SCRIPT" --origin al-wd --successor al-wd-1 --kind folded || rc=$?
 eq "$rc/$(field alpha status al-wd)" "0/closed" "(aw) a bead held in_progress under that actor is its own to close"
 mkbead alpha in_progress al-we; mkbead alpha open al-we-1
-printf 'assignee=someone-else\n' >> "$ALPHA/al-we"
-rc=0; no_identity FAKE_BD_DEFAULT_ACTOR="Operator Name" "$SCRIPT" --origin al-we --successor al-we-1 --kind folded || rc=$?
+bset al-we assignee=someone-else
+rc=0; no_identity BD_ACTOR="Operator Name" "$SCRIPT" --origin al-we --successor al-we-1 --kind folded || rc=$?
 eq "$rc" 7 "(aw) one held in_progress under anyone else is not"
 # It asks only when an assignee has to be compared.
 mkbead alpha open al-wf; mkbead alpha open al-wf-1
-: > "$TMP/wf.calls"; : > "$FAKE_ACTOR_LOG"
-rc=0; no_identity FAKE_CALL_LOG="$TMP/wf.calls" "$SCRIPT" --origin al-wf --successor al-wf-1 --kind folded || rc=$?
-eq "$rc/$(grep -c '^create' "$TMP/wf.calls" || true)" "0/0" "(aw) an unassigned origin needs no preview"
-eq "$(grep -c . "$FAKE_ACTOR_LOG" || true)" 0 "…and its writes leave the actor to bd"
+clear_calls
+rc=0; no_identity "$SCRIPT" --origin al-wf --successor al-wf-1 --kind folded || rc=$?
+eq "$rc/$(grep -c ' create ' "$STUB_GC_LOG" || true)" "0/0" "(aw) an unassigned origin needs no preview"
+eq "$(grep -c -- ' --actor ' "$STUB_GC_LOG" || true)" 0 "…and its writes leave the actor to bd"
 mkbead alpha open al-wg; mkbead alpha open al-wg-1
-printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$ALPHA/al-wg"
-: > "$TMP/wg.calls"
-rc=0; FAKE_CALL_LOG="$TMP/wg.calls" run --origin al-wg --successor al-wg-1 --kind folded || rc=$?
-eq "$rc/$(grep -c '^create' "$TMP/wg.calls" || true)" "0/0" "(aw) a caller with an identity of its own needs no preview"
-unset FAKE_BD_ENFORCE_CLOSE_GUARDS
+bset al-wg "assignee=$BEADS_ACTOR"
+clear_calls
+rc=0; run --origin al-wg --successor al-wg-1 --kind folded || rc=$?
+eq "$rc/$(grep -c ' create ' "$STUB_GC_LOG" || true)" "0/0" "(aw) a caller with an identity of its own needs no preview"
 
 # --- (ax) the close takes the store's record lock -----------------------------
-LOCK="$TMP/rigs/alpha/.beads/pr-record.lock"
+LOCK="$ALPHA/pr-record.lock"
 # hold_lock — a writer of the record holds the lock until release_lock; HELD
 # exists once it does. With $1 set, it marks that bead while it holds the lock,
 # as a publication's first write does.
 hold_lock() {
     rm -f "$TMP/held" "$TMP/go"; mkfifo "$TMP/go"
     flock "$LOCK" bash -c '
-        [ -z "$1" ] || printf "m.pr_reconcile_pending=true\n" >> "$2/$1"
+        [ -z "$1" ] || gc --harness-write set "$1" metadata.pr_reconcile_pending:=true
         : > "$3/held"; read -r _ < "$3/go"' _ "${1:-}" "$TMP/rigs/alpha/.beads" "$TMP" &
     HOLDER=$!
     for _ in $(seq 50); do [ -e "$TMP/held" ] && break; sleep 0.1; done
@@ -1942,7 +1704,7 @@ eq "$(field alpha status al-lock1)" closed "(ax) …the origin is closed"
 # under the lock, so it sees the marker and clears it.
 mkbead alpha open al-lock2
 mkbead alpha open al-lock-succ2
-export FAKE_UPDATE_LOG="$TMP/updates.log"; : > "$FAKE_UPDATE_LOG"
+clear_calls
 hold_lock al-lock2
 "$SCRIPT" --origin al-lock2 --successor al-lock-succ2 --kind re-homed >"$TMP/out" 2>"$TMP/err" &
 CLOSER=$!
@@ -1952,13 +1714,13 @@ rc=0; wait "$CLOSER" || rc=$?
 eq "$rc" 0 "(ax) a close that waited on a publication goes ahead"
 eq "$(field alpha status al-lock2)" closed "(ax) …the origin is closed"
 eq "$(field alpha m.pr_reconcile_pending al-lock2)" "" "(ax) …and the marker the publication wrote is cleared"
-CLOSE_LINE=$(grep -- '--status=closed' "$FAKE_UPDATE_LOG" | grep '^al-lock2 ' || true)
+CLOSE_LINE=$(grep -- '--status=closed' "$STUB_GC_LOG" | grep ' update al-lock2 ' || true)
 has "$CLOSE_LINE" "--unset-metadata pr_reconcile_pending" "(ax) the marker clears in the close's own update"
-: > "$FAKE_UPDATE_LOG"
+clear_calls
 mkbead alpha open al-lock3
 mkbead alpha open al-lock-succ3
 rc=0; run --origin al-lock3 --successor al-lock-succ3 --kind re-homed || rc=$?
-CLOSE_LINE=$(grep -- '--status=closed' "$FAKE_UPDATE_LOG" | grep '^al-lock3 ' || true)
+CLOSE_LINE=$(grep -- '--status=closed' "$STUB_GC_LOG" | grep ' update al-lock3 ' || true)
 eq "$rc" 0 "(ax) an unmarked origin closes"
 case "$CLOSE_LINE" in *--unset-metadata*) bad "(ax) …and its close clears no marker it does not carry" ;;
     *) ok "(ax) …and its close clears no marker it does not carry" ;; esac
@@ -1968,21 +1730,20 @@ case "$CLOSE_LINE" in *--unset-metadata*) bad "(ax) …and its close clears no m
 # note held to what it read, since the landing order reopens a closed bead that
 # carries it with no verified merge.
 mkbead alpha closed al-lock5; mkbead alpha open al-lock-succ5
-printf 'dep.al-lock-succ5=supersedes\nm.pr_reconcile_pending=true\n' >> "$ALPHA/al-lock5"
-: > "$FAKE_UPDATE_LOG"
+dep al-lock5 al-lock-succ5 supersedes; bset al-lock5 metadata.pr_reconcile_pending=true
+clear_calls
 rc=0; run --origin al-lock5 --successor al-lock-succ5 --kind re-homed || rc=$?
 eq "$rc" 0 "(ax) a closed origin that already records the disposition and carries the marker is confirmed"
 eq "$(field alpha m.pr_reconcile_pending al-lock5)/$(field alpha status al-lock5)" "/closed" "(ax) …its marker is cleared and it stays closed"
-has "$(grep '^al-lock5 ' "$FAKE_UPDATE_LOG" || true)" "al-lock5 --if-status=closed --if-assignee= --unset-metadata pr_reconcile_pending --append-notes" "(ax) …in a note held to the status and assignee it read"
+has "$(grep ' update al-lock5 ' "$STUB_GC_LOG" || true)" "update al-lock5 --if-status=closed --if-assignee= --unset-metadata pr_reconcile_pending --append-notes" "(ax) …in a note held to the status and assignee it read"
 has "$(cat "$TMP/out")" "marker is cleared" "(ax) …and the output says so"
 mkbead alpha closed al-lock6; mkbead alpha open al-lock-succ6
-printf 'dep.al-lock-succ6=supersedes\nm.pr_reconcile_pending=true\n' >> "$ALPHA/al-lock6"
+dep al-lock6 al-lock-succ6 supersedes; bset al-lock6 metadata.pr_reconcile_pending=true
 H=$(reopen_hook l6 al-lock6)
-rc=0; FAKE_RACE_BEFORE_NOTE="$H" run --origin al-lock6 --successor al-lock-succ6 --kind re-homed || rc=$?
+rc=0; raced al-lock6 RACE_BEFORE_NOTE="$H" -- --origin al-lock6 --successor al-lock-succ6 --kind re-homed || rc=$?
 eq "$rc" 4 "(ax) a reopen and a claim since the read leave the marker: exit 4"
 eq "$(field alpha status al-lock6)/$(field alpha m.pr_reconcile_pending al-lock6)" "in_progress/true" "(ax) …the claim stands, and the marker with it"
 has "$(cat "$TMP/err")" "marker did not clear" "(ax) …and the refusal says the marker did not clear"
-unset FAKE_UPDATE_LOG
 
 # --check and --dry-run write nothing and take no lock; a held lock bounds the
 # close's wait, and the close writes nothing then.
@@ -2006,8 +1767,8 @@ release_lock
 REFINERY="rig/alpha.refinery"
 # ruled <bead> <kind> <successor> [store] — the ruling pr-dispose.sh records.
 ruled() {
-    printf 'm.gc.pr_close_disposition_kind=%s\nm.gc.pr_close_disposition_successor=%s\n' "$2" "$3" >> "$ALPHA/$1"
-    [ -z "${4:-}" ] || printf 'm.gc.pr_close_disposition_successor_store=%s\n' "$4" >> "$ALPHA/$1"
+    bset "$1" "metadata.gc.pr_close_disposition_kind=$2" "metadata.gc.pr_close_disposition_successor=$3"
+    [ -z "${4:-}" ] || bset "$1" "metadata.gc.pr_close_disposition_successor_store=$4"
 }
 # judged <bead> <successor> [args...] — the landing order's call: as the
 # refinery, judging the bead blocked under it and carrying out its ruling.
@@ -2017,14 +1778,13 @@ judged() {
         --if-status blocked --if-assignee "$REFINERY" --if-ruled "$@"
 }
 mkbead alpha blocked al-j1; mkbead alpha open al-j1-conv
-printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j1"; ruled al-j1 not-needed al-j1-conv
-export FAKE_UPDATE_LOG="$TMP/updates.log"; : > "$FAKE_UPDATE_LOG"
+bset al-j1 "assignee=$REFINERY"; ruled al-j1 not-needed al-j1-conv
+clear_calls
 rc=0; judged al-j1 al-j1-conv || rc=$?
 eq "$rc/$(field alpha status al-j1)" "0/closed" "(ay) a bead still as its caller judged it closes"
 eq "$(edge alpha al-j1 al-j1-conv)" supersedes "(ay) …onto the ruling's successor"
-has "$(grep -- '--status=closed' "$FAKE_UPDATE_LOG" | grep '^al-j1 ' || true)" "--if-status=blocked --if-assignee=$REFINERY --status=closed" \
+has "$(grep -- '--status=closed' "$STUB_GC_LOG" | grep ' update al-j1 ' || true)" "--if-status=blocked --if-assignee=$REFINERY --status=closed" \
     "(ay) …in a close held to the status and assignee the caller judged"
-unset FAKE_UPDATE_LOG
 
 # A release that lands once the caller has freed the lock, as hand-back.sh's,
 # leaves the bead to its new route: it is open and unassigned, and an
@@ -2046,12 +1806,12 @@ rc=0; BEADS_ACTOR="$REFINERY" run --origin al-j2b --successor al-j2b-conv --kind
 eq "$rc/$(field alpha status al-j2b)" "4/open" "(ay) a release that keeps the status is refused on the assignee alone"
 # A status that moved under the same assignee refuses as well.
 mkbead alpha open al-j3; mkbead alpha open al-j3-conv
-printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j3"; ruled al-j3 not-needed al-j3-conv
+bset al-j3 "assignee=$REFINERY"; ruled al-j3 not-needed al-j3-conv
 rc=0; judged al-j3 al-j3-conv || rc=$?
 eq "$rc/$(field alpha status al-j3)" "4/open" "(ay) a status that moved since the caller's judgment refuses the close"
 # An empty --if-assignee names an unassigned origin, as bd's guard does.
 mkbead alpha open al-j4; mkbead alpha open al-j4-1
-printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$ALPHA/al-j4"
+bset al-j4 "assignee=$BEADS_ACTOR"
 rc=0; run --origin al-j4 --successor al-j4-1 --kind folded --if-assignee "" || rc=$?
 eq "$rc/$(field alpha status al-j4)" "4/open" "(ay) --if-assignee '' refuses an assigned origin"
 has "$(cat "$TMP/err")" "al-j4 is open under $BEADS_ACTOR now, not unassigned" "(ay) …and says it was judged unassigned"
@@ -2070,7 +1830,7 @@ eq "$(snap alpha al-j6)" "$BEFORE" "(ay) …and the repair path writes nothing"
 # that carries out the first ruling closes nothing, and one that carries out
 # the second closes onto it.
 mkbead alpha blocked al-j7; mkbead alpha open al-j7-old; mkbead alpha open al-j7-new
-printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j7"; ruled al-j7 not-needed al-j7-old
+bset al-j7 "assignee=$REFINERY"; ruled al-j7 not-needed al-j7-old
 hold_lock
 BEADS_ACTOR="$REFINERY" "$SCRIPT" --origin al-j7 --successor al-j7-old --kind not-needed \
     --if-status blocked --if-assignee "$REFINERY" --if-ruled >"$TMP/out" 2>"$TMP/err" &
@@ -2089,11 +1849,11 @@ eq "$rc/$(field alpha status al-j7)/$(edge alpha al-j7 al-j7-new)" "0/closed/sup
 # A kind, a store or a ruling that is not on the origin refuses as well, and a
 # store matches only the store the call names, none included.
 mkbead alpha blocked al-j8; mkbead alpha open al-j8-1
-printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j8"; ruled al-j8 re-homed al-j8-1
+bset al-j8 "assignee=$REFINERY"; ruled al-j8 re-homed al-j8-1
 rc=0; judged al-j8 al-j8-1 || rc=$?
 eq "$rc/$(field alpha status al-j8)" "4/blocked" "(ay) a ruling of another kind refuses the close"
 mkbead alpha blocked al-j9; mkbead beta open bt-j9
-printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j9"; ruled al-j9 not-needed bt-j9 rig:beta
+bset al-j9 "assignee=$REFINERY"; ruled al-j9 not-needed bt-j9 rig:beta
 rc=0; judged al-j9 bt-j9 || rc=$?
 eq "$rc/$(field alpha status al-j9)" "4/blocked" "(ay) a ruling that names a store the call does not refuses the close"
 has "$(cat "$TMP/err")" "records the ruling not-needed onto bt-j9 in rig:beta, not the not-needed onto bt-j9 this close" \
@@ -2101,7 +1861,7 @@ has "$(cat "$TMP/err")" "records the ruling not-needed onto bt-j9 in rig:beta, n
 rc=0; judged al-j9 bt-j9 --successor-store rig:beta || rc=$?
 eq "$rc/$(field alpha status al-j9)" "0/closed" "(ay) …and the call that names it closes"
 mkbead alpha blocked al-j10; mkbead alpha open al-j10-1
-printf 'assignee=%s\n' "$REFINERY" >> "$ALPHA/al-j10"
+bset al-j10 "assignee=$REFINERY"
 rc=0; judged al-j10 al-j10-1 || rc=$?
 eq "$rc/$(field alpha status al-j10)" "4/blocked" "(ay) an origin that records no ruling refuses --if-ruled"
 has "$(cat "$TMP/err")" "al-j10 records no ruling" "(ay) …and says so"
@@ -2113,7 +1873,7 @@ rc=0; judged al-j11 al-j11-conv --check || rc=$?
 eq "$rc" 1 "(ay) --check refuses a judgment that no longer holds"
 has "$(cat "$TMP/err")" "--check refused: al-j11 is open and unassigned now" "(ay) …and says why"
 eq "$(snap alpha al-j11)" "$BEFORE" "(ay) …writing nothing"
-printf 'status=blocked\nassignee=%s\n' "$REFINERY" >> "$ALPHA/al-j11"
+bset al-j11 status=blocked "assignee=$REFINERY"
 rc=0; judged al-j11 al-j11-conv --check || rc=$?
 eq "$rc" 0 "(ay) …and passes one that holds"
 

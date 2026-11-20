@@ -735,13 +735,14 @@ func TestAfterWriteRunsOnceEachWriteHasLanded(t *testing.T) {
 		{"bd", "dep", "list", "a", "--json"},
 		{"bd", "gate", "list", "--json"},
 		{"rig", "list", "--json"},
+		{"bd", "create", "a preview", "--dry-run", "--json"},
 	} {
 		if r := f.run(set, args...); r.status != 0 {
 			t.Fatalf("%v: %+v", args, r)
 		}
 	}
 	if _, err := os.Stat(fired); err == nil {
-		t.Fatalf("a read ran the program: %s", f.file("fired"))
+		t.Fatalf("a read or a dry run ran the program: %s", f.file("fired"))
 	}
 	if r := f.run(set, "bd", "update", "a", "--if-status=in_progress", "--status=closed"); r.status != 13 {
 		t.Fatalf("a guarded update that does not hold: %+v", r)

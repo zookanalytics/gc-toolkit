@@ -11,31 +11,46 @@ import (
 )
 
 func (c *Call) bd(s, d string, args []string) (err error) {
+	db, args := takeDB(args)
+	rigName := ""
 	for {
 		switch {
-		case first(args) == "--db":
-			args = args[min(2, len(args)):]
-			continue
-		case strings.HasPrefix(first(args), "--db="):
-			args = args[1:]
-			continue
 		case first(args) == "--actor" && len(args) >= 2:
 			c.Env = withEnv(c.Env, "BEADS_ACTOR="+args[1])
 			args = args[2:]
 			continue
+		case first(args) == "--rig" && len(args) >= 2:
+			rigName = args[1]
+			args = args[2:]
+			continue
+		case strings.HasPrefix(first(args), "--rig="):
+			rigName = strings.TrimPrefix(first(args), "--rig=")
+			args = args[1:]
+			continue
 		}
 		break
 	}
-	if first(args) == "where" {
+	verb, args := shift(args)
+	unrouted := c.Env
+	st := c.route(c.defaultStore(s, d), db, rigName, subject(verb, args))
+	c.use(st)
+	s, d = st.beads, st.deps
+	if verb == "where" {
 		o := NewObject()
-		o.Set("path", shellDir(s)+"/.beads")
-		o.Set("prefix", "")
+		if st.dir != "" {
+			o.Set("path", st.dir)
+		} else {
+			o.Set("path", shellDir(s)+"/.beads")
+		}
+		o.Set("prefix", st.prefix)
 		c.out(Compact(o) + "\n")
 		return nil
 	}
-	verb, args := shift(args)
 	defer func() {
 		if err == nil && writes(verb, args) {
+			// The program is a process of its own, so it starts with the store
+			// settings the call found, not the files of the store it was routed to.
+			c.Env = unrouted
 			err = c.afterWrite()
 		}
 	}()
@@ -66,19 +81,37 @@ func (c *Call) bd(s, d string, args []string) (err error) {
 		return c.comment(s, args)
 	case "comments":
 		return c.comments(s, args)
+	case "statuses":
+		c.out(builtInStatuses + "\n")
+		return nil
 	case "set-state":
 		return c.setState(s, d, args)
 	}
 	return c.fail(2, "gc bd stub: unsupported '"+verb+"'")
 }
 
+// builtInStatuses is `bd statuses --json` for a store with no custom status:
+// each status bd knows, with the category a reader of the status contract
+// sorts it by.
+const builtInStatuses = `{"built_in_statuses":[` +
+	`{"category":"active","description":"Available to work (default)","icon":"○","name":"open"},` +
+	`{"category":"wip","description":"Actively being worked on","icon":"◐","name":"in_progress"},` +
+	`{"category":"wip","description":"Blocked by a dependency","icon":"●","name":"blocked"},` +
+	`{"category":"frozen","description":"Deliberately put on ice for later","icon":"❄","name":"deferred"},` +
+	`{"category":"done","description":"Completed","icon":"✓","name":"closed"},` +
+	`{"category":"frozen","description":"Persistent, stays open indefinitely","icon":"📌","name":"pinned"},` +
+	`{"category":"wip","description":"Attached to an agent's hook","icon":"◇","name":"hooked"}` +
+	`],"schema_version":1}`
+
 // writes reports whether a bd verb, with the arguments after it, writes the
-// store: an update, a create, a close, a comment, a dep add or remove, or a
-// gate resolve.
+// store: an update, a create that is not a dry run, a close, a comment, a dep
+// add or remove, or a gate resolve.
 func writes(verb string, args []string) bool {
 	switch verb {
-	case "update", "create", "close", "comment":
+	case "update", "close", "comment":
 		return true
+	case "create":
+		return !slices.Contains(args, "--dry-run")
 	case "dep":
 		return first(args) != "list"
 	case "gate":
@@ -556,8 +589,13 @@ func (c *Call) update(s, d string, args []string) error {
 		args = args[1:]
 	}
 	if len(ids) > 1 {
+		// Each id's write is a call of its own, in the store this one acts in.
+		pin := []string{}
+		if c.home.dir != "" {
+			pin = []string{"--db", c.home.dir}
+		}
 		for _, id := range ids {
-			status, err := c.spawn(io.Discard, append([]string{"gc", "bd", "update", id}, args...)...)
+			status, err := c.spawn(io.Discard, append(append([]string{"gc", "bd", "update", id}, args...), pin...)...)
 			if err != nil {
 				return c.fail(status, "fake gc: "+err.Error())
 			}
@@ -645,11 +683,6 @@ func (c *Call) update(s, d string, args []string) error {
 		return err
 	}
 	defer release()
-	if c.getenv("STUB_ENFORCE_BLOCKS") != "" && newstatus == "closed" {
-		if err := c.refuseBlockedClose(s, d, id); err != nil {
-			return err
-		}
-	}
 	for _, a := range sets {
 		if !strings.Contains(a, "=") {
 			return c.fail(1, "Error updating "+id+`: invalid --set-metadata: expected key=value, got "`+a+`"`)
@@ -672,6 +705,11 @@ func (c *Call) update(s, d string, args []string) error {
 			return c.fail(13, "Error updating "+id+": assignee mismatch: "+id+` is held by "`+held+`", expected "`+ifAssignee+`"`)
 		case ifStatusSet && status != ifStatus:
 			return c.fail(13, "Error updating "+id+": status mismatch: "+id+` is "`+status+`", expected "`+ifStatus+`"`)
+		}
+	}
+	if c.getenv("STUB_ENFORCE_BLOCKS") != "" && newstatus == "closed" {
+		if err := c.refuseBlockedClose(s, d, id); err != nil {
+			return err
 		}
 	}
 	drops := c.dropsFor(id)
@@ -769,43 +807,56 @@ func (c *Call) update(s, d string, args []string) error {
 	return nil
 }
 
-// refuseBlockedClose refuses a close of id while a bead its blocks rows name
-// is not closed, as bd refuses closing a blocked issue. A blocker the store
-// does not hold counts as open.
+// refuseBlockedClose refuses a close of id as bd's checked close refuses one:
+// while a bead that blocks it is neither closed nor pinned, and while a child
+// of it is not closed. A blocker the store does not hold counts as open.
 func (c *Call) refuseBlockedClose(s, d, id string) error {
-	edges, err := readEdges(d)
+	rows, edges, err := readStore(s, d)
 	if err != nil {
 		return err
 	}
-	rows, err := readRows(s)
-	if err != nil {
-		return err
-	}
-	for _, e := range edges {
-		if e.typ != "blocks" || e.b != id {
-			continue
-		}
+	status := func(bid string) string {
 		var st []string
 		for _, r := range rows {
-			if idIs(r, e.a) {
+			if idIs(r, bid) {
 				if v := get(r, "status"); Truthy(v) {
 					st = append(st, Raw(v))
 				}
 			}
 		}
-		status := strings.Join(st, "\n")
 		if len(st) == 0 {
-			status = "open"
+			return "open"
 		}
-		if status != "closed" {
-			return c.fail(1, "gc: cannot close blocked issue "+id+" (blocked by "+e.a+")")
+		return strings.Join(st, "\n")
+	}
+	var blockers []string
+	open := 0
+	for _, r := range rows {
+		self, _ := get(r, "id").(string)
+		for _, l := range linksOf(r, edges) {
+			switch {
+			case self == id && l.typ == "blocks":
+				if st := status(l.id); st != "closed" && st != "pinned" {
+					blockers = append(blockers, l.id)
+				}
+			case self != id && l.typ == "parent-child" && l.id == id:
+				if status(self) != "closed" {
+					open++
+				}
+			}
 		}
+	}
+	if len(blockers) > 0 {
+		return c.fail(1, "Error: cannot close blocked issue: "+id+" is blocked by ["+strings.Join(blockers, ", ")+"] (use --force to override)")
+	}
+	if open > 0 {
+		return c.fail(1, fmt.Sprintf("Error: cannot close %s: %d open child issue(s); close children first or use --force to override", id, open))
 	}
 	return nil
 }
 
 func (c *Call) create(s, d string, args []string) error {
-	title, titled, ephemeral := "", false, false
+	title, titled, ephemeral, dryRun := "", false, false, false
 	body, meta, status, notes, parent, prio, typ, assignee := "", "{}", "open", "", "", "", "task", ""
 	var deps, labels []string
 	value := func(i *int) string {
@@ -870,6 +921,8 @@ func (c *Call) create(s, d string, args []string) error {
 			assignee = strings.TrimPrefix(a, "--assignee=")
 		case a == "--ephemeral":
 			ephemeral = true
+		case a == "--dry-run":
+			dryRun = true
 		case a == "-l" || a == "--labels":
 			labels = append(labels, strings.Split(value(&i), ",")...)
 		case strings.HasPrefix(a, "--labels="):
@@ -894,6 +947,9 @@ func (c *Call) create(s, d string, args []string) error {
 		if prioValue, err = priority(prio); err != nil {
 			return invalid()
 		}
+	}
+	if dryRun {
+		return c.preview(title, typ, status, prioValue)
 	}
 	// Each --deps argument and the parent are comma-joined, then split at
 	// commas and blanks, as the stub's unquoted word list splits them.
@@ -934,7 +990,7 @@ func (c *Call) create(s, d string, args []string) error {
 		if !strings.Contains(spec, ":") {
 			target = spec
 		}
-		if !holds(rows, target) {
+		if !holds(rows, target) && !c.foreign(target) {
 			return c.fail(1, "Error: validation failed: create: dependency target does not exist: issue "+target+" not found")
 		}
 	}
@@ -990,6 +1046,49 @@ func (c *Call) create(s, d string, args []string) error {
 		c.out(`{"id":"` + id + `"}` + "\n")
 	}
 	return nil
+}
+
+// preview answers a dry-run create: the row bd would file, with no id yet and
+// created_by the actor bd would record it under, and nothing written.
+func (c *Call) preview(title, typ, status string, prio Value) error {
+	o := NewObject()
+	o.Set("created_by", c.bdActor())
+	o.Set("id", "")
+	o.Set("issue_type", typ)
+	o.Set("priority", orDefault(prio, Number("2")))
+	o.Set("status", status)
+	o.Set("title", title)
+	c.out(Compact(o) + "\n")
+	return nil
+}
+
+// bdActor is the actor bd records a write under, as bd resolves it: --actor,
+// which the fake keeps as BEADS_ACTOR, else BEADS_ACTOR, else BD_ACTOR, else
+// git's user.name, else USER, else unknown.
+func (c *Call) bdActor() string {
+	for _, k := range []string{"BEADS_ACTOR", "BD_ACTOR"} {
+		if v := c.getenv(k); v != "" {
+			return v
+		}
+	}
+	var name strings.Builder
+	if status, err := c.spawn(&name, "git", "config", "user.name"); err == nil && status == 0 {
+		if u := strings.TrimSpace(name.String()); u != "" {
+			return u
+		}
+	}
+	if u := c.getenv("USER"); u != "" {
+		return u
+	}
+	return "unknown"
+}
+
+// foreign reports whether id carries another prefix than the store the call
+// acts in, whose bead bd keeps an edge onto without finding it. Only a rig's
+// store knows its own prefix, so in any other store no id is foreign.
+func (c *Call) foreign(id string) bool {
+	p := c.home.prefix
+	return p != "" && !strings.HasPrefix(id, p+"-")
 }
 
 func (c *Call) close(s, d string, args []string) error {
