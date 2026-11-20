@@ -539,9 +539,9 @@ why a reader must know it, and the work that retires it.
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
   the memory intake.
-- **The old review path's code still runs.** Each pass of the merge cadence
-  runs the arms that send a PR's checks out as review beads, record their
-  verdicts through `signoff.sh` and rule their findings through validation
-  passes, though they read only anchors at `pre_open_gate` or `pull_request`,
-  which no bead carries. The retirement bead (tk-1tfzr71.122) deletes the old
-  path once the GitHub intake (tk-1tfzr71.21) has landed.
+- **The old review path's code still runs.** The merge cadence still runs the
+  old review path beside the review run
+  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), though no
+  PR is on it, so step 7 is not yet the one review path in the code. The
+  retirement bead (tk-1tfzr71.122) deletes the old path once the GitHub intake
+  (tk-1tfzr71.21) has landed.
