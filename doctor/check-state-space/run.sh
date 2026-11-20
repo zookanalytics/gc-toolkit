@@ -14,8 +14,6 @@
 
 set -u
 
-dir="${GC_PACK_DIR:-.}"
-
 # The values the pack writes outside the pending record: merged, the direct
 # landing's record, which only a closed bead carries, and the refinery's parks,
 # blocked and refused_false_completion. "unanchored" (merge_result absent) has
@@ -235,7 +233,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not stage the state-space enumeration (temp-file write failed — e.g. /tmp under disk pressure) — this store was NOT checked")
         continue
     fi
-    while IFS=$'\037' read -r kind id val extra; do
+    while IFS=$'\037' read -r kind id val _; do
         [ -n "$kind" ] || continue
         case "$kind" in
             badmr)      errors+=("$label bead $id: merge_result=\"$val\" is not a value the pack writes ($enum_str) — an unknown value has no handler and every reader defaults differently on it; surface it with human-gate.sh, never invent a reading") ;;
