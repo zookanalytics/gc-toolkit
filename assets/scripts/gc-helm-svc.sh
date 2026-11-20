@@ -39,8 +39,8 @@ if [ ! -x "$BIN" ]; then
 gc-helm-svc: no binary at $BIN — nothing to exec.
 The build runs out of band and has not produced one yet.
   build now: assets/scripts/gc-build.sh helm
-  automatic: the 'helm-build' order (orders/helm-build.toml) builds and restarts
-             this service whenever services/helm has moved past the binary.
+  automatic: the 'helm-build' order (orders/helm-build.toml) builds a missing
+             or out-of-date binary and restarts this service onto it.
 Deliberately NOT building here: the readiness window is 5s and a cold build
 takes longer, so a build started here is killed with the start.
 MSG

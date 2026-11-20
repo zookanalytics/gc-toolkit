@@ -20,6 +20,9 @@
 #                                      gctk is a command that serves the moment
 #                                      it lands, so --deploy does what a hand
 #                                      run does.
+#   gc-build.sh <component> --due      the order's check: whether a --deploy run
+#                                      is owed and due now, by the rule at the
+#                                      check below. It writes nothing.
 # A binary is stale when a source is newer than it (find -newer), or when the
 # recorded binary_rev differs from the revision this run sees, because find
 # -newer is blind to an input a commit deleted. The revision is one hash over
@@ -29,33 +32,34 @@
 # Exit: 0 current or built, and for helm under --deploy serving · 1 the build
 # or the restart failed, including a build owed with no Go toolchain or with
 # no Go release named in go.mod (the previous binary is left exactly as it
-# was) · 2 usage. A current binary needs no toolchain.
+# was) · 2 usage. A current binary needs no toolchain. Under --due: 0 a run is
+# due · 1 none is, or the state root cannot be located, which it says on stderr.
 # Writes, under the component's state root <city>/.gc/services/<name>:
 #   bin/<binary>       the published binary
-#   build-status.json  the record of what the component serves: source_rev
-#                      against binary_rev, built_at, last_build_rc,
-#                      restart_pending, behind_main (commits behind
-#                      origin/<default> under the component's inputs,
-#                      report-only) and checked_at
+#   build-status.json  the record every run writes of what the component
+#                      serves: source_rev, the revision the run saw, against
+#                      binary_rev, built_at, last_build_rc, restart_pending,
+#                      and checked_at, the time the run wrote it
 # Env: GC_CITY_PATH / GC_CITY / GC_CITY_ROOT (the city), else the city_path
 # `gc service list --json` reports; GC_GO_BIN. Per component, with <C> one of
 # HELM and GCTK: GC_<C>_STATE_ROOT (the state root, overriding the city's),
 # GC_<C>_GOTMP (Go scratch root, default /var/tmp/gotmp), GC_<C>_GC_BIN (the gc
-# to call), GC_<C>_ORIGIN_FETCH_TTL (seconds between origin fetches for
-# behind_main, default 1800; 0 leans on reconcile-rig-checkouts' fetch). helm
-# only: GC_HELM_SERVICE_NAME. GC_SERVICE_STATE_ROOT is not read: the supervisor
-# sets it for whichever service spawned the caller, so an inherited one would
-# publish this component into another one's state root.
-# Callers: orders/helm-build, orders/gctk-build.
+# to call). helm only: GC_HELM_SERVICE_NAME. GC_SERVICE_STATE_ROOT is not read:
+# the supervisor sets it for whichever service spawned the caller, so an
+# inherited one would publish this component into another one's state root.
+# Callers: orders/helm-build and orders/gctk-build, whose check is --due and
+# whose run is --deploy.
 set -euo pipefail
 
-usage() { echo "usage: gc-build.sh <helm|gctk> [--deploy]" >&2; }
+usage() { echo "usage: gc-build.sh <helm|gctk> [--deploy | --due]" >&2; }
 
 COMPONENT=""
 DEPLOY=0
+DUE=0
 for arg in "$@"; do
     case "$arg" in
         --deploy) DEPLOY=1 ;;
+        --due) DUE=1 ;;
         -*) echo "gc-build: unknown argument: $arg" >&2; usage; exit 2 ;;
         *)
             if [ -n "$COMPONENT" ]; then
@@ -64,6 +68,9 @@ for arg in "$@"; do
             COMPONENT="$arg" ;;
     esac
 done
+if [ "$DEPLOY" -eq 1 ] && [ "$DUE" -eq 1 ]; then
+    echo "gc-build: --due answers whether a --deploy run is due, and runs nothing; give one of them" >&2; usage; exit 2
+fi
 
 # The component table: what each binary compiles from, what it compiles to, and
 # which per-component steps it takes. Everything below the table is one body for
@@ -87,7 +94,6 @@ case "$COMPONENT" in
         STATE_ROOT_ENV=GC_HELM_STATE_ROOT
         GOTMP="${GC_HELM_GOTMP:-/var/tmp/gotmp}"
         GC_BIN="${GC_HELM_GC_BIN:-gc}"
-        FETCH_TTL="${GC_HELM_ORIGIN_FETCH_TTL:-1800}"
         ;;
     gctk)
         DIR=services/gctk IMPORTS=() PKG=./cmd/gctk BIN_NAME=gctk
@@ -95,7 +101,6 @@ case "$COMPONENT" in
         STATE_ROOT_ENV=GC_GCTK_STATE_ROOT
         GOTMP="${GC_GCTK_GOTMP:-/var/tmp/gotmp}"
         GC_BIN="${GC_GCTK_GC_BIN:-gc}"
-        FETCH_TTL="${GC_GCTK_ORIGIN_FETCH_TTL:-1800}"
         ;;
     "") echo "gc-build: name the component to build" >&2; usage; exit 2 ;;
     *)  echo "gc-build: unknown component: $COMPONENT" >&2; usage; exit 2 ;;
@@ -107,9 +112,9 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 # The binary's inputs, relative to ROOT, the module root: go.mod and go.sum,
 # which pin every dependency the binary compiles, and the folders it compiles
-# from. SOURCE_REV (the staleness identity), newer_than_binary (the mtime scan)
-# and behind_main all span exactly these, so a change confined to a folder the
-# binary imports rebuilds it, and a dependency bump rebuilds both binaries.
+# from. SOURCE_REV (the staleness identity) and newer_than_binary (the mtime
+# scan) both span exactly these, so a change confined to a folder the binary
+# imports rebuilds it, and a dependency bump rebuilds both binaries.
 INPUTS=(go.mod go.sum "$DIR" ${IMPORTS[@]+"${IMPORTS[@]}"})
 
 # The city this run builds for: the env chain an order's process and a shell
@@ -121,10 +126,22 @@ CITY_ROOT="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 # where that service's state root is (authoritative: it beats reproducing
 # gascity's StateRootOrDefault here), and which city this is when the
 # environment does not say. A command component whose environment names its city
-# has nothing to ask it. Only a SUCCESSFUL listing that omits the service is
-# proof of absence; an erroring one must not silently stop deploys.
+# has nothing to ask it. Neither has the check (--due) whose environment names
+# its city or its state root: the order dispatcher runs the check on every pass
+# and waits for it, so the check takes the root Gas City gives a service that
+# declares no state_root, <city>/.gc/services/<name> below. A city whose service
+# declares one sets GC_<C>_STATE_ROOT in the order's env ([[orders.overrides]]).
+# Only a SUCCESSFUL listing that omits the service is proof of absence; an
+# erroring one must not silently stop deploys.
 SERVICES=""
-if [ -n "$SERVICE" ] || [ -z "$CITY_ROOT" ]; then
+ASK_LISTING=0
+if [ "$DUE" -eq 1 ]; then
+    [ -n "$CITY_ROOT" ] || [ -n "${!STATE_ROOT_ENV:-}" ] || ASK_LISTING=1
+elif [ -n "$SERVICE" ] || [ -z "$CITY_ROOT" ]; then
+    ASK_LISTING=1
+fi
+NO_SERVICE=0
+if [ "$ASK_LISTING" -eq 1 ]; then
     if ! SERVICES="$("$GC_BIN" service list --json 2>/dev/null)"; then
         SERVICES=""
         if [ -n "$SERVICE" ] && [ "$DEPLOY" -eq 1 ]; then
@@ -140,10 +157,10 @@ if [ -n "$SERVICE" ] && [ -n "$SERVICES" ]; then
     _q_rc=$?
     set -e
     if [ "$_q_rc" -eq 1 ]; then
-        # This city does not run the service; a hand-run build is not gated.
+        # This city does not run the service; a hand-run build is not gated,
+        # and a deploy records its run and builds nothing (see below).
         if [ "$DEPLOY" -eq 1 ]; then
-            echo "$ME: no '$SERVICE' service in this city; nothing to deploy"
-            exit 0
+            NO_SERVICE=1
         fi
     elif [ "$_q_rc" -ne 0 ]; then
         echo "$ME: could not read the service listing (jq exit $_q_rc); proceeding" >&2
@@ -179,7 +196,6 @@ fi
 
 BIN_DIR="$STATE_ROOT/bin"
 BIN="$BIN_DIR/$BIN_NAME"
-mkdir -p "$BIN_DIR"
 
 # A service's publish that nothing has restarted onto yet. It is written before
 # the restart and removed only by a restart that succeeded (see
@@ -192,55 +208,11 @@ STATUS="$STATE_ROOT/build-status.json"
 # included: git's hash of the listing `git ls-tree HEAD` gives for INPUTS, the
 # tree of each folder and the blob of go.mod and go.sum. The repo HEAD would
 # move on every merge to main and cost a rebuild, and for a service a restart,
-# for each. A tick that cannot list them (git absent, no commit) leaves it
+# for each. A run that cannot list them (git absent, no commit) leaves it
 # empty, never the hash of an empty listing.
 SOURCE_REV=""
 if _listing="$(git -C "$ROOT" ls-tree HEAD -- "${INPUTS[@]}" 2>/dev/null)" && [ -n "$_listing" ]; then
     SOURCE_REV="$(printf '%s\n' "$_listing" | git -C "$ROOT" hash-object --stdin 2>/dev/null || true)"
-fi
-
-# behind_main — how far this checkout is behind origin/<default> under the
-# binary's inputs, REPORT-ONLY. Everything above keys on the LOCAL checkout:
-# SOURCE_REV lists HEAD's inputs, newer_than_binary scans HEAD's files.
-# So a checkout parked off-main (another branch, or one not fast-forwarded)
-# keeps its binary current with THAT branch — source_rev == binary_rev — while
-# what it serves is behind main. Nothing above can see that, so the record
-# would read a false "current". This counts the commits origin/<default>
-# carries under the binary's inputs that HEAD lacks.
-#
-# It NEVER feeds need_build. A checkout may be off-main on purpose, and a rebuild
-# on every unrelated main merge is exactly what the SOURCE_REV identity exists
-# to avoid — the requirement is to REPORT drift, not to rebuild
-# on it. The comparison wants a fresh origin ref: reconcile-rig-checkouts fetches
-# origin on its own cadence, so it is usually already current, and this fetch is
-# bounded to at most one ATTEMPT per FETCH_TTL for each state root (0 disables
-# it and leans on reconcile) so a 5-minute tick does not fetch every time, and a
-# failing origin costs one attempt per TTL rather than one per tick. Every step
-# degrades to "gap unknown" (0), never to a failed build.
-BEHIND_MAIN=0
-if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    DEFAULT_REF="$(git -C "$ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"
-    case "$FETCH_TTL" in ''|*[!0-9]*) FETCH_TTL=1800 ;; esac
-    FETCH_MARK="$STATE_ROOT/origin-fetch-at"
-    NOW_S="$(date +%s 2>/dev/null || echo 0)"
-    LAST_S=0
-    [ -f "$FETCH_MARK" ] && LAST_S="$(cat "$FETCH_MARK" 2>/dev/null || echo 0)"
-    case "$LAST_S" in ''|*[!0-9]*) LAST_S=0 ;; esac
-    # Record the attempt BEFORE fetching, not only on success. The cost the
-    # cadence bounds is the fetch ATTEMPT, so a marker advanced only after a
-    # successful fetch leaves an unreachable or unauthenticated origin
-    # re-attempting on every later tick. Advancing it here holds a failing
-    # origin to one attempt per TTL; the gap below still reads off the last
-    # origin ref, so a lost fetch degrades to a stale count, never a failure.
-    if [ "$FETCH_TTL" -gt 0 ] && [ "$((NOW_S - LAST_S))" -ge "$FETCH_TTL" ]; then
-        printf '%s\n' "$NOW_S" > "$FETCH_MARK" 2>/dev/null || true
-        git -C "$ROOT" fetch --quiet --no-tags origin "${DEFAULT_REF#origin/}" 2>/dev/null || true
-    fi
-    # Commits the default branch carries under the binary's inputs that HEAD
-    # lacks: 0 when on main and current, when ahead, or when the ref is absent.
-    _behind="$(git -C "$ROOT" rev-list --count "HEAD..$DEFAULT_REF" -- "${INPUTS[@]}" 2>/dev/null || true)"
-    case "$_behind" in ''|*[!0-9]*) _behind=0 ;; esac
-    BEHIND_MAIN="$_behind"
 fi
 
 # A field of the previous record, or empty. A build that failed keeps the last
@@ -255,12 +227,12 @@ prev_field() { # <key>
 # say. Nothing else can answer it: every caller execs a prebuilt binary, so one
 # older than its sources serves in silence.
 #
-# Every run that reaches a build decision writes one, the no-op tick included:
-# checked_at is what says the build order itself is still running, and it is the
-# only field a quiet tick moves. Published by atomic rename, so a reader polling
-# the file never catches it half-written. Every step degrades to leaving the old
-# record in place, because a status file is a report and losing one must not
-# fail a build.
+# Every run writes one, a run that builds nothing included, so source_rev and
+# checked_at name the revision the last run saw and when it ran, which is what
+# the check (--due) times the next run by. Published by atomic rename, so a
+# reader polling the file never catches it half-written. Every step degrades to
+# leaving the old record in place, because losing one must not fail a build,
+# and the check then times the next run by the run before.
 write_record() { # <last_build_rc> <binary_rev> <built_at>
     local rc="$1" brev="$2" bat="$3" pending="false" tmp
     if [ -n "$SERVICE" ] && [ -e "$RESTART_PENDING" ]; then pending="true"; fi
@@ -268,12 +240,10 @@ write_record() { # <last_build_rc> <binary_rev> <built_at>
     if jq -n --arg component "$STATE_NAME" --arg built_at "$bat" \
         --arg source_rev "$SOURCE_REV" --arg binary_rev "$brev" \
         --argjson last_build_rc "$rc" --argjson restart_pending "$pending" \
-        --argjson behind_main "$BEHIND_MAIN" \
         --arg checked_at "$(date -u +%FT%TZ)" \
         '{component: $component, built_at: $built_at, source_rev: $source_rev,
           binary_rev: $binary_rev, last_build_rc: $last_build_rc,
-          restart_pending: $restart_pending, behind_main: $behind_main,
-          checked_at: $checked_at}' \
+          restart_pending: $restart_pending, checked_at: $checked_at}' \
         > "$tmp" 2>/dev/null; then
         mv -f "$tmp" "$STATUS" 2>/dev/null || rm -f -- "$tmp" 2>/dev/null
     else
@@ -281,6 +251,56 @@ write_record() { # <last_build_rc> <binary_rev> <built_at>
     fi
     return 0
 }
+
+# --due, the order's check. A run is owed while the binary is missing, was
+# built from a revision other than the checkout's, or cannot be shown current
+# because the checkout's revision cannot be read, and for a service while
+# restart-pending names a publish nothing has restarted onto. It reads the
+# revision alone, not the find -newer scan, because what the order keeps current
+# is the committed checkout. An owed run is due at once when the checkout's
+# revision is not the one the last run saw, and otherwise RETRY_AFTER seconds
+# after that run, so a build or a restart that failed for a reason that clears is
+# tried again until it succeeds, and not on every pass. The reason goes to
+# stdout, which the dispatcher discards, and nothing goes to stderr, which the
+# dispatcher reports as a check that failed.
+RETRY_AFTER=300
+if [ "$DUE" -eq 1 ]; then
+    if [ ! -x "$BIN" ]; then
+        OWED="there is no binary at $BIN"
+    elif [ -z "$SOURCE_REV" ]; then
+        OWED="the checkout's revision cannot be read, so nothing shows $BIN current"
+    elif [ "$(prev_field binary_rev)" != "$SOURCE_REV" ]; then
+        OWED="$BIN was not built from the checkout's revision, $SOURCE_REV"
+    elif [ -n "$SERVICE" ] && [ -e "$RESTART_PENDING" ]; then
+        OWED="'$SERVICE' has not restarted onto the binary published at $BIN"
+    else
+        echo "$ME: no run owed: $BIN is built from the checkout's revision${SERVICE:+ and serving}"
+        exit 1
+    fi
+    # "now", or when the last run ran while the next is not yet due. A missing or
+    # unreadable record answers nothing, and owes the run at once.
+    WHEN="$(jq -r --arg rev "$SOURCE_REV" --argjson after "$RETRY_AFTER" '
+        ((.checked_at // "") | try fromdateiso8601 catch null) as $ran
+        | if (.source_rev // "") != $rev or $ran == null or $ran + $after <= now
+          then "now" else .checked_at end' "$STATUS" 2>/dev/null || true)"
+    case "$WHEN" in
+        now|"") echo "$ME: run due: $OWED"; exit 0 ;;
+    esac
+    echo "$ME: run owed but not yet due: $OWED, and the last run, at $WHEN, saw this revision; the next is due ${RETRY_AFTER}s after it"
+    exit 1
+fi
+
+# A deploy in a city that does not run the service builds nothing. It still
+# writes its record, so the check times the next run as it times any owed run's,
+# and the first one after the city declares the service builds it.
+if [ "$NO_SERVICE" -eq 1 ]; then
+    echo "$ME: no '$SERVICE' service in this city; nothing to deploy"
+    mkdir -p "$STATE_ROOT" 2>/dev/null || true
+    write_record 0 "$(prev_field binary_rev)" "$(prev_field built_at)"
+    exit 0
+fi
+
+mkdir -p "$BIN_DIR"
 
 # Go toolchain: override, PATH, then the conventional system install. It is
 # needed only once there is something to build. Whichever go starts the build,
@@ -326,9 +346,9 @@ pid_alive() {
 
 # Restart the service onto the published binary; clear the pending marker only
 # on success. "Published" and "serving" differ, and only the first is on disk: a
-# failed restart leaves a binary newer than every source, so no later tick would
-# ever be stale — the marker is what carries the unfinished restart to the next
-# run.
+# failed restart leaves a binary newer than every source, so no later run would
+# ever find it stale — the marker is what carries the unfinished restart to the
+# next run.
 restart_service() {
     echo "$ME: restarting service '$SERVICE'"
     if ! "$GC_BIN" service restart "$SERVICE"; then
@@ -364,9 +384,9 @@ if [ "$need_build" -eq 0 ]; then
     # no earlier record names it.
     CURRENT_BUILT_AT="$(prev_field built_at)"
     [ -n "$CURRENT_BUILT_AT" ] || CURRENT_BUILT_AT="$(date -u -r "$BIN" +%FT%TZ 2>/dev/null || true)"
-    # A tick that could not read the revision (git absent, a held index.lock)
+    # A run that could not read the revision (git absent, a held index.lock)
     # has learned nothing about the binary: keep naming the revision it was
-    # built from, or the next tick that can read sees an empty binary_rev and
+    # built from, or the next run that can read sees an empty binary_rev and
     # rebuilds a current binary, and restarts a service onto it.
     CURRENT_REV="$SOURCE_REV"
     [ -n "$CURRENT_REV" ] || CURRENT_REV="$(prev_field binary_rev)"
@@ -489,8 +509,8 @@ echo "$ME: built $BIN"
 
 # For a service, build and restart are one step: a binary nothing restarts onto
 # is inert. Record the unfinished half BEFORE the restart, so whatever stops
-# this run leaves the evidence; it also carries a hand-run build to the next
-# tick. The status record is written AFTER the restart either way —
+# this run leaves the evidence; it also carries a hand-run build to the order's
+# next run. The status record is written AFTER the restart either way —
 # restart_pending is a fact about the moment the record is taken, and a failed
 # restart is exactly the state worth publishing.
 if [ -n "$SERVICE" ]; then

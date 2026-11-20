@@ -81,8 +81,8 @@
 #   (STATUSFAIL)  a FAILED build moves source_rev, keeps the last good
 #                 binary_rev and built_at, and records the non-zero rc — the
 #                 gap between the two revisions IS the signal
-#   (STATUSNOOP)  an up-to-date tick still writes a record; checked_at is the
-#                 only field that can say the build order itself stopped
+#   (STATUSNOOP)  a run with nothing to build still writes a record, with the
+#                 checked_at the check times the next run by
 #   (STATUSDEL)   a deletion-only change rebuilds — `find -newer` is blind to an
 #                 input that no longer exists, and the record must never name a
 #                 revision the binary was not built from
@@ -95,14 +95,17 @@
 #                 revision and rebuilds nothing
 #   (STATUSPEND)  a published-but-not-serving binary is recorded as such
 #   (STATUSTMP)   the record is published by rename, leaving no staging file
-#   (BEHINDMAIN)  a checkout behind origin/main under the helm sources records
-#                 the gap (behind_main) and is NEVER rebuilt for it — report-only
-#   (ONMAIN)      a checkout level with origin/main records no drift
-#   (FETCHFAIL)   a failed origin fetch still advances the fetch cadence marker,
-#                 so an unreachable origin costs one attempt per TTL, not one per
-#                 tick, and the gap is still reported off the last origin ref
-#   (SYMLINK)     a checkout reached through a symlinked path still counts its
-#                 gap and reaches its fetch
+#
+#   the order's check (--due); gc-build.test.sh pins its build cases
+#   (DUESKIP)     a city with no helm service: the run records its pass, so the
+#                 check owes the next run five minutes later, not every pass
+#   (DUEPEND)     a published binary that waits for its restart owes a run,
+#                 timed from the run whose restart failed; once a restart
+#                 succeeds, none is owed
+#   (DUEHAND)     a hand-run build's publish is owed its restart five minutes
+#                 after the build
+#   (DUEROOT)     with the city in its environment, the check reads
+#                 <city>/.gc/services/<name> and asks gc nothing
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -140,7 +143,7 @@ trap 'rm -rf "$TMP"' EXIT
 #      real service's binary.
 # ---------------------------------------------------------------------------
 unset GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_CITY_RUNTIME_DIR GC_SERVICE_STATE_ROOT
-unset GC_HELM_STATE_ROOT GC_GCTK_STATE_ROOT GC_HELM_CITY_PATH GC_HELM_ORIGIN_FETCH_TTL
+unset GC_HELM_STATE_ROOT GC_GCTK_STATE_ROOT GC_HELM_CITY_PATH
 unset GC_RIG GC_RIG_ROOT GC_PACK_DIR PACK_DIR GC_HELM_SERVICE_NAME GC_HELM_GC_BIN
 for _leak in GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_SERVICE_STATE_ROOT GC_HELM_STATE_ROOT GC_GCTK_STATE_ROOT; do
     if [ -n "$(eval "printf '%s' \"\${$_leak:-}\"")" ]; then
@@ -308,6 +311,15 @@ add_gctk_dep() {
 # `// ""` reader would report restart_pending=false as an empty string and the
 # cleared case would pass against the wrong value.
 status_field() { jq -r --arg k "$1" 'if has($k) then .[$k] else "" end | tostring' "$STATE/build-status.json" 2>/dev/null; }
+
+# Move the record's checked_at <seconds> into the past, as if its run were that
+# old, which is what the check times the next run by.
+age_record() {
+    local at
+    at="$(jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate')"
+    jq --arg at "$at" '.checked_at = $at' "$STATE/build-status.json" > "$STATE/build-status.json.new" \
+        && mv "$STATE/build-status.json.new" "$STATE/build-status.json"
+}
 
 run_build() { # -> OUT ERR RC
     local err="$TMP/case$CASE/stderr-build"
@@ -810,9 +822,10 @@ eq "$(status_field source_rev)" "$REV_B" "(STATUSFAIL) source_rev follows the tr
 eq "$(status_field binary_rev)" "$REV_A" "(STATUSFAIL) binary_rev stays on what is still serving"
 eq "$(status_field built_at)" "$BUILT_AT_A" "(STATUSFAIL) and so does built_at"
 
-# --- case: a tick with nothing to do still reports ----------------------------
-# checked_at is the only field a quiet tick moves, so it is the only thing that
-# can distinguish a healthy no-op from a build order that stopped running.
+# --- case: a run with nothing to build still reports --------------------------
+# checked_at is the only field such a run moves, and it is what the check times
+# the next run by: a run that left something owed, a failed restart, comes back
+# five minutes after its own checked_at.
 fixture
 REV_C="$(commit_fixture "$ROOT" || true)"
 run_build
@@ -825,8 +838,8 @@ absent "$RECORD" "(STATUSNOOP) and builds nothing"
 eq "$(status_field last_build_rc)" "0" "(STATUSNOOP) it still reports success"
 eq "$(status_field binary_rev)" "$REV_C" "(STATUSNOOP) binary_rev still names the revision the binary was built from"
 [ "$(status_field checked_at)" != "$CHECKED_1" ] \
-    && ok "(STATUSNOOP) checked_at advanced — the build order is demonstrably alive" \
-    || bad "(STATUSNOOP) checked_at did not move; a stopped build order would look healthy"
+    && ok "(STATUSNOOP) checked_at advanced to the run that wrote it" \
+    || bad "(STATUSNOOP) checked_at did not move; the check would time the next run by an older one"
 
 # --- case: a deletion-only change still rebuilds ------------------------------
 # `find -newer` can only test files that still exist. Delete a source and
@@ -956,119 +969,98 @@ grep -q 'mv -f "$tmp" "$STATUS"' "$BUILD" \
     && ok "(STATUSTMP) the record is published by rename, never written in place" \
     || bad "(STATUSTMP) the record is no longer published by rename"
 
-# --- case: a checkout behind origin/main is REPORTED, never rebuilt for it ----
-# Every staleness axis above keys on the LOCAL checkout, so a checkout parked
-# off-main keeps its binary current with THAT branch and records a clean row
-# while the served binary is behind main.
-# behind_main is the axis that sees the gap against main — and it must NOT feed
-# the rebuild decision, because a checkout may be off-main on purpose and the
-# SOURCE_REV identity is what decides a build.
-fixture
-commit_fixture "$ROOT" >/dev/null 2>&1 || true
-A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
-# One more helm-source commit, parked on origin/main only; HEAD stays at A, so
-# HEAD is one helm-source commit behind origin/main.
-printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
-git -C "$ROOT" add -A >/dev/null 2>&1
-git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
-    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
-git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
-git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
-# reconcile-rig-checkouts keeps origin fresh; pin the fetch marker so the case
-# reuses it (the common path) and never reaches the network.
-date +%s > "$STATE/origin-fetch-at"
-run_build
-eq "$RC" 0 "(BEHINDMAIN) the first build exits 0"
-BEHIND1="$(status_field behind_main)"
-[ "${BEHIND1:-0}" -ge 1 ] 2>/dev/null \
-    && ok "(BEHINDMAIN) the record counts the checkout as behind origin/main" \
-    || bad "(BEHINDMAIN) behind_main is '$BEHIND1', want >= 1"
-# Now current with its own sources: being behind main must not force a rebuild.
-rm -f "$RECORD" "$RECORD.out"
-date +%s > "$STATE/origin-fetch-at"
-run_build
-eq "$RC" 0 "(BEHINDMAIN) the next tick exits 0"
-absent "$RECORD" "(BEHINDMAIN) behind-main alone never rebuilds — the revision identity still decides"
-has "$OUT" "up to date" "(BEHINDMAIN) the binary is current with its own sources"
-BEHIND2="$(status_field behind_main)"
-[ "${BEHIND2:-0}" -ge 1 ] 2>/dev/null \
-    && ok "(BEHINDMAIN) the drift is still recorded on the no-op tick" \
-    || bad "(BEHINDMAIN) behind_main is '$BEHIND2' on the no-op tick, want >= 1"
+# ==============================================================================
+# THE ORDER'S CHECK (--due) — whether the helm-build order runs this pass
+# ==============================================================================
 
-# --- case: a checkout level with origin/main records no drift -----------------
+# --- case: a city with no helm service is owed a run every five minutes -------
+# The binary never appears in such a city, so a run stays owed. The run's record
+# is what keeps the check from owing one on every pass.
 fixture
-commit_fixture "$ROOT" >/dev/null 2>&1 || true
-git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
-date +%s > "$STATE/origin-fetch-at"
-run_build
-eq "$RC" 0 "(ONMAIN) exits 0"
-eq "$(status_field behind_main)" "0" "(ONMAIN) a checkout level with origin/main records no drift"
+REV_SKIP="$(commit_fixture "$ROOT" || true)"
+printf '{"city_path":"%s","services":[{"service_name":"something-else","state_root":".gc/services/other"}]}' \
+    "$STATE_CITY" > "$SERVICES"
+run_build --deploy
+eq "$RC" 0 "(DUESKIP) the run exits 0, with nothing to deploy"
+eq "$(status_field source_rev)" "$REV_SKIP" "(DUESKIP) and records the revision it saw"
+absent "$STATE/bin/helm-svc" "(DUESKIP) and publishes nothing"
+: > "$GCLOG"
+run_build --due
+eq "$RC" 1 "(DUESKIP) the next pass owes no run"
+eq "$ERR" "" "(DUESKIP) and says nothing on stderr"
+age_record 360
+run_build --due
+eq "$RC" 0 "(DUESKIP) five minutes after the run, the next is due"
+[ ! -s "$GCLOG" ] && ok "(DUESKIP) and the check asked gc nothing" \
+                  || bad "(DUESKIP) the check called gc: $(tr '\n' ';' < "$GCLOG")"
 
-# --- case: a FAILED origin fetch still advances the fetch cadence -------------
-# The behind_main fetch is bounded to one attempt per GC_HELM_ORIGIN_FETCH_TTL so
-# a 5-minute build tick does not fetch every time. The marker that bounds it used
-# to advance only after a SUCCESSFUL fetch, so an unreachable or unauthenticated
-# origin left it absent and every later tick re-attempted the fetch — the
-# report-only check spending network on every tick instead of degrading quietly
-# until the TTL expired. The marker must advance on the ATTEMPT.
+# --- case: a restart that failed is owed again five minutes later -------------
 fixture
 commit_fixture "$ROOT" >/dev/null 2>&1 || true
-# Behind main under the helm sources, so the block runs and reaches the fetch.
-A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
-printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
-git -C "$ROOT" add -A >/dev/null 2>&1
-git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
-    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
-git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
-git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
-# The fixture configures no `origin` remote, so the fetch this tick attempts
-# FAILS. Clear the marker so the cadence gate is open and the tick attempts it.
-rm -f "$STATE/origin-fetch-at"
-run_build
-eq "$RC" 0 "(FETCHFAIL) a failed origin fetch does not fail the build"
-present "$STATE/origin-fetch-at" \
-    "(FETCHFAIL) a failed fetch still records the attempt, so the cadence advances"
-BEHIND_FF="$(status_field behind_main)"
-[ "${BEHIND_FF:-0}" -ge 1 ] 2>/dev/null \
-    && ok "(FETCHFAIL) the drift is still reported off the last origin ref despite the failed fetch" \
-    || bad "(FETCHFAIL) behind_main is '$BEHIND_FF' after a failed fetch, want >= 1"
-# The next tick within the TTL must SKIP the fetch. Hold the marker fresh but a
-# few seconds in the past: a re-fetch would restamp it to the current second, so
-# an unchanged value proves the tick did not re-attempt before the TTL expired.
-SENTINEL="$(( $(date +%s) - 5 ))"
-printf '%s\n' "$SENTINEL" > "$STATE/origin-fetch-at"
-run_build
-eq "$RC" 0 "(FETCHFAIL) the next tick exits 0"
-eq "$(cat "$STATE/origin-fetch-at" 2>/dev/null)" "$SENTINEL" \
-    "(FETCHFAIL) a fresh marker keeps the next tick from re-fetching before the TTL"
+RESTART_FAIL=1
+run_build --deploy
+RESTART_FAIL=""
+eq "$RC" 1 "(DUEPEND) the run's restart fails"
+present "$STATE/restart-pending" "(DUEPEND) and leaves the marker"
+: > "$GCLOG"
+run_build --due
+eq "$RC" 1 "(DUEPEND) the next pass does not try the restart again"
+age_record 360
+run_build --due
+eq "$RC" 0 "(DUEPEND) five minutes after the failed run, the restart is owed"
+has "$OUT" "has not restarted" "(DUEPEND) and the check names the restart as what is owed"
+[ ! -s "$GCLOG" ] && ok "(DUEPEND) the check asked gc nothing" \
+                  || bad "(DUEPEND) the check called gc: $(tr '\n' ';' < "$GCLOG")"
+run_build --deploy
+eq "$RC" 0 "(DUEPEND) the owed run restarts the service"
+absent "$STATE/restart-pending" "(DUEPEND) and clears the marker"
+age_record 3600
+run_build --due
+eq "$RC" 1 "(DUEPEND) once a restart succeeds, no run is owed, however long ago the last was"
 
-# --- case: a checkout reached through a symlinked path still counts its gap ----
-# The builder derives the repository root with logical `pwd`, while git answers
-# for the checkout with symlinks resolved, so the two spell one checkout
-# differently when it is reached through a symlink. The gap and the fetch must
-# not depend on the spelling. Run the build through a link to the fixture root.
+# --- case: a hand-run build is restarted onto five minutes after it -----------
 fixture
 commit_fixture "$ROOT" >/dev/null 2>&1 || true
-A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
-printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
-git -C "$ROOT" add -A >/dev/null 2>&1
-git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
-    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
-git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
-git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
-LINKED="$TMP/case$CASE/linked-root"
-ln -s "$ROOT" "$LINKED"
-rm -f "$STATE/origin-fetch-at"
-REAL_ROOT="$ROOT"; ROOT="$LINKED"
 run_build
-ROOT="$REAL_ROOT"
-eq "$RC" 0 "(SYMLINK) a build run through a symlinked checkout exits 0"
-BEHIND_SL="$(status_field behind_main)"
-[ "${BEHIND_SL:-0}" -ge 1 ] 2>/dev/null \
-    && ok "(SYMLINK) the checkout is still counted as behind origin/main" \
-    || bad "(SYMLINK) behind_main is '$BEHIND_SL' through a symlinked checkout, want >= 1"
-present "$STATE/origin-fetch-at" \
-    "(SYMLINK) the block reaches its fetch, so the cadence marker is written"
+eq "$RC" 0 "(DUEHAND) a hand-run build exits 0"
+present "$STATE/restart-pending" "(DUEHAND) and leaves its publish for the order to restart onto"
+run_build --due
+eq "$RC" 1 "(DUEHAND) the check does not restart onto it at once"
+age_record 360
+run_build --due
+eq "$RC" 0 "(DUEHAND) five minutes after the build, the restart is owed"
+
+# --- case: the check finds the state root without asking gc -------------------
+# The city in the environment and no override: the check reads Gas City's
+# default root for the service, under the sacrificial name, and never lists
+# services. The record there is from a run ten minutes ago, so the run a missing
+# binary owes is due.
+fixture
+REV_ROOT="$(commit_fixture "$ROOT" || true)"
+CITY_STATE="$STATE_CITY/.gc/services/$SAFE_NAME"
+mkdir -p "$CITY_STATE/bin"
+printf '#!/bin/sh\n' > "$CITY_STATE/bin/helm-svc"
+chmod +x "$CITY_STATE/bin/helm-svc"
+RAN_AT="$(jq -nr --argjson t "$(( $(date -u +%s) - 600 ))" '$t | todate')"
+jq -n --arg n "$SAFE_NAME" --arg rev "$REV_ROOT" --arg at "$RAN_AT" \
+    '{component: $n, built_at: $at, source_rev: $rev, binary_rev: $rev,
+      last_build_rc: 0, restart_pending: false, checked_at: $at}' > "$CITY_STATE/build-status.json"
+due_in_city() { # -> OUT RC
+    set +e
+    OUT="$(GC_CITY_PATH="$STATE_CITY" GC_HELM_SERVICE_NAME="$SAFE_NAME" GC_HELM_GC_BIN="$GCBIN" \
+           STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" \
+           bash "$ROOT/assets/scripts/gc-build.sh" helm --due 2>/dev/null)"
+    RC=$?
+    set -e
+}
+: > "$GCLOG"
+due_in_city
+eq "$RC" 1 "(DUEROOT) a current binary at <city>/.gc/services/<name> owes no run"
+rm -f "$CITY_STATE/bin/helm-svc"
+due_in_city
+eq "$RC" 0 "(DUEROOT) and with no binary there, a run is owed"
+[ ! -s "$GCLOG" ] && ok "(DUEROOT) the check asked gc nothing" \
+                  || bad "(DUEROOT) the check called gc: $(tr '\n' ';' < "$GCLOG")"
 
 # ==============================================================================
 # STATIC GUARDS
