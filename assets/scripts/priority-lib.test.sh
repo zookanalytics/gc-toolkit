@@ -16,8 +16,7 @@
 #               $PRIORITY_JQ
 #   (NO-COPY)   no other file in the pack defines the function's jq defs
 # A reader with a private copy of the function drifts silently from this one.
-# The behavioral half lives beside its reader, in queue-priority.test.sh, which
-# also runs the gc-helm.sh priority verb.
+# The behavioral half lives beside its reader, in queue-priority.test.sh.
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree

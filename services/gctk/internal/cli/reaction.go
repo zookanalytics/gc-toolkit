@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,18 +21,19 @@ import (
 )
 
 func newReactionCmd(stdout, stderr io.Writer) *cobra.Command {
-	return group("reaction", "a bead's first reaction: whether it takes one, its sling, and the exit it takes",
+	return group("reaction", "a bead's first reaction: whether it takes one, its sling, the exit it takes, and the acceptance of its recommendation",
 		`A first reaction is the run of mol-first-reaction every new bead gets: it reads
 the bead once, writes a card on it, and takes one of five exits, which dispose
 performs (docs/human-engagement.md). sling starts one on a bead nobody has
 decided on, sweep starts one on each such bead in the rig, check is the
-reaction's own first act, and deliverable says whether the rig's proactive pool
-can take one now.`,
+reaction's own first act, deliverable says whether the rig's proactive pool
+can take one now, and accept takes the recommendation a recommend exit leaves.`,
 		newReactionCheckCmd(stdout, stderr),
 		newReactionSlingCmd(stdout, stderr),
 		newReactionSweepCmd(stdout, stderr),
 		newReactionDeliverableCmd(stdout),
-		newReactionDisposeCmd(stdout, stderr))
+		newReactionDisposeCmd(stdout, stderr),
+		newReactionAcceptCmd(stdout, stderr))
 }
 
 // reactionRefusals is the refusals check and sling apply, in their order, with
@@ -421,4 +423,158 @@ func disposeReaction(d *reaction.Dispose, db string, stdout, stderr io.Writer) e
 	}
 	fmt.Fprintf(stderr, "%s: %v\n", prog, err)
 	return exit(4)
+}
+
+const reactionAcceptLong = `Takes a first reaction's recommendation, gc.recommended_formula on <bead>:
+it answers the human gate under the key first-reaction that puts the
+recommendation to the operator, and nothing else, and dispatches the formula
+at the bead, once. A sitting's sign-off runs it when the operator's ruling
+takes the recommendation, with --conversation naming the sitting's own
+conversation, which it then does not warn of as a live sitting on the bead,
+and a --var for each var the ruling settled for the dispatch, such as
+mol-design-convoy's design_gated=false.
+
+It is offered while the bead carries the recommendation, its gate is open and
+unassigned or closed with an acceptance an earlier Accept did not finish, and
+no other open human gate blocks the bead. It runs under the bead's acceptance
+lock, from before its live read of those three to its last write, and refuses
+while another Accept holds it. Its first write removes the bead's arm (gctk
+bead disarm). It records the acceptance's dispatch input on the gate (its
+token, the formula and each --var), answers the gate
+"ruled: accepted <formula> accept:<token>", and reads which answer the gate
+took: bd's resolve exits 0 on a gate already closed, so that read tells this
+answer from one that reached the gate first, and the first stands. It then
+reads that no open human gate blocks the bead, slings the formula titled
+"<formula> accept:<token>" with each --var, lifts the bead's hold:mayor, since
+an Accept is a placement, and records the dispatch, withdrawing the
+recommendation. A gate filed meanwhile, or a sling that poured nothing, opens
+the gate again. A run that stopped after its answer leaves an unfinished
+acceptance, which the next Accept finishes under the same token: it slings
+only when no root carries the token, slings the vars the acceptance recorded,
+and refuses a --var that differs from them.
+
+<bead> may name the recommendation's gate, which names the one bead waiting on
+it, or a conversation, which names the bead it tracks. A pull request's number
+or URL, and a closed bead, name the live bead gc-helm.sh resolve names, which
+needs GCTK_SCRIPTS_DIR. --db names the store, a store's .beads directory.
+Without it the store is the one gc routes the bead to.
+
+exit: 0 dispatched, or a dispatch an earlier Accept poured recorded
+      1 the sling poured nothing, and the gate is open again
+      2 usage, or the bead carries no recommendation
+      3 the acceptance lock could not be taken
+      4 refused, or a step did not land: the message says what did and what runs it again`
+
+func newReactionAcceptCmd(stdout, stderr io.Writer) *cobra.Command {
+	var req reaction.AcceptRequest
+	var db string
+	cmd := &cobra.Command{
+		Use:   "accept <bead> [--reason <text>] [--conversation <task>] [--var <key>=<value>]... [--db <path>]",
+		Short: "take a first reaction's recommendation: answer the gate that asks it and dispatch its formula at the bead, once",
+		Long:  reactionAcceptLong,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			const prog = "gctk reaction accept"
+			ref := strings.TrimSpace(args[0])
+			if ref == "" {
+				return errors.New("name the bead: gctk reaction accept <bead>")
+			}
+			if err := reaction.CheckVars(req.Vars); err != nil {
+				return acceptStopped(err, stderr, prog)
+			}
+			rt := gascity.New()
+			if reaction.IsPRReference(ref) {
+				id, err := reaction.Resolve(rt, ref)
+				if err != nil {
+					fmt.Fprintf(stderr, "%s: %v. Nothing dispatched\n", prog, err)
+					return exit(4)
+				}
+				ref = id
+			}
+			r, err := acceptFor(ref, db, rt, stderr, prog)
+			if err != nil {
+				fmt.Fprintf(stderr, "%s: %v. Nothing dispatched\n", prog, err)
+				return exit(4)
+			}
+			subject, err := r.Subject(ref)
+			if err != nil {
+				return acceptStopped(err, stderr, prog)
+			}
+			if db == "" && reactionPrefix(subject) != reactionPrefix(ref) {
+				if r, err = acceptFor(subject, "", rt, stderr, prog); err != nil {
+					fmt.Fprintf(stderr, "%s: %v. Nothing dispatched\n", prog, err)
+					return exit(4)
+				}
+			}
+			req.Bead = subject
+			out, err := r.Accept(req)
+			if err != nil {
+				return acceptStopped(err, stderr, prog)
+			}
+			if out.Root != "" {
+				fmt.Fprintf(stdout, "%s: acceptance %s had already dispatched %s at %s (root %s); recorded it, slinging nothing\n", prog, out.Token, out.Formula, subject, out.Root)
+				return nil
+			}
+			fmt.Fprintf(stdout, "%s: dispatched %s at %s (acceptance %s)\n", prog, out.Formula, subject, out.Token)
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&req.Reason, "reason", "", "why the recommendation is taken, which the dispatch's note carries")
+	f.StringVar(&req.Conversation, "conversation", "", "the conversation whose sitting's sign-off runs this Accept")
+	f.StringArrayVar(&req.Vars, "var", nil, "a var the dispatch carries, <key>=<value>, repeatable")
+	f.StringVar(&db, "db", "", "the store, a store's .beads directory")
+	return cmd
+}
+
+// acceptFor builds the reaction's verbs for an acceptance on bead: its store,
+// db or the one gc routes the bead to, the rig whose prefix begins its id,
+// which the sling runs under, the arm's disarm, and the city's live sessions.
+func acceptFor(bead, db string, rt *gascity.City, stderr io.Writer, prog string) (*reaction.Reactions, error) {
+	l, err := ledger.Open(db, bead)
+	if err != nil {
+		return nil, fmt.Errorf("could not open %s's store (%v)", bead, err)
+	}
+	rig := strings.TrimSpace(os.Getenv("GC_RIG"))
+	if name, _, err := rigOf(rt, bead); err == nil {
+		rig = name
+	}
+	r := &reaction.Reactions{Ledger: l, Runtime: rt, Rig: rig, DB: db, Now: time.Now,
+		Log: func(line string) { fmt.Fprintf(stderr, "%s: %s\n", prog, line) }}
+	r.Disarm = func(id, reason string) (string, error) {
+		a := &arm.Arms{Ledger: l, Runtime: rt, Now: time.Now, Actor: actor()}
+		locks, err := arm.LockDir(rt)
+		if err != nil {
+			return "", err
+		}
+		a.Locks = locks
+		said, err := a.Disarm(id, reason)
+		if err == nil && strings.HasPrefix(said, "disarmed ") {
+			fmt.Fprintf(stderr, "%s: %s\n", prog, said)
+		}
+		return said, err
+	}
+	r.Sessions = func() ([]gascity.Session, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return rt.Sessions(ctx)
+	}
+	return r, nil
+}
+
+// acceptStopped prints why an acceptance went no further and gives its exit.
+func acceptStopped(err error, stderr io.Writer, prog string) error {
+	var u *reaction.Unaccepted
+	if errors.As(err, &u) {
+		fmt.Fprintf(stderr, "%s: %s\n", prog, u.Msg)
+		return exit(u.Code)
+	}
+	fmt.Fprintf(stderr, "%s: %v\n", prog, err)
+	return exit(4)
+}
+
+// reactionPrefix is the store prefix a bead's id begins with.
+func reactionPrefix(id string) string {
+	p, _, _ := strings.Cut(id, "-")
+	return p
 }

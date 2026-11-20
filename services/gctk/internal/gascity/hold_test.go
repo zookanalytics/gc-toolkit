@@ -2,6 +2,27 @@ package gascity
 
 import "testing"
 
+// HasHold reads one of the holds, in every spelling a dispatch hold reads in,
+// and no other label.
+func TestHasHoldReadsOneHoldInAnySpelling(t *testing.T) {
+	for _, c := range []struct {
+		labels []string
+		hold   string
+		want   bool
+	}{
+		{[]string{"learning", " Hold:Mayor "}, HoldMayor, true},
+		{[]string{"HOLD:EXTERNAL"}, HoldExternal, true},
+		{[]string{"hold:external"}, HoldMayor, false},
+		{[]string{"hold:mayor"}, HoldExternal, false},
+		{[]string{"hold:mayor-later", "xhold:mayor"}, HoldMayor, false},
+		{nil, HoldMayor, false},
+	} {
+		if got := HasHold(c.labels, c.hold); got != c.want {
+			t.Errorf("HasHold(%q, %q) = %v, want %v", c.labels, c.hold, got, c.want)
+		}
+	}
+}
+
 // A dispatch hold is hold:mayor or hold:external, trimmed and in any case, as
 // Gas City's HasDispatchHold reads a label, and the human label is no hold.
 func TestADispatchHoldIsGasCitysHoldLabelInAnyCase(t *testing.T) {

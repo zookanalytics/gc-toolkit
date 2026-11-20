@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Hermetic tests for gc-helm.sh's retired board verb and its rig-enumeration
-# helper. open, engage, accept, dismiss and the other verbs each have a suite
-# of their own (gc-helm-<verb>.test.sh), and gctk's takeaway package holds the
-# takeaway's. Runs the REAL script with a stubbed `gc` on PATH: no live city,
-# Dolt, network, or sessions. Covered:
+# helper. open, engage, dismiss and the other verbs each have a suite of their
+# own (gc-helm-<verb>.test.sh), and gctk's takeaway and reaction packages hold
+# the takeaway's and accept's. Runs the REAL script with a stubbed `gc` on PATH:
+# no live city, Dolt, network, or sessions. Covered:
 #   the retired board verb refuses and names helm-svc board
 #   the rig-enumeration helper leaving no trap installed on its caller
 set -euo pipefail

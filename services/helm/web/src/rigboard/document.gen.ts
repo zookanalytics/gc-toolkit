@@ -100,8 +100,7 @@ export interface Row {
   line2?: string;
   /**
    * Line3 names the beads the table puts on the row's third line: what a
-   * wait further along ends on, or each wait that holds work nobody is
-   * scheduled to do.
+   * wait further along ends on.
    */
   line3?: Ref[];
   /**
@@ -291,13 +290,13 @@ export interface KindCount {
 }
 /**
  * WorkQueue is a Work queue view: the work in the order it is expected to land
- * (services/gctk/queue). Queue is the work the city takes as things stand: by
- * bd graph's execution layers, what can go now first, and within a layer in
- * the order the pool claims ready work, priority, then oldest, then id.
- * NotScheduled comes after it, in the same order: work the city takes none of
- * as things stand, since nobody has scheduled it or a hold label holds it, as
- * queue reads its row, and work that waits on such work. Unread is the work a
- * reader could not answer, in priority order and then oldest first.
+ * (services/gctk/queue). Queue is that work, apart from the ready work nothing
+ * sends anywhere: by bd graph's execution layers, what can go now first, and
+ * within a layer in the order the pool claims ready work, priority, then
+ * oldest, then id. NotScheduled comes after it, in the same order: the ready
+ * work that no hold, route, assignee, arm or live run sends anywhere, as queue
+ * answers it. Unread is the work a reader could not answer, in priority order
+ * and then oldest first.
  */
 export interface WorkQueue {
   queue: string[];

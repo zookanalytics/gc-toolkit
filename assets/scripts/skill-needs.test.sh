@@ -544,7 +544,7 @@ have "…which gives the call" 'converse-invalidate-recommendation.sh" "<why' "$
 # One writer dispatches a recommendation, under the bead's acceptance lock and a
 # token that finds a dispatch an Accept that stopped part way already poured. A
 # sling of the agent's own pours the formula again once that run has finished.
-have "the work skill takes a recommendation through Accept's writer" 'gc-helm.sh" accept <bead>' "$WORK_SKILL"
+have "the work skill takes a recommendation through Accept's writer" '"$GCTK" reaction accept <bead>' "$WORK_SKILL"
 lacks "…and gives no sling of its own that records the dispatch" 'gc.recommended_formula_dispatched=' "$WORK_SKILL" \
     "a sling and record of its own bypasses Accept's lock and token, and dispatches the recommendation twice"
 have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --no-wait --accept' "$SETTLE"
@@ -1924,8 +1924,8 @@ lacks "…never off bd's parent filter, which also returns a bead moved out from
     "a bead whose parent edge was removed still lists under the parent its id names, so a close would wait on work that has left"
 have "…as an epic under the epic, opening with its aim" \
     'gc bd create "Delivery: <what it lands>" -t epic --parent "$EPIC"' "$EPIC_REVIEW"
-have "the next priority uses the steering move" '"$CONV/gc-helm.sh" priority "$EPIC" <P0-P4>' "$EPIC_REVIEW"
-have "…and so does the park" '"$CONV/gc-helm.sh" park "$EPIC"' "$EPIC_REVIEW"
+have "the next priority uses the steering move" '"$CONV/queue-priority.sh" move "$EPIC" <P0-P4>' "$EPIC_REVIEW"
+have "…and so does the park" '"$GCTK" bead park "$EPIC"' "$EPIC_REVIEW"
 have "an unpark releases the epic by write 3's release step" \
     "A ruling that unparks the epic releases it from its park instead, by write 3's release step with \`\"\$EPIC\"\` as the bead." "$EPIC_REVIEW_JOINED"
 have "…which takes only the epic's edge off a gate another bead waits on" 'gc bd dep remove "$EPIC" <park>' "$EPIC_REVIEW"

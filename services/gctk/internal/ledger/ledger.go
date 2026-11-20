@@ -84,17 +84,19 @@ var ErrGuard = gcbd.ErrGuard
 // the labels it removes, the note it appends and the guard it lands under, made
 // in one update.
 type Write struct {
-	id        string
-	title     string
-	sets      []string // key=value, in the order set
-	unsets    []string
-	labelsOff []string
-	status    string
-	assignee  *string
-	note      string
-	prio      *int
-	guard     *guard
-	err       error
+	id          string
+	title       string
+	sets        []string // key=value, in the order set
+	unsets      []string
+	labelsOff   []string
+	status      string
+	assignee    *string
+	note        string
+	prio        *int
+	description *string
+	parent      *string
+	guard       *guard
+	err         error
 }
 
 // guard is the status and assignee a write lands under.
@@ -174,6 +176,23 @@ func (w *Write) RemoveLabel(label string) {
 	}
 }
 
+// Description gives the bead text as its description in the same write. The
+// description is the row's own field, which no key declares, so the act that
+// sets it says what it means.
+func (w *Write) Description(text string) { w.description = &text }
+
+// Parent makes parent the bead's one parent in the same write, through bd's
+// parent-child edge, which bd refuses when parent sits under the bead. The edge
+// is the store's own, which no key declares, so the act that sets it says what
+// it means.
+func (w *Write) Parent(parent string) { w.parent = &parent }
+
+// Unroute removes the bead's route, gc.routed_to, in the same write, so no
+// pool's queue offers it. The key is Gas City's (lifecycle/lifecycle.toml,
+// [metadata.runtime_owned]), which gc sling writes and no domain declares, so
+// the act that takes a route away clears it here.
+func (w *Write) Unroute() { w.unset("gc.routed_to") }
+
 // Release takes the bead back from the pool and the session it was last sent
 // to, in the same write: its route, gc.routed_to, is set empty, and the route a
 // pour stamps, gc.execution_routed_to, and the session pins its last executor
@@ -196,7 +215,8 @@ func (w *Write) Release() {
 func (w *Write) Guard(status, assignee string) { w.guard = &guard{status: status, assignee: assignee} }
 
 // args is the update's arguments: the guard, the status, the assignee, the
-// title, every set, every removal, every label removed, then the note.
+// title, the priority, the description, the parent, every set, every removal,
+// every label removed, then the note.
 func (w *Write) args() []string {
 	var args []string
 	if w.guard != nil {
@@ -213,6 +233,12 @@ func (w *Write) args() []string {
 	}
 	if w.prio != nil {
 		args = append(args, "--priority", strconv.Itoa(*w.prio))
+	}
+	if w.description != nil {
+		args = append(args, "--description", *w.description)
+	}
+	if w.parent != nil {
+		args = append(args, "--parent", *w.parent)
 	}
 	for _, s := range w.sets {
 		args = append(args, "--set-metadata", s)
@@ -350,7 +376,8 @@ func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
-	if len(w.sets)+len(w.unsets)+len(w.labelsOff) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" && w.prio == nil {
+	if len(w.sets)+len(w.unsets)+len(w.labelsOff) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" && w.prio == nil &&
+		w.description == nil && w.parent == nil {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}
 	if out, err := l.store.Update(w.id, w.args()...); err != nil {
@@ -360,6 +387,47 @@ func (l *Ledger) Commit(w *Write) error {
 		return fmt.Errorf("ledger: the write to %s did not land: %w", w.id, err)
 	}
 	return nil
+}
+
+// Unrelate removes the relates-to link between id and other, in both
+// directions, as one `gc bd dep unrelate`. The write's exit decides whether it
+// landed.
+func (l *Ledger) Unrelate(id, other string) error {
+	if out, err := l.store.Unrelate(id, other); err != nil {
+		return landed(fmt.Sprintf("the removal of the link between %s and %s", id, other), out, err)
+	}
+	return nil
+}
+
+// ResolveGate closes the gate id with reason as its answer, as one `gc bd gate
+// resolve`. bd closes a gate already closed without changing it and exits 0
+// either way, so a caller that must know whose answer the gate holds reads the
+// gate after this write: that read settles a race between two answers, and
+// does not confirm the write. A write that exits non-zero has failed.
+func (l *Ledger) ResolveGate(id, reason string) error {
+	if out, err := l.store.ResolveGate(id, reason); err != nil {
+		return landed("the answer on "+id, out, err)
+	}
+	return nil
+}
+
+// Reopen opens the closed bead id again with reason, as one `gc bd reopen`,
+// which clears its close and its reason, so what the bead blocked waits on it
+// again. The write's exit decides whether it landed.
+func (l *Ledger) Reopen(id, reason string) error {
+	if out, err := l.store.Reopen(id, reason); err != nil {
+		return landed("the reopen of "+id, out, err)
+	}
+	return nil
+}
+
+// landed is the error of a write named what that did not land, with what the
+// store said.
+func landed(what, out string, err error) error {
+	if out = strings.TrimSpace(out); out != "" {
+		return fmt.Errorf("ledger: %s did not land (%w): %s", what, err, out)
+	}
+	return fmt.Errorf("ledger: %s did not land: %w", what, err)
 }
 
 // SetState sets one state dimension of bead id to value, with reason, as one

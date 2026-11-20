@@ -4,10 +4,11 @@
     "type": "string",
     "readers": [
       "listing",
+      "place",
       "pr",
       "reaction"
     ],
-    "doc": "The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool."
+    "doc": "A placement refuses PR-finishing work, which follows its anchor and is never a member of an epic. The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool."
   },
   {
     "name": "blocked_reason",
@@ -134,6 +135,12 @@
       "pr"
     ],
     "doc": "The branch a bead's work was folded onto by a polecat (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it has its work on that branch."
+  },
+  {
+    "name": "gc.acceptance",
+    "type": "json",
+    "owner": "reaction",
+    "doc": "On the human gate under the key first-reaction, the dispatch input of the acceptance that answers it: a JSON object {token, formula, vars}, with vars the \u003ckey\u003e=\u003cvalue\u003e strings its sling carries. gctk reaction accept writes it before the answer that names the token, and a run that finishes that acceptance slings the vars recorded under the token, so a finishing run given no var dispatches what the operator accepted. A record whose token no answer on the gate names binds nothing, and the next acceptance overwrites it. Never cleared."
   },
   {
     "name": "gc.attempt",
@@ -300,7 +307,13 @@
     "name": "gc.recommended_formula",
     "type": "string",
     "owner": "reaction",
-    "doc": "The execution formula a first reaction's recommend exit puts to the operator: the board offers Accept, which slings that formula at the bead, beside the exit's human gate. gctk reaction dispose sets it once the gate is filed and clears it before any exit acts, so no recommendation is older than the newest first-reaction gate. gc-helm.sh accept and converse-invalidate-recommendation.sh clear it, and converse-signoff.sh reads it, in shell (docs/gctk-architecture.md, Debt). Absent or empty, the bead carries no recommendation."
+    "doc": "The execution formula a first reaction's recommend exit puts to the operator: the board offers Accept, which slings that formula at the bead, beside the exit's human gate. gctk reaction dispose sets it once the gate is filed and clears it before any exit acts, so no recommendation is older than the newest first-reaction gate. gctk reaction accept clears it in the write that records its dispatch. converse-invalidate-recommendation.sh clears it and converse-signoff.sh reads it, in shell (docs/gctk-architecture.md, Debt). Absent or empty, the bead carries no recommendation."
+  },
+  {
+    "name": "gc.recommended_formula_dispatched",
+    "type": "string",
+    "owner": "reaction",
+    "doc": "The formula gctk reaction accept slung at the bead for its recommendation, written in the update that clears gc.recommended_formula, so absent means no Accept has recorded a dispatch. An Accept that finds it and no recommendation says the recommendation was dispatched, and so does a sitting's sign-off, which converse-signoff.sh reads in shell. Never cleared. A formula name."
   },
   {
     "name": "gc.root_bead_id",
@@ -319,11 +332,12 @@
     "readers": [
       "arm",
       "listing",
+      "place",
       "pr",
       "reaction",
       "review"
     ],
-    "doc": "gctk bead arm refuses a routed bead, which is dispatched already. An ask carries none, so no pool claims it and the review run is the one that works it. The pool, agent or person a bead is routed to (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A bead on a branch that a pool still holds has not pushed its work. The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A first reaction takes no bead routed anywhere, which has a dispatch path."
+    "doc": "gctk bead arm refuses a routed bead, which is dispatched already. A placement clears the route of a held bead, which gctk bead arm refuses, before it dispatches it. An ask carries none, so no pool claims it and the review run is the one that works it. The pool, agent or person a bead is routed to (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A bead on a branch that a pool still holds has not pushed its work. The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A first reaction takes no bead routed anywhere, which has a dispatch path."
   },
   {
     "name": "gc.session_id",

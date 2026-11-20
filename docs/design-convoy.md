@@ -199,7 +199,7 @@ implementation.
 The recommend-to-Accept-to-sling path carries the pattern with no special
 handling. The recommendation is `gc.recommended_formula = mol-design-convoy` on
 the subject, and the board offers Accept while that key is non-empty. Accept
-(`gc-helm.sh accept`) runs
+(`gctk reaction accept`) runs
 `gc sling --rig <the subject's rig> <subject> --on mol-design-convoy`. The
 `--rig` pin resolves the subject in its own rig's store, whatever directory the
 sling runs from. The sling carries no `issue` var, because graph.v2 reserves

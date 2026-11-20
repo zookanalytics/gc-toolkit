@@ -151,7 +151,7 @@ Every write that stops an armed bead, or sends it on another way, removes the ar
 first, through `gctk bead disarm`, and goes on only once that exits 0, for the same
 reason. `gctk bead takeaway --release` makes the disarm its first write, before
 the release write, the waits, the run's end and any `--route` or `--assign`, so a
-bead it stops stays stopped once nothing holds it. `gc-helm.sh accept` does too,
+bead it stops stays stopped once nothing holds it. `gctk reaction accept` does too,
 because the answer it gives the recommendation's gate could release the bead to its
 arm ahead of Accept's own pour. So do `stand-down.sh` and a sitting's withdrawal of
 the subject's arm and route.

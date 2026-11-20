@@ -46,7 +46,7 @@ skill), or leave it for the operator to place.
   no `blocks` edge that makes the epic wait on it: an epic already waits on its
   members.
 - **Give it a parent only when one applies.** A parent makes the bead a member
-  of its epic: parking the epic (`gc-helm.sh park`) holds the bead too, and the
+  of its epic: parking the epic (`gctk bead park`) holds the bead too, and the
   bead follows the epic's priority. The parent of the bead it came from applies
   only when the new work serves the same epic. Find it with
   `"$(gc <binding> scripts-dir)/converse-parent.sh" <bead>`.
@@ -178,15 +178,20 @@ polecat pool is `mol-polecat-work`.
 - **A held bead is placed, never slung.** A bead carrying `hold:mayor` waits
   for the operator's placement, and a sling reads no hold, so it would start
   the work with the label left on and the bead still in the queue. Once the
-  operator has placed it, carry that out with
-  `"$(gc <binding> scripts-dir)/gc-helm.sh" place <bead> --under <parent>`,
-  where the parent is the epic, or its open Delivery whose aim covers the bead,
-  or with `--standalone` for no parent. It sets the parent, settles the
-  priority, slings the bead to its rig's polecat pool, or arms it while a park
-  or a blocker holds it, and then lifts the hold. `--route <rig>/<pool>` and
+  operator has placed it, carry that out with `gctk bead place`, under the
+  parent, which is the epic, or its open Delivery whose aim covers the bead, or
+  with `--standalone` for no parent. It sets the parent, settles the priority,
+  slings the bead to its rig's polecat pool, or arms it while a park or a
+  blocker holds it, and then lifts the hold. `--route <rig>/<pool>` and
   `--on <formula>` send it elsewhere, and `--shift <±n>` ranks it against its
   parent. Running it again after a failure finishes the placement without a
-  second run.
+  second run:
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead place <bead> --under <parent>
+```
 - **One dispatch, never two.** A sling starts a workflow on the bead and sets
   `gc.execution_routed_to` on it. A raw route,
   `gc sling <rig>/<pool> <bead> --no-formula --no-convoy`, has the pool claim
@@ -286,15 +291,21 @@ When the proactive agent's first reaction to a bead cannot send it, the agent
 records the formula it recommends as `gc.recommended_formula` and asks the
 operator in a human gate on the bead, under the key `first-reaction`. Take the
 recommendation only once the operator approves it, and only through
-`gc-helm.sh accept`, the command the board's Accept button runs:
+`gctk reaction accept`, the one writer that dispatches a recommendation:
 
-- **Outside a sitting:** `"$(gc <binding> scripts-dir)/gc-helm.sh" accept <bead>`.
+- **Outside a sitting:**
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" reaction accept <bead>
+```
 - **In a sitting:** pass `--accept` on the sign-off, or on the `--answer` call
   of a turn that does not sign off. It answers the recommendation's gate
-  through `gc-helm.sh accept` after the ruling's other writes succeed, including
-  its answer to every other gate (the converse-settle step). Pass a var
-  the operator settles for the dispatch beside it as `--var <key>=<value>`; the
-  formula's own description names the vars it takes.
+  through `gctk reaction accept` after the ruling's other writes succeed,
+  including its answer to every other gate (the converse-settle step). Pass a
+  var the operator settles for the dispatch beside it as `--var <key>=<value>`;
+  the formula's own description names the vars it takes.
 
 Never send a recommended formula with a sling of your own. Accept holds a lock
 on the bead while it clears the recommendation's gate and nothing else, sends

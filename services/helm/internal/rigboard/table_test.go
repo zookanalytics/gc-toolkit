@@ -32,10 +32,12 @@ func TestTableRows(t *testing.T) {
 	owesReview := prstatus.Blocker{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
 		Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "7"}}
 	prWait := waits.Wait{ID: "tk-pr", Type: "blocks", Title: "land the change", Status: "open", IssueType: "task"}
-	// Where queue placed the bead: in a place the city takes as things stand,
-	// and in one it does not.
+	// Where queue placed the bead: in a place something sends it from, in one
+	// nothing does, and waiting outside the city.
 	taken := &queue.Place{ID: "tk-w", Layer: 1, Scheduled: true}
 	untaken := &queue.Place{ID: "tk-w", Layer: 1}
+	ready := &queue.Place{ID: "tk-w", Layer: 0}
+	outside := &queue.Place{ID: "tk-w", Layer: 0, Outside: true}
 
 	cases := []struct {
 		name   string
@@ -129,17 +131,32 @@ func TestTableRows(t *testing.T) {
 		{name: "assigned to an agent is queued",
 			in:  tableInput{b: bead{ID: "tk-w", Status: "open", Assignee: "gc-toolkit.mechanik"}, kind: KindWork, holds: clear, place: taken},
 			out: outQueued, group: GroupQueued, signal: "Queued"},
-		{name: "nobody scheduled it, and line 3 names what it waits on",
-			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait), place: untaken},
-			out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled", line3: []string{"tk-other"}},
-		{name: "armed, in a place the city does not take, is not scheduled",
-			in: tableInput{b: bead{ID: "tk-w", Status: "open", Labels: []string{"hold:external"}}, kind: KindWork,
-				holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: untaken},
+		{name: "ready work nothing sends is not scheduled",
+			in:  tableInput{b: work, kind: KindWork, holds: clear, place: ready, notScheduled: true},
 			out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled"},
+		{name: "ready work nothing sends is not scheduled, though a run it no longer has left a branch on its row",
+			in:  tableInput{b: work, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, InFlight: "carries branch"}, place: ready, notScheduled: true},
+			out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled"},
+		{name: "nothing sends it and it waits, so it names each wait",
+			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait), place: untaken},
+			out: outUnsent, group: GroupNotMoving, signal: "Waits on tk-other"},
+		{name: "nothing sends it, and the store does not serve it as ready though it waits on nothing",
+			in:  tableInput{b: work, kind: KindWork, holds: clear, place: untaken},
+			out: outUnsent, group: GroupNotMoving, signal: "Not ready"},
+		{name: "held hold:external, armed or not, waits outside the city",
+			in: tableInput{b: bead{ID: "tk-w", Status: "open", Labels: []string{"hold:external"}}, kind: KindWork,
+				holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: outside},
+			out: outOutside, group: GroupNotMoving, signal: "Waits outside the city"},
+		{name: "held for the Product Owner in any spelling, with nothing sending it, waits for the Product Owner",
+			in:  tableInput{b: bead{ID: "tk-w", Status: "open", Labels: []string{" Hold:Mayor "}}, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, InFlight: "carries branch"}, place: ready},
+			out: outForProductOwner, group: GroupNotMoving, signal: "Waits for the Product Owner"},
+		{name: "held for the Product Owner and worked by a live run is queued",
+			in:  tableInput{b: bead{ID: "tk-w", Status: "open", Labels: []string{"hold:mayor"}}, kind: KindWork, holds: clear, place: &queue.Place{ID: "tk-w", Scheduled: true}},
+			out: outQueued, group: GroupQueued, signal: "Queued"},
 		{name: "work that queue placed nowhere is unread",
 			in:  tableInput{b: bead{ID: "tk-w", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"}, kind: KindWork, holds: clear},
 			out: outUnread, signal: "unread"},
-		{name: "rows 6 to 8 never apply to an epic",
+		{name: "rows 6 to 9 never apply to an epic",
 			in:  tableInput{b: bead{ID: "tk-e", Status: "open", IssueType: "epic", Assignee: "gc-toolkit.mechanik"}, kind: KindEpic, holds: clear},
 			out: outNone},
 		{name: "a bead waits could not answer is unread",

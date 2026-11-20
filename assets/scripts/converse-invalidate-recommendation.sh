@@ -4,7 +4,7 @@
 # gc.recommended_formula from the SUBJECT and records why, leaving the subject
 # and the sitting's conversation open. gc.recommended_formula is the key the
 # operator's Accept reads — the board offers Accept only where it is present,
-# and gc-helm.sh accept refuses a bead without it — so removing it withdraws
+# and gctk reaction accept refuses a bead without it — so removing it withdraws
 # Accept while the subject stays open for Discuss.
 #
 # The board offers Accept on a row a live sitting is discussing too, so the
@@ -48,7 +48,7 @@ command -v jq >/dev/null 2>&1 || { echo "converse-invalidate-recommendation: jq 
 command -v gc >/dev/null 2>&1 || { echo "converse-invalidate-recommendation: gc is required" >&2; exit 2; }
 
 # A live recommendation is a NON-EMPTY gc.recommended_formula: every reader —
-# gc-helm.sh accept and gctk reaction dispose's stale-clear — treats a
+# gctk reaction accept and gctk reaction dispose's stale-clear — treats a
 # present-but-empty key as no recommendation, so this does too. One read
 # answers both questions the strip needs — is the subject readable, and is there
 # a live value to strip — so a subject that changes between reads cannot record a

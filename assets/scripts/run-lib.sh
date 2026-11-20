@@ -54,9 +54,6 @@
 # sibling from a tree left behind, and refinery-find-work.sh for a bead that
 # waits on the one it would take, to tell a writer from a bead that only waits.
 # gate-ensure.sh takes the runs poured over a review, live or not, to judge whether a pour still drives it.
-# gc-helm.sh ends the live runs beneath an anchor it releases, its park
-# survey applies run_rows to the listing it reads to find a bead's workflows,
-# and its place takes a live run that works a bead as a dispatch already made.
 # queue-priority.sh takes the live runs that work a bead it settles, to write
 # their convoys, roots and steps, and priority-lib.sh follows a root to the
 # convoy it names and a convoy to the bead it tracks through run_convoy and
