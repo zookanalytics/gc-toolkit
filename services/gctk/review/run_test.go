@@ -63,6 +63,7 @@ func (f *filed) File(subject, key, message string) error {
 func newWorld(t *testing.T) *world {
 	t.Helper()
 	s := fake.New()
+	s.IDPrefix = "tk"
 	s.Put(bead{ID: prBead, Status: "blocked", IssueType: "task", Metadata: map[string]string{
 		"merge_result": "pull_request_pending", "branch": branch, "pr_head_sha": h1, "merged_target": target,
 	}, Edges: []gcbd.Edge{{ID: root, Type: gcbd.EdgeBlocks}}})
@@ -733,6 +734,135 @@ func TestOneSourceAndReasonFiledTwice(t *testing.T) {
 	}
 	if id, filed, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "Fix the cap.", Source: "tk-other"}, nil); err != nil || !filed || id == first {
 		t.Fatalf("another source's ask = %q, %t, %v; want one of its own", id, filed, err)
+	}
+	if n := len(w.store.Creates()); n != 2 {
+		t.Fatalf("the store took %d creates; want 2", n)
+	}
+}
+
+// An ask filed to wait on another bead carries the wait in the create that
+// files it, as its own blocks edge beside its edge onto the PR's bead, and no
+// write follows, so no read finds the ask without its wait.
+func TestAnAskThatWaitsLandsWithItsWaitInOneCreate(t *testing.T) {
+	w := newWorld(t)
+	w.store.Put(bead{ID: "tk-ruling", Status: "closed", IssueType: "task"})
+	w.store.Put(bead{ID: "tk-other", Status: "open", IssueType: "task"})
+	req := review.AskRequest{Bead: prBead, Reason: "Fix the cap.", Source: "tk-ruling", WaitingOn: []string{"tk-other", " tk-other "}}
+	id, filed, err := review.FileAsk(w.ledger(), req, nil)
+	if err != nil || !filed {
+		t.Fatalf("FileAsk = %q, %t, %v", id, filed, err)
+	}
+	creates := w.store.Creates()
+	if deps := "blocks:" + prBead + ",blocked-by:tk-other,discovered-from:tk-ruling"; len(creates) != 1 || !slices.Contains(creates[0].Args, deps) {
+		t.Fatalf("the store took the creates %+v; want one whose --deps are %s", creates, deps)
+	}
+	if writes := w.store.Writes(); len(writes) != 0 {
+		t.Fatalf("filing the ask wrote %+v after its create; want no write", writes)
+	}
+	asks, err := review.AsksOn(w.ledger(), prBead)
+	if err != nil || len(asks) != 1 || asks[0].ID != id || !slices.Equal(asks[0].WaitingOn, []string{"tk-other"}) {
+		t.Fatalf("AsksOn = %+v, %v; want the one ask, waiting on tk-other", asks, err)
+	}
+}
+
+// A wait whose edge would hold nothing is refused by name with nothing filed,
+// by the ledger's rule for every wait edge, which FileAsk returns as its own
+// refusal. bd keeps an edge between beads of two id prefixes as one into
+// another rig's store, so a bead of another prefix is refused whether another
+// rig's store holds it or the PR's store does. A bead of the PR bead's prefix
+// is refused when the store does not hold it.
+func TestAnAskThatWaitsOnABeadItsEdgeWouldNotHoldIsRefused(t *testing.T) {
+	for _, c := range []struct{ name, wait, why string }{
+		{"a bead in another rig's store", "rb-other", "rb-other does not carry the id prefix tk,"},
+		{"a bead of another prefix that the PR's store holds", "rb-held", "rb-held does not carry the id prefix tk,"},
+		{"a bead of the PR's prefix that the store does not hold", "tk-gone", "the store holds no bead tk-gone"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.store.Put(bead{ID: "tk-other", Status: "open", IssueType: "task"})
+			w.store.Put(bead{ID: "rb-held", Status: "open", IssueType: "task"})
+			_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: prBead, Reason: "Fix the cap.", WaitingOn: []string{"tk-other", c.wait}}, nil)
+			var refused *review.Refusal
+			if !errors.As(err, &refused) || !strings.Contains(err.Error(), c.wait) || !strings.Contains(err.Error(), c.why) || strings.Contains(err.Error(), "tk-other") {
+				t.Fatalf("a wait on %s: %v; want a refusal that names %s alone, saying %q", c.wait, err, c.wait, c.why)
+			}
+			if n := len(w.store.Creates()); n != 0 {
+				t.Fatalf("the refused ask reached the store in %d creates", n)
+			}
+		})
+	}
+}
+
+// A store can hold a bead of another id prefix than the one it gives a bead it
+// files, which bd allows under --force or allowed_prefixes. An ask on such a
+// PR's bead is refused with nothing filed, with or without a wait of the
+// bead's prefix, since bd keeps both the ask's edge onto the bead and its wait
+// as edges into another rig's store, and the ledger refuses both.
+func TestAnAskOnABeadOfAnotherPrefixThanItsStoreIsRefused(t *testing.T) {
+	w := newWorld(t)
+	pr, _ := w.store.Row(prBead)
+	pr.ID = "rb-pr"
+	w.store.Put(pr)
+	w.store.Put(bead{ID: "rb-other", Status: "open", IssueType: "task"})
+	for _, waits := range [][]string{nil, {"rb-other"}} {
+		_, _, err := review.FileAsk(w.ledger(), review.AskRequest{Bead: "rb-pr", Reason: "Fix the cap.", WaitingOn: waits}, nil)
+		var refused *review.Refusal
+		if !errors.As(err, &refused) || !strings.Contains(err.Error(), "rb-pr") || !strings.Contains(err.Error(), "does not carry the id prefix tk,") {
+			t.Fatalf("an ask on rb-pr in a store of prefix tk, waiting on %v: %v; want a refusal naming rb-pr and the prefix tk", waits, err)
+		}
+	}
+	if n := len(w.store.Creates()); n != 0 {
+		t.Fatalf("the refused asks reached the store in %d creates", n)
+	}
+}
+
+// A re-run finds the ask of its source and reason and files nothing. One that
+// names a wait the ask it finds does not carry is refused, naming the ask and
+// that wait, so it never answers with an ask that a run can take first. One
+// that names the waits the ask carries, or none, finds it.
+func TestARerunNamingAWaitTheAskLacksIsRefused(t *testing.T) {
+	w := newWorld(t)
+	for _, id := range []string{"tk-ruling", "tk-later"} {
+		w.store.Put(bead{ID: id, Status: "closed", IssueType: "task"})
+	}
+	for _, id := range []string{"tk-other", "tk-third"} {
+		w.store.Put(bead{ID: id, Status: "open", IssueType: "task"})
+	}
+	bare := review.AskRequest{Bead: prBead, Reason: "Fix the cap.", Source: "tk-ruling"}
+	first, _, err := review.FileAsk(w.ledger(), bare, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting := bare
+	waiting.WaitingOn = []string{"tk-other"}
+	_, _, err = review.FileAsk(w.ledger(), waiting, nil)
+	var refused *review.Refusal
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), first) || !strings.Contains(err.Error(), "tk-other") || !strings.Contains(err.Error(), "can take it") {
+		t.Fatalf("a re-run waiting on tk-other, beside an open ask that does not wait: %v; want a refusal naming %s and tk-other, which a run can take", err, first)
+	}
+	row, _ := w.store.Row(first)
+	row.Status = "closed"
+	w.store.Put(row)
+	_, _, err = review.FileAsk(w.ledger(), waiting, nil)
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), first) || !strings.Contains(err.Error(), "closed without waiting on tk-other") || strings.Contains(err.Error(), "can take it") {
+		t.Fatalf("a re-run waiting on tk-other, beside a closed ask that did not wait: %v; want a refusal saying %s closed without that wait", err, first)
+	}
+
+	later := review.AskRequest{Bead: prBead, Reason: "Fix the cap.", Source: "tk-later", WaitingOn: []string{"tk-other"}}
+	second, _, err := review.FileAsk(w.ledger(), later, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, waits := range [][]string{{"tk-other"}, nil} {
+		later.WaitingOn = waits
+		if id, filed, err := review.FileAsk(w.ledger(), later, nil); err != nil || filed || id != second {
+			t.Fatalf("a re-run waiting on %v = %q, %t, %v; want %s found", waits, id, filed, err, second)
+		}
+	}
+	later.WaitingOn = []string{"tk-other", "tk-third"}
+	_, _, err = review.FileAsk(w.ledger(), later, nil)
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "tk-third") || strings.Contains(err.Error(), "tk-other") {
+		t.Fatalf("a re-run that adds tk-third: %v; want a refusal that names tk-third alone", err)
 	}
 	if n := len(w.store.Creates()); n != 2 {
 		t.Fatalf("the store took %d creates; want 2", n)

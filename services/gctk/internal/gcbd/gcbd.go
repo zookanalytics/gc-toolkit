@@ -304,6 +304,33 @@ func (c *Client) Where() (path, prefix string, err error) {
 	return where.Path, where.Prefix, nil
 }
 
+// Prefix is the id prefix the store gives a bead it files: the store's
+// issue_prefix setting, which bd's create mints an id from, read with `gc bd
+// config get issue_prefix --json` from the store the client reads, less the
+// trailing dash the create drops. The prefix `gc bd where` names is
+// config.yaml's when that file sets one, and the create does not read it. A
+// read that fails or names no prefix returns a *ReadError.
+func (c *Client) Prefix() (string, error) {
+	var stderr bytes.Buffer
+	cmd := c.command("bd", "config", "get", "issue_prefix", "--json")
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", &ReadError{Reason: "gc bd config get did not read the store's issue prefix: " + failure(out, stderr.String())}
+	}
+	var setting struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(Scrub(out), &setting); err != nil {
+		return "", &ReadError{Reason: "gc bd config get did not decode: " + err.Error()}
+	}
+	prefix := strings.TrimSuffix(setting.Value, "-")
+	if prefix == "" {
+		return "", &ReadError{Reason: "the store sets no issue prefix"}
+	}
+	return prefix, nil
+}
+
 // configuredRig is one store the city's config names, a rig's or the city's
 // own: its name, its bead prefix, and the folder its .beads directory sits
 // under.

@@ -503,19 +503,45 @@ func TestADraftWithAnOpenAskThatNothingHoldsIsNotMarkedReady(t *testing.T) {
 	is(t, d.once(t), pr.ActReadied)
 }
 
-// An ask an open bead holds, on a head that passed, pours no run, files no gate
-// and leaves the head's passed result, and the run after the bead that holds it
-// closes pours one run, which can take it.
-func TestAnAskAnOpenBeadHoldsWaitsAndThePassAfterItsHolderClosesPoursOne(t *testing.T) {
+// listOnItsWaits has the blocked listing hold the bead on each bead its own
+// blocks edges name that has not closed, and leave it out when none is open,
+// as the store's blocked rule does, so the listing holds an ask only on a wait
+// its create wrote.
+func (d *admitting) listOnItsWaits(t *testing.T, id string) {
+	t.Helper()
+	r, ok := d.store.Row(id)
+	if !ok {
+		t.Fatalf("no bead %s", id)
+	}
+	var on []string
+	for _, e := range r.Edges {
+		if far, ok := d.store.Row(e.ID); ok && e.Type == gcbd.EdgeBlocks && far.Status != "closed" {
+			on = append(on, e.ID)
+		}
+	}
+	if len(on) == 0 {
+		d.store.Unlist(id)
+		return
+	}
+	d.store.List(id, on...)
+}
+
+// An ask filed to wait on an open bead, as a send-back that waits for another
+// PR is, on a head that passed, pours no run, files no gate and leaves the
+// head's passed result, because its create wrote the wait. The pass after that
+// bead closes pours one run, which can take it.
+func TestAnAskFiledToWaitOnAnOpenBeadGetsNoRunUntilThatBeadCloses(t *testing.T) {
 	d := newAdmit(t)
 	passed := `[{"head":"` + head + `","target":"main","passed":true}]`
 	d.edit(t, func(b *fake.Bead) { b.Metadata["review_results"] = passed })
-	a := d.ask(t, "Apply the ruling once the other PR lands.")
 	d.store.Put(fake.Bead{ID: "tk-other", Title: "the other PR's work", Status: "open"})
-	r, _ := d.store.Row(a)
-	r.Edges = append(r.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: "tk-other", Status: "open"})
-	d.store.Put(r)
-	d.store.List(a, "tk-other")
+	a, filed, err := review.FileAsk(ledger.New(d.store), review.AskRequest{Bead: bead,
+		Reason: "Apply the ruling once the other PR lands.", WaitingOn: []string{"tk-other"}}, nil)
+	if err != nil || !filed {
+		t.Fatalf("the ask did not file: %v (filed %v)", err, filed)
+	}
+	d.store.List(bead, a)
+	d.listOnItsWaits(t, a)
 	o := d.once(t)
 	is(t, o, pr.ActChecked)
 	if d.runs.count() != 0 || len(d.gates.list()) != 0 || d.row(t).Metadata["review_results"] != passed {
@@ -525,11 +551,18 @@ func TestAnAskAnOpenBeadHoldsWaitsAndThePassAfterItsHolderClosesPoursOne(t *test
 	other, _ := d.store.Row("tk-other")
 	other.Status, other.ClosedAt = "closed", "2026-11-12T09:30:00Z"
 	d.store.Put(other)
-	d.store.Unlist(a)
+	r, _ := d.store.Row(a)
+	for i := range r.Edges {
+		if r.Edges[i].ID == "tk-other" {
+			r.Edges[i].Status, r.Edges[i].ClosedAt = "closed", other.ClosedAt
+		}
+	}
+	d.store.Put(r)
+	d.listOnItsWaits(t, a)
 	o = d.once(t)
 	is(t, o, pr.ActPoured)
 	if !strings.Contains(o.Detail, a) || d.runs.count() != 1 {
-		t.Fatalf("the pass after the holder closed poured %d runs (%s)", d.runs.count(), o.Detail)
+		t.Fatalf("the pass after tk-other closed poured %d runs (%s)", d.runs.count(), o.Detail)
 	}
 	got, err := review.AsksOn(ledger.New(d.store), bead)
 	if err != nil || len(got) != 1 || !got[0].Takeable() {
