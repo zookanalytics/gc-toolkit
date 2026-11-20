@@ -344,7 +344,7 @@ no warrant.
   - In `gastownhall/beads`, an update that would close a bead with an open
     child or a live direct blocker returns `CloseOpenChildrenError` or
     `ErrCloseBlocked` to its caller unless it forces the close policy
-    (`issueops/issueops.go` 561-566). bd's human gate
+    (`issueops/issueops.go` 573-578). bd's human gate
     (`bd gate create --type human`, `cmd/bd/gate.go` 1952) is the primitive the
     exception's gate composes.
   - A search of `gastownhall/gascity` and `gastownhall/beads` for a refused
@@ -352,8 +352,9 @@ no warrant.
     in Gas City handles a refusal inside the closes Gas City makes itself, such
     as the autoclose sweep's retry of a convoy, wisp or molecule autoclose
     (`cmd/gc/autoclose_sweep.go` 21-22).
-- **Verified.** 2026-11-17, at `gastownhall/gascity-packs` main 0f07496d2,
-  `gastownhall/beads` main 8cdfa796a and `gastownhall/gascity` main 6cf1cccd6.
+- **Verified.** 2026-11-20, at `gastownhall/gascity-packs` main 132914b3e42e,
+  `gastownhall/beads` main 3a274fbf8f76 and `gastownhall/gascity` main
+  441dfd3e25bf.
 - **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
   make. The exception then moves onto what Gas Town records.
 
