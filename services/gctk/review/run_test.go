@@ -524,31 +524,23 @@ func TestNoResultForARunThatJudgedNoHead(t *testing.T) {
 
 // The asks the last round answered close with their work record, which the
 // runtime's enforced work-record gate takes: an ask fixed at an earlier head
-// as shipped with its commit on the PR's branch, any other as no-op; a shadow
-// run writes nothing and files no gate.
+// as shipped with its commit on the PR's branch, any other as no-op.
 func TestRecordClosesTheAsksTheRunAnswered(t *testing.T) {
-	setup := func(shadow bool) *world {
-		w := newWorld(t)
-		w.store.WorkRecordGate = true
-		if shadow {
-			w.shadowRun()
-		}
-		w.ask("tk-fixed", "")
-		w.ask("tk-nit", "")
-		w.ask("tk-asked", "")
-		w.output(triage(1, h1, "correctness"))
-		w.output(lane(1, "correctness", h1, review.VerdictApprove))
-		w.output(repair(1, h1, h2, review.Ruling{Ask: "tk-fixed", Ruling: review.RulingMustFix, Commit: fix},
-			review.Ruling{Ask: "tk-nit", Ruling: review.RulingDeclined}, review.Ruling{Ask: "tk-asked", Ruling: review.RulingDeclined}))
-		w.output(triage(2, h2, "correctness"))
-		w.output(lane(2, "correctness", h2, review.VerdictApprove))
-		w.output(repair(2, h2, "", review.Ruling{Ask: "tk-fixed", Ruling: review.RulingAnswered},
-			review.Ruling{Ask: "tk-nit", Ruling: review.RulingDeclined},
-			review.Ruling{Ask: "tk-asked", Ruling: review.RulingQuestion, Gate: "tk-gate"}))
-		w.store.Put(bead{ID: "tk-gate", Status: "open", IssueType: "gate"})
-		return w
-	}
-	w := setup(false)
+	w := newWorld(t)
+	w.store.WorkRecordGate = true
+	w.ask("tk-fixed", "")
+	w.ask("tk-nit", "")
+	w.ask("tk-asked", "")
+	w.output(triage(1, h1, "correctness"))
+	w.output(lane(1, "correctness", h1, review.VerdictApprove))
+	w.output(repair(1, h1, h2, review.Ruling{Ask: "tk-fixed", Ruling: review.RulingMustFix, Commit: fix},
+		review.Ruling{Ask: "tk-nit", Ruling: review.RulingDeclined}, review.Ruling{Ask: "tk-asked", Ruling: review.RulingDeclined}))
+	w.output(triage(2, h2, "correctness"))
+	w.output(lane(2, "correctness", h2, review.VerdictApprove))
+	w.output(repair(2, h2, "", review.Ruling{Ask: "tk-fixed", Ruling: review.RulingAnswered},
+		review.Ruling{Ask: "tk-nit", Ruling: review.RulingDeclined},
+		review.Ruling{Ask: "tk-asked", Ruling: review.RulingQuestion, Gate: "tk-gate"}))
+	w.store.Put(bead{ID: "tk-gate", Status: "open", IssueType: "gate"})
 	got := w.record(2)
 	want := []review.ClosedAsk{{ID: "tk-fixed", Ruling: review.RulingAnswered, Outcome: "shipped", Commit: fix},
 		{ID: "tk-nit", Ruling: review.RulingDeclined, Outcome: "no-op"}}
@@ -573,11 +565,6 @@ func TestRecordClosesTheAsksTheRunAnswered(t *testing.T) {
 	}
 	if !reflect.DeepEqual(w.results(), []review.Result{{Head: h2, Target: target, Run: root}}) {
 		t.Fatalf("with the question's gate open, review_results = %+v", w.results())
-	}
-
-	w = setup(true)
-	if got := w.record(2); !got.Shadow || len(w.store.Writes()) != 0 || len(w.gates.calls) != 0 {
-		t.Fatalf("a shadow run recorded %+v, wrote %+v and filed %v; want nothing written", got, w.store.Writes(), w.gates.calls)
 	}
 }
 

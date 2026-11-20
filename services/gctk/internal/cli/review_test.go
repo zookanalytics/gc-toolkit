@@ -113,8 +113,7 @@ func checking(t *testing.T, s *fake.Store, rt *gcfake.Runtime, n int) (int, stri
 // last it records nothing; at the last attempt not passing it records a result
 // that does not pass, asks a person through a review-loop-exhausted gate and
 // exits 1, so the loop ends exhausted. A write, the gate or the findings' close
-// that does not land exits 75, which spends no attempt. A shadow run writes,
-// files and runs nothing.
+// that does not land exits 75, which spends no attempt.
 func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 	triage := func(n int, head string) string {
 		return `{"review":"triage","iteration":` + string(rune('0'+n)) + `,"head":"` + head + `","checks":[],"material":false}`
@@ -181,18 +180,5 @@ func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 	}}
 	if code, _, errs := checking(t, s, rt, 1); code != passedNoVerdict || !strings.Contains(errs, "findings whose asks closed") {
 		t.Fatalf("a findings' close that did not land = exit %d: %s; want %d", code, errs, passedNoVerdict)
-	}
-
-	s = withBound(runStore())
-	r, _ := s.Row("tk-run")
-	r.Metadata["gc.var.shadow"] = "true"
-	s.Put(r)
-	putOutput(s, "tk-o1", triage(1, runHead))
-	putOutput(s, "tk-o2", repair(1, runHead, runNext))
-	putOutput(s, "tk-o3", triage(2, runNext))
-	rt = &gcfake.Runtime{}
-	code, out, _ = checking(t, s, rt, 2)
-	if code != 1 || result(s) != "" || len(rt.Scripts()) != 0 || !strings.Contains(out, "shadow run, nothing filed") {
-		t.Fatalf("a shadow run's last attempt = exit %d, review_results %q, scripts %v: %s", code, result(s), scripts(rt), out)
 	}
 }
