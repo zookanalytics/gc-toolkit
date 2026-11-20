@@ -78,7 +78,7 @@ func (c *Call) fail(status int, msg string) error {
 	return exit(status)
 }
 
-func (c *Call) out(s string) { io.WriteString(c.Stdout, s) }
+func (c *Call) out(s string) { _, _ = io.WriteString(c.Stdout, s) }
 
 // required is a setting the harness always exports, read the way the stub's
 // ${NAME:?} reads it.
