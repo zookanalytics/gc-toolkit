@@ -105,7 +105,7 @@ func get(t *testing.T, method, url, accept string) (*http.Response, []byte) {
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +235,9 @@ func startServe(t *testing.T, cmdline, dir string) string {
 		t.Fatal(err)
 	}
 	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
-	ln.Close()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	var stderr lockedBuffer
 	cmd := exec.Command("bash", "-c", cmdline)
@@ -272,7 +274,7 @@ func startServe(t *testing.T, cmdline, dir string) string {
 		default:
 		}
 		if res, err := http.Get(base + "/"); err == nil {
-			res.Body.Close()
+			_ = res.Body.Close()
 			if res.StatusCode == http.StatusOK {
 				return base
 			}

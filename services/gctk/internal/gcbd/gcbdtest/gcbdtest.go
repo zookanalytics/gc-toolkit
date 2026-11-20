@@ -193,7 +193,9 @@ func (s *Store) Enter(t *testing.T, more string) {
 	for _, kv := range os.Environ() {
 		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "BEADS_") || strings.HasPrefix(name, "GC_") {
 			t.Setenv(name, "")
-			os.Unsetenv(name)
+			if err := os.Unsetenv(name); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	t.Setenv("BEADS_DIR", s.DB())

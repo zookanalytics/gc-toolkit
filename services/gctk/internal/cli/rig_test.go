@@ -433,7 +433,7 @@ func TestRigAResultTheStoreDoesNotTakeIsAMachineFailureAndIsNotPublished(t *test
 			if err := os.Mkdir(store, 0o555); err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { os.Chmod(store, 0o755) })
+			t.Cleanup(func() { _ = os.Chmod(store, 0o755) })
 			args := append(append([]string{"test"}, c.args...), "--publish-bead", "tk-work")
 
 			code, _, errs := f.call(args...)
@@ -463,11 +463,20 @@ func TestRigAResultTheStoreDoesNotTakeIsAMachineFailureAndIsNotPublished(t *test
 
 func TestRigRefusesADirtyTree(t *testing.T) {
 	for name, dirty := range map[string]func(f *rigFixture){
-		"an untracked file":   func(f *rigFixture) { f.write("new.txt", "x\n") },
-		"an unstaged change":  func(f *rigFixture) { f.write("a.txt", "changed\n") },
-		"a staged change":     func(f *rigFixture) { f.write("a.txt", "changed\n"); f.git("add", "a.txt") },
-		"a deleted file":      func(f *rigFixture) { os.Remove(filepath.Join(f.repo, "a.txt")) },
-		"an untracked subdir": func(f *rigFixture) { os.Mkdir(filepath.Join(f.repo, "d"), 0o755); f.write("d/x", "x\n") },
+		"an untracked file":  func(f *rigFixture) { f.write("new.txt", "x\n") },
+		"an unstaged change": func(f *rigFixture) { f.write("a.txt", "changed\n") },
+		"a staged change":    func(f *rigFixture) { f.write("a.txt", "changed\n"); f.git("add", "a.txt") },
+		"a deleted file": func(f *rigFixture) {
+			if err := os.Remove(filepath.Join(f.repo, "a.txt")); err != nil {
+				f.t.Fatal(err)
+			}
+		},
+		"an untracked subdir": func(f *rigFixture) {
+			if err := os.Mkdir(filepath.Join(f.repo, "d"), 0o755); err != nil {
+				f.t.Fatal(err)
+			}
+			f.write("d/x", "x\n")
+		},
 		"an untracked file config hides": func(f *rigFixture) {
 			f.git("config", "status.showUntrackedFiles", "no")
 			f.write("foo_test.go", "package foo\n")
