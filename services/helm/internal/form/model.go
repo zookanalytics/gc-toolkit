@@ -533,8 +533,7 @@ func (m *Model) resolved() *lookup {
 }
 
 // heldLines are what holds the subject with no bead behind it: the PR's own
-// review threads and its blocked merge verdict, which prstatus.Reasons gives
-// with no ID. Engaging the subject is how a person acts on them, so each is a
+// review threads, which prstatus.RenderReasons gives with no ID. Engaging the subject is how a person acts on them, so each is a
 // line under the rows on the subject, and no row: the cursor, Space and Ctrl+S
 // never reach it. A gate or a blocker is a row (contextRows).
 func (m *Model) heldLines() []string {

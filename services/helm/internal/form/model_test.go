@@ -2094,24 +2094,21 @@ func TestAShortTerminalShowsFewerLinesOfTheQuestion(t *testing.T) {
 	}
 }
 
-// heldAbout is tk-a with one conversation, held by a gate, by its PR's review
-// threads and by the merge pass's blocked verdict. The two the PR holds it by
-// carry no ID, as prstatus.Reasons gives them.
+// heldAbout is tk-a with one conversation, held by a gate and by its PR's
+// review threads, which carry no ID, as prstatus.RenderReasons gives them.
 func heldAbout() About {
 	a := subjectAbout("tk-a", "gc-toolkit")
 	a.Conversations = []Conversation{{ID: "tk-c1", Readiness: Ready, Title: "a question"}}
 	a.Holds = []Hold{
 		{Held: "gate", ID: "tk-g1", Title: "approve the wording"},
 		{Held: "review", Title: "2 review threads wait on the city's answer"},
-		{Held: "blocked", Title: "a live blocker no automated actor holds"},
 	}
 	return a
 }
 
-// What holds the subject with no bead behind it, the PR's review threads and
-// its blocked verdict, is shown under the rows, and no key reaches it: the
-// cursor stops on the last row, Space chooses only rows, and Ctrl+S files on the
-// subject.
+// What holds the subject with no bead behind it, the PR's review threads, is
+// shown under the rows, and no key reaches it: the cursor stops on the last
+// row, Space chooses only rows, and Ctrl+S files on the subject.
 func TestHoldsWithNoBeadAreShownAndNeverChosen(t *testing.T) {
 	f := &fakeHelm{
 		about:    map[string]About{"tk-a": heldAbout()},
@@ -2120,13 +2117,8 @@ func TestHoldsWithNoBeadAreShownAndNeverChosen(t *testing.T) {
 	m := newForm(t, f, Options{Subject: "tk-a"})
 	settle(m)
 	v := m.composeView()
-	for _, want := range []string{
-		"· held: review — 2 review threads wait on the city's answer",
-		"· held: blocked — a live blocker no automated actor holds",
-	} {
-		if !strings.Contains(v, want) {
-			t.Fatalf("the screen does not show %q:\n%s", want, v)
-		}
+	if want := "· held: review — 2 review threads wait on the city's answer"; !strings.Contains(v, want) {
+		t.Fatalf("the screen does not show %q:\n%s", want, v)
 	}
 	if rows := m.contextRows(); len(rows) != 3 || rows[1].id != "tk-c1" || rows[2].id != "tk-g1" {
 		t.Fatalf("rows = %+v, want the new conversation, tk-c1 and the gate", rows)
@@ -2527,8 +2519,8 @@ func TestHeldLinesStayOnScreenWithTheRowInPlay(t *testing.T) {
 	if l := marked(shown, "› "); !strings.Contains(l, "tk-c24") {
 		t.Fatalf("the cursor's row is not on screen:\n%s", v)
 	}
-	if marked(shown, "· held: review") == "" || marked(shown, "· held: blocked") == "" {
-		t.Fatalf("the held lines are not on screen:\n%s", v)
+	if marked(shown, "· held: review") == "" {
+		t.Fatalf("the held line is not on screen:\n%s", v)
 	}
 }
 

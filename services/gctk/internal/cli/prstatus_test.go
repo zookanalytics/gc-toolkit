@@ -70,7 +70,7 @@ func derive(t *testing.T, anchor string, extra ...string) (string, int) {
 func TestPRStatusDerive(t *testing.T) {
 	t.Run("a rework child in the in-flight set => working", func(t *testing.T) {
 		stubGC(t,
-			`[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]`,
+			`[{"id":"tk-a","status":"open","metadata":{}}]`,
 			`[{"id":"tk-k","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`)
 		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
 			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
@@ -79,7 +79,7 @@ func TestPRStatusDerive(t *testing.T) {
 
 	t.Run("a non-rework bead in the in-flight set => working", func(t *testing.T) {
 		stubGC(t,
-			`[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]`,
+			`[{"id":"tk-a","status":"open","metadata":{}}]`,
 			`[{"id":"tk-v","metadata":{"task_kind":"validation","anchor_bead":"tk-a"}}]`)
 		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
 			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
@@ -90,20 +90,6 @@ func TestPRStatusDerive(t *testing.T) {
 		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_hold":true}}]`, `[]`)
 		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
 			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
-		}
-	})
-
-	t.Run("a draft the city opened, not yet readied => working", func(t *testing.T) {
-		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123"}}]`, `[]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
-		}
-	})
-
-	t.Run("a draft the city readied => needs-review", func(t *testing.T) {
-		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123","draft_readied":"abc123"}}]`, `[]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-review\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-review\n")
 		}
 	})
 
@@ -122,34 +108,15 @@ func TestPRStatusDerive(t *testing.T) {
 		}
 	})
 
-	// An approved PR the merge pass would land reads merging until an open human
-	// gate blocks its anchor; the gate is a hold, so the same PR then reads
-	// needs-attention.
-	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}}]`
+	// An approved PR reads merging until an open human gate blocks its anchor;
+	// the gate is a hold, so the same PR then reads needs-attention.
+	approved := `[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t"}}]`
 	gate := `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","await_id":"pr-comments.7.x","title":"answer the review","dependency_type":"blocks"}]`
 
 	t.Run("approved and merging, no open human gate => merging", func(t *testing.T) {
 		stubGC(t, approved, `[]`)
 		if out, code := derive(t, "tk-a"); code != 0 || out != "merging\n" {
 			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "merging\n")
-		}
-	})
-
-	// The machine verdict and its cause are read off the anchor: a blocked
-	// verdict at the posture's head holds the PR, and one whose cause is a live
-	// blocker no automated actor holds counts whatever is in flight.
-	t.Run("approved, blocked by the merge pass at the posture's head => needs-attention", func(t *testing.T) {
-		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"check-failed"}}]`, `[]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
-		}
-	})
-
-	t.Run("the blocker cause beside live work => needs-attention", func(t *testing.T) {
-		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker"}}]`,
-			`[{"id":"tk-f","status":"open","metadata":{"task_kind":"finding","anchor_bead":"tk-a"}}]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
 		}
 	})
 
@@ -242,10 +209,10 @@ func TestPRStatusDerive(t *testing.T) {
 
 // --json prints the status beside what holds the PR, the values the held: labels
 // carry. An open human gate blocking the anchor holds it, and a live decision
-// holds it as the merge pass's stuck-blocker verdict does. A route marks no
-// blocker as a person's.
+// holds it as a bead a person owes the next move on. A route marks no blocker
+// as a person's.
 func TestPRStatusDeriveHeld(t *testing.T) {
-	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}}]`
+	approved := `[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t"}}]`
 	rework := `[{"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`
 	gate := `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]`
 	for _, tc := range []struct {
@@ -279,13 +246,7 @@ func TestPRStatusDeriveHeld(t *testing.T) {
 		{"a blocker a pool will claim is the city's", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependency_type":"blocks"}]`},
 			`{"status":"merging","held":[],"reasons":[]}`},
-		{"the merge pass's thread verdict", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"review-threads"}}]`, `[]`, nil,
-			`{"status":"needs-attention","held":["review"],"reasons":[{"held":"review","id":"","title":"unresolved review threads hold the merge"}]}`},
-		{"the merge pass's stuck-blocker verdict", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker"}}]`, `[]`, nil,
-			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"","title":"a live blocker no automated actor holds"}]}`},
-		{"a failed check reads needs-attention and holds nothing", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"check-failed"}}]`, `[]`, nil,
-			`{"status":"needs-attention","held":[],"reasons":[]}`},
-		{"the merge freeze reads needs-attention and holds nothing", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","merge_hold":"true"}}]`, `[]`, nil,
+		{"the merge freeze reads needs-attention and holds nothing", `[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}}]`, `[]`, nil,
 			`{"status":"needs-attention","held":[],"reasons":[]}`},
 		{"a human gate on the anchor beside a person's blocker", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"},{"id":"tk-d","status":"open","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
@@ -335,8 +296,7 @@ func TestPRStatusDeriveHeld(t *testing.T) {
 // from the same beads through the in-memory store: the status, the held values
 // and the reasons. The answer is the definition's own, so a change to it reaches
 // this reader with no edit here, and a rule kept in this command would part from
-// it. The helm board's TestBoardReadsTheDefinition holds the board to the same
-// scenarios the same way.
+// it.
 func TestPRStatusDeriveReadsTheDefinition(t *testing.T) {
 	scenarios, err := fixture.Scenarios()
 	if err != nil {
@@ -431,7 +391,7 @@ func storeRow(sc fixture.Scenario, b fixture.Bead) map[string]any {
 // The walk behind the held: gate value: a gate on a rework the anchor waits on
 // holds the PR, by the one read the label and engage share.
 func TestPRStatusDeriveWalksToTheGate(t *testing.T) {
-	unapproved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"review_required@abc@t"}}]`
+	unapproved := `[{"id":"tk-a","status":"open","metadata":{"pr_posture":"review_required@abc@t"}}]`
 	inFlight := `[{"id":"tk-rw","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`
 	rework := `[{"id":"tk-rw","status":"open","issue_type":"task","dependency_type":"blocks"}]`
 	const openGate = `{"id":"tk-g","title":"approve the release","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"}`
@@ -734,16 +694,6 @@ func TestPRStatusOnThePendingRecord(t *testing.T) {
 		}
 	})
 
-	t.Run("the merge pass's verdict and thread count, left from the old record, hold nothing", func(t *testing.T) {
-		store := pendingStore(t, map[string]any{"review_results": nil, "pr_github_read": savedRead(t, unapproved),
-			"pr_posture": "approved@abc@t", "pr.machine": "blocked@abc@t", "pr.machine_cause": "blocker",
-			"pr.unanswered_threads": "2@abc"}, nil)
-		got := decode(t, store)
-		if got.Status != "working" || len(got.Held) != 0 || got.Held == nil || len(got.Reasons) != 0 || got.Reasons == nil {
-			t.Fatalf("derive --json = %+v, want working with nothing held", got)
-		}
-	})
-
 	t.Run("a saved read that does not decode derives nothing", func(t *testing.T) {
 		store := pendingStore(t, map[string]any{"pr_github_read": "{not json"}, nil)
 		if out, code := pendingDerive(t, store); code != 2 || out != "" {
@@ -752,7 +702,7 @@ func TestPRStatusOnThePendingRecord(t *testing.T) {
 	})
 
 	t.Run("an anchor off the record reads its recorded facts, and its --json carries no answer", func(t *testing.T) {
-		out, code := pendingDerive(t, `[{"id":"st-1","status":"open","metadata":{"merge_result":"pull_request"}}]`, "--json")
+		out, code := pendingDerive(t, `[{"id":"st-1","status":"open","metadata":{"merge_result":"pull_request_closed_unmerged"}}]`, "--json")
 		if code != 0 || strings.Contains(out, `"ready"`) || strings.Contains(out, `"conditions"`) {
 			t.Fatalf("derive --json = (%q, %d), want the derivation alone", out, code)
 		}
