@@ -734,11 +734,11 @@ func TestAnOpenChangedHeadIsRequeuedForValidation(t *testing.T) {
 	readsThePR(t, d)
 }
 
-// The refinery pushes a head and then records it, so a read the watch saved
-// before the push finds the PR at a head the validated one descends from. The
-// act fetches the PR's branch and finds the validated head on it, so the read
-// is older than the record: nothing is sent back on it, and once the watch
-// reads the PR again, the record stands at its head.
+// The refinery pushes a head and then records it, and GitHub's answer can lag
+// the push, so the act's own read finds the PR at a head the validated one
+// descends from. The act fetches the PR's branch and finds the validated head
+// on it, so the answer is older than the record: nothing is sent back on it,
+// and once GitHub gives the validated head, the record stands at it.
 func TestAGitHubAnswerBehindTheValidatedHeadSendsNothingBack(t *testing.T) {
 	d := newLand(t)
 	d.co.descends[other] = []string{head}
@@ -766,9 +766,8 @@ func TestAGitHubAnswerBehindTheValidatedHeadSendsNothingBack(t *testing.T) {
 // A person rewrites the PR's branch off the head the watch last read, and the
 // refinery's preparation fetches the rewritten head, validates it and records
 // it before the watch reads the PR again. The saved head is on no line of the
-// validated head's history, so only the branch tells the two apart: its tip is
-// the validated head, so nothing is sent back on the read, and once the watch
-// reads the PR again, the record stands at its head.
+// validated head's history, but the run decides on its own read, which gives
+// the validated head: nothing is sent back, and the act fetches no branch.
 func TestAValidatedRewrittenHeadIsNotSentBackOnTheReadFromBeforeIt(t *testing.T) {
 	d := newLand(t)
 	d.refresh(t)
@@ -1214,7 +1213,8 @@ func TestAPRThatIsNoLongerTheRecordsIsAnException(t *testing.T) {
 	}
 }
 
-// A bead with no read of its PR saved owes no act until the PR watch saves one.
+// A bead with no read of its PR saved is decided all the same, on the run's own
+// read of the PR, and the run saves none of that read on the bead.
 func TestARecordWithNoSavedReadIsDecidedOnTheRunsOwnRead(t *testing.T) {
 	d := newLand(t)
 	is(t, d.run(t), pr.ActRequested)
