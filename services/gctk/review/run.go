@@ -110,15 +110,13 @@ type Finding struct {
 
 // Repair is what rule-and-repair writes: the head it ruled at, a ruling for
 // each finding and each ask it took, and the head its push made, "" when it
-// pushed nothing. A shadow run's round also writes what it would have written
-// outside the run.
+// pushed nothing.
 type Repair struct {
 	Review    string   `json:"review"`
 	Iteration int      `json:"iteration"`
 	Head      string   `json:"head"`
 	Rulings   []Ruling `json:"rulings"`
 	Pushed    string   `json:"pushed,omitempty"`
-	Shadow    *Shadow  `json:"shadow,omitempty"`
 }
 
 // Ruling is how the round ruled one finding, named by its lane's check and its
@@ -168,7 +166,6 @@ func (r Ruling) rulesFinding(check, id string) bool {
 // as one, which the pass rule reads as not written.
 type Run struct {
 	Root, PRBead, Head, Target string
-	Shadow                     bool
 	MaxAttempts                int
 	Loop                       *ledger.Record
 	Iterations                 map[int]*Iteration
@@ -203,7 +200,7 @@ func ReadRun(l *ledger.Ledger, id string) (*Run, error) {
 		}
 	}
 	run := &Run{Root: root.ID, PRBead: str(prBeadVar, root), Head: str(headVar, root),
-		Target: str(targetVar, root), Shadow: str(shadowVar, root) == "true", Iterations: map[int]*Iteration{}}
+		Target: str(targetVar, root), Iterations: map[int]*Iteration{}}
 	if n, err := strconv.Atoi(str(maxAttemptsVar, root)); err == nil && n > 0 {
 		run.MaxAttempts = n
 	}

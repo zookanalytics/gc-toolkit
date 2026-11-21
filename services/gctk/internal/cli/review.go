@@ -298,10 +298,9 @@ closes with its work record: shipped with the commit of the run's must-fix
 ruling of it, else no-op. At an exhausted loop it asks a person through a
 review-loop-exhausted gate on the bead (human-gate.sh), and it closes each
 person's finding whose ask closed (finding.sh close-answered), both from the
-scripts directory GCTK_SCRIPTS_DIR names. A shadow run (its shadow var reads true) writes and files nothing, and
-the command prints what it would have written. A record that does not land
-exits 75, so Gas City runs the check again without spending an attempt, and the
-retry replaces the same entry.
+scripts directory GCTK_SCRIPTS_DIR names. A record that does not land exits 75,
+so Gas City runs the check again without spending an attempt, and the retry
+replaces the same entry.
 
 It reads only the store, which is all a check's PATH reaches. It prints the
 verdict and each reason the iteration did not pass, with --explain the
@@ -422,8 +421,6 @@ func (r *recorder) record(l *ledger.Ledger, v *review.Verdict, stdout, stderr io
 	switch {
 	case got.Result == nil:
 		fmt.Fprintf(stdout, "%s: no result: %s\n", got.Bead, got.NoResult)
-	case got.Shadow:
-		fmt.Fprintf(stdout, "%s: shadow run, nothing written: the result would read %s\n", got.Bead, got.Result)
 	default:
 		fmt.Fprintf(stdout, "%s: review %s\n", got.Bead, got.Result)
 	}
@@ -431,23 +428,11 @@ func (r *recorder) record(l *ledger.Ledger, v *review.Verdict, stdout, stderr io
 		fmt.Fprintf(stdout, "%s: gate %s is open\n", got.Bead, g)
 	}
 	for _, a := range got.Closed {
-		verb := "closed"
-		if got.Shadow {
-			verb = "would close"
-		}
-		fmt.Fprintf(stdout, "%s: %s ask %s, %s (%s%s)\n", got.Bead, verb, a.ID, a.Ruling, a.Outcome, commitSuffix(a.Commit))
+		fmt.Fprintf(stdout, "%s: closed ask %s, %s (%s%s)\n", got.Bead, a.ID, a.Ruling, a.Outcome, commitSuffix(a.Commit))
 	}
-	switch {
-	case got.Result == nil || !got.Exhausted:
-	case got.Shadow:
-		fmt.Fprintf(stdout, "%s: shadow run, nothing filed: the loop exhausted its attempts at %s, which asks a person through a %s gate\n",
-			got.Bead, got.Result.Head, review.LoopExhaustedKey)
-	default:
+	if got.Result != nil && got.Exhausted {
 		fmt.Fprintf(stdout, "%s: the loop exhausted its attempts at %s, so a person is asked through a %s gate\n",
 			got.Bead, got.Result.Head, review.LoopExhaustedKey)
-	}
-	if got.Shadow {
-		return 0
 	}
 	// A person's comment is a human finding until tk-1tfzr71.21 gives it its
 	// new form, and its ask closing above is what lets it close.

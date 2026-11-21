@@ -613,8 +613,9 @@ no warrant.
     `mol-adopt-pr` and `mol-pr-merge-only` formulas. Gas Town's
     refinery patrol and its `pr-merge-reconcile` read a PR through the pulls
     API and none of its reviews (`gastown/formulas/mol-refinery-patrol.toml`
-    and `gastown/commands/pr-merge-reconcile/run.sh`), at packs main and at the
-    pin Gas City bundles. The approvals the `gascity` and `gastown` packs
+    and `gastown/commands/pr-merge-reconcile/run.sh`) at packs main, and the
+    patrol does the same at the pin Gas City bundles, which carries no
+    `pr-merge-reconcile`. The approvals the `gascity` and `gastown` packs
     record are review workflows' verdicts on beads
     (`gascity/assets/scripts/checks/implementation-review-approved.sh` and
     `gastown/assets/scripts/checks/adopt-pr-review-approved.sh`), not GitHub
