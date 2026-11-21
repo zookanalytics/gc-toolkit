@@ -80,8 +80,10 @@ own, asks GitHub for each one's cheap signs in one request for each 50 PRs in
 a repository, and runs the one-PR update (gctk pr refresh) for each PR whose
 signs moved from the ones saved on its bead, whose bead holds no read or one
 not current for it, or that is open with a merge state GitHub had not computed
-when it was saved. It starts no update more than 90 seconds in. A pass in which
-none of these holds writes no bead.
+when it was saved. It takes those PRs, from every repository, in a shuffled
+order, so one whose update is slow or keeps failing holds no other back, and
+starts no update more than 90 seconds in. A pass in which none of these holds
+writes no bead.
 
 The signs are the PR's state and draft flag, its head, its base and the base's
 tip, when GitHub last changed it, its comments, reviews and dismissed reviews
@@ -102,8 +104,9 @@ const prCompareLong = `One pass of the net over the store's live beads: it lists
 reads each in full in one request for each 10 PRs in a repository, and runs
 the one-PR update (gctk pr refresh) for each PR whose read differs from the
 read saved on its bead, over each part that differs or whose cheap signs
-moved, as gctk pr poll tells them. It starts no update more than 3 minutes in.
-A pass in which no part differs or moved writes no bead.
+moved, as gctk pr poll tells them. It takes those PRs in a shuffled order, as
+gctk pr poll does, and starts no update more than 3 minutes in. A pass in
+which no part differs or moved writes no bead.
 
 The full read is the cheap signs gctk pr poll reads and the facts no sign
 shows: the PR's merge state, its review decision, whether it is in a merge
@@ -126,9 +129,10 @@ The pass then searches the rig's own repository, the one its clone's origin
 names, for the PRs that carry a status: or held: label the labels' writer
 names, 100 PRs a page, and reads on a page at a time until it has found 20
 PRs no live bead owns or the results end. It has the writer
-(pr-status-label.sh clear) take the city's labels off each of them, starting
-none past the 3 minutes. A clear that does not land is found by the next
-pass's search.
+(pr-status-label.sh clear) take the city's labels off each of them, in a
+shuffled order, so a PR whose clear is slow or keeps failing holds no other
+back, starting none past the 3 minutes. A clear that does not land is found
+by the next pass's search.
 
 Each update prints on a line of its own, as <bead> <url> <action>: <detail>,
 each PR that failed as <url> failed: <why>, each PR left for the next pass as

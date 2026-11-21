@@ -208,11 +208,13 @@ type Search struct {
 // clearStrays searches the rig's repository, the one its clone's origin names,
 // for PRs that carry a label the writer names, a page at a time, until it has
 // found StrayClears PRs that no live bead owns or the results end, and has the
-// writer clear each, starting none past o.Window, which start began. A page
-// that holds only owned PRs never hides the ones behind it. all is the owners
-// the pass listed. A clear that does not land is reported failed, and the next
-// pass's search finds the PR again. Only the rig's own repository is searched,
-// since a PR in another is owned by the beads of that repository's rig.
+// writer clear each, in a shuffled order, so one whose clear is slow or keeps
+// failing holds no other back, starting none past o.Window, which start began.
+// A page that holds only owned PRs never hides the ones behind it. all is the
+// owners the pass listed. A clear that does not land is reported failed, and
+// the next pass's search finds the PR again. Only the rig's own repository is
+// searched, since a PR in another is owned by the beads of that repository's
+// rig.
 func (w Watcher) clearStrays(o PassOptions, start time.Time, all map[string][]owned, report *PassReport) {
 	search := &Search{}
 	report.Search = search
@@ -259,13 +261,20 @@ func (w Watcher) clearStrays(o PassOptions, start time.Time, all map[string][]ow
 		after = page.Next
 	}
 	search.Found = len(strays)
+	urls := make([]string, 0, len(strays))
+	numbers := map[string]int{}
 	for _, n := range strays {
 		url := fmt.Sprintf("https://%s/%s/pull/%d", host, repo, n)
+		urls = append(urls, url)
+		numbers[url] = n
+	}
+	w.shuffle(urls)
+	for _, url := range urls {
 		if o.Window > 0 && w.clock().Sub(start) > o.Window {
 			report.Late = append(report.Late, url)
 			continue
 		}
-		if err := w.Labels.Clear(context.Background(), host, repo, n, nil); err != nil {
+		if err := w.Labels.Clear(context.Background(), host, repo, numbers[url], nil); err != nil {
 			report.Failed[url] = fmt.Errorf("no live bead owns it, and its labels did not come off: %w", err)
 			continue
 		}

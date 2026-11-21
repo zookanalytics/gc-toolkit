@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/rand/v2"
 	"slices"
 	"strings"
 	"sync"
@@ -488,5 +489,41 @@ func TestTheNetStartsNoClearPastItsWindow(t *testing.T) {
 	}
 	if rep = d.compare(t); !slices.Equal(rep.Cleared, urls(3, 2)) {
 		t.Fatalf("the next pass cleared %q", rep.Cleared)
+	}
+}
+
+// slowClear is the labels' writer with a clear of one PR that fails once
+// elapse has moved the clock past the pass's window.
+type slowClear struct {
+	pr.Labels
+	number int
+	elapse func()
+}
+
+func (s slowClear) Clear(ctx context.Context, host, repo string, number int, current []string) error {
+	if number == s.number {
+		s.elapse()
+		return errors.New("pr-status-label.sh: exit 2: could not write the PR's labels")
+	}
+	return s.Labels.Clear(ctx, host, repo, number, current)
+}
+
+// A PR whose clear keeps failing after taking the net's whole window holds no
+// other PR back: over a few passes, the shuffled order reaches the PR the
+// search finds after it.
+func TestAStrayWhoseClearKeepsFailingSlowlyHoldsNoOtherBack(t *testing.T) {
+	d := newLabeled(t, []string{"status: merging"})
+	d.strays([]string{"status: working"}, 3, 2)
+	d.w.Labels = slowClear{Labels: d.lw, number: 3, elapse: func() { d.clock = d.clock.Add(3*time.Minute + time.Second) }}
+	src := rand.New(rand.NewPCG(1, 2))
+	d.w.Shuffle = func(ids []string) { src.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] }) }
+	passes := 0
+	for ; passes < 10 && len(d.github.PRs["acme/widgets#2"].Labels) != 0; passes++ {
+		if rep := d.compare(t); rep.Failed[urls(3)[0]] == nil {
+			t.Fatalf("pass %d cleared %q and failed %v, want PR 3 failed", passes, rep.Cleared, rep.Failed)
+		}
+	}
+	if got := d.github.PRs["acme/widgets#2"].Labels; len(got) != 0 {
+		t.Fatalf("PR 2 still shows %q after %d passes behind PR 3's slow failing clear", got, passes)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"math/rand/v2"
 	"reflect"
 	"regexp"
 	"slices"
@@ -47,6 +48,7 @@ func newWatched(t *testing.T) *watched {
 		Feedback: func() (pr.Feedback, error) { return w.rule, nil },
 		Now:      func() time.Time { d.clock = d.clock.Add(time.Second); return d.clock },
 		Wait:     5 * time.Second,
+		Shuffle:  func([]string) {},
 	}
 	w.put(w.md)
 	return d
@@ -534,6 +536,92 @@ func TestThePollStartsNoUpdatePastItsWindow(t *testing.T) {
 	}
 	if d.saved(t, "tk-8") != nil {
 		t.Fatal("a PR the window left was saved")
+	}
+}
+
+// wrenches gives the watched world a second owned PR, number 8 in the
+// repository acme/wrenches, whose name sorts after acme/widgets, with its bead
+// tk-8.
+func wrenches(d *watched) {
+	eight := *d.pr
+	eight.Facts.Number, eight.Facts.ID = 8, "PR_8"
+	eight.Facts.Repository, eight.Facts.URL = "acme/wrenches", "https://github.com/acme/wrenches/pull/8"
+	d.github.Put(&eight)
+	md := maps.Clone(d.md)
+	md["pr_url"], md["pr_number"] = eight.Facts.URL, "8"
+	d.store.Put(fake.Bead{ID: "tk-8", Status: "blocked", Assignee: refinery, Metadata: md})
+}
+
+// A pass takes the PRs whose update is due, from every repository it asked, in
+// the order Shuffle gives them.
+func TestAPassTakesTheDuePRsOfEveryRepositoryInAShuffledOrder(t *testing.T) {
+	d := newWatched(t)
+	wrenches(d)
+	var given []string
+	d.w.Shuffle = func(ids []string) {
+		given = slices.Clone(ids)
+		slices.Reverse(ids)
+	}
+	rep := d.poll(t)
+	if !slices.Equal(given, []string{prURL, "https://github.com/acme/wrenches/pull/8"}) {
+		t.Fatalf("the shuffle was given %v, want the due PRs of both repositories", given)
+	}
+	var order []string
+	for _, u := range rep.Updates {
+		order = append(order, u.Bead)
+	}
+	if !slices.Equal(order, []string{"tk-8", bead}) || len(rep.Failed) != 0 || rep.Repositories != 2 {
+		t.Fatalf("the pass updated %v and failed %v over %d repositories, want the shuffle's order",
+			order, rep.Failed, rep.Repositories)
+	}
+}
+
+// slowSeven is GitHub with a conversation read of PR 7 that fails once elapse
+// has moved the clock past the pass's window.
+type slowSeven struct {
+	pr.Watch
+	elapse func()
+}
+
+func (s slowSeven) Conversation(repo string, n int) (*gh.Conversation, error) {
+	if n == 7 {
+		s.elapse()
+		return nil, errors.New("github: the conversation read of PR 7 failed after a slow page")
+	}
+	return s.Watch.Conversation(repo, n)
+}
+
+// A PR whose update keeps failing after taking a pass's whole window holds no
+// other PR back: over a few passes of the cheap question or the net, the
+// shuffled order reaches the PR behind it, in another repository.
+func TestAPRWhoseUpdateKeepsFailingSlowlyHoldsNoOtherBack(t *testing.T) {
+	for _, net := range []bool{false, true} {
+		name, window := "the cheap question", 90*time.Second
+		if net {
+			name, window = "the net", 3*time.Minute
+		}
+		t.Run(name, func(t *testing.T) {
+			d := newWatched(t)
+			wrenches(d)
+			slow := slowSeven{Watch: d.github, elapse: func() { d.clock = d.clock.Add(window + time.Second) }}
+			d.w.GitHub = func(string) pr.Watch { return slow }
+			src := rand.New(rand.NewPCG(1, 2))
+			d.w.Shuffle = func(ids []string) { src.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] }) }
+			pass := d.w.Poll
+			if net {
+				pass = d.w.Compare
+			}
+			passes := 0
+			for ; passes < 10 && d.saved(t, "tk-8") == nil; passes++ {
+				rep, err := pass(pr.PassOptions{Window: window})
+				if err != nil || rep.Failed[prURL] == nil {
+					t.Fatalf("pass %d reported %+v, %v, want PR 7 failed", passes, rep, err)
+				}
+			}
+			if d.saved(t, "tk-8") == nil {
+				t.Fatalf("PR 8 was not saved in %d passes behind PR 7's slow failing update", passes)
+			}
+		})
 	}
 }
 

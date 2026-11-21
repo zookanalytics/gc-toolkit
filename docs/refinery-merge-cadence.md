@@ -577,8 +577,10 @@ pass exits 2.
 
 **The one-PR update.** For each PR whose signs differ from the ones saved on its
 bead, or whose bead holds no read or one not current for it, the pass runs the
-one-PR update, `gctk pr refresh`, starting none more than 90 seconds in. The
-update reads only what moved:
+one-PR update, `gctk pr refresh`. It takes those PRs, from every repository it
+asked, in a shuffled order, so one whose update is slow or keeps failing holds
+no other back, and starts none more than 90 seconds in. The update reads only
+what moved:
 
 | What moved | What it reads |
 |---|---|
@@ -642,9 +644,10 @@ names:
 A merge state GitHub reads as `UNKNOWN` differs in nothing, since GitHub reads
 an open PR's so until it has computed one, and a merged PR's for good. So a
 change no cheap sign shows reaches the saved read within one pass of the net.
-A pass in which nothing differs writes no bead. The net starts no update more
-than 3 minutes in, and a PR whose read failed keeps its saved read and fails
-the pass, as in the cheap question's pass.
+A pass in which nothing differs writes no bead. The net takes its updates in a
+shuffled order and starts none more than 3 minutes in, and a PR whose read
+failed keeps its saved read and fails the pass, as in the cheap question's
+pass.
 
 **The labels on PRs no bead owns.** The landing order keeps the labels of the
 PRs the beads own ([The landing order](#the-landing-order)), and nothing holds
@@ -655,9 +658,11 @@ for the PRs that carry a `status:` or `held:` label the labels' writer names:
 working",...`, 100 PRs a page for 1 point. It reads on a page at a time until
 it has found 20 PRs that no live bead owns or the results end, so a page that
 holds only owned PRs hides none behind it, and has the writer,
-`pr-status-label.sh clear`, take the city's labels off each, starting none past
-its 3 minutes. The writer reads each PR's labels itself first. A clear that
-does not land fails the pass, and the next pass's search finds the PR again.
+`pr-status-label.sh clear`, take the city's labels off each. It takes them in a
+shuffled order, so a PR whose clear is slow or keeps failing holds no other
+back, and starts none past its 3 minutes. The writer reads each PR's labels
+itself first. A clear that does not land fails the pass, and the next pass's
+search finds the PR again.
 The net searches no other repository, since a PR there is owned by the beads
 of that repository's rig.
 

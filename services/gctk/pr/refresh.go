@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/rand/v2"
 	"slices"
 	"sort"
 	"strconv"
@@ -45,7 +46,8 @@ type Watch interface {
 // update waits for it. Feedback loads the definition of feedback, once a run
 // first needs it. Labels is the PRs' labels, which the net clears off a PR no
 // live bead owns in the repository Origin's URL names, the rig clone's origin;
-// with Labels nil the net clears none.
+// with Labels nil the net clears none. Shuffle orders the updates a pass starts
+// and the clears the net starts, at random when nil.
 type Watcher struct {
 	Ledger   *ledger.Ledger
 	Dir      string
@@ -55,6 +57,7 @@ type Watcher struct {
 	Origin   func() (string, error)
 	Now      func() time.Time
 	Wait     time.Duration
+	Shuffle  func([]string)
 }
 
 // The actions an update reports.
@@ -448,8 +451,9 @@ type asker func(hub Watch, repo string, owners []owned) (map[int]sighting, map[i
 // Poll is one pass of the cheap question over the PRs the store's live beads
 // own: it asks GitHub about every one, in one request for each gh.SignsBatch
 // PRs in a repository, and runs the one-PR update for each whose signs moved,
-// over the parts they make stale, starting none past o.Window. A PR whose signs
-// did not read keeps its saved read, and the pass reports it failed.
+// over the parts they make stale, in a shuffled order, starting none past
+// o.Window. A PR whose signs did not read keeps its saved read, and the pass
+// reports it failed.
 func (w Watcher) Poll(o PassOptions) (PassReport, error) {
 	report, _, err := w.pass(o, w.clock(), func(hub Watch, repo string, owners []owned) (map[int]sighting, map[int]error) {
 		signs, errs := hub.Signs(repo, prNumbers(owners))
@@ -474,12 +478,12 @@ func (w Watcher) Poll(o PassOptions) (PassReport, error) {
 // reads every one in full, in one request for each gh.FullReadBatch PRs in a
 // repository, and runs the one-PR update for each whose read differs from the
 // read saved on its bead, over each part that differs (differs) or whose signs
-// moved (moved), starting none past o.Window. So a change no cheap sign shows,
-// such as a review thread resolved or an edit to a post that left the PR's
-// updatedAt as it was, reaches the saved read within one pass. A PR whose read
-// failed keeps its saved read, and the pass reports it failed. With Labels set,
-// the pass then searches the rig's repository for the city's labels on PRs no
-// live bead owns, and clears them (clearStrays).
+// moved (moved), in a shuffled order, starting none past o.Window. So a change
+// no cheap sign shows, such as a review thread resolved or an edit to a post
+// that left the PR's updatedAt as it was, reaches the saved read within one
+// pass. A PR whose read failed keeps its saved read, and the pass reports it
+// failed. With Labels set, the pass then searches the rig's repository for the
+// city's labels on PRs no live bead owns, and clears them (clearStrays).
 func (w Watcher) Compare(o PassOptions) (PassReport, error) {
 	start := w.clock()
 	report, all, err := w.pass(o, start, func(hub Watch, repo string, owners []owned) (map[int]sighting, map[int]error) {
@@ -526,14 +530,15 @@ func prNumbers(owners []owned) []int {
 
 // pass is one pass of the watch over the PRs the store's live beads own, which
 // started at start: ask reads every owned PR in a repository, and the pass runs
-// the one-PR update over the parts of each PR the read found stale, starting
-// none past o.Window. A PR that did not read keeps its saved read, and the pass
-// reports it failed, as it does a PR owned by more than one bead and an update
-// that did not save. A PR the window left is read at the next pass, since
-// nothing saved it. It returns the owners it listed, and an error when the
-// store's listing did not read.
+// the one-PR update over the parts of each PR the reads found stale. It takes
+// those PRs, from every repository, in a shuffled order, so one whose update is
+// slow or keeps failing holds no other back, and starts none past o.Window. A
+// PR that did not read keeps its saved read, and the pass reports it failed, as
+// it does a PR owned by more than one bead and an update that did not save. A
+// PR the window left is read at the next pass, since nothing saved it. It
+// returns the owners it listed, and an error when the store's listing did not
+// read.
 func (w Watcher) pass(o PassOptions, start time.Time, ask asker) (PassReport, map[string][]owned, error) {
-	now := w.clock
 	report := PassReport{Failed: map[string]error{}}
 	all, err := w.owners()
 	if err != nil {
@@ -552,7 +557,15 @@ func (w Watcher) pass(o PassOptions, start time.Time, ask asker) (PassReport, ma
 		report.Asked++
 	}
 	report.Repositories = len(byRepo)
-	u := w.run()
+	// stale is a PR whose update is due, with what its repository's read saw,
+	// and the GitHub and the instant of that read.
+	type stale struct {
+		owner owned
+		hub   Watch
+		seen  sighting
+		at    string
+	}
+	due := map[string]stale{}
 	keys := slices.SortedFunc(maps.Keys(byRepo),
 		func(a, b repoKey) int { return strings.Compare(a.host+"/"+a.repo, b.host+"/"+b.repo) })
 	for _, k := range keys {
@@ -570,20 +583,36 @@ func (w Watcher) pass(o PassOptions, start time.Time, ask asker) (PassReport, ma
 				report.Failed[ow.url] = errors.New("the pass read nothing of it")
 				continue
 			}
-			if !r.due.any() {
-				continue
+			if r.due.any() {
+				due[ow.key()] = stale{owner: ow, hub: hub, seen: r, at: at}
 			}
-			if o.Window > 0 && now().Sub(start) > o.Window {
-				report.Late = append(report.Late, ow.url)
-				continue
-			}
-			done, err := u.update(ow, hub, r.signs, at, r.due)
-			if err != nil {
-				report.Failed[ow.url] = err
-				continue
-			}
-			report.Updates = append(report.Updates, done)
 		}
 	}
+	order := slices.Sorted(maps.Keys(due))
+	w.shuffle(order)
+	u := w.run()
+	for _, id := range order {
+		s := due[id]
+		if o.Window > 0 && w.clock().Sub(start) > o.Window {
+			report.Late = append(report.Late, s.owner.url)
+			continue
+		}
+		done, err := u.update(s.owner, s.hub, s.seen.signs, s.at, s.seen.due)
+		if err != nil {
+			report.Failed[s.owner.url] = err
+			continue
+		}
+		report.Updates = append(report.Updates, done)
+	}
 	return report, all, nil
+}
+
+// shuffle puts ids in the order Shuffle gives them, or in a random order when
+// Shuffle is nil.
+func (w Watcher) shuffle(ids []string) {
+	if w.Shuffle == nil {
+		rand.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] })
+		return
+	}
+	w.Shuffle(ids)
 }
