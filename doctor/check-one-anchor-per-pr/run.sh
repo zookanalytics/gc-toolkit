@@ -116,7 +116,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select((($m.task_kind // "") | tostring) != "review")
         | (($m.merge_result // "") | tostring) as $mr
         | select(if ((.status // "open") | tostring) == "blocked"
-                 then ($mr == "pull_request" or $mr == "pull_request_pending" or $mr == "pull_request_head_changed")
+                 then ($mr == "pull_request_pending" or $mr == "pull_request_head_changed")
                  else $mr != "" end)
         | [$u, ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " "))] | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then

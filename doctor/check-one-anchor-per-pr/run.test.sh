@@ -47,7 +47,7 @@ BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores" BD_ARGS="$TMP/bd-args.log" RIGS_ATTEMPT_FILE="$TMP/rigs-attempts.log"
 run_check() { : > "$BD_ARGS"; : > "$RIGS_ATTEMPT_FILE"; RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
-anchor() { printf '{"id":"%s","status":"open","metadata":{"pr_url":"%s","merge_result":"pull_request"}}' "$1" "$2"; }
+anchor() { printf '{"id":"%s","status":"open","metadata":{"pr_url":"%s","merge_result":"pull_request_head_changed"}}' "$1" "$2"; }
 review() { printf '{"id":"%s","status":"open","metadata":{"pr_url":"%s","task_kind":"review","anchor_bead":"%s"}}' "$1" "$2" "$3"; }
 rework() { printf '{"id":"%s","status":"open","metadata":{"pr_url":"%s","rejection_reason":"rebase"}}' "$1" "$2"; }
 store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.json"; }

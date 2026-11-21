@@ -340,9 +340,8 @@ func holdingAncestor(h waits.Holds) string {
 }
 
 // hasOpenPullRequest reports whether a bead is a merge anchor whose pull
-// request is open, which is what its merge_result says: pull_request on the old
-// record (lifecycle/lifecycle.toml), or a value [pr.OnRecord] names on Gas
-// Town's pending record.
+// request is open, which is what its merge_result says: a value [pr.OnRecord]
+// names on Gas Town's pending record.
 func hasOpenPullRequest(b bead) bool {
-	return b.MergeResult == "pull_request" || pr.OnRecord(b.MergeResult)
+	return pr.OnRecord(b.MergeResult)
 }

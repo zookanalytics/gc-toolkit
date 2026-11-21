@@ -754,10 +754,10 @@ carries exactly one value, and setting one removes any other `status:` value.
 
 | Label | Whose move | When |
 |---|---|---|
-| `status: working` | the city's, changing the PR | an unapproved PR with live work on the anchor (a rework or fix child, a validation pass, a review, a finding), a draft the city opened that still waits on the checks that flip it ready, or a PR, approved or not, whose merge a conversation holds while its sitting stays for the work it sent, or a decision holds while the work its ruling sent is out |
-| `status: merging` | the city's, landing the PR | an approved PR with no known blocker: its required checks may still be running, a merge-in rework or other city work may be in flight, or it waits for the merge pass |
-| `status: needs-review` | a human's review | an unapproved PR with nothing in flight and nothing holding it: opened check-green or flipped from draft to ready, reworked and handed back, or a non-blocking review left comments |
-| `status: needs-attention` | a person's, to clear a blocker | a blocker stands that the city will not clear on its own: an operator freeze, a rebase hold, anything a `held:` label names, a blocked verdict the merge pass recorded at the current head ([The machine axis](#the-machine-axis)), or a recorded posture, verdict or cause outside its writer's vocabulary, a state the derivation cannot name |
+| `status: working` | the city's, changing the PR | an unapproved PR with the city's work left on it: live work on the anchor (a rework or fix child, a validation pass, a review, a finding), a draft the landing order has yet to mark ready, or a required check still running. Also a PR the landing order has yet to read on GitHub at the head the store holds, and a PR, approved or not, whose merge a conversation holds while its sitting stays for the work it sent, or a decision holds while the work its ruling sent is out |
+| `status: merging` | the city's, landing the PR | a ready PR, or an approved one with only the city's work left: its required checks may still be running, a merge-in rework or other city work may be in flight, or GitHub has yet to compute its merge state |
+| `status: needs-review` | a human's review | an unapproved PR with nothing in flight and nothing holding it, such as one marked ready, reworked and handed back, or left comments by a non-blocking review: only an approval is left, or the lift of a request for changes by the account that made it |
+| `status: needs-attention` | a person's, to clear a blocker | a blocker stands that the city will not clear on its own: an operator freeze, a rebase hold, anything a `held:` label names, a required check that failed, a PR that is not open or not the one the record names, a merge state on an approved PR that nothing of the city's changes, such as a conflict or a branch behind a base that requires it current, or a failure of the city's own review machinery ([The machine axis](#the-machine-axis)) |
 
 Precedence when inputs overlap: `needs-attention` > `merging` > `working` >
 `needs-review`. It follows from the middle column. A blocker the city will not
@@ -771,26 +771,22 @@ City work on an unapproved PR comes before the verdict it leads to, and the
 verdict is what remains when neither stands. A hold that only a human can release reads
 `needs-attention` with no rule of its own.
 
-For a PR on the pending record, the status renders the evaluator's answer for
-its anchor, with the same precedence (`prstatus.Render`, which `gctk pr status`
-prints). The evaluator decides over the store as it stands and the GitHub read
-the landing order saved on the bead, and reads nothing on GitHub, so the label
-and the rig board give one answer. It reads `merging` once the evaluator finds
-the PR ready, or approved with only the city's work left; `working` while it
-waits on the city's work and on an approval, or while the landing order has yet
-to read the PR on GitHub at the head the store holds; `needs-review` when only
-an approval, or the lift of a request for changes, is left; and
-`needs-attention` when something only a person clears holds it. The `held:`
-reasons are the gates and the beads a person owes that the walk below names,
-and the review threads the saved read finds waiting on the city's answer while
-no work of the city's acts on them. It also reads `needs-attention`, with no
-`held:` value, when the city's own review machinery has failed
+A PR on the pending record renders the evaluator's answer for its anchor, with
+that precedence (`prstatus.Render`, which `gctk pr status` prints). The evaluator decides over the store as it stands and
+the GitHub read the landing order saved on the bead, and reads nothing on
+GitHub, so the label and the rig board give one answer. The draft flag is
+GitHub's, read through the evaluator as the city's work in progress. The
+`held:` reasons are the gates and the beads a person owes that the walk below
+names, and the review threads the saved read finds waiting on the city's answer
+while no work of the city's acts on them. A failure of the city's own review
+machinery reads `needs-attention` with no `held:` value
 ([The machine axis](#the-machine-axis)). A review run's question to a person,
-its gate keyed `review-question-<key>`, is a person's hold, `held: gate`. The
-merge pass's blocked verdict and its thread count are no reason there, since
-that pass reads only the old record.
-The draft flag is GitHub's, read through the evaluator as the city's work in
-progress, and `opened_as_draft` and `draft_readied` play no part.
+its gate keyed `review-question-<key>`, is a person's hold, `held: gate`.
+`gctk pr status` asks the evaluator only for a bead on the record. For any
+other bead, such as one that owns no PR or one whose record a writer left half
+written, it derives the status from the facts the store records alone
+(`prstatus.Derive`), where a recorded posture outside its writer's vocabulary
+is a state the derivation cannot name and reads `needs-attention`.
 
 Beside the one `status:` value, a workflow-owned `held:` label names each thing
 that holds an open PR which the city will not clear on its own. Each value is a
@@ -800,64 +796,48 @@ carries none.
 | Label | What holds the PR | Read from |
 |---|---|---|
 | `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.Holding`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation is no human gate, so it never counts here: one that holds an open PR's merge counts under `held: blocked`, except while its sitting stays for the work it sent |
-| `held: review` | review feedback the city has not answered, or a review thread the merge waits on, and nothing in flight acts on it | the merge pass's count of review threads waiting on the city's answer (`pr.unanswered_threads`), by the rule below, or its `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
-| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a bead a person owes the next move on that `prstatus.Holding` reaches through the anchor's open `blocks` edges, on the anchor or behind a bead it waits on, such as its rework. That bead is a decision, though not while a ruling leaves it waiting on the work it sent, with an open `blocks` edge of its own onto a bead that is no gate, is a conversation, which holds an open PR's merge until it closes, though not while its sitting stays for the work it sent, open under the sitting with an open `blocks` edge of its own (each as `prstatus.Stays` reads it), or is another merge anchor whose own status, by the same rule over the facts it records and its own `blocks` edges, is `needs-attention`, or `needs-review` once its PR is open. An open bead on that anchor's edges that no person moves counts as work in flight on it, so a PR the city is changing or landing holds nothing, and the gates and the beads a person owes on those edges are counted once, by the walk. Live work that waits on such a bead is not the city changing the PR, so the PR reads `needs-attention` and not `working`. A human gate is not among them, because `held: gate` counts it |
+| `held: review` | review feedback the city has not answered, and nothing in flight acts on it | the review threads the evaluator finds waiting on the city's answer in the GitHub read the landing order saved, by the rule below |
+| `held: blocked` | a live blocker holds the PR that no automated actor will clear | a bead a person owes the next move on that `prstatus.Holding` reaches through the anchor's open `blocks` edges, on the anchor or behind a bead it waits on, such as its rework. That bead is a decision, though not while a ruling leaves it waiting on the work it sent, with an open `blocks` edge of its own onto a bead that is no gate, is a conversation, which holds an open PR's merge until it closes, though not while its sitting stays for the work it sent, open under the sitting with an open `blocks` edge of its own (each as `prstatus.Stays` reads it), or is another merge anchor whose own status, derived from the facts its row records and its own `blocks` edges (`prstatus.Derive`, since the walk reads no GitHub), is `needs-attention`, or `needs-review` once its PR is open at the head the refinery validated and its posture is recorded. An open bead on that anchor's edges that no person moves counts as work in flight on it, so a PR the city is changing or landing holds nothing, and the gates and the beads a person owes on those edges are counted once, by the walk. Live work that waits on such a bead is not the city changing the PR, so the PR reads `needs-attention` and not `working`. A human gate is not among them, because `held: gate` counts it |
 
 Any `held:` label reads `status: needs-attention`, because each names something
 a person has to act on. The merge freeze and the rebase hold carry no `held:`
-value, and neither do a failed required check, a deferred merge-in, a base gone
-`BEHIND` or a rule the merge pass cannot name: each reads `needs-attention` on
-its own. A blocker the city is landing, one an automated actor holds and no
-person owes, is no hold, and the PR keeps its status.
+value, and neither do a failed required check or a merge state only a person
+moves: each reads `needs-attention` on its own. A blocker the city is landing,
+one an automated actor holds and no person owes, is no hold, and the PR keeps
+its status.
 
 `held: review` stands on any base, approved or not, for review feedback the city
-has not answered. On every open PR it visits that is not a draft, the merge pass
-counts the review threads that wait on the city's answer and records the count
-as `pr.unanswered_threads`, pinned to the head it read. A thread waits when it is
-unresolved and the newest of its posts that asks or answers is feedback
-(`gc_thread_awaits_answer` in `pr-post.sh`). A post not for review neither asks
-nor answers, whoever posted it. Neither does a post the city marked handled with
-the THUMBS_UP that `pr-facts.sh`'s write-back puts on a post it owes nothing
-more, which is the only answer a point declined with no reply owed gets. Nor
-does a post a dismissal retired (`live_comments` in `review-dismissal.sh`). The
-count holds the PR at the head the posture was read at, while nothing is in
-flight on the anchor, because work in flight is the city answering, and while
-no feedback waits for `pr-facts.sh` to route it (posture `commented`). A thread
-the city answered and left open, such as one whose question waits on a human
-gate, does not wait on the city and is not counted. Where the base requires
-thread resolution, the merge pass's `review-threads` verdict holds an approved
-PR for any unresolved thread, answered or not. The merge does not read the
-count, so on a base that requires no thread resolution an approved PR still
-lands while `held: review` stands.
+has not answered. When the landing order reads a PR on GitHub, it saves on the
+bead, beside the PR's other facts, the review threads that wait on the city's
+answer. A thread waits when it is unresolved and the newest of its posts that
+asks or answers is feedback (`gc_thread_awaits_answer` in `pr-post.sh`). A post
+not for review neither asks nor answers, whoever posted it. Neither does a post
+the city marked handled with the THUMBS_UP that `pr-facts.sh`'s write-back puts
+on a post it owes nothing more, which is the only answer a point declined with
+no reply owed gets. Nor does a post a dismissal retired (`live_comments` in
+`review-dismissal.sh`). A thread the city answered and left open, such as one
+whose question waits on a human gate, does not wait on the city and is not
+counted. The threads hold the PR while nothing of the city's acts on them: no
+feedback waits for the intake to route it, no live bead names the PR's bead as
+its anchor, and no wait of the bead's own is work, such as work on the PR's
+branch. A thread that waits is one of the evaluator's conditions, so it holds
+the landing order's merge too, whether or not the base requires thread
+resolution.
 
-`prstatus.Held` is the rule, over the facts `prstatus.Read` gathers for every
-reader: the anchor's own row, `pr.unanswered_threads` among it, its in-flight
+`prstatus.RenderHeld` is the rule, over the evaluator's answer and the facts
+`prstatus.Read` gathers for every reader: the anchor's own row, its in-flight
 set, every bead carrying the anchor's `anchor_bead`, any `task_kind`, at a live
 status (`prstatus.InFlightStatuses`), and the gates and the beads a person owes
 that its walk reaches. `gctk pr status` and the rig board each hand
 `prstatus.Read` their own adapter onto the store, and neither gathers or
 decides any of it.
 
-A blocked machine verdict whose cause is outside its writer's vocabulary holds
-the PR wherever it was recorded, as any state the derivation cannot name does.
-Any other blocked verdict holds the PR only at the head the posture was read at,
-because a verdict at another head was reached about another commit. It holds
-only while nothing is in flight on the anchor: the merge pass records most
-causes only when no live bead holds the merge, so work that arrives afterwards
-is the city acting on the cause, and the next pass replaces the verdict. Cause
-`blocker` holds whatever is in flight, because the merge pass records it after
-weighing the live holders, and the stuck holder is often one of them, such as a
-must-fix finding no fix unit answers. `prstatus.Blocked` is that rule. The helm
-board applies it too, over the in-flight set the labels count, and by it decides
-a blocked row's phase, whether the operator's queue lists the row, and the row's
-needs phrase.
-
 `prstatus.Holding` is the one reader of what holds a PR through its edges, the
 human gates and the beads a person owes the next move on, and `prstatus.Read`
 gathers through it. The labels count both. The board's row asks for each gate and
 each blocker of its own a person owes, and names any other bead in its needs as
 where the move is. `gc-helm engage` on the PR offers each, beside every other
-reason `prstatus.Reasons` gives, through `gctk pr status --json`. Each
+reason `gctk pr status --json` gives. Each
 bead walks for itself, and the walks of one call share their reads: each bead is
 read once, and its edges a level at a time. So a PR reads the same on the board,
 which walks a rig's PRs together, as on its label and at engage, which walk it
@@ -898,14 +878,12 @@ conversation, and once it closes the labels read what they read before it
 opened. A conversation whose sitting lifted the hold blocks nothing, so it
 holds no label.
 
-The labels read the city's own state — the refinery-computed posture on the
-anchor, the merge cadence's machine verdict and its cause, its holds, the open
-human gates and the beads a person owes that its `blocks` edges reach, its
-draft-stage markers, and its live work — not GitHub's review posture, merge state or draft
-flag directly. The
-`working`->`needs-review` flip rests on the live work, which closes as the fix
-lands, so a sticky `CHANGES_REQUESTED` never traps the label in `working` after a
-rework hands back.
+The labels read GitHub only through the read the landing order saved on the
+anchor, beside the city's own state: the anchor's holds, the open human gates
+and the beads a person owes that its `blocks` edges reach, and its live work.
+The `working`->`needs-review` flip rests on the live work, which closes as the
+fix lands, so a sticky `CHANGES_REQUESTED` never traps the label in `working`
+after a rework hands back.
 
 The label is workflow state and never says a PR may merge. The draft flag is a
 phase signal, not a merge signal: the refinery opens every PR as a draft, and
@@ -967,7 +945,7 @@ written by `gate-ensure.sh` through `lifecycle.sh`.
 |---|---|
 | `progressing` | some automated actor will act: a declared lane is short of green, or a fix unit, rework child or validation pass is in flight |
 | `settled` | every declared check derives `green`, and the cadence is done |
-| `blocked` | a hold no automated actor will clear, with its cause in `pr.machine_cause` and a sentence in `pr.machine_reason`. Nothing writes it, and `prstatus` and the board still read it |
+| `blocked` | a hold no automated actor will clear, with its cause in `pr.machine_cause` and a sentence in `pr.machine_reason`. Nothing writes it |
 
 `gate-ensure.sh` replaces a `blocked` verdict at the same head only when an
 automated actor is due to act. For the `blocker` cause it asks
