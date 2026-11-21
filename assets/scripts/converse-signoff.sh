@@ -7,17 +7,17 @@
 # sign-off:
 #   1. carries out what the ruling does to an open PR it reaches, the subject
 #      or a bead a gate it answers releases: its rework, through
-#      converse-rework.sh with the conversation as the rework's
-#      source_ruling_bead (--rework), which on Gas Town's pending record goes
-#      to the PR's review run as an ask carrying the checks --check names, with
-#      the conversation as its source and nothing superseded, since the run
-#      triages the head its fix pushes; or its retirement, through pr-dispose.sh,
-#      which records the disposition and closes the PR (--retire). Either one
-#      runs in that PR's own rig, its store, pool and checkout, whichever rig
-#      the conversation lives in, and the PR it acts on is recorded on the
-#      conversation before it acts, so a re-run of the same ruling acts on the
-#      same PR even once that PR has closed. The rework is recorded there too
-#      once it is filed, so a re-run once it has closed files no second one;
+#      converse-rework.sh (--rework), which goes to the PR's review run as an
+#      ask carrying the checks --check names and the waits --rework-waiting-on
+#      names, with the conversation as its source and nothing superseded, since
+#      the run triages the head its fix pushes; or its retirement, through
+#      pr-dispose.sh, which records the disposition and closes the PR
+#      (--retire). Either one runs in that PR's own rig, its store, pool and
+#      checkout, whichever rig the conversation lives in, and the PR it acts on
+#      is recorded on the conversation before it acts, so a re-run of the same
+#      ruling acts on the same PR even once that PR has closed. The rework is
+#      recorded there too once it is filed, so a re-run once it has closed files
+#      no second one;
 #   2. writes the subject's headline through gc-helm.sh takeaway, and stops
 #      when takeaway refuses it, then, when the ruling leaves the subject
 #      waiting on work, its close brief and the arm of its validating closer,
@@ -165,7 +165,7 @@
 #     [--subject <id>] [--ruled yes|no] [--ruling "<one line>"] \
 #     [--leave <gate> ...] [--answer <gate> ...] \
 #     [--no-wait | --waiting-on <bead> ... [--close-brief "<text>"]] \
-#     [--rework [--check <check> ...] | --no-rework | --retire <kind> [--successor <bead>]] \
+#     [--rework [--check <check> ...] [--rework-waiting-on <bead> ...] | --no-rework | --retire <kind> [--successor <bead>]] \
 #     [--pr-anchor <bead>] [--accept [--var <key>=<value> ...]] [--stay "<text>"]
 #   --outcome is the subject's headline, and the close reason the sittings card
 #   falls back to. A PR the ruling leaves standing with no Approve review adds a
@@ -182,8 +182,8 @@
 #     it.
 #   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
 #     does to an already-published PR it reaches: the subject when it owns an
-#     open PR (merge_result pull_request, or pull_request_pending or
-#     pull_request_head_changed on the pending record), the PR whose merge this
+#     open PR (merge_result pull_request_pending or pull_request_head_changed
+#     on the pending record), the PR whose merge this
 #     conversation holds, the anchor that depends on the conversation through a
 #     blocks edge, and each bead owning an open PR that a human gate the ruling
 #     answers releases, while the gate is open or once this ruling's own answer
@@ -204,8 +204,8 @@
 #     and before every other write, and when it does not complete nothing else
 #     is written. A re-run of the same ruling with the same answer acts on the
 #     PR the record names, the one --pr-anchor named or the ruling reached
-#     then, even once it has closed, as a retired PR's anchor closes when its
-#     closer, pr-facts or the landing order, consummates its disposition; a PR
+#     then, even once it has closed, as a retired PR's anchor closes when the
+#     landing order consummates its disposition; a PR
 #     that reads closed has nothing left for the rework or the retirement to
 #     do, so the re-run goes on without it.
 #     The record also names the child a --rework filed, written once
@@ -218,18 +218,25 @@
 #     that no recorded answer names stands, since that attempt may have filed
 #     it.
 #   --check <check> (with --rework, repeatable) names a check the ruling sends
-#     back, from the check index. On Gas Town's pending record the rework is an
-#     ask the PR's review run takes, which carries the checks, and the run
-#     picks each at the first head it judges once it can take the ask. On the
-#     old path every lane returns to unreviewed, so converse-rework.sh refuses
-#     a check there.
+#     back, from the check index. The rework is an ask the PR's review run
+#     takes, which carries the checks, and the run picks each at the first head
+#     it judges once it can take the ask.
+#   --rework-waiting-on <bead> (with --rework, repeatable) names a bead the
+#     ruling's rework waits on, such as the anchor of another PR that must land
+#     first. It is the rework's wait, where --waiting-on is the subject's. The
+#     ask carries it as its own blocks edge from the create that files it
+#     (gctk review ask --waiting-on), so no run takes the ask before that bead
+#     closes. The bead must carry the PR's id prefix and be in its store, or
+#     the ask is refused with nothing filed. A re-run whose earlier attempt
+#     filed the rework stops, with nothing written, while the PR is open,
+#     unless that rework waits on each bead it names, since a run can take it,
+#     or may have, before that work lands.
 #   --pr-anchor <bead> names the PR --rework or --retire acts on when the
 #     ruling reaches more than one, which it requires; every other one the
-#     ruling reaches stands. A conversation owns one live rework child, so a
-#     sign-off files one rework, and a second PR whose branch must change takes
-#     a ruling of its own: the gate that releases it stays owed until then. A
-#     re-run may name the PR an earlier attempt of the same ruling recorded,
-#     even once it has closed.
+#     ruling reaches stands. A sign-off files one rework, so a second PR whose
+#     branch must change takes a ruling of its own: the gate that releases it
+#     stays owed until then. A re-run may name the PR an earlier attempt of the
+#     same ruling recorded, even once it has closed.
 #   --accept (with a ruling) says the ruling takes the subject's
 #     recommendation, gc.recommended_formula, which a first reaction put to the
 #     operator through a human gate under the key first-reaction that blocks
@@ -281,9 +288,10 @@
 #     and with --no-rework in place of a --rework, whose child has landed. The
 #     return leaves out the --pr-anchor that named the PR the rework went to,
 #     since --pr-anchor goes only with --rework or --retire, and --no-rework
-#     leaves every PR the ruling reaches standing. The closer the stay armed
-#     already checks that work, and a --waiting-on on work that has landed
-#     would arm it again once its arm has sent it.
+#     leaves every PR the ruling reaches standing. It leaves out each --check
+#     and --rework-waiting-on too, which go only with --rework. The closer the
+#     stay armed already checks that work, and a --waiting-on on work that has
+#     landed would arm it again once its arm has sent it.
 # Exit: 0 signed off, or with --answer the named gates answered, or with --stay
 #   the conversation left waiting on the work; 1 stopped short — a read
 #   failed, the rework did not file or its record did not land, the PR did not
@@ -328,6 +336,7 @@ PR_PICK=""
 ACCEPT=""
 ACCEPT_VARS=()
 CHECKS=()
+REWORK_WAITS=()
 WAIT=()
 WAIT_IDS=""
 CLOSE_BRIEF=""
@@ -482,6 +491,11 @@ while [ $# -gt 0 ]; do
     --successor)  shift; [ $# -gt 0 ] || die "--successor needs a bead id"; SUCCESSOR="$1" ;;
     --pr-anchor)  shift; [ $# -gt 0 ] || die "--pr-anchor needs a bead id"; PR_PICK="$1" ;;
     --check)      shift; [ $# -gt 0 ] || die "--check needs a check's name"; CHECKS+=(--check "$1") ;;
+    --rework-waiting-on) shift; REWORK_WAIT="${1:-}"
+                  # gctk review ask trims a wait's id, and a re-run compares this
+                  # value with the ask's edges, so it is trimmed here too.
+                  REWORK_WAIT="${REWORK_WAIT#"${REWORK_WAIT%%[![:space:]]*}"}"; REWORK_WAIT="${REWORK_WAIT%"${REWORK_WAIT##*[![:space:]]}"}"
+                  [ -n "$REWORK_WAIT" ] || die "--rework-waiting-on needs a bead id"; REWORK_WAITS+=(--waiting-on "$REWORK_WAIT") ;;
     --accept)     ACCEPT=yes ;;
     --var)        shift; [ $# -gt 0 ] || die "--var needs <key>=<value>"
                   case "$1" in
@@ -550,6 +564,8 @@ case "$PR_ANSWER" in
 esac
 [ "${#CHECKS[@]}" -eq 0 ] || [ "$PR_ANSWER" = rework ] \
   || die "--check names a check the ruling's rework sends back, so it requires --rework"
+[ "${#REWORK_WAITS[@]}" -eq 0 ] || [ "$PR_ANSWER" = rework ] \
+  || die "--rework-waiting-on names a bead the ruling's rework waits on, so it requires --rework"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
 
@@ -643,11 +659,11 @@ fi
 PR_ANCHORS=()
 GATE_WAITERS='{}'
 # open_pr_row <row> — 0 when the row's bead owns an open PR: merge_result
-# pull_request, or pull_request_pending or pull_request_head_changed on Gas
-# Town's pending record.
+# pull_request_pending or pull_request_head_changed on Gas Town's pending
+# record.
 open_pr_row() {
   case "$(printf '%s' "$1" | jq -r '.metadata.merge_result // ""' 2>/dev/null)" in
-    pull_request|pull_request_pending|pull_request_head_changed) return 0 ;;
+    pull_request_pending|pull_request_head_changed) return 0 ;;
   esac
   return 1
 }
@@ -697,39 +713,33 @@ if [ "$RULED" = yes ] && [ -z "$PR_ANSWER" ] && [ -n "$PR_LIST" ]; then
 fi
 # --rework and --retire act on one open PR: the one the ruling reaches, the one
 # --pr-anchor names when it reaches more than one, or else the subject, which
-# converse-rework.sh and pr-dispose.sh refuse unless it is an open PR. A
-# conversation owns one live rework child (rework-child.sh), so one sign-off
-# files one rework, and each other open PR the ruling reaches stands under it,
-# as --no-rework says of every one.
+# converse-rework.sh and pr-dispose.sh refuse unless it is an open PR. One
+# sign-off files one rework, so each other open PR the ruling reaches stands
+# under it, as --no-rework says of every one.
 #
 # The PR a ruling's rework or retirement acts on is recorded on the conversation
 # (gc.ruling_consequence, keyed by the ruling's answer) before it acts, because
-# what it acts on can close in between: the retired PR's closer, pr-facts or
-# the landing order, consummates a retirement by closing its anchor, and a
-# closed bead is no open PR the ruling reaches. A re-run of the same ruling
+# what it acts on can close in between: the retired PR's closer, the landing
+# order, consummates a retirement by closing its anchor, and a closed bead is
+# no open PR the ruling reaches. A re-run of the same ruling
 # with the same answer recovers that PR from the record, so it never falls back
 # to the subject or acts on another PR, and a recorded PR that reads closed has
 # nothing left for the answer to do. A re-run that answers differently is a new
 # answer, and the record does not bind it.
 #
-# A rework's record also names the child it filed, once converse-rework.sh
-# reports it, because the store cannot name it later: a conversation's rework
-# children all carry its id as source_ruling_bead, and the ruling a child
-# carries as its rejection_reason is cleared once its worker resumes the branch
-# (work-setup.sh). The writer adopts only a live child, so
-# a re-run once the child has closed would file a second rework on the same
-# ruling, block the PR again and supersede the reviews of the reworked branch.
-# So a recorded child that has closed is this ruling's rework done: the re-run
-# files nothing and supersedes nothing, and a stay waits on that child, which
-# returns it at once. A stop after the child is filed and before its record
-# lands leaves the record without it, and the re-run then adopts the child
-# while it is live, and the check after in_target_rig below refuses the re-run
-# once that child has closed. The child's writer, rework-child.sh, is retired
-# by the deletion plan, so it gains no record of the ruling.
-# rework_of($c): whether a `gc bd show` row is conversation $c's rework: a rework
-# child whose source_ruling_bead names it, or, on Gas Town's pending record, the
+# A rework's record also names the rework it filed, the ask converse-rework.sh
+# reports, so a re-run and a stay read this ruling's rework from the record. A
+# recorded rework that has closed is this ruling's rework done: the re-run
+# files nothing, and a stay waits on the recorded rework, which returns it at
+# once. A stop after the ask is filed and before its record lands leaves the
+# record without it, and the re-run sends the ruling to converse-rework.sh
+# again, which finds that ask by its source and reason, open or closed, and
+# files nothing, so the re-run records it then. A record can also name a
+# rework child that rework-child.sh filed for the conversation.
+# rework_of($c): whether a `gc bd show` row is conversation $c's rework: the
 # ask its ruling filed for the PR's review run, whose discovered-from edge names
-# it (gctk review ask --source).
+# it (gctk review ask --source), or a rework child whose source_ruling_bead
+# names it.
 REWORK_OF_JQ='def rework_of($c): ((.metadata // {}).source_ruling_bead // "") == $c
   or any((.dependencies // [])[]?; ((.id // .depends_on_id // "") == $c) and ((.dependency_type // .type // "") == "discovered-from"));'
 CONSEQUENCE_JQ='def consequences: ((.metadata // {})["gc.ruling_consequence"] // {})
@@ -774,6 +784,23 @@ case "$PR_ANSWER" in
         printf '%s' "$CHROW" | jq -e --arg c "$CONVERSATION" "$REWORK_OF_JQ"'rework_of($c)' >/dev/null 2>&1 \
           || stopped "$RECORDED_CHILD, which the record on conversation $CONVERSATION names as this ruling's rework on $PR_TARGET, does not read as this conversation's rework; nothing was written"
         [ "$(printf '%s' "$CHROW" | jq -r '(.status // "") | ascii_downcase')" = closed ] && CHILD_CLOSED=yes
+        # The rework an earlier attempt filed stands for a re-run on an open PR
+        # only when it waits on each bead --rework-waiting-on names, by its own
+        # blocks edge, since a run can take it, or may have, before that work
+        # lands.
+        LACKS=""
+        if [ -z "$TARGET_CLOSED" ]; then
+          for ((i = 1; i < ${#REWORK_WAITS[@]}; i += 2)); do
+            printf '%s' "$CHROW" | jq -e --arg w "${REWORK_WAITS[$i]}" 'any((.dependencies // [])[]?;
+                ((.id // .depends_on_id // "") == $w) and ((.dependency_type // .type // "") == "blocks"))' >/dev/null 2>&1 \
+              || LACKS="${LACKS:+$LACKS or }${REWORK_WAITS[$i]}"
+          done
+        fi
+        if [ -n "$LACKS" ] && [ -n "$CHILD_CLOSED" ]; then
+          stopped "$RECORDED_CHILD, the rework an earlier attempt of this ruling filed on $PR_TARGET, closed without waiting on $LACKS, so a run may have worked it before that work landed; nothing was written. Re-run without --rework-waiting-on to sign off on the rework as it ran, or raise it in the thread if it must run again once that work lands"
+        elif [ -n "$LACKS" ]; then
+          stopped "$RECORDED_CHILD, the rework an earlier attempt of this ruling filed on $PR_TARGET, is open and does not wait on $LACKS, so a run can take it before that work lands; nothing was written. Re-run without --rework-waiting-on to send the rework without that wait, or raise it in the thread"
+        fi
       fi
     fi ;;
   no-rework)
@@ -782,10 +809,8 @@ case "$PR_ANSWER" in
 esac
 # The rework or the retirement acts in the rig of the PR it acts on, which can
 # be another rig than the conversation's when a gate in another store releases
-# it. converse-rework.sh and rework-child.sh find the rework pool, file and
-# deduplicate the child, prove its blocks edge onto the anchor and sling it in
-# the store and rig GC_RIG names; pr-dispose.sh reads the anchor there; and the
-# review lanes read their check index from the checkout. So the consequence
+# it. converse-rework.sh reads the anchor and files its ask in that rig's
+# store, and pr-dispose.sh reads the anchor there. So the consequence
 # runs with GC_RIG, GC_RIG_ROOT and the working directory all pinned to that
 # rig, resolved from the PR's id prefix by bead-store.sh, the one resolver of
 # a bead's store. The conversation stays the rework's provenance.
@@ -802,17 +827,16 @@ fi
 in_target_rig() { ( cd "$TARGET_PATH" && GC_RIG="$TARGET_RIG" GC_RIG_ROOT="$TARGET_PATH" "$@" ); }
 # A re-run of a --rework ruling whose record names the PR and no rework comes
 # after an attempt that stopped between those two records: before
-# converse-rework.sh filed a rework, or after it filed one whose record never
-# landed, as when that writer's supersede failed or the store refused the
-# record. The writer adopts only a live rework (rework-child.sh), so a rework
-# that attempt filed and that has since closed would be filed a second time,
-# block the PR again and send the reworked branch's reviews back to unreviewed.
-# Nothing tells such a rework from one an unrecorded earlier ruling filed, so
-# a closed rework of this conversation on that PR that no recorded answer names
-# refuses the re-run, before any write, and the sitting holds to ask the
-# operator. A live one is adopted and recorded, and none means the attempt
-# filed none. The record is written after the writer reports its child, since
-# the writer, which the deletion plan retires, names the child only then.
+# converse-rework.sh filed its ask, or after it filed one whose record never
+# landed, as when the store refused the record. converse-rework.sh finds an ask
+# that attempt filed by its source and reason, open or closed, and files
+# nothing. A rework child that rework-child.sh filed for this conversation is
+# no ask, so one that has since closed would have the ruling sent a second
+# time, and nothing tells it from one an unrecorded earlier ruling filed. So a
+# closed rework child of this conversation on that PR that no recorded answer
+# names refuses the re-run, before any write, and the sitting holds to ask the
+# operator. The record is written after converse-rework.sh reports its ask,
+# since it names the ask only then.
 if [ "$PR_ANSWER" = rework ] && [ -n "$RECORDED_ON" ] && [ "$PR_TARGET" = "$RECORDED_ON" ] \
    && [ -z "$RECORDED_CHILD" ] && [ -z "$TARGET_CLOSED" ]; then
   REWORKS=$(in_target_rig bd_list --metadata-field "source_ruling_bead=$CONVERSATION" --all) \
@@ -1197,7 +1221,7 @@ case "$ACTING" in
     CR=$(pack_script converse-rework.sh)
     if [ -z "$CR" ]; then
       PR_OUT="no converse-rework.sh beside $0"
-    elif PR_OUT=$(in_target_rig "$CR" --anchor "$PR_TARGET" --ruling-bead "$CONVERSATION" --ruling "$RULING" ${CHECKS[@]+"${CHECKS[@]}"} 2>&1); then
+    elif PR_OUT=$(in_target_rig "$CR" --anchor "$PR_TARGET" --ruling-bead "$CONVERSATION" --ruling "$RULING" ${CHECKS[@]+"${CHECKS[@]}"} ${REWORK_WAITS[@]+"${REWORK_WAITS[@]}"} 2>&1); then
       echo "$PR_OUT"
       CONSEQUENCE="filed ruling-driven rework on $PR_TARGET"
     fi
@@ -1207,11 +1231,10 @@ case "$ACTING" in
       echo "Repair the cause and re-run. If $PR_TARGET is not an open PR, file the ruling's consequence as work, then re-run without --rework and with --waiting-on <that bead>. If it cannot be repaired, raise it in the thread."
       exit 1
     fi
-    # The child the writer names on its last line
-    # ("<child> <route> <filed|adopted|in-flight>") is recorded under the
-    # ruling before anything else is written, so a re-run once it has closed
-    # finds it there. A refused record stops here, and a re-run while the
-    # child is open adopts it and records it.
+    # The ask the writer names on its last line ("<ask> ask <filed|found>") is
+    # recorded under the ruling before anything else is written, so a re-run
+    # once it has closed finds it there. A refused record stops here, and a
+    # re-run finds the ask again and records it.
     read -r CHILD _ <<EOF
 $(printf '%s\n' "$PR_OUT" | tail -n 1)
 EOF
@@ -1220,7 +1243,7 @@ EOF
       RECORD=$(printf '%s' "$CONV_ROW" | jq -c --arg a "$ANSWER" --arg t "$PR_TARGET" --arg c "$CHILD" "$CONSEQUENCE_JQ"'
         consequences + {($a): {act: "rework", anchor: $t, child: $c}}' 2>/dev/null)
       [ -n "$RECORD" ] && gc bd update "$CONVERSATION" --set-metadata "gc.ruling_consequence=$RECORD" >/dev/null 2>&1 \
-        || stopped "rework $CHILD is filed on $PR_TARGET, but the store refused its record on conversation $CONVERSATION (gc.ruling_consequence), which a re-run reads once $CHILD has closed so that it files no second rework; nothing else was written${STAY:+ but the staying: line that records the stay}. Re-run while $CHILD is open, which adopts it"
+        || stopped "rework $CHILD is filed on $PR_TARGET, but the store refused its record on conversation $CONVERSATION (gc.ruling_consequence), which a re-run reads once $CHILD has closed so that it files no second rework; nothing else was written${STAY:+ but the staying: line that records the stay}. Re-run, which finds $CHILD again and records it"
     fi
     record_action "Sent $(pr_label "$PR_TARGET") back for rework." ;;
   retire)

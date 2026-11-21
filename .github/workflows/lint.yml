@@ -1,0 +1,68 @@
+name: lint
+
+# Runs golangci-lint, the repository's Go lint, off-host on pull requests to
+# main and on pushes to main: the release .golangci-lint-version names, on
+# .golangci.yml, which are the version and config tools/lint.sh runs at each
+# polecat self-review and merge. Its command is lint.sh's: `go run` builds the
+# pinned release from source with the Go setup-go installs, the version go.mod
+# names, and the release lints every package of the repository's one module.
+# One platform is enough while no Go file carries a build constraint, because
+# the lint then type-checks the same files on Linux as on macOS. A file built
+# for one platform only, by a //go:build line or a name such as x_darwin.go, is
+# linted only on that platform, so such a file needs a lint job there.
+# A draft pull request does not run the lint, which saves Actions minutes while
+# a change is still taking follow-up commits, as in tests.yml. Marking the pull
+# request ready, or pushing to it once ready, runs it.
+# Main's ruleset names the checks that gate a merge by job id, so renaming the
+# job, or giving it a name: or a matrix, changes the check a merge waits on.
+# The job skips only a draft. The city's merge counts no skipped result
+# (services/gctk/pr/rules.go), so a condition of the job's own that skipped it
+# at a ready head would hold that pull request's merge.
+
+on:
+  pull_request:
+    branches: [main]
+    # Specifying types replaces GitHub's default set, so opened/synchronize/
+    # reopened are kept explicitly; ready_for_review runs the lint when a
+    # draft is marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    # A draft pull request skips the lint. A push to main and a manual
+    # dispatch carry no pull_request context, so the event-name guard runs
+    # them anyway.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # The job, not the workflow, holds the concurrency group, as in tests.yml:
+    # a job that a draft skips never starts, so a draft's run cannot cancel the
+    # run that marking the pull request ready started.
+    concurrency:
+      group: ${{ github.workflow }}-lint-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # go.mod names the toolchain version. The job keeps no cache, as
+      # tests.yml's jobs keep none, so each run downloads and builds the pinned
+      # release.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # helm reaches ICU through Dolt's go-icu-regex, a cgo package that
+      # includes unicode/regex.h, which the image installs without headers,
+      # and the lint type-checks it.
+      - name: Install ICU's headers for helm's cgo
+        run: sudo apt-get update -q && sudo apt-get install -y -q libicu-dev
+
+      - name: Lint every package with golangci-lint
+        run: go run "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(cat .golangci-lint-version)" run ./...

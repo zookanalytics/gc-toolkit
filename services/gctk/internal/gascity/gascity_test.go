@@ -361,3 +361,25 @@ exit 0
 		t.Fatalf("gc ran with\n%s\nwant\n%s", raw, want)
 	}
 }
+
+// The Claude settings file sits under the city's root.
+func TestTheClaudeSettingsFile(t *testing.T) {
+	dir := t.TempDir()
+	gc := filepath.Join(dir, "gc")
+	if err := os.WriteFile(gc, []byte(`#!/bin/sh
+[ "$1 $2 $3" = "rig list --json" ] || exit 2
+echo '{"rigs":[{"name":"town","path":"`+dir+`","prefix":"lx","hq":true},{"name":"r","path":"/r","prefix":"tk"}]}'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY_PATH", "")
+	t.Setenv("GC_CITY", "")
+	t.Setenv("GC_CITY_ROOT", "")
+	c := &City{bin: gc}
+	if got, err := c.ClaudeSettings(); err != nil || got != filepath.Join(dir, ".gc", "settings.json") {
+		t.Errorf("ClaudeSettings = %q, %v", got, err)
+	}
+}

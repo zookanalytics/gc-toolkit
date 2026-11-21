@@ -91,7 +91,9 @@ func realOpen(t *testing.T, timeout time.Duration) (Script, string) {
 	t.Setenv("TMPDIR", dir)
 	for _, k := range []string{"GC_CITY_PATH", "GC_CITY", "GC_CITY_ROOT", "GC_RIG", "BEADS_DIR", "GC_HELM_FIXTURE"} {
 		t.Setenv(k, "")
-		os.Unsetenv(k)
+		if err := os.Unsetenv(k); err != nil {
+			t.Fatal(err)
+		}
 	}
 	path, err := filepath.Abs("../../../../assets/scripts/gc-helm.sh")
 	if err != nil {
@@ -199,7 +201,7 @@ func TestAGateSaveKilledInItsReplyIsSavedAgainOntoTheConversationItFiled(t *test
 	const q = "is the rollout safe to approve?"
 	s, state := realOpen(t, 3*time.Second)
 	rows := `[{"id": "tk-gate1", "issue_type": "gate", "await_type": "human", "status": "open", "title": "Approve the rollout", "description": "Approve it or say why not."},
-		{"id": "tk-held1", "issue_type": "task", "status": "open", "title": "the rollout", "metadata": {"merge_result": "pull_request", "pr_number": "41"},
+		{"id": "tk-held1", "issue_type": "task", "status": "blocked", "title": "the rollout", "metadata": {"merge_result": "pull_request_pending", "pr_number": "41"},
 		 "dependencies": [{"type": "blocks", "depends_on_id": "tk-gate1"}]}]`
 	for name, content := range map[string]string{"rows.json": rows, "stall.in-reply": ""} {
 		if err := os.WriteFile(filepath.Join(state, name), []byte(content), 0o644); err != nil {

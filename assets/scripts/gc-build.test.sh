@@ -4,9 +4,9 @@
 # bounding, the atomic publish, the record's revisions, deletion-only rebuilds,
 # behind_main's fetch cadence, the probe and the restart. This suite pins what
 # is gctk's own, starting with the questions that decide whether lifecycle.sh
-# and merge.sh have a binary to exec. Both exec gctk and have no other
-# implementation, so a build the city cannot perform has to show up as a failed
-# build rather than as a quiet tick.
+# has a binary to exec. It execs gctk and has no other implementation, so a
+# build the city cannot perform has to show up as a failed build rather than as
+# a quiet tick.
 #   (USAGE)    no component, an unknown one, two of them, or an unknown argument
 #              exits 2 and writes nothing
 #   (TOOLLESS) a build owed with no Go toolchain is a FAILED build: exit 1 and a

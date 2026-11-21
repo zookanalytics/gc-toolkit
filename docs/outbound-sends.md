@@ -19,7 +19,8 @@ not own: how it is recorded, how it waits, and how the operator takes it up.
 
 **Boundaries.** This covers GitHub writes issued through `gh`. It does not
 speak for our own repository — a send to the rig's origin is ordinary work,
-and PRs on it go through [`pr-open.sh`](../assets/scripts/pr-open.sh). A
+and PRs on it go through the refinery's publication
+([`refinery-publish.sh`](../assets/scripts/refinery-publish.sh)). A
 problem in software another rig of this city owns is work for that rig. The
 commands an agent runs are the
 [`gc-toolkit.external-issue`](../skills/external-issue/SKILL.md) skill, how the
@@ -34,8 +35,8 @@ org: a rig whose origin sits outside the city's usual org would have its whole
 PR workflow refused by an org-keyed rule, while an upstream repo inside that
 org would sail through it. The origin remote is the only reading that matches
 what "we own this" means, and it is the reading
-[`pr-open.sh`](../assets/scripts/pr-open.sh) already pins its own `gh pr
-create` to.
+[`refinery-publish.sh`](../assets/scripts/refinery-publish.sh) already pins its
+own `gh pr create` to.
 
 ## An agent records an upstream finding
 

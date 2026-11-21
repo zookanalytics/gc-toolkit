@@ -675,9 +675,7 @@ field would be lying on a normal day.
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
 machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
-declared lane, and `assets/scripts/merge.sh` decides it again at each of its
-holds. Both record it through the lifecycle writer, gate-ensure through
-`lifecycle.sh` and `gctk merge` in-process, in the head-pinned
+declared lane and records it through `lifecycle.sh`, in the head-pinned
 `<value>@<oid>@<since>` shape. Nothing here adds a pass, a scanner or a GitHub
 read.
 
@@ -746,7 +744,7 @@ about it.
 once it has held past three days (`preOpenStaleThresholdDays`) with a check not
 yet green and nothing advancing it, meaning no review or rework a live session is
 working. Its checks are the lanes its `check_set` declares, split by the rule
-`merge.sh` and `pr-open.sh` apply: commas separate lanes, whitespace is stripped,
+the check resolver (`gctk review checks --resolve`) applies: commas separate lanes, whitespace is stripped,
 and `none`, `off` and `approval` name no lane. Every lane holds the PR, and a lane
 is green when a review backs it the way `lane-state.sh` reads a local backing
 (`laneGreen`): a closed review bead naming the anchor in `anchor_bead` and the

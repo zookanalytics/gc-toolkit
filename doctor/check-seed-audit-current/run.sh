@@ -4,10 +4,10 @@
 # of every agent and the compiled recipe of every formula, committed for
 # review. Whether it is current is a question only a render answers, and this
 # check renders nothing: `assets/scripts/render-seed-audit.sh --check`
-# re-renders a checkout, and merge.sh holds a merge that would land a render the
-# merge itself made stale (`--check-merge`). This check reads what that
-# machinery depends on: an artifact to hold merges to, and the pre-commit hook
-# that keeps a branch current before it reaches the merge.
+# re-renders a checkout, and the landing order checks the default branch's
+# audit once a PR lands and asks for its re-render (orders/pr-reconcile.toml).
+# This check reads what that upkeep depends on: an artifact to check, and the
+# pre-commit hook that keeps a branch current before it lands.
 # An ABSENT audit is a WARNING — a fresh clone before the first render is
 # expected, and it renders on first install (--install-hook). A renderer that
 # is not executable, and an unwired hook, are warnings too.
@@ -31,23 +31,23 @@ if [ ! -e "$script" ]; then
     echo "OK: no render-seed-audit.sh in this pack — nothing to keep current"
     exit 0
 fi
-[ -x "$script" ] || warnings+=("assets/scripts/render-seed-audit.sh is NOT executable — merge.sh and the pre-commit hook run it through bash, so the upkeep still works, but the documented operator command and --install-hook invoke it directly and will fail; chmod +x it")
+[ -x "$script" ] || warnings+=("assets/scripts/render-seed-audit.sh is NOT executable — the pre-commit hook runs it through bash, so the upkeep still works, but the documented operator command and --install-hook invoke it directly and will fail; chmod +x it")
 
 if [ ! -f "$index" ]; then
     echo "seed audit ABSENT — generated/seed-audit/INDEX.md does not exist (warning, not error)"
-    detail "A fresh clone ships without the rendered audit and regenerates it on first install; until then nothing shows what any agent receives, and merge.sh has no artifact to hold a merge to."
+    detail "A fresh clone ships without the rendered audit and regenerates it on first install; until then nothing shows what any agent receives."
     detail "Render it: assets/scripts/render-seed-audit.sh && git add generated/seed-audit (wire upkeep with --install-hook)."
     detail ${warnings[@]+"${warnings[@]}"}
     exit 1
 fi
 
-# The pre-commit hook is what keeps a branch's artifact current before the
-# merge gate sees it.
+# The pre-commit hook is what keeps a branch's artifact current before it
+# lands.
 if command -v git >/dev/null 2>&1 && git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
     hookspath=$(git -C "$dir" config --get core.hooksPath 2>/dev/null)
     if [ "$hookspath" != "assets/hooks" ]; then
         shown="${hookspath:+\"$hookspath\"}"
-        warnings+=("core.hooksPath is ${shown:-unset}, not assets/hooks — nothing regenerates the audit on commit, so a branch that moves a prompt input reaches the merge gate stale and is held there; wire it: assets/scripts/render-seed-audit.sh --install-hook (deliberate on rigs that disable hooks — there, render by hand before pushing: assets/scripts/render-seed-audit.sh)")
+        warnings+=("core.hooksPath is ${shown:-unset}, not assets/hooks — nothing regenerates the audit on commit, so a branch that moves a prompt input lands with a stale render until the re-render after its landing; wire it: assets/scripts/render-seed-audit.sh --install-hook (deliberate on rigs that disable hooks — there, render by hand before pushing: assets/scripts/render-seed-audit.sh)")
     fi
 fi
 

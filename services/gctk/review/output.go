@@ -32,24 +32,14 @@ import (
 // review. Paths that cannot be listed leave the edit unchecked, and needs_you
 // then says so, so the approver reads the diff for one.
 
-// Shadow is what a shadow run's round would have written outside the run: the
-// head's comment it posted nowhere, and each push, gate and bead it made none
-// of, one line each.
-type Shadow struct {
-	Comment string   `json:"comment"`
-	Writes  []string `json:"writes,omitempty"`
-}
-
 // OutputRequest is one step's output to check: the step's bead, the text the
-// step wrote, the checkouts that can read the reviewed commit, for a shadow
-// run's round each write it made none of, and the reader of the withdrawal
-// filed on a bead for a head, open or closed, "" when none is, which the pr
-// domain answers (pr.WithdrawalFor).
+// step wrote, the checkouts that can read the reviewed commit, and the reader
+// of the withdrawal filed on a bead for a head, open or closed, "" when none
+// is, which the pr domain answers (pr.WithdrawalFor).
 type OutputRequest struct {
 	Step       string
 	Raw        []byte
 	Repos      []string
-	Writes     []string
 	Withdrawal func(bead, head string) (string, error)
 }
 
@@ -122,8 +112,7 @@ func decode(raw []byte, v any, what string) error {
 // triageOutput checks triage's output. A head ruled material keeps the
 // approvals given before it only until the landing order carries out the
 // withdrawal triage files for it, so the output stands only once that
-// withdrawal is on the bead that owns the PR, open or closed. A shadow run
-// files none, so its ruling stands alone.
+// withdrawal is on the bead that owns the PR, open or closed.
 func triageOutput(run *Run, n int, req OutputRequest) (*Triage, error) {
 	var t Triage
 	if err := decode(req.Raw, &t, OutputTriage); err != nil {
@@ -148,7 +137,7 @@ func triageOutput(run *Run, n int, req OutputRequest) (*Triage, error) {
 	if t.Checks == nil {
 		t.Checks = []Pick{}
 	}
-	if t.Material && !run.Shadow {
+	if t.Material {
 		if req.Withdrawal == nil {
 			return nil, errors.New("no reader of withdrawals was given, so a material ruling cannot be checked")
 		}
@@ -250,7 +239,7 @@ func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair
 	declined := earlierDeclines(run, n)
 	subjects := map[subject]bool{}
 	for _, r := range rp.Rulings {
-		if err := checkRuling(r, it, asks, declined, run.Shadow); err != nil {
+		if err := checkRuling(r, it, asks, declined); err != nil {
 			return nil, err
 		}
 		if subjects[r.subject()] {
@@ -270,26 +259,11 @@ func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair
 			return nil, refuse("ask %s is open and nothing holds it, so the round rules it", a.ID)
 		}
 	}
-	switch {
-	case rp.Pushed != "" && run.Shadow:
-		return nil, refuse("a shadow run pushes nothing, and the output names the push %s", rp.Pushed)
-	case rp.Pushed != "" && !git.IsObjectID(rp.Pushed):
+	if rp.Pushed != "" && !git.IsObjectID(rp.Pushed) {
 		return nil, refuse("the push %q is not a full object name", rp.Pushed)
 	}
 	if rp.Rulings == nil {
 		rp.Rulings = []Ruling{}
-	}
-	switch {
-	case run.Shadow:
-		rp.Shadow = &Shadow{Writes: req.Writes}
-		draft := *run
-		draft.Iterations = maps.Clone(run.Iterations)
-		withRepair := *it
-		withRepair.Repair = &rp
-		draft.Iterations[n] = &withRepair
-		rp.Shadow.Comment = Comment(&draft, n, asks)
-	case rp.Shadow != nil:
-		return nil, refuse("only a shadow run's round writes what it would have written")
 	}
 	return &rp, nil
 }
@@ -366,7 +340,7 @@ var (
 // code, a question with no gate, and a fix for an ask an earlier round of the
 // run declined, which a later ruling of its own overrules only through an ask
 // that carries it.
-func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string, shadow bool) error {
+func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string) error {
 	switch {
 	case r.Ask != "" && (r.Check != "" || r.Finding != ""):
 		return refuse("a ruling names the ask %s and a lane's finding at once", r.Ask)
@@ -386,13 +360,11 @@ func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string
 		return refuse("%s is ruled %q, which is not a ruling (%s)", r.Subject(), r.Ruling, strings.Join(rulings, ", "))
 	}
 	switch {
-	case r.Ruling == RulingMustFix && shadow && r.Commit != "":
-		return refuse("a shadow run fixes nothing, and %s names the commit %s", r.Subject(), r.Commit)
-	case r.Ruling == RulingMustFix && !shadow && !git.IsObjectID(r.Commit):
+	case r.Ruling == RulingMustFix && !git.IsObjectID(r.Commit):
 		return refuse("%s is ruled must-fix and names no commit that fixes it (a full object name)", r.Subject())
 	case r.Ruling != RulingMustFix && r.Commit != "":
 		return refuse("%s is ruled %s, which changes no code, and names the commit %s", r.Subject(), r.Ruling, r.Commit)
-	case r.Ruling == RulingQuestion && !shadow && strings.TrimSpace(r.Gate) == "":
+	case r.Ruling == RulingQuestion && strings.TrimSpace(r.Gate) == "":
 		return refuse("%s is put to a person and names no gate", r.Subject())
 	case r.Ruling != RulingQuestion && r.Gate != "":
 		return refuse("%s is ruled %s and names the gate %s, which only a question goes to", r.Subject(), r.Ruling, r.Gate)

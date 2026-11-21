@@ -39,6 +39,20 @@ func (g *graph) read(ids []string) (map[string][]person.Blocker, error) {
 	return out, nil
 }
 
+// holdingGates is [Holding]'s gates, root by root, with its bound and its
+// errors, the part of the walk these tests read.
+func holdingGates(roots []string, read ReadBlockers) (map[string][]person.Blocker, error) {
+	holds, err := Holding(roots, read)
+	if holds == nil {
+		return nil, err
+	}
+	gates := make(map[string][]person.Blocker, len(holds))
+	for root, h := range holds {
+		gates[root] = h.Gates
+	}
+	return gates, err
+}
+
 func gateIDs(gates []person.Blocker) []string {
 	out := []string{}
 	for _, g := range gates {
@@ -83,7 +97,7 @@ func TestHoldingGates(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &graph{edges: tc.edges}
-			got, err := HoldingGates([]string{"a"}, g.read)
+			got, err := holdingGates([]string{"a"}, g.read)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,7 +111,7 @@ func TestHoldingGates(t *testing.T) {
 // The gate comes back with the fields a caller names it by.
 func TestHoldingGatesKeepTheTitle(t *testing.T) {
 	g := &graph{edges: map[string][]person.Blocker{"a": {task("rw")}, "rw": {gate("g")}}}
-	got, err := HoldingGates([]string{"a"}, g.read)
+	got, err := holdingGates([]string{"a"}, g.read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +129,7 @@ func TestHoldingGatesOverManyRoots(t *testing.T) {
 		"c":  {task("other")},
 		"rw": {gate("shared")},
 	}}
-	got, err := HoldingGates([]string{"a", "b", "c", "b"}, g.read)
+	got, err := holdingGates([]string{"a", "b", "c", "b"}, g.read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +159,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 	t.Run("a read that fails answers nothing", func(t *testing.T) {
 		boom := errors.New("store down")
 		calls := 0
-		got, err := HoldingGates([]string{"a"}, func(ids []string) (map[string][]person.Blocker, error) {
+		got, err := holdingGates([]string{"a"}, func(ids []string) (map[string][]person.Blocker, error) {
 			calls++
 			if calls == 2 {
 				return nil, boom
@@ -162,7 +176,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 		for i := 0; i <= walkDepth; i++ {
 			g.edges[fmt.Sprintf("n%d", i)] = []person.Blocker{task(fmt.Sprintf("n%d", i+1))}
 		}
-		got, err := HoldingGates([]string{"n0"}, g.read)
+		got, err := holdingGates([]string{"n0"}, g.read)
 		if _, answered := got["n0"]; answered || !errors.Is(err, ErrWalkBound) {
 			t.Errorf("(%v, %v), want no answer for n0 and ErrWalkBound", got, err)
 		}
@@ -177,7 +191,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 			g.edges[fmt.Sprintf("n%d", i)] = []person.Blocker{task(fmt.Sprintf("n%d", i+1))}
 		}
 		g.edges[fmt.Sprintf("n%d", walkDepth-1)] = nil
-		if _, err := HoldingGates([]string{"n0"}, g.read); err != nil {
+		if _, err := holdingGates([]string{"n0"}, g.read); err != nil {
 			t.Errorf("a walk of %d levels: %v", walkDepth, err)
 		}
 	})
@@ -188,7 +202,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 			wide = append(wide, task(fmt.Sprintf("t%d", i)))
 		}
 		g := &graph{edges: map[string][]person.Blocker{"a": wide}}
-		if _, err := HoldingGates([]string{"a"}, g.read); !errors.Is(err, ErrWalkBound) {
+		if _, err := holdingGates([]string{"a"}, g.read); !errors.Is(err, ErrWalkBound) {
 			t.Errorf("err = %v, want ErrWalkBound", err)
 		}
 		if len(g.reads) != 1 {
@@ -243,7 +257,7 @@ func TestHoldingGatesAnswerARootAloneOrInABatch(t *testing.T) {
 	for _, batch := range batches {
 		t.Run(strings.Join(batch, "+"), func(t *testing.T) {
 			g := &graph{edges: edges}
-			got, err := HoldingGates(batch, g.read)
+			got, err := holdingGates(batch, g.read)
 			wantNamed := []string{}
 			for _, root := range batch {
 				ids, answered := got[root]
@@ -299,7 +313,7 @@ func boundRoots(err error) []string {
 // that names only such beads reads nothing.
 func TestHoldingGatesShareReadsAcrossLevels(t *testing.T) {
 	g := &graph{edges: map[string][]person.Blocker{"a": {task("x")}, "x": {task("y")}, "b": {task("y")}, "y": {gate("g")}}}
-	got, err := HoldingGates([]string{"a", "b"}, g.read)
+	got, err := holdingGates([]string{"a", "b"}, g.read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,21 +509,6 @@ func TestHoldingStaying(t *testing.T) {
 				t.Errorf("staying of a = %v, want %v", ids, tc.wantStays)
 			}
 		})
-	}
-}
-
-// HoldingGates is Holding's gates, root by root, with its bound and its errors.
-func TestHoldingGatesIsHoldingsGates(t *testing.T) {
-	g := &graph{edges: map[string][]person.Blocker{"a": {task("rw"), decision("d")}, "rw": {gate("g")}, "b": nil}}
-	gates, err := HoldingGates([]string{"a", "b"}, g.read)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids := gateIDs(gates["a"]); !slices.Equal(ids, []string{"g"}) {
-		t.Errorf("gates of a = %v, want only the gate", ids)
-	}
-	if ids, answered := gates["b"]; !answered || len(ids) != 0 {
-		t.Errorf("gates of b = %v (%v), want an answer with none", ids, answered)
 	}
 }
 

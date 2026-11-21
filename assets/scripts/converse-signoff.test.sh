@@ -380,10 +380,16 @@ _a=""; _r=""; _p=""; for x in "$@"; do [ "$_p" = "--anchor" ] && _a="$x"; [ "$_p
 _held=$(gc --harness-read status "$_child")
 if [ -n "${REWORK_ASK:-}" ]; then
   # On the pending record the writer files an ask instead: a task naming the
-  # conversation as its source through a discovered-from edge.
+  # conversation as its source through a discovered-from edge, and waiting on
+  # each --waiting-on bead by its own blocks edge, onto the id trimmed as gctk
+  # review ask trims it.
   if [ "$_held" = "<absent>" ]; then
     gc --harness-write row "$_child" "title=Review ask: the ruling" issue_type=task status=open assignee= 'metadata:={"branch":"polecat/anc"}'
     printf '%s|discovered-from|%s\n' "$_child" "$_r" >> "$STUB_DEPS"
+    _p=""; for x in "$@"; do
+      [ "$_p" = "--waiting-on" ] && printf '%s|blocks|%s\n' "$(jq -rn --arg w "$x" '$w | gsub("^\\s+|\\s+$"; "")')" "$_child" >> "$STUB_DEPS"
+      _p="$x"
+    done
   fi
   echo "$_child ask filed"
   exit 0
@@ -468,7 +474,7 @@ acceptance() {
 # An open PR whose merge only the conversation's own gate holds, so resolving
 # that gate releases the merge.
 open_pr() {
-    fresh; bead tk-anc; setm tk-anc merge_result pull_request
+    fresh; bead tk-anc; setm tk-anc merge_result pull_request_pending
     gate tk-rev conversation; edge tk-anc blocks tk-rev
     conv tk-conv tk-anc; edge tk-conv replies-to tk-rev
 }
@@ -481,8 +487,8 @@ run_signoff() {
     set -e
 }
 writes() { grep -c -E "$WRITES" "$CALLS" || true; }
-# merge_held <bead> — "held" while the real finalize gate refuses the bead, the
-# check merge.sh makes for an open human gate before it lands a PR.
+# merge_held <bead> — "held" while the real finalize gate refuses the bead, as it
+# does while an open human gate holds it.
 merge_held() {
     if (cd "$TMP/cwd" && bash "$HERE/finalize-gate.sh" check "$1" >/dev/null 2>&1); then echo released; else echo held; fi
 }
@@ -588,7 +594,7 @@ echo "# an open PR a gate releases: a member's PR answered from the epic's sitti
 # retirement lands on that PR before the gate is resolved. The record and the
 # headline stay on the epic.
 epic_pr() {
-    fresh; bead tk-epic epic; bead tk-mem; setm tk-mem merge_result pull_request; setm tk-mem pr_number 52; edge tk-mem parent-child tk-epic
+    fresh; bead tk-epic epic; bead tk-mem; setm tk-mem merge_result pull_request_pending; setm tk-mem pr_number 52; edge tk-mem parent-child tk-epic
     gate tk-mg design-choice; edge tk-mem blocks tk-mg
     conv tk-conv tk-epic; edge tk-conv replies-to tk-mg
 }
@@ -666,7 +672,7 @@ eq "$RC" 0 "(EPIC-PR-EARLIER) a gate another answer closed first does not reach 
 has "$OUT" "gate tk-mg was already cleared before this sign-off" "(EPIC-PR-EARLIER) …and that answer stands"
 # reply_to_task -> a member's open PR behind a task the epic's conversation replies to.
 reply_to_task() {
-    fresh; bead tk-epic epic; bead tk-mem; setm tk-mem merge_result pull_request; edge tk-mem parent-child tk-epic
+    fresh; bead tk-epic epic; bead tk-mem; setm tk-mem merge_result pull_request_pending; edge tk-mem parent-child tk-epic
     bead tk-note; edge tk-mem blocks tk-note
     conv tk-conv tk-epic; edge tk-conv replies-to tk-note
 }
@@ -690,7 +696,7 @@ echo "# a gate about the subject and another open PR"
 # A conversation files one live rework, so --rework or --retire names the PR it
 # acts on, and the other stands under the ruling.
 shared_pr() {
-    fresh; bead tk-anc; setm tk-anc merge_result pull_request; bead tk-pr2; setm tk-pr2 merge_result pull_request
+    fresh; bead tk-anc; setm tk-anc merge_result pull_request_pending; bead tk-pr2; setm tk-pr2 merge_result pull_request_pending
     gate tk-sg approach; edge tk-anc blocks tk-sg; edge tk-pr2 blocks tk-sg
     conv tk-conv tk-anc; edge tk-conv replies-to tk-sg
 }
@@ -721,7 +727,7 @@ run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --
 eq "$RC" 0 "(SHARED-PR-RERUN) the re-run with the same --pr-anchor exits 0, the gate it already answered still reaching that PR"
 has "$(calls)" "converse-rework --anchor tk-pr2 --ruling-bead tk-conv" "(SHARED-PR-RERUN) …and sends the rework to the PR it names again"
 has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(SHARED-PR-RERUN) …with the subject's PR standing, as the first attempt said"
-fresh; bead tk-anc; bead tk-pr2; setm tk-pr2 merge_result pull_request
+fresh; bead tk-anc; bead tk-pr2; setm tk-pr2 merge_result pull_request_pending
 gate tk-sg approach; edge tk-anc blocks tk-sg; edge tk-pr2 blocks tk-sg
 conv tk-conv tk-anc; edge tk-conv replies-to tk-sg
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
@@ -781,7 +787,7 @@ echo "# the rework or the retirement runs in the rig of the PR it acts on"
 # gate that holds its merge live in rig-b (prefix rb), and the conversation
 # replies to that gate across the stores.
 rig_pr() {
-    fresh; bead tk-epic epic; bead rb-mem; setm rb-mem merge_result pull_request
+    fresh; bead tk-epic epic; bead rb-mem; setm rb-mem merge_result pull_request_pending
     gate rb-mg design-choice; edge rb-mem blocks rb-mg
     conv tk-conv tk-epic; edge tk-conv replies-to rb-mg
 }
@@ -795,7 +801,7 @@ rig_pr; run_signoff --conversation tk-conv --outcome "the member's PR moves to t
 eq "$RC" 0 "(RIG-RETIRE) the same ruling with --retire exits 0"
 has "$(calls)" "pr-dispose --anchor rb-mem --successor tk-conv --kind not-needed" "(RIG-RETIRE) rig-b's PR is retired, the rig-a conversation its evidence"
 has "$(calls)" "pr-dispose ran in GC_RIG=rig-b GC_RIG_ROOT=$RIG_B PWD=$RIG_B" "(RIG-RETIRE) …in rig-b"
-fresh; bead tk-epic epic; bead zz-mem; setm zz-mem merge_result pull_request
+fresh; bead tk-epic epic; bead zz-mem; setm zz-mem merge_result pull_request_pending
 gate tk-mg design-choice; edge zz-mem blocks tk-mg
 conv tk-conv tk-epic; edge tk-conv replies-to tk-mg
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
@@ -1077,7 +1083,7 @@ has "$OUT" "city's own store" "(CLOSER-HQ) …saying a person closes it, through
 eq "$(writes)" 0 "(CLOSER-HQ) …and writes nothing"
 
 echo "# a ruling on an open PR says whether its branch changes"
-acceptance; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
+acceptance; setm tk-anc merge_result pull_request_pending; setm tk-anc pr_number 41
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 2 "(OPEN-PR) a ruled sign-off on an open PR with neither --rework nor --no-rework exits 2"
 eq "$(writes)" 0 "(OPEN-PR) …writing nothing"
@@ -1103,7 +1109,7 @@ has "$(grep '^pr-sitting-comment' "$CALLS")" "refresh --sitting tk-conv" "(REWOR
 # The record names the rework once it is filed. A sign-off that stops after
 # it, run again once the rework has closed with the PR still open, files no
 # second rework and goes on to sign off.
-acceptance; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
+acceptance; setm tk-anc merge_result pull_request_pending; setm tk-anc pr_number 41
 TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-CLOSED) a sign-off that stops after its rework is filed exits 1"
 eq "$(consequence "ruled: fix the retry before the merge")" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-CLOSED) …with the rework recorded under its ruling"
@@ -1115,14 +1121,14 @@ hasnt "$(calls)" "converse-rework" "(REWORK-CLOSED) …filing no second rework a
 eq "$(acts tk-conv)" "Sent PR #41 back for rework.|Ruled: fix the retry before the merge" "(REWORK-CLOSED) …recording the rework once"
 eq "$(field tk-conv status)" "closed" "(REWORK-CLOSED) …and closing the conversation"
 # A record the store refuses stops the sign-off before the headline.
-acceptance; setm tk-anc merge_result pull_request
+acceptance; setm tk-anc merge_result pull_request_pending
 STUB_UPDATE_FAIL_ON='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-RECORD-REFUSED) a rework whose record the store refuses exits 1"
 has "$OUT" "the store refused its record on conversation tk-conv" "(REWORK-RECORD-REFUSED) …saying so"
 hasnt "$(calls)" "gc-helm takeaway" "(REWORK-RECORD-REFUSED) …with no headline written"
 eq "$(field tk-rev status)" "open" "(REWORK-RECORD-REFUSED) …and no gate resolved"
 # A recorded rework that does not read stops a re-run before any write.
-acceptance; setm tk-anc merge_result pull_request
+acceptance; setm tk-anc merge_result pull_request_pending
 TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 : > "$CALLS"
 STUB_SHOW_FAIL_ON=tk-child run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
@@ -1134,7 +1140,7 @@ eq "$(writes)" 0 "(REWORK-RECORD-UNREAD) …writing nothing"
 # the writer adopts it and the record names it. Run again once it has closed,
 # the writer would file a second one, so the re-run is refused before any
 # write, and the sitting holds.
-acceptance; setm tk-anc merge_result pull_request
+acceptance; setm tk-anc merge_result pull_request_pending
 STUB_UPDATE_FAIL_ON='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-WINDOW) an attempt whose rework's record the store refuses exits 1"
 eq "$(consequence "ruled: fix the retry before the merge")" '{"act":"rework","anchor":"tk-anc"}' "(REWORK-WINDOW) …leaving the record naming the PR and no rework"
@@ -1143,7 +1149,7 @@ run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK-WINDOW-OPEN) the same sign-off, run while that rework is open, exits 0"
 has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REWORK-WINDOW-OPEN) …sending the ruling to the writer, which adopts the open rework"
 eq "$(consequence "ruled: fix the retry before the merge")" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-WINDOW-OPEN) …and recording it"
-acceptance; setm tk-anc merge_result pull_request
+acceptance; setm tk-anc merge_result pull_request_pending
 STUB_UPDATE_FAIL_ON='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 setf tk-child status closed
 : > "$CALLS"
@@ -1162,28 +1168,28 @@ eq "$RC/$(writes)" "1/0" "(REWORK-WINDOW-UNREAD) a re-run whose reworks do not r
 has "$OUT" "could not be read, to tell whether an earlier attempt of this ruling filed one on tk-anc" "(REWORK-WINDOW-UNREAD) …saying so"
 # A closed rework another ruling's record names, or one on another PR, is no
 # window, and an open one beside a closed one is adopted.
-acceptance; setm tk-anc merge_result pull_request
+acceptance; setm tk-anc merge_result pull_request_pending
 bead tk-old task closed; setm tk-old task_kind rework; setm tk-old anchor_bead tk-anc; setm tk-old source_ruling_bead tk-conv
 bead tk-else task closed; setm tk-else task_kind rework; setm tk-else anchor_bead tk-pr2; setm tk-else source_ruling_bead tk-conv
 setm tk-conv gc.ruling_consequence '{"ruled: an earlier ruling":{"act":"rework","anchor":"tk-anc","child":"tk-old"},"ruled: fix the retry before the merge":{"act":"rework","anchor":"tk-anc"}}'
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK-WINDOW-NAMED) a re-run beside a closed rework another ruling records, and one on another PR, exits 0"
 has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REWORK-WINDOW-NAMED) …filing its rework"
-acceptance; setm tk-anc merge_result pull_request
+acceptance; setm tk-anc merge_result pull_request_pending
 bead tk-old task closed; setm tk-old task_kind rework; setm tk-old anchor_bead tk-anc; setm tk-old source_ruling_bead tk-conv
 bead tk-child task open; setm tk-child task_kind rework; setm tk-child anchor_bead tk-anc; setm tk-child source_ruling_bead tk-conv
 setm tk-conv gc.ruling_consequence '{"ruled: fix the retry before the merge":{"act":"rework","anchor":"tk-anc"}}'
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK-WINDOW-LIVE) a re-run with an open rework beside a closed one no record names exits 0"
 eq "$(consequence "ruled: fix the retry before the merge")" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-WINDOW-LIVE) …adopting and recording the open one"
-acceptance; setm tk-anc merge_result pull_request
+acceptance; setm tk-anc merge_result pull_request_pending
 REWORK_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-FAIL) a rework that does not file exits 1"
 has "$OUT" "REWORK NOT COMPLETE on tk-anc" "(REWORK-FAIL) …saying so"
 hasnt "$(calls)" "gc-helm takeaway" "(REWORK-FAIL) …with no headline written"
 eq "$(field tk-rev status)" "open" "(REWORK-FAIL) …no gate resolved"
 eq "$(field tk-conv status)" "in_progress" "(REWORK-FAIL) …and the conversation open"
-acceptance; setm tk-anc merge_result pull_request
+acceptance; setm tk-anc merge_result pull_request_pending
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --no-rework
 eq "$RC" 0 "(NO-REWORK) --no-rework exits 0"
 eq "$(acts tk-conv)" "Ruled: fix the retry before the merge" "(NO-REWORK) …and the ruling is the only action recorded, since the branch stands"
@@ -1193,7 +1199,7 @@ echo "# a conversation on a PR's review reaches the PR whose merge it holds"
 # anchor's blocks edge onto the conversation (gc-helm.sh open), so its ruling
 # says what it does to that PR, which it reaches through nothing else.
 held_review() {
-    fresh; bead tk-anc; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
+    fresh; bead tk-anc; setm tk-anc merge_result pull_request_pending; setm tk-anc pr_number 41
     bead tk-rw; setm tk-rw task_kind review; setm tk-rw anchor_bead tk-anc
     conv tk-conv tk-rw
 }
@@ -1215,7 +1221,7 @@ eq "$(field tk-conv status)" "closed" "(HELD-PR-LIFTED) …closing the conversat
 echo "# two conversations on one PR: each ruling answers its own question"
 # Each conversation replies to a gate of its own on the anchor, under a key that
 # names it, and its ruling answers that gate alone.
-fresh; bead tk-anc; setm tk-anc merge_result pull_request
+fresh; bead tk-anc; setm tk-anc merge_result pull_request_pending
 gate tk-ga conversation.tk-ca; edge tk-anc blocks tk-ga
 gate tk-gb conversation.tk-cb; edge tk-anc blocks tk-gb
 conv tk-ca tk-anc; edge tk-ca replies-to tk-ga
@@ -1381,7 +1387,7 @@ echo "# a review whose subject is an open PR answers a landed Delivery's gate fi
 # on a call of its own before the epic closes, and the sign-off then finds the
 # retired PR closed.
 review_pr() {
-    fresh; bead tk-epic epic; bead tk-anc; setm tk-anc merge_result pull_request; setm tk-anc pr_number 52
+    fresh; bead tk-epic epic; bead tk-anc; setm tk-anc merge_result pull_request_pending; setm tk-anc pr_number 52
     edge tk-anc parent-child tk-epic; gate tk-rev epic-review.tk-epic; edge tk-anc blocks tk-rev
     bead tk-dl epic; edge tk-dl parent-child tk-epic; gate tk-dg epic-review.tk-dl; edge tk-dl blocks tk-dg
     conv tk-conv tk-anc; edge tk-conv replies-to tk-rev; edge tk-conv replies-to tk-dg
@@ -1425,7 +1431,7 @@ hasnt "$(calls)" "pr-dispose" "(REVIEW-PR-RETIRE) …and disposing nothing again
 # A PR in flight beside the subject is retired on a call of its own, under its
 # own ruling. That call reaches the subject's open PR too and leaves it
 # standing, so the writer adds the subject's Approve clause to its outcome.
-review_pr; bead tk-pr3; setm tk-pr3 merge_result pull_request; setm tk-pr3 pr_number 53
+review_pr; bead tk-pr3; setm tk-pr3 merge_result pull_request_pending; setm tk-pr3 pr_number 53
 edge tk-pr3 parent-child tk-epic; gate tk-g3 epic-review.tk-pr3; edge tk-pr3 blocks tk-g3; edge tk-conv replies-to tk-g3
 run_signoff --conversation tk-conv --answer tk-g3 --ruling "close: the hypothesis held; it retires PR #53 (tk-pr3)" \
     --pr-anchor tk-pr3 --retire not-needed --outcome "the epic is closed" --no-wait
@@ -1853,13 +1859,13 @@ has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …
 # many_prs <count> — a gate that releases the subject's PR and others up to
 # <count>, numbered from #1000 in the order the sign-off finds them.
 many_prs() {
-    fresh; bead tk-anc; setm tk-anc merge_result pull_request; pr_at tk-anc 1000
+    fresh; bead tk-anc; setm tk-anc merge_result pull_request_pending; pr_at tk-anc 1000
     gate tk-sg approach; edge tk-anc blocks tk-sg
     conv tk-conv tk-anc; edge tk-conv replies-to tk-sg
     _i=1
     while [ "$_i" -lt "$1" ]; do
         _b=$(printf 'tk-pr%02d' "$_i")
-        bead "$_b"; setm "$_b" merge_result pull_request; pr_at "$_b" "$((1000 + _i))"; edge "$_b" blocks tk-sg
+        bead "$_b"; setm "$_b" merge_result pull_request_pending; pr_at "$_b" "$((1000 + _i))"; edge "$_b" blocks tk-sg
         _i=$((_i + 1))
     done
 }
@@ -2010,6 +2016,48 @@ has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling f
 has "$(calls)" "bd dep add tk-conv tk-ask --type blocks" "(STAY-REWORK-ASK) …and waiting on the ask, read as this conversation's rework by its discovered-from edge"
 run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "fix the retry" --no-rework --check arch --no-wait
 eq "$RC" 2 "(CHECK-NEEDS-REWORK) --check without --rework is refused"
+# A ruling that sends the PR back once another PR lands names that PR's anchor
+# as the rework's wait, which the writer passes on as the ask's own wait. It is
+# no wait of the subject's, so the headline does not carry it.
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "sent back once #78 lands" --ruled yes --ruling "fix the retry once #78 lands" --rework --check arch --rework-waiting-on tk-pr2 --no-wait
+eq "$RC" 0 "(REWORK-WAITS) a ruling whose rework waits on another PR signs off, exit 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry once #78 lands --check arch --waiting-on tk-pr2" "(REWORK-WAITS) …passing that PR's anchor on as the ask's wait"
+TAKEAWAY=$(grep '^gc-helm takeaway tk-anc ' "$CALLS")
+has "$TAKEAWAY" "--no-wait" "(REWORK-WAITS) …writing the subject's headline with the wait the sitting stated"
+hasnt "$TAKEAWAY" "tk-pr2" "(REWORK-WAITS) …and without the bead the rework waits on"
+open_pr; bead tk-pr2
+run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "fix the retry" --no-rework --rework-waiting-on tk-pr2 --no-wait
+eq "$RC $(writes)" "2 0" "(REWORK-WAITS-NEEDS-REWORK) --rework-waiting-on without --rework is refused, with nothing written"
+# An attempt that filed the ask and stopped before its headline leaves a re-run
+# the ask, open, or closed once a run has worked it. A re-run that names a wait
+# the ask does not carry stops with nothing written, and one whose ask carries
+# it signs off.
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+: > "$CALLS"
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+eq "$RC $(writes)" "1 0" "(REWORK-WAITS-RERUN) a re-run naming a wait the open ask of its earlier attempt lacks stops, with nothing written"
+has "$OUT" "tk-ask, the rework an earlier attempt of this ruling filed on tk-anc, is open and does not wait on tk-pr2" "(REWORK-WAITS-RERUN) …naming the ask and the wait it lacks"
+setf tk-ask status closed; : > "$CALLS"
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+eq "$RC $(writes)" "1 0" "(REWORK-WAITS-RERUN) …and so does one whose ask has closed"
+has "$OUT" "tk-ask, the rework an earlier attempt of this ruling filed on tk-anc, closed without waiting on tk-pr2" "(REWORK-WAITS-RERUN) …saying a run may have worked it before that work landed"
+eq "$(field tk-conv status) $(merge_held tk-anc)" "in_progress held" "(REWORK-WAITS-RERUN) …leaving the conversation open and the merge held"
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+setf tk-ask status closed
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+eq "$RC $(field tk-conv status)" "0 closed" "(REWORK-WAITS-RERUN) …while a re-run whose ask waited on that bead signs off"
+has "$OUT" "tk-ask, the rework an earlier attempt of this ruling filed on tk-anc, has closed, so the rework has nothing left to do" "(REWORK-WAITS-RERUN) …taking the ask that ran as the ruling's rework"
+# gctk review ask trims a wait's id, so the sign-off passes each wait on
+# trimmed and compares the trimmed id with the ask's edges: a re-run that names
+# the wait with the same spaces around it finds the ask that waits on it.
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on " tk-pr2 "
+has "$(cat "$CALLS")" "--waiting-on tk-pr2" "(REWORK-WAITS-TRIM) a wait named with spaces around it is passed on trimmed"
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on " tk-pr2 "
+eq "$RC $(field tk-conv status)" "0 closed" "(REWORK-WAITS-TRIM) …and a re-run naming it the same way finds the ask that waits on it and signs off"
 # A ruling that reaches two open PRs reworks the one its --pr-anchor names. The
 # return leaves that --pr-anchor out with the --rework, since --no-rework takes
 # none and leaves both PRs standing.
@@ -2216,7 +2264,7 @@ hasnt "$OUT" "gc bd dep remove" "(STAY-HOLDS-MERGE) …and offering no lift of t
 eq "$(writes)" 0 "(STAY-HOLDS-MERGE) …and writes nothing"
 # A conversation about the PR's rework holds that PR's merge too, and a stay
 # there waits on the PR's landing only once the sitting lifts the hold.
-fresh; bead tk-anc; setm tk-anc merge_result pull_request
+fresh; bead tk-anc; setm tk-anc merge_result pull_request_pending
 bead tk-rw; setm tk-rw anchor_bead tk-anc
 conv tk-conv tk-rw; edge tk-anc blocks tk-conv
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "land it once the rework is in" --no-rework --waiting-on tk-anc --close-brief "$BRIEF" --stay "x"
@@ -2255,7 +2303,7 @@ has "$(calls)" "bd dep add tk-conv tk-found --type blocks" "(STAY-HOLDS-MERGE-OT
 # gates, templates, infrastructure beads and wisps unless the call asks for
 # them, so the walk asks for them all. A path to the conversation through a
 # bead of a kind the list hides is refused like any other.
-fresh; bead tk-anc; setm tk-anc merge_result pull_request
+fresh; bead tk-anc; setm tk-anc merge_result pull_request_pending
 bead tk-rw; setm tk-rw anchor_bead tk-anc
 conv tk-conv tk-rw; edge tk-anc blocks tk-conv
 gate tk-gpath path-gate; bead tk-tpl; setf tk-tpl is_template true; bead tk-msg message; bead tk-wisp-1; setf tk-wisp-1 ephemeral true

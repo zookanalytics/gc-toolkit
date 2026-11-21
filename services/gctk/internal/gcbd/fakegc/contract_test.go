@@ -34,7 +34,7 @@ type step struct {
 	stdin    string
 	settings []string
 	actor    string
-	answer   string // "", "rows", "edges", "listed-edges", "texts", "labels", "json", "null-or-ids" or "count:<title>"
+	answer   string // "", "exit", "rows", "edges", "listed-edges", "shown-edges", "dependents", "texts", "labels", "json", "preview", "null-or-ids" or "count:<title>"
 }
 
 type contractCase struct {
@@ -154,6 +154,21 @@ func contractCases() []contractCase {
 			{args: []string{"dep", "add", "--file", "-"}, stdin: `{"from":"{c}","to":"{b}","type":"blocks"}` + "\n" + `{"from":"{a}","to":"{b}","type":"blocks"}` + "\n"},
 			{args: []string{"dep", "add", "--file", "-"}, stdin: `{"from":"{c}","to":"{a}","type":"blocks"}` + "\n"},
 		}},
+		{name: "a show leaves out an edge onto a bead its store does not hold, and a listing keeps it", beads: []string{"a", "b"}, steps: []step{
+			{args: []string{"dep", "add", "{a}", "{b}", "--type=blocks"}},
+			{args: []string{"dep", "add", "{a}", "zz-gone", "--type=blocks"}},
+			{args: []string{"show", "{a}", "--json"}, answer: "shown-edges"},
+			{args: []string{"list", "--id", "{a}", "--json"}, answer: "listed-edges"},
+		}},
+		{name: "a show carries its dependents only when asked, and no key when it has none", beads: []string{"s", "w1", "w2"},
+			more: [][]string{{"kid", "--parent", "{s}"}}, steps: []step{
+				{args: []string{"dep", "add", "{w1}", "{s}", "--type=blocks"}},
+				{args: []string{"dep", "add", "{w2}", "{s}", "--type=until"}},
+				{args: []string{"close", "{w2}"}},
+				{args: []string{"show", "{s}", "--brief-deps", "--include-dependents", "--json"}, answer: "dependents"},
+				{args: []string{"show", "{s}", "--json"}, answer: "dependents"},
+				{args: []string{"show", "{w1}", "--include-dependents", "--json"}, answer: "dependents"},
+			}},
 		{name: "show answers each bead with its edges, and bd's error for one it does not hold", beads: []string{"a", "b"}, state: []string{"a", "b"}, steps: []step{
 			{args: []string{"dep", "add", "{a}", "{b}", "--type=blocks"}},
 			{args: []string{"show", "{a}", "{b}", "--json"}, answer: "rows"},
@@ -203,15 +218,27 @@ func contractCases() []contractCase {
 			{args: []string{"show", "{a}", "ct-nope", "--json"}, answer: "rows"},
 			{args: []string{"show", "ct-nope", "{a}", "--json"}, answer: "rows"},
 		}},
-		{name: "a list with no status leaves out closed beads", beads: []string{"a", "b"}, steps: []step{
-			{args: []string{"close", "{b}"}},
-			{args: []string{"list", "--json"}, answer: "null-or-ids"},
-			{args: []string{"list", "--all", "--json"}, answer: "null-or-ids"},
-			{args: []string{"list", "--status=closed", "--json"}, answer: "null-or-ids"},
-		}},
+		{name: "a list with no status leaves out closed and pinned beads", beads: []string{"a", "b", "p"},
+			more: [][]string{{"kid", "--parent", "{p}"}, {"pinkid", "--parent", "{p}"}}, steps: []step{
+				{args: []string{"close", "{b}"}},
+				{args: []string{"update", "{pinkid}", "--status=pinned"}},
+				{args: []string{"list", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--all", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--status=closed", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--parent", "{p}", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--parent", "{p}", "--all", "--json"}, answer: "null-or-ids"},
+			}},
 		{name: "an update reads --status in either spelling and refuses a key with no value", beads: []string{"a", "b"}, state: []string{"a", "b"}, steps: []step{
 			{args: []string{"update", "{a}", "--status", "in_progress"}},
 			{args: []string{"update", "{b}", "--set-metadata", "k=v", "--set-metadata", "novalue"}},
+		}},
+		{name: "an update writes the title it names, in either spelling, beside its other fields", beads: []string{"a", "b"}, state: []string{"a", "b"}, steps: []step{
+			{args: []string{"update", "{a}", "--title", "ct-retitled", "--set-metadata", "pr_summary=s"}},
+			{args: []string{"update", "{b}", "--title=ct-retitled-too"}},
+			{args: []string{"update", "{b}", "--title", ""}},
+			{args: []string{"update", "{b}", "--title", "  ", "--set-metadata", "k=v"}},
+			{args: []string{"list", "--all", "--json"}, answer: "count:ct-retitled"},
+			{args: []string{"list", "--all", "--json"}, answer: "count:ct-retitled-too"},
 		}},
 		{name: "a dep add that names no type adds a blocks edge", beads: []string{"a", "b"}, state: []string{"a"}, steps: []step{
 			{args: []string{"dep", "add", "{a}", "{b}"}},
@@ -263,6 +290,37 @@ func contractCases() []contractCase {
 			{args: []string{"create", "-t", "task", "--title", "ct-flagged", "-d", "the body", "--assignee", "bob", "--json"}},
 			{args: []string{"list", "--all", "--json"}, answer: "count:ct-flagged"},
 		}},
+		{name: "a dry-run create previews the row it would file, under the actor bd resolves, and writes nothing", steps: []step{
+			{args: []string{"create", "ct-preview", "--dry-run", "--json"}, answer: "preview"},
+			{args: []string{"create", "ct-preview", "--dry-run", "-p", "1", "-t", "bug", "--json"}, actor: "Named Actor", answer: "preview"},
+			{args: []string{"list", "--all", "--json"}, answer: "count:ct-preview"},
+		}},
+		{name: "statuses names each built-in status and its category", steps: []step{
+			{args: []string{"statuses", "--json"}, answer: "json"},
+		}},
+		{name: "an edge or a create dependency onto another prefix's bead is kept without the bead", beads: []string{"a"},
+			more: [][]string{{"x", "--deps", "related:zz-other"}}, steps: []step{
+				{args: []string{"dep", "add", "{a}", "zz-nope", "--type", "supersedes"}},
+				{args: []string{"list", "--id", "{a},{x}", "--json"}, answer: "listed-edges"},
+			}},
+		{name: "the checked close: a stale guard refuses first, a pinned blocker holds nothing, and a child that is not closed holds its parent",
+			beads: []string{"x", "pb", "y", "yb", "p", "p2", "pin"},
+			more:  [][]string{{"k", "--parent", "{p}"}, {"k2", "--parent", "{p2}"}},
+			state: []string{"x", "y", "p", "p2", "pin"},
+			steps: []step{
+				{args: []string{"update", "{pb}", "--status=pinned"}},
+				{args: []string{"dep", "add", "{x}", "{pb}", "--type", "blocks"}},
+				{args: []string{"update", "{x}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+				{args: []string{"dep", "add", "{y}", "{yb}", "--type", "blocks"}},
+				{args: []string{"update", "{y}", "--if-status=in_progress", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+				{args: []string{"update", "{y}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+				{args: []string{"update", "{k}", "--status=pinned"}},
+				{args: []string{"update", "{p}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+				{args: []string{"update", "{k2}", "--status=closed"}},
+				{args: []string{"update", "{p2}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+				{args: []string{"update", "{pin}", "--status=pinned"}},
+				{args: []string{"update", "{pin}", "--status=closed"}, settings: []string{"STUB_ENFORCE_BLOCKS=1"}, answer: "exit"},
+			}},
 		{name: "comments are kept per bead, and a bead the store does not hold takes none", beads: []string{"a", "b"}, steps: []step{
 			{args: []string{"comments", "{a}", "--json"}, answer: "texts"},
 			{args: []string{"comment", "{a}", "first"}},
@@ -322,7 +380,11 @@ func (s side) call(t *testing.T, st step, args []string, nm map[string]string) o
 	st.stdin = stdin
 	out, errOut, status := s.self.run(st, args)
 	o := outcome{status: status, raw: out + errOut}
-	if st.answer == "" {
+	switch st.answer {
+	case "":
+		return o
+	case "exit":
+		o.answer = status
 		return o
 	}
 	v := decodeAny(t, out)
@@ -357,6 +419,34 @@ func (s side) call(t *testing.T, st step, args []string, nm map[string]string) o
 		}
 		sort.Strings(edges)
 		o.answer = edges
+	case st.answer == "shown-edges":
+		var edges []string
+		for _, r := range asList(v) {
+			m := r.(map[string]any)
+			for _, d := range asList(m["dependencies"]) {
+				e := d.(map[string]any)
+				edges = append(edges, fmt.Sprintf("%s->%s:%v", nameOf(nm, m["id"]), nameOf(nm, e["id"]), e["dependency_type"]))
+			}
+		}
+		sort.Strings(edges)
+		o.answer = edges
+	case st.answer == "dependents":
+		var rows []string
+		for _, r := range asList(v) {
+			m := r.(map[string]any)
+			on, has := m["dependents"]
+			if !has {
+				rows = append(rows, nameOf(nm, m["id"])+": no dependents key")
+				continue
+			}
+			for _, d := range asList(on) {
+				e := d.(map[string]any)
+				rows = append(rows, fmt.Sprintf("%s<-%s:%v %v %v %v %v", nameOf(nm, m["id"]), nameOf(nm, e["id"]), e["dependency_type"],
+					e["title"], e["status"], e["priority"], e["issue_type"]))
+			}
+		}
+		sort.Strings(rows)
+		o.answer = rows
 	case st.answer == "texts":
 		var texts []string
 		for _, r := range asList(v) {
@@ -376,6 +466,13 @@ func (s side) call(t *testing.T, st step, args []string, nm map[string]string) o
 		m, _ := v.(map[string]any)
 		delete(m, "hint")
 		o.answer = m
+	case st.answer == "preview":
+		m, _ := v.(map[string]any)
+		kept := map[string]any{}
+		for _, k := range []string{"id", "title", "status", "issue_type", "priority", "created_by"} {
+			kept[k] = m[k]
+		}
+		o.answer = kept
 	case st.answer == "null-or-ids":
 		if v == nil {
 			o.answer = "null"
@@ -500,6 +597,9 @@ type fakeSide struct {
 	env      []string
 }
 
+// The fake's store is the store of a rig ct, whose prefix is the scratch
+// store's, so the fake tells a bead of its own prefix from another's as bd
+// does. Its environment is the test's, as bd's is, less the store settings.
 func newFakeSide(t *testing.T) *fakeSide {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "bin", "gc")
@@ -507,18 +607,34 @@ func newFakeSide(t *testing.T) *fakeSide {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("the fake gc did not build: %v\n%s", err, out)
 	}
-	files := map[string]string{"beads.json": "[]", "deps.txt": "", "kv.txt": "", "gc.log": "", "session.log": "", "comments.json": "[]"}
+	db := filepath.Join(dir, ".beads")
+	if err := os.MkdirAll(db, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{"beads.json": "[]", "deps.txt": "", "kv.txt": "", "comments.json": "[]"}
 	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(db, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, body := range map[string]string{"gc.log": "", "session.log": "", "rigs.json": `{"rigs":[{"name":"ct","prefix":"ct","path":"` + dir + `"}]}`} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	f := &fakeSide{bin: bin, dir: dir, env: []string{
-		"PATH=" + filepath.Dir(bin) + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"STUB_STORE=" + filepath.Join(dir, "beads.json"), "STUB_DEPS=" + filepath.Join(dir, "deps.txt"),
-		"STUB_KV=" + filepath.Join(dir, "kv.txt"), "STUB_GC_LOG=" + filepath.Join(dir, "gc.log"),
-		"STUB_SESSION_LOG=" + filepath.Join(dir, "session.log"), "STUB_COMMENTS=" + filepath.Join(dir, "comments.json"),
-	}}
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "BEADS_") && !strings.HasPrefix(kv, "GC_") && !strings.HasPrefix(kv, "STUB_") && !strings.HasPrefix(kv, "PATH=") {
+			env = append(env, kv)
+		}
+	}
+	f := &fakeSide{bin: bin, dir: dir, env: append(env,
+		"PATH="+filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"STUB_STORE="+filepath.Join(db, "beads.json"), "STUB_DEPS="+filepath.Join(db, "deps.txt"),
+		"STUB_KV="+filepath.Join(db, "kv.txt"), "STUB_GC_LOG="+filepath.Join(dir, "gc.log"),
+		"STUB_SESSION_LOG="+filepath.Join(dir, "session.log"), "STUB_COMMENTS="+filepath.Join(db, "comments.json"),
+		"STUB_RIGS="+filepath.Join(dir, "rigs.json"), "GC_RIG=ct",
+	)}
 	f.self = f
 	return f
 }

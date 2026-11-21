@@ -212,8 +212,8 @@ func TestIsSetMatchesTheShellTruthiness(t *testing.T) {
 	}
 }
 
-// The stage test is presence, the prefilter pr-open.sh and gate-ensure.sh run on
-// the same two oid markers, not the hold truthiness rule: any non-empty
+// The stage test is presence, the prefilter gate-ensure.sh runs on the same two
+// oid markers, not the hold truthiness rule: any non-empty
 // opened_as_draft opens the stage and any non-empty draft_readied ends it.
 func TestInDraftStageIsMarkerPresence(t *testing.T) {
 	for _, tc := range []struct {
