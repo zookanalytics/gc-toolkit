@@ -25,7 +25,9 @@ const root = "tk-root"
 // world is one reaction's surroundings: a store holding the subject tk-sub,
 // an open member of the epic tk-epic, and its blocker tk-blk1; a city whose
 // roster runs the rig's polecat and proactive pools, the mechanik and the
-// rig's refinery; a GitHub; and one log of every write and act across them,
+// rig's refinery, and which configures those agents alone, so a sling, a
+// takeaway's route or an arm's default to any other target is refused as Gas
+// City refuses it; a GitHub; and one log of every write and act across them,
 // in order, as the shell suite's FAKE_LOG kept it.
 type world struct {
 	t     *testing.T
@@ -66,18 +68,13 @@ func newWorld(t *testing.T) *world {
 		w.sync()
 	}
 	w.store.OnFind = func(q gcbd.Query) { w.add("FIND " + strings.Join(q.IDs, " ")) }
-	two := 2
 	w.rt = &rtfake.Runtime{
 		Resolves: []string{"mol-x", "mol-polecat-work"},
 		Roster: []gascity.Agent{
-			{QualifiedName: "gc-toolkit/gc-toolkit.polecat", Name: "polecat", Dir: "gc-toolkit", Scope: "rig", Pool: &struct {
-				Max *int `json:"max"`
-			}{Max: &two}},
+			{QualifiedName: "gc-toolkit/gc-toolkit.polecat", Name: "polecat", Dir: "gc-toolkit", Scope: "rig"},
 			{QualifiedName: "gc-toolkit.mechanik", Name: "mechanik", Scope: "city"},
 			{QualifiedName: "gc-toolkit/gc-toolkit.refinery", Name: "refinery", Dir: "gc-toolkit", Scope: "rig"},
-			{QualifiedName: "gc-toolkit/gc-toolkit.proactive", Name: "proactive", Dir: "gc-toolkit", Scope: "rig", Pool: &struct {
-				Max *int `json:"max"`
-			}{Max: &two}},
+			{QualifiedName: "gc-toolkit/gc-toolkit.proactive", Name: "proactive", Dir: "gc-toolkit", Scope: "rig"},
 		},
 		Named: []gascity.NamedSession{{Template: "mechanik"}, {Template: "refinery", Dir: "gc-toolkit"}},
 		RigList: []gascity.Rig{
@@ -98,6 +95,8 @@ func newWorld(t *testing.T) *world {
 		}
 		w.add(line)
 		switch {
+		case !w.configured(s.Target):
+			return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: w.unconfigured(s.Target)}}
 		case w.slingFails:
 			return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: "gc sling: fake refusal"}}
 		case w.slingCode == 3:
@@ -132,12 +131,27 @@ func newWorld(t *testing.T) *world {
 			line += " --on " + req.Formula
 		}
 		w.add(line)
-		if w.armErr != nil {
+		switch {
+		case req.Formula == "" && !w.configured(req.Target):
+			return "", fmt.Errorf("%s's default formula could not be read (no agent in the city's config answers to %s), so name one with --on", req.Target, req.Target)
+		case w.armErr != nil:
 			return "", w.armErr
 		}
 		return "armed " + req.ID, nil
 	}
 	return w
+}
+
+// configured is whether the city configures an agent at target, one its roster
+// lists.
+func (w *world) configured(target string) bool {
+	return slices.ContainsFunc(w.rt.Roster, func(a gascity.Agent) bool { return a.QualifiedName == target })
+}
+
+// unconfigured is gc sling's refusal of a target the city configures no agent
+// for, as the city's build prints it.
+func (w *world) unconfigured(target string) string {
+	return `gc sling: agent "` + target + `" not found in city.toml; did you mean "gc-toolkit/gc-toolkit.po"?`
 }
 
 // sync makes the store's blocked answers for the subject what its edges say,
@@ -169,11 +183,12 @@ func (w *world) add(line string) {
 }
 
 // script answers gc-helm.sh and human-gate.sh. gc-helm.sh takeaway's release
-// makes its subject ready as its waits land (released). human-gate.sh files a
-// gate under its key that blocks its subject, its message's first line as its
-// title and the whole message as its description, and prints its id, or finds
-// the open gate under the key and prints that; --retract closes the open gates
-// under the key.
+// makes its subject ready as its waits land (released), and its route, its last
+// write, fails as gc sling refuses a target the city does not configure.
+// human-gate.sh files a gate under its key that blocks its subject, its
+// message's first line as its title and the whole message as its description,
+// and prints its id, or finds the open gate under the key and prints that;
+// --retract closes the open gates under the key.
 func (w *world) script(c rtfake.Call) gascity.Result {
 	switch c.Name {
 	case "gc-helm.sh":
@@ -182,6 +197,10 @@ func (w *world) script(c rtfake.Call) gascity.Result {
 			return gascity.Result{Code: 4, Output: "gc-helm: could not update 'tk-sub': the store refused it"}
 		}
 		w.released(c.Args)
+		if route := flagValue(c.Args, "--route"); route != "" && !w.configured(route) {
+			return gascity.Result{Code: 4, Output: w.unconfigured(route) + "\ngc-helm: takeaway: " + c.Args[1] + " is released and the run beneath it has ended, but gc sling did not route it to '" + route +
+				"' (exit 1, its reason above), so it rests open, unassigned and routed to no pool. Route it once the cause is fixed: gc sling " + route + " " + c.Args[1] + " --no-formula --no-convoy\n"}
+		}
 		return gascity.Result{}
 	case "human-gate.sh":
 		w.add("GATE " + strings.Join(c.Args, " "))

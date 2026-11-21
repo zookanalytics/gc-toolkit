@@ -6,11 +6,10 @@
 // `gctk reaction dispose`, each exit's writes in their order and the rules that
 // decide them: intake's (docs/steering.md), an emergency's confirmation on the
 // default branch, the form each named agent takes its work in, and whether a
-// route or a hand-off reaches someone, which `gctk reaction deliverable` asks of
-// the rig's proactive pool. It asks waits what holds a bead and which runs work
-// it, the arm to arm one, the arm's record and the PR record what a bead
-// carries, conversation which tasks are conversations, and prstatus which beads
-// are human gates, and no domain asks it.
+// hand-off reaches the named agent. It asks waits what holds a bead and which
+// runs work it, the arm to arm one, the arm's record and the PR record what a
+// bead carries, conversation which tasks are conversations, and prstatus which
+// beads are human gates, and no domain asks it.
 //
 // A reaction disposes its subject and never closes it. Each exit orders its
 // writes so that the write which dispatches, holds or gates the subject comes

@@ -145,8 +145,8 @@ func (r *Reactions) Sling(bead string) (*Refusal, error) {
 	return nil, nil
 }
 
-// ErrNoRig is a sling, a sweep or a pool's answer in no rig, whose proactive
-// pool cannot be named.
+// ErrNoRig is a sling or a sweep in no rig, whose proactive pool cannot be
+// named.
 var ErrNoRig = errors.New("cannot rig-qualify the proactive pool: set GC_RIG. The pool is rig-scoped (agents/proactive/agent.toml serves <rig>/" + proactivePool + "), and a bare route matches nobody")
 
 // proactiveTarget is the rig's proactive pool, rig-qualified.
@@ -157,24 +157,13 @@ func (r *Reactions) proactiveTarget() (string, error) {
 	return r.Rig + "/" + proactivePool, nil
 }
 
-// ProactiveDeliverable answers whether the rig's proactive pool can take a
-// first reaction now, as Deliverable answers for a pool, with no bead named.
-// A caller in no rig is answered no.
-func (r *Reactions) ProactiveDeliverable() (ok bool, why string) {
-	target, err := r.proactiveTarget()
-	if err != nil {
-		return false, err.Error()
-	}
-	return r.Deliverable(target, "")
-}
-
 // refusal is the first refusal that holds on bead, in their order: the kind,
 // then the row's status, assignee, dispatch path and dispatch hold, then an open
 // conversation, a live reaction, a live run of another formula and an open
-// human gate. run
-// is the asking reaction's run under the check, passed over, and empty for a
-// sling. A read that does not answer decides nothing, so it returns an error
-// and no refusal.
+// human gate. run is the asking reaction's run under the check, passed over,
+// and empty for a sling. It reads bead's row and the beads that track it once
+// each, for every question it asks of them. A read that does not answer decides
+// nothing, so it returns an error and no refusal.
 func (r *Reactions) refusal(bead, run string) (*Refusal, error) {
 	rows, err := r.Ledger.Find(ledger.ByID(bead).WithClosed())
 	if err != nil {
@@ -188,7 +177,11 @@ func (r *Reactions) refusal(bead, run string) (*Refusal, error) {
 		return refused, nil
 	}
 
-	convs, err := r.conversations(bead)
+	up, err := r.Ledger.Dependents(bead, "tracks")
+	if err != nil {
+		return nil, fmt.Errorf("could not read whether an open conversation tracks %s (%v)", bead, err)
+	}
+	convs, err := r.conversations(bead, up)
 	if err != nil {
 		return nil, fmt.Errorf("could not read whether an open conversation tracks %s (%v)", bead, err)
 	}
@@ -196,14 +189,13 @@ func (r *Reactions) refusal(bead, run string) (*Refusal, error) {
 		return &Refusal{Code: Reacting, Why: "an open conversation tracks it (" + strings.Join(convs, ", ") + "), which puts it to the operator already"}, nil
 	}
 
-	runs, err := waits.RunsOf(r.Ledger, bead)
+	runs, err := waits.LiveRunsOf(r.Ledger, bead, up)
 	if err != nil {
 		return nil, fmt.Errorf("could not read the runs that work %s (%v), and a reaction that raced one could dispose of work in flight", bead, err)
 	}
 	var reacting, driven []string
 	for _, w := range runs {
 		switch {
-		case !w.Live:
 		case w.Formula == Formula && w.Root != run:
 			reacting = append(reacting, w.Root)
 		case w.Formula != Formula:
@@ -221,7 +213,7 @@ func (r *Reactions) refusal(bead, run string) (*Refusal, error) {
 		return &Refusal{Code: Driven, Why: "a live workflow already works it (" + strings.Join(driven, ", ") + "), and a reaction would race work in flight"}, nil
 	}
 
-	gates, err := r.personsGates(bead, run)
+	gates, err := r.personsGates(bead, run, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -280,16 +272,12 @@ func dispatchPaths(row *ledger.Record) []string {
 }
 
 // conversations is the open conversations about bead, by the conversation
-// domain's shape. The tasks that track the bead are the candidates, open and
-// assigned as a conversation is. That proves only that each one tracks the
-// bead, not that the bead is all it tracks, so the candidates' own rows are read
-// with their edges, and the shape decides. A candidate whose row does not read
-// fails the read.
-func (r *Reactions) conversations(bead string) ([]string, error) {
-	up, err := r.Ledger.Dependents(bead, "tracks")
-	if err != nil {
-		return nil, err
-	}
+// domain's shape. The tasks among up, the beads that track it, are the
+// candidates, open and assigned as a conversation is. That proves only that
+// each one tracks the bead, not that the bead is all it tracks, so the
+// candidates' own rows are read with their edges, and the shape decides. A
+// candidate whose row does not read fails the read.
+func (r *Reactions) conversations(bead string, up []*ledger.Record) ([]string, error) {
 	var cands []string
 	for _, d := range up {
 		if t := d.IssueType(); t != "" && t != conversation.IssueType {
@@ -333,11 +321,12 @@ func (r *Reactions) conversations(bead string) ([]string, error) {
 }
 
 // personsGates names each open human gate among what waits says holds bead,
-// with the ancestor it is on, if any. Under the check, run names the asking
-// reaction's run, and a gate filed under the reaction's key whose message names
-// the run among its words is that run's own and passed over.
-func (r *Reactions) personsGates(bead, run string) ([]string, error) {
-	snap, err := waits.Read(r.Ledger, bead)
+// with the ancestor it is on, if any, over listed, bead's row as the refusal
+// read it. Under the check, run names the asking reaction's run, and a gate
+// filed under the reaction's key whose message names the run among its words
+// is that run's own and passed over.
+func (r *Reactions) personsGates(bead, run string, listed []*ledger.Record) ([]string, error) {
+	snap, err := waits.ReadFrom(r.Ledger, listed, bead)
 	var h waits.Holds
 	if err == nil {
 		h, err = snap.Holds(bead)

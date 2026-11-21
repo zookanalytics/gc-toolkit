@@ -2,6 +2,7 @@ package reaction
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,9 +12,11 @@ import (
 
 // The close exit hands the subject to a validating closer, rig-pinned, after
 // the close brief and the headline, and never closes it or releases it to a
-// pool as a raw bead; a closer that cannot claim is refused; a brief or a
-// headline that does not land dispatches nothing; a failed sling names gc
-// sling's reason; and a closer already live is the subject's closer.
+// pool as a raw bead; a closer pool that does not run is slung to as any other
+// is; a closer route gc sling refuses leaves the brief and the headline, says
+// what to do, and lands when run again with a pool the city configures; a
+// brief or a headline that does not land dispatches nothing; a failed sling
+// names gc sling's reason; and a closer already live is the subject's closer.
 func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	w := newWorld(t)
 	code, out, err := w.dispose("tk-sub", "--disposition", "close", "--reason", "already fixed, nothing to merge", "--takeaway", "close: fixed in #123", "--run", root)
@@ -40,13 +43,25 @@ func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	}
 
 	w = newWorld(t)
-	w.rt.Roster = w.rt.Roster[1:]
+	w.rt.Roster[0].Suspended = true
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
-	wantCode(t, code, 2, err, "(CLOSE) a closer pool that cannot claim")
-	errHas(t, err, "Put it to the operator instead", "(CLOSE) naming the exits that reach a person")
-	if got := w.writes(); len(got) != 0 {
-		t.Errorf("(CLOSE) wrote %q", got)
+	wantCode(t, code, 0, err, "(CLOSE) a closer pool that does not run")
+	w.has("SLING gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close --rig gc-toolkit", "(CLOSE) the closer is slung to it all the same")
+	if slices.Contains(w.rt.Reads(), "roster") {
+		t.Errorf("(CLOSE) the exit asked about the pool: the reads were %v", w.rt.Reads())
 	}
+
+	w = newWorld(t)
+	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.nosuch", "--run", root)
+	wantCode(t, code, 4, err, "(CLOSEBADROUTE) a closer route gc sling refuses")
+	w.before("Close brief", "SLING gc-toolkit/gc-toolkit.nosuch", "(CLOSEBADROUTE) the brief lands before the closer's sling")
+	w.before("HELM takeaway", "SLING gc-toolkit/gc-toolkit.nosuch", "(CLOSEBADROUTE) and the headline")
+	errHas(t, err, `gc sling: agent "gc-toolkit/gc-toolkit.nosuch" not found in city.toml`, "(CLOSEBADROUTE) giving gc sling's reason")
+	errHas(t, err, "The close brief and the headline stand", "(CLOSEBADROUTE) saying what landed")
+	errHas(t, err, "run this exit again with --route naming a pool the city configures", "(CLOSEBADROUTE) and what to do")
+	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
+	wantCode(t, code, 0, err, "(CLOSEBADROUTE) the exit run again with a pool the city configures")
+	w.has("SLING gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close --rig gc-toolkit", "(CLOSEBADROUTE) slings the closer there")
 
 	w = newWorld(t)
 	w.store.BeforeUpdate = func(id string, args []string) error {

@@ -229,8 +229,9 @@ func (d Disposed) String() string {
 // Dispose takes the exit d names on its subject, a call Validate passed. It
 // reads the subject's status before its first write and writes nothing to a
 // subject that is not open (NotOpen). A call that asks for what cannot land,
-// such as a route no pool claims, is a *UsageError, with nothing written. Any
-// other error stops the exit part way, and its message says what landed; a
+// such as a hand-off to an agent whose hook would not offer the bead, is a
+// *UsageError, with nothing written. Any other error, a route gc sling refuses
+// among them, stops the exit part way, and its message says what landed; a
 // re-run of the same call resumes it.
 func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	out := Disposed{Bead: d.Bead, Disposition: d.Disposition}
@@ -304,23 +305,14 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		}
 	}
 
-	// Route and hand off only where something can claim. A route intake holds
-	// is never written, so it is not asked about.
-	claimRoute := ""
-	switch {
-	case d.Disposition == Actionable && admit != "" && d.Assign == "":
-		claimRoute = d.Route
-	case d.Disposition == Close:
-		claimRoute = d.Route
-	}
-	if claimRoute != "" {
-		if ok, why := r.Deliverable(claimRoute, d.Bead); !ok {
-			if d.Disposition == Actionable {
-				return out, usage("%s cannot pick this bead up: %s. Routing there would leave %s open, unassigned and offered to nobody. Route it to a pool that can claim it, or hand it with --assign to the named agent whose work it is (a town-repo edit is gc-toolkit.mechanik's). Put it to the operator (--disposition recommend or ruling) only when the next move is the operator's", claimRoute, why, d.Bead)
-			}
-			return out, usage("%s cannot pick this bead up: %s. Routing there would leave %s open, unassigned and offered to nobody. Put it to the operator instead (--disposition recommend or ruling)", claimRoute, why, d.Bead)
-		}
-	}
+	// A route goes to its pool whether or not the pool runs. One that cannot
+	// work is refused where the exit makes it: gc sling refuses a target the
+	// city configures no agent for and a route into a store the target does not
+	// read, before it writes anything (cmdSlingWithJSON in cmd/gc/cmd_sling.go
+	// and preflight in internal/sling/sling_core.go, at gastownhall/gascity
+	// 781c975d79), and the arm refuses a --then-route whose default formula
+	// does not read. A hand-off is made only to a named agent whose hook would
+	// offer the bead.
 	who, form := d.Assign, ""
 	if who == "" {
 		who = d.ThenAssign
@@ -329,11 +321,6 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		form, _ = handoffForm(who, "", "", d.Bead)
 		if ok, why := r.Assignable(who, d.Bead); !ok {
 			return out, usage("%s cannot be handed this bead: %s. Handing it there would leave %s offered to nobody. Name the agent by its exact qualified name (gc-toolkit.mechanik for a town-repo edit), or route a pool with --route or --then-route", who, why, d.Bead)
-		}
-	}
-	if d.Disposition == Blocked && d.ThenRoute != "" && admit != "" {
-		if ok, why := r.Deliverable(d.ThenRoute, d.Bead); !ok {
-			return out, usage("--then-route %s cannot pick this bead up: %s. Arming it would record a dispatch the deferred-dispatch order replays into a failure every pass. Pass a pool that runs, such as <rig>/gc-toolkit.polecat, or omit --then-route when no pool takes this bead", d.ThenRoute, why)
 		}
 	}
 
@@ -470,11 +457,12 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	// wait edges. A blocked exit waits on its blockers, and a ruling or a
 	// recommend on its gate, whose edge the gate's create already wrote.
 	args := []string{"takeaway", d.Bead, d.Takeaway, "--by", d.By, "--release"}
+	routes := false
 	switch d.Disposition {
 	case Actionable:
 		switch {
 		case d.Assign == "" && admit != "":
-			args = append(args, "--route", d.Route, "--no-wait")
+			args, routes = append(args, "--route", d.Route, "--no-wait"), true
 		case form == formAssignee:
 			args = append(args, "--assign", d.Assign, "--no-wait")
 		default:
@@ -491,6 +479,9 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		args = append(args, "--waiting-on", gate)
 	}
 	if res := r.Runtime.Script("gc-helm.sh", args...); res.Failure() != "" {
+		if routes {
+			return out, fmt.Errorf("gc-helm.sh takeaway failed on %s (%s); its message names what landed and what did not. Its route to %s is its last write, so when gc sling refused that route, as it refuses a pool the city does not configure and a store the pool does not read, the headline and the release stand and %s rests open and routed to no pool: run this exit again with --route naming a pool the city configures. Otherwise clear the cause and re-run this command", d.Bead, scriptFailure(res), d.Route, d.Bead)
+		}
 		return out, fmt.Errorf("gc-helm.sh takeaway failed on %s (%s); its message names what landed and what did not. Clear the cause and re-run this command", d.Bead, scriptFailure(res))
 	}
 
@@ -500,7 +491,7 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	// placement sitting's.
 	if d.Disposition == Blocked && d.ThenRoute != "" && admit != "" {
 		if _, err := r.Arm(arm.Request{ID: d.Bead, Target: d.ThenRoute, Reason: "first reaction: " + d.Reason}); err != nil {
-			return out, fmt.Errorf("the blocked exit on %s did not land: the dispatch to %s for when its wait lifts was not armed (%v), so nothing would route %s once the wait lifts. The headline, the release and the hold stand, so clear the cause and re-run this command: a re-run resumes rather than refusing", d.Bead, d.ThenRoute, err, d.Bead)
+			return out, fmt.Errorf("the blocked exit on %s did not land: the dispatch to %s for when its wait lifts was not armed (%v), so nothing would route %s once the wait lifts. The headline, the release and the hold stand. When the arm refused %s because the city configures no such pool, run this exit again with --then-route naming one it configures. Otherwise clear the cause and re-run this command: a re-run resumes rather than refusing", d.Bead, d.ThenRoute, err, d.Bead, d.ThenRoute)
 		}
 		r.say("armed the dispatch to %s for when the wait lifts", d.ThenRoute)
 	}
@@ -566,7 +557,7 @@ func (r *Reactions) closeExit(d *Dispose, waiting []string, out Disposed) (Dispo
 		// bead already, such as the closer an earlier run of this exit slung.
 		r.say("a validating closer already drives %s, so no second is slung: %s", d.Bead, oneLine(res.Output))
 	case res.Failure() != "":
-		return out, fmt.Errorf("could not sling %s to the validating closer %s (gc sling --on %s: %s). The close brief and the headline stand. Clear the cause and re-run this command", d.Bead, d.Route, closer, res.Failure())
+		return out, fmt.Errorf("could not sling %s to the validating closer %s (gc sling --on %s: %s). The close brief and the headline stand. When gc sling refused the route, as it refuses a pool the city does not configure and a store the pool does not read, run this exit again with --route naming a pool the city configures; otherwise clear the cause and re-run this command", d.Bead, d.Route, closer, res.Failure())
 	}
 	return out, nil
 }
@@ -620,12 +611,19 @@ func (r *Reactions) dbFlag() string {
 	return " --db " + r.DB
 }
 
-// scriptFailure is a script's failure in one line, with the last line it
-// printed, which names what landed.
+// scriptFailure is a script's failure in one line, with every line it printed:
+// its last names what landed, and a line above it the reason of a command the
+// script ran, such as gc sling's refusal of a route.
 func scriptFailure(res gascity.Result) string {
-	f := res.Failure()
-	if f == "" {
+	switch {
+	case res.Failure() == "":
 		return "it exited 0"
+	case res.Err != nil:
+		return res.Failure()
 	}
-	return f
+	out := strings.Join(strings.Fields(res.Output), " ")
+	if out == "" {
+		out = "it printed nothing"
+	}
+	return fmt.Sprintf("exit %d: %s", res.Code, out)
 }
