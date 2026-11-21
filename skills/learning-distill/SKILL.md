@@ -407,14 +407,25 @@ before anyone builds it.
 **Code this rig does not own** goes through `gc-toolkit.external-issue`, which
 sends the fix to the rig of the city that owns the code, through
 `gc-toolkit.work`, or records it as an upstream finding for the operator. A
-fix sent to another rig is in that rig's store, where an edge would hold
-nothing, so the pattern waits on it as `gc-toolkit.waits` says for a blocker
-there. An upstream finding is not a fix but a report, which the operator sends
-or declines when they choose to look. `gc-toolkit.external-issue` files it
-with no hold, and nothing waits on it. So the pattern takes no edge onto the
-finding and does not record it as its `eng_bead`, which names the city's own
-fix. It closes once the finding is recorded, with a close reason that names
-the finding, and reopens when its feedback comes back, as Pattern states says.
+memory note whose fix takes this route waits on the bead the route leaves and
+joins no pattern. `gctk memory settle`, which ends a note's wait, reads that
+bead in the store that holds it, but it looks for a pattern's fix only among
+the pattern's follow-ups that its own store holds, and the route's bead is
+never one of them.
+
+- **A fix sent to another rig** is that rig's work, filed in its store or
+  added to the open bead there that carries it. An edge would hold nothing
+  across stores, so the pattern waits on a human gate in its own store that
+  names the bead, as `gc-toolkit.waits` says for a blocker there.
+- **An upstream finding** is not a fix but a report, which the operator sends
+  or declines when they choose to look. `gc-toolkit.external-issue` files it
+  with no hold, and no bead waits on it. So the pattern takes no edge onto the
+  finding and does not record it as its `eng_bead`, which names the city's own
+  fix. It closes once the finding is recorded, with a close reason that names
+  the finding, and reopens when its feedback comes back, as Pattern states
+  says. A memory note waits on the finding while it is open. The finding
+  closes once the operator has sent the report, declined it or found it moot,
+  and the note then comes back due.
 
 **What the bead says.** Before you file, look for an open bead or PR that
 already carries the fix: add the evidence to its notes and make the pattern
@@ -601,14 +612,9 @@ operator's placement, and take these routes first:
   its follow-up is your update proposal.
 - A problem an open bead already carries is appended there as more evidence,
   and the pattern waits on that bead.
-- A problem in software no rig of the city owns becomes an upstream finding by
-  the `gc-toolkit.external-issue` skill, and the pattern closes once the
-  finding is recorded, as [Fixes in code](#fixes-in-code) says.
-- A fix in another rig's repository is that rig's work. File it in that rig's
-  store with the `gc-toolkit.work` skill, held for placement, or append it to
-  the open bead there that carries it. The note waits on that bead and joins no
-  pattern, because a pattern's `blocks` edge names only a bead in its own
-  store.
+- A fix in code another rig or project owns takes the route
+  [Fixes in code](#fixes-in-code) gives that code, which says what the note
+  waits on there.
 
 One run's wording fixes in one repository are one bead, so one PR carries them
 and they count once against the per-run cap.
@@ -617,13 +623,15 @@ and they count once against the per-run cap.
 
 A note leaves when you drop it, or once the work it waits on has landed. When
 that work closes with nothing landed, the note comes back due, and
-`memory_prior` gives the close reason in its words.
+`memory_prior` gives the close reason in its words. A bead closed the way
+`gc-toolkit.work` closes one that needs no work, as an upstream finding is,
+has no close reason, and the disposition note its close appends says why.
 
-A veto is such a close: a prompt-update the pattern spawned whose PR closed
-unmerged, as load-and-gate's vetoed-PR sweep reads it. The veto has settled the
-rule the note states, so do not keep the note for that rule: judge what else it
-holds as you judge any due note, and drop it when nothing else in it is worth
-keeping.
+A veto is a close with nothing landed: a prompt-update the pattern spawned
+whose PR closed unmerged, as load-and-gate's vetoed-PR sweep reads it. The
+veto has settled the rule the note states, so do not keep the note for that
+rule: judge what else it holds as you judge any due note, and drop it when
+nothing else in it is worth keeping.
 
 ### Decision lines
 
@@ -632,7 +640,8 @@ file-and-dispatch applies with `gctk memory apply` once the beads the lines
 name are filed:
 
 - `<memory_ref> waits <bead-id>`: a note on a pattern waits on the pattern,
-  and one whose fix went to another rig's store waits on that bead.
+  and one whose fix is in code another rig or project owns waits on the bead
+  its route leaves, as [Fixes in code](#fixes-in-code) says.
 - `<memory_ref> next <YYYY-MM-DD>`: a note about a moment that has not passed
   is due again that day, which must be after today. Add `ask-use` for a note
   not substantiated either way, a whole note only. A `waits` line, or a `next`
