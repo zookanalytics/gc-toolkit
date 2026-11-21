@@ -13,10 +13,7 @@ merges on, and closes the asks the run answered, so no step records it. The
 design is specs/tk-1tfzr71.108/design.md.
 
 The landing order pours a run attached to the bead that owns the PR, which the
-run then holds, with the record it read as the run's vars. A shadow run
-(shadow=true) writes nothing outside itself: no withdrawal, push, post, gate or
-bead, no result and no ask closed, and its rule-and-repair writes what it would
-have written into its output.
+run then holds, with the record it read as the run's vars.
 
 Hard rules, in force for every step:
 
@@ -66,10 +63,6 @@ default = ""
 [vars.max_attempts]
 description = "The loop's bound: the heads one run judges, each iteration one head. The loop's check reads it to know its last attempt, where it records a result that does not pass."
 default = "3"
-
-[vars.shadow]
-description = "true for a shadow run, which writes nothing outside itself."
-default = "false"
 
 [vars.binding_prefix]
 description = "The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog, and with no dot the name of its commands. Sling adds it to every pour, and a cooked run is passed it, as gc formula cook passes only its --var flags."
@@ -171,9 +164,7 @@ the PR's head:
 
 **3. Rule every finding and every ask, by the bar.** Fix each must-fix point in
 the run's worktree with a commit of its own, its siblings with it, and name the
-commit in its ruling. A shadow run, which the read names, fixes nothing: rule
-a must-fix point with no commit, and each call below prints what it would have
-written instead. A point ruled declined, deferred, answered or put to a
+commit in its ruling. A point ruled declined, deferred, answered or put to a
 person gets no change. A fix outside the reviewed diff goes to a bead of its
 own, armed to start once the PR lands, which the call prints for the ruling's
 reason:

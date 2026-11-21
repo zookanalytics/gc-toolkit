@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # doctor/check-closed-implies-landed — I5: closed means landed. A CLOSED ANCHOR
-# still carrying merge_result=pull_request or pre_open_gate left the merge queue
-# without landing — merge.sh enumerates OPEN anchors only, so nothing will land
-# it (error). One still carrying pull_request_pending or
-# pull_request_head_changed owned an open PR on Gas Town's pending record, whose
-# end the landing order records only on a bead that is not closed (error). A
-# closed anchor that landed, merged or the landing order's mr_merged, with no
-# merged_sha recorded landed without evidence (warning).
+# still carrying pull_request_pending or pull_request_head_changed owned an open
+# PR on Gas Town's pending record, whose end the landing order records only on a
+# bead that is not closed (error). A closed anchor that landed, merged or the
+# landing order's mr_merged, with no merged_sha recorded landed without evidence
+# (warning).
 # Carrying merge_result is NOT the same as being an anchor: rework and review
 # children are stamped with the anchor's PR identity by the same machinery, and
-# merge.sh never enumerates them. Two shapes are therefore out of scope, and
+# the landing order never enumerates them. Two shapes are therefore out of
+# scope, and
 # both are readable from the ledger alone:
 #   - a bead whose PARENT carries merge_result and names the same work (same
 #     pr_number or same branch) — the parent is the anchor, so a finding, if
@@ -163,8 +162,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | ((($m.pr_url // "") | tostring)) as $u
         | ((if $u != "" then $u else (($m.existing_pr // "") | tostring) end)
            | gsub("[[:cntrl:]]"; " ")) as $pr
-        | (if $mr == "pull_request" or $mr == "pre_open_gate"
-              or $mr == "pull_request_pending" or $mr == "pull_request_head_changed" then "unlanded"
+        | (if $mr == "pull_request_pending" or $mr == "pull_request_head_changed" then "unlanded"
            elif ($mr == "merged" or $mr == "mr_merged") and ((($m.merged_sha // "") | tostring) == "") then "nosha"
            else empty end) as $kind
         | (if (disposed_to != "") then "exempt-disposed"
@@ -191,13 +189,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         [ -n "$kind" ] || continue
         case "$kind" in
             unlanded)
-                if [ "$mr" = "pull_request_pending" ] || [ "$mr" = "pull_request_head_changed" ]; then
-                    errors+=("$label bead $id: CLOSED carrying merge_result=$mr${pr:+ (PR $pr)} — it owned an open PR on the pending record, and the landing order records a PR's end only on a bead that is not closed, so nothing will land this. Read the PR before repairing: merged means the ledger is stale (\`gc bd update $id --set-metadata merge_result=mr_merged --set-metadata merged_sha=<the full 40-character merge commit id> --set-metadata pr_state=merged --set-metadata pr_merged_at=<the PR's mergedAt>\`, since the landing order reads a closed bead's merge as verified only from all four, with the sha in full), still open means the bead has to come back to the refinery, which records the PR again (\`gc bd update $id --status=open --assignee=<the rig's refinery>\`), and dropped on purpose means it needs its successor recorded (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)")
-                elif [ "$mr" = "pull_request" ]; then
-                    errors+=("$label bead $id: CLOSED carrying merge_result=pull_request${pr:+ (PR $pr)} — merge.sh enumerates open anchors only, so nothing will land this. Read the PR before repairing: merged means the ledger is stale (\`lifecycle.sh transition $id --to merged --close --set merged_sha=<sha>\`), still open means the anchor has to come back (\`lifecycle.sh reopen $id\`), and dropped on purpose means it needs its successor recorded (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)")
-                else
-                    errors+=("$label bead $id: CLOSED carrying merge_result=$mr — no PR was ever opened and merge.sh enumerates open anchors only, so nothing will land this. Reopen the anchor to resume it (\`lifecycle.sh reopen $id\`), or record the disposition that ended it (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)")
-                fi ;;
+                    errors+=("$label bead $id: CLOSED carrying merge_result=$mr${pr:+ (PR $pr)} — it owned an open PR on the pending record, and the landing order records a PR's end only on a bead that is not closed, so nothing will land this. Read the PR before repairing: merged means the ledger is stale (\`gc bd update $id --set-metadata merge_result=mr_merged --set-metadata merged_sha=<the full 40-character merge commit id> --set-metadata pr_state=merged --set-metadata pr_merged_at=<the PR's mergedAt>\`, since the landing order reads a closed bead's merge as verified only from all four, with the sha in full), still open means the bead has to come back to the refinery, which records the PR again (\`gc bd update $id --status=open --assignee=<the rig's refinery>\`), and dropped on purpose means it needs its successor recorded (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)") ;;
             nosha)    warnings+=("$label bead $id: closed as merged${pr:+ (PR $pr)} but records NO merged_sha — the landing is unevidenced; recover the sha from the PR and record it") ;;
             exempt-child)    n_child=$((n_child + 1)) ;;
             exempt-disposed) n_disposed=$((n_disposed + 1)) ;;

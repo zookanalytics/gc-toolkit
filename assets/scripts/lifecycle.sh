@@ -1,56 +1,43 @@
 #!/usr/bin/env bash
-# lifecycle.sh — THE writer of anchor lifecycle transitions (lifecycle/lifecycle.toml).
-#   lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]...
+# lifecycle.sh — the plain write of a bead's merge_result.
+#   lifecycle.sh transition <bead-id> --to <value> [--expect <value>] [--set k=v]...
 #     [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>]
 #     [--route <rig>/<agent> | --keep-route] [--takeaway <text>] [--close]
 #     [--append-notes <t>] [--json]
-#   lifecycle.sh state <bead-id>
-#   lifecycle.sh reopen <bead-id>
-# transition: validate the edge against the declared machine, perform ONE atomic
-# `gc bd update` carrying every field, and take its exit as the transition's.
+# transition: ONE atomic `gc bd update` carrying every field, whose exit is the
+# transition's. --to sets merge_result, and --to unanchored clears it. It checks
+# no edge between values: the doctor checks the beads after the write
+# (doctor/check-closed-implies-landed, doctor/check-state-space).
+# --expect is a compare-and-swap on the merge_result the bead carries, with
+# unanchored for none.
 # --set-dated writes a key in the dated shape <value>@<oid>@<since>, appending
 # the third component under compare-and-preserve: the existing instant survives
 # while value and oid both hold, and a change to either stamps a fresh one. The
 # reconcile cadence re-derives the same verdict at the same head every few
 # minutes, so a naive clock would restart a three-day wait on every pass.
-# --close only into a closed state, and a closed state requires --close (status
-# and merge_result move together). --to merged also requires a non-empty
-# --set merged_sha, the landing the state names; a bead that never had a PR is
-# no merge anchor and closes with a plain `gc bd close`. The same write records
-# the work the landing shipped: gc.work_outcome=shipped, gc.work_commit (the
-# merged_sha) and gc.work_branch (merged_target), each unless the call writes
-# that key itself. A landing whose merged_sha is no object id, or that names no
-# merged_target, records none of the three, and the bead keeps the record it
-# already had. When the commit is not yet on origin/<branch> in $GC_RIG_ROOT,
-# the branch is fetched there first, because the runtime's work-record gate
-# asks that checkout whether it is. With no GC_RIG_ROOT, or a branch git does
-# not accept as a branch name, nothing is fetched and one WARN line names the
-# landing. No transition writes a park route: a person's wait is the human gate
-# filed on the bead. A detached state clears gc.routed_to in the same call
-# unless --route is given. --route takes a rig-qualified <rig>/<agent>, or an
-# empty value that clears the route, so a bare name such as `human` is refused.
-# --keep-route writes no route at all, for a write that records on a bead
-# staying in its state: the bead keeps the gc.routed_to it carries, and a
-# detached state's clear does not run. It is refused with --route, and on an
-# edge into another state, which takes that state's routing.
-# A detached state also clears the assignee of a bead still at status=open,
-# unless --assignee is given; that is the unheld half of the same property.
+# --to merged is a landing. The same write clears rejection_reason and
+# blocked_reason, and records the work the landing shipped: gc.work_outcome=
+# shipped, gc.work_commit (the merged_sha) and gc.work_branch (merged_target),
+# each unless the call writes that key itself. A landing whose merged_sha is no
+# object id, or that names no merged_target, records none of the three, and the
+# bead keeps the record it already had.
+# --route takes a rig-qualified <rig>/<agent>, or an empty value that clears the
+# route, so a bare name such as `human` is refused. --keep-route writes no route
+# at all, and is refused with --route. An --assignee "" write also clears the
+# executor identity (gc.session_id, gc.session_name).
 # --takeaway writes the triple (text/_at/_by) in the same atomic call, capped at
 # 140 codepoints and refused when it normalizes to nothing.
-# reopen: repair a bead closed while merge_result is a NON-closed state — set
-# status=open, merge_result untouched. Human-invoked only (docs/authority-map.md).
-# Callers: pr-open.sh, pr-facts.sh, mol-refinery-patrol. gctk merge runs the
-# same writer in-process.
-# Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage, or no
-# gctk binary to run; 2 the bead could not be read before the write, or a
-# landed transition could not be reported as JSON.
+# Callers: direct-merge-push.sh (the direct landing), pr-facts.sh and
+# gate-ensure.sh.
+# Exits: 0 ok; 1 --expect mismatch / bd refusal / usage, or no gctk binary to
+# run; 2 the bead could not be read before the write, or a landed write could
+# not be reported as JSON.
 # CAVEAT (docs/gascity/routing-model.md, "Clearing an assignee can be refused"):
 # clearing an assignee on a bead another actor holds in_progress is refused by
 # bd, and the refusal drops the WHOLE atomic update — a caller that passes
 # --assignee "" must hold the claim.
-# The detached-state clear reads the status for that reason and stops at open.
 #
-# `gctk lifecycle` (services/gctk/internal/cli/lifecycle.go) implements every
+# `gctk lifecycle` (services/gctk/internal/cli/lifecycle.go) implements the
 # verb above, and this script execs it. The gctk-build order publishes the
 # binary. With no binary to exec the call exits 1, names that order, and writes
 # nothing. That covers a fresh city before the order's first build and a city

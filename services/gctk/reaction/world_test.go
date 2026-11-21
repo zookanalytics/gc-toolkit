@@ -56,6 +56,7 @@ type world struct {
 func newWorld(t *testing.T) *world {
 	t.Helper()
 	w := &world{t: t, store: fake.New(), gh: ghfake.New("bot"), gateID: "tk-gate1"}
+	w.store.IDPrefix = "tk"
 	w.gh.Repos = map[string]*ghfake.Repo{}
 	w.store.Put(fake.Bead{ID: "tk-epic", Title: "the epic", Status: "open", IssueType: "epic"})
 	w.store.Put(fake.Bead{ID: "tk-blk1", Title: "the blocker", Status: "open", IssueType: "task"})

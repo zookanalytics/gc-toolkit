@@ -111,13 +111,11 @@ that does not import the pack itself.
   sittings (`converse-claude-opus`, `converse-claude-fable`,
   `converse-codex-sol`, `converse-codex-astra`, which `gc-helm engage` opens
   per conversation), and `proactive` (always-on, 2-slot).
-- **The lifecycle** — `lifecycle/lifecycle.toml` (states, transitions,
-  metadata registry) and the single transition writer
-  `assets/scripts/lifecycle.sh`. The script execs the `gctk` binary that the
-  `gctk-build` order builds from `services/gctk`, so the city needs a Go
-  toolchain. Until the first build lands, every transition is refused, and no
-  PR merges either: the merge cadence's merge arm, `assets/scripts/merge.sh`,
-  execs the same binary.
+- **The lifecycle** — `lifecycle/lifecycle.toml` (the metadata registry) and
+  the plain write `assets/scripts/lifecycle.sh`. The script execs the `gctk`
+  binary that the `gctk-build` order builds from `services/gctk`, so the city
+  needs a Go toolchain. Until the first build lands, every such write is
+  refused, and no PR merges either: the landing order runs the same binary.
 - **Orders** — the merge cadence (`refinery-reconcile`, 60s, rig-scoped),
   `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
   `boot-health`, `witness-nudge`, `gctk-build`, `helm-build`, and the feedback
@@ -220,14 +218,14 @@ The pack's checks, and what a failure means:
 | Check | Asserts (invariant) | First-failure cause |
 |---|---|---|
 | `check-wait-is-an-edge` | every live bead carrying a declared hold marker also carries a pending wait edge onto a live bead in the same store — a wait is an edge, not prose or a bare marker (I1) — and no live bead's wait edge points into another store | a hold left as a marker or note with no wait edge filed, one whose waits all landed or name another store, or a wait edge into another store, which holds nothing |
-| `check-state-space` | every `merge_result`/status combo is declared in `lifecycle.toml`, and a detached state rests unheld and offered to no pool (I2) | a writer minted an undeclared state, or something routed a parked anchor back into pool demand |
+| `check-state-space` | every open bead's `merge_result` is a value the pack writes, and no open bead carries a closed-only one (I2) | a writer minted a value nothing handles, or a landed bead was reopened |
 | `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
 | `check-gate-integrity` | gating anchors declare a non-empty `check_set` or the `none` opt-out (I6) | an anchor normalized by no gate-ensure pass, or a `check_set` written empty by hand |
 | `check-gate-marker-provenance` | every closed approve review backing a lane on an open gating anchor records the outcome its writer stamps, `gc.outcome=recorded` or `superseded` (I7 depth) | an approve verdict whose outcome was never recorded, which still derives its lane green |
 | `check-step-terminal` | no offerable step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
 | `check-pour-text-current` | a running molecule executes the formula text that is current when it runs (I9) | a rig checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref, or a formula edited after a live molecule was poured |
-| `check-cadence-live` | every pack order fired within its cadence window (three intervals, or one trip of the order dispatch rotation when longer), a `gctk` binary is deployed for `lifecycle.sh` and `merge.sh` to exec, and `flock` resolves for the pass lock `refinery-reconcile` takes (I10) | order not registered for a rig, the controller is down, the `gctk-build` order has never published a binary, or `flock` is missing from `PATH` |
+| `check-cadence-live` | every pack order fired within its cadence window (three intervals, or one trip of the order dispatch rotation when longer), a `gctk` binary is deployed for `lifecycle.sh` to exec, and `flock` resolves for the pass lock `refinery-reconcile` takes (I10) | order not registered for a rig, the controller is down, the `gctk-build` order has never published a binary, or `flock` is missing from `PATH` |
 | `check-claim-advancing` | every step a pool should run is advancing: a claimed step is held by a running session still producing output, and an offered step has been claimed (I11) | a claimed step whose holder is gone or stalled past the bound, or a routed open step a live pool session leaves unclaimed |
 | `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
 | `check-epic-closed-implies-ruled` | a closed epic other than a Delivery was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (a duplicates or supersedes edge onto its successor); a Delivery, an epic whose parent is an epic and that carries no hypothesis, is exempt, because its epic carries the ruling (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
@@ -289,11 +287,9 @@ for a clone that carries no render yet.
 The hook keeps a branch current against its own base, which is not the same as
 keeping the landing branch current: the artifact is rendered from the whole
 source tree, so a PR whose render predates a prompt input the base has since
-gained lands over that input. Until a rig's cutover onto the pending record,
-`merge.sh` refuses such a merge, using `render-seed-audit.sh --check-merge`,
-which renders the tree `git merge-tree` writes. On the pending record the
-landing order lets it land, and then checks the default branch with the same
-mode, run on the branch's tip against itself. So the host that runs the
+gained lands over that input. The landing order lets it land, and then checks
+the default branch with `render-seed-audit.sh --check-merge`, run on the
+branch's tip against itself. So the host that runs the
 refinery's merges and the landing order needs `gc` on its PATH and git 2.38 or
 newer.
 

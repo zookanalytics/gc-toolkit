@@ -18,11 +18,9 @@ scripts at shell runtime, since formula bodies get no {{.ConfigDir}}:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/<script>"`.
 
 The merge strategy is the bead's `merge_strategy`: `direct` lands by a
-fast-forward push, and `mr` publishes a pull request. On a rig whose
-`pending_through_merge` formula var is "true", the PR's bead stays open on Gas
-Town's pending-through-merge record until the landing order (orders/
-pr-reconcile.toml) verifies its merge; on any other rig the merge cadence
-(the refinery-reconcile order) opens and merges it. Neither is yours to run:
+fast-forward push, and `mr` publishes a pull request. The PR's bead stays open
+on Gas Town's pending-through-merge record until the landing order (orders/
+pr-reconcile.toml) verifies its merge, which is not yours to run:
 docs/refinery-merge-cadence.md."""
 formula = "mol-refinery-patrol"
 
@@ -74,14 +72,6 @@ default = "direct"
 description = "Delete a branch from origin once its direct landing is recorded."
 default = "true"
 
-[vars.check_set]
-description = "The merge cadence's gating check set, stamped on a bead the old path parks for the cadence: a comma list of checks, each a lane that must derive green before merge.sh lands the PR. 'none' is stamped as itself, and an empty value recovers this default. Read only while pending_through_merge is unset."
-default = "correctness,triage"
-
-[vars.pending_through_merge]
-description = "Whether the rig is on the new path: 'true' has the merge-push step publish an mr bead's PR and record it pending until the landing order verifies its merge. Any other value keeps the old path, where the bead parks for the merge cadence. A rig sets it in its [rigs.formula_vars] at its cutover, and the merge-push step reads the rig's value."
-default = "false"
-
 [[steps]]
 id = "validate-identity"
 title = "Validate canonical agent identity"
@@ -116,11 +106,9 @@ description = """
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-find-work.sh"
 ```
 It lists the beads assigned to you, open or in progress, that carry a branch,
-and leaves a bead something holds, a bead whose branch another open bead works
-on, and a bead the old path's cadence drives; its stderr names each one left.
-A rework child an earlier requeue filed and never sent on is neither a hold nor
-a writer, so its bead is taken, and the rebase step sends the child on. Among
-the rest it takes a rework child handed back before its anchor.
+and leaves a bead something holds and a bead whose branch another open bead
+works on; its stderr names each one left. Among the rest it takes a rework child
+handed back before its anchor.
 
 Exit 0: the one line it printed is the bead this iteration acts for. Note it
 and close this step. Exit 3: no work. Write `IDLE: no work, exiting turn.` and
@@ -143,12 +131,11 @@ under your own worktree. A branch is never rebased.
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-prep.sh" --bead <the bead> --pool {{binding_prefix}}polecat
 ```
 - Exit 0: prepared. Close this step and run the gate.
-- Exit 3: the merge conflicted, and the work went back to the pool with the
-  reason "Conflicts with <target> at <commit>": the bead itself through
-  `gc sling` when it records no open PR, or its PR's rework child when it does.
-  Or the bead's rework child, filed by an earlier requeue and never sent on,
-  was sent on, or the bead had left you before the requeue wrote. Jump to
-  next-iteration.
+- Exit 3: the merge conflicted, and the work went back with the reason
+  "Conflicts with <target> at <commit>": the bead itself to the pool through
+  `gc sling` when it records no open PR, or, when it does, to its PR's review
+  run as an ask, or to the rework child already on its branch. Or the bead had
+  left you before the requeue wrote. Jump to next-iteration.
 - Exit 4: the target or the branch is not on origin, so the bead waits behind
   a human gate. Jump to next-iteration.
 - Exit 1: nothing prepared, and the bead stays with you. End the session with
@@ -208,9 +195,10 @@ failure.**
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-requeue.sh" --bead <the bead> --reason "<failure summary>" --pool {{binding_prefix}}polecat
 ```
-It goes back as the bead itself through `gc sling`, unassigned, or as its PR's
-rework child when it records an open PR. Exit 0 or 3: jump to
-next-iteration. Exit 1: end the session with `gc runtime drain-ack`.
+It goes back as the bead itself through `gc sling`, unassigned, or, when it
+records an open PR, to its PR's review run as an ask, or to the rework child
+already on its branch. Exit 0 or 3: jump to next-iteration. Exit 1: end the
+session with `gc runtime drain-ack`.
 
 **Pre-existing on the target:** track each failure once, then land. Run it
 once per failure (each failing test function, each failing target with none,
@@ -238,12 +226,10 @@ description = """
 ```
 It refuses a branch with no change against its target, then lands by the
 bead's strategy. `direct` is a fast-forward push, recorded `merged` and closed.
-`mr` on a rig on the new path edits the PR's title and body, pushes the head
-under the lease on the commit the prep read, opens the PR as a draft when none
-is open, and records it pending with `gctk pr record`; it takes a PR only when
-the city's account opened it. `mr` on any other rig pushes the head and parks
-the bead for the merge cadence. A rework child handed back lands on its
-anchor's branch and closes.
+`mr` edits the PR's title and body, pushes the head under the lease on the
+commit the prep read, opens the PR as a draft when none is open, and records it
+pending with `gctk pr record`; it takes a PR only when the city's account opened
+it. A rework child handed back lands on its anchor's branch and closes.
 
 - Exit 0: done. Close this step.
 - Exit 4: the bead waits behind a human gate. Close this step.

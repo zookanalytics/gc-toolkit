@@ -71,9 +71,8 @@ func TestATriageOutput(t *testing.T) {
 
 // A triage that rules its head material stands only once the withdrawal for
 // that head is filed on the bead that owns the PR, open or carried out, and
-// one for another head does not count. A shadow run files no withdrawal, so
-// its ruling stands alone, and a read of the withdrawals that fails is no
-// refusal: the step writes nothing until the store answers.
+// one for another head does not count. A read of the withdrawals that fails is
+// no refusal: the step writes nothing until the store answers.
 func TestATriageThatRulesItsHeadMaterialNeedsItsWithdrawal(t *testing.T) {
 	w := newWorld(t)
 	st := w.step(1, "triage")
@@ -92,12 +91,6 @@ func TestATriageThatRulesItsHeadMaterialNeedsItsWithdrawal(t *testing.T) {
 		t.Fatalf("a material head whose withdrawal was carried out is refused: %v", err)
 	}
 
-	shadow := newWorld(t)
-	shadow.shadowRun()
-	if err := shadow.check(shadow.step(1, "triage"), material, nil); err != nil {
-		t.Fatalf("a shadow run's material ruling is refused for its missing withdrawal: %v", err)
-	}
-
 	broken := newWorld(t)
 	_, err := review.Output(broken.ledger(), review.OutputRequest{Step: broken.step(1, "triage"), Raw: jsonOf(t, material),
 		Withdrawal: func(string, string) (string, error) { return "", errors.New("the store did not answer") }})
@@ -105,13 +98,6 @@ func TestATriageThatRulesItsHeadMaterialNeedsItsWithdrawal(t *testing.T) {
 	if err == nil || errors.As(err, &refused) {
 		t.Fatalf("a withdrawal read that failed returns %v; want the read's error, not a refusal", err)
 	}
-}
-
-// shadowRun makes the world's run a shadow run.
-func (w *world) shadowRun() {
-	r, _ := w.store.Row(root)
-	r.Metadata["gc.var.shadow"] = "true"
-	w.store.Put(r)
 }
 
 // withdrawal files a withdrawal for head on the PR's bead, as gctk pr withdraw
@@ -370,43 +356,6 @@ func TestAFindingsIDKeepsItsCase(t *testing.T) {
 	lanes(w)
 	w.output(both)
 	mustPass(t, w.passed(1))
-}
-
-// A shadow run's round fixes, pushes and files nothing. Its output carries the
-// comment it would have posted, and each write it made none of.
-func TestAShadowRound(t *testing.T) {
-	w := newWorld(t)
-	r, _ := w.store.Row(root)
-	r.Metadata["gc.var.shadow"] = "true"
-	w.store.Put(r)
-	w.output(triage(1, h1, "correctness"))
-	w.output(lane(1, "correctness", h1, review.VerdictRequestChanges, "F1"))
-	st := w.step(1, "rule-and-repair")
-	shadowMust := review.Ruling{Check: "correctness", Finding: "F1", Ruling: review.RulingMustFix, Reason: "it holds"}
-	raw := jsonOf(t, repair(1, h1, "", shadowMust))
-	out, err := review.Output(w.ledger(), review.OutputRequest{Step: st, Raw: raw, Writes: []string{"push: would push 1 commit"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got review.Repair
-	if err := json.Unmarshal(out, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Shadow == nil || !strings.Contains(got.Shadow.Comment, "a shadow run fixes nothing") ||
-		len(got.Shadow.Writes) != 1 {
-		t.Errorf("the shadow round's output carries %+v; want the comment and the one write", got.Shadow)
-	}
-	mustRefuse(t, w.check(st, repair(1, h1, fix, shadowMust), nil), "a shadow run pushes nothing")
-	withCommit := shadowMust
-	withCommit.Commit = fix
-	mustRefuse(t, w.check(st, repair(1, h1, "", withCommit), nil), "a shadow run fixes nothing")
-
-	w = newWorld(t)
-	w.output(triage(1, h1))
-	st = w.step(1, "rule-and-repair")
-	own := repair(1, h1, "")
-	own.Shadow = &review.Shadow{Comment: "x"}
-	mustRefuse(t, w.check(st, own, nil), "only a shadow run's round")
 }
 
 // A bead of the run that writes no output, such as the loop's spec, is

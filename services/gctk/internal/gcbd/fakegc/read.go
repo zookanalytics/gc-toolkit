@@ -11,9 +11,10 @@ import (
 // calls never sees its own reads.
 const readFlag = "--harness-read"
 
-// harnessRead answers one reader: what a bead carries, by its id. Each answer
-// is a line for each row the store holds under the id, and the reader's
-// fallback when it holds none.
+// harnessRead answers one reader: what a bead carries, by its id, in the store
+// a gc call naming the id would act in (route). Each answer is a line for each
+// row the store holds under the id, and the reader's fallback when it holds
+// none.
 //
 //	meta <id> <key>   the metadata value, or <absent>
 //	status <id>       the status, or <absent>
@@ -34,8 +35,15 @@ const readFlag = "--harness-read"
 //	                  blank-separated
 //	comments <id>     the text of each of its comments, a line each, in the
 //	                  order they were added
+//	edge <id> <other> the type of each of its edges onto the other bead, from
+//	                  every place an edge can be, sorted and blank-separated:
+//	                  an empty line when it has none
+//	record <id>       all the store holds on it: each row under the id as
+//	                  compact JSON, then each dep row naming it at either end,
+//	                  a line each, in the store's order
 //
-// One reader takes no bead:
+// One reader takes no bead, and reads the store GC_RIG names, else the default
+// store:
 //
 //	ids [<name>=<value>...]  the id of each bead whose fields all hold those
 //	                  values, a line each, in the store's order; a name
@@ -43,11 +51,13 @@ const readFlag = "--harness-read"
 func harnessRead(c *Call, args []string) error {
 	verb, args := shift(args)
 	if verb == "ids" {
+		c.use(c.route(c.defaultStore(c.getenv("STUB_STORE"), c.getenv("STUB_DEPS")), "", "", ""))
 		return c.readIDs(args)
 	}
-	if len(args) < 1 || ((verb == "meta" || verb == "field" || verb == "edges" || verb == "onto") && len(args) < 2) {
+	if len(args) < 1 || ((verb == "meta" || verb == "field" || verb == "edges" || verb == "onto" || verb == "edge") && len(args) < 2) {
 		return c.fail(2, "fake gc: "+readFlag+" "+verb+" names no bead")
 	}
+	c.use(c.route(c.defaultStore(c.getenv("STUB_STORE"), c.getenv("STUB_DEPS")), "", "", args[0]))
 	s, err := c.required("STUB_STORE")
 	if err != nil {
 		return err
@@ -198,6 +208,49 @@ func harnessRead(c *Call, args []string) error {
 		for _, cm := range all {
 			if strEq(get(cm, "issue_id"), id) {
 				c.out(ToString(orDefault(get(cm, "text"), "")) + "\n")
+			}
+		}
+	case "edge":
+		d, err := c.required("STUB_DEPS")
+		if err != nil {
+			return err
+		}
+		edges, err := readEdges(d)
+		if err != nil {
+			return err
+		}
+		var types []string
+		for _, r := range mine {
+			for _, l := range linksOf(r, edges) {
+				if l.id == args[1] {
+					types = append(types, l.typ)
+				}
+			}
+		}
+		if len(mine) == 0 {
+			for _, e := range edges {
+				if e.issue() == id && e.on() == args[1] {
+					types = append(types, e.typ)
+				}
+			}
+		}
+		slices.Sort(types)
+		c.out(strings.Join(slices.Compact(types), " ") + "\n")
+	case "record":
+		d, err := c.required("STUB_DEPS")
+		if err != nil {
+			return err
+		}
+		lines, err := readLines(d)
+		if err != nil {
+			return err
+		}
+		for _, r := range mine {
+			c.out(Compact(r) + "\n")
+		}
+		for _, l := range lines {
+			if e := parseEdge(l); e.a == id || e.b == id {
+				c.out(l + "\n")
 			}
 		}
 	default:

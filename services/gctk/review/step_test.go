@@ -218,8 +218,8 @@ func on(g *ghfake.GitHub) func(string) review.GitHub {
 
 // A run's vars name the bead's record when its head is the head the record
 // validated, its target the record's and its branch var the bead's branch, and
-// a run whose vars do not stops before it reads GitHub. A shadow run judges a
-// PR whose bead is on no record, and needs only the PR.
+// a run whose vars do not stops before it reads GitHub, as does a run whose
+// bead is on no record or names no PR.
 func TestARunsVarsNameTheRecord(t *testing.T) {
 	mismatch := func(w *world) string {
 		t.Helper()
@@ -273,13 +273,9 @@ func TestARunsVarsNameTheRecord(t *testing.T) {
 	if got := mismatch(w); !strings.Contains(got, "not on the pending record") {
 		t.Errorf("a bead on no record reads %q", got)
 	}
-	setRoot(w, "gc.var.shadow", "true")
-	if got := mismatch(w); got != "" {
-		t.Errorf("a shadow run on a bead with a PR and no record reads %q", got)
-	}
 	setPR(w, "pr_url", "")
 	if got := mismatch(w); !strings.Contains(got, "names no PR") {
-		t.Errorf("a shadow run on a bead with no PR reads %q", got)
+		t.Errorf("a bead with no PR reads %q", got)
 	}
 }
 

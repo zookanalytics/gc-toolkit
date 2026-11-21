@@ -60,9 +60,8 @@
 # behind a commit landed after it. The read-back fetch and the transition are
 # each tried DIRECT_MERGE_PUSH_ATTEMPTS times (default 3), with a pause of
 # DIRECT_MERGE_PUSH_BACKOFF seconds (default 2) times the attempt between
-# tries. The transition records and closes the bead and clears the stamp. It is
-# handed this script's rig root as GC_RIG_ROOT, the checkout lifecycle.sh checks
-# the landing in. A transition can write and still fail, since a commit whose
+# tries. The transition records and closes the bead and clears the stamp. A
+# transition can write and still fail, since a commit whose
 # result bd cannot tell after a lost connection exits non-zero and may have
 # landed. So after each failed try the bead is read, and a bead that reads
 # merge_result=merged at this merged_sha is recorded. A write that lands on the
@@ -161,7 +160,7 @@ recorded() {
 }
 # shellcheck disable=SC2329  # run through retry
 record() {
-  GC_RIG_ROOT="$RIG_ROOT" "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --unset direct_landing_sha --append-notes "Merged to $TARGET at $(git -C "$RIG_ROOT" rev-parse --short "$MERGED_SHA")" && return 0
+  "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --unset direct_landing_sha --append-notes "Merged to $TARGET at $(git -C "$RIG_ROOT" rev-parse --short "$MERGED_SHA")" && return 0
   recorded || return 1
   echo "$WORK reads merge_result=merged at $MERGED_SHA, so the transition wrote the landing before it failed; it is recorded"
 }

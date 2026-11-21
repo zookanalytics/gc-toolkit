@@ -24,13 +24,10 @@ each step one call to a tested script, read as you reach it.
 
 ## The merge after you is not yours to drive
 
-What happens to a PR after you publish it runs as orders, with no session. On
-a rig on the new path (`pending_through_merge`), the landing order
-(`pr-reconcile`) reads each PR you record as pending, merges it once it is
-ready, and closes its bead once the merge is verified. On any other rig, the
-`refinery-reconcile` order opens and merges the PRs of the beads you park for
-it. Never run either inline and never re-implement them: read what they did
-(`gc order list`) instead. The full pipeline: `docs/refinery-merge-cadence.md`.
+What happens to a PR after you publish it runs as orders, with no session. The
+landing order (`pr-reconcile`) reads each PR you record as pending, merges it
+once it is ready, and closes its bead once the merge is verified. Never run it
+inline and never re-implement it: read what it did (`gc order list`) instead. The full pipeline: `docs/refinery-merge-cadence.md`.
 
 ## Startup — adopt before pour
 
@@ -361,3 +358,19 @@ the tool's time limit ends it. Look up anything else where it lives:
 - a node package: the worktree's own `node_modules`, or its package manager;
 - Claude session transcripts: `~/.claude/projects/`, in the folder named for
   the session's working directory with each `/` and `.` turned into `-`.
+
+
+
+## Where what you learn goes
+
+- **Your memory** holds what should change the next agent's behavior. When it
+  records something that went wrong, give the instruction, command or script
+  that led there, by file and section or command line, what it cost, and
+  whether it happened before, so the learning loop can fix it at its source. A
+  rule is the operator's only with their words and where they said them.
+  Otherwise say it is yours.
+- **An observation**, which the `gc-toolkit.records` skill files, holds a
+  correction to how agents work, from a review, a rework or the operator.
+- **A bead's notes** hold the state of its open work.
+
+Leave out what the pack already says.
