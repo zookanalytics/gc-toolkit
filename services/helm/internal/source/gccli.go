@@ -1,3 +1,10 @@
+// Package source reads what the board's pages show from Gas City's own
+// interfaces: the gc command, through which the rig board reads each rig's
+// store (internal/rigboard) and the service finds its city, and the
+// supervisor's API, whose event log the city page reads (events.go).
+//
+// The gc command is run from the city root and bounded, and its JSON is read
+// past the chatter gc prints before it.
 package source
 
 import (
@@ -9,56 +16,14 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
-// The `gc` CLI is the third sanctioned Gas City interface this package reads,
-// alongside the in-process beads library and the supervisor HTTP API. Two facts
-// come from it:
-//
-//   - SESSION LIVENESS. Whether the session that claimed a child is still alive
-//     is what separates work in flight from an orphan, and no bead carries it.
-//     The supervisor API has no sessions endpoint and the beads library cannot
-//     see sessions at all; `gc session list` is the only reader. This is the
-//     same read gc-helm.sh makes (`gcq session list`), so the two boards agree
-//     by construction rather than by two independent derivations.
-//
-//   - CITY DISCOVERY. When no city env var is set, the city root comes from
-//     `gc config show` — the city gc itself resolves — rather than a discovery
-//     reimplemented here: gc-toolkit runs on Gas City, so gc is the authority on
-//     which city to read and helm-svc mirrors its answer. See DiscoverCityPath
-//     and CityPath.
-//
-// Convoy ownership and membership are read in-process from the rig store: a
-// convoy is `owned` when its bead carries the "owned" label — the test gascity
-// itself applies for the `gc convoy list` owned flag — and its members are the
-// `tracks` edges out of it. This source honours the package's data-access
-// contract for the same reason the other two backends do: it is a Gas City
-// interface, not raw Dolt. There is no sql.Open here.
-//
-// EVERY CALL IS BEST-EFFORT. A board that loses its liveness join is narrower
-// (nothing reads as in flight) but still correct about what it does show, so a
-// missing or failing `gc` degrades to a partial error rather than an aborted
-// gather.
-
 // defaultGCTimeout bounds one `gc` invocation. `gc rig list` alone has been
-// measured at ~10s on this host (tk-lzdty), and the session read hits the same
-// supervisor, so the bound is generous rather than snappy: the cost of guessing
-// too low is a board that silently loses its liveness join.
+// measured at ~10s on this host, so the bound is generous rather than snappy:
+// a bound guessed too low fails a read that would have answered.
 const defaultGCTimeout = 30 * time.Second
 
-// gcClient is the slice of the `gc` CLI this source uses. It is an interface so
-// tests can drive the gather without a live city.
-type gcClient interface {
-	// Sessions maps every session's NAME, ALIAS and ID to that session's state.
-	// Each form is a key because a child's assignee may be written any of these
-	// ways. A key a live session shares with an ended one holds the live one's
-	// state, whichever is listed first ([board.SessionEnded]).
-	Sessions(ctx context.Context) (map[string]string, error)
-}
-
-// gcExec is the production gcClient: it shells out to the `gc` binary.
+// gcExec runs the `gc` binary.
 type gcExec struct {
 	bin      string
 	cityPath string
@@ -146,41 +111,6 @@ func firstLine(s string) string {
 	return s
 }
 
-// Sessions implements gcClient.
-func (g *gcExec) Sessions(ctx context.Context) (map[string]string, error) {
-	var payload struct {
-		Sessions []struct {
-			ID          string `json:"id"`
-			Alias       string `json:"alias"`
-			SessionName string `json:"session_name"`
-			State       string `json:"state"`
-		} `json:"sessions"`
-	}
-	if err := g.run(ctx, &payload, "session", "list", "--json"); err != nil {
-		return nil, err
-	}
-	out := make(map[string]string, len(payload.Sessions)*2)
-	for _, s := range payload.Sessions {
-		// Key on every form a claim may have recorded: `gc bd update --claim`
-		// writes the session NAME, a routed assignment writes the ALIAS, and a
-		// bead claimed by id carries the ID.
-		for _, k := range []string{s.SessionName, s.Alias, s.ID} {
-			if k == "" {
-				continue
-			}
-			// Two listed sessions can share a key, because a new session can
-			// take an identifier a failed-create session still carries. The
-			// list puts the newest first, so the ended session is listed after
-			// the live one that took its identifier.
-			if prev, ok := out[k]; ok && !board.SessionEnded(prev) && board.SessionEnded(s.State) {
-				continue
-			}
-			out[k] = s.State
-		}
-	}
-	return out, nil
-}
-
 // CityPath returns the city root gc resolves for this invocation, so discovery
 // reads the same city gc acts on instead of reimplementing city discovery.
 // `gc config show` reports gc's resolved configuration, city_path among it, so
@@ -206,11 +136,38 @@ type GC interface {
 	JSON(ctx context.Context, out any, args ...string) error
 }
 
-// NewGC returns the gc command, located and run from cityPath as the board's
-// session read runs it.
+// NewGC returns the gc command, located and run from cityPath.
 func NewGC(cityPath string) GC { return newGCExec(cityPath) }
 
 // JSON implements GC.
 func (g *gcExec) JSON(ctx context.Context, out any, args ...string) error {
 	return g.run(ctx, out, args...)
+}
+
+// DiscoverCityPath returns the city root this process should read. An explicit
+// GC_HELM_CITY_PATH, GC_CITY_PATH or GC_CITY wins, in that order; with none of
+// them set it asks gc — `gc config show` — for the city it would act on and takes
+// that. A plain shell that injects none of those vars still reads a city, the
+// same one gc resolves, rather than a discovery reimplemented here: gc-toolkit
+// runs on Gas City, so gc is the authority on which city to read. A gc that
+// cannot answer — absent, or resolving no city — yields "", the same fail-closed
+// "no city" the callers already handle.
+//
+// The entrypoint resolves it once at startup and threads it to the rig board's
+// reads and the verb runner's working directory, so they cannot disagree about
+// which city they act on.
+func DiscoverCityPath() string {
+	for _, k := range []string{"GC_HELM_CITY_PATH", "GC_CITY_PATH", "GC_CITY"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	// The plain-shell case: no city env set. Ask gc which city it resolves. The
+	// discovery client carries no cityPath, so gc resolves from this process's
+	// own context (see gcExec.CityPath); run bounds the call with its own timeout.
+	// Best-effort — any failure resolves to "".
+	if p, err := newGCExec("").CityPath(context.Background()); err == nil {
+		return p
+	}
+	return ""
 }

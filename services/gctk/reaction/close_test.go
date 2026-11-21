@@ -19,10 +19,10 @@ func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	code, out, err := w.dispose("tk-sub", "--disposition", "close", "--reason", "already fixed, nothing to merge", "--takeaway", "close: fixed in #123", "--run", root)
 	wantCode(t, code, 0, err, "(CLOSE) the close exit")
 	w.has("SLING gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close --rig gc-toolkit", "(CLOSE) it slings the closer to the rig's polecat pool, rig-pinned")
-	w.has("HELM takeaway tk-sub close: fixed in #123 --by proactive", "(CLOSE) it sets the board headline")
+	w.has("TAKEAWAY tk-sub close: fixed in #123 --by proactive", "(CLOSE) it sets the headline")
 	w.has("UPDATE tk-sub --append-notes ## Close brief (first reaction, 2026-11-16T12:00:00Z)\nalready fixed, nothing to merge", "(CLOSEBRIEF) the brief is the reason, on the subject's notes")
-	w.before("Close brief", "HELM takeaway", "(CLOSEBRIEF) before the headline")
-	w.before("HELM takeaway", "SLING ", "(CLOSEHEAD) the headline before the closer")
+	w.before("Close brief", "TAKEAWAY", "(CLOSEBRIEF) before the headline")
+	w.before("TAKEAWAY", "SLING ", "(CLOSEHEAD) the headline before the closer")
 	w.hasnt("--release", "(CLOSE) not released to a pool as a raw bead")
 	w.hasnt("held on", "(CLOSEBRIEF) a close that waits on nothing names no hold")
 	w.hasnt("--status", "(CLOSE) the subject is never closed here")
@@ -58,13 +58,13 @@ func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
 	wantCode(t, code, 4, err, "(CLOSEBRIEF) a brief that does not land")
 	w.hasnt("SLING", "(CLOSEBRIEF) no closer without its brief")
-	w.hasnt("HELM", "(CLOSEBRIEF) and no headline")
+	w.hasnt("TAKEAWAY", "(CLOSEBRIEF) and no headline")
 
 	w = newWorld(t)
-	w.helmFails = true
+	w.takeawayFails = true
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
 	wantCode(t, code, 4, err, "(CLOSEHEAD) a headline that does not land")
-	errHas(t, err, "its board headline did not land", "(CLOSEHEAD) saying so")
+	errHas(t, err, "its headline did not land", "(CLOSEHEAD) saying so")
 	w.hasnt("SLING", "(CLOSEHEAD) no closer under no headline")
 
 	w = newWorld(t)
@@ -100,8 +100,8 @@ func TestCloseWaitsOnTheBeadsThatEndItsJob(t *testing.T) {
 	wantCode(t, code, 0, err, "(CLOSEWAIT) a close that waits")
 	w.has("DEP-ADD tk-sub tk-retire --type blocks", "(CLOSEWAIT) the subject is held on the bead")
 	w.has("--append-notes ## Close brief (first reaction, held on tk-retire, ", "(CLOSEWAIT) the brief names the bead it is held on")
-	w.before("Close brief", "HELM takeaway", "(CLOSEWAIT) the brief, then the headline")
-	w.before("HELM takeaway", "DEP-ADD", "(CLOSEWAIT) before the hold")
+	w.before("Close brief", "TAKEAWAY", "(CLOSEWAIT) the brief, then the headline")
+	w.before("TAKEAWAY", "DEP-ADD", "(CLOSEWAIT) before the hold")
 	if a := w.lines("ARM "); len(a) != 1 || a[0] != "ARM tk-sub --target gc-toolkit/gc-toolkit.polecat --on mol-validate-close" {
 		t.Errorf("(CLOSEWAIT) the arms were %q", a)
 	}

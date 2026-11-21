@@ -14,9 +14,9 @@ import (
 
 // The rig board's routes: GET /helm/rigs lists the city's rigs, and
 // GET /helm/rigs/{rig} answers one rig's document. Each answer is cached whole
-// by the same rule the board's cache keeps: a time to live, one gather of a
-// key at a time, and every key dropped when a write route succeeds, since a
-// write changes what the store answers. The drop also lets the next request
+// for a time to live, with one gather of a key at a time, and every key is
+// dropped when a write route succeeds, since a write changes what the store
+// answers. The drop also lets the next request
 // gather beside a gather that began before the write, whose answer stays out
 // of the cache.
 

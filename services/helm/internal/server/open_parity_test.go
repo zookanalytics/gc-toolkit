@@ -8,12 +8,8 @@ package server
 // match what the author BELIEVED the script says. This one reads the script and
 // feeds the parser the sentences it really contains, so a reworded echo is
 // caught here rather than silently degrading every open to the unclassified
-// "opened" outcome in front of an operator.
-//
-// The precedent for a Go test reading a sibling source file is
-// web/contract_parity_test.go, which parses ../internal/board/model.go for the
-// same class of reason: two things that must agree, with nothing between them
-// that would fail on its own.
+// "opened" outcome in front of an operator: two things that must agree, with
+// nothing between them that would fail on its own.
 
 import (
 	"os"

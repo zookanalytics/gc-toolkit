@@ -283,7 +283,7 @@ has "$OUT" "queued bead al-q4 is armed for dispatch to alpha/gc-toolkit.polecat"
 has "$OUT" "gctk bead disarm al-q4 --reason" "…with the disarm"
 has "$OUT" "queued bead hq-q5 is assigned to someone" "an assignee on a queued bead is named"
 has "$OUT" "queued bead al-q6 is worked by live run al-run1 (mol-polecat-work)" "a live run working a queued bead is named"
-has "$OUT" "gc-helm.sh place al-q6 --under <parent> or --standalone" "…with the placement that finishes it"
+has "$OUT" "gctk bead place al-q6 --under <parent> or --standalone" "…with the placement that finishes it"
 hasnt "$OUT" "al-q7" "a run that has ended is not a live run"
 
 # A first reaction's run sends nothing: it triages the bead and works none of
@@ -314,7 +314,7 @@ Q8=$(line_of "$OUT" "al-q8")
 has "$Q8" "queued bead al-q8 is armed for its validating closer (mol-validate-close) on alpha/gc-toolkit.polecat" "an arm for the validating closer is named as one"
 has "$Q8" "gc bd update al-q8 --remove-label hold:mayor --db $TMP/alpha/.beads, and keep the arm" "…with the lift that lets the closer run, in its own store"
 hasnt "$Q8" "disarm" "…and no disarm, which would drop the check"
-hasnt "$Q8" "gc-helm.sh place" "…and no placement"
+hasnt "$Q8" "gctk bead place" "…and no placement"
 Q9=$(line_of "$OUT" "al-q9")
 has "$Q9" "queued bead al-q9 is armed for dispatch to alpha/gc-toolkit.polecat" "an arm on another formula keeps the placement remedy"
 has "$Q9" "gctk bead disarm al-q9 --reason" "…and its disarm"

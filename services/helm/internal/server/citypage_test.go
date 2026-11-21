@@ -36,7 +36,7 @@ func (l *cityLog) Newest(_ context.Context, typ string) (*cityboard.Event, error
 func TestCityPageRoute(t *testing.T) {
 	now := time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC)
 	l := &cityLog{started: now.Add(-3 * time.Hour)}
-	s := New(newFake(), time.Minute, WithCityPage(l, CityPageTTL))
+	s := New(WithCityPage(l, CityPageTTL))
 	s.now = func() time.Time { return now }
 	rr := get(t, s, "/helm/city")
 	var resp cityboard.Response
@@ -55,14 +55,14 @@ func TestCityPageRoute(t *testing.T) {
 func TestCityPageCaches(t *testing.T) {
 	now := time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC)
 	l := &cityLog{started: now}
-	s := New(newFake(), time.Minute, WithCityPage(l, CityPageTTL))
+	s := New(WithCityPage(l, CityPageTTL))
 	s.now = func() time.Time { return now }
 	for range 3 {
 		if rr := get(t, s, "/helm/city"); rr.Code != http.StatusOK {
 			t.Fatalf("status %d", rr.Code)
 		}
 	}
-	s.invalidateBoard()
+	s.invalidate()
 	s.now = func() time.Time { return now.Add(CityPageTTL - time.Second) }
 	get(t, s, "/helm/city")
 	if l.reads != 1 {
@@ -78,7 +78,7 @@ func TestCityPageCaches(t *testing.T) {
 // TestCityPageSaysAFailedRead holds a failed read to an error naming it, never
 // a document drawn from nothing.
 func TestCityPageSaysAFailedRead(t *testing.T) {
-	s := New(newFake(), time.Minute, WithCityPage(&cityLog{fail: errors.New("the supervisor did not answer")}, CityPageTTL))
+	s := New(WithCityPage(&cityLog{fail: errors.New("the supervisor did not answer")}, CityPageTTL))
 	rr := get(t, s, "/helm/city")
 	if rr.Code != http.StatusBadGateway || !strings.Contains(rr.Body.String(), "the supervisor did not answer") {
 		t.Fatalf("a failed read = %d %s, want 502 naming the failure", rr.Code, rr.Body.String())
@@ -89,7 +89,7 @@ func TestCityPageSaysAFailedRead(t *testing.T) {
 }
 
 func TestCityPageOff(t *testing.T) {
-	s := New(newFake(), time.Minute)
+	s := New()
 	if rr := get(t, s, "/helm/city"); rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("without the city page = %d, want 503", rr.Code)
 	}

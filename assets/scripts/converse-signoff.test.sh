@@ -193,7 +193,7 @@ mkdir -p "$ST" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # matches the lines of it that write, which are what a case counts and reads:
 # the store's writes, and the stand-ins' own lines.
 CALLS="$STUB_GC_LOG"
-WRITES='^(bd (create|update|close|comment|dep (add|remove)|gate )|gctk |gc-helm |converse-rework|pr-dispose|pr-sitting-comment)'
+WRITES='^(bd (create|update|close|comment|dep (add|remove)|gate )|gctk |converse-rework|pr-dispose|pr-sitting-comment)'
 export CALLS WRITES ST
 
 # --- gh stub ------------------------------------------------------------------
@@ -217,7 +217,14 @@ GH
 # $ST/conditions-<bead> holds, as a PR on the pending record carries them,
 # with no conditions key when none is set, as on the old record. Every call is
 # logged to $GCTK_CALLS with how many writes came before it, and GCTK_DOWN fails
-# every call.
+# every status read.
+#
+# `reaction accept` leaves the store as Accept's writer would, per ACCEPT_DOES:
+# take (the default) answers each open first-reaction gate on the subject with
+# an Accept's answer and records the dispatch; refuse writes nothing, as a run
+# refused at the lock does; other finds the gate answered first; dispatched
+# finds the recommendation already dispatched. It logs its call to $CALLS, with
+# the scripts directory it was given, which the sign-off names as its own.
 #
 # The sign-off never disarms. A sitting's own block does, through gctk bead
 # disarm, before an answer that sends the subject elsewhere, and (ANSWER-ROUTE)
@@ -227,10 +234,29 @@ GH
 # the arm write nothing and exit 1, as a refused arm does. The arm and the
 # disarm each append the note the real ones append, so a case sees the notes
 # that follow a close brief in a real store.
+#
+# bead takeaway writes the headline as the takeaway does, unless TAKEAWAY_FAIL
+# refuses it with nothing written: one update, which exits 4 when the store
+# refuses it (the takeaway package's TestARefusedUpdateFailsTheVerb holds the
+# real one to that), then each --waiting-on as a blocks edge from the bead onto
+# it, exiting 4 once the rest is written when the store refuses one.
 { _stub_shebang; cat; } > "$BIN/gctk" <<'GCTK'
 printf 'writes=%s %s\n' "$(grep -c -E "$WRITES" "$CALLS" 2>/dev/null)" "$*" >> "$GCTK_CALLS"
-[ -n "${GCTK_DOWN:-}" ] && { echo "gctk: could not read the store" >&2; exit 2; }
+[ -n "${GCTK_DOWN:-}" ] && [ "${1:-} ${2:-}" = "pr status" ] && { echo "gctk: could not read the store" >&2; exit 2; }
 case "${1:-} ${2:-}" in
+  "bead takeaway")
+    printf 'gctk %s\n' "$*" >> "$CALLS"
+    [ -n "${TAKEAWAY_FAIL:-}" ] && { echo "takeaway refused" >&2; exit 2; }
+    gc bd update "$3" --set-metadata "gc.takeaway=$4" >/dev/null \
+      || { echo "gctk bead takeaway: could not write the headline on $3" >&2; exit 4; }
+    _miss=""; _p=""
+    for a in "$@"; do
+      if [ "$_p" = --waiting-on ] && ! gc bd dep add "$3" "$a" --type blocks >/dev/null; then
+        echo "gctk bead takeaway: could not wire --waiting-on $a" >&2; _miss=1
+      fi
+      _p="$a"
+    done
+    [ -z "$_miss" ] || exit 4 ;;
   "pr status")
     _s=needs-review; [ -f "$ST/status-$3" ] && _s=$(<"$ST/status-$3")
     _c=""; [ -f "$ST/conditions-$3" ] && _c=",\"conditions\":$(<"$ST/conditions-$3")"
@@ -255,6 +281,25 @@ case "${1:-} ${2:-}" in
       --set-metadata "gc.dispatch_when_ready_args=$_j" \
       --append-notes "deferred-dispatch: dispatch armed by test at 2026-11-09T12:00:00Z, for $_t on $_f, because $_r. The deferred-dispatch order starts it once nothing holds this bead, and no agent keeps it in context." >/dev/null
     echo "armed $3 for $_t on $_f" ;;
+  "reaction accept")
+    printf 'gctk %s\n' "$*" >> "$CALLS"
+    printf '%s\n' "${GCTK_SCRIPTS_DIR:-unset}" >> "$ST/accept-scripts-dir"
+    _s="$3"; _f=$(gc --harness-read meta "$_s" gc.recommended_formula); [ "$_f" != "<absent>" ] || _f=""
+    _rec=""
+    for g in $(gc --harness-read edges "$_s" blocks); do
+      [ "$(gc --harness-read field "$g" await_id)" = first-reaction ] && [ "$(gc --harness-read status "$g")" != closed ] && _rec="$_rec $g"
+    done
+    close_rec() { for g in $_rec; do gc --harness-write set "$g" status=closed "close_reason=$1"; done; }
+    case "${ACCEPT_DOES:-take}" in
+      refuse) echo "gctk reaction accept: another Accept on $_s holds its acceptance lock (pid 7), so this one refuses and writes nothing." >&2; exit 4 ;;
+      other)  close_rec "moot: the reaction withdrew its recommendation"
+              echo "gctk reaction accept: another answer reached $_s's recommendation gate first" >&2; exit 4 ;;
+      dispatched) echo "gctk reaction accept: $_s carries no gc.recommended_formula: its recommendation was dispatched. Nothing to accept; nothing dispatched." >&2; exit 2 ;;
+      *) close_rec "ruled: accepted $_f accept:0123456789abcdef"
+         gc --harness-write set "$_s" "metadata.gc.recommended_formula_dispatched=$_f"
+         gc --harness-write unset "$_s" metadata.gc.recommended_formula
+         echo "gctk reaction accept: dispatched $_f at $_s (acceptance 0123456789abcdef)" ;;
+    esac ;;
   *) printf 'gctk %s\n' "$*" >> "$CALLS"; echo "gctk fake: unsupported '$*'" >&2; exit 2 ;;
 esac
 GCTK
@@ -321,50 +366,7 @@ L
 chmod +x "$TMP/earlier-answer" "$TMP/before-update" "$TMP/second-fails" "$TMP/list-id-fails"
 
 # --- stub pack scripts at the rig root the sign-off searches first ------------
-# gc-helm.sh's accept leaves the store as Accept's writer would, per
-# ACCEPT_DOES: take (the default) answers each open first-reaction gate on the
-# subject with an Accept's answer and records the dispatch; refuse writes
-# nothing, as a run refused at the lock does; other finds the gate answered
-# first; dispatched finds the recommendation already dispatched.
 S="$TMP/rig/assets/scripts"
-cat > "$S/gc-helm.sh" <<'H'
-#!/usr/bin/env bash
-printf 'gc-helm %s\n' "$*" >> "$CALLS"
-case "$1" in
-  takeaway)
-    [ -n "${TAKEAWAY_FAIL:-}" ] && { echo "takeaway refused" >&2; exit 2; }
-    gc bd update "$2" --set-metadata "gc.takeaway=$3" >/dev/null
-    # Each --waiting-on after the headline, as a blocks edge from the bead onto
-    # it, and exit 4 once the rest is written when the store refuses one, as
-    # takeaway does.
-    _miss=""; _p=""
-    for a in "$@"; do
-      if [ "$_p" = --waiting-on ] && ! gc bd dep add "$2" "$a" --type blocks >/dev/null; then
-        echo "gc-helm.sh: takeaway: could not wire --waiting-on $a" >&2; _miss=1
-      fi
-      _p="$a"
-    done
-    [ -z "$_miss" ] || exit 4 ;;
-  accept)
-    _s="$2"; _f=$(gc --harness-read meta "$_s" gc.recommended_formula); [ "$_f" != "<absent>" ] || _f=""
-    _rec=""
-    for g in $(gc --harness-read edges "$_s" blocks); do
-      [ "$(gc --harness-read field "$g" await_id)" = first-reaction ] && [ "$(gc --harness-read status "$g")" != closed ] && _rec="$_rec $g"
-    done
-    close_rec() { for g in $_rec; do gc --harness-write set "$g" status=closed "close_reason=$1"; done; }
-    case "${ACCEPT_DOES:-take}" in
-      refuse) echo "gc-helm.sh: accept: another Accept on $_s holds its acceptance lock (pid 7), so this one refuses and writes nothing." >&2; exit 4 ;;
-      other)  close_rec "moot: the reaction withdrew its recommendation"
-              echo "gc-helm.sh: accept: another answer reached $_s's recommendation gate first" >&2; exit 4 ;;
-      dispatched) echo "gc-helm.sh: accept: $_s carries no gc.recommended_formula: its recommendation was dispatched. Nothing to accept; nothing dispatched." >&2; exit 2 ;;
-      *) close_rec "ruled: accepted $_f accept:0123456789abcdef"
-         gc --harness-write set "$_s" "metadata.gc.recommended_formula_dispatched=$_f"
-         gc --harness-write unset "$_s" metadata.gc.recommended_formula
-         echo "gc-helm.sh: accept: dispatched $_f at $_s (acceptance 0123456789abcdef)" ;;
-    esac ;;
-esac
-exit 0
-H
 # The rework and the retirement stand-ins each log the rig they ran in: GC_RIG,
 # GC_RIG_ROOT and the working directory. The rework names the child it filed,
 # tk-child, or REWORK_CHILD, and files it in the store as the writer does, an
@@ -541,7 +543,7 @@ has "$OUT" "it held tk-anc" "(ONLY-REPLIED) …with the bead it released"
 eq "$(acts tk-conv)" "Ruled: fix the retry before the merge" "(ONLY-REPLIED) the ruling, the answer the gate now carries, is the one action recorded on the conversation"
 eq "$(grep '^pr-sitting-comment' "$CALLS")" "pr-sitting-comment refresh --sitting tk-conv" "(ONLY-REPLIED) the visit's comment on the PR is drawn again from the conversation, with no text of the sign-off's own"
 case "$(calls)" in
-  *"gc-helm takeaway"*"gate resolve tk-rev"*"bd comment tk-conv Ruled: "*"bd close tk-conv"*"pr-sitting-comment refresh"*) ok "(ORDER) headline, then the gate and the ruling it carries, then the close, then the comment drawn again" ;;
+  *"gctk bead takeaway"*"gate resolve tk-rev"*"bd comment tk-conv Ruled: "*"bd close tk-conv"*"pr-sitting-comment refresh"*) ok "(ORDER) headline, then the gate and the ruling it carries, then the close, then the comment drawn again" ;;
   *) bad "(ORDER) the writes ran out of order: $(calls)" ;;
 esac
 acceptance
@@ -837,16 +839,13 @@ acceptance; TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settle
 eq "$RC" 1 "(HEADLINE) a headline that does not land exits 1"
 eq "$(field tk-rev status)" "open" "(HEADLINE) …before any gate is resolved"
 eq "$(field tk-conv status)" "in_progress" "(HEADLINE) …or the conversation closed"
-# (HEADLINE-REFUSED) the real gc-helm.sh in place of the stub, whose headline
-# update the store refuses. takeaway exits non-zero, so the sign-off stops
-# before any gate is resolved.
+# (HEADLINE-REFUSED) a headline update the store refuses. The takeaway exits
+# non-zero, so the sign-off stops before any gate is resolved.
 acceptance
 setm tk-anc gc.takeaway "the sitting before this one parked it"
-mv "$S/gc-helm.sh" "$TMP/gc-helm.stub"; ln -s "$HERE/gc-helm.sh" "$S/gc-helm.sh"
 STUB_UPDATE_FAIL_ON='gc.takeaway=settled' TMPDIR="$TMP" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
-rm -f "$S/gc-helm.sh"; mv "$TMP/gc-helm.stub" "$S/gc-helm.sh"
 eq "$RC" 1 "(HEADLINE-REFUSED) a headline update the store refuses stops the sign-off"
-has "$OUT" "could not update 'tk-anc'" "(HEADLINE-REFUSED) …after the real takeaway says so"
+has "$OUT" "could not write the headline on tk-anc" "(HEADLINE-REFUSED) …after the takeaway says so"
 hasnt "$(calls)" "gate resolve" "(HEADLINE-REFUSED) …so no gate is resolved"
 eq "$(field tk-rev status)" "open" "(HEADLINE-REFUSED) …the gate stays open and owed"
 hasnt "$(calls)" "bd close tk-conv" "(HEADLINE-REFUSED) …and the conversation is not closed"
@@ -902,7 +901,7 @@ eq "$(field tk-g status)/$(field tk-conv status)" "closed/closed" "(CLOSER) the 
 has "$(acts tk-conv)" "Arranged the check that closes this once the work it waits on lands." "(CLOSER) the arm is one of the visit's actions"
 hasnt "$(calls)" "--remove-label" "(CLOSER) …and a subject that carries no hold has no label removed"
 case "$(calls)" in
-  *"gc-helm takeaway tk-sub"*"--waiting-on tk-work"*"## Close brief"*"gctk bead arm tk-sub"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-ORDER) the headline and its edge, then the brief, then the arm, then the gate and the close" ;;
+  *"gctk bead takeaway tk-sub"*"--waiting-on tk-work"*"## Close brief"*"gctk bead arm tk-sub"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-ORDER) the headline and its edge, then the brief, then the arm, then the gate and the close" ;;
   *) bad "(CLOSER-ORDER) the writes ran out of order: $(calls)" ;;
 esac
 ARMS=$(grep -c '^gctk bead arm' "$CALLS" || true)
@@ -1125,7 +1124,7 @@ acceptance; setm tk-anc merge_result pull_request_pending
 STUB_UPDATE_FAIL_ON='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-RECORD-REFUSED) a rework whose record the store refuses exits 1"
 has "$OUT" "the store refused its record on conversation tk-conv" "(REWORK-RECORD-REFUSED) …saying so"
-hasnt "$(calls)" "gc-helm takeaway" "(REWORK-RECORD-REFUSED) …with no headline written"
+hasnt "$(calls)" "gctk bead takeaway" "(REWORK-RECORD-REFUSED) …with no headline written"
 eq "$(field tk-rev status)" "open" "(REWORK-RECORD-REFUSED) …and no gate resolved"
 # A recorded rework that does not read stops a re-run before any write.
 acceptance; setm tk-anc merge_result pull_request_pending
@@ -1186,7 +1185,7 @@ acceptance; setm tk-anc merge_result pull_request_pending
 REWORK_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-FAIL) a rework that does not file exits 1"
 has "$OUT" "REWORK NOT COMPLETE on tk-anc" "(REWORK-FAIL) …saying so"
-hasnt "$(calls)" "gc-helm takeaway" "(REWORK-FAIL) …with no headline written"
+hasnt "$(calls)" "gctk bead takeaway" "(REWORK-FAIL) …with no headline written"
 eq "$(field tk-rev status)" "open" "(REWORK-FAIL) …no gate resolved"
 eq "$(field tk-conv status)" "in_progress" "(REWORK-FAIL) …and the conversation open"
 acceptance; setm tk-anc merge_result pull_request_pending
@@ -1253,7 +1252,7 @@ RETIRE_FAIL=1 run_signoff --conversation tk-conv --outcome "retired" "${RETIRED[
 eq "$RC" 1 "(RETIRE-FAIL) a retirement that leaves the PR open exits 1"
 has "$OUT" "RETIREMENT NOT COMPLETE on tk-anc" "(RETIRE-FAIL) …saying so"
 has "$OUT" "NOT SIGNED OFF" "(RETIRE-FAIL) …and that the sign-off is not to be posted"
-hasnt "$(calls)" "gc-helm takeaway" "(RETIRE-FAIL) …with no headline written"
+hasnt "$(calls)" "gctk bead takeaway" "(RETIRE-FAIL) …with no headline written"
 eq "$(field tk-rev status)" "open" "(RETIRE-FAIL) …no gate resolved"
 eq "$(merge_held tk-anc)" held "(RETIRE-FAIL) …so the real finalize gate still holds the open PR's merge"
 eq "$(field tk-conv status)" "in_progress" "(RETIRE-FAIL) …and the conversation stays open for the re-run"
@@ -1303,7 +1302,7 @@ eq "$(field tk-two status)" "open" "(ANSWER) the other gate the conversation rep
 eq "$(field tk-conv status)/$(field tk-conv assignee)" "in_progress/gc-toolkit/gc-toolkit.tk-conv" "(ANSWER) the conversation stays open under its sitting"
 eq "$(meta tk-anc gc.takeaway)" "ruled on the review; the rollout is still open" "(ANSWER) the headline is written"
 case "$(calls)" in
-  *"gc-helm takeaway"*"gate resolve tk-rev"*) ok "(ANSWER) …before the gate" ;;
+  *"gctk bead takeaway"*"gate resolve tk-rev"*) ok "(ANSWER) …before the gate" ;;
   *) bad "(ANSWER) the gate was resolved before the headline: $(calls)" ;;
 esac
 hasnt "$(calls)" "bd close" "(ANSWER) nothing is closed"
@@ -1497,7 +1496,8 @@ TAKE=(--ruled yes --ruling "take the reaction's mol-fix" --no-wait --accept)
 echo "# a ruling that takes the recommendation hands its gate to Accept's writer"
 recommend; run_signoff --conversation tk-conv --outcome "took the reaction's mol-fix" "${TAKE[@]}"
 eq "$RC" 0 "(ACCEPT) a sign-off that takes the recommendation exits 0"
-has "$(calls)" "gc-helm accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix" "(ACCEPT) …running Accept's writer on the subject, naming its own conversation"
+has "$(calls)" "gctk reaction accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix" "(ACCEPT) …running Accept's writer on the subject, naming its own conversation"
+eq "$(cat "$ST/accept-scripts-dir" 2>/dev/null)" "$(dirname "$SCRIPT")" "(ACCEPT) …with the sign-off's own scripts directory, where gctk finds the pack's scripts"
 hasnt "$(calls)" "gate resolve tk-rec" "(ACCEPT) …and never resolving the recommendation's gate itself"
 eq "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:0123456789abcdef" "(ACCEPT) the gate carries Accept's answer"
 eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(ACCEPT) …and the dispatch is recorded"
@@ -1506,7 +1506,7 @@ eq "$(bedges tk-conv replies-to)" "tk-rec" "(ACCEPT) …keeping its reply onto t
 has "$OUT" "took the recommendation: mol-fix at tk-anc, through Accept" "(ACCEPT) the take is reported"
 eq "$(acts tk-conv)" "Ruled: take the reaction's mol-fix|Took the recommendation and started its work." "(ACCEPT) …and the conversation records the ruling, then the recommendation taken"
 case "$(calls)" in
-  *"gc-helm takeaway"*"gc-helm accept"*"bd close tk-conv"*) ok "(ACCEPT-ORDER) headline, then the acceptance, then the close" ;;
+  *"gctk bead takeaway"*"gctk reaction accept"*"bd close tk-conv"*) ok "(ACCEPT-ORDER) headline, then the acceptance, then the close" ;;
   *) bad "(ACCEPT-ORDER) the writes ran out of order: $(calls)" ;;
 esac
 TAKEN="$(calls)"
@@ -1522,7 +1522,7 @@ run_signoff --conversation tk-conv --outcome "fix the retry; mol-fix is taken" "
 eq "$RC" 0 "(ACCEPT-BESIDE) a ruling on both gates that takes the recommendation exits 0"
 eq "$(field tk-rev close_reason)" "ruled: take the reaction's mol-fix" "(ACCEPT-BESIDE) the review gate is answered with the ruling"
 case "$(calls)" in
-  *"gate resolve tk-rev"*"gc-helm accept tk-anc"*) ok "(ACCEPT-BESIDE) …before Accept's writer runs, so no other gate holds the bead when it dispatches" ;;
+  *"gate resolve tk-rev"*"gctk reaction accept tk-anc"*) ok "(ACCEPT-BESIDE) …before Accept's writer runs, so no other gate holds the bead when it dispatches" ;;
   *) bad "(ACCEPT-BESIDE) Accept ran before the review gate was answered: $(calls)" ;;
 esac
 eq "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:0123456789abcdef" "(ACCEPT-BESIDE) the recommendation's gate carries Accept's answer"
@@ -1605,7 +1605,7 @@ eq "$(acts tk-conv)" "Ruled: take the reaction's mol-fix" "(ACCEPT-FIRST) …and
 echo "# --var hands Accept's writer a var the ruling settled for the dispatch"
 recommend; run_signoff --conversation tk-conv --outcome "mol-fix is taken all-in-one" "${TAKE[@]}" --var design_gated=false
 eq "$RC" 0 "(ACCEPT-VAR) a take that settles a var for the dispatch exits 0"
-has "$(calls)" "gc-helm accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix --var design_gated=false" "(ACCEPT-VAR) …passing it to Accept's writer"
+has "$(calls)" "gctk reaction accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix --var design_gated=false" "(ACCEPT-VAR) …passing it to Accept's writer"
 ACCEPT_DOES=dispatched run_signoff --conversation tk-conv --outcome "mol-fix is taken all-in-one" "${TAKE[@]}" --var design_gated=false
 eq "$RC" 0 "(ACCEPT-VAR) a re-run once the dispatch is made exits 0"
 has "$OUT" "keeps the vars it was made with, so the --var given here does not reach it" "(ACCEPT-VAR) …saying the dispatch already made keeps its own vars"
@@ -1750,7 +1750,9 @@ has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "(APPROVE-UNREAD) 
 eq "$(field tk-conv status)" "closed" "(APPROVE-UNREAD) …and the conversation closes"
 open_pr; pr_at tk-anc 77; pr_status tk-anc merging
 GCTK_BIN="$TMP/no-gctk" run_signoff "${STAND[@]}"
-has "$OUT" "The status of PR #77 could not be read" "(APPROVE-UNREAD) with no gctk binary, a PR that is merging cannot pass for one"
+eq "$RC" 1 "(APPROVE-UNREAD) with no gctk binary, which writes the headline, the sign-off stops"
+has "$OUT" "no gctk binary at '$TMP/no-gctk'" "(APPROVE-UNREAD) …naming the binary it looked for"
+hasnt "$(calls)" "gate resolve" "(APPROVE-UNREAD) …before any gate is resolved"
 open_pr; pr_at tk-anc 77; pr_status tk-anc ""
 run_signoff "${STAND[@]}"
 has "$OUT" "The status of PR #77 could not be read" "(APPROVE-UNREAD) …and an empty status is none"
@@ -1773,7 +1775,7 @@ ln -sf "$BIN/gh" "$TMP/no-timeout/gh"
 open_pr; pr_at tk-anc 77; pr_status tk-anc merging
 PATH="$TMP/no-timeout" run_signoff "${STAND[@]}"
 eq "$RC" 0 "(APPROVE-NO-TIMEOUT) a host with no timeout tool still signs off"
-eq "$(cat "$GCTK_CALLS")" "" "(APPROVE-NO-TIMEOUT) …making no status read it could not bound"
+hasnt "$(cat "$GCTK_CALLS")" "pr status" "(APPROVE-NO-TIMEOUT) …making no status read it could not bound"
 has "$OUT" "The status of PR #77 could not be read" "(APPROVE-NO-TIMEOUT) …so the PR reads as one whose status did not read, a merging one included"
 eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-NO-TIMEOUT) …and counts as needing one"
 eq "$(field tk-rev status)" "closed" "(APPROVE-NO-TIMEOUT) …and the ruling answers the gate"
@@ -1806,20 +1808,20 @@ open_pr; pr_at tk-anc 77
 run_signoff --conversation tk-conv --outcome "fix the retry" "${RULED[@]}" --rework
 eq "$RC" 0 "(APPROVE-REWORK) --rework signs off"
 eq "$(meta tk-anc gc.takeaway)" "fix the retry" "(APPROVE-REWORK) …with the headline as given: the branch is changing, so no Approve is owed yet"
-eq "$(cat "$GCTK_CALLS")" "" "(APPROVE-REWORK) …and no status read"
+hasnt "$(cat "$GCTK_CALLS")" "pr status" "(APPROVE-REWORK) …and no status read"
 open_pr; pr_at tk-anc 77
 run_signoff --conversation tk-conv --outcome "it will not land" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(APPROVE-RETIRE) --retire signs off"
 eq "$(meta tk-anc gc.takeaway)" "it will not land" "(APPROVE-RETIRE) …with the headline as given"
-eq "$(cat "$GCTK_CALLS")" "" "(APPROVE-RETIRE) …and no status read"
+hasnt "$(cat "$GCTK_CALLS")" "pr status" "(APPROVE-RETIRE) …and no status read"
 acceptance; run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --no-rework
 eq "$(meta tk-anc gc.takeaway)" "settled" "(APPROVE-NO-PR) --no-rework where the ruling reaches no open PR says nothing of an Approve"
-eq "$(cat "$GCTK_CALLS")" "" "(APPROVE-NO-PR) …and reads no status"
+hasnt "$(cat "$GCTK_CALLS")" "pr status" "(APPROVE-NO-PR) …and reads no status"
 open_pr; pr_at tk-anc 77
 run_signoff --conversation tk-conv --outcome "not yet" --ruled no
 eq "$RC" 0 "(APPROVE-CUT-SHORT) a sign-off cut short exits 0"
 eq "$(meta tk-anc gc.takeaway)" "not yet" "(APPROVE-CUT-SHORT) …and, with no ruling, says nothing of an Approve"
-eq "$(cat "$GCTK_CALLS")" "" "(APPROVE-CUT-SHORT) …and reads no status"
+hasnt "$(cat "$GCTK_CALLS")" "pr status" "(APPROVE-CUT-SHORT) …and reads no status"
 
 epic_pr; pr_at tk-mem 78
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --no-rework
@@ -1869,15 +1871,15 @@ many_prs() {
         _i=$((_i + 1))
     done
 }
-# under_cap <label> <text> — within the cap gc-helm.sh takeaway refuses past. The
-# suite stubs that writer, so the number is read from the real one.
-TAKEAWAY_CAP=$(sed -n 's/^TAKEAWAY_MAX=\([0-9][0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)
+# under_cap <label> <text> — within the cap gctk bead takeaway refuses past. The
+# suite stubs that writer, so the number is read from the constant it applies.
+TAKEAWAY_CAP=$(sed -n 's/^const TakeawayMax = \([0-9][0-9]*\).*/\1/p' "$HERE/../../services/gctk/internal/lifecycle/headline.go" | head -1)
 under_cap() { [ "${#2}" -le "${TAKEAWAY_CAP:?}" ] && ok "$1" || bad "$1 (${#2} chars, the cap is $TAKEAWAY_CAP: $2)"; }
 many_prs 12
 run_signoff --conversation tk-conv --outcome x "${RULED[@]}" --no-rework
 eq "$RC" 0 "(APPROVE-MANY) a ruling that leaves twelve unapproved PRs standing signs off"
 eq "$(meta tk-anc gc.takeaway)" "x; 12 PRs still need your Approve on GitHub" "(APPROVE-MANY) …counting them in the headline"
-under_cap "(APPROVE-MANY) …which stays under gc-helm.sh's cap" "$(meta tk-anc gc.takeaway)"
+under_cap "(APPROVE-MANY) …which stays under the headline's cap" "$(meta tk-anc gc.takeaway)"
 eq "$(printf '%s\n' "$OUT" | grep -c "still needs the operator's Approve review")" 12 "(APPROVE-MANY) …and the sitting is told of each"
 has "$OUT" "PR #1000 still needs the operator's Approve review" "(APPROVE-MANY) the sitting is told of the first"
 has "$OUT" "PR #1011 still needs the operator's Approve review" "(APPROVE-MANY) …and of the last"
@@ -2023,7 +2025,7 @@ open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
 REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "sent back once #78 lands" --ruled yes --ruling "fix the retry once #78 lands" --rework --check arch --rework-waiting-on tk-pr2 --no-wait
 eq "$RC" 0 "(REWORK-WAITS) a ruling whose rework waits on another PR signs off, exit 0"
 has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry once #78 lands --check arch --waiting-on tk-pr2" "(REWORK-WAITS) …passing that PR's anchor on as the ask's wait"
-TAKEAWAY=$(grep '^gc-helm takeaway tk-anc ' "$CALLS")
+TAKEAWAY=$(grep '^gctk bead takeaway tk-anc ' "$CALLS")
 has "$TAKEAWAY" "--no-wait" "(REWORK-WAITS) …writing the subject's headline with the wait the sitting stated"
 hasnt "$TAKEAWAY" "tk-pr2" "(REWORK-WAITS) …and without the bead the rework waits on"
 open_pr; bead tk-pr2
@@ -2344,7 +2346,7 @@ member_case
 : > "$CALLS"
 run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
 eq "$RC" 0 "(STAY-MEMBER) a stay on the epic's own member exits 0"
-has "$(calls)" "gc-helm takeaway tk-epic staying — waits on the first unit --by converse --no-wait" "(STAY-MEMBER) …its headline waiting on nothing, as an epic's sign-off on its decomposition does"
+has "$(calls)" "gctk bead takeaway tk-epic staying — waits on the first unit --by converse --no-wait" "(STAY-MEMBER) …its headline waiting on nothing, as an epic's sign-off on its decomposition does"
 hasnt "$(calls)" "bd dep add tk-epic tk-mem" "(STAY-MEMBER) …attempting no edge from the epic onto its member"
 has "$(calls)" "bd dep add tk-conv tk-mem --type blocks" "(STAY-MEMBER) …while the conversation waits on the member"
 has "$(field tk-conv notes)" "staying: the first unit lands the parser (waits on tk-mem)" "(STAY-MEMBER) …which its staying: line names"
@@ -2353,7 +2355,7 @@ eq "$(field tk-g status)" "closed" "(STAY-MEMBER) …answering the gate"
 eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolkit.tk-conv" "(STAY-MEMBER) …and leaving the conversation open under its sitting"
 run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
 eq "$RC" 0 "(STAY-MEMBER-RERUN) a re-run with the same flags exits 0"
-eq "$(grep -c -- '^gc-helm takeaway tk-epic .* --by converse --no-wait$' "$CALLS")" 2 "(STAY-MEMBER-RERUN) …giving the headline the same --no-wait"
+eq "$(grep -c -- '^gctk bead takeaway tk-epic .* --by converse --no-wait$' "$CALLS")" 2 "(STAY-MEMBER-RERUN) …giving the headline the same --no-wait"
 hasnt "$(calls)" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-RERUN) …and attempting no edge from the epic onto its member"
 member_case
 STUB_DEP_ADD_FAIL=tk-conv run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem
@@ -2375,7 +2377,7 @@ hasnt "$(calls)" "bd dep add tk-epic tk-unit" "(STAY-MEMBER-PARENTS) …walking 
 member_case; bead tk-dep
 run_signoff "${MEMBER_STAY[@]}" --waiting-on tk-mem --waiting-on tk-dep
 eq "$RC" 0 "(STAY-MEMBER-BESIDE) a stay on the member and on independent work exits 0"
-has "$(calls)" "gc-helm takeaway tk-epic staying — waits on the first unit --by converse --waiting-on tk-dep" "(STAY-MEMBER-BESIDE) …the headline waiting on the independent work alone"
+has "$(calls)" "gctk bead takeaway tk-epic staying — waits on the first unit --by converse --waiting-on tk-dep" "(STAY-MEMBER-BESIDE) …the headline waiting on the independent work alone"
 has "$(calls)" "bd dep add tk-epic tk-dep --type blocks" "(STAY-MEMBER-BESIDE) …which the epic waits on"
 hasnt "$(calls)" "bd dep add tk-epic tk-mem" "(STAY-MEMBER-BESIDE) …and not on its member"
 has "$(field tk-conv notes)" "(waits on tk-mem, tk-dep)" "(STAY-MEMBER-BESIDE) …while the conversation waits on both"

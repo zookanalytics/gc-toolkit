@@ -283,7 +283,8 @@ mk_sut_dir() { # <dir> <file>...
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
   # retires, review-answer.sh, what the living answer to a review shows,
   # dispatch-path.sh, the one definition of a dispatch path and a label hold,
-  # which gc-helm.sh sources to ask how a bead is dispatched, priority-lib.sh,
+  # which converse-signoff.sh and the liveness scripts source to ask how a bead
+  # is dispatched, priority-lib.sh,
   # the priority function, whose reading of a PR's approval pr-facts.sh
   # sources, git-lib.sh, the one read of a branch's head on origin, which
   # gate-ensure.sh and signoff.sh source, and run-lib.sh, the one reader of a

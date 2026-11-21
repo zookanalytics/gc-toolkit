@@ -211,6 +211,18 @@ for s in $BLOCKS; do
         || bad "$s: looks for no writer in a checkout or a variable an earlier call set" "found:$found"
     refs=$(grep -oF -- "$RESOLVE" "$f" | wc -l | tr -d ' ')
     writers=$(grep -oE '"\$\(gc <binding> scripts-dir\)/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u)
+    # The gctk-bin block names the city's build of gctk, which is no writer of
+    # the pack's, by the one definition gctk-bin.test.sh holds.
+    stray=$(awk '/# >>> gctk-bin$/ { skip = 1; next } /# <<< gctk-bin$/ { skip = 0; next } !skip' "$f" \
+        | grep -oE '"\$(\{[^}]*\}|[A-Za-z_][A-Za-z_0-9]*)/[A-Za-z0-9._-]+' | sort -u | tr '\n' ' ')
+    [ -z "$stray" ] && ok "$s: every writer an example calls goes through the pack command" \
+        || bad "$s: every writer an example calls goes through the pack command" "stray: $stray"
+    # A skill that names no pack script and no binding calls none of the pack's
+    # writers, so it has none to resolve and no binding to name.
+    if [ "${refs:-0}" -eq 0 ] && ! grep -qE -- '<binding>|\.sh([^A-Za-z0-9_]|$)' "$f"; then
+        ok "$s: names no pack script, so it resolves none and names no binding"
+        continue
+    fi
     [ "${refs:-0}" -gt 0 ] && ok "$s: calls its writers through gc <binding> scripts-dir (calls: $refs)" \
         || bad "$s: calls its writers through gc <binding> scripts-dir" "no $RESOLVE<writer>\" call found"
     tr '\n' ' ' <"$f" >"$TMP/joined-$s"
@@ -220,12 +232,6 @@ for s in $BLOCKS; do
     else
         bad "$s: says where the agent reads the binding" "no \`gc-toolkit\` in \`gc-toolkit.$s\` with gc skill list's FROM column"
     fi
-    # The gctk-bin block names the city's build of gctk, which is no writer of
-    # the pack's, by the one definition gctk-bin.test.sh holds.
-    stray=$(awk '/# >>> gctk-bin$/ { skip = 1; next } /# <<< gctk-bin$/ { skip = 0; next } !skip' "$f" \
-        | grep -oE '"\$(\{[^}]*\}|[A-Za-z_][A-Za-z_0-9]*)/[A-Za-z0-9._-]+' | sort -u | tr '\n' ' ')
-    [ -z "$stray" ] && ok "$s: every writer an example calls goes through the pack command" \
-        || bad "$s: every writer an example calls goes through the pack command" "stray: $stray"
     missing=""
     for w in $writers; do
         [ -x "$ROOT/assets/scripts/$w" ] || missing="$missing $w"
@@ -542,7 +548,7 @@ have "…which gives the call" 'converse-invalidate-recommendation.sh" "<why' "$
 # One writer dispatches a recommendation, under the bead's acceptance lock and a
 # token that finds a dispatch an Accept that stopped part way already poured. A
 # sling of the agent's own pours the formula again once that run has finished.
-have "the work skill takes a recommendation through Accept's writer" 'gc-helm.sh" accept <bead>' "$WORK_SKILL"
+have "the work skill takes a recommendation through Accept's writer" '"$GCTK" reaction accept <bead>' "$WORK_SKILL"
 lacks "…and gives no sling of its own that records the dispatch" 'gc.recommended_formula_dispatched=' "$WORK_SKILL" \
     "a sling and record of its own bypasses Accept's lock and token, and dispatches the recommendation twice"
 have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --no-wait --accept' "$SETTLE"
@@ -1552,7 +1558,9 @@ echo "── a moot or benign close settles a headline that waits on nothing ─
 # built from this checkout, answers what holds the subject from a store of that
 # row with an edge onto each bead RL_GATES lists, `blocks` unless the bead names
 # its `edge`, those beads, and the rows RL_MORE adds. Its reads fail at
-# RL_DEPS_RC, or when RL_GATES is not a list.
+# RL_DEPS_RC, or when RL_GATES is not a list. gctk writes the headline into
+# that store, and each of its writes that lands is logged beside the block's
+# own calls; HOLDS_FAIL=update refuses them.
 RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
 RL="$TMP/release"
 mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
@@ -1567,7 +1575,9 @@ if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
     [ "${RL_DEPS_RC:-0}" -eq 0 ] || { echo "gc bd: simulated read failure" >&2; exit "$RL_DEPS_RC"; }
     jq -nc --argjson row "$RL_ROW" --argjson g "$RL_GATES" --argjson more "${RL_MORE:-[]}" \
         '[ ($row[0] + {_deps: [ $g[] | {id, dependency_type: (.edge // "blocks")} ]}) ] + $g + $more' >"$RL_DIR/holds.json" || exit 1
-    HOLDS_STORE="$RL_DIR/holds.json" exec "$HOLDS_STUB" answer "$@"
+    HOLDS_STORE="$RL_DIR/holds.json" "$HOLDS_STUB" answer "$@" || exit
+    case " $* " in *" update "*) printf 'gc bd %s\n' "$*" >>"$RL_DIR/log" ;; esac
+    exit 0
 fi
 printf 'gc %s\n' "$*" >>"$RL_DIR/log"
 case "$1 ${2:-} ${3:-}" in
@@ -1577,11 +1587,6 @@ case "$1 ${2:-} ${3:-}" in
     "bd comment "*) [ -z "${RL_COMMENT_REFUSE:-}" ] || exit 1 ;;
 esac
 exit 0
-STUB
-cat >"$RL/pack/assets/scripts/gc-helm.sh" <<'STUB'
-#!/usr/bin/env bash
-printf 'gc-helm %s\n' "$*" >>"$RL_DIR/log"
-[ -z "${RL_TAKEAWAY_FAIL:-}" ] || exit 1
 STUB
 cat >"$RL/pack/assets/scripts/pr-sitting-comment.sh" <<'STUB'
 #!/usr/bin/env bash
@@ -1616,7 +1621,7 @@ for sh_ in $shells; do
     rc=$(run_release "$run" "$WAITING" "$NONE_HOLDS")
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;"*"gc bd close tk-v --reason x: x;"*)
+        0:*" update tk-x --set-metadata gc.takeaway=x: x --set-metadata gc.takeaway_at="*" --set-metadata gc.takeaway_by=converse --set-metadata gc.takeaway_settled=1;"*"gc bd close tk-v --reason x: x;"*)
             ok "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" ;;
         *) bad "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" "exit $rc, calls: $calls" ;;
     esac
@@ -1625,7 +1630,7 @@ for sh_ in $shells; do
         rc=$(run_release "$run" "$WAITING" "$gates" RL_MORE="$more")
         calls=$(tr '\n' ';' <"$RL/log")
         case "$rc:$calls" in
-            *"gc-helm takeaway"*) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
+            *"gc.takeaway="*) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
             0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a subject $what still holds keeps its headline, and the conversation closes" ;;
             *) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
         esac
@@ -1638,7 +1643,7 @@ for sh_ in $shells; do
     rc=$(run_release "$run" "$WAITING" "$CONV_HOLDS")
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;"*"gc bd close tk-v --reason x: x;"*)
+        0:*" update tk-x --set-metadata gc.takeaway=x: x --set-metadata gc.takeaway_at="*" --set-metadata gc.takeaway_by=converse --set-metadata gc.takeaway_settled=1;"*"gc bd close tk-v --reason x: x;"*)
             ok "($sh_) recheck close: the conversation's own hold on the anchor keeps no headline, and the conversation closes" ;;
         *) bad "($sh_) recheck close: the conversation's own hold on the anchor keeps no headline, and the conversation closes" "exit $rc, calls: $calls" ;;
     esac
@@ -1646,7 +1651,7 @@ for sh_ in $shells; do
     rc=$(run_release "$run" "$WAITING" "$CONV_AND_GATE")
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls:$(cat "$RL/out")" in
-        *"gc-helm takeaway"*) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls" ;;
+        *"gc.takeaway="*) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls" ;;
         0:*"gc bd close tk-v "*"tk-x keeps its headline: tk-g2 still holds it"*)
             ok "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline, named without the conversation" ;;
         *) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
@@ -1654,7 +1659,7 @@ for sh_ in $shells; do
     rc=$(run_release "$run" "$SETTLED" '[]')
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        *"gc-helm takeaway"*) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
+        *"gc.takeaway="*) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
         0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a settled headline is not written, and the conversation closes" ;;
         *) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
     esac
@@ -1670,7 +1675,7 @@ for sh_ in $shells; do
             ok "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" ;;
         *) bad "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
     esac
-    for stop in "RL_TAKEAWAY_FAIL=1|a headline that does not land|$NONE_HOLDS" "RL_SHOW_DOWN=1|a subject that does not read|$NONE_HOLDS" \
+    for stop in "HOLDS_FAIL=update|a headline that does not land|$NONE_HOLDS" "RL_SHOW_DOWN=1|a subject that does not read|$NONE_HOLDS" \
         "RL_NONE=1|a hold read that does not answer|{\"error\":\"no issue found\"}"; do
         IFS='|' read -r setting what gates <<EOF
 $stop
@@ -1698,7 +1703,7 @@ EOF
         rc=$(run_release "$run" "$row" "$NONE_HOLDS" "$show_rc" "$deps_rc")
         calls=$(tr '\n' ';' <"$RL/log")
         case "$rc:$calls" in
-            0:*|*"bd close"*|*"bd update"*|*"gc-helm takeaway"*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
+            0:*|*"bd close"*|*"bd update"*|*"gc.takeaway="*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
             *) ok "($sh_) recheck close: $what closes nothing" ;;
         esac
     done
@@ -1917,7 +1922,7 @@ have "…and a gate on waiting work is the sign-off's, once every write has land
 have "a close stands down waiting work it retires, which disarms it before the answer" \
     '"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>" --successor "$CONVERSATION"' "$EPIC_REVIEW"
 have "…and releases waiting work it re-homes into another store, a release that disarms it first, before its gate is answered" \
-    '`"$CONV/gc-helm.sh" takeaway <bead> "<the ruling, one sentence>" --release --no-wait`' "$EPIC_REVIEW"
+    'GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "<the ruling, one sentence>" --release --no-wait' "$EPIC_REVIEW"
 have "…then answers that gate on its own call and runs the writer last" \
     'then answer its gate on a call of its own, as write 2 answers one, and run the writer last' "$EPIC_REVIEW_JOINED"
 have "each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling" \
@@ -1960,8 +1965,8 @@ lacks "…never off bd's parent filter, which also returns a bead moved out from
     "a bead whose parent edge was removed still lists under the parent its id names, so a close would wait on work that has left"
 have "…as an epic under the epic, opening with its aim" \
     'gc bd create "Delivery: <what it lands>" -t epic --parent "$EPIC"' "$EPIC_REVIEW"
-have "the next priority uses the steering move" '"$CONV/gc-helm.sh" priority "$EPIC" <P0-P4>' "$EPIC_REVIEW"
-have "…and so does the park" '"$CONV/gc-helm.sh" park "$EPIC"' "$EPIC_REVIEW"
+have "the next priority uses the steering move" '"$CONV/queue-priority.sh" move "$EPIC" <P0-P4>' "$EPIC_REVIEW"
+have "…and so does the park" '"$GCTK" bead park "$EPIC"' "$EPIC_REVIEW"
 have "an unpark releases the epic by write 3's release step" \
     "A ruling that unparks the epic releases it from its park instead, by write 3's release step with \`\"\$EPIC\"\` as the bead." "$EPIC_REVIEW_JOINED"
 have "…which takes only the epic's edge off a gate another bead waits on" 'gc bd dep remove "$EPIC" <park>' "$EPIC_REVIEW"

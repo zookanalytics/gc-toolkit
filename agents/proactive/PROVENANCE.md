@@ -32,7 +32,7 @@ supersession banner before citing the rest of it.
 
 "Proactive" is deliberately NOT a resident loop (the operator deferred that). A
 reaction is a run slung per subject — by `gctk reaction sling`
-(operator/board one-shot, via `gc-helm react`, and a patrol finding at filing)
+(the operator's intake, `operator-intake.sh`, and a patrol finding at filing)
 or the scan order's `gctk reaction sweep` over movable-forward beads — and the
 pour routes its step here. This pool is where those reactions execute. It is a
 sibling of the impl polecat pool (same worktree/refinery machinery) with three
