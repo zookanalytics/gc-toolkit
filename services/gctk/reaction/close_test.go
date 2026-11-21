@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 )
@@ -45,14 +44,11 @@ func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 
 	w = newWorld(t)
 	w.rt.Roster[0].Suspended = true
-	w.rt.OnPreview = func(gascity.Sling) gascity.SlingPreview {
-		return gascity.SlingPreview{Answered: true, Warnings: []string{gascity.AgentSuspended, gascity.PoolEmpty}}
-	}
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
 	wantCode(t, code, 0, err, "(CLOSE) a closer pool that does not run")
 	w.has("SLING gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close --rig gc-toolkit", "(CLOSE) the closer is slung to it all the same")
-	if len(w.rt.Previews()) > 0 || slices.Contains(w.rt.Reads(), "roster") {
-		t.Errorf("(CLOSE) the exit asked about the pool: previewed %v, with the reads %v", w.rt.Previews(), w.rt.Reads())
+	if slices.Contains(w.rt.Reads(), "roster") {
+		t.Errorf("(CLOSE) the exit asked about the pool: the reads were %v", w.rt.Reads())
 	}
 
 	w = newWorld(t)

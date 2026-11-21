@@ -14,58 +14,6 @@ func prefixOf(id string) string {
 	return p
 }
 
-// Deliverable answers whether the bead of s, a sling about to be made, would
-// be picked up where s sends it, by Gas City's own preview of that sling. It
-// answers no when Gas City refuses the sling, as it refuses a target the city
-// resolves no agent by and a route into a store the target does not read, and
-// when the preview warns that the city, the target or the target's rig is
-// suspended, or that the target's pool runs no sessions, which Gas City reads
-// only from a cap of 0. No is a positive finding only: a preview that does not
-// answer answers yes, because it is no evidence that the pool is gone. why
-// says what the answer rests on.
-//
-// Two answers follow from asking the sling's own preview. A process that sets
-// GC_SUSPENDED=1 is answered yes for a pool the city's state does not suspend,
-// since the sling passes over that override, which does not say whether the
-// controller runs the pool (targetScopeSuspension in
-// internal/sling/sling_core.go at gastownhall/gascity 1feaf7eeb7). And the
-// preview checks a route's store only once it finds the bead not routed to the
-// target already: a bead Gas City counts as routed there, with a live tracking
-// convoy, previews as going ahead with no store check (preflight in the same
-// file), so a route into another store passes only when the bead's routing was
-// already wrong before the question.
-func (r *Reactions) Deliverable(s gascity.Sling) (ok bool, why string) {
-	p := r.Runtime.Preview(s)
-	switch {
-	case !p.Answered:
-		return true, fmt.Sprintf("Gas City's preview of the sling to %s did not answer (%s), so the pool is taken as live: a preview that does not answer is no evidence that it is gone", s.Target, p.Unanswered())
-	case p.Refused != "":
-		return false, fmt.Sprintf("gc sling refuses to send %s to %s (%s)", s.Bead, s.Target, p.Refused)
-	}
-	if warned := targetWords(s.Target, p.TargetWarnings()); len(warned) > 0 {
-		return false, fmt.Sprintf("Gas City's preview of the sling warns that %s, so work sent there sits unclaimed", strings.Join(warned, " and "))
-	}
-	return true, fmt.Sprintf("Gas City's preview of the sling of %s to %s refuses nothing and warns of no suspension or empty pool", s.Bead, s.Target)
-}
-
-// targetWords is each of a preview's warnings about target, in words.
-func targetWords(target string, warnings []string) []string {
-	var out []string
-	for _, w := range warnings {
-		switch w {
-		case gascity.CitySuspended:
-			out = append(out, "the city is suspended")
-		case gascity.AgentSuspended:
-			out = append(out, target+" is suspended")
-		case gascity.RigSuspended:
-			out = append(out, "the rig of "+target+" is suspended")
-		case gascity.PoolEmpty:
-			out = append(out, target+" runs no sessions (its max_active_sessions is 0)")
-		}
-	}
-	return out
-}
-
 // Assignable answers whether a bead handed to the named agent who would be
 // offered by the agent's own hook. It answers no when the roster registers no
 // agent by that exact name, when the agent is suspended, when the city's

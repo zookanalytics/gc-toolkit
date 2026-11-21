@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -259,15 +258,12 @@ func TestBlockedArmsItsDispatchLast(t *testing.T) {
 
 	w = newWorld(t)
 	w.rt.Roster[0].Suspended = true
-	w.rt.OnPreview = func(gascity.Sling) gascity.SlingPreview {
-		return gascity.SlingPreview{Answered: true, Warnings: []string{gascity.AgentSuspended, gascity.PoolEmpty}}
-	}
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1",
 		"--then-route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
 	wantCode(t, code, 0, err, "(BLKROUTE) --then-route to a pool that does not run")
 	w.has("ARM tk-sub --target gc-toolkit/gc-toolkit.polecat", "(BLKROUTE) the dispatch is armed for it all the same")
-	if len(w.rt.Previews()) > 0 || slices.Contains(w.rt.Reads(), "roster") {
-		t.Errorf("(BLKROUTE) the exit asked about the pool: previewed %v, with the reads %v", w.rt.Previews(), w.rt.Reads())
+	if slices.Contains(w.rt.Reads(), "roster") {
+		t.Errorf("(BLKROUTE) the exit asked about the pool: the reads were %v", w.rt.Reads())
 	}
 
 	w = newWorld(t)

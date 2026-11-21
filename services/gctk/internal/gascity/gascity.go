@@ -1,21 +1,20 @@
 // Package gascity is gctk's runtime adapter: Gas City as gctk reaches it apart
 // from its store, which internal/gcbd reaches (docs/gctk-architecture.md, "The
-// adapters"). It runs `gc sling` and asks for a sling's preview, reads the
-// formula a sling to an agent pours when it names none, reads the city's
-// roster, its named sessions, its session list, its rigs and whether a formula
-// resolves, wakes and nudges a session, names the city's root, runs the pack's
-// scripts that ask a person, runs gc doctor, and reads and records the city's
-// events. A domain reaches them only through Runtime, or through an interface
-// of its own that City meets. City is the city gctk runs in, and gascity/fake
-// records what a domain asked and answers as its test says, so a domain's
-// rules are tested in Go with no Gas City. It also states Gas City's dispatch
-// holds (hold.go), the one rule of them each domain asks.
+// adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
+// when it names none, reads the city's roster, its named sessions, its
+// session list, its rigs and whether a formula resolves, wakes and nudges a
+// session, names the city's root, runs the pack's scripts that ask a person,
+// runs gc doctor, and reads and records the city's events. A domain reaches
+// them only through Runtime, or through an interface of its own that City
+// meets. City is the city gctk runs in, and gascity/fake records what a
+// domain asked and answers as its test says, so a domain's rules are tested
+// in Go with no Gas City. It also states Gas City's dispatch holds (hold.go),
+// the one rule of them each domain asks.
 package gascity
 
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,9 +31,6 @@ import (
 type Runtime interface {
 	// Sling runs one `gc sling` and returns what it answered.
 	Sling(s Sling) SlingResult
-	// Preview runs one `gc sling --dry-run --json` of s, which writes nothing,
-	// and returns what Gas City says of the sling.
-	Preview(s Sling) SlingPreview
 	// Cook runs one `gc formula cook --attach` and returns what it answered.
 	Cook(c Cook) CookResult
 	// DefaultFormula is the formula sling s pours when it names none: the
@@ -107,56 +103,6 @@ type CookResult struct {
 type SlingResult struct {
 	Result
 	Live []string
-}
-
-// The warnings Gas City's preview of a sling gives about its target, whatever
-// the sling routes (slingJSONWarnings in cmd/gc/cmd_sling.go, from
-// newTargetResult in internal/sling/sling_core.go, at gastownhall/gascity
-// 1feaf7eeb7): the city, the target agent or the target's rig is suspended, or
-// the target's pool runs no sessions, its cap being exactly 0.
-const (
-	CitySuspended  = "city_suspended"
-	AgentSuspended = "agent_suspended"
-	RigSuspended   = "rig_suspended"
-	PoolEmpty      = "pool_empty"
-)
-
-// SlingPreview is what Gas City says of a sling it was asked to preview.
-// Answered is whether it answered: the sling would go ahead, with the warnings
-// it gives, or it refused the sling, saying why in Refused, with Unresolved set
-// when the refusal is that the city resolves no agent by the target's name. A
-// reply that is neither, such as a city config that did not load or a store
-// that did not read, did not answer, and Bounded says what it was.
-type SlingPreview struct {
-	Bounded
-	Answered   bool
-	Warnings   []string
-	Refused    string
-	Unresolved bool
-}
-
-// Unanswered is why the preview did not answer, in one line, empty when it
-// did.
-func (p SlingPreview) Unanswered() string {
-	switch {
-	case p.Answered:
-		return ""
-	case p.Failure() != "":
-		return p.Failure()
-	}
-	return "exit 0 with no dry run's result that reads: " + clipLine(p.Stdout)
-}
-
-// TargetWarnings is the preview's warnings about the target, each once, in the
-// order Gas City gives them.
-func (p SlingPreview) TargetWarnings() []string {
-	var out []string
-	for _, w := range p.Warnings {
-		if (w == CitySuspended || w == AgentSuspended || w == RigSuspended || w == PoolEmpty) && !slices.Contains(out, w) {
-			out = append(out, w)
-		}
-	}
-	return out
 }
 
 // City is the Gas City gctk runs in, reached through `gc` on PATH and the
@@ -234,81 +180,6 @@ func (c *City) Sling(s Sling) SlingResult {
 		out.Live = liveWorkflows(r.Output, s.Bead)
 	}
 	return out
-}
-
-// Preview runs `gc sling <target> <bead> --dry-run --json` for s through
-// runBounded, bounded by RosterWait, as the roster read whose question it
-// answers is: gc's --rig when s names one, --no-formula and --no-convoy for a
-// sling that pours nothing, --on for one that names its formula, and neither
-// for one that pours the target's default. Gas City's replies read as follows
-// (cmdSlingWithJSON and writeSlingJSONResult in cmd/gc/cmd_sling.go, the
-// command_failed failure in cmd/gc/main.go and CrossStoreRouteError in
-// internal/sling/sling.go, at gastownhall/gascity 1feaf7eeb7): exit 0 with the
-// result line a dry run marks is the sling going ahead, with its warnings; a
-// JSON error coded target_resolve_failed refuses a target the city resolves no
-// agent by; and a failure whose standard error carries the cross-store refusal
-// refuses a route into a store the target does not read. No other reply is an
-// answer, and neither is one that ran out of time.
-func (c *City) Preview(s Sling) SlingPreview {
-	args := []string{"sling"}
-	if s.Rig != "" {
-		args = append(args, "--rig", s.Rig)
-	}
-	args = append(args, s.Target, s.Bead)
-	switch {
-	case s.NoFormula:
-		args = append(args, "--no-formula", "--no-convoy")
-	case s.Formula != "":
-		args = append(args, "--on", s.Formula)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), RosterWait)
-	defer cancel()
-	return previewOf(c.runBounded(ctx, c.bin, append(args, "--dry-run", "--json")...))
-}
-
-// crossStoreRefusal opens the line gc sling prints when it refuses a route into
-// a store the target does not read (CrossStoreRouteError).
-const crossStoreRefusal = "gc sling: refusing cross-store route:"
-
-// previewOf reads a dry run's reply.
-func previewOf(b Bounded) SlingPreview {
-	p := SlingPreview{Bounded: b}
-	if b.Err != nil {
-		return p
-	}
-	type reply struct {
-		DryRun   bool     `json:"dry_run"`
-		Success  bool     `json:"success"`
-		Warnings []string `json:"warnings"`
-		Error    *struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	var last *reply
-	for dec := json.NewDecoder(strings.NewReader(b.Stdout)); ; {
-		var v reply
-		if dec.Decode(&v) != nil {
-			break
-		}
-		last = &v
-	}
-	switch {
-	case b.Code == 0 && last != nil && last.DryRun && last.Success:
-		p.Answered, p.Warnings = true, last.Warnings
-	case b.Code == 0:
-	case last != nil && last.Error != nil && last.Error.Code == "target_resolve_failed":
-		p.Answered, p.Refused, p.Unresolved = true, last.Error.Message, true
-	default:
-		sc := bufio.NewScanner(strings.NewReader(b.Stderr))
-		for sc.Scan() {
-			if l := strings.TrimSpace(sc.Text()); strings.HasPrefix(l, crossStoreRefusal) {
-				p.Answered, p.Refused = true, l
-				break
-			}
-		}
-	}
-	return p
 }
 
 // Cook runs the cook in gctk's own process group, its vars in their names'

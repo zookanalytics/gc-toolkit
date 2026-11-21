@@ -301,9 +301,9 @@ func TestASweepsDeadlineReadsAsAnOrdersTimeout(t *testing.T) {
 	}
 }
 
-// The sweep asks nothing about the rig's proactive pool: it reads no roster and
-// previews no sling, with a candidate or without, and slings each candidate to
-// the pool whether or not the pool runs. A sling gc sling refuses, as it
+// The sweep asks nothing about the rig's proactive pool: it reads no roster,
+// with a candidate or without, and slings each candidate to the pool whether
+// or not the pool runs. A sling gc sling refuses, as it
 // refuses a pool the city does not configure, is that candidate's failure, and
 // the sweep goes on to the next. A sweep in no rig fails before anything is
 // read.
@@ -311,8 +311,8 @@ func TestTheSweepSlingsToItsPoolWhetherOrNotItRuns(t *testing.T) {
 	w := newWorld(t)
 	asked := func(what string) {
 		t.Helper()
-		if len(w.rt.Previews()) > 0 || slices.Contains(w.rt.Reads(), "roster") {
-			t.Errorf("(SWEEP-NOASK) %s: previewed %v, with the reads %v", what, w.rt.Previews(), w.rt.Reads())
+		if slices.Contains(w.rt.Reads(), "roster") {
+			t.Errorf("(SWEEP-NOASK) %s: the reads were %v", what, w.rt.Reads())
 		}
 	}
 	for _, dryRun := range []bool{false, true} {
@@ -326,9 +326,6 @@ func TestTheSweepSlingsToItsPoolWhetherOrNotItRuns(t *testing.T) {
 	w.ready(input("tk-a", func(b *fake.Bead) { b.Priority = 0 }), input("tk-b", func(b *fake.Bead) { b.Priority = 1 }))
 	for i := range w.rt.Roster {
 		w.rt.Roster[i].Suspended = true
-	}
-	w.rt.OnPreview = func(gascity.Sling) gascity.SlingPreview {
-		return gascity.SlingPreview{Answered: true, Warnings: []string{gascity.AgentSuspended, gascity.PoolEmpty}}
 	}
 	if _, summary, err := w.sweep(false, time.Minute); err != nil || summary != "slung 2 first reaction(s)" || !slices.Equal(w.slings(), []string{"tk-a", "tk-b"}) {
 		t.Errorf("(SWEEP-STOPPED) a pool that does not run: %q, %v, slinging %v; want both slung to it", summary, err, w.slings())

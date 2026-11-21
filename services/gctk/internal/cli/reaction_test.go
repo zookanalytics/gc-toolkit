@@ -121,19 +121,16 @@ func TestReactionVerbsRefuseUsageBeforeAnyCall(t *testing.T) {
 	log := stubLoggingGC(t, `{"rigs":[]}`)
 	t.Setenv("GC_RIG", "gc-toolkit")
 	for name, args := range map[string][]string{
-		"a check with no run":           {"reaction", "check", "tk-sub"},
-		"a check with a bad run":        {"reaction", "check", "tk-sub", "--run", "tk root"},
-		"a check with no bead":          {"reaction", "check", "--run", "tk-root"},
-		"a check of a blank bead":       {"reaction", "check", " ", "--run", "tk-root"},
-		"a sling with no bead":          {"reaction", "sling"},
-		"a sling of a blank bead":       {"reaction", "sling", ""},
-		"a sling with two beads":        {"reaction", "sling", "tk-sub", "tk-other"},
-		"a sling's unknown flag":        {"reaction", "sling", "tk-sub", "--nudge"},
-		"a sling's dry run":             {"reaction", "sling", "tk-sub", "--dry-run"},
-		"a sweep with a bead":           {"reaction", "sweep", "tk-sub"},
-		"a pool answer with no bead":    {"reaction", "deliverable"},
-		"a pool answer of a blank bead": {"reaction", "deliverable", " "},
-		"a pool answer with two beads":  {"reaction", "deliverable", "tk-sub", "tk-other"},
+		"a check with no run":     {"reaction", "check", "tk-sub"},
+		"a check with a bad run":  {"reaction", "check", "tk-sub", "--run", "tk root"},
+		"a check with no bead":    {"reaction", "check", "--run", "tk-root"},
+		"a check of a blank bead": {"reaction", "check", " ", "--run", "tk-root"},
+		"a sling with no bead":    {"reaction", "sling"},
+		"a sling of a blank bead": {"reaction", "sling", ""},
+		"a sling with two beads":  {"reaction", "sling", "tk-sub", "tk-other"},
+		"a sling's unknown flag":  {"reaction", "sling", "tk-sub", "--nudge"},
+		"a sling's dry run":       {"reaction", "sling", "tk-sub", "--dry-run"},
+		"a sweep with a bead":     {"reaction", "sweep", "tk-sub"},
 	} {
 		var out, errb bytes.Buffer
 		if code := Run(args, "test", &out, &errb); code != 2 {
@@ -149,9 +146,8 @@ func TestReactionVerbsRefuseUsageBeforeAnyCall(t *testing.T) {
 }
 
 // With no GC_RIG there is no proactive pool to name, so a sling and a sweep
-// fail with exit 1, saying so once, and the pool's answer is no, before
-// anything is read. A sweep whose deadline does not read fails before
-// anything is read, too.
+// fail with exit 1, saying so once, before anything is read. A sweep whose
+// deadline does not read fails before anything is read, too.
 func TestReactionVerbsFailClosedWithNoRigOrDeadline(t *testing.T) {
 	log := stubLoggingGC(t, `{"rigs":[]}`)
 	t.Setenv("GC_RIG", "")
@@ -161,14 +157,9 @@ func TestReactionVerbsFailClosedWithNoRigOrDeadline(t *testing.T) {
 			t.Errorf("%v with no GC_RIG exited %d, saying %q", args, code, errb.String())
 		}
 	}
-	var out, errb bytes.Buffer
-	if code := Run([]string{"reaction", "deliverable", "tk-sub"}, "test", &out, &errb); code != 1 || !strings.HasPrefix(out.String(), "no: cannot rig-qualify the proactive pool") {
-		t.Errorf("deliverable with no GC_RIG exited %d, saying %q", code, out.String())
-	}
 	t.Setenv("GC_RIG", "gc-toolkit")
 	t.Setenv("GC_PROACTIVE_SWEEP_TIMEOUT", "soon")
-	out.Reset()
-	errb.Reset()
+	var out, errb bytes.Buffer
 	if code := Run([]string{"reaction", "sweep"}, "test", &out, &errb); code != 1 || !strings.Contains(errb.String(), "GC_PROACTIVE_SWEEP_TIMEOUT must be a duration") {
 		t.Errorf("a sweep with an unreadable deadline exited %d, saying %q", code, errb.String())
 	}
@@ -207,10 +198,7 @@ case "$1" in
   rig) printf '{"rigs":[{"name":"town","prefix":"hq","path":"%s","hq":true},{"name":"gc-toolkit","prefix":"tk","path":"%s"}]}' "$STUB_TOWN" "$STUB_RIG"; exit 0 ;;
   agent) [ -n "$STUB_WARN" ] && echo "$STUB_WARN" >&2; printf '%s' "$STUB_AGENTS"; exit 0 ;;
   config) printf '{"config":{"NamedSessions":[],"Agents":[]}}'; exit 0 ;;
-  sling) case " $* " in
-           *" --dry-run "*) printf '%s' "$STUB_PREVIEW_OUT"; printf '%s' "$STUB_PREVIEW_ERR" >&2; exit "${STUB_PREVIEW_RC:-0}" ;;
-         esac
-         printf '%s\n' "${STUB_SLING_OUT:-Slung}"; exit "${STUB_SLING_RC:-0}" ;;
+  sling) printf '%s\n' "${STUB_SLING_OUT:-Slung}"; exit "${STUB_SLING_RC:-0}" ;;
   bd) shift ;;
   *) echo "unexpected call: gc $*" >&2; exit 1 ;;
 esac
@@ -244,9 +232,6 @@ esac
 	t.Setenv("STUB_WARN", "")
 	t.Setenv("STUB_SLING_RC", "0")
 	t.Setenv("STUB_SLING_OUT", "")
-	t.Setenv("STUB_PREVIEW_OUT", goesAhead)
-	t.Setenv("STUB_PREVIEW_ERR", "")
-	t.Setenv("STUB_PREVIEW_RC", "0")
 	t.Setenv("GC_RIG", "gc-toolkit")
 	t.Setenv("GC_PROACTIVE_SWEEP_TIMEOUT", "")
 	return log, filepath.Join(rig, ".beads")
@@ -387,42 +372,6 @@ func TestReactionSlingPassesGcSlingsRefusalThrough(t *testing.T) {
 	errb.Reset()
 	if code := Run([]string{"reaction", "sling", "tk-sub"}, "test", &out, &errb); code != 1 || !strings.Contains(errb.String(), "gc sling refused or failed on tk-sub (exit 1: gc sling: no such target)") {
 		t.Errorf("a sling gc sling failed exited %d: %s", code, errb.String())
-	}
-}
-
-// goesAhead is gc sling --dry-run --json's reply for a reaction's sling that
-// would go ahead, as the city's build printed it.
-const goesAhead = `{"bead_id":"tk-sub","dry_run":true,"method":"on-formula","ok":true,"queued":false,"routed":false,"schema_version":"1","success":true,"target":"gc-toolkit/gc-toolkit.proactive"}` + "\n"
-
-// The pool's answer is Gas City's preview of the reaction's own sling of the
-// bead named, and no roster is read: yes when the sling would go ahead, and no
-// when gc sling refuses its target or its preview warns that the pool is
-// suspended, whatever gc notes on stderr beside it, each saying why on stdout.
-func TestReactionDeliverableAnswersTheRigsPool(t *testing.T) {
-	log, _ := stubCity(t, []byte("[]"))
-	var out, errb bytes.Buffer
-	if code := Run([]string{"reaction", "deliverable", "tk-sub"}, "test", &out, &errb); code != 0 ||
-		!strings.HasPrefix(out.String(), "yes: Gas City's preview of the sling of tk-sub to gc-toolkit/gc-toolkit.proactive refuses nothing") {
-		t.Errorf("a sling that would go ahead: exit %d, %q", code, out.String())
-	}
-	if raw, _ := os.ReadFile(log); !strings.Contains(string(raw), "sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive tk-sub --on mol-first-reaction --dry-run --json") ||
-		strings.Contains(string(raw), "agent list") {
-		t.Errorf("the pool's answer asked gc %q; want the reaction's sling previewed and no roster read", raw)
-	}
-	t.Setenv("STUB_PREVIEW_OUT", `{"schema_version":"1","ok":false,"error":{"code":"target_resolve_failed","message":"gc sling: agent \"gc-toolkit/gc-toolkit.proactive\" not found in city.toml","exit_code":1}}`)
-	t.Setenv("STUB_PREVIEW_RC", "1")
-	out.Reset()
-	if code := Run([]string{"reaction", "deliverable", "tk-sub"}, "test", &out, &errb); code != 1 ||
-		!strings.HasPrefix(out.String(), `no: gc sling refuses to send tk-sub to gc-toolkit/gc-toolkit.proactive (gc sling: agent "gc-toolkit/gc-toolkit.proactive" not found in city.toml)`) {
-		t.Errorf("a target the city does not resolve: exit %d, %q", code, out.String())
-	}
-	t.Setenv("STUB_PREVIEW_OUT", strings.Replace(goesAhead, `"target":`, `"warnings":["agent_suspended"],"target":`, 1))
-	t.Setenv("STUB_PREVIEW_ERR", "warning: city.toml: [agents] is a deprecated compatibility alias for [agent_defaults]; rewrite the table name to [agent_defaults]\n")
-	t.Setenv("STUB_PREVIEW_RC", "0")
-	out.Reset()
-	if code := Run([]string{"reaction", "deliverable", "tk-sub"}, "test", &out, &errb); code != 1 ||
-		!strings.HasPrefix(out.String(), "no: Gas City's preview of the sling warns that gc-toolkit/gc-toolkit.proactive is suspended") {
-		t.Errorf("a suspended pool gc noted a warning beside: exit %d, %q", code, out.String())
 	}
 }
 

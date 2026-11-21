@@ -3,7 +3,6 @@ package gascity
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -360,111 +359,5 @@ exit 0
 		"session\nnudge\nrig/gone.refinery\n" + msg + "\n--\n"
 	if string(raw) != want {
 		t.Fatalf("gc ran with\n%s\nwant\n%s", raw, want)
-	}
-}
-
-// The replies below are the ones gc sling --dry-run --json gave on the city's
-// build, with the rig and the beads renamed: the sling would go ahead, the city
-// resolves no agent by the target, and the target reads another store.
-const (
-	goesAhead  = `{"bead_id":"tk-1","dry_run":true,"method":"bead","ok":true,"queued":false,"routed":false,"schema_version":"1","success":true,"target":"rig/rig.polecat"}` + "\n"
-	unresolved = `{
-  "schema_version": "1",
-  "ok": false,
-  "error": {
-    "code": "target_resolve_failed",
-    "message": "gc sling: agent \"rig/rig.nosuch\" not found in city.toml; did you mean \"rig/rig.po\"?",
-    "exit_code": 1
-  }
-}
-`
-	unresolvedNote = `{"schema_version":"1","level":"error","code":"target_resolve_failed","message":"gc sling: agent \"rig/rig.nosuch\" not found in city.toml; did you mean \"rig/rig.po\"?","exit_code":1}` + "\n"
-	failed         = `{"schema_version":"1","ok":false,"error":{"code":"command_failed","message":"command failed; see stderr for diagnostics","exit_code":1}}` + "\n"
-	crossStore     = `gc sling: refusing cross-store route: bead tk-1 lives in rig:rig but target "other/rig.polecat" reads rig:other; re-file the bead in rig:other (or pick a target reachable from rig:rig). Cross-store routes silently wedge pools — see tr-6s7yx` + "\n"
-)
-
-// Preview asks gc sling for a dry run of the sling itself: its rig when it
-// names one, and its formula as it names it, --no-formula and --no-convoy for a
-// raw route, --on for a named formula, and neither for the target's default.
-// It reads each reply Gas City gives: a sling that would go ahead, with every
-// warning it carries and the ones about the target among them, and a refusal
-// of a target the city does not resolve or of a route into another store. A
-// failure that is neither, a reply that does not read and a run that ended at
-// its deadline did not answer.
-func TestPreviewReadsGasCitysReplies(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(`#!/bin/sh
-d=$(dirname "$0")
-printf '%s\n' "$*" >> "$d/log"
-shift
-[ "$1" = --rig ] && shift 2
-f="$d/sling_$(printf '%s' "$1" | tr / _)"
-cat "$f.out"
-cat "$f.err" >&2
-exit "$(cat "$f.code")"
-`), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	reply := func(target, stdout, stderr, code string) {
-		t.Helper()
-		f := filepath.Join(dir, "sling_"+strings.ReplaceAll(target, "/", "_"))
-		for ext, body := range map[string]string{".out": stdout, ".err": stderr, ".code": code} {
-			if err := os.WriteFile(f+ext, []byte(body), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	warned := strings.Replace(goesAhead, `"target":"rig/rig.polecat"}`, `"target":"rig/rig.polecat","warnings":["agent_suspended","bead tk-1 is claimed by rig/rig.polecat-2","pool_empty"]}`, 1)
-	reply("rig/rig.polecat", goesAhead, "", "0")
-	reply("rig/rig.warned", warned, "", "0")
-	reply("rig/rig.nosuch", unresolved, unresolvedNote, "1")
-	reply("other/rig.polecat", failed, crossStore, "1")
-	reply("rig/rig.lookup", failed, `getting bead "tk-1" from store rig:rig: dial tcp 127.0.0.1:3307: i/o timeout`+"\n", "1")
-	reply("rig/rig.config", `{"schema_version":"1","ok":false,"error":{"code":"config_load_failed","message":"gc sling: loading city.toml: no such file","exit_code":1}}`+"\n", "", "1")
-	reply("rig/rig.garbled", "Slung tk-1\n", "", "0")
-	c := &City{bin: filepath.Join(dir, "gc")}
-	for _, tc := range []struct {
-		name     string
-		s        Sling
-		asks     string
-		answered bool
-		warnings []string
-		target   []string
-		refused  string
-		unres    bool
-		says     string
-	}{
-		{"a raw route that would go ahead", Sling{Target: "rig/rig.polecat", Bead: "tk-1", NoFormula: true},
-			"sling rig/rig.polecat tk-1 --no-formula --no-convoy --dry-run --json", true, nil, nil, "", false, ""},
-		{"a named formula in a rig", Sling{Rig: "rig", Target: "rig/rig.polecat", Bead: "tk-1", Formula: "mol-first-reaction"},
-			"sling --rig rig rig/rig.polecat tk-1 --on mol-first-reaction --dry-run --json", true, nil, nil, "", false, ""},
-		{"the target's default formula", Sling{Target: "rig/rig.polecat", Bead: "tk-1"},
-			"sling rig/rig.polecat tk-1 --dry-run --json", true, nil, nil, "", false, ""},
-		{"a sling with warnings", Sling{Target: "rig/rig.warned", Bead: "tk-1"}, "sling rig/rig.warned tk-1 --dry-run --json", true,
-			[]string{AgentSuspended, "bead tk-1 is claimed by rig/rig.polecat-2", PoolEmpty}, []string{AgentSuspended, PoolEmpty}, "", false, ""},
-		{"a target the city does not resolve", Sling{Target: "rig/rig.nosuch", Bead: "tk-1"}, "sling rig/rig.nosuch tk-1 --dry-run --json", true,
-			nil, nil, `gc sling: agent "rig/rig.nosuch" not found in city.toml; did you mean "rig/rig.po"?`, true, ""},
-		{"a route into another store", Sling{Target: "other/rig.polecat", Bead: "tk-1", NoFormula: true},
-			"sling other/rig.polecat tk-1 --no-formula --no-convoy --dry-run --json", true, nil, nil, strings.TrimSpace(crossStore), false, ""},
-		{"a store that did not read", Sling{Target: "rig/rig.lookup", Bead: "tk-1"}, "sling rig/rig.lookup tk-1 --dry-run --json", false,
-			nil, nil, "", false, "exit 1: getting bead"},
-		{"a config that did not load", Sling{Target: "rig/rig.config", Bead: "tk-1"}, "sling rig/rig.config tk-1 --dry-run --json", false,
-			nil, nil, "", false, "exit 1"},
-		{"a reply that does not read", Sling{Target: "rig/rig.garbled", Bead: "tk-1"}, "sling rig/rig.garbled tk-1 --dry-run --json", false,
-			nil, nil, "", false, "exit 0 with no dry run's result that reads: Slung tk-1"},
-	} {
-		p := c.Preview(tc.s)
-		raw, _ := os.ReadFile(filepath.Join(dir, "log"))
-		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-		if asked := lines[len(lines)-1]; asked != tc.asks {
-			t.Errorf("%s: gc was asked %q; want %q", tc.name, asked, tc.asks)
-		}
-		if p.Answered != tc.answered || !slices.Equal(p.Warnings, tc.warnings) || !slices.Equal(p.TargetWarnings(), tc.target) ||
-			p.Refused != tc.refused || p.Unresolved != tc.unres || !strings.Contains(p.Unanswered(), tc.says) || (tc.answered != (p.Unanswered() == "")) {
-			t.Errorf("%s: the preview read %+v, its target's warnings %v, unanswered %q", tc.name, p, p.TargetWarnings(), p.Unanswered())
-		}
-	}
-	if p := previewOf(Bounded{Code: -1, Stdout: goesAhead, Err: ErrDeadline}); p.Answered || p.Unanswered() != ErrDeadline.Error() {
-		t.Errorf("a dry run that ended at its deadline read %+v", p)
 	}
 }

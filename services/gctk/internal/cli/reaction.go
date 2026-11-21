@@ -24,13 +24,11 @@ func newReactionCmd(stdout, stderr io.Writer) *cobra.Command {
 		`A first reaction is the run of mol-first-reaction every new bead gets: it reads
 the bead once, writes a card on it, and takes one of five exits, which dispose
 performs (docs/human-engagement.md). sling starts one on a bead nobody has
-decided on, sweep starts one on each such bead in the rig, check is the
-reaction's own first act, and deliverable says whether the rig's proactive pool
-can take one now.`,
+decided on, sweep starts one on each such bead in the rig, and check is the
+reaction's own first act.`,
 		newReactionCheckCmd(stdout, stderr),
 		newReactionSlingCmd(stdout, stderr),
 		newReactionSweepCmd(stdout, stderr),
-		newReactionDeliverableCmd(stdout),
 		newReactionDisposeCmd(stdout, stderr))
 }
 
@@ -239,48 +237,6 @@ func newReactionSweepCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.Flags().StringVar(&db, "db", "", "the store, a store's .beads directory")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "sling nothing, and print each candidate the sweep would sling")
 	return cmd
-}
-
-const reactionDeliverableLong = `Whether the rig's proactive pool, GC_RIG/gc-toolkit.proactive, can take a
-first reaction on <bead> now. A slung reaction waits for a slot at no cost, but
-one sent where nothing claims it waits for nobody. The answer is Gas City's own
-preview of the reaction's sling, gc sling --dry-run, which writes nothing: no
-when it refuses the sling, as it refuses a target the city resolves no agent by
-and a route into another rig's store, or when it warns that the city, the pool
-or its rig is suspended or that the pool runs no sessions. No is a positive
-finding only: a preview that does not answer answers yes, since it is no
-evidence that the pool is gone. It prints yes or no, and why, on stdout.
-
-exit: 0 yes
-      1 no
-      2 usage`
-
-func newReactionDeliverableCmd(stdout io.Writer) *cobra.Command {
-	return &cobra.Command{
-		Use:   "deliverable <bead>",
-		Short: "whether this rig's proactive pool can take a first reaction on a bead now",
-		Long:  reactionDeliverableLong,
-		Args:  cobra.ExactArgs(1),
-		RunE: func(c *cobra.Command, args []string) error {
-			bead := strings.TrimSpace(args[0])
-			if bead == "" {
-				return errors.New("name the bead: gctk reaction deliverable <bead>")
-			}
-			rig := strings.TrimSpace(os.Getenv("GC_RIG"))
-			if rig == "" {
-				fmt.Fprintf(stdout, "no: %v\n", reaction.ErrNoRig)
-				return exit(1)
-			}
-			r := &reaction.Reactions{Runtime: gascity.New(), Rig: rig}
-			ok, why := r.ProactiveDeliverable(bead)
-			if !ok {
-				fmt.Fprintf(stdout, "no: %s\n", why)
-				return exit(1)
-			}
-			fmt.Fprintf(stdout, "yes: %s\n", why)
-			return nil
-		},
-	}
 }
 
 // reactionFor is the reaction over bead's store, --db or else the one gc routes

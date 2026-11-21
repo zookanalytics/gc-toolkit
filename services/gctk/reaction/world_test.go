@@ -82,16 +82,6 @@ func newWorld(t *testing.T) *world {
 		},
 	}
 	w.rt.OnScript = w.script
-	// The city's preview of a sling resolves an agent its roster lists, and
-	// refuses any other target as gc sling does.
-	w.rt.OnPreview = func(s gascity.Sling) gascity.SlingPreview {
-		for _, a := range w.rt.Roster {
-			if a.QualifiedName == s.Target {
-				return gascity.SlingPreview{Answered: true}
-			}
-		}
-		return gascity.SlingPreview{Answered: true, Unresolved: true, Refused: `gc sling: agent "` + s.Target + `" not found in city.toml`}
-	}
 	w.rt.OnSling = func(s gascity.Sling) gascity.SlingResult {
 		line := "SLING " + s.Target + " " + s.Bead
 		if s.NoFormula {

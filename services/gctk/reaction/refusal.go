@@ -145,8 +145,8 @@ func (r *Reactions) Sling(bead string) (*Refusal, error) {
 	return nil, nil
 }
 
-// ErrNoRig is a sling, a sweep or a pool's answer in no rig, whose proactive
-// pool cannot be named.
+// ErrNoRig is a sling or a sweep in no rig, whose proactive pool cannot be
+// named.
 var ErrNoRig = errors.New("cannot rig-qualify the proactive pool: set GC_RIG. The pool is rig-scoped (agents/proactive/agent.toml serves <rig>/" + proactivePool + "), and a bare route matches nobody")
 
 // proactiveTarget is the rig's proactive pool, rig-qualified.
@@ -155,17 +155,6 @@ func (r *Reactions) proactiveTarget() (string, error) {
 		return "", ErrNoRig
 	}
 	return r.Rig + "/" + proactivePool, nil
-}
-
-// ProactiveDeliverable answers whether the rig's proactive pool can take a
-// first reaction on bead now, as Deliverable answers for the sling Sling would
-// make. A caller in no rig is answered no.
-func (r *Reactions) ProactiveDeliverable(bead string) (ok bool, why string) {
-	target, err := r.proactiveTarget()
-	if err != nil {
-		return false, err.Error()
-	}
-	return r.Deliverable(gascity.Sling{Rig: r.Rig, Target: target, Bead: bead, Formula: Formula})
 }
 
 // refusal is the first refusal that holds on bead, in their order: the kind,

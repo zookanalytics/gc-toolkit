@@ -31,17 +31,15 @@ type Runtime struct {
 	// Root is the city's root, and RootErr fails the read of it.
 	Root    string
 	RootErr error
-	// OnSling answers a sling, and nil answers exit 0. OnPreview answers a
-	// sling's preview, and nil answers that the sling would go ahead with no
-	// warning. OnScript answers a script call, and nil answers exit 0. OnCook
-	// answers a cook, and nil answers exit 0 with a root of its own. OnWake
-	// answers a session's wake and OnNudge its nudge, and nil answers exit 0.
-	OnSling   func(gascity.Sling) gascity.SlingResult
-	OnPreview func(gascity.Sling) gascity.SlingPreview
-	OnScript  func(Call) gascity.Result
-	OnCook    func(gascity.Cook) gascity.CookResult
-	OnWake    func(session string) gascity.Result
-	OnNudge   func(Nudge) gascity.Result
+	// OnSling answers a sling, and nil answers exit 0. OnScript answers a script
+	// call, and nil answers exit 0. OnCook answers a cook, and nil answers exit 0
+	// with a root of its own. OnWake answers a session's wake and OnNudge its
+	// nudge, and nil answers exit 0.
+	OnSling  func(gascity.Sling) gascity.SlingResult
+	OnScript func(Call) gascity.Result
+	OnCook   func(gascity.Cook) gascity.CookResult
+	OnWake   func(session string) gascity.Result
+	OnNudge  func(Nudge) gascity.Result
 	// Formulas the city resolves, which ShowFormula answers exit 0 for. Every
 	// other name answers exit 1.
 	Resolves []string
@@ -52,15 +50,14 @@ type Runtime struct {
 	RigList                      []gascity.Rig
 	RosterErr, NamedErr, RigsErr error
 
-	mu       sync.Mutex
-	slings   []gascity.Sling
-	previews []gascity.Sling
-	asks     []gascity.Sling
-	scripts  []Call
-	cooks    []gascity.Cook
-	wakes    []string
-	nudges   []Nudge
-	reads    []string
+	mu      sync.Mutex
+	slings  []gascity.Sling
+	asks    []gascity.Sling
+	scripts []Call
+	cooks   []gascity.Cook
+	wakes   []string
+	nudges  []Nudge
+	reads   []string
 }
 
 // Nudge is one nudge: the session nudged and the message.
@@ -80,25 +77,6 @@ func (r *Runtime) Sling(s gascity.Sling) gascity.SlingResult {
 		return on(s)
 	}
 	return gascity.SlingResult{}
-}
-
-// Preview records s as a sling previewed and answers it.
-func (r *Runtime) Preview(s gascity.Sling) gascity.SlingPreview {
-	r.mu.Lock()
-	r.previews = append(r.previews, s)
-	on := r.OnPreview
-	r.mu.Unlock()
-	if on != nil {
-		return on(s)
-	}
-	return gascity.SlingPreview{Answered: true}
-}
-
-// Previews returns every sling the domain asked Gas City to preview, in order.
-func (r *Runtime) Previews() []gascity.Sling {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return slices.Clone(r.previews)
 }
 
 // Cook records c and answers it.
